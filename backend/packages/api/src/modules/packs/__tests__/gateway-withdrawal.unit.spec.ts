@@ -589,6 +589,33 @@ describe('startWithdrawal — money ordering', () => {
     }
   });
 
+  // 2026-10-20 17:40: TGPay refused every BANK payout with the same text, and
+  // the generic "check your bank details" copy sent customers retrying 4–6
+  // times. Their routing: say the details are fine and come back later.
+  it('tells a bank customer their details are fine when TGPay has no payout provider', async () => {
+    const h = harness();
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError(
+        'TGPay /transaction/payout/withdraw failed (HTTP 400): No payout provider is available for this order',
+        [],
+        400,
+        true,
+      ),
+    });
+    const error = (await start(h).catch((e: unknown) => e)) as Error;
+    expect(error.message).toBe(
+      'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.',
+    );
+    expect(error.message).not.toMatch(
+      /refused by the payment provider|TGPay|Touch 'n Go/i,
+    );
+    // Refunded and closed like any definite refusal.
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed' }),
+    );
+  });
+
   it("refuses a Touch 'n Go withdrawal before any row or debit while TNG payouts are paused", async () => {
     const tng = {
       ...SAVED_ACCOUNT,

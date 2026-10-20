@@ -90,6 +90,16 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map(tngDown)).toBe(tngDown);
   });
 
+  it('passes the bank no-provider refusal through instead of blaming the bank details', () => {
+    // packs/gateway-withdrawal.ts: TGPay refused every bank payout from
+    // 2026-10-20 17:40 with "No payout provider is available for this order",
+    // and the "check your bank details" copy sent customers retrying 4–6 times.
+    const noProvider =
+      'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.';
+    expect(map(noProvider)).toBe(noProvider);
+    expect(map(noProvider)).not.toMatch(/check your bank details/i);
+  });
+
   it('points an unverified customer at the screen that clears the gate', () => {
     // Action-neutral copy: the same guard fires on topup AND withdrawal
     // (2026-08-05), so the message must not name either one.
