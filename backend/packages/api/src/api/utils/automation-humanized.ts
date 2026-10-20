@@ -577,18 +577,13 @@ type Decision = {
   fatigue?: number;
 };
 
-// Pace N divides every in-session wait by N and lets a session hold N× the
-// draws. Sleep, offline days and session windows stay on the real clock, and
-// the random draws consumed are identical, so pace 1 is the desktop timing.
 function decide(
   state: HumanizedState,
   nowMs: number,
   random: () => number,
   afterCycle = false,
   result = { spend: 0, value: 0 },
-  pace = 1,
 ): Decision {
-  const fast = (seconds: number) => Math.trunc(seconds / pace);
   const local = localParts(nowMs, regions[state.region].zone);
   const plan = dailyPlan(state, local.date);
   const asleep = sleepDelay(state, nowMs);
@@ -634,9 +629,7 @@ function decide(
         Math.min(
           Math.max(
             20,
-            fast(
-              Math.trunc(between(...personas[state.persona].warmup, random)),
-            ),
+            Math.trunc(between(...personas[state.persona].warmup, random)),
           ),
           Math.max(20, Math.trunc(remaining - 30)),
         ),
@@ -650,7 +643,7 @@ function decide(
   if (!afterCycle)
     return draw(
       Math.min(
-        fast(normalDelay(state, nowMs, random)),
+        normalDelay(state, nowMs, random),
         Math.max(20, Math.trunc(remaining - 20)),
       ),
       'NORMAL',
@@ -672,10 +665,9 @@ function decide(
     fatigue,
   });
   const cap =
-    (personas[state.persona].cap +
-      (plan.traits.includes('Long Session') ? 2 : 0) -
-      (plan.traits.includes('Low Frequency') ? 1 : 0)) *
-    pace;
+    personas[state.persona].cap +
+    (plan.traits.includes('Long Session') ? 2 : 0) -
+    (plan.traits.includes('Low Frequency') ? 1 : 0);
   if (remaining < 90 || state.sessionDraws >= Math.max(1, cap))
     return end(
       'Natural session ending / fatigue',
@@ -683,7 +675,7 @@ function decide(
       Math.trunc(remaining),
     );
   if ((state.burstRemaining ?? 0) > 0) {
-    const delay = fast(Math.trunc(between(45, 240, random)));
+    const delay = Math.trunc(between(45, 240, random));
     if (delay < remaining - 30)
       return {
         ...draw(delay, 'HIGH ENGAGEMENT', 'Short high-engagement burst'),
@@ -708,7 +700,7 @@ function decide(
   if (x < leave) return end('Decided to leave this session');
   x -= leave;
   if (x < shortBreak) {
-    const delay = fast(Math.trunc(between(300, 1080, random)));
+    const delay = Math.trunc(between(300, 1080, random));
     return delay >= remaining - 20
       ? end('Short break became session end')
       : {
@@ -725,7 +717,7 @@ function decide(
     const length = Math.floor(between(1, 5, random));
     return {
       ...draw(
-        fast(Math.trunc(between(45, 240, random))),
+        Math.trunc(between(45, 240, random)),
         'HIGH ENGAGEMENT',
         `High-engagement burst (${length + 1} draws max)`,
       ),
@@ -735,7 +727,7 @@ function decide(
   }
   x -= burst;
   if (x < think) {
-    const delay = fast(Math.trunc(between(300, 1800, random)));
+    const delay = Math.trunc(between(300, 1800, random));
     return delay >= remaining - 20
       ? end('Thinking ended the session')
       : {
@@ -743,7 +735,7 @@ function decide(
           fatigue,
         };
   }
-  const delay = fast(normalDelay(state, nowMs, random));
+  const delay = normalDelay(state, nowMs, random);
   return delay >= remaining - 20
     ? end('Next normal draw falls outside this session')
     : { ...draw(delay, 'NORMAL', 'Continue within active session'), fatigue };
@@ -776,7 +768,6 @@ export function planHumanized(
   state: HumanizedState,
   nowMs: number,
   random: () => number = Math.random,
-  pace = 1,
 ): { delayMs: number; reason: string; ready: boolean } {
   if (!Number.isFinite(nowMs)) throw new Error('Invalid humanized clock');
   if (state.nextDrawAt !== null && !state.timerKind) {
@@ -797,11 +788,7 @@ export function planHumanized(
   if (drawDue && !sleepDelay(state, nowMs))
     return { delayMs: 0, reason: 'Within active session', ready: true };
   if (state.nextDrawAt === null || state.nextDrawAt <= nowMs)
-    applyDecision(
-      state,
-      nowMs,
-      decide(state, nowMs, random, false, undefined, pace),
-    );
+    applyDecision(state, nowMs, decide(state, nowMs, random));
   return {
     delayMs: Math.max(1, Math.ceil(state.nextDrawAt! - nowMs)),
     reason:
@@ -816,10 +803,9 @@ export function recordHumanizedCycle(
   nowMs: number,
   random: () => number = Math.random,
   result = { spend: 0, value: 0 },
-  pace = 1,
 ): number {
   if (!Number.isFinite(nowMs)) throw new Error('Invalid humanized clock');
   state.sessionDraws++;
-  applyDecision(state, nowMs, decide(state, nowMs, random, true, result, pace));
+  applyDecision(state, nowMs, decide(state, nowMs, random, true, result));
   return state.nextDrawAt! - nowMs;
 }
