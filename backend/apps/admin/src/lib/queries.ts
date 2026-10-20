@@ -59,8 +59,6 @@ import {
   getGatewayBalance,
   getGatewayAudit,
   acknowledgeAuditFinding,
-  getArrivedQuote,
-  settleArrivedDeposit,
   getPaymentGateway,
   savePaymentGateway,
   getWithdrawalControls,
@@ -171,7 +169,7 @@ import type { SetEntry } from '@acme/odds-math';
 import type { GroupPolicy } from './player-groups';
 import { qk } from './query-keys';
 import { keepPreviousWhenSame } from './keep-previous';
-import { LEDGER_CURRENCY, rm } from './format';
+import { LEDGER_CURRENCY } from './format';
 import {
   classifyApproveResult,
   classifyDenyResult,
@@ -1134,34 +1132,6 @@ export const useSaveTierSettings = () => {
 
 // Gateway deposits. Polls once a minute: this is the money-in watch list, and a
 // stranded payment should surface without an operator remembering to reload.
-/** The live quote for settling a held USDT deposit; fetched only while its
- *  dialog is open, never cached across openings. */
-export const useArrivedQuote = (id: string | null) =>
-  useQuery({
-    queryKey: ['admin', 'arrived-quote', id],
-    queryFn: () => getArrivedQuote(id!),
-    enabled: id !== null,
-    gcTime: 0,
-    retry: false,
-  });
-
-export const useSettleArrived = () => {
-  const qc = useQueryClient();
-  const { t } = useTranslation();
-  return useMutation({
-    mutationFn: settleArrivedDeposit,
-    onSuccess: (r) =>
-      toast.success(
-        t('deposits.settledToast', { amount: rm(r.quote.credit) }),
-      ),
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'gateway-deposits'] });
-      qc.invalidateQueries({ queryKey: ['admin', 'arrived-quote'] });
-    },
-  });
-};
-
 export const useGatewayDeposits = (
   page = 0,
   status: GatewayDepositView = 'pending',

@@ -1554,14 +1554,6 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
-      // Settle a HELD USDT deposit for what arrived: a credit driven by an
-      // admin token, though only for the amount the gateway's own record
-      // reports and through the deposit's idempotency anchor. Same budget.
-      matcher: '/admin/payments/deposits/*/settle-arrived',
-      method: 'POST',
-      middlewares: [adminActionRateLimit],
-    },
-    {
       // Settlement's Acknowledge: takes a gateway audit finding out of the
       // "payments differ" count. Moves no money, but it can hide a warning,
       // so it shares the admin action budget.

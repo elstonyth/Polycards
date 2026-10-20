@@ -118,9 +118,6 @@ export const ADMIN_AUDIT_ACTIONS = [
   // An operator acknowledging a gateway audit finding on Settlement, entity
   // 'gateway_deposit' or 'gateway_withdrawal' — see Migration20261015160000.
   'acknowledge_finding',
-  // Staff settling a held USDT deposit for what arrived, entity
-  // 'gateway_deposit' — see Migration20261020120000.
-  'settle_deposit',
 ] as const;
 
 // admin_action_audit — append-only record of every admin money mutation
