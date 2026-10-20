@@ -1,9 +1,9 @@
 /**
  * The home page's feed read must be memoised per process, not just per ISR
- * window. A form-encoded POST to `/` (bots send these) skips the route cache
- * and re-renders the whole tree, and getRecentPulls() was the one read in it
- * with no memo of its own — every such POST cost one backend call to
- * /store/pulls/recent (the 2026-10-20 feed flood).
+ * window. A form-encoded POST to `/`, or a cookie-setting server action there,
+ * skips the route cache and re-renders the whole tree, and getRecentPulls()
+ * was the one read in it with no memo of its own — every such render cost one
+ * backend call to /store/pulls/recent.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 

@@ -36,10 +36,10 @@ export const revalidate = 15;
 const CHASE_LOOKUPS = 16;
 
 // The route cache above does NOT cover every render: a form-encoded POST to /
-// (bots send them; Next treats it as a possible server action) skips it and
-// renders this whole tree per request. Every other read here has its own memo,
-// so the feed needs one too — without it each such POST was one backend call
-// to /store/pulls/recent (~4/s per instance on 2026-10-20). Same 5s window as
+// (Next treats it as a possible server action) and a server action that sets
+// a cookie (login on /) both render this whole tree per request. Every other
+// read here has its own memo, so the feed needs one too — without it each such
+// render is one backend call to /store/pulls/recent. Same 5s window as
 // /api/recent-pulls, under its own key: that route caches a string body.
 // shortcut: getRecentPulls swallows a backend failure into an empty feed, so a
 // blip memoises "no pulls" for one window — the trade /api/recent-pulls makes.
