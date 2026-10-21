@@ -16,7 +16,7 @@
 //     node scripts/upload-pixel-sprites.mjs <dir> [--dry-run]
 // (ADMIN_TOKEN=<jwt> works instead of QA_JWT_FILE; --dry-run without a token
 // cannot see existing rows.) <dir> holds the sprite files plus manifest.json:
-// [{ "file", "name", "franchise"?, "number"?, "variant"?, "types"? }] — franchise
+// [{ "file", "name", "franchise"?, "dex"?, "number"?, "variant"?, "types"? }] — franchise
 // 'pokemon' (default, numbered by "dex") or 'one-piece' (numbered by "number").
 // Writes <dir>/upload-results.json after every entry:
 // [{ file, name, franchise, variant, status, id?, image_url?, error? }].
@@ -99,6 +99,7 @@ for (const entry of manifest) {
     file,
     name,
     franchise = 'pokemon',
+    dex = null,
     number = null,
     variant = 'custom',
     types = [],
@@ -143,6 +144,7 @@ for (const entry of manifest) {
         body: JSON.stringify({
           name,
           franchise,
+          dex,
           number,
           image_url: url,
           variant,

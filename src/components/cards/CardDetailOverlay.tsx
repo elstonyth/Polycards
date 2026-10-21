@@ -41,7 +41,7 @@ export function CardDetailOverlay({
   seed,
   buybackPercent = null,
   onClose,
-  pokemon = true,
+  pokemon,
 }: {
   seed: CardSeed | null;
   buybackPercent?: number | null;

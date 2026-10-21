@@ -18,7 +18,8 @@ export function franchiseFor(
   ...hints: (string | null | undefined)[]
 ): SpriteFranchise {
   const text = hints.filter(Boolean).join(' ');
-  return /one\s*piece|\bOP\d{2}-\d{3}\b|\bST\d{2}-\d{3}\b/i.test(text)
+  // Booster (OP), starter (ST), extra (EB) and premium (PRB) card codes.
+  return /\bone\s*piece\b|\b(?:OP|ST|EB|PRB)\d{2}-\d{3}\b/i.test(text)
     ? 'one-piece'
     : 'pokemon';
 }

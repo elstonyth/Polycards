@@ -34,8 +34,9 @@ export type BadgeSprite = {
 export function badgeSprite(
   card: BadgeCard,
   still = false,
-  /** false in a non-Pokémon pack (isPokemonPack): never resolve a Pokémon. */
-  pokemon = true,
+  /** isPokemonPack of the pack this renders in; undefined = no pack context
+   *  (see resolveCardPokemon for what each value does). */
+  pokemon?: boolean,
 ): BadgeSprite {
   // resolveCardPokemon takes snake_case; PackCard carries camelCase. Both
   // fields are optional there, so an unmapped call compiles clean and silently

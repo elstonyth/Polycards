@@ -42,10 +42,15 @@ describe('franchiseFor', () => {
     expect(franchiseFor('Starter Deck', 'Roronoa Zoro ST01-001')).toBe(
       'one-piece',
     );
+    expect(franchiseFor('Extra Booster', 'Uta EB01-012')).toBe('one-piece');
+    expect(franchiseFor('Premium Booster', 'Nami PRB01-001')).toBe('one-piece');
   });
   it('keeps everything else Pokémon', () => {
     expect(franchiseFor('Pokemon Base Set', 'Charizard #4')).toBe('pokemon');
     expect(franchiseFor(null, undefined)).toBe('pokemon');
+    // word-bounded: "onepieces"-style run-ons and stray OP text don't flip it
+    expect(franchiseFor('Pokemon Onepiecestyle Promo')).toBe('pokemon');
+    expect(franchiseFor('Pokemon Promo', 'Charizard OP Rare')).toBe('pokemon');
   });
 });
 

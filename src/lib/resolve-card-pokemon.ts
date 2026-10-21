@@ -44,26 +44,30 @@ const POKEMON_CATEGORIES: ReadonlySet<string> = new Set([
 export const isPokemonPack = (categoryId: string | null | undefined): boolean =>
   categoryId == null || POKEMON_CATEGORIES.has(categoryId);
 
+/**
+ * `pokemon` — what the caller knows about the card's pack (isPokemonPack):
+ *   true      a Pokémon pack: a card with no dex derives one from its name even
+ *             when it has a custom sprite (the dex is the badge's fallback if
+ *             that sprite's URL ever breaks).
+ *   undefined no pack context (vault, /card/<handle>): derive only for a card
+ *             with NOTHING configured — a dex-less custom sprite may be a One
+ *             Piece character, and "Bartholomew Kuma" contains "mew".
+ *   false     a One Piece / sports pack: never a Pokémon, not even a stray dex.
+ */
 export function resolveCardPokemon(
   card: CardPokemonInput,
-  { pokemon = true }: { pokemon?: boolean } = {},
+  { pokemon }: { pokemon?: boolean } = {},
 ): ResolvedCardPokemon {
-  // In a non-Pokémon pack even a stray configured dex is ignored: only the
-  // card's own custom sprite may show.
   const explicit =
-    pokemon && validDex(card.pokemon_dex) ? card.pokemon_dex : null;
+    pokemon !== false && validDex(card.pokemon_dex) ? card.pokemon_dex : null;
   const custom =
     card.sprite_image && card.sprite_image.trim() !== ''
       ? card.sprite_image
       : null;
-  // Name-derivation only for cards with NOTHING configured. A custom sprite
-  // without a dex is a deliberate non-Pokémon pick (One Piece characters): its
-  // name must not be mined for a species — "Bartholomew Kuma" contains "mew",
-  // which would put Mew in that pack's reel.
-  const fallback =
-    pokemon && explicit === null && custom === null
-      ? pokemonFromCard(card.name)
-      : null;
+  const derive =
+    explicit === null &&
+    (pokemon === true || (pokemon === undefined && custom === null));
+  const fallback = derive ? pokemonFromCard(card.name) : null;
   const dex = explicit ?? fallback?.dex ?? null;
   const name =
     explicit !== null

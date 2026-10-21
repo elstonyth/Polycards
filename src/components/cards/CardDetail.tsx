@@ -27,7 +27,7 @@ export function CardDetail({
   detail,
   buybackPercent = null,
   entrance = false,
-  pokemon = true,
+  pokemon,
 }: {
   seed: CardSeed;
   detail: CardDetailData | null;

@@ -15,7 +15,7 @@ export function CardTile({
   card,
   onOpen,
   sizes = '(max-width: 768px) 45vw, 200px',
-  pokemon = true,
+  pokemon,
 }: {
   card: PackCard;
   onOpen: (card: PackCard) => void;

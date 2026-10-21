@@ -42,7 +42,7 @@ export function PokemonBadge({
   frameVariant,
   slabSrc = null,
   className,
-  pokemon = true,
+  pokemon,
 }: {
   card: BadgeCard;
   rarity?: Rarity | null;

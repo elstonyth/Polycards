@@ -39,7 +39,7 @@ export function PoolByRarity({
   full,
   tierChances,
   onOpen,
-  pokemon = true,
+  pokemon,
 }: {
   /** Top-tier subset for the teaser rail, value-sorted. */
   rail: PackCard[];
@@ -160,7 +160,7 @@ function PoolModal({
   title: string;
   tierChances: Partial<Record<Rarity, number>> | null;
   onOpen: (card: PackCard) => void;
-  pokemon: boolean;
+  pokemon?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);

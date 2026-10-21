@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Button, Input, Label, Text, clx, toast } from '@medusajs/ui';
-import { spriteGif } from '@acme/pokemon';
+import { pokemonFromCard, spriteGif } from '@acme/pokemon';
 import {
   useUploadImage,
   usePixelPokemon,
@@ -146,7 +146,12 @@ const CardPokemonFields = ({
     franchise,
     limit: PICKER_LIMIT,
   });
-  const matches = q.length >= 1 ? (data?.pixel_pokemon ?? []) : [];
+  // The query keeps the previous page while the next loads — right after a
+  // deck switch that's the OTHER deck's rows, so filter them out here.
+  const matches =
+    q.length >= 1
+      ? (data?.pixel_pokemon ?? []).filter((m) => m.franchise === franchise)
+      : [];
 
   const linked = value.pixel_pokemon_id !== null;
   // Only let this session's pick drive the preview while it still matches the
@@ -166,9 +171,7 @@ const CardPokemonFields = ({
   const pickedNumber = pickedForValue ? entryNumber(pickedForValue) : '';
   const previewLabel = pickedForValue
     ? `${pickedForValue.name}${pickedNumber ? ` · ${pickedNumber}` : ''}${
-        pickedForValue.is_custom && pickedForValue.franchise === 'pokemon'
-          ? ' · custom'
-          : ''
+        pickedForValue.variant !== 'normal' ? ` · ${pickedForValue.variant}` : ''
       }`
     : linked
       ? 'Linked to a library entry'
@@ -189,12 +192,16 @@ const CardPokemonFields = ({
   // dep on an ever-new identity would cancel the in-flight fetch on every
   // parent render while autoTried blocks the retry.
   const autoTried = useRef<string | null>(null);
+  // The name the operator pressed "Clear link" on — never auto-relinked, even
+  // after a deck switch (the per-deck tryKey alone would re-arm it).
+  const clearedFor = useRef<string | null>(null);
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   });
   useEffect(() => {
     if (!autoResolveName || linked) return;
+    if (clearedFor.current === autoResolveName) return;
     const tryKey = `${franchise}:${autoResolveName}`;
     if (autoTried.current === tryKey) return;
     autoTried.current = tryKey;
@@ -222,6 +229,7 @@ const CardPokemonFields = ({
   }, [autoResolveName, linked, franchise]);
 
   const clear = () => {
+    clearedFor.current = autoResolveName ?? null;
     setPicked(null);
     onChange({ pixel_pokemon_id: null });
   };
@@ -250,6 +258,12 @@ const CardPokemonFields = ({
       const res = await createEntry.mutateAsync({
         name,
         franchise,
+        // A Pokémon upload carries its species, so the card keeps a dex
+        // fallback (badge + reel) if the uploaded URL ever breaks.
+        dex:
+          franchise === 'pokemon'
+            ? (pokemonFromCard(name)?.dex ?? null)
+            : null,
         image_url: url,
         variant: 'custom',
       });
@@ -387,7 +401,7 @@ const CardPokemonFields = ({
             type="button"
             onClick={clear}
           >
-            Clear link (use name)
+            {franchise === 'pokemon' ? 'Clear link (use name)' : 'Clear link'}
           </Button>
         )}
         <input

@@ -113,28 +113,32 @@ describe('buildDecoyPool', () => {
   test('a One Piece pack flickers its own custom sprites, never the Pokémon fallback', () => {
     // Regression: dex-less custom-sprite cards were skipped, the pool came out
     // empty and the reel fell back to DECOY_DEXES — Pokémon in a One Piece pack.
-    const pool = buildDecoyPool([
-      {
-        name: 'Monkey.D.Luffy OP05-119',
-        pokemonDex: null,
-        spriteImage: 'https://cdn.example/luffy-gear5.gif',
-        rarity: 'Immortal' as const,
-      },
-      // "Bartholomew Kuma" contains "mew" — must stay Kuma, not Mew (dex 151)
-      {
-        name: 'Bartholomew Kuma OP07-079',
-        pokemonDex: null,
-        spriteImage: 'https://cdn.example/kuma.gif',
-        rarity: 'Rare' as const,
-      },
-      // same sprite + rarity → deduped
-      {
-        name: 'Monkey.D.Luffy OP05-119 Parallel',
-        pokemonDex: null,
-        spriteImage: 'https://cdn.example/luffy-gear5.gif',
-        rarity: 'Immortal' as const,
-      },
-    ]);
+    const pool = buildDecoyPool(
+      [
+        {
+          name: 'Monkey.D.Luffy OP05-119',
+          pokemonDex: null,
+          spriteImage: 'https://cdn.example/luffy-gear5.gif',
+          rarity: 'Immortal' as const,
+        },
+        // "Bartholomew Kuma" contains "mew" — must stay Kuma, not Mew (dex 151)
+        {
+          name: 'Bartholomew Kuma OP07-079',
+          pokemonDex: null,
+          spriteImage: 'https://cdn.example/kuma.gif',
+          rarity: 'Rare' as const,
+        },
+        // same sprite + rarity → deduped
+        {
+          name: 'Monkey.D.Luffy OP05-119 Parallel',
+          pokemonDex: null,
+          spriteImage: 'https://cdn.example/luffy-gear5.gif',
+          rarity: 'Immortal' as const,
+        },
+      ],
+      // the slot machine passes the pack's isPokemonPack — false for One Piece
+      { pokemon: false },
+    );
     expect(pool).toEqual([
       {
         dex: 0,
