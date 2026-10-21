@@ -609,6 +609,7 @@ const AddFromPriceChartingPage = () => {
               value={pokemon}
               onChange={(p) => setPokemon((v) => ({ ...v, ...p }))}
               suggestionName={pcProduct?.name ?? ''}
+              setName={pcProduct?.set}
               autoResolveName={pcProduct?.name}
             />
             {pokemon.pixel_pokemon_id === null && (

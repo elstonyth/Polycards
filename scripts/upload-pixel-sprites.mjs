@@ -16,8 +16,10 @@
 //     node scripts/upload-pixel-sprites.mjs <dir> [--dry-run]
 // (ADMIN_TOKEN=<jwt> works instead of QA_JWT_FILE; --dry-run without a token
 // cannot see existing rows.) <dir> holds the sprite files plus manifest.json:
-// [{ "file", "name", "variant"?, "types"? }]. Writes <dir>/upload-results.json
-// after every entry: [{ file, name, status, id?, image_url?, error? }].
+// [{ "file", "name", "franchise"?, "number"?, "variant"?, "types"? }] — franchise
+// 'pokemon' (default, numbered by "dex") or 'one-piece' (numbered by "number").
+// Writes <dir>/upload-results.json after every entry:
+// [{ file, name, franchise, variant, status, id?, image_url?, error? }].
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 
@@ -47,7 +49,10 @@ const MIME = {
 };
 const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
 const resultsPath = join(dir, 'upload-results.json');
-const key = (name, variant) => `${name}\u0000${variant ?? 'custom'}`;
+// The deck is part of the identity: a Pokémon and a One Piece row may share a
+// name + variant.
+const key = (franchise, name, variant) =>
+  `${franchise ?? 'pokemon'}\u0000${name}\u0000${variant ?? 'custom'}`;
 
 async function api(path, init = {}) {
   const res = await fetch(`${BACKEND}${path}`, {
@@ -70,7 +75,8 @@ if (token) {
     const page = await api(
       `/admin/pixel-pokemon?custom=true&limit=200&offset=${offset}`,
     );
-    for (const p of page.pixel_pokemon) existing.set(key(p.name, p.variant), p);
+    for (const p of page.pixel_pokemon)
+      existing.set(key(p.franchise, p.name, p.variant), p);
     if (offset + 200 >= page.total) break;
   }
 }
@@ -80,37 +86,41 @@ const staged = new Map();
 if (existsSync(resultsPath)) {
   for (const r of JSON.parse(readFileSync(resultsPath, 'utf8'))) {
     if (r.status === 'failed' && r.image_url)
-      staged.set(key(r.name, r.variant), r.image_url);
+      staged.set(key(r.franchise, r.name, r.variant), r.image_url);
   }
 }
 
 const results = [];
 const save = () => writeFileSync(resultsPath, JSON.stringify(results, null, 1));
 for (const entry of manifest) {
-  const { file, name, variant = 'custom', types = [] } = entry;
-  const k = key(name, variant);
+  const {
+    file,
+    name,
+    franchise = 'pokemon',
+    number = null,
+    variant = 'custom',
+    types = [],
+  } = entry;
+  const k = key(franchise, name, variant);
+  const who = { file, name, franchise, variant };
   const type = MIME[extname(file).toLowerCase()];
   let result;
   if (!name || !type) {
     result = {
-      file,
-      name,
-      variant,
+      ...who,
       status: 'failed',
       error: 'needs a name and a .gif/.png/.webp file',
     };
   } else if (existing.has(k)) {
     const found = existing.get(k);
     result = {
-      file,
-      name,
-      variant,
+      ...who,
       status: 'exists',
       id: found.id,
       image_url: found.image_url,
     };
   } else if (dryRun) {
-    result = { file, name, variant, status: 'would-upload' };
+    result = { ...who, status: 'would-upload' };
     existing.set(k, { id: null, image_url: null }); // a repeat would not upload twice
   } else {
     let url = staged.get(k);
@@ -128,13 +138,18 @@ for (const entry of manifest) {
       const { pixel_pokemon: row } = await api('/admin/pixel-pokemon', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, image_url: url, variant, types }),
+        body: JSON.stringify({
+          name,
+          franchise,
+          number,
+          image_url: url,
+          variant,
+          types,
+        }),
       });
       existing.set(k, row);
       result = {
-        file,
-        name,
-        variant,
+        ...who,
         status: 'created',
         id: row.id,
         image_url: row.image_url,
@@ -142,9 +157,7 @@ for (const entry of manifest) {
     } catch (err) {
       // image_url (when the upload got through) lets the next run reuse it.
       result = {
-        file,
-        name,
-        variant,
+        ...who,
         status: 'failed',
         image_url: url,
         error: String(err.message ?? err),

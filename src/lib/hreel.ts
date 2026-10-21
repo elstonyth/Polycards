@@ -44,6 +44,15 @@ export function idleDriftFits(poolLen: number): boolean {
  *  reward in this pack, never arbitrary species. */
 export const DECOY_DEXES = [1, 4, 7, 25, 6, 9, 3, 143, 94, 130, 448, 197];
 
+/** Neutral card-back (vector, so it stays crisp under the reel's pixelated
+ *  scaling): the sprite a non-Pokémon pack shows when a card has none — never
+ *  a Pokémon, never a Poké Ball. */
+export const NEUTRAL_CARD_SPRITE =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='22' y='9' width='56' height='82' rx='7' fill='#262626' stroke='#a3a3a3' stroke-width='3'/><rect x='30' y='17' width='40' height='66' rx='4' fill='none' stroke='#525252' stroke-width='2'/><path d='M50 36 62 50 50 64 38 50Z' fill='#d4d4d4'/></svg>",
+  );
+
 /** A reel cell. `image` is set only for a card with a custom sprite and NO
  *  Pokémon (One Piece characters): it is what the cell draws, and `dex` is then
  *  0 (no species). Pokémon cells keep drawing their dex sprite as before. */
@@ -66,21 +75,29 @@ const spriteOf = (c: Pick<HReelCell, 'dex' | 'image'>): number | string =>
  * by its URL; one with neither (trainer/energy) is skipped. Without this a
  * One Piece pack's pool came out empty and the reel fell back to DECOY_DEXES —
  * Pokémon in a One Piece pack.
+ *
+ * `pokemon: false` (a One Piece / sports pack — see isPokemonPack) never
+ * resolves a Pokémon, and a pool with nothing to show falls back to the neutral
+ * card-back instead of the Pokémon DECOY_DEXES.
  */
 export function buildDecoyPool(
   cards: readonly Pick<
     PackCard,
     'name' | 'pokemonDex' | 'spriteImage' | 'rarity'
   >[],
+  { pokemon = true }: { pokemon?: boolean } = {},
 ): HReelCell[] {
   const seen = new Set<string>();
   const out: HReelCell[] = [];
   for (const c of cards) {
-    const { dex, sprite } = resolveCardPokemon({
-      name: c.name,
-      pokemon_dex: c.pokemonDex,
-      sprite_image: c.spriteImage,
-    });
+    const { dex, sprite } = resolveCardPokemon(
+      {
+        name: c.name,
+        pokemon_dex: c.pokemonDex,
+        sprite_image: c.spriteImage,
+      },
+      { pokemon },
+    );
     if (dex === null && sprite === null) continue;
     const cell: HReelCell =
       dex !== null
@@ -90,6 +107,14 @@ export function buildDecoyPool(
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(cell);
+  }
+  if (!pokemon && out.length === 0) {
+    // Six cycled tier colours so the spin still flickers.
+    return RARITY_ORDER.map((_, i) => ({
+      dex: 0,
+      rarity: decoyRarity(i),
+      image: NEUTRAL_CARD_SPRITE,
+    }));
   }
   return out;
 }

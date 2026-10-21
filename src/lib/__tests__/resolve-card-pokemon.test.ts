@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
+import { isPokemonPack, resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { POKEDEX_NAMES } from '@/lib/mock/pokedex-names';
 import { STATIC_ONLY_DEX } from '@/lib/mock/pokedex';
 
@@ -45,6 +45,33 @@ describe('resolveCardPokemon', () => {
     });
     // Same name with nothing configured still derives (legacy unlinked cards).
     expect(resolveCardPokemon({ name: 'Bartholomew Kuma' }).name).toBe('Mew');
+  });
+
+  it('a non-Pokémon pack never resolves a Pokémon — not even a stray dex', () => {
+    expect(
+      resolveCardPokemon(
+        { name: 'Pikachu', pokemon_dex: 25, sprite_image: null },
+        { pokemon: false },
+      ),
+    ).toEqual({ dex: null, name: null, sprite: null });
+    // its own custom sprite still shows
+    expect(
+      resolveCardPokemon(
+        {
+          name: 'Bartholomew Kuma',
+          sprite_image: 'https://cdn.example/kuma.gif',
+        },
+        { pokemon: false },
+      ).sprite,
+    ).toBe('https://cdn.example/kuma.gif');
+  });
+
+  it('isPokemonPack: only One Piece / sports / … packs opt out', () => {
+    for (const c of ['one-piece', 'basketball', 'yugioh'])
+      expect(isPokemonPack(c)).toBe(false);
+    // free_welcome / reward_box carry Pokémon prizes
+    for (const c of ['pokemon', 'free_welcome', 'reward_box', undefined])
+      expect(isPokemonPack(c)).toBe(true);
   });
 
   it('falls back to name-derivation when pokemon_dex is null', () => {

@@ -26,10 +26,32 @@ const MAX_DEX = POKEDEX_NAMES.length;
 const validDex = (d: number | null | undefined): d is number =>
   typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= MAX_DEX;
 
+/** Pack categories (backend `pack.category` keys) whose cards are never
+ *  Pokémon. Anything else — pokemon, plus free_welcome / reward_box, which
+ *  carry Pokémon prizes — keeps the Pokémon resolution. */
+const NON_POKEMON_CATEGORIES: ReadonlySet<string> = new Set([
+  'one-piece',
+  'basketball',
+  'baseball',
+  'football',
+  'soccer',
+  'yugioh',
+  'riftbound',
+]);
+
+/** False for a One Piece / sports / … pack: its cards must never resolve to a
+ *  Pokémon (no dex, no name-derivation) — the decks don't mix. */
+export const isPokemonPack = (categoryId: string | null | undefined): boolean =>
+  !NON_POKEMON_CATEGORIES.has(categoryId ?? '');
+
 export function resolveCardPokemon(
   card: CardPokemonInput,
+  { pokemon = true }: { pokemon?: boolean } = {},
 ): ResolvedCardPokemon {
-  const explicit = validDex(card.pokemon_dex) ? card.pokemon_dex : null;
+  // In a non-Pokémon pack even a stray configured dex is ignored: only the
+  // card's own custom sprite may show.
+  const explicit =
+    pokemon && validDex(card.pokemon_dex) ? card.pokemon_dex : null;
   const custom =
     card.sprite_image && card.sprite_image.trim() !== ''
       ? card.sprite_image
@@ -39,7 +61,9 @@ export function resolveCardPokemon(
   // name must not be mined for a species — "Bartholomew Kuma" contains "mew",
   // which would put Mew in that pack's reel.
   const fallback =
-    explicit === null && custom === null ? pokemonFromCard(card.name) : null;
+    pokemon && explicit === null && custom === null
+      ? pokemonFromCard(card.name)
+      : null;
   const dex = explicit ?? fallback?.dex ?? null;
   const name =
     explicit !== null

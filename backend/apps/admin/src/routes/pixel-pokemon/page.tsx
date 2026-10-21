@@ -18,6 +18,11 @@ import {
 } from '../../lib/queries';
 import { validateImageFile } from '../../lib/image-validation';
 import { resolveImageUrl } from '../../lib/image-url';
+import {
+  FRANCHISE_LABEL,
+  entryNumber,
+  type SpriteFranchise,
+} from '../../lib/sprite-franchise';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -35,11 +40,14 @@ const PAGE_SIZE = 60;
 const PixelPokedexPage = () => {
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
+  // Deck filter — Pokémon and One Piece sprites live in one library.
+  const [franchise, setFranchise] = useState<'' | SpriteFranchise>('');
   const [custom, setCustom] = useState<'' | 'true'>('');
   const [page, setPage] = useState(0);
 
   const { data, isError } = usePixelPokemon({
     q,
+    franchise,
     type,
     custom,
     page,
@@ -142,9 +150,7 @@ const PixelPokedexPage = () => {
               <Heading level="h2">Pixel Pokédex</Heading>
               <Text className="text-ui-fg-subtle mt-1" size="small">
                 Browse the pixel-Pokémon library
-                {data
-                  ? ` (${data.total.toLocaleString('en-US')} entries)`
-                  : ''}
+                {data ? ` (${data.total.toLocaleString('en-US')} entries)` : ''}
                 . Cards link to these by id.
               </Text>
             </div>
@@ -263,11 +269,29 @@ const PixelPokedexPage = () => {
           )}
 
           <Input
-            placeholder="Search by name or #dex…"
-            aria-label="Search pixel pokémon by name or dex"
+            placeholder="Search by name or number…"
+            aria-label="Search pixel sprites by name or number"
             value={q}
             onChange={(e) => setFilter(() => setQ(e.target.value))}
           />
+
+          <div
+            role="group"
+            aria-label="Deck"
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            {(['', 'pokemon', 'one-piece'] as const).map((f) => (
+              <button
+                key={f || 'all'}
+                type="button"
+                aria-pressed={franchise === f}
+                className={chip(franchise === f)}
+                onClick={() => setFilter(() => setFranchise(f))}
+              >
+                {f ? FRANCHISE_LABEL[f] : 'All decks'}
+              </button>
+            ))}
+          </div>
 
           {data && data.all_types.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -343,7 +367,7 @@ const PixelPokedexPage = () => {
                     {p.name}
                   </Text>
                   <Text size="xsmall" className="text-ui-fg-subtle">
-                    {p.dex !== null ? `#${p.dex}` : 'custom'} · {p.variant}
+                    {entryNumber(p) || 'custom'} · {p.variant}
                   </Text>
                 </div>
                 {p.types.length > 0 && (

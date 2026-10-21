@@ -6,6 +6,7 @@ import {
   HREEL_IDLE_BASE_INDEX,
   HREEL_IDLE_POOL_MAX,
   DECOY_DEXES,
+  NEUTRAL_CARD_SPRITE,
   decoyRarity,
   teaseRarity,
   buildHReelStrip,
@@ -142,6 +143,49 @@ describe('buildDecoyPool', () => {
       },
       { dex: 0, rarity: 'Rare', image: 'https://cdn.example/kuma.gif' },
     ]);
+  });
+});
+
+describe('buildDecoyPool in a non-Pokémon pack (pokemon: false)', () => {
+  test('keeps only custom sprites — a Pokémon-dex card is never flickered', () => {
+    const pool = buildDecoyPool(
+      [
+        {
+          name: 'Pikachu #25',
+          pokemonDex: 25,
+          spriteImage: null,
+          rarity: 'Common' as const,
+        },
+        {
+          name: 'Roronoa Zoro OP01-025',
+          pokemonDex: null,
+          spriteImage: 'https://cdn.example/zoro.gif',
+          rarity: 'Rare' as const,
+        },
+      ],
+      { pokemon: false },
+    );
+    expect(pool).toEqual([
+      { dex: 0, rarity: 'Rare', image: 'https://cdn.example/zoro.gif' },
+    ]);
+  });
+
+  test('with nothing to show it falls back to the neutral card-back, never DECOY_DEXES', () => {
+    const pool = buildDecoyPool(
+      [
+        {
+          name: 'LeBron James 2003 Topps #221',
+          pokemonDex: null,
+          spriteImage: null,
+          rarity: 'Legendary' as const,
+        },
+      ],
+      { pokemon: false },
+    );
+    expect(pool.length).toBe(6);
+    expect(pool.every((c) => c.image === NEUTRAL_CARD_SPRITE)).toBe(true);
+    expect(new Set(pool.map((c) => c.rarity)).size).toBe(6);
+    expect(pool.some((c) => DECOY_DEXES.includes(c.dex))).toBe(false);
   });
 });
 
