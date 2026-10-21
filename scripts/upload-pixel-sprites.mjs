@@ -4,19 +4,25 @@
 // keeps animating), then create the library row with POST /admin/pixel-pokemon.
 // Cards are then linked to these rows in the admin card form's picker.
 //
-// Idempotent: an entry whose name + variant already exists as a custom row is
-// skipped, so a re-run after a failure only does what is left.
+// Idempotent: an entry whose name + variant already exists as a custom row (or
+// appeared earlier in this run) is skipped, so a re-run after a failure only
+// does what is left. A run is one operator at a time — nothing stops two
+// overlapping runs from both creating a row. If the upload succeeded but the
+// row did not, the results file keeps the uploaded URL and the next run reuses
+// it instead of storing a second copy (there is no media DELETE to clean up).
 //
 // Usage:
 //   QA_JWT_FILE=/path/admin.jwt [BACKEND_URL=http://localhost:9000] \
 //     node scripts/upload-pixel-sprites.mjs <dir> [--dry-run]
-// (ADMIN_TOKEN=<jwt> works instead of QA_JWT_FILE.) <dir> holds the sprite
-// files plus manifest.json: [{ "file", "name", "variant"?, "types"? }].
-// Writes <dir>/upload-results.json: [{ file, name, status, id?, image_url?, error? }].
-import { readFileSync, writeFileSync } from 'node:fs';
+// (ADMIN_TOKEN=<jwt> works instead of QA_JWT_FILE; --dry-run without a token
+// cannot see existing rows.) <dir> holds the sprite files plus manifest.json:
+// [{ "file", "name", "variant"?, "types"? }]. Writes <dir>/upload-results.json
+// after every entry: [{ file, name, status, id?, image_url?, error? }].
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:9000';
+const TIMEOUT_MS = 30_000; // a stalled request fails its entry, not the run
 const dir = process.argv[2];
 const dryRun = process.argv.includes('--dry-run');
 if (!dir) {
@@ -40,12 +46,14 @@ const MIME = {
   '.webp': 'image/webp',
 };
 const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+const resultsPath = join(dir, 'upload-results.json');
 const key = (name, variant) => `${name}\u0000${variant ?? 'custom'}`;
 
 async function api(path, init = {}) {
   const res = await fetch(`${BACKEND}${path}`, {
     ...init,
     headers: { authorization: `Bearer ${token}`, ...init.headers },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok)
@@ -55,9 +63,9 @@ async function api(path, init = {}) {
   return body;
 }
 
-// Existing custom rows, so re-runs skip what is already there.
+// Existing custom rows, so re-runs (and dry runs) skip what is already there.
 const existing = new Map();
-if (!dryRun) {
+if (token) {
   for (let offset = 0; ; offset += 200) {
     const page = await api(
       `/admin/pixel-pokemon?custom=true&limit=200&offset=${offset}`,
@@ -67,75 +75,93 @@ if (!dryRun) {
   }
 }
 
+// Uploads a previous run stored but never got a row for — reused, not re-sent.
+const staged = new Map();
+if (existsSync(resultsPath)) {
+  for (const r of JSON.parse(readFileSync(resultsPath, 'utf8'))) {
+    if (r.status === 'failed' && r.image_url)
+      staged.set(key(r.name, r.variant), r.image_url);
+  }
+}
+
 const results = [];
+const save = () => writeFileSync(resultsPath, JSON.stringify(results, null, 1));
 for (const entry of manifest) {
   const { file, name, variant = 'custom', types = [] } = entry;
+  const k = key(name, variant);
   const type = MIME[extname(file).toLowerCase()];
+  let result;
   if (!name || !type) {
-    results.push({
+    result = {
       file,
       name,
+      variant,
       status: 'failed',
       error: 'needs a name and a .gif/.png/.webp file',
-    });
-    continue;
-  }
-  const found = existing.get(key(name, variant));
-  if (found) {
-    results.push({
+    };
+  } else if (existing.has(k)) {
+    const found = existing.get(k);
+    result = {
       file,
       name,
+      variant,
       status: 'exists',
       id: found.id,
       image_url: found.image_url,
-    });
-    continue;
+    };
+  } else if (dryRun) {
+    result = { file, name, variant, status: 'would-upload' };
+    existing.set(k, { id: null, image_url: null }); // a repeat would not upload twice
+  } else {
+    let url = staged.get(k);
+    try {
+      if (!url) {
+        const form = new FormData();
+        form.append('kind', 'sprite');
+        form.append(
+          'files',
+          new Blob([readFileSync(join(dir, file))], { type }),
+          file,
+        );
+        ({ url } = await api('/admin/media', { method: 'POST', body: form }));
+      }
+      const { pixel_pokemon: row } = await api('/admin/pixel-pokemon', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, image_url: url, variant, types }),
+      });
+      existing.set(k, row);
+      result = {
+        file,
+        name,
+        variant,
+        status: 'created',
+        id: row.id,
+        image_url: row.image_url,
+      };
+    } catch (err) {
+      // image_url (when the upload got through) lets the next run reuse it.
+      result = {
+        file,
+        name,
+        variant,
+        status: 'failed',
+        image_url: url,
+        error: String(err.message ?? err),
+      };
+    }
   }
-  if (dryRun) {
-    results.push({ file, name, status: 'would-upload' });
-    continue;
-  }
-  try {
-    const form = new FormData();
-    form.append('kind', 'sprite');
-    form.append(
-      'files',
-      new Blob([readFileSync(join(dir, file))], { type }),
-      file,
-    );
-    const { url } = await api('/admin/media', { method: 'POST', body: form });
-    const { pixel_pokemon: row } = await api('/admin/pixel-pokemon', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, image_url: url, variant, types }),
-    });
-    results.push({
-      file,
-      name,
-      status: 'created',
-      id: row.id,
-      image_url: row.image_url,
-    });
-  } catch (err) {
-    results.push({
-      file,
-      name,
-      status: 'failed',
-      error: String(err.message ?? err),
-    });
-  }
-  const last = results.at(-1);
+  results.push(result);
+  save();
   console.log(
-    `${last.status.padEnd(8)} ${name}${last.error ? ` — ${last.error}` : ''}`,
+    `${result.status.padEnd(8)} ${name}${result.error ? ` — ${result.error}` : ''}`,
   );
 }
 
-writeFileSync(
-  join(dir, 'upload-results.json'),
-  JSON.stringify(results, null, 1),
-);
 const count = (s) => results.filter((r) => r.status === s).length;
 console.log(
   `created ${count('created')}, already there ${count('exists')}, would upload ${count('would-upload')}, failed ${count('failed')}`,
 );
-process.exit(count('failed') ? 1 : 0);
+// exitCode, not process.exit(): exiting while fetch's keep-alive sockets are
+// still closing trips a libuv assertion on Windows (UV_HANDLE_CLOSING, 0xC0000409).
+process.exitCode = count('failed') ? 1 : 0;

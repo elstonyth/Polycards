@@ -49,10 +49,12 @@ export const DECOY_DEXES = [1, 4, 7, 25, 6, 9, 3, 143, 94, 130, 448, 197];
  *  0 (no species). Pokémon cells keep drawing their dex sprite as before. */
 export type HReelCell = { dex: number; rarity: Rarity; image?: string };
 
-/** What a cell SHOWS — the no-adjacent-repeat checks compare this, so two
- *  different custom sprites (both dex 0) never count as a repeat. */
+/** Cell identity for the no-adjacent-repeat checks: the species when there is
+ *  one (a seeded-linked winner carries BOTH its dex and an image URL, and must
+ *  still match the dex-only decoys of the same Pokémon), else the custom image —
+ *  so two different dex-less sprites (both dex 0) never count as a repeat. */
 const spriteOf = (c: Pick<HReelCell, 'dex' | 'image'>): number | string =>
-  c.image ?? c.dex;
+  c.dex > 0 ? c.dex : (c.image ?? c.dex);
 
 /**
  * Decoy flicker pool from the pack's OWN cards: each entry pairs a card's

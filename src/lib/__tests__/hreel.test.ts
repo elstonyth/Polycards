@@ -182,6 +182,30 @@ describe('custom-sprite (dex 0 + image) cells through the strip builders', () =>
       expect(press[i]!.image).not.toBe(press[i - 1]!.image);
     }
   });
+
+  test('a seeded-linked winner (dex + image) never lands beside its own species', () => {
+    // The winner carries its hosted sprite URL AND its dex; decoys of the same
+    // Pokémon are dex-only. Identity must be the dex, or Pikachu can land with
+    // a Pikachu decoy right beside it.
+    const pool: HReelCell[] = [
+      { dex: 25, rarity: 'Common' },
+      { dex: 6, rarity: 'Rare' },
+    ];
+    for (let rngSeed = 0; rngSeed < 40; rngSeed++) {
+      const press = buildPressStrip({
+        winnerDex: 25,
+        winnerImage: 'https://cdn.example/pixel/25.gif',
+        winnerRarity: 'Common',
+        winIndex: 30,
+        keepCells: 5,
+        seed: 0,
+        rngSeed,
+        decoyCards: pool,
+      });
+      expect(press[29]!.dex).not.toBe(25);
+      expect(press[31]!.dex).not.toBe(25);
+    }
+  });
 });
 
 describe('HREEL_IDLE_POOL_MAX (frozen-rails regression)', () => {
