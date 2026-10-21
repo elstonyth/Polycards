@@ -30,16 +30,21 @@ export function resolveCardPokemon(
   card: CardPokemonInput,
 ): ResolvedCardPokemon {
   const explicit = validDex(card.pokemon_dex) ? card.pokemon_dex : null;
-  const fallback = explicit === null ? pokemonFromCard(card.name) : null;
+  const custom =
+    card.sprite_image && card.sprite_image.trim() !== ''
+      ? card.sprite_image
+      : null;
+  // Name-derivation only for cards with NOTHING configured. A custom sprite
+  // without a dex is a deliberate non-Pokémon pick (One Piece characters): its
+  // name must not be mined for a species — "Bartholomew Kuma" contains "mew",
+  // which would put Mew in that pack's reel.
+  const fallback =
+    explicit === null && custom === null ? pokemonFromCard(card.name) : null;
   const dex = explicit ?? fallback?.dex ?? null;
   const name =
     explicit !== null
       ? (POKEDEX_NAMES[explicit - 1] ?? null)
       : (fallback?.name ?? null);
-  const custom =
-    card.sprite_image && card.sprite_image.trim() !== ''
-      ? card.sprite_image
-      : null;
   const sprite = custom ?? (dex !== null ? spriteGif(dex) : null);
   return { dex, name, sprite };
 }

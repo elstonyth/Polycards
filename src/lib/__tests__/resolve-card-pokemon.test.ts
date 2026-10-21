@@ -30,6 +30,23 @@ describe('resolveCardPokemon', () => {
     expect(r.sprite).toBe('/static/custom.png');
   });
 
+  it('does not mine a dex-less custom sprite card name for a species', () => {
+    // "Bartholomew Kuma" contains "mew": a One Piece card linked to its own
+    // sprite must stay dex-less, or the reel flickers Mew for it.
+    const r = resolveCardPokemon({
+      name: 'Bartholomew Kuma OP07-079',
+      pokemon_dex: null,
+      sprite_image: 'https://cdn.example/kuma.gif',
+    });
+    expect(r).toEqual({
+      dex: null,
+      name: null,
+      sprite: 'https://cdn.example/kuma.gif',
+    });
+    // Same name with nothing configured still derives (legacy unlinked cards).
+    expect(resolveCardPokemon({ name: 'Bartholomew Kuma' }).name).toBe('Mew');
+  });
+
   it('falls back to name-derivation when pokemon_dex is null', () => {
     const r = resolveCardPokemon({ name: 'Charizard VMAX', pokemon_dex: null });
     expect(r.dex).toBe(6);

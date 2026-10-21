@@ -288,10 +288,9 @@ export default function SlotMachineClient({
   // has stays in the flicker (an all-Pikachu/Charizard pack across six tiers
   // flickers all six colors, not just the first card per species).
   // Empty → ReelStrip falls back to its curated set.
-  // ponytail: decoys render the dex sprite (spriteGif); for seeded entries that
-  // IS the linked sprite. A custom-uploaded (dex-less) sprite would only flicker
-  // via name-derive — threading the custom sprite_image into decoy cells is the
-  // upgrade path if that ever matters.
+  // Pokémon cells render their dex sprite (spriteGif; for seeded entries that IS
+  // the linked sprite); a dex-less custom sprite (One Piece) rides on the cell as
+  // `image`, so a One Piece pack flickers its own characters, not the fallback.
   const basePool = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
   // Per-reel pools are sliced to HREEL_IDLE_POOL_MAX: the idle drift tiles one
   // full pool period + the visible window onto the strip, so a pool past the
