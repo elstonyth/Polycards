@@ -59,7 +59,9 @@ medusaIntegrationTestRunner({
           variant: 'normal',
         });
         expect(dup.status).toBe(400);
-        expect(dup.data.message).toMatch(/franchise: one-piece, number: 1, already exists/);
+        expect(dup.data.message).toMatch(
+          /franchise: one-piece, number: 1, already exists/,
+        );
 
         // …a variant shares the number…
         const gear5 = await create({
@@ -100,6 +102,19 @@ medusaIntegrationTestRunner({
           variant: 'normal',
         });
         await create({ name: 'Ivysaur', dex: 2, variant: 'normal' });
+        // created out of order — the deck list must still read #11 before #12
+        await create({
+          name: 'Zeta',
+          franchise: 'one-piece',
+          number: 12,
+          variant: 'normal',
+        });
+        await create({
+          name: 'Alpha',
+          franchise: 'one-piece',
+          number: 11,
+          variant: 'normal',
+        });
 
         const op = await unwrapResponse(
           api.get(
@@ -113,6 +128,10 @@ medusaIntegrationTestRunner({
             (p: { franchise: string }) => p.franchise === 'one-piece',
           ),
         ).toBe(true);
+        const names = op.data.pixel_pokemon.map(
+          (p: { name: string }) => p.name,
+        );
+        expect(names.indexOf('Alpha')).toBeLessThan(names.indexOf('Zeta'));
 
         const byNumber = await unwrapResponse(
           api.get('/admin/pixel-pokemon?franchise=one-piece&q=2', headers()),

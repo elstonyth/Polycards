@@ -66,8 +66,8 @@ describe('resolveCardPokemon', () => {
     ).toBe('https://cdn.example/kuma.gif');
   });
 
-  it('isPokemonPack: only One Piece / sports / … packs opt out', () => {
-    for (const c of ['one-piece', 'basketball', 'yugioh'])
+  it('isPokemonPack: only Pokémon packs resolve Pokémon — any other deck, even a new one, opts out', () => {
+    for (const c of ['one-piece', 'basketball', 'yugioh', 'some-future-deck'])
       expect(isPokemonPack(c)).toBe(false);
     // free_welcome / reward_box carry Pokémon prizes
     for (const c of ['pokemon', 'free_welcome', 'reward_box', undefined])

@@ -82,10 +82,12 @@ if (token) {
 }
 
 // Uploads a previous run stored but never got a row for — reused, not re-sent.
+// Only from the SAME backend: a local test run's localhost URL must never end
+// up on a prod row when the same folder is uploaded to prod next.
 const staged = new Map();
 if (existsSync(resultsPath)) {
   for (const r of JSON.parse(readFileSync(resultsPath, 'utf8'))) {
-    if (r.status === 'failed' && r.image_url)
+    if (r.status === 'failed' && r.image_url && r.backend === BACKEND)
       staged.set(key(r.franchise, r.name, r.variant), r.image_url);
   }
 }
@@ -102,7 +104,7 @@ for (const entry of manifest) {
     types = [],
   } = entry;
   const k = key(franchise, name, variant);
-  const who = { file, name, franchise, variant };
+  const who = { file, name, franchise, variant, backend: BACKEND };
   const type = MIME[extname(file).toLowerCase()];
   let result;
   if (!name || !type) {

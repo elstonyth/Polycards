@@ -85,6 +85,15 @@ export async function GET(
     if (customF === 'false' && p.is_custom) return false;
     return true;
   });
+  // The list query orders by dex, which a non-Pokémon deck doesn't have: order
+  // it by its own number (#001 → …), unnumbered entries last.
+  if (franchiseF && franchiseF !== 'pokemon') {
+    filtered.sort(
+      (a, b) =>
+        (a.number ?? Infinity) - (b.number ?? Infinity) ||
+        a.name.localeCompare(b.name),
+    );
+  }
 
   // Distinct types across the whole library — powers the filter chips.
   const typeSet = new Set<string>();

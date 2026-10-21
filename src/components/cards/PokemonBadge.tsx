@@ -42,6 +42,7 @@ export function PokemonBadge({
   frameVariant,
   slabSrc = null,
   className,
+  pokemon = true,
 }: {
   card: BadgeCard;
   rarity?: Rarity | null;
@@ -50,9 +51,11 @@ export function PokemonBadge({
   /** The card's baked composite; null = raw. Decides the art box to anchor to. */
   slabSrc?: string | null;
   className?: string;
+  /** false in a non-Pokémon pack: only the card's own sprite, never a guess. */
+  pokemon?: boolean;
 }) {
   const still = usePrefersReducedMotion();
-  const { name, chain } = badgeSprite(card, still);
+  const { name, chain } = badgeSprite(card, still, pokemon);
 
   // Walk the chain on load failure. Reset when the CARD changes: the overlay
   // switches card→card without remounting, so a step left over from a broken

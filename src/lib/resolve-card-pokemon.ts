@@ -26,23 +26,23 @@ const MAX_DEX = POKEDEX_NAMES.length;
 const validDex = (d: number | null | undefined): d is number =>
   typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= MAX_DEX;
 
-/** Pack categories (backend `pack.category` keys) whose cards are never
- *  Pokémon. Anything else — pokemon, plus free_welcome / reward_box, which
- *  carry Pokémon prizes — keeps the Pokémon resolution. */
-const NON_POKEMON_CATEGORIES: ReadonlySet<string> = new Set([
-  'one-piece',
-  'basketball',
-  'baseball',
-  'football',
-  'soccer',
-  'yugioh',
-  'riftbound',
+/** Pack categories (backend `pack.category` keys) whose cards ARE Pokémon:
+ *  'pokemon' from the admin's closed category list
+ *  (backend/apps/admin/src/routes/packs/page.tsx CATEGORIES), plus the reserved
+ *  free_welcome / reward_box packs, which carry Pokémon prizes. An allowlist on
+ *  purpose: one-piece, basketball… and any category added later default to
+ *  non-Pokémon, so a new deck can never inherit Pokémon filler. */
+const POKEMON_CATEGORIES: ReadonlySet<string> = new Set([
+  'pokemon',
+  'free_welcome',
+  'reward_box',
 ]);
 
 /** False for a One Piece / sports / … pack: its cards must never resolve to a
- *  Pokémon (no dex, no name-derivation) — the decks don't mix. */
+ *  Pokémon (no dex, no name-derivation) — the decks don't mix. An unknown
+ *  context (no category at hand) keeps the Pokémon behaviour. */
 export const isPokemonPack = (categoryId: string | null | undefined): boolean =>
-  !NON_POKEMON_CATEGORIES.has(categoryId ?? '');
+  categoryId == null || POKEMON_CATEGORIES.has(categoryId);
 
 export function resolveCardPokemon(
   card: CardPokemonInput,
