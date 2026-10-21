@@ -6,3 +6,8 @@
 # Same constant in the first commit's client-side generator (file rewritten
 # since; the alphabet now lives only in partner-accounts.ts).
 445abd670e71053578eca33754ef13645adb7966:backend/apps/admin/src/lib/create-player.ts:generic-api-key:13
+# pixel-franchise.spec.ts PASSWORD is the made-up password of the admin the
+# integration runner creates in its throwaway test database, not a credential.
+# The current tree carries an inline gitleaks:allow; this covers the commit
+# that introduced it.
+f586b9d906de8fbd2da64a9ed127c70b055a8f31:backend/packages/api/integration-tests/http/pixel-franchise.spec.ts:generic-api-key:6

@@ -3,7 +3,7 @@ import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-const PASSWORD = 'pixel-franchise-test-pw-1';
+const PASSWORD = 'pixel-franchise-test-pw-1'; // gitleaks:allow — throwaway test-DB admin
 const ADMIN_EMAIL = 'admin-pixel-franchise@test.dev';
 
 // One sprite library, separate decks (Migration20261021120000): Pokémon are
