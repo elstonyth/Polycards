@@ -116,7 +116,9 @@ export function PokemonBadge({
           // check, and it read 0 badges on a page rendering eight.
           data-poke-badge=""
           src={src}
-          alt={name ?? ''}
+          // No Pokémon name for a custom non-Pokémon sprite (One Piece) — the
+          // card's own name describes it.
+          alt={name ?? card.name}
           loading="lazy"
           decoding="async"
           onError={advance}
