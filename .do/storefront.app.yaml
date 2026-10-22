@@ -52,25 +52,27 @@ services:
       branch: master
       deploy_on_push: true
     http_port: 3000
-    # 1 GiB, NEVER 512 MB: the smaller box ran the storefront out of memory in
-    # production (mem pinned ~99%, CPU idle, /healthz UNHEALTHY, 503s). Keep it
-    # in step with NODE_OPTIONS below.
+    # Dedicated 1 vCPU / 4 GiB, autoscaled 6-14 on CPU (App Platform autoscaling
+    # needs a dedicated size). Keep the heap in NODE_OPTIONS below in step with
+    # the box: 512 MB once ran it out of memory, and on 2026-10-20 two shared
+    # 1 GiB boxes pinned at 95% CPU and OOM-restarted (503/504 site-wide).
     #
-    # professional-xs, not basic-xs, ONLY because the basic tier is hard-capped
-    # at one instance — `doctl apps propose` rejects instance_count: 2 with
-    # "must not exceed 1 instance for instance_size_slug basic-xs". Same 1 shared
-    # vCPU and 1 GiB for $12/mo instead of $10; the tier buys horizontal scaling
-    # (and unlocks autoscaling), not a faster box.
-    instance_size_slug: professional-xs
-    # TWO instances, not one. The storefront reaches the backend over HTTP and
-    # touches no Postgres connection, so it scales freely — and it is where the
-    # read ceiling actually sits: every public page except / reads an auth
-    # cookie somewhere in its tree (getFreePackState, getOwnProfileHandle) and
-    # so must be React-rendered per request. The second instance is also what
-    # makes a deploy a rolling one instead of an outage window.
-    instance_count: 2
+    # The storefront reaches the backend over HTTP and touches no Postgres
+    # connection, so it scales freely, and it is where the read ceiling sits:
+    # every public page except / reads an auth cookie somewhere in its tree
+    # (getFreePackState, getOwnProfileHandle) and is React-rendered per request.
+    # Never drop below 2 instances: the second makes a deploy rolling.
+    instance_size_slug: apps-d-1vcpu-4gb
+    autoscaling:
+      min_instance_count: 6
+      max_instance_count: 14
+      metrics:
+        cpu:
+          percent: 60
     health_check:
       http_path: /healthz
+      # 1s default flapped pods out of rotation under CPU load.
+      timeout_seconds: 5
     alerts:
       - rule: CPU_UTILIZATION
         value: 80
@@ -177,7 +179,12 @@ services:
       # a different, larger machine.
       - key: NODE_OPTIONS
         scope: RUN_TIME
-        value: --max-old-space-size=896
+        value: --max-old-space-size=2048
+      # sharp/libvips + glibc malloc arenas grew RSS to 1.7 GB with only
+      # 354 MB of JS heap (2026-10-20); two arenas keep native memory flat.
+      - key: MALLOC_ARENA_MAX
+        scope: RUN_TIME
+        value: "2"
       - key: NEXT_TELEMETRY_DISABLED
         scope: RUN_AND_BUILD_TIME
         value: '1'
