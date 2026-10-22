@@ -74,9 +74,10 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const processed = useDeliveryOrderCount('processed');
   const ready = useDeliveryOrderCount('ready_to_ship');
   const runs = useReferralSettlements();
-  // Both rails: a refunded payout either gateway still holds or paid.
+  // Every rail: a refunded payout any gateway still holds or paid.
   const auditRm = useGatewayAudit('MYR');
   const auditSgd = useGatewayAudit('SGD');
+  const auditUsdt = useGatewayAudit('USDT');
   const pricing = usePricingHealth();
   const queries = [
     held,
@@ -87,6 +88,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     runs,
     auditRm,
     auditSgd,
+    auditUsdt,
     pricing,
   ];
   const shipping = [requested, processed, ready];
@@ -101,7 +103,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     ? shipping.reduce((n, q) => n + (q.data ?? 0), 0)
     : undefined;
   const drafts = runs.data?.filter((r) => r.status === 'draft');
-  const twice = doublePayAcross([auditRm.data, auditSgd.data]);
+  const twice = doublePayAcross([auditRm.data, auditSgd.data, auditUsdt.data]);
 
   // Only queues that loaded are counted, so a failed read is never "zero".
   const counts: Record<string, number> = {};

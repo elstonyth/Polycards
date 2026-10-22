@@ -565,6 +565,35 @@ envs:
   - key: A3PAY_CALLBACK_IPS
     scope: RUN_TIME
     value: 13.192.222.226
+  # GlobePay365 USDT rail (docs/payments/gp365-setup.md). USDT is a channel on
+  # the existing Polycard merchant (2026-10-21), so the keys are that merchant's
+  # old pair under GP365_* names. Never re-add GLOBEPAY_*: gateway-env.ts still
+  # reads those as fallbacks for the global switches. GP365_ENABLED ships
+  # "false": the hourly feed creates the USDT_MYR row, an admin saves its fee
+  # (Settlement -> USDT), and only then is this flipped to "true" (with no fee
+  # saved the rail would show as paused). Callbacks come from 13.159.14.239,
+  # the code default, so GP365_CALLBACK_IPS stays unset.
+  - key: GP365_ENABLED # gitleaks:allow (an env var name, not a key)
+    scope: RUN_TIME
+    value: "false"
+  - key: GP365_API_BASE
+    scope: RUN_TIME
+    value: https://mapi.globepay365.com
+  - key: GP365_MERCHANT_CODE
+    scope: RUN_TIME
+    value: Polycard
+  - key: GP365_PUBLIC_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__GP365_PUBLIC_KEY__"
+  - key: GP365_AES_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__GP365_AES_KEY__"
+  - key: GP365_MERCHANT_PRIVATE_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__GP365_MERCHANT_PRIVATE_KEY__"
 
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and

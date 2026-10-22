@@ -9,7 +9,7 @@ import {
   Trophy,
   type LucideIcon,
 } from 'lucide-react';
-import { rm } from '@/lib/format';
+import { rm, usdt } from '@/lib/format';
 
 /**
  * Whether the notification feed is allowed to raise a toast for a template.
@@ -196,8 +196,11 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     title: 'Withdrawal paid',
     body: (data) => {
       const amount = numOf(data, 'amount_myr');
-      return amount === null
-        ? null
+      // Set only on a USDT payout: the wallet got USDT, not RM at a bank.
+      const sent = numOf(data, 'usdt_amount');
+      if (amount === null) return null;
+      return sent !== null && sent > 0
+        ? `${usdt(sent)} (${rm(amount)}) has been sent to your wallet.`
         : `${rm(amount)} has been sent to your bank.`;
     },
     href: '/transactions',

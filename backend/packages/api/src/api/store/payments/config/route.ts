@@ -101,7 +101,12 @@ async function regionalRails(req: MedusaRequest, adminOpen: boolean) {
       // never offers an S$ amount the backend must refuse.
       deposit:
         priced && currencyLimits
-          ? regionalDepositBand(quote, currencyLimits, rmLimits)
+          ? regionalDepositBand(
+              quote,
+              currencyLimits,
+              rmLimits,
+              GATEWAYS[id].payinNudgeCents,
+            )
           : {
               min: currencyLimits?.depositMin ?? null,
               max: currencyLimits?.depositMax ?? null,

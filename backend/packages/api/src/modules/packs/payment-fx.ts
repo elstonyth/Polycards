@@ -31,8 +31,8 @@ export function paymentFxPair(currency: string): string {
 /**
  * Per regional currency: where its mid rate comes from and the sane band an
  * admin's manual rate must sit in (RM per 1 unit). A currency with no `url`
- * is priced by an admin manual rate only (e.g. USDT, which the ECB feed does
- * not carry). Adding a rail = one entry here + its gateway in gateway.ts.
+ * is priced by an admin manual rate only. Adding a rail = one entry here +
+ * its gateway in gateway.ts.
  */
 export const PAYMENT_FX_FEEDS: Record<
   string,
@@ -40,6 +40,9 @@ export const PAYMENT_FX_FEEDS: Record<
     url?: string;
     /** Tried when `url` fails or answers outside the band. */
     fallbackUrl?: string;
+    /** The currency the fallback quotes FROM when it prices this one by
+     *  proxy (USDT by USD). The feed must still say so, or it is refused. */
+    fallbackQuotes?: string;
     min: number;
     max: number;
     unit: string;
@@ -55,6 +58,20 @@ export const PAYMENT_FX_FEEDS: Record<
     min: 1,
     max: 10,
     unit: 'S$1',
+  },
+  // Coinbase quotes USDT itself, hourly. When it fails, USD->MYR (ECB) is the
+  // proxy: USDT tracks the dollar, and the admin fee covers the gap. A manual
+  // rate (which never ages out) overrides both if USDT ever trades off its
+  // peg.
+  USDT: {
+    url:
+      process.env.FX_USDT_MYR_URL ??
+      'https://api.coinbase.com/v2/exchange-rates?currency=USDT',
+    fallbackUrl: 'https://api.frankfurter.dev/v1/latest?from=USD&to=MYR',
+    fallbackQuotes: 'USD',
+    min: 2,
+    max: 8,
+    unit: '1 USDT',
   },
 };
 
@@ -246,18 +263,19 @@ export function regionalDepositBand(
   quote: Pick<PaymentFxQuote, 'depositRate'>,
   currencyBand: { depositMin: number; depositMax: number },
   ledgerBand: { depositMin: number; depositMax: number },
+  windowCents: number = PAYIN_NUDGE_CENTS,
 ): { min: number; max: number } {
   return {
     min: Math.max(
       currencyBand.depositMin,
       Math.ceil((ledgerBand.depositMin / quote.depositRate) * 100 - 1e-6) / 100,
     ),
-    // Less the nudge A3Pay may add (PAYIN_NUDGE_CENTS), so the nudged sum
-    // still credits inside the RM band and the row re-locks normally.
+    // Less the nudge the gateway may add (its payinNudgeCents), so the
+    // nudged sum still credits inside the RM band and the row re-locks.
     max: Math.min(
       currencyBand.depositMax,
       (Math.floor((ledgerBand.depositMax / quote.depositRate) * 100 + 1e-6) -
-        PAYIN_NUDGE_CENTS) /
+        windowCents) /
         100,
     ),
   };
@@ -337,7 +355,8 @@ export function toLedgerAmount(row: RowFx, reported: number): number {
  * (nudgedDeposit), so the customer is credited for every cent they send. A
  * CALLBACK inside this window settles at exactly the row's locked RM credit
  * (a row the re-lock missed keeps its original credit); anything outside it
- * is left to the amount fence (and the sweep's requery).
+ * is left to the amount fence (and the sweep's requery). A gateway may set
+ * its own window (GATEWAYS[id].payinNudgeCents); this is the default.
  */
 export const PAYIN_NUDGE_CENTS = 10;
 
@@ -349,10 +368,11 @@ export const PAYIN_NUDGE_CENTS = 10;
 export function nudgedDeposit(
   lock: { gatewayAmount: number; mid: number; markup: number },
   actual: number,
+  windowCents: number = PAYIN_NUDGE_CENTS,
 ): { gatewayAmount: number; credit: number } | null {
   if (!Number.isFinite(actual) || actual <= 0) return null;
   const moved = cents(actual) - cents(lock.gatewayAmount);
-  if (moved === 0 || Math.abs(moved) > PAYIN_NUDGE_CENTS) return null;
+  if (moved === 0 || Math.abs(moved) > windowCents) return null;
   const gatewayAmount = cents(actual) / 100;
   return {
     gatewayAmount,
@@ -367,7 +387,11 @@ export function nudgedDeposit(
  * reported payment is the locked amount or a small upward nudge of it, else
  * the proportional conversion (which the callback fence then compares).
  */
-export function callbackLedgerAmount(row: RowFx, reported: number): number {
+export function callbackLedgerAmount(
+  row: RowFx,
+  reported: number,
+  windowCents: number = PAYIN_NUDGE_CENTS,
+): number {
   const gateway = Number(row.gatewayAmount);
   if (
     row.gatewayAmount != null &&
@@ -376,7 +400,7 @@ export function callbackLedgerAmount(row: RowFx, reported: number): number {
     Number.isFinite(reported)
   ) {
     const over = cents(reported) - cents(gateway);
-    if (over >= 0 && over <= PAYIN_NUDGE_CENTS) {
+    if (over >= 0 && over <= windowCents) {
       return cents(Number(row.ledgerAmount)) / 100;
     }
   }
@@ -390,14 +414,18 @@ export function callbackLedgerAmount(row: RowFx, reported: number): number {
  * never a customer who paid a different amount. RM rows and unreadable
  * amounts are false here: the existing money fences handle those.
  */
-export function offLock(row: RowFx, reported: number): boolean {
+export function offLock(
+  row: RowFx,
+  reported: number,
+  windowCents: number = PAYIN_NUDGE_CENTS,
+): boolean {
   if (row.currency == null || row.currency === LEDGER_CURRENCY_CODE) {
     return false;
   }
   const locked = Number(row.gatewayAmount);
   if (row.gatewayAmount == null || !Number.isFinite(locked)) return false;
   if (!Number.isFinite(reported)) return false;
-  return Math.abs(cents(reported) - cents(locked)) > PAYIN_NUDGE_CENTS;
+  return Math.abs(cents(reported) - cents(locked)) > windowCents;
 }
 
 /** The identity lock, for an RM row. */

@@ -29,6 +29,31 @@ describe('withdrawal receipt template', () => {
     }
   });
 
+  it('paid USDT: says wallet and shows the USDT sent', () => {
+    const r = renderTemplate(WITHDRAWAL_RECEIPT_TEMPLATE, {
+      ...DATA,
+      amount_myr: 300,
+      usdt_amount: 71.07,
+    })!;
+    expect(r.text).toContain(
+      'Your USDT transfer is complete — USDT 71.07 has left Polycards and reached your wallet.',
+    );
+    expect(r.text).toContain('Sent:       USDT 71.07');
+    expect(r.text).toContain('Amount:     RM 300.00');
+    for (const body of [r.html, r.text]) {
+      expect(body).not.toMatch(/bank/i);
+    }
+  });
+
+  it('ignores a bad usdt_amount and keeps the bank wording', () => {
+    const r = renderTemplate(WITHDRAWAL_RECEIPT_TEMPLATE, {
+      ...DATA,
+      usdt_amount: 0,
+    })!;
+    expect(r.text).toContain('reached your bank');
+    expect(r.text).not.toContain('USDT');
+  });
+
   it('refunded: says the money came back, not that it was paid', () => {
     const r = renderTemplate(WITHDRAWAL_RECEIPT_TEMPLATE, {
       ...DATA,
@@ -171,6 +196,16 @@ describe('sendWithdrawalReceipt', () => {
       reference: 'W1',
       outcome: 'paid',
     });
+  });
+
+  it('passes the USDT sent through, and only when given', async () => {
+    const h = harness();
+    await sendWithdrawalReceipt(h.container, { ...input, usdtAmount: 71.07 });
+    expect(h.createNotifications.mock.calls[0][0].data.usdt_amount).toBe(71.07);
+    await sendWithdrawalReceipt(h.container, input);
+    expect(h.createNotifications.mock.calls[1][0].data).not.toHaveProperty(
+      'usdt_amount',
+    );
   });
 
   it('refunded outcome carries its own key and payload', async () => {

@@ -7,6 +7,7 @@ import {
   PAYMENT_FX_LIVE_MAX_AGE_MS,
   PAYIN_NUDGE_CENTS,
   creditForDeposit,
+  loadPaymentFxQuote,
   paymentFxQuote,
   payoutForWithdrawal,
   rowFx,
@@ -110,7 +111,9 @@ describe('paymentFxQuote', () => {
         'SGD',
         NOW,
       );
-    expect(at('coinbase', PAYMENT_FX_LIVE_MAX_AGE_MS)).not.toHaveProperty('error');
+    expect(at('coinbase', PAYMENT_FX_LIVE_MAX_AGE_MS)).not.toHaveProperty(
+      'error',
+    );
     expect(at('coinbase', PAYMENT_FX_LIVE_MAX_AGE_MS + 1)).toEqual({
       error: 'The SGD exchange rate is out of date.',
     });
@@ -122,7 +125,13 @@ describe('paymentFxQuote', () => {
     for (const manual_rate of [0, null, 'x', -3]) {
       expect(
         paymentFxQuote(
-          { rate: 3.3, fetched_at: fresh, manual_override: true, manual_rate, ...fee(0.5) },
+          {
+            rate: 3.3,
+            fetched_at: fresh,
+            manual_override: true,
+            manual_rate,
+            ...fee(0.5),
+          },
           'SGD',
           NOW,
         ),
@@ -133,7 +142,11 @@ describe('paymentFxQuote', () => {
   it('refuses a negative or absurd fee', () => {
     for (const pct of [-0.01, 20.01, 'x']) {
       expect(
-        paymentFxQuote({ rate: 3.3, fetched_at: fresh, ...fee(pct) }, 'SGD', NOW),
+        paymentFxQuote(
+          { rate: 3.3, fetched_at: fresh, ...fee(pct) },
+          'SGD',
+          NOW,
+        ),
       ).toEqual({ error: 'The SGD fee is out of range.' });
     }
   });
@@ -195,7 +208,11 @@ describe('review fixes (2026-10-06)', () => {
   it('refuses to quote a rail whose fee was never configured — it stays paused', () => {
     for (const fee_enabled of [null, undefined]) {
       expect(
-        paymentFxQuote({ rate: 3.3, fetched_at: fresh, fee_enabled }, 'SGD', NOW),
+        paymentFxQuote(
+          { rate: 3.3, fetched_at: fresh, fee_enabled },
+          'SGD',
+          NOW,
+        ),
       ).toEqual({ error: 'No SGD fee is set.' });
     }
   });
@@ -247,7 +264,21 @@ describe('review fixes (2026-10-06)', () => {
     ).toBeLessThanOrEqual(10000);
     // ...and so does the top of the band after A3Pay nudges it up.
     expect(
-      creditForDeposit(band.max + PAYIN_NUDGE_CENTS / 100, { depositRate: 3.4 }),
+      creditForDeposit(band.max + PAYIN_NUDGE_CENTS / 100, {
+        depositRate: 3.4,
+      }),
+    ).toBeLessThanOrEqual(10000);
+    // A gateway with a wider nudge window (GlobePay365: 100 cents) keeps
+    // that much more room under the RM ceiling.
+    const wide = regionalDepositBand(
+      { depositRate: 3.4 },
+      sgdBand,
+      rmBand,
+      100,
+    );
+    expect(wide.max).toBe(2940.17);
+    expect(
+      creditForDeposit(wide.max + 1, { depositRate: 3.4 }),
     ).toBeLessThanOrEqual(10000);
   });
 });
@@ -257,24 +288,38 @@ describe('regionalWithdrawalBand — the RM a payout to an S$ bank may take toda
   const sgdBand = { withdrawalMin: 30, withdrawalMax: 10000 };
 
   it('lifts the RM floor to what pays the S$ floor, and caps at the RM ceiling', () => {
-    const band = regionalWithdrawalBand({ payoutRate: 3.201662 }, sgdBand, rmBand);
+    const band = regionalWithdrawalBand(
+      { payoutRate: 3.201662 },
+      sgdBand,
+      rmBand,
+    );
     // S$30 x 3.201662 = RM 96.04986 -> 96.05; S$10,000 would be RM 32,016.62.
     expect(band).toEqual({ min: 96.05, max: 30000 });
-    expect(payoutForWithdrawal(band.min, { payoutRate: 3.201662 })).toBeGreaterThanOrEqual(30);
-    expect(payoutForWithdrawal(band.min - 0.01, { payoutRate: 3.201662 })).toBeLessThan(30);
+    expect(
+      payoutForWithdrawal(band.min, { payoutRate: 3.201662 }),
+    ).toBeGreaterThanOrEqual(30);
+    expect(
+      payoutForWithdrawal(band.min - 0.01, { payoutRate: 3.201662 }),
+    ).toBeLessThan(30);
   });
 
   it('every RM amount inside the band pays inside the S$ band', () => {
     for (const payoutRate of [2.9, 3.0, 3.1905, 3.20595, 3.33333, 3.5]) {
       const band = regionalWithdrawalBand({ payoutRate }, sgdBand, rmBand);
-      expect(payoutForWithdrawal(band.min, { payoutRate })).toBeGreaterThanOrEqual(30);
-      expect(payoutForWithdrawal(band.max, { payoutRate })).toBeLessThanOrEqual(10000);
+      expect(
+        payoutForWithdrawal(band.min, { payoutRate }),
+      ).toBeGreaterThanOrEqual(30);
+      expect(payoutForWithdrawal(band.max, { payoutRate })).toBeLessThanOrEqual(
+        10000,
+      );
     }
   });
 
   it('keeps the RM band where it is the tighter one', () => {
     // At 1.50, S$30 is RM 45 — under the RM 50 floor.
-    expect(regionalWithdrawalBand({ payoutRate: 1.5 }, sgdBand, rmBand)).toEqual({
+    expect(
+      regionalWithdrawalBand({ payoutRate: 1.5 }, sgdBand, rmBand),
+    ).toEqual({
       min: 50,
       max: 15000,
     });
@@ -299,6 +344,22 @@ describe('nudgedDeposit — credit what A3Pay actually asks the customer for', (
     });
   });
 
+  it("a gateway's own wider window re-locks a larger tail (GlobePay365: 1 USDT)", () => {
+    expect(nudgedDeposit(lock, 50.37)).toBeNull();
+    expect(nudgedDeposit(lock, 50.37, 100)).toEqual({
+      gatewayAmount: 50.37,
+      credit: 155.66,
+    });
+    expect(nudgedDeposit(lock, 51.01, 100)).toBeNull();
+    expect(
+      callbackLedgerAmount(
+        { ledgerAmount: 154.52, gatewayAmount: 50 },
+        50.37,
+        100,
+      ),
+    ).toBe(154.52);
+  });
+
   it('keeps the lock for no change, a non-number, or more than a nudge', () => {
     expect(nudgedDeposit(lock, 50)).toBeNull();
     expect(nudgedDeposit(lock, Number.NaN)).toBeNull();
@@ -311,9 +372,94 @@ describe('nudgedDeposit — credit what A3Pay actually asks the customer for', (
     const relocked = nudgedDeposit(lock, 50.01)!;
     expect(
       callbackLedgerAmount(
-        { ledgerAmount: relocked.credit, gatewayAmount: relocked.gatewayAmount },
+        {
+          ledgerAmount: relocked.credit,
+          gatewayAmount: relocked.gatewayAmount,
+        },
         50.01,
       ),
     ).toBe(154.55);
+  });
+});
+
+// The USDT rail (GlobePay365) prices through the SAME row and the same quote
+// as S$: one fee system, a percent each way, never an absolute RM amount.
+describe('USDT uses the same percent fee as S$', () => {
+  const usdt = (row: Parameters<typeof paymentFxQuote>[0]) => {
+    const q = paymentFxQuote(row, 'USDT', NOW);
+    if ('error' in q) throw new Error(q.error);
+    return q;
+  };
+  const halfPercent = {
+    fee_enabled: true,
+    deposit_fee_percent: 0.5,
+    payout_fee_percent: 0.5,
+  };
+
+  it('0.5% each way: M 4.20 credits a top-up at 4.179 and debits a withdrawal at 4.221', () => {
+    const manual = usdt({
+      rate: 4.08,
+      fetched_at: fresh,
+      manual_override: true,
+      manual_rate: 4.2,
+      ...halfPercent,
+    });
+    expect(manual).toMatchObject({
+      currency: 'USDT',
+      mid: 4.2,
+      depositRate: 4.179, // 4.20 x 99.5%
+      payoutRate: 4.221, // 4.20 x 100.5%
+      depositMarkup: 0.021,
+      payoutMarkup: 0.021,
+      source: 'manual',
+    });
+    // The hourly feed's M carries the same fee.
+    expect(
+      usdt({ rate: 4.2, fetched_at: fresh, ...halfPercent }),
+    ).toMatchObject({
+      depositRate: 4.179,
+      payoutRate: 4.221,
+      source: 'feed',
+    });
+  });
+
+  it('fee switched off quotes the bare market rate both ways', () => {
+    const q = usdt({
+      rate: 4.2,
+      fetched_at: fresh,
+      fee_enabled: false,
+      deposit_fee_percent: 0.5,
+      payout_fee_percent: 0.5,
+    });
+    expect(q.depositRate).toBe(4.2);
+    expect(q.payoutRate).toBe(4.2);
+  });
+
+  it('a USDT row whose fee was never saved is paused, whatever its old markup', async () => {
+    const neverSaved = {
+      rate: 4.2,
+      fetched_at: fresh,
+      markup: 0.1,
+      fee_enabled: null,
+    };
+    expect(paymentFxQuote(neverSaved, 'USDT', NOW)).toEqual({
+      error: 'No USDT fee is set.',
+    });
+    await expect(
+      loadPaymentFxQuote(
+        { listFxRates: async () => [neverSaved] },
+        'USDT',
+        NOW,
+      ),
+    ).rejects.toThrow('USDT payments are paused right now');
+  });
+
+  it('USDT amounts are 2 dp (GlobePay365 PayinAmount/PayoutAmount) and round down in our favour', () => {
+    const q = usdt({ rate: 4.2, fetched_at: fresh, ...halfPercent });
+    expect(creditForDeposit(100, q)).toBe(417.9);
+    expect(creditForDeposit(20, q)).toBe(83.58);
+    expect(creditForDeposit(10.01, q)).toBe(41.83); // 41.8317...
+    expect(payoutForWithdrawal(200, q)).toBe(47.38); // 47.3821...
+    expect(payoutForWithdrawal(40, q)).toBe(9.47); // 9.4764..., under the USDT 10 floor
   });
 });

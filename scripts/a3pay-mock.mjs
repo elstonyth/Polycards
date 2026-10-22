@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Local A3Pay stand-in for end-to-end testing — A3Pay has no sandbox, and its
 // production API only answers whitelisted IPs, so this is the only way to run
-// the whole SGD loop on a laptop.
+// the whole SGD loop on a laptop. `--tenant gp365` plays GlobePay365 (USDT),
+// the same platform under another name: its own MID, keys, env file and port.
 //
 // It speaks the real wire format (handbook v3.3.5): every request is an
 // AES-256-CBC + RSA-SHA1 envelope, and it REFUSES a request whose signature
@@ -9,11 +10,12 @@
 // signing, not just our JSON. Callbacks and payout verifications it sends are
 // signed with its own ("A3Pay's") key, exactly as production would.
 //
-//   node scripts/a3pay-mock.mjs [--port 4455] [--backend http://localhost:9000]
+//   node scripts/a3pay-mock.mjs [--tenant a3pay|gp365] [--port 4455]
+//                               [--backend http://localhost:9000]
 //
-// Keys: a throwaway merchant pair and a throwaway A3Pay pair are generated on
-// first run and kept in %TEMP%/a3pay-mock-keys.json. The backend env to point
-// at this mock is written to %TEMP%/a3pay-mock.env (never the production key).
+// Keys: a throwaway merchant pair and a throwaway gateway pair are generated
+// on first run and kept in %TEMP%/<tenant>-mock-keys.json. The backend env to
+// point at this mock is written to %TEMP%/<tenant>-mock.env (never a real key).
 //
 // Control endpoints (local only, not part of A3Pay's API):
 //   POST /__control/payin/<MTransactionId>   {"status":6}  set status + send the callback
@@ -38,11 +40,58 @@ const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : fallback;
 };
-const PORT = Number(arg('--port', '4455'));
+const TENANTS = {
+  a3pay: {
+    label: 'A3Pay',
+    prefix: 'A3PAY',
+    mid: 'SGD00001',
+    currency: 'SGD',
+    symbol: 'S$',
+    port: '4455',
+    payerRequired: true,
+    banks: [
+      'SDBS',
+      'POSB',
+      'OCBC',
+      'UOB',
+      'SCBS',
+      'CITIS',
+      'HSBCS',
+      'MBBS',
+      'CIMB',
+      'RHB',
+      'HLB',
+      'BOC',
+      'ABMB',
+      'TBL',
+      'GXS',
+      'Maribank',
+      'PayNow',
+      'Wise',
+      'LiquidPay',
+      'DASH',
+    ],
+  },
+  gp365: {
+    label: 'GlobePay365',
+    prefix: 'GP365',
+    mid: 'GP00001',
+    currency: 'USDT',
+    symbol: 'USDT ',
+    port: '4456',
+    payerRequired: false,
+    banks: ['USDTTRC', 'USDTERC'],
+  },
+};
+const TENANT_ID = arg('--tenant', 'a3pay');
+const TENANT = TENANTS[TENANT_ID];
+if (!TENANT) throw new Error('--tenant must be a3pay or gp365');
+const PORT = Number(arg('--port', TENANT.port));
 const BACKEND = arg('--backend', 'http://127.0.0.1:9000').replace(/\/+$/, '');
-const MID = 'SGD00001';
-const keysPath = join(tmpdir(), 'a3pay-mock-keys.json');
-const envPath = join(tmpdir(), 'a3pay-mock.env');
+const MID = TENANT.mid;
+const CURRENCY = TENANT.currency;
+const keysPath = join(tmpdir(), `${TENANT_ID}-mock-keys.json`);
+const envPath = join(tmpdir(), `${TENANT_ID}-mock.env`);
 
 function pair() {
   const { publicKey, privateKey } = generateKeyPairSync('rsa', {
@@ -63,13 +112,14 @@ writeFileSync(keysPath, JSON.stringify(keys));
 writeFileSync(
   envPath,
   [
-    `A3PAY_ENABLED=true`,
-    `A3PAY_API_BASE=http://localhost:${PORT}`,
-    `A3PAY_MERCHANT_CODE=${MID}`,
-    `A3PAY_AES_KEY=${keys.aes}`,
-    `A3PAY_MERCHANT_PRIVATE_KEY=${keys.merchant.privateKey}`,
-    `A3PAY_PUBLIC_KEY=${keys.a3pay.publicKey}`,
-    `A3PAY_CALLBACK_IPS=127.0.0.1`,
+    `${TENANT.prefix}_ENABLED=true`,
+    `${TENANT.prefix}_API_BASE=http://localhost:${PORT}`,
+    `${TENANT.prefix}_MERCHANT_CODE=${MID}`,
+    `${TENANT.prefix}_AES_KEY=${keys.aes}`,
+    `${TENANT.prefix}_MERCHANT_PRIVATE_KEY=${keys.merchant.privateKey}`,
+    `${TENANT.prefix}_PUBLIC_KEY=${keys.a3pay.publicKey}`,
+    `${TENANT.prefix}_CURRENCY=${CURRENCY}`,
+    `${TENANT.prefix}_CALLBACK_IPS=127.0.0.1`,
     '',
   ].join('\n'),
 );
@@ -138,7 +188,7 @@ async function payinCallback(p) {
     envelope(
       {
         MerchantCode: MID,
-        CurrencyCode: 'SGD',
+        CurrencyCode: CURRENCY,
         MerchantTransactionId: p.mtid,
         Status: p.status,
         Amount: p.actual, // what the customer paid, nudge included
@@ -164,7 +214,7 @@ async function payoutCallback(p) {
     envelope(
       {
         MerchantCode: MID,
-        CurrencyCode: 'SGD',
+        CurrencyCode: CURRENCY,
         MerchantTransactionId: p.mtid,
         Status: p.status,
         Amount: p.amount,
@@ -180,7 +230,7 @@ async function payoutCallback(p) {
   return r;
 }
 
-const log = (m) => console.log(`[a3pay-mock] ${m}`);
+const log = (m) => console.log(`[${TENANT_ID}-mock] ${m}`);
 const ok = (data) => ({
   isSuccess: true,
   successCode: 200,
@@ -222,10 +272,10 @@ const routes = {
   'POST /api/Payin/CreatePayin': (d) => {
     if (payins.has(d.MTransactionId))
       return refuse('PMT10000', 'Duplicate MTransactionId');
-    if (!d.FromCustomerAccountHolderName)
+    if (TENANT.payerRequired && !d.FromCustomerAccountHolderName)
       return refuse('PMT10020', 'FromCustomerAccountHolderName is required');
     const amount = Number(d.PayinAmount);
-    // SGD uniqueness nudge: a second open payin of the same amount pays a cent more.
+    // Uniqueness nudge: a second open payin of the same amount pays a cent more.
     const clash = [...payins.values()].some(
       (p) => p.status !== 6 && p.amount === amount,
     );
@@ -242,13 +292,15 @@ const routes = {
       callbacks: [],
     };
     payins.set(p.mtid, p);
-    log(`CreatePayin ${p.mtid} S$${amount} (${p.method}) payer "${p.payer}"`);
+    log(
+      `CreatePayin ${p.mtid} ${TENANT.symbol}${amount} (${p.method}) payer "${p.payer ?? '-'}"`,
+    );
     return ok({
       paymentOrderId: p.orderId,
       // https on a fake host: the storefront refuses a non-https cashier URL
       // (DepositStartSchema). E2E scripts intercept this host and drive
       // /cashier/<id>/pay on the mock instead.
-      paymentURL: `https://cashier.a3pay.mock/cashier/${p.orderId}`,
+      paymentURL: `https://cashier.${TENANT_ID}.mock/cashier/${p.orderId}`,
       paymentBankCode: null,
       paymentAccountNumber: null,
       paymentAccountHolderName: null,
@@ -291,7 +343,9 @@ const routes = {
       callbacks: [],
     };
     payouts.set(p.mtid, p);
-    log(`SubmitPayout ${p.mtid} S$${amount} to ${p.bank} ${p.account}`);
+    log(
+      `SubmitPayout ${p.mtid} ${TENANT.symbol}${amount} to ${p.bank} ${p.account} holder "${p.holder}"`,
+    );
     // Payout Verification, after the response (as A3Pay does it), so our row
     // already carries its gateway id.
     setTimeout(async () => {
@@ -301,7 +355,7 @@ const routes = {
           {
             MerchantTransactionId: p.mtid,
             Amount: p.amount,
-            CurrencyCode: 'SGD',
+            CurrencyCode: CURRENCY,
           },
           {
             MerchantCode: MID,
@@ -337,34 +391,13 @@ const routes = {
   'POST /api/Merchant/CheckAccBalance': () =>
     ok({
       mID: MID,
-      currCode: 'SGD',
+      currCode: CURRENCY,
       currentBalanceAmount: balance.current,
       availableBalanceAmount: balance.available,
     }),
 };
 
-const BANKS = [
-  'SDBS',
-  'POSB',
-  'OCBC',
-  'UOB',
-  'SCBS',
-  'CITIS',
-  'HSBCS',
-  'MBBS',
-  'CIMB',
-  'RHB',
-  'HLB',
-  'BOC',
-  'ABMB',
-  'TBL',
-  'GXS',
-  'Maribank',
-  'PayNow',
-  'Wise',
-  'LiquidPay',
-  'DASH',
-];
+const BANKS = TENANT.banks;
 
 function body(req) {
   return new Promise((resolve) => {
@@ -394,7 +427,7 @@ createServer(async (req, res) => {
             bankName: b,
             bankNameOrigin: b,
             bankCode: b,
-            currCode: 'SGD',
+            currCode: CURRENCY,
             mID: MID,
           })),
         ),
@@ -462,9 +495,9 @@ createServer(async (req, res) => {
       return send(
         res,
         200,
-        `<!doctype html><meta name=viewport content="width=device-width"><title>A3Pay mock cashier</title>
+        `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><title>${TENANT.label} mock cashier</title>
 <body style="font-family:system-ui;max-width:420px;margin:40px auto;padding:0 16px">
-<h2>A3Pay (local mock)</h2><p>Pay <b>S$${p.actual.toFixed(2)}</b> by ${p.method === 'BQR' ? 'PayNow QR' : 'bank transfer'}<br>Payer: ${p.payer}<br>Order ${p.orderId}</p>
+<h2>${TENANT.label} (local mock)</h2><p>Pay <b>${TENANT.symbol}${p.actual.toFixed(2)}</b> by ${p.method}<br>Payer: ${p.payer ?? '-'}<br>Order ${p.orderId}</p>
 <p><a id=pay href="/cashier/${p.orderId}/pay">Pay now</a> · <a id=fail href="/cashier/${p.orderId}/fail">Fail payment</a></p></body>`,
         'text/html',
       );
