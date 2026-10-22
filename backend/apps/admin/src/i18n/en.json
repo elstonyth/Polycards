@@ -601,7 +601,7 @@
     "confirmApproveBody": "Send {{amount}} to {{bank}} {{account}} ({{holder}}) via the active payment gateway. This submits the transfer immediately and cannot be recalled from here.",
     "confirmDenyTitle": "Deny this withdrawal?",
     "confirmDenyBody": "Refuse this {{amount}} withdrawal. Nothing is sent to {{bank}} {{account}} ({{holder}}) — the funds are returned to the customer's in-app balance instead.",
-    "paidOutIn": "bank receives {{amount}}"
+    "paidOutIn": "paid out as {{amount}}"
   },
   "withdrawalControls": {
     "title": "Withdrawal controls",
@@ -884,8 +884,8 @@
     "fxConfirmTitle": "Save {{currency}} conversion",
     "fxConfirm": "New {{currency}} top-ups will credit RM {{deposit}} per {{unit}} and withdrawals will cost RM {{payout}} per {{unit}}. Payments already started keep their rate. Continue?",
     "fxConfirmOff": "The fee will be OFF: new {{currency}} top-ups and withdrawals both use the market rate, RM {{deposit}} per {{unit}}. Payments already started keep their rate. Continue?",
-    "fxPreview": "Preview: market {{mid}} → top-up RM {{deposit}} (−{{inPct}}%) · withdrawal RM {{payout}} (+{{outPct}}%). {{currency}} 100 top-up → RM {{credit}} credit · RM 100 withdrawal → {{currency}} {{paid}} to the bank.",
-    "fxPreviewOff": "Preview, fee off: top-ups and withdrawals both at the market rate {{mid}}. {{currency}} 100 top-up → RM {{credit}} credit · RM 100 withdrawal → {{currency}} {{paid}} to the bank.",
+    "fxPreview": "Preview: market {{mid}} → top-up RM {{deposit}} (−{{inPct}}%) · withdrawal RM {{payout}} (+{{outPct}}%). {{currency}} 100 top-up → RM {{credit}} credit · RM 100 withdrawal → {{currency}} {{paid}} paid out.",
+    "fxPreviewOff": "Preview, fee off: top-ups and withdrawals both at the market rate {{mid}}. {{currency}} 100 top-up → RM {{credit}} credit · RM 100 withdrawal → {{currency}} {{paid}} paid out.",
     "fxPreviewEmpty": "Enter each fee as a percent between 0 and {{max}} to see the customer rates.",
     "switchGateway": "Switch gateway…",
     "gatewayLabel": "Gateway",

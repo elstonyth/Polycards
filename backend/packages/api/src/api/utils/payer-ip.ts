@@ -5,6 +5,10 @@ import {
   tgpayEnvName,
   type TgpayKind,
 } from '../../modules/packs/tgpay-client';
+import {
+  A3PAY_FAMILY,
+  type A3payKind,
+} from '../../modules/packs/a3pay-client';
 // The IP a money route reports to the gateway as the payer IP.
 //
 // THEIR requirement is the paying customer's IP, not ours. req.ip FIRST:
@@ -156,22 +160,36 @@ export function createTgpayCallbackAllowlist(
 export const A3PAY_DEFAULT_CALLBACK_IPS = '13.192.222.226';
 
 /**
- * `/hooks/a3pay/*`. Defence in depth only: the RSA signature over the
- * decrypted payload is the real gate, checked inside each handler. A list
- * that is set but parses to nothing refuses everything rather than quietly
- * disabling the check.
+ * GlobePay365's PRODUCTION outbound address (API doc, 2026-10-12). Its
+ * staging callbacks come from 160.250.92.219 instead — set
+ * GP365_CALLBACK_IPS to that while pointed at staging.
+ */
+export const GP365_DEFAULT_CALLBACK_IPS = '13.159.14.239';
+
+const A3PAY_FAMILY_CALLBACK_IPS: Record<A3payKind, string> = {
+  a3pay: A3PAY_DEFAULT_CALLBACK_IPS,
+  gp365: GP365_DEFAULT_CALLBACK_IPS,
+};
+
+/**
+ * `/hooks/<kind>/*` for a tenant of the A3Pay platform (A3Pay, GlobePay365).
+ * Defence in depth only: the RSA signature over the decrypted payload is the
+ * real gate, checked inside each handler. A list that is set but parses to
+ * nothing refuses everything rather than quietly disabling the check.
  */
 export function createA3payCallbackAllowlist(
-  env: { A3PAY_CALLBACK_IPS?: string } = process.env,
+  env: Partial<Record<string, string>> = process.env,
+  kind: A3payKind = 'a3pay',
 ): CallbackAllowlist {
-  return callbackAllowlist('a3pay', (sourceIp) => {
+  const listName = `${A3PAY_FAMILY[kind].envPrefix}_CALLBACK_IPS`;
+  return callbackAllowlist(kind, (sourceIp) => {
     const entries = parseCallbackAllowlist(
-      env.A3PAY_CALLBACK_IPS?.trim() || A3PAY_DEFAULT_CALLBACK_IPS,
+      env[listName]?.trim() || A3PAY_FAMILY_CALLBACK_IPS[kind],
     );
     if (entries.length === 0)
       return {
         allowed: false,
-        reason: 'unparseable — A3PAY_CALLBACK_IPS has no valid entries',
+        reason: `unparseable — ${listName} has no valid entries`,
       };
     return callbackIpAllowed(sourceIp, entries)
       ? { allowed: true }

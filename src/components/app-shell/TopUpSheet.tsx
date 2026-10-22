@@ -29,7 +29,6 @@ import {
   DEPOSIT_METHODS,
   DEFAULT_DEPOSIT_METHOD,
   type DepositMethod,
-  type DepositMethodCode,
 } from '@/lib/deposit-methods';
 
 // Does a real gateway back the sheet? Any value except 'mock' (or unset)
@@ -114,7 +113,8 @@ export default function TopUpSheet({
     methods.find((option) => option.code === DEFAULT_DEPOSIT_METHOD)?.code ??
     methods[0]?.code ??
     DEFAULT_DEPOSIT_METHOD;
-  const [method, setMethod] = useState<DepositMethodCode>(preferred);
+  // A rail code: an RM channel, or a regional rail's own (UTRC, …).
+  const [method, setMethod] = useState<string>(preferred);
   // null = the "Choose a currency" step. Gateway mode always starts there;
   // the demo (mock) path has RM only and goes straight to the form.
   const [currency, setCurrency] = useState<Currency | null>(
@@ -265,7 +265,7 @@ export default function TopUpSheet({
       symbol: option.ui.symbol,
       flag: option.ui.flag,
       name: option.ui.name,
-      hint: `${option.ui.hint} · ${option.ui.symbol}1 = RM ${option.rate.deposit.toFixed(4)}`,
+      hint: `${option.ui.hint} · ${option.ui.unit} = RM ${option.rate.deposit.toFixed(4)}`,
     })),
     ...(USE_GATEWAY ? (limits.regional ?? []) : []).flatMap((closed) => {
       const ui = regionalRailUi(closed.currency);
@@ -771,17 +771,15 @@ export default function TopUpSheet({
               </div>
               {rail && (
                 <p className="mt-1 text-right text-[11px] text-neutral-500">
-                  {rail.ui.symbol}1 = RM {rail.rate.deposit.toFixed(4)}
+                  {rail.ui.unit} = RM {rail.rate.deposit.toFixed(4)}
                 </p>
               )}
-              {/* A3Pay matches a transfer ONLY by its exact amount, and may
-                  ask for a few cents more than this to keep it unique. */}
+              {/* The A3Pay platform matches a transfer ONLY by its exact
+                  amount, and may ask for a few cents more than this to keep
+                  it unique. */}
               {rail && (
                 <p className="mt-2 text-[12px] leading-snug text-neutral-300">
-                  Transfer the exact amount the next page shows, cents included.
-                  It can be a few cents more than this (for example{' '}
-                  {rail.ui.symbol}100.01). A rounded amount can’t be matched to
-                  your top-up.
+                  {rail.ui.exactAmountNote}
                 </p>
               )}
               <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">

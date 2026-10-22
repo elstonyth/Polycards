@@ -34,7 +34,7 @@ Handbook: <https://api.a3paysg.com/API/a3pay_api_doc.html> (v3.3.5, SGD only). C
   - No `SGD_MYR` row exists.
   - The feed is older than 7 days (ECB skips holidays) and no manual rate is set.
 - **The customer sees the rate they get.** The top-up sheet and the withdraw form send the rate they showed (`quoted_rate`). If an admin changed the fee in between, the backend refuses before any row or debit ("The exchange rate just changed"), and the form re-reads the rate.
-- **Adding a regional currency (USDT next):** one `GATEWAYS` entry (backend `gateway.ts`), one `PAYMENT_FX_FEEDS` entry (`payment-fx.ts`; no `url` means manual rate only), and one `REGIONAL_RAILS` entry (storefront `src/lib/regional-rails.ts`). The admin Settlement page gets the currency's tab from the gateway registry by itself; add its tab name (`settlement.rail.<CODE>`) to the admin's `en.json`. Payout destinations for a wallet (not a bank) are not built yet.
+- **Adding a regional currency:** one `GATEWAYS` entry (backend `gateway.ts`), one `PAYMENT_FX_FEEDS` entry (`payment-fx.ts`; no `url` means manual rate only), and one `REGIONAL_RAILS` entry (storefront `src/lib/regional-rails.ts`). The admin Settlement page gets the currency's tab from the gateway registry by itself; add its tab name (`settlement.rail.<CODE>`) to the admin's `en.json`. USDT (GlobePay365) was added this way, plus wallet payout destinations: see [gp365-setup.md](gp365-setup.md).
 - A rate change never affects payments already started. Held payouts are approved at the S$ amount locked when the customer asked.
 
 ## Onboarding with A3Pay (the Telegram checklist)

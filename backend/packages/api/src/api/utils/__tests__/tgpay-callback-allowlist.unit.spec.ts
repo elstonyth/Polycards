@@ -194,3 +194,29 @@ describe('createA3payCallbackAllowlist — same middleware, A3Pay rule', () => {
     );
   });
 });
+
+describe('createA3payCallbackAllowlist for GlobePay365 — its own address list', () => {
+  it("passes GlobePay365's production address by default, not A3Pay's", () => {
+    const gp = createA3payCallbackAllowlist({}, 'gp365');
+    const ok = run({ ip: '13.159.14.239' }, gp);
+    expect(ok.next).toHaveBeenCalled();
+    expect(ok.logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('[gp365] callback from 13.159.14.239 accepted'),
+    );
+    expect(run({ ip: '13.192.222.226' }, gp).res.statusCode).toBe(403);
+  });
+
+  it('GP365_CALLBACK_IPS replaces it (staging: 160.250.92.219); A3PAY_CALLBACK_IPS does not', () => {
+    const staging = createA3payCallbackAllowlist(
+      { GP365_CALLBACK_IPS: '160.250.92.219' },
+      'gp365',
+    );
+    expect(run({ ip: '160.250.92.219' }, staging).next).toHaveBeenCalled();
+    expect(run({ ip: '13.159.14.239' }, staging).res.statusCode).toBe(403);
+    const crossed = createA3payCallbackAllowlist(
+      { A3PAY_CALLBACK_IPS: '160.250.92.219' },
+      'gp365',
+    );
+    expect(run({ ip: '160.250.92.219' }, crossed).res.statusCode).toBe(403);
+  });
+});

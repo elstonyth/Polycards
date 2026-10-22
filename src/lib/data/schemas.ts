@@ -788,6 +788,10 @@ export const WithdrawBanksSchema = z.looseObject({
         })
         .optional(),
       accountHint: z.string().optional(),
+      // A USDT wallet (GlobePay365): the account is an address on this
+      // chain. A plain string, not an enum: a chain the backend adds before
+      // this build knows it must not fail the whole bank list.
+      wallet: z.string().optional(),
     }),
   ),
 });
@@ -822,6 +826,8 @@ export const SavedBankAccountsSchema = z.looseObject({
       // Why an unsupported account cannot be paid right now, when it is not
       // the provider (e.g. the admin paused Touch 'n Go).
       unavailableReason: z.string().nullish(),
+      // A USDT wallet's chain; absent for a bank.
+      wallet: z.string().optional(),
     }),
   ),
 });
