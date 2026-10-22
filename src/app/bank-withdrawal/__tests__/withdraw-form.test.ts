@@ -1033,6 +1033,12 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
         'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.',
       ),
     ).toBeNull();
+    // Same for the payout partner's no-provider refusal.
+    expect(
+      withdrawRemedy(
+        'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.',
+      ),
+    ).toBeNull();
     // The plain cap already says what to do.
     expect(withdrawRemedy('You can withdraw up to RM 12.34 right now.')).toBe(
       null,

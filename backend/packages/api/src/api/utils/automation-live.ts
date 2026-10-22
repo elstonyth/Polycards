@@ -45,6 +45,23 @@ const pace = (state: LiveState) =>
   state.config?.humanizedPace ?? DEFAULT_LIVE_TIMING.humanizedPace;
 
 /**
+ * Humanized speed is a clock multiplier: the simulated players live on a
+ * virtual clock that runs `pace` times faster than real time from the run's
+ * start, so sessions, breaks, sleep and days all shrink together (5× = one
+ * player day in about 4.8 real hours). Pace 1 is the real clock.
+ */
+function playerClock(state: LiveState, now: number) {
+  const speed = pace(state);
+  const start = (state.startedAt ??= now);
+  return {
+    now: start + (now - start) * speed,
+    /** A virtual instant or duration converted back to real time. */
+    toRealAt: (virtualAt: number) => start + (virtualAt - start) / speed,
+    toRealMs: (virtualMs: number) => Math.ceil(virtualMs / speed),
+  };
+}
+
+/**
  * One draw's pack from a weighted mix (weights in basis points). Packs the
  * account cannot afford drop out and the rest keep their relative weights, so
  * a rare expensive pick never fails the whole run on a low balance. With none
@@ -207,6 +224,7 @@ export function claimLiveCycle(
       state.config.humanizedRegion ?? DEFAULT_LIVE_TIMING.humanizedRegion,
       state.humanizedAssignments,
     );
+    const clock = playerClock(state, now);
     state.schedules = state.config.customerIds.map((id) => {
       const previous = state.schedules?.find((row) => row.customerId === id);
       if (previous && (previous.nextRunAt > now || !remaining.includes(id)))
@@ -215,14 +233,14 @@ export function claimLiveCycle(
         ? { ...previous.humanized }
         : assignments.find((row) => row.profileId === id)!;
       if (!humanized.timerKind) humanized.waitReason = previous?.waitReason;
-      const plan = planHumanized(humanized, now, random, pace(state));
+      const plan = planHumanized(humanized, clock.now, random);
       return {
         customerId: id,
         humanized,
         // A due draw keeps its due time, so the longest-waiting account goes first.
         nextRunAt: plan.ready
-          ? Math.min(now, humanized.nextDrawAt ?? now)
-          : now + plan.delayMs,
+          ? Math.min(now, clock.toRealAt(humanized.nextDrawAt ?? clock.now))
+          : now + clock.toRealMs(plan.delayMs),
         waitReason: plan.reason,
       };
     });
@@ -314,15 +332,13 @@ export function completeLiveCycle(
       (row) => row.customerId === cycle.customerId,
     );
     if (schedule) {
-      recordHumanizedCycle(
-        schedule.humanized,
-        now,
-        random,
-        { spend: cycle.costCents ?? 0, value: cycle.saleCents ?? 0 },
-        pace(state),
-      );
-      const plan = planHumanized(schedule.humanized, now, random, pace(state));
-      schedule.nextRunAt = now + plan.delayMs;
+      const clock = playerClock(state, now);
+      recordHumanizedCycle(schedule.humanized, clock.now, random, {
+        spend: cycle.costCents ?? 0,
+        value: cycle.saleCents ?? 0,
+      });
+      const plan = planHumanized(schedule.humanized, clock.now, random);
+      schedule.nextRunAt = now + clock.toRealMs(plan.delayMs);
       schedule.waitReason = plan.reason;
     }
   }
@@ -403,7 +419,7 @@ export function validateLiveConfig(
     ) ||
     !Number.isInteger(input.humanizedPace) ||
     Number(input.humanizedPace) < 1 ||
-    Number(input.humanizedPace) > 10 ||
+    Number(input.humanizedPace) > 24 ||
     !Array.isArray(input.customerIds) ||
     input.customerIds.length < 1 ||
     input.customerIds.length > 80 ||
@@ -433,7 +449,7 @@ export function validateLiveConfig(
     Number(input.randomMinSeconds) > Number(input.randomMaxSeconds)
   )
     throw new Error(
-      'Choose a paid pack, 1–80 monitored customers, Fixed/Random/Humanized timing, 2–86400 second intervals with minimum no greater than maximum, a supported region, Humanized pace 1–10× and 1–10 cycles per account.',
+      'Choose a paid pack, 1–80 monitored customers, Fixed/Random/Humanized timing, 2–86400 second intervals with minimum no greater than maximum, a supported region, Humanized speed 1–24× and 1–10 cycles per account.',
     );
   return {
     packSlug: input.packSlug,

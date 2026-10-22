@@ -625,7 +625,7 @@ export function LivePanel() {
             title="How fast?"
             hint={
               config.timingMode === 'humanized'
-                ? 'Each account sleeps at night, plays in short sessions and pauses between packs. Speed shortens the pauses inside a session; sleep and session times stay real. All accounts share one queue, so about 15 packs a minute is the most it will do.'
+                ? 'Each account lives its own day: short play sessions, breaks, pauses between packs and sleep at night. Speed runs that whole day faster, so the pull, rest, sleep, pull cycle repeats sooner: 5× fits a full day into about 5 hours, 24× into 1 hour. All accounts share one queue, so about 15 packs a minute is the most it will do.'
                 : 'Gap between one pack and the next, across all accounts.'
             }
           >
@@ -706,9 +706,11 @@ export function LivePanel() {
                         <Select.Value />
                       </Select.Trigger>
                       <Select.Content>
-                        {[1, 2, 3, 5, 10].map((pace) => (
+                        {[1, 2, 3, 5, 10, 24].map((pace) => (
                           <Select.Item value={String(pace)} key={pace}>
-                            {pace === 1 ? 'Normal (1×)' : `${pace}× faster`}
+                            {pace === 1
+                              ? 'Real time (1 day = 24 h)'
+                              : `${pace}× (1 day ≈ ${+(24 / pace).toFixed(1)} h)`}
                           </Select.Item>
                         ))}
                       </Select.Content>

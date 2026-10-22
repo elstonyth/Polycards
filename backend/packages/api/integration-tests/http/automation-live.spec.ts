@@ -3,6 +3,7 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { tickLive } from '../../src/api/utils/automation-live-store';
+import { clearRecentPullsCache } from '../../src/api/store/pulls/recent/route';
 import automationLiveJob from '../../src/jobs/automation-live';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
@@ -294,7 +295,8 @@ medusaIntegrationTestRunner({
           ),
         ).toHaveLength(1);
       }
-      await new Promise((resolve) => setTimeout(resolve, 5100));
+      // The feed serves a stale body while it rebuilds (#835); read it fresh.
+      clearRecentPullsCache();
       for (const path of [
         '/store/pulls/recent',
         '/store/pulls/recent?pack_id=live-pack',
@@ -467,7 +469,8 @@ medusaIntegrationTestRunner({
         status: { state: 'limited', currentRank: 2, mode: 'live' },
       });
       expect(limited.cycles).toHaveLength(1);
-      await new Promise((resolve) => setTimeout(resolve, 5100));
+      // The feed serves a stale body while it rebuilds (#835); read it fresh.
+      clearRecentPullsCache();
       const feed = (
         await api.get('/store/pulls/recent?pack_id=live-pack', {
           headers: storeHeaders,

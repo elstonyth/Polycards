@@ -63,7 +63,8 @@ export const VAULT_RULES: ErrorRule[] = [
   // Our TGPay payout wallet is short (backend TGPAY_PAYOUT_FLOAT_EMPTY). The
   // backend copy already says it is our side and the bank details are fine;
   // without this rule it fell through to "Something went wrong. Please try
-  // again." — the retry loop this message exists to stop.
+  // again." — the retry loop this message exists to stop. The payout
+  // partner's no-provider refusal (2026-10-20) is worded to land here too.
   [/withdrawals are temporarily unavailable/i, (text) => text],
   // The timed pause (GATEWAY_WITHDRAWALS_PAUSED_UNTIL) names when to come
   // back — pass it through rather than flatten it to "not open yet".

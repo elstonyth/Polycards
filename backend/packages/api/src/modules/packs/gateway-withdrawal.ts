@@ -1198,6 +1198,19 @@ export async function startWithdrawal(
           "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
         );
       }
+      // The same refusal for every bank: from 2026-10-20 17:40 TGPay refused
+      // all bank payouts this way (67 refusals, 8+ customers). Under the
+      // generic copy below customers blamed their bank details and retried 4–6
+      // times. Their routing, so say the details are fine and come back later.
+      // Worded to hit the storefront's existing /withdrawals are temporarily
+      // unavailable/ pass-through (vault-errors.ts), so it reads right whichever
+      // deploy lands first.
+      if (/no payout provider is available/i.test(error.message)) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.',
+        );
+      }
       // Says who refused, and does not instruct the customer to fix something
       // that may well be correct. The old wording ("check the bank details")
       // was a guess dressed as a diagnosis: on 2026-08-11 two customers retried
