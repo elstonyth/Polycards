@@ -633,14 +633,15 @@ services:
       branch: master
       deploy_on_push: true
     http_port: 9000
-    # professional-xs, not basic-xs, ONLY because the basic tier is hard-capped
-    # at one instance — `doctl apps propose` rejects instance_count: 2 with
-    # "must not exceed 1 instance for instance_size_slug basic-xs". Same 1 shared
-    # vCPU and 1 GiB for $12/mo instead of $10; the tier buys horizontal scaling
-    # (and unlocks autoscaling), not a faster box.
-    instance_size_slug: professional-xs
+    # Dedicated 2 vCPU / 4 GiB with a 3 GiB heap (NODE_OPTIONS below). On
+    # 2026-10-20 the shared 1 GiB box hit the ~500 MB default V8 heap and
+    # crash-looped once requests queued behind a full DB pool. Scale this box
+    # up, not out: see the connection arithmetic below.
+    instance_size_slug: apps-d-2vcpu-4gb
     # TWO is the ceiling here, and the arithmetic is the reason — this is not a
-    # budget choice. The cluster is db-s-1vcpu-1gb: 25 connections, ~22 usable.
+    # budget choice. The cluster is db-s-1vcpu-2gb since 2026-10-13: 50
+    # connections, 47 usable. The numbers below were written against the old
+    # 25/22 tier, so the margin is now wider than they state.
     # Every backend process opens up to DEFAULT_DB_POOL_MAX (5, see
     # src/utils/db-driver-options.ts), and the PRE_DEPLOY migrate job runs while
     # the old containers are still serving. 2 x 5 + worker 5 + migrate 5 = 20,
@@ -666,6 +667,9 @@ services:
         operator: GREATER_THAN
         window: FIVE_MINUTES
     envs:
+      - key: NODE_OPTIONS
+        scope: RUN_TIME
+        value: --max-old-space-size=3072
       - key: MEDUSA_WORKER_MODE
         scope: RUN_TIME
         value: server
