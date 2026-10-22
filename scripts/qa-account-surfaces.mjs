@@ -148,7 +148,7 @@ await set('Last name', 'Delete-Me');
 await set('Address', '1 QA Street');
 await set('City', 'Testville');
 await set('Postal code', '12345');
-await set('Country code', 'MY');
+await page.getByRole('combobox', { name: 'Country' }).selectOption('MY');
 await set('Phone (optional)', '+60100000000');
 await page
   .locator('form')

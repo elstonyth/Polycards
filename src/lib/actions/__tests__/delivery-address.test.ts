@@ -147,3 +147,42 @@ describe('addAddress — province is required for MY only', () => {
     expect(mocks.createAddress).toHaveBeenCalled();
   });
 });
+
+// 2026-10-20: the forms took the country as free text, and 74 Malaysian
+// addresses were saved as "60", "+6", "MALAYSIA", "MA", "MYS" or an area code.
+// Nothing ships to those, so the delivery modal refused every one of them.
+describe('addAddress / updateAddress — country must be MY or SG', () => {
+  const COUNTRY_ERROR = 'Choose Malaysia or Singapore as the country.';
+
+  it.each(['60', '+6', 'MALAYSIA', 'MA', 'MYS', '03', 'GB'])(
+    'refuses %s before saving',
+    async (countryCode) => {
+      const r = await addAddress({ ...BASE_INPUT, countryCode });
+
+      expect(r).toEqual({ ok: false, error: COUNTRY_ERROR });
+      expect(mocks.createAddress).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses it on update too', async () => {
+    const r = await updateAddress('addr_1', {
+      ...BASE_INPUT,
+      countryCode: '60',
+    });
+
+    expect(r).toEqual({ ok: false, error: COUNTRY_ERROR });
+    expect(mocks.updateAddress).not.toHaveBeenCalled();
+  });
+
+  it('stores a lowercase or padded code as the canonical upper case', async () => {
+    mocks.createAddress.mockResolvedValueOnce({
+      customer: { addresses: [{ id: 'addr_my' }] },
+    });
+
+    const r = await addAddress({ ...BASE_INPUT, countryCode: ' my ' });
+
+    expect(r).toEqual({ ok: true, addressId: 'addr_my' });
+    const [body] = mocks.createAddress.mock.calls[0]!;
+    expect(body.country_code).toBe('MY');
+  });
+});

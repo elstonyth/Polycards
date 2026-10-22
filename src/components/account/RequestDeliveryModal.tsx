@@ -5,6 +5,7 @@ import { SlabImage } from '@/components/SlabImage';
 import {
   shipVaultCards,
   addAddress,
+  updateAddress,
   getPrizeShippingAllowance,
   type AddressView,
   type AddAddressInput,
@@ -16,6 +17,7 @@ import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
+import { CountrySelect } from '@/components/account/CountrySelect';
 import {
   computeDeliveryFee,
   deliveryZone,
@@ -55,10 +57,16 @@ export default function RequestDeliveryModal({
   onSubmitted,
 }: Props) {
   const [addrList, setAddrList] = useState<AddressView[]>(addresses);
+  // A saved address that can ship beats one that can't (old free-text
+  // country rows), so a fixed customer isn't greeted by the warning again.
   const [selectedAddr, setSelectedAddr] = useState<string>(
-    addresses[0]?.id ?? '',
+    (addresses.find((a) => isShippableCountry(a.countryCode)) ?? addresses[0])
+      ?.id ?? '',
   );
   const [adding, setAdding] = useState(addresses.length === 0);
+  // The saved address the form is repairing ("Fix this address"), or null
+  // when it is adding a new one.
+  const [fixingId, setFixingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The charge is confirmed in a second step before anything is requested.
@@ -101,7 +109,7 @@ export default function RequestDeliveryModal({
     city: '',
     province: '',
     postalCode: '',
-    countryCode: '',
+    countryCode: 'MY',
   });
   const panelRef = useRef<HTMLDivElement>(null);
   // The sheet stays mounted while closed, so a pending confirmation must not
@@ -193,14 +201,30 @@ export default function RequestDeliveryModal({
     setBusy(true);
     setError(null);
     try {
-      const res = await addAddress(form);
-      if (!res.ok) {
-        setError(res.error);
-        return;
+      if (fixingId) {
+        // Repaired in place: a second row would leave the broken one behind.
+        const res = await updateAddress(fixingId, form);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        setAddrList((p) =>
+          p.map((a) =>
+            a.id === fixingId ? addressViewFromInput(fixingId, form) : a,
+          ),
+        );
+        setSelectedAddr(fixingId);
+        setFixingId(null);
+      } else {
+        const res = await addAddress(form);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        // Optimistic: append + select. (A full refresh would re-fetch getAddresses.)
+        setAddrList((p) => [...p, addressViewFromInput(res.addressId, form)]);
+        setSelectedAddr(res.addressId);
       }
-      // Optimistic: append + select. (A full refresh would re-fetch getAddresses.)
-      setAddrList((p) => [...p, addressViewFromInput(res.addressId, form)]);
-      setSelectedAddr(res.addressId);
       setAdding(false);
       // A new address re-prices: confirm the new charge.
       setConfirming(false);
@@ -334,6 +358,7 @@ export default function RequestDeliveryModal({
             <button
               type="button"
               onClick={() => {
+                setFixingId(null);
                 setAdding(true);
                 setConfirming(false);
               }}
@@ -446,24 +471,18 @@ export default function RequestDeliveryModal({
             </label>
             <label className="col-span-2 block">
               <span className="mb-1.5 block text-[12px] font-medium text-white/55">
-                Country code
+                Country
               </span>
-              <input
-                aria-label="Country code"
-                autoComplete="country"
-                placeholder="MY or SG"
-                maxLength={2}
+              <CountrySelect
                 value={form.countryCode}
-                onChange={(e) => {
-                  const countryCode = e.target.value.toUpperCase();
+                onChange={(countryCode) =>
                   // A state from the other country's list is never valid.
                   setForm((f) => ({
                     ...f,
                     countryCode,
                     province: stateAfterCountryChange(countryCode, f.province),
-                  }));
-                }}
-                className={INPUT_CLASS}
+                  }))
+                }
               />
             </label>
             <div className="col-span-2 flex gap-2">
@@ -475,7 +494,10 @@ export default function RequestDeliveryModal({
               {addrList.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setAdding(false)}
+                  onClick={() => {
+                    setAdding(false);
+                    setFixingId(null);
+                  }}
                   className="text-[13px] text-white/60"
                 >
                   Cancel
@@ -564,11 +586,38 @@ export default function RequestDeliveryModal({
             </Pill>
           </div>
         )}
-        {!adding && unshippableCountry && (
-          <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
-            We currently ship within Malaysia and Singapore only — choose an
-            address in one of them.
-          </p>
+        {/* Nearly every address that lands here is Malaysian, saved with "60"
+            or "MALAYSIA" as its country back when that was free text, so name
+            the stored value and offer the fix rather than only the rule. */}
+        {!adding && unshippableCountry && selectedAddress && (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+            <p>
+              This address has “{country}” as its country, so it can’t ship. We
+              ship within Malaysia and Singapore only — fix it and pick the
+              country from the list.
+            </p>
+            <Pill
+              onClick={() => {
+                setForm({
+                  firstName: selectedAddress.firstName,
+                  lastName: selectedAddress.lastName,
+                  address1: selectedAddress.line1,
+                  address2: selectedAddress.line2 ?? undefined,
+                  city: selectedAddress.city,
+                  province: selectedAddress.province ?? '',
+                  postalCode: selectedAddress.postalCode,
+                  countryCode: '',
+                  phone: selectedAddress.phone ?? undefined,
+                });
+                setFixingId(selectedAddress.id);
+                setAdding(true);
+                setConfirming(false);
+              }}
+              className="mt-2 px-4"
+            >
+              Fix this address
+            </Pill>
+          </div>
         )}
         {!adding && badPostcode && (
           <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">

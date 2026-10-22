@@ -12,6 +12,7 @@ import type { AddressView } from '@/lib/actions/delivery';
 
 const mocks = vi.hoisted(() => ({
   shipVaultCards: vi.fn(),
+  updateAddress: vi.fn(),
   openTopUp: vi.fn(),
   balance: 1000 as number | null,
   bonus: 0,
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/actions/delivery', () => ({
   shipVaultCards: mocks.shipVaultCards,
   addAddress: vi.fn(),
+  updateAddress: mocks.updateAddress,
   getPrizeShippingAllowance: async () => mocks.allowance,
 }));
 vi.mock('@/lib/actions/wallet', () => ({
@@ -88,6 +90,7 @@ beforeEach(() => {
   mocks.allowance = null;
   mocks.shipVaultCards.mockReset();
   mocks.openTopUp.mockReset();
+  mocks.updateAddress.mockReset();
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -198,9 +201,64 @@ describe('RequestDeliveryModal confirm and balance', () => {
       [{ ...ADDRESS, countryCode: 'TH', postalCode: '10110' } as AddressView],
     );
     expect(host.textContent).toContain(
-      'We currently ship within Malaysia and Singapore only',
+      'We ship within Malaysia and Singapore only',
     );
     expect(button('Request delivery')!.disabled).toBe(true);
+  });
+
+  // 2026-10-20: 74 Malaysian addresses were saved with "60" or "MALAYSIA" as
+  // the country back when it was free text. The modal names the bad value and
+  // re-opens the address with everything but the country already filled in.
+  test('offers to re-enter an address saved with a junk country', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60' } as AddressView],
+    );
+    expect(host.textContent).toContain('This address has “60” as its country');
+
+    await act(async () => button('Fix this address')!.click());
+
+    const input = (label: string) =>
+      host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+        .value;
+    expect(input('Address')).toBe(ADDRESS.line1);
+    expect(input('Postal code')).toBe(ADDRESS.postalCode);
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    expect(country.value).toBe('');
+    expect([...country.options].map((o) => o.textContent)).toEqual([
+      'Select country',
+      'Malaysia',
+      'Singapore',
+    ]);
+
+    // Saving repairs the SAME row; a second one would leave the junk behind.
+    mocks.updateAddress.mockResolvedValueOnce({ ok: true });
+    await act(async () => {
+      country.value = 'MY';
+      country.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => button('Save address')!.click());
+    expect(mocks.updateAddress).toHaveBeenCalledWith(
+      'addr_1',
+      expect.objectContaining({ countryCode: 'MY', address1: ADDRESS.line1 }),
+    );
+    expect(host.querySelectorAll('input[name="addr"]')).toHaveLength(1);
+    expect(host.textContent).not.toContain('as its country');
+    expect(host.textContent).toContain('West Malaysia');
+  });
+
+  test('opens on a saved address that can ship, not an old junk one', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [
+        { ...ADDRESS, id: 'addr_junk', countryCode: '60' } as AddressView,
+        ADDRESS,
+      ],
+    );
+    expect(host.textContent).not.toContain('as its country');
+    expect(button('Request delivery')!.disabled).toBe(false);
   });
 });
 
