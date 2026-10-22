@@ -187,14 +187,27 @@ export const RATE_CHANGED_MESSAGE =
  * balance read is cheap and read-only; a failed read is NOT short (the submit
  * still decides), so a balance-endpoint outage never blocks payouts.
  */
+/**
+ * What a payout of `gatewayAmount` takes from OUR float: the amount PLUS the
+ * gateway's own fee (percent and flat), rounded up to the cent, since an
+ * amount that passed on its own could still be refused.
+ */
+export function payoutFloatNeeded(
+  gateway: PaymentGateway,
+  gatewayAmount: number,
+): number {
+  const { payoutFeePercent = 0, payoutFlatFee = 0 } = GATEWAYS[gateway] ?? {};
+  return (
+    Math.ceil(gatewayAmount * (100 + payoutFeePercent) - 1e-6) / 100 +
+    payoutFlatFee
+  );
+}
+
 async function regionalFloatShort(
   config: GatewayConfig,
   gatewayAmount: number,
 ): Promise<{ available: number; currency: string } | null> {
-  // The wallet pays the amount PLUS the gateway's own payout fee, rounded up
-  // to the cent: an amount that passed on its own could still be refused.
-  const fee = GATEWAYS[config.kind as PaymentGateway]?.payoutFeePercent ?? 0;
-  const needed = Math.ceil(gatewayAmount * (100 + fee) - 1e-6) / 100;
+  const needed = payoutFloatNeeded(config.kind as PaymentGateway, gatewayAmount);
   try {
     const b = await checkBalance(config);
     const available = Number(b.availableBalance);

@@ -87,7 +87,7 @@ node scripts/gp365-e2e.mjs payouts
 
 ## Open before go-live
 
-- **USDT limits.** The `currencyLimits` in `gateway.ts` (deposit 10–2,000, payout 10–5,000) are **placeholders**. Replace them with the back-office settings. Keep the RM `limits.withdrawalMin` (RM 30) below the USDT floor at today's rate, so the USDT floor is the one that binds.
+- **USDT limits.** GlobePay365 production takes 3 USDT and up with no maximum (2026-10-21). Ours (`currencyLimits` in `gateway.ts`): top-ups 10–2,000 USDT, payouts **60**–5,000 USDT. The 60 floor keeps the 1 USDT gas covered by the 2% withdrawal fee. The RM `limits.withdrawalMin` (RM 30) stays below it, so the USDT floor is the one that binds.
 - **Nudge window.** `payinNudgeCents: 100` lets a payin move up to 1 USDT from what we asked and still re-lock at the same rate. Staging never moved an amount (a 10 USDT order stayed 10 in CreatePayin and GetPayinDetail), so the window is probably unused; it is harmless either way.
 
 ## Proven on staging (2026-10-20)
@@ -100,8 +100,23 @@ Run from the office (egress IP 60.48.37.75, whitelisted by GlobePay365 that day;
 - **Payout:** SubmitPayout for 10 USDT to a TRC20 wallet returned W2026102002371683 at status 6 "Unknown", the balance reserved. Like A3Pay, GlobePay365 posts payouts by hand. Once posted it read status 4 (Success, as the doc says) and our payout sweep settled it (RM 42.21, USDT 10, staging fee 0); the staging balance went back to 0.
 - **A different amount is not a payment** (GlobePay365, 2026-10-20): if the USDT that arrives differs from the order (e.g. order 10, pay 9), they treat the order as **unpaid** (status 4), and both the callback and GetPayinDetail keep showing the **order** amount, never what arrived. They resolve it by hand. So we never credit a short or over payment, and if they mark one successful, the record still says the order amount and we credit the full order: they must only do that once the full amount has arrived. The storefront tells the customer to send exactly the amount shown, exchange fee included.
 
+## Production (2026-10-21/22)
+
+- **Merchant:** USDT is a channel on the existing **Polycard** merchant (`GP365_MERCHANT_CODE=Polycard`, `GP365_API_BASE=https://mapi.globepay365.com`). Its keys are that merchant's old pair, copied in the deploy secrets file from the `GLOBEPAY_*` entries into `GP365_AES_KEY` / `GP365_PUBLIC_KEY` / `GP365_MERCHANT_PRIVATE_KEY`. The pair generated on 2026-10-12 was never registered and is kept only as `GP365_MERCHANT_PRIVATE_KEY_UNUSED_1012`.
+- **Whitelist:** 188.166.181.61, 188.166.181.204 and the office 60.48.37.75.
+- **Their costs:** top-up 1%; payout 0.2% + 1 USDT gas (`payoutFeePercent` / `payoutFlatFee`, which the payout float check reserves). Cashier window 600 s.
+- **Our fee (owner decision 2026-10-22):** top-up **1.5%**, withdrawal **2%**, saved in Admin → Settlement → USDT → Exchange rate. We keep 0.5% of a top-up, and about 1.8% of a payout minus the 1 USDT gas.
+- **Preflight from the office (2026-10-22):** balance OK (USDT 0), unknown references read "Not found". GetSupportedBankList lists only `USDTERC`, but GlobePay365 says TRC20 payouts are submitted the same way (`WD` with `ToClientBankCode=USDTTRC`), so the preflight's missing-USDTTRC line is expected there. The first TRC20 payout proves it; a refusal is refunded automatically.
+
+## Go-live order
+
+1. Deploy with `GP365_ENABLED=false` (as shipped in `.do/backend.app.yaml`). Nothing changes for customers.
+2. Wait for the hourly feed to create the `USDT_MYR` row, then save the fee (1.5% / 2%) on the Settlement USDT tab.
+3. Run `check-a3pay.ts gp365` from the backend (DO egress).
+4. Set `GP365_ENABLED=true` in the spec and apply.
+5. Fund the USDT float, then a 10 USDT TRC20 top-up and a 60 USDT payout from a staff account. Watch the first callback (`[gp365] callback … accepted`).
+
 ## Still open before go-live
 
 - the callback on production (signature, `Amount`, source IP);
-- the production fee and limits (staging: 1–1,000 USDT, fee 0);
-- the production cashier's payment window (staging times out within minutes).
+- ops alerts: `TELEGRAM_OPS_CHAT_ID` is unset, so Verify Fail and payout alerts reach no one.

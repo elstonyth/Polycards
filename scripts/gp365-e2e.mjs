@@ -365,17 +365,17 @@ async function payoutLegs(admin, cust) {
     JSON.stringify(banks.json.banks?.filter((b) => b.currency === 'USDT')),
   );
 
-  // ---- 7. Withdraw RM 200 -> 47.38 USDT (200 / 4.221, floored)
+  // ---- 7. Withdraw RM 300 -> 71.07 USDT (300 / 4.221, floored)
   const wBefore = (await balance(cust)).balance;
   const w1 = await call('POST', '/store/credits/withdraw', {
     token: cust,
-    body: { amount: 200, account_id: w?.id },
+    body: { amount: 300, account_id: w?.id },
   });
   check(
-    'withdraw RM 200 to the wallet -> USDT 47.38 (at 4.221)',
+    'withdraw RM 300 to the wallet -> USDT 71.07 (at 4.221)',
     w1.status === 200 &&
       w1.json.currency === 'USDT' &&
-      w1.json.payAmount === 47.38,
+      w1.json.payAmount === 71.07,
     JSON.stringify({ status: w1.status, ...w1.json }),
   );
   const mw1 = w1.json.merchantTransactionId;
@@ -384,7 +384,7 @@ async function payoutLegs(admin, cust) {
     const p = (await mockState()).payouts.find((x) => x.mtid === mw1);
     check(
       'GlobePay365 got USDTTRC, the address, and MCustId as the holder',
-      p?.amount === 47.38 &&
+      p?.amount === 71.07 &&
         p?.bank === 'USDTTRC' &&
         p?.account === TRON &&
         p?.holder === customerId,
@@ -408,14 +408,14 @@ async function payoutLegs(admin, cust) {
       'payout settled; row in RM with the USDT lock',
       rw[0] === 'settled' &&
         rw[1] === 'USDT' &&
-        Number(rw[2]) === 47.38 &&
-        Number(rw[5]) === 200 &&
+        Number(rw[2]) === 71.07 &&
+        Number(rw[5]) === 300 &&
         rw[8] === 'gp365',
       rw.join('|'),
     );
     check(
-      'ledger debited RM 200',
-      Math.round((wBefore - (await balance(cust)).balance) * 100) === 20000,
+      'ledger debited RM 300',
+      Math.round((wBefore - (await balance(cust)).balance) * 100) === 30000,
     );
   }
 
@@ -423,7 +423,7 @@ async function payoutLegs(admin, cust) {
   const w2Before = (await balance(cust)).balance;
   const w2 = await call('POST', '/store/credits/withdraw', {
     token: cust,
-    body: { amount: 180, account_id: w?.id },
+    body: { amount: 280, account_id: w?.id },
   });
   if (w2.json.merchantTransactionId) {
     await sleep(1500);
@@ -444,12 +444,12 @@ async function payoutLegs(admin, cust) {
   const tinyBefore = (await balance(cust)).balance;
   const tiny = await call('POST', '/store/credits/withdraw', {
     token: cust,
-    body: { amount: 40, account_id: w?.id },
+    body: { amount: 250, account_id: w?.id },
   });
   check(
-    'RM 40 (= USDT 9.47) refused before any debit',
+    'RM 250 (= USDT 59.22, under the 60 floor) refused before any debit',
     tiny.status === 400 &&
-      /USDT 10|RM 50/.test(tiny.json.message ?? '') &&
+      /USDT 60|RM 253/.test(tiny.json.message ?? '') &&
       (await balance(cust)).balance === tinyBefore,
     tiny.json.message,
   );

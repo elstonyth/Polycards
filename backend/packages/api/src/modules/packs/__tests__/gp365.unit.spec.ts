@@ -22,6 +22,7 @@ import {
 import { isPayinVerifyFail, regionalDepositGateway } from '../gateway-deposit';
 import { savedBankAccountViews } from '../saved-accounts';
 import {
+  payoutFloatNeeded,
   payoutGatewayFor,
   regionalPayoutGateways,
   withdrawalDetailsError,
@@ -397,5 +398,22 @@ describe('the shared adapter, bound to GlobePay365', () => {
       ),
     ).rejects.toMatchObject({ definite: true, codes: ['A3PAY_UNKNOWN_BANK'] });
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("GlobePay365's production payout cost and band (2026-10-21)", () => {
+  it('reserves 0.2% plus the 1 USDT gas from our float; A3Pay keeps its 1.5%', () => {
+    expect(payoutFloatNeeded('gp365', 60)).toBe(61.12); // 60.12 + 1
+    expect(payoutFloatNeeded('gp365', 1000)).toBe(1003);
+    expect(payoutFloatNeeded('a3pay', 100)).toBe(101.5);
+  });
+
+  it('pays out from 60 USDT, so the 2% withdrawal fee covers the gas', () => {
+    expect(GATEWAYS.gp365.currencyLimits).toEqual({
+      depositMin: 10,
+      depositMax: 2000,
+      withdrawalMin: 60,
+      withdrawalMax: 5000,
+    });
   });
 });

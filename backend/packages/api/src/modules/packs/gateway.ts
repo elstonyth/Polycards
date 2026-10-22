@@ -97,6 +97,9 @@ export type GatewayDefinition = {
    * on top of the amount paid out. The float pre-check must cover both.
    */
   payoutFeePercent?: number;
+  /** A flat fee per payout on top of the percent, in the gateway's currency
+   *  (GlobePay365's 1 USDT gas). Also taken from our float. */
+  payoutFlatFee?: number;
   /** Are the credentials for this gateway present in the environment? */
   configured: (env: Partial<NodeJS.ProcessEnv>) => boolean;
   /** Its client config from env; throws when `configured` would be false. */
@@ -257,20 +260,23 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       withdrawal: '/hooks/gp365/withdrawal',
       payoutVerify: '/hooks/gp365/payout-verify',
     },
-    // RM fences on the converted amount, as for A3Pay. The USDT band is a
-    // PLACEHOLDER: the API doc states no limits — replace it with the
-    // back-office Merchant Transaction Setting before go-live.
+    // GlobePay365's own payout cost (2026-10-21): 0.2% + 1 USDT gas.
+    payoutFeePercent: 0.2,
+    payoutFlatFee: 1,
+    // RM fences on the converted amount, as for A3Pay. GlobePay365 itself
+    // takes 3 USDT and up with no maximum (2026-10-21); our band is tighter.
+    // Payouts start at 60 USDT so the 2% withdrawal fee covers the 1 USDT gas.
     limits: {
       depositMin: 30,
       depositMax: 10000,
-      // Under USDT 10 (~RM 45) so the USDT floor, not this one, binds.
+      // Under USDT 60 (~RM 250) so the USDT floor, not this one, binds.
       withdrawalMin: 30,
       withdrawalMax: 30000,
     },
     currencyLimits: {
       depositMin: 10,
       depositMax: 2000,
-      withdrawalMin: 10,
+      withdrawalMin: 60,
       withdrawalMax: 5000,
     },
   },
