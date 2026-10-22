@@ -142,6 +142,8 @@ const METHOD_LABEL: Record<string, string> = {
   BQR: 'QR / e-wallet',
   FPX: 'FPX',
   DN: 'DuitNow',
+  UTRC: 'USDT · TRC20',
+  UERC: 'USDT · ERC20',
 };
 
 type ReceiptData = {
@@ -449,6 +451,8 @@ type WithdrawalReceiptData = {
   outcome: 'paid' | 'refunded';
   occurredAt: string;
   siteUrl: string;
+  /** A paid USDT payout: what the wallet received. */
+  usdtAmount?: number;
 };
 
 const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
@@ -457,9 +461,16 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
   const site = escapeHtml(d.siteUrl.replace(/\/+$/, ''));
   const logo = `${site}/branding/polycards-logo.png`;
   const paid = d.outcome === 'paid';
+  const usdt =
+    paid && d.usdtAmount !== undefined
+      ? `USDT ${d.usdtAmount.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`
+      : null;
 
   const heading = paid ? 'Withdrawal paid' : 'Withdrawal returned';
-  const lede = paid
+  const bankLede = paid
     ? 'Your bank transfer is complete — the money has left Polycards and reached your bank.'
     : // Cause-agnostic on purpose, same reasoning as copy.ts's withdrawal_refunded
       // (the storefront half of this same fix): this outcome fires on a denied
@@ -468,6 +479,10 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
       // empty merchant payout float) that is not the bank either. "Your bank
       // rejected this" was flatly false on both paths.
       'The transfer could not be completed, so the full amount is back in your Polycards balance. Nothing was lost.';
+  // A paid USDT payout reached a wallet, not a bank.
+  const lede = usdt
+    ? `Your USDT transfer is complete — ${usdt} has left Polycards and reached your wallet.`
+    : bankLede;
 
   return {
     subject: paid
@@ -479,6 +494,7 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
       lede,
       '',
       `Amount:     ${amount}`,
+      usdt ? `Sent:       ${usdt}` : '',
       `Reference:  ${d.reference}`,
       when ? `Date:       ${when}` : '',
       '',
@@ -502,6 +518,7 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
 
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;border-top:1px solid #404040;border-bottom:1px solid #404040;margin:0 0 32px;">
         ${row('Amount', amount, true)}
+        ${usdt ? row('Sent', usdt) : ''}
         ${row('Reference', d.reference)}
         ${when ? row('Date', when) : ''}
       </table>
@@ -626,12 +643,19 @@ export const renderTemplate = (
     }
     if (outcome !== 'paid' && outcome !== 'refunded') return undefined;
     if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
+    const usdtAmount = data?.usdt_amount;
     return withdrawalReceipt({
       amount,
       reference,
       outcome,
       occurredAt: typeof occurredAt === 'string' ? occurredAt : '',
       siteUrl,
+      // Optional: a bad value drops back to the RM-and-bank wording.
+      ...(typeof usdtAmount === 'number' &&
+      Number.isFinite(usdtAmount) &&
+      usdtAmount > 0
+        ? { usdtAmount }
+        : {}),
     });
   }
 

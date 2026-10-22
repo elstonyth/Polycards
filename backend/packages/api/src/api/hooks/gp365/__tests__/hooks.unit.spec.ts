@@ -11,6 +11,8 @@ jest.mock('../../../../modules/packs/ops-alert', () => ({
   alertOps: jest.fn().mockResolvedValue(undefined),
 }));
 import { alertOps } from '../../../../modules/packs/ops-alert';
+import { notifyFeed } from '../../../../modules/packs/notify-feed';
+import { sendWithdrawalReceipt } from '../../../../modules/packs/withdrawal-receipt';
 
 import { generateKeyPairSync } from 'node:crypto';
 import { POST as deposit } from '../deposit/route';
@@ -250,6 +252,22 @@ describe('POST /hooks/gp365/withdrawal', () => {
     );
     expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith(
       expect.objectContaining({ to: 'settled' }),
+    );
+    // The paid email and bell row carry the USDT the wallet got.
+    expect(sendWithdrawalReceipt).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        outcome: 'paid',
+        amount: 420,
+        usdtAmount: 91.3,
+      }),
+    );
+    expect(notifyFeed).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        template: 'withdrawal_paid',
+        data: expect.objectContaining({ amount_myr: 420, usdt_amount: 91.3 }),
+      }),
     );
   });
 });

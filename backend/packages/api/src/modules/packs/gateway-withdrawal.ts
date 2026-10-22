@@ -1618,7 +1618,19 @@ export type WithdrawalOutcomeRow = {
   merchant_transaction_id: string;
   gateway_transaction_id: string | null;
   amount: unknown;
+  /** The gateway leg (payment-fx.ts). Read only to word the USDT receipt. */
+  currency?: unknown;
+  gateway_amount?: unknown;
 };
+
+/** The USDT the wallet received, for the paid receipt and bell row; undefined
+ *  on every other rail, whose notices stay RM-and-bank worded. */
+function usdtPaidAmount(row: WithdrawalOutcomeRow): number | undefined {
+  const amount = Number(row.gateway_amount);
+  return row.currency === 'USDT' && Number.isFinite(amount) && amount > 0
+    ? amount
+    : undefined;
+}
 
 /**
  * What the caller observed about a payout that reached the bank. Everything
@@ -1677,6 +1689,7 @@ export async function applyWithdrawalOutcome(
 ): Promise<{ replayed: boolean }> {
   const packs = resolvePacks<GatewayWithdrawals>(scope);
   const amount = Number(withdrawal.amount);
+  const usdtAmount = usdtPaidAmount(withdrawal);
   const gatewayTransactionId = outcome.gatewayTransactionId || null;
 
   await sendWithdrawalReceipt(scope, {
@@ -1685,6 +1698,7 @@ export async function applyWithdrawalOutcome(
     reference: outcome.gatewayRef,
     merchantTransactionId: withdrawal.merchant_transaction_id,
     outcome: 'paid',
+    ...(usdtAmount !== undefined ? { usdtAmount } : {}),
   });
 
   const claimed = await packs.claimWithdrawalStatus({
@@ -1721,7 +1735,11 @@ export async function applyWithdrawalOutcome(
       await notifyFeed(scope, {
         receiverId: withdrawal.customer_id,
         template: 'withdrawal_paid',
-        data: { amount_myr: amount, reference: outcome.gatewayRef },
+        data: {
+          amount_myr: amount,
+          reference: outcome.gatewayRef,
+          ...(usdtAmount !== undefined ? { usdt_amount: usdtAmount } : {}),
+        },
         idempotencyKey: withdrawalFeedKey(
           withdrawal.merchant_transaction_id,
           'paid',

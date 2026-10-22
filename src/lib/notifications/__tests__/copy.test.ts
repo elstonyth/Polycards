@@ -192,6 +192,16 @@ describe('body rendering', () => {
     );
   });
 
+  it('a USDT payout says wallet and shows what the wallet got', () => {
+    expect(
+      copyFor('withdrawal_paid').body({ amount_myr: 300, usdt_amount: 71.07 }),
+    ).toBe('USDT 71.07 (RM 300.00) has been sent to your wallet.');
+    // A bad value falls back to the bank wording rather than "USDT NaN".
+    expect(
+      copyFor('withdrawal_paid').body({ amount_myr: 300, usdt_amount: 'x' }),
+    ).toBe('RM 300.00 has been sent to your bank.');
+  });
+
   // Spec 2026-10-07 §1; the bonus line is spec 2026-10-15 §3.
   it('announces a gifted pack and bonus credit', () => {
     expect(
