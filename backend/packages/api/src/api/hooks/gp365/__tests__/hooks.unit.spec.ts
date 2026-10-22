@@ -24,7 +24,7 @@ import { aesEncrypt, signPayload } from '../../../../modules/packs/a3pay';
 
 function pair() {
   const { publicKey, privateKey } = generateKeyPairSync('rsa', {
-    modulusLength: 1024,
+    modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'der' },
     privateKeyEncoding: { type: 'pkcs8', format: 'der' },
   });

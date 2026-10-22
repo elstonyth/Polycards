@@ -32,7 +32,7 @@ import { PAYMENT_FX_FEEDS } from '../payment-fx';
 // GlobePay365 (USDT): a second tenant of the A3Pay platform, beside A3Pay.
 
 const ours = generateKeyPairSync('rsa', {
-  modulusLength: 1024,
+  modulusLength: 2048,
   publicKeyEncoding: { type: 'spki', format: 'der' },
   privateKeyEncoding: { type: 'pkcs8', format: 'der' },
 });
