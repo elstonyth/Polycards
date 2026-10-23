@@ -122,13 +122,26 @@ export function pullTime(iso: string): string {
 }
 
 // Calendar date in Malaysian time ("19 Oct 2026") — the referral friend
-// list's joined dates. Fixed UTC+8 and hand-rolled for the same server/client
-// parity as pullTime. Unparsable → "".
+// list's joined dates, /transactions and /orders. Fixed UTC+8 and hand-rolled
+// for the same server/client parity as pullTime. Unparsable → "".
 export function mytDate(iso: string): string {
   const ms = new Date(iso).getTime();
   if (!Number.isFinite(ms)) return '';
   const d = new Date(ms + MYT_OFFSET_MS);
   return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+// Wall-clock time in Malaysian time ("10:27 PM") for the /transactions rows.
+// That page renders on the UTC server, so a plain Intl formatter printed a
+// 10:27 PM withdrawal as "2:27 PM" and customers read an 8-hour wait into it.
+// Unparsable → "".
+export function mytClock(iso: string): string {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms + MYT_OFFSET_MS);
+  const h24 = d.getUTCHours();
+  const minute = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${h24 % 12 || 12}:${minute} ${h24 < 12 ? 'AM' : 'PM'}`;
 }
 
 // The mirror of relativeTime for a FUTURE instant ("in 45m", "in 23h", "in 2d")

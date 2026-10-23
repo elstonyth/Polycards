@@ -5,7 +5,7 @@ import {
   Pager,
   StatCards,
 } from '@/components/account/ui';
-import { rm } from '@/lib/format';
+import { mytClock, mytDate, rm } from '@/lib/format';
 import { getPendingDeposits, getTransactions } from '@/lib/actions/vault';
 import {
   bonusMark,
@@ -21,16 +21,6 @@ import { PendingDeposits } from '@/components/account/PendingDeposits';
 import { DepositAutoRefresh } from '@/components/account/deposit-autorefresh';
 
 export const metadata: Metadata = { title: 'Transactions' };
-
-const dateFmt = new Intl.DateTimeFormat('en-US', {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-});
-const timeFmt = new Intl.DateTimeFormat('en-US', {
-  hour: 'numeric',
-  minute: '2-digit',
-});
 
 // The credit ledger: lifetime money in/out + a server-paged transaction list
 // (?page=N). The (account) layout already gates signed-out visitors;
@@ -139,7 +129,6 @@ export default async function TransactionsPage({
             </thead>
             <tbody>
               {rows.map((t) => {
-                const at = new Date(t.createdAt);
                 const bonus = bonusMark(t.bonus);
                 const forPacks = forPacksMark(t.playthrough);
                 const cards = cardsLine(t.packTitle, t.cardNames);
@@ -166,10 +155,10 @@ export default async function TransactionsPage({
                   >
                     <td className="hidden whitespace-nowrap px-4 py-3 sm:table-cell">
                       <span className="text-white/70">
-                        {dateFmt.format(at)}
+                        {mytDate(t.createdAt)}
                       </span>
                       <span className="ml-2 hidden text-[12px] text-white/40 sm:inline">
-                        {timeFmt.format(at)}
+                        {mytClock(t.createdAt)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-white/90">
@@ -197,7 +186,7 @@ export default async function TransactionsPage({
                         </span>
                       )}
                       <span className="mt-0.5 block text-[12px] text-white/50 sm:hidden">
-                        {dateFmt.format(at)}, {timeFmt.format(at)}
+                        {mytDate(t.createdAt)}, {mytClock(t.createdAt)}
                       </span>
                       {t.reference && (
                         <span className="mt-0.5 block text-[12px] text-white/50 sm:hidden">
