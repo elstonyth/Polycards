@@ -20,6 +20,8 @@
  *    one sellable.
  *  - POST /store/tasks/claims/:id/spin answers a daily free rip locked with no
  *    quote, a weekly one sellable with a live quote.
+ *  - GET /admin/customers/:id/pulls quotes no payable-now amount for a locked
+ *    daily card, so the desk sees the customer's answer.
  *
  * Harness: the free-pack-route.integration.spec.ts rig — a real DB-backed
  * PacksModuleService in a medusa container beside inert fakes, route handlers
@@ -66,6 +68,7 @@ import { PixelPokemon } from '../models/pixel-pokemon';
 
 import { GET as vaultGET } from '../../../api/store/vault/route';
 import { POST as spinPOST } from '../../../api/store/tasks/claims/[claimId]/spin/route';
+import { GET as adminPullsGET } from '../../../api/admin/customers/[id]/pulls/route';
 
 jest.setTimeout(300 * 1000);
 
@@ -139,7 +142,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
     })();
 
     type ResCapture = { status?: number; body?: any };
-    const makeReqRes = (params: Record<string, string> = {}) => {
+    const makeReqRes = (
+      params: Record<string, string> = {},
+      query: Record<string, string> = {},
+    ) => {
       const captured: ResCapture = {};
       const res = {
         status(code: number) {
@@ -154,6 +160,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const req = {
         auth_context: { actor_id: customerId },
         params,
+        query,
         scope: container,
       };
       return { req: req as any, res: res as any, captured };
@@ -163,6 +170,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const { req, res, captured } = makeReqRes();
       await vaultGET(req, res);
       return (captured.body.items as any[]).find((i) => i.pull_id === pullId);
+    };
+
+    const adminQuote = async (pullId: string) => {
+      const { req, res, captured } = makeReqRes({ id: customerId });
+      await adminPullsGET(req, res);
+      return (captured.body.items as any[]).find((i) => i.id === pullId)
+        ?.quote;
     };
 
     const spin = async (claimId: string) => {
@@ -191,8 +205,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
     // A check-in task of the given cadence, claimed through the real path:
     // check in, complete, claim. One check-in a day is idempotent, so a daily
     // and a weekly task can both be claimed in one test.
+    type Kind = 'daily' | 'weekly' | 'achievement';
     const claim = async (
-      kind: 'daily' | 'weekly',
+      kind: Kind,
       reward: Record<string, unknown>,
     ) => {
       await service.checkInDaily({ customerId });
@@ -211,7 +226,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       return claimed;
     };
 
-    const claimCard = async (kind: 'daily' | 'weekly') =>
+    const claimCard = async (kind: Kind) =>
       (await claim(kind, { type: 'card', card_handle: 'card-1' }))
         .ref as string;
 
@@ -270,12 +285,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     describe('lockedPullIds', () => {
-      it('locks a daily card until the first paid open, never a weekly one', async () => {
+      it('locks a daily card until the first paid open, never a weekly or achievement one', async () => {
         const daily = await claimCard('daily');
         const weekly = await claimCard('weekly');
+        const achievement = await claimCard('achievement');
         const pulls = [
           { id: daily, source: 'reward' },
           { id: weekly, source: 'reward' },
+          { id: achievement, source: 'reward' },
         ];
 
         expect([...(await service.lockedPullIds(customerId, pulls))]).toEqual([
@@ -364,6 +381,20 @@ moduleIntegrationTestRunner<PacksModuleService>({
           locked: false,
           sellable: true,
         });
+      });
+    });
+
+    describe('GET /admin/customers/:id/pulls', () => {
+      it('quotes nothing payable for a locked daily card, a price for a weekly one', async () => {
+        const daily = await claimCard('daily');
+        const weekly = await claimCard('weekly');
+
+        expect(await adminQuote(daily)).toBeNull();
+        expect((await adminQuote(weekly))?.amount).toBeGreaterThan(0);
+
+        await payForAPack();
+
+        expect((await adminQuote(daily))?.amount).toBeGreaterThan(0);
       });
     });
 

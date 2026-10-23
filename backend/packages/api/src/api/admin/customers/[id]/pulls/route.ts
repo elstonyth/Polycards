@@ -134,7 +134,10 @@ export async function GET(
   // unsellable until this customer's first PAID open, so it must show no
   // payable-now quote while locked — admin and customer refuse on the SAME
   // rule (lockedPullIds).
-  const lockedIds = await packs.lockedPullIds(id, rows as any[]);
+  const lockedIds = await packs.lockedPullIds(
+    id,
+    rows as { id: string; source?: string | null }[],
+  );
   res.json({
     total,
     fx: { rate: fx, firm: fxFirm },

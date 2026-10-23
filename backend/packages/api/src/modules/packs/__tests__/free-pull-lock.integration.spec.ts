@@ -15,7 +15,9 @@
  *    locked free pull fails with that message while the normal pull still sells.
  *  - requestDeliveryWorkflow refuses a locked free pull with the same message,
  *    and accepts it once a paid open exists.
- *  - Reward and pack pulls are untouched by the new gate.
+ *  - Pack pulls and weekly/achievement reward pulls are untouched by the new
+ *    gate (a DAILY task's reward pull is gated too since 2026-10-23 — see
+ *    daily-claim-lock.integration.spec.ts).
  *
  * Harness: the free-pack-open.integration.spec.ts rig — moduleIntegration
  * TestRunner for a real DB-backed PacksModuleService, registered into a medusa

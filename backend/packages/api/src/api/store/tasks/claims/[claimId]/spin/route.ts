@@ -90,20 +90,33 @@ export async function POST(
     rate_type?: string;
     instant_deadline_ms?: number;
   } = { ...UNQUOTED_BUYBACK };
-  let locked = false;
+  // A daily task's rip carries the free welcome pull's lock until the first
+  // PAID open. Its own try, failing CLOSED: a lookup error must not let the
+  // reveal offer a sell the buyback step then refuses (the vault shows the
+  // real answer on the next read), nor cost the card its price enrichment.
+  let locked = true;
   try {
-    const [{ rate: fxRate, firm: fxFirm }, [row], lockedIds] =
-      await Promise.all([
-        resolveFxRateInfo(packs),
-        packs.listCards(
-          { handle: result.card.handle },
-          { select: ['handle', 'market_multiplier'], take: 1 },
-        ),
-        packs.lockedPullIds(customerId, [
-          { id: result.pullId, source: 'reward' },
-        ]),
-      ]);
-    locked = lockedIds.has(result.pullId);
+    locked = (
+      await packs.lockedPullIds(customerId, [
+        { id: result.pullId, source: 'reward' },
+      ])
+    ).has(result.pullId);
+  } catch (err) {
+    req.scope
+      .resolve(ContainerRegistrationKeys.LOGGER)
+      .error(
+        `[task-spin] lock lookup failed for claim '${req.params.claimId}' (customer ${customerId}) — serving the pull as locked`,
+        err instanceof Error ? err : new Error(String(err)),
+      );
+  }
+  try {
+    const [{ rate: fxRate, firm: fxFirm }, [row]] = await Promise.all([
+      resolveFxRateInfo(packs),
+      packs.listCards(
+        { handle: result.card.handle },
+        { select: ['handle', 'market_multiplier'], take: 1 },
+      ),
+    ]);
     // MYR display Value (raw USD × FX × per-card markup) — what the reveal
     // shows, and the base the buyback percent applies to.
     const marketPriceMyr = displayMarketPrice(

@@ -3142,6 +3142,8 @@ class PacksModuleService extends MedusaService({
     // kind drives period_key, which drives BOTH the claim unique index and
     // the credit idempotency key — flipping it in place re-opens already
     // claimed rewards (review 2026-08-25 finding 5). New cadence = new task.
+    // lockedPullIds relies on this too: a claim's task kind is what says a
+    // card came from a DAILY task, so it must never change under the card.
     if (existing && existing.kind !== input.kind) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
