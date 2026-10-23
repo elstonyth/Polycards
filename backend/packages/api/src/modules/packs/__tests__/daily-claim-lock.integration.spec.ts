@@ -13,7 +13,8 @@
  * Asserted contracts:
  *  - buybackPullWorkflow refuses a daily card with FREE_PULL_LOCKED_MESSAGE
  *    (vaulted, uncredited) and sells it once a paid open exists; a weekly card
- *    sells with no paid open at all.
+ *    sells with no paid open at all. POST /store/vault/buyback-batch reports
+ *    the daily card with the same copy and still sells the weekly one.
  *  - recordRewardWithdrawal refuses a daily card with the same copy, and ships
  *    it once a paid open exists.
  *  - GET /store/vault reports the daily card locked with no quote, the weekly
@@ -69,6 +70,7 @@ import { PixelPokemon } from '../models/pixel-pokemon';
 import { GET as vaultGET } from '../../../api/store/vault/route';
 import { POST as spinPOST } from '../../../api/store/tasks/claims/[claimId]/spin/route';
 import { GET as adminPullsGET } from '../../../api/admin/customers/[id]/pulls/route';
+import { POST as buybackBatchPOST } from '../../../api/store/vault/buyback-batch/route';
 
 jest.setTimeout(300 * 1000);
 
@@ -145,6 +147,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     const makeReqRes = (
       params: Record<string, string> = {},
       query: Record<string, string> = {},
+      body: unknown = undefined,
     ) => {
       const captured: ResCapture = {};
       const res = {
@@ -161,6 +164,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         auth_context: { actor_id: customerId },
         params,
         query,
+        body,
         scope: container,
       };
       return { req: req as any, res: res as any, captured };
@@ -177,6 +181,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await adminPullsGET(req, res);
       return (captured.body.items as any[]).find((i) => i.id === pullId)
         ?.quote;
+    };
+
+    const sellBatch = async (pullIds: string[]) => {
+      const { req, res, captured } = makeReqRes({}, {}, { pull_ids: pullIds });
+      await buybackBatchPOST(req, res);
+      return captured.body;
     };
 
     const spin = async (claimId: string) => {
@@ -322,6 +332,23 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         expect(result.amount).toBeGreaterThan(0);
         expect((await pullById(daily)).status).toBe('bought_back');
+      });
+
+      it('batch: reports the daily card with the free-pack copy and sells the weekly one', async () => {
+        const daily = await claimCard('daily');
+        const weekly = await claimCard('weekly');
+
+        const body = await sellBatch([daily, weekly]);
+
+        expect(body).toMatchObject({ sold: 1, failed: 1 });
+        expect(body.results).toEqual(
+          expect.arrayContaining([
+            { pull_id: daily, ok: false, error: FREE_PULL_LOCKED_MESSAGE },
+            expect.objectContaining({ pull_id: weekly, ok: true }),
+          ]),
+        );
+        expect((await pullById(daily)).status).toBe('vaulted');
+        expect((await pullById(weekly)).status).toBe('bought_back');
       });
 
       it('still sells a weekly card with no paid open at all', async () => {

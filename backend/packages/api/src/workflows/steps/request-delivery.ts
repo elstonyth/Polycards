@@ -105,14 +105,14 @@ export const requestDeliveryStep = createStep(
           { take: input.pull_ids.length },
         )
       : [];
-    // One indexed read for the whole batch: a free welcome pull can't ship
+    // One lock read for the whole batch: a free welcome pull can't ship
     // until this customer has opened a PAID pack (spec 2026-08-14).
-    const freeUnlocked = await packs.hasPaidOpen(input.customer_id);
+    const lockedIds = await packs.lockedPullIds(input.customer_id, pulls);
     const verdict = validateDeliveryRequest(
       pulls,
       input.pull_ids,
       input.customer_id,
-      freeUnlocked,
+      lockedIds,
     );
     if (verdict !== 'ok') throw verdictError(verdict);
 

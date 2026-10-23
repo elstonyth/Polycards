@@ -5089,11 +5089,11 @@ class PacksModuleService extends MedusaService({
       pull ? [pull] : [],
       [pullId],
       customerId,
-      // freeUnlocked is irrelevant on this path: the reward gate returns first
+      // lockedIds is irrelevant on this path: the reward gate returns first
       // for the only shape that ships here, and a source='free' pull is
       // 'invalid' whichever verdict it earns. The daily-task lock is checked
       // just below.
-      true,
+      new Set(),
     );
     if (verdict !== 'reward_source') {
       return { status: 'invalid' };

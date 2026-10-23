@@ -65,14 +65,15 @@ export type DeliveryRequestVerdict =
 // the same caller-facing 404 upstream (no existence leak), but we distinguish
 // them here for precise logging/branching.
 //
-// `freeUnlocked` is the caller's hasPaidOpen(callerId) — resolved ONCE per
-// request, never stored on the pull, so the customer's first paid open lifts
-// the free-welcome lock with zero writes (spec 2026-08-14).
+// `lockedIds` is the caller's lockedPullIds(callerId, fetchedPulls) — the
+// ONE lock rule (free welcome pull, daily task card), resolved once per
+// request and never stored on the pull, so the customer's first paid open
+// lifts it with zero writes (spec 2026-08-14).
 export function validateDeliveryRequest(
   fetchedPulls: PullLike[],
   requestedIds: string[],
   callerId: string,
-  freeUnlocked: boolean,
+  lockedIds: ReadonlySet<string>,
 ): DeliveryRequestVerdict {
   if (requestedIds.length === 0) return 'empty';
   if (new Set(requestedIds).size !== requestedIds.length) return 'duplicate';
@@ -95,9 +96,9 @@ export function validateDeliveryRequest(
     // ROUTING verdict, not a refusal: the vault sends these pulls to the
     // reward path rather than showing the customer a wall.
     if (pull.source === 'reward') return 'reward_source';
-    // The free welcome pull ships only after the customer's first PAID open —
-    // same lock the buyback step applies (modules/packs/free-pack.ts).
-    if (pull.source === 'free' && !freeUnlocked) return 'free_locked';
+    // A locked pull ships only after the customer's first PAID open — same
+    // lock the buyback step applies (lockedPullIds).
+    if (lockedIds.has(pull.id)) return 'free_locked';
   }
   return 'ok';
 }
