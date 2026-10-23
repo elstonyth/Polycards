@@ -127,7 +127,12 @@ import {
 } from './referral';
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
-import { EFFECTIVE_GROUP_SQL, isDefaultPlayerGroup } from './odds-sets';
+import {
+  DEFAULT_PLAYER_GROUP_FLAG,
+  DEFAULT_PLAYER_GROUP_NAME,
+  EFFECTIVE_GROUP_SQL,
+  isDefaultPlayerGroup,
+} from './odds-sets';
 import {
   taskIsLive,
   taskPeriodKey,
@@ -237,6 +242,7 @@ import type {
   PeriodLeader,
   PeriodLeaders,
   SignupTopupStats,
+  StatsWindow,
   WithdrawalStats,
 } from './stats';
 import {
@@ -453,7 +459,7 @@ const LIVE_VALUE_USD_SQL = 'c.market_value * COALESCE(c.market_multiplier, ?)';
 // pre-snapshot behavior.
 // Per-player ledger sums in sen over credit_transaction rows (no alias), one
 // spelling for both the admin Players list's values (playersOverview) and its
-// server-side sort (playerIdsByLedger), so a sorted column always reads in
+// server-side sort (playerIdsSorted), so a sorted column always reads in
 // the order it is sorted.
 const PLAYER_LEDGER_SUMS = {
   wallet: 'SUM(ROUND(amount * 100))',
@@ -467,6 +473,123 @@ const PLAYER_LEDGER_SUMS = {
 
 /** The Players list's server-side sort keys over the ledger. */
 export type PlayerLedgerSort = keyof typeof PLAYER_LEDGER_SUMS | 'contribution';
+
+/** Every Players list sort ordered in SQL (playerIdsSorted): the ledger sums
+ *  plus the columns that live off the customer row, and phone. */
+export type PlayerSort =
+  | PlayerLedgerSort
+  | 'vault'
+  | 'level'
+  | 'group'
+  | 'status'
+  | 'phone';
+
+export const PLAYER_SORTS: ReadonlySet<string> = new Set<PlayerSort>([
+  'wallet',
+  'spend',
+  'topup',
+  'withdrawn',
+  'contribution',
+  'vault',
+  'level',
+  'group',
+  'status',
+  'phone',
+]);
+
+// The Players list's period figures (top-up, withdraw, turnover) limited to a
+// half-open [from, to) window by the ledger row's created_at, as an aggregate
+// FILTER; no window = lifetime. Wallet is a balance and never takes one.
+// `filter` binds the two `params`.
+const ledgerWindow = (w: StatsWindow | null) =>
+  w
+    ? {
+        filter:
+          ' FILTER (WHERE created_at >= ?::timestamptz AND created_at < ?::timestamptz)',
+        params: [w.from.toISOString(), w.to.toISOString()],
+      }
+    : { filter: '', params: [] as string[] };
+
+// The Players list's ORDER BY for one key: what to join onto `customer c`,
+// the params that join binds, and the value to order by. Each value is what
+// playersOverview shows in that column, so a sorted column reads in order.
+function playerSortSql(
+  key: PlayerSort,
+  window: StatsWindow | null,
+  fx: number,
+): { join: string; params: unknown[]; value: string } {
+  switch (key) {
+    case 'vault':
+      // playersOverview's vault value. `card c` is the subquery's own alias.
+      return {
+        join:
+          'LEFT JOIN (SELECT p.customer_id, ' +
+          `SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)) AS cents ` +
+          'FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
+          "WHERE p.status = 'vaulted' AND p.deleted_at IS NULL " +
+          'GROUP BY p.customer_id) v ON v.customer_id = c.id',
+        params: [DEFAULT_MARKET_MULTIPLIER, fx],
+        value: 'COALESCE(v.cents, 0)',
+      };
+    case 'level':
+      return {
+        join:
+          'LEFT JOIN (SELECT customer_id, MAX(current_level) AS lvl FROM vip_member_state ' +
+          'WHERE deleted_at IS NULL GROUP BY customer_id) vm ON vm.customer_id = c.id',
+        params: [],
+        value: 'COALESCE(vm.lvl, 1)',
+      };
+    case 'group':
+      // The effective group's name, and for everyone outside one the default
+      // group's own name, as the column shows it: the dashboard names it the
+      // same way (the flagged or DEFAULT-named group, else the constant).
+      return {
+        join:
+          `LEFT JOIN (${EFFECTIVE_GROUP_SQL}) eff ON eff.customer_id = c.id ` +
+          'LEFT JOIN customer_group g ON g.id = eff.group_id ' +
+          'LEFT JOIN (SELECT name FROM customer_group WHERE deleted_at IS NULL ' +
+          `AND (metadata->'${DEFAULT_PLAYER_GROUP_FLAG}' = 'true'::jsonb ` +
+          `OR name = '${DEFAULT_PLAYER_GROUP_NAME}') ` +
+          'ORDER BY created_at, id LIMIT 1) dg ON true',
+        params: [],
+        value: `COALESCE(g.name, dg.name, '${DEFAULT_PLAYER_GROUP_NAME}')`,
+      };
+    case 'status':
+      // Login blocked; descending lists the disabled players first.
+      return {
+        join:
+          'LEFT JOIN (SELECT customer_id, bool_or(disabled) AS disabled FROM customer_account_state ' +
+          'WHERE deleted_at IS NULL GROUP BY customer_id) s ON s.customer_id = c.id',
+        params: [],
+        value: 'COALESCE(s.disabled, false)',
+      };
+    case 'phone':
+      // A blank phone shows as '—' like a missing one, so it sorts like one.
+      return { join: '', params: [], value: "NULLIF(c.phone, '')" };
+    default: {
+      // The ledger sums. The window goes in the WHERE, so a period sort only
+      // reads that period's rows; wallet is a balance and ignores it.
+      const w = key === 'wallet' ? null : window;
+      const keys: (keyof typeof PLAYER_LEDGER_SUMS)[] =
+        key === 'contribution' ? ['topup', 'withdrawn'] : [key];
+      return {
+        join:
+          'LEFT JOIN (SELECT customer_id, ' +
+          keys.map((k) => `${PLAYER_LEDGER_SUMS[k]} AS ${k}`).join(', ') +
+          ' FROM credit_transaction WHERE deleted_at IS NULL' +
+          (w
+            ? ' AND created_at >= ?::timestamptz AND created_at < ?::timestamptz'
+            : '') +
+          ' GROUP BY customer_id) t ON t.customer_id = c.id',
+        params: w ? [w.from.toISOString(), w.to.toISOString()] : [],
+        value:
+          key === 'contribution'
+            ? 'COALESCE(t.topup, 0) - COALESCE(t.withdrawn, 0)'
+            : `COALESCE(t.${key}, 0)`,
+      };
+    }
+  }
+}
 
 const PULLED_VALUE_USD_SQL =
   'COALESCE(pu.recorded_value_usd, ' + LIVE_VALUE_USD_SQL + ')';
@@ -9098,10 +9221,13 @@ class PacksModuleService extends MedusaService({
   // of BOTH vault_count and vault_value (profileStatsForCustomer deliberately
   // differs — its LEFT JOIN still counts the pull, at its recorded value). Keeping the twin exact
   // is what makes the Players list and the economy dashboard agree.
+  // `window` limits top-up, withdraw and spend to [from, to) (the Players
+  // list's ?range=); wallet, vault and the rest are always as of now.
   @InjectManager()
   async playersOverview(
     ids: string[],
     fx: number,
+    window: StatsWindow | null = null,
     @MedusaContext() sharedContext: Context = {},
   ) {
     const wallet = new Map<
@@ -9112,9 +9238,10 @@ class PacksModuleService extends MedusaService({
         // calls vip_spend_cents (NOT its differently-defined spend_cents).
         vipSpendCents: number;
         lastSpendAt: string | null;
-        // Lifetime cash in and out, the Finance player report's buckets
-        // (ledgerTotals' topups and cashout): Σ topup, and Σ cashout negated
-        // so a withdrawal reads positive (a refunded one nets back out).
+        // Cash in and out, lifetime or over `window`, the Finance player
+        // report's buckets (ledgerTotals' topups and cashout): Σ topup, and
+        // Σ cashout negated so a withdrawal reads positive (a refunded one
+        // nets back out).
         topupCents: number;
         withdrawnCents: number;
       }
@@ -9144,6 +9271,7 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const ph = ids.map(() => '?').join(',');
+    const win = ledgerWindow(window);
     // Sequential to avoid concurrent queries on the shared injected EntityManager.
     const credits = await em.execute<
       {
@@ -9157,12 +9285,12 @@ class PacksModuleService extends MedusaService({
     >(
       'SELECT customer_id, ' +
         `  COALESCE(${PLAYER_LEDGER_SUMS.wallet}, 0)::bigint AS balance_cents, ` +
-        `  COALESCE(${PLAYER_LEDGER_SUMS.spend}, 0)::bigint AS vip_spend_cents, ` +
-        `  COALESCE(${PLAYER_LEDGER_SUMS.topup}, 0)::bigint AS topup_cents, ` +
-        `  COALESCE(${PLAYER_LEDGER_SUMS.withdrawn}, 0)::bigint AS withdrawn_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.spend}${win.filter}, 0)::bigint AS vip_spend_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.topup}${win.filter}, 0)::bigint AS topup_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.withdrawn}${win.filter}, 0)::bigint AS withdrawn_cents, ` +
         "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
         `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
-      ids,
+      [...win.params, ...win.params, ...win.params, ...ids],
     );
     const vaults = await em.execute<
       { customer_id: string; n: string; cents: string }[]
@@ -9256,46 +9384,48 @@ class PacksModuleService extends MedusaService({
     return rows.map((r) => r.customer_id);
   }
 
-  // One page of the admin Players list ordered by a ledger sum over EVERY
-  // player (or over `ids`, the route's search matches), not just the page in
-  // hand: the ids in order, plus how many players the sort covered. A player
-  // with no ledger rows sums to 0; ties go to the customer id.
-  // ponytail: aggregates the whole ledger per request; precompute per-player
-  // totals if the Players page ever gets slow.
+  // One page of the admin Players list ordered by any SQL-sorted column
+  // (playerSortSql) over EVERY player (or over `ids`, the route's search
+  // matches), not just the page in hand: the ids in order, plus how many
+  // players the sort covered. A player with no rows sorts as 0 / level 1 /
+  // the default group / active; a missing phone sorts last both ways. Ties
+  // go to the customer id.
+  // ponytail: aggregates the whole ledger (or vault) per request; precompute
+  // per-player totals if the Players page ever gets slow.
   @InjectManager()
-  async playerIdsByLedger(
+  async playerIdsSorted(
     input: {
-      key: PlayerLedgerSort;
+      key: PlayerSort;
       dir: 'ASC' | 'DESC';
       ids: string[] | null;
       /** Never list these (the players list's ?group=default). */
       excludeIds?: string[];
+      /** Limits the ledger sums except wallet to [from, to); null = lifetime. */
+      window?: StatsWindow | null;
+      /** USD→MYR, the rate the vault value is shown at. */
+      fx: number;
       limit: number;
       offset: number;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ ids: string[]; total: number }> {
-    // The key is spliced into the SQL: only the known sums get through.
-    if (
-      input.key !== 'contribution' &&
-      !Object.hasOwn(PLAYER_LEDGER_SUMS, input.key)
-    ) {
+    // The key picks SQL that is spliced in: only the known keys get through.
+    if (!PLAYER_SORTS.has(input.key)) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        `Unknown ledger sort '${String(input.key)}'.`,
+        `Unknown players sort '${String(input.key)}'.`,
       );
     }
     if (input.ids?.length === 0) return { ids: [], total: 0 };
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const sums = Object.entries(PLAYER_LEDGER_SUMS)
-      .map(([k, sql]) => `${sql} AS ${k}`)
-      .join(', ');
-    const value =
-      input.key === 'contribution'
-        ? 'COALESCE(t.topup, 0) - COALESCE(t.withdrawn, 0)'
-        : `COALESCE(t.${input.key}, 0)`;
+    const { join, params, value } = playerSortSql(
+      input.key,
+      input.window ?? null,
+      input.fx,
+    );
     const dir = input.dir === 'ASC' ? 'ASC' : 'DESC';
+    const nulls = input.key === 'phone' ? ' NULLS LAST' : '';
     const exclude = input.excludeIds ?? [];
     const scope =
       (input.ids
@@ -9305,13 +9435,12 @@ class PacksModuleService extends MedusaService({
         ? ` AND c.id NOT IN (${exclude.map(() => '?').join(',')})`
         : '');
     const scopeParams = [...(input.ids ?? []), ...exclude];
+    // Bind order: the join's params, the scope's, then the page.
     const rows = await em.execute<{ id: string }[]>(
-      'SELECT c.id FROM customer c ' +
-        `LEFT JOIN (SELECT customer_id, ${sums} FROM credit_transaction ` +
-        '  WHERE deleted_at IS NULL GROUP BY customer_id) t ON t.customer_id = c.id ' +
+      `SELECT c.id FROM customer c ${join} ` +
         `WHERE c.deleted_at IS NULL${scope} ` +
-        `ORDER BY ${value} ${dir}, c.id ${dir} LIMIT ? OFFSET ?`,
-      [...scopeParams, input.limit, input.offset],
+        `ORDER BY ${value} ${dir}${nulls}, c.id ${dir} LIMIT ? OFFSET ?`,
+      [...params, ...scopeParams, input.limit, input.offset],
     );
     const [count] = await em.execute<{ n: string }[]>(
       `SELECT COUNT(*)::bigint AS n FROM customer c WHERE c.deleted_at IS NULL${scope}`,

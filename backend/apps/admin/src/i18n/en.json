@@ -966,6 +966,7 @@
   "players": {
     "title": "All Players",
     "subtitle": "Every registered player.",
+    "periodNote": "Top-up, withdrawn, contribution and turnover for {{window}}, by the date of each wallet record (a withdrawal counts when it is requested). Wallet, vault and level are as of now.",
     "name": "Name",
     "email": "Email",
     "phone": "Phone",

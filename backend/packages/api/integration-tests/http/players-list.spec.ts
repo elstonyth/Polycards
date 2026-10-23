@@ -511,6 +511,94 @@ medusaIntegrationTestRunner({
         expect(ids(narrowed)).toEqual([aId]);
       });
 
+      it('?sort= orders vault, level, group, status and phone too', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ids = (res: any): string[] => res.data.players.map((p: any) => p.id);
+        // A: one vaulted card, level 3, a named group, a phone. B: none.
+        for (const key of ['vault', 'level', 'group', 'phone']) {
+          const desc = await list(`?sort=${key}:desc`);
+          expect(desc.status).toBe(200);
+          expect(desc.data.total).toBe(2);
+          expect(ids(desc)).toEqual([aId, bId]);
+        }
+        for (const key of ['vault', 'level', 'group']) {
+          expect(ids(await list(`?sort=${key}:asc`))).toEqual([bId, aId]);
+        }
+        // A missing phone sorts last both ways.
+        expect(ids(await list('?sort=phone:asc'))).toEqual([aId, bId]);
+
+        // Status: descending lists the disabled player first.
+        const disable = await unwrapResponse(
+          api.post(
+            `/admin/customers/${bId}/disable`,
+            { reason: 'players list sort test' },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(disable.status).toBe(200);
+        expect(ids(await list('?sort=status:desc'))).toEqual([bId, aId]);
+        expect(ids(await list('?sort=status:asc'))).toEqual([aId, bId]);
+        // The group filter still narrows a SQL-sorted page.
+        const grouped = await list('?group=default&sort=level:desc');
+        expect(ids(grouped)).toEqual([bId]);
+      });
+
+      it('?range= limits top-up, withdraw, contribution and turnover; wallet stays', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ids = (res: any): string[] => res.data.players.map((p: any) => p.id);
+        // A's rows were written just now: inside the last 7 days, outside
+        // a fixed range in the past (no MYT-midnight flake either way).
+        const week = await list('?range=7d');
+        expect(week.status).toBe(200);
+        expect(week.data.window).not.toBeNull();
+        expect(rowFor(week, aId)).toMatchObject({
+          total_topup: 100,
+          total_spend: 30,
+          wallet_balance: 70,
+        });
+
+        const past = await list('?range=custom&from=2026-01-01&to=2026-01-02');
+        expect(past.status).toBe(200);
+        expect(rowFor(past, aId)).toMatchObject({
+          total_topup: 0,
+          total_withdrawn: 0,
+          total_contribution: 0,
+          total_spend: 0,
+          // A balance, not a period figure.
+          wallet_balance: 70,
+          vault_count: 1,
+        });
+
+        // All time is the default, and says so.
+        expect((await list()).data.window).toBeNull();
+        expect(rowFor(await list('?range=all'), aId).total_topup).toBe(100);
+
+        // A period sort uses the period: both read 0 in the past range, so
+        // the tie goes to the id; this week A's top-up leads.
+        const tie = [aId, bId].sort().reverse();
+        expect(ids(await list('?range=custom&from=2026-01-01&to=2026-01-02&sort=topup:desc'))).toEqual(
+          tie,
+        );
+        expect(ids(await list('?range=7d&sort=topup:desc'))).toEqual([
+          aId,
+          bId,
+        ]);
+        // Wallet ignores the window.
+        expect(ids(await list('?range=custom&from=2026-01-01&to=2026-01-02&sort=wallet:desc'))).toEqual([
+          aId,
+          bId,
+        ]);
+
+        // Unknown, repeated and bad custom ranges are refused, not read as
+        // all time.
+        expect((await list('?range=fortnight')).status).toBe(400);
+        expect((await list('?range=today&range=7d')).status).toBe(400);
+        expect(
+          (await list('?range=custom&from=2026-10-10&to=2026-10-01')).status,
+        ).toBe(400);
+      });
+
+
       it('disabled (Task 1) flows through to the row', async () => {
         const disable = await unwrapResponse(
           api.post(
