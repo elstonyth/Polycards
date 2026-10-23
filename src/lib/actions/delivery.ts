@@ -9,7 +9,7 @@
  *   GET  /store/delivery-orders            — the caller's orders
  *   POST /store/delivery-orders/:id/address — edit address pre-ship
  *   POST /store/delivery-orders/:id/cancel  — cancel pre-ship (cards → vault)
- *   POST /store/rewards/withdraw            — ship ONE reward pull (capped/day)
+ *   GET  /store/rewards/withdraw            — today's prize-shipping allowance
  *
  * Those five go through the `Store` port (src/lib/store.ts), which owns the
  * cookie read, the bearer, the schema check and the failure log. The ADDRESS
