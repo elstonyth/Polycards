@@ -16,7 +16,7 @@ import {
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
 import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
-import { rm } from '@/lib/format';
+import { mytDate, rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -86,13 +86,6 @@ const isSafeMediaUrl = (u: string) => {
     return false;
   }
 };
-
-const orderDate = (value: string | Date) =>
-  new Date(value).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
 
 function DeliveryItems({ items }: { items: DeliveryOrderView['items'] }) {
   const first = items[0];
@@ -553,7 +546,7 @@ function OrderDetailModal({
               Order #{shortId}
             </h2>
             <p className="mt-1 text-[13px] text-white/55">
-              Requested {orderDate(order.createdAt)}
+              Requested {mytDate(order.createdAt)}
             </p>
           </div>
           <Badge tone={STATUS_TONE[order.status] ?? 'neutral'}>
@@ -778,7 +771,7 @@ export default function OrdersClient({
                   </button>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-white/80">
-                  {orderDate(o.createdAt)}
+                  {mytDate(o.createdAt)}
                 </td>
                 <td className="px-4 py-3 text-white/80">
                   {o.trackingNumber ? (
