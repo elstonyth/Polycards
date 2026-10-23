@@ -60,7 +60,7 @@ export async function POST(
   // claim (nothing gates claiming on a never-spent account). So `free` is the
   // WRONG signal for the reveal's sell UI: it would suppress the sell on a pull
   // that GET /store/vault and buybackPullStep both treat as unlocked. Resolved
-  // live below from the same hasPaidOpen() read those two use.
+  // live below from the same lockedPullIds() rule those two use.
   //
   // Seeded as `isFree` so it is default-safe: if the enrichment below fails, the
   // response never advertises a sell that would then 400.
@@ -108,8 +108,10 @@ export async function POST(
     //
     // An UNLOCKED free pull (the customer had already paid-opened before
     // claiming) takes the normal quote path — buybackPullStep re-checks
-    // hasPaidOpen live and honours the sell, so the offer is real.
-    if (isFree) locked = !(await packsService.hasPaidOpen(customerId));
+    // lockedPullIds live and honours the sell, so the offer is real.
+    if (isFree)
+      locked = (await packsService.lockedPullIds(customerId, [result.pull]))
+        .size > 0;
     if (locked) {
       buyback = UNQUOTED_BUYBACK;
     } else {

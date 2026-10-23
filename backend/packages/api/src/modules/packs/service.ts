@@ -48,7 +48,7 @@ import {
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
-import { FREE_WELCOME_CATEGORY } from './free-pack';
+import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
 import {
   parseWithdrawalControls,
@@ -3142,6 +3142,8 @@ class PacksModuleService extends MedusaService({
     // kind drives period_key, which drives BOTH the claim unique index and
     // the credit idempotency key — flipping it in place re-opens already
     // claimed rewards (review 2026-08-25 finding 5). New cadence = new task.
+    // lockedPullIds relies on this too: a claim's task kind is what says a
+    // card came from a DAILY task, so it must never change under the card.
     if (existing && existing.kind !== input.kind) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -5087,14 +5089,22 @@ class PacksModuleService extends MedusaService({
       pull ? [pull] : [],
       [pullId],
       customerId,
-      // freeUnlocked is irrelevant on this path: the reward gate returns first
+      // lockedIds is irrelevant on this path: the reward gate returns first
       // for the only shape that ships here, and a source='free' pull is
-      // 'invalid' whichever verdict it earns. No hasPaidOpen read under the
-      // lock.
-      true,
+      // 'invalid' whichever verdict it earns. The daily-task lock is checked
+      // just below.
+      new Set(),
     );
     if (verdict !== 'reward_source') {
       return { status: 'invalid' };
+    }
+    // A daily task's card ships only after the first PAID open, like the
+    // free welcome pull (lockedPullIds).
+    if ((await this.lockedPullIds(customerId, [pull!], sharedContext)).size) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PULL_LOCKED_MESSAGE,
+      );
     }
 
     // 2) Snapshot the shipping address (denormalized at request time). A missing
@@ -5830,6 +5840,48 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return pulls.length > 0;
+  }
+
+  // Which of `pulls` are locked right now — no sell, no delivery, refusal copy
+  // FREE_PULL_LOCKED_MESSAGE. The free welcome pull, and since 2026-10-23
+  // (owner) every card a DAILY task paid out: its card reward or the card its
+  // free rip landed. Both stay locked until the customer's first PAID open
+  // (hasPaidOpen), computed and never stored. task_claim.claim_ref is the
+  // minted pull and a task's kind cannot change after creation, so the claim
+  // says for good whether the card came from a daily task. A paying customer
+  // costs one indexed read.
+  @InjectManager()
+  async lockedPullIds(
+    customerId: string,
+    pulls: { id: string; source?: string | null }[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Set<string>> {
+    const free = pulls.filter((p) => p.source === 'free').map((p) => p.id);
+    const reward = pulls.filter((p) => p.source === 'reward').map((p) => p.id);
+    if (!free.length && !reward.length) return new Set();
+    if (await this.hasPaidOpen(customerId, sharedContext)) return new Set();
+    // customer_id keeps this on IDX_task_claim_customer: claim_ref has no index.
+    const claims = reward.length
+      ? await this.listTaskClaims(
+          { customer_id: customerId, claim_ref: reward },
+          { select: ['task_id', 'claim_ref'], take: reward.length },
+          sharedContext,
+        )
+      : [];
+    const daily = claims.length
+      ? await this.listTaskDefinitions(
+          { id: [...new Set(claims.map((c) => c.task_id))], kind: 'daily' },
+          { select: ['id'], take: claims.length },
+          sharedContext,
+        )
+      : [];
+    const dailyTasks = new Set(daily.map((d) => d.id));
+    return new Set([
+      ...free,
+      ...claims
+        .filter((c) => dailyTasks.has(c.task_id))
+        .map((c) => c.claim_ref as string),
+    ]);
   }
 
   // At least one positive top-up ever (any era, any amount). Withdrawals and
