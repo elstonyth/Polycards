@@ -115,10 +115,10 @@ each put in, ranked 1–10.
   with tickets. Tapping it goes to `/lucky-draw`. _(My call.)_
 - Admin task editor: a "Tickets" number field (0 = none). The task labels used
   by the tasks poster should mention tickets when N > 0.
-- **Pending operator answer (Q4):** can a task give _only_ tickets? Default
-  until answered: **no**, every task keeps its normal reward and tickets are an
-  add-on. If the answer is yes, the main reward becomes optional and
-  `claimTask` needs an explicit "no main reward" branch, never the bare `else`.
+- No ticket-only tasks in v1: every task keeps its normal reward and tickets
+  are an add-on. _(My call.)_ If ticket-only tasks are wanted later, the main
+  reward becomes optional and `claimTask` needs an explicit "no main reward"
+  branch, never the bare `else`.
 
 ### 2. Ticket balance and history
 
@@ -128,7 +128,7 @@ each put in, ranked 1–10.
   locks the player's balance, checks it, writes the entry and the ledger row in
   one transaction. Two taps at once must not spend the same tickets twice.
 - Tickets are not tied to an event; one balance carries across events.
-  **Pending operator answer (Q2):** what happens to unused tickets when an event
+  **Pending operator answer (Q5):** what happens to unused tickets when an event
   ends? Default until answered: **they carry over** to next month.
 - Exact schema (cached balance column vs. sum of ledger) is the builder's call,
   as long as the rules above hold.
@@ -161,10 +161,18 @@ each put in, ranked 1–10.
   - Publish the event: it goes live on the storefront at its start time.
   - See, per prize: entrants, tickets, and after the draw the result.
   - Cancel a prize before its draw: every entrant's tickets on it are refunded.
-- **Prize cards are set aside when the event is published**, not at draw time.
-  The weekly challenge takes stock at settlement, which is fine for a week, but
-  over a month the card could be pulled from a pack first. Cancelling a prize,
-  or a prize ending with no entries, puts the card back.
+- **The prize card must still physically exist for the winner.** In software
+  the winner always gets the card: card stock is a fulfilment counter, not a
+  gate (`modules/packs/card-stock.ts`). Pack rolls and delivery requests ignore
+  it, and challenge/task prizes are granted whatever the stock. The real risk
+  is physical: another player pulls the same card from a pack during the month
+  and gets the one slab delivered before the draw.
+  **Pending operator answer (Q2):** default until answered: **a prize card must
+  not be in any live pack.** Publishing refuses a card prize whose card sits in
+  a live pack's pool, and refuses a card with no physical unit in stock. The
+  stock counter is lowered at publish and put back if the prize is cancelled
+  or ends with no entries (bookkeeping, so admin stock views stay right). Pack
+  pools, odds and the roll path are not touched.
 - New admin permissions must be declared in `src/policies`. Undeclared policies
   are soft-deleted on every backend boot (see #692).
 
@@ -185,6 +193,16 @@ each put in, ranked 1–10.
   call.)_
 - Players must be logged in to enter. Accounts that are frozen or disabled
   cannot enter (existing account gates).
+- **Pending operator answer (Q3): who may enter.** Tickets have no cap and
+  daily check-ins can be farmed across many accounts with no phone and no
+  top-up (the reason daily-task cards got a sell/delivery lock on 2026-10-23).
+  Won prize cards sell back as cash, so farmed accounts could turn check-ins
+  into RM 100k of withdrawable value. Default until answered: **entering needs
+  at least one settled real top-up** on the account. The page tells players
+  without one to top up first; earning and holding tickets stays open to
+  everyone. The existing daily-task lock does not carry over to draw pulls (a
+  draw pull has no task claim, and one entry mixes tickets from many tasks),
+  so the gate sits at entry instead.
 - Errors (not enough tickets, draw closed) are answered in the route itself.
   Medusa's error handler replaces any CONFLICT message with a generic
   idempotency text, so a plain 409 would show the wrong words.
@@ -229,7 +247,7 @@ _(My call. The minimum — stored seed + frozen entry list — is a must. The pu
   with `source: 'reward'`, full bonus basis points). Under the 2026-10-15
   withdrawal rules, reward cards sell back as cash. The existing "no top-up = no
   withdraw/delivery" rule still applies.
-- **Credit prize:** **Pending operator answer (Q3).** Default until answered:
+- **Credit prize:** **Pending operator answer (Q4).** Default until answered:
   **bonus credit** (spend on packs, never withdrawable), paid like the weekly
   challenge (`mutateCreditAtomic` with `reward_credit` plus a `WP` ledger row,
   idempotency key per prize). This is the only credit path a job can pay today,
@@ -291,10 +309,12 @@ Defaults above apply until answered.
 
 1. **Q1 — Draw trigger:** automatic at each prize's draw time (default: event
    end, 30 Nov 23:59 MYT)?
-2. **Q2 — Unused tickets at event end:** carry over (default) or expire?
-3. **Q3 — Credit prizes:** bonus credit (default) or withdrawable cash?
-4. **Q4 — Ticket-only tasks:** allowed, or must every task keep a normal reward
-   (default)?
+2. **Q2 — Prize cards:** only cards not in any live pack, with a physical unit
+   in stock (default)?
+3. **Q3 — Who may enter:** accounts with at least one real top-up (default), or
+   everyone?
+4. **Q4 — Credit prizes:** bonus credit (default) or withdrawable cash?
+5. **Q5 — Unused tickets at event end:** carry over (default) or expire?
 
 ## Left to the builder
 
