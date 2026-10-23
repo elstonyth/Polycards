@@ -44,6 +44,9 @@ export const DELIVERY_RULES: ErrorRule[] = [
   // No top-up ever (2026-10-11): the refusal names its own fix. Above the
   // broad /not allowed|409/ rule, which would misread it as a card problem.
   [/top up at least once/i, (text) => text],
+  // Daily prize cap (2026-10-23): prize cards ride in the delivery order and
+  // the backend refuses the whole parcel past the cap; its sentence is the fix.
+  [/prize cards ship \d+ per day/i, (text) => text],
   // Delivery-fee rules (2026-08-25) — must precede the generic /not allowed/
   // and /invalid|400/ rules, which would flatten them into wrong diagnoses.
   [
