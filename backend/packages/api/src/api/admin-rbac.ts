@@ -138,13 +138,15 @@ const METHODS_BY_OPERATION = Object.entries(OPERATION_BY_METHOD).reduce<
 /** The middleware entries middlewares.ts spreads in. Two matchers per prefix
  *  (`/admin/x` and `/admin/x/*`, a `*` spanning `/` under path-to-regexp
  *  0.1.x), never a bare `/admin/x*`, which would also catch any future
- *  sibling prefix that merely starts with the same letters. */
+ *  sibling prefix that merely starts with the same letters.
+ *
+ *
+ *  Automation reads and runs on `automation:*` alone, so the automation
+ *  operator role (scripts/create-automation-operator.ts) works without
+ *  `customer:read`. Saving the account list also asks `customer:read`: it
+ *  accepts ANY registered customer's email, and a live run then opens packs on
+ *  that customer's wallet. Only staff choose which accounts automation touches. */
 export const adminRbacRoutes: MiddlewareRoute[] = [
-  {
-    matcher: '/admin/automation',
-    methods: ['GET'],
-    policies: [{ resource: 'customer', operation: 'read' }],
-  },
   {
     matcher: '/admin/automation/accounts',
     methods: ['POST'],

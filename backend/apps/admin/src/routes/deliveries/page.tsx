@@ -16,7 +16,7 @@ import {
   toast,
 } from '@medusajs/ui';
 import { TruckFast, XMark } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useBulkUpdateDeliveryOrders,
   useDeliveryOrders,
@@ -48,6 +48,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: TruckFast,
   rank: 10,
+  permissions: ['delivery_order:read' as Permission],
 };
 
 const STATUSES: DeliveryStatus[] = [
