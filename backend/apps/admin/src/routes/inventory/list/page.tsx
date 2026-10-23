@@ -12,7 +12,7 @@ import {
   toast,
 } from '@medusajs/ui';
 import { ArchiveBox } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useEligibleProducts,
   useInventory,
@@ -49,6 +49,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: ArchiveBox,
   rank: 50,
+  permissions: ['inventory:read' as Permission],
 };
 
 // The route truncates ?q= at 100 chars. Matching the input's maxLength keeps

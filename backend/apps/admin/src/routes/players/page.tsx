@@ -28,7 +28,7 @@ import {
 } from '@medusajs/icons';
 import CreatePlayerModal from './CreatePlayerModal';
 import { PeriodLeaders } from './PeriodLeaders';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useCustomerGroupsAdmin,
   useExportPartnerAccounts,
@@ -52,6 +52,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: Users,
   rank: 30,
+  permissions: ['player:read' as Permission],
 };
 
 // The player the confirm modal is about. `disabled` here is the player's

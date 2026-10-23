@@ -83,9 +83,11 @@ const GROUPS: Group[] = [
       { path: '/odds-sets', label: 'pcNav.playerGroups' },
       { path: '/referrals', label: 'pcNav.referrals' },
       { path: '/support', label: 'pcNav.customerSupport' },
-      { path: '/automation', label: 'pcNav.automation' },
     ],
   },
+  // Top-level since 2026-10-23: the automation operator role sees only this
+  // entry, and a nested entry renders only under a visible parent.
+  { path: '/automation', label: 'pcNav.automation', children: [] },
   {
     path: '/packs',
     label: 'pcNav.packs',
@@ -172,11 +174,21 @@ const entry = (c: PageConfig): Entry => ({
 });
 
 describe('sidebar contract (Vault spec §6)', () => {
-  it('shows exactly the 8 top-level entries, in order', () => {
+  it('shows exactly the 9 top-level entries, in order', () => {
     const top = configs.filter((c) => !c.nested).sort(byRank);
     expect(top.map(entry)).toEqual(
       GROUPS.map(({ path, label }) => ({ path, label })),
     );
+  });
+
+  it('gates every top-level entry with permissions', () => {
+    // The sidebar shows an entry without `permissions` to EVERY role, so one
+    // ungated page would appear for the automation operator. Nested entries
+    // hide with their parent.
+    for (const c of configs.filter((x) => !x.nested)) {
+      const body = configBody(join(ROUTES, c.path.slice(1), 'page.tsx'));
+      expect(body, c.path).toMatch(/\bpermissions:\s*\[/);
+    }
   });
 
   it.each(GROUPS)('$path lists its pages in order', (group) => {
