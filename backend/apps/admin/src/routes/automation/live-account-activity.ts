@@ -1,5 +1,8 @@
 import type { LiveSnapshot } from '../../../../../packages/api/src/api/utils/automation-live-types';
-import { liveRankReady } from '../../../../../packages/api/src/api/utils/automation-live-rank';
+import {
+  LIVE_GOAL_MAX_CYCLES,
+  liveRankReady,
+} from '../../../../../packages/api/src/api/utils/automation-live-rank';
 
 export interface LiveAccountActivity {
   label: string;
@@ -163,7 +166,9 @@ export function getLiveAccountActivity(
       (id) =>
         liveRankReady(state, id, now) &&
         state.cycles.filter((cycle) => cycle.customerId === id).length <
-          (state.config?.maxCyclesPerAccount ?? 1),
+          (isGoal(id)
+            ? LIVE_GOAL_MAX_CYCLES
+            : (state.config?.maxCyclesPerAccount ?? 1)),
     ) ?? [];
   const nextCustomer = queue.find(isGoal) ?? queue[0];
   if (customerId !== nextCustomer || state.pending)

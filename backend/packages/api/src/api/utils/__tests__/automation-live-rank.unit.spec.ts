@@ -5,6 +5,7 @@ import {
   validateLiveConfig,
 } from '../automation-live';
 import {
+  LIVE_GOAL_MAX_CYCLES,
   liveRankTargetsToObserve,
   refreshLiveRankGoals,
 } from '../automation-live-rank';
@@ -110,23 +111,34 @@ it('confirms final settled draw twice before marking goal reached, surviving res
   expect(state.cycles).toHaveLength(1);
 });
 
-it('reports cycle limit without claiming the rank was reached', () => {
+it('keeps a goal account drawing past the per-account cap, up to its own ceiling', () => {
   const state = running();
   refreshLiveRankGoals(state, [observation()], NOW);
   const cycle = claimLiveCycle(state, NOW)!;
-  completeLiveCycle(
-    state,
-    { ...cycle, costCents: 4500, differenceCents: 0, bonusDifferenceCents: 0 },
-    NOW + 1,
-  );
+  completeLiveCycle(state, settle(cycle), NOW + 1);
   refreshLiveRankGoals(
     state,
-    [{ ...observation(NOW + 3000), ownPulls: 2, ownValueMyr: 20 }],
-    NOW + 3000,
+    [{ ...observation(NOW + 6000), ownPulls: 2, ownValueMyr: 20 }],
+    NOW + 6000,
   );
-  claimLiveCycle(state, NOW + 3000);
-  expect(state.rankGoals![0].status.state).toBe('limited');
-  expect(state.status).toBe('completed');
+  expect(claimLiveCycle(state, NOW + 6000)?.customerId).toBe('cus_a');
+  // At its ceiling the goal stops without claiming the rank was reached.
+  const capped = running();
+  capped.cycles = Array.from({ length: LIVE_GOAL_MAX_CYCLES }, (_, index) => ({
+    id: `c${index}`,
+    customerId: 'cus_a',
+    startedAt: NOW,
+    finishedAt: NOW,
+    error: null,
+  }));
+  refreshLiveRankGoals(
+    capped,
+    [{ ...observation(), ownPulls: LIVE_GOAL_MAX_CYCLES }],
+    NOW,
+  );
+  claimLiveCycle(capped, NOW);
+  expect(capped.rankGoals![0].status.state).toBe('limited');
+  expect(capped.status).toBe('completed');
 });
 
 it('stops on weekly rollover and unconfirmed own-pull updates without another draw', () => {
@@ -162,7 +174,7 @@ it('stops on weekly rollover and unconfirmed own-pull updates without another dr
   }
 });
 
-it('does not let an owned-boundary wait block an eligible account', () => {
+it('pushes a goal account past an owned account at its target boundary', () => {
   const state = running(config);
   state.config = {
     ...config,
@@ -185,8 +197,8 @@ it('does not let an owned-boundary wait block an eligible account', () => {
     ],
     NOW,
   );
-  expect(state.rankGoals![0].status.state).toBe('conflict');
-  expect(claimLiveCycle(state, NOW)?.customerId).toBe('cus_b');
+  expect(state.rankGoals![0].status.state).toBe('pushing');
+  expect(claimLiveCycle(state, NOW)?.customerId).toBe('cus_a');
 });
 
 it('respects real-clock Humanized sleep even when a rank draw is eligible', () => {
@@ -266,23 +278,9 @@ describe('accounts without a goal in a goal run', () => {
     timingMode: 'fixed',
   };
 
-  it('keep drawing while the goal account has no fresh rank data or holds', () => {
+  it('keep drawing while the goal account has no fresh rank data', () => {
     const state = running(mixed);
     expect(claimLiveCycle(state, NOW)?.customerId).toBe('cus_b');
-    // An owned account (cus_c) sits above the target: the goal holds.
-    const held = running(mixed);
-    refreshLiveRankGoals(
-      held,
-      [
-        {
-          ...observation(),
-          entries: [{ customerId: 'cus_c', pulls: 1, valueMyr: 100 }],
-        },
-      ],
-      NOW,
-    );
-    expect(held.rankGoals![0].status.state).toBe('conflict');
-    expect(claimLiveCycle(held, NOW)?.customerId).toBe('cus_b');
   });
 
   it('draw after an eligible goal account, even when listed before it', () => {
@@ -306,14 +304,11 @@ describe('accounts without a goal in a goal run', () => {
     const goalDraw = claimLiveCycle(state, NOW)!;
     expect(goalDraw.customerId).toBe('cus_a');
     completeLiveCycle(state, settle(goalDraw), NOW + 1);
-    // Goal out of cycles without reaching its rank: done, but cus_b has not drawn.
-    refreshLiveRankGoals(
-      state,
-      [{ ...observation(NOW + 3000), ownPulls: 2, ownValueMyr: 20 }],
-      NOW + 3000,
-    );
+    // Two fresh checks confirm the goal; cus_b has not drawn yet.
+    refreshLiveRankGoals(state, [observation(NOW + 3000, true)], NOW + 3000);
+    refreshLiveRankGoals(state, [observation(NOW + 5000, true)], NOW + 5000);
+    expect(state.rankGoals![0].status.state).toBe('secured');
     const other = claimLiveCycle(state, NOW + 6000)!;
-    expect(state.rankGoals![0].status.state).toBe('limited');
     expect(other.customerId).toBe('cus_b');
     expect(state.status).toBe('running');
     completeLiveCycle(state, settle(other), NOW + 6001);
