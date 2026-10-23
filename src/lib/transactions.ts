@@ -69,6 +69,21 @@ export function forPacksMark(forPacks: number): string | null {
     : `${signedRm(forPacks)} for packs`;
 }
 
+/** "Bronze Pack · Rayquaza ×3, Pikachu" — what a pack open bought or a
+ *  sell-back sold, a batch open's repeats counted; null on rows with no card. */
+export function cardsLine(
+  packTitle: string | null,
+  cardNames: string[],
+): string | null {
+  if (cardNames.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const n of cardNames) counts.set(n, (counts.get(n) ?? 0) + 1);
+  const cards = [...counts]
+    .map(([n, c]) => (c > 1 ? `${n} ×${c}` : n))
+    .join(', ');
+  return packTitle ? `${packTitle} · ${cards}` : cards;
+}
+
 /** "RM 15.00 bonus credit" — the row's bonus part (the amount column carries
  *  the direction); null when the row has none. */
 export function bonusMark(bonus: number): string | null {

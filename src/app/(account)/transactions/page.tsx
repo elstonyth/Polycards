@@ -9,6 +9,7 @@ import { rm } from '@/lib/format';
 import { getPendingDeposits, getTransactions } from '@/lib/actions/vault';
 import {
   bonusMark,
+  cardsLine,
   forPacksMark,
   gatewayMethodLabel,
   gatewayStatusLabel,
@@ -124,9 +125,15 @@ export default async function TransactionsPage({
           <table className="w-full text-left text-sm">
             <thead className="text-[12px] uppercase tracking-wide text-white/50">
               <tr className="border-b border-white/10">
-                <th className="px-4 py-3 font-medium">Date</th>
+                {/* Phone: Date and Reference fold into the Type cell — four
+                    columns pushed Amount off a 390px screen. */}
+                <th className="hidden px-4 py-3 font-medium sm:table-cell">
+                  Date
+                </th>
                 <th className="px-4 py-3 font-medium">Type</th>
-                <th className="px-4 py-3 font-medium">Reference</th>
+                <th className="hidden px-4 py-3 font-medium sm:table-cell">
+                  Reference
+                </th>
                 <th className="px-4 py-3 text-right font-medium">Amount</th>
               </tr>
             </thead>
@@ -135,12 +142,29 @@ export default async function TransactionsPage({
                 const at = new Date(t.createdAt);
                 const bonus = bonusMark(t.bonus);
                 const forPacks = forPacksMark(t.playthrough);
+                const cards = cardsLine(t.packTitle, t.cardNames);
+                // The gateway id support asks for — same value the receipt
+                // email and the admin pages show. Internal rows (pack opens,
+                // buybacks) have none.
+                const reference = (
+                  <>
+                    <span className="font-mono break-all">
+                      {t.reference ?? '—'}
+                    </span>
+                    {t.gateway ? (
+                      <span className="mt-0.5 block text-[11px] text-white/40">
+                        {gatewayMethodLabel(t.gateway.method)} ·{' '}
+                        {gatewayStatusLabel(t.gateway.status)}
+                      </span>
+                    ) : null}
+                  </>
+                );
                 return (
                   <tr
                     key={t.id}
                     className="border-b border-white/5 transition-colors last:border-0 hover:bg-white/[0.02]"
                   >
-                    <td className="whitespace-nowrap px-4 py-3">
+                    <td className="hidden whitespace-nowrap px-4 py-3 sm:table-cell">
                       <span className="text-white/70">
                         {dateFmt.format(at)}
                       </span>
@@ -165,20 +189,24 @@ export default async function TransactionsPage({
                           <Badge tone="sky">{forPacks}</Badge>
                         </span>
                       )}
-                    </td>
-                    {/* The gateway id support asks for — same value the
-                        receipt email and the admin pages show. Internal rows
-                        (pack opens, buybacks) have none. */}
-                    <td className="px-4 py-3 text-[12px] text-white/50">
-                      <span className="font-mono break-all">
-                        {t.reference ?? '—'}
-                      </span>
-                      {t.gateway ? (
-                        <span className="mt-0.5 block text-[11px] text-white/40">
-                          {gatewayMethodLabel(t.gateway.method)} ·{' '}
-                          {gatewayStatusLabel(t.gateway.status)}
+                      {/* Which pack and card(s) a pack open bought or a
+                          sell-back sold — the full story is on Pull history. */}
+                      {cards && (
+                        <span className="mt-0.5 block text-[12px] text-neutral-400">
+                          {cards}
                         </span>
-                      ) : null}
+                      )}
+                      <span className="mt-0.5 block text-[12px] text-white/50 sm:hidden">
+                        {dateFmt.format(at)}, {timeFmt.format(at)}
+                      </span>
+                      {t.reference && (
+                        <span className="mt-0.5 block text-[12px] text-white/50 sm:hidden">
+                          {reference}
+                        </span>
+                      )}
+                    </td>
+                    <td className="hidden px-4 py-3 text-[12px] text-white/50 sm:table-cell">
+                      {reference}
                     </td>
                     <td
                       className={`whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums ${
