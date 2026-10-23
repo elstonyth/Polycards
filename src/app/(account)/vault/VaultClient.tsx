@@ -573,9 +573,10 @@ export default function VaultClient({
             // an unknown tier string did before the mapper guarded it.
             const glow = rarityRgb(item.card.rarity ?? '');
             // Locked = the backend refuses BOTH sell and ship — the free
-            // welcome pull before the first PAID open, and only that. NOT
-            // `source`: every reward card (task, achievement, challenge prize)
-            // is source='reward' and sells like any pulled card.
+            // welcome pull and a daily task's card before the first PAID open,
+            // and only those. NOT `source`: every other reward card (weekly
+            // task, achievement, challenge prize) is source='reward' too and
+            // sells like any pulled card.
             const showLock = item.locked && !lockDismissed.has(item.pullId);
             const art = (
               // Pass `rarity` so the slab renders its tier frame + halo, matching
