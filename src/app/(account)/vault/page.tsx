@@ -3,6 +3,7 @@ import { getVault } from '@/lib/actions/vault';
 import { getAddresses } from '@/lib/actions/delivery';
 import { getPackGifts } from '@/lib/actions/pack-gifts';
 import { AccountHeader } from '@/components/account/ui';
+import { VaultTabs } from '@/components/account/VaultTabs';
 import VaultClient from './VaultClient';
 
 export const metadata: Metadata = { title: 'Vault' };
@@ -21,8 +22,9 @@ export default async function VaultPage() {
     <>
       <AccountHeader
         title="Vault"
-        sub="Every card you’ve pulled. Hold, ship, or sell back instantly."
+        sub="The cards you hold. Ship them, or sell back instantly."
       />
+      <VaultTabs current="/vault" />
       <VaultClient
         initial={initial}
         addresses={addresses}

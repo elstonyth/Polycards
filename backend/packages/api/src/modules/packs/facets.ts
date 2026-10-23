@@ -74,6 +74,10 @@ export type CustomerWallet = Pick<
   | 'listCreditTransactions'
   | 'listGatewayDeposits'
   | 'listGatewayWithdrawals'
+  // The ledger names each pack open's / sell-back's card (GET /store/credits).
+  | 'listCards'
+  | 'listPacks'
+  | 'listPulls'
   | 'mutateCustomerMetadata'
   | 'otherPayoutAccountHolders'
   | 'walletSummary'

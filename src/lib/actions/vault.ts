@@ -10,6 +10,7 @@
  *   GET  /store/vault              — vaulted pulls + live buyback offers
  *   POST /store/vault/:id/buyback  — instant sell-back (credits FMV × pack %)
  *   GET  /store/credits            — balance (Σ ledger) + recent transactions
+ *   GET  /store/pulls/history      — every pull, sold/shipped included
  *   POST /store/credits/topup      — buy credit via the mock gateway (demo)
  *
  * Every call goes through the `Store` port (src/lib/store.ts), which owns the
@@ -48,7 +49,9 @@ import {
   SavedBankAccountsSchema,
   CreditsPageSchema,
   PaymentConfigSchema,
+  PullHistoryPageSchema,
 } from '@/lib/data/schemas';
+import { toCardView, type CardView } from '@/lib/card-view';
 import { mapVaultItem, type BackendVaultItem } from './vault-map';
 import {
   DEFAULT_PAYMENT_LIMITS,
@@ -640,6 +643,10 @@ export type CreditTxn = {
   // Signed move into (+) or out of (−) "Still to use on packs" (top-up, a
   // sell-back's free share, pack open); 0 otherwise.
   playthrough: number;
+  // The pack and card(s) a pack open bought or a sell-back sold; null / []
+  // on every other row (and from an older backend).
+  packTitle: string | null;
+  cardNames: string[];
 };
 
 export type TransactionsResult =
@@ -701,9 +708,73 @@ export async function getTransactions(
       gateway: row.gateway ?? null,
       bonus: row.bonus ?? 0,
       playthrough: row.playthrough ?? 0,
+      packTitle: row.pack_title ?? null,
+      cardNames: row.card_names ?? [],
     })),
     page: safePage,
     hasMore: totals?.has_more ?? false,
+  };
+}
+
+export type PullHistoryItem = {
+  pullId: string;
+  rolledAt: string;
+  packTitle: string;
+  /** Won in the weekly challenge — wears the prism frame, as in the vault. */
+  challengePrize: boolean;
+  source: VaultItem['source'];
+  /** vaulted | bought_back | delivering | delivered (any string passes). */
+  status: string;
+  card: CardView;
+  /** RM this card cost: its open's charge split over the cards it paid for.
+   *  null = no charge links to it (free / gift / reward, or a pre-2a open). */
+  paid: number | null;
+  /** RM value when pulled (draw-time snapshot, else today's price). */
+  value: number | null;
+  /** RM credited when sold back, and when; null while not sold. */
+  soldFor: number | null;
+  soldAt: string | null;
+};
+
+export type PullHistoryResult =
+  | { ok: true; items: PullHistoryItem[]; page: number; hasMore: boolean }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+// Matches the backend default (PAGE_SIZE in store/pulls/history).
+const PULLS_PAGE_SIZE = 20;
+
+// Every card the customer ever pulled — sold and shipped ones included, which
+// the vault (held cards only) cannot show. One page, newest first.
+export async function getPullHistory(
+  page: number = 1,
+): Promise<PullHistoryResult> {
+  const safePage = sanePage(page);
+  const r = await store.get('/store/pulls/history', PullHistoryPageSchema, {
+    query: {
+      limit: PULLS_PAGE_SIZE,
+      offset: (safePage - 1) * PULLS_PAGE_SIZE,
+    },
+  });
+  if (!r.ok) {
+    return vaultFailure(r, 'Please log in to view your pulls.', VAULT_FALLBACK);
+  }
+  return {
+    ok: true,
+    items: r.data.items.map((i) => ({
+      pullId: i.pull_id,
+      rolledAt: i.rolled_at,
+      packTitle: i.pack_title,
+      challengePrize: i.challenge_prize,
+      source: i.source,
+      status: i.status,
+      card: toCardView(i.card),
+      paid: i.paid,
+      value: i.value,
+      soldFor: i.sold_for,
+      soldAt: i.sold_at,
+    })),
+    page: safePage,
+    hasMore: r.data.has_more,
   };
 }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   bonusMark,
+  cardsLine,
   elapsedLabel,
   forPacksMark,
   gatewayMethodLabel,
@@ -100,5 +101,17 @@ describe('bonusMark', () => {
   });
   it('is absent when the row has no bonus part', () => {
     expect(bonusMark(0)).toBeNull();
+  });
+});
+
+describe('cardsLine', () => {
+  it('names the pack and counts a batch open’s repeats', () => {
+    expect(
+      cardsLine('Silver Pack', ['Rayquaza', 'Pikachu', 'Rayquaza', 'Rayquaza']),
+    ).toBe('Silver Pack · Rayquaza ×3, Pikachu');
+  });
+  it('drops a missing pack name; null when the row has no card', () => {
+    expect(cardsLine(null, ['Mew'])).toBe('Mew');
+    expect(cardsLine('Bronze Pack', [])).toBeNull();
   });
 });
