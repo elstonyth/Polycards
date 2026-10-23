@@ -44,6 +44,8 @@ export interface LiveConfig {
   /** Humanized clock speed, 1–24: the players' whole day (sessions, breaks, sleep) runs N× faster. */
   humanizedPace?: number;
   rankTargets?: LiveRankTarget[];
+  /** Start the next round by itself when a round finishes (always-on runs). */
+  repeat?: boolean;
 }
 
 export interface LiveSchedule {
@@ -100,6 +102,8 @@ export interface LiveState {
   rankGoals?: LiveRankGoal[];
   /** When the current run started (absent on runs started before it existed). */
   startedAt?: number;
+  /** Humanized clock start, kept across repeated rounds so schedules carry on. */
+  clockStartedAt?: number;
   /** Earlier runs, newest first, archived when the next run starts. */
   history?: LiveRunSummary[];
 }

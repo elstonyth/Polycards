@@ -8,6 +8,7 @@ import {
 } from './automation-humanized';
 import { DEFAULT_LIVE_TIMING } from './automation-live-types';
 import {
+  LIVE_GOAL_MAX_CYCLES,
   liveRankReady,
   nextLiveRankCheck,
   validateLiveRankTargets,
@@ -52,7 +53,7 @@ const pace = (state: LiveState) =>
  */
 function playerClock(state: LiveState, now: number) {
   const speed = pace(state);
-  const start = (state.startedAt ??= now);
+  const start = state.clockStartedAt ?? (state.startedAt ??= now);
   return {
     now: start + (now - start) * speed,
     /** A virtual instant or duration converted back to real time. */
@@ -133,8 +134,77 @@ function remainingCustomers(state: LiveState): string[] {
       // An account that ran out of balance is finished for this run.
       !state.cycles.some((cycle) => cycle.customerId === id && cycle.skipped) &&
       state.cycles.filter((cycle) => cycle.customerId === id).length <
-        config.maxCyclesPerAccount,
+        // A goal account pushes until its goal is done, not the per-account cap.
+        (goalAccount(state, id)
+          ? LIVE_GOAL_MAX_CYCLES
+          : config.maxCyclesPerAccount),
   );
+}
+
+/** A finished round may start the next one by itself (config.repeat) unless
+ *  it failed or was stopped, drew nothing (every account out of balance would
+ *  restart it every tick), or stopped a goal for safety. */
+export function canRepeatLiveRound(state: LiveState): boolean {
+  return (
+    state.status === 'completed' &&
+    !!state.config?.repeat &&
+    !state.pending &&
+    state.cycles.some((cycle) => !cycle.skipped && !cycle.error) &&
+    !state.rankGoals?.some(
+      (goal) =>
+        goal.done && !['secured', 'limited'].includes(goal.status.state),
+    )
+  );
+}
+
+/** Starts a round: the finished one goes to history, cycles, goals and spend
+ *  reset. A repeated round (carryOver) keeps the Humanized schedules and their
+ *  clock, so the accounts carry on their day instead of all waking at once. */
+export function beginLiveRound(
+  state: LiveState,
+  round: Pick<LiveState, 'packPriceCents' | 'packPricesCents'> & {
+    config: LiveConfig;
+  },
+  now: number,
+  carryOver: boolean,
+): void {
+  const finished = summarizeLiveRun(state);
+  if (finished?.draws)
+    state.history = [finished, ...(state.history ?? [])].slice(0, 30);
+  const { config } = round;
+  if (carryOver) state.clockStartedAt ??= state.startedAt;
+  else state.clockStartedAt = undefined;
+  Object.assign(state, {
+    config,
+    packPriceCents: round.packPriceCents,
+    packPricesCents: round.packPricesCents,
+    status: 'running',
+    runId: randomUUID(),
+    startedAt: now,
+    spentCents: 0,
+    cycles: [],
+    schedules:
+      config.timingMode !== 'humanized'
+        ? []
+        : carryOver
+          ? (state.schedules ?? []).filter((row) =>
+              config.customerIds.includes(row.customerId),
+            )
+          : createHumanizedStates(
+              config.customerIds,
+              config.humanizedRegion ?? 'mysg',
+              state.humanizedAssignments,
+            ).map((humanized) => ({
+              customerId: humanized.profileId,
+              humanized,
+              nextRunAt: now,
+              waitReason: 'Planning activity',
+            })),
+    rankGoals: undefined,
+    nextDrawAt: undefined,
+    nextRunAt: now,
+    error: null,
+  });
 }
 
 /** A finished-or-current run in one row, for the run history list. */
@@ -327,7 +397,9 @@ export function completeLiveCycle(
   if (
     (state.status === 'running' || state.status === 'paused') &&
     !remainingCustomers(state).length &&
-    !state.config?.rankTargets?.length
+    !state.config?.rankTargets?.length &&
+    // A repeat round finishes at the next claim, where the next one starts.
+    !state.config?.repeat
   )
     state.status = 'completed';
   if (
@@ -418,8 +490,10 @@ export function validateLiveConfig(
           'humanizedPace',
           'packMix',
           'rankTargets',
+          'repeat',
         ].includes(key),
     ) ||
+    (input.repeat !== undefined && typeof input.repeat !== 'boolean') ||
     typeof input.packSlug !== 'string' ||
     !(
       SLUG.test(input.packSlug) ||
@@ -472,6 +546,7 @@ export function validateLiveConfig(
     randomMaxSeconds: input.randomMaxSeconds,
     humanizedRegion: input.humanizedRegion,
     humanizedPace: input.humanizedPace,
+    ...(input.repeat ? { repeat: true } : {}),
     ...(input.rankTargets === undefined
       ? {}
       : {

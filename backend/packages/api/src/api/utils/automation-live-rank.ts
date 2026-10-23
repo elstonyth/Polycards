@@ -6,6 +6,11 @@ import type {
   LiveState,
 } from './automation-live-types';
 
+/** Draws one goal account may make in a round: it pushes past the run's
+ *  per-account cap until its goal is done, and this bound keeps the run's
+ *  stored state small (Repeat starts another round). */
+export const LIVE_GOAL_MAX_CYCLES = 100;
+
 export function validateLiveRankTargets(
   value: unknown,
   selected: string[],
@@ -79,7 +84,7 @@ export function refreshLiveRankGoals(
         goal: 'reach',
         secureBufferMyr: 0,
         threatBufferMyr: 0,
-        maxCycles: config.maxCyclesPerAccount,
+        maxCycles: LIVE_GOAL_MAX_CYCLES,
         maxSpendMyr: 0,
         maxDurationMinutes: 0,
       },
@@ -112,7 +117,7 @@ export function refreshLiveRankGoals(
       now,
       completedCycles: cycles.length,
       spentMyr: 0,
-      maxCycles: config.maxCyclesPerAccount,
+      maxCycles: LIVE_GOAL_MAX_CYCLES,
       nextCostMyr: state.packPriceCents / 100,
       ownedCustomerIds: new Set(config.customerIds),
     });

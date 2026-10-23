@@ -9,6 +9,7 @@ import {
   Label,
   Select,
   StatusBadge,
+  Switch,
   Table,
   Text,
 } from '@medusajs/ui';
@@ -749,20 +750,31 @@ export function LivePanel() {
           <Step
             n={3}
             title="How many packs per account?"
-            hint="The run finishes when every account has opened this many, or runs out of balance."
+            hint="A round finishes when every account has opened this many, or runs out of balance. With Repeat on, the next round starts by itself until you stop it."
           >
-            <div className="max-w-40">
-              <Input
-                id="live-cycles"
-                aria-label="Packs per account"
-                type="number"
-                min={1}
-                max={10}
-                value={config.maxCyclesPerAccount}
-                onChange={(event) =>
-                  update('maxCyclesPerAccount', Number(event.target.value))
-                }
-              />
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="max-w-40">
+                <Input
+                  id="live-cycles"
+                  aria-label="Packs per account"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={config.maxCyclesPerAccount}
+                  onChange={(event) =>
+                    update('maxCyclesPerAccount', Number(event.target.value))
+                  }
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="live-repeat"
+                  checked={!!config.repeat}
+                  disabled={locked}
+                  onCheckedChange={(repeat) => update('repeat', repeat)}
+                />
+                <Label htmlFor="live-repeat">Repeat rounds</Label>
+              </div>
             </div>
           </Step>
 
