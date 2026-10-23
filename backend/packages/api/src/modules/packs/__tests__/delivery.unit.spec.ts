@@ -105,6 +105,24 @@ describe("validateDeliveryRequest", () => {
         "forbidden",
       );
     });
+
+    // The generic delivery path (2026-10-23): prize cards ride in the vault
+    // order, so a mixed selection validates as one parcel.
+    it("passes prize pulls with prizesShipHere, still checking every pull and the lock", () => {
+      const prize = { ...vaulted("p2"), source: "reward" };
+      const opts = { prizesShipHere: true };
+      expect(
+        validateDeliveryRequest([vaulted("p1"), prize], ["p1", "p2"], caller, new Set(), opts),
+      ).toBe("ok");
+      // A pull AFTER the prize is still validated (no early return).
+      expect(
+        validateDeliveryRequest([prize, vaulted("p3", "cus_2")], ["p2", "p3"], caller, new Set(), opts),
+      ).toBe("forbidden");
+      // A daily-task prize card stays locked until the first paid open.
+      expect(
+        validateDeliveryRequest([prize], ["p2"], caller, new Set(["p2"]), opts),
+      ).toBe("free_locked");
+    });
   });
 
   // Free welcome pull (spec 2026-08-14): locked out of delivery until the
