@@ -29,6 +29,7 @@ import {
   validateDeliveryStatusTransition,
   snapshotAddress,
   computeDeliveryFee,
+  computeParcelFee,
   isShippableCountry,
   isShippablePostcode,
   type AddressSnapshot,
@@ -5042,8 +5043,8 @@ class PacksModuleService extends MedusaService({
   //   'requested' — order + item created, Pull flipped.
   //   'invalid'   — Pull not source='reward', not owned, or not 'vaulted'
   //                 (also: missing required shipping fields on the address).
-  //   'capped'    — today's is_reward delivery_order count already hit
-  //                 withdrawals_per_day.
+  //   'capped'    — today's shipped prize cards (rewardShipmentsToday) already
+  //                 hit withdrawals_per_day.
   @InjectTransactionManager()
   async recordRewardWithdrawal(
     customerId: string,
@@ -5139,8 +5140,8 @@ class PacksModuleService extends MedusaService({
       snapshot.ship_country_code,
     );
 
-    // 3) Daily-cap COUNT under the lock: today's is_reward delivery orders for
-    //    this customer. DeliveryOrder has no draw_day column, so we key the day
+    // 3) Daily-cap COUNT under the lock: today's prize cards in this customer's
+    //    shipments. DeliveryOrder has no draw_day column, so we key the day
     //    on created_at — but on the SAME UTC boundary settleRewardDraw uses
     //    (new Date().toISOString().slice(0,10)), NOT Postgres CURRENT_DATE (which
     //    is the DB session TZ). (created_at AT TIME ZONE 'UTC')::date compares the
@@ -5218,17 +5219,21 @@ class PacksModuleService extends MedusaService({
     return { status: 'requested' };
   }
 
-  // Today's non-canceled prize shipments for a customer, on the SAME UTC day
-  // boundary settleRewardDraw uses (see recordRewardWithdrawal's cap note).
+  // Today's prize cards in non-canceled shipments for a customer, on the SAME
+  // UTC day boundary settleRewardDraw uses (see recordRewardWithdrawal's cap
+  // note). Counts prize PULLS, not is_reward orders: since 2026-10-23 one
+  // vault order can carry several prizes.
   private async rewardShipmentsToday(
     em: LedgerSqlManager,
     customerId: string,
   ): Promise<number> {
     const utcDay = new Date().toISOString().slice(0, 10);
     const rows = await em.execute<{ n: string | null }[]>(
-      `SELECT COUNT(*) AS n FROM delivery_order
-         WHERE customer_id = ? AND is_reward = TRUE AND status <> 'canceled'
-           AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
+      `SELECT COUNT(*) AS n FROM delivery_order o
+         JOIN delivery_order_item i ON i.delivery_order_id = o.id AND i.deleted_at IS NULL
+         JOIN pull p ON p.id = i.pull_id
+         WHERE o.customer_id = ? AND p.source = 'reward' AND o.status <> 'canceled'
+           AND (o.created_at AT TIME ZONE 'UTC')::date = ?::date AND o.deleted_at IS NULL`,
       [customerId, utcDay],
     );
     return Number(rows[0]?.n ?? 0);
@@ -5292,20 +5297,49 @@ class PacksModuleService extends MedusaService({
       { take: input.pullIds.length },
       sharedContext,
     );
+    // Prize pulls ride in this parcel (2026-10-23) but stay outside value
+    // tracking, as recordRewardWithdrawal writes them: they add insurance on
+    // their own value, never vault_delta.
+    const prizes = pulls.filter((p) => p.source === 'reward');
     const vaultDelta = await this.vaultValueForPulls(
-      pulls,
+      pulls.filter((p) => p.source !== 'reward'),
       input.fx,
       sharedContext,
     );
+    const prizeValues: number[] = [];
+    for (const prize of prizes) {
+      prizeValues.push(
+        await this.vaultValueForPulls([prize], input.fx, sharedContext),
+      );
+    }
+    if (prizes.length) {
+      // The prize daily cap, counted under the same credit: lock
+      // recordRewardWithdrawal holds (mutateCreditAtomic below re-takes it;
+      // a transaction-level advisory lock is re-entrant).
+      const em =
+        sharedContext.transactionManager as unknown as LedgerSqlManager;
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `credit:${input.customerId}`,
+      ]);
+      const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
+      const used = await this.rewardShipmentsToday(em, input.customerId);
+      if (used + prizes.length > withdrawals_per_day) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          `Prize cards ship ${withdrawals_per_day} per day. Take the extra prize cards out and try again.`,
+        );
+      }
+    }
     // Shipping + mandatory insurance, valued at the SAME instant as the OD
     // debit so both derive from one vaultValueForPulls read.
     // Zone comes from postcode AND state/city (see deliveryZone) — a
     // customer-typed West postcode on a Sabah address must not buy the RM15
     // rate. Fee must be a real charge: a non-finite total would skip the debit
     // here while the cancel arm refuses to reverse it, so fail closed.
-    const fee = computeDeliveryFee(
+    const fee = computeParcelFee(
       input.snapshot.ship_postal_code,
       vaultDelta,
+      prizeValues,
       input.snapshot.ship_province,
       input.snapshot.ship_city,
       input.snapshot.ship_country_code,
@@ -5322,6 +5356,7 @@ class PacksModuleService extends MedusaService({
         {
           customer_id: input.customerId,
           status: 'requested' as const,
+          is_reward: prizes.length > 0,
           ...input.snapshot,
           shipping_fee: fee.shipping,
           insurance_fee: fee.insurance,
