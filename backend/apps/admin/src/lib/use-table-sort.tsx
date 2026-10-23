@@ -57,8 +57,12 @@ export function useTableSort<K extends string>(
           onClick={() => toggleSort(key)}
         >
           {label}
-          <span aria-hidden="true">
-            {active ? (dir === 'asc' ? '↑' : '↓') : ''}
+          {/* A faint ↕ on an inactive column says it can be tapped to sort. */}
+          <span
+            aria-hidden="true"
+            className={active ? undefined : 'text-ui-fg-muted'}
+          >
+            {active ? (dir === 'asc' ? '↑' : '↓') : '↕'}
           </span>
         </button>
       </Table.HeaderCell>
