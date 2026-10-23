@@ -108,15 +108,16 @@ Run from the office (egress IP 60.48.37.75, whitelisted by GlobePay365 that day;
 - **Our fee (owner decision 2026-10-22):** top-up **1.5%**, withdrawal **2%**, saved in Admin → Settlement → USDT → Exchange rate. We keep 0.5% of a top-up, and about 1.8% of a payout minus the 1 USDT gas.
 - **Preflight from the office (2026-10-22):** balance OK (USDT 0), unknown references read "Not found". GetSupportedBankList lists only `USDTERC`, but GlobePay365 says TRC20 payouts are submitted the same way (`WD` with `ToClientBankCode=USDTTRC`), so the preflight's missing-USDTTRC line is expected there. The first TRC20 payout proves it; a refusal is refunded automatically.
 
-## Go-live order
+## Go-live (2026-10-22/23)
 
-1. Deploy with `GP365_ENABLED=false` (as shipped in `.do/backend.app.yaml`). Nothing changes for customers.
-2. Wait for the hourly feed to create the `USDT_MYR` row, then save the fee (1.5% / 2%) on the Settlement USDT tab.
-3. Run `check-a3pay.ts gp365` from the backend (DO egress).
-4. Set `GP365_ENABLED=true` in the spec and apply.
-5. Fund the USDT float, then a 10 USDT TRC20 top-up and a 60 USDT payout from a staff account. Watch the first callback (`[gp365] callback … accepted`).
+1. Shipped dark in #846 with `GP365_ENABLED=false`; nothing changed for customers.
+2. The first `USDT_MYR` feed row arrived at the 17:05 UTC hourly run (the 16:05 run was still on the pre-deploy worker). The fee (1.5% / 2%) was saved on the Settlement USDT tab against a feed of 4.0776.
+3. `check-a3pay.ts gp365` with the production keys, run from the office IP because the live backend had no GP365 keys yet: balance OK (USDT 0), both `USDTERC` and `USDTTRC` listed, unknown references read "Not found". The backend's dedicated egress IPs are the two GlobePay365 whitelisted.
+4. `GP365_ENABLED` set to `"true"` and applied with `scripts/do-apply.ps1 backend` (2026-10-23 06:27 UTC).
 
-## Still open before go-live
+Next: fund the USDT float, then a 10 USDT TRC20 top-up and a 60 USDT payout from a staff account. Watch the first callback (`[gp365] callback … accepted`). Until the float is funded, USDT withdrawals are refused as "temporarily unavailable" and nothing is debited.
+
+## Still open
 
 - the callback on production (signature, `Amount`, source IP);
 - ops alerts: `TELEGRAM_OPS_CHAT_ID` is unset, so Verify Fail and payout alerts reach no one.
