@@ -61,6 +61,7 @@ import {
   freePackVerifyMessage,
   type FreePackRequirement,
 } from '@/lib/packs-data';
+import { isPokemonPack } from '@/lib/resolve-card-pokemon';
 
 /**
  * Shown where the gift offer would be, when this visitor cannot claim it.
@@ -272,6 +273,8 @@ export default function PackDetailClient({
   // siblings list is empty (it is not in the catalog), so `active` can never
   // become a different, paid pack.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+  // One Piece / sports packs: the prize badges never guess a Pokémon.
+  const pokemonPack = isPokemonPack(pack.categoryId);
   // The free pack, reached by someone who cannot claim it — a spent claim OR a
   // failed eligibility read, which the storefront cannot tell apart (hence the
   // neutral copy above; nothing here may assert a past claim). Every gift
@@ -832,6 +835,7 @@ export default function PackDetailClient({
                 full={pool}
                 tierChances={liveDetail?.publishedOdds?.tiers ?? null}
                 onOpen={(card) => setOpenCard(toSeed(card))}
+                pokemon={pokemonPack}
               />
             </Reveal>
           )}
@@ -1011,6 +1015,7 @@ export default function PackDetailClient({
         seed={openCard}
         buybackPercent={active.buybackPercent ?? FLAT_BUYBACK_PERCENT}
         onClose={() => setOpenCard(null)}
+        pokemon={pokemonPack}
       />
     </div>
   );

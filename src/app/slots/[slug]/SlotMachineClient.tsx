@@ -77,13 +77,14 @@ import {
   blastMs,
   type Phase,
 } from '@/lib/reveal-phase';
-import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
+import { isPokemonPack, resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
 import {
   buildDecoyPool,
   buildIdlePool,
   HREEL_IDLE_POOL_MAX,
+  NEUTRAL_CARD_SPRITE,
   type HReelCell,
 } from '@/lib/hreel';
 import { SlotStatusBar } from './SlotStatusBar';
@@ -116,21 +117,31 @@ function topRarityOf(cards: WonCard[]): Rarity {
 }
 
 /** Cosmetic reel-winner mapping for a won/demo card (decides nothing): rarity
- *  color + the column's Pokémon sprite (custom image ⇢ dex gif ⇢ Poké Ball). */
-function winnerFor(card: WonCard): ColumnWinner {
+ *  color + the column's Pokémon sprite (custom image ⇢ dex gif ⇢ Poké Ball).
+ *  In a non-Pokémon pack: custom image ⇢ neutral card-back — never a Pokémon. */
+function winnerFor(card: WonCard, pokemon: boolean): ColumnWinner {
   // resolveCardPokemon takes the wire's snake_case; the view is camelCase.
-  const r = resolveCardPokemon({
-    name: card.name,
-    pokemon_dex: card.pokemonDex,
-    sprite_image: card.spriteImage,
-  });
+  const r = resolveCardPokemon(
+    {
+      name: card.name,
+      pokemon_dex: card.pokemonDex,
+      sprite_image: card.spriteImage,
+    },
+    { pokemon },
+  );
   const custom =
     card.spriteImage && card.spriteImage.trim() !== ''
       ? card.spriteImage
       : null;
   return {
     dex: r.dex,
-    image: custom ?? (r.dex === null ? POKEBALL_PLACEHOLDER : undefined),
+    image:
+      custom ??
+      (r.dex !== null
+        ? undefined
+        : pokemon
+          ? POKEBALL_PLACEHOLDER
+          : NEUTRAL_CARD_SPRITE),
     name: r.name ?? card.name,
     rarity: card.rarity as ColumnWinner['rarity'],
     rarityRgb: rarityRgb(card.rarity),
@@ -288,11 +299,14 @@ export default function SlotMachineClient({
   // has stays in the flicker (an all-Pikachu/Charizard pack across six tiers
   // flickers all six colors, not just the first card per species).
   // Empty → ReelStrip falls back to its curated set.
-  // ponytail: decoys render the dex sprite (spriteGif); for seeded entries that
-  // IS the linked sprite. A custom-uploaded (dex-less) sprite would only flicker
-  // via name-derive — threading the custom sprite_image into decoy cells is the
-  // upgrade path if that ever matters.
-  const basePool = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
+  // Pokémon cells render their dex sprite (spriteGif; for seeded entries that IS
+  // the linked sprite); a dex-less custom sprite (One Piece) rides on the cell as
+  // `image`, so a One Piece pack flickers its own characters, not the fallback.
+  const pokemonPack = isPokemonPack(pack.categoryId);
+  const basePool = useMemo<HReelCell[]>(
+    () => buildDecoyPool(pool, { pokemon: pokemonPack }),
+    [pool, pokemonPack],
+  );
   // Per-reel pools are sliced to HREEL_IDLE_POOL_MAX: the idle drift tiles one
   // full pool period + the visible window onto the strip, so a pool past the
   // cap can't wrap and ReelStrip rests the reel sharp — the "rails frozen" bug
@@ -672,7 +686,8 @@ export default function SlotMachineClient({
     const winners: ColumnWinner[] = [];
     let mappingFailed = false;
     try {
-      for (const card of batch.cards) winners.push(winnerFor(card));
+      for (const card of batch.cards)
+        winners.push(winnerFor(card, pokemonPack));
     } catch (err) {
       logger.error('[slots] post-charge mapping failed', err);
       mappingFailed = true;

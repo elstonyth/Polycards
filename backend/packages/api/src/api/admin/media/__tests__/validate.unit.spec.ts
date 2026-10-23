@@ -194,6 +194,19 @@ describe('validateImage — sprite profile', () => {
   it('accepts a small near-square sprite', () => {
     expect(validateImage(facts(64, 64), 'sprite')).toEqual({ ok: true });
   });
+  it('accepts an animated idle-loop GIF sprite', () => {
+    expect(
+      validateImage(
+        {
+          ...facts(98, 98),
+          mimeType: 'image/gif',
+          detectedFormat: 'gif',
+          frames: 4,
+        },
+        'sprite',
+      ),
+    ).toEqual({ ok: true });
+  });
   it('rejects a portrait card-shaped image under the sprite profile', () => {
     const r = validateImage(facts(600, 840), 'sprite');
     expect(r.ok).toBe(false);

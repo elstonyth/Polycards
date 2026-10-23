@@ -953,6 +953,7 @@ const AddFromPcCollectionPage = () => {
                         patchDraft(d.key, { pokemon: { ...d.pokemon, ...p } })
                       }
                       suggestionName={d.name}
+                      setName={d.set}
                       idPrefix={`draft-${d.key}`}
                       autoResolveName={d.name}
                     />

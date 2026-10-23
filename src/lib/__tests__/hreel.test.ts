@@ -6,6 +6,7 @@ import {
   HREEL_IDLE_BASE_INDEX,
   HREEL_IDLE_POOL_MAX,
   DECOY_DEXES,
+  NEUTRAL_CARD_SPRITE,
   decoyRarity,
   teaseRarity,
   buildHReelStrip,
@@ -108,6 +109,150 @@ describe('buildDecoyPool', () => {
       },
     ]);
     expect(pool).toEqual([{ dex: 25, rarity: 'Common' }]);
+  });
+  test('a One Piece pack flickers its own custom sprites, never the Pokémon fallback', () => {
+    // Regression: dex-less custom-sprite cards were skipped, the pool came out
+    // empty and the reel fell back to DECOY_DEXES — Pokémon in a One Piece pack.
+    const pool = buildDecoyPool(
+      [
+        {
+          name: 'Monkey.D.Luffy OP05-119',
+          pokemonDex: null,
+          spriteImage: 'https://cdn.example/luffy-gear5.gif',
+          rarity: 'Immortal' as const,
+        },
+        // "Bartholomew Kuma" contains "mew" — must stay Kuma, not Mew (dex 151)
+        {
+          name: 'Bartholomew Kuma OP07-079',
+          pokemonDex: null,
+          spriteImage: 'https://cdn.example/kuma.gif',
+          rarity: 'Rare' as const,
+        },
+        // same sprite + rarity → deduped
+        {
+          name: 'Monkey.D.Luffy OP05-119 Parallel',
+          pokemonDex: null,
+          spriteImage: 'https://cdn.example/luffy-gear5.gif',
+          rarity: 'Immortal' as const,
+        },
+      ],
+      // the slot machine passes the pack's isPokemonPack — false for One Piece
+      { pokemon: false },
+    );
+    expect(pool).toEqual([
+      {
+        dex: 0,
+        rarity: 'Immortal',
+        image: 'https://cdn.example/luffy-gear5.gif',
+      },
+      { dex: 0, rarity: 'Rare', image: 'https://cdn.example/kuma.gif' },
+    ]);
+  });
+});
+
+describe('buildDecoyPool in a non-Pokémon pack (pokemon: false)', () => {
+  test('keeps only custom sprites — a Pokémon-dex card is never flickered', () => {
+    const pool = buildDecoyPool(
+      [
+        {
+          name: 'Pikachu #25',
+          pokemonDex: 25,
+          spriteImage: null,
+          rarity: 'Common' as const,
+        },
+        {
+          name: 'Roronoa Zoro OP01-025',
+          pokemonDex: null,
+          spriteImage: 'https://cdn.example/zoro.gif',
+          rarity: 'Rare' as const,
+        },
+      ],
+      { pokemon: false },
+    );
+    expect(pool).toEqual([
+      { dex: 0, rarity: 'Rare', image: 'https://cdn.example/zoro.gif' },
+    ]);
+  });
+
+  test('with nothing to show it falls back to the neutral card-back, never DECOY_DEXES', () => {
+    const pool = buildDecoyPool(
+      [
+        {
+          name: 'LeBron James 2003 Topps #221',
+          pokemonDex: null,
+          spriteImage: null,
+          rarity: 'Legendary' as const,
+        },
+      ],
+      { pokemon: false },
+    );
+    expect(pool.length).toBe(6);
+    expect(pool.every((c) => c.image === NEUTRAL_CARD_SPRITE)).toBe(true);
+    expect(new Set(pool.map((c) => c.rarity)).size).toBe(6);
+    expect(pool.some((c) => DECOY_DEXES.includes(c.dex))).toBe(false);
+  });
+});
+
+describe('custom-sprite (dex 0 + image) cells through the strip builders', () => {
+  const POOL: HReelCell[] = ['a', 'b', 'c'].map((s, i) => ({
+    dex: 0,
+    rarity: decoyRarity(i),
+    image: `https://cdn.example/${s}.gif`,
+  }));
+
+  test('the idle tiling keeps every cell’s image', () => {
+    const s = buildHReelStrip(null, 'Common', 64, 48, 0, POOL);
+    expect(s.every((c) => c.image?.startsWith('https://cdn.example/'))).toBe(
+      true,
+    );
+  });
+
+  test('a press spin pins the winner image and never doubles a sprite', () => {
+    const press = buildPressStrip({
+      winnerDex: null,
+      winnerImage: 'https://cdn.example/b.gif',
+      winnerRarity: 'Legendary',
+      winIndex: 40,
+      keepCells: 12,
+      seed: 0,
+      rngSeed: 7,
+      decoyCards: POOL,
+    });
+    expect(press[40]).toEqual({
+      dex: 0,
+      rarity: 'Legendary',
+      image: 'https://cdn.example/b.gif',
+    });
+    expect(press.every((c) => c.image !== undefined)).toBe(true);
+    // All cells are dex 0: the repeat checks must compare the IMAGE, or every
+    // neighbour pair would count as a repeat (or none would).
+    for (let i = 1; i < press.length; i++) {
+      expect(press[i]!.image).not.toBe(press[i - 1]!.image);
+    }
+  });
+
+  test('a seeded-linked winner (dex + image) never lands beside its own species', () => {
+    // The winner carries its hosted sprite URL AND its dex; decoys of the same
+    // Pokémon are dex-only. Identity must be the dex, or Pikachu can land with
+    // a Pikachu decoy right beside it.
+    const pool: HReelCell[] = [
+      { dex: 25, rarity: 'Common' },
+      { dex: 6, rarity: 'Rare' },
+    ];
+    for (let rngSeed = 0; rngSeed < 40; rngSeed++) {
+      const press = buildPressStrip({
+        winnerDex: 25,
+        winnerImage: 'https://cdn.example/pixel/25.gif',
+        winnerRarity: 'Common',
+        winIndex: 30,
+        keepCells: 5,
+        seed: 0,
+        rngSeed,
+        decoyCards: pool,
+      });
+      expect(press[29]!.dex).not.toBe(25);
+      expect(press[31]!.dex).not.toBe(25);
+    }
   });
 });
 

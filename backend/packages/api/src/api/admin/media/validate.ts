@@ -229,8 +229,16 @@ export function validateImage(
 
   // 3 — no animated/multi-frame art (server only): we store a single image.
   // EXCEPT 'display': the pack-page hero is meant to animate (factory scene),
-  // and the storefront renders it unoptimized so frames survive.
-  if (kind !== 'display' && facts.frames !== undefined && facts.frames > 1) {
+  // and the storefront renders it unoptimized so frames survive. And EXCEPT
+  // 'sprite': pixel sprites are idle-loop GIFs like the seeded showdown ones;
+  // the route stores sprite bytes untouched and the storefront draws them with
+  // a plain <img>, so the loop survives.
+  if (
+    kind !== 'display' &&
+    kind !== 'sprite' &&
+    facts.frames !== undefined &&
+    facts.frames > 1
+  ) {
     return fail(
       'animated',
       "Animated images aren't supported — upload a single frame.",
