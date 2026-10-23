@@ -122,52 +122,61 @@ export async function GET(
     pulls.filter(isSyntheticReward).map((p) => p.card_id),
   );
 
-  const items = pulls
-    .map((p) => {
-      const card = byHandle.get(p.card_id);
-      if (!card) return null;
-      const multiplier = Number(
-        card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
-      );
-      return {
-        pull_id: p.id,
-        rolled_at: p.rolled_at,
-        pack_id: p.pack_id,
-        pack_title: pullPackTitle(p, packBySlug.get(p.pack_id)?.title),
-        challenge_prize: isChallengePrizePack(p.pack_id),
-        source: p.source ?? 'pack',
-        status: p.status,
-        card: {
-          ...toCardView(
-            card,
-            isSyntheticReward(p)
-              ? (prizeTier.get(p.card_id) ?? '')
-              : rarityOf(p.pack_id, p.card_id),
-          ),
-          marketPriceMyr: displayMarketPrice(
-            toMoney(card.market_value),
-            fx,
-            multiplier,
-          ),
-        },
-        // RM per card from the open's charge; null = no charge links to it
-        // (free, gift and reward pulls cost nothing; pre-2a opens are unknown).
-        paid:
-          (p.source === 'pack' || p.source === 'bonus') && p.open_id
-            ? (paid.get(p.open_id) ?? null)
-            : null,
-        // Value when pulled: the draw-time snapshot (already × multiplier, as
-        // the boards read it), else today's price — reward/free/gift pulls and
-        // un-backfilled rows carry no snapshot.
-        value:
-          p.recorded_value_usd != null
-            ? displayMarketPrice(toMoney(p.recorded_value_usd), fx, 1)
-            : displayMarketPrice(toMoney(card.market_value), fx, multiplier),
-        sold_for: p.buyback_amount == null ? null : toMoney(p.buyback_amount),
-        sold_at: p.buyback_at ?? null,
-      };
-    })
-    .filter((e): e is NonNullable<typeof e> => e !== null);
+  const items = pulls.map((p) => {
+    const card = byHandle.get(p.card_id);
+    const multiplier = Number(
+      card?.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
+    );
+    // Live price; null once the card is gone from the catalogue.
+    const priceNow = card
+      ? displayMarketPrice(toMoney(card.market_value), fx, multiplier)
+      : null;
+    return {
+      pull_id: p.id,
+      rolled_at: p.rolled_at,
+      pack_id: p.pack_id,
+      pack_title: pullPackTitle(p, packBySlug.get(p.pack_id)?.title),
+      challenge_prize: isChallengePrizePack(p.pack_id),
+      source: p.source ?? 'pack',
+      status: p.status,
+      // A card deleted after the pull (delete-card refuses only while copies
+      // are held) keeps its row: the paid / sold-for trail outlives the
+      // catalogue entry, so the history must not drop it.
+      card: card
+        ? {
+            ...toCardView(
+              card,
+              isSyntheticReward(p)
+                ? (prizeTier.get(p.card_id) ?? '')
+                : rarityOf(p.pack_id, p.card_id),
+            ),
+            marketPriceMyr: priceNow,
+          }
+        : {
+            handle: '',
+            name: 'Retired card',
+            image: '',
+            slab_image: null,
+            rarity: '',
+            marketPriceMyr: null,
+          },
+      // RM per card from the open's charge; null = no charge links to it
+      // (free, gift and reward pulls cost nothing; pre-2a opens are unknown).
+      paid:
+        (p.source === 'pack' || p.source === 'bonus') && p.open_id
+          ? (paid.get(p.open_id) ?? null)
+          : null,
+      // Value when pulled: the draw-time snapshot (already × multiplier, as
+      // the boards read it), else today's price — reward/free/gift pulls and
+      // un-backfilled rows carry no snapshot.
+      value:
+        p.recorded_value_usd != null
+          ? displayMarketPrice(toMoney(p.recorded_value_usd), fx, 1)
+          : priceNow,
+      sold_for: p.buyback_amount == null ? null : toMoney(p.buyback_amount),
+      sold_at: p.buyback_at ?? null,
+    };
+  });
 
   res.json({ items, has_more: hasMore });
 }

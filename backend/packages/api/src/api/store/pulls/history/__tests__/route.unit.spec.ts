@@ -193,6 +193,29 @@ describe('GET /store/pulls/history', () => {
     });
     expect(listCreditTransactions).not.toHaveBeenCalled();
   });
+
+  it('keeps a pull whose card was since deleted, with its money trail', async () => {
+    listPulls.mockResolvedValueOnce([
+      pull({
+        id: 'p_gone',
+        card_id: 'retired',
+        status: 'bought_back',
+        recorded_value_usd: 20,
+        buyback_amount: 72,
+        buyback_at: at,
+      }),
+    ]);
+    const { res, out } = mkRes();
+    await history(mkReq() as unknown as AuthenticatedMedusaRequest, res);
+
+    const [item] = (out.body as { items: Record<string, unknown>[] }).items;
+    expect(item).toMatchObject({
+      pull_id: 'p_gone',
+      card: { handle: '', name: 'Retired card', marketPriceMyr: null },
+      value: 80,
+      sold_for: 72,
+    });
+  });
 });
 
 describe('paidPerOpen', () => {

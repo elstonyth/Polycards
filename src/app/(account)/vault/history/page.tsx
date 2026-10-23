@@ -101,20 +101,28 @@ export default async function PullHistoryPage({
                 key={p.pullId}
                 className="flex gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3"
               >
-                <Link
-                  href={`/card/${encodeURIComponent(p.card.handle)}`}
-                  aria-label={`View ${p.card.name}`}
-                  className="w-14 shrink-0 self-start rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:w-16"
-                >
-                  <SlabImage
-                    card={p.card}
-                    alt=""
-                    frameVariant={p.challengePrize ? 'prism' : undefined}
-                    sizes="64px"
-                    glowScale={0.5}
-                    className="w-full"
+                {p.card.handle ? (
+                  <Link
+                    href={`/card/${encodeURIComponent(p.card.handle)}`}
+                    aria-label={`View ${p.card.name}`}
+                    className="w-14 shrink-0 self-start rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:w-16"
+                  >
+                    <SlabImage
+                      card={p.card}
+                      alt=""
+                      frameVariant={p.challengePrize ? 'prism' : undefined}
+                      sizes="64px"
+                      glowScale={0.5}
+                      className="w-full"
+                    />
+                  </Link>
+                ) : (
+                  // A card since removed from the catalogue: no art, no page.
+                  <span
+                    aria-hidden
+                    className="aspect-[16/27] w-14 shrink-0 self-start rounded-lg border border-white/10 bg-white/[0.04] sm:w-16"
                   />
-                </Link>
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
                     <p
