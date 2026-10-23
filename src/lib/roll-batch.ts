@@ -334,9 +334,10 @@ async function openRolls(
       // A task reward sells like any pulled card (completing the task IS the
       // requirement), so the backend quotes it and reports `locked: false` —
       // the same `locked` + `buyback` pair a paid open carries, passed through
-      // rather than hardcoded here. `locked: true` is what would make the
-      // reveal show "Keep in vault"; buildOffer's flat-rate fallback still
-      // yields a real offer when the backend quotes none.
+      // rather than hardcoded here. `locked: true` (a DAILY task's rip before
+      // the first paid open) makes the reveal show "Keep in vault";
+      // buildOffer's flat-rate fallback still yields a real offer when the
+      // backend quotes none.
       return {
         ok: true,
         batch: batchOf(
