@@ -10,7 +10,10 @@ import type {
 } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import type { PlayerSort } from '../../../modules/packs/service';
+import {
+  PLAYER_SORTS,
+  type PlayerSort,
+} from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
 import { STATS_RANGES, statsWindows } from '../../../modules/packs/stats';
 import { isPartnerGroup } from '../../../modules/packs/group-policy';
@@ -32,23 +35,11 @@ import {
 // Sortable columns are an allowlist, not a passthrough. Two query shapes:
 // created_at, email and name are real `customer` columns that go straight
 // into the customer query builder (`name` = first_name + last_name, in that
-// order). SQL_SORTS are ordered in SQL over every matching player by
+// order). PLAYER_SORTS are ordered in SQL over every matching player by
 // playerIdsSorted: the ledger money totals (operator request, 2026-10-09),
 // and since 2026-10-23 every other column too: vault, VIP level, effective
 // group, status, and phone (there so a missing phone sorts last both ways).
-const SQL_SORTS: ReadonlySet<string> = new Set<PlayerSort>([
-  'wallet',
-  'spend',
-  'topup',
-  'withdrawn',
-  'contribution',
-  'vault',
-  'level',
-  'group',
-  'status',
-  'phone',
-]);
-const SORTABLE = new Set(['created_at', 'email', 'name', ...SQL_SORTS]);
+const SORTABLE = new Set(['created_at', 'email', 'name', ...PLAYER_SORTS]);
 
 // ?range= takes the Dashboard's presets, plus all time (the default).
 const RANGES = ['all', ...STATS_RANGES] as const;
@@ -56,7 +47,7 @@ const RANGES = ['all', ...STATS_RANGES] as const;
 const str = (v: unknown): string | undefined =>
   typeof v === 'string' ? v : undefined;
 
-// ponytail: a search sorted by a money column orders at most this many
+// ponytail: a search sorted by a SQL-sorted column orders at most this many
 // matches; page the search in SQL if a search ever matches more players.
 const MAX_SORTED_MATCHES = 5000;
 
@@ -214,7 +205,7 @@ export async function GET(
   }
   // Before the page: the vault sort orders by the value shown at this rate.
   const fx = await resolveFxRate(packs);
-  const [page, total] = SQL_SORTS.has(sortKey)
+  const [page, total] = PLAYER_SORTS.has(sortKey)
     ? await sqlSortedPage()
     : await customers.listAndCountCustomers(customerFilters, {
         skip: offset,

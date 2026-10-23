@@ -127,7 +127,12 @@ import {
 } from './referral';
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
-import { EFFECTIVE_GROUP_SQL, isDefaultPlayerGroup } from './odds-sets';
+import {
+  DEFAULT_PLAYER_GROUP_FLAG,
+  DEFAULT_PLAYER_GROUP_NAME,
+  EFFECTIVE_GROUP_SQL,
+  isDefaultPlayerGroup,
+} from './odds-sets';
 import {
   taskIsLive,
   taskPeriodKey,
@@ -479,7 +484,7 @@ export type PlayerSort =
   | 'status'
   | 'phone';
 
-const PLAYER_SORTS: ReadonlySet<string> = new Set<PlayerSort>([
+export const PLAYER_SORTS: ReadonlySet<string> = new Set<PlayerSort>([
   'wallet',
   'spend',
   'topup',
@@ -535,14 +540,19 @@ function playerSortSql(
         value: 'COALESCE(vm.lvl, 1)',
       };
     case 'group':
-      // The effective group's name; the default group ('') sorts first
-      // ascending, last descending.
+      // The effective group's name, and for everyone outside one the default
+      // group's own name, as the column shows it: the dashboard names it the
+      // same way (the flagged or DEFAULT-named group, else the constant).
       return {
         join:
           `LEFT JOIN (${EFFECTIVE_GROUP_SQL}) eff ON eff.customer_id = c.id ` +
-          'LEFT JOIN customer_group g ON g.id = eff.group_id',
+          'LEFT JOIN customer_group g ON g.id = eff.group_id ' +
+          'LEFT JOIN (SELECT name FROM customer_group WHERE deleted_at IS NULL ' +
+          `AND (metadata->'${DEFAULT_PLAYER_GROUP_FLAG}' = 'true'::jsonb ` +
+          `OR name = '${DEFAULT_PLAYER_GROUP_NAME}') ` +
+          'ORDER BY created_at, id LIMIT 1) dg ON true',
         params: [],
-        value: "COALESCE(g.name, '')",
+        value: `COALESCE(g.name, dg.name, '${DEFAULT_PLAYER_GROUP_NAME}')`,
       };
     case 'status':
       // Login blocked; descending lists the disabled players first.
@@ -554,7 +564,8 @@ function playerSortSql(
         value: 'COALESCE(s.disabled, false)',
       };
     case 'phone':
-      return { join: '', params: [], value: 'c.phone' };
+      // A blank phone shows as '—' like a missing one, so it sorts like one.
+      return { join: '', params: [], value: "NULLIF(c.phone, '')" };
     default: {
       // The ledger sums. The window goes in the WHERE, so a period sort only
       // reads that period's rows; wallet is a balance and ignores it.

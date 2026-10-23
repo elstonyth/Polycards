@@ -546,18 +546,20 @@ medusaIntegrationTestRunner({
       it('?range= limits top-up, withdraw, contribution and turnover; wallet stays', async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ids = (res: any): string[] => res.data.players.map((p: any) => p.id);
-        // A's rows were written just now: inside today, outside yesterday.
-        const today = await list('?range=today');
-        expect(today.status).toBe(200);
-        expect(today.data.window).not.toBeNull();
-        expect(rowFor(today, aId)).toMatchObject({
+        // A's rows were written just now: inside the last 7 days, outside
+        // a fixed range in the past (no MYT-midnight flake either way).
+        const week = await list('?range=7d');
+        expect(week.status).toBe(200);
+        expect(week.data.window).not.toBeNull();
+        expect(rowFor(week, aId)).toMatchObject({
           total_topup: 100,
           total_spend: 30,
           wallet_balance: 70,
         });
 
-        const yesterday = await list('?range=yesterday');
-        expect(rowFor(yesterday, aId)).toMatchObject({
+        const past = await list('?range=custom&from=2026-01-01&to=2026-01-02');
+        expect(past.status).toBe(200);
+        expect(rowFor(past, aId)).toMatchObject({
           total_topup: 0,
           total_withdrawn: 0,
           total_contribution: 0,
@@ -571,18 +573,18 @@ medusaIntegrationTestRunner({
         expect((await list()).data.window).toBeNull();
         expect(rowFor(await list('?range=all'), aId).total_topup).toBe(100);
 
-        // A period sort uses the period: both read 0 yesterday, so the tie
-        // goes to the id; today A's top-up leads.
+        // A period sort uses the period: both read 0 in the past range, so
+        // the tie goes to the id; this week A's top-up leads.
         const tie = [aId, bId].sort().reverse();
-        expect(ids(await list('?range=yesterday&sort=topup:desc'))).toEqual(
+        expect(ids(await list('?range=custom&from=2026-01-01&to=2026-01-02&sort=topup:desc'))).toEqual(
           tie,
         );
-        expect(ids(await list('?range=today&sort=topup:desc'))).toEqual([
+        expect(ids(await list('?range=7d&sort=topup:desc'))).toEqual([
           aId,
           bId,
         ]);
         // Wallet ignores the window.
-        expect(ids(await list('?range=yesterday&sort=wallet:desc'))).toEqual([
+        expect(ids(await list('?range=custom&from=2026-01-01&to=2026-01-02&sort=wallet:desc'))).toEqual([
           aId,
           bId,
         ]);
@@ -594,11 +596,6 @@ medusaIntegrationTestRunner({
         expect(
           (await list('?range=custom&from=2026-10-10&to=2026-10-01')).status,
         ).toBe(400);
-        const custom = await list(
-          '?range=custom&from=2026-01-01&to=2026-01-02',
-        );
-        expect(custom.status).toBe(200);
-        expect(rowFor(custom, aId).total_topup).toBe(0);
       });
 
 
