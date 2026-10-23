@@ -1263,6 +1263,7 @@ import {
   type AdminCustomerDetail,
   type PayoutDetails,
   type PlayersPage,
+  type PlayersPeriod,
 } from './admin-rest';
 
 export type {
@@ -1297,16 +1298,22 @@ export const useExportPartnerAccounts = () =>
 
 // Paged + searchable, but NOT id-scoped, so plain keepPreviousData is right
 // here (no stale-row-click hazard — the whole page swaps together).
+// A half-typed custom period (a day missing, or from after to) waits instead
+// of asking: the route would 400, and the previous page stays on screen.
 export const usePlayers = (
   page = 0,
   q?: string,
   sort?: string,
   group?: string,
+  period?: PlayersPeriod,
 ): UseQueryResult<PlayersPage> =>
   useQuery({
-    queryKey: qk.players(page, q, sort, group),
-    queryFn: () => listPlayers(page, q, 50, sort, group),
+    queryKey: qk.players(page, q, sort, group, period),
+    queryFn: () => listPlayers(page, q, 50, sort, group, period),
     placeholderData: keepPreviousData,
+    enabled:
+      period?.range !== 'custom' ||
+      (!!period.from && !!period.to && period.from <= period.to),
   });
 
 // `disabled` is the TARGET state: true → block login, false → lift the block.

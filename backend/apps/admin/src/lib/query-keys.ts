@@ -145,7 +145,13 @@ export const qk = {
   tierSettings: ['admin', 'tier-settings'] as const,
 
   // ── Epic 2 (Players) ───────────────────────────────────────────────────────
-  players: (page: number, q?: string, sort?: string, group?: string) =>
+  players: (
+    page: number,
+    q?: string,
+    sort?: string,
+    group?: string,
+    period?: { range: string; from?: string; to?: string },
+  ) =>
     [
       'admin',
       'players',
@@ -153,6 +159,9 @@ export const qk = {
       q ?? '',
       sort ?? 'created_at:desc',
       group ?? '',
+      period?.range ?? 'all',
+      period?.from ?? '',
+      period?.to ?? '',
     ] as const,
   // 2-segment prefix — invalidates ALL pages/searches of the players list
   playersKey: ['admin', 'players'] as const,
