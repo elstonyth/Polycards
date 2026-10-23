@@ -575,7 +575,7 @@ envs:
   # the code default, so GP365_CALLBACK_IPS stays unset.
   - key: GP365_ENABLED # gitleaks:allow (an env var name, not a key)
     scope: RUN_TIME
-    value: "false"
+    value: "true"
   - key: GP365_API_BASE
     scope: RUN_TIME
     value: https://mapi.globepay365.com
