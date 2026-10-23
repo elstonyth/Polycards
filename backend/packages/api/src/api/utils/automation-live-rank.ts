@@ -126,7 +126,13 @@ export function liveRankReady(
   customerId: string,
   now: number,
 ): boolean {
-  if (!state.config?.rankTargets?.length) return true;
+  // An account without a goal draws ordinarily, goal run or not.
+  if (
+    !state.config?.rankTargets?.some(
+      (target) => target.customerId === customerId,
+    )
+  )
+    return true;
   const goal = state.rankGoals?.find(
     (row) => row.target.profileId === customerId,
   );

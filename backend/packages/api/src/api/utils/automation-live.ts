@@ -118,13 +118,15 @@ export function validateLivePackMix(value: unknown): LivePackWeight[] {
     .map((row) => ({ packSlug: row.packSlug, weightBp: row.weightBp }));
 }
 
+/** Accounts with a leaderboard goal in this run. The rest draw ordinarily. */
+const goalAccount = (state: LiveState, id: string) =>
+  !!state.config?.rankTargets?.some((target) => target.customerId === id);
+
 function remainingCustomers(state: LiveState): string[] {
   const { config } = state;
   if (!config) return [];
   return config.customerIds.filter(
     (id) =>
-      (!config.rankTargets?.length ||
-        config.rankTargets.some((target) => target.customerId === id)) &&
       !state.rankGoals?.some(
         (goal) => goal.target.profileId === id && goal.done,
       ) &&
@@ -195,7 +197,9 @@ export function claimLiveCycle(
     return null;
   }
   const eligible = remaining.filter((id) => liveRankReady(state, id, now));
-  let customerId = eligible[0];
+  // A goal account draws as soon as its fresh rank check allows; the other
+  // accounts fill the run's draw slots between its draws.
+  let customerId = eligible.find((id) => goalAccount(state, id)) ?? eligible[0];
   if (!customerId) {
     state.nextRunAt = Math.max(now + 2000, nextLiveRankCheck(state, now));
     return null;
@@ -258,18 +262,22 @@ export function claimLiveCycle(
         .map((row) => row.nextRunAt),
     );
     // Draws run one at a time, so serve the longest-waiting account first;
-    // list order would starve the accounts at the end of a busy queue.
-    const ready = state.schedules
-      .filter(
-        (row) =>
-          remaining.includes(row.customerId) &&
-          row.nextRunAt <= now &&
-          eligible.includes(row.customerId),
-      )
-      .reduce<LiveSchedule | undefined>(
+    // list order would starve the accounts at the end of a busy queue. A
+    // ready goal account still goes before the ordinary ones.
+    const due = state.schedules.filter(
+      (row) =>
+        remaining.includes(row.customerId) &&
+        row.nextRunAt <= now &&
+        eligible.includes(row.customerId),
+    );
+    const longestWaiting = (rows: LiveSchedule[]) =>
+      rows.reduce<LiveSchedule | undefined>(
         (best, row) => (best && best.nextRunAt <= row.nextRunAt ? best : row),
         undefined,
       );
+    const ready =
+      longestWaiting(due.filter((row) => goalAccount(state, row.customerId))) ??
+      longestWaiting(due);
     if (ranked)
       state.nextRunAt = Math.min(
         state.nextRunAt,
