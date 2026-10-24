@@ -132,7 +132,7 @@ export async function runGroupCreditAdjustment(
     if (results[customer.id]?.status === 'succeeded') continue;
     const key = `${batch.id}:${customer.id}`;
     try {
-      const result = await withRateLimitRetry(
+      const result = await withRateLimitRetry<{ balance: number }>(
         () =>
           batch.tickets
             ? adjustCustomerTickets(customer.id, batch.amount, batch.note, key)
