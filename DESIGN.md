@@ -357,6 +357,11 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
   dust rises from the wedge, the wheel dims, and the prize rises from the hub
   in a thin holo frame. Decoration only — the result is stored before the
   wheel turns. Reduced motion: the winner shows directly, no spin, no dust.
+  Sound (2026-10-25, `drawStart/drawTick/drawStop/drawWin` in
+  `src/lib/slot-sfx.ts`, header mute applies): a soft air swoosh on launch, a
+  light pawl click per wedge edge (at most one per 38 ms), a muted wooden
+  knock on the stop, and a glassy E-major shimmer with high sparkles as the
+  prize rises — quiet and premium, never a casino jingle.
 - **Results** — the winner, their tickets, a Watch-the-draw replay and the
   frozen entry list in draw order with ticket ranges. The seed and its hash
   stay off the page (operator 2026-10-25); the server still commits and

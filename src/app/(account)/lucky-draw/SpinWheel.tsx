@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { num } from '@/lib/format';
+import { useSound } from '@/lib/use-sound';
 import {
   HOLO_STOPS,
   holoConic,
@@ -39,6 +40,9 @@ const PULLBACK_DEG = 7;
 const OVERSHOOT_DEG = 1.4;
 const REVEAL_AFTER_MS = 900;
 const TELL_AFTER_MS = 1000;
+// At most one pointer tick per this many ms: hundreds of thin wedges racing
+// past would otherwise blur into a buzz.
+const TICK_GAP_MS = 38;
 // The frame's soft glow, in its own foil (violet, then cyan).
 const HOLO_FRAME_GLOW = `0 0 60px ${HOLO_STOPS[1]}33, 0 0 120px ${HOLO_STOPS[0]}22`;
 
@@ -112,6 +116,13 @@ export function SpinWheel({
     [segs, win],
   );
   const [step, setStep] = useState<Step>(0);
+  // The cues (header mute applies). Read through a ref so a new sfx identity
+  // never restarts the spin.
+  const { sfx } = useSound();
+  const sfxRef = useRef(sfx);
+  useEffect(() => {
+    sfxRef.current = sfx;
+  });
   // Reduced motion (even switched on mid-spin) or nothing to land on: the
   // end state, told as is.
   const shown: Step = reduced || !winSeg ? 3 : step;
@@ -133,6 +144,8 @@ export function SpinWheel({
       face.setAttribute('transform', `rotate(${deg})`);
     if (reduced) {
       turn(target);
+      // No spin under reduced motion, but the winner is still announced.
+      sfxRef.current('drawWin');
       return;
     }
 
@@ -146,6 +159,8 @@ export function SpinWheel({
     let lastRot = 0;
     let lastIdx = segmentAt(segs, 0);
     let stopped = false;
+    let launched = false;
+    let lastTick = 0;
     // The pointer: a damped spring, kicked each time a wedge edge passes.
     let pAngle = 0;
     let pVel = 0;
@@ -154,6 +169,10 @@ export function SpinWheel({
       const t = now - t0;
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      if (t >= WINDUP_MS && !launched) {
+        launched = true;
+        sfxRef.current('drawStart');
+      }
       if (t < WINDUP_MS) {
         rotation = -PULLBACK_DEG * easeInOut(t / WINDUP_MS);
       } else if (t < WINDUP_MS + MAIN_MS) {
@@ -179,6 +198,10 @@ export function SpinWheel({
       if (idx !== lastIdx) {
         pAngle = Math.min(pAngle, -Math.min(16, 4 + speed * 0.9));
         lastIdx = idx;
+        if (now - lastTick >= TICK_GAP_MS) {
+          lastTick = now;
+          sfxRef.current('drawTick');
+        }
       }
       pVel += (-520 * pAngle - 26 * pVel) * dt;
       pAngle += pVel * dt;
@@ -188,10 +211,12 @@ export function SpinWheel({
         stopped = true;
         setStep(1);
         dust.burst();
+        sfxRef.current('drawStop');
         timers.push(
           window.setTimeout(() => {
             setStep(2);
             dust.wave(); // the second, softer wave off the card's top edge
+            sfxRef.current('drawWin');
           }, REVEAL_AFTER_MS),
           window.setTimeout(() => setStep(3), TELL_AFTER_MS),
         );
