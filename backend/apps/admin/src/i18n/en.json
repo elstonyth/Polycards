@@ -24,7 +24,7 @@
     "email": "Email",
     "status": "Result",
     "loading": "Loading all players in this group…",
-    "loadError": "Could not load the full group. Reload before editing credits.",
+    "loadError": "Could not load the full group. Reload before making changes.",
     "reload": "Reload",
     "empty": "No players found.",
     "review": "Review changes",
@@ -34,22 +34,24 @@
     "cancel": "Cancel",
     "close": "Close",
     "batchSummary": "{{amount}} per player · {{count}} players · {{total}} total change",
-    "progress": "Processing credits… {{done}} of {{count}} results received.",
+    "progress": "Processing… {{done}} of {{count}} results received.",
     "results": "{{succeeded}} applied · {{failed}} failed",
     "retryFailed": "Retry {{count}} failed",
     "retryHint": "Retry uses the original amounts and request IDs. Applied players are skipped. Keep this page open to retain retry details.",
     "newAdjustment": "New adjustment",
-    "discardFailures": "This clears the previous retry details. Some failed requests may already have applied credits if their response was lost. Review failed players’ transactions before creating another adjustment. Applied players will not be selected automatically.",
+    "discardFailures": "This clears the previous retry details. Some failed requests may already have applied if their response was lost. Review failed players’ transactions before creating another adjustment. Applied players will not be selected automatically.",
     "applied": "Applied · balance {{balance}}",
     "pending": "Pending",
     "giving": "What to change",
     "givingCredit": "Credit (RM)",
     "givingTickets": "Lucky Draw tickets",
     "ticketsLabel": "Ticket change per player",
-    "ticketsHint": "Positive gives tickets; negative takes them back (never below zero). Whole numbers only, up to 1,000,000 per player.",
+    "ticketsHint": "Positive gives tickets; negative takes them back. A take-back larger than a player's balance fails for that player. Whole numbers only, up to 10,000 per player.",
     "invalidTickets": "Enter a nonzero whole number of tickets within the limit.",
-    "ticketsAmount": "{{tickets}} Lucky Draw tickets",
-    "appliedTickets": "Applied · {{balance}} tickets"
+    "ticketsAmount_one": "{{tickets}} Lucky Draw ticket",
+    "ticketsAmount_other": "{{tickets}} Lucky Draw tickets",
+    "appliedTickets": "Applied · {{balance}} tickets",
+    "waiting": "Pausing a few seconds for the rate limit. Keep this page open."
   },
   "customFields": {
     "title": "Custom Fields",
@@ -740,7 +742,8 @@
       "grant_pack_gift": "Gifted packs",
       "revoke_pack_gift": "Revoked a pack gift",
       "grant_bonus_credit": "Bonus credit",
-      "release_reward_holds": "Released old prize-sale holds"
+      "release_reward_holds": "Released old prize-sale holds",
+      "luckyDrawTickets": "Lucky Draw tickets {{delta}} (balance {{balance}})"
     },
     "gift": {
       "title": "Gift packs",
@@ -793,10 +796,10 @@
       "amount": "Tickets (e.g. 10 to give, -10 to take back)",
       "note": "Note (required, audit trail)",
       "apply": "Apply",
-      "invalid": "Tickets must be a nonzero whole number within 1,000,000.",
+      "invalid": "Tickets must be a nonzero whole number within 10,000.",
       "confirmGive": "Give {{tickets}} Lucky Draw tickets to {{email}}?",
       "confirmTake": "Take back {{tickets}} Lucky Draw tickets from {{email}}?",
-      "confirmDesc": "The note is recorded in the audit trail. A take-back never leaves the balance below zero.",
+      "confirmDesc": "The note is recorded in the audit trail. A take-back larger than the balance is refused.",
       "applied": "Tickets applied · balance {{balance}}"
     }
   },

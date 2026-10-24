@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -60,6 +60,9 @@ function GroupCreditEditor({ data: group }: Props) {
   const [giving, setGiving] = useState<'credit' | 'tickets'>('credit');
   const tickets = giving === 'tickets';
   const [busy, setBusy] = useState(false);
+  // A player waiting out the admin rate limit: shown so a long run of a big
+  // group doesn't look hung (and get reloaded, losing its retry keys).
+  const [waiting, setWaiting] = useState(false);
   const [batch, setBatch] = useState<GroupCreditAdjustment | null>(null);
   const [results, setResults] = useState<GroupCreditResults>({});
   const members = useQuery({
@@ -79,7 +82,10 @@ function GroupCreditEditor({ data: group }: Props) {
   // "RM 10.00 bonus credit" / "10 tickets" for one player, and the total.
   const amountLabel = (b: GroupCreditAdjustment) =>
     b.tickets
-      ? t('groupCredits.ticketsAmount', { tickets: num(b.amount) })
+      ? t('groupCredits.ticketsAmount', {
+          tickets: num(b.amount),
+          count: b.amount,
+        })
       : t(b.bonus ? 'creditKind.bonusAmount' : 'creditKind.normalAmount', {
           amount: rm(b.amount),
         });
@@ -87,6 +93,7 @@ function GroupCreditEditor({ data: group }: Props) {
     b.tickets
       ? t('groupCredits.ticketsAmount', {
           tickets: num(b.amount * b.customers.length),
+          count: b.amount * b.customers.length,
         })
       : rm((Math.round(b.amount * 100) * b.customers.length) / 100);
   const succeeded = Object.values(results).filter(
@@ -209,7 +216,16 @@ function GroupCreditEditor({ data: group }: Props) {
     running.current = true;
     setBusy(true);
     try {
-      await runGroupCreditAdjustment(snapshot, previous, setResults);
+      await runGroupCreditAdjustment(
+        snapshot,
+        previous,
+        setResults,
+        async (ms) => {
+          setWaiting(true);
+          await new Promise<void>((done) => window.setTimeout(done, ms));
+          setWaiting(false);
+        },
+      );
       void queryClient.invalidateQueries({ queryKey: ['admin', 'customer'] });
       void queryClient.invalidateQueries({ queryKey: qk.luckyDraw });
       void queryClient.invalidateQueries({ queryKey: qk.playersKey });
@@ -219,6 +235,14 @@ function GroupCreditEditor({ data: group }: Props) {
       setBusy(false);
     }
   };
+
+  // Leaving mid-run drops the batch and its request keys; warn first.
+  useEffect(() => {
+    if (!busy) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [busy]);
 
   const confirm = async () => {
     if (!canSubmit || confirming.current) return;
@@ -397,6 +421,7 @@ function GroupCreditEditor({ data: group }: Props) {
                         failed,
                       },
                     )}
+                    {busy && waiting && ` ${t('groupCredits.waiting')}`}
                   </Text>
                   {failed > 0 && (
                     <Text size="small" className="text-ui-fg-subtle">

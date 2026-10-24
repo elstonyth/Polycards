@@ -63,9 +63,7 @@ each put in, ranked 1–10.
   credit; ledger reason `admin_grant`, audited).
 - No new "More" tab or homepage "Game" section. Those are separate roadmap
   items (nav redesign). v1 entry points are the vault ticket row and the task
-  hub.
-- No admin "grant tickets to a customer" button. Support can see a customer's
-  ticket history (read-only). _(My call; add later if support asks.)_
+  hub; since 2026-10-25 the Games tab's picker links here too.
 - No tickets in the Transactions page. Ticket history lives on the Lucky Draw
   page. _(Transactions changes are a separate roadmap item.)_
 - No push / email notification to winners. The winner sees the prize in the

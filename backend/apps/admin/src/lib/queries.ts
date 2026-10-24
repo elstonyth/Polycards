@@ -1960,7 +1960,8 @@ export const useAdjustTickets = () => {
         vars.note,
         vars.idempotencyKey,
       ),
-    onSuccess: (_data, vars) => {
+    // Settled, not success: a lost response may still have committed.
+    onSettled: (_data, _error, vars) => {
       qc.invalidateQueries({ queryKey: qk.luckyDrawTickets(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
     },

@@ -1028,8 +1028,8 @@ function checkLuckyDrawEvent(input: {
 }
 
 // The prize shape rules saveLuckyDrawPrize and createLuckyDrawEventWithPrizes
-// share: exactly one of card / credit per `kind`, the credit range in whole
-// sen, a credit prize's picture. Returns the stored fields (draw time aside).
+// share: exactly one of card / credit per `kind` and the credit range in
+// whole sen. Returns the stored fields (draw time aside).
 function checkLuckyDrawPrize(input: LuckyDrawPrizeCreateInput) {
   const title = input.title.trim();
   if (!title || title.length > 120)
@@ -6479,7 +6479,7 @@ class PacksModuleService extends MedusaService({
   }
 
   // A customer's Lucky Draw ticket balance: the sum of their live ledger rows
-  // (task claims +, entries -, refunds +). 0 when they have none.
+  // (task claims +, entries -, refunds +, admin grants ±). 0 when none.
   @InjectManager()
   async luckyDrawBalance(
     customerId: string,
@@ -7633,18 +7633,16 @@ class PacksModuleService extends MedusaService({
     );
     // The ORM row is not flushed yet: the new balance is arithmetic.
     const balance = before + tickets;
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer' as const,
-          entity_id: customerId,
-          action: 'edit' as const,
-          before: { lucky_draw_tickets: before },
-          after: { lucky_draw_tickets: balance, delta: tickets, ref },
-          reason: note,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: customerId,
+        action: 'edit',
+        before: { lucky_draw_tickets: before },
+        after: { lucky_draw_tickets: balance, delta: tickets, ref },
+        reason: note,
+      },
       sharedContext,
     );
     return { tickets, balance, replayed: false };

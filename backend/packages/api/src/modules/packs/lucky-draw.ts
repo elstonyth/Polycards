@@ -8,8 +8,10 @@ import { pickWonRow } from './pick';
 // Sanity ceilings so a typo'd extra zero is refused (same stance as MAX_TASK_CREDIT_MYR).
 export const MAX_TASK_TICKETS = 10_000;
 export const MAX_ENTRY_TICKETS = 1_000_000;
-/** The most tickets one admin grant (or take-back) may move. */
-export const MAX_ADMIN_TICKETS = 1_000_000;
+/** The most tickets one admin grant (or take-back) may move. Kept at the task
+ *  ceiling: a prize's entries are summed into an int4 `total_tickets`, which a
+ *  group-wide million-ticket typo could overflow and so block the draw. */
+export const MAX_ADMIN_TICKETS = 10_000;
 export const MAX_PRIZE_CREDIT_MYR = 50_000;
 
 // Synthetic pull.pack_id for prize cards, like 'task-reward'.

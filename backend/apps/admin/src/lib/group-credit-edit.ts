@@ -35,14 +35,14 @@ export function parseGroupCreditAmount(input: string): number | null {
     : null;
 }
 
-/** Lucky Draw tickets per player: a nonzero whole number within ±1,000,000
+/** Lucky Draw tickets per player: a nonzero whole number within ±10,000
  *  (the backend's MAX_ADMIN_TICKETS). */
 export function parseGroupTickets(input: string): number | null {
   if (!/^[+-]?\d+$/.test(input.trim())) return null;
   const tickets = Number(input);
   return Number.isSafeInteger(tickets) &&
     tickets !== 0 &&
-    Math.abs(tickets) <= 1_000_000
+    Math.abs(tickets) <= 10_000
     ? tickets
     : null;
 }
@@ -151,7 +151,7 @@ export async function runGroupCreditAdjustment(
       results[customer.id] = {
         status: 'failed',
         message:
-          error instanceof Error ? error.message : 'Credit adjustment failed.',
+          error instanceof Error ? error.message : 'Adjustment failed.',
       };
     }
     onProgress({ ...results });

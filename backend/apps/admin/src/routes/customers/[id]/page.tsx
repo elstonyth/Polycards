@@ -1104,6 +1104,17 @@ const HistoryTab = ({
   const { t } = useTranslation();
 
   const { data: auditData, isError: auditError } = auditQ;
+  // Ticket grants are audited as a customer `edit`; `after` holds the change.
+  const ticketLabel = (after: unknown) => {
+    const a = after as { delta?: unknown; lucky_draw_tickets?: unknown } | null;
+    return typeof a?.delta === 'number' &&
+      typeof a.lucky_draw_tickets === 'number'
+      ? t('customer360.action.luckyDrawTickets', {
+          delta: `${a.delta > 0 ? '+' : ''}${a.delta.toLocaleString('en-US')}`,
+          balance: a.lucky_draw_tickets.toLocaleString('en-US'),
+        })
+      : null;
+  };
 
   const auditActions = (auditData?.actions ?? [])
     // ponytail: belt-and-suspenders — backend already orders DESC; sort client-side to guarantee newest-first regardless of fetch order
@@ -1227,7 +1238,8 @@ const HistoryTab = ({
                     </Table.Cell>
                     <Table.Cell>
                       {/* ponytail: t() falls back to raw action key if label missing */}
-                      {t(`customer360.action.${row.action}`, row.action)}
+                      {ticketLabel(row.after) ??
+                        t(`customer360.action.${row.action}`, row.action)}
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
                       {row.reason ?? '—'}

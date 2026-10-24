@@ -105,6 +105,16 @@ const CreditRow = ({
           >
             {credit.imageUrl ? 'Replace…' : 'Upload…'}
           </Button>
+          {credit.imageUrl && (
+            <Button
+              size="small"
+              variant="transparent"
+              type="button"
+              onClick={() => onPatch({ imageUrl: '' })}
+            >
+              Use coins
+            </Button>
+          )}
         </div>
       </Field>
       <IconButton
@@ -120,8 +130,7 @@ const CreditRow = ({
 };
 
 /** Bonus-credit prizes for a new event: an amount, a title (defaults to
- *  "RM <amount> bonus credit") and the art, which a credit prize cannot do
- *  without. */
+ *  "RM <amount> bonus credit") and optional art (the coins when empty). */
 export const CreditPrizeRows = ({
   credits,
   onChange,

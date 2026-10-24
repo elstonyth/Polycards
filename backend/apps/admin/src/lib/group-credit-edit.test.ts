@@ -173,11 +173,11 @@ describe('group credit editing', () => {
     });
   });
 
-  it('accepts a nonzero whole number of tickets within ±1,000,000', () => {
-    for (const valid of ['5', '-3', '+20', '1000000', '-1000000']) {
+  it('accepts a nonzero whole number of tickets within ±10,000', () => {
+    for (const valid of ['5', '-3', '+20', '10000', '-10000']) {
       expect(parseGroupTickets(valid)).toBe(Number(valid));
     }
-    for (const invalid of ['', '0', '1.5', '1e3', '10.00', '1000001', 'abc']) {
+    for (const invalid of ['', '0', '1.5', '1e3', '10.00', '10001', 'abc']) {
       expect(parseGroupTickets(invalid)).toBeNull();
     }
     // A ticket batch parses the amount as tickets, never as RM.

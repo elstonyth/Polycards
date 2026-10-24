@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -36,6 +36,7 @@ export const LuckyDrawTicketsPanel = ({
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [confirming, setConfirming] = useState(false);
+  const amountRef = useRef<HTMLInputElement>(null);
   // Idempotency slot, kept outside the panel: see grant-attempts.ts.
   const slot = `tickets:${customerId}`;
 
@@ -47,8 +48,10 @@ export const LuckyDrawTicketsPanel = ({
     setConfirming(false);
     if (tickets === null || !note.trim() || adjust.isPending) return;
     const trimmed = note.trim();
-    adjust.mutate(
-      {
+    // The promise, unlike mutate()'s per-call callbacks, still settles after
+    // the panel unmounts, so a mid-request tab switch can't strand the slot.
+    adjust
+      .mutateAsync({
         id: customerId,
         tickets,
         note: trimmed,
@@ -56,23 +59,23 @@ export const LuckyDrawTicketsPanel = ({
           slot,
           JSON.stringify([customerId, tickets, trimmed]),
         ),
-      },
-      {
-        onSuccess: (res) => {
+      })
+      .then(
+        (res) => {
           settleAttempt(slot);
           toast.success(
             t('customer360.tickets.applied', { balance: num(res.balance) }),
           );
           setAmount('');
           setNote('');
+          amountRef.current?.focus();
         },
-        onError: (e) => settleAttempt(slot, e),
-      },
-    );
+        (e: unknown) => settleAttempt(slot, e),
+      );
   }
 
   return (
-    <Container className="mt-3 p-0">
+    <Container className="p-0">
       <div className="px-6 py-4">
         <Heading level="h2">{t('customer360.tickets.title')}</Heading>
         <Text className="text-ui-fg-subtle mt-1" size="small">
@@ -84,22 +87,31 @@ export const LuckyDrawTicketsPanel = ({
           <Text size="small" className="text-ui-fg-subtle">
             {t('customer360.tickets.balance')}
           </Text>
-          <Heading level="h1" className="mt-1 tabular-nums">
+          <Text size="xlarge" weight="plus" className="mt-1 tabular-nums">
             {ticketsQ.data ? num(ticketsQ.data.balance) : '—'}
-          </Heading>
+          </Text>
         </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor="tickets-amount" size="small">
             {t('customer360.tickets.amount')}
           </Label>
           <Input
+            ref={amountRef}
             id="tickets-amount"
-            inputMode="numeric"
+            type="number"
+            step="1"
+            aria-invalid={amount.trim() !== '' && tickets === null}
+            aria-describedby="tickets-amount-error"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
           {amount.trim() !== '' && tickets === null && (
-            <Text size="small" className="text-ui-fg-error">
+            <Text
+              id="tickets-amount-error"
+              role="alert"
+              size="small"
+              className="text-ui-fg-error"
+            >
               {t('customer360.tickets.invalid')}
             </Text>
           )}
