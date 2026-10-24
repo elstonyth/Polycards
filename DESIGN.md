@@ -156,6 +156,10 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 
 **The Signal Rule.** Every non-neutral color on screen must mean something a collector can name: a tier, a rarity, money in, or danger. If a color is there "for energy", delete it.
 
+### Lucky Draw only — Holo foil (2026-10-24)
+
+- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on three things: the prize wheel's rim, the prize frame in the win reveal, and the win's dust. Never chrome, never buttons, never text, never another surface. No gold anywhere on the wheel (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` / `.holo-ring` in `globals.css` only turn the light and cut the ring (still under reduced motion).
+
 ## 3. Typography
 
 **Display Font:** Nekst (Black 900, self-hosted) with system sans fallback
@@ -334,6 +338,27 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
   `.claim-ring`, `.claim-sweep` in globals.css). Chase Gold only, only on
   claimable things, never ambient — it marks a real prize, which is why it is
   not the confetti/coin-shower the Don'ts ban. Reduced motion: still and lit.
+
+### Signature: Lucky Draw (/lucky-draw, 2026-10-24)
+
+Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
+**Task** tab (its `match`: tasks pay the tickets).
+
+- **Tabs** — Prizes · Results · My tickets, the leaderboard's segmented pill.
+- **Prize card** — charcoal card: the prize on a 5:7 pedestal, RM value in
+  Chase Gold Nekst, draw time in MYT with a live countdown, tickets in /
+  entrants / my chance, the top 10 (framed avatars), one white Enter pill,
+  and a quiet "Fair draw" disclosure with the seed hash.
+- **The wheel** (style "K — Holo Foil") — matte black and graphite wedges
+  sized by tickets, hair-thin silver lines, the holo-foil rim, a pearl hub, a
+  slim silver pointer that flicks on each edge. Pull-back, ~7 s ease-out,
+  settle, landing inside the winner's wedge (never dead centre). Win: holo
+  dust rises from the wedge, the wheel dims, and the prize rises from the hub
+  in a thin holo frame. Decoration only — the result is stored before the
+  wheel turns. Reduced motion: the winner shows directly, no spin, no dust.
+- **Results** — every draw keeps its seed, the hash shown before it, and the
+  frozen entry list in draw order with ticket ranges, plus a plain "How to
+  check" paragraph.
 
 ## 6. Do's and Don'ts
 

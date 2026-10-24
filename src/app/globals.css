@@ -843,6 +843,41 @@
   }
 }
 
+/* Holo foil (Lucky Draw only, 2026-10-24 — DESIGN.md "Holo foil"): the wheel
+   rim and the prize frame. The colour stops live once in src/lib/lucky-draw.ts
+   (HOLO_STOPS -> holoConic, set as the element's background); this file only
+   turns the light (--holo-turn) and cuts the rim's ring. The light never turns
+   with the wheel, so the foil shines like a lamp on a real card. */
+@property --holo-turn {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
+}
+@keyframes holo-turn {
+  to {
+    --holo-turn: 360deg;
+  }
+}
+@layer utilities {
+  .holo-turn {
+    animation: holo-turn var(--holo-period, 9s) linear infinite;
+  }
+  .holo-ring {
+    mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - 9px),
+      #000 calc(100% - 8px),
+      #000 calc(100% - 1px),
+      transparent 100%
+    );
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .holo-turn {
+      animation: none;
+    }
+  }
+}
+
 /* iOS Safari zooms the whole page when a focused field renders under 16px, and
    it never zooms back out. Every form shape in the app is text-sm (14px), so
    pin the floor once here rather than in eight copies of the same input class

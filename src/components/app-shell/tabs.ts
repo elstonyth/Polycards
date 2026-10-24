@@ -19,7 +19,13 @@ export type Tab = {
 
 /** The five app destinations, in the boss-specified order (Home center). */
 export const TABS: Tab[] = [
-  { label: 'Task', href: '/task', icon: ListChecks },
+  {
+    label: 'Task',
+    href: '/task',
+    icon: ListChecks,
+    // Tasks pay the Lucky Draw tickets, so the draw sits under Task.
+    match: ['/lucky-draw'],
+  },
   { label: 'Ranks', href: '/leaderboard', icon: Trophy },
   { label: 'Home', href: '/', icon: Home },
   { label: 'Vault', href: '/vault', icon: Vault, gated: true },
