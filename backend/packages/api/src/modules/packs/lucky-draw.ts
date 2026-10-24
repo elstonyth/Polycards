@@ -46,7 +46,10 @@ export function drawSeedHash(seed: string): string {
 }
 
 /** HMAC-SHA256(seed, prizeId) mod totalTickets. A 256-bit value mod a total under
- *  2^53 has negligible modulo bias. */
+ *  2^53 has negligible modulo bias.
+ *  Precondition: totalTickets is a positive integer (RangeError otherwise).
+ *  Verifier detail: the HMAC key is the seed's 64-char hex STRING as UTF-8 bytes,
+ *  not the 32 decoded bytes; the message is the prizeId string. */
 export function winningTicketIndex(
   seed: string,
   prizeId: string,
@@ -81,6 +84,14 @@ const bad = (m: string): never => {
 
 const isInt = (v: unknown): v is number =>
   typeof v === 'number' && Number.isInteger(v);
+
+// The seed is never stored before the draw (staff tools and bots can read the DB):
+// the prize row keeps only a random nonce (newDrawSeed()) and the seed is derived
+// from a server env secret.
+export function deriveDrawSeed(secret: string, nonce: string): string {
+  if (!secret) bad('Lucky Draw seed secret is not configured.');
+  return createHmac('sha256', secret).update(`lucky-draw-seed:${nonce}`).digest('hex');
+}
 
 /** Tickets a task grants on claim: absent → 0, else an integer 0..MAX_TASK_TICKETS. */
 export function validateTaskTickets(raw: unknown): number {

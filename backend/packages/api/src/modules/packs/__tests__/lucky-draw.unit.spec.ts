@@ -2,6 +2,7 @@ import {
   MAX_ENTRY_TICKETS,
   MAX_TASK_TICKETS,
   aggregateEntries,
+  deriveDrawSeed,
   drawSeedHash,
   drawWinner,
   newDrawSeed,
@@ -73,4 +74,18 @@ it('validateEntryTickets: integer 1..MAX_ENTRY_TICKETS; else INVALID_DATA', () =
   expect(validateEntryTickets(1)).toBe(1);
   for (const bad of [0, -3, 2.5, '10', null, MAX_ENTRY_TICKETS + 1])
     expect(() => validateEntryTickets(bad)).toThrow();
+});
+
+it('deriveDrawSeed is HMAC-SHA256(secret, "lucky-draw-seed:" + nonce) hex — fixed vector', () => {
+  const seed = deriveDrawSeed('test-secret', 'b'.repeat(64));
+  expect(seed).toBe(
+    '7e0cbfdfea31e0b95b8f7337da2f76a786f76f956dbd03af4d33dcb6564312da',
+  );
+  expect(drawSeedHash(seed)).toBe(
+    '6869746cfa18aa25f345f3a5b0a4b0069d1531820ec93140c82449425c18e418',
+  );
+});
+
+it('deriveDrawSeed refuses an empty secret', () => {
+  expect(() => deriveDrawSeed('', 'b'.repeat(64))).toThrow();
 });
