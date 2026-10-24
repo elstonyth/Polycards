@@ -2666,6 +2666,8 @@ export interface AdminLuckyDrawPrize {
     entrant_count: number;
     drawn_at: string;
     seed: string;
+    /** false only when a winner exists and nothing was minted / credited. */
+    granted: boolean;
   } | null;
 }
 

@@ -58,22 +58,31 @@ const EVENT_COLOR: Record<
   'orange' | 'green' | 'grey'
 > = { draft: 'orange', published: 'green', cancelled: 'grey' };
 
-const PRIZE_COLOR: Record<PrizeState, 'blue' | 'green' | 'grey'> = {
+const PRIZE_COLOR: Record<PrizeState, 'blue' | 'green' | 'grey' | 'red'> = {
   open: 'blue',
   drawn: 'green',
   cancelled: 'grey',
+  overdue: 'red',
+  ungranted: 'red',
 };
 
 const PRIZE_LABEL: Record<PrizeState, string> = {
   open: 'open',
   drawn: 'drawn',
   cancelled: 'cancelled',
+  overdue: 'overdue',
+  ungranted: 'Not granted',
 };
 
 /** The Status column of a prize: its state, and for a drawn one the winner and
  *  the revealed seed (anyone can recompute the winner from it). */
-const PrizeOutcome = ({ prize }: { prize: AdminLuckyDrawPrize }) => {
-  const state = prizeState(prize);
+const PrizeOutcome = ({
+  prize,
+  state,
+}: {
+  prize: AdminLuckyDrawPrize;
+  state: PrizeState;
+}) => {
   const result = prize.result;
   return (
     <div className="flex flex-col items-start gap-y-1">
@@ -83,7 +92,17 @@ const PrizeOutcome = ({ prize }: { prize: AdminLuckyDrawPrize }) => {
           {whenLabel(prize.cancelled_at)} · entries refunded
         </Text>
       )}
-      {state === 'drawn' && result && (
+      {state === 'overdue' && (
+        <Text size="small" className="text-ui-fg-error">
+          Not drawn yet — check the draw job log
+        </Text>
+      )}
+      {state === 'ungranted' && (
+        <Text size="small" className="text-ui-fg-error">
+          Drawn, but nothing was minted or credited — fulfil by hand
+        </Text>
+      )}
+      {(state === 'drawn' || state === 'ungranted') && result && (
         <>
           {result.winner_customer_id ? (
             <Text size="small">
@@ -153,12 +172,15 @@ const PrizeTable = ({
           {event.prizes.map((p) => {
             const art = artOf(p);
             const state = prizeState(p);
+            // An overdue prize stays editable and cancellable: cancelling is
+            // how staff refund a draw that keeps failing.
+            const undrawn = state === 'open' || state === 'overdue';
             const actions = [
-              ...(state === 'open' && event.status !== 'cancelled'
+              ...(undrawn && event.status !== 'cancelled'
                 ? [{ label: 'Edit', onSelect: () => onEdit(p) }]
                 : []),
               { label: 'Entrants', onSelect: () => onEntrants(p) },
-              ...(state === 'open'
+              ...(undrawn
                 ? [
                     {
                       label: 'Cancel prize…',
@@ -216,7 +238,7 @@ const PrizeTable = ({
                   </span>
                 </Table.Cell>
                 <Table.Cell>
-                  <PrizeOutcome prize={p} />
+                  <PrizeOutcome prize={p} state={state} />
                 </Table.Cell>
                 <Table.Cell className="text-right">
                   <RowActions subject={p.title} actions={actions} />

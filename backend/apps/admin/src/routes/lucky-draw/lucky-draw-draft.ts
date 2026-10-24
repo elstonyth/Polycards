@@ -155,14 +155,31 @@ export function eventDraftToPayload(
   };
 }
 
-export type PrizeState = 'cancelled' | 'drawn' | 'open';
+export type PrizeState =
+  | 'cancelled'
+  | 'drawn'
+  | 'ungranted'
+  | 'overdue'
+  | 'open';
+
+/** The draw job ticks every minute; past this, a missing result is a problem. */
+const OVERDUE_AFTER_MS = 2 * 60 * 1000;
 
 /** Cancelled beats drawn: a cancelled prize never has a result (the backend
  *  refuses to cancel a drawn one), but if both ever showed, the refund is the
- *  fact customers care about. */
+ *  fact customers care about. `ungranted` is a drawn prize whose winner got
+ *  nothing (spec §8: never drawn-but-unpaid); `overdue` an undrawn one whose
+ *  draw keeps failing. Both need staff. */
 export const prizeState = (
-  p: Pick<AdminLuckyDrawPrize, 'cancelled_at' | 'result'>,
-): PrizeState => (p.cancelled_at ? 'cancelled' : p.result ? 'drawn' : 'open');
+  p: Pick<AdminLuckyDrawPrize, 'cancelled_at' | 'result' | 'draw_at'>,
+  now: number = Date.now(),
+): PrizeState => {
+  if (p.cancelled_at) return 'cancelled';
+  if (p.result) return p.result.granted === false ? 'ungranted' : 'drawn';
+  return new Date(p.draw_at).getTime() < now - OVERDUE_AFTER_MS
+    ? 'overdue'
+    : 'open';
+};
 
 /** The head of a seed commitment, for a table cell. */
 export const shortHash = (hash: string | null): string =>

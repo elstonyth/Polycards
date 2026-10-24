@@ -268,21 +268,49 @@ describe('event drafts', () => {
 });
 
 describe('display helpers', () => {
+  const BEFORE = Date.parse(DRAW_AT) - 60_000;
+  const result = (
+    over: Partial<NonNullable<AdminLuckyDrawPrize['result']>> = {},
+  ): AdminLuckyDrawPrize['result'] => ({
+    winner_customer_id: 'cus_1',
+    winner_tickets: 5,
+    total_tickets: 50,
+    entrant_count: 9,
+    drawn_at: DRAW_AT,
+    seed: 'b'.repeat(64),
+    granted: true,
+    ...over,
+  });
+
   test('prizeState: cancelled beats drawn beats open', () => {
-    expect(prizeState(prize())).toBe('open');
-    expect(prizeState(prize({ cancelled_at: DRAW_AT }))).toBe('cancelled');
+    expect(prizeState(prize(), BEFORE)).toBe('open');
+    expect(prizeState(prize({ cancelled_at: DRAW_AT }), BEFORE)).toBe(
+      'cancelled',
+    );
+    expect(prizeState(prize({ result: result() }), BEFORE)).toBe('drawn');
+  });
+
+  test('prizeState: overdue once the draw is over 2 minutes late with no result', () => {
+    const at = Date.parse(DRAW_AT);
+    expect(prizeState(prize(), at + 2 * 60_000)).toBe('open');
+    expect(prizeState(prize(), at + 2 * 60_000 + 1)).toBe('overdue');
+    // A cancelled prize is never overdue; a drawn one is judged by its result.
+    expect(
+      prizeState(prize({ cancelled_at: DRAW_AT }), at + 3_600_000),
+    ).toBe('cancelled');
+    expect(prizeState(prize({ result: result() }), at + 3_600_000)).toBe(
+      'drawn',
+    );
+  });
+
+  test('prizeState: ungranted when the winner was not paid; no winner owes nothing', () => {
+    expect(
+      prizeState(prize({ result: result({ granted: false }) }), BEFORE),
+    ).toBe('ungranted');
     expect(
       prizeState(
-        prize({
-          result: {
-            winner_customer_id: 'cus_1',
-            winner_tickets: 5,
-            total_tickets: 50,
-            entrant_count: 9,
-            drawn_at: DRAW_AT,
-            seed: 'b'.repeat(64),
-          },
-        }),
+        prize({ result: result({ winner_customer_id: null, granted: true }) }),
+        BEFORE,
       ),
     ).toBe('drawn');
   });
