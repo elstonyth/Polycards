@@ -694,7 +694,7 @@ git commit -m "feat(admin): Lucky Draw page under Rewards and a Tickets field on
 
 **Files:**
 
-- Modify: `src/lib/data/schemas.ts` (Lucky Draw schemas)
+- Modify: `src/lib/data/schemas.ts` (Lucky Draw schemas), `DESIGN.md` (Holo foil accent, Lucky Draw only)
 - Create: `src/lib/actions/lucky-draw.ts`, `src/lib/lucky-draw.ts`, `src/lib/__tests__/lucky-draw.test.ts`, `src/lib/data/__tests__/lucky-draw-schema.test.ts`
 - Create: `src/app/(account)/lucky-draw/page.tsx`, `LuckyDrawClient.tsx`, `PrizeCard.tsx`, `EnterSheet.tsx`, `SpinWheel.tsx`, `ResultsList.tsx`, `ResultDetail.tsx`, `MyTickets.tsx`, `TicketOpenIntro.tsx`
 
