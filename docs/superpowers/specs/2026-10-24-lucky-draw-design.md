@@ -261,22 +261,43 @@ Handles are the same public handles shown on the leaderboard.
 ### 10. The spin moment
 
 - When a prize's draw time arrives while the player is on the page, the page
-  picks up the stored result (polling is fine) and plays a spin that lands on
-  the winner's handle. Opening a past result can replay it.
+  picks up the stored result (polling is fine) and spins a **prize wheel** that
+  lands on the winner. Opening a past result can replay it.
 - The spin is decoration only: it is chosen to land on the stored winner.
 - Under `prefers-reduced-motion`, show the result directly (house rule:
   `usePrefersReducedMotion`).
 
+**The wheel (operator picked style "K — Holo Foil", 2026-10-24; "too much
+gold" — no gold anywhere on it):**
+
+- Front-on wheel: matte black and graphite segments alternating, hair-thin
+  silver lines between them, a thin **holographic-foil rim** (soft pale
+  cyan/violet/pink shimmer, like a premium card's foil), a pearlescent hub, a
+  slim silver pointer at 12 o'clock.
+- One segment per entrant, **sized by their tickets**. Names sit along the
+  radius on segments wide enough to hold them.
+- Motion: a small pull-back, then a fast spin that slows smoothly over about
+  7 s and settles; the pointer flicks as each segment edge passes; it stops at
+  a random point inside the winner's segment (never dead centre).
+- **Win effect (operator picked "Holo dust + prize reveal", 2026-10-24):** fine
+  holographic sparkles (a few four-point glints) rise from the winning segment;
+  then the wheel dims and the prize card rises out of the hub inside a thin
+  holo-foil frame, with a second soft wave of sparkles off the card's top edge;
+  winner name and "N of M tickets" appear under it.
+- Reference: `docs/superpowers/specs/assets/lucky-draw-spin-prototype.html`
+  (throwaway prototype: motion curves, pointer spring, dust, reveal timing).
+  The wheel is drawn in code (SVG + CSS); no image file is needed for it.
+
 ### 11. Asset slots (placeholders in v1)
 
-The build ships with placeholder art in these slots. The Codex asset plan fills
-them, and it must land before 2026-11-01:
+The build ships with placeholder art in these slots; Codex art can replace
+them before 2026-11-01:
 
 1. Ticket icon (task hub chip, balance display)
 2. Vault ticket row art + the "open tickets" animation
 3. Lucky Draw page header / hero
-4. Prize card frame (card prizes and credit prizes)
-5. Spin / winner reveal animation
+
+The prize frame and the spin/win animation are code (section 10), not art.
 
 ## Constraints
 
