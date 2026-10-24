@@ -15,7 +15,7 @@
 //   QA_SLAB_IMAGE=<png path>       served at /media/slab.png as the card prize
 //   POST /__mock/reset?drawIn=60   fresh state, timed prize draws in 60 s
 // The storefront under test must be built against it:
-//   NEXT_PUBLIC_MEDUSA_BACKEND_URL=http://127.0.0.1:9199
+//   NEXT_PUBLIC_MEDUSA_BACKEND_URL=http://localhost:9199
 //   NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_mock_preview   (any value; ignored)
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -23,7 +23,9 @@ import { readFileSync } from 'node:fs';
 
 const PORT = Number(process.env.QA_MOCK_PORT ?? 9199);
 const SLAB_FILE = process.env.QA_SLAB_IMAGE ?? null;
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+// Bound to 127.0.0.1 below; `localhost` still reaches it, and the image
+// allow-list of a storefront built against localhost keeps matching.
+const ORIGIN = `http://localhost:${PORT}`;
 const SLAB_URL = SLAB_FILE
   ? `${ORIGIN}/media/slab.png`
   : '/images/app/polycards-slab-back.webp';

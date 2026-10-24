@@ -94,7 +94,8 @@ const PrizeOutcome = ({
       )}
       {state === 'overdue' && (
         <Text size="small" className="text-ui-fg-error">
-          Not drawn yet — check the draw job log
+          Draw time passed with no result — is the event published? Check
+          the draw job log
         </Text>
       )}
       {state === 'ungranted' && (
