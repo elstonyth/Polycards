@@ -134,6 +134,19 @@ import {
   isDefaultPlayerGroup,
 } from './odds-sets';
 import {
+  LUCKY_DRAW_PULL_PACK_ID,
+  MAX_PRIZE_CREDIT_MYR,
+  aggregateEntries,
+  commitDrawSeed,
+  deriveDrawSeed,
+  drawSeedHash,
+  drawWinner,
+  requireDrawSeedSecret,
+  validateEntryTickets,
+  validateTaskTickets,
+  type EnterRefusal,
+} from './lucky-draw';
+import {
   taskIsLive,
   taskPeriodKey,
   taskProgress,
@@ -156,6 +169,11 @@ import WeeklySettlement from './models/weekly-settlement';
 import WeeklySettlementLine from './models/weekly-settlement-line';
 import Announcement from './models/announcement';
 import PackGift from './models/pack-gift';
+import LuckyDrawEvent from './models/lucky-draw-event';
+import LuckyDrawPrize from './models/lucky-draw-prize';
+import LuckyDrawEntry from './models/lucky-draw-entry';
+import LuckyDrawTicket from './models/lucky-draw-ticket';
+import LuckyDrawResult from './models/lucky-draw-result';
 import { pickLiveAnnouncements, validateAnnouncement } from './announcements';
 import { pageAll } from '../../api/utils/page-all';
 import {
@@ -834,6 +852,221 @@ function toPackGiftView(
   };
 }
 
+/** A prize as the admin Lucky Draw overview shows it. Dates are ISO strings.
+ *  There is no seed field: `result.seed` exists only for a drawn prize. */
+export type AdminLuckyDrawPrize = {
+  id: string;
+  kind: 'card' | 'credit';
+  card_handle: string | null;
+  credit_myr: number | null;
+  title: string;
+  image_url: string | null;
+  sort: number;
+  draw_at: string;
+  cancelled_at: string | null;
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
+  /** RM: the credit amount, or a card's current value (null if the card is gone). */
+  value_myr: number | null;
+  result: {
+    winner_customer_id: string | null;
+    winner_tickets: number;
+    total_tickets: number;
+    entrant_count: number;
+    drawn_at: string;
+    seed: string;
+    /** false only when a winner exists and nothing was minted / credited
+     *  (e.g. the card was deleted before the draw): someone owes them a prize.
+     *  A no-winner result owes nothing, so it is true. */
+    granted: boolean;
+  } | null;
+};
+
+/** What one prize's draw did, for the job after the transaction commits.
+ *  `pullId` null on a card prize with a winner = the Card row was gone, so
+ *  nothing was minted and someone has to fulfil it by hand. */
+export interface LuckyDrawOutcome {
+  prizeId: string;
+  winnerId: string | null;
+  kind: 'card' | 'credit';
+  cardHandle: string | null;
+  pullId: string | null;
+}
+
+export type AdminLuckyDrawEvent = {
+  id: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  status: 'draft' | 'published' | 'cancelled';
+  prizes: AdminLuckyDrawPrize[];
+};
+
+/** A card's RM value as the vault, the task hub and the Lucky Draw admin
+ *  overview show it. */
+function cardValueMyr(
+  card: { market_value: unknown; market_multiplier?: unknown },
+  fxRate: number,
+): number {
+  return displayMarketPrice(
+    toMoney(card.market_value),
+    fxRate,
+    Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+  );
+}
+
+/** A drawn prize as the player routes show it. Ids are raw — the route
+ *  resolves names. `seed` is the revealed draw seed; it exists here only
+ *  because a result row does. */
+export type LuckyDrawResultRow = {
+  prize_id: string;
+  title: string;
+  image: string | null;
+  value_myr: number;
+  drawn_at: string;
+  winner_customer_id: string | null;
+  winner_tickets: number;
+  total_tickets: number;
+  entrant_count: number;
+  seed: string;
+  seed_hash: string;
+};
+
+export type LuckyDrawPagePrize = {
+  id: string;
+  kind: 'card' | 'credit';
+  title: string;
+  image: string | null;
+  value_myr: number;
+  draw_at: string;
+  seed_hash: string;
+  total_tickets: number;
+  entrant_count: number;
+  /** Most tickets first, raw customer ids. */
+  top: { customer_id: string; tickets: number }[];
+  result: LuckyDrawResultRow | null;
+};
+
+export type LuckyDrawPage = {
+  event: {
+    id: string;
+    name: string;
+    starts_at: string;
+    ends_at: string;
+  } | null;
+  prizes: LuckyDrawPagePrize[];
+};
+
+export type LuckyDrawMine = {
+  balance: number;
+  history: { delta: number; reason: string; created_at: string }[];
+  entries: {
+    prize_id: string;
+    title: string;
+    image: string | null;
+    my_tickets: number;
+    draw_at: string;
+    status: 'open' | 'won' | 'lost' | 'cancelled';
+  }[];
+};
+
+/** A card as the Lucky Draw routes need it: its value inputs and its picture. */
+type LuckyDrawCard = {
+  handle: string;
+  market_value: unknown;
+  market_multiplier?: unknown;
+  image?: string | null;
+  slab_image?: string | null;
+};
+
+/** The player page's top-entrants length. */
+const LUCKY_DRAW_TOP_ENTRANTS = 10;
+/** A finished event stays on the page this long. */
+const LUCKY_DRAW_LINGER_MS = 7 * 24 * 60 * 60 * 1000;
+/** A draw time must be at least this far ahead when it is set or published:
+ *  one already past makes the next tick write a permanent "No entries" result. */
+const LUCKY_DRAW_MIN_LEAD_MS = 2 * 60 * 1000;
+/** Prize columns the player routes read. Never `seed_nonce`: a seed must not
+ *  even be loadable on a path that returns before the draw. */
+const LUCKY_DRAW_PRIZE_FIELDS = [
+  'id',
+  'event_id',
+  'kind',
+  'card_handle',
+  'credit_myr',
+  'title',
+  'image_url',
+  'sort',
+  'draw_at',
+  'seed_hash',
+  'cancelled_at',
+];
+/** Result columns without the frozen entry list (long). */
+const LUCKY_DRAW_RESULT_FIELDS = [
+  'prize_id',
+  'winner_customer_id',
+  'winner_tickets',
+  'total_tickets',
+  'entrant_count',
+  'seed',
+  'drawn_at',
+];
+
+/** RM value and picture of a prize for the player routes: a credit prize is its
+ *  amount; a card prize is the card's current value (0 if the card is gone).
+ *  The picture is the prize's own, else the card's slab, else its scan. */
+function luckyDrawShown(
+  prize: {
+    kind: string;
+    card_handle?: string | null;
+    credit_myr?: unknown;
+    image_url?: string | null;
+  },
+  cards: { cardByHandle: Map<string, LuckyDrawCard>; fxRate: number },
+): { value_myr: number; image: string | null } {
+  const card =
+    prize.kind === 'card' && prize.card_handle
+      ? cards.cardByHandle.get(prize.card_handle)
+      : undefined;
+  return {
+    value_myr:
+      prize.kind === 'credit'
+        ? toMoney(prize.credit_myr)
+        : card
+          ? cardValueMyr(card, cards.fxRate)
+          : 0,
+    image: prize.image_url || card?.slab_image || card?.image || null,
+  };
+}
+
+function luckyDrawResultRow(
+  prize: { id: string; title: string; seed_hash?: string | null },
+  result: {
+    winner_customer_id?: string | null;
+    winner_tickets: number;
+    total_tickets: number;
+    entrant_count: number;
+    seed: string;
+    drawn_at: unknown;
+  },
+  shown: { value_myr: number; image: string | null },
+): LuckyDrawResultRow {
+  return {
+    prize_id: prize.id,
+    title: prize.title,
+    image: shown.image,
+    value_myr: shown.value_myr,
+    drawn_at: new Date(result.drawn_at as Date).toISOString(),
+    winner_customer_id: result.winner_customer_id ?? null,
+    winner_tickets: result.winner_tickets,
+    total_tickets: result.total_tickets,
+    entrant_count: result.entrant_count,
+    seed: result.seed,
+    seed_hash: prize.seed_hash ?? '',
+  };
+}
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -879,6 +1112,11 @@ class PacksModuleService extends MedusaService({
   DailyCheckin,
   Announcement,
   PackGift,
+  LuckyDrawEvent,
+  LuckyDrawPrize,
+  LuckyDrawEntry,
+  LuckyDrawTicket,
+  LuckyDrawResult,
 }) {
   // Claim only the exact state priced before the HTTP request. The claim's row
   // lock lasts through the ORM money write, preserving its raw_* twin atomically.
@@ -2758,6 +2996,8 @@ class PacksModuleService extends MedusaService({
       title: string;
       requirement: HubRequirement;
       reward: HubReward;
+      /** Lucky Draw tickets a claim also pays (0 = none). */
+      tickets: number;
       progress: { current: number; target: number; completed: boolean };
       claimed: boolean;
     }[];
@@ -2933,13 +3173,7 @@ class PacksModuleService extends MedusaService({
           ...reward,
           card_name: c?.name ?? null,
           card_grade: c?.grader && c.grade ? `${c.grader} ${c.grade}` : null,
-          card_value_myr: c
-            ? displayMarketPrice(
-                toMoney(c.market_value),
-                fxRate,
-                Number(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
-              )
-            : null,
+          card_value_myr: c ? cardValueMyr(c, fxRate) : null,
           card_image: c?.slab_image || c?.image || null,
         };
       }
@@ -2987,6 +3221,7 @@ class PacksModuleService extends MedusaService({
           title: d.title,
           requirement: hubRequirement(requirement),
           reward: hubReward(d.reward as unknown as TaskReward),
+          tickets: d.tickets ?? 0,
           progress: taskProgress(kind, requirement, facts),
           claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
         };
@@ -3021,6 +3256,8 @@ class PacksModuleService extends MedusaService({
          *  slot spends — the tab sends the player to /slots/<pack>/spin with
          *  it. */
         claimId: string;
+        /** Lucky Draw tickets this claim paid (0 = the task pays none). */
+        tickets: number;
       }
     | {
         claimed: false;
@@ -3071,6 +3308,8 @@ class PacksModuleService extends MedusaService({
     }
     const requirement = def.requirement as unknown as TaskRequirement;
     const reward = def.reward as unknown as TaskReward;
+    // Rows from before the column existed read 0.
+    const tickets = def.tickets ?? 0;
 
     const facts = await this.taskFactsFor(
       { customerId: input.customerId, week, day },
@@ -3101,7 +3340,12 @@ class PacksModuleService extends MedusaService({
             customer_id: input.customerId,
             task_id: def.id,
             period_key: periodKey,
-            reward_snapshot: reward as unknown as Record<string, unknown>,
+            // Frozen with the reward: editing the task's tickets later must
+            // not change what this claim paid.
+            reward_snapshot: { ...reward, tickets } as unknown as Record<
+              string,
+              unknown
+            >,
           },
         ],
         sharedContext,
@@ -3115,6 +3359,23 @@ class PacksModuleService extends MedusaService({
         return { claimed: false, reason: 'already_claimed' };
       }
       throw e;
+    }
+
+    // Lucky Draw tickets ride the claim, in its transaction. The claim's
+    // unique index makes this once-only; (reason, ref) is the backstop.
+    // Deliberately BEFORE (and apart from) the reward chain below.
+    if (tickets > 0) {
+      await this.createLuckyDrawTickets(
+        [
+          {
+            customer_id: input.customerId,
+            delta: tickets,
+            reason: 'task_claim' as const,
+            ref: claimId,
+          },
+        ],
+        sharedContext,
+      );
     }
 
     let ref: string | null = null;
@@ -3210,7 +3471,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    return { claimed: true, reward, ref, claimId };
+    return { claimed: true, reward, ref, claimId, tickets };
   }
 
   // Admin CRUD for task definitions — validated + audited.
@@ -3224,6 +3485,10 @@ class PacksModuleService extends MedusaService({
       reward: unknown;
       active: boolean;
       sort: number;
+      /** Lucky Draw tickets a claim also pays. Omitted on an edit keeps the
+       *  stored value (Retire / the active toggle re-POST without it); on a
+       *  create it means 0. Validated by validateTaskTickets. */
+      tickets?: unknown;
       /** Optional run window; omitted means "unscheduled" (null/null). */
       startsAt?: Date | null;
       endsAt?: Date | null;
@@ -3238,6 +3503,7 @@ class PacksModuleService extends MedusaService({
         'title is required (1–120 chars).',
       );
     }
+    const newTickets = validateTaskTickets(input.tickets);
     if (
       input.startsAt &&
       input.endsAt &&
@@ -3346,6 +3612,10 @@ class PacksModuleService extends MedusaService({
       reward: reward as unknown as Record<string, unknown>,
       active: input.active,
       sort: input.sort,
+      tickets:
+        input.tickets === undefined && existing
+          ? (existing.tickets ?? 0)
+          : newTickets,
       starts_at: input.startsAt ?? null,
       ends_at: input.endsAt ?? null,
       // Stamped when the task goes OFF, cleared when it comes back on, kept
@@ -3367,6 +3637,7 @@ class PacksModuleService extends MedusaService({
         reward: existing.reward,
         active: existing.active,
         sort: existing.sort,
+        tickets: existing.tickets ?? 0,
         starts_at: existing.starts_at,
         ends_at: existing.ends_at,
       };
@@ -6059,6 +6330,1467 @@ class PacksModuleService extends MedusaService({
       [customerId],
     );
     return rows.length > 0;
+  }
+
+  // A customer's Lucky Draw ticket balance: the sum of their live ledger rows
+  // (task claims +, entries -, refunds +). 0 when they have none.
+  @InjectManager()
+  async luckyDrawBalance(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ balance: string | number }[]>(
+      'SELECT COALESCE(SUM(delta), 0) AS balance FROM lucky_draw_ticket ' +
+        'WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+    return Number(rows[0]?.balance ?? 0);
+  }
+
+  // Spend tickets on a Lucky Draw prize. Two advisory locks, always in this
+  // order: the SHARED prize lock (the draw and cancel take it exclusive, so
+  // they wait for in-flight entries and an entry arriving after the draw sees
+  // its result), then the per-customer ticket lock (serialises this customer's
+  // spends so two parallel enters cannot both pass the balance check). Every
+  // read below runs on this locked transaction. `tickets` is validated before
+  // any lock is taken. A refusal is a return value; only a bad amount or a
+  // frozen account throws.
+  @InjectTransactionManager()
+  async enterLuckyDraw(
+    input: {
+      customerId: string;
+      prizeId: string;
+      tickets: unknown;
+      now?: Date;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    | { entered: true; entryId: string; balance: number; myTickets: number }
+    | { entered: false; reason: EnterRefusal }
+  > {
+    const tickets = validateEntryTickets(input.tickets);
+    const { customerId, prizeId } = input;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const refuse = (reason: EnterRefusal) => ({
+      entered: false as const,
+      reason,
+    });
+
+    await em.execute(
+      'SELECT pg_advisory_xact_lock_shared(hashtextextended(?, 0))',
+      [`luckydraw:${prizeId}`],
+    );
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `tickets:${customerId}`,
+    ]);
+    // Taken after the locks: a wait behind the draw must not leave a stale clock.
+    const now = (input.now ?? new Date()).getTime();
+
+    await this.assertNotFrozen(customerId, sharedContext);
+
+    const [prize] = await this.listLuckyDrawPrizes(
+      { id: prizeId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!prize || prize.cancelled_at) return refuse('not_found');
+    const [event] = await this.listLuckyDrawEvents(
+      { id: prize.event_id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!event || event.status !== 'published') return refuse('not_found');
+
+    if (now < new Date(event.starts_at).getTime()) return refuse('not_open');
+    if (now >= new Date(prize.draw_at).getTime()) return refuse('closed');
+    const [result] = await this.listLuckyDrawResults(
+      { prize_id: prizeId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (result) return refuse('closed');
+
+    if (!(await this.hasTopUp(customerId, sharedContext))) {
+      return refuse('no_topup');
+    }
+    const before = await this.luckyDrawBalance(customerId, sharedContext);
+    if (before < tickets) return refuse('not_enough_tickets');
+    // The ORM creates below are not flushed until the transaction ends, so a raw
+    // read after them would miss them: take this customer's running total now.
+    // Only this customer's enters write it and the ticket lock serialises them,
+    // so it is exact.
+    const mine = await em.execute<{ total: string | number }[]>(
+      'SELECT COALESCE(SUM(tickets), 0) AS total FROM lucky_draw_entry ' +
+        'WHERE prize_id = ? AND customer_id = ? AND deleted_at IS NULL',
+      [prizeId, customerId],
+    );
+
+    const [entry] = await this.createLuckyDrawEntries(
+      [{ prize_id: prizeId, customer_id: customerId, tickets }],
+      sharedContext,
+    );
+    await this.createLuckyDrawTickets(
+      [
+        {
+          customer_id: customerId,
+          delta: -tickets,
+          reason: 'entry' as const,
+          ref: entry.id,
+        },
+      ],
+      sharedContext,
+    );
+
+    return {
+      entered: true,
+      entryId: entry.id,
+      balance: before - tickets,
+      myTickets: Number(mine[0]?.total ?? 0) + tickets,
+    };
+  }
+
+  // Admin: create or edit a Lucky Draw event. A draft edits freely; once
+  // published only the name may change (the window is what customers saw);
+  // a cancelled event is closed. Takes the per-event lock so a publish or a
+  // prize save cannot interleave with an edit.
+  @InjectTransactionManager()
+  async saveLuckyDrawEvent(
+    input: {
+      id?: string;
+      name: string;
+      startsAt: Date;
+      endsAt: Date;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string }> {
+    const invalid = (m: string): never => {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, m);
+    };
+    const name = input.name.trim();
+    if (!name || name.length > 80) invalid('name is required (1–80 chars).');
+    const startsAt = input.startsAt.getTime();
+    const endsAt = input.endsAt.getTime();
+    if (Number.isNaN(startsAt) || Number.isNaN(endsAt)) {
+      invalid('starts_at and ends_at must be valid dates.');
+    }
+    if (endsAt <= startsAt) invalid('The event end must be after its start.');
+
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    if (input.id) {
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `luckydrawevent:${input.id}`,
+      ]);
+    }
+    const [existing] = input.id
+      ? await this.listLuckyDrawEvents(
+          { id: input.id },
+          { take: 1 },
+          sharedContext,
+        )
+      : [];
+    if (input.id && !existing) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Lucky Draw event ${input.id} not found.`,
+      );
+    }
+    if (existing?.status === 'cancelled') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A cancelled event cannot be edited.',
+      );
+    }
+    if (
+      existing?.status === 'published' &&
+      (new Date(existing.starts_at).getTime() !== startsAt ||
+        new Date(existing.ends_at).getTime() !== endsAt)
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A published event can only be renamed — its window is fixed.',
+      );
+    }
+
+    const data = {
+      name,
+      starts_at: input.startsAt,
+      ends_at: input.endsAt,
+    };
+    const iso = (d: unknown) => new Date(d as Date).toISOString();
+    let id = existing?.id;
+    if (existing) {
+      await this.updateLuckyDrawEvents(
+        { selector: { id: existing.id }, data },
+        sharedContext,
+      );
+    } else {
+      const [row] = await this.createLuckyDrawEvents(
+        [{ ...data, status: 'draft' as const, created_by: input.adminId }],
+        sharedContext,
+      );
+      id = row.id;
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'lucky_draw_event',
+        entity_id: id as string,
+        action: existing ? 'edit' : 'create',
+        before: existing
+          ? {
+              name: existing.name,
+              starts_at: iso(existing.starts_at),
+              ends_at: iso(existing.ends_at),
+            }
+          : null,
+        after: {
+          name,
+          starts_at: iso(data.starts_at),
+          ends_at: iso(data.ends_at),
+        },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return { id: id as string };
+  }
+
+  // Admin: create or edit a prize. Exactly one of card / credit per `kind`.
+  // On a published event a NEW prize is committed at creation (nonce + seed
+  // hash, like publish does for the existing ones) and an existing prize may
+  // change only title, image and sort — kind, card, amount and draw time are
+  // what customers entered for. An unchanged locked field re-posted by the
+  // console is fine; a changed one is refused.
+  @InjectTransactionManager()
+  async saveLuckyDrawPrize(
+    input: {
+      id?: string;
+      eventId: string;
+      kind: 'card' | 'credit';
+      cardHandle?: string | null;
+      creditMyr?: number | null;
+      title: string;
+      imageUrl?: string | null;
+      sort: number;
+      drawAt?: Date | null;
+      adminId: string;
+      reason: string;
+      now?: Date;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string }> {
+    const invalid = (m: string): never => {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, m);
+    };
+    const title = input.title.trim();
+    if (!title || title.length > 120)
+      invalid('title is required (1–120 chars).');
+    if (!Number.isInteger(input.sort)) invalid('sort must be a whole number.');
+    if (input.kind !== 'card' && input.kind !== 'credit') {
+      invalid("kind must be 'card' or 'credit'.");
+    }
+    const cardHandle = input.cardHandle?.trim() || null;
+    const imageUrl = input.imageUrl?.trim() || null;
+    let creditMyr: number | null = null;
+    if (input.kind === 'card') {
+      if (!cardHandle) invalid('A card prize needs a card.');
+      if (input.creditMyr != null)
+        invalid('A card prize carries no credit amount.');
+    } else {
+      if (cardHandle) invalid('A credit prize carries no card.');
+      const amount = input.creditMyr;
+      if (
+        typeof amount !== 'number' ||
+        !Number.isFinite(amount) ||
+        amount <= 0 ||
+        amount > MAX_PRIZE_CREDIT_MYR ||
+        fromSen(toSen(amount)) !== amount
+      ) {
+        invalid(
+          `credit_myr must be a positive amount in whole sen, at most ${MAX_PRIZE_CREDIT_MYR}.`,
+        );
+      }
+      creditMyr = amount as number;
+      if (!imageUrl) invalid('A credit prize needs an image.');
+    }
+    if (input.drawAt && Number.isNaN(input.drawAt.getTime())) {
+      invalid('draw_at must be a valid date.');
+    }
+
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `luckydrawevent:${input.eventId}`,
+    ]);
+    const [event] = await this.listLuckyDrawEvents(
+      { id: input.eventId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!event) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Lucky Draw event ${input.eventId} not found.`,
+      );
+    }
+    if (event.status === 'cancelled') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A cancelled event takes no prizes.',
+      );
+    }
+    const [existing] = input.id
+      ? await this.listLuckyDrawPrizes(
+          { id: input.id },
+          { take: 1 },
+          sharedContext,
+        )
+      : [];
+    if (input.id && !existing) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Lucky Draw prize ${input.id} not found.`,
+      );
+    }
+    if (existing && existing.event_id !== event.id) {
+      invalid('That prize belongs to another event.');
+    }
+    if (existing?.cancelled_at) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A cancelled prize cannot be edited.',
+      );
+    }
+
+    // On an edit a missing draw time keeps the stored one; on a create it is
+    // the event's end.
+    const drawAt =
+      input.drawAt ?? new Date(existing ? existing.draw_at : event.ends_at);
+    const drawChanged =
+      !existing || drawAt.getTime() !== new Date(existing.draw_at).getTime();
+    if (
+      drawChanged &&
+      !(
+        drawAt.getTime() > new Date(event.starts_at).getTime() &&
+        drawAt.getTime() <= new Date(event.ends_at).getTime()
+      )
+    ) {
+      invalid(
+        'The draw time must fall after the event starts and by the time it ends.',
+      );
+    }
+    if (
+      drawChanged &&
+      drawAt.getTime() <=
+        (input.now ?? new Date()).getTime() + LUCKY_DRAW_MIN_LEAD_MS
+    ) {
+      invalid('The draw time must be at least 2 minutes from now.');
+    }
+    // A card must exist — only when it is new, so retitling a prize whose
+    // card was deleted since is not blocked.
+    if (cardHandle && existing?.card_handle !== cardHandle) {
+      const [card] = await this.listCards(
+        { handle: cardHandle },
+        { select: ['handle'], take: 1 },
+        sharedContext,
+      );
+      if (!card) invalid(`Card '${cardHandle}' does not exist.`);
+    }
+
+    const published = event.status === 'published';
+    if (
+      published &&
+      existing &&
+      (existing.kind !== input.kind ||
+        (existing.card_handle ?? null) !== cardHandle ||
+        (existing.credit_myr == null ? null : toMoney(existing.credit_myr)) !==
+          creditMyr ||
+        drawChanged)
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A published prize can only change its title, image and sort.',
+      );
+    }
+    // Committed before any write, so a missing secret leaves nothing behind.
+    const commit =
+      published && !existing ? commitDrawSeed(requireDrawSeedSecret()) : null;
+
+    const fields = {
+      kind: input.kind,
+      card_handle: cardHandle,
+      credit_myr: creditMyr,
+      title,
+      image_url: imageUrl,
+      sort: input.sort,
+      draw_at: drawAt,
+    };
+    let id = existing?.id;
+    if (existing) {
+      await this.updateLuckyDrawPrizes(
+        { selector: { id: existing.id }, data: fields },
+        sharedContext,
+      );
+    } else {
+      const [row] = await this.createLuckyDrawPrizes(
+        [{ event_id: event.id, ...fields, ...commit }],
+        sharedContext,
+      );
+      id = row.id;
+    }
+    const view = (p: {
+      kind: string;
+      card_handle: string | null;
+      credit_myr: unknown;
+      title: string;
+      image_url: string | null;
+      sort: number;
+      draw_at: unknown;
+    }) => ({
+      kind: p.kind,
+      card_handle: p.card_handle,
+      credit_myr: p.credit_myr == null ? null : toMoney(p.credit_myr),
+      title: p.title,
+      image_url: p.image_url,
+      sort: p.sort,
+      draw_at: new Date(p.draw_at as Date).toISOString(),
+    });
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'lucky_draw_prize',
+        entity_id: id as string,
+        action: existing ? 'edit' : 'create',
+        before: existing ? view(existing) : null,
+        // The commitment hash is public; the nonce and the seed stay out.
+        after: { ...view(fields), seed_hash: commit?.seed_hash ?? null },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return { id: id as string };
+  }
+
+  // Admin: take a draft event live. Every live prize gets its seed commitment
+  // here — a random nonce and the hash of the seed it derives; the seed itself
+  // is never written (deriveDrawSeed recomputes it at draw time).
+  @InjectTransactionManager()
+  async publishLuckyDrawEvent(
+    input: { id: string; adminId: string; reason: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `luckydrawevent:${input.id}`,
+    ]);
+    const [event] = await this.listLuckyDrawEvents(
+      { id: input.id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!event) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Lucky Draw event ${input.id} not found.`,
+      );
+    }
+    if (event.status !== 'draft') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only a draft event can be published (this one is ${event.status}).`,
+      );
+    }
+    const prizes = (
+      await pageAll((opts) =>
+        this.listLuckyDrawPrizes({ event_id: event.id }, opts, sharedContext),
+      )
+    ).filter((p) => !p.cancelled_at);
+    if (prizes.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Add at least one prize before publishing.',
+      );
+    }
+    // A window edit after the prize was saved can strand its draw time, and a
+    // draft can sit until its draw time has passed.
+    const starts = new Date(event.starts_at).getTime();
+    const ends = new Date(event.ends_at).getTime();
+    const earliest =
+      (input.now ?? new Date()).getTime() + LUCKY_DRAW_MIN_LEAD_MS;
+    for (const p of prizes) {
+      const at = new Date(p.draw_at).getTime();
+      if (!(at > starts && at <= ends)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Prize '${p.title}' draws outside the event window — fix its draw time first.`,
+        );
+      }
+      if (at <= earliest) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Prize '${p.title}' draw time has passed or is under 2 minutes away — move its draw time first.`,
+        );
+      }
+    }
+    const secret = requireDrawSeedSecret();
+    const commits = prizes
+      .filter((p) => !p.seed_nonce)
+      .map((p) => ({ id: p.id, ...commitDrawSeed(secret) }));
+    if (commits.length > 0) {
+      await this.updateLuckyDrawPrizes(commits, sharedContext);
+    }
+    await this.updateLuckyDrawEvents(
+      { id: event.id, status: 'published' as const },
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'lucky_draw_event',
+        entity_id: event.id,
+        action: 'publish',
+        before: { status: 'draft' },
+        after: {
+          status: 'published',
+          prizes: prizes.map((p) => ({
+            id: p.id,
+            seed_hash:
+              commits.find((c) => c.id === p.id)?.seed_hash ?? p.seed_hash,
+          })),
+        },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+  }
+
+  // Admin: withdraw a prize before its draw and give every entrant their
+  // tickets back. Takes the EXCLUSIVE prize lock first — the same key an entry
+  // holds shared — so it waits for in-flight entries and an entry arriving
+  // afterwards is refused; the result is then re-checked under the lock, so a
+  // cancel racing the draw can never both pay a winner and refund.
+  @InjectTransactionManager()
+  async cancelLuckyDrawPrize(
+    input: { id: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ refunded: number }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `luckydraw:${input.id}`,
+    ]);
+    const [prize] = await this.listLuckyDrawPrizes(
+      { id: input.id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!prize) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Lucky Draw prize ${input.id} not found.`,
+      );
+    }
+    if (prize.cancelled_at) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'That prize is already cancelled.',
+      );
+    }
+    const [result] = await this.listLuckyDrawResults(
+      { prize_id: prize.id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (result) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'That prize has already been drawn and cannot be cancelled.',
+      );
+    }
+    // Read through the ORM, before this transaction writes anything: raw SQL
+    // would not see rows the unit of work has not flushed yet. Paged — a
+    // truncated read here is a missed refund.
+    const entrants = aggregateEntries(
+      await pageAll((opts) =>
+        this.listLuckyDrawEntries({ prize_id: prize.id }, opts, sharedContext),
+      ),
+    );
+    const cancelledAt = new Date();
+    await this.updateLuckyDrawPrizes(
+      { selector: { id: prize.id }, data: { cancelled_at: cancelledAt } },
+      sharedContext,
+    );
+    if (entrants.length > 0) {
+      await this.createLuckyDrawTickets(
+        entrants.map((e) => ({
+          customer_id: e.customer_id,
+          delta: e.tickets,
+          reason: 'refund' as const,
+          ref: `${prize.id}:${e.customer_id}`,
+        })),
+        sharedContext,
+      );
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'lucky_draw_prize',
+        entity_id: prize.id,
+        action: 'disable',
+        before: { cancelled_at: null },
+        after: {
+          cancelled_at: cancelledAt.toISOString(),
+          refunded: entrants.length,
+          tickets_refunded: entrants.reduce((n, e) => n + e.tickets, 0),
+        },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return { refunded: entrants.length };
+  }
+
+  // The once-a-minute draw job's loop. A plain read context and NO
+  // transaction here: each prize draws in its OWN transaction, so one bad
+  // prize rolls back alone and the rest still draw. The due list is raw SQL
+  // over committed rows (nothing is written at this level) and is only a
+  // hint — the lock and re-check inside drawLuckyDrawPrize are what stop a
+  // double draw. Card stock is taken after each commit, never inside it.
+  @InjectManager()
+  async drawDueLuckyDrawPrizes(
+    deps: {
+      now?: Date;
+      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
+      /** Called after each committed draw (the job's missing-card warning). */
+      onDrawn?: (outcome: LuckyDrawOutcome) => Promise<void>;
+    } = {},
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ drawn: number; failed: number }> {
+    const now = deps.now ?? new Date();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // shortcut: LIMIT 100, oldest first — if 100+ older due prizes fail for
+    // good, newer ones starve behind them; skip prizes that keep failing (or
+    // page past them) once a monthly event carries anywhere near 100 prizes.
+    const due = await em.execute<{ id: string }[]>(
+      'SELECT p.id FROM lucky_draw_prize p ' +
+        'JOIN lucky_draw_event e ON e.id = p.event_id ' +
+        "AND e.status = 'published' AND e.deleted_at IS NULL " +
+        'WHERE p.draw_at <= ?::timestamptz AND p.cancelled_at IS NULL ' +
+        'AND p.deleted_at IS NULL AND NOT EXISTS (' +
+        'SELECT 1 FROM lucky_draw_result r ' +
+        'WHERE r.prize_id = p.id AND r.deleted_at IS NULL) ' +
+        'ORDER BY p.draw_at ASC, p.id ASC LIMIT 100',
+      [now.toISOString()],
+    );
+    let drawn = 0;
+    let failed = 0;
+    for (const { id } of due) {
+      let outcome: LuckyDrawOutcome | null;
+      try {
+        // No context forwarded: each prize opens its own transaction.
+        outcome = await this.drawLuckyDrawPrize({ prizeId: id, now });
+      } catch (err) {
+        // Not drawn: it stays due and the next tick retries it. The message
+        // is the operator's clue (e.g. "LUCKY_DRAW_SEED_SECRET changed since
+        // publish"); the job logs the count.
+        failed += 1;
+        // eslint-disable-next-line no-console
+        console.warn('[drawDueLuckyDrawPrizes] prize not drawn', {
+          prize_id: id,
+          error: String(err),
+        });
+        continue;
+      }
+      if (!outcome) continue; // drawn, cancelled or unpublished since the list
+      drawn += 1;
+      await this.reserveLuckyDrawStock(outcome, deps.decrementStock);
+      if (!deps.onDrawn) continue;
+      try {
+        await deps.onDrawn(outcome);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[drawDueLuckyDrawPrizes] onDrawn failed (draw already committed)',
+          { prize_id: id, error: String(err) },
+        );
+      }
+    }
+    return { drawn, failed };
+  }
+
+  // Draw one prize, pay its winner and write its result in ONE transaction,
+  // so a prize is never drawn-but-unpaid. Takes the EXCLUSIVE prize lock
+  // first: in-flight entries hold it shared, so the draw waits for them and
+  // counts them, and an entry arriving after this commit sees the result and
+  // is refused. Everything is re-checked under the lock; null = nothing to do
+  // (gone, cancelled, not due, event not published, or already drawn). Every
+  // read runs before the first write: raw SQL in the writers below would not
+  // see rows the unit of work has not flushed yet.
+  @InjectTransactionManager()
+  async drawLuckyDrawPrize(
+    input: { prizeId: string; now: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LuckyDrawOutcome | null> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `luckydraw:${input.prizeId}`,
+    ]);
+    const [prize] = await this.listLuckyDrawPrizes(
+      { id: input.prizeId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!prize || prize.cancelled_at) return null;
+    if (new Date(prize.draw_at).getTime() > input.now.getTime()) return null;
+    const [event] = await this.listLuckyDrawEvents(
+      { id: prize.event_id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (event?.status !== 'published') return null;
+    const [result] = await this.listLuckyDrawResults(
+      { prize_id: prize.id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (result) return null;
+
+    // Never draw against a hash the public did not see.
+    if (!prize.seed_nonce || !prize.seed_hash) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Lucky Draw prize ${prize.id} has no published seed hash.`,
+      );
+    }
+    const seed = deriveDrawSeed(requireDrawSeedSecret(), prize.seed_nonce);
+    if (drawSeedHash(seed) !== prize.seed_hash) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `LUCKY_DRAW_SEED_SECRET changed since publish — prize ${prize.id} no longer matches its published seed hash.`,
+      );
+    }
+    const creditMyr = toMoney(prize.credit_myr);
+    if (prize.kind === 'credit' && !(creditMyr > 0)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Lucky Draw prize ${prize.id} has no credit amount.`,
+      );
+    }
+
+    // Every entry on the prize, with no time filter: the cut-off was enforced
+    // at entry time under this lock, and app/DB clock skew must never drop an
+    // accepted entry. Paged — a truncated read is a dropped entry.
+    const all = aggregateEntries(
+      await pageAll((opts) =>
+        this.listLuckyDrawEntries({ prize_id: prize.id }, opts, sharedContext),
+      ),
+    );
+    // Disabled (and deleted) accounts are left out of the draw and refunded.
+    const disabled = await this.disabledCustomerIds(
+      all.map((e) => e.customer_id),
+      sharedContext,
+    );
+    const entrants = all.filter((e) => !disabled.has(e.customer_id));
+    const excluded = all.filter((e) => disabled.has(e.customer_id));
+    const pick = drawWinner(entrants, seed, prize.id);
+    const winnerId = pick?.winner.customer_id ?? null;
+    const cardHandle =
+      prize.kind === 'card' ? (prize.card_handle ?? null) : null;
+    // A card deleted since the prize was saved has no handle to mint against:
+    // the result is still written (pull_id null) and the job flags it.
+    const [card] =
+      winnerId && cardHandle
+        ? await this.listCards(
+            { handle: cardHandle },
+            { select: ['handle'], take: 1 },
+            sharedContext,
+          )
+        : [];
+
+    if (excluded.length > 0) {
+      // Same ref as a cancel refund: a prize is either drawn or cancelled.
+      await this.createLuckyDrawTickets(
+        excluded.map((e) => ({
+          customer_id: e.customer_id,
+          delta: e.tickets,
+          reason: 'refund' as const,
+          ref: `${prize.id}:${e.customer_id}`,
+        })),
+        sharedContext,
+      );
+    }
+    let creditTransactionId: string | null = null;
+    let pullId: string | null = null;
+    if (winnerId && prize.kind === 'credit') {
+      // Bonus credit, like a weekly-challenge money prize; claimTask's shape.
+      const { id, amount } = await this.mutateCreditAtomic(
+        {
+          customerId: winnerId,
+          amount: creditMyr,
+          reason: 'reward_credit',
+          idempotencyReference: `luckydraw:${prize.id}`,
+        },
+        sharedContext,
+      );
+      await this.recordLedgerEntry(
+        {
+          type: 'WP',
+          customerId: winnerId,
+          refId: id,
+          walletDelta: amount,
+          vaultDelta: null,
+          payload: {
+            type: 'WP',
+            period: `luckydraw:${prize.id}`,
+            stage: 0,
+            rank: 0,
+            sku: null,
+            value: 0,
+          },
+        },
+        sharedContext,
+      );
+      creditTransactionId = id;
+    } else if (winnerId && card) {
+      // The settleChallengeWinner card shape. The stock take runs after this
+      // transaction commits (reserveLuckyDrawStock).
+      const [pull] = await this.createPulls(
+        [
+          {
+            customer_id: winnerId,
+            pack_id: LUCKY_DRAW_PULL_PACK_ID,
+            card_id: card.handle,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward' as const,
+            bonus_bp: BONUS_BP_FULL, // reward: sale not held (ADR 0012)
+            stock_earmarked: false,
+          },
+        ],
+        sharedContext,
+      );
+      // A card-only WP row, like settleChallengeWinner's: walletDelta 0, the
+      // card in `sku`. No pull minted (card gone) = no row.
+      await this.recordLedgerEntry(
+        {
+          type: 'WP',
+          customerId: winnerId,
+          refId: pull.id,
+          walletDelta: 0,
+          vaultDelta: null,
+          payload: {
+            type: 'WP',
+            period: `luckydraw:${prize.id}`,
+            stage: 0,
+            rank: 0,
+            sku: card.handle,
+            value: 0,
+          },
+        },
+        sharedContext,
+      );
+      pullId = pull.id;
+    }
+    await this.createLuckyDrawResults(
+      [
+        {
+          prize_id: prize.id,
+          winner_customer_id: winnerId,
+          winner_tickets: pick?.winner.tickets ?? 0,
+          total_tickets: pick?.totalTickets ?? 0,
+          entrant_count: entrants.length,
+          ticket_index: pick?.ticketIndex ?? null,
+          seed,
+          // The json columns are typed as Record; the result stores arrays.
+          entries: entrants as unknown as Record<string, unknown>,
+          excluded: excluded.map((e) => e.customer_id) as unknown as Record<
+            string,
+            unknown
+          >,
+          credit_transaction_id: creditTransactionId,
+          pull_id: pullId,
+          drawn_at: new Date(),
+        },
+      ],
+      sharedContext,
+    );
+    return {
+      prizeId: prize.id,
+      winnerId,
+      kind: prize.kind,
+      cardHandle,
+      pullId,
+    };
+  }
+
+  // Take a drawn card prize's unit once its draw has COMMITTED — the
+  // reserveSettledStock shape (see there): adjustInventory commits on the
+  // inventory module's own connection and cannot roll back with the draw.
+  // The result row keeps the prize from being drawn again, so this runs at
+  // most once per prize. Failures are logged, never thrown: the prize is
+  // already granted, and an unflagged pull is the safe side (buyback never
+  // restores a unit that was not taken). qty is 1, so a take is never partial.
+  private async reserveLuckyDrawStock(
+    outcome: LuckyDrawOutcome,
+    decrementStock:
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
+  ): Promise<void> {
+    const { pullId, cardHandle } = outcome;
+    if (!decrementStock || !pullId || !cardHandle) return;
+    try {
+      // false = untracked product: nothing counted, so nothing to flag.
+      if (!(await decrementStock(cardHandle, 1))) return;
+      await this.updatePulls({
+        selector: { id: pullId },
+        data: { stock_earmarked: true },
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[drawDueLuckyDrawPrizes] stock take failed AFTER the draw committed — prize already granted, pull left unflagged; check the card stock counter',
+        {
+          prize_id: outcome.prizeId,
+          customer_id: outcome.winnerId,
+          handle: cardHandle,
+          pull_id: pullId,
+          error: String(err),
+        },
+      );
+    }
+  }
+
+  // Admin overview: every event with its prizes' facts. A prize's seed never
+  // appears here until its result exists — the prize row has none to leak, and
+  // the only seed read is the one the draw wrote into lucky_draw_result.
+  // Entry counts are the entries ever made on the prize (a cancelled prize
+  // keeps showing what was entered before the refund).
+  @InjectManager()
+  async adminLuckyDrawOverview(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<AdminLuckyDrawEvent[]> {
+    const events = await this.listLuckyDrawEvents(
+      {},
+      { order: { starts_at: 'DESC', id: 'DESC' }, take: 200 },
+      sharedContext,
+    );
+    if (events.length === 0) return [];
+    const prizes = await pageAll(
+      (opts) =>
+        this.listLuckyDrawPrizes(
+          { event_id: events.map((e) => e.id) },
+          opts,
+          sharedContext,
+        ),
+      { sort: 'ASC', id: 'ASC' },
+    );
+    const prizeIds = prizes.map((p) => p.id);
+
+    const sumByPrize = await this.luckyDrawEntrySums(prizeIds, sharedContext);
+
+    const results = prizeIds.length
+      ? await pageAll((opts) =>
+          this.listLuckyDrawResults(
+            { prize_id: prizeIds },
+            {
+              ...opts,
+              // Not `entries`: the frozen entrant list can be long.
+              select: [
+                ...LUCKY_DRAW_RESULT_FIELDS,
+                'pull_id',
+                'credit_transaction_id',
+              ],
+            },
+            sharedContext,
+          ),
+        )
+      : [];
+    const resultByPrize = new Map(results.map((r) => [r.prize_id, r]));
+
+    const { cardByHandle, fxRate } = await this.luckyDrawCards(
+      prizes,
+      sharedContext,
+    );
+
+    const iso = (d: unknown) => new Date(d as Date).toISOString();
+    const view = (p: (typeof prizes)[number]): AdminLuckyDrawPrize => {
+      const sum = sumByPrize.get(p.id);
+      const result = resultByPrize.get(p.id);
+      const card = p.card_handle ? cardByHandle.get(p.card_handle) : undefined;
+      return {
+        id: p.id,
+        kind: p.kind,
+        card_handle: p.card_handle ?? null,
+        credit_myr: p.credit_myr == null ? null : toMoney(p.credit_myr),
+        title: p.title,
+        image_url: p.image_url ?? null,
+        sort: p.sort,
+        draw_at: iso(p.draw_at),
+        cancelled_at: p.cancelled_at ? iso(p.cancelled_at) : null,
+        seed_hash: p.seed_hash ?? null,
+        total_tickets: sum?.total_tickets ?? 0,
+        entrant_count: sum?.entrant_count ?? 0,
+        value_myr:
+          p.kind === 'credit'
+            ? p.credit_myr == null
+              ? null
+              : toMoney(p.credit_myr)
+            : card
+              ? cardValueMyr(card, fxRate)
+              : null,
+        result: result
+          ? {
+              winner_customer_id: result.winner_customer_id ?? null,
+              winner_tickets: result.winner_tickets,
+              total_tickets: result.total_tickets,
+              entrant_count: result.entrant_count,
+              drawn_at: iso(result.drawn_at),
+              seed: result.seed,
+              granted:
+                !result.winner_customer_id ||
+                Boolean(
+                  p.kind === 'card'
+                    ? result.pull_id
+                    : result.credit_transaction_id,
+                ),
+            }
+          : null,
+      };
+    };
+    return events.map((e) => ({
+      id: e.id,
+      name: e.name,
+      starts_at: iso(e.starts_at),
+      ends_at: iso(e.ends_at),
+      status: e.status,
+      prizes: prizes.filter((p) => p.event_id === e.id).map(view),
+    }));
+  }
+
+  // A customer's ticket balance and their newest ledger rows (admin support).
+  @InjectManager()
+  async luckyDrawTicketHistory(
+    customerId: string,
+    take: number,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    balance: number;
+    rows: { delta: number; reason: string; ref: string; created_at: string }[];
+  }> {
+    const balance = await this.luckyDrawBalance(customerId, sharedContext);
+    const rows = await this.listLuckyDrawTickets(
+      { customer_id: customerId },
+      { order: { created_at: 'DESC', id: 'DESC' }, take },
+      sharedContext,
+    );
+    return {
+      balance,
+      rows: rows.map((r) => ({
+        delta: r.delta,
+        reason: r.reason,
+        ref: r.ref,
+        created_at: new Date(r.created_at).toISOString(),
+      })),
+    };
+  }
+
+  // Tickets in and distinct entrants per prize. Counts the entries ever made on
+  // a prize (a cancelled prize keeps showing what was entered before its
+  // refund). Prizes with no entries are absent from the map.
+  private async luckyDrawEntrySums(
+    prizeIds: string[],
+    sharedContext: Context,
+  ): Promise<Map<string, { total_tickets: number; entrant_count: number }>> {
+    if (prizeIds.length === 0) return new Map();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      {
+        prize_id: string;
+        total: string | number;
+        entrants: string | number;
+      }[]
+    >(
+      'SELECT prize_id, COALESCE(SUM(tickets), 0) AS total, ' +
+        'COUNT(DISTINCT customer_id) AS entrants FROM lucky_draw_entry ' +
+        `WHERE prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
+        'AND deleted_at IS NULL GROUP BY prize_id',
+      prizeIds,
+    );
+    return new Map(
+      rows.map((r) => [
+        r.prize_id,
+        { total_tickets: Number(r.total), entrant_count: Number(r.entrants) },
+      ]),
+    );
+  }
+
+  // The cards behind a set of prizes, with the FX rate their RM value needs.
+  private async luckyDrawCards(
+    prizes: { kind: string; card_handle?: string | null }[],
+    sharedContext: Context,
+  ): Promise<{ cardByHandle: Map<string, LuckyDrawCard>; fxRate: number }> {
+    const handles = [
+      ...new Set(
+        prizes.flatMap((p) =>
+          p.kind === 'card' && p.card_handle ? [p.card_handle] : [],
+        ),
+      ),
+    ];
+    const cards = handles.length
+      ? await this.listCards(
+          { handle: handles },
+          {
+            select: [
+              'handle',
+              'market_value',
+              'market_multiplier',
+              'image',
+              'slab_image',
+            ],
+            take: handles.length,
+          },
+          sharedContext,
+        )
+      : [];
+    return {
+      cardByHandle: new Map(cards.map((c) => [c.handle, c])),
+      fxRate: cards.length ? await resolveFxRate(this) : DEFAULT_USD_MYR,
+    };
+  }
+
+  // The player page's shared part: the live event (else the latest one that
+  // ended within 7 days; either needs a prize that is not cancelled), its
+  // prizes with totals, the top entrants (raw ids)
+  // and, for drawn prizes, the result. Everything here is the same for every
+  // viewer, so the route caches it; the viewer's own balance and tickets come
+  // from luckyDrawBalance / luckyDrawMyTickets. Cancelled prizes are left out.
+  // A prize's seed is read only from its result row.
+  @InjectManager()
+  async luckyDrawPage(
+    input: { now?: Date } = {},
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LuckyDrawPage> {
+    const now = (input.now ?? new Date()).getTime();
+    const at = (d: unknown) => new Date(d as Date).getTime();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const published = await this.listLuckyDrawEvents(
+      { status: 'published' },
+      { order: { starts_at: 'DESC', id: 'DESC' }, take: 50 },
+      sharedContext,
+    );
+    // An event whose prizes were all cancelled (how an event is withdrawn)
+    // must not hide a live or recent one: only events with a live prize count.
+    const inWindow = published.filter(
+      (e) =>
+        at(e.starts_at) <= now && now - at(e.ends_at) <= LUCKY_DRAW_LINGER_MS,
+    );
+    const withPrizes = new Set(
+      inWindow.length
+        ? (
+            await em.execute<{ event_id: string }[]>(
+              'SELECT DISTINCT event_id FROM lucky_draw_prize ' +
+                `WHERE event_id IN (${inWindow.map(() => '?').join(', ')}) ` +
+                'AND cancelled_at IS NULL AND deleted_at IS NULL',
+              inWindow.map((e) => e.id),
+            )
+          ).map((r) => r.event_id)
+        : [],
+    );
+    const events = inWindow.filter((e) => withPrizes.has(e.id));
+    const event =
+      events.find((e) => now < at(e.ends_at)) ??
+      events
+        .filter((e) => at(e.ends_at) <= now)
+        .sort((a, b) => at(b.ends_at) - at(a.ends_at))[0];
+    if (!event) return { event: null, prizes: [] };
+
+    const prizes = (
+      await pageAll(
+        (opts) =>
+          this.listLuckyDrawPrizes(
+            { event_id: event.id },
+            { ...opts, select: [...LUCKY_DRAW_PRIZE_FIELDS] },
+            sharedContext,
+          ),
+        { sort: 'ASC', id: 'ASC' },
+      )
+    ).filter((p) => !p.cancelled_at);
+    const prizeIds = prizes.map((p) => p.id);
+    const sums = await this.luckyDrawEntrySums(prizeIds, sharedContext);
+
+    // Per prize, the top entrants: tickets summed per customer, most first
+    // (customer id breaks a tie so the order is stable).
+    const topRows = prizeIds.length
+      ? await em.execute<
+          {
+            prize_id: string;
+            customer_id: string;
+            tickets: string | number;
+          }[]
+        >(
+          'SELECT prize_id, customer_id, tickets FROM (' +
+            'SELECT prize_id, customer_id, SUM(tickets) AS tickets, ' +
+            'ROW_NUMBER() OVER (PARTITION BY prize_id ' +
+            'ORDER BY SUM(tickets) DESC, customer_id ASC) AS rn ' +
+            'FROM lucky_draw_entry ' +
+            `WHERE prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
+            'AND deleted_at IS NULL GROUP BY prize_id, customer_id' +
+            ') ranked WHERE rn <= ? ORDER BY prize_id, rn',
+          [...prizeIds, LUCKY_DRAW_TOP_ENTRANTS],
+        )
+      : [];
+    const topByPrize = new Map<string, LuckyDrawPagePrize['top']>();
+    for (const r of topRows) {
+      const list = topByPrize.get(r.prize_id) ?? [];
+      list.push({ customer_id: r.customer_id, tickets: Number(r.tickets) });
+      topByPrize.set(r.prize_id, list);
+    }
+
+    const results = prizeIds.length
+      ? await pageAll((opts) =>
+          this.listLuckyDrawResults(
+            { prize_id: prizeIds },
+            { ...opts, select: [...LUCKY_DRAW_RESULT_FIELDS] },
+            sharedContext,
+          ),
+        )
+      : [];
+    const resultByPrize = new Map(results.map((r) => [r.prize_id, r]));
+    const cards = await this.luckyDrawCards(prizes, sharedContext);
+
+    return {
+      event: {
+        id: event.id,
+        name: event.name,
+        starts_at: new Date(event.starts_at).toISOString(),
+        ends_at: new Date(event.ends_at).toISOString(),
+      },
+      prizes: prizes.map((p) => {
+        const shown = luckyDrawShown(p, cards);
+        const result = resultByPrize.get(p.id);
+        const sum = sums.get(p.id);
+        return {
+          id: p.id,
+          kind: p.kind,
+          title: p.title,
+          image: shown.image,
+          value_myr: shown.value_myr,
+          draw_at: new Date(p.draw_at).toISOString(),
+          seed_hash: p.seed_hash ?? '',
+          // A drawn prize shows the numbers the draw used (after exclusions).
+          total_tickets: result?.total_tickets ?? sum?.total_tickets ?? 0,
+          entrant_count: result?.entrant_count ?? sum?.entrant_count ?? 0,
+          top: topByPrize.get(p.id) ?? [],
+          result: result ? luckyDrawResultRow(p, result, shown) : null,
+        };
+      }),
+    };
+  }
+
+  // The viewer's own tickets on each of the given prizes (absent = 0).
+  @InjectManager()
+  async luckyDrawMyTickets(
+    customerId: string,
+    prizeIds: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Record<string, number>> {
+    if (prizeIds.length === 0) return {};
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      { prize_id: string; tickets: string | number }[]
+    >(
+      'SELECT prize_id, COALESCE(SUM(tickets), 0) AS tickets ' +
+        'FROM lucky_draw_entry WHERE customer_id = ? ' +
+        `AND prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
+        'AND deleted_at IS NULL GROUP BY prize_id',
+      [customerId, ...prizeIds],
+    );
+    return Object.fromEntries(rows.map((r) => [r.prize_id, Number(r.tickets)]));
+  }
+
+  // One page of drawn prizes, newest draw first, across every event: the prize
+  // ids (callers batch-load the rows through luckyDrawResultRows) and the
+  // cursor for the next page. `before` is exclusive.
+  // shortcut: the cursor is the last draw time alone, so two results drawn in
+  // the same millisecond across a page edge would skip one; draws commit one
+  // transaction at a time, so move to a (drawn_at, id) cursor if that changes.
+  @InjectManager()
+  async luckyDrawResultPage(
+    input: { before?: Date | null; limit: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ prizeIds: string[]; nextBefore: string | null }> {
+    const rows = await this.listLuckyDrawResults(
+      input.before ? { drawn_at: { $lt: input.before } } : {},
+      {
+        select: ['prize_id', 'drawn_at'],
+        order: { drawn_at: 'DESC', id: 'DESC' },
+        take: input.limit + 1,
+      },
+      sharedContext,
+    );
+    const page = rows.slice(0, input.limit);
+    return {
+      prizeIds: page.map((r) => r.prize_id),
+      nextBefore:
+        rows.length > input.limit
+          ? new Date(page[page.length - 1].drawn_at).toISOString()
+          : null,
+    };
+  }
+
+  // Result rows for the given drawn prizes (no entry lists). A prize with no
+  // result is simply absent.
+  @InjectManager()
+  async luckyDrawResultRows(
+    prizeIds: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LuckyDrawResultRow[]> {
+    if (prizeIds.length === 0) return [];
+    const results = await this.listLuckyDrawResults(
+      { prize_id: prizeIds },
+      { select: [...LUCKY_DRAW_RESULT_FIELDS], take: prizeIds.length },
+      sharedContext,
+    );
+    if (results.length === 0) return [];
+    const prizes = await this.listLuckyDrawPrizes(
+      { id: results.map((r) => r.prize_id) },
+      { select: [...LUCKY_DRAW_PRIZE_FIELDS], take: results.length },
+      sharedContext,
+    );
+    const prizeById = new Map(prizes.map((p) => [p.id, p]));
+    const cards = await this.luckyDrawCards(prizes, sharedContext);
+    return results.flatMap((r) => {
+      const prize = prizeById.get(r.prize_id);
+      return prize
+        ? [luckyDrawResultRow(prize, r, luckyDrawShown(prize, cards))]
+        : [];
+    });
+  }
+
+  // One drawn prize with its frozen entry list (in draw order) and winning
+  // ticket index, or null when it has not been drawn.
+  @InjectManager()
+  async luckyDrawResult(
+    prizeId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    row: LuckyDrawResultRow;
+    entries: { customer_id: string; tickets: number }[];
+    ticket_index: number | null;
+  } | null> {
+    const [result] = await this.listLuckyDrawResults(
+      { prize_id: prizeId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!result) return null;
+    const [prize] = await this.listLuckyDrawPrizes(
+      { id: prizeId },
+      { select: [...LUCKY_DRAW_PRIZE_FIELDS], take: 1 },
+      sharedContext,
+    );
+    if (!prize) return null;
+    const cards = await this.luckyDrawCards([prize], sharedContext);
+    const stored: unknown = result.entries;
+    return {
+      row: luckyDrawResultRow(prize, result, luckyDrawShown(prize, cards)),
+      entries: Array.isArray(stored)
+        ? (stored as { customer_id: string; tickets: number }[])
+        : [],
+      ticket_index: result.ticket_index ?? null,
+    };
+  }
+
+  // A player's Lucky Draw page: balance, their last 100 ticket movements and
+  // every prize they have entered with its outcome. Self-contained (no names).
+  @InjectManager()
+  async luckyDrawMine(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LuckyDrawMine> {
+    const { balance, rows } = await this.luckyDrawTicketHistory(
+      customerId,
+      100,
+      sharedContext,
+    );
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const entered = await em.execute<
+      { prize_id: string; tickets: string | number }[]
+    >(
+      'SELECT prize_id, SUM(tickets) AS tickets FROM lucky_draw_entry ' +
+        'WHERE customer_id = ? AND deleted_at IS NULL GROUP BY prize_id',
+      [customerId],
+    );
+    const ticketsByPrize = new Map(
+      entered.map((r) => [r.prize_id, Number(r.tickets)]),
+    );
+    const prizeIds = [...ticketsByPrize.keys()];
+    const prizes = prizeIds.length
+      ? await pageAll((opts) =>
+          this.listLuckyDrawPrizes(
+            { id: prizeIds },
+            { ...opts, select: [...LUCKY_DRAW_PRIZE_FIELDS] },
+            sharedContext,
+          ),
+        )
+      : [];
+    const results = prizeIds.length
+      ? await pageAll((opts) =>
+          this.listLuckyDrawResults(
+            { prize_id: prizeIds },
+            { ...opts, select: ['prize_id', 'winner_customer_id'] },
+            sharedContext,
+          ),
+        )
+      : [];
+    const resultByPrize = new Map(results.map((r) => [r.prize_id, r]));
+    const cards = await this.luckyDrawCards(prizes, sharedContext);
+    const entries = prizes
+      .map((p) => {
+        const result = resultByPrize.get(p.id);
+        const status: LuckyDrawMine['entries'][number]['status'] =
+          p.cancelled_at
+            ? 'cancelled'
+            : !result
+              ? 'open'
+              : result.winner_customer_id === customerId
+                ? 'won'
+                : 'lost';
+        return {
+          prize_id: p.id,
+          title: p.title,
+          image: luckyDrawShown(p, cards).image,
+          my_tickets: ticketsByPrize.get(p.id) ?? 0,
+          draw_at: new Date(p.draw_at).toISOString(),
+          status,
+        };
+      })
+      // Latest draw first: what is still open sits above what is over.
+      .sort((a, b) =>
+        a.draw_at === b.draw_at
+          ? a.prize_id < b.prize_id
+            ? 1
+            : -1
+          : a.draw_at < b.draw_at
+            ? 1
+            : -1,
+      )
+      .slice(0, 100);
+    return {
+      balance,
+      history: rows.map((r) => ({
+        delta: r.delta,
+        reason: r.reason,
+        created_at: r.created_at,
+      })),
+      entries,
+    };
   }
 
   // The live free welcome pack, or null when the operator has not published

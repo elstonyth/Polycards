@@ -8,6 +8,7 @@
  */
 import type { PublicProfile } from '@/lib/data/profiles';
 import { relativeTime } from '@/lib/format';
+import { avatarForSeed } from '@/lib/avatar-seed';
 import { toCardView, type CardView } from '@/lib/card-view';
 import type { LeaderboardEntry } from '@/lib/data/leaderboard';
 
@@ -47,15 +48,8 @@ export interface ProfileViewUser {
   activity?: ProfileViewActivity[];
 }
 
-const PFP_COUNT = 81; // public/images/pfps/pfp-1..81.webp
-
-/** Seed → avatar path — shared with the leaderboard seam so the same seed
- * always renders the same avatar on both surfaces. A non-finite seed (a dropped/
- * renamed backend field) falls back to a fixed avatar instead of pfp-NaN.webp. */
-export const avatarForSeed = (seed: number): string => {
-  const n = Number.isFinite(seed) ? Math.abs(Math.trunc(seed)) : 0;
-  return `/images/pfps/pfp-${(n % PFP_COUNT) + 1}.webp`;
-};
+// Lives in a pure leaf since the Lucky Draw schemas map faces too.
+export { avatarForSeed };
 
 /** Join year for "Collecting since {year}" — "—" for an unparsable date. */
 function joinedYear(iso: string): string {

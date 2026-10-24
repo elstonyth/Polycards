@@ -36,6 +36,7 @@ const task = (
     reward: { type: 'credit', amount_myr: 5 },
     progress: { current: done ? 3 : 1, target: 3, completed: Boolean(done) },
     claimed: false,
+    tickets: 0,
     ...rest,
   };
 };
@@ -171,6 +172,25 @@ describe('claimNotice', () => {
     expect(claimNotice({ type: 'card', card_name: 'Mew' })).toBe(
       'Card added to your Vault. Ship it (delivery fee applies) or sell it back.',
     );
+  });
+});
+
+describe('claimNotice — Lucky Draw tickets', () => {
+  const base = claimNotice({ type: 'credit', amount_myr: 5 });
+  it('appends the ticket count, singular for one', () => {
+    expect(claimNotice({ type: 'credit', amount_myr: 5 }, 50)).toBe(
+      `${base} + 50 Lucky Draw tickets`,
+    );
+    expect(claimNotice({ type: 'credit', amount_myr: 5 }, 1)).toBe(
+      `${base} + 1 Lucky Draw ticket`,
+    );
+  });
+
+  it('adds nothing for zero, none, or a broken count', () => {
+    for (const tickets of [0, undefined, Number.NaN, -3])
+      expect(claimNotice({ type: 'credit', amount_myr: 5 }, tickets)).toBe(
+        base,
+      );
   });
 });
 

@@ -1,6 +1,7 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { posterRm } from '../../../../modules/packs/brand-poster';
+import { ticketsSuffix } from '../../../../modules/packs/lucky-draw';
 import { taskWeekFor } from '../../../../modules/packs/referral';
 import type {
   HubReward,
@@ -17,9 +18,12 @@ export type CatalogueTask = {
   level: number | null;
   /** The check-in days a checkin_days task asks for; null otherwise. */
   checkin_days: number | null;
-  /** As the /task page words it: 'Free rip · Silver Pack'. */
+  /** As the /task page words it: 'Free rip · Silver Pack', plus
+   *  ' + 50 Lucky Draw tickets' when the task also pays tickets. */
   prize: string;
   prize_type: HubReward['type'];
+  /** Lucky Draw tickets a claim also pays (0 = none); already in `prize`. */
+  tickets: number;
   /** What /task says it is worth: the credit, the pack price, the card's
    *  display price today; null when the pack or card is gone. */
   value_myr: number | null;
@@ -34,7 +38,18 @@ export type CatalogueTask = {
  *  post and the page a player opens from it say the same thing. A pack or
  *  card that no longer exists is marked for staff, as the admin console
  *  marks it, because nobody can claim it. */
-export function prizeLabel(reward: HubReward): {
+export function prizeLabel(
+  reward: HubReward,
+  tickets = 0,
+): {
+  prize: string;
+  value_myr: number | null;
+} {
+  const { prize, value_myr } = rewardPrize(reward);
+  return { prize: prize + ticketsSuffix(tickets), value_myr };
+}
+
+function rewardPrize(reward: HubReward): {
   prize: string;
   value_myr: number | null;
 } {
@@ -111,8 +126,9 @@ export async function taskCatalogue(
       level: requirement.type === 'reach_level' ? requirement.level : null,
       checkin_days:
         requirement.type === 'checkin_days' ? requirement.days : null,
-      ...prizeLabel(t.reward),
+      ...prizeLabel(t.reward, t.tickets),
       prize_type: t.reward.type,
+      tickets: t.tickets,
       // The hub already resolved the prize's picture (the pack's product
       // shot; slab, else raw scan) — the same one /task shows on the task.
       image:

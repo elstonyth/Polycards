@@ -67,6 +67,13 @@ export const qk = {
   // Referral rebuild (spec 2026-08-24).
   referralSettings: ['admin', 'referral-settings'] as const,
   taskDefinitions: ['admin', 'task-definitions'] as const,
+  // Lucky Draw (spec 2026-10-24): the overview is the prefix of the entrant
+  // lists, so invalidating it after a cancel refreshes both.
+  luckyDraw: ['admin', 'lucky-draw'] as const,
+  luckyDrawEntries: (prizeId: string) =>
+    ['admin', 'lucky-draw', 'entries', prizeId] as const,
+  luckyDrawTickets: (customerId: string) =>
+    ['admin', 'lucky-draw', 'tickets', customerId] as const,
   announcements: ['admin', 'announcements'] as const,
   referralSettlements: ['admin', 'referral-settlements'] as const,
   referralSettlement: (id: string) =>

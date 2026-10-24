@@ -872,6 +872,27 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
     },
     {
+      // The Lucky Draw page (GET /store/lucky-draw). Its own entry because the
+      // wildcard below does not match the bare path.
+      matcher: '/store/lucky-draw',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Every Lucky Draw read below the page: balance, me, results and
+      // results/:prizeId. GET-only, so the enter POST below is not caught.
+      matcher: '/store/lucky-draw/*',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Enter a Lucky Draw prize (POST /store/lucky-draw/prizes/:id/enter) —
+      // spends tickets, so it shares the task-action write budget.
+      matcher: '/store/lucky-draw/prizes/*/enter',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+    },
+    {
       // The customer's in-app notification feed (GET /store/notifications).
       // receiver_id is scoped to the verified bearer token in the route handler —
       // never from query/body — so this entry is the auth + rate-limit gate only.
@@ -1447,6 +1468,32 @@ export default defineMiddlewares({
       // Cancel a window (POST /admin/lossless-schedules/:id/cancel); "*" spans
       // "/" so it covers the nested path.
       matcher: '/admin/lossless-schedules/*',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Lucky Draw event create / rename (POST /admin/lucky-draw/events).
+      matcher: '/admin/lucky-draw/events',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Publish an event (POST /admin/lucky-draw/events/:id/publish) — commits
+      // every prize's seed hash.
+      matcher: '/admin/lucky-draw/events/*/publish',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Lucky Draw prize create / edit (POST /admin/lucky-draw/prizes).
+      matcher: '/admin/lucky-draw/prizes',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Cancel a prize and refund its entrants' tickets
+      // (POST /admin/lucky-draw/prizes/:id/cancel).
+      matcher: '/admin/lucky-draw/prizes/*/cancel',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

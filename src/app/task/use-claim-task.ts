@@ -35,7 +35,9 @@ export function useClaimTask(onDone: (message: string) => void) {
           );
           return;
         }
-        onDone(claimNotice({ ...task.reward, type: res.rewardType }));
+        onDone(
+          claimNotice({ ...task.reward, type: res.rewardType }, task.tickets),
+        );
       } else if (res.ok && !res.claimed) {
         onDone(CLAIM_FAILURE_COPY[res.reason] ?? CLAIM_FALLBACK);
       } else if (!res.ok) {

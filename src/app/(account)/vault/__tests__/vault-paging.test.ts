@@ -91,6 +91,7 @@ beforeEach(async () => {
         initial: { ok: true, items, balance: 0 },
         addresses: [],
         initialGifts: [],
+        tickets: null,
       }),
     );
   });
@@ -179,11 +180,56 @@ describe('weekly-challenge prizes', () => {
           },
           addresses: [],
           initialGifts: [],
+          tickets: null,
         }),
       );
     });
     expect(container.textContent).not.toMatch(/Immortal/i);
     await click('Rare');
     expect(showing()).toBe('1/1');
+  });
+});
+
+describe('Lucky Draw tickets row', () => {
+  const mount = (tickets: number | null) =>
+    act(async () => {
+      root.render(
+        createElement(VaultClient, {
+          key: `tickets-${tickets}`,
+          initial: { ok: true, items: [], balance: 0 },
+          addresses: [],
+          initialGifts: [],
+          tickets,
+        }),
+      );
+    });
+  const link = (text: string) =>
+    [...container.querySelectorAll('a')].find(
+      (a) => a.textContent?.trim() === text,
+    );
+
+  test('holding tickets: count, hint, and Open into the intro', async () => {
+    await mount(3);
+    expect(container.textContent).toContain('Lucky Draw Tickets ×3');
+    expect(container.textContent).toContain('Put them on the prizes you want');
+    expect(link('Open')?.getAttribute('href')).toBe('/lucky-draw?open=1');
+  });
+
+  test('a large balance is grouped like the Lucky Draw page shows it', async () => {
+    await mount(1250);
+    expect(container.textContent).toContain('Lucky Draw Tickets ×1,250');
+  });
+
+  test('none yet: points at the tasks that earn them', async () => {
+    await mount(0);
+    expect(container.textContent).toContain('Lucky Draw Tickets ×0');
+    expect(container.textContent).toContain('Earn tickets from tasks');
+    expect(link('Tasks')?.getAttribute('href')).toBe('/task');
+    expect(link('Open')).toBeUndefined();
+  });
+
+  test('unreadable balance hides the row', async () => {
+    await mount(null);
+    expect(container.textContent).not.toContain('Lucky Draw');
   });
 });

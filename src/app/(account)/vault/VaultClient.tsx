@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Eye, Lock, Package, Search, Star } from 'lucide-react';
+import { Eye, Lock, Package, Search, Star, Ticket } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
-import { rm, rm0 } from '@/lib/format';
+import { num, rm, rm0 } from '@/lib/format';
 import { sellBackNotice } from '@/lib/buyback-copy';
 import {
   getVault,
@@ -44,11 +44,14 @@ export default function VaultClient({
   initial,
   addresses,
   initialGifts,
+  tickets,
 }: {
   initial: VaultResult;
   addresses: AddressView[];
   /** Packs gifted into this vault, unopened — the Packs row above the cards. */
   initialGifts: PackGift[];
+  /** Lucky Draw tickets held; null when unreadable, which hides the row. */
+  tickets: number | null;
 }) {
   const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
   const [items, setItems] = useState<VaultItem[]>(
@@ -383,6 +386,39 @@ export default function VaultClient({
           </div>
         ))}
       </div>
+
+      {/* Lucky Draw tickets: always shown when readable, so a player with none
+          is pointed at the tasks that pay them. */}
+      {tickets !== null && (
+        <section aria-label="Lucky Draw tickets" className="mt-4">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3">
+            {/* Placeholder art until the real ticket art lands. */}
+            <span
+              aria-hidden
+              className="text-chase flex h-14 w-8 shrink-0 items-center justify-center"
+            >
+              <Ticket className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-white">
+                Lucky Draw Tickets ×{num(tickets)}
+              </p>
+              <p className="mt-0.5 text-[12px] text-neutral-400">
+                {tickets > 0
+                  ? 'Put them on the prizes you want'
+                  : 'Earn tickets from tasks'}
+              </p>
+            </div>
+            <Link
+              href={tickets > 0 ? '/lucky-draw?open=1' : '/task'}
+              aria-label={tickets > 0 ? 'Open Lucky Draw' : undefined}
+              className={cn(pillVariants({ size: 'sm' }), 'px-5')}
+            >
+              {tickets > 0 ? 'Open' : 'Tasks'}
+            </Link>
+          </div>
+        </section>
+      )}
 
       {/* Packs gifted into the vault, unopened (spec 2026-10-07 §1). Open
           goes to the pack page, where the gift applies itself as Vault x1. */}
