@@ -6,11 +6,32 @@
 // details beside (desktop) or under (mobile) the wheel. The list under the
 // ring is the at-a-glance index and the keyboard / screen-reader path.
 //
-// Adapted from crafterui's WorksWheel, Copyright (c) 2026 CrafterUI, MIT
-// License (github.com/SriSomanaath/crafterui/blob/main/LICENSE). Changes: it
-// never takes over page scroll (it sits mid-page), cards are portrait, the
-// ring drifts and bobs, and opening and turning ease separately so a tapped
-// card comes straight to the front instead of the drum winding round to it.
+// Adapted from crafterui's WorksWheel (github.com/SriSomanaath/crafterui).
+// Changes: it never takes over page scroll (it sits mid-page), cards are
+// portrait, the ring drifts and bobs, and opening and turning ease separately
+// so a tapped card comes straight to the front instead of the drum winding
+// round to it. WorksWheel's licence:
+//
+//   MIT License
+//   Copyright (c) 2026 CrafterUI
+//   Copyright (c) 2026 Moumen Soliman (site scaffold, from
+//   github.com/moumen-soliman/lab)
+//
+//   Permission is hereby granted, free of charge, to any person obtaining a
+//   copy of this software and associated documentation files (the
+//   "Software"), to deal in the Software without restriction, including
+//   without limitation the rights to use, copy, modify, merge, publish,
+//   distribute, sublicense, and/or sell copies of the Software, and to permit
+//   persons to whom the Software is furnished to do so, subject to the
+//   following conditions: The above copyright notice and this permission
+//   notice shall be included in all copies or substantial portions of the
+//   Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+//   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+//   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+//   NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+//   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+//   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+//   USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 // Two eased numbers drive it, written to the DOM by one rAF pass, so turning
 // is not a render: `open` (0 = ring, 1 = drum) and `pos` (the drum's front
@@ -94,6 +115,8 @@ export function PrizeWheel({
   const wheelRef = useRef<HTMLDivElement>(null);
   const hubRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   const open = useRef(0);
   const openTo = useRef(0);
@@ -112,6 +135,8 @@ export function PrizeWheel({
   const [opened, setOpened] = useState(false);
   const [active, setActive] = useState(0);
   const [stage, setStage] = useState({ w: 0, h: 0 });
+  const wasOpened = useRef(false);
+  const frontRef = useRef(0);
 
   const count = prizes.length;
   const last = Math.max(count - 1, 0);
@@ -126,6 +151,17 @@ export function PrizeWheel({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Opening swaps the list for the details, so the focused row unmounts:
+  // move focus to the close button, and back to the prize's row on close
+  // (not on first mount, which must not grab focus).
+  useEffect(() => {
+    if (opened) closeRef.current?.focus({ preventScroll: true });
+    else if (wasOpened.current) {
+      rowRefs.current[frontRef.current]?.focus({ preventScroll: true });
+    }
+    wasOpened.current = opened;
+  }, [opened]);
 
   const metrics = useMemo(() => {
     const { w, h } = stage;
@@ -203,6 +239,7 @@ export function PrizeWheel({
         hubRef.current.style.opacity = String(clamp(1 - m * 1.6, 0, 1));
       }
       const near = clamp(Math.round(pos.current), 0, last);
+      frontRef.current = near;
       setActive((prev) => (prev === near ? prev : near));
     };
 
@@ -397,6 +434,8 @@ export function PrizeWheel({
                   cardRefs.current[i] = node;
                 }}
                 onClick={() => onCard(i)}
+                // Never focused: they sit inside aria-hidden.
+                onMouseDown={(e) => e.preventDefault()}
                 className="absolute cursor-pointer outline-none [backface-visibility:hidden]"
                 style={{
                   width: metrics.cardW,
@@ -427,6 +466,7 @@ export function PrizeWheel({
         {opened && (
           <>
             <button
+              ref={closeRef}
               type="button"
               onClick={close}
               aria-label="Back to all prizes"
@@ -469,6 +509,9 @@ export function PrizeWheel({
             {prizes.map((p, i) => (
               <li key={p.id}>
                 <button
+                  ref={(node) => {
+                    rowRefs.current[i] = node;
+                  }}
                   type="button"
                   onClick={() => show(i)}
                   className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors outline-none hover:bg-white/[0.04] focus-visible:bg-white/[0.06]"
