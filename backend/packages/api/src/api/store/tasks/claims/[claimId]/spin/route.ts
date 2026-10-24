@@ -39,9 +39,12 @@ import {
 //
 // The response mirrors POST /store/packs/:slug/open closely enough that the
 // storefront reuses one reveal path. `price` is 0 (nothing was charged), and
-// the card is sellable on the spot: a task reward sells like any pulled card
-// (completing the task IS the requirement — no free-welcome lock applies), so
-// the reveal gets the same authoritative instant quote a paid open gets.
+// the card is sellable on the spot: a weekly or achievement task reward sells
+// like any pulled card (completing the task IS the requirement), so the reveal
+// gets the same authoritative instant quote a paid open gets. A DAILY task's
+// free rip is the exception (owner, 2026-10-23): until the customer's first
+// PAID open it carries the free welcome pull's lock (lockedPullIds), so it
+// answers `locked: true` with no quote, exactly like a locked free open.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -87,6 +90,25 @@ export async function POST(
     rate_type?: string;
     instant_deadline_ms?: number;
   } = { ...UNQUOTED_BUYBACK };
+  // A daily task's rip carries the free welcome pull's lock until the first
+  // PAID open. Its own try, failing CLOSED: a lookup error must not let the
+  // reveal offer a sell the buyback step then refuses (the vault shows the
+  // real answer on the next read), nor cost the card its price enrichment.
+  let locked = true;
+  try {
+    locked = (
+      await packs.lockedPullIds(customerId, [
+        { id: result.pullId, source: 'reward' },
+      ])
+    ).has(result.pullId);
+  } catch (err) {
+    req.scope
+      .resolve(ContainerRegistrationKeys.LOGGER)
+      .error(
+        `[task-spin] lock lookup failed for claim '${req.params.claimId}' (customer ${customerId}) — serving the pull as locked`,
+        err instanceof Error ? err : new Error(String(err)),
+      );
+  }
   try {
     const [{ rate: fxRate, firm: fxFirm }, [row]] = await Promise.all([
       resolveFxRateInfo(packs),
@@ -103,29 +125,34 @@ export async function POST(
       Number(row?.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
     );
     card = { ...result.card, marketPriceMyr };
-    // Quote from the SAME helper the buyback workflow credits with, so the
-    // reveal's "sell on the spot" number is what selling pays. Freshly rolled,
-    // so this is inside the instant window.
-    const quoted = await packs.quoteBuyback(
-      result.packId,
-      {
-        rolled_at: result.rolledAt,
-        revealed_at: null,
-        instant_closed_at: null,
-      },
-      marketPriceMyr,
-      undefined,
-      // A free rip is a source='reward' pull on a real pack: Lossless Mode
-      // never lifts it, and the quote must say so to match the credit.
-      'reward',
-    );
-    buyback = {
-      ...quoted,
-      firm: fxFirm,
-      vault_percent: FLAT_PERCENT,
-      vault_amount: buybackAmount(marketPriceMyr, FLAT_PERCENT),
-      instant_deadline_ms: instantDeadlineMs(result.rolledAt, null),
-    };
+    // A locked rip offers no sell-on-the-spot price — selling it 400s — so
+    // UNQUOTED_BUYBACK stays, as on a locked free open. marketPriceMyr above
+    // still shows what the card is worth.
+    if (!locked) {
+      // Quote from the SAME helper the buyback workflow credits with, so the
+      // reveal's "sell on the spot" number is what selling pays. Freshly rolled,
+      // so this is inside the instant window.
+      const quoted = await packs.quoteBuyback(
+        result.packId,
+        {
+          rolled_at: result.rolledAt,
+          revealed_at: null,
+          instant_closed_at: null,
+        },
+        marketPriceMyr,
+        undefined,
+        // A free rip is a source='reward' pull on a real pack: Lossless Mode
+        // never lifts it, and the quote must say so to match the credit.
+        'reward',
+      );
+      buyback = {
+        ...quoted,
+        firm: fxFirm,
+        vault_percent: FLAT_PERCENT,
+        vault_amount: buybackAmount(marketPriceMyr, FLAT_PERCENT),
+        instant_deadline_ms: instantDeadlineMs(result.rolledAt, null),
+      };
+    }
   } catch (err) {
     req.scope
       .resolve(ContainerRegistrationKeys.LOGGER)
@@ -143,11 +170,11 @@ export async function POST(
     price: 0,
     balance: null,
     free: true,
-    // Never locked: the free-welcome lock is keyed on source='free', and a
-    // task reward is source='reward'. Sellable AND shippable (the latter via
-    // the reward withdraw path) — same as GET /store/vault reports it.
-    locked: false,
-    sellable: true,
+    // Same answer GET /store/vault gives: locked only for a daily task's rip
+    // before the first PAID open; otherwise sellable AND shippable (the latter
+    // via the reward withdraw path).
+    locked,
+    sellable: !locked,
     buyback,
   });
 }

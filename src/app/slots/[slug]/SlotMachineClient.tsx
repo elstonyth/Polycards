@@ -206,7 +206,8 @@ export default function SlotMachineClient({
   // A task's free rip. Like the welcome pack it is exactly ONE open at no cost,
   // but it spends an entitlement rather than a one-time eligibility, and the
   // card it yields is a reward pull — sellable on the spot like any pulled
-  // card (completing the task is the requirement; no welcome-pack lock).
+  // card, except a DAILY task's rip before the first paid open, which carries
+  // the welcome-pack lock (the backend's `locked` says which).
   const isFreeRip = freeRipClaimId !== null && freeRipClaimId !== '';
 
   // Which of the four routes a press takes — decided ONCE, here, by the seam

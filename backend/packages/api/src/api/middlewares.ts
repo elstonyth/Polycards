@@ -782,6 +782,14 @@ export default defineMiddlewares({
       ],
     },
     {
+      // The caller's own pull history (GET /store/pulls/history) — every card
+      // they pulled, sold or shipped ones included. Authenticated, unlike its
+      // public '/store/pulls/recent' sibling. Read budget: one paged list.
+      matcher: '/store/pulls/history',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // Credit balance + ledger (GET /store/credits).
       matcher: '/store/credits',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],

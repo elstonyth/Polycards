@@ -26,7 +26,7 @@ import {
   ChevronRightMini,
   Gift,
 } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { type AdminPack, type AdminPackWrite } from '../../lib/packs-api';
 import {
   PACK_STATUS_COLOR,
@@ -79,6 +79,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: Gift,
   rank: 40,
+  permissions: ['pack:read' as Permission],
 };
 
 // Known pack categories — the storefront maps these to labels + icons, so the

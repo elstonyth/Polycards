@@ -9,6 +9,7 @@ import {
   timeUntil,
   pullTime,
   mytDate,
+  mytClock,
   affordable,
 } from '../format';
 
@@ -142,6 +143,22 @@ describe('pullTime — fixed-MYT absolute roll time', () => {
 
   it('is empty for garbage rather than "NaN NaN"', () => {
     expect(pullTime('not-a-date')).toBe('');
+  });
+});
+
+describe('mytClock — fixed-MYT 12h clock', () => {
+  it('prints the Malaysian wall clock, not the UTC server clock', () => {
+    // 14:27 UTC = 10:27 PM MYT: /transactions printed this as "2:27 PM".
+    expect(mytClock('2026-10-23T14:27:59.000Z')).toBe('10:27 PM');
+    // 17:05 UTC = 1:05 AM MYT next day; the hour is not zero-padded.
+    expect(mytClock('2026-12-31T17:05:00.000Z')).toBe('1:05 AM');
+    // Noon and midnight read 12, never 0.
+    expect(mytClock('2026-09-02T04:00:00.000Z')).toBe('12:00 PM');
+    expect(mytClock('2026-09-02T16:00:00.000Z')).toBe('12:00 AM');
+  });
+
+  it('is empty for garbage', () => {
+    expect(mytClock('not-a-date')).toBe('');
   });
 });
 

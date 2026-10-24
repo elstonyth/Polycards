@@ -1582,8 +1582,10 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 
 // Gateway deposits (GET /admin/payments/deposits) — the operator's only
 // window into money-in. 'stale' means the row is still pending past the
-// reconciliation sweep's window, i.e. a payment that may have landed at the
-// gateway without ever being credited here.
+// reconciliation sweep's window — mostly a customer who walked away, which the
+// next sweep expires. 'stuck' is the narrow subset the dashboard flags: still
+// pending two sweeps later with a gateway id, i.e. possibly a payment that
+// landed at the gateway without ever being credited here.
 export type GatewayDepositView =
   'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
@@ -1616,6 +1618,7 @@ export interface GatewayDeposit {
   created_at: string;
   settled_at: string | null;
   stale: boolean;
+  stuck: boolean;
 }
 
 export interface GatewayDepositsResponse {
@@ -1814,10 +1817,11 @@ export interface PlayerRow {
   wallet_balance: number;
   vault_value: number;
   vault_count: number;
+  /** Turnover; this and the three below cover the list's `window`. */
   total_spend: number;
-  /** Lifetime top-ups (Σ topup ledger rows). */
+  /** Top-ups (Σ topup ledger rows). */
   total_topup: number;
-  /** Lifetime withdrawals (Σ cashout rows, positive; refunds net out). */
+  /** Withdrawals (Σ cashout rows, positive; refunds net out). */
   total_withdrawn: number;
   /** total_topup − total_withdrawn: cash the player has put in, net. */
   total_contribution: number;
@@ -1846,21 +1850,32 @@ export interface PlayersPage {
   total: number;
   offset: number;
   limit: number;
+  /** The period the turnover and money in/out columns cover; null = all time. */
+  window: { from: string; to: string } | null;
   players: PlayerRow[];
 }
 
-// `sort` is `<column>:<asc|desc>`; the route allowlists the column
-// (created_at | email | name) and falls back to created_at.
-// `group` is 'default' (everyone outside a non-default group) or a group id.
+/** GET /admin/players' ?range=: a Stats preset, or custom with its MYT days
+ *  (YYYY-MM-DD). None = all time. */
+export type PlayersPeriod = { range: StatsRange; from?: string; to?: string };
+
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column and falls
+// back to created_at. `group` is 'default' (everyone outside a non-default
+// group) or a group id.
 export const listPlayers = (
   page = 0,
   q?: string,
   limit = 50,
   sort = 'created_at:desc',
   group?: string,
+  period?: PlayersPeriod,
 ) =>
   getJson<PlayersPage>(
-    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${group ? `&group=${encodeURIComponent(group)}` : ''}`,
+    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${group ? `&group=${encodeURIComponent(group)}` : ''}${
+      period
+        ? `&range=${period.range}${period.range === 'custom' ? `&from=${encodeURIComponent(period.from ?? '')}&to=${encodeURIComponent(period.to ?? '')}` : ''}`
+        : ''
+    }`,
   );
 
 /** One generated partner account — what POST /admin/players answers and what

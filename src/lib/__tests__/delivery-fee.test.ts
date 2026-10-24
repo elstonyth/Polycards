@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeDeliveryFee,
+  computeParcelFee,
   deliveryZone,
   isEastMalaysiaPostcode,
   isShippablePostcode,
@@ -144,6 +145,27 @@ describe('computeDeliveryFee', () => {
       shipping: WEST_SHIPPING_MYR,
       insurance: 16.67,
       total: 31.67,
+    });
+  });
+});
+
+// Mirror of the backend computeParcelFee spec (2026-10-23): one parcel, one
+// shipping fee; insurance as separate orders charged it.
+describe('computeParcelFee', () => {
+  it('charges one zone fee for vault cards plus prize cards', () => {
+    expect(computeParcelFee('50000', 120, [80])).toEqual({
+      shipping: WEST_SHIPPING_MYR,
+      insurance: 0,
+      total: WEST_SHIPPING_MYR,
+    });
+  });
+
+  it('insures the vault cards together and each prize on its own value', () => {
+    expect(computeParcelFee('50000', 190, [190]).insurance).toBe(0);
+    expect(computeParcelFee('50000', 250, [300, 100])).toEqual({
+      shipping: 15,
+      insurance: 27.5,
+      total: 42.5,
     });
   });
 });

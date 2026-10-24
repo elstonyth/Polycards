@@ -580,7 +580,9 @@ export function TaskHubClient({
           <p>
             Task rewards (cards, slabs, and cards from reward packs) sell back
             as cash you can withdraw once you’ve topped up and used your money
-            for packs. Credit rewards are bonus credit for packs.{' '}
+            for packs. Cards from daily tasks work like the welcome pack: pay
+            for one pack yourself to unlock selling &amp; delivery. Credit
+            rewards are bonus credit for packs.{' '}
             <Link
               href="/wallet"
               className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"

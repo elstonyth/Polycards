@@ -1,4 +1,6 @@
 import {
+  beginLiveRound,
+  canRepeatLiveRound,
   claimLiveCycle,
   completeLiveCycle,
   createLiveState,
@@ -9,6 +11,7 @@ import {
 } from '../automation-live';
 import { createHumanizedState, planHumanized } from '../automation-humanized';
 import { DEFAULT_LIVE_TIMING } from '../automation-live-types';
+import type { LiveConfig } from '../automation-live-types';
 
 const config = {
   packSlug: 'pokemon-white',
@@ -581,5 +584,119 @@ describe('live automation', () => {
       sell: async () => ({ amount: 13 }),
     });
     expect(result.differenceCents).toBe(100);
+  });
+});
+
+describe('repeating live rounds', () => {
+  const settled = { differenceCents: 0, bonusDifferenceCents: 0 };
+  const repeatRun = () =>
+    Object.assign(createLiveState(), {
+      config: { ...config, timingMode: 'fixed', repeat: true } as LiveConfig,
+      packPriceCents: 1000,
+      packPricesCents: { 'pokemon-white': 1000 },
+      status: 'running' as const,
+      runId: 'round-1',
+      startedAt: 50,
+    });
+
+  it('keeps a repeat run going after its last draw, then finishes the round for the next one', () => {
+    const state = repeatRun();
+    const cycle = claimLiveCycle(state, 100)!;
+    completeLiveCycle(state, { ...cycle, ...settled, costCents: 1000 }, 200);
+    expect(state.status).toBe('running');
+    expect(claimLiveCycle(state, state.nextRunAt!)).toBeNull();
+    expect(state.status).toBe('completed');
+    expect(canRepeatLiveRound(state)).toBe(true);
+  });
+
+  it('does not repeat a round that failed, was stopped, drew nothing or stopped a goal for safety', () => {
+    const done = () => {
+      const state = repeatRun();
+      const cycle = claimLiveCycle(state, 100)!;
+      completeLiveCycle(state, { ...cycle, ...settled }, 200);
+      claimLiveCycle(state, state.nextRunAt!);
+      return state;
+    };
+    expect(canRepeatLiveRound({ ...done(), config: { ...config } })).toBe(
+      false,
+    );
+    expect(canRepeatLiveRound({ ...done(), status: 'failed' })).toBe(false);
+    expect(canRepeatLiveRound({ ...done(), status: 'stopped' })).toBe(false);
+    const broke = repeatRun();
+    const skip = claimLiveCycle(broke, 100)!;
+    completeLiveCycle(broke, { ...skip, skipped: 'Balance too low' }, 200);
+    claimLiveCycle(broke, broke.nextRunAt!);
+    expect(broke.status).toBe('completed');
+    expect(canRepeatLiveRound(broke)).toBe(false);
+    const unsafe = done();
+    unsafe.rankGoals = [
+      {
+        done: true,
+        status: { state: 'pending_timeout' },
+      } as unknown as NonNullable<typeof unsafe.rankGoals>[number],
+    ];
+    expect(canRepeatLiveRound(unsafe)).toBe(false);
+  });
+
+  it('starts the next round fresh but keeps Humanized schedules and their clock', () => {
+    const state = repeatRun();
+    state.config = {
+      ...state.config,
+      timingMode: 'humanized',
+      humanizedRegion: 'mysg',
+    };
+    const schedule = {
+      customerId: 'cus_live',
+      humanized: createHumanizedState('cus_live', 'mysg'),
+      nextRunAt: 9000,
+      waitReason: 'Between activity sessions',
+    };
+    Object.assign(state, {
+      status: 'completed',
+      schedules: [schedule],
+      cycles: [
+        {
+          id: 'c1',
+          customerId: 'cus_live',
+          startedAt: 100,
+          finishedAt: 200,
+          error: null,
+          costCents: 1000,
+          saleCents: 700,
+          ...settled,
+        },
+      ],
+      spentCents: 1000,
+      rankGoals: [],
+    });
+    beginLiveRound(
+      state,
+      {
+        config: state.config,
+        packPriceCents: 1200,
+        packPricesCents: { 'pokemon-white': 1200 },
+      },
+      5000,
+      true,
+    );
+    expect(state).toMatchObject({
+      status: 'running',
+      cycles: [],
+      spentCents: 0,
+      startedAt: 5000,
+      clockStartedAt: 50,
+      nextRunAt: 5000,
+      packPricesCents: { 'pokemon-white': 1200 },
+      error: null,
+    });
+    expect(state.runId).not.toBe('round-1');
+    expect(state.rankGoals).toBeUndefined();
+    expect(state.schedules).toEqual([schedule]);
+    expect(state.history?.[0]).toMatchObject({
+      runId: 'round-1',
+      draws: 1,
+      settled: 1,
+      soldCents: 700,
+    });
   });
 });

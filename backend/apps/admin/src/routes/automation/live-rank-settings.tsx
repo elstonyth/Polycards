@@ -45,11 +45,13 @@ export function LiveRankSettings({
     <div className="mt-5 space-y-3 border-t pt-5">
       <Heading level="h3">Live leaderboard rank goals</Heading>
       <Text size="small" className="text-ui-fg-subtle">
-        Optional. With goals configured, only those accounts draw. A goal stops
-        after two fresh checks confirm its Top N rank, or its cycle limit is
-        reached. Humanized timing still applies. Rankings can change afterward.
-        Goals use the all-time board only: Automation accounts never rank on the
-        weekly challenge board or receive its prizes.
+        Optional. A goal account draws whenever a fresh rank check allows it,
+        past the packs-per-account limit (up to 100 a round), and pushes past
+        our own accounts too; the other selected accounts keep their ordinary
+        draws in between. A goal stops after two fresh checks confirm its Top N
+        rank. Humanized timing still applies. Rankings can change
+        afterward. Goals use the all-time board only: Automation accounts never
+        rank on the weekly challenge board or receive its prizes.
       </Text>
       {disabled && (
         <Text size="small">

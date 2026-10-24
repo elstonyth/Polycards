@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Container, Heading, Text } from '@medusajs/ui';
 import { House } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import type { StatsRange } from '../../lib/admin-rest';
 import { useStats } from '../../lib/queries';
 import { useScopeParam } from '../../lib/scope-param';
@@ -34,7 +34,12 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: House,
   rank: 0,
+  permissions: ['stats:read' as Permission],
 };
+
+// Login lands here (via /orders). A role without the dashboard's figures —
+// the automation operator — goes to the one page it can use instead.
+export const handle = { permissions: 'stats:read', redirectTo: '/automation' };
 
 const OverviewPage = () => {
   const { t } = useTranslation();

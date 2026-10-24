@@ -16,7 +16,7 @@ import {
   toast,
 } from '@medusajs/ui';
 import { TruckFast, XMark } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useBulkUpdateDeliveryOrders,
   useDeliveryOrders,
@@ -48,6 +48,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: TruckFast,
   rank: 10,
+  permissions: ['delivery_order:read' as Permission],
 };
 
 const STATUSES: DeliveryStatus[] = [
@@ -81,11 +82,12 @@ const DEPOSIT_TONE: Record<
   // the page and must not read as either settled, refused, or still-in-flight.
   expired: 'purple',
 };
+// Same words as routes/deposits (i18n deposits.statusLabel).
 const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
-  pending: 'Pending',
+  pending: 'Awaiting payment',
   settled: 'Settled',
-  failed: 'Failed',
-  expired: 'Expired',
+  failed: 'Cancelled / rejected',
+  expired: 'No gateway answer',
 };
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
@@ -237,16 +239,16 @@ const PackPurchases = () => {
   );
 };
 
-// Money IN. Same rows as the standalone /deposits screen (which keeps its
-// reconciliation tooling — the stale-pending warning, the status filter); this
-// tab exists so "All Orders" actually means all of them, and reuses that
-// screen's query rather than growing a second deposits endpoint.
+// Money IN. Settled top-ups only, the same default as the standalone /deposits
+// screen (which keeps the status filter that reaches unpaid, cancelled and
+// stuck attempts), reusing that screen's query rather than growing a second
+// deposits endpoint.
 // Read-only: a deposit is settled by the gateway callback or the sweep, never
 // by hand here.
 const Topups = () => {
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
-  const { data, isError } = useGatewayDeposits(page, 'all');
+  const { data, isError } = useGatewayDeposits(page, 'settled');
   const deposits = data?.deposits ?? null;
 
   return (
@@ -311,14 +313,9 @@ const Topups = () => {
                       {d.customer_email ?? d.customer_id.slice(0, 8)}
                     </button>
                   </Table.Cell>
-                  {/* A pending row past the sweep's stale window is the one
-                      case that needs an operator — same signal the /deposits
-                      screen leads with. */}
                   <Table.Cell>
                     <StatusBadge color={DEPOSIT_TONE[d.status]}>
-                      {d.status === 'pending' && d.stale
-                        ? 'Stale'
-                        : DEPOSIT_STATUS_LABEL[d.status]}
+                      {DEPOSIT_STATUS_LABEL[d.status]}
                     </StatusBadge>
                   </Table.Cell>
                 </Table.Row>

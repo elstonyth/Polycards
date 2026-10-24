@@ -65,14 +65,21 @@ export type DeliveryRequestVerdict =
 // the same caller-facing 404 upstream (no existence leak), but we distinguish
 // them here for precise logging/branching.
 //
-// `freeUnlocked` is the caller's hasPaidOpen(callerId) — resolved ONCE per
-// request, never stored on the pull, so the customer's first paid open lifts
-// the free-welcome lock with zero writes (spec 2026-08-14).
+// `lockedIds` is the caller's lockedPullIds(callerId, fetchedPulls) — the
+// ONE lock rule (free welcome pull, daily task card), resolved once per
+// request and never stored on the pull, so the customer's first paid open
+// lifts it with zero writes (spec 2026-08-14).
+//
+// `prizesShipHere` is the generic delivery path's flag: prize pulls ride in
+// the same parcel as the vault cards (2026-10-23) and pass on to the lock
+// check. recordRewardWithdrawal never sets it — it ships only what earns the
+// 'reward_source' verdict.
 export function validateDeliveryRequest(
   fetchedPulls: PullLike[],
   requestedIds: string[],
   callerId: string,
-  freeUnlocked: boolean,
+  lockedIds: ReadonlySet<string>,
+  opts: { prizesShipHere?: boolean } = {},
 ): DeliveryRequestVerdict {
   if (requestedIds.length === 0) return 'empty';
   if (new Set(requestedIds).size !== requestedIds.length) return 'duplicate';
@@ -90,14 +97,14 @@ export function validateDeliveryRequest(
       if (pull.status === 'bought_back') return 'bought_back';
       return 'not_vaulted';
     }
-    // Reward prizes ship ONLY via recordRewardWithdrawal (daily cap +
-    // is_reward stamping) — never via the generic delivery path. This is a
-    // ROUTING verdict, not a refusal: the vault sends these pulls to the
-    // reward path rather than showing the customer a wall.
-    if (pull.source === 'reward') return 'reward_source';
-    // The free welcome pull ships only after the customer's first PAID open —
-    // same lock the buyback step applies (modules/packs/free-pack.ts).
-    if (pull.source === 'free' && !freeUnlocked) return 'free_locked';
+    // Without the flag this is a ROUTING verdict, not a refusal: the caller
+    // (recordRewardWithdrawal) ships exactly the pulls that earn it.
+    if (pull.source === 'reward' && !opts.prizesShipHere) {
+      return 'reward_source';
+    }
+    // A locked pull ships only after the customer's first PAID open — same
+    // lock the buyback step applies (lockedPullIds).
+    if (lockedIds.has(pull.id)) return 'free_locked';
   }
   return 'ok';
 }
@@ -276,6 +283,28 @@ export function computeDeliveryFee(
     orderValueMyr > PROTECTION_INCLUDED_MYR
       ? toCents(orderValueMyr * INSURANCE_RATE)
       : 0;
+  return { shipping, insurance, total: toCents(shipping + insurance) };
+}
+
+// One parcel pays ONE shipping fee (2026-10-23): prize cards sent with vault
+// cards ride in the vault order instead of shipping as their own order and
+// paying the zone fee again. Insurance is kept exactly as the old split
+// charged it — the vault cards on their combined value, each prize on its own
+// value — so shipping them together never costs more than separately.
+export function computeParcelFee(
+  postalCode: string,
+  vaultValueMyr: number,
+  prizeValuesMyr: number[],
+  province?: string | null,
+  city?: string | null,
+  countryCode?: string | null,
+): DeliveryFee {
+  const fee = (value: number) =>
+    computeDeliveryFee(postalCode, value, province, city, countryCode);
+  const { shipping, insurance: vaultInsurance } = fee(vaultValueMyr);
+  const insurance = toCents(
+    prizeValuesMyr.reduce((sum, v) => sum + fee(v).insurance, vaultInsurance),
+  );
   return { shipping, insurance, total: toCents(shipping + insurance) };
 }
 

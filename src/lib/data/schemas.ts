@@ -507,6 +507,30 @@ export const VaultPageSchema = z.looseObject({
   items: listOf(VaultItemSchema),
 });
 
+/** GET /store/pulls/history row — every pull, sold and shipped ones included.
+ *  Only the pull id and card name drop a row; each money figure is caught to
+ *  null on its own (null = unknown, rendered '—', never RM 0.00). `status` is
+ *  any string so a status added later still lists. */
+export const PullHistoryItemSchema = z.looseObject({
+  pull_id: z.string(),
+  rolled_at: z.string().catch(''),
+  pack_title: z.string().catch(''),
+  challenge_prize: z.boolean().catch(false),
+  source: z.enum(['pack', 'reward', 'free', 'gift', 'bonus']).catch('pack'),
+  status: z.string().catch(''),
+  card: z.looseObject({ name: z.string() }),
+  paid: finite.nullable().catch(null),
+  value: finite.nullable().catch(null),
+  sold_for: finite.nullable().catch(null),
+  sold_at: z.string().nullable().catch(null),
+});
+
+/** GET /store/pulls/history — one page (?limit=&offset=). */
+export const PullHistoryPageSchema = z.looseObject({
+  items: listOf(PullHistoryItemSchema),
+  has_more: z.boolean().catch(false),
+});
+
 // --- data/free-pack.ts ------------------------------------------------------
 
 /** GET /store/free-pack — the one-time welcome-pack claim badge's whole answer.
@@ -652,6 +676,10 @@ export const CreditTransactionSchema = z.looseObject({
   // what a pack open used of it. Buyback-only before 2026-10-15. Optional for
   // the same older-backend reason.
   playthrough: finite.optional(),
+  // What a pack open bought / a sell-back sold: its pack and card names.
+  // Caught, not just optional: a malformed label must never drop a money row.
+  pack_title: z.string().nullable().optional().catch(undefined),
+  card_names: z.array(z.string()).optional().catch(undefined),
 });
 
 /** GET /store/credits as the Transactions page reads it. The totals are SOFT:

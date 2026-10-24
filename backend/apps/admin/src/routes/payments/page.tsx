@@ -9,6 +9,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: CreditCard,
   rank: 20,
+  permissions: ['payment:read'],
 };
 
 const PaymentsGroup = () => <Navigate to="/withdrawals" replace />;

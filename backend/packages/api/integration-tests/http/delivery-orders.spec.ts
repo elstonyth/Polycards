@@ -580,6 +580,43 @@ medusaIntegrationTestRunner({
         expect(pull.status).toBe('vaulted');
       });
 
+      // One parcel, one shipping fee (2026-10-23): a prize card sent with a
+      // vault card rides in the same order instead of paying RM15 again.
+      it('ships a vault card and a prize card as ONE order with ONE fee', async () => {
+        const token = await registerCustomer('del-fee-parcel@test.dev');
+        const pullId = await openOne(token, 'delivery-fee-topup-parcel');
+        const addressId = await addAddress(token); // 50000 = West
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [vaultPull] = await packs.listPulls({ id: pullId }, { take: 1 });
+        const [prize] = await packs.createPulls([
+          {
+            customer_id: vaultPull.customer_id,
+            pack_id: PACK_SLUG,
+            card_id: CARD_HANDLE,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward',
+          },
+        ]);
+
+        const created = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId, prize.id], address_id: addressId },
+        );
+        expect(created.status).toBe(201);
+        const orders = await packs.listDeliveryOrders(
+          { customer_id: vaultPull.customer_id },
+          { take: 10 },
+        );
+        expect(orders).toHaveLength(1);
+        expect(orders[0]).toMatchObject({ is_reward: true });
+        expect(Number(orders[0].shipping_fee)).toBe(15);
+        // Wallet: topup 25 − open 5 − ONE fee 15 = 5.
+        expect(await packs.creditBalance(vaultPull.customer_id)).toBe(5);
+      });
+
       it('refuses the request when the balance cannot cover the East fee, leaving the pull vaulted', async () => {
         const token = await registerCustomer('del-fee-e@test.dev');
         const pullId = await openOne(token, 'delivery-fee-topup-e');

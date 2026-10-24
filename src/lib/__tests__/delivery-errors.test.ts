@@ -103,6 +103,13 @@ describe('DELIVERY_RULES backend-message contract', () => {
       expect(map(msg)).toBe(msg);
   });
 
+  it('passes the daily prize-cap refusal through instead of blaming the cards', () => {
+    // createDeliveryOrderWithLedger (backend), a NOT_ALLOWED refusal.
+    const msg =
+      'Prize cards ship 1 per day. Take the extra prize cards out and try again.';
+    expect(map(msg)).toBe(msg);
+  });
+
   it('keeps the phone-verification rule ahead of the broad not-allowed rule', () => {
     expect(map('Verify your phone number before continuing.')).toBe(
       'Verify your phone number in Account settings before requesting delivery.',

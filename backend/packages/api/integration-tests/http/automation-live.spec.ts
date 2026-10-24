@@ -460,15 +460,18 @@ medusaIntegrationTestRunner({
         (await packs.listPulls({ id: rankedDraw.cycles[0].pullId }))[0].status,
       ).toBe('bought_back');
       let rankClock = rankedDraw.nextRunAt;
-      expect(await tickLive(container, () => rankClock)).toBe(false);
-      const limited = (await api.get('/admin/automation/live', { headers }))
+      // Still below its rank: the goal account keeps drawing past the
+      // per-account cap (1) until the goal is done.
+      expect(await tickLive(container, () => rankClock)).toBe(true);
+      const pushing = (await api.get('/admin/automation/live', { headers }))
         .data;
-      expect(limited.status).toBe('completed');
-      expect(limited.rankGoals[0]).toMatchObject({
-        done: true,
-        status: { state: 'limited', currentRank: 2, mode: 'live' },
+      expect(pushing.status).toBe('running');
+      expect(pushing.rankGoals[0]).toMatchObject({
+        done: false,
+        status: { currentRank: 2, mode: 'live' },
       });
-      expect(limited.cycles).toHaveLength(1);
+      expect(pushing.cycles).toHaveLength(2);
+      await api.post('/admin/automation/live', { action: 'stop' }, { headers });
       // The feed serves a stale body while it rebuilds (#835); read it fresh.
       clearRecentPullsCache();
       const feed = (
@@ -508,6 +511,44 @@ medusaIntegrationTestRunner({
       expect(secured.rankGoals[0]).toMatchObject({
         done: true,
         status: { state: 'secured', currentRank: 2 },
+      });
+      // Repeat: a finished round starts the next one on its own, archived in
+      // history, at the pack prices of the moment.
+      await api.post(
+        '/admin/automation/live',
+        {
+          action: 'run',
+          config: { ...config, maxCyclesPerAccount: 1, repeat: true },
+        },
+        { headers },
+      );
+      expect(await tickLive(container)).toBe(true);
+      const firstRound = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(firstRound).toMatchObject({ status: 'running' });
+      expect(firstRound.cycles).toHaveLength(1);
+      await packs.updatePacks({
+        selector: { slug: 'live-pack' },
+        data: { price: 10.5 },
+      });
+      expect(await tickLive(container, () => firstRound.nextRunAt)).toBe(false);
+      const nextRound = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(nextRound).toMatchObject({
+        status: 'running',
+        cycles: [],
+        packPricesCents: { 'live-pack': 1050 },
+      });
+      expect(nextRound.runId).not.toBe(firstRound.runId);
+      expect(nextRound.history[0]).toMatchObject({
+        runId: firstRound.runId,
+        draws: 1,
+        settled: 1,
+      });
+      await api.post('/admin/automation/live', { action: 'stop' }, { headers });
+      await packs.updatePacks({
+        selector: { slug: 'live-pack' },
+        data: { price: 10 },
       });
       // Simulate a disable arriving after the next draw, at the separate sell boundary.
       const pullsBeforeDisable = (

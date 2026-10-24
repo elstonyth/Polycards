@@ -1,5 +1,8 @@
 import type { LiveSnapshot } from '../../../../../packages/api/src/api/utils/automation-live-types';
-import { liveRankReady } from '../../../../../packages/api/src/api/utils/automation-live-rank';
+import {
+  LIVE_GOAL_MAX_CYCLES,
+  liveRankReady,
+} from '../../../../../packages/api/src/api/utils/automation-live-rank';
 
 export interface LiveAccountActivity {
   label: string;
@@ -69,18 +72,10 @@ export function getLiveAccountActivity(
       failed.error ?? 'Settlement balance mismatch needs review.',
     );
   const ranked = !!state.config?.rankTargets?.length;
-  if (
-    ranked &&
-    !state.config?.rankTargets?.some(
-      (target) => target.customerId === customerId,
-    )
-  )
-    return activity(
-      'No rank goal',
-      'grey',
-      'Only accounts with a configured rank goal draw in this run.',
-    );
-  const goal = ranked
+  // Accounts without a goal draw ordinarily, also in a run with goals.
+  const isGoal = (id: string) =>
+    !!state.config?.rankTargets?.some((target) => target.customerId === id);
+  const goal = isGoal(customerId)
     ? state.rankGoals?.find((row) => row.target.profileId === customerId)
     : undefined;
   if (goal?.done)
@@ -93,7 +88,10 @@ export function getLiveAccountActivity(
       goal.status.state === 'secured' ? 'green' : 'orange',
       goal.status.reason,
     );
-  if (!ranked && settledCycles >= (state.config?.maxCyclesPerAccount ?? 1))
+  if (
+    !isGoal(customerId) &&
+    settledCycles >= (state.config?.maxCyclesPerAccount ?? 1)
+  )
     return activity(
       'Completed',
       'green',
@@ -117,7 +115,7 @@ export function getLiveAccountActivity(
     );
   if (state.status !== 'running')
     return activity('Ready', 'grey', 'Waiting for a live run to start.');
-  if (ranked && !goal?.status.eligible)
+  if (isGoal(customerId) && !goal?.status.eligible)
     return activity(
       goal?.status.state === 'stale'
         ? 'Rank data unavailable'
@@ -162,12 +160,17 @@ export function getLiveAccountActivity(
       schedule.nextRunAt,
     );
   }
-  const nextCustomer = state.config?.customerIds.find(
-    (id) =>
-      liveRankReady(state, id, now) &&
-      state.cycles.filter((cycle) => cycle.customerId === id).length <
-        (state.config?.maxCyclesPerAccount ?? 1),
-  );
+  // Same order as claimLiveCycle: a ready goal account goes first.
+  const queue =
+    state.config?.customerIds.filter(
+      (id) =>
+        liveRankReady(state, id, now) &&
+        state.cycles.filter((cycle) => cycle.customerId === id).length <
+          (isGoal(id)
+            ? LIVE_GOAL_MAX_CYCLES
+            : (state.config?.maxCyclesPerAccount ?? 1)),
+    ) ?? [];
+  const nextCustomer = queue.find(isGoal) ?? queue[0];
   if (customerId !== nextCustomer || state.pending)
     return activity(
       'Pending',

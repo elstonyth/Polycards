@@ -25,6 +25,10 @@ import { insertOrMapDuplicate } from './duplicate-race';
 export type BuybackPullInput = {
   pull_id: string;
   customer_id: string; // from the authenticated token — NEVER the request body
+  /** Set ONLY by buyback-batch, which resolved lockedPullIds for its whole
+   *  selection server-side and never runs a locked pull: skips the per-pull
+   *  lock read. Never taken from a request body. */
+  lock_checked?: boolean;
 };
 
 export type BuybackResult = {
@@ -88,18 +92,20 @@ export const buybackPullStep = createStep(
     // forever). A stale sentinel row, should one exist, still fails safely at
     // the listCards check below — it is refused, never credited.
     //
-    // Free welcome pull: fully locked (no buyback, no delivery) until the
-    // customer's first PAID open — computed, never stored, so the first
-    // source='pack' pull unlocks it with zero writes (spec 2026-08-14).
-    // buyback-batch runs this same step per id, so the batch inherits the gate.
-    if (pull.source === 'free') {
-      const unlocked = await packs.hasPaidOpen(input.customer_id);
-      if (!unlocked) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          FREE_PULL_LOCKED_MESSAGE,
-        );
-      }
+    // The one exception to the above: a DAILY task's card (owner, 2026-10-23).
+    // Like the free welcome pull it is fully locked (no buyback, no delivery)
+    // until the customer's first PAID open — computed, never stored, so the
+    // first source='pack' pull unlocks it with zero writes (spec 2026-08-14,
+    // lockedPullIds). buyback-batch runs this same step per id, so the batch
+    // inherits the gate.
+    if (
+      !input.lock_checked &&
+      (await packs.lockedPullIds(input.customer_id, [pull])).size
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PULL_LOCKED_MESSAGE,
+      );
     }
 
     // Frozen accounts cannot draw value out (Batch A item 5): a fraud/AMLA hold

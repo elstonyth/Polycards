@@ -1,4 +1,4 @@
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { BuildingStorefront } from '@medusajs/icons';
 import { Navigate } from 'react-router-dom';
 
@@ -9,6 +9,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: BuildingStorefront,
   rank: 70,
+  permissions: ['announcement:read' as Permission],
 };
 
 const StorefrontGroup = () => <Navigate to="/announcements" replace />;

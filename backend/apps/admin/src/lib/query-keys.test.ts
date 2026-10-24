@@ -106,6 +106,9 @@ describe('qk', () => {
       '',
       'created_at:desc',
       '',
+      'all',
+      '',
+      '',
     ]);
     expect(qk.players(2, 'ada', 'email:asc', 'default')).toEqual([
       'admin',
@@ -114,7 +117,19 @@ describe('qk', () => {
       'ada',
       'email:asc',
       'default',
+      'all',
+      '',
+      '',
     ]);
+    // The period is part of the key: 7 days and a custom range are
+    // different pages, so neither serves the other's cached rows.
+    expect(
+      qk.players(0, undefined, undefined, undefined, {
+        range: 'custom',
+        from: '2026-10-01',
+        to: '2026-10-15',
+      }).slice(-3),
+    ).toEqual(['custom', '2026-10-01', '2026-10-15']);
     // playersKey must be a strict prefix of every page key, or a post-disable
     // invalidation would leave the row's status stale on the current page.
     for (const key of [qk.players(0), qk.players(2, 'ada', 'email:asc')]) {
