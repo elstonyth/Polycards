@@ -1146,6 +1146,235 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
         expect(audits.map((a) => a.action)).toEqual(['create']);
       });
+
+      describe('create an event with its prize pool', () => {
+        const create = (over: Record<string, unknown> = {}) =>
+          service.createLuckyDrawEventWithPrizes({
+            name: 'December Lucky Draw',
+            startsAt: new Date(Date.now() - HOUR),
+            endsAt: new Date(Date.now() + 48 * HOUR),
+            prizes: [],
+            adminId: ADMIN,
+            reason: REASON,
+            ...over,
+          });
+
+        const cardPrize = (
+          cardHandle: string,
+          over: Record<string, unknown> = {},
+        ) => ({
+          kind: 'card' as const,
+          cardHandle,
+          creditMyr: null,
+          title: `Card ${cardHandle}`,
+          imageUrl: null,
+          sort: 0,
+          drawAt: null,
+          ...over,
+        });
+
+        const creditPrize = (over: Record<string, unknown> = {}) => ({
+          kind: 'credit' as const,
+          cardHandle: null,
+          creditMyr: 25,
+          title: 'RM 25 bonus credit',
+          imageUrl: '/cdn/credit.webp',
+          sort: 0,
+          drawAt: null,
+          ...over,
+        });
+
+        const nothingExists = async () => {
+          expect(await service.listLuckyDrawEvents({})).toHaveLength(0);
+          expect(await service.listLuckyDrawPrizes({})).toHaveLength(0);
+          expect(
+            await service.listAdminActionAudits({
+              entity_type: ['lucky_draw_event', 'lucky_draw_prize'],
+            }),
+          ).toHaveLength(0);
+        };
+
+        it('creates a draft event with every prize, draw time at the event end, and an audit row each', async () => {
+          await makeCard('pool-a');
+          await makeCard('pool-b');
+          const { id, prizeIds } = await create({
+            prizes: [
+              cardPrize('pool-a', { sort: 0 }),
+              creditPrize({ sort: 1 }),
+              cardPrize('pool-b', { title: '  Second card  ', sort: 2 }),
+            ],
+          });
+
+          const [event] = await service.listLuckyDrawEvents({ id });
+          expect(event).toMatchObject({
+            name: 'December Lucky Draw',
+            status: 'draft',
+            created_by: ADMIN,
+          });
+          expect(prizeIds).toHaveLength(3);
+
+          // prizeIds follow the input order.
+          const rows = await Promise.all(prizeIds.map((p) => prizeRow(p)));
+          expect(rows.map((r) => r.sort)).toEqual([0, 1, 2]);
+          expect(rows.map((r) => r.kind)).toEqual(['card', 'credit', 'card']);
+          expect(rows.map((r) => r.event_id)).toEqual([id, id, id]);
+          expect(rows[0]).toMatchObject({
+            card_handle: 'pool-a',
+            image_url: null,
+          });
+          expect(rows[0].credit_myr).toBeNull();
+          expect(rows[1]).toMatchObject({
+            card_handle: null,
+            image_url: '/cdn/credit.webp',
+          });
+          expect(Number(rows[1].credit_myr)).toBe(25);
+          expect(rows[2].title).toBe('Second card');
+          for (const r of rows) {
+            expect(new Date(r.draw_at).getTime()).toBe(
+              new Date(event.ends_at).getTime(),
+            );
+            // A draft carries no seed commitment: publish makes it.
+            expect(r.seed_nonce).toBeNull();
+            expect(r.seed_hash).toBeNull();
+          }
+
+          const eventAudits = await service.listAdminActionAudits({
+            entity_type: 'lucky_draw_event',
+            entity_id: id,
+          });
+          expect(eventAudits).toHaveLength(1);
+          expect(eventAudits[0]).toMatchObject({
+            action: 'create',
+            admin_id: ADMIN,
+            reason: REASON,
+          });
+          const prizeAudits = await service.listAdminActionAudits({
+            entity_type: 'lucky_draw_prize',
+            entity_id: prizeIds,
+          });
+          expect(prizeAudits.map((a) => a.entity_id).sort()).toEqual(
+            [...prizeIds].sort(),
+          );
+          expect(
+            prizeAudits.every(
+              (a) =>
+                a.action === 'create' &&
+                a.admin_id === ADMIN &&
+                a.reason === REASON,
+            ),
+          ).toBe(true);
+        });
+
+        it('honours an explicit draw time inside the window', async () => {
+          await makeCard('pool-t');
+          const drawAt = new Date(Date.now() + 24 * HOUR);
+          const { prizeIds } = await create({
+            prizes: [cardPrize('pool-t', { drawAt })],
+          });
+          expect(new Date((await prizeRow(prizeIds[0])).draw_at).getTime()).toBe(
+            drawAt.getTime(),
+          );
+        });
+
+        it('with no prizes is a plain draft event', async () => {
+          const { id, prizeIds } = await create();
+          expect(prizeIds).toEqual([]);
+          const [event] = await service.listLuckyDrawEvents({ id });
+          expect(event.status).toBe('draft');
+          expect(
+            await service.listLuckyDrawPrizes({ event_id: id }),
+          ).toHaveLength(0);
+          expect(
+            await service.listAdminActionAudits({
+              entity_type: 'lucky_draw_event',
+              entity_id: id,
+            }),
+          ).toHaveLength(1);
+        });
+
+        it('one bad prize creates nothing: no event, no prizes, no audit', async () => {
+          await makeCard('pool-ok');
+          const good = [cardPrize('pool-ok'), creditPrize({ sort: 1 })];
+          const bad: Record<string, unknown>[] = [
+            creditPrize({ imageUrl: null }),
+            creditPrize({ creditMyr: 0 }),
+            creditPrize({ creditMyr: MAX_PRIZE_CREDIT_MYR + 1 }),
+            creditPrize({ creditMyr: 10.005 }),
+            creditPrize({ cardHandle: 'pool-ok' }),
+            cardPrize('no-such-card'),
+            cardPrize(''),
+            cardPrize('pool-ok', { creditMyr: 10 }),
+            cardPrize('pool-ok', { title: '' }),
+            cardPrize('pool-ok', { sort: 1.5 }),
+            // outside the window / too soon
+            cardPrize('pool-ok', { drawAt: new Date(Date.now() - 2 * HOUR) }),
+            cardPrize('pool-ok', { drawAt: new Date(Date.now() + 72 * HOUR) }),
+            cardPrize('pool-ok', { drawAt: new Date(Date.now() + 60 * 1000) }),
+          ];
+          for (const prize of bad) {
+            await rejectsWith(
+              create({ prizes: [...good, prize] }),
+              MedusaError.Types.INVALID_DATA,
+            );
+            await nothingExists();
+          }
+        });
+
+        it('a database failure after the event and prizes are written rolls all of it back', async () => {
+          await makeCard('pool-r');
+          // Passes every rule above, then Postgres refuses the NUL character — in
+          // the transaction that already holds the event and the prizes.
+          await expect(
+            create({
+              prizes: [cardPrize('pool-r'), creditPrize({ title: 'bad\u0000' })],
+            }),
+          ).rejects.toThrow(/Unicode escape|0x00/);
+          await nothingExists();
+        });
+
+        it('names the offending prize in the refusal', async () => {
+          await makeCard('pool-n');
+          await expect(
+            create({
+              prizes: [cardPrize('pool-n'), creditPrize({ imageUrl: null })],
+            }),
+          ).rejects.toThrow(/^Prize 2: .*image/);
+        });
+
+        it('applies the event rules too: a bad name or window creates nothing', async () => {
+          await makeCard('pool-e');
+          const at = new Date(Date.now() + HOUR);
+          for (const over of [
+            { name: '   ' },
+            { name: 'x'.repeat(81) },
+            { startsAt: at, endsAt: at },
+            { startsAt: at, endsAt: new Date(at.getTime() - 1) },
+          ]) {
+            await rejectsWith(
+              create({ ...over, prizes: [cardPrize('pool-e')] }),
+              MedusaError.Types.INVALID_DATA,
+            );
+          }
+          await nothingExists();
+        });
+
+        it('lets the same card be a prize twice', async () => {
+          await makeCard('pool-d');
+          const { prizeIds } = await create({
+            prizes: [cardPrize('pool-d'), cardPrize('pool-d', { sort: 1 })],
+          });
+          expect(prizeIds).toHaveLength(2);
+        });
+
+        it('publishes like any other draft', async () => {
+          await makeCard('pool-p');
+          const { id } = await create({ prizes: [cardPrize('pool-p')] });
+          await publish(id);
+          expect((await service.listLuckyDrawEvents({ id }))[0].status).toBe(
+            'published',
+          );
+        });
+      });
     });
 
     describe('admin overview and ticket history', () => {

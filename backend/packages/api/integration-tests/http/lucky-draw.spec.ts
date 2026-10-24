@@ -218,6 +218,115 @@ medusaIntegrationTestRunner({
           ]);
         });
 
+        it('POST /admin/lucky-draw/events with prizes creates the event and its pool in one request', async () => {
+          const created = await post(
+            '/admin/lucky-draw/events',
+            eventBody({
+              prizes: [
+                {
+                  kind: 'card',
+                  card_handle: CARD_HANDLE,
+                  title: 'Test card',
+                  sort: 0,
+                },
+                {
+                  kind: 'credit',
+                  credit_myr: 25,
+                  title: 'RM 25 bonus credit',
+                  image_url: '/cdn/ld-credit.webp',
+                  sort: 1,
+                },
+              ],
+            }),
+          );
+          expect(created.status).toBe(200);
+          const { id, prize_ids: prizeIds } = created.data as {
+            id: string;
+            prize_ids: string[];
+          };
+          expect(prizeIds).toHaveLength(2);
+
+          const overview = await get('/admin/lucky-draw');
+          const ev = overview.data.events.find(
+            (e: { id: string }) => e.id === id,
+          );
+          expect(ev).toMatchObject({ status: 'draft' });
+          expect(ev.prizes.map((p: { id: string }) => p.id)).toEqual(prizeIds);
+          expect(ev.prizes[0]).toMatchObject({
+            kind: 'card',
+            card_handle: CARD_HANDLE,
+            value_myr: 240,
+            seed_hash: null,
+          });
+          expect(ev.prizes[1]).toMatchObject({
+            kind: 'credit',
+            credit_myr: 25,
+            image_url: '/cdn/ld-credit.webp',
+          });
+          // Each prize draws at the event's end unless told otherwise.
+          for (const p of ev.prizes) expect(p.draw_at).toBe(ev.ends_at);
+
+          // A pool made this way publishes like any other draft.
+          const published = await post(
+            `/admin/lucky-draw/events/${id}/publish`,
+            { reason: 'go live' },
+          );
+          expect(published.status).toBe(200);
+        });
+
+        it('POST /admin/lucky-draw/events without prizes still creates a plain draft, and an edit returns no prize ids', async () => {
+          const created = await post('/admin/lucky-draw/events', eventBody());
+          expect(created.status).toBe(200);
+          expect(created.data.prize_ids).toEqual([]);
+          const edited = await post(
+            '/admin/lucky-draw/events',
+            eventBody({ id: created.data.id, name: 'Renamed' }),
+          );
+          expect(edited.status).toBe(200);
+          expect(edited.data).toEqual({ id: created.data.id, prize_ids: [] });
+        });
+
+        it('POST /admin/lucky-draw/events refuses prizes on an edit and a bad pool without writing', async () => {
+          const existing = await post('/admin/lucky-draw/events', eventBody());
+          const withId = await post(
+            '/admin/lucky-draw/events',
+            eventBody({
+              id: existing.data.id,
+              prizes: [
+                {
+                  kind: 'card',
+                  card_handle: CARD_HANDLE,
+                  title: 'Test card',
+                },
+              ],
+            }),
+          );
+          expect(withId.status).toBe(400);
+          expect(
+            await packs.listLuckyDrawPrizes({ event_id: existing.data.id }),
+          ).toHaveLength(0);
+
+          const events = (await packs.listLuckyDrawEvents({})).length;
+          for (const prizes of [
+            [{ kind: 'credit', credit_myr: 25, title: 'No art' }],
+            [{ kind: 'card', card_handle: 'no-such-card', title: 'Ghost' }],
+            [{ kind: 'cash', title: 'Cash' }],
+            Array.from({ length: 101 }, () => ({
+              kind: 'card',
+              card_handle: CARD_HANDLE,
+              title: 'Test card',
+            })),
+          ]) {
+            const res = await post(
+              '/admin/lucky-draw/events',
+              eventBody({ name: 'Bad pool', prizes }),
+            );
+            expect(res.status).toBe(400);
+          }
+          expect(await packs.listLuckyDrawEvents({})).toHaveLength(events);
+          expect(await packs.listLuckyDrawPrizes({})).toHaveLength(0);
+        });
+
         it('refuses bad bodies without writing', async () => {
           const noReason = await post('/admin/lucky-draw/events', {
             ...eventBody(),

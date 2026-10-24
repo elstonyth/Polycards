@@ -27,20 +27,71 @@ const optText = (value: unknown, field: string): string | null =>
 const optId = (value: unknown): string | undefined =>
   typeof value === 'string' && value !== '' ? value : undefined;
 
+/** The most prizes one create request may carry. */
+export const MAX_NEW_EVENT_PRIZES = 100;
+
+/** One prize's fields, as POST /admin/lucky-draw/prizes and the `prizes` of a
+ *  new event both take them. */
+function parsePrizeFields(raw: Record<string, unknown>) {
+  if (raw.kind !== 'card' && raw.kind !== 'credit') {
+    invalid("kind must be 'card' or 'credit'.");
+  }
+  if (raw.credit_myr != null && typeof raw.credit_myr !== 'number') {
+    invalid('credit_myr must be a number.');
+  }
+  if (
+    raw.sort !== undefined &&
+    !(typeof raw.sort === 'number' && Number.isInteger(raw.sort))
+  ) {
+    invalid('sort must be a whole number.');
+  }
+  return {
+    kind: raw.kind as 'card' | 'credit',
+    cardHandle: optText(raw.card_handle, 'card_handle'),
+    creditMyr: (raw.credit_myr as number | null | undefined) ?? null,
+    title: text(raw.title, 'title'),
+    imageUrl: optText(raw.image_url, 'image_url'),
+    sort: (raw.sort as number | undefined) ?? 0,
+    drawAt:
+      raw.draw_at == null || raw.draw_at === ''
+        ? null
+        : isoDate(raw.draw_at, 'draw_at'),
+  };
+}
+
 /** Shape checks for POST /admin/lucky-draw/events (create, or edit with `id`).
- *  Name length and the window rules are the service's. */
+ *  A create may carry its whole prize pool in `prizes` (an edit may not: its
+ *  prizes go through the prize route). Name length, the window rules and what
+ *  makes a prize valid are the service's. */
 export function parseLuckyDrawEvent(body: unknown): {
   id?: string;
   name: string;
   startsAt: Date;
   endsAt: Date;
+  prizes?: ReturnType<typeof parsePrizeFields>[];
 } {
   const raw = (body ?? {}) as Record<string, unknown>;
+  const id = optId(raw.id);
+  let prizes: ReturnType<typeof parsePrizeFields>[] | undefined;
+  if (raw.prizes != null) {
+    if (id) invalid('An existing event takes no prizes here.');
+    if (!Array.isArray(raw.prizes)) invalid('prizes must be a list.');
+    const list = raw.prizes as unknown[];
+    if (list.length > MAX_NEW_EVENT_PRIZES) {
+      invalid(`A new event takes at most ${MAX_NEW_EVENT_PRIZES} prizes.`);
+    }
+    prizes = list.map((item) =>
+      typeof item === 'object' && item !== null
+        ? parsePrizeFields(item as Record<string, unknown>)
+        : invalid('Each prize must be an object.'),
+    );
+  }
   return {
-    id: optId(raw.id),
+    id,
     name: text(raw.name, 'name'),
     startsAt: isoDate(raw.starts_at, 'starts_at'),
     endsAt: isoDate(raw.ends_at, 'ends_at'),
+    ...(prizes ? { prizes } : {}),
   };
 }
 
@@ -58,30 +109,9 @@ export function parseLuckyDrawPrize(body: unknown): {
   drawAt: Date | null;
 } {
   const raw = (body ?? {}) as Record<string, unknown>;
-  if (raw.kind !== 'card' && raw.kind !== 'credit') {
-    invalid("kind must be 'card' or 'credit'.");
-  }
-  if (raw.credit_myr != null && typeof raw.credit_myr !== 'number') {
-    invalid('credit_myr must be a number.');
-  }
-  if (
-    raw.sort !== undefined &&
-    !(typeof raw.sort === 'number' && Number.isInteger(raw.sort))
-  ) {
-    invalid('sort must be a whole number.');
-  }
   return {
     id: optId(raw.id),
     eventId: text(raw.event_id, 'event_id'),
-    kind: raw.kind as 'card' | 'credit',
-    cardHandle: optText(raw.card_handle, 'card_handle'),
-    creditMyr: (raw.credit_myr as number | null | undefined) ?? null,
-    title: text(raw.title, 'title'),
-    imageUrl: optText(raw.image_url, 'image_url'),
-    sort: (raw.sort as number | undefined) ?? 0,
-    drawAt:
-      raw.draw_at == null || raw.draw_at === ''
-        ? null
-        : isoDate(raw.draw_at, 'draw_at'),
+    ...parsePrizeFields(raw),
   };
 }

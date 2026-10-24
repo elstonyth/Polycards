@@ -987,6 +987,138 @@ const LUCKY_DRAW_LINGER_MS = 7 * 24 * 60 * 60 * 1000;
 /** A draw time must be at least this far ahead when it is set or published:
  *  one already past makes the next tick write a permanent "No entries" result. */
 const LUCKY_DRAW_MIN_LEAD_MS = 2 * 60 * 1000;
+
+/** One prize of a new event, in the fields saveLuckyDrawPrize takes (minus the
+ *  event and the audit ones). */
+export type LuckyDrawPrizeCreateInput = {
+  kind: 'card' | 'credit';
+  cardHandle?: string | null;
+  creditMyr?: number | null;
+  title: string;
+  imageUrl?: string | null;
+  sort: number;
+  drawAt?: Date | null;
+};
+
+const luckyDrawInvalid = (m: string): never => {
+  throw new MedusaError(MedusaError.Types.INVALID_DATA, m);
+};
+
+// The event rules saveLuckyDrawEvent and createLuckyDrawEventWithPrizes share.
+// Returns the trimmed name.
+function checkLuckyDrawEvent(input: {
+  name: string;
+  startsAt: Date;
+  endsAt: Date;
+}): string {
+  const name = input.name.trim();
+  if (!name || name.length > 80) {
+    luckyDrawInvalid('name is required (1–80 chars).');
+  }
+  const startsAt = input.startsAt.getTime();
+  const endsAt = input.endsAt.getTime();
+  if (Number.isNaN(startsAt) || Number.isNaN(endsAt)) {
+    luckyDrawInvalid('starts_at and ends_at must be valid dates.');
+  }
+  if (endsAt <= startsAt) {
+    luckyDrawInvalid('The event end must be after its start.');
+  }
+  return name;
+}
+
+// The prize shape rules saveLuckyDrawPrize and createLuckyDrawEventWithPrizes
+// share: exactly one of card / credit per `kind`, the credit range in whole
+// sen, a credit prize's picture. Returns the stored fields (draw time aside).
+function checkLuckyDrawPrize(input: LuckyDrawPrizeCreateInput) {
+  const title = input.title.trim();
+  if (!title || title.length > 120)
+    luckyDrawInvalid('title is required (1–120 chars).');
+  if (!Number.isInteger(input.sort)) {
+    luckyDrawInvalid('sort must be a whole number.');
+  }
+  if (input.kind !== 'card' && input.kind !== 'credit') {
+    luckyDrawInvalid("kind must be 'card' or 'credit'.");
+  }
+  const cardHandle = input.cardHandle?.trim() || null;
+  const imageUrl = input.imageUrl?.trim() || null;
+  let creditMyr: number | null = null;
+  if (input.kind === 'card') {
+    if (!cardHandle) luckyDrawInvalid('A card prize needs a card.');
+    if (input.creditMyr != null)
+      luckyDrawInvalid('A card prize carries no credit amount.');
+  } else {
+    if (cardHandle) luckyDrawInvalid('A credit prize carries no card.');
+    const amount = input.creditMyr;
+    if (
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      amount > MAX_PRIZE_CREDIT_MYR ||
+      fromSen(toSen(amount)) !== amount
+    ) {
+      luckyDrawInvalid(
+        `credit_myr must be a positive amount in whole sen, at most ${MAX_PRIZE_CREDIT_MYR}.`,
+      );
+    }
+    creditMyr = amount as number;
+    if (!imageUrl) luckyDrawInvalid('A credit prize needs an image.');
+  }
+  if (input.drawAt && Number.isNaN(input.drawAt.getTime())) {
+    luckyDrawInvalid('draw_at must be a valid date.');
+  }
+  return {
+    kind: input.kind,
+    card_handle: cardHandle,
+    credit_myr: creditMyr,
+    title,
+    image_url: imageUrl,
+    sort: input.sort,
+  };
+}
+
+// A new draw time must fall after the event starts and by the time it ends,
+// and at least LUCKY_DRAW_MIN_LEAD_MS from now.
+function checkLuckyDrawDrawTime(
+  drawAt: Date,
+  window: { starts_at: Date | string; ends_at: Date | string },
+  now: Date,
+): void {
+  const at = drawAt.getTime();
+  if (
+    !(
+      at > new Date(window.starts_at).getTime() &&
+      at <= new Date(window.ends_at).getTime()
+    )
+  ) {
+    luckyDrawInvalid(
+      'The draw time must fall after the event starts and by the time it ends.',
+    );
+  }
+  if (at <= now.getTime() + LUCKY_DRAW_MIN_LEAD_MS) {
+    luckyDrawInvalid('The draw time must be at least 2 minutes from now.');
+  }
+}
+
+/** A prize as its audit row records it. */
+function luckyDrawPrizeAuditView(p: {
+  kind: string;
+  card_handle: string | null;
+  credit_myr: unknown;
+  title: string;
+  image_url: string | null;
+  sort: number;
+  draw_at: unknown;
+}) {
+  return {
+    kind: p.kind,
+    card_handle: p.card_handle,
+    credit_myr: p.credit_myr == null ? null : toMoney(p.credit_myr),
+    title: p.title,
+    image_url: p.image_url,
+    sort: p.sort,
+    draw_at: new Date(p.draw_at as Date).toISOString(),
+  };
+}
 /** Prize columns the player routes read. Never `seed_nonce`: a seed must not
  *  even be loadable on a path that returns before the draw. */
 const LUCKY_DRAW_PRIZE_FIELDS = [
@@ -6467,17 +6599,9 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string }> {
-    const invalid = (m: string): never => {
-      throw new MedusaError(MedusaError.Types.INVALID_DATA, m);
-    };
-    const name = input.name.trim();
-    if (!name || name.length > 80) invalid('name is required (1–80 chars).');
+    const name = checkLuckyDrawEvent(input);
     const startsAt = input.startsAt.getTime();
     const endsAt = input.endsAt.getTime();
-    if (Number.isNaN(startsAt) || Number.isNaN(endsAt)) {
-      invalid('starts_at and ends_at must be valid dates.');
-    }
-    if (endsAt <= startsAt) invalid('The event end must be after its start.');
 
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     if (input.id) {
@@ -6583,43 +6707,8 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string }> {
-    const invalid = (m: string): never => {
-      throw new MedusaError(MedusaError.Types.INVALID_DATA, m);
-    };
-    const title = input.title.trim();
-    if (!title || title.length > 120)
-      invalid('title is required (1–120 chars).');
-    if (!Number.isInteger(input.sort)) invalid('sort must be a whole number.');
-    if (input.kind !== 'card' && input.kind !== 'credit') {
-      invalid("kind must be 'card' or 'credit'.");
-    }
-    const cardHandle = input.cardHandle?.trim() || null;
-    const imageUrl = input.imageUrl?.trim() || null;
-    let creditMyr: number | null = null;
-    if (input.kind === 'card') {
-      if (!cardHandle) invalid('A card prize needs a card.');
-      if (input.creditMyr != null)
-        invalid('A card prize carries no credit amount.');
-    } else {
-      if (cardHandle) invalid('A credit prize carries no card.');
-      const amount = input.creditMyr;
-      if (
-        typeof amount !== 'number' ||
-        !Number.isFinite(amount) ||
-        amount <= 0 ||
-        amount > MAX_PRIZE_CREDIT_MYR ||
-        fromSen(toSen(amount)) !== amount
-      ) {
-        invalid(
-          `credit_myr must be a positive amount in whole sen, at most ${MAX_PRIZE_CREDIT_MYR}.`,
-        );
-      }
-      creditMyr = amount as number;
-      if (!imageUrl) invalid('A credit prize needs an image.');
-    }
-    if (input.drawAt && Number.isNaN(input.drawAt.getTime())) {
-      invalid('draw_at must be a valid date.');
-    }
+    const shape = checkLuckyDrawPrize(input);
+    const { card_handle: cardHandle, credit_myr: creditMyr } = shape;
 
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
@@ -6656,7 +6745,7 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (existing && existing.event_id !== event.id) {
-      invalid('That prize belongs to another event.');
+      luckyDrawInvalid('That prize belongs to another event.');
     }
     if (existing?.cancelled_at) {
       throw new MedusaError(
@@ -6671,33 +6760,13 @@ class PacksModuleService extends MedusaService({
       input.drawAt ?? new Date(existing ? existing.draw_at : event.ends_at);
     const drawChanged =
       !existing || drawAt.getTime() !== new Date(existing.draw_at).getTime();
-    if (
-      drawChanged &&
-      !(
-        drawAt.getTime() > new Date(event.starts_at).getTime() &&
-        drawAt.getTime() <= new Date(event.ends_at).getTime()
-      )
-    ) {
-      invalid(
-        'The draw time must fall after the event starts and by the time it ends.',
-      );
-    }
-    if (
-      drawChanged &&
-      drawAt.getTime() <=
-        (input.now ?? new Date()).getTime() + LUCKY_DRAW_MIN_LEAD_MS
-    ) {
-      invalid('The draw time must be at least 2 minutes from now.');
+    if (drawChanged) {
+      checkLuckyDrawDrawTime(drawAt, event, input.now ?? new Date());
     }
     // A card must exist — only when it is new, so retitling a prize whose
     // card was deleted since is not blocked.
     if (cardHandle && existing?.card_handle !== cardHandle) {
-      const [card] = await this.listCards(
-        { handle: cardHandle },
-        { select: ['handle'], take: 1 },
-        sharedContext,
-      );
-      if (!card) invalid(`Card '${cardHandle}' does not exist.`);
+      await this.assertLuckyDrawCardsExist([cardHandle], sharedContext);
     }
 
     const published = event.status === 'published';
@@ -6719,15 +6788,7 @@ class PacksModuleService extends MedusaService({
     const commit =
       published && !existing ? commitDrawSeed(requireDrawSeedSecret()) : null;
 
-    const fields = {
-      kind: input.kind,
-      card_handle: cardHandle,
-      credit_myr: creditMyr,
-      title,
-      image_url: imageUrl,
-      sort: input.sort,
-      draw_at: drawAt,
-    };
+    const fields = { ...shape, draw_at: drawAt };
     let id = existing?.id;
     if (existing) {
       await this.updateLuckyDrawPrizes(
@@ -6741,23 +6802,7 @@ class PacksModuleService extends MedusaService({
       );
       id = row.id;
     }
-    const view = (p: {
-      kind: string;
-      card_handle: string | null;
-      credit_myr: unknown;
-      title: string;
-      image_url: string | null;
-      sort: number;
-      draw_at: unknown;
-    }) => ({
-      kind: p.kind,
-      card_handle: p.card_handle,
-      credit_myr: p.credit_myr == null ? null : toMoney(p.credit_myr),
-      title: p.title,
-      image_url: p.image_url,
-      sort: p.sort,
-      draw_at: new Date(p.draw_at as Date).toISOString(),
-    });
+    const view = luckyDrawPrizeAuditView;
     await this.audit(
       {
         admin_id: input.adminId,
@@ -6772,6 +6817,119 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { id: id as string };
+  }
+
+  // Admin: create a draft event together with its whole prize pool, or nothing.
+  // Every rule is the one saveLuckyDrawEvent / saveLuckyDrawPrize apply (the
+  // check* helpers), run over the whole pool BEFORE the first write, and the
+  // writes share one transaction. A prize with no draw time draws at the
+  // event's end. No seeds are committed here — publish does that. A new event
+  // has no id yet, so there is no per-event lock to take.
+  @InjectTransactionManager()
+  async createLuckyDrawEventWithPrizes(
+    input: {
+      name: string;
+      startsAt: Date;
+      endsAt: Date;
+      prizes: LuckyDrawPrizeCreateInput[];
+      adminId: string;
+      reason: string;
+      now?: Date;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string; prizeIds: string[] }> {
+    const name = checkLuckyDrawEvent(input);
+    const now = input.now ?? new Date();
+    const prizes = input.prizes.map((p, i) => {
+      try {
+        const shape = checkLuckyDrawPrize(p);
+        const drawAt = p.drawAt ?? input.endsAt;
+        checkLuckyDrawDrawTime(
+          drawAt,
+          { starts_at: input.startsAt, ends_at: input.endsAt },
+          now,
+        );
+        return { ...shape, draw_at: drawAt };
+      } catch (e) {
+        // Say which prize: the pool can be a hundred long.
+        throw e instanceof MedusaError
+          ? new MedusaError(e.type, `Prize ${i + 1}: ${e.message}`)
+          : e;
+      }
+    });
+    await this.assertLuckyDrawCardsExist(
+      prizes.flatMap((p) => (p.card_handle ? [p.card_handle] : [])),
+      sharedContext,
+    );
+
+    const [event] = await this.createLuckyDrawEvents(
+      [
+        {
+          name,
+          starts_at: input.startsAt,
+          ends_at: input.endsAt,
+          status: 'draft' as const,
+          created_by: input.adminId,
+        },
+      ],
+      sharedContext,
+    );
+    const rows = prizes.length
+      ? await this.createLuckyDrawPrizes(
+          prizes.map((p) => ({ event_id: event.id, ...p })),
+          sharedContext,
+        )
+      : [];
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'lucky_draw_event',
+        entity_id: event.id,
+        action: 'create',
+        before: null,
+        after: {
+          name,
+          starts_at: input.startsAt.toISOString(),
+          ends_at: input.endsAt.toISOString(),
+        },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    for (const [i, row] of rows.entries()) {
+      await this.audit(
+        {
+          admin_id: input.adminId,
+          entity_type: 'lucky_draw_prize',
+          entity_id: row.id,
+          action: 'create',
+          before: null,
+          after: { ...luckyDrawPrizeAuditView(prizes[i]), seed_hash: null },
+          reason: input.reason,
+        },
+        sharedContext,
+      );
+    }
+    return { id: event.id, prizeIds: rows.map((r) => r.id) };
+  }
+
+  // Every handle must be a Card row. One query for the lot.
+  private async assertLuckyDrawCardsExist(
+    handles: string[],
+    sharedContext: Context,
+  ): Promise<void> {
+    const wanted = [...new Set(handles)];
+    if (wanted.length === 0) return;
+    const found = await this.listCards(
+      { handle: wanted },
+      { select: ['handle'], take: wanted.length },
+      sharedContext,
+    );
+    const have = new Set(found.map((c) => c.handle));
+    const missing = wanted.find((h) => !have.has(h));
+    if (missing !== undefined) {
+      luckyDrawInvalid(`Card '${missing}' does not exist.`);
+    }
   }
 
   // Admin: take a draft event live. Every live prize gets its seed commitment

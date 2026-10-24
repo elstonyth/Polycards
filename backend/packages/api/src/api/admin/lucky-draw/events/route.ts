@@ -9,17 +9,28 @@ import { parseLuckyDrawEvent } from '../validate';
 
 // POST /admin/lucky-draw/events — create (no id) or edit (with id) an event.
 // Validation, the draft/published edit rules and the audit row live in
-// saveLuckyDrawEvent.
+// saveLuckyDrawEvent. A create may carry its prize pool in `prizes`:
+// createLuckyDrawEventWithPrizes writes the event and every prize in one
+// transaction, or nothing. Either way the event stays a draft.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const input = parseLuckyDrawEvent(req.body);
+  const { id, prizes, ...event } = parseLuckyDrawEvent(req.body);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const { id } = await packs.saveLuckyDrawEvent({
-    ...input,
+  const write = {
+    ...event,
     adminId: req.auth_context.actor_id,
     reason: reqReason(req.body),
+  };
+  if (id) {
+    await packs.saveLuckyDrawEvent({ ...write, id });
+    res.json({ id, prize_ids: [] });
+    return;
+  }
+  const created = await packs.createLuckyDrawEventWithPrizes({
+    ...write,
+    prizes: prizes ?? [],
   });
-  res.json({ id });
+  res.json({ id: created.id, prize_ids: created.prizeIds });
 }
