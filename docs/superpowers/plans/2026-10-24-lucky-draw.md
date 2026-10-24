@@ -20,6 +20,7 @@
 - Entering needs a logged-in, not-frozen account with `hasTopUp(customerId) === true`.
 - A prize's `seed` never leaves the server before that prize's result exists — not on store routes, not on admin routes.
 - One result per prize (unique index on `lucky_draw_result.prize_id`); a result is never updated or deleted by any code path.
+- **Every entry the gate accepted is either in the draw or refunded.** Entering holds `pg_advisory_xact_lock_shared(hashtextextended('luckydraw:<prizeId>', 0))`; drawing and cancelling hold the exclusive `pg_advisory_xact_lock` on the same key and re-check for a result under it. The draw therefore waits for in-flight entries, and an entry that arrives after the draw sees the result and is refused.
 - Tickets can only be earned from task claims (and refunds). No route sells tickets.
 - Customer copy never says "bet", "gamble", "lottery" or "jackpot" (PRODUCT.md anti-casino). Words: Lucky Draw, tickets, enter, prize, draw, winner.
 - New admin writes are audited with `this.audit({ admin_id, entity_type, entity_id, action, before, after, reason })`, like `saveTaskDefinition`.
@@ -31,7 +32,7 @@
 
 1. **Seed leak:** any store or admin JSON for an undrawn prize containing `seed` → must never happen. Pinned in Task 7 (store) and Task 5 (admin).
 2. **Double-tap / parallel enter:** two concurrent enters for more tickets than the balance → exactly one succeeds, balance never below 0. Pinned in Task 4.
-3. **Draw-time boundary:** an entry made at or after `draw_at` → refused, and never counted in the draw. Pinned in Tasks 4 and 6.
+3. **Draw-time boundary:** an entry accepted just before `draw_at` whose transaction commits late → still counted; an entry tried at/after `draw_at`, or after the result exists → refused. Pinned in Tasks 4 and 6.
 4. **Replayed claim / edited task:** re-claiming the same task period, or editing a task's tickets after claims → tickets paid once, at the claimed amount. Pinned in Task 3.
 5. **Empty or all-disabled prize:** no entries, or every entrant disabled → one "no entries" result, nothing paid, disabled entrants refunded, the job does not retry it. Pinned in Task 6.
 
@@ -74,9 +75,9 @@ Storefront (`src/`): `lib/data/schemas.ts`, `lib/actions/lucky-draw.ts` (new), `
   - `export const MAX_ENTRY_TICKETS = 1_000_000;`
   - `export const MAX_PRIZE_CREDIT_MYR = 50_000;`
   - `export const LUCKY_DRAW_PULL_PACK_ID = 'lucky-draw';` (synthetic `pull.pack_id` for prize cards, like `'task-reward'`)
-  - `export interface DrawEntryRow { id: string; customer_id: string; tickets: number; created_at: Date | string }`
+  - `export interface DrawEntryRow { id: string; customer_id: string; tickets: number }`
   - `export interface DrawEntrant { customer_id: string; tickets: number }`
-  - `export function aggregateEntries(rows: DrawEntryRow[], drawAt: Date): DrawEntrant[]`
+  - `export function aggregateEntries(rows: DrawEntryRow[]): DrawEntrant[]` — no time filter: the draw counts every committed entry on the prize; the cut-off is enforced at entry time under the prize lock (Tasks 4 and 6).
   - `export function newDrawSeed(): string`
   - `export function drawSeedHash(seed: string): string`
   - `export function winningTicketIndex(seed: string, prizeId: string, totalTickets: number): number`
@@ -89,35 +90,13 @@ Storefront (`src/`): `lib/data/schemas.ts`, `lib/actions/lucky-draw.ts` (new), `
 ```ts
 const SEED = 'a'.repeat(64);
 
-it('aggregateEntries sums per customer, drops entries at/after drawAt, sorts by customer_id', () => {
-  const drawAt = new Date('2026-11-30T15:59:00Z');
+it('aggregateEntries sums per customer and sorts by customer_id', () => {
   const rows = [
-    {
-      id: 'e1',
-      customer_id: 'cus_b',
-      tickets: 20,
-      created_at: '2026-11-02T00:00:00Z',
-    },
-    {
-      id: 'e2',
-      customer_id: 'cus_a',
-      tickets: 30,
-      created_at: '2026-11-03T00:00:00Z',
-    },
-    {
-      id: 'e3',
-      customer_id: 'cus_b',
-      tickets: 30,
-      created_at: '2026-11-04T00:00:00Z',
-    },
-    {
-      id: 'e4',
-      customer_id: 'cus_c',
-      tickets: 99,
-      created_at: '2026-11-30T15:59:00Z',
-    }, // exactly drawAt: excluded
+    { id: 'e1', customer_id: 'cus_b', tickets: 20 },
+    { id: 'e2', customer_id: 'cus_a', tickets: 30 },
+    { id: 'e3', customer_id: 'cus_b', tickets: 30 },
   ];
-  expect(aggregateEntries(rows, drawAt)).toEqual([
+  expect(aggregateEntries(rows)).toEqual([
     { customer_id: 'cus_a', tickets: 30 },
     { customer_id: 'cus_b', tickets: 50 },
   ]);
@@ -338,7 +317,7 @@ In `claimTask`, right after `createTaskClaims` succeeds and before the reward br
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: same two commands. Expected: PASS. Then run the existing task suites: `corepack yarn test:unit src/modules/packs/__tests__/tasks.unit.spec.ts src/modules/packs/__tests__/task-save-and-facts.unit.spec.ts` → PASS.
+Run: same two commands. Expected: PASS. Then run the existing task suites, which may assert exact claim/hub shapes: `corepack yarn test:unit src/modules/packs/__tests__/tasks.unit.spec.ts src/modules/packs/__tests__/task-save-and-facts.unit.spec.ts "src/api/store/tasks"` and `node integration-tests/run-http-shards.mjs tasks.spec` → PASS (update any exact-shape assertion to include `tickets`).
 
 - [ ] **Step 5: Commit**
 
@@ -362,7 +341,7 @@ git commit -m "feat(lucky-draw): tasks can pay Lucky Draw tickets with the norma
 - Produces:
   - `export type EnterRefusal = 'not_found' | 'not_open' | 'closed' | 'not_enough_tickets' | 'no_topup';` (in `lucky-draw.ts`)
   - `enterLuckyDraw(input: { customerId: string; prizeId: string; tickets: unknown; now?: Date }, sharedContext?): Promise<{ entered: true; entryId: string; balance: number; myTickets: number } | { entered: false; reason: EnterRefusal }>` — `@InjectTransactionManager`.
-  - Rules, in this order: tickets valid (else throws INVALID_DATA) → `pg_advisory_xact_lock(hashtextextended('tickets:<customerId>', 0))` → `assertNotFrozen` (throws) → prize exists, not cancelled, its event `published` (else `not_found`) → `now >= event.starts_at` (else `not_open`) → `now < prize.draw_at` (else `closed`) → `hasTopUp` (else `no_topup`) → balance ≥ tickets (else `not_enough_tickets`) → insert `lucky_draw_entry` + ticket row `{ delta: -tickets, reason: 'entry', ref: entryId }`. `myTickets` = this customer's total on that prize after the insert.
+  - Rules, in this order: tickets valid (else throws INVALID_DATA) → shared prize lock `pg_advisory_xact_lock_shared(hashtextextended('luckydraw:<prizeId>', 0))` → `pg_advisory_xact_lock(hashtextextended('tickets:<customerId>', 0))` → `assertNotFrozen` (throws) → prize exists, not cancelled, its event `published` (else `not_found`) → `now >= event.starts_at` (else `not_open`) → `now < prize.draw_at` **and** no `lucky_draw_result` row for the prize (else `closed`) → `hasTopUp` (else `no_topup`) → balance ≥ tickets (else `not_enough_tickets`) → insert `lucky_draw_entry` + ticket row `{ delta: -tickets, reason: 'entry', ref: entryId }`. `myTickets` = this customer's total on that prize after the insert. Lock order is always prize lock, then customer lock (the draw takes only the prize lock), so no deadlock.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -450,7 +429,7 @@ git commit -m "feat(lucky-draw): enter a prize — locked balance check, top-up 
   - `saveLuckyDrawEvent(input: { id?: string; name: string; startsAt: Date; endsAt: Date; adminId: string; reason: string }): Promise<{ id: string }>` — name 1–80 chars, `endsAt > startsAt`. Draft: everything editable. Published: only `name`. Cancelled: refused (NOT_ALLOWED).
   - `saveLuckyDrawPrize(input: { id?: string; eventId: string; kind: 'card' | 'credit'; cardHandle?: string | null; creditMyr?: number | null; title: string; imageUrl?: string | null; sort: number; drawAt?: Date | null; adminId: string; reason: string }): Promise<{ id: string }>` — card must exist (`listCards({ handle })`); credit `0 < x ≤ MAX_PRIZE_CREDIT_MYR`, whole sen; `drawAt` defaults to the event's `ends_at` and must satisfy `starts_at < drawAt ≤ ends_at`; a credit prize needs `imageUrl`. On a **published** event: a new prize gets `seed`/`seed_hash` at creation; an existing prize may change only `title`, `imageUrl`, `sort`.
   - `publishLuckyDrawEvent(input: { id: string; adminId: string; reason: string }): Promise<void>` — draft only; ≥ 1 live prize; sets `seed = newDrawSeed()`, `seed_hash = drawSeedHash(seed)` on every prize without one; `status = 'published'`.
-  - `cancelLuckyDrawPrize(input: { id: string; adminId: string; reason: string }): Promise<{ refunded: number }>` — refused once a result exists; sets `cancelled_at`; per entrant one ticket row `{ delta: +total, reason: 'refund', ref: '<prizeId>:<customerId>' }`; `refunded` = entrants refunded.
+  - `cancelLuckyDrawPrize(input: { id: string; adminId: string; reason: string }): Promise<{ refunded: number }>` — takes the exclusive `luckydraw:<prizeId>` advisory lock first, then refuses if a result exists (re-checked under the lock, so a cancel racing the draw cannot both pay and refund); sets `cancelled_at`; per entrant one ticket row `{ delta: +total, reason: 'refund', ref: '<prizeId>:<customerId>' }`; `refunded` = entrants refunded.
   - `adminLuckyDrawOverview(): Promise<AdminLuckyDrawEvent[]>` where each event carries its prizes with `seed_hash`, `total_tickets`, `entrant_count`, `result` (with `seed` only when drawn). **Never** the seed of an undrawn prize.
   - `luckyDrawTicketHistory(customerId: string, take: number): Promise<{ balance: number; rows: { delta: number; reason: string; ref: string; created_at: string }[] }>` — `@InjectManager`, newest first.
   - Admin routes map 1:1 to these; bodies use snake_case (`starts_at`, `card_handle`, `credit_myr`, `image_url`, `draw_at`, `reason`); `adminId` = `req.auth_context.actor_id`.
@@ -475,6 +454,9 @@ it('a published prize keeps kind, card, credit and draw time; title/image/sort s
 it('cancel refunds every entrant their total on that prize, once', async () => {
   // a: 30+20 entries, b: 10 → balances back up by 50 and 10; second cancel throws
 });
+it('cancel is refused once the prize has a result', async () => {
+  // draw it via drawLuckyDrawPrize, then cancelLuckyDrawPrize rejects NOT_ALLOWED and no refund rows exist
+});
 it('writes an audit row per admin action', async () => {
   /* listAdminActionAudits entity_type 'lucky_draw_event' / 'lucky_draw_prize' */
 });
@@ -484,9 +466,11 @@ HTTP spec:
 
 ```ts
 it('GET /admin/lucky-draw never returns an undrawn prize seed', async () => {
+  const [row] = await packs.listLuckyDrawPrizes({ id: prizeId });
   const res = await api.get('/admin/lucky-draw', adminHeaders);
-  expect(JSON.stringify(res.data)).not.toMatch(/"seed":/);
-  expect(res.data.events[0].prizes[0].seed_hash).toMatch(/^[0-9a-f]{64}$/);
+  // Check the secret itself — `seed` is also a field name elsewhere.
+  expect(JSON.stringify(res.data)).not.toContain(row.seed);
+  expect(res.data.events[0].prizes[0].seed_hash).toBe(row.seed_hash);
 });
 ```
 
@@ -520,7 +504,7 @@ git commit -m "feat(lucky-draw): admin events and prizes — publish with seed c
 - Consumes: `aggregateEntries`, `drawWinner`, `LUCKY_DRAW_PULL_PACK_ID` (Task 1); `disabledCustomerIds`, `mutateCreditAtomic`, `recordLedgerEntry`, `createPulls`, `BONUS_BP_FULL` (existing).
 - Produces:
   - `export interface LuckyDrawOutcome { prizeId: string; winnerId: string | null; kind: 'card' | 'credit'; cardHandle: string | null; pullId: string | null }`
-  - `drawLuckyDrawPrize(input: { prizeId: string; now: Date }, sharedContext?): Promise<LuckyDrawOutcome | null>` — `@InjectTransactionManager`. Steps: advisory lock `luckydraw:<prizeId>`; result exists → `null`; prize not due / cancelled / event not published → `null`; entries → `aggregateEntries(rows, prize.draw_at)`; drop `disabledCustomerIds` and refund each (`reason: 'refund'`, `ref: '<prizeId>:<customerId>'`), recording them in `excluded`; `drawWinner(entrants, prize.seed, prize.id)`; pay (credit: bonus + WP ledger with `period: 'luckydraw:<prizeId>'`; card: one pull with `pack_id: LUCKY_DRAW_PULL_PACK_ID`, `card_id: card_handle`, `source: 'reward'`, `bonus_bp: BONUS_BP_FULL`, `stock_earmarked: false`); insert the result row (winner null + zeros when nobody entered). A card whose `Card` row is gone: result still written, `pull_id` null, logged by the job.
+  - `drawLuckyDrawPrize(input: { prizeId: string; now: Date }, sharedContext?): Promise<LuckyDrawOutcome | null>` — `@InjectTransactionManager`. Steps: exclusive advisory lock `luckydraw:<prizeId>` (waits for in-flight entries holding the shared lock); result exists → `null`; prize not due / cancelled / event not published → `null`; entries → `aggregateEntries(rows)` over **every** entry on the prize (no `created_at` filter — clock skew between app and DB must never drop an accepted entry); drop `disabledCustomerIds` and refund each (`reason: 'refund'`, `ref: '<prizeId>:<customerId>'`), recording them in `excluded`; `drawWinner(entrants, prize.seed, prize.id)`; pay (credit: bonus + WP ledger with `period: 'luckydraw:<prizeId>'`; card: one pull with `pack_id: LUCKY_DRAW_PULL_PACK_ID`, `card_id: card_handle`, `source: 'reward'`, `bonus_bp: BONUS_BP_FULL`, `stock_earmarked: false`); insert the result row (winner null + zeros when nobody entered). A card whose `Card` row is gone: result still written, `pull_id` null, logged by the job.
   - `drawDueLuckyDrawPrizes(deps: { now?: Date; decrementStock?: (handle: string, qty: number) => Promise<boolean> }): Promise<{ drawn: number; failed: number }>` — lists due prizes (`draw_at <= now`, not cancelled, event published, no result), calls `drawLuckyDrawPrize` one by one (sequential, own transaction each, a throw counts as `failed` and does not stop the loop), then `reserveLuckyDrawStock` for card outcomes after each commit (same failure handling as `reserveSettledStock`).
   - Job `draw-lucky-draw`: `config = { name: 'draw-lucky-draw', schedule: '* * * * *' }`; calls `drawDueLuckyDrawPrizes({ decrementStock: takeCardStock(container) })`; logs `failed > 0` with the logger like `settle-challenge-week.ts`.
 
@@ -549,8 +533,16 @@ it('draws a due credit prize once, pays bonus credit, stores a checkable result'
 it('a card prize mints one reward pull for the winner with full bonus bp and no earmark', async () => {
   /* pull.source 'reward', pack_id 'lucky-draw' */
 });
-it('entries created at or after draw_at are ignored', async () => {
-  /* ... */
+it('an entry accepted before draw_at counts even though its row is written after draw_at', async () => {
+  // draw_at is 1 hour in the REAL past; enter with now = draw_at - 1s, so the
+  // gate accepts while created_at (real clock) lands after draw_at.
+  await service.enterLuckyDraw({ customerId: 'cus_late', prizeId, tickets: 5, now: new Date(drawAt.getTime() - 1000) });
+  await service.drawDueLuckyDrawPrizes({ now: new Date() });
+  const [res] = await service.listLuckyDrawResults({ prize_id: prizeId });
+  expect(res.entries).toContainEqual({ customer_id: 'cus_late', tickets: 5 });
+});
+it('an enter after the result exists is refused as closed and spends nothing', async () => {
+  // drawn prize; enter with now = draw_at - 1s (gate time OK) → closed, balance unchanged
 });
 it('no entries → result with null winner, nothing paid, not drawn again', async () => {
   /* ... */
@@ -597,7 +589,7 @@ git commit -m "feat(lucky-draw): once-a-minute draw job — seeded winner, bonus
 **Interfaces:**
 
 - Consumes: `enterLuckyDraw` (Task 4), `luckyDrawBalance`, `luckyDrawTicketHistory` (Tasks 3, 5); `loadPullerProfiles` (`api/store/pulls/pullers.ts`) for every name shown.
-- Produces — JSON contracts the storefront (Task 9) parses. `Person = { who: string; seed: number | null; avatar_url: string | null; frame_url: string | null }` (from `profileOf`; disabled → `ANONYMOUS_PULLER`):
+- Produces — JSON contracts the storefront (Task 9) parses. `Person = { who: string; face_seed: number | null; avatar_url: string | null; frame_url: string | null }` (from `profileOf`, with its avatar `seed` renamed `face_seed` so it can never be confused with a draw seed; disabled → `ANONYMOUS_PULLER`):
   - `GET /store/lucky-draw` → `{ balance: number; event: { id; name; starts_at; ends_at } | null; prizes: PrizeView[] }` — the published event whose `starts_at ≤ now < ends_at`, else the most recent published event that ended within 7 days, else `null`. `PrizeView = { id; kind: 'card' | 'credit'; title; image: string | null; value_myr: number; draw_at; seed_hash: string; total_tickets; entrant_count; my_tickets; top: { person: Person; tickets: number }[] /* ≤10, most tickets first */; result: ResultView | null }`. `value_myr` = credit amount, or the card's current RM value (same source as `HubReward.card_value_myr`). `image` = `image_url ?? card image`.
   - `ResultView = { prize_id; title; image; value_myr; drawn_at; winner: Person | null; winner_tickets; total_tickets; entrant_count; seed; seed_hash }`
   - `GET /store/lucky-draw/results?before=<iso>&limit=<1..50, default 20>` → `{ results: ResultView[]; next_before: string | null }`, newest first, every event.
@@ -605,19 +597,26 @@ git commit -m "feat(lucky-draw): once-a-minute draw job — seeded winner, bonus
   - `GET /store/lucky-draw/me` → `{ balance; history: { delta; reason: 'task_claim' | 'entry' | 'refund'; created_at }[] /* last 100 */; entries: { prize_id; title; image; my_tickets; draw_at; status: 'open' | 'won' | 'lost' | 'cancelled' }[] }`
   - `GET /store/lucky-draw/balance` → `{ balance: number }`
   - `POST /store/lucky-draw/prizes/:id/enter` body `{ tickets: number }` → 200 with `enterLuckyDraw`'s result object (refusals are 200 `{ entered: false, reason }`, never 409 — Medusa rewrites CONFLICT messages); invalid tickets → 400.
+  - **Caching (the draw moment is a synchronized read — see the 10-20 outage):** `view.ts` keeps an in-process cache of the shared part of `GET /store/lucky-draw` (event, prizes, totals, top 10, results) for 10 s, and of drawn `ResultView`s/entry lists by prize id with no expiry (results are immutable; cap 500 entries). Only `balance` and `my_tickets` are read per request. Export `clearLuckyDrawCache()` for tests (like `clearPackListCache`). An undrawn `results/:prizeId` 404 is not cached.
 
 - [ ] **Step 1: Write the failing HTTP tests**
 
 ```ts
-it('GET /store/lucky-draw lists live prizes with my tickets, top 10 and no seed', async () => {
+it('GET /store/lucky-draw lists live prizes with my tickets, top 10 and no draw seed', async () => {
+  clearLuckyDrawCache();
+  const [row] = await packs.listLuckyDrawPrizes({ id: prizeId });
   const res = await api.get('/store/lucky-draw', customerHeaders);
   expect(res.data.balance).toBe(70);
   expect(res.data.prizes[0]).toMatchObject({
     my_tickets: 30,
     total_tickets: 30,
     entrant_count: 1,
+    seed_hash: row.seed_hash,
   });
-  expect(JSON.stringify(res.data)).not.toMatch(/"seed":/);
+  expect(JSON.stringify(res.data)).not.toContain(row.seed);
+  // the same secret must not appear on any other store route before the draw
+  for (const path of ['/store/lucky-draw/me', '/store/lucky-draw/results'])
+    expect(JSON.stringify((await api.get(path, customerHeaders)).data)).not.toContain(row.seed);
 });
 it('POST enter returns 200 { entered:false, reason:"no_topup" } for a never-topped-up account', async () => {
   /* ... */
@@ -707,7 +706,7 @@ git commit -m "feat(admin): Lucky Draw page under Rewards and a Tickets field on
   - Actions (`'use server'`, via `store.get` / `store.post`): `getLuckyDraw(): Promise<LuckyDrawPage | null>`, `enterLuckyDraw(prizeId: string, tickets: number): Promise<{ ok: true; entered: true; balance: number; myTickets: number } | { ok: true; entered: false; reason: string } | { ok: false; error: string }>`, `getLuckyDrawResults(before?: string): Promise<LuckyDrawResults | null>`, `getLuckyDrawResult(prizeId: string): Promise<LuckyDrawResultDetail | null>`, `getMyLuckyDraw(): Promise<LuckyDrawMine | null>`, `getTicketBalance(): Promise<number | null>`.
   - Pure helpers in `src/lib/lucky-draw.ts`: `chancePercent(mine: number, total: number): string` (`'0%'` when total 0; one decimal under 10%, whole number otherwise; `'<0.1%'` for tiny non-zero), `drawCountdown(drawAtIso: string, nowMs: number): string` (`'2d 4h'`, `'3h 05m'`, `'4m 09s'`, `'Drawing…'` at ≤ 0), `ENTER_REFUSAL_COPY: Record<string, string>` with exactly: `not_found: 'This prize is no longer available.'`, `not_open: 'This Lucky Draw has not started yet.'`, `closed: 'Entries for this prize are closed.'`, `not_enough_tickets: 'You don\'t have that many tickets.'`, `no_topup: 'Top up at least once to enter the Lucky Draw.'`.
   - Page: server `page.tsx` (`metadata.title = 'Lucky Draw'`) loads `getLuckyDraw()`; client has three tabs — **Prizes** (grid of `PrizeCard`: art, title, RM value, countdown, total tickets, entrants, my tickets + `chancePercent`, top-10 list, Enter button → `EnterSheet` with stepper and Max, `seed_hash` under a "Fair draw" disclosure), **Results** (`ResultsList` paginated with `next_before`; tap → `ResultDetail`: winner, tickets, full entry list, seed + hash, and a plain "How to check" paragraph: sha256(seed) must equal the hash shown before the draw; HMAC-SHA256(seed, prize id) mod total tickets gives the winning ticket; count through the list in order), **My tickets** (`MyTickets`: balance, history, my entries with status).
-  - Polling: while a prize on screen is within 2 minutes of `draw_at` and has no result, re-fetch `getLuckyDraw()` every 5 s; when its result appears, `SpinReveal` plays a reel of entrant names that stops on the stored winner (decoration only); reduced motion → show the winner directly.
+  - Polling: from `draw_at` until its result appears or `draw_at + 5 min`, poll the cheap `getLuckyDrawResult(prizeId)` (not the whole page) every 5 s plus 0–2 s random jitter per tick; when the result appears, `SpinReveal` plays a reel of entrant names that stops on the stored winner (decoration only); reduced motion → show the winner directly. After entering, update balance/my tickets/total locally from the enter response instead of re-fetching the page.
   - `?open=1` (from the vault row) plays `TicketOpenIntro` once (placeholder art: lucide `Ticket` icon + scale/fade); reduced motion → skipped.
   - No balance → empty state "Earn tickets from tasks" linking `/task`. No event → "The next Lucky Draw is coming soon." plus the Results tab.
 
