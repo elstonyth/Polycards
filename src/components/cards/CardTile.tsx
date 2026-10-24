@@ -15,10 +15,13 @@ export function CardTile({
   card,
   onOpen,
   sizes = '(max-width: 768px) 45vw, 200px',
+  pokemon,
 }: {
   card: PackCard;
   onOpen: (card: PackCard) => void;
   sizes?: string;
+  /** false in a non-Pokémon pack (isPokemonPack) — see PokemonBadge. */
+  pokemon?: boolean;
 }) {
   // The badge is the reel↔card key, and the reel states its sprite's name
   // (PokemonToken's alt). Naming it here too keeps the mapping reachable
@@ -27,7 +30,7 @@ export function CardTile({
   // content, so an sr-only span inside the badge would be silently dropped;
   // it has to be spliced into the label itself. Every QA selector matches this
   // label by PREFIX, so the suffix is safe to append.
-  const pokeName = badgeSprite(card).name;
+  const pokeName = badgeSprite(card, false, pokemon).name;
   return (
     <button
       type="button"
@@ -53,6 +56,7 @@ export function CardTile({
           card={card}
           rarity={card.rarity}
           slabSrc={card.slabImage}
+          pokemon={pokemon}
         />
         <span
           aria-hidden

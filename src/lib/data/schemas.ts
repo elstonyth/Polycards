@@ -69,6 +69,7 @@ const rarity = z.custom<Rarity>((v) => typeof v === 'string' && isRarity(v));
 export const CardWireSchema = z.object({
   handle: z.string().catch(''),
   name: z.string().catch(''),
+  set: z.string().catch(''),
   image: z.string().catch(''),
   slab_image: z.string().nullable().catch(null),
   rarity: rarity.nullable().catch(null),

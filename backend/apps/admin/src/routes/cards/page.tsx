@@ -1033,6 +1033,7 @@ const GachaCardsPage = () => {
                   currentSprite={form.sprite_image}
                   currentDex={form.pokemon_dex}
                   suggestionName={form.name}
+                  setName={form.set}
                 />
               </div>
             )}

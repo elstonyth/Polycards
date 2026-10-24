@@ -211,6 +211,11 @@ async function buildFeed(
         ),
         image: card.image,
         slab_image: card.slab_image ?? null,
+        // The linked sprite, so a feed card never has to guess one by name;
+        // the set tells an unlinked One Piece card from a Pokémon one.
+        set: card.set,
+        pokemon_dex: card.pokemon_dex ?? null,
+        sprite_image: card.sprite_image ?? null,
         // pack the card came from (= Pack.slug) + live catalog label fields.
         pack_id: p.pack_id,
         pack_title: pack?.title ?? null,
