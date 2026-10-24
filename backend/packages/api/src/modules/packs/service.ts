@@ -912,6 +912,154 @@ function cardValueMyr(
   );
 }
 
+/** A drawn prize as the player routes show it. Ids are raw — the route
+ *  resolves names. `seed` is the revealed draw seed; it exists here only
+ *  because a result row does. */
+export type LuckyDrawResultRow = {
+  prize_id: string;
+  title: string;
+  image: string | null;
+  value_myr: number;
+  drawn_at: string;
+  winner_customer_id: string | null;
+  winner_tickets: number;
+  total_tickets: number;
+  entrant_count: number;
+  seed: string;
+  seed_hash: string;
+};
+
+export type LuckyDrawPagePrize = {
+  id: string;
+  kind: 'card' | 'credit';
+  title: string;
+  image: string | null;
+  value_myr: number;
+  draw_at: string;
+  seed_hash: string;
+  total_tickets: number;
+  entrant_count: number;
+  /** Most tickets first, raw customer ids. */
+  top: { customer_id: string; tickets: number }[];
+  result: LuckyDrawResultRow | null;
+};
+
+export type LuckyDrawPage = {
+  event: {
+    id: string;
+    name: string;
+    starts_at: string;
+    ends_at: string;
+  } | null;
+  prizes: LuckyDrawPagePrize[];
+};
+
+export type LuckyDrawMine = {
+  balance: number;
+  history: { delta: number; reason: string; created_at: string }[];
+  entries: {
+    prize_id: string;
+    title: string;
+    image: string | null;
+    my_tickets: number;
+    draw_at: string;
+    status: 'open' | 'won' | 'lost' | 'cancelled';
+  }[];
+};
+
+/** A card as the Lucky Draw routes need it: its value inputs and its picture. */
+type LuckyDrawCard = {
+  handle: string;
+  market_value: unknown;
+  market_multiplier?: unknown;
+  image?: string | null;
+  slab_image?: string | null;
+};
+
+/** The player page's top-entrants length. */
+const LUCKY_DRAW_TOP_ENTRANTS = 10;
+/** A finished event stays on the page this long. */
+const LUCKY_DRAW_LINGER_MS = 7 * 24 * 60 * 60 * 1000;
+/** Prize columns the player routes read. Never `seed_nonce`: a seed must not
+ *  even be loadable on a path that returns before the draw. */
+const LUCKY_DRAW_PRIZE_FIELDS = [
+  'id',
+  'event_id',
+  'kind',
+  'card_handle',
+  'credit_myr',
+  'title',
+  'image_url',
+  'sort',
+  'draw_at',
+  'seed_hash',
+  'cancelled_at',
+];
+/** Result columns without the frozen entry list (long). */
+const LUCKY_DRAW_RESULT_FIELDS = [
+  'prize_id',
+  'winner_customer_id',
+  'winner_tickets',
+  'total_tickets',
+  'entrant_count',
+  'seed',
+  'drawn_at',
+];
+
+/** RM value and picture of a prize for the player routes: a credit prize is its
+ *  amount; a card prize is the card's current value (0 if the card is gone).
+ *  The picture is the prize's own, else the card's slab, else its scan. */
+function luckyDrawShown(
+  prize: {
+    kind: string;
+    card_handle?: string | null;
+    credit_myr?: unknown;
+    image_url?: string | null;
+  },
+  cards: { cardByHandle: Map<string, LuckyDrawCard>; fxRate: number },
+): { value_myr: number; image: string | null } {
+  const card =
+    prize.kind === 'card' && prize.card_handle
+      ? cards.cardByHandle.get(prize.card_handle)
+      : undefined;
+  return {
+    value_myr:
+      prize.kind === 'credit'
+        ? toMoney(prize.credit_myr)
+        : card
+          ? cardValueMyr(card, cards.fxRate)
+          : 0,
+    image: prize.image_url || card?.slab_image || card?.image || null,
+  };
+}
+
+function luckyDrawResultRow(
+  prize: { id: string; title: string; seed_hash?: string | null },
+  result: {
+    winner_customer_id?: string | null;
+    winner_tickets: number;
+    total_tickets: number;
+    entrant_count: number;
+    seed: string;
+    drawn_at: unknown;
+  },
+  shown: { value_myr: number; image: string | null },
+): LuckyDrawResultRow {
+  return {
+    prize_id: prize.id,
+    title: prize.title,
+    image: shown.image,
+    value_myr: shown.value_myr,
+    drawn_at: new Date(result.drawn_at as Date).toISOString(),
+    winner_customer_id: result.winner_customer_id ?? null,
+    winner_tickets: result.winner_tickets,
+    total_tickets: result.total_tickets,
+    entrant_count: result.entrant_count,
+    seed: result.seed,
+    seed_hash: prize.seed_hash ?? '',
+  };
+}
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -7116,24 +7264,7 @@ class PacksModuleService extends MedusaService({
     );
     const prizeIds = prizes.map((p) => p.id);
 
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const sums = prizeIds.length
-      ? await em.execute<
-          {
-            prize_id: string;
-            total: string | number;
-            entrants: string | number;
-          }[]
-        >(
-          'SELECT prize_id, COALESCE(SUM(tickets), 0) AS total, ' +
-            'COUNT(DISTINCT customer_id) AS entrants FROM lucky_draw_entry ' +
-            `WHERE prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
-            'AND deleted_at IS NULL GROUP BY prize_id',
-          prizeIds,
-        )
-      : [];
-    const sumByPrize = new Map(sums.map((r) => [r.prize_id, r]));
+    const sumByPrize = await this.luckyDrawEntrySums(prizeIds, sharedContext);
 
     const results = prizeIds.length
       ? await pageAll((opts) =>
@@ -7142,15 +7273,7 @@ class PacksModuleService extends MedusaService({
             {
               ...opts,
               // Not `entries`: the frozen entrant list can be long.
-              select: [
-                'prize_id',
-                'winner_customer_id',
-                'winner_tickets',
-                'total_tickets',
-                'entrant_count',
-                'seed',
-                'drawn_at',
-              ],
+              select: [...LUCKY_DRAW_RESULT_FIELDS],
             },
             sharedContext,
           ),
@@ -7158,25 +7281,10 @@ class PacksModuleService extends MedusaService({
       : [];
     const resultByPrize = new Map(results.map((r) => [r.prize_id, r]));
 
-    const cardHandles = [
-      ...new Set(
-        prizes.flatMap((p) =>
-          p.kind === 'card' && p.card_handle ? [p.card_handle] : [],
-        ),
-      ),
-    ];
-    const cards = cardHandles.length
-      ? await this.listCards(
-          { handle: cardHandles },
-          {
-            select: ['handle', 'market_value', 'market_multiplier'],
-            take: cardHandles.length,
-          },
-          sharedContext,
-        )
-      : [];
-    const cardByHandle = new Map(cards.map((c) => [c.handle, c]));
-    const fxRate = cards.length ? await resolveFxRate(this) : DEFAULT_USD_MYR;
+    const { cardByHandle, fxRate } = await this.luckyDrawCards(
+      prizes,
+      sharedContext,
+    );
 
     const iso = (d: unknown) => new Date(d as Date).toISOString();
     const view = (p: (typeof prizes)[number]): AdminLuckyDrawPrize => {
@@ -7194,8 +7302,8 @@ class PacksModuleService extends MedusaService({
         draw_at: iso(p.draw_at),
         cancelled_at: p.cancelled_at ? iso(p.cancelled_at) : null,
         seed_hash: p.seed_hash ?? null,
-        total_tickets: Number(sum?.total ?? 0),
-        entrant_count: Number(sum?.entrants ?? 0),
+        total_tickets: sum?.total_tickets ?? 0,
+        entrant_count: sum?.entrant_count ?? 0,
         value_myr:
           p.kind === 'credit'
             ? p.credit_myr == null
@@ -7250,6 +7358,386 @@ class PacksModuleService extends MedusaService({
         ref: r.ref,
         created_at: new Date(r.created_at).toISOString(),
       })),
+    };
+  }
+
+  // Tickets in and distinct entrants per prize. Counts the entries ever made on
+  // a prize (a cancelled prize keeps showing what was entered before its
+  // refund). Prizes with no entries are absent from the map.
+  private async luckyDrawEntrySums(
+    prizeIds: string[],
+    sharedContext: Context,
+  ): Promise<Map<string, { total_tickets: number; entrant_count: number }>> {
+    if (prizeIds.length === 0) return new Map();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      {
+        prize_id: string;
+        total: string | number;
+        entrants: string | number;
+      }[]
+    >(
+      'SELECT prize_id, COALESCE(SUM(tickets), 0) AS total, ' +
+        'COUNT(DISTINCT customer_id) AS entrants FROM lucky_draw_entry ' +
+        `WHERE prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
+        'AND deleted_at IS NULL GROUP BY prize_id',
+      prizeIds,
+    );
+    return new Map(
+      rows.map((r) => [
+        r.prize_id,
+        { total_tickets: Number(r.total), entrant_count: Number(r.entrants) },
+      ]),
+    );
+  }
+
+  // The cards behind a set of prizes, with the FX rate their RM value needs.
+  private async luckyDrawCards(
+    prizes: { kind: string; card_handle?: string | null }[],
+    sharedContext: Context,
+  ): Promise<{ cardByHandle: Map<string, LuckyDrawCard>; fxRate: number }> {
+    const handles = [
+      ...new Set(
+        prizes.flatMap((p) =>
+          p.kind === 'card' && p.card_handle ? [p.card_handle] : [],
+        ),
+      ),
+    ];
+    const cards = handles.length
+      ? await this.listCards(
+          { handle: handles },
+          {
+            select: [
+              'handle',
+              'market_value',
+              'market_multiplier',
+              'image',
+              'slab_image',
+            ],
+            take: handles.length,
+          },
+          sharedContext,
+        )
+      : [];
+    return {
+      cardByHandle: new Map(cards.map((c) => [c.handle, c])),
+      fxRate: cards.length ? await resolveFxRate(this) : DEFAULT_USD_MYR,
+    };
+  }
+
+  // The player page's shared part: the live event (else the latest one that
+  // ended within 7 days), its prizes with totals, the top entrants (raw ids)
+  // and, for drawn prizes, the result. Everything here is the same for every
+  // viewer, so the route caches it; the viewer's own balance and tickets come
+  // from luckyDrawBalance / luckyDrawMyTickets. Cancelled prizes are left out.
+  // A prize's seed is read only from its result row.
+  @InjectManager()
+  async luckyDrawPage(
+    input: { now?: Date } = {},
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LuckyDrawPage> {
+    const now = (input.now ?? new Date()).getTime();
+    const at = (d: unknown) => new Date(d as Date).getTime();
+    const events = await this.listLuckyDrawEvents(
+      { status: 'published' },
+      { order: { starts_at: 'DESC', id: 'DESC' }, take: 50 },
+      sharedContext,
+    );
+    const event =
+      events.find((e) => at(e.starts_at) <= now && now < at(e.ends_at)) ??
+      events
+        .filter(
+          (e) =>
+            at(e.ends_at) <= now && now - at(e.ends_at) <= LUCKY_DRAW_LINGER_MS,
+        )
+        .sort((a, b) => at(b.ends_at) - at(a.ends_at))[0];
+    if (!event) return { event: null, prizes: [] };
+
+    const prizes = (
+      await pageAll(
+        (opts) =>
+          this.listLuckyDrawPrizes(
+            { event_id: event.id },
+            { ...opts, select: [...LUCKY_DRAW_PRIZE_FIELDS] },
+            sharedContext,
+          ),
+        { sort: 'ASC', id: 'ASC' },
+      )
+    ).filter((p) => !p.cancelled_at);
+    const prizeIds = prizes.map((p) => p.id);
+    const sums = await this.luckyDrawEntrySums(prizeIds, sharedContext);
+
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // Per prize, the top entrants: tickets summed per customer, most first
+    // (customer id breaks a tie so the order is stable).
+    const topRows = prizeIds.length
+      ? await em.execute<
+          {
+            prize_id: string;
+            customer_id: string;
+            tickets: string | number;
+          }[]
+        >(
+          'SELECT prize_id, customer_id, tickets FROM (' +
+            'SELECT prize_id, customer_id, SUM(tickets) AS tickets, ' +
+            'ROW_NUMBER() OVER (PARTITION BY prize_id ' +
+            'ORDER BY SUM(tickets) DESC, customer_id ASC) AS rn ' +
+            'FROM lucky_draw_entry ' +
+            `WHERE prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
+            'AND deleted_at IS NULL GROUP BY prize_id, customer_id' +
+            ') ranked WHERE rn <= ? ORDER BY prize_id, rn',
+          [...prizeIds, LUCKY_DRAW_TOP_ENTRANTS],
+        )
+      : [];
+    const topByPrize = new Map<string, LuckyDrawPagePrize['top']>();
+    for (const r of topRows) {
+      const list = topByPrize.get(r.prize_id) ?? [];
+      list.push({ customer_id: r.customer_id, tickets: Number(r.tickets) });
+      topByPrize.set(r.prize_id, list);
+    }
+
+    const results = prizeIds.length
+      ? await pageAll((opts) =>
+          this.listLuckyDrawResults(
+            { prize_id: prizeIds },
+            { ...opts, select: [...LUCKY_DRAW_RESULT_FIELDS] },
+            sharedContext,
+          ),
+        )
+      : [];
+    const resultByPrize = new Map(results.map((r) => [r.prize_id, r]));
+    const cards = await this.luckyDrawCards(prizes, sharedContext);
+
+    return {
+      event: {
+        id: event.id,
+        name: event.name,
+        starts_at: new Date(event.starts_at).toISOString(),
+        ends_at: new Date(event.ends_at).toISOString(),
+      },
+      prizes: prizes.map((p) => {
+        const shown = luckyDrawShown(p, cards);
+        const result = resultByPrize.get(p.id);
+        const sum = sums.get(p.id);
+        return {
+          id: p.id,
+          kind: p.kind,
+          title: p.title,
+          image: shown.image,
+          value_myr: shown.value_myr,
+          draw_at: new Date(p.draw_at).toISOString(),
+          seed_hash: p.seed_hash ?? '',
+          // A drawn prize shows the numbers the draw used (after exclusions).
+          total_tickets: result?.total_tickets ?? sum?.total_tickets ?? 0,
+          entrant_count: result?.entrant_count ?? sum?.entrant_count ?? 0,
+          top: topByPrize.get(p.id) ?? [],
+          result: result ? luckyDrawResultRow(p, result, shown) : null,
+        };
+      }),
+    };
+  }
+
+  // The viewer's own tickets on each of the given prizes (absent = 0).
+  @InjectManager()
+  async luckyDrawMyTickets(
+    customerId: string,
+    prizeIds: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Record<string, number>> {
+    if (prizeIds.length === 0) return {};
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      { prize_id: string; tickets: string | number }[]
+    >(
+      'SELECT prize_id, COALESCE(SUM(tickets), 0) AS tickets ' +
+        'FROM lucky_draw_entry WHERE customer_id = ? ' +
+        `AND prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
+        'AND deleted_at IS NULL GROUP BY prize_id',
+      [customerId, ...prizeIds],
+    );
+    return Object.fromEntries(rows.map((r) => [r.prize_id, Number(r.tickets)]));
+  }
+
+  // One page of drawn prizes, newest draw first, across every event: the prize
+  // ids (callers batch-load the rows through luckyDrawResultRows) and the
+  // cursor for the next page. `before` is exclusive.
+  // shortcut: the cursor is the last draw time alone, so two results drawn in
+  // the same millisecond across a page edge would skip one; draws commit one
+  // transaction at a time, so move to a (drawn_at, id) cursor if that changes.
+  @InjectManager()
+  async luckyDrawResultPage(
+    input: { before?: Date | null; limit: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ prizeIds: string[]; nextBefore: string | null }> {
+    const rows = await this.listLuckyDrawResults(
+      input.before ? { drawn_at: { $lt: input.before } } : {},
+      {
+        select: ['prize_id', 'drawn_at'],
+        order: { drawn_at: 'DESC', id: 'DESC' },
+        take: input.limit + 1,
+      },
+      sharedContext,
+    );
+    const page = rows.slice(0, input.limit);
+    return {
+      prizeIds: page.map((r) => r.prize_id),
+      nextBefore:
+        rows.length > input.limit
+          ? new Date(page[page.length - 1].drawn_at).toISOString()
+          : null,
+    };
+  }
+
+  // Result rows for the given drawn prizes (no entry lists). A prize with no
+  // result is simply absent.
+  @InjectManager()
+  async luckyDrawResultRows(
+    prizeIds: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LuckyDrawResultRow[]> {
+    if (prizeIds.length === 0) return [];
+    const results = await this.listLuckyDrawResults(
+      { prize_id: prizeIds },
+      { select: [...LUCKY_DRAW_RESULT_FIELDS], take: prizeIds.length },
+      sharedContext,
+    );
+    if (results.length === 0) return [];
+    const prizes = await this.listLuckyDrawPrizes(
+      { id: results.map((r) => r.prize_id) },
+      { select: [...LUCKY_DRAW_PRIZE_FIELDS], take: results.length },
+      sharedContext,
+    );
+    const prizeById = new Map(prizes.map((p) => [p.id, p]));
+    const cards = await this.luckyDrawCards(prizes, sharedContext);
+    return results.flatMap((r) => {
+      const prize = prizeById.get(r.prize_id);
+      return prize
+        ? [luckyDrawResultRow(prize, r, luckyDrawShown(prize, cards))]
+        : [];
+    });
+  }
+
+  // One drawn prize with its frozen entry list (in draw order) and winning
+  // ticket index, or null when it has not been drawn.
+  @InjectManager()
+  async luckyDrawResult(
+    prizeId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    row: LuckyDrawResultRow;
+    entries: { customer_id: string; tickets: number }[];
+    ticket_index: number | null;
+  } | null> {
+    const [result] = await this.listLuckyDrawResults(
+      { prize_id: prizeId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!result) return null;
+    const [prize] = await this.listLuckyDrawPrizes(
+      { id: prizeId },
+      { select: [...LUCKY_DRAW_PRIZE_FIELDS], take: 1 },
+      sharedContext,
+    );
+    if (!prize) return null;
+    const cards = await this.luckyDrawCards([prize], sharedContext);
+    const stored: unknown = result.entries;
+    return {
+      row: luckyDrawResultRow(prize, result, luckyDrawShown(prize, cards)),
+      entries: Array.isArray(stored)
+        ? (stored as { customer_id: string; tickets: number }[])
+        : [],
+      ticket_index: result.ticket_index ?? null,
+    };
+  }
+
+  // A player's Lucky Draw page: balance, their last 100 ticket movements and
+  // every prize they have entered with its outcome. Self-contained (no names).
+  @InjectManager()
+  async luckyDrawMine(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LuckyDrawMine> {
+    const { balance, rows } = await this.luckyDrawTicketHistory(
+      customerId,
+      100,
+      sharedContext,
+    );
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const entered = await em.execute<
+      { prize_id: string; tickets: string | number }[]
+    >(
+      'SELECT prize_id, SUM(tickets) AS tickets FROM lucky_draw_entry ' +
+        'WHERE customer_id = ? AND deleted_at IS NULL GROUP BY prize_id',
+      [customerId],
+    );
+    const ticketsByPrize = new Map(
+      entered.map((r) => [r.prize_id, Number(r.tickets)]),
+    );
+    const prizeIds = [...ticketsByPrize.keys()];
+    const prizes = prizeIds.length
+      ? await pageAll((opts) =>
+          this.listLuckyDrawPrizes(
+            { id: prizeIds },
+            { ...opts, select: [...LUCKY_DRAW_PRIZE_FIELDS] },
+            sharedContext,
+          ),
+        )
+      : [];
+    const results = prizeIds.length
+      ? await pageAll((opts) =>
+          this.listLuckyDrawResults(
+            { prize_id: prizeIds },
+            { ...opts, select: ['prize_id', 'winner_customer_id'] },
+            sharedContext,
+          ),
+        )
+      : [];
+    const resultByPrize = new Map(results.map((r) => [r.prize_id, r]));
+    const cards = await this.luckyDrawCards(prizes, sharedContext);
+    const entries = prizes
+      .map((p) => {
+        const result = resultByPrize.get(p.id);
+        const status: LuckyDrawMine['entries'][number]['status'] =
+          p.cancelled_at
+            ? 'cancelled'
+            : !result
+              ? 'open'
+              : result.winner_customer_id === customerId
+                ? 'won'
+                : 'lost';
+        return {
+          prize_id: p.id,
+          title: p.title,
+          image: luckyDrawShown(p, cards).image,
+          my_tickets: ticketsByPrize.get(p.id) ?? 0,
+          draw_at: new Date(p.draw_at).toISOString(),
+          status,
+        };
+      })
+      // Latest draw first: what is still open sits above what is over.
+      .sort((a, b) =>
+        a.draw_at === b.draw_at
+          ? a.prize_id < b.prize_id
+            ? 1
+            : -1
+          : a.draw_at < b.draw_at
+            ? 1
+            : -1,
+      )
+      .slice(0, 100);
+    return {
+      balance,
+      history: rows.map((r) => ({
+        delta: r.delta,
+        reason: r.reason,
+        created_at: r.created_at,
+      })),
+      entries,
     };
   }
 

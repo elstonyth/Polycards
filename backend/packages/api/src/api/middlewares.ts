@@ -872,6 +872,27 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
     },
     {
+      // The Lucky Draw page (GET /store/lucky-draw). Its own entry because the
+      // wildcard below does not match the bare path.
+      matcher: '/store/lucky-draw',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Every Lucky Draw read below the page: balance, me, results and
+      // results/:prizeId. GET-only, so the enter POST below is not caught.
+      matcher: '/store/lucky-draw/*',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Enter a Lucky Draw prize (POST /store/lucky-draw/prizes/:id/enter) —
+      // spends tickets, so it shares the task-action write budget.
+      matcher: '/store/lucky-draw/prizes/*/enter',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+    },
+    {
       // The customer's in-app notification feed (GET /store/notifications).
       // receiver_id is scoped to the verified bearer token in the route handler —
       // never from query/body — so this entry is the auth + rate-limit gate only.
