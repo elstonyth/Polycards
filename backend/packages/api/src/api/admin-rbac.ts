@@ -44,6 +44,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   inventory: 'inventory',
   ledger: 'ledger',
   'lossless-schedules': 'lossless_schedule',
+  'lucky-draw': 'lucky_draw',
   media: 'media',
   'pack-gifts': 'pack_gift',
   packs: 'pack',

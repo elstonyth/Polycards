@@ -93,6 +93,33 @@ export function deriveDrawSeed(secret: string, nonce: string): string {
   return createHmac('sha256', secret).update(`lucky-draw-seed:${nonce}`).digest('hex');
 }
 
+/** The server secret every draw seed derives from. Publish and draw refuse
+ *  loudly without it (NOT_ALLOWED, not deriveDrawSeed's INVALID_DATA), so a
+ *  missing env var is an operator problem, not a bad request. */
+export function requireDrawSeedSecret(): string {
+  const secret = process.env.LUCKY_DRAW_SEED_SECRET;
+  if (!secret) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'LUCKY_DRAW_SEED_SECRET is not set',
+    );
+  }
+  return secret;
+}
+
+/** What a prize row stores at publish: a random nonce and the public hash of the
+ *  seed it derives. The seed itself is never returned, so it cannot be stored. */
+export function commitDrawSeed(secret: string): {
+  seed_nonce: string;
+  seed_hash: string;
+} {
+  const seed_nonce = newDrawSeed();
+  return {
+    seed_nonce,
+    seed_hash: drawSeedHash(deriveDrawSeed(secret, seed_nonce)),
+  };
+}
+
 /** Tickets a task grants on claim: absent → 0, else an integer 0..MAX_TASK_TICKETS. */
 export function validateTaskTickets(raw: unknown): number {
   if (raw === undefined || raw === null) return 0;

@@ -1,11 +1,14 @@
+import { MedusaError } from '@medusajs/framework/utils';
 import {
   MAX_ENTRY_TICKETS,
   MAX_TASK_TICKETS,
   aggregateEntries,
+  commitDrawSeed,
   deriveDrawSeed,
   drawSeedHash,
   drawWinner,
   newDrawSeed,
+  requireDrawSeedSecret,
   validateEntryTickets,
   validateTaskTickets,
   winningTicketIndex,
@@ -88,4 +91,40 @@ it('deriveDrawSeed is HMAC-SHA256(secret, "lucky-draw-seed:" + nonce) hex — fi
 
 it('deriveDrawSeed refuses an empty secret', () => {
   expect(() => deriveDrawSeed('', 'b'.repeat(64))).toThrow();
+});
+
+describe('commitDrawSeed', () => {
+  it('commits to the seed derived from the secret and a fresh nonce, without exposing it', () => {
+    const a = commitDrawSeed('test-secret');
+    expect(Object.keys(a).sort()).toEqual(['seed_hash', 'seed_nonce']);
+    expect(a.seed_nonce).toMatch(/^[0-9a-f]{64}$/);
+    expect(a.seed_hash).toBe(
+      drawSeedHash(deriveDrawSeed('test-secret', a.seed_nonce)),
+    );
+    expect(commitDrawSeed('test-secret').seed_nonce).not.toBe(a.seed_nonce);
+  });
+});
+
+describe('requireDrawSeedSecret', () => {
+  const saved = process.env.LUCKY_DRAW_SEED_SECRET;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.LUCKY_DRAW_SEED_SECRET;
+    else process.env.LUCKY_DRAW_SEED_SECRET = saved;
+  });
+
+  it('returns the configured secret', () => {
+    process.env.LUCKY_DRAW_SEED_SECRET = 'configured';
+    expect(requireDrawSeedSecret()).toBe('configured');
+  });
+
+  it.each([undefined, ''])('refuses NOT_ALLOWED when the secret is %p', (v) => {
+    if (v === undefined) delete process.env.LUCKY_DRAW_SEED_SECRET;
+    else process.env.LUCKY_DRAW_SEED_SECRET = v;
+    expect(() => requireDrawSeedSecret()).toThrow(
+      expect.objectContaining({
+        type: MedusaError.Types.NOT_ALLOWED,
+        message: 'LUCKY_DRAW_SEED_SECRET is not set',
+      }),
+    );
+  });
 });

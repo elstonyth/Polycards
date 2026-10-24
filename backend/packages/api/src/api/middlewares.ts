@@ -1451,6 +1451,32 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Lucky Draw event create / rename (POST /admin/lucky-draw/events).
+      matcher: '/admin/lucky-draw/events',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Publish an event (POST /admin/lucky-draw/events/:id/publish) — commits
+      // every prize's seed hash.
+      matcher: '/admin/lucky-draw/events/*/publish',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Lucky Draw prize create / edit (POST /admin/lucky-draw/prizes).
+      matcher: '/admin/lucky-draw/prizes',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Cancel a prize and refund its entrants' tickets
+      // (POST /admin/lucky-draw/prizes/:id/cancel).
+      matcher: '/admin/lucky-draw/prizes/*/cancel',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Challenge settings singleton patch (POST /admin/challenge/settings) —
       // retimes the reward cycle (cadence/reset), so it shares the admin
       // money-mutation budget.
