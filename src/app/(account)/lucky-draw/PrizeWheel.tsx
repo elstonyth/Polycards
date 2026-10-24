@@ -7,8 +7,9 @@
 // ring is the at-a-glance index and the keyboard / screen-reader path.
 //
 // Adapted from crafterui's WorksWheel (github.com/SriSomanaath/crafterui).
-// Changes: it never takes over page scroll (it sits mid-page), cards are
-// portrait, the ring drifts and bobs, and opening and turning ease separately
+// Changes: scroll lands one step per notch and hands back to the page at
+// either end (it sits mid-page), a vertical swipe turns it only while open,
+// cards are portrait, the ring drifts and bobs, and opening and turning ease separately
 // so a tapped card comes straight to the front instead of the drum winding
 // round to it. WorksWheel's licence:
 //
@@ -66,6 +67,9 @@ const HUB = 0.4; // the countdown's clear radius, of half the stage
 const RING_MAX = 12;
 const DRIFT = 3; // degrees per second the ring turns at rest
 const EASE = 0.12; // fraction of the remaining distance closed per frame
+const WHEEL_UNITS = 240; // wheel deltaY per prize (a mouse notch is ~100)
+const SETTLE = 140; // ms of wheel quiet before it lands on a prize
+const NUDGE = 0.15; // a gesture this far lands one step on, not back
 
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(hi, Math.max(lo, v));
@@ -124,6 +128,10 @@ export function PrizeWheel({
   const posTo = useRef(0);
   const spin = useRef(0);
   const hovering = useRef(false);
+  // Only a click or key moves focus; a scroll that opens the wheel must not.
+  const moveFocus = useRef(false);
+  const settling = useRef(0);
+  const gestureFrom = useRef<number | null>(null);
   const drag = useRef<{
     x: number;
     y: number;
@@ -135,7 +143,6 @@ export function PrizeWheel({
   const [opened, setOpened] = useState(false);
   const [active, setActive] = useState(0);
   const [stage, setStage] = useState({ w: 0, h: 0 });
-  const wasOpened = useRef(false);
   const frontRef = useRef(0);
 
   const count = prizes.length;
@@ -153,15 +160,62 @@ export function PrizeWheel({
   }, []);
 
   // Opening swaps the list for the details, so the focused row unmounts:
-  // move focus to the close button, and back to the prize's row on close
-  // (not on first mount, which must not grab focus).
+  // move focus to the close button, and back to the prize's row on close.
   useEffect(() => {
-    if (opened) closeRef.current?.focus({ preventScroll: true });
-    else if (wasOpened.current) {
-      rowRefs.current[frontRef.current]?.focus({ preventScroll: true });
+    if (moveFocus.current) {
+      if (opened) closeRef.current?.focus({ preventScroll: true });
+      else rowRefs.current[frontRef.current]?.focus({ preventScroll: true });
     }
-    wasOpened.current = opened;
+    moveFocus.current = false;
   }, [opened]);
+
+  // Scrolling over the wheel turns it (WorksWheel). One virtual turn T: 0 is
+  // the ring, 1 the drum at the first prize, each whole number after that one
+  // more prize. The wheel event is cancelled only while T still has room to
+  // move, so at either end the page scrolls on instead of trapping the reader.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const turnNow = () =>
+      openTo.current < 1 ? openTo.current : 1 + posTo.current;
+    const setTurn = (t: number) => {
+      openTo.current = clamp(t, 0, 1);
+      if (t <= 1) {
+        posTo.current = 0;
+        // From the ring the drum terms are still zero: jump, nothing moves.
+        if (open.current < 0.05) pos.current = 0;
+      } else posTo.current = t - 1;
+      setOpened(openTo.current >= 0.5);
+    };
+    const onWheel = (e: WheelEvent) => {
+      const from = turnNow();
+      const to = clamp(from + e.deltaY / WHEEL_UNITS, 0, last + 1);
+      if (to === from) return;
+      e.preventDefault();
+      gestureFrom.current ??= from;
+      setTurn(to);
+      // A wheel gesture has no end event. Once it goes quiet, land on the
+      // ring or a prize in the direction it was heading: one notch, one step.
+      window.clearTimeout(settling.current);
+      settling.current = window.setTimeout(() => {
+        const t = turnNow();
+        const moved = t - (gestureFrom.current ?? t);
+        gestureFrom.current = null;
+        setTurn(
+          moved > NUDGE
+            ? Math.ceil(t - 1e-6)
+            : moved < -NUDGE
+              ? Math.floor(t + 1e-6)
+              : Math.round(t),
+        );
+      }, SETTLE);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      window.clearTimeout(settling.current);
+    };
+  }, [last]);
 
   const metrics = useMemo(() => {
     const { w, h } = stage;
@@ -255,6 +309,7 @@ export function PrizeWheel({
       if (open.current < 0.05) pos.current = to;
       posTo.current = to;
       openTo.current = 1;
+      moveFocus.current = true;
       setOpened(true);
     },
     [last],
@@ -262,6 +317,7 @@ export function PrizeWheel({
 
   const close = useCallback(() => {
     openTo.current = 0;
+    moveFocus.current = true;
     setOpened(false);
   }, []);
 
@@ -300,7 +356,12 @@ export function PrizeWheel({
     >
       <div
         ref={stageRef}
-        className="relative mx-auto aspect-square w-full max-w-[38rem] touch-pan-y overflow-hidden rounded-3xl bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.06),transparent_62%)] select-none"
+        className={cn(
+          'relative mx-auto aspect-square w-full max-w-[38rem] overflow-hidden rounded-3xl bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.06),transparent_62%)] select-none',
+          // Open, a vertical swipe on the wheel turns the drum; on the ring
+          // it scrolls the page. Set at render, before the next touchstart.
+          opened ? 'touch-none' : 'touch-pan-y',
+        )}
         onPointerEnter={(e) => {
           if (e.pointerType === 'mouse') hovering.current = true;
         }}
