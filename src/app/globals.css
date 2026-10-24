@@ -918,6 +918,21 @@ body:has([data-telegram-banner]) [data-testid='free-pack-badge'] {
 ::view-transition {
   pointer-events: none;
 }
+/* The header and tab bar hold still in their own layers, stacked in their
+   normal paint order: above the pages (so a scrolled page fading out never
+   covers them) and below full-screen rooms like the slot machine. */
+::view-transition-group(site-header),
+::view-transition-group(tab-bar),
+::view-transition-new(site-header),
+::view-transition-new(tab-bar) {
+  animation: none;
+}
+/* Not display:none — the old layer must show until the new one paints, and
+   a quick fade keeps the old active tab from ghosting under the new bar. */
+::view-transition-old(site-header),
+::view-transition-old(tab-bar) {
+  animation: 120ms ease-out both vt-out;
+}
 ::view-transition-old(.page) {
   animation: 140ms ease-in both vt-out;
 }

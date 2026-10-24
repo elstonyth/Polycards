@@ -23,6 +23,13 @@ export function GamesSheet() {
   // included) closes it.
   const [openOn, setOpenOn] = useState<string | null>(null);
   const pathname = usePathname();
+  // Run once the sheet has fully gone: its focus restore (useModalA11y) must
+  // land first, or it pulls focus back out of whatever opens next.
+  const afterClose = useRef<(() => void) | null>(null);
+  const close = (then?: () => void) => {
+    afterClose.current = then ?? null;
+    setOpenOn(null);
+  };
 
   useEffect(() => {
     const show = () => setOpenOn(window.location.pathname);
@@ -32,14 +39,20 @@ export function GamesSheet() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <AnimatePresence>
-        {openOn === pathname && <Panel onClose={() => setOpenOn(null)} />}
+      <AnimatePresence
+        onExitComplete={() => {
+          const then = afterClose.current;
+          afterClose.current = null;
+          if (then) window.setTimeout(then, 0);
+        }}
+      >
+        {openOn === pathname && <Panel onClose={close} />}
       </AnimatePresence>
     </MotionConfig>
   );
 }
 
-function Panel({ onClose }: { onClose: () => void }) {
+function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const { customer, isLoading } = useAuth();
   useModalA11y(panelRef, true, onClose);
@@ -54,7 +67,7 @@ function Panel({ onClose }: { onClose: () => void }) {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
-        onClick={onClose}
+        onClick={() => onClose()}
       />
       <motion.div
         ref={panelRef}
@@ -84,7 +97,7 @@ function Panel({ onClose }: { onClose: () => void }) {
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose()}
             aria-label="Close"
             className="-mr-2 flex h-11 w-11 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/10 hover:text-white"
           >
@@ -102,9 +115,8 @@ function Panel({ onClose }: { onClose: () => void }) {
                 // The draw is behind login: visitors get the signup modal.
                 if (!customer && !isLoading) {
                   e.preventDefault();
-                  openAuth('signup');
-                }
-                onClose();
+                  onClose(() => openAuth('signup'));
+                } else onClose();
               }}
               className="group relative flex aspect-[4/5] flex-col justify-end overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_35%,rgba(199,240,255,0.14),transparent_65%)] bg-neutral-900 p-3 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40"
             >
@@ -115,7 +127,7 @@ function Panel({ onClose }: { onClose: () => void }) {
               <span className="absolute inset-x-0 top-8 flex justify-center">
                 <TicketArt
                   width={132}
-                  className="-rotate-6 transition-transform duration-300 group-hover:scale-105"
+                  className="h-auto w-[80%] max-w-[132px] -rotate-6 transition-transform duration-300 group-hover:scale-105"
                 />
               </span>
               <span className="font-heading text-lg leading-tight text-white">
@@ -140,6 +152,7 @@ function Panel({ onClose }: { onClose: () => void }) {
                   alt=""
                   width={104}
                   height={104}
+                  className="h-auto w-[66%] max-w-[104px]"
                 />
               </span>
               <span className="font-heading text-lg leading-tight text-neutral-300">

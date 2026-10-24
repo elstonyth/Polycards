@@ -25,7 +25,8 @@ export default function TabBar() {
     <nav
       data-site-chrome
       aria-label="Primary"
-      className="glass-chrome fixed inset-x-0 bottom-0 z-50 border-t border-white/10 pb-[env(safe-area-inset-bottom)] lg:hidden"
+      // Its own still layer during page transitions (globals.css).
+      className="glass-chrome fixed inset-x-0 bottom-0 z-50 border-t border-white/10 pb-[env(safe-area-inset-bottom)] [view-transition-name:tab-bar] lg:hidden"
     >
       <div className="mx-auto flex h-16 max-w-md items-stretch">
         {TABS.map((tab) => {
