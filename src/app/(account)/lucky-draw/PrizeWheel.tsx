@@ -278,7 +278,11 @@ export function PrizeWheel({
     let drawn = '';
     const draw = (ts: number) => {
       frame = requestAnimationFrame(draw);
-      if (!visible.current) return;
+      // Only the idle ring may skip: opening or turning still has to update
+      // `active`, which picks the details shown under an off-screen wheel.
+      if (!visible.current && openTo.current === 0 && open.current === 0) {
+        return;
+      }
       const dt = lastTs ? Math.min(ts - lastTs, 64) : 16;
       lastTs = ts;
       const ease = (cur: number, to: number) =>
