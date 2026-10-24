@@ -10,3 +10,8 @@
 # key value. The tree now carries an inline gitleaks:allow; this covers the commit
 # that predates it.
 df472da06ecca061b3385c3ba4ae666b47be6c66:.do/backend.app.yaml:generic-api-key:576
+# pixel-franchise.spec.ts PASSWORD is the made-up password of the admin the
+# integration runner creates in its throwaway test database, not a credential.
+# The current tree carries an inline gitleaks:allow; this covers the commit
+# that introduced it.
+f586b9d906de8fbd2da64a9ed127c70b055a8f31:backend/packages/api/integration-tests/http/pixel-franchise.spec.ts:generic-api-key:6

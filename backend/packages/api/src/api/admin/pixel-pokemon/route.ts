@@ -2,10 +2,12 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
+import { entryLabel, parsePixelPokemonBody } from './parse';
 
 // GET /admin/pixel-pokemon — the Pokédex library list for the admin dashboard.
-// Returns every seeded/custom pixel-pokémon. Filters (q = name or dex, type,
-// variant, custom) + pagination are applied server-side over the (≤ a couple
+// Returns every seeded/custom pixel-pokémon. Filters (q = name or number — dex
+// for Pokémon, `number` for other franchises — franchise, type, variant,
+// custom) + pagination are applied server-side over the (≤ a couple
 // thousand) rows, so a single ordered list query backs the whole page. The
 // route is auto-protected by Medusa admin auth. Uses asPixelPokemonCrud because
 // the pixel_pokemon runtime methods are singular ("pokemon" is uncountable).
@@ -14,13 +16,16 @@ type Row = {
   id: string;
   name: string;
   dex: number | null;
+  franchise: string;
+  number: number | null;
   variant: string;
   types: unknown;
   image_url: string | null;
   is_custom: boolean;
 };
 
-const asTypes = (t: unknown): string[] => (Array.isArray(t) ? (t as string[]) : []);
+const asTypes = (t: unknown): string[] =>
+  Array.isArray(t) ? (t as string[]) : [];
 
 export async function GET(
   req: MedusaRequest,
@@ -29,9 +34,18 @@ export async function GET(
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const pixels = asPixelPokemonCrud(packs);
 
-  const q = String(req.query.q ?? '').trim().toLowerCase();
-  const typeF = String(req.query.type ?? '').trim().toLowerCase();
-  const variantF = String(req.query.variant ?? '').trim().toLowerCase();
+  const q = String(req.query.q ?? '')
+    .trim()
+    .toLowerCase();
+  const typeF = String(req.query.type ?? '')
+    .trim()
+    .toLowerCase();
+  const franchiseF = String(req.query.franchise ?? '')
+    .trim()
+    .toLowerCase();
+  const variantF = String(req.query.variant ?? '')
+    .trim()
+    .toLowerCase();
   const customF = req.query.custom; // 'true' | 'false' | undefined
   const limit = Math.min(Math.max(Number(req.query.limit ?? 60) || 60, 1), 200);
   const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0);
@@ -45,18 +59,26 @@ export async function GET(
   for (let skip = 0; ; skip += PAGE) {
     const batch = (await pixels.listPixelPokemon(
       {},
-      { skip, take: PAGE, order: { dex: 'ASC' } },
+      // `id` breaks dex ties so a row can't straddle two pages (shown twice,
+      // or never) — variants and custom uploads share a dex.
+      { skip, take: PAGE, order: { dex: 'ASC', id: 'ASC' } },
     )) as unknown as Row[];
     all.push(...batch);
     if (batch.length < PAGE) break;
   }
 
-  const dexQ = /^\d+$/.test(q) ? Number(q) : null;
+  const numQ = /^\d+$/.test(q) ? Number(q) : null;
+  // Each deck's own number: a Pokémon's dex, a One Piece character's number.
+  const numberOf = (p: Row) => (p.franchise === 'pokemon' ? p.dex : p.number);
   const filtered = all.filter((p) => {
     const types = asTypes(p.types);
+    if (franchiseF && p.franchise !== franchiseF) return false;
     if (
       q &&
-      !(p.name.toLowerCase().includes(q) || (dexQ !== null && p.dex === dexQ))
+      !(
+        p.name.toLowerCase().includes(q) ||
+        (numQ !== null && numberOf(p) === numQ)
+      )
     )
       return false;
     if (typeF && !types.some((t) => t.toLowerCase() === typeF)) return false;
@@ -65,6 +87,15 @@ export async function GET(
     if (customF === 'false' && p.is_custom) return false;
     return true;
   });
+  // The list query orders by dex, which a non-Pokémon deck doesn't have: order
+  // it by its own number (#001 → …), unnumbered entries last.
+  if (franchiseF && franchiseF !== 'pokemon') {
+    filtered.sort(
+      (a, b) =>
+        (a.number ?? Infinity) - (b.number ?? Infinity) ||
+        a.name.localeCompare(b.name),
+    );
+  }
 
   // Distinct types across the whole library — powers the filter chips.
   const typeSet = new Set<string>();
@@ -83,77 +114,51 @@ export async function GET(
 
 // POST /admin/pixel-pokemon — add a custom pixel-pokémon to the library. The
 // sprite is uploaded separately via POST /admin/media; the returned URL comes
-// in as image_url. `dex` is optional (grouping only); `variant` defaults to
-// 'custom' so it never collides with the seeded 'normal' rows (the partial
-// unique index only constrains variant='normal'). is_custom is forced true.
+// in as image_url. `franchise` (default 'pokemon') picks the deck: Pokémon
+// take an optional `dex`, other franchises an optional `number` — never the
+// other way round (see ./parse.ts). `variant` defaults to 'custom' so it never
+// collides with a base 'normal' row (the partial unique indexes only constrain
+// variant='normal'). is_custom is forced true.
 export async function POST(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const pixels = asPixelPokemonCrud(packs);
-  const b = (req.body ?? {}) as Record<string, unknown>;
-
-  const name = typeof b.name === 'string' ? b.name.trim() : '';
-  if (!name) {
-    res.status(400).json({ message: "'name' is required." });
+  const parsed = parsePixelPokemonBody(
+    (req.body ?? {}) as Record<string, unknown>,
+  );
+  if (!parsed.ok) {
+    res.status(400).json({ message: parsed.message });
     return;
   }
-  const image_url = typeof b.image_url === 'string' ? b.image_url.trim() : '';
-  // http(s):// or a single root-relative path — reject javascript:/data: (XSS in
-  // the <img src> render) AND protocol-relative "//host" / "/\\host" (which would
-  // load an arbitrary external host). Normal uploads return our own media URL.
-  if (!image_url || !/^(https?:\/\/|\/(?![/\\]))/.test(image_url)) {
-    res
-      .status(400)
-      .json({ message: "'image_url' must be an uploaded sprite URL." });
-    return;
-  }
-
-  let dex: number | null = null;
-  if (b.dex !== undefined && b.dex !== null && b.dex !== '') {
-    const n = Number(b.dex);
-    if (!Number.isInteger(n) || n < 1 || n > 1025) {
-      res
-        .status(400)
-        .json({ message: "'dex' must be an integer 1–1025, or left blank." });
-      return;
-    }
-    dex = n;
-  }
-  const variant =
-    (typeof b.variant === 'string' && b.variant.trim()) || 'custom';
-  const types = Array.isArray(b.types)
-    ? (b.types as unknown[])
-        .filter((t): t is string => typeof t === 'string')
-        .map((t) => t.trim())
-        .filter(Boolean)
-    : [];
-  const image_key =
-    typeof b.image_key === 'string' && b.image_key.trim()
-      ? b.image_key.trim()
-      : null;
+  const v = parsed.value;
 
   try {
     const [created] = await pixels.createPixelPokemon([
       {
-        name,
-        dex,
-        variant,
-        types: types as unknown as Record<string, unknown>,
-        image_url,
-        image_key,
+        name: v.name,
+        franchise: v.franchise,
+        dex: v.dex,
+        number: v.number,
+        variant: v.variant,
+        types: v.types as unknown as Record<string, unknown>,
+        image_url: v.image_url,
+        image_key: v.image_key,
         is_custom: true,
       },
     ]);
     res.status(201).json({ pixel_pokemon: created });
   } catch (e) {
-    // Partial unique index (dex, variant='normal') — a custom row named
-    // 'normal' for a dex that already has one. Surface a clean 400.
+    // Partial unique indexes — (dex) for Pokémon, (franchise, number) for the
+    // rest — among 'normal' rows: a second base sprite for the same character.
+    // (Medusa's db-error mapper normally answers this itself with a 400 "Pixel
+    // pokemon with franchise: one-piece, number: 1, already exists."; the raw
+    // pg code is the fallback for paths that skip that mapper.)
     if ((e as { code?: string })?.code === '23505') {
-      res
-        .status(400)
-        .json({ message: `A '${variant}' entry for dex ${dex} already exists.` });
+      res.status(400).json({
+        message: `A '${v.variant}' entry for ${entryLabel(v)} already exists.`,
+      });
       return;
     }
     throw e;
