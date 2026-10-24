@@ -209,7 +209,13 @@ async function run(width, height) {
     `${tag} ?open=1 dropped from the URL`,
   );
 
-  // 3. Prizes, before the draw.
+  // 3. Prizes, before the draw: open the prize from the wheel's list.
+  await page
+    .locator('section[aria-label="Prizes"] ol')
+    .getByRole('button')
+    .filter({ hasText: TIMED })
+    .first()
+    .click();
   await page.getByRole('button', { name: `Enter ${TIMED}` }).waitFor();
   await wait(800); // images + countdown tick
   const before = await page.content();

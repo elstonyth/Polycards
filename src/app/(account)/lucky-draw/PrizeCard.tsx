@@ -83,6 +83,7 @@ export function PrizeCard({
   balance,
   onEnter,
   onOpenResult,
+  art = true,
 }: {
   prize: LuckyDrawPrize;
   /** Null until mounted: the countdown is client-only (hydration). */
@@ -92,6 +93,8 @@ export function PrizeCard({
   balance: number;
   onEnter: (prize: LuckyDrawPrize) => void;
   onOpenResult: (prizeId: string) => void;
+  /** False beside the prize wheel, whose front card already shows the art. */
+  art?: boolean;
 }) {
   const { result } = prize;
   const closed = nowMs != null && nowMs >= Date.parse(prize.draw_at);
@@ -99,11 +102,13 @@ export function PrizeCard({
   return (
     <li className="flex flex-col rounded-2xl border border-white/10 bg-neutral-900 p-4">
       <div className="flex gap-4">
-        <span className="relative aspect-[5/7] w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] p-1.5 sm:w-28">
-          <span className="relative block h-full w-full">
-            <PrizeArt src={prize.image} kind={prize.kind} />
+        {art && (
+          <span className="relative aspect-[5/7] w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] p-1.5 sm:w-28">
+            <span className="relative block h-full w-full">
+              <PrizeArt src={prize.image} kind={prize.kind} />
+            </span>
           </span>
-        </span>
+        )}
         <div className="min-w-0 flex-1">
           <h3 className="text-base leading-snug font-semibold text-white">
             {prize.title}

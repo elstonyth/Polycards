@@ -61,6 +61,37 @@ export function drawCountdown(drawAtIso: string, nowMs: number): string {
   return `${m}m ${pad(s % 60)}s`;
 }
 
+/** The prize wheel's big clock: time left as padded days, hours, minutes,
+ *  seconds (seconds round up, as drawCountdown), or null once it is due. */
+export function countdownClock(
+  drawAtIso: string,
+  nowMs: number,
+): { d: string; h: string; m: string; s: string } | null {
+  const ms = Date.parse(drawAtIso) - nowMs;
+  if (!(ms > 0)) return null;
+  const s = Math.ceil(ms / 1000);
+  return {
+    d: pad(Math.floor(s / 86_400)),
+    h: pad(Math.floor((s % 86_400) / 3600)),
+    m: pad(Math.floor((s % 3600) / 60)),
+    s: pad(s % 60),
+  };
+}
+
+/** What the wheel's hub counts down to: the soonest undrawn prize still
+ *  ahead; 'drawing' while a past one waits for its result; else 'done'. */
+export function nextDraw(
+  prizes: { draw_at: string; result: unknown }[],
+  nowMs: number,
+): { kind: 'next'; at: string } | { kind: 'drawing' } | { kind: 'done' } {
+  const undrawn = prizes.filter((p) => !p.result);
+  const ahead = undrawn
+    .filter((p) => Date.parse(p.draw_at) > nowMs)
+    .sort((a, b) => Date.parse(a.draw_at) - Date.parse(b.draw_at))[0];
+  if (ahead) return { kind: 'next', at: ahead.draw_at };
+  return undrawn.length > 0 ? { kind: 'drawing' } : { kind: 'done' };
+}
+
 /** Each entry's tickets as an inclusive range, counted from 0 through the list
  *  in its order — the draw order the fair-draw check walks. */
 export function ticketRanges(

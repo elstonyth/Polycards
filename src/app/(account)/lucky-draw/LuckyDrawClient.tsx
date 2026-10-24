@@ -17,6 +17,7 @@ import type {
 import { EnterSheet, type Entered } from './EnterSheet';
 import { MyTickets } from './MyTickets';
 import { PrizeCard } from './PrizeCard';
+import { PrizeWheel } from './PrizeWheel';
 import { ResultDetail } from './ResultDetail';
 import { ResultsList } from './ResultsList';
 import { SpinOverlay } from './SpinOverlay';
@@ -286,19 +287,24 @@ export function LuckyDrawClient({
                 Prizes for this Lucky Draw are on their way.
               </p>
             ) : (
-              <ul className="grid gap-3 sm:grid-cols-2">
-                {page.prizes.map((p) => (
-                  <PrizeCard
-                    key={p.id}
-                    prize={p}
-                    nowMs={nowMs}
-                    opensAt={event.starts_at}
-                    balance={balance}
-                    onEnter={setEntering}
-                    onOpenResult={openResult}
-                  />
-                ))}
-              </ul>
+              <PrizeWheel
+                prizes={page.prizes}
+                nowMs={nowMs}
+                details={(p) => (
+                  <ul aria-label="Selected prize">
+                    <PrizeCard
+                      key={p.id}
+                      prize={p}
+                      nowMs={nowMs}
+                      opensAt={event.starts_at}
+                      balance={balance}
+                      onEnter={setEntering}
+                      onOpenResult={openResult}
+                      art={false}
+                    />
+                  </ul>
+                )}
+              />
             )}
           </>
         )}

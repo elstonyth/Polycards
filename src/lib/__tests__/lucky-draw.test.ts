@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   chancePercent,
+  countdownClock,
   drawCountdown,
   ENTER_REFUSALS,
   ENTER_REFUSAL_COPY,
   entriesIntact,
   landingAngle,
+  nextDraw,
   segmentAt,
   ticketRanges,
   wheelSegments,
@@ -52,6 +54,63 @@ describe('drawCountdown', () => {
   it('says Drawing… only once the draw time has come', () => {
     expect(drawCountdown(at, Date.parse(at) - 400)).toBe('0m 01s');
     expect(drawCountdown(at, Date.parse(at))).toBe('Drawing…');
+  });
+});
+
+describe('countdownClock', () => {
+  const at = '2026-11-30T15:59:00Z';
+  it('splits the time left into zero-padded days, hours, minutes, seconds', () => {
+    expect(countdownClock(at, Date.parse('2026-11-28T11:54:51Z'))).toEqual({
+      d: '02',
+      h: '04',
+      m: '04',
+      s: '09',
+    });
+  });
+
+  it('rounds seconds up and stops at the draw time', () => {
+    expect(countdownClock(at, Date.parse(at) - 400)).toEqual({
+      d: '00',
+      h: '00',
+      m: '00',
+      s: '01',
+    });
+    expect(countdownClock(at, Date.parse(at))).toBeNull();
+    expect(countdownClock('not a date', 0)).toBeNull();
+  });
+});
+
+describe('nextDraw', () => {
+  const now = Date.parse('2026-11-10T00:00:00Z');
+  const prize = (draw_at: string, drawn = false) => ({
+    draw_at,
+    result: drawn ? {} : null,
+  });
+
+  it('is the soonest undrawn prize still ahead', () => {
+    expect(
+      nextDraw(
+        [
+          prize('2026-11-30T15:59:00Z'),
+          prize('2026-11-01T00:00:00Z', true),
+          prize('2026-11-15T12:00:00Z'),
+        ],
+        now,
+      ),
+    ).toEqual({ kind: 'next', at: '2026-11-15T12:00:00Z' });
+  });
+
+  it('says drawing while a past prize waits for its result', () => {
+    expect(nextDraw([prize('2026-11-09T23:59:00Z')], now)).toEqual({
+      kind: 'drawing',
+    });
+  });
+
+  it('is done once every prize is drawn', () => {
+    expect(nextDraw([prize('2026-11-01T00:00:00Z', true)], now)).toEqual({
+      kind: 'done',
+    });
+    expect(nextDraw([], now)).toEqual({ kind: 'done' });
   });
 });
 
