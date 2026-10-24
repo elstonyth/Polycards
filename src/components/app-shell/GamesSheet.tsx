@@ -8,7 +8,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { X } from 'lucide-react';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { TicketArt } from '@/components/TicketArt';
+import { AmbientVideo } from '@/components/AmbientVideo';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { GLASS_SUBTLE, useLiquidGlass } from '@/lib/use-liquid-glass';
 import { GAMES_EVENT } from './games';
@@ -124,10 +124,15 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 Live
               </span>
-              <span className="absolute inset-x-0 top-8 flex justify-center">
-                <TicketArt
-                  width={132}
-                  className="h-auto w-[80%] max-w-[132px] -rotate-6 transition-transform duration-300 group-hover:scale-105"
+              <span className="absolute inset-x-0 top-6 flex justify-center">
+                {/* SnapGen Seedance loop of the ticket art, played forward then
+                    back. Black backdrop + lighten lets the tile glow through. */}
+                <AmbientVideo
+                  mp4="/images/lucky-draw/ticket-loop.mp4"
+                  webm="/images/lucky-draw/ticket-loop.webm"
+                  poster="/images/lucky-draw/ticket-loop-poster.webp"
+                  fit="contain"
+                  className="aspect-[480/356] w-[94%] max-w-[155px] mix-blend-lighten transition-transform duration-300 group-hover:scale-105"
                 />
               </span>
               <span className="font-heading text-lg leading-tight text-white">
