@@ -76,6 +76,8 @@ export interface ProfileRule {
    * DoS (the shared 8000 bomb guard is far too high for a small photo).
    */
   maxDimension?: number;
+  /** Frame cap for a profile that may animate (server only: sharp pages). */
+  maxFrames?: number;
 }
 
 export const IMAGE_RULES = {
@@ -122,6 +124,11 @@ export const IMAGE_RULES = {
       minHeight: 64,
       targetRatio: 1,
       aspectTolerance: 0.25,
+      // Every reel and decoy cell decodes every frame on the player's phone.
+      // Real sprites are ≤ 138px with ≤ 4 frames (One Piece) and showdown-
+      // style loops run ~100 frames; these caps leave headroom over both.
+      maxDimension: 1024,
+      maxFrames: 150,
     },
     // PriceCharting ingest (see ImageKind note): card-shaped but small. The min
     // only rejects degenerate/tracking-pixel responses, not real card photos.
@@ -257,6 +264,18 @@ export function validateImage(
   }
 
   const profile: ProfileRule = IMAGE_RULES.profiles[kind];
+
+  // 5b — frame cap on a profile that may animate.
+  if (
+    profile.maxFrames !== undefined &&
+    facts.frames !== undefined &&
+    facts.frames > profile.maxFrames
+  ) {
+    return fail(
+      'animated',
+      `Too many animation frames — keep it to ${profile.maxFrames}.`,
+    );
+  }
 
   // 6 — upper dimension guard. Per-profile cap when set (a customer-reachable
   // decode path caps tight to bound sharp decode/re-encode cost), otherwise the

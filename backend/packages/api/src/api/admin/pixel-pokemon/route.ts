@@ -59,7 +59,9 @@ export async function GET(
   for (let skip = 0; ; skip += PAGE) {
     const batch = (await pixels.listPixelPokemon(
       {},
-      { skip, take: PAGE, order: { dex: 'ASC' } },
+      // `id` breaks dex ties so a row can't straddle two pages (shown twice,
+      // or never) — variants and custom uploads share a dex.
+      { skip, take: PAGE, order: { dex: 'ASC', id: 'ASC' } },
     )) as unknown as Row[];
     all.push(...batch);
     if (batch.length < PAGE) break;

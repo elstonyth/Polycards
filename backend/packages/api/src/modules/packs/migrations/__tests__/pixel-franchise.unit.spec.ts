@@ -26,10 +26,17 @@ test('up() adds franchise (default pokemon), a nullable number, and the per-fran
   );
   // existing rows are Pokémon via the column default — no backfill UPDATE
   expect(sql).not.toMatch(/\bupdate\b/i);
+  // the decks never cross at the DB: no number on a Pokémon, no dex elsewhere
+  expect(sql).toContain(
+    `add constraint "pixel_pokemon_deck_numbering_check" check (("franchise" = 'pokemon' and "number" is null) or ("franchise" <> 'pokemon' and "dex" is null));`,
+  );
 });
 
-test('down() drops the index and both columns', async () => {
+test('down() drops the check, the index and both columns', async () => {
   const sql = await emit('down');
+  expect(sql).toContain(
+    'drop constraint if exists "pixel_pokemon_deck_numbering_check"',
+  );
   expect(sql).toContain(
     'drop index if exists "UQ_pixel_pokemon_franchise_number_normal"',
   );

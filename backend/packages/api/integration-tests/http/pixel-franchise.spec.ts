@@ -1,4 +1,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
+import { PACKS_MODULE } from '../../src/modules/packs';
+import type PacksModuleService from '../../src/modules/packs/service';
+import { asPixelPokemonCrud } from '../../src/modules/packs/pixel-pokemon-service';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -92,6 +95,29 @@ medusaIntegrationTestRunner({
           dex: 25,
         });
         expect(crossed.status).toBe(400);
+
+        // …nor around the parser: the DB check refuses a crossed row.
+        const pixels = asPixelPokemonCrud(
+          getContainer().resolve<PacksModuleService>(PACKS_MODULE),
+        );
+        const row = {
+          name: 'Crossed',
+          variant: 'custom',
+          types: [] as unknown as Record<string, unknown>,
+          image_url: 'https://example.com/x.gif',
+          image_key: null,
+          is_custom: true,
+        };
+        await expect(
+          pixels.createPixelPokemon([
+            { ...row, franchise: 'one-piece', dex: 25, number: null },
+          ]),
+        ).rejects.toThrow(/pixel_pokemon_deck_numbering_check/);
+        await expect(
+          pixels.createPixelPokemon([
+            { ...row, franchise: 'pokemon', dex: 25, number: 7 },
+          ]),
+        ).rejects.toThrow(/pixel_pokemon_deck_numbering_check/);
       });
 
       it('filters the library by deck and searches each deck by its own number', async () => {

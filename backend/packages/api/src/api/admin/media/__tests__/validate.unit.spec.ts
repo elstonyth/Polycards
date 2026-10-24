@@ -211,6 +211,24 @@ describe('validateImage — sprite profile', () => {
     const r = validateImage(facts(600, 840), 'sprite');
     expect(r.ok).toBe(false);
   });
+  it('caps a sprite at 1024px and 150 frames (every reel cell decodes it)', () => {
+    expect(validateImage(facts(1024, 1024), 'sprite')).toEqual({ ok: true });
+    expect(validateImage(facts(1025, 1025), 'sprite')).toMatchObject({
+      ok: false,
+      code: 'too_big_dimension',
+    });
+    const gif = (frames: number): ImageFacts => ({
+      ...facts(138, 138),
+      mimeType: 'image/gif',
+      detectedFormat: 'gif',
+      frames,
+    });
+    expect(validateImage(gif(150), 'sprite')).toEqual({ ok: true });
+    expect(validateImage(gif(151), 'sprite')).toMatchObject({
+      ok: false,
+      code: 'animated',
+    });
+  });
 });
 
 describe('validateImage — avatar profile decode-DoS dimension cap', () => {

@@ -59,6 +59,7 @@ const PROFILES: Record<
     minHeight: 64,
     targetRatio: 1,
     aspectTolerance: 0.25,
+    maxDimension: 1024,
   },
   frame: {
     minWidth: 400,
