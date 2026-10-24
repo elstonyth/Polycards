@@ -27,7 +27,10 @@ export const PrizeEditor = ({
 }: {
   draft: PrizeDraft;
   event: AdminLuckyDrawEvent;
-  onChange: (d: PrizeDraft) => void;
+  /** Updater form, applied to the latest draft: an upload resolves long after
+   *  the handler captured `draft`, and must not roll back what was typed
+   *  meanwhile. */
+  onChange: (update: (d: PrizeDraft) => PrizeDraft) => void;
   onClose: () => void;
 }) => {
   const save = useSaveLuckyDrawPrize();
@@ -35,6 +38,8 @@ export const PrizeEditor = ({
   const fileRef = useRef<HTMLInputElement>(null);
   const [reason, setReason] = useState('');
   const [cardQuery, setCardQuery] = useState('');
+  const patch = (changes: Partial<PrizeDraft>) =>
+    onChange((d) => ({ ...d, ...changes }));
   const { data: cards } = useCards({ enabled: draft.kind === 'card' });
 
   const locked = event.status === 'published' && Boolean(draft.id);
@@ -73,7 +78,7 @@ export const PrizeEditor = ({
     }
     try {
       const url = await upload.mutateAsync({ file, kind: 'card' });
-      onChange({ ...draft, imageUrl: url });
+      patch({ imageUrl: url });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -125,7 +130,7 @@ export const PrizeEditor = ({
               value={draft.kind}
               disabled={locked}
               onValueChange={(kind) =>
-                onChange({ ...draft, kind: kind as PrizeDraft['kind'] })
+                patch({ kind: kind as PrizeDraft['kind'] })
               }
             >
               <Select.Trigger>
@@ -156,7 +161,7 @@ export const PrizeEditor = ({
               >
                 <StaleAwareSelect
                   value={draft.cardHandle}
-                  onChange={(cardHandle) => onChange({ ...draft, cardHandle })}
+                  onChange={(cardHandle) => patch({ cardHandle })}
                   placeholder="Pick a card"
                   options={cardOptions}
                   disabled={locked}
@@ -176,7 +181,7 @@ export const PrizeEditor = ({
                 value={draft.creditMyr}
                 disabled={locked}
                 onChange={(e) =>
-                  onChange({ ...draft, creditMyr: e.target.value })
+                  patch({ creditMyr: e.target.value })
                 }
                 placeholder="250"
               />
@@ -220,7 +225,7 @@ export const PrizeEditor = ({
                   size="small"
                   variant="transparent"
                   type="button"
-                  onClick={() => onChange({ ...draft, imageUrl: '' })}
+                  onClick={() => patch({ imageUrl: '' })}
                 >
                   Remove
                 </Button>
@@ -237,7 +242,7 @@ export const PrizeEditor = ({
               id="ld-title"
               value={draft.title}
               maxLength={120}
-              onChange={(e) => onChange({ ...draft, title: e.target.value })}
+              onChange={(e) => patch({ title: e.target.value })}
               placeholder="e.g. Charizard PSA 10"
             />
           </Field>
@@ -253,7 +258,7 @@ export const PrizeEditor = ({
                 id="ld-sort"
                 type="number"
                 value={draft.sort}
-                onChange={(e) => onChange({ ...draft, sort: e.target.value })}
+                onChange={(e) => patch({ sort: e.target.value })}
               />
             </Field>
             <Field
@@ -267,7 +272,7 @@ export const PrizeEditor = ({
                 type="datetime-local"
                 value={draft.drawAt}
                 disabled={locked}
-                onChange={(e) => onChange({ ...draft, drawAt: e.target.value })}
+                onChange={(e) => patch({ drawAt: e.target.value })}
               />
             </Field>
           </div>

@@ -6822,9 +6822,12 @@ class PacksModuleService extends MedusaService({
   // Admin: create a draft event together with its whole prize pool, or nothing.
   // Every rule is the one saveLuckyDrawEvent / saveLuckyDrawPrize apply (the
   // check* helpers), run over the whole pool BEFORE the first write, and the
-  // writes share one transaction. A prize with no draw time draws at the
-  // event's end. No seeds are committed here — publish does that. A new event
-  // has no id yet, so there is no per-event lock to take.
+  // writes share one transaction. The event itself is written by
+  // saveLuckyDrawEvent (same row, same audit); handed this transaction it
+  // joins it, and a create reads nothing back, so there is nothing to flush
+  // first. A prize with no draw time draws at the event's end. No seeds are
+  // committed here — publish does that. A new event has no id yet, so there
+  // is no per-event lock to take.
   @InjectTransactionManager()
   async createLuckyDrawEventWithPrizes(
     input: {
@@ -6838,7 +6841,7 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string; prizeIds: string[] }> {
-    const name = checkLuckyDrawEvent(input);
+    checkLuckyDrawEvent(input);
     const now = input.now ?? new Date();
     const prizes = input.prizes.map((p, i) => {
       try {
@@ -6862,40 +6865,22 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    const [event] = await this.createLuckyDrawEvents(
-      [
-        {
-          name,
-          starts_at: input.startsAt,
-          ends_at: input.endsAt,
-          status: 'draft' as const,
-          created_by: input.adminId,
-        },
-      ],
-      sharedContext,
-    );
-    const rows = prizes.length
-      ? await this.createLuckyDrawPrizes(
-          prizes.map((p) => ({ event_id: event.id, ...p })),
-          sharedContext,
-        )
-      : [];
-    await this.audit(
+    const { id } = await this.saveLuckyDrawEvent(
       {
-        admin_id: input.adminId,
-        entity_type: 'lucky_draw_event',
-        entity_id: event.id,
-        action: 'create',
-        before: null,
-        after: {
-          name,
-          starts_at: input.startsAt.toISOString(),
-          ends_at: input.endsAt.toISOString(),
-        },
+        name: input.name,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+        adminId: input.adminId,
         reason: input.reason,
       },
       sharedContext,
     );
+    const rows = prizes.length
+      ? await this.createLuckyDrawPrizes(
+          prizes.map((p) => ({ event_id: id, ...p })),
+          sharedContext,
+        )
+      : [];
     for (const [i, row] of rows.entries()) {
       await this.audit(
         {
@@ -6910,7 +6895,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    return { id: event.id, prizeIds: rows.map((r) => r.id) };
+    return { id, prizeIds: rows.map((r) => r.id) };
   }
 
   // Every handle must be a Card row. One query for the lot.

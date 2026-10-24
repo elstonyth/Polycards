@@ -459,7 +459,8 @@ const LuckyDrawPage = () => {
         <PrizeEditor
           draft={prizeDraft}
           event={selected}
-          onChange={setPrizeDraft}
+          // A closed editor (null) stays closed if an upload lands late.
+          onChange={(update) => setPrizeDraft((d) => (d ? update(d) : d))}
           onClose={() => setPrizeDraft(null)}
         />
       )}

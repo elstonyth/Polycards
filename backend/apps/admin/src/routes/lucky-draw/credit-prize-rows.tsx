@@ -9,16 +9,19 @@ import {
   blankCredit,
   creditAmount,
   creditTitle,
+  patchCredit,
   type PoolCredit,
 } from './prize-pool';
 
 const CreditRow = ({
   credit,
-  onChange,
+  onPatch,
   onRemove,
 }: {
   credit: PoolCredit;
-  onChange: (c: PoolCredit) => void;
+  /** Applied to the latest list by key (see patchCredit), never to `credit`
+   *  as it was when the handler was made: an upload resolves much later. */
+  onPatch: (patch: Partial<Omit<PoolCredit, 'key'>>) => void;
   onRemove: () => void;
 }) => {
   const upload = useUploadImage();
@@ -38,7 +41,7 @@ const CreditRow = ({
     }
     try {
       const url = await upload.mutateAsync({ file, kind: 'card' });
-      onChange({ ...credit, imageUrl: url });
+      onPatch({ imageUrl: url });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -59,7 +62,7 @@ const CreditRow = ({
           inputMode="decimal"
           aria-invalid={credit.amount !== '' && amount === null}
           value={credit.amount}
-          onChange={(e) => onChange({ ...credit, amount: e.target.value })}
+          onChange={(e) => onPatch({ amount: e.target.value })}
           placeholder="250"
         />
       </Field>
@@ -73,7 +76,7 @@ const CreditRow = ({
           size="small"
           value={credit.title}
           maxLength={120}
-          onChange={(e) => onChange({ ...credit, title: e.target.value })}
+          onChange={(e) => onPatch({ title: e.target.value })}
           placeholder={creditTitle(amount ?? 250)}
         />
       </Field>
@@ -125,7 +128,8 @@ export const CreditPrizeRows = ({
   canAddMore,
 }: {
   credits: PoolCredit[];
-  onChange: (next: PoolCredit[]) => void;
+  /** A state setter's updater form: every change is made on the latest list. */
+  onChange: (update: (prev: PoolCredit[]) => PoolCredit[]) => void;
   /** false once the pool is full. */
   canAddMore: boolean;
 }) => (
@@ -136,10 +140,12 @@ export const CreditPrizeRows = ({
           <CreditRow
             key={c.key}
             credit={c}
-            onChange={(next) =>
-              onChange(credits.map((x) => (x.key === c.key ? next : x)))
+            onPatch={(patch) =>
+              onChange((prev) => patchCredit(prev, c.key, patch))
             }
-            onRemove={() => onChange(credits.filter((x) => x.key !== c.key))}
+            onRemove={() =>
+              onChange((prev) => prev.filter((x) => x.key !== c.key))
+            }
           />
         ))}
       </ul>
@@ -150,7 +156,7 @@ export const CreditPrizeRows = ({
         variant="secondary"
         type="button"
         disabled={!canAddMore}
-        onClick={() => onChange([...credits, blankCredit()])}
+        onClick={() => onChange((prev) => [...prev, blankCredit()])}
       >
         Add credit prize
       </Button>

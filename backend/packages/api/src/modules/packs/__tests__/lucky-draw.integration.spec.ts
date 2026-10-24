@@ -1322,13 +1322,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         it('a database failure after the event and prizes are written rolls all of it back', async () => {
           await makeCard('pool-r');
-          // Passes every rule above, then Postgres refuses the NUL character — in
-          // the transaction that already holds the event and the prizes.
+          // Passes every rule above, then Postgres refuses the NUL character on
+          // the prize insert — after the event row is already in the transaction.
           await expect(
             create({
               prizes: [cardPrize('pool-r'), creditPrize({ title: 'bad\u0000' })],
             }),
-          ).rejects.toThrow(/Unicode escape|0x00/);
+          ).rejects.toThrow(/insert into "lucky_draw_prize"/);
           await nothingExists();
         });
 

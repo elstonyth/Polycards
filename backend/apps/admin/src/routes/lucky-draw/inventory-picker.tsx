@@ -3,13 +3,9 @@ import { Checkbox, IconButton, Input, Text } from '@medusajs/ui';
 import { XMark } from '@medusajs/icons';
 import { useInventory } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
+import { rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
-import {
-  inStockCards,
-  poolCardFrom,
-  poolMoney,
-  type PoolCard,
-} from './prize-pool';
+import { inStockCards, poolCardFrom, type PoolCard } from './prize-pool';
 
 // The route truncates ?q= at 100 chars; the input's maxLength matches.
 const MAX_Q = 100;
@@ -30,7 +26,14 @@ const Thumb = ({ src }: { src: string | null }) =>
     <div className="bg-ui-bg-subtle h-10 w-7 shrink-0 rounded" />
   );
 
-const money = (n: number | null) => (n === null ? '—' : poolMoney(n));
+// The card's RM value (the inventory row's price), as the rest of admin writes
+// money; "—" when no FMV is recorded.
+const Value = ({ n }: { n: number | null }) => (
+  <Text size="small" className="shrink-0">
+    <span className="text-ui-fg-subtle">Value </span>
+    {rm(n)}
+  </Text>
+);
 
 /** Pick prize cards from the inventory: in-stock cards only, searched on the
  *  server, any number ticked. Picking holds no stock — the card is minted to
@@ -92,9 +95,7 @@ export const InventoryPicker = ({
                   placeholder={c.name}
                 />
               </div>
-              <Text size="small" className="text-ui-fg-subtle shrink-0">
-                {money(c.value)}
-              </Text>
+              <Value n={c.value} />
               <IconButton
                 size="small"
                 variant="transparent"
@@ -150,9 +151,7 @@ export const InventoryPicker = ({
                   <Text size="small" className="min-w-0 flex-1 truncate">
                     {r.name}
                   </Text>
-                  <Text size="small" className="shrink-0">
-                    {money(r.price)}
-                  </Text>
+                  <Value n={r.price} />
                   <Text
                     size="small"
                     className="text-ui-fg-subtle w-24 shrink-0 text-right"

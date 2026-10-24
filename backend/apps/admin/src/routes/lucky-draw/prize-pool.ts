@@ -68,6 +68,16 @@ export const poolCardFrom = (r: InventoryRow): PoolCard => ({
 export const creditAmount = (c: PoolCredit): number | null =>
   parseCreditAmount(c.amount);
 
+/** Change one credit row of the LATEST list, found by key. A late result (an
+ *  image upload that lands after the row was edited or removed) goes through
+ *  this inside a state updater, so it can neither roll back what was typed
+ *  meanwhile nor bring a removed row back. */
+export const patchCredit = (
+  list: PoolCredit[],
+  key: string,
+  patch: Partial<Omit<PoolCredit, 'key'>>,
+): PoolCredit[] => list.map((c) => (c.key === key ? { ...c, ...patch } : c));
+
 /** "RM 98,400" — whole amounts without decimals, anything else with two. */
 export const poolMoney = (n: number): string => {
   const sen = Math.round(n * 100);
@@ -95,9 +105,16 @@ export const poolSummary = (
   credits: PoolCredit[],
 ): string => {
   const n = cards.length + credits.length;
-  return n === 0
-    ? 'No prizes yet'
-    : `${n} prize${n === 1 ? '' : 's'} · ${poolMoney(poolTotal(cards, credits))}`;
+  if (n === 0) return 'No prizes yet';
+  const noValue = cards.filter((c) => c.value === null).length;
+  return [
+    `${n} prize${n === 1 ? '' : 's'}`,
+    poolMoney(poolTotal(cards, credits)),
+    // A card with no FMV adds nothing, so say the total is short.
+    ...(noValue > 0
+      ? [`${noValue} card${noValue === 1 ? ' has' : 's have'} no value yet`]
+      : []),
+  ].join(' · ');
 };
 
 const toNewPrize = (p: {

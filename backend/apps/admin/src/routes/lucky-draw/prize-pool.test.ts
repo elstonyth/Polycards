@@ -6,6 +6,7 @@ import {
   creditTitle,
   inStockCards,
   newEventPayload,
+  patchCredit,
   poolCardFrom,
   poolMoney,
   poolSummary,
@@ -163,6 +164,48 @@ describe('poolMoney / poolTotal / poolSummary', () => {
     ).toBe('8 prizes · RM 98,400');
     expect(poolSummary([card({ value: 50 })], [])).toBe('1 prize · RM 50');
     expect(poolSummary([], [])).toBe('No prizes yet');
+  });
+
+  test('a card with no value is called out, so the total is not silently low', () => {
+    expect(poolSummary([card({ value: null })], [])).toBe(
+      '1 prize · RM 0 · 1 card has no value yet',
+    );
+    expect(
+      poolSummary(
+        [
+          card({ value: 50 }),
+          card({ handle: 'b', value: null }),
+          card({ handle: 'c', value: null }),
+        ],
+        [credit({ amount: '10' })],
+      ),
+    ).toBe('4 prizes · RM 60 · 2 cards have no value yet');
+  });
+});
+
+describe('patchCredit', () => {
+  test('changes only the row with that key', () => {
+    const a = credit({ amount: '10' });
+    const b = credit({ amount: '20' });
+    const out = patchCredit([a, b], b.key, { imageUrl: '/new.png' });
+    expect(out).toEqual([a, { ...b, imageUrl: '/new.png' }]);
+    expect(out[0]).toBe(a);
+  });
+
+  test('keeps what was typed after the patch was prepared (a late upload only sets its image)', () => {
+    const row = credit({ amount: '10', imageUrl: '' });
+    // The row is edited while the upload is still running...
+    const edited = patchCredit([row], row.key, { amount: '99', title: 'Typed' });
+    // ...and the upload then lands on the latest list, not the old row.
+    expect(patchCredit(edited, row.key, { imageUrl: '/up.png' })).toEqual([
+      { ...row, amount: '99', title: 'Typed', imageUrl: '/up.png' },
+    ]);
+  });
+
+  test('a row removed meanwhile stays removed', () => {
+    const a = credit();
+    const b = credit();
+    expect(patchCredit([a], b.key, { imageUrl: '/late.png' })).toEqual([a]);
   });
 });
 
