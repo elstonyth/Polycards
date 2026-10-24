@@ -15,13 +15,13 @@ import {
   PackageOpen,
   Sun,
   Target,
-  Ticket,
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import { checkInToday } from '@/lib/actions/tasks';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { HelpTip } from '@/components/ui/help-tip';
+import { TicketArt } from '@/components/TicketArt';
 import {
   Panel,
   SignInPrompt,
@@ -265,7 +265,7 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
                 : 'border-chase/40 text-chase',
             )}
           >
-            <Ticket className="h-3 w-3" aria-hidden />+{task.tickets}{' '}
+            <TicketArt width={16} className="shrink-0" />+{task.tickets}{' '}
             {task.tickets === 1 ? 'ticket' : 'tickets'}
           </Link>
         )}

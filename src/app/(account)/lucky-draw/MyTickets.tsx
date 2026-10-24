@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Ticket } from 'lucide-react';
 import { pillVariants } from '@/components/ui/pill';
 import { UnavailablePanel } from '@/components/task-ui';
+import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
 import { mytClock, mytDate, num } from '@/lib/format';
 import { getMyLuckyDraw } from '@/lib/actions/lucky-draw';
@@ -64,7 +64,7 @@ export function MyTickets() {
     <div>
       <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-neutral-900 p-4">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/[0.06]">
-          <Ticket className="h-6 w-6 text-neutral-200" aria-hidden />
+          <TicketArt width={44} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">

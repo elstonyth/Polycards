@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Eye, Lock, Package, Search, Star, Ticket } from 'lucide-react';
+import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
+import { TicketArt } from '@/components/TicketArt';
 import { num, rm, rm0 } from '@/lib/format';
 import { sellBackNotice } from '@/lib/buyback-copy';
 import {
@@ -392,13 +393,7 @@ export default function VaultClient({
       {tickets !== null && (
         <section aria-label="Lucky Draw tickets" className="mt-4">
           <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3">
-            {/* Placeholder art until the real ticket art lands. */}
-            <span
-              aria-hidden
-              className="text-chase flex h-14 w-8 shrink-0 items-center justify-center"
-            >
-              <Ticket className="h-5 w-5" />
-            </span>
+            <TicketArt width={64} className="shrink-0" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-white">
                 Lucky Draw Tickets ×{num(tickets)}

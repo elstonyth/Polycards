@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Ticket } from 'lucide-react';
+import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
 
-// Placeholder art (spec §11 slot 2): the lucide ticket until the Codex
-// "open tickets" art lands. Plays once when the vault row's Open brings the
-// player here (?open=1); the caller skips it under reduced motion.
+// The ticket art (spec §11 slot 2) grows in and fades out. Plays once when
+// the vault row's Open brings the player here (?open=1); the caller skips it
+// under reduced motion.
 const IN_MS = 40;
 const OUT_MS = 1100;
 const DONE_MS = 1500;
@@ -39,7 +39,7 @@ export function TicketOpenIntro({ onDone }: { onDone: () => void }) {
           phase === 'out' && 'scale-110 opacity-0',
         )}
       >
-        <Ticket className="h-24 w-24 text-neutral-50" strokeWidth={1.5} />
+        <TicketArt width={240} priority />
         <p className="font-heading text-2xl text-white">LUCKY DRAW</p>
       </div>
     </div>

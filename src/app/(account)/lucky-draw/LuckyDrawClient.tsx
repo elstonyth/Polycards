@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Ticket } from 'lucide-react';
 import { pillVariants } from '@/components/ui/pill';
 import { Panel, UnavailablePanel } from '@/components/task-ui';
+import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
 import { mytDate, num } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
@@ -201,7 +201,7 @@ export function LuckyDrawClient({
         </div>
         {page && (
           <p className="flex shrink-0 items-center gap-1.5 rounded-full bg-neutral-800 py-2 pr-3.5 pl-3 text-sm font-semibold text-white">
-            <Ticket className="h-4 w-4" aria-hidden />
+            <TicketArt width={26} className="-my-1" />
             <span className="tabular-nums">{num(balance)}</span>
             <span className="sr-only">tickets</span>
           </p>
@@ -267,10 +267,7 @@ export function LuckyDrawClient({
           <>
             {balance <= 0 && (
               <Panel className="mb-4 flex items-center gap-3">
-                <Ticket
-                  className="h-6 w-6 shrink-0 text-neutral-300"
-                  aria-hidden
-                />
+                <TicketArt width={44} className="shrink-0" />
                 <p className="flex-1 text-sm text-neutral-300">
                   Earn tickets from tasks
                 </p>
