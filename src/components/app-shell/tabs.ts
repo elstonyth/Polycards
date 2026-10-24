@@ -1,5 +1,6 @@
 import {
   CircleUserRound,
+  Gamepad2,
   Home,
   ListChecks,
   Trophy,
@@ -15,18 +16,22 @@ export type Tab = {
   match?: string[];
   /** Requires auth — logged-out clicks open the signup modal instead of navigating. */
   gated?: boolean;
+  /** Opens a picker sheet instead of navigating (`href` is only its home). */
+  opens?: 'games';
 };
 
-/** The five app destinations, in the boss-specified order (Home center). */
+/** The six app destinations (operator 2026-10-25 added Games as the sixth). */
 export const TABS: Tab[] = [
-  {
-    label: 'Task',
-    href: '/task',
-    icon: ListChecks,
-    // Tasks pay the Lucky Draw tickets, so the draw sits under Task.
-    match: ['/lucky-draw'],
-  },
+  { label: 'Task', href: '/task', icon: ListChecks },
   { label: 'Ranks', href: '/leaderboard', icon: Trophy },
+  {
+    label: 'Games',
+    href: '/lucky-draw',
+    icon: Gamepad2,
+    opens: 'games',
+    // Lit on every game; Coin Flip joins when it ships.
+    match: ['/coin-flip'],
+  },
   { label: 'Home', href: '/', icon: Home },
   { label: 'Vault', href: '/vault', icon: Vault, gated: true },
   {
