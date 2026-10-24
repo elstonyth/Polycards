@@ -118,11 +118,16 @@ export function SpinWheel({
   const [step, setStep] = useState<Step>(0);
   // The cues (header mute applies). Read through a ref so a new sfx identity
   // never restarts the spin.
-  const { sfx } = useSound();
+  const { sfx, duck } = useSound();
   const sfxRef = useRef(sfx);
   useEffect(() => {
     sfxRef.current = sfx;
   });
+  // The music bed steps back while the wheel is on screen.
+  useEffect(() => {
+    duck(true);
+    return () => duck(false);
+  }, [duck]);
   // Reduced motion (even switched on mid-spin) or nothing to land on: the
   // end state, told as is.
   const shown: Step = reduced || !winSeg ? 3 : step;

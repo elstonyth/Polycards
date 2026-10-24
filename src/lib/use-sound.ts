@@ -199,6 +199,15 @@ function useSoundPlayer() {
     [load, duckMusic],
   );
 
+  // Hold the music bed down (as a rarity reveal does) while a cue sequence
+  // needs the room — the Lucky Draw wheel. Every duck(true) gets a duck(false).
+  const duck = useCallback(
+    (on: boolean) => {
+      celebrations.current = Math.max(0, celebrations.current + (on ? 1 : -1));
+      duckMusic();
+    },
+    [duckMusic],
+  );
   const playReveal = useCallback(
     (rarities: readonly string[]) => {
       const rarity = revealSound(rarities);
@@ -292,7 +301,7 @@ function useSoundPlayer() {
     return () => document.removeEventListener('click', uiClick);
   }, [sfx]);
 
-  return { muted, toggleMuted, play, playReveal, vibrate, sfx };
+  return { muted, toggleMuted, play, playReveal, vibrate, sfx, duck };
 }
 
 const SoundContext = createContext<ReturnType<typeof useSoundPlayer> | null>(
