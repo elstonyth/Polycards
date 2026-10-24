@@ -217,23 +217,6 @@ export function PrizeCard({
           </Pill>
         )}
       </div>
-
-      <details className="group mt-3 text-xs text-neutral-400">
-        <summary className="cursor-pointer py-2 font-semibold text-neutral-300 select-none hover:text-white">
-          Fair draw
-        </summary>
-        <p className="leading-relaxed">
-          SHA-256 hash of this prize&rsquo;s secret seed, fixed before anyone
-          entered:
-        </p>
-        <code className="mt-1 block rounded-lg bg-neutral-950 px-2 py-1.5 font-mono text-[11px] break-all text-neutral-300">
-          {prize.seed_hash}
-        </code>
-        <p className="mt-1 leading-relaxed">
-          The seed is shown with the result after the draw, so anyone can check
-          the winner.
-        </p>
-      </details>
     </li>
   );
 }

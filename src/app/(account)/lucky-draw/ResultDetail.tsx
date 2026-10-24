@@ -14,23 +14,10 @@ import { mytWhen, PersonChip, PrizeArt } from './PrizeCard';
 const range = (r: { start: number; end: number }) =>
   r.start === r.end ? `#${r.start}` : `#${r.start}–#${r.end}`;
 
-function Code({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
-        {label}
-      </p>
-      <code className="mt-1 block rounded-lg bg-neutral-950 px-2 py-1.5 font-mono text-[11px] break-all text-neutral-300">
-        {value}
-      </code>
-    </div>
-  );
-}
-
 /**
- * One drawn prize (spec §7, §9): the winner, the revealed seed beside the hash
- * shown before the draw, the frozen entry list in draw order with each
- * entrant's ticket numbers, and how to check it all by hand.
+ * One drawn prize (spec §9): the winner, the replay, and the frozen entry list
+ * in draw order with each entrant's ticket numbers. The seed and its hash are
+ * not shown (operator 2026-10-25); the API still returns them.
  */
 export function ResultDetail({
   detail,
@@ -134,28 +121,6 @@ export function ResultDetail({
             </p>
           )}
         </div>
-
-        <section className="mt-5 space-y-3">
-          <h3 className="text-sm font-semibold text-white">Fair draw</h3>
-          <Code label="Hash shown before the draw" value={result.seed_hash} />
-          <Code label="Seed" value={result.seed} />
-          <p className="text-xs leading-relaxed text-neutral-400">
-            <span className="font-semibold text-neutral-300">
-              How to check.
-            </span>{' '}
-            The SHA-256 of the seed (the 64-character text above, as UTF-8) must
-            equal the hash shown before the draw. The winning ticket is
-            HMAC-SHA256 with that 64-character hex seed string as the key
-            (UTF-8) and this prize&rsquo;s id as the message (
-            <code className="font-mono break-all text-neutral-300">
-              {result.prize_id}
-            </code>
-            ), read as a 256-bit number, modulo the total tickets (
-            {num(result.total_tickets)}). Count through the entry list below in
-            the order shown — each entrant&rsquo;s tickets are a range, starting
-            at #0 — and the range holding that number is the winner.
-          </p>
-        </section>
 
         <section className="mt-5">
           <h3 className="text-sm font-semibold text-white">

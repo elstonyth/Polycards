@@ -348,8 +348,8 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
 - **Tabs** — Prizes · Results · My tickets, the leaderboard's segmented pill.
 - **Prize card** — charcoal card: the prize on a 5:7 pedestal, RM value in
   Chase Gold Nekst, draw time in MYT with a live countdown, tickets in /
-  entrants / my chance, the top 10 (framed avatars), one white Enter pill,
-  and a quiet "Fair draw" disclosure with the seed hash.
+  entrants / my chance, the top 10 (framed avatars) and one white Enter
+  pill.
 - **The wheel** (style "K — Holo Foil") — matte black and graphite wedges
   sized by tickets, hair-thin silver lines, the holo-foil rim, a pearl hub, a
   slim silver pointer that flicks on each edge. Pull-back, ~7 s ease-out,
@@ -357,9 +357,10 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
   dust rises from the wedge, the wheel dims, and the prize rises from the hub
   in a thin holo frame. Decoration only — the result is stored before the
   wheel turns. Reduced motion: the winner shows directly, no spin, no dust.
-- **Results** — every draw keeps its seed, the hash shown before it, and the
-  frozen entry list in draw order with ticket ranges, plus a plain "How to
-  check" paragraph.
+- **Results** — the winner, their tickets, a Watch-the-draw replay and the
+  frozen entry list in draw order with ticket ranges. The seed and its hash
+  stay off the page (operator 2026-10-25); the server still commits and
+  stores them.
 
 ## 6. Do's and Don'ts
 

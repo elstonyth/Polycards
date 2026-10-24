@@ -350,23 +350,17 @@ async function run(width, height) {
   await detail.waitFor();
   await frosted(detail, `${tag} result detail`);
   await wait(400);
+  // The seed and its hash are not shown (operator 2026-10-25).
   const shown = await detail.innerText();
-  const seeds = (shown.match(HEX64) ?? []).filter((h) => !hashes.has(h));
   check(
-    seeds.length === 1,
-    `${tag} result detail reveals the seed after the draw`,
+    (shown.match(HEX64) ?? []).length === 0,
+    `${tag} result detail shows no seed or hash`,
   );
   await noSideScroll(page, `${tag} result detail`);
   await shot(
     page,
     `result-detail-${tag}`,
     'result detail: winner, tickets, Watch the draw',
-  );
-  await detail.getByText('How to check.').scrollIntoViewIfNeeded();
-  await shot(
-    page,
-    `result-check-${tag}`,
-    'result detail: hash, seed and "How to check"',
   );
   await detail.getByText('(in draw order)').scrollIntoViewIfNeeded();
   await detail.evaluate((d) =>
