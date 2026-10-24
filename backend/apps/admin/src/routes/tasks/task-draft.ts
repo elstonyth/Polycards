@@ -90,6 +90,8 @@ export interface Draft {
   rewardValue: string;
   active: boolean;
   sort: string;
+  /** Lucky Draw tickets a claim also pays (whole number, 0 = none). */
+  tickets: string;
   /** datetime-local strings, same idiom as the Weekly Challenge schedule. */
   startsAt: string;
   endsAt: string;
@@ -106,6 +108,7 @@ export const blankDraft = (): Draft => ({
   rewardValue: '',
   active: true,
   sort: '0',
+  tickets: '0',
   startsAt: '',
   endsAt: '',
 });
@@ -154,15 +157,26 @@ export const draftFrom = (t: AdminTaskDefinition): Draft => {
           : String(rew.card_handle ?? ''),
     active: t.active,
     sort: String(t.sort),
+    tickets: String(t.tickets ?? 0),
     startsAt: t.starts_at ? toLocalInput(new Date(t.starts_at)) : '',
     endsAt: t.ends_at ? toLocalInput(new Date(t.ends_at)) : '',
   };
 };
 
+// Mirrors MAX_TASK_TICKETS in the backend's lucky-draw.ts.
+const MAX_TICKETS = 10_000;
+
 export function draftToPayload(d: Draft): {
   requirement: Record<string, unknown>;
   reward: Record<string, unknown>;
+  tickets: number;
 } | null {
+  // Always sent: the backend keeps the stored value only when the field is
+  // omitted, so a save that left it out would be a silent "keep", not a "0".
+  const tickets = d.tickets.trim() === '' ? NaN : Number(d.tickets);
+  if (!Number.isInteger(tickets) || tickets < 0 || tickets > MAX_TICKETS) {
+    return null;
+  }
   // A goal with no count box (the daily check-in) must not be blocked by
   // whatever the hidden box last held — the operator could not fix it.
   const n = countApplies(d) ? Number(d.reqN) : 1;
@@ -214,7 +228,7 @@ export function draftToPayload(d: Draft): {
     if (!d.rewardValue.trim()) return null;
     reward = { type: 'card', card_handle: d.rewardValue.trim() };
   }
-  return { requirement, reward };
+  return { requirement, reward, tickets };
 }
 
 /**
