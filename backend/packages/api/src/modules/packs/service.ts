@@ -156,6 +156,11 @@ import WeeklySettlement from './models/weekly-settlement';
 import WeeklySettlementLine from './models/weekly-settlement-line';
 import Announcement from './models/announcement';
 import PackGift from './models/pack-gift';
+import LuckyDrawEvent from './models/lucky-draw-event';
+import LuckyDrawPrize from './models/lucky-draw-prize';
+import LuckyDrawEntry from './models/lucky-draw-entry';
+import LuckyDrawTicket from './models/lucky-draw-ticket';
+import LuckyDrawResult from './models/lucky-draw-result';
 import { pickLiveAnnouncements, validateAnnouncement } from './announcements';
 import { pageAll } from '../../api/utils/page-all';
 import {
@@ -879,6 +884,11 @@ class PacksModuleService extends MedusaService({
   DailyCheckin,
   Announcement,
   PackGift,
+  LuckyDrawEvent,
+  LuckyDrawPrize,
+  LuckyDrawEntry,
+  LuckyDrawTicket,
+  LuckyDrawResult,
 }) {
   // Claim only the exact state priced before the HTTP request. The claim's row
   // lock lasts through the ORM money write, preserving its raw_* twin atomically.
