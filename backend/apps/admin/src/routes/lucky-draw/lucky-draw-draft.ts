@@ -13,8 +13,18 @@ import { toIso, toLocalInput } from '../tasks/task-draft';
 // Mirror the backend's saveLuckyDrawEvent / saveLuckyDrawPrize (the gate that
 // matters) so a bad form is refused before the round trip.
 const MAX_EVENT_NAME = 80;
-const MAX_PRIZE_TITLE = 120;
+export const MAX_PRIZE_TITLE = 120;
 const MAX_PRIZE_CREDIT_MYR = 50_000;
+
+/** A credit amount as typed, or null if the backend would refuse it: not a
+ *  number, not above 0, over the ceiling, or not whole sen. */
+export function parseCreditAmount(text: string): number | null {
+  const amount = text.trim() === '' ? NaN : Number(text);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_PRIZE_CREDIT_MYR)
+    return null;
+  // Whole sen: the same test the backend runs (fromSen(toSen(x)) === x).
+  return Math.round(amount * 100) / 100 === amount ? amount : null;
+}
 
 export interface PrizeDraft {
   id?: string;
@@ -76,14 +86,10 @@ export function prizeDraftToPayload(
     cardHandle = d.cardHandle.trim() || null;
     if (!cardHandle) return null;
   } else {
-    const amount = d.creditMyr.trim() === '' ? NaN : Number(d.creditMyr);
-    if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_PRIZE_CREDIT_MYR)
-      return null;
-    // Whole sen: the same test the backend runs (fromSen(toSen(x)) === x).
-    if (Math.round(amount * 100) / 100 !== amount) return null;
+    creditMyr = parseCreditAmount(d.creditMyr);
+    if (creditMyr === null) return null;
     // A card shows its own art; a credit prize has none to fall back on.
     if (!imageUrl) return null;
-    creditMyr = amount;
   }
 
   return {

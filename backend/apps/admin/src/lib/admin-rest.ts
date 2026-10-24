@@ -2685,6 +2685,9 @@ export interface AdminLuckyDrawEventInput {
   name: string;
   starts_at: string;
   ends_at: string;
+  /** A NEW event only (an edit with prizes is refused): its whole prize pool,
+   *  created with it in one transaction. */
+  prizes?: AdminLuckyDrawNewPrize[];
 }
 
 /** One prize as POST /admin/lucky-draw/prizes takes it (plus `reason`). Send
@@ -2702,6 +2705,13 @@ export interface AdminLuckyDrawPrizeInput {
   draw_at: string | null;
 }
 
+/** One prize of a new event: the prize route's fields without the ids (the
+ *  event does not exist yet). Send every field. */
+export type AdminLuckyDrawNewPrize = Omit<
+  AdminLuckyDrawPrizeInput,
+  'id' | 'event_id'
+>;
+
 export async function listLuckyDraw(): Promise<AdminLuckyDrawEvent[]> {
   const data = await getJson<{ events: AdminLuckyDrawEvent[] }>(
     '/admin/lucky-draw',
@@ -2711,7 +2721,11 @@ export async function listLuckyDraw(): Promise<AdminLuckyDrawEvent[]> {
 
 export const saveLuckyDrawEvent = (
   input: AdminLuckyDrawEventInput & { reason: string },
-) => postJson<{ id: string }>('/admin/lucky-draw/events', input);
+) =>
+  postJson<{ id: string; prize_ids: string[] }>(
+    '/admin/lucky-draw/events',
+    input,
+  );
 
 export const publishLuckyDrawEvent = (id: string, reason: string) =>
   postJson<{ id: string; status: 'published' }>(

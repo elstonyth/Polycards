@@ -1,12 +1,24 @@
 import { useState } from 'react';
 import { Button, Drawer, Input, Text, toast } from '@medusajs/ui';
 import { useSaveLuckyDrawEvent } from '../../lib/queries';
-import { Field } from '../../components/form-bits';
+import { Field, Section } from '../../components/form-bits';
 import { toIso } from '../tasks/task-draft';
+import { CreditPrizeRows } from './credit-prize-rows';
+import { InventoryPicker } from './inventory-picker';
 import { eventDraftToPayload, type EventDraft } from './lucky-draw-draft';
+import {
+  MAX_NEW_EVENT_PRIZES,
+  newEventPayload,
+  poolSummary,
+  type PoolCard,
+  type PoolCredit,
+} from './prize-pool';
 
 /** Create or edit an event: name and window. Once published only the name may
- *  change (the window is what customers saw), so the times lock. */
+ *  change (the window is what customers saw), so the times lock. A NEW event
+ *  also takes its prize pool — cards picked from the inventory plus credit
+ *  prizes — and is created with them in one request. An existing event's
+ *  prizes are the prize editor's. */
 export const EventEditor = ({
   draft,
   published,
@@ -22,8 +34,14 @@ export const EventEditor = ({
 }) => {
   const save = useSaveLuckyDrawEvent();
   const [reason, setReason] = useState('');
+  const [cards, setCards] = useState<PoolCard[]>([]);
+  const [credits, setCredits] = useState<PoolCredit[]>([]);
 
-  const payload = eventDraftToPayload(draft);
+  const creating = !draft.id;
+  const payload = creating
+    ? newEventPayload(draft, cards, credits)
+    : eventDraftToPayload(draft);
+  const poolFull = cards.length + credits.length >= MAX_NEW_EVENT_PRIZES;
   const starts = toIso(draft.startsAt);
   const ends = toIso(draft.endsAt);
   const windowBad =
@@ -38,7 +56,13 @@ export const EventEditor = ({
       { ...payload, reason: reason.trim() },
       {
         onSuccess: ({ id }) => {
-          toast.success(draft.id ? 'Event updated.' : 'Event created.');
+          toast.success(
+            draft.id
+              ? 'Event updated.'
+              : cards.length + credits.length > 0
+                ? `Event created with ${cards.length + credits.length} prizes.`
+                : 'Event created.',
+          );
           onSaved(id);
         },
         onError: (e) => toast.error(e.message),
@@ -103,6 +127,42 @@ export const EventEditor = ({
             <Text size="small" className="text-ui-fg-error -mt-3">
               {windowBad}
             </Text>
+          )}
+
+          {creating && (
+            <Section
+              title="Prize pool"
+              description="Cards come from the inventory; picking one holds no stock. The event is created as a draft — publish it from the event page."
+            >
+              <Field label="Cards from inventory">
+                <InventoryPicker
+                  selected={cards}
+                  onChange={setCards}
+                  canAddMore={!poolFull}
+                />
+              </Field>
+              <Field label="Credit prizes">
+                <CreditPrizeRows
+                  credits={credits}
+                  onChange={setCredits}
+                  canAddMore={!poolFull}
+                />
+              </Field>
+              <div>
+                <Text weight="plus" aria-live="polite">
+                  {poolSummary(cards, credits)}
+                </Text>
+                <Text size="small" className="text-ui-fg-subtle">
+                  Each prize draws when the event ends. Change a prize’s draw
+                  time after creating it.
+                </Text>
+                {poolFull && (
+                  <Text size="small" className="text-ui-fg-subtle">
+                    A new event takes at most {MAX_NEW_EVENT_PRIZES} prizes.
+                  </Text>
+                )}
+              </div>
+            </Section>
           )}
 
           <Field
