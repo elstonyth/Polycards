@@ -35,6 +35,31 @@ describe('badgeSprite', () => {
     ]);
   });
 
+  it('in a Pokémon pack a dex-less custom sprite still gets its name-derived dex fallback', () => {
+    // Regression guard: cards linked via "Upload + link custom sprite" carry no
+    // dex — if the upload URL breaks, the badge must fall back to the species.
+    const card = {
+      name: 'Pikachu with Grey Felt Hat #85',
+      pokemonDex: null,
+      spriteImage: 'https://cdn.example/custom.gif',
+    };
+    expect(badgeSprite(card, false, true)).toEqual({
+      name: 'Pikachu',
+      chain: [
+        'https://cdn.example/custom.gif',
+        expect.stringContaining('/25.gif'),
+        expect.stringContaining('/25.png'),
+      ],
+    });
+    // no pack context (vault, card page): the custom sprite alone, no guess
+    expect(badgeSprite(card).chain).toEqual(['https://cdn.example/custom.gif']);
+    // a One Piece pack: never a Pokémon
+    expect(badgeSprite(card, false, false)).toEqual({
+      name: null,
+      chain: ['https://cdn.example/custom.gif'],
+    });
+  });
+
   it('renders nothing for a card with no resolvable Pokémon', () => {
     expect(badgeSprite({ name: "Professor's Research" }).chain).toEqual([]);
   });

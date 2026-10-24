@@ -2978,7 +2978,9 @@ class PacksModuleService extends MedusaService({
         // LINK — a card an admin has not linked yet does not count, and
         // linking it later advances progress (admin data, honest either way).
         // Grouped so a task can name ONE Pokémon; the ungrouped total is the
-        // sum of the groups. The same scan also FILTERs the period counts
+        // sum of the POKÉMON groups only — a pixel task reads "N Pokémon
+        // (pixel) cards", so One Piece sprites (franchise) don't advance it
+        // unless a task names that sprite. The same scan also FILTERs the period counts
         // daily/weekly pixel tasks read — those count PAID pulls only
         // (source='pack', like rip counts), so a task's own card prize can
         // never feed a task; the lifetime achievement count keeps every
@@ -2986,21 +2988,23 @@ class PacksModuleService extends MedusaService({
         em.execute<
           {
             pixel_pokemon_id: string;
+            franchise: string | null;
             n: string;
             n_week: string;
             n_day: string;
           }[]
         >(
           // Lifetime n leaves out gift and bonus pulls (spec 2026-10-07).
-          "SELECT c.pixel_pokemon_id, COUNT(*) FILTER (WHERE p.source NOT IN ('gift', 'bonus'))::bigint AS n, " +
+          "SELECT c.pixel_pokemon_id, pp.franchise, COUNT(*) FILTER (WHERE p.source NOT IN ('gift', 'bonus'))::bigint AS n, " +
             "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
             '    AND p.created_at >= ? AND p.created_at < ?)::bigint AS n_week, ' +
             "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
             '    AND p.created_at >= ? AND p.created_at < ?)::bigint AS n_day ' +
             'FROM pull p JOIN card c ON c.handle = p.card_id ' +
+            'LEFT JOIN pixel_pokemon pp ON pp.id = c.pixel_pokemon_id ' +
             'WHERE p.customer_id = ? AND p.deleted_at IS NULL ' +
             '  AND c.deleted_at IS NULL AND c.pixel_pokemon_id IS NOT NULL ' +
-            'GROUP BY c.pixel_pokemon_id',
+            'GROUP BY c.pixel_pokemon_id, pp.franchise',
           [
             input.week.startUtc,
             input.week.endUtcExcl,
@@ -3036,6 +3040,15 @@ class PacksModuleService extends MedusaService({
     const myr = (sen: string | null | undefined) => Number(sen ?? 0) / 100;
     const sum = (m: Map<string, number>) =>
       [...m.values()].reduce((a, b) => a + b, 0);
+    // Untargeted pixel totals count Pokémon sprites only (a missing library
+    // row — deleted — counts as before, i.e. as a Pokémon).
+    const pokemonPixelIds = new Set(
+      pixelRows
+        .filter((r) => (r.franchise ?? 'pokemon') === 'pokemon')
+        .map((r) => r.pixel_pokemon_id),
+    );
+    const pokemonSum = (m: Map<string, number>) =>
+      [...m].reduce((a, [id, v]) => (pokemonPixelIds.has(id) ? a + v : a), 0);
     const tally = <R>(rows: R[], key: (r: R) => string, n: (r: R) => string) =>
       new Map(
         rows.map((r) => [key(r), Number(n(r))] as const).filter(([, v]) => v),
@@ -3049,7 +3062,7 @@ class PacksModuleService extends MedusaService({
       checkinDays,
       rips: sum(ripsByPack),
       ripsByPack,
-      pixelPulls: sum(pixelPullsById),
+      pixelPulls: pokemonSum(pixelPullsById),
       pixelPullsById,
       topupMyr,
     });
@@ -3089,7 +3102,7 @@ class PacksModuleService extends MedusaService({
       ),
       vipLevel: stateRow ? Number(stateRow.highest_level_ever) : 1,
       vaultCount: Number(vaultRows[0]?.n ?? 0),
-      vaultPixelCount: sum(byPixel),
+      vaultPixelCount: pokemonSum(byPixel),
       vaultPixelCountById: byPixel,
       topupMyrTotal: myr(topupRows[0]?.total_sen),
     };

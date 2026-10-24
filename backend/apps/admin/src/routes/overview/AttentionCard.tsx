@@ -21,7 +21,7 @@ import { rm, timeAgo } from '../../lib/format';
 import {
   attentionWithdrawals,
   doublePayAcross,
-  staleDeposits,
+  stuckDeposits,
 } from '../../lib/dashboard';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { isForbidden } from './helpers';
@@ -97,7 +97,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     ? attentionWithdrawals(held.data.withdrawals, held.data.total)
     : undefined;
   const s = pending.data
-    ? staleDeposits(pending.data.deposits, pending.data.total)
+    ? stuckDeposits(pending.data.deposits, pending.data.total)
     : undefined;
   const toShip = shipping.every((q) => q.data !== undefined)
     ? shipping.reduce((n, q) => n + (q.data ?? 0), 0)
@@ -176,18 +176,21 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
       urgent: true,
     });
   }
+  // Stuck only (2026-10-25): a customer who opened the cashier and walked away
+  // is not shown — operators read that as a gateway fault. What is left is
+  // rare and real: the gateway never confirmed a top-up the customer may have
+  // paid. Calm (no ping), and the link opens the pending view, oldest first.
   if (s && s.count > 0) {
     const shown = s.capped ? `${s.count}+` : String(s.count);
     items.push({
       id: 'deposits',
       icon: <Clock />,
-      title: t('dashboard.staleTopups', { count: s.count, shown }),
-      detail: t('dashboard.staleDetail', {
+      title: t('dashboard.stuckTopups', { count: s.count, shown }),
+      detail: t('dashboard.stuckDetail', {
         age: s.oldest ? timeAgo(s.oldest) : '—',
       }),
-      to: '/deposits',
+      to: '/deposits?view=pending',
       action: t('dashboard.check'),
-      urgent: true,
     });
   }
   if (toShip) {

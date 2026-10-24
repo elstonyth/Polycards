@@ -11,27 +11,19 @@ export const metadata: Metadata = {
 // Pack catalog read live from the backend. Render fresh.
 export const dynamic = 'force-dynamic';
 
-export default async function SlotsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ category?: string }>;
-}) {
-  const [{ category }, categories, freePack] = await Promise.all([
-    searchParams,
+export default async function SlotsPage() {
+  const [categories, freePack] = await Promise.all([
     getPackCategories(),
     // Per-visitor and never cached; degrades to "hidden" on any failure, so it
     // can't take the catalog down with it.
     getFreePackState(),
   ]);
 
-  // Honor /slots?category=<key> when it exists; else default to "All Packs".
-  const initialCategory =
-    category && categories.some((c) => c.id === category) ? category : 'all';
-
   return (
     <CatalogClient
-      categories={categories}
-      initialCategory={initialCategory}
+      // Only categories with packs get a tab; the client picks one from
+      // ?category= (else the first).
+      categories={categories.filter((c) => c.packs.length > 0)}
       // The free pack is absent from `categories` by design (the backend hides
       // its category) — the badge is its only entry point.
       freePack={freePack.mode === 'hidden' ? null : freePack}

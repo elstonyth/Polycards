@@ -50,6 +50,7 @@ describe('openPack', () => {
       card: {
         handle: 'pikachu-base-58',
         name: 'Pikachu',
+        set: '',
         image: 'https://cdn/pikachu.png',
         slabImage: 'https://cdn/pikachu-slab.png',
         rarity: 'Rare',

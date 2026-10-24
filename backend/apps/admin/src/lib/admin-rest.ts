@@ -1520,6 +1520,10 @@ export interface PixelPokemonRow {
   id: string;
   name: string;
   dex: number | null;
+  /** The deck ('pokemon' | 'one-piece'): Pokémon are numbered by `dex`,
+   *  every other franchise by `number`. */
+  franchise: string;
+  number: number | null;
   variant: string;
   types: string[];
   image_url: string | null;
@@ -1537,6 +1541,7 @@ export interface PixelPokemonPage {
 
 export interface PixelPokemonQuery {
   q?: string;
+  franchise?: string;
   type?: string;
   variant?: string;
   custom?: '' | 'true' | 'false';
@@ -1554,6 +1559,7 @@ export async function getPixelPokemon(
     offset: String((params.page ?? 0) * limit),
   });
   if (params.q) qs.set('q', params.q);
+  if (params.franchise) qs.set('franchise', params.franchise);
   if (params.type) qs.set('type', params.type);
   if (params.variant) qs.set('variant', params.variant);
   if (params.custom) qs.set('custom', params.custom);
@@ -1562,7 +1568,9 @@ export async function getPixelPokemon(
 
 export interface CreatePixelPokemonBody {
   name: string;
+  franchise?: string;
   dex?: number | null;
+  number?: number | null;
   variant?: string;
   types?: string[];
   image_url: string;
@@ -1574,8 +1582,10 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 
 // Gateway deposits (GET /admin/payments/deposits) — the operator's only
 // window into money-in. 'stale' means the row is still pending past the
-// reconciliation sweep's window, i.e. a payment that may have landed at the
-// gateway without ever being credited here.
+// reconciliation sweep's window — mostly a customer who walked away, which the
+// next sweep expires. 'stuck' is the narrow subset the dashboard flags: still
+// pending two sweeps later with a gateway id, i.e. possibly a payment that
+// landed at the gateway without ever being credited here.
 export type GatewayDepositView =
   'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
@@ -1608,6 +1618,7 @@ export interface GatewayDeposit {
   created_at: string;
   settled_at: string | null;
   stale: boolean;
+  stuck: boolean;
 }
 
 export interface GatewayDepositsResponse {

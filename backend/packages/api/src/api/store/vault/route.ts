@@ -192,6 +192,10 @@ export async function GET(
               : rarityOf(p.pack_id, p.card_id),
           ),
           marketPriceMyr,
+          // The linked sprite (Pokémon or One Piece), so the vault never has
+          // to guess one from the card name ("Bartholomew Kuma" → Mew).
+          pokemon_dex: card.pokemon_dex ?? null,
+          sprite_image: card.sprite_image ?? null,
         },
         // How the pull was acquired. NOTE for UI code: a weekly-challenge prize
         // takes THIS path with source='reward' and a live, sellable quote — so

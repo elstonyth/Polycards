@@ -61,6 +61,7 @@ import {
   freePackVerifyMessage,
   type FreePackRequirement,
 } from '@/lib/packs-data';
+import { isPokemonPack } from '@/lib/resolve-card-pokemon';
 
 /**
  * Shown where the gift offer would be, when this visitor cannot claim it.
@@ -272,6 +273,8 @@ export default function PackDetailClient({
   // siblings list is empty (it is not in the catalog), so `active` can never
   // become a different, paid pack.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+  // One Piece / sports packs: the prize badges never guess a Pokémon.
+  const pokemonPack = isPokemonPack(pack.categoryId);
   // The free pack, reached by someone who cannot claim it — a spent claim OR a
   // failed eligibility read, which the storefront cannot tell apart (hence the
   // neutral copy above; nothing here may assert a past claim). Every gift
@@ -437,9 +440,9 @@ export default function PackDetailClient({
   return (
     // pb clears the mobile sticky buy bar (fixed above the tab bar).
     <div className="mx-auto w-full px-fluid pb-28 pt-4 lg:pb-4">
-      {/* Back link */}
+      {/* Back link — to this pack's franchise tab */}
       <Link
-        href="/slots"
+        href={`/slots?category=${encodeURIComponent(pack.categoryId)}`}
         className="-mt-2.5 mb-1.5 inline-flex items-center gap-1.5 py-2.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
@@ -832,6 +835,7 @@ export default function PackDetailClient({
                 full={pool}
                 tierChances={liveDetail?.publishedOdds?.tiers ?? null}
                 onOpen={(card) => setOpenCard(toSeed(card))}
+                pokemon={pokemonPack}
               />
             </Reveal>
           )}
@@ -1011,6 +1015,7 @@ export default function PackDetailClient({
         seed={openCard}
         buybackPercent={active.buybackPercent ?? FLAT_BUYBACK_PERCENT}
         onClose={() => setOpenCard(null)}
+        pokemon={pokemonPack}
       />
     </div>
   );

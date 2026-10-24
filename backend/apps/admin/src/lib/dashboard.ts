@@ -206,17 +206,20 @@ export const doublePayAcross = (
 };
 
 /**
- * Pending deposits past the reconcile window. The route sorts pending oldest
- * first and flags `stale` with the sweep's own rule, so the overdue rows lead
- * the page; a full page of them with more behind is a floor, not a count.
+ * Pending deposits the sweep should long since have closed (`stuck`, computed
+ * server-side: two sweeps past the reconcile window, with a gateway id). Not
+ * `stale` — that also catches customers who walked away, which the next sweep
+ * expires, and operators read it as a gateway fault. The route sorts pending
+ * oldest first, so the stuck rows lead the page; a full page of them with more
+ * behind is a floor, not a count.
  */
-export const staleDeposits = (rows: GatewayDeposit[], total: number) => {
-  const stale = rows.filter((r) => r.stale);
+export const stuckDeposits = (rows: GatewayDeposit[], total: number) => {
+  const stuck = rows.filter((r) => r.stuck);
   return {
-    count: stale.length,
+    count: stuck.length,
     capped:
-      stale.length === rows.length && total > rows.length && rows.length > 0,
-    oldest: oldestOf(stale),
+      stuck.length === rows.length && total > rows.length && rows.length > 0,
+    oldest: oldestOf(stuck),
   };
 };
 

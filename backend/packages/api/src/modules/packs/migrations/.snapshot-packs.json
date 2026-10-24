@@ -4511,6 +4511,25 @@
           "nullable": true,
           "mappedType": "integer"
         },
+        "franchise": {
+          "name": "franchise",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'pokemon'",
+          "mappedType": "text"
+        },
+        "number": {
+          "name": "number",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
         "variant": {
           "name": "variant",
           "type": "text",
@@ -4611,6 +4630,15 @@
           "primary": false,
           "unique": false,
           "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"UQ_pixel_pokemon_dex_normal\" ON \"pixel_pokemon\" (\"dex\") WHERE variant = 'normal' AND deleted_at IS NULL"
+        },
+        {
+          "keyName": "UQ_pixel_pokemon_franchise_number_normal",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"UQ_pixel_pokemon_franchise_number_normal\" ON \"pixel_pokemon\" (\"franchise\", \"number\") WHERE variant = 'normal' AND number IS NOT NULL AND deleted_at IS NULL"
         },
         {
           "keyName": "pixel_pokemon_pkey",

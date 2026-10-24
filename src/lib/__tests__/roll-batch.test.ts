@@ -178,7 +178,7 @@ describe('rollBatch — demo Spin', () => {
   // backend configured. Spreading the pool card through unchanged (which is
   // what a "the pool card IS the reveal's card" simplification does) silently
   // changed the demo reveal's sprite.
-  it('drops the pool card’s sprite fields, where a PAID roll keeps them', async () => {
+  it('keeps the pool card’s sprite fields, like a PAID roll', async () => {
     const sprites = { pokemonDex: 25, spriteImage: '/sprites/pikachu.gif' };
     const configured: PackCard = { ...card('a'), ...sprites };
 
@@ -209,11 +209,11 @@ describe('rollBatch — demo Spin', () => {
 
     expect(demo.ok && paid.ok).toBe(true);
     if (!demo.ok || !paid.ok) return;
+    // A demo winner shows exactly the sprite a real pull would (a One Piece
+    // demo winner used to land on a card-back), and the demo slab still
+    // stamps the pool price.
     expect(demo.batch.cards[0]).toMatchObject({
-      pokemonDex: null,
-      spriteImage: null,
-      // Everything else about the pool card survives — the demo slab still
-      // stamps its pool price.
+      ...sprites,
       priceMyr: 10,
       name: 'a',
     });
