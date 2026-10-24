@@ -38,6 +38,8 @@ const PULLBACK_DEG = 7;
 const OVERSHOOT_DEG = 1.4;
 const REVEAL_AFTER_MS = 900;
 const TELL_AFTER_MS = 1000;
+// The frame's soft glow, in its own foil (violet, then cyan).
+const HOLO_FRAME_GLOW = `0 0 60px ${HOLO_STOPS[1]}33, 0 0 120px ${HOLO_STOPS[0]}22`;
 
 const pt = (a: number, r: number) => {
   const rad = (a * Math.PI) / 180;
@@ -373,12 +375,12 @@ export function SpinWheel({
           )}
         >
           <div
-            className="holo-turn aspect-[5/7] w-[38%] rounded-[10px] p-[1.5px] shadow-[0_0_60px_#c4b5fd33,0_0_120px_#67e8f922] [--holo-period:6s]"
-            style={{ background: holoConic }}
+            className="holo-turn aspect-[5/7] w-[38%] rounded-[10px] p-[1.5px] [--holo-period:6s]"
+            style={{ background: holoConic, boxShadow: HOLO_FRAME_GLOW }}
           >
             <div className="relative h-full w-full overflow-hidden rounded-[9px] bg-[radial-gradient(90%_60%_at_50%_30%,#2a2a2e,#121214_70%)] p-2">
               <span className="relative block h-full w-full">
-                <PrizeArt src={result.image} sizes="180px" />
+                <PrizeArt src={result.image} />
               </span>
             </div>
           </div>

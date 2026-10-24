@@ -99,7 +99,7 @@ export function MyTickets() {
               >
                 <span className="relative aspect-[5/7] w-10 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
                   <span className="relative block h-full w-full">
-                    <PrizeArt src={e.image} sizes="40px" />
+                    <PrizeArt src={e.image} />
                   </span>
                 </span>
                 <div className="min-w-0 flex-1">

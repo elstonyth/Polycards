@@ -43,14 +43,20 @@ export function EnterSheet({
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, true, onClose);
   const max = Math.max(0, Math.min(balance, MAX_ENTRY_TICKETS));
-  const [amount, setAmount] = useState(Math.min(1, max));
+  // The field's own text: typing is never rewritten under the player's
+  // fingers (entries are final). Clamped on blur; confirm stays off while
+  // the number is out of range.
+  const [raw, setRaw] = useState(String(Math.min(1, max)));
   const [error, setError] = useState<{ text: string; topUp: boolean } | null>(
     null,
   );
   const [pending, startTransition] = useTransition();
   const clamp = (n: number) =>
     Math.max(1, Math.min(max, Number.isFinite(n) ? Math.trunc(n) : 1));
+  const typed = Number(raw);
+  const amount = raw.trim() !== '' && Number.isInteger(typed) ? typed : 0;
   const valid = amount >= 1 && amount <= max;
+  const setAmount = (n: number) => setRaw(String(clamp(n)));
 
   const confirm = () =>
     startTransition(async () => {
@@ -83,7 +89,7 @@ export function EnterSheet({
         <div className="flex items-start gap-3">
           <span className="relative aspect-[5/7] w-14 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-1">
             <span className="relative block h-full w-full">
-              <PrizeArt src={prize.image} kind={prize.kind} sizes="56px" />
+              <PrizeArt src={prize.image} kind={prize.kind} />
             </span>
           </span>
           <div className="min-w-0 flex-1">
@@ -122,7 +128,7 @@ export function EnterSheet({
             className={stepBtn}
             aria-label="One ticket fewer"
             disabled={pending || amount <= 1}
-            onClick={() => setAmount((n) => clamp(n - 1))}
+            onClick={() => setAmount(amount - 1)}
           >
             <Minus className="h-5 w-5" aria-hidden />
           </button>
@@ -136,9 +142,10 @@ export function EnterSheet({
             min={1}
             max={max}
             step={1}
-            value={amount}
+            value={raw}
             disabled={pending || max === 0}
-            onChange={(e) => setAmount(clamp(e.target.valueAsNumber))}
+            onChange={(e) => setRaw(e.target.value)}
+            onBlur={() => setAmount(amount)}
             className="font-heading h-12 min-w-0 flex-1 rounded-xl bg-neutral-800 px-3 text-center text-xl text-white tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-white/40"
           />
           <button
@@ -146,7 +153,7 @@ export function EnterSheet({
             className={stepBtn}
             aria-label="One ticket more"
             disabled={pending || amount >= max}
-            onClick={() => setAmount((n) => clamp(n + 1))}
+            onClick={() => setAmount(amount + 1)}
           >
             <Plus className="h-5 w-5" aria-hidden />
           </button>
@@ -164,11 +171,16 @@ export function EnterSheet({
           My chance after entering:{' '}
           <span className="font-semibold text-white tabular-nums">
             {chancePercent(
-              prize.my_tickets + amount,
-              prize.total_tickets + amount,
+              prize.my_tickets + (valid ? amount : 0),
+              prize.total_tickets + (valid ? amount : 0),
             )}
           </span>
         </p>
+        {amount > max && (
+          <p className="mt-1 text-xs text-red-400">
+            You have {num(balance)} {balance === 1 ? 'ticket' : 'tickets'}.
+          </p>
+        )}
         <p className="mt-1 text-xs leading-relaxed text-neutral-400">
           Entries are final — tickets on a prize can&rsquo;t be taken back.
         </p>

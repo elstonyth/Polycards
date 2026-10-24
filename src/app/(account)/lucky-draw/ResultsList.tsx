@@ -72,7 +72,7 @@ export function ResultsList({ onOpen }: { onOpen: (prizeId: string) => void }) {
             >
               <span className="relative aspect-[5/7] w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
                 <span className="relative block h-full w-full">
-                  <PrizeArt src={r.image} sizes="44px" />
+                  <PrizeArt src={r.image} />
                 </span>
               </span>
               <span className="min-w-0 flex-1">

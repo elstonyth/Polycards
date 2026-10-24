@@ -63,7 +63,7 @@ export function ResultDetail({
         <div className="flex items-start gap-3">
           <span className="relative aspect-[5/7] w-16 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-1">
             <span className="relative block h-full w-full">
-              <PrizeArt src={result.image} sizes="64px" />
+              <PrizeArt src={result.image} />
             </span>
           </span>
           <div className="min-w-0 flex-1">

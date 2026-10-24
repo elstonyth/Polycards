@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import { Gift } from 'lucide-react';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { Pill } from '@/components/ui/pill';
@@ -16,19 +15,20 @@ export const mytWhen = (iso: string): string =>
   `${mytDate(iso)}, ${mytClock(iso)} MYT`;
 
 /** The prize's picture: the card slab or the admin's art, the credit coins
- *  for a credit prize without art, else a neutral gift. Fills its parent. */
-export function PrizeArt({
-  src,
-  kind,
-  sizes,
-}: {
-  src: string | null;
-  kind?: string;
-  sizes: string;
-}) {
+ *  for a credit prize without art, else a neutral gift. Fills its parent.
+ *  A plain <img> (FramedAvatar's choice): the admin's image_url is free text,
+ *  and next/image throws during render for a host outside remotePatterns. */
+export function PrizeArt({ src, kind }: { src: string | null; kind?: string }) {
   const art = src ?? (kind === 'card' ? null : CREDIT_ART);
   return art ? (
-    <Image src={art} alt="" fill sizes={sizes} className="object-contain" />
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={art}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      className="absolute inset-0 h-full w-full object-contain"
+    />
   ) : (
     <span className="flex h-full w-full items-center justify-center">
       <Gift className="h-1/3 w-1/3 text-neutral-500" aria-hidden />
@@ -101,7 +101,7 @@ export function PrizeCard({
       <div className="flex gap-4">
         <span className="relative aspect-[5/7] w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] p-1.5 sm:w-28">
           <span className="relative block h-full w-full">
-            <PrizeArt src={prize.image} kind={prize.kind} sizes="112px" />
+            <PrizeArt src={prize.image} kind={prize.kind} />
           </span>
         </span>
         <div className="min-w-0 flex-1">

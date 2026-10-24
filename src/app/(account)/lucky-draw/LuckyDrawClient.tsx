@@ -309,7 +309,11 @@ export function LuckyDrawClient({
           onClose={() => setSpins([])}
         />
       )}
-      {playIntro && !reduced && <TicketOpenIntro onDone={endIntro} />}
+      {/* After hydration only (nowMs is mount-only): server HTML must never
+          ship a full-screen scrim, and reduced motion is known by then. */}
+      {playIntro && !reduced && nowMs !== null && (
+        <TicketOpenIntro onDone={endIntro} />
+      )}
     </div>
   );
 }
