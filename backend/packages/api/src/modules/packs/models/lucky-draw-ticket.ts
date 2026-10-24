@@ -6,7 +6,8 @@ import { model } from '@medusajs/framework/utils';
 // refunds; no route sells them.
 //
 // (reason, ref) is unique so a replayed claim / entry / refund is a no-op:
-// ref is the task claim id, the entry id, or the refunded entry id.
+// ref is the task claim id, the entry id, or '<prizeId>:<customerId>' for a
+// refund (one per entrant per prize — a prize is either cancelled or drawn).
 export const LuckyDrawTicket = model
   .define('lucky_draw_ticket', {
     id: model.id({ prefix: 'ldtk' }).primaryKey(),

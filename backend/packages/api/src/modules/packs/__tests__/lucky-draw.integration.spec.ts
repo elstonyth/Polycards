@@ -1,9 +1,11 @@
 /**
- * Lucky Draw entry — integration:modules
+ * Lucky Draw — integration:modules
  *
  * enterLuckyDraw spends tickets on a prize under two advisory locks (the
  * shared prize lock, then the per-customer ticket lock). This pins the
- * rule order and the no-overspend guarantee against a real Postgres.
+ * rule order and the no-overspend guarantee against a real Postgres, then the
+ * admin console's writes and the draw job: once per prize, against the
+ * published seed hash, paying exactly one winner.
  */
 process.env.LUCKY_DRAW_SEED_SECRET ??= 'test-lucky-draw-seed-secret';
 
@@ -12,11 +14,17 @@ import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
+import type { LuckyDrawOutcome } from '../service';
 import {
+  LUCKY_DRAW_PULL_PACK_ID,
   MAX_PRIZE_CREDIT_MYR,
+  commitDrawSeed,
   deriveDrawSeed,
   drawSeedHash,
+  drawWinner,
+  type DrawEntrant,
 } from '../lucky-draw';
+import { BONUS_BP_FULL } from '../bonus-credit';
 import { clearFxDisplayCache } from '../pricing';
 import LuckyDrawEvent from '../models/lucky-draw-event';
 import LuckyDrawPrize from '../models/lucky-draw-prize';
@@ -28,6 +36,9 @@ import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
 import Card from '../models/card';
 import FxRate from '../models/fx-rate';
+import Pull from '../models/pull';
+import LedgerEntry from '../models/ledger-entry';
+import LedgerSequence from '../models/ledger-sequence';
 
 jest.setTimeout(300 * 1000);
 
@@ -49,6 +60,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
     AdminActionAudit,
     Card,
     FxRate,
+    Pull,
+    LedgerEntry,
+    LedgerSequence,
   ],
   testSuite: ({ service, MikroOrmWrapper }) => {
     // Fixtures use the generated create methods. Each test uses its own
@@ -74,7 +88,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
     const makePrize = async (
       eventId: string,
-      over: Partial<{ draw_at: Date; cancelled_at: Date | null }> = {},
+      over: Partial<{
+        draw_at: Date;
+        cancelled_at: Date | null;
+        kind: 'card' | 'credit';
+        card_handle: string | null;
+        credit_myr: number | null;
+        seed_nonce: string;
+        seed_hash: string;
+      }> = {},
     ) => {
       const [prize] = await service.createLuckyDrawPrizes([
         {
@@ -924,30 +946,23 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
 
       it('cancel is refused once the prize has a result', async () => {
-        const prize = await livePrize();
+        const prize = await makePrize(
+          (await makeEvent()).id,
+          commitDrawSeed(process.env.LUCKY_DRAW_SEED_SECRET!),
+        );
         await fund('cus_rd', 100);
         await service.enterLuckyDraw({
           customerId: 'cus_rd',
           prizeId: prize.id,
           tickets: 10,
         });
-        // The draw job (a later task) writes this row; stand in for it.
-        await service.createLuckyDrawResults([
-          {
-            prize_id: prize.id,
-            winner_customer_id: 'cus_rd',
-            winner_tickets: 10,
-            total_tickets: 10,
-            entrant_count: 1,
-            seed: 'f'.repeat(64),
-            // The draw job stores arrays; the generated type says Record.
-            entries: [
-              { customer_id: 'cus_rd', tickets: 10 },
-            ] as unknown as Record<string, unknown>,
-            excluded: [] as unknown as Record<string, unknown>,
-            drawn_at: new Date(),
-          },
-        ]);
+        await service.drawLuckyDrawPrize({
+          prizeId: prize.id,
+          now: new Date(new Date(prize.draw_at).getTime() + 1000),
+        });
+        expect(
+          await service.listLuckyDrawResults({ prize_id: prize.id }),
+        ).toHaveLength(1);
 
         await rejectsWith(cancel(prize.id), MedusaError.Types.NOT_ALLOWED);
         expect((await prizeRow(prize.id)).cancelled_at).toBeNull();
@@ -1217,6 +1232,556 @@ moduleIntegrationTestRunner<PacksModuleService>({
           balance: 0,
           rows: [],
         });
+      });
+    });
+    describe('the draw', () => {
+      const secret = () => process.env.LUCKY_DRAW_SEED_SECRET!;
+
+      // A published, committed RM 25 credit prize that draws in an hour, so the
+      // test can still enter; draw it with `after(prize)`.
+      const committedPrize = async (
+        over: Parameters<typeof makePrize>[1] = {},
+        event: Parameters<typeof makeEvent>[0] = {},
+      ) =>
+        makePrize((await makeEvent(event)).id, {
+          kind: 'credit',
+          card_handle: null,
+          credit_myr: 25,
+          ...commitDrawSeed(secret()),
+          ...over,
+        });
+
+      const after = (prize: { draw_at: Date | string }) =>
+        new Date(new Date(prize.draw_at).getTime() + 1000);
+
+      const enter = async (
+        customerId: string,
+        prizeId: string,
+        tickets: number,
+      ) => {
+        const r = await service.enterLuckyDraw({
+          customerId,
+          prizeId,
+          tickets,
+        });
+        expect(r).toMatchObject({ entered: true });
+      };
+
+      const resultOf = async (prizeId: string) => {
+        const rows = await service.listLuckyDrawResults({ prize_id: prizeId });
+        expect(rows.length).toBeLessThanOrEqual(1);
+        return rows[0];
+      };
+
+      const createCard = (handle: string) =>
+        service.createCards([
+          {
+            handle,
+            name: `Card ${handle}`,
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 50,
+            market_multiplier: 1.2,
+            image: `/cdn/${handle}.webp`,
+          },
+        ]);
+
+      const rewardCredits = (customerId: string) =>
+        service.listCreditTransactions({
+          customer_id: customerId,
+          reason: 'reward_credit',
+        });
+
+      const drawnCreditPrize = async () => {
+        const prize = await committedPrize();
+        for (const [customerId, tickets] of [
+          ['cus_da', 30],
+          ['cus_db', 50],
+          ['cus_dc', 20],
+        ] as const) {
+          await fund(customerId, 100);
+          await enter(customerId, prize.id, tickets);
+        }
+        return prize;
+      };
+
+      it('draws a due credit prize once, pays bonus credit, stores a checkable result', async () => {
+        const prize = await drawnCreditPrize();
+        const seed = deriveDrawSeed(secret(), prize.seed_nonce!);
+        const entrants = [
+          { customer_id: 'cus_da', tickets: 30 },
+          { customer_id: 'cus_db', tickets: 50 },
+          { customer_id: 'cus_dc', tickets: 20 },
+        ];
+        const expected = drawWinner(entrants, seed, prize.id)!;
+        const winner = expected.winner.customer_id;
+
+        expect(
+          await service.drawDueLuckyDrawPrizes({ now: after(prize) }),
+        ).toEqual({ drawn: 1, failed: 0 });
+
+        const res = await resultOf(prize.id);
+        expect(res).toMatchObject({
+          winner_customer_id: winner,
+          winner_tickets: expected.winner.tickets,
+          ticket_index: expected.ticketIndex,
+          total_tickets: 100,
+          entrant_count: 3,
+          seed,
+          pull_id: null,
+        });
+        expect(res.entries).toEqual(entrants);
+        expect(res.excluded).toEqual([]);
+        expect(drawSeedHash(res.seed)).toBe(prize.seed_hash);
+
+        // Bonus credit: the whole row is spend-only, keyed once per prize.
+        const credits = await rewardCredits(winner);
+        expect(credits).toHaveLength(1);
+        expect(credits[0]).toMatchObject({
+          id: res.credit_transaction_id,
+          source_transaction_id: `luckydraw:${prize.id}`,
+          bonus_cents: 2500,
+        });
+        expect(Number(credits[0].amount)).toBe(25);
+        const wp = await service.listLedgerEntries({
+          type: 'WP',
+          customer_id: winner,
+        });
+        expect(wp).toHaveLength(1);
+        expect(wp[0].ref_id).toBe(res.credit_transaction_id);
+        expect(Number(wp[0].wallet_delta)).toBe(25);
+        expect(wp[0].payload).toMatchObject({
+          period: `luckydraw:${prize.id}`,
+        });
+        for (const loser of ['cus_da', 'cus_db', 'cus_dc'].filter(
+          (c) => c !== winner,
+        )) {
+          expect(await rewardCredits(loser)).toHaveLength(0);
+        }
+
+        // Never twice: the loop finds nothing, the direct call re-checks under
+        // the lock, and nothing more is paid.
+        expect(
+          await service.drawDueLuckyDrawPrizes({ now: after(prize) }),
+        ).toEqual({ drawn: 0, failed: 0 });
+        expect(
+          await service.drawLuckyDrawPrize({
+            prizeId: prize.id,
+            now: after(prize),
+          }),
+        ).toBeNull();
+        expect(await rewardCredits(winner)).toHaveLength(1);
+        expect(
+          await service.listLuckyDrawResults({ prize_id: prize.id }),
+        ).toHaveLength(1);
+      });
+
+      it('a recompute from the stored result picks the same winner', async () => {
+        const prize = await drawnCreditPrize();
+        await service.drawDueLuckyDrawPrizes({ now: after(prize) });
+
+        const res = await resultOf(prize.id);
+        const again = drawWinner(
+          res.entries as unknown as DrawEntrant[],
+          res.seed,
+          prize.id,
+        );
+        expect(again?.winner.customer_id).toBe(res.winner_customer_id);
+        expect(again?.ticketIndex).toBe(res.ticket_index);
+      });
+
+      it('a card prize mints one reward pull for the winner with full bonus bp, earmarked once stock is taken', async () => {
+        await createCard('ld-card');
+        const prize = await committedPrize({
+          kind: 'card',
+          card_handle: 'ld-card',
+          credit_myr: null,
+        });
+        await fund('cus_k', 100);
+        await enter('cus_k', prize.id, 10);
+        const takes: [string, number][] = [];
+        const outcomes: LuckyDrawOutcome[] = [];
+
+        expect(
+          await service.drawDueLuckyDrawPrizes({
+            now: after(prize),
+            decrementStock: async (handle, qty) => {
+              takes.push([handle, qty]);
+              return true;
+            },
+            onDrawn: async (o) => {
+              outcomes.push(o);
+            },
+          }),
+        ).toEqual({ drawn: 1, failed: 0 });
+
+        const res = await resultOf(prize.id);
+        const pulls = await service.listPulls({ customer_id: 'cus_k' });
+        expect(pulls).toHaveLength(1);
+        expect(pulls[0]).toMatchObject({
+          id: res.pull_id,
+          pack_id: LUCKY_DRAW_PULL_PACK_ID,
+          card_id: 'ld-card',
+          order_id: null,
+          source: 'reward',
+          bonus_bp: BONUS_BP_FULL,
+          stock_earmarked: true,
+        });
+        expect(res).toMatchObject({
+          winner_customer_id: 'cus_k',
+          credit_transaction_id: null,
+        });
+        expect(takes).toEqual([['ld-card', 1]]);
+        expect(outcomes).toEqual([
+          {
+            prizeId: prize.id,
+            winnerId: 'cus_k',
+            kind: 'card',
+            cardHandle: 'ld-card',
+            pullId: res.pull_id,
+          },
+        ]);
+        expect(await rewardCredits('cus_k')).toHaveLength(0);
+      });
+
+      it('an untracked or failed stock take leaves the pull unflagged and the prize still drawn', async () => {
+        await createCard('ld-untracked');
+        await createCard('ld-broken');
+        const untracked = await committedPrize({
+          kind: 'card',
+          card_handle: 'ld-untracked',
+          credit_myr: null,
+        });
+        const broken = await committedPrize({
+          kind: 'card',
+          card_handle: 'ld-broken',
+          credit_myr: null,
+        });
+        await fund('cus_u', 100);
+        await enter('cus_u', untracked.id, 5);
+        await enter('cus_u', broken.id, 5);
+
+        expect(
+          await service.drawDueLuckyDrawPrizes({
+            now: after(untracked),
+            decrementStock: async (handle) => {
+              if (handle === 'ld-broken') throw new Error('inventory down');
+              return false;
+            },
+          }),
+        ).toEqual({ drawn: 2, failed: 0 });
+
+        const pulls = await service.listPulls({ customer_id: 'cus_u' });
+        expect(pulls.map((p) => [p.card_id, p.stock_earmarked]).sort()).toEqual(
+          [
+            ['ld-broken', false],
+            ['ld-untracked', false],
+          ],
+        );
+      });
+
+      it('a card prize whose Card row is gone still writes the result, with no pull, flagged for the job', async () => {
+        const prize = await committedPrize({
+          kind: 'card',
+          card_handle: 'ld-gone',
+          credit_myr: null,
+        });
+        await fund('cus_g', 100);
+        await enter('cus_g', prize.id, 5);
+        const outcomes: LuckyDrawOutcome[] = [];
+        const takes: string[] = [];
+
+        expect(
+          await service.drawDueLuckyDrawPrizes({
+            now: after(prize),
+            decrementStock: async (handle) => {
+              takes.push(handle);
+              return true;
+            },
+            onDrawn: async (o) => {
+              outcomes.push(o);
+            },
+          }),
+        ).toEqual({ drawn: 1, failed: 0 });
+
+        expect(await resultOf(prize.id)).toMatchObject({
+          winner_customer_id: 'cus_g',
+          pull_id: null,
+        });
+        expect(outcomes).toEqual([
+          {
+            prizeId: prize.id,
+            winnerId: 'cus_g',
+            kind: 'card',
+            cardHandle: 'ld-gone',
+            pullId: null,
+          },
+        ]);
+        expect(await service.listPulls({ customer_id: 'cus_g' })).toHaveLength(
+          0,
+        );
+        expect(takes).toEqual([]);
+      });
+
+      it('an entry accepted before draw_at counts even though its row is written after draw_at', async () => {
+        // draw_at is an hour in the REAL past; enter with now = draw_at - 1s,
+        // so the gate accepts while created_at (real clock) lands after it.
+        const drawAt = new Date(Date.now() - HOUR);
+        const prize = await committedPrize(
+          { draw_at: drawAt },
+          { starts_at: new Date(Date.now() - 3 * HOUR) },
+        );
+        await fund('cus_late', 10);
+        expect(
+          await service.enterLuckyDraw({
+            customerId: 'cus_late',
+            prizeId: prize.id,
+            tickets: 5,
+            now: new Date(drawAt.getTime() - 1000),
+          }),
+        ).toMatchObject({ entered: true });
+
+        expect(
+          await service.drawDueLuckyDrawPrizes({ now: new Date() }),
+        ).toEqual({ drawn: 1, failed: 0 });
+        const res = await resultOf(prize.id);
+        expect(res.entries).toContainEqual({
+          customer_id: 'cus_late',
+          tickets: 5,
+        });
+        expect(res.winner_customer_id).toBe('cus_late');
+      });
+
+      it('an enter after the result exists is refused as closed and spends nothing', async () => {
+        const prize = await committedPrize();
+        await service.drawDueLuckyDrawPrizes({ now: after(prize) });
+        expect(await resultOf(prize.id)).toBeDefined();
+        await fund('cus_af', 100);
+
+        expect(
+          await service.enterLuckyDraw({
+            customerId: 'cus_af',
+            prizeId: prize.id,
+            tickets: 1,
+            now: new Date(new Date(prize.draw_at).getTime() - 1000),
+          }),
+        ).toEqual({ entered: false, reason: 'closed' });
+        expect(await service.luckyDrawBalance('cus_af')).toBe(100);
+      });
+
+      it('no entries → result with null winner, nothing paid, not drawn again', async () => {
+        const prize = await committedPrize();
+        const outcomes: LuckyDrawOutcome[] = [];
+
+        expect(
+          await service.drawDueLuckyDrawPrizes({
+            now: after(prize),
+            onDrawn: async (o) => {
+              outcomes.push(o);
+            },
+          }),
+        ).toEqual({ drawn: 1, failed: 0 });
+
+        const res = await resultOf(prize.id);
+        expect(res).toMatchObject({
+          winner_customer_id: null,
+          winner_tickets: 0,
+          total_tickets: 0,
+          entrant_count: 0,
+          ticket_index: null,
+          seed: deriveDrawSeed(secret(), prize.seed_nonce!),
+          credit_transaction_id: null,
+          pull_id: null,
+        });
+        expect(res.entries).toEqual([]);
+        expect(res.excluded).toEqual([]);
+        expect(outcomes).toEqual([
+          {
+            prizeId: prize.id,
+            winnerId: null,
+            kind: 'credit',
+            cardHandle: null,
+            pullId: null,
+          },
+        ]);
+        expect(
+          await service.listCreditTransactions({ reason: 'reward_credit' }),
+        ).toHaveLength(0);
+        expect(
+          await service.drawDueLuckyDrawPrizes({ now: after(prize) }),
+        ).toEqual({ drawn: 0, failed: 0 });
+      });
+
+      it('disabled entrants are excluded and refunded; all-disabled → null winner', async () => {
+        const prize = await committedPrize();
+        await fund('cus_x1', 100);
+        await fund('cus_x2', 100);
+        await enter('cus_x1', prize.id, 10);
+        await enter('cus_x1', prize.id, 20);
+        await enter('cus_x2', prize.id, 15);
+        const lonely = await committedPrize();
+        await fund('cus_x3', 100);
+        await enter('cus_x3', lonely.id, 40);
+        await service.createCustomerAccountStates([
+          { customer_id: 'cus_x1', disabled: true },
+          { customer_id: 'cus_x3', disabled: true },
+        ]);
+
+        expect(
+          await service.drawDueLuckyDrawPrizes({ now: after(prize) }),
+        ).toEqual({ drawn: 2, failed: 0 });
+
+        const res = await resultOf(prize.id);
+        expect(res).toMatchObject({
+          winner_customer_id: 'cus_x2',
+          winner_tickets: 15,
+          total_tickets: 15,
+          entrant_count: 1,
+        });
+        expect(res.entries).toEqual([{ customer_id: 'cus_x2', tickets: 15 }]);
+        expect(res.excluded).toEqual(['cus_x1']);
+        expect(await service.luckyDrawBalance('cus_x1')).toBe(100);
+        expect(await rewardCredits('cus_x2')).toHaveLength(1);
+
+        const none = await resultOf(lonely.id);
+        expect(none).toMatchObject({
+          winner_customer_id: null,
+          total_tickets: 0,
+          entrant_count: 0,
+          credit_transaction_id: null,
+        });
+        expect(none.entries).toEqual([]);
+        expect(none.excluded).toEqual(['cus_x3']);
+        expect(await service.luckyDrawBalance('cus_x3')).toBe(100);
+        expect(await rewardCredits('cus_x3')).toHaveLength(0);
+
+        // Same ref as a cancel refund: a prize is either drawn or cancelled.
+        const refunds = await service.listLuckyDrawTickets({
+          reason: 'refund',
+        });
+        expect(refunds.map((t) => [t.ref, t.delta])).toHaveLength(2);
+        expect(refunds.map((t) => [t.ref, t.delta])).toEqual(
+          expect.arrayContaining([
+            [`${lonely.id}:cus_x3`, 40],
+            [`${prize.id}:cus_x1`, 30],
+          ]),
+        );
+      });
+
+      it('a prize not yet due, cancelled, or on a draft or cancelled event is not drawn', async () => {
+        const past = new Date(Date.now() - 1000);
+        const notDue = await committedPrize();
+        const cancelled = await committedPrize({
+          draw_at: past,
+          cancelled_at: new Date(),
+        });
+        const draft = await committedPrize(
+          { draw_at: past },
+          { status: 'draft' },
+        );
+        const cancelledEvent = await committedPrize(
+          { draw_at: past },
+          { status: 'cancelled' },
+        );
+        const now = new Date();
+
+        expect(await service.drawDueLuckyDrawPrizes({ now })).toEqual({
+          drawn: 0,
+          failed: 0,
+        });
+        // The re-check under the lock is the real guard, not the list.
+        for (const p of [notDue, cancelled, draft, cancelledEvent]) {
+          expect(
+            await service.drawLuckyDrawPrize({ prizeId: p.id, now }),
+          ).toBeNull();
+        }
+        expect(
+          await service.drawLuckyDrawPrize({ prizeId: 'ldpz_missing', now }),
+        ).toBeNull();
+        expect(await service.listLuckyDrawResults({})).toHaveLength(0);
+      });
+
+      it('refuses to draw (failed: 1, no result) when the secret no longer matches the published hash', async () => {
+        const prize = await committedPrize();
+        await fund('cus_sc', 100);
+        await enter('cus_sc', prize.id, 10);
+
+        const saved = process.env.LUCKY_DRAW_SEED_SECRET;
+        try {
+          process.env.LUCKY_DRAW_SEED_SECRET = 'a-rotated-secret';
+          expect(
+            await service.drawDueLuckyDrawPrizes({ now: after(prize) }),
+          ).toEqual({ drawn: 0, failed: 1 });
+          await expect(
+            service.drawLuckyDrawPrize({
+              prizeId: prize.id,
+              now: after(prize),
+            }),
+          ).rejects.toThrow('LUCKY_DRAW_SEED_SECRET changed since publish');
+
+          delete process.env.LUCKY_DRAW_SEED_SECRET;
+          expect(
+            await service.drawDueLuckyDrawPrizes({ now: after(prize) }),
+          ).toEqual({ drawn: 0, failed: 1 });
+        } finally {
+          process.env.LUCKY_DRAW_SEED_SECRET = saved;
+        }
+        expect(await resultOf(prize.id)).toBeUndefined();
+        expect(await rewardCredits('cus_sc')).toHaveLength(0);
+
+        // The original secret back: the next tick draws it.
+        expect(
+          await service.drawDueLuckyDrawPrizes({ now: after(prize) }),
+        ).toEqual({ drawn: 1, failed: 0 });
+      });
+
+      it('refuses a committed-less prize on a published event loudly', async () => {
+        const prize = await makePrize((await makeEvent()).id, {
+          draw_at: new Date(Date.now() - 1000),
+        });
+        expect(
+          await service.drawDueLuckyDrawPrizes({ now: new Date() }),
+        ).toEqual({ drawn: 0, failed: 1 });
+        expect(await resultOf(prize.id)).toBeUndefined();
+      });
+
+      it('the draw waits for an in-flight entry and includes it', async () => {
+        const prize = await committedPrize();
+        await fund('cus_fl', 100);
+        // An entry that has taken the SHARED prize lock but not yet committed.
+        const entering = await holdLock(
+          'pg_advisory_xact_lock_shared',
+          `luckydraw:${prize.id}`,
+        );
+        let released = false;
+        try {
+          await entering.tx.execute(
+            'INSERT INTO lucky_draw_entry (id, prize_id, customer_id, tickets, created_at, updated_at) ' +
+              "VALUES ('lden_fl', ?, 'cus_fl', 25, now(), now())",
+            [prize.id],
+          );
+          await entering.tx.execute(
+            'INSERT INTO lucky_draw_ticket (id, customer_id, delta, reason, ref, created_at, updated_at) ' +
+              "VALUES ('ldtk_fl', 'cus_fl', -25, 'entry', 'lden_fl', now(), now())",
+          );
+          const drawing = service.drawDueLuckyDrawPrizes({ now: after(prize) });
+          // The exclusive lock cannot be had while the entry is in flight.
+          expect(await settledWithin(drawing, 750)).toBe(false);
+
+          await entering.release();
+          released = true;
+          expect(await drawing).toEqual({ drawn: 1, failed: 0 });
+          const res = await resultOf(prize.id);
+          expect(res).toMatchObject({
+            winner_customer_id: 'cus_fl',
+            total_tickets: 25,
+            entrant_count: 1,
+          });
+          expect(res.entries).toEqual([{ customer_id: 'cus_fl', tickets: 25 }]);
+        } finally {
+          if (!released) await entering.tx.rollback();
+        }
       });
     });
   },

@@ -134,9 +134,13 @@ import {
   isDefaultPlayerGroup,
 } from './odds-sets';
 import {
+  LUCKY_DRAW_PULL_PACK_ID,
   MAX_PRIZE_CREDIT_MYR,
   aggregateEntries,
   commitDrawSeed,
+  deriveDrawSeed,
+  drawSeedHash,
+  drawWinner,
   requireDrawSeedSecret,
   validateEntryTickets,
   validateTaskTickets,
@@ -874,6 +878,17 @@ export type AdminLuckyDrawPrize = {
     seed: string;
   } | null;
 };
+
+/** What one prize's draw did, for the job after the transaction commits.
+ *  `pullId` null on a card prize with a winner = the Card row was gone, so
+ *  nothing was minted and someone has to fulfil it by hand. */
+export interface LuckyDrawOutcome {
+  prizeId: string;
+  winnerId: string | null;
+  kind: 'card' | 'credit';
+  cardHandle: string | null;
+  pullId: string | null;
+}
 
 export type AdminLuckyDrawEvent = {
   id: string;
@@ -6763,6 +6778,293 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { refunded: entrants.length };
+  }
+
+  // The once-a-minute draw job's loop. A plain read context and NO
+  // transaction here: each prize draws in its OWN transaction, so one bad
+  // prize rolls back alone and the rest still draw. The due list is raw SQL
+  // over committed rows (nothing is written at this level) and is only a
+  // hint — the lock and re-check inside drawLuckyDrawPrize are what stop a
+  // double draw. Card stock is taken after each commit, never inside it.
+  @InjectManager()
+  async drawDueLuckyDrawPrizes(
+    deps: {
+      now?: Date;
+      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
+      /** Called after each committed draw (the job's missing-card warning). */
+      onDrawn?: (outcome: LuckyDrawOutcome) => Promise<void>;
+    } = {},
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ drawn: number; failed: number }> {
+    const now = deps.now ?? new Date();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const due = await em.execute<{ id: string }[]>(
+      'SELECT p.id FROM lucky_draw_prize p ' +
+        'JOIN lucky_draw_event e ON e.id = p.event_id ' +
+        "AND e.status = 'published' AND e.deleted_at IS NULL " +
+        'WHERE p.draw_at <= ?::timestamptz AND p.cancelled_at IS NULL ' +
+        'AND p.deleted_at IS NULL AND NOT EXISTS (' +
+        'SELECT 1 FROM lucky_draw_result r ' +
+        'WHERE r.prize_id = p.id AND r.deleted_at IS NULL) ' +
+        'ORDER BY p.draw_at ASC, p.id ASC LIMIT 100',
+      [now.toISOString()],
+    );
+    let drawn = 0;
+    let failed = 0;
+    for (const { id } of due) {
+      let outcome: LuckyDrawOutcome | null;
+      try {
+        // No context forwarded: each prize opens its own transaction.
+        outcome = await this.drawLuckyDrawPrize({ prizeId: id, now });
+      } catch (err) {
+        // Not drawn: it stays due and the next tick retries it. The message
+        // is the operator's clue (e.g. "LUCKY_DRAW_SEED_SECRET changed since
+        // publish"); the job logs the count.
+        failed += 1;
+        // eslint-disable-next-line no-console
+        console.warn('[drawDueLuckyDrawPrizes] prize not drawn', {
+          prize_id: id,
+          error: String(err),
+        });
+        continue;
+      }
+      if (!outcome) continue; // drawn, cancelled or unpublished since the list
+      drawn += 1;
+      await this.reserveLuckyDrawStock(outcome, deps.decrementStock);
+      if (!deps.onDrawn) continue;
+      try {
+        await deps.onDrawn(outcome);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[drawDueLuckyDrawPrizes] onDrawn failed (draw already committed)',
+          { prize_id: id, error: String(err) },
+        );
+      }
+    }
+    return { drawn, failed };
+  }
+
+  // Draw one prize, pay its winner and write its result in ONE transaction,
+  // so a prize is never drawn-but-unpaid. Takes the EXCLUSIVE prize lock
+  // first: in-flight entries hold it shared, so the draw waits for them and
+  // counts them, and an entry arriving after this commit sees the result and
+  // is refused. Everything is re-checked under the lock; null = nothing to do
+  // (gone, cancelled, not due, event not published, or already drawn). Every
+  // read runs before the first write: raw SQL in the writers below would not
+  // see rows the unit of work has not flushed yet.
+  @InjectTransactionManager()
+  async drawLuckyDrawPrize(
+    input: { prizeId: string; now: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LuckyDrawOutcome | null> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `luckydraw:${input.prizeId}`,
+    ]);
+    const [prize] = await this.listLuckyDrawPrizes(
+      { id: input.prizeId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!prize || prize.cancelled_at) return null;
+    if (new Date(prize.draw_at).getTime() > input.now.getTime()) return null;
+    const [event] = await this.listLuckyDrawEvents(
+      { id: prize.event_id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (event?.status !== 'published') return null;
+    const [result] = await this.listLuckyDrawResults(
+      { prize_id: prize.id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (result) return null;
+
+    // Never draw against a hash the public did not see.
+    if (!prize.seed_nonce || !prize.seed_hash) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Lucky Draw prize ${prize.id} has no published seed hash.`,
+      );
+    }
+    const seed = deriveDrawSeed(requireDrawSeedSecret(), prize.seed_nonce);
+    if (drawSeedHash(seed) !== prize.seed_hash) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `LUCKY_DRAW_SEED_SECRET changed since publish — prize ${prize.id} no longer matches its published seed hash.`,
+      );
+    }
+    const creditMyr = toMoney(prize.credit_myr);
+    if (prize.kind === 'credit' && !(creditMyr > 0)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Lucky Draw prize ${prize.id} has no credit amount.`,
+      );
+    }
+
+    // Every entry on the prize, with no time filter: the cut-off was enforced
+    // at entry time under this lock, and app/DB clock skew must never drop an
+    // accepted entry. Paged — a truncated read is a dropped entry.
+    const all = aggregateEntries(
+      await pageAll((opts) =>
+        this.listLuckyDrawEntries({ prize_id: prize.id }, opts, sharedContext),
+      ),
+    );
+    // Disabled (and deleted) accounts are left out of the draw and refunded.
+    const disabled = await this.disabledCustomerIds(
+      all.map((e) => e.customer_id),
+      sharedContext,
+    );
+    const entrants = all.filter((e) => !disabled.has(e.customer_id));
+    const excluded = all.filter((e) => disabled.has(e.customer_id));
+    const pick = drawWinner(entrants, seed, prize.id);
+    const winnerId = pick?.winner.customer_id ?? null;
+    const cardHandle =
+      prize.kind === 'card' ? (prize.card_handle ?? null) : null;
+    // A card deleted since the prize was saved has no handle to mint against:
+    // the result is still written (pull_id null) and the job flags it.
+    const [card] =
+      winnerId && cardHandle
+        ? await this.listCards(
+            { handle: cardHandle },
+            { select: ['handle'], take: 1 },
+            sharedContext,
+          )
+        : [];
+
+    if (excluded.length > 0) {
+      // Same ref as a cancel refund: a prize is either drawn or cancelled.
+      await this.createLuckyDrawTickets(
+        excluded.map((e) => ({
+          customer_id: e.customer_id,
+          delta: e.tickets,
+          reason: 'refund' as const,
+          ref: `${prize.id}:${e.customer_id}`,
+        })),
+        sharedContext,
+      );
+    }
+    let creditTransactionId: string | null = null;
+    let pullId: string | null = null;
+    if (winnerId && prize.kind === 'credit') {
+      // Bonus credit, like a weekly-challenge money prize; claimTask's shape.
+      const { id, amount } = await this.mutateCreditAtomic(
+        {
+          customerId: winnerId,
+          amount: creditMyr,
+          reason: 'reward_credit',
+          idempotencyReference: `luckydraw:${prize.id}`,
+        },
+        sharedContext,
+      );
+      await this.recordLedgerEntry(
+        {
+          type: 'WP',
+          customerId: winnerId,
+          refId: id,
+          walletDelta: amount,
+          vaultDelta: null,
+          payload: {
+            type: 'WP',
+            period: `luckydraw:${prize.id}`,
+            stage: 0,
+            rank: 0,
+            sku: null,
+            value: 0,
+          },
+        },
+        sharedContext,
+      );
+      creditTransactionId = id;
+    } else if (winnerId && card) {
+      // The settleChallengeWinner card shape. The stock take runs after this
+      // transaction commits (reserveLuckyDrawStock).
+      const [pull] = await this.createPulls(
+        [
+          {
+            customer_id: winnerId,
+            pack_id: LUCKY_DRAW_PULL_PACK_ID,
+            card_id: card.handle,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward' as const,
+            bonus_bp: BONUS_BP_FULL, // reward: sale not held (ADR 0012)
+            stock_earmarked: false,
+          },
+        ],
+        sharedContext,
+      );
+      pullId = pull.id;
+    }
+    await this.createLuckyDrawResults(
+      [
+        {
+          prize_id: prize.id,
+          winner_customer_id: winnerId,
+          winner_tickets: pick?.winner.tickets ?? 0,
+          total_tickets: pick?.totalTickets ?? 0,
+          entrant_count: entrants.length,
+          ticket_index: pick?.ticketIndex ?? null,
+          seed,
+          // The json columns are typed as Record; the result stores arrays.
+          entries: entrants as unknown as Record<string, unknown>,
+          excluded: excluded.map((e) => e.customer_id) as unknown as Record<
+            string,
+            unknown
+          >,
+          credit_transaction_id: creditTransactionId,
+          pull_id: pullId,
+          drawn_at: new Date(),
+        },
+      ],
+      sharedContext,
+    );
+    return {
+      prizeId: prize.id,
+      winnerId,
+      kind: prize.kind,
+      cardHandle,
+      pullId,
+    };
+  }
+
+  // Take a drawn card prize's unit once its draw has COMMITTED — the
+  // reserveSettledStock shape (see there): adjustInventory commits on the
+  // inventory module's own connection and cannot roll back with the draw.
+  // The result row keeps the prize from being drawn again, so this runs at
+  // most once per prize. Failures are logged, never thrown: the prize is
+  // already granted, and an unflagged pull is the safe side (buyback never
+  // restores a unit that was not taken). qty is 1, so a take is never partial.
+  private async reserveLuckyDrawStock(
+    outcome: LuckyDrawOutcome,
+    decrementStock:
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
+  ): Promise<void> {
+    const { pullId, cardHandle } = outcome;
+    if (!decrementStock || !pullId || !cardHandle) return;
+    try {
+      // false = untracked product: nothing counted, so nothing to flag.
+      if (!(await decrementStock(cardHandle, 1))) return;
+      await this.updatePulls({
+        selector: { id: pullId },
+        data: { stock_earmarked: true },
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[drawDueLuckyDrawPrizes] stock take failed AFTER the draw committed — prize already granted, pull left unflagged; check the card stock counter',
+        {
+          prize_id: outcome.prizeId,
+          customer_id: outcome.winnerId,
+          handle: cardHandle,
+          pull_id: pullId,
+          error: String(err),
+        },
+      );
+    }
   }
 
   // Admin overview: every event with its prizes' facts. A prize's seed never
