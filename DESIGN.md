@@ -349,7 +349,7 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 ### Signature: Lucky Draw (/lucky-draw, 2026-10-24)
 
 Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
-**Task** tab (its `match`: tasks pay the tickets).
+**Games** tab (2026-10-25; Task no longer matches `/lucky-draw`).
 
 - **Tabs** — Prizes · Results · My tickets, the leaderboard's segmented pill.
 - **Prize card** — charcoal card: the prize on a 5:7 pedestal, RM value in

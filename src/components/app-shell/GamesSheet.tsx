@@ -23,6 +23,13 @@ export function GamesSheet() {
   // included) closes it.
   const [openOn, setOpenOn] = useState<string | null>(null);
   const pathname = usePathname();
+  // A navigation that bypasses close() (the back gesture, a redirect) must
+  // still drop it, or the sheet reopens by itself on the next visit here.
+  const [seenPath, setSeenPath] = useState(pathname);
+  if (seenPath !== pathname) {
+    setSeenPath(pathname);
+    setOpenOn(null);
+  }
   // Run once the sheet has fully gone: its focus restore (useModalA11y) must
   // land first, or it pulls focus back out of whatever opens next.
   const afterClose = useRef<(() => void) | null>(null);
