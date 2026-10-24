@@ -1443,6 +1443,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
           },
         ]);
         expect(await rewardCredits('cus_k')).toHaveLength(0);
+        // A card-only WP row, like a weekly-challenge card prize.
+        const wp = await service.listLedgerEntries({
+          type: 'WP',
+          customer_id: 'cus_k',
+        });
+        expect(wp).toHaveLength(1);
+        expect(wp[0].ref_id).toBe(res.pull_id);
+        expect(Number(wp[0].wallet_delta)).toBe(0);
+        expect(wp[0].payload).toMatchObject({
+          period: `luckydraw:${prize.id}`,
+          sku: 'ld-card',
+        });
       });
 
       it('an untracked or failed stock take leaves the pull unflagged and the prize still drawn', async () => {
@@ -1522,6 +1534,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           0,
         );
         expect(takes).toEqual([]);
+        expect(
+          await service.listLedgerEntries({ type: 'WP', customer_id: 'cus_g' }),
+        ).toHaveLength(0);
       });
 
       it('an entry accepted before draw_at counts even though its row is written after draw_at', async () => {
@@ -1744,6 +1759,31 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await service.drawDueLuckyDrawPrizes({ now: new Date() }),
         ).toEqual({ drawn: 0, failed: 1 });
         expect(await resultOf(prize.id)).toBeUndefined();
+      });
+
+      it('a prize that throws does not stop the tick; the next prize still draws and pays', async () => {
+        const past = new Date(Date.now() - 1000);
+        // No commitment: drawLuckyDrawPrize throws for this one. It draws
+        // first (earlier draw_at), so the good prize comes after the throw.
+        const broken = await makePrize((await makeEvent()).id, {
+          draw_at: new Date(past.getTime() - 1000),
+        });
+        const good = await committedPrize({ draw_at: past });
+        await fund('cus_ok', 100);
+        await service.createLuckyDrawEntries([
+          { prize_id: good.id, customer_id: 'cus_ok', tickets: 10 },
+        ]);
+
+        expect(
+          await service.drawDueLuckyDrawPrizes({ now: new Date() }),
+        ).toEqual({ drawn: 1, failed: 1 });
+
+        expect(await resultOf(broken.id)).toBeUndefined();
+        const res = await resultOf(good.id);
+        expect(res).toMatchObject({ winner_customer_id: 'cus_ok' });
+        const credits = await rewardCredits('cus_ok');
+        expect(credits).toHaveLength(1);
+        expect(credits[0].id).toBe(res.credit_transaction_id);
       });
 
       it('the draw waits for an in-flight entry and includes it', async () => {

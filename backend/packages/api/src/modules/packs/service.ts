@@ -6799,6 +6799,9 @@ class PacksModuleService extends MedusaService({
     const now = deps.now ?? new Date();
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    // shortcut: LIMIT 100, oldest first — if 100+ older due prizes fail for
+    // good, newer ones starve behind them; skip prizes that keep failing (or
+    // page past them) once a monthly event carries anywhere near 100 prizes.
     const due = await em.execute<{ id: string }[]>(
       'SELECT p.id FROM lucky_draw_prize p ' +
         'JOIN lucky_draw_event e ON e.id = p.event_id ' +
@@ -6995,6 +6998,26 @@ class PacksModuleService extends MedusaService({
             stock_earmarked: false,
           },
         ],
+        sharedContext,
+      );
+      // A card-only WP row, like settleChallengeWinner's: walletDelta 0, the
+      // card in `sku`. No pull minted (card gone) = no row.
+      await this.recordLedgerEntry(
+        {
+          type: 'WP',
+          customerId: winnerId,
+          refId: pull.id,
+          walletDelta: 0,
+          vaultDelta: null,
+          payload: {
+            type: 'WP',
+            period: `luckydraw:${prize.id}`,
+            stage: 0,
+            rank: 0,
+            sku: card.handle,
+            value: 0,
+          },
+        },
         sharedContext,
       );
       pullId = pull.id;
