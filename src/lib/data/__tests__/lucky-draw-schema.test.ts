@@ -65,6 +65,8 @@ describe('LuckyDrawPageSchema', () => {
     );
     expect(r.success).toBe(true);
     expect(r.data?.prizes).toHaveLength(1);
+    // Defence in depth: never carried on into the RSC payload.
+    expect(r.data?.prizes[0]).not.toHaveProperty('seed');
   });
 
   it('turns a person into the avatar the leaderboard would show', () => {

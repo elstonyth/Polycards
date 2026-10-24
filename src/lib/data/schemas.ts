@@ -1541,20 +1541,29 @@ const LuckyDrawResultSchema = z.looseObject({
 });
 export type LuckyDrawResult = z.infer<typeof LuckyDrawResultSchema>;
 
-const LuckyDrawPrizeSchema = z.looseObject({
-  id: z.string(),
-  kind: z.string(),
-  title: z.string(),
-  image: z.string().nullable().catch(null),
-  value_myr: finite,
-  draw_at: z.string(),
-  seed_hash: z.string(),
-  total_tickets: finite,
-  entrant_count: finite,
-  my_tickets: finite.catch(0),
-  top: droppableArray(LuckyDrawEntrySchema).catch([]),
-  result: LuckyDrawResultSchema.nullable().catch(null),
-});
+const LuckyDrawPrizeSchema = z
+  .looseObject({
+    id: z.string(),
+    kind: z.string(),
+    title: z.string(),
+    image: z.string().nullable().catch(null),
+    value_myr: finite,
+    draw_at: z.string(),
+    seed_hash: z.string(),
+    total_tickets: finite,
+    entrant_count: finite,
+    my_tickets: finite.catch(0),
+    top: droppableArray(LuckyDrawEntrySchema).catch([]),
+    result: LuckyDrawResultSchema.nullable().catch(null),
+  })
+  // Defence in depth: a prize's seed is never on the page before its result
+  // exists; if a backend ever sent one loose, it must not ride on into the
+  // client payload.
+  .transform((p) => {
+    const prize = { ...p };
+    delete prize.seed;
+    return prize;
+  });
 export type LuckyDrawPrize = z.infer<typeof LuckyDrawPrizeSchema>;
 
 /** GET /store/lucky-draw — the live event (null: none running). */

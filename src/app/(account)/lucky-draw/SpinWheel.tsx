@@ -9,6 +9,7 @@ import {
   landingAngle,
   segmentAt,
   wheelSegments,
+  entriesIntact,
   winnerIndex,
   type WheelSegment,
 } from '@/lib/lucky-draw';
@@ -102,14 +103,18 @@ export function SpinWheel({
   reduced: boolean;
 }) {
   const { result, entries } = detail;
-  const win = winnerIndex(entries, detail.ticket_index);
+  // An entry list that does not add up cannot be walked: no landing.
+  const intact = entriesIntact(entries, result);
+  const win = intact ? winnerIndex(entries, detail.ticket_index) : -1;
   const segs = useMemo(() => wheelSegments(entries, win), [entries, win]);
   const winSeg = useMemo(
     () => segs.find((s) => s.index === win) ?? null,
     [segs, win],
   );
-  // Nothing to turn to (no readable winning wedge): tell the result as is.
-  const [step, setStep] = useState<Step>(reduced || !winSeg ? 3 : 0);
+  const [step, setStep] = useState<Step>(0);
+  // Reduced motion (even switched on mid-spin) or nothing to land on: the
+  // end state, told as is.
+  const shown: Step = reduced || !winSeg ? 3 : step;
   const faceRef = useRef<SVGGElement>(null);
   const pointerRef = useRef<SVGGElement>(null);
   const labelsRef = useRef<SVGGElement>(null);
@@ -210,7 +215,7 @@ export function SpinWheel({
         <div
           className={cn(
             'absolute inset-0 transition-[scale,filter] duration-900 ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none',
-            step >= 2 && 'scale-86 brightness-38 saturate-80',
+            shown >= 2 && 'scale-86 brightness-38 saturate-80',
           )}
         >
           <svg
@@ -309,7 +314,7 @@ export function SpinWheel({
                   <path
                     d={arc(winSeg.a0, winSeg.a1)}
                     fill="url(#ld-holo-fill)"
-                    opacity={step >= 1 ? 0.45 : 0}
+                    opacity={shown >= 1 ? 0.45 : 0}
                     className="transition-opacity duration-700 motion-reduce:transition-none"
                   />
                   {/* Everything but the winning wedge steps back (evenodd cut). */}
@@ -317,7 +322,7 @@ export function SpinWheel({
                     d={`M-${R} 0 A${R} ${R} 0 1 0 ${R} 0 A${R} ${R} 0 1 0 -${R} 0 Z ${arc(winSeg.a0, winSeg.a1)}`}
                     fill="#000"
                     fillRule="evenodd"
-                    opacity={step >= 1 ? 0.3 : 0}
+                    opacity={shown >= 1 ? 0.3 : 0}
                     className="pointer-events-none transition-opacity duration-600 motion-reduce:transition-none"
                   />
                 </>
@@ -350,7 +355,7 @@ export function SpinWheel({
             aria-hidden
             className={cn(
               'holo-ring holo-turn absolute inset-[2.5%] rounded-full transition-[filter] duration-600',
-              step >= 1
+              shown >= 1
                 ? 'brightness-115 saturate-125'
                 : 'brightness-95 saturate-90',
             )}
@@ -371,7 +376,9 @@ export function SpinWheel({
           aria-hidden
           className={cn(
             'pointer-events-none absolute inset-0 grid place-items-center transition-[opacity,translate,scale] delay-150 duration-700 ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none',
-            step >= 2 ? 'opacity-100' : 'translate-y-[18px] scale-94 opacity-0',
+            shown >= 2
+              ? 'opacity-100'
+              : 'translate-y-[18px] scale-94 opacity-0',
           )}
         >
           <div
@@ -391,10 +398,10 @@ export function SpinWheel({
         aria-live="polite"
         className={cn(
           'mt-4 min-h-20 text-center transition-[opacity,translate] duration-500 motion-reduce:transition-none',
-          step >= 3 ? 'opacity-100' : 'translate-y-1.5 opacity-0',
+          shown >= 3 ? 'opacity-100' : 'translate-y-1.5 opacity-0',
         )}
       >
-        {step >= 3 && result.winner && (
+        {shown >= 3 && result.winner && (
           <>
             <p className="text-[11px] font-semibold tracking-[0.16em] text-neutral-400 uppercase">
               Winner
@@ -406,6 +413,11 @@ export function SpinWheel({
               {num(result.winner_tickets)} of {num(result.total_tickets)}{' '}
               tickets
             </p>
+            {!intact && (
+              <p className="mt-1 text-xs text-neutral-400">
+                Entry list couldn&rsquo;t be read — refresh.
+              </p>
+            )}
           </>
         )}
       </div>

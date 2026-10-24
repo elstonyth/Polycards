@@ -33,8 +33,10 @@ const TABS: { key: TabKey; label: string }[] = [
 // The spin moment (spec §10): from a prize's draw time until its result
 // appears (or 5 minutes pass), the cheap per-prize result read is polled —
 // never the whole page — every 5 s plus 0–2 s of jitter, so open tabs do not
-// hit the draw minute in lockstep. One prize per tick: the draw job settles
-// every due prize in the same minute, so the next tick finds the next one.
+// hit the draw minute in lockstep. One prize per tick, the one polled least
+// recently, so a prize stuck undrawn cannot starve others sharing its draw
+// time. When a prize's window closes without a result, the page is re-read
+// once, so a tab left open does not say "Drawing…" forever.
 const POLL_MS = 5000;
 const POLL_JITTER_MS = 2000;
 const POLL_WINDOW_MS = 5 * 60_000;
@@ -84,13 +86,31 @@ export function LuckyDrawClient({
   useEffect(() => {
     let live = true;
     let timer = 0;
-    const tick = async () => {
+    const polledAt = new Map<string, number>();
+    const reread = new Set<string>();
+    const poll = async () => {
       const now = Date.now();
-      const due = pageRef.current?.prizes.find((p) => {
-        const at = Date.parse(p.draw_at);
-        return !p.result && now >= at && now < at + POLL_WINDOW_MS;
-      });
+      const undrawn = (pageRef.current?.prizes ?? []).filter((p) => !p.result);
+      const lapsed = undrawn.filter(
+        (p) =>
+          !reread.has(p.id) && now >= Date.parse(p.draw_at) + POLL_WINDOW_MS,
+      );
+      if (lapsed.length > 0) {
+        lapsed.forEach((p) => reread.add(p.id));
+        const fresh = await getLuckyDraw();
+        if (live && fresh) setPage(fresh);
+        return;
+      }
+      const due = undrawn
+        .filter((p) => {
+          const at = Date.parse(p.draw_at);
+          return now >= at && now < at + POLL_WINDOW_MS;
+        })
+        .sort(
+          (a, b) => (polledAt.get(a.id) ?? 0) - (polledAt.get(b.id) ?? 0),
+        )[0];
       if (due) {
+        polledAt.set(due.id, now);
         const found = await getLuckyDrawResult(due.id);
         if (!live) return;
         if (found) {
@@ -109,7 +129,16 @@ export function LuckyDrawClient({
           if (found.ticket_index != null) setSpins((q) => [...q, found]);
         }
       }
-      timer = window.setTimeout(tick, POLL_MS + Math.random() * POLL_JITTER_MS);
+    };
+    const tick = async () => {
+      // A failed read (network, deploy) must not end the polling.
+      await poll().catch(() => undefined);
+      if (live) {
+        timer = window.setTimeout(
+          tick,
+          POLL_MS + Math.random() * POLL_JITTER_MS,
+        );
+      }
     };
     timer = window.setTimeout(tick, POLL_MS + Math.random() * POLL_JITTER_MS);
     return () => {
@@ -201,14 +230,14 @@ export function LuckyDrawClient({
         ))}
       </div>
 
-      {notice && (
-        <p
-          aria-live="polite"
-          className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
-        >
-          {notice}
-        </p>
-      )}
+      {/* Always mounted: a live region added with its text is not announced. */}
+      <div aria-live="polite">
+        {notice && (
+          <p className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300">
+            {notice}
+          </p>
+        )}
+      </div>
 
       <div className="mt-4">
         {tab === 'results' ? (
@@ -301,7 +330,8 @@ export function LuckyDrawClient({
           }}
         />
       )}
-      {spins[0] && (
+      {/* A live draw waits, queued, while the player is in a sheet. */}
+      {spins[0] && !entering && !detail && (
         <SpinOverlay
           detail={spins[0]}
           queued={spins.length - 1}

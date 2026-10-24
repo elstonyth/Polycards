@@ -6,7 +6,7 @@ import { Pill } from '@/components/ui/pill';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { cn } from '@/lib/utils';
 import { num, rmAuto } from '@/lib/format';
-import { ticketRanges, winnerIndex } from '@/lib/lucky-draw';
+import { entriesIntact, ticketRanges, winnerIndex } from '@/lib/lucky-draw';
 import type { LuckyDrawResultDetail } from '@/lib/data/schemas';
 import { mytWhen, PersonChip, PrizeArt } from './PrizeCard';
 
@@ -43,8 +43,11 @@ export function ResultDetail({
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, true, onClose);
   const { result, entries, ticket_index } = detail;
-  const ranges = ticketRanges(entries);
-  const win = winnerIndex(entries, ticket_index);
+  // A list that does not add up is shown as read, but never walked: no
+  // ranges, no winner badge, no replay landing (ticket numbers would shift).
+  const intact = entriesIntact(entries, result);
+  const ranges = intact ? ticketRanges(entries) : [];
+  const win = intact ? winnerIndex(entries, ticket_index) : -1;
 
   return (
     <div
@@ -91,7 +94,7 @@ export function ResultDetail({
         </div>
 
         <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-3">
-          {result.winner && win >= 0 ? (
+          {result.winner ? (
             <>
               <p className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
                 Winner
@@ -107,14 +110,20 @@ export function ResultDetail({
                 {result.entrant_count === 1 ? 'entrant' : 'entrants'} · winning
                 ticket #{ticket_index}
               </p>
-              <Pill
-                variant="secondary"
-                size="sm"
-                className="mt-3"
-                onClick={() => onReplay(detail)}
-              >
-                Watch the draw
-              </Pill>
+              {win >= 0 ? (
+                <Pill
+                  variant="secondary"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => onReplay(detail)}
+                >
+                  Watch the draw
+                </Pill>
+              ) : (
+                <p className="mt-2 text-xs text-neutral-400">
+                  Entry list couldn&rsquo;t be read — refresh.
+                </p>
+              )}
             </>
           ) : (
             <p className="text-sm text-neutral-300">

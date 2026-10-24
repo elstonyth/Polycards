@@ -74,6 +74,21 @@ export function ticketRanges(
   });
 }
 
+/** Whether an entry list can be walked: its tickets add up to the result's
+ *  total, and a result with a winner has entries. The schema drops a row it
+ *  cannot read, and one missing row shifts every later ticket range — the
+ *  wheel would land on, and the list would badge, the wrong entrant. */
+export function entriesIntact(
+  entries: { tickets: number }[],
+  result: { total_tickets: number; winner: unknown },
+): boolean {
+  const sum = entries.reduce((n, e) => n + e.tickets, 0);
+  return (
+    sum === result.total_tickets &&
+    (result.winner == null || entries.length > 0)
+  );
+}
+
 /** The entry holding the winning ticket, or -1. By ticket, never by name:
  *  disabled accounts all show as "Anonymous". */
 export function winnerIndex(

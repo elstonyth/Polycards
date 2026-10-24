@@ -4,6 +4,7 @@ import {
   drawCountdown,
   ENTER_REFUSALS,
   ENTER_REFUSAL_COPY,
+  entriesIntact,
   landingAngle,
   segmentAt,
   ticketRanges,
@@ -97,6 +98,26 @@ describe('ticket ranges and the winner', () => {
     expect(winnerIndex(entries, null)).toBe(-1);
     expect(winnerIndex(entries, 100)).toBe(-1);
     expect(winnerIndex([], 0)).toBe(-1);
+  });
+});
+
+describe('entriesIntact', () => {
+  const entries = [{ tickets: 50 }, { tickets: 1 }, { tickets: 49 }];
+  const won = { total_tickets: 100, winner: { who: 'A' } };
+
+  it('accepts a list whose tickets add up to the result', () => {
+    expect(entriesIntact(entries, won)).toBe(true);
+    expect(entriesIntact([], { total_tickets: 0, winner: null })).toBe(true);
+  });
+
+  it('refuses a list missing a row (every later range would shift)', () => {
+    expect(entriesIntact([entries[0]!, entries[2]!], won)).toBe(false);
+  });
+
+  it('refuses an empty list when the result has a winner', () => {
+    expect(entriesIntact([], { total_tickets: 0, winner: { who: 'A' } })).toBe(
+      false,
+    );
   });
 });
 

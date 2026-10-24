@@ -19,6 +19,8 @@ import {
 import type { LuckyDrawPrize } from '@/lib/data/schemas';
 import { PrizeArt } from './PrizeCard';
 
+const noop = () => {};
+
 export type Entered = Extract<EnterLuckyDrawResult, { entered: true }>;
 
 const stepBtn =
@@ -41,7 +43,9 @@ export function EnterSheet({
   onEntered: (prize: LuckyDrawPrize, tickets: number, res: Entered) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  useModalA11y(panelRef, true, onClose);
+  const [pending, startTransition] = useTransition();
+  // Escape must not close the sheet while the entry is in flight.
+  useModalA11y(panelRef, true, pending ? noop : onClose);
   const max = Math.max(0, Math.min(balance, MAX_ENTRY_TICKETS));
   // The field's own text: typing is never rewritten under the player's
   // fingers (entries are final). Clamped on blur; confirm stays off while
@@ -50,7 +54,6 @@ export function EnterSheet({
   const [error, setError] = useState<{ text: string; topUp: boolean } | null>(
     null,
   );
-  const [pending, startTransition] = useTransition();
   const clamp = (n: number) =>
     Math.max(1, Math.min(max, Number.isFinite(n) ? Math.trunc(n) : 1));
   const typed = Number(raw);

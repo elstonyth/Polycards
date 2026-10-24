@@ -205,6 +205,7 @@ export function PrizeCard({
             size="lg"
             className="w-full"
             disabled={balance <= 0 || notOpen}
+            aria-label={notOpen ? undefined : `Enter ${prize.title}`}
             onClick={() => onEnter(prize)}
           >
             {notOpen ? `Opens ${mytDate(opensAt)}` : 'Enter'}
