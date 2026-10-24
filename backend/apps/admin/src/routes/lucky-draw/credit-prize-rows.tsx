@@ -80,7 +80,7 @@ const CreditRow = ({
           placeholder={creditTitle(amount ?? 250)}
         />
       </Field>
-      <Field label="Art (required)">
+      <Field label="Art (optional — coins if empty)">
         <input
           ref={fileRef}
           type="file"

@@ -1060,8 +1060,8 @@ function checkLuckyDrawPrize(input: LuckyDrawPrizeCreateInput) {
         `credit_myr must be a positive amount in whole sen, at most ${MAX_PRIZE_CREDIT_MYR}.`,
       );
     }
+    // No image is fine: the storefront shows the credit coins.
     creditMyr = amount as number;
-    if (!imageUrl) luckyDrawInvalid('A credit prize needs an image.');
   }
   if (input.drawAt && Number.isNaN(input.drawAt.getTime())) {
     luckyDrawInvalid('draw_at must be a valid date.');

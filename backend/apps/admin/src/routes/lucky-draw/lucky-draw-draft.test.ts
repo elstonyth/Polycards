@@ -175,9 +175,9 @@ describe('prizeDraftToPayload rejects what the backend would reject', () => {
     expect(payload(credit({ creditMyr: '50000.01' }))).toBeNull();
   });
 
-  test('a credit prize with no art (the backend refuses it)', () => {
-    expect(payload(credit({ imageUrl: '' }))).toBeNull();
-    expect(payload(credit({ imageUrl: '   ' }))).toBeNull();
+  test('a credit prize with no art saves without one (players see coins)', () => {
+    expect(payload(credit({ imageUrl: '' }))!.image_url).toBeNull();
+    expect(payload(credit({ imageUrl: '   ' }))!.image_url).toBeNull();
   });
 
   test('a card prize needs no art of its own', () => {

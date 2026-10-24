@@ -308,7 +308,7 @@ medusaIntegrationTestRunner({
 
           const events = (await packs.listLuckyDrawEvents({})).length;
           for (const prizes of [
-            [{ kind: 'credit', credit_myr: 25, title: 'No art' }],
+            [{ kind: 'credit', credit_myr: 0, title: 'Nothing' }],
             [{ kind: 'card', card_handle: 'no-such-card', title: 'Ghost' }],
             [{ kind: 'cash', title: 'Cash' }],
             Array.from({ length: 101 }, () => ({
@@ -353,7 +353,6 @@ medusaIntegrationTestRunner({
           for (const body of [
             cardPrizeBody(eventId, { card_handle: 'no-such-card' }),
             creditPrizeBody(eventId, { credit_myr: 999_999 }),
-            creditPrizeBody(eventId, { image_url: null }),
             creditPrizeBody(eventId, {
               draw_at: new Date(Date.now() + 99 * HOUR).toISOString(),
             }),

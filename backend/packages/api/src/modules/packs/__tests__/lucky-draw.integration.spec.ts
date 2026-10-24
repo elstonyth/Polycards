@@ -618,9 +618,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
           saveCreditPrize(eventId, { creditMyr: MAX_PRIZE_CREDIT_MYR + 1 }),
           saveCreditPrize(eventId, { creditMyr: 10.005 }),
           saveCreditPrize(eventId, { cardHandle: 'real-card' }),
-          // a credit prize needs a picture
-          saveCreditPrize(eventId, { imageUrl: null }),
-          saveCreditPrize(eventId, { imageUrl: '  ' }),
           // title and sort
           saveCreditPrize(eventId, { title: '' }),
           saveCreditPrize(eventId, { sort: 1.5 }),
@@ -640,15 +637,21 @@ moduleIntegrationTestRunner<PacksModuleService>({
       it('accepts the credit ceiling and a card prize; draw time defaults to the event end', async () => {
         const { id: eventId } = await saveEvent();
         await makeCard('c-ok');
+        // No image: the storefront shows the credit coins.
         const credit = await saveCreditPrize(eventId, {
           creditMyr: MAX_PRIZE_CREDIT_MYR,
+          imageUrl: '  ',
         });
         const card = await saveCardPrize(eventId, 'c-ok', { imageUrl: null });
         const [event] = await service.listLuckyDrawEvents({ id: eventId });
 
         const c = await prizeRow(credit.id);
         expect(Number(c.credit_myr)).toBe(MAX_PRIZE_CREDIT_MYR);
-        expect(c).toMatchObject({ kind: 'credit', card_handle: null });
+        expect(c).toMatchObject({
+          kind: 'credit',
+          card_handle: null,
+          image_url: null,
+        });
         expect(new Date(c.draw_at).getTime()).toBe(
           new Date(event.ends_at).getTime(),
         );
@@ -1296,7 +1299,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await makeCard('pool-ok');
           const good = [cardPrize('pool-ok'), creditPrize({ sort: 1 })];
           const bad: Record<string, unknown>[] = [
-            creditPrize({ imageUrl: null }),
             creditPrize({ creditMyr: 0 }),
             creditPrize({ creditMyr: MAX_PRIZE_CREDIT_MYR + 1 }),
             creditPrize({ creditMyr: 10.005 }),
@@ -1336,9 +1338,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await makeCard('pool-n');
           await expect(
             create({
-              prizes: [cardPrize('pool-n'), creditPrize({ imageUrl: null })],
+              prizes: [cardPrize('pool-n'), creditPrize({ creditMyr: 0 })],
             }),
-          ).rejects.toThrow(/^Prize 2: .*image/);
+          ).rejects.toThrow(/^Prize 2: .*credit_myr/);
         });
 
         it('applies the event rules too: a bad name or window creates nothing', async () => {

@@ -291,11 +291,15 @@ describe('newEventPayload', () => {
     ['a zero amount', { amount: '0' }],
     ['more than the ceiling', { amount: '50001' }],
     ['a fraction of a sen', { amount: '10.005' }],
-    ['no image', { imageUrl: '' }],
   ])('a credit row with %s makes the whole payload null', (_, over) => {
     expect(
       newEventPayload(draft, [card()], [credit(over)]),
     ).toBeNull();
+  });
+
+  test('a credit row with no image is fine (players see coins)', () => {
+    const out = newEventPayload(draft, [], [credit({ imageUrl: '' })]);
+    expect(out!.prizes![0]).toMatchObject({ kind: 'credit', image_url: null });
   });
 
   test('an invalid event makes it null', () => {

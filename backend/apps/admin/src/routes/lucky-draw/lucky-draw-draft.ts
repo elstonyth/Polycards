@@ -88,8 +88,6 @@ export function prizeDraftToPayload(
   } else {
     creditMyr = parseCreditAmount(d.creditMyr);
     if (creditMyr === null) return null;
-    // A card shows its own art; a credit prize has none to fall back on.
-    if (!imageUrl) return null;
   }
 
   return {

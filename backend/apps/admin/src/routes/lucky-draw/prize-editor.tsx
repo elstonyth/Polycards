@@ -192,7 +192,7 @@ export const PrizeEditor = ({
             label="Art"
             hint={
               draft.kind === 'credit'
-                ? 'Required — a credit prize has no card to borrow art from. 5:7 portrait, at least 600×840.'
+                ? 'Optional — players see the credit coins if you leave this empty. 5:7 portrait, at least 600×840.'
                 : 'Optional — the card’s own art shows if you leave this empty. 5:7 portrait, at least 600×840.'
             }
           >
