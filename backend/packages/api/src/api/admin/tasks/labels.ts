@@ -1,4 +1,5 @@
 import type PacksModuleService from '../../../modules/packs/service';
+import { ticketsSuffix } from '../../../modules/packs/lucky-draw';
 import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
 import type {
   TaskKind,
@@ -137,9 +138,7 @@ export async function resolveTaskLabels(
       ),
       reward:
         rewardLabel(row.reward, packTitle, cardName) +
-        (row.tickets && row.tickets > 0
-          ? ` + ${plural(row.tickets, 'Lucky Draw ticket', 'Lucky Draw tickets')}`
-          : ''),
+        ticketsSuffix(row.tickets),
     });
   }
   return out;

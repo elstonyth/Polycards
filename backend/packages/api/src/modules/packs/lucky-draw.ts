@@ -102,6 +102,14 @@ export function validateTaskTickets(raw: unknown): number {
   return raw as number;
 }
 
+/** What a task label adds for the tickets it pays: ' + 50 Lucky Draw tickets',
+ *  ' + 1 Lucky Draw ticket', or '' for none. One wording for the admin console
+ *  and the growth posters. */
+export function ticketsSuffix(tickets: number | null | undefined): string {
+  const n = tickets ?? 0;
+  return n > 0 ? ` + ${n} Lucky Draw ticket${n === 1 ? '' : 's'}` : '';
+}
+
 /** Tickets a customer spends on one entry: an integer 1..MAX_ENTRY_TICKETS. */
 export function validateEntryTickets(raw: unknown): number {
   if (!isInt(raw) || raw < 1 || raw > MAX_ENTRY_TICKETS) {
