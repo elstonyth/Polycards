@@ -99,7 +99,7 @@ export default async function HomePage() {
       <PullsMarquee pulls={pulls} />
 
       {/* 02 — tier-racked shelf */}
-      <TierShelf packs={packs} chaseByPack={chaseByPack} />
+      <TierShelf categories={categories} chaseByPack={chaseByPack} />
 
       {/* 03 — live proof */}
       <RecentPullsSection initial={feed} />

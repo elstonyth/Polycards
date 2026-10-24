@@ -148,10 +148,28 @@ export type PackCategory = {
   packs: Pack[];
 };
 
-// Category badge icons (localized to public/pack-index-icons/).
+// Category badge icons (localized to public/pack-index-icons/), keyed by the
+// admin's pack category keys.
 export const CAT_ICON = {
   pokemon: '/pack-index-icons/pokemon.webp',
+  'one-piece': '/pack-index-icons/onepiece.webp',
+  basketball: '/pack-index-icons/nba.webp',
+  baseball: '/pack-index-icons/mlb.webp',
+  football: '/pack-index-icons/nfl.webp',
+  soccer: '/pack-index-icons/soccer.webp',
+  yugioh: '/pack-index-icons/yugioh.webp',
+  riftbound: '/pack-index-icons/riftbound.webp',
 } as const;
+
+/** The category a pack list opens on: `wanted` when it has packs, else the
+ *  first category that does (catalog order, so Pokémon leads). Every surface
+ *  shows ONE franchise at a time — mixing them is what buried the list. */
+export const pickCategory = (
+  categories: PackCategory[],
+  wanted?: string,
+): string | undefined =>
+  categories.find((c) => c.id === wanted && c.packs.length > 0)?.id ??
+  categories.find((c) => c.packs.length > 0)?.id;
 
 // Category chrome only — getPackCategories fills `packs` from the backend.
 export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [

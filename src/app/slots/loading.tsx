@@ -1,5 +1,5 @@
 // /slots is force-dynamic and awaits the pack catalog before its first byte.
-// Mirrors CatalogClient's shell: sticky chip rail over a grid of pack cards.
+// Mirrors CatalogClient's shell: franchise switch over a grid of pack cards.
 export default function SlotsLoading() {
   return (
     <div
@@ -9,17 +9,11 @@ export default function SlotsLoading() {
     >
       <span className="sr-only">Loading packs</span>
 
-      {/* Category chip rail */}
-      <div className="glass-chrome mb-6 rounded-2xl border border-white/10 p-2">
-        <div className="flex items-center gap-1.5 overflow-hidden">
-          {[72, 96, 88, 104, 80].map((w, i) => (
-            <div
-              key={i}
-              style={{ width: w }}
-              className="h-9 shrink-0 rounded-xl bg-white/10"
-            />
-          ))}
-        </div>
+      {/* Franchise switch */}
+      <div className="mb-6 flex gap-1 rounded-full border border-white/10 bg-neutral-900 p-1">
+        {[0, 1].map((i) => (
+          <div key={i} className="h-12 flex-1 rounded-full bg-white/10" />
+        ))}
       </div>
 
       {/* Pack grid */}

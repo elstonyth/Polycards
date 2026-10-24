@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { getPackCategories } from '@/lib/data/packs';
 import { getFreePackState } from '@/lib/data/free-pack';
+import { pickCategory } from '@/lib/packs-data';
 import CatalogClient from './CatalogClient';
 
 export const metadata: Metadata = {
@@ -24,14 +25,14 @@ export default async function SlotsPage({
     getFreePackState(),
   ]);
 
-  // Honor /slots?category=<key> when it exists; else default to "All Packs".
-  const initialCategory =
-    category && categories.some((c) => c.id === category) ? category : 'all';
+  // Honor /slots?category=<key> when it has packs; else the first franchise
+  // that does. Only categories with packs get a tab.
+  const listed = categories.filter((c) => c.packs.length > 0);
 
   return (
     <CatalogClient
-      categories={categories}
-      initialCategory={initialCategory}
+      categories={listed}
+      initialCategory={pickCategory(listed, category) ?? ''}
       // The free pack is absent from `categories` by design (the backend hides
       // its category) — the badge is its only entry point.
       freePack={freePack.mode === 'hidden' ? null : freePack}

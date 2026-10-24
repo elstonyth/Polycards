@@ -2,27 +2,36 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowRight } from 'lucide-react';
 import Reveal from '@/components/Reveal';
-import { packHref, type Pack, type PackCard } from '@/lib/packs-data';
+import ShelfTabs from '@/components/home/ShelfTabs';
+import {
+  packHref,
+  type Pack,
+  type PackCard,
+  type PackCategory,
+} from '@/lib/packs-data';
 import { rm, rm0 } from '@/lib/format';
 
+/** Display ladder: rounded price high→low; ties retain catalog order. */
+export const ladderOrder = (packs: Pack[]): Pack[] =>
+  [...packs].sort((a, b) => Math.round(b.priceMyr) - Math.round(a.priceMyr));
+
 /**
- * Board 02 — RIP A PACK: one full-width row per pack, most expensive first, so
- * the catalog reads as a price ladder. Packs carry no rarity/tier label — just
- * art, name, top chase, and price. The top row leads full-width on desktop; the
- * rest sit two-up. Every row → that pack's own detail page (the "All packs"
- * link is what goes to the /slots index); sold out is inert.
+ * Board 02 — RIP A PACK: one ladder per franchise (Pokémon, One Piece, …)
+ * behind a category switch, so adding a franchise adds a tab, not a longer
+ * list. Each ladder is one full-width row per pack, most expensive first.
+ * Packs carry no rarity/tier label — just art, name, top chase, and price. The
+ * top row leads full-width on desktop; the rest sit two-up. Every row → that
+ * pack's own detail page (the "All packs" link is what goes to the /slots
+ * index); sold out is inert.
  */
 export default function TierShelf({
-  packs,
+  categories,
   chaseByPack,
 }: {
-  packs: Pack[];
+  categories: PackCategory[];
   chaseByPack: Map<string, PackCard | null>;
 }) {
-  // Display ladder: rounded price high→low; ties retain catalog order.
-  const rows = [...packs].sort(
-    (a, b) => Math.round(b.priceMyr) - Math.round(a.priceMyr),
-  );
+  const shelves = categories.filter((c) => c.packs.length > 0);
 
   return (
     <section
@@ -48,29 +57,50 @@ export default function TierShelf({
         Pick a pack. See the cards and odds. Make it a moment.
       </p>
 
-      {rows.length === 0 ? (
+      {shelves.length === 0 ? (
         <p className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-10 text-center text-[13px] text-neutral-400">
           No packs available right now — check back soon.
         </p>
       ) : (
-        <div className="mt-4 flex flex-col gap-3 lg:grid lg:grid-cols-2">
-          {rows.map((pack, i) => (
-            <Reveal
-              key={pack.id}
-              delay={i * 70}
-              // The top rung leads full-width on desktop — the ladder's crown.
-              className={i === 0 ? 'lg:col-span-2' : undefined}
-            >
-              <LadderRow
-                pack={pack}
-                chase={chaseByPack.get(pack.id) ?? null}
-                lead={i === 0}
-              />
-            </Reveal>
-          ))}
-        </div>
+        <ShelfTabs
+          categories={shelves}
+          panels={Object.fromEntries(
+            shelves.map((c) => [
+              c.id,
+              <Ladder key={c.id} packs={c.packs} chaseByPack={chaseByPack} />,
+            ]),
+          )}
+        />
       )}
     </section>
+  );
+}
+
+/** One franchise's price ladder. */
+function Ladder({
+  packs,
+  chaseByPack,
+}: {
+  packs: Pack[];
+  chaseByPack: Map<string, PackCard | null>;
+}) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 lg:grid lg:grid-cols-2">
+      {ladderOrder(packs).map((pack, i) => (
+        <Reveal
+          key={pack.id}
+          delay={i * 70}
+          // The top rung leads full-width on desktop — the ladder's crown.
+          className={i === 0 ? 'lg:col-span-2' : undefined}
+        >
+          <LadderRow
+            pack={pack}
+            chase={chaseByPack.get(pack.id) ?? null}
+            lead={i === 0}
+          />
+        </Reveal>
+      ))}
+    </div>
   );
 }
 

@@ -16,6 +16,7 @@ import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
 import FreePackBadge from '@/components/FreePackBadge';
+import PackCategoryTabs from '@/components/PackCategoryTabs';
 import {
   catalogGroupOf,
   packHref,
@@ -238,7 +239,7 @@ function PackRow({
 // "Raw Cards (Ungraded)" lists ONLY backend-derived all-raw pools; everything
 // uncertain (MIX, graded-but-not-all-PSA-10, null/older-backend) lists under
 // the claim-free "More Packs" so neither heading can ever overclaim.
-// The category chip rail still filters which packs feed the sections.
+// The franchise switch picks which category's packs feed the sections.
 // Desktop renders a horizontally-scrolling card row per section; mobile
 // renders list rows. `initialCategory` lets a deep link (/slots?category=<key>)
 // preselect a tab.
@@ -272,22 +273,23 @@ export default function CatalogClient({
   freePack?: Exclude<FreePackState, { mode: 'hidden' }> | null;
 }) {
   const [active, setActive] = useState<string>(initialCategory);
+  const pick = (id: string) => {
+    setActive(id);
+    // Back from a pack page (and a shared link) lands on the same franchise.
+    window.history.replaceState(null, '', `?category=${id}`);
+  };
 
-  const tabs = [
-    { id: 'all', tab: 'All Packs', icon: '' },
-    ...categories.map((c) => ({ id: c.id, tab: c.tab, icon: c.icon })),
-  ];
-  // The chip filter narrows the pack set; the sections below regroup it by
-  // composition, so category icons/names travel with each pack entry.
-  const filtered =
-    active === 'all' ? categories : categories.filter((c) => c.id === active);
-  const entries = filtered.flatMap((cat) =>
-    cat.packs.map((pack) => ({
-      pack,
-      icon: cat.icon,
-      categoryName: cat.tab,
-    })),
-  );
+  // One franchise at a time; the sections below regroup it by composition,
+  // so category icons/names travel with each pack entry.
+  const entries = categories
+    .filter((c) => c.id === active)
+    .flatMap((cat) =>
+      cat.packs.map((pack) => ({
+        pack,
+        icon: cat.icon,
+        categoryName: cat.tab,
+      })),
+    );
   const byGroup = {
     graded: entries.filter((e) => catalogGroupOf(e.pack) === 'graded'),
     raw: entries.filter((e) => catalogGroupOf(e.pack) === 'raw'),
@@ -317,44 +319,19 @@ export default function CatalogClient({
         {BUYBACK_RATE_LABEL} of card value in your vault.
       </p>
 
-      {/* Sticky filter bar — category chip rail */}
-      <div className="glass-chrome sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 p-2">
-        {/* Category chip rail (icons + label) */}
-        <div className="flex items-center gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setActive(t.id)}
-              aria-pressed={active === t.id}
-              className={cn(
-                'flex shrink-0 items-center gap-1.5 rounded-full px-3 py-2 text-[12px] font-medium transition-colors sm:text-[13px]',
-                active === t.id
-                  ? 'bg-white text-neutral-950'
-                  : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white',
-              )}
-            >
-              {t.icon ? (
-                <Image
-                  src={t.icon}
-                  alt=""
-                  aria-hidden="true"
-                  width={16}
-                  height={16}
-                  className="h-4 w-4 shrink-0 rounded-full object-cover"
-                />
-              ) : (
-                <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              )}
-              {t.tab}
-            </button>
-          ))}
+      {/* Sticky franchise switch — only once there are two to pick from. */}
+      {categories.length > 1 && (
+        <div className="sticky top-2 z-20 mb-6">
+          <PackCategoryTabs
+            categories={categories}
+            active={active}
+            onChange={pick}
+          />
         </div>
-      </div>
+      )}
 
-      {/* Empty state — zero packs behind the active filter (the backend is
-          the source of truth), whether that's "All" on an empty catalog or a
-          directly-selected empty category. */}
+      {/* Empty state — zero packs in the catalog (the backend is the source
+          of truth); only categories with packs are passed in. */}
       {entries.length === 0 && (
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
           No packs available right now — check back soon.
