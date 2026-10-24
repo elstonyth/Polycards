@@ -84,7 +84,13 @@ export const PrizeEditor = ({
   const submit = () => {
     if (!payload || !valid) return;
     save.mutate(
-      { ...payload, reason: reason.trim() },
+      {
+        ...payload,
+        // Locked: don't re-post the time at all (null = keep the stored one),
+        // so a draw time with stray seconds can't read as a change.
+        ...(locked ? { draw_at: null } : {}),
+        reason: reason.trim(),
+      },
       {
         onSuccess: () => {
           toast.success(draft.id ? 'Prize updated.' : 'Prize added.');

@@ -302,9 +302,16 @@ const LuckyDrawPage = () => {
                     }`}
                   >
                     <Table.Cell>
-                      <Text size="small" weight="plus">
+                      {/* A real button: the row's onClick is mouse-only, and
+                          cancelled events have no actions menu to select from. */}
+                      <button
+                        type="button"
+                        className="text-ui-fg-base txt-compact-small-plus text-left hover:underline"
+                        aria-current={e.id === selected?.id}
+                        onClick={() => setSelectedId(e.id)}
+                      >
                         {e.name}
-                      </Text>
+                      </button>
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
                       {whenLabel(e.starts_at)} → {whenLabel(e.ends_at)}
