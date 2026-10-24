@@ -100,3 +100,37 @@ describe('resolveCardPokemon', () => {
     expect(POKEDEX_NAMES.length).toBeGreaterThanOrEqual(1025);
   });
 });
+
+describe('a One Piece card by its own set or code (#842 review)', () => {
+  it('never resolves a Pokémon, with or without pack context', () => {
+    const kuma = {
+      name: 'Bartholomew Kuma',
+      set: 'One Piece Wings of the Captain',
+    };
+    expect(resolveCardPokemon(kuma)).toEqual({
+      dex: null,
+      name: null,
+      sprite: null,
+    });
+    // a reward box is a Pokémon-allowlisted pack, but Kuma is still not Mew
+    expect(resolveCardPokemon(kuma, { pokemon: true }).dex).toBeNull();
+    expect(
+      resolveCardPokemon({ name: 'Bartholomew Kuma OP07-079' }).dex,
+    ).toBeNull();
+  });
+
+  it('keeps a linked One Piece sprite', () => {
+    expect(
+      resolveCardPokemon({
+        name: 'Monkey.D.Luffy OP05-119',
+        sprite_image: '/sprites/gear5.gif',
+      }).sprite,
+    ).toBe('/sprites/gear5.gif');
+  });
+
+  it('leaves Pokémon cards alone', () => {
+    expect(
+      resolveCardPokemon({ name: 'Mew #151', set: 'Pokemon 151' }).dex,
+    ).toBe(151);
+  });
+});

@@ -634,3 +634,60 @@ describe('shuffleCells', () => {
     expect(shuffleCells([pool[0]!], seededRand(1))).toEqual([pool[0]]);
   });
 });
+
+describe('review fixes (#842): every card flickers its own sprite', () => {
+  test('a Pokémon card with a custom sprite flickers that sprite, not the stock one', () => {
+    const pool = buildDecoyPool([
+      {
+        name: 'Pikachu with Grey Felt Hat',
+        pokemonDex: 25,
+        spriteImage: '/sprites/pikachu-hat.gif',
+        rarity: 'Rare',
+      },
+      // a variant of the same species in the same tier stays its own decoy
+      {
+        name: 'Pikachu (Shiny)',
+        pokemonDex: 25,
+        spriteImage: '/sprites/pikachu-shiny.gif',
+        rarity: 'Rare',
+      },
+      // no custom sprite: the stock dex cell, exactly as before
+      { name: 'Charizard', pokemonDex: 6, spriteImage: null, rarity: 'Rare' },
+    ]);
+    expect(pool).toEqual([
+      { dex: 25, rarity: 'Rare', image: '/sprites/pikachu-hat.gif' },
+      { dex: 25, rarity: 'Rare', image: '/sprites/pikachu-shiny.gif' },
+      { dex: 6, rarity: 'Rare' },
+    ]);
+  });
+
+  test('a One Piece prize in a Pokémon-allowlisted pack never derives a Pokémon', () => {
+    // reward boxes count as Pokémon packs; Kuma's set still says One Piece
+    const pool = buildDecoyPool([
+      {
+        name: 'Bartholomew Kuma',
+        set: 'One Piece Wings of the Captain',
+        pokemonDex: null,
+        spriteImage: null,
+        rarity: 'Rare',
+      },
+    ]);
+    expect(pool).toEqual([]);
+  });
+
+  test('the neutral card-back reel still spins several tier colours', () => {
+    const pool = buildDecoyPool([], { pokemon: false });
+    const press = buildPressStrip({
+      winnerDex: null,
+      winnerImage: NEUTRAL_CARD_SPRITE,
+      winnerRarity: 'Rare',
+      winIndex: 30,
+      keepCells: 12,
+      seed: 0,
+      rngSeed: 7,
+      decoyCards: pool,
+    });
+    const spun = press.slice(12, 29).map((c) => c.rarity);
+    expect(new Set(spun).size).toBeGreaterThan(2);
+  });
+});

@@ -210,14 +210,14 @@ export function PokemonToken({
         loading={eager ? 'eager' : 'lazy'}
         onError={() => {
           setSrc((s) => {
-            // A custom image override that 404s has no dex fallback — go straight
-            // to the poké-ball rather than showing a broken-image icon. A dex-0
-            // cell is a non-Pokémon sprite (One Piece): the neutral card-back.
-            if (imageSrc) {
-              const fallback =
-                dex > 0 ? POKEBALL_FALLBACK : NEUTRAL_CARD_SPRITE;
-              return s === fallback ? s : fallback;
+            // A custom image that 404s: a Pokémon cell drops to its species'
+            // stock sprite (then the gif → png → poké-ball chain below); a
+            // dex-0 cell is a non-Pokémon sprite (One Piece): the neutral
+            // card-back. Never a broken-image icon.
+            if (imageSrc && s === imageSrc) {
+              return dex > 0 ? spriteGif(dex) : NEUTRAL_CARD_SPRITE;
             }
+            if (s === NEUTRAL_CARD_SPRITE) return s;
             // Check static first: some dex entries have no animated sprite.
             if (s === spritePng(dex)) return POKEBALL_FALLBACK;
             if (s === spriteGif(dex)) return spritePng(dex);

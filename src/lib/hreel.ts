@@ -83,7 +83,7 @@ const spriteOf = (c: Pick<HReelCell, 'dex' | 'image'>): number | string =>
 export function buildDecoyPool(
   cards: readonly Pick<
     PackCard,
-    'name' | 'pokemonDex' | 'spriteImage' | 'rarity'
+    'name' | 'set' | 'pokemonDex' | 'spriteImage' | 'rarity'
   >[],
   { pokemon = true }: { pokemon?: boolean } = {},
 ): HReelCell[] {
@@ -93,17 +93,25 @@ export function buildDecoyPool(
     const { dex, sprite } = resolveCardPokemon(
       {
         name: c.name,
+        set: c.set,
         pokemon_dex: c.pokemonDex,
         sprite_image: c.spriteImage,
       },
       { pokemon },
     );
     if (dex === null && sprite === null) continue;
+    // A card's own custom sprite flickers as itself (a variant row, a custom
+    // upload), species or not; a card without one keeps the stock dex cell.
+    const custom = c.spriteImage?.trim() ? c.spriteImage : null;
     const cell: HReelCell =
-      dex !== null
-        ? { dex, rarity: c.rarity }
-        : { dex: 0, rarity: c.rarity, image: sprite! };
-    const key = `${spriteOf(cell)}:${c.rarity}`;
+      custom !== null
+        ? { dex: dex ?? 0, rarity: c.rarity, image: custom }
+        : dex !== null
+          ? { dex, rarity: c.rarity }
+          : { dex: 0, rarity: c.rarity, image: sprite! };
+    // Dedup by the exact sprite: two variants of one species in a tier stay
+    // two decoys (the repeat checks still key on the species — spriteOf).
+    const key = `${cell.dex}:${cell.image ?? ''}:${c.rarity}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(cell);
@@ -287,9 +295,14 @@ export function buildPressStrip({
       // Small pools can exhaust the tries; pick deterministically rather than
       // give up — doubling the WINNER's sprite at the landing is the artifact
       // that matters most, so prefer avoiding both, then at least the winner.
+      // When only the previous cell's repeat is unavoidable (every cell shares
+      // one sprite — the neutral card-back pool), keep the random pick: the
+      // first pool cell every time would spin a single tier colour.
       c =
         pool.find((p) => !blocked(p)) ??
-        pool.find((p) => spriteOf(p) !== winnerAhead) ??
+        (spriteOf(c) !== winnerAhead
+          ? c
+          : pool.find((p) => spriteOf(p) !== winnerAhead)) ??
         c;
     }
     cells.push({ ...c });

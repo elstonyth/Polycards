@@ -7,6 +7,7 @@ import { spriteGif } from '@/lib/mock/pokedex';
 
 export type CardPokemonInput = {
   name: string;
+  set?: string | null;
   pokemon_dex?: number | null;
   sprite_image?: string | null;
 };
@@ -44,6 +45,12 @@ const POKEMON_CATEGORIES: ReadonlySet<string> = new Set([
 export const isPokemonPack = (categoryId: string | null | undefined): boolean =>
   categoryId == null || POKEMON_CATEGORIES.has(categoryId);
 
+// A One Piece card by its set ("One Piece …" / "One-Piece …") or an OP/ST/EB/
+// PRB card code. Same test as the admin's franchiseFor (backend/apps/admin/
+// src/lib/sprite-franchise.ts) — keep the two in step.
+const ONE_PIECE_RE =
+  /\bone[\s-]*piece\b|(?<![a-z0-9])(?:OP|ST|EB|PRB)\d{2}-\d{3}(?!\d)/i;
+
 /**
  * `pokemon` — what the caller knows about the card's pack (isPokemonPack):
  *   true      a Pokémon pack: a card with no dex derives one from its name even
@@ -53,11 +60,16 @@ export const isPokemonPack = (categoryId: string | null | undefined): boolean =>
  *             with NOTHING configured — a dex-less custom sprite may be a One
  *             Piece character, and "Bartholomew Kuma" contains "mew".
  *   false     a One Piece / sports pack: never a Pokémon, not even a stray dex.
+ * A card that is One Piece by its own set or code counts as `false` in ANY
+ * context — an unlinked one in the vault, or a One Piece prize in a reward box.
  */
 export function resolveCardPokemon(
   card: CardPokemonInput,
-  { pokemon }: { pokemon?: boolean } = {},
+  options: { pokemon?: boolean } = {},
 ): ResolvedCardPokemon {
+  const pokemon = ONE_PIECE_RE.test(`${card.set ?? ''} ${card.name}`)
+    ? false
+    : options.pokemon;
   const explicit =
     pokemon !== false && validDex(card.pokemon_dex) ? card.pokemon_dex : null;
   const custom =

@@ -281,19 +281,11 @@ function demoSpin(req: RollRequest, deps: RollDeps): RollResult {
     // Unreachable past `rollBlocker` — an empty pool is demoDraw's only miss.
     if (!drawn) return { ok: false, kind: 'rejected', error: EMPTY_DEMO_POOL };
     // A pool card IS the reveal's card shape; its pool price is what the demo
-    // slab stamps, and no offer is ever built for it (pullId null).
-    //
-    // The two sprite fields are dropped ON PURPOSE: `winnerFor`
-    // (SlotMachineClient) then derives the demo winner's reel cell from the
-    // card NAME instead of its configured pixel-Pokémon. The decoys around it
-    // keep theirs (`buildDecoyPool`, hreel.ts), so winner and decoys can
-    // disagree for the same card — long-standing demo behaviour, and making
-    // them agree is a product decision for a follow-up, not a refactor.
-    rolls.push({
-      card: { ...drawn, pokemonDex: null, spriteImage: null },
-      pullId: null,
-      buyback: null,
-    });
+    // slab stamps, and no offer is ever built for it (pullId null). It keeps
+    // its configured sprite, like the decoys around it: a demo winner shows
+    // exactly the sprite a real pull of that card would (owner's call,
+    // 2026-10-25 — before, a One Piece demo winner landed on a card-back).
+    rolls.push({ card: drawn, pullId: null, buyback: null });
   }
   return { ok: true, batch: batchOf(req, rolls, spinAt, null, false) };
 }

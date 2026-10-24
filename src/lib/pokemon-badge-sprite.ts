@@ -5,6 +5,7 @@ import { spriteGif, spritePng } from '@/lib/mock/pokedex';
 
 export type BadgeCard = {
   name: string;
+  set?: string | null;
   pokemonDex?: number | null;
   spriteImage?: string | null;
 };
@@ -44,6 +45,7 @@ export function badgeSprite(
   const { dex, name } = resolveCardPokemon(
     {
       name: card.name,
+      set: card.set,
       pokemon_dex: card.pokemonDex,
       sprite_image: card.spriteImage,
     },

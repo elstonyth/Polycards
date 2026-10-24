@@ -32,6 +32,9 @@ export type CardView = {
   /** Public route key — /card/<handle>. '' when the route sent none. */
   handle: string;
   name: string;
+  /** The card's set ('' when the route sent none) — tells a One Piece card
+   *  from a Pokémon one where no pack says which (vault, /card/<handle>). */
+  set?: string;
   /** Raw card art. '' when absent — SlabImage still needs a string src. */
   image: string;
   /** The graded-slab composite; null = raw card (no case, no tier band). */
@@ -55,6 +58,7 @@ export function toCardView(raw: CardWireInput): CardView {
   return {
     handle: c.handle,
     name: c.name,
+    set: c.set,
     image: c.image,
     slabImage: c.slab_image,
     rarity: c.rarity,

@@ -124,6 +124,7 @@ function winnerFor(card: WonCard, pokemon: boolean): ColumnWinner {
   const r = resolveCardPokemon(
     {
       name: card.name,
+      set: card.set,
       pokemon_dex: card.pokemonDex,
       sprite_image: card.spriteImage,
     },
