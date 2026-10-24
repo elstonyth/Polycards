@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { X } from 'lucide-react';
 import { Pill } from '@/components/ui/pill';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { GLASS_SUBTLE, useLiquidGlass } from '@/lib/use-liquid-glass';
 import { cn } from '@/lib/utils';
 import { num, rmAuto } from '@/lib/format';
 import { entriesIntact, ticketRanges, winnerIndex } from '@/lib/lucky-draw';
@@ -42,6 +43,8 @@ export function ResultDetail({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, true, onClose);
+  // The panel's blur: .glass-panel is only the tint (TopUpSheet's pairing).
+  useLiquidGlass(panelRef, true, GLASS_SUBTLE);
   const { result, entries, ticket_index } = detail;
   // A list that does not add up is shown as read, but never walked: no
   // ranges, no winner badge, no replay landing (ticket numbers would shift).

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Eye, Lock, Package, Search, Star, Ticket } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
-import { rm, rm0 } from '@/lib/format';
+import { num, rm, rm0 } from '@/lib/format';
 import { sellBackNotice } from '@/lib/buyback-copy';
 import {
   getVault,
@@ -401,7 +401,7 @@ export default function VaultClient({
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-white">
-                Lucky Draw Tickets ×{tickets}
+                Lucky Draw Tickets ×{num(tickets)}
               </p>
               <p className="mt-0.5 text-[12px] text-neutral-400">
                 {tickets > 0

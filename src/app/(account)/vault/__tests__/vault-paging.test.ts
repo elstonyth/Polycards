@@ -215,6 +215,11 @@ describe('Lucky Draw tickets row', () => {
     expect(link('Open')?.getAttribute('href')).toBe('/lucky-draw?open=1');
   });
 
+  test('a large balance is grouped like the Lucky Draw page shows it', async () => {
+    await mount(1250);
+    expect(container.textContent).toContain('Lucky Draw Tickets ×1,250');
+  });
+
   test('none yet: points at the tasks that earn them', async () => {
     await mount(0);
     expect(container.textContent).toContain('Lucky Draw Tickets ×0');

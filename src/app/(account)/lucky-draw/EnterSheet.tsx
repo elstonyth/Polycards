@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Minus, Plus, X } from 'lucide-react';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { GLASS_SUBTLE, useLiquidGlass } from '@/lib/use-liquid-glass';
 import { cn } from '@/lib/utils';
 import { num, rmAuto } from '@/lib/format';
 import {
@@ -46,6 +47,8 @@ export function EnterSheet({
   const [pending, startTransition] = useTransition();
   // Escape must not close the sheet while the entry is in flight.
   useModalA11y(panelRef, true, pending ? noop : onClose);
+  // The panel's blur: .glass-panel is only the tint (TopUpSheet's pairing).
+  useLiquidGlass(panelRef, true, GLASS_SUBTLE);
   const max = Math.max(0, Math.min(balance, MAX_ENTRY_TICKETS));
   // The field's own text: typing is never rewritten under the player's
   // fingers (entries are final). Clamped on blur; confirm stays off while

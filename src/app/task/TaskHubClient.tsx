@@ -258,7 +258,8 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
           <Link
             href="/lucky-draw"
             className={cn(
-              'mt-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap',
+              // Tighter on a phone: "+999 tickets" must fit the 7rem stub.
+              'mt-2 inline-flex items-center gap-0.5 rounded-full border px-1.5 py-1 text-[11px] font-semibold whitespace-nowrap sm:gap-1 sm:px-2.5',
               claimed
                 ? 'border-white/10 text-neutral-400'
                 : 'border-chase/40 text-chase',
