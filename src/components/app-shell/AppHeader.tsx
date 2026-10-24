@@ -47,7 +47,8 @@ export default function AppHeader() {
       <div className="flex items-center justify-between gap-2 min-[375px]:gap-3">
         {/* Clips rather than slides under the buttons if a phone is ever too
             narrow (a long balance on a 280px fold screen). */}
-        <div className="flex min-w-0 items-center gap-5 max-lg:overflow-hidden">
+        {/* p-1/-m-1 leaves room for the logo's focus ring inside the clip. */}
+        <div className="flex min-w-0 items-center gap-5 max-lg:-m-1 max-lg:overflow-hidden max-lg:p-1">
           <Link
             href="/"
             className="flex min-h-11 shrink-0 items-center"

@@ -188,8 +188,13 @@ export function PrizeWheel({
       setOpened(openTo.current >= 0.5);
     };
     const onWheel = (e: WheelEvent) => {
+      // ctrl+wheel is a trackpad pinch: leave zoom to the browser.
+      if (e.ctrlKey) return;
+      // Line- and page-mode wheels (some mice, Firefox) report in units, not px.
+      const px =
+        e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
       const from = turnNow();
-      const to = clamp(from + e.deltaY / WHEEL_UNITS, 0, last + 1);
+      const to = clamp(from + (e.deltaY * px) / WHEEL_UNITS, 0, last + 1);
       if (to === from) return;
       e.preventDefault();
       gestureFrom.current ??= from;
@@ -251,6 +256,7 @@ export function PrizeWheel({
     const ringStep = 360 / Math.max(ringCount, 1);
     const k = reduced ? 1 : EASE;
 
+    let drawn = '';
     const draw = (ts: number) => {
       frame = requestAnimationFrame(draw);
       const dt = lastTs ? Math.min(ts - lastTs, 64) : 16;
@@ -263,6 +269,11 @@ export function PrizeWheel({
       if (!reduced && m === 0 && !hovering.current && !drag.current) {
         spin.current = (spin.current + (DRIFT * dt) / 1000) % 360;
       }
+      // Settled on the drum (or a still ring under reduced motion): nothing
+      // moves, so skip rewriting every card each frame.
+      const state = `${m}|${pos.current}|${spin.current}`;
+      if (state === drawn && (m === 1 || reduced)) return;
+      drawn = state;
 
       if (wheelRef.current) {
         wheelRef.current.style.transform = `translateZ(${-m * drumR}px)`;
@@ -346,16 +357,22 @@ export function PrizeWheel({
       aria-label="Prizes"
       className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start lg:gap-8"
       onKeyDown={(e) => {
-        if (!opened) return;
-        if (e.key === 'Escape') close();
-        else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') turn(1);
-        else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') turn(-1);
-        else return;
+        if (!opened || e.key !== 'Escape') return;
+        close();
         e.preventDefault();
       }}
     >
       <div
         ref={stageRef}
+        // Arrows turn the drum only from the wheel's own controls, so they
+        // still scroll the page from the details panel.
+        onKeyDown={(e) => {
+          if (!opened) return;
+          if (e.key === 'ArrowDown' || e.key === 'ArrowRight') turn(1);
+          else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') turn(-1);
+          else return;
+          e.preventDefault();
+        }}
         className={cn(
           'relative mx-auto aspect-square w-full max-w-[38rem] overflow-hidden rounded-3xl bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.06),transparent_62%)] select-none',
           // Open, a vertical swipe on the wheel turns the drum; on the ring
