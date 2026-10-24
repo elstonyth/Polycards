@@ -327,6 +327,60 @@ medusaIntegrationTestRunner({
           expect(await packs.listLuckyDrawPrizes({})).toHaveLength(0);
         });
 
+        it('POST /admin/customers/:id/lucky-draw-tickets gives and takes back tickets', async () => {
+          const [customer] = await getContainer()
+            .resolve(Modules.CUSTOMER)
+            .createCustomers([{ email: 'ld-gift@test.dev' }]);
+          const url = `/admin/customers/${customer.id}/lucky-draw-tickets`;
+
+          const given = await post(url, {
+            tickets: 40,
+            note: 'Launch gift',
+            idempotency_key: 'h1',
+          });
+          expect(given.status).toBe(200);
+          expect(given.data).toEqual({ tickets: 40, balance: 40 });
+          // A retry with the same key replays rather than granting twice.
+          const replay = await post(url, {
+            tickets: 40,
+            note: 'Launch gift',
+            idempotency_key: 'h1',
+          });
+          expect(replay.status).toBe(200);
+          expect(replay.data).toEqual({ tickets: 40, balance: 40 });
+          const clash = await post(url, {
+            tickets: 41,
+            note: 'Launch gift',
+            idempotency_key: 'h1',
+          });
+          expect(clash.status).toBe(409);
+          expect(clash.data.message).toMatch(/different amount/);
+
+          const back = await post(url, { tickets: -15, note: 'Mistake' });
+          expect(back.data).toEqual({ tickets: -15, balance: 25 });
+          expect(
+            (await post(url, { tickets: -26, note: 'Too much' })).status,
+          ).toBe(400);
+          expect((await post(url, { tickets: 0, note: 'x' })).status).toBe(400);
+          expect((await post(url, { tickets: 5 })).status).toBe(400);
+          expect(
+            (
+              await post('/admin/customers/cus_missing/lucky-draw-tickets', {
+                tickets: 5,
+                note: 'x',
+              })
+            ).status,
+          ).toBe(404);
+
+          const history = await get(
+            `/admin/lucky-draw/tickets?customer_id=${customer.id}`,
+          );
+          expect(history.data.balance).toBe(25);
+          expect(
+            history.data.rows.map((r: { reason: string }) => r.reason),
+          ).toEqual(['admin_grant', 'admin_grant']);
+        });
+
         it('refuses bad bodies without writing', async () => {
           const noReason = await post('/admin/lucky-draw/events', {
             ...eventBody(),

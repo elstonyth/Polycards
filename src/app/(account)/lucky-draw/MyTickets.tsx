@@ -143,7 +143,11 @@ export function MyTickets() {
             >
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-neutral-200">
-                  {REASON[h.reason] ?? 'Tickets'}
+                  {h.reason === 'admin_grant'
+                    ? h.delta > 0
+                      ? 'Gift from Polycards'
+                      : 'Adjusted by Polycards'
+                    : (REASON[h.reason] ?? 'Tickets')}
                 </p>
                 <p className="text-[11px] text-neutral-400">
                   {mytDate(h.created_at)}, {mytClock(h.created_at)} MYT

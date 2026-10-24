@@ -1,5 +1,6 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import {
+  MAX_ADMIN_TICKETS,
   MAX_ENTRY_TICKETS,
   MAX_TASK_TICKETS,
   aggregateEntries,
@@ -9,6 +10,7 @@ import {
   drawWinner,
   newDrawSeed,
   requireDrawSeedSecret,
+  validateAdminTickets,
   validateEntryTickets,
   validateTaskTickets,
   winningTicketIndex,
@@ -77,6 +79,24 @@ it('validateEntryTickets: integer 1..MAX_ENTRY_TICKETS; else INVALID_DATA', () =
   expect(validateEntryTickets(1)).toBe(1);
   for (const bad of [0, -3, 2.5, '10', null, MAX_ENTRY_TICKETS + 1])
     expect(() => validateEntryTickets(bad)).toThrow();
+});
+
+it('validateAdminTickets: nonzero integer within ±MAX_ADMIN_TICKETS; else INVALID_DATA', () => {
+  expect(validateAdminTickets(50)).toBe(50);
+  expect(validateAdminTickets(-20)).toBe(-20);
+  expect(validateAdminTickets(MAX_ADMIN_TICKETS)).toBe(MAX_ADMIN_TICKETS);
+  expect(validateAdminTickets(-MAX_ADMIN_TICKETS)).toBe(-MAX_ADMIN_TICKETS);
+  for (const bad of [
+    0,
+    1.5,
+    '10',
+    null,
+    MAX_ADMIN_TICKETS + 1,
+    -MAX_ADMIN_TICKETS - 1,
+  ])
+    expect(() => validateAdminTickets(bad)).toThrow(
+      expect.objectContaining({ type: MedusaError.Types.INVALID_DATA }),
+    );
 });
 
 it('deriveDrawSeed is HMAC-SHA256(secret, "lucky-draw-seed:" + nonce) hex — fixed vector', () => {

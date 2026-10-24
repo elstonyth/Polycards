@@ -8,6 +8,8 @@ import { pickWonRow } from './pick';
 // Sanity ceilings so a typo'd extra zero is refused (same stance as MAX_TASK_CREDIT_MYR).
 export const MAX_TASK_TICKETS = 10_000;
 export const MAX_ENTRY_TICKETS = 1_000_000;
+/** The most tickets one admin grant (or take-back) may move. */
+export const MAX_ADMIN_TICKETS = 1_000_000;
 export const MAX_PRIZE_CREDIT_MYR = 50_000;
 
 // Synthetic pull.pack_id for prize cards, like 'task-reward'.
@@ -30,11 +32,20 @@ export interface DrawEntrant {
 export function aggregateEntries(rows: DrawEntryRow[]): DrawEntrant[] {
   const byCustomer = new Map<string, number>();
   for (const r of rows) {
-    byCustomer.set(r.customer_id, (byCustomer.get(r.customer_id) ?? 0) + r.tickets);
+    byCustomer.set(
+      r.customer_id,
+      (byCustomer.get(r.customer_id) ?? 0) + r.tickets,
+    );
   }
   return [...byCustomer]
     .map(([customer_id, tickets]) => ({ customer_id, tickets }))
-    .sort((a, b) => (a.customer_id < b.customer_id ? -1 : a.customer_id > b.customer_id ? 1 : 0));
+    .sort((a, b) =>
+      a.customer_id < b.customer_id
+        ? -1
+        : a.customer_id > b.customer_id
+          ? 1
+          : 0,
+    );
 }
 
 export function newDrawSeed(): string {
@@ -90,7 +101,9 @@ const isInt = (v: unknown): v is number =>
 // from a server env secret.
 export function deriveDrawSeed(secret: string, nonce: string): string {
   if (!secret) bad('Lucky Draw seed secret is not configured.');
-  return createHmac('sha256', secret).update(`lucky-draw-seed:${nonce}`).digest('hex');
+  return createHmac('sha256', secret)
+    .update(`lucky-draw-seed:${nonce}`)
+    .digest('hex');
 }
 
 /** The server secret every draw seed derives from. Publish and draw refuse
@@ -140,6 +153,17 @@ export function ticketsSuffix(tickets: number | null | undefined): string {
 /** Why enterLuckyDraw turned an entry away (a refusal, not an error). */
 export type EnterRefusal =
   'not_found' | 'not_open' | 'closed' | 'not_enough_tickets' | 'no_topup';
+
+/** An admin ticket grant: a nonzero integer within ±MAX_ADMIN_TICKETS
+ *  (negative takes tickets back). */
+export function validateAdminTickets(raw: unknown): number {
+  if (!isInt(raw) || raw === 0 || Math.abs(raw) > MAX_ADMIN_TICKETS) {
+    bad(
+      `tickets must be a nonzero whole number within ±${MAX_ADMIN_TICKETS.toLocaleString('en-US')}.`,
+    );
+  }
+  return raw as number;
+}
 
 /** Tickets a customer spends on one entry: an integer 1..MAX_ENTRY_TICKETS. */
 export function validateEntryTickets(raw: unknown): number {

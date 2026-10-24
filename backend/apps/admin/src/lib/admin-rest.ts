@@ -2768,6 +2768,29 @@ export const getLuckyDrawTickets = (customerId: string) =>
     `/admin/lucky-draw/tickets?customer_id=${encodeURIComponent(customerId)}`,
   );
 
+/** Give (positive) or take back (negative) a customer's Lucky Draw tickets.
+ *  The same idempotency key replays instead of granting twice. */
+export async function adjustCustomerTickets(
+  id: string,
+  tickets: number,
+  note: string,
+  idempotencyKey?: string,
+): Promise<{ tickets: number; balance: number }> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/lucky-draw-tickets`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets, note, idempotency_key: idempotencyKey }),
+    },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  return (await res.json()) as { tickets: number; balance: number };
+}
+
 // ── Announcement popup (spec 2026-10-06 §5) ──────────────────────────────────
 
 export interface AdminAnnouncement {

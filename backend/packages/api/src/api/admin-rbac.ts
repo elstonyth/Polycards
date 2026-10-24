@@ -89,6 +89,7 @@ export const CORE_PREFIX_WRITES: {
     'enable',
     'freeze',
     'group',
+    'lucky-draw-tickets',
     'pack-gifts',
     'partner-rate',
     'payout-details',

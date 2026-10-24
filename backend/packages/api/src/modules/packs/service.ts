@@ -142,6 +142,7 @@ import {
   drawSeedHash,
   drawWinner,
   requireDrawSeedSecret,
+  validateAdminTickets,
   validateEntryTickets,
   validateTaskTickets,
   type EnterRefusal,
@@ -7537,6 +7538,103 @@ class PacksModuleService extends MedusaService({
         created_at: new Date(r.created_at).toISOString(),
       })),
     };
+  }
+
+  // Admin: give (positive) or take back (negative) a customer's Lucky Draw
+  // tickets (operator 2026-10-25), one customer per call — the admin group
+  // editor loops a group's members. Takes only the per-customer ticket lock,
+  // the second of the two locks an entry takes, so it cannot deadlock with an
+  // entry, a draw or a cancel. The idempotency key makes a retried call a
+  // replay, scoped to the customer: the same key with a different amount is a
+  // CONFLICT. A take-back never leaves the balance below zero. The ledger row
+  // and an admin_action_audit row (entity 'customer', action 'edit', the note
+  // as its reason) commit together.
+  @InjectTransactionManager()
+  async adjustLuckyDrawTickets(
+    input: {
+      customerId: string;
+      tickets: unknown;
+      note: unknown;
+      adminId: string;
+      idempotencyKey?: unknown;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ tickets: number; balance: number; replayed: boolean }> {
+    const tickets = validateAdminTickets(input.tickets);
+    const note = typeof input.note === 'string' ? input.note.trim() : '';
+    if (note.length < 1 || note.length > 512) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'A note (1–512 characters) is required.',
+      );
+    }
+    const key = input.idempotencyKey;
+    if (
+      key !== undefined &&
+      (typeof key !== 'string' || key.length < 1 || key.length > 200)
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'idempotency_key must be a string of 1–200 characters.',
+      );
+    }
+    const { customerId } = input;
+    const ref = `admin:${customerId}:${key ?? crypto.randomUUID()}`;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `tickets:${customerId}`,
+    ]);
+
+    const before = await this.luckyDrawBalance(customerId, sharedContext);
+    const [done] = await em.execute<{ delta: number }[]>(
+      "SELECT delta FROM lucky_draw_ticket WHERE reason = 'admin_grant' " +
+        'AND ref = ? AND customer_id = ? AND deleted_at IS NULL',
+      [ref, customerId],
+    );
+    if (done) {
+      if (Number(done.delta) !== tickets) {
+        throw new MedusaError(
+          MedusaError.Types.CONFLICT,
+          'This request was already applied with a different amount.',
+        );
+      }
+      return { tickets, balance: before, replayed: true };
+    }
+    if (before + tickets < 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only ${before.toLocaleString('en-US')} tickets to take back.`,
+      );
+    }
+
+    await this.createLuckyDrawTickets(
+      [
+        {
+          customer_id: customerId,
+          delta: tickets,
+          reason: 'admin_grant' as const,
+          ref,
+        },
+      ],
+      sharedContext,
+    );
+    // The ORM row is not flushed yet: the new balance is arithmetic.
+    const balance = before + tickets;
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer' as const,
+          entity_id: customerId,
+          action: 'edit' as const,
+          before: { lucky_draw_tickets: before },
+          after: { lucky_draw_tickets: balance, delta: tickets, ref },
+          reason: note,
+        },
+      ],
+      sharedContext,
+    );
+    return { tickets, balance, replayed: false };
   }
 
   // Tickets in and distinct entrants per prize. Counts the entries ever made on

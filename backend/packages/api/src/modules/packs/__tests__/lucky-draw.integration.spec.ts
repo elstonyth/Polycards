@@ -1274,9 +1274,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           const { prizeIds } = await create({
             prizes: [cardPrize('pool-t', { drawAt })],
           });
-          expect(new Date((await prizeRow(prizeIds[0])).draw_at).getTime()).toBe(
-            drawAt.getTime(),
-          );
+          expect(
+            new Date((await prizeRow(prizeIds[0])).draw_at).getTime(),
+          ).toBe(drawAt.getTime());
         });
 
         it('with no prizes is a plain draft event', async () => {
@@ -1328,7 +1328,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
           // the prize insert — after the event row is already in the transaction.
           await expect(
             create({
-              prizes: [cardPrize('pool-r'), creditPrize({ title: 'bad\u0000' })],
+              prizes: [
+                cardPrize('pool-r'),
+                creditPrize({ title: 'bad\u0000' }),
+              ],
             }),
           ).rejects.toThrow(/insert into "lucky_draw_prize"/);
           await nothingExists();
@@ -1376,6 +1379,104 @@ moduleIntegrationTestRunner<PacksModuleService>({
             'published',
           );
         });
+      });
+    });
+
+    describe('admin ticket grants', () => {
+      const reject = (p: Promise<unknown>, type: string) =>
+        expect(p).rejects.toMatchObject({ type });
+      const grant = (
+        customerId: string,
+        tickets: unknown,
+        idempotencyKey?: unknown,
+        note: unknown = 'Launch gift',
+      ) =>
+        service.adjustLuckyDrawTickets({
+          customerId,
+          tickets,
+          note,
+          adminId: 'user_grant',
+          idempotencyKey,
+        });
+
+      it('gives tickets once per key, writes the ledger and the audit', async () => {
+        expect(await grant('cus_g1', 50, 'k1')).toEqual({
+          tickets: 50,
+          balance: 50,
+          replayed: false,
+        });
+        // A retried request (lost response) replays: no second grant.
+        expect(await grant('cus_g1', 50, 'k1')).toEqual({
+          tickets: 50,
+          balance: 50,
+          replayed: true,
+        });
+        expect(await service.luckyDrawBalance('cus_g1')).toBe(50);
+        const rows = await service.listLuckyDrawTickets({
+          customer_id: 'cus_g1',
+        });
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          delta: 50,
+          reason: 'admin_grant',
+          ref: 'admin:cus_g1:k1',
+        });
+        const audits = await service.listAdminActionAudits({
+          entity_type: 'customer',
+          entity_id: 'cus_g1',
+        });
+        expect(audits).toHaveLength(1);
+        expect(audits[0]).toMatchObject({
+          admin_id: 'user_grant',
+          action: 'edit',
+          reason: 'Launch gift',
+          before: { lucky_draw_tickets: 0 },
+          after: { lucky_draw_tickets: 50, delta: 50 },
+        });
+      });
+
+      it('a key is scoped to its customer; reused with another amount it conflicts', async () => {
+        await grant('cus_g2', 10, 'shared');
+        // The same key for another customer is a separate grant.
+        expect(await grant('cus_g3', 10, 'shared')).toMatchObject({
+          balance: 10,
+          replayed: false,
+        });
+        await reject(grant('cus_g2', 99, 'shared'), MedusaError.Types.CONFLICT);
+        expect(await service.luckyDrawBalance('cus_g2')).toBe(10);
+      });
+
+      it('takes tickets back, never below zero', async () => {
+        await grant('cus_g4', 30, 'a');
+        expect(await grant('cus_g4', -20, 'b')).toMatchObject({ balance: 10 });
+        await reject(grant('cus_g4', -11, 'c'), MedusaError.Types.NOT_ALLOWED);
+        expect(await grant('cus_g4', -10, 'd')).toMatchObject({ balance: 0 });
+        expect(await service.luckyDrawBalance('cus_g4')).toBe(0);
+      });
+
+      it('refuses a bad amount, note or key and writes nothing', async () => {
+        for (const bad of [0, 1.5, '5', null, 1_000_001]) {
+          await reject(grant('cus_g5', bad), MedusaError.Types.INVALID_DATA);
+        }
+        await reject(
+          grant('cus_g5', 5, undefined, '   '),
+          MedusaError.Types.INVALID_DATA,
+        );
+        await reject(
+          grant('cus_g5', 5, undefined, 'x'.repeat(513)),
+          MedusaError.Types.INVALID_DATA,
+        );
+        await reject(grant('cus_g5', 5, 42), MedusaError.Types.INVALID_DATA);
+        expect(await service.luckyDrawBalance('cus_g5')).toBe(0);
+        expect(
+          await service.listAdminActionAudits({ entity_id: 'cus_g5' }),
+        ).toHaveLength(0);
+      });
+
+      it('without a key, each call is its own grant', async () => {
+        await grant('cus_g6', 5);
+        await grant('cus_g6', 5);
+        expect(await service.luckyDrawBalance('cus_g6')).toBe(10);
       });
     });
 

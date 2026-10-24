@@ -61,6 +61,7 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
 import { GiftAndBonusPanels } from './gift-and-bonus';
+import { LuckyDrawTicketsPanel } from './lucky-draw-tickets';
 import { MoneySummary, PeriodsCard, PlayCard } from './MoneyCards';
 import { LevelTab } from './LevelTab';
 import { VaultTab } from './VaultTab';
@@ -1505,6 +1506,9 @@ const Customer360Page = () => {
                   <DropdownMenu.Item onClick={() => setTab('gifts')}>
                     {t('playerMoney.bonusCredit')}
                   </DropdownMenu.Item>
+                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
+                    {t('playerMoney.luckyDrawTickets')}
+                  </DropdownMenu.Item>
                 </DropdownMenu.Content>
               </DropdownMenu>
             </div>
@@ -1654,7 +1658,13 @@ const Customer360Page = () => {
       )}
       {/* key={id}: an unsent note must not carry over to the next player. */}
       {tab === 'gifts' && customerId && (
-        <GiftAndBonusPanels key={id} customerId={customerId} />
+        <>
+          <GiftAndBonusPanels key={id} customerId={customerId} />
+          <LuckyDrawTicketsPanel
+            key={`tickets-${id}`}
+            customerId={customerId}
+          />
+        </>
       )}
       {tab === 'history' && (
         <HistoryTab

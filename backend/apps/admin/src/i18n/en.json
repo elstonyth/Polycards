@@ -7,10 +7,10 @@
     "normalAmount": "{{amount}} withdrawable credit"
   },
   "groupCredits": {
-    "title": "Credits",
-    "description": "Add or deduct credits for selected players or everyone in this customer group.",
-    "edit": "Bulk edit credits",
-    "viewResults": "View credit results",
+    "title": "Credits & Lucky Draw tickets",
+    "description": "Add or deduct credits or Lucky Draw tickets for selected players or everyone in this customer group.",
+    "edit": "Bulk edit credits or tickets",
+    "viewResults": "View results",
     "amount": "Credit change per player (RM)",
     "amountHint": "Positive adds credits; negative deducts. Maximum RM 1,000,000 per player, up to 2 decimal places.",
     "invalidAmount": "Enter a nonzero amount with up to 2 decimal places within the limit.",
@@ -28,9 +28,9 @@
     "reload": "Reload",
     "empty": "No players found.",
     "review": "Review changes",
-    "confirmTitle": "Apply group credit changes?",
+    "confirmTitle": "Apply group changes?",
     "confirmDescription": "Group: {{group}}. Change {{amount}} for each of {{count}} selected players. Total change: {{total}}. Audit note: {{note}}. Each player is processed separately; failed adjustments can be retried.",
-    "apply": "Apply credit changes",
+    "apply": "Apply changes",
     "cancel": "Cancel",
     "close": "Close",
     "batchSummary": "{{amount}} per player · {{count}} players · {{total}} total change",
@@ -41,7 +41,15 @@
     "newAdjustment": "New adjustment",
     "discardFailures": "This clears the previous retry details. Some failed requests may already have applied credits if their response was lost. Review failed players’ transactions before creating another adjustment. Applied players will not be selected automatically.",
     "applied": "Applied · balance {{balance}}",
-    "pending": "Pending"
+    "pending": "Pending",
+    "giving": "What to change",
+    "givingCredit": "Credit (RM)",
+    "givingTickets": "Lucky Draw tickets",
+    "ticketsLabel": "Ticket change per player",
+    "ticketsHint": "Positive gives tickets; negative takes them back (never below zero). Whole numbers only, up to 1,000,000 per player.",
+    "invalidTickets": "Enter a nonzero whole number of tickets within the limit.",
+    "ticketsAmount": "{{tickets}} Lucky Draw tickets",
+    "appliedTickets": "Applied · {{balance}} tickets"
   },
   "customFields": {
     "title": "Custom Fields",
@@ -777,6 +785,19 @@
       "confirmTake": "Take back {{amount}} bonus credit from {{email}}?",
       "confirmDesc": "The note is recorded in the ledger and the audit trail.",
       "applied": "Bonus credit applied"
+    },
+    "tickets": {
+      "title": "Lucky Draw tickets",
+      "subtitle": "Give tickets as a gift or compensation, or take back tickets given by mistake. Players put tickets on the Lucky Draw prizes they want; tickets cannot be bought or withdrawn.",
+      "balance": "Ticket balance",
+      "amount": "Tickets (e.g. 10 to give, -10 to take back)",
+      "note": "Note (required, audit trail)",
+      "apply": "Apply",
+      "invalid": "Tickets must be a nonzero whole number within 1,000,000.",
+      "confirmGive": "Give {{tickets}} Lucky Draw tickets to {{email}}?",
+      "confirmTake": "Take back {{tickets}} Lucky Draw tickets from {{email}}?",
+      "confirmDesc": "The note is recorded in the audit trail. A take-back never leaves the balance below zero.",
+      "applied": "Tickets applied · balance {{balance}}"
     }
   },
   "statsBoard": {
@@ -1514,7 +1535,8 @@
     "sellsPaused": "Selling is paused: the exchange-rate feed is down, so the player can't sell any card right now. The prices below are indicative.",
     "heldBoth": "{{held}} held back: bonus credit, plus the rest until money for packs is used",
     "heldBonus": "{{held}} held back: bonus credit",
-    "heldPlay": "{{held}} held back until the money still to use on packs is used"
+    "heldPlay": "{{held}} held back until the money still to use on packs is used",
+    "luckyDrawTickets": "Lucky Draw tickets"
   },
   "automationMonitor": {
     "subtitle": "The bot accounts, their balances and the public leaderboard.",

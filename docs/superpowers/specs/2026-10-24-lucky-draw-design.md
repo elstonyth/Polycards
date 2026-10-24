@@ -58,7 +58,9 @@ each put in, ranked 1–10.
 ## Non-goals (v1)
 
 - No buying tickets directly with money or credit. Tickets come only from
-  tasks. _(My call: keeps this a task reward, not a lottery sale.)_
+  tasks _(my call: keeps this a task reward, not a lottery sale)_ and, since
+  2026-10-25, from admin grants (one customer or a whole customer group, like
+  credit; ledger reason `admin_grant`, audited).
 - No new "More" tab or homepage "Game" section. Those are separate roadmap
   items (nav redesign). v1 entry points are the vault ticket row and the task
   hub.

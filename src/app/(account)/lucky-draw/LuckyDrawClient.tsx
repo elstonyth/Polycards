@@ -308,11 +308,12 @@ export function LuckyDrawClient({
       </div>
 
       <p className="mt-6 text-xs leading-relaxed text-neutral-400">
-        Tickets come from tasks — they can&rsquo;t be bought. Entering needs at
-        least one top-up, and entries are final. Card prizes go to your vault
-        and sell back like task rewards; credit prizes are bonus credit for
-        packs. Every winner is drawn from a seed fixed before entries open, so
-        anyone can check it. All times are Malaysia time (MYT).
+        Tickets come from tasks and Polycards gifts — they can&rsquo;t be
+        bought. Entering needs at least one top-up, and entries are final. Card
+        prizes go to your vault and sell back like task rewards; credit prizes
+        are bonus credit for packs. Every winner is drawn from a seed fixed
+        before entries open, so anyone can check it. All times are Malaysia time
+        (MYT).
       </p>
 
       {entering && (

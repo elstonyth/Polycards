@@ -1345,6 +1345,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Lucky Draw tickets decide RM-valued prizes, so a grant shares the
+      // money-mutation budget like /credits (the group editor waits out a 429).
+      matcher: '/admin/customers/*/lucky-draw-tickets',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Gift packs to a customer / revoke one (spec 2026-10-07) — they mint
       // value like a credit grant, so they share the money-mutation budget.
       matcher: '/admin/customers/*/pack-gifts',

@@ -157,6 +157,7 @@ import {
   cancelLuckyDrawPrize,
   listLuckyDrawEntries,
   getLuckyDrawTickets,
+  adjustCustomerTickets,
   type AdminLuckyDrawEvent,
   listAnnouncements,
   saveAnnouncement,
@@ -1943,6 +1944,29 @@ export const useLuckyDrawTickets = (customerId: string | null) =>
     enabled: customerId !== null,
     staleTime: 0,
   });
+
+export const useAdjustTickets = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      id: string;
+      tickets: number;
+      note: string;
+      idempotencyKey?: string;
+    }) =>
+      adjustCustomerTickets(
+        vars.id,
+        vars.tickets,
+        vars.note,
+        vars.idempotencyKey,
+      ),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: qk.luckyDrawTickets(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
 
 export type { AdminAnnouncement } from './admin-rest';
 
