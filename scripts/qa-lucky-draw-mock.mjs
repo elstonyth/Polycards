@@ -13,6 +13,8 @@
 //   QA_MOCK_PORT=9199              port (default 9199)
 //   QA_DRAW_IN=90                  timed prize draws this many s after start
 //   QA_SLAB_IMAGE=<png path>       served at /media/slab.png as the card prize
+//   QA_STOREFRONT_ORIGINS=<list>   comma-separated origins allowed by CORS
+//                                  (default http://localhost:4100,http://127.0.0.1:4100)
 //   POST /__mock/reset?drawIn=60   fresh state, timed prize draws in 60 s
 // The storefront under test must be built against it:
 //   NEXT_PUBLIC_MEDUSA_BACKEND_URL=http://localhost:9199
@@ -26,6 +28,17 @@ const SLAB_FILE = process.env.QA_SLAB_IMAGE ?? null;
 // Bound to 127.0.0.1 below; `localhost` still reaches it, and the image
 // allow-list of a storefront built against localhost keeps matching.
 const ORIGIN = `http://localhost:${PORT}`;
+// Only the storefront under test may make credentialed browser calls; any
+// other origin gets no CORS headers (never reflect the request's Origin).
+const ALLOWED_ORIGINS = new Set(
+  (
+    process.env.QA_STOREFRONT_ORIGINS ??
+    'http://localhost:4100,http://127.0.0.1:4100'
+  )
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean),
+);
 const SLAB_URL = SLAB_FILE
   ? `${ORIGIN}/media/slab.png`
   : '/images/app/polycards-slab-back.webp';
@@ -387,12 +400,17 @@ reset(Number(process.env.QA_DRAW_IN ?? 90));
 
 createServer((req, res) => {
   const url = new URL(req.url, ORIGIN);
-  const cors = {
-    'access-control-allow-origin': req.headers.origin ?? '*',
-    'access-control-allow-credentials': 'true',
-    'access-control-allow-headers': '*',
-    'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
-  };
+  const origin = req.headers.origin;
+  const cors =
+    origin && ALLOWED_ORIGINS.has(origin)
+      ? {
+          'access-control-allow-origin': origin,
+          'access-control-allow-credentials': 'true',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+          vary: 'Origin',
+        }
+      : { vary: 'Origin' };
   if (req.method === 'OPTIONS') {
     res.writeHead(204, cors).end();
     return;
