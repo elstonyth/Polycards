@@ -217,8 +217,18 @@ each put in, ranked 1–10.
 _(My call. The minimum — stored seed + frozen entry list — is a must. The public
 "verify" explanation can be simple.)_
 
-- When an event is published, each prize gets a secret random seed (from
-  `crypto`). The page shows the seed's SHA-256 hash **before** the draw.
+- When an event is published, each prize gets a secret seed. The page shows
+  the seed's SHA-256 hash **before** the draw.
+- **The seed is never stored before the draw** (security review, 2026-10-24):
+  staff tools and the desk bots can read the database, and anyone who saw a
+  seed could time an entry to win. The prize row keeps only a random nonce;
+  the seed is HMAC-SHA256 of that nonce under a server secret
+  (`LUCKY_DRAW_SEED_SECRET`, an environment variable), derived at publish to
+  make the hash and again at the draw. The draw refuses if the derived seed no
+  longer matches the published hash. Someone with the production environment
+  secret could still predict a draw; that is the operator's own trust boundary.
+  A public randomness beacon (e.g. drand) mixed in at the draw would close it
+  and is left for later.
 - At the draw, the winner is computed from the seed and the frozen entry list
   only: entries in a fixed order (e.g. by entry id), tickets as weights, a
   number derived from the seed (HMAC-SHA256 of seed and prize id, no modulo

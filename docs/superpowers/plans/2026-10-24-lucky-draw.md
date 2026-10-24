@@ -18,7 +18,7 @@
 - Card prizes are granted exactly like weekly-challenge card prizes: `createPulls` with `source: 'reward'`, `bonus_bp: BONUS_BP_FULL`, `stock_earmarked: false`, stock taken **after** commit with `takeCardStock`, pull earmarked only if the take happened.
 - Credit prizes are **bonus**: `mutateCreditAtomic({ reason: 'reward_credit', idempotencyReference: 'luckydraw:<prizeId>' })` + `recordLedgerEntry({ type: 'WP', refId: <credit txn id> })` in the same transaction.
 - Entering needs a logged-in, not-frozen account with `hasTopUp(customerId) === true`.
-- A prize's `seed` never leaves the server before that prize's result exists — not on store routes, not on admin routes.
+- A prize's `seed` never leaves the server before that prize's result exists — not on store routes, not on admin routes — and is **never stored in the database before the draw**: the prize row holds only a random `seed_nonce` and the public `seed_hash`; the seed is `deriveDrawSeed(LUCKY_DRAW_SEED_SECRET, seed_nonce)`, computed at publish (to make the hash) and again at draw time, and written only into the result row. Reason: staff tools and the desk bots can read prize rows. Missing `LUCKY_DRAW_SEED_SECRET` → publish and draw refuse loudly. Test specs set `process.env.LUCKY_DRAW_SEED_SECRET ??= 'test-lucky-draw-seed-secret'` at the top of the file.
 - One result per prize (unique index on `lucky_draw_result.prize_id`); a result is never updated or deleted by any code path.
 - **Every entry the gate accepted is either in the draw or refunded.** Entering holds `pg_advisory_xact_lock_shared(hashtextextended('luckydraw:<prizeId>', 0))`; drawing and cancelling hold the exclusive `pg_advisory_xact_lock` on the same key and re-check for a result under it. The draw therefore waits for in-flight entries, and an entry that arrives after the draw sees the result and is refused.
 - Tickets can only be earned from task claims (and refunds). No route sells tickets.
@@ -80,6 +80,7 @@ Storefront (`src/`): `lib/data/schemas.ts`, `lib/actions/lucky-draw.ts` (new), `
   - `export function aggregateEntries(rows: DrawEntryRow[]): DrawEntrant[]` — no time filter: the draw counts every committed entry on the prize; the cut-off is enforced at entry time under the prize lock (Tasks 4 and 6).
   - `export function newDrawSeed(): string`
   - `export function drawSeedHash(seed: string): string`
+  - `export function deriveDrawSeed(secret: string, nonce: string): string` — HMAC-SHA256(key = secret, message = `'lucky-draw-seed:' + nonce`) hex; throws INVALID_DATA on an empty secret. Test vector: `deriveDrawSeed('test-secret', 'b'.repeat(64)) === '7e0cbfdfea31e0b95b8f7337da2f76a786f76f956dbd03af4d33dcb6564312da'`. (Added after Task 1 by a security ruling; `newDrawSeed()` now makes the nonce.)
   - `export function winningTicketIndex(seed: string, prizeId: string, totalTickets: number): number`
   - `export function drawWinner(entrants: DrawEntrant[], seed: string, prizeId: string): { winner: DrawEntrant; ticketIndex: number; totalTickets: number } | null`
   - `export function validateTaskTickets(raw: unknown): number`
@@ -191,7 +192,7 @@ git commit -m "feat(lucky-draw): pure draw math — seeded winner pick, entry ag
 - Produces (table → fields; every table also gets Medusa's `created_at/updated_at/deleted_at`):
   - `task_definition.tickets`: `model.number().default(0)` → `integer not null default 0`
   - `lucky_draw_event` (id prefix `ldev`): `name text`, `starts_at dateTime`, `ends_at dateTime`, `status enum('draft','published','cancelled') default 'draft'`, `created_by text`
-  - `lucky_draw_prize` (`ldpz`): `event_id text`, `kind enum('card','credit')`, `card_handle text null`, `credit_myr bigNumber null` (+ `raw_credit_myr jsonb null`), `title text`, `image_url text null`, `sort number default 0`, `draw_at dateTime`, `seed text null`, `seed_hash text null`, `cancelled_at dateTime null`. Indexes: `(event_id)`, `(draw_at) WHERE cancelled_at IS NULL AND deleted_at IS NULL`.
+  - `lucky_draw_prize` (`ldpz`): `event_id text`, `kind enum('card','credit')`, `card_handle text null`, `credit_myr bigNumber null` (+ `raw_credit_myr jsonb null`), `title text`, `image_url text null`, `sort number default 0`, `draw_at dateTime`, `seed_nonce text null`, `seed_hash text null`, `cancelled_at dateTime null` (no `seed` column on the prize — the seed is derived, see Global Constraints). Indexes: `(event_id)`, `(draw_at) WHERE cancelled_at IS NULL AND deleted_at IS NULL`.
   - `lucky_draw_entry` (`lden`): `prize_id text`, `customer_id text`, `tickets number`. Indexes: `(prize_id)`, `(customer_id)`.
   - `lucky_draw_ticket` (`ldtk`): `customer_id text`, `delta number` (negative = spent), `reason enum('task_claim','entry','refund')`, `ref text`. Indexes: `(customer_id)`, **unique** `(reason, ref) WHERE deleted_at IS NULL`.
   - `lucky_draw_result` (`ldrs`): `prize_id text`, `winner_customer_id text null`, `winner_tickets number default 0`, `total_tickets number default 0`, `entrant_count number default 0`, `ticket_index number null`, `seed text`, `entries json` (`DrawEntrant[]`, draw order), `excluded json` (customer ids refunded as disabled), `credit_transaction_id text null`, `pull_id text null`, `drawn_at dateTime`. Index: **unique** `(prize_id) WHERE deleted_at IS NULL`.
@@ -427,8 +428,8 @@ git commit -m "feat(lucky-draw): enter a prize — locked balance check, top-up 
 - Consumes: `newDrawSeed`, `drawSeedHash`, `MAX_PRIZE_CREDIT_MYR`; `reqReason` (`api/admin/rewards-settings/validate`).
 - Produces (all `@InjectTransactionManager`, all audited):
   - `saveLuckyDrawEvent(input: { id?: string; name: string; startsAt: Date; endsAt: Date; adminId: string; reason: string }): Promise<{ id: string }>` — name 1–80 chars, `endsAt > startsAt`. Draft: everything editable. Published: only `name`. Cancelled: refused (NOT_ALLOWED).
-  - `saveLuckyDrawPrize(input: { id?: string; eventId: string; kind: 'card' | 'credit'; cardHandle?: string | null; creditMyr?: number | null; title: string; imageUrl?: string | null; sort: number; drawAt?: Date | null; adminId: string; reason: string }): Promise<{ id: string }>` — card must exist (`listCards({ handle })`); credit `0 < x ≤ MAX_PRIZE_CREDIT_MYR`, whole sen; `drawAt` defaults to the event's `ends_at` and must satisfy `starts_at < drawAt ≤ ends_at`; a credit prize needs `imageUrl`. On a **published** event: a new prize gets `seed`/`seed_hash` at creation; an existing prize may change only `title`, `imageUrl`, `sort`.
-  - `publishLuckyDrawEvent(input: { id: string; adminId: string; reason: string }): Promise<void>` — draft only; ≥ 1 live prize; sets `seed = newDrawSeed()`, `seed_hash = drawSeedHash(seed)` on every prize without one; `status = 'published'`.
+  - `saveLuckyDrawPrize(input: { id?: string; eventId: string; kind: 'card' | 'credit'; cardHandle?: string | null; creditMyr?: number | null; title: string; imageUrl?: string | null; sort: number; drawAt?: Date | null; adminId: string; reason: string }): Promise<{ id: string }>` — card must exist (`listCards({ handle })`); credit `0 < x ≤ MAX_PRIZE_CREDIT_MYR`, whole sen; `drawAt` defaults to the event's `ends_at` and must satisfy `starts_at < drawAt ≤ ends_at`; a credit prize needs `imageUrl`. On a **published** event: a new prize gets `seed_nonce`/`seed_hash` at creation; an existing prize may change only `title`, `imageUrl`, `sort`.
+  - `publishLuckyDrawEvent(input: { id: string; adminId: string; reason: string }): Promise<void>` — draft only; ≥ 1 live prize; on every prize without a nonce sets `seed_nonce = newDrawSeed()` and `seed_hash = drawSeedHash(deriveDrawSeed(secret, seed_nonce))` (secret = `process.env.LUCKY_DRAW_SEED_SECRET`; missing → NOT_ALLOWED `'LUCKY_DRAW_SEED_SECRET is not set'`); the seed itself is never written; `status = 'published'`.
   - `cancelLuckyDrawPrize(input: { id: string; adminId: string; reason: string }): Promise<{ refunded: number }>` — takes the exclusive `luckydraw:<prizeId>` advisory lock first, then refuses if a result exists (re-checked under the lock, so a cancel racing the draw cannot both pay and refund); sets `cancelled_at`; per entrant one ticket row `{ delta: +total, reason: 'refund', ref: '<prizeId>:<customerId>' }`; `refunded` = entrants refunded.
   - `adminLuckyDrawOverview(): Promise<AdminLuckyDrawEvent[]>` where each event carries its prizes with `seed_hash`, `total_tickets`, `entrant_count`, `result` (with `seed` only when drawn). **Never** the seed of an undrawn prize.
   - `luckyDrawTicketHistory(customerId: string, take: number): Promise<{ balance: number; rows: { delta: number; reason: string; ref: string; created_at: string }[] }>` — `@InjectManager`, newest first.
@@ -467,9 +468,12 @@ HTTP spec:
 ```ts
 it('GET /admin/lucky-draw never returns an undrawn prize seed', async () => {
   const [row] = await packs.listLuckyDrawPrizes({ id: prizeId });
+  expect(row).not.toHaveProperty('seed'); // the prize row holds only the nonce
+  const seed = deriveDrawSeed(process.env.LUCKY_DRAW_SEED_SECRET!, row.seed_nonce!);
+  expect(drawSeedHash(seed)).toBe(row.seed_hash);
   const res = await api.get('/admin/lucky-draw', adminHeaders);
   // Check the secret itself — `seed` is also a field name elsewhere.
-  expect(JSON.stringify(res.data)).not.toContain(row.seed);
+  expect(JSON.stringify(res.data)).not.toContain(seed);
   expect(res.data.events[0].prizes[0].seed_hash).toBe(row.seed_hash);
 });
 ```
@@ -504,7 +508,7 @@ git commit -m "feat(lucky-draw): admin events and prizes — publish with seed c
 - Consumes: `aggregateEntries`, `drawWinner`, `LUCKY_DRAW_PULL_PACK_ID` (Task 1); `disabledCustomerIds`, `mutateCreditAtomic`, `recordLedgerEntry`, `createPulls`, `BONUS_BP_FULL` (existing).
 - Produces:
   - `export interface LuckyDrawOutcome { prizeId: string; winnerId: string | null; kind: 'card' | 'credit'; cardHandle: string | null; pullId: string | null }`
-  - `drawLuckyDrawPrize(input: { prizeId: string; now: Date }, sharedContext?): Promise<LuckyDrawOutcome | null>` — `@InjectTransactionManager`. Steps: exclusive advisory lock `luckydraw:<prizeId>` (waits for in-flight entries holding the shared lock); result exists → `null`; prize not due / cancelled / event not published → `null`; entries → `aggregateEntries(rows)` over **every** entry on the prize (no `created_at` filter — clock skew between app and DB must never drop an accepted entry); drop `disabledCustomerIds` and refund each (`reason: 'refund'`, `ref: '<prizeId>:<customerId>'`), recording them in `excluded`; `drawWinner(entrants, prize.seed, prize.id)`; pay (credit: bonus + WP ledger with `period: 'luckydraw:<prizeId>'`; card: one pull with `pack_id: LUCKY_DRAW_PULL_PACK_ID`, `card_id: card_handle`, `source: 'reward'`, `bonus_bp: BONUS_BP_FULL`, `stock_earmarked: false`); insert the result row (winner null + zeros when nobody entered). A card whose `Card` row is gone: result still written, `pull_id` null, logged by the job.
+  - `drawLuckyDrawPrize(input: { prizeId: string; now: Date }, sharedContext?): Promise<LuckyDrawOutcome | null>` — `@InjectTransactionManager`. Steps: exclusive advisory lock `luckydraw:<prizeId>` (waits for in-flight entries holding the shared lock); result exists → `null`; prize not due / cancelled / event not published → `null`; entries → `aggregateEntries(rows)` over **every** entry on the prize (no `created_at` filter — clock skew between app and DB must never drop an accepted entry); drop `disabledCustomerIds` and refund each (`reason: 'refund'`, `ref: '<prizeId>:<customerId>'`), recording them in `excluded`; `seed = deriveDrawSeed(secret, prize.seed_nonce)` and, if `drawSeedHash(seed) !== prize.seed_hash`, throw (the job counts it `failed` and logs "LUCKY_DRAW_SEED_SECRET changed since publish" — never draw against a hash the public did not see); `drawWinner(entrants, seed, prize.id)`; the result row stores `seed`; pay (credit: bonus + WP ledger with `period: 'luckydraw:<prizeId>'`; card: one pull with `pack_id: LUCKY_DRAW_PULL_PACK_ID`, `card_id: card_handle`, `source: 'reward'`, `bonus_bp: BONUS_BP_FULL`, `stock_earmarked: false`); insert the result row (winner null + zeros when nobody entered). A card whose `Card` row is gone: result still written, `pull_id` null, logged by the job.
   - `drawDueLuckyDrawPrizes(deps: { now?: Date; decrementStock?: (handle: string, qty: number) => Promise<boolean> }): Promise<{ drawn: number; failed: number }>` — lists due prizes (`draw_at <= now`, not cancelled, event published, no result), calls `drawLuckyDrawPrize` one by one (sequential, own transaction each, a throw counts as `failed` and does not stop the loop), then `reserveLuckyDrawStock` for card outcomes after each commit (same failure handling as `reserveSettledStock`).
   - Job `draw-lucky-draw`: `config = { name: 'draw-lucky-draw', schedule: '* * * * *' }`; calls `drawDueLuckyDrawPrizes({ decrementStock: takeCardStock(container) })`; logs `failed > 0` with the logger like `settle-challenge-week.ts`.
 
@@ -512,17 +516,24 @@ git commit -m "feat(lucky-draw): admin events and prizes — publish with seed c
 
 ```ts
 it('draws a due credit prize once, pays bonus credit, stores a checkable result', async () => {
-  // entrants a:30 b:50 c:20 before draw_at; prize seed fixed to 'a'.repeat(64) and id 'ldpz_test' via direct create
+  // entrants a:30 b:50 c:20 before draw_at; prize id 'ldpz_test' via direct create, published (seed_nonce + seed_hash set)
+  const [prize] = await service.listLuckyDrawPrizes({ id: 'ldpz_test' });
+  const seed = deriveDrawSeed(process.env.LUCKY_DRAW_SEED_SECRET!, prize.seed_nonce!);
+  const expected = drawWinner(
+    [{ customer_id: 'cus_a', tickets: 30 }, { customer_id: 'cus_b', tickets: 50 }, { customer_id: 'cus_c', tickets: 20 }],
+    seed, 'ldpz_test',
+  )!;
   const first = await service.drawDueLuckyDrawPrizes({ now: afterDraw });
   expect(first).toEqual({ drawn: 1, failed: 0 });
   const [res] = await service.listLuckyDrawResults({ prize_id: 'ldpz_test' });
   expect(res).toMatchObject({
-    winner_customer_id: 'cus_b',
-    ticket_index: 41,
+    winner_customer_id: expected.winner.customer_id,
+    ticket_index: expected.ticketIndex,
     total_tickets: 100,
     entrant_count: 3,
-    seed: 'a'.repeat(64),
+    seed,
   });
+  expect(drawSeedHash(res.seed)).toBe(prize.seed_hash);
   // winner's credit row: reason reward_credit, bonus; WP ledger row exists
   expect(await service.drawDueLuckyDrawPrizes({ now: afterDraw })).toEqual({
     drawn: 0,
@@ -552,6 +563,9 @@ it('disabled entrants are excluded and refunded; all-disabled → null winner', 
 });
 it('a prize not yet due, cancelled, or on a draft event is not drawn', async () => {
   /* ... */
+});
+it('refuses to draw (failed: 1, no result) when the secret no longer matches the published hash', async () => {
+  // publish with one secret, draw with process.env.LUCKY_DRAW_SEED_SECRET changed → failed 1, no lucky_draw_result row
 });
 it('a recompute from the stored result picks the same winner', async () => {
   const [res] = await service.listLuckyDrawResults({ prize_id: 'ldpz_test' });
@@ -605,6 +619,7 @@ git commit -m "feat(lucky-draw): once-a-minute draw job — seeded winner, bonus
 it('GET /store/lucky-draw lists live prizes with my tickets, top 10 and no draw seed', async () => {
   clearLuckyDrawCache();
   const [row] = await packs.listLuckyDrawPrizes({ id: prizeId });
+  const seed = deriveDrawSeed(process.env.LUCKY_DRAW_SEED_SECRET!, row.seed_nonce!);
   const res = await api.get('/store/lucky-draw', customerHeaders);
   expect(res.data.balance).toBe(70);
   expect(res.data.prizes[0]).toMatchObject({
@@ -613,10 +628,10 @@ it('GET /store/lucky-draw lists live prizes with my tickets, top 10 and no draw 
     entrant_count: 1,
     seed_hash: row.seed_hash,
   });
-  expect(JSON.stringify(res.data)).not.toContain(row.seed);
+  expect(JSON.stringify(res.data)).not.toContain(seed);
   // the same secret must not appear on any other store route before the draw
   for (const path of ['/store/lucky-draw/me', '/store/lucky-draw/results'])
-    expect(JSON.stringify((await api.get(path, customerHeaders)).data)).not.toContain(row.seed);
+    expect(JSON.stringify((await api.get(path, customerHeaders)).data)).not.toContain(seed);
 });
 it('POST enter returns 200 { entered:false, reason:"no_topup" } for a never-topped-up account', async () => {
   /* ... */
@@ -801,7 +816,8 @@ git commit -m "test(lucky-draw): Playwright capture for the vault row, page, ent
 
 ## Launch checklist (operator, after merge and deploy — not code)
 
-1. Codex asset pass replaces the five placeholder slots (spec §11) before 2026-11-01.
-2. Admin → Rewards → Lucky draw: create "November 2026" (start 2026-11-01 00:00, end 2026-11-30 23:59 MYT), add prizes (~RM 100k total), publish.
-3. Admin → Tasks: set Tickets on the tasks that should pay them (e.g. weekly top-up RM 500 → 50, weekly 7-day check-in → 2).
-4. After 2026-11-30 23:59 MYT, confirm each prize shows a result within a minute; check the job log for `failed`.
+1. Codex asset pass replaces the three placeholder slots (spec §11) before 2026-11-01.
+2. Set `LUCKY_DRAW_SEED_SECRET` (random, ≥ 32 bytes) in the production app spec BEFORE publishing any event, and never change it while a published prize is undrawn (a change makes those draws refuse).
+3. Admin → Rewards → Lucky draw: create "November 2026" (start 2026-11-01 00:00, end 2026-11-30 23:59 MYT), add prizes (~RM 100k total), publish.
+4. Admin → Tasks: set Tickets on the tasks that should pay them (e.g. weekly top-up RM 500 → 50, weekly 7-day check-in → 2).
+5. After 2026-11-30 23:59 MYT, confirm each prize shows a result within a minute; check the job log for `failed`.
