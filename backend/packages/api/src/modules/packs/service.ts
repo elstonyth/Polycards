@@ -133,7 +133,11 @@ import {
   EFFECTIVE_GROUP_SQL,
   isDefaultPlayerGroup,
 } from './odds-sets';
-import { validateTaskTickets } from './lucky-draw';
+import {
+  validateEntryTickets,
+  validateTaskTickets,
+  type EnterRefusal,
+} from './lucky-draw';
 import {
   taskIsLive,
   taskPeriodKey,
@@ -6126,6 +6130,108 @@ class PacksModuleService extends MedusaService({
       [customerId],
     );
     return Number(rows[0]?.balance ?? 0);
+  }
+
+  // Spend tickets on a Lucky Draw prize. Two advisory locks, always in this
+  // order: the SHARED prize lock (the draw and cancel take it exclusive, so
+  // they wait for in-flight entries and an entry arriving after the draw sees
+  // its result), then the per-customer ticket lock (serialises this customer's
+  // spends so two parallel enters cannot both pass the balance check). Every
+  // read below runs on this locked transaction. `tickets` is validated before
+  // any lock is taken. A refusal is a return value; only a bad amount or a
+  // frozen account throws.
+  @InjectTransactionManager()
+  async enterLuckyDraw(
+    input: {
+      customerId: string;
+      prizeId: string;
+      tickets: unknown;
+      now?: Date;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    | { entered: true; entryId: string; balance: number; myTickets: number }
+    | { entered: false; reason: EnterRefusal }
+  > {
+    const tickets = validateEntryTickets(input.tickets);
+    const { customerId, prizeId } = input;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const refuse = (reason: EnterRefusal) => ({
+      entered: false as const,
+      reason,
+    });
+
+    await em.execute(
+      'SELECT pg_advisory_xact_lock_shared(hashtextextended(?, 0))',
+      [`luckydraw:${prizeId}`],
+    );
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `tickets:${customerId}`,
+    ]);
+    // Taken after the locks: a wait behind the draw must not leave a stale clock.
+    const now = (input.now ?? new Date()).getTime();
+
+    await this.assertNotFrozen(customerId, sharedContext);
+
+    const [prize] = await this.listLuckyDrawPrizes(
+      { id: prizeId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!prize || prize.cancelled_at) return refuse('not_found');
+    const [event] = await this.listLuckyDrawEvents(
+      { id: prize.event_id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!event || event.status !== 'published') return refuse('not_found');
+
+    if (now < new Date(event.starts_at).getTime()) return refuse('not_open');
+    if (now >= new Date(prize.draw_at).getTime()) return refuse('closed');
+    const [result] = await this.listLuckyDrawResults(
+      { prize_id: prizeId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (result) return refuse('closed');
+
+    if (!(await this.hasTopUp(customerId, sharedContext))) {
+      return refuse('no_topup');
+    }
+    const before = await this.luckyDrawBalance(customerId, sharedContext);
+    if (before < tickets) return refuse('not_enough_tickets');
+    // The ORM creates below are not flushed until the transaction ends, so a raw
+    // read after them would miss them: take this customer's running total now.
+    // Only this customer's enters write it and the ticket lock serialises them,
+    // so it is exact.
+    const mine = await em.execute<{ total: string | number }[]>(
+      'SELECT COALESCE(SUM(tickets), 0) AS total FROM lucky_draw_entry ' +
+        'WHERE prize_id = ? AND customer_id = ? AND deleted_at IS NULL',
+      [prizeId, customerId],
+    );
+
+    const [entry] = await this.createLuckyDrawEntries(
+      [{ prize_id: prizeId, customer_id: customerId, tickets }],
+      sharedContext,
+    );
+    await this.createLuckyDrawTickets(
+      [
+        {
+          customer_id: customerId,
+          delta: -tickets,
+          reason: 'entry' as const,
+          ref: entry.id,
+        },
+      ],
+      sharedContext,
+    );
+
+    return {
+      entered: true,
+      entryId: entry.id,
+      balance: before - tickets,
+      myTickets: Number(mine[0]?.total ?? 0) + tickets,
+    };
   }
 
   // The live free welcome pack, or null when the operator has not published

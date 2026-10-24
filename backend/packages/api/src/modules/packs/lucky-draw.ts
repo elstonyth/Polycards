@@ -110,6 +110,10 @@ export function ticketsSuffix(tickets: number | null | undefined): string {
   return n > 0 ? ` + ${n} Lucky Draw ticket${n === 1 ? '' : 's'}` : '';
 }
 
+/** Why enterLuckyDraw turned an entry away (a refusal, not an error). */
+export type EnterRefusal =
+  'not_found' | 'not_open' | 'closed' | 'not_enough_tickets' | 'no_topup';
+
 /** Tickets a customer spends on one entry: an integer 1..MAX_ENTRY_TICKETS. */
 export function validateEntryTickets(raw: unknown): number {
   if (!isInt(raw) || raw < 1 || raw > MAX_ENTRY_TICKETS) {
