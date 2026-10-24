@@ -118,7 +118,7 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
                   onClose(() => openAuth('signup'));
                 } else onClose();
               }}
-              className="group relative flex aspect-[4/5] flex-col justify-end overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_35%,rgba(199,240,255,0.14),transparent_65%)] bg-neutral-900 p-3 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40"
+              className="group relative flex min-h-[14rem] flex-col sm:aspect-[4/5] justify-end overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_35%,rgba(199,240,255,0.14),transparent_65%)] bg-neutral-900 p-3 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40"
             >
               <span className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -146,7 +146,7 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
           <li>
             <div
               aria-disabled="true"
-              className="relative flex aspect-[4/5] flex-col justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3"
+              className="relative flex min-h-[14rem] flex-col sm:aspect-[4/5] justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3"
             >
               <span className="absolute top-3 left-3 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-300 uppercase">
                 Soon
