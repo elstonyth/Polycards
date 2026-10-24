@@ -195,35 +195,37 @@ const CUES: Record<SfxName, () => void> = {
   // in the 1–1.4 kHz band phone speakers reproduce; lower "thud" variants
   // vanish on mobile. `gain` is the loudness knob (0.07 was inaudible).
   uiClick: () => blip(1400, 40, { type: 'triangle', gain: 0.25, slideTo: 900 }),
+  // Gains below are ~6x the first cut, which peaked near -26 dBFS and was
+  // inaudible on phone speakers and under the music bed (operator 2026-10-25).
   // The wheel launching out of its pull-back: a soft rising air swoosh.
   drawStart: () => {
-    noise(650, { from: 380, to: 2600, q: 0.7, gain: 0.07, attackMs: 220 });
-    blip(110, 500, { type: 'sine', gain: 0.06, slideTo: 165 });
+    noise(650, { from: 380, to: 2600, q: 0.7, gain: 0.45, attackMs: 220 });
+    blip(110, 500, { type: 'sine', gain: 0.35, slideTo: 165 });
   },
   // The pointer flicking over a wedge edge: a crisp, light pawl click (fires
   // per edge, throttled by the wheel, so it slows into a countable landing).
   drawTick: () => {
-    blip(3200, 14, { type: 'triangle', gain: 0.1, slideTo: 2500 });
-    noise(12, { from: 6000, q: 1.4, gain: 0.05 });
+    blip(3200, 14, { type: 'triangle', gain: 0.5, slideTo: 2500 });
+    noise(12, { from: 6000, q: 1.4, gain: 0.3 });
   },
   // The wheel settling: a muted wooden knock.
   drawStop: () => {
-    blip(150, 240, { type: 'sine', gain: 0.22, slideTo: 78 });
-    blip(430, 90, { type: 'triangle', gain: 0.06, slideTo: 300 });
-    noise(70, { from: 1800, to: 600, q: 0.8, gain: 0.07 });
+    blip(150, 240, { type: 'sine', gain: 1, slideTo: 78 });
+    blip(430, 90, { type: 'triangle', gain: 0.35, slideTo: 300 });
+    noise(70, { from: 1800, to: 600, q: 0.8, gain: 0.4 });
   },
   // The prize rising and the winner named: a glassy arpeggio over a soft
   // pad, with high sparkles drifting off like the dust motes.
   drawWin: () => {
     WIN_NOTES.forEach((f, i) =>
-      blip(f, 1200, { type: 'sine', gain: 0.06, at: i * 0.085 }),
+      blip(f, 1200, { type: 'sine', gain: 0.32, at: i * 0.085 }),
     );
-    blip(659.3, 1600, { type: 'sine', gain: 0.035, at: 0.05 });
-    blip(988, 1500, { type: 'sine', gain: 0.025, at: 0.12 });
+    blip(659.3, 1600, { type: 'sine', gain: 0.2, at: 0.05 });
+    blip(988, 1500, { type: 'sine', gain: 0.14, at: 0.12 });
     for (let i = 0; i < 9; i++) {
       blip(3000 + Math.random() * 4000, 120, {
         type: 'sine',
-        gain: 0.018,
+        gain: 0.1,
         at: 0.25 + i * 0.12 + Math.random() * 0.06,
       });
     }
