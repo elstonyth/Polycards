@@ -49,7 +49,7 @@ export const isPokemonPack = (categoryId: string | null | undefined): boolean =>
 // PRB card code. Same test as the admin's franchiseFor (backend/apps/admin/
 // src/lib/sprite-franchise.ts) — keep the two in step.
 const ONE_PIECE_RE =
-  /\bone[\s-]*piece\b|(?<![a-z0-9])(?:OP|ST|EB|PRB)\d{2}-\d{3}(?!\d)/i;
+  /\bone[\s-]*piece\b|(?:^|[^a-z0-9])(?:OP|ST|EB|PRB)\d{2}-\d{3}(?!\d)/i;
 
 /**
  * `pokemon` — what the caller knows about the card's pack (isPokemonPack):

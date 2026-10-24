@@ -20,7 +20,7 @@ export function franchiseFor(
   const text = hints.filter(Boolean).join(' ');
   // "One Piece" / "One-Piece", or a booster (OP), starter (ST), extra (EB) or
   // premium (PRB) card code — also when glued to a suffix ("OP05-119_p1").
-  return /\bone[\s-]*piece\b|(?<![a-z0-9])(?:OP|ST|EB|PRB)\d{2}-\d{3}(?!\d)/i.test(
+  return /\bone[\s-]*piece\b|(?:^|[^a-z0-9])(?:OP|ST|EB|PRB)\d{2}-\d{3}(?!\d)/i.test(
     text,
   )
     ? 'one-piece'
