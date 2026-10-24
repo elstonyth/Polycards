@@ -263,7 +263,7 @@ The home page is a six-board editorial scroll story (spec:
 - **Franchise switch** — the home ladder and the `/slots` catalog show ONE
   pack category (Pokémon, One Piece, …) at a time, behind
   `PackCategoryTabs.tsx`: the segmented pill sized up (48px, 56px at lg), with
-  the category icon and pack count. Only categories with packs get a tab; with
+  the category icon (no pack count). Only categories with packs get a tab; with
   one, the switch is hidden. A new franchise adds a tab, never a longer list.
   `/slots` keeps the pick in `?category=`.
 

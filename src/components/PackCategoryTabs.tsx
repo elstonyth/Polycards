@@ -49,7 +49,6 @@ export default function PackCategoryTabs({
               className="h-6 w-6 shrink-0 object-contain lg:h-7 lg:w-7"
             />
             {c.tab}
-            <span className="font-normal tabular-nums">{c.packs.length}</span>
           </button>
         );
       })}
