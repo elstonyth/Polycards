@@ -18,7 +18,9 @@ import {
 //    balance and my_tickets are read per request;
 //  - a drawn prize is immutable, so its ResultView and entry list are kept by
 //    prize id with no expiry (capped, oldest out). A prize that is not drawn
-//    yet is never cached, so a 404 cannot outlive the draw.
+//    yet is remembered as a miss for only 2 s, so the polls at the draw
+//    minute cost one query per prize per 2 s and a 404 outlives the draw by
+//    at most that.
 // Names are resolved when a view is first built, so a drawn result keeps the
 // names it had then (a later rename shows after a restart); accepted — the
 // result is a record of the draw.
@@ -80,6 +82,7 @@ type SharedPage = {
 };
 
 const PAGE_TTL_MS = 10_000;
+const UNDRAWN_TTL_MS = 2_000;
 const MAX_DRAWN_ENTRIES = 500;
 
 let pageCache: { expires: number; body: SharedPage } | null = null;
@@ -87,6 +90,9 @@ let pageInFlight: Promise<SharedPage> | null = null;
 const resultCache = new Map<string, ResultView>();
 const detailCache = new Map<string, ResultDetail>();
 const detailInFlight = new Map<string, Promise<ResultDetail | null>>();
+/** Prize id → when its "not drawn yet" answer expires. Keyed by a URL
+ *  param, so capped like the others. */
+const undrawnUntil = new Map<string, number>();
 
 /** Test seam: module state outlives a test's fixtures (one jest process is one
  *  module instance), so a prior test's page would be served to the next. */
@@ -96,6 +102,7 @@ export function clearLuckyDrawCache(): void {
   resultCache.clear();
   detailCache.clear();
   detailInFlight.clear();
+  undrawnUntil.clear();
 }
 
 function remember<V>(cache: Map<string, V>, key: string, value: V): void {
@@ -269,7 +276,10 @@ async function buildDetail(
   prizeId: string,
 ): Promise<ResultDetail | null> {
   const found = await packs.luckyDrawResult(prizeId);
-  if (!found) return null;
+  if (!found) {
+    remember(undrawnUntil, prizeId, Date.now() + UNDRAWN_TTL_MS);
+    return null;
+  }
   const personOf = await personResolver(req, packs, [
     found.row.winner_customer_id,
     ...found.entries.map((e) => e.customer_id),
@@ -287,8 +297,8 @@ async function buildDetail(
   return detail;
 }
 
-/** One drawn prize with its entry list, or null when it is not drawn (never
- *  cached, so the first read after the draw sees it). */
+/** One drawn prize with its entry list, or null when it is not drawn (that
+ *  miss is remembered for UNDRAWN_TTL_MS). */
 export async function resultDetailFor(
   req: MedusaRequest,
   packs: PacksModuleService,
@@ -296,6 +306,7 @@ export async function resultDetailFor(
 ): Promise<ResultDetail | null> {
   const cached = detailCache.get(prizeId);
   if (cached) return cached;
+  if ((undrawnUntil.get(prizeId) ?? 0) > Date.now()) return null;
   let pending = detailInFlight.get(prizeId);
   if (!pending) {
     pending = buildDetail(req, packs, prizeId).finally(() => {

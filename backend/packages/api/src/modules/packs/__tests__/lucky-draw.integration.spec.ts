@@ -685,6 +685,92 @@ moduleIntegrationTestRunner<PacksModuleService>({
         );
       });
 
+      it('refuses a draw time that has passed or is under 2 minutes away', async () => {
+        // The event opened an hour ago: these draw times are inside its window,
+        // so only the past-time rule can refuse them.
+        const { id: eventId } = await saveEvent();
+        for (const drawAt of [
+          new Date(Date.now() - 10 * 60 * 1000),
+          new Date(Date.now() + 60 * 1000),
+        ]) {
+          await rejectsWith(
+            saveCreditPrize(eventId, { drawAt }),
+            MedusaError.Types.INVALID_DATA,
+          );
+        }
+        // The clock is injectable: an hour ahead is "past" once now moves on.
+        const drawAt = new Date(Date.now() + HOUR);
+        await rejectsWith(
+          saveCreditPrize(eventId, {
+            drawAt,
+            now: new Date(drawAt.getTime() + 1000),
+          }),
+          MedusaError.Types.INVALID_DATA,
+        );
+        expect(
+          await service.listLuckyDrawPrizes({ event_id: eventId }),
+        ).toHaveLength(0);
+
+        // A draft edit that MOVES the time is checked too...
+        const { id } = await saveCreditPrize(eventId, { drawAt });
+        const later = new Date(drawAt.getTime() + HOUR);
+        await rejectsWith(
+          saveCreditPrize(eventId, {
+            id,
+            drawAt: later,
+            now: new Date(later.getTime() - 60 * 1000),
+          }),
+          MedusaError.Types.INVALID_DATA,
+        );
+        // ...but an unchanged re-post after the time passed still saves.
+        await saveCreditPrize(eventId, {
+          id,
+          title: 'Retitled late',
+          drawAt,
+          now: new Date(drawAt.getTime() + HOUR),
+        });
+        expect((await prizeRow(id)).title).toBe('Retitled late');
+      });
+
+      it('refuses publishing when a live prize draw time has passed', async () => {
+        const { id: eventId } = await saveEvent();
+        const drawAt = new Date(Date.now() + HOUR);
+        const { id } = await saveCreditPrize(eventId, { drawAt });
+        // A cancelled prize's time does not count.
+        const { id: gone } = await saveCreditPrize(eventId, {
+          drawAt: new Date(Date.now() + 10 * 60 * 1000),
+        });
+        await cancel(gone);
+        for (const now of [
+          new Date(drawAt.getTime() + 1000),
+          new Date(drawAt.getTime() - 60 * 1000),
+        ]) {
+          await rejectsWith(
+            service.publishLuckyDrawEvent({
+              id: eventId,
+              adminId: ADMIN,
+              reason: REASON,
+              now,
+            }),
+            MedusaError.Types.INVALID_DATA,
+          );
+        }
+        expect(
+          (await service.listLuckyDrawEvents({ id: eventId }))[0].status,
+        ).toBe('draft');
+        expect((await prizeRow(id)).seed_hash).toBeNull();
+
+        await service.publishLuckyDrawEvent({
+          id: eventId,
+          adminId: ADMIN,
+          reason: REASON,
+          now: new Date(drawAt.getTime() - 3 * 60 * 1000),
+        });
+        expect(
+          (await service.listLuckyDrawEvents({ id: eventId }))[0].status,
+        ).toBe('published');
+      });
+
       it('publish gives every prize a seed hash and moves the event to published', async () => {
         const { id: eventId } = await saveEvent();
         await makeCard('c-pub');
@@ -1188,6 +1274,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
           entrant_count: 2,
           drawn_at: drawnAt.toISOString(),
           seed: 'e'.repeat(64),
+          // A card prize with a winner and no pull: nothing was minted.
+          granted: false,
         });
       });
 
@@ -1234,6 +1322,34 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
       });
     });
+    describe('the player page', () => {
+      it('skips a published event whose prizes were all cancelled', async () => {
+        const credit = {
+          kind: 'credit' as const,
+          card_handle: null,
+          credit_myr: 5,
+        };
+        const right = await makeEvent({
+          starts_at: new Date(Date.now() - 2 * HOUR),
+        });
+        const shown = await makePrize(right.id, credit);
+        // Starts later and ends later, so it would win both picks — but it
+        // has nothing left to enter.
+        const wrong = await makeEvent();
+        await makePrize(wrong.id, { ...credit, cancelled_at: new Date() });
+
+        const live = await service.luckyDrawPage();
+        expect(live.event?.id).toBe(right.id);
+        expect(live.prizes.map((p) => p.id)).toEqual([shown.id]);
+
+        // The recently-ended fallback skips it too.
+        const ended = await service.luckyDrawPage({
+          now: new Date(Date.now() + 30 * HOUR),
+        });
+        expect(ended.event?.id).toBe(right.id);
+      });
+    });
+
     describe('the draw', () => {
       const secret = () => process.env.LUCKY_DRAW_SEED_SECRET!;
 
@@ -1626,6 +1742,41 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(
           await service.drawDueLuckyDrawPrizes({ now: after(prize) }),
         ).toEqual({ drawn: 0, failed: 0 });
+      });
+
+      it('the admin overview flags a drawn prize whose winner got nothing', async () => {
+        await createCard('gr-card');
+        const credit = await committedPrize();
+        const card = await committedPrize({
+          kind: 'card',
+          card_handle: 'gr-card',
+          credit_myr: null,
+        });
+        const gone = await committedPrize({
+          kind: 'card',
+          card_handle: 'gr-gone',
+          credit_myr: null,
+        });
+        const empty = await committedPrize();
+        await fund('cus_gr', 100);
+        for (const p of [credit, card, gone]) await enter('cus_gr', p.id, 5);
+
+        expect(
+          // `empty` was made last, so it draws last.
+          await service.drawDueLuckyDrawPrizes({ now: after(empty) }),
+        ).toEqual({ drawn: 4, failed: 0 });
+
+        const grantedOf = new Map(
+          (await service.adminLuckyDrawOverview())
+            .flatMap((e) => e.prizes)
+            .map((p) => [p.id, p.result?.granted]),
+        );
+        expect(grantedOf.get(credit.id)).toBe(true);
+        expect(grantedOf.get(card.id)).toBe(true);
+        // A winner with no pull minted (the Card row was gone) is owed a prize.
+        expect(grantedOf.get(gone.id)).toBe(false);
+        // Nobody entered: nothing is owed.
+        expect(grantedOf.get(empty.id)).toBe(true);
       });
 
       it('disabled entrants are excluded and refunded; all-disabled → null winner', async () => {

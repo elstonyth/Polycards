@@ -824,7 +824,7 @@ medusaIntegrationTestRunner({
           await fund(ada.id, 100);
           await enter(prizeId, { tickets: 30 }, adaHeaders());
 
-          // Not drawn yet: 404, and the 404 is not cached.
+          // Not drawn yet: 404.
           expect(
             (await get(`/store/lucky-draw/results/${prizeId}`, adaHeaders()))
               .status,
@@ -834,6 +834,8 @@ medusaIntegrationTestRunner({
           ).toEqual({ results: [], next_before: null });
 
           await drawAfter(49);
+          // The 404 is remembered ~2 s (the draw-minute polls); skip the wait.
+          clearLuckyDrawCache();
 
           const res = await get(
             `/store/lucky-draw/results/${prizeId}`,
