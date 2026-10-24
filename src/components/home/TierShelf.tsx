@@ -2,7 +2,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowRight } from 'lucide-react';
 import Reveal from '@/components/Reveal';
-import ShelfTabs from '@/components/home/ShelfTabs';
+import ShelfTabs, { ShelfHeader } from '@/components/home/ShelfTabs';
 import {
   packHref,
   type Pack,
@@ -38,32 +38,17 @@ export default function TierShelf({
       aria-labelledby="shelf-heading"
       className="px-fluid mt-10 w-full lg:mt-14"
     >
-      <div className="flex items-baseline justify-between">
-        <h2
-          id="shelf-heading"
-          className="font-heading text-2xl tracking-tight text-white lg:text-4xl"
-        >
-          Find your next pull.
-        </h2>
-        <Link
-          href="/slots"
-          className="flex min-h-11 items-center gap-1 text-[13px] font-semibold text-neutral-400 transition-colors hover:text-white"
-        >
-          All packs
-          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-        </Link>
-      </div>
-      <p className="mt-1 text-sm text-neutral-400">
-        Pick a pack. See the cards and odds. Make it a moment.
-      </p>
-
       {shelves.length === 0 ? (
-        <p className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-10 text-center text-[13px] text-neutral-400">
-          No packs available right now — check back soon.
-        </p>
+        <>
+          <ShelfHeader href="/slots" />
+          <p className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-10 text-center text-[13px] text-neutral-400">
+            No packs available right now — check back soon.
+          </p>
+        </>
       ) : (
         <ShelfTabs
-          categories={shelves}
+          // Tab chrome only — the packs travel inside the server-rendered panels.
+          categories={shelves.map(({ id, tab, icon }) => ({ id, tab, icon }))}
           panels={Object.fromEntries(
             shelves.map((c) => [
               c.id,

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import {
   ChevronRight,
@@ -20,6 +21,7 @@ import PackCategoryTabs from '@/components/PackCategoryTabs';
 import {
   catalogGroupOf,
   packHref,
+  pickCategory,
   CATALOG_GROUP_HEADING,
   CATALOG_GROUP_ORDER,
   type CatalogGroup,
@@ -261,30 +263,26 @@ const GROUP_CHROME: Record<
 
 export default function CatalogClient({
   categories,
-  initialCategory,
   freePack = null,
 }: {
+  /** Only categories that have packs. */
   categories: PackCategory[];
-  initialCategory: string;
   /** Visible badge state, or null. `claim` only while this customer's one-time
    *  welcome claim is unspent; `signup` for logged-out visitors while an
    *  active free pack exists. The badge is the free pack's only entry point
    *  (it is not in `categories`). */
   freePack?: Exclude<FreePackState, { mode: 'hidden' }> | null;
 }) {
-  const [picked, setActive] = useState<string>(initialCategory);
-  // A refresh can drop the picked franchise; fall back to the first one left.
-  const active = categories.some((c) => c.id === picked)
-    ? picked
-    : (categories[0]?.id ?? '');
+  // The URL is the only state: Back to a cached /slots, a shared link and a
+  // refresh that drops a franchise all read the same ?category=.
+  const active =
+    pickCategory(categories, useSearchParams().get('category') ?? undefined) ??
+    '';
   const pick = (id: string) => {
-    setActive(id);
-    // Back from a pack page (and a shared link) lands on the same franchise.
-    window.history.replaceState(
-      null,
-      '',
-      `?category=${encodeURIComponent(id)}`,
-    );
+    // Next syncs useSearchParams with replaceState; other params survive.
+    const params = new URLSearchParams(window.location.search);
+    params.set('category', id);
+    window.history.replaceState(null, '', `?${params}`);
   };
 
   // One franchise at a time; the sections below regroup it by composition,
@@ -327,9 +325,10 @@ export default function CatalogClient({
         {BUYBACK_RATE_LABEL} of card value in your vault.
       </p>
 
-      {/* Sticky franchise switch — only once there are two to pick from. */}
+      {/* Franchise switch — only once there are two to pick from. Not sticky:
+          the app header is sticky itself and would cover it. */}
       {categories.length > 1 && (
-        <div className="sticky top-2 z-20 mb-6">
+        <div className="mb-6">
           <PackCategoryTabs
             categories={categories}
             active={active}

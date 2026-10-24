@@ -14,7 +14,7 @@ export default function PackCategoryTabs({
   active,
   onChange,
 }: {
-  categories: PackCategory[];
+  categories: Pick<PackCategory, 'id' | 'tab' | 'icon'>[];
   active: string;
   onChange: (id: string) => void;
 }) {

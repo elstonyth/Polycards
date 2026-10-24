@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { getPackCategories } from '@/lib/data/packs';
 import { getFreePackState } from '@/lib/data/free-pack';
-import { pickCategory } from '@/lib/packs-data';
 import CatalogClient from './CatalogClient';
 
 export const metadata: Metadata = {
@@ -12,27 +11,19 @@ export const metadata: Metadata = {
 // Pack catalog read live from the backend. Render fresh.
 export const dynamic = 'force-dynamic';
 
-export default async function SlotsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ category?: string }>;
-}) {
-  const [{ category }, categories, freePack] = await Promise.all([
-    searchParams,
+export default async function SlotsPage() {
+  const [categories, freePack] = await Promise.all([
     getPackCategories(),
     // Per-visitor and never cached; degrades to "hidden" on any failure, so it
     // can't take the catalog down with it.
     getFreePackState(),
   ]);
 
-  // Honor /slots?category=<key> when it has packs; else the first franchise
-  // that does. Only categories with packs get a tab.
-  const listed = categories.filter((c) => c.packs.length > 0);
-
   return (
     <CatalogClient
-      categories={listed}
-      initialCategory={pickCategory(listed, category) ?? ''}
+      // Only categories with packs get a tab; the client picks one from
+      // ?category= (else the first).
+      categories={categories.filter((c) => c.packs.length > 0)}
       // The free pack is absent from `categories` by design (the backend hides
       // its category) — the badge is its only entry point.
       freePack={freePack.mode === 'hidden' ? null : freePack}

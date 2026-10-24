@@ -1,5 +1,7 @@
 // /slots is force-dynamic and awaits the pack catalog before its first byte.
-// Mirrors CatalogClient's shell: franchise switch over a grid of pack cards.
+// Mirrors CatalogClient's shell: a grid of pack cards. No franchise switch —
+// the loader can't know whether there will be one, and a phantom switch makes
+// the single-franchise page jump.
 export default function SlotsLoading() {
   return (
     <div
@@ -8,13 +10,6 @@ export default function SlotsLoading() {
       className="mx-auto w-full animate-pulse px-fluid py-4 motion-reduce:animate-none"
     >
       <span className="sr-only">Loading packs</span>
-
-      {/* Franchise switch */}
-      <div className="mb-6 flex gap-1 rounded-full border border-white/10 bg-neutral-900 p-1">
-        {[0, 1].map((i) => (
-          <div key={i} className="h-12 flex-1 rounded-full bg-white/10" />
-        ))}
-      </div>
 
       {/* Pack grid */}
       <div className="h-6 w-40 rounded bg-white/10" />
