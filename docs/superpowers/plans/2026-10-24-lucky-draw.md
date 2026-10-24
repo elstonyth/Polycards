@@ -817,7 +817,7 @@ git commit -m "test(lucky-draw): Playwright capture for the vault row, page, ent
 ## Launch checklist (operator, after merge and deploy — not code)
 
 1. Codex asset pass replaces the three placeholder slots (spec §11) before 2026-11-01.
-2. Set `LUCKY_DRAW_SEED_SECRET` (random, ≥ 32 bytes) in the production app spec BEFORE publishing any event, and never change it while a published prize is undrawn (a change makes those draws refuse).
+2. Set `LUCKY_DRAW_SEED_SECRET` (random, ≥ 32 bytes) as an APP-LEVEL secret so it reaches both the backend service and the worker; put the value in the deploy env file used by do-apply (the repo spec only holds the placeholder) BEFORE publishing any event; never change it while a published prize is undrawn.
 3. Admin → Rewards → Lucky draw: create "November 2026" (start 2026-11-01 00:00, end 2026-11-30 23:59 MYT), add prizes (~RM 100k total), publish.
 4. Admin → Tasks: set Tickets on the tasks that should pay them (e.g. weekly top-up RM 500 → 50, weekly 7-day check-in → 2).
 5. After 2026-11-30 23:59 MYT, confirm each prize shows a result within a minute; check the job log for `failed`.

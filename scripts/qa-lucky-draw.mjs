@@ -1,7 +1,7 @@
 // Lucky Draw visual QA (spec 2026-10-24 §5, §9, §10) against the standalone
 // production build. DEMO DATA: run it against the fixture backend
 // scripts/qa-lucky-draw-mock.mjs (the storefront built with
-// NEXT_PUBLIC_MEDUSA_BACKEND_URL=http://localhost:9199); the session cookie is
+// NEXT_PUBLIC_MEDUSA_BACKEND_URL=http://127.0.0.1:9199); the session cookie is
 // seeded directly, the mock ignores auth.
 //
 // Per viewport (375×812, 1440×900): the vault tickets row, the ?open=1 intro,
@@ -25,7 +25,7 @@ import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE = process.env.PW_BASE ?? 'http://localhost:4100';
-const MOCK = process.env.PW_MOCK ?? 'http://localhost:9199';
+const MOCK = process.env.PW_MOCK ?? 'http://127.0.0.1:9199';
 const OUT = process.env.PW_OUT ?? 'docs/research';
 const CHROME = '[data-site-chrome] { visibility: hidden !important; }';
 const BANNED = /\b(bet|bets|betting|gamble|gambling|lottery|jackpot)\b/i;

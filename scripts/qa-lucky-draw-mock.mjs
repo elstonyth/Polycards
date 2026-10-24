@@ -9,22 +9,28 @@
 // real fair-draw maths — HMAC-SHA256(seed hex, prize id) mod total tickets —
 // so "How to check" on the result sheet holds for the demo numbers too.
 //
-// Usage: node scripts/qa-lucky-draw-mock.mjs   (port 9199, QA_MOCK_PORT)
-//   POST /__mock/reset?drawIn=60   fresh state, timed prize draws in 60 s
+// Usage: node scripts/qa-lucky-draw-mock.mjs   (127.0.0.1 only)
+//   QA_MOCK_PORT=9199              port (default 9199)
+//   QA_DRAW_IN=90                  timed prize draws this many s after start
 //   QA_SLAB_IMAGE=<png path>       served at /media/slab.png as the card prize
+//   POST /__mock/reset?drawIn=60   fresh state, timed prize draws in 60 s
+// The storefront under test must be built against it:
+//   NEXT_PUBLIC_MEDUSA_BACKEND_URL=http://127.0.0.1:9199
+//   NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_mock_preview   (any value; ignored)
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 
 const PORT = Number(process.env.QA_MOCK_PORT ?? 9199);
 const SLAB_FILE = process.env.QA_SLAB_IMAGE ?? null;
-const ORIGIN = `http://localhost:${PORT}`;
+const ORIGIN = `http://127.0.0.1:${PORT}`;
 const SLAB_URL = SLAB_FILE
   ? `${ORIGIN}/media/slab.png`
   : '/images/app/polycards-slab-back.webp';
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
-const EVENT_END = '2026-11-30T15:59:00.000Z'; // 30 Nov 23:59 MYT
+// Relative to mock start, so the demo event never ends under the QA run.
+const EVENT_END = new Date(Date.now() + 30 * DAY).toISOString();
 
 const person = (who, face) => ({
   who,
@@ -413,4 +419,4 @@ createServer((req, res) => {
     res.writeHead(status, { ...cors, 'content-type': 'application/json' });
     res.end(JSON.stringify(json));
   });
-}).listen(PORT, () => console.log(`lucky-draw mock on ${ORIGIN}`));
+}).listen(PORT, '127.0.0.1', () => console.log(`lucky-draw mock on ${ORIGIN}`));

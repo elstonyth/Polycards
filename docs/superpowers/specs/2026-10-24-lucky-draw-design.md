@@ -159,6 +159,9 @@ each put in, ranked 1–10.
   - Publish the event: it goes live on the storefront at its start time.
   - See, per prize: entrants, tickets, and after the draw the result.
   - Cancel a prize before its draw: every entrant's tickets on it are refunded.
+  - Withdrawing an event = cancel all its prizes (refunds every entrant; an
+    event with no live prize is never shown). A one-click event cancel is
+    follow-up work.
 - **Card prizes work exactly like today's reward cards** (weekly-challenge and
   task card prizes): admin picks any card, and at the draw the winner gets it
   the same way a challenge winner does. No extra rules for prize cards.
