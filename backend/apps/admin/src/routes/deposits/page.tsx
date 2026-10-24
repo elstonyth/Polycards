@@ -189,7 +189,17 @@ const DepositsPage = () => {
                       {d.net_amount === null ? '—' : rm(d.net_amount)}
                     </Table.Cell>
                     <Table.Cell>
-                      {statusBadge(d, t(`deposits.statusLabel.${d.status}`))}
+                      {/* Past the sweep's window a pending row is no longer
+                          the customer's move: the gateway lookup keeps
+                          failing, or the sweep quarantined a mismatched
+                          payment for a human. Named calmly, never an alarm,
+                          but distinct so support can tell it apart. */}
+                      {statusBadge(
+                        d,
+                        d.stale
+                          ? t('deposits.statusChecking')
+                          : t(`deposits.statusLabel.${d.status}`),
+                      )}
                     </Table.Cell>
                     {/* All references support can quote: ours (merchant) is
                         what their back office lists, theirs (gateway) is null

@@ -549,6 +549,7 @@
       "failed": "Rejected",
       "expired": "Not paid"
     },
+    "statusChecking": "Checking with gateway",
     "empty": "No deposits in this view.",
     "loadError": "Could not load deposits.",
     "tableLabel": "Deposits table",
