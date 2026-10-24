@@ -205,6 +205,24 @@ export const doublePayAcross = (
     : undefined;
 };
 
+/**
+ * Pending deposits the sweep should long since have closed (`stuck`, computed
+ * server-side: two sweeps past the reconcile window, with a gateway id). Not
+ * `stale` — that also catches customers who walked away, which the next sweep
+ * expires, and operators read it as a gateway fault. The route sorts pending
+ * oldest first, so the stuck rows lead the page; a full page of them with more
+ * behind is a floor, not a count.
+ */
+export const stuckDeposits = (rows: GatewayDeposit[], total: number) => {
+  const stuck = rows.filter((r) => r.stuck);
+  return {
+    count: stuck.length,
+    capped:
+      stuck.length === rows.length && total > rows.length && rows.length > 0,
+    oldest: oldestOf(stuck),
+  };
+};
+
 export interface PaymentRow {
   id: string;
   kind: 'deposit' | 'withdrawal';

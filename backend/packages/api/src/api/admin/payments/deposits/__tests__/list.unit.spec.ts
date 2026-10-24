@@ -1,5 +1,8 @@
 import { GET, parseStatusFilter } from '../route';
-import { GATEWAY_STALE_AFTER_MS } from '../../../../../modules/packs/gateway-reconcile';
+import {
+  GATEWAY_FULL_SWEEP_EVERY_MIN,
+  GATEWAY_STALE_AFTER_MS,
+} from '../../../../../modules/packs/gateway-reconcile';
 import type {
   FakeFacet,
   GatewayReports,
@@ -66,15 +69,8 @@ describe('parseStatusFilter', () => {
     expect(parseStatusFilter(['settled'])).toBe('pending');
   });
 
-  it('accepts the supported views', () => {
-    for (const s of [
-      'resolved',
-      'pending',
-      'settled',
-      'failed',
-      'expired',
-      'all',
-    ]) {
+  it('accepts the four supported views', () => {
+    for (const s of ['pending', 'settled', 'failed', 'all']) {
       expect(parseStatusFilter(s)).toBe(s);
     }
   });
@@ -102,16 +98,6 @@ describe('GET /admin/payments/deposits', () => {
     expect(calls.filter).toEqual({});
     expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
     expect(out.body.total).toBe(2);
-  });
-
-  it('the "resolved" view lists only settled and refused rows, newest first', async () => {
-    const { res, out } = mkRes();
-    const { scope, calls } = mkScope([deposit(1, { status: 'settled' })]);
-    await GET({ scope, query: { status: 'resolved' } } as any, res);
-
-    expect(calls.filter).toEqual({ status: ['settled', 'failed'] });
-    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
-    expect(out.body.status).toBe('resolved');
   });
 
   it('an explicit ?sort= overrides the status-dependent default, with id tiebreaker', async () => {
@@ -173,6 +159,36 @@ describe('GET /admin/payments/deposits', () => {
 
     expect(out.body.deposits[0].stale).toBe(true);
     expect(out.body.deposits[1].stale).toBe(false);
+  });
+
+  // `stuck` = what the dashboard alarms on: pending two full sweeps past the
+  // stale window WITH a gateway id. An abandoned cashier is expired by then;
+  // a row with no gateway id never reached a cashier, so it cannot be paid.
+  it('flags stuck only past two sweeps beyond the window, with a gateway id', async () => {
+    const sweep = GATEWAY_FULL_SWEEP_EVERY_MIN * 60 * 1000;
+    const ago = (ms: number) => new Date(Date.now() - GATEWAY_STALE_AFTER_MS - ms);
+    const { res, out } = mkRes();
+    const { scope } = mkScope([
+      deposit(1, { created_at: ago(sweep) }),
+      deposit(2, { created_at: ago(3 * sweep) }),
+      deposit(3, { created_at: ago(3 * sweep), gateway_transaction_id: null }),
+      deposit(4, {
+        status: 'settled',
+        amount_settled: '30.00',
+        created_at: ago(30 * sweep),
+      }),
+    ]);
+    await GET({ scope, query: { status: 'all' } } as any, res);
+
+    expect(out.body.deposits.map((d: any) => d.stuck)).toEqual([
+      false,
+      true,
+      false,
+      false,
+    ]);
+    // The broader `stale` still fires on the first one — that is the
+    // abandoned-cashier window the dashboard no longer alarms on.
+    expect(out.body.deposits[0].stale).toBe(true);
   });
 
   it('never flags a settled row, however old', async () => {

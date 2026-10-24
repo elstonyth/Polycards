@@ -4,7 +4,10 @@ import {
   resolvePacks,
   type GatewayReports,
 } from '../../../../modules/packs/facets';
-import { GATEWAY_STALE_AFTER_MS } from '../../../../modules/packs/gateway-reconcile';
+import {
+  GATEWAY_FULL_SWEEP_EVERY_MIN,
+  GATEWAY_STALE_AFTER_MS,
+} from '../../../../modules/packs/gateway-reconcile';
 import {
   parsePaginationParams,
   parseSortParam,
@@ -31,13 +34,7 @@ import {
 // deposit the gateway never ruled on. It needs its own view precisely because
 // this page exists to answer "did somebody pay and not get credit?", and an
 // expired row is the strongest candidate for a yes.
-//
-// 'resolved' is a view too: only the rows the gateway has ruled on (settled or
-// refused). It is the dashboard's default since 2026-10-25 — the operator found
-// pending/expired rows (customers who opened the cashier and never paid) to be
-// noise, and the sweep chases those on its own.
 const STATUS_FILTERS = [
-  'resolved',
   'pending',
   'settled',
   'failed',
@@ -61,6 +58,17 @@ export function parseStatusFilter(raw: unknown): StatusFilter {
 // ordering targets the numeric column (proved against a real database in
 // integration-tests/http/gateway-reconcile.spec.ts, not just a mock).
 const SORTABLE = new Set(['created_at', 'amount_requested', 'amount_settled']);
+
+// A pending row the sweep should long since have closed. An abandoned cashier
+// requeries as non-final and expires on the first full sweep past the stale
+// window, so `stale` alone mostly flags customers who walked away (the noise
+// operators asked to stop seeing, 2026-10-25). Two full sweeps later, a row
+// that still has the gateway's id (the customer DID get a cashier) is stuck on
+// our side or theirs — quarantined, an unanswerable requery, an unknown state —
+// and may be a payment nobody credited. Rows without a gateway id never
+// reached a cashier, so they cannot be paid and are never stuck.
+const STUCK_AFTER_MS =
+  GATEWAY_STALE_AFTER_MS + 2 * GATEWAY_FULL_SWEEP_EVERY_MIN * 60 * 1000;
 
 export async function GET(
   req: MedusaRequest,
@@ -102,11 +110,7 @@ export async function GET(
   const order: Record<string, 'ASC' | 'DESC'> = { [key]: dir, id: dir };
 
   const [rows, total] = await packs.listAndCountGatewayDeposits(
-    status === 'all'
-      ? {}
-      : status === 'resolved'
-        ? { status: ['settled', 'failed'] }
-        : { status },
+    status === 'all' ? {} : { status },
     { skip: offset, take: limit, order },
   );
 
@@ -124,9 +128,8 @@ export async function GET(
   const emailById = new Map(customers.map((c) => [c.id, c.email]));
 
   // `stale` is computed here, from the SAME window the sweep uses, so the
-  // dashboard and the job can never disagree about what counts as overdue. A
-  // pending row past it means the sweep has had at least six chances to resolve
-  // this deposit and has not — i.e. look at it by hand.
+  // dashboard and the job can never disagree about what counts as overdue.
+  // `stuck` is the narrower signal the dashboard alarms on — see STUCK_AFTER_MS.
   const now = Date.now();
   const deposits = rows.map((r) => ({
     id: r.id,
@@ -166,6 +169,10 @@ export async function GET(
     stale:
       r.status === 'pending' &&
       now - new Date(r.created_at).getTime() > GATEWAY_STALE_AFTER_MS,
+    stuck:
+      r.status === 'pending' &&
+      !!r.gateway_transaction_id &&
+      now - new Date(r.created_at).getTime() > STUCK_AFTER_MS,
   }));
 
   // Identity-varying response carrying emails

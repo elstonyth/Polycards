@@ -1573,12 +1573,13 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
   postJson<{ pixel_pokemon: PixelPokemonRow }>('/admin/pixel-pokemon', body);
 
 // Gateway deposits (GET /admin/payments/deposits) — the operator's only
-// window into money-in. 'resolved' = settled + refused rows only (the
-// dashboard default). 'stale' means the row is still pending past the
-// reconciliation sweep's window; the route still sends it, the dashboard no
-// longer renders it.
+// window into money-in. 'stale' means the row is still pending past the
+// reconciliation sweep's window — mostly a customer who walked away, which the
+// next sweep expires. 'stuck' is the narrow subset the dashboard flags: still
+// pending two sweeps later with a gateway id, i.e. possibly a payment that
+// landed at the gateway without ever being credited here.
 export type GatewayDepositView =
-  'resolved' | 'pending' | 'settled' | 'failed' | 'expired' | 'all';
+  'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1609,6 +1610,7 @@ export interface GatewayDeposit {
   created_at: string;
   settled_at: string | null;
   stale: boolean;
+  stuck: boolean;
 }
 
 export interface GatewayDepositsResponse {

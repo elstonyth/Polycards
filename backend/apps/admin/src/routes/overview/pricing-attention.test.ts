@@ -41,6 +41,7 @@ vi.mock('../../lib/queries', () => {
   return {
     usePricingHealth: () => state.pricing,
     useGatewayWithdrawals: () => result({ withdrawals: [], total: 0 }),
+    useGatewayDeposits: () => result({ deposits: [], total: 0 }),
     useDeliveryOrderCount: () => result(0),
     useReferralSettlements: () => result([]),
     useGatewayAudit: () => result({ findings: [] }),

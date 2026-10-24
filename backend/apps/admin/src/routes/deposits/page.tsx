@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Container,
   Heading,
@@ -27,20 +27,20 @@ export const config: RouteConfig = {
   nested: '/payments',
 };
 
-// Pending and expired sit last, labelled as the customer's side ("Awaiting
-// payment" / "Not paid"): they are customers who opened the cashier and have
-// not (or never) paid, which the sweep resolves on its own. Never the default
-// and never an alarm, but support still needs them for an "I paid but got
-// nothing" ticket — the sweep credits a late payment, so a row still here
-// means the gateway has no payment either.
+// Settled first and the default (2026-10-25): operators read unpaid and
+// cancelled cashier sessions as a gateway fault, and TGPay files a customer's
+// own cancel/timeout as 'failed'. The rest stay one click away for support
+// ("I paid but got no credit"); the Overview's stuck-top-up row deep-links
+// here with ?view=pending, which sorts oldest — i.e. stuck — first.
 const VIEWS: GatewayDepositView[] = [
-  'resolved',
   'settled',
   'failed',
   'pending',
   'expired',
   'all',
 ];
+const isView = (v: string | null): v is GatewayDepositView =>
+  VIEWS.includes(v as GatewayDepositView);
 
 // EXACTLY the backend's SORTABLE allow-list (api/admin/payments/deposits/
 // route.ts) — real columns only. Customer and status are computed/joined
@@ -50,9 +50,11 @@ const VIEWS: GatewayDepositView[] = [
 // credited, and a header must sort the value its own cells display.
 type SortKey = 'created_at' | 'amount_requested' | 'amount_settled';
 
-// No "Overdue" alarm (removed 2026-10-25): an old pending row is almost always
-// a customer who abandoned the cashier, and the operator found the warning to
-// be noise. The sweep settles, refuses or expires every row on its own.
+// The orange alarm is for `stuck` rows only (server-side: pending two sweeps
+// past the stale window, with a gateway id) — the one pending case that may be
+// a customer who paid and was not credited. A merely `stale` row is almost
+// always a customer who walked away, which the next sweep expires; it stays
+// grey so it does not read as a gateway fault.
 const statusBadge = (d: GatewayDeposit, label: string) => {
   if (d.status === 'settled')
     return <StatusBadge color="green">{label}</StatusBadge>;
@@ -61,18 +63,23 @@ const statusBadge = (d: GatewayDeposit, label: string) => {
   // 'expired' needs its OWN colour, not the pending fall-through: the sweep
   // gave up on it while the gateway never ruled, which makes it the likeliest
   // uncredited payment on the page — exactly the row that must not read as
-  // "still being chased". Purple because the others are spoken for: green
-  // settled, red refused, grey pending.
+  // "still being chased". Purple because the other four are spoken for and
+  // each carries a meaning this state would contradict: green settled, red
+  // refused, orange the stuck-PENDING alarm, grey healthy-pending.
   if (d.status === 'expired')
     return <StatusBadge color="purple">{label}</StatusBadge>;
-  return <StatusBadge color="grey">{label}</StatusBadge>;
+  return <StatusBadge color={d.stuck ? 'orange' : 'grey'}>{label}</StatusBadge>;
 };
 
 const DepositsPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
-  const [view, setView] = useState<GatewayDepositView>('resolved');
+  const [searchParams] = useSearchParams();
+  const [view, setView] = useState<GatewayDepositView>(() => {
+    const asked = searchParams.get('view');
+    return isView(asked) ? asked : 'settled';
+  });
   // Starts NULL, not seeded: with no explicit sort the route orders pending
   // oldest-first (the work queue) and history views newest-first, and a seeded
   // default would silently flatten that. First header click opts in.
@@ -91,6 +98,8 @@ const DepositsPage = () => {
     setView(next as GatewayDepositView);
     setPage(0);
   };
+
+  const stuckOnPage = data?.deposits.filter((d) => d.stuck).length ?? 0;
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -115,6 +124,16 @@ const DepositsPage = () => {
             </Select.Content>
           </Select>
         </div>
+
+        {stuckOnPage > 0 && (
+          <div className="border-t px-6 py-3">
+            <Text size="small" className="text-ui-fg-subtle">
+              {/* `n`, not `count`: i18next treats `count` as a plural selector
+                  and resolves suffixed keys before the base one. */}
+              {t('deposits.stuckWarning', { n: stuckOnPage })}
+            </Text>
+          </div>
+        )}
 
         {isError ? (
           <div className="border-t px-6 py-8">
@@ -189,15 +208,10 @@ const DepositsPage = () => {
                       {d.net_amount === null ? '—' : rm(d.net_amount)}
                     </Table.Cell>
                     <Table.Cell>
-                      {/* Past the sweep's window a pending row is no longer
-                          the customer's move: the gateway lookup keeps
-                          failing, or the sweep quarantined a mismatched
-                          payment for a human. Named calmly, never an alarm,
-                          but distinct so support can tell it apart. */}
                       {statusBadge(
                         d,
-                        d.stale
-                          ? t('deposits.statusChecking')
+                        d.stuck
+                          ? t('deposits.statusStuck')
                           : t(`deposits.statusLabel.${d.status}`),
                       )}
                     </Table.Cell>

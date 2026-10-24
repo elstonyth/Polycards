@@ -1920,8 +1920,8 @@ export const useRecentGatewayDeposits = (
 ): UseQueryResult<GatewayDepositsResponse> =>
   useQuery({
     queryKey: qk.recentGatewayDeposits(limit),
-    // 'resolved', not 'all': an unpaid cashier session is not a payment.
-    queryFn: () => getGatewayDeposits(0, 'resolved', limit),
+    // 'settled', not 'all': an unpaid or cancelled cashier is not a payment.
+    queryFn: () => getGatewayDeposits(0, 'settled', limit),
   });
 
 export const useRecentGatewayWithdrawals = (

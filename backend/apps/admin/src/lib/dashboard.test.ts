@@ -13,6 +13,7 @@ import {
   paymentStatus,
   percentChange,
   referralSeries,
+  stuckDeposits,
 } from './dashboard';
 import type {
   GatewayDeposit,
@@ -211,13 +212,14 @@ const wd = (
 const dep = (
   id: string,
   created_at: string,
-  stale: boolean,
+  stuck: boolean,
   extra: Partial<GatewayDeposit> = {},
 ): GatewayDeposit =>
   ({
     id,
     created_at,
-    stale,
+    stale: stuck,
+    stuck,
     status: 'pending',
     amount_requested: 100,
     amount_settled: null,
@@ -258,6 +260,34 @@ describe('attentionWithdrawals', () => {
       amount: 0,
       oldest: null,
     });
+  });
+});
+
+describe('stuckDeposits', () => {
+  it('counts only stuck rows and reports the oldest of them', () => {
+    const s = stuckDeposits(
+      [
+        dep('a', '2026-10-14T01:00:00Z', true),
+        dep('b', '2026-10-14T02:00:00Z', true),
+        dep('c', '2026-10-14T03:00:00Z', false),
+      ],
+      3,
+    );
+    expect(s).toEqual({
+      count: 2,
+      capped: false,
+      oldest: '2026-10-14T01:00:00Z',
+    });
+  });
+  it('ignores a stale row that is not stuck (a customer who walked away)', () => {
+    const walkedAway = dep('w', '2026-10-14T00:00:00Z', false, { stale: true });
+    expect(stuckDeposits([walkedAway], 1)).toMatchObject({ count: 0 });
+  });
+  it('caps when a full page is all stuck and more exist', () => {
+    const rows = Array.from({ length: 50 }, (_, i) =>
+      dep(String(i), '2026-10-14T00:00:00Z', true),
+    );
+    expect(stuckDeposits(rows, 80)).toMatchObject({ count: 50, capped: true });
   });
 });
 

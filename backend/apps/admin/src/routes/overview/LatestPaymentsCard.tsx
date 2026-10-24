@@ -20,8 +20,8 @@ export const LatestPaymentsCard = ({
   className?: string;
 }) => {
   const { t } = useTranslation();
-  // The newest few of each; the routes sort these views newest first.
-  // Deposits skip pending/expired rows (see useRecentGatewayDeposits).
+  // The newest few of each, newest first. Top-ups are settled ones only (see
+  // useRecentGatewayDeposits); withdrawals are every status.
   const deposits = useRecentGatewayDeposits(SHOWN);
   const withdrawals = useRecentGatewayWithdrawals(SHOWN);
   const forbidden =

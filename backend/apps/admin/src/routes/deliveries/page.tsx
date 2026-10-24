@@ -82,11 +82,12 @@ const DEPOSIT_TONE: Record<
   // the page and must not read as either settled, refused, or still-in-flight.
   expired: 'purple',
 };
+// Same words as routes/deposits (i18n deposits.statusLabel).
 const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
-  pending: 'Pending',
+  pending: 'Awaiting payment',
   settled: 'Settled',
-  failed: 'Rejected',
-  expired: 'Expired',
+  failed: 'Cancelled / rejected',
+  expired: 'No gateway answer',
 };
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
@@ -238,16 +239,16 @@ const PackPurchases = () => {
   );
 };
 
-// Money IN. Same rows as the standalone /deposits screen's default view
-// (settled + rejected — pending/expired cashier sessions are noise here, and
-// /deposits keeps the filter that reaches them), reusing that screen's query
-// rather than growing a second deposits endpoint.
+// Money IN. Settled top-ups only, the same default as the standalone /deposits
+// screen (which keeps the status filter that reaches unpaid, cancelled and
+// stuck attempts), reusing that screen's query rather than growing a second
+// deposits endpoint.
 // Read-only: a deposit is settled by the gateway callback or the sweep, never
 // by hand here.
 const Topups = () => {
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
-  const { data, isError } = useGatewayDeposits(page, 'resolved');
+  const { data, isError } = useGatewayDeposits(page, 'settled');
   const deposits = data?.deposits ?? null;
 
   return (

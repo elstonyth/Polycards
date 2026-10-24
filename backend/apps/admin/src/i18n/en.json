@@ -526,11 +526,10 @@
     "title": "Deposits",
     "subtitle": "Gateway top-ups — what a customer started paying, and what actually settled.",
     "view": {
-      "resolved": "Settled + rejected",
       "pending": "Awaiting payment",
       "settled": "Settled",
-      "failed": "Rejected",
-      "expired": "Not paid",
+      "failed": "Cancelled / rejected",
+      "expired": "No gateway answer",
       "all": "All attempts"
     },
     "when": "Started",
@@ -546,10 +545,11 @@
     "statusLabel": {
       "pending": "Awaiting payment",
       "settled": "Settled",
-      "failed": "Rejected",
-      "expired": "Not paid"
+      "failed": "Cancelled / rejected",
+      "expired": "No gateway answer"
     },
-    "statusChecking": "Checking with gateway",
+    "statusStuck": "Needs gateway check",
+    "stuckWarning": "{{n}} top-up(s) on this page still have no answer from the gateway well past the usual hour. Not a customer issue: check each one in the gateway back office before crediting anyone by hand.",
     "empty": "No deposits in this view.",
     "loadError": "Could not load deposits.",
     "tableLabel": "Deposits table",
@@ -1281,6 +1281,9 @@
     "withdrawalsToApprove_other": "{{shown}} withdrawals to approve",
     "withdrawalsDetail": "{{amount}} waiting · oldest {{age}}",
     "withdrawalsDetailCapped": "{{amount}} in the first 50 · oldest {{age}}",
+    "stuckTopups_one": "{{shown}} top-up the gateway hasn't confirmed",
+    "stuckTopups_other": "{{shown}} top-ups the gateway hasn't confirmed",
+    "stuckDetail": "Not a customer issue · check with the gateway · oldest {{age}}",
     "ordersToShip_one": "{{shown}} order to ship",
     "ordersToShip_other": "{{shown}} orders to ship",
     "ordersDetail": "New, packing or ready to ship",
