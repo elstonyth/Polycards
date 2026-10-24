@@ -40,8 +40,9 @@ const PAGE_SIZE = 60;
 const PixelPokedexPage = () => {
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
-  // Deck filter — Pokémon and One Piece sprites live in one library.
-  const [franchise, setFranchise] = useState<'' | SpriteFranchise>('');
+  // Deck filter — Pokémon and One Piece sprites live in one library; the page
+  // opens on the Pokémon deck so the two never mix by default.
+  const [franchise, setFranchise] = useState<'' | SpriteFranchise>('pokemon');
   const [custom, setCustom] = useState<'' | 'true'>('');
   const [page, setPage] = useState(0);
 
@@ -147,9 +148,9 @@ const PixelPokedexPage = () => {
         <div className="flex flex-col gap-3 px-6 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <Heading level="h2">Pixel Pokédex</Heading>
+              <Heading level="h2">Pixel sprites</Heading>
               <Text className="text-ui-fg-subtle mt-1" size="small">
-                Browse the pixel-Pokémon library
+                Browse the pixel sprite library
                 {data ? ` (${data.total.toLocaleString('en-US')} entries)` : ''}
                 . Cards link to these by id.
               </Text>
@@ -280,7 +281,7 @@ const PixelPokedexPage = () => {
             aria-label="Deck"
             className="flex flex-wrap items-center gap-1.5"
           >
-            {(['', 'pokemon', 'one-piece'] as const).map((f) => (
+            {(['pokemon', 'one-piece', ''] as const).map((f) => (
               <button
                 key={f || 'all'}
                 type="button"
