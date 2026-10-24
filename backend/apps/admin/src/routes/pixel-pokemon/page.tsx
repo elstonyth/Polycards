@@ -21,6 +21,7 @@ import { resolveImageUrl } from '../../lib/image-url';
 import {
   FRANCHISE_LABEL,
   entryNumber,
+  onePieceSearchTerm,
   type SpriteFranchise,
 } from '../../lib/sprite-franchise';
 import { Pager } from '../../components/Pager';
@@ -47,7 +48,8 @@ const PixelPokedexPage = () => {
   const [page, setPage] = useState(0);
 
   const { data, isError } = usePixelPokemon({
-    q,
+    // One Piece searches understand the TCG spellings ("Big Mom", "Law").
+    q: franchise === 'pokemon' ? q : onePieceSearchTerm(q),
     franchise,
     type,
     custom,

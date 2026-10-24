@@ -16,10 +16,13 @@ import {
 } from '../../lib/pixel-auto-resolve';
 import {
   FRANCHISE_LABEL,
+  autoLinkKey,
   entryNumber,
-  fetchOnePieceBase,
+  fetchOnePieceRoster,
   franchiseFor,
   matchOnePieceEntry,
+  onePieceSearchTerm,
+  pickerDeck,
   type SpriteFranchise,
 } from '../../lib/sprite-franchise';
 
@@ -83,11 +86,16 @@ const CardPokemonFields = ({
   const searchId = `${idPrefix}-pokemon-search`;
   const listboxId = `${idPrefix}-pokemon-listbox`;
   const [search, setSearch] = useState('');
-  // The deck follows the card's set until the operator switches it by hand.
-  const [chosenFranchise, setChosenFranchise] =
-    useState<SpriteFranchise | null>(null);
-  const franchise =
-    chosenFranchise ?? franchiseFor(setName, autoResolveName ?? suggestionName);
+  // The deck follows the card's set until the operator switches it by hand —
+  // and that switch holds only for the card it was made on.
+  const hint = `${setName ?? ''}|${autoResolveName ?? suggestionName}`;
+  const derived = franchiseFor(setName, autoResolveName ?? suggestionName);
+  const [chosen, setChosen] = useState<{
+    deck: SpriteFranchise;
+    hint: string;
+  } | null>(null);
+  const franchise = pickerDeck(chosen, hint, derived);
+  const manualDeck = chosen?.hint === hint;
   // The entry chosen THIS session — drives the preview once picked. On first
   // load it's null and the preview falls back to the card's mirrored sprite.
   const [picked, setPicked] = useState<PixelPokemonRow | null>(null);
@@ -142,7 +150,8 @@ const CardPokemonFields = ({
 
   const q = search.trim();
   const { data, isFetching } = usePixelPokemon({
-    q,
+    // One Piece searches understand the TCG spellings ("Big Mom", "Law").
+    q: franchise === 'one-piece' ? onePieceSearchTerm(q) : q,
     franchise,
     limit: PICKER_LIMIT,
   });
@@ -171,7 +180,9 @@ const CardPokemonFields = ({
   const pickedNumber = pickedForValue ? entryNumber(pickedForValue) : '';
   const previewLabel = pickedForValue
     ? `${pickedForValue.name}${pickedNumber ? ` · ${pickedNumber}` : ''}${
-        pickedForValue.variant !== 'normal' ? ` · ${pickedForValue.variant}` : ''
+        pickedForValue.variant !== 'normal'
+          ? ` · ${pickedForValue.variant}`
+          : ''
       }`
     : linked
       ? 'Linked to a library entry'
@@ -195,29 +206,38 @@ const CardPokemonFields = ({
   // The name the operator pressed "Clear link" on — never auto-relinked, even
   // after a deck switch (the per-deck tryKey alone would re-arm it).
   const clearedFor = useRef<string | null>(null);
+  // The id auto-link set, so a deck switch can take back ONLY that guess.
+  const autoLinked = useRef<string | null>(null);
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   });
   useEffect(() => {
-    if (!autoResolveName || linked) return;
-    if (clearedFor.current === autoResolveName) return;
-    const tryKey = `${franchise}:${autoResolveName}`;
-    if (autoTried.current === tryKey) return;
+    // Auto-link only ever matches in the card's own deck; once the operator
+    // switches decks by hand, linking is theirs.
+    const tryKey = autoLinkKey({
+      name: autoResolveName,
+      linked,
+      manualDeck,
+      clearedFor: clearedFor.current,
+      deck: derived,
+    });
+    if (!tryKey || !autoResolveName || autoTried.current === tryKey) return;
     autoTried.current = tryKey;
     // Each deck matches its own way: Pokémon by the species hidden in the name
     // (dex-keyed, seeded rows), One Piece by the character's whole name.
     const pokemonQ =
-      franchise === 'pokemon' ? autoResolveQuery(autoResolveName) : null;
-    if (franchise === 'pokemon' && !pokemonQ) return;
+      derived === 'pokemon' ? autoResolveQuery(autoResolveName) : null;
+    if (derived === 'pokemon' && !pokemonQ) return;
     let stale = false;
-    (pokemonQ ? fetchSeededCandidates(pokemonQ) : fetchOnePieceBase())
+    (pokemonQ ? fetchSeededCandidates(pokemonQ) : fetchOnePieceRoster())
       .then((rows) => {
         if (stale) return;
         const entry = pokemonQ
           ? matchSeededEntry(autoResolveName, rows)
           : matchOnePieceEntry(autoResolveName, rows);
         if (entry) {
+          autoLinked.current = entry.id;
           setPicked(entry);
           onChangeRef.current({ pixel_pokemon_id: entry.id });
         }
@@ -226,7 +246,22 @@ const CardPokemonFields = ({
     return () => {
       stale = true;
     };
-  }, [autoResolveName, linked, franchise]);
+  }, [autoResolveName, linked, derived, manualDeck]);
+
+  const switchDeck = (f: SpriteFranchise) => {
+    if (f === franchise) return;
+    // A guess made in the other deck is not the operator's pick — drop it.
+    if (
+      autoLinked.current !== null &&
+      value.pixel_pokemon_id === autoLinked.current
+    ) {
+      autoLinked.current = null;
+      setPicked(null);
+      onChange({ pixel_pokemon_id: null });
+    }
+    setChosen({ deck: f, hint });
+    setSearch('');
+  };
 
   const clear = () => {
     clearedFor.current = autoResolveName ?? null;
@@ -261,9 +296,7 @@ const CardPokemonFields = ({
         // A Pokémon upload carries its species, so the card keeps a dex
         // fallback (badge + reel) if the uploaded URL ever breaks.
         dex:
-          franchise === 'pokemon'
-            ? (pokemonFromCard(name)?.dex ?? null)
-            : null,
+          franchise === 'pokemon' ? (pokemonFromCard(name)?.dex ?? null) : null,
         image_url: url,
         variant: 'custom',
       });
@@ -290,10 +323,7 @@ const CardPokemonFields = ({
               type="button"
               variant={f === franchise ? 'primary' : 'secondary'}
               aria-pressed={f === franchise}
-              onClick={() => {
-                setChosenFranchise(f);
-                setSearch('');
-              }}
+              onClick={() => switchDeck(f)}
             >
               {FRANCHISE_LABEL[f]}
             </Button>
@@ -380,7 +410,10 @@ const CardPokemonFields = ({
                   <span className="flex-1 truncate text-sm font-medium">
                     {m.name}
                     {entryNumber(m) && (
-                      <span className="text-ui-fg-subtle"> · {entryNumber(m)}</span>
+                      <span className="text-ui-fg-subtle">
+                        {' '}
+                        · {entryNumber(m)}
+                      </span>
                     )}
                     {m.variant !== 'normal' && (
                       <span className="text-ui-fg-subtle"> · {m.variant}</span>
