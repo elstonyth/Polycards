@@ -72,6 +72,9 @@ const PixelPokedexPage = () => {
   // ── Upload custom pixel-pokémon ──────────────────────────────────────────
   const [showUpload, setShowUpload] = useState(false);
   const [name, setName] = useState('');
+  // The deck the new sprite joins; opens on the deck being browsed.
+  const [deck, setDeck] = useState<SpriteFranchise>('pokemon');
+  // Dex # for a Pokémon, the deck's own number for any other franchise.
   const [dex, setDex] = useState('');
   const [variant, setVariant] = useState('');
   const [types, setTypes] = useState('');
@@ -117,17 +120,22 @@ const PixelPokedexPage = () => {
       return;
     }
     const dexNum = dex.trim() ? Number(dex) : null;
+    const max = deck === 'pokemon' ? 1025 : 99999;
     if (
       dexNum !== null &&
-      (!Number.isInteger(dexNum) || dexNum < 1 || dexNum > 1025)
+      (!Number.isInteger(dexNum) || dexNum < 1 || dexNum > max)
     ) {
-      toast.error('Dex # must be a whole number 1–1025, or left blank.');
+      toast.error(
+        `${deck === 'pokemon' ? 'Dex #' : 'Number'} must be a whole number 1–${max}, or left blank.`,
+      );
       return;
     }
     try {
       await createMut.mutateAsync({
         name: name.trim(),
-        dex: dexNum,
+        franchise: deck,
+        dex: deck === 'pokemon' ? dexNum : null,
+        number: deck === 'pokemon' ? null : dexNum,
         variant: variant.trim() || 'custom',
         types: types
           .split(',')
@@ -158,7 +166,10 @@ const PixelPokedexPage = () => {
             <Button
               size="small"
               variant={showUpload ? 'secondary' : 'primary'}
-              onClick={() => setShowUpload((v) => !v)}
+              onClick={() => {
+                if (!showUpload) setDeck(franchise || 'pokemon');
+                setShowUpload((v) => !v);
+              }}
             >
               {showUpload ? 'Close' : 'Upload pixel Pokémon'}
             </Button>
@@ -166,9 +177,28 @@ const PixelPokedexPage = () => {
 
           {showUpload && (
             <div className="border-ui-border-base bg-ui-bg-subtle flex flex-col gap-3 rounded-lg border p-4">
-              <Text size="small" weight="plus">
-                New custom pixel Pokémon
-              </Text>
+              <div className="flex items-center justify-between gap-2">
+                <Text size="small" weight="plus">
+                  New custom sprite
+                </Text>
+                <div
+                  role="group"
+                  aria-label="Deck of the new sprite"
+                  className="flex gap-1"
+                >
+                  {(['pokemon', 'one-piece'] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      aria-pressed={deck === f}
+                      className={chip(deck === f)}
+                      onClick={() => setDeck(f)}
+                    >
+                      {FRANCHISE_LABEL[f]}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
                   <Label size="small" htmlFor="pp-name">
@@ -176,19 +206,29 @@ const PixelPokedexPage = () => {
                   </Label>
                   <Input
                     id="pp-name"
-                    placeholder="e.g. Pikachu (Shiny)"
+                    placeholder={
+                      deck === 'pokemon'
+                        ? 'e.g. Pikachu (Shiny)'
+                        : 'e.g. Monkey D. Luffy (Gear 5)'
+                    }
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                   />
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label size="small" htmlFor="pp-dex">
-                    Dex # (optional)
+                    {deck === 'pokemon'
+                      ? 'Dex # (optional)'
+                      : 'Number (optional)'}
                   </Label>
                   <Input
                     id="pp-dex"
                     inputMode="numeric"
-                    placeholder="1–1025, or blank"
+                    placeholder={
+                      deck === 'pokemon'
+                        ? '1–1025, or blank'
+                        : 'e.g. 1 for OP #001; variants share it'
+                    }
                     value={dex}
                     onChange={(e) => setDex(e.target.value)}
                   />
