@@ -440,9 +440,9 @@ export default function PackDetailClient({
   return (
     // pb clears the mobile sticky buy bar (fixed above the tab bar).
     <div className="mx-auto w-full px-fluid pb-28 pt-4 lg:pb-4">
-      {/* Back link */}
+      {/* Back link — to this pack's franchise tab */}
       <Link
-        href="/slots"
+        href={`/slots?category=${encodeURIComponent(pack.categoryId)}`}
         className="-mt-2.5 mb-1.5 inline-flex items-center gap-1.5 py-2.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
