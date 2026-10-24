@@ -255,7 +255,7 @@ export function classifyRequeryError(error: unknown): RequeryRefusal {
  * in a GATEWAY_RECONCILE_BATCH-sized, oldest-first window until the sweep does
  * nothing but requery zombies and never reaches a fresh deposit whose callback
  * was dropped: the exact loss this job exists to prevent. They would also each
- * render an orange "Overdue" on the admin deposits page forever.
+ * stay flagged "Needs gateway check" (`stuck`) on the admin dashboard forever.
  *
  * A WEEK, and the size is the whole point. The failures that produce an
  * ambiguous 400 are credential/whitelist/config breakages resolved by a support
