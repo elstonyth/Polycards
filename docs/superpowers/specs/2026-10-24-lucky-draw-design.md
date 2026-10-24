@@ -78,8 +78,6 @@ each put in, ranked 1–10.
 - **A result changes after the draw**, or a prize is drawn twice, re-rolled, or
   paid twice. A result is final.
 - **Tickets spent twice** or a ticket balance below zero.
-- **A prize card disappears before its draw** (pulled from a pack or sold) so
-  the winner gets nothing.
 - **It looks like a casino** (slot machine, flashing coins). `PRODUCT.md` lists
   cheap gacha/casino as an anti-reference. Premium, the card is the hero.
 - **A task with tickets silently becomes a free-pack claim.** See "Tickets on
@@ -128,8 +126,8 @@ each put in, ranked 1–10.
   locks the player's balance, checks it, writes the entry and the ledger row in
   one transaction. Two taps at once must not spend the same tickets twice.
 - Tickets are not tied to an event; one balance carries across events.
-  **Pending operator answer (Q5):** what happens to unused tickets when an event
-  ends? Default until answered: **they carry over** to next month.
+  Unused tickets when an event ends **carry over** to next month (Q5, default
+  kept by operator 2026-10-24).
 - Exact schema (cached balance column vs. sum of ledger) is the builder's call,
   as long as the rules above hold.
 
@@ -161,18 +159,10 @@ each put in, ranked 1–10.
   - Publish the event: it goes live on the storefront at its start time.
   - See, per prize: entrants, tickets, and after the draw the result.
   - Cancel a prize before its draw: every entrant's tickets on it are refunded.
-- **The prize card must still physically exist for the winner.** In software
-  the winner always gets the card: card stock is a fulfilment counter, not a
-  gate (`modules/packs/card-stock.ts`). Pack rolls and delivery requests ignore
-  it, and challenge/task prizes are granted whatever the stock. The real risk
-  is physical: another player pulls the same card from a pack during the month
-  and gets the one slab delivered before the draw.
-  **Pending operator answer (Q2):** default until answered: **a prize card must
-  not be in any live pack.** Publishing refuses a card prize whose card sits in
-  a live pack's pool, and refuses a card with no physical unit in stock. The
-  stock counter is lowered at publish and put back if the prize is cancelled
-  or ends with no entries (bookkeeping, so admin stock views stay right). Pack
-  pools, odds and the roll path are not touched.
+- **Card prizes work exactly like today's reward cards** (weekly-challenge and
+  task card prizes): admin picks any card, and at the draw the winner gets it
+  the same way a challenge winner does. No extra rules for prize cards.
+  _(Operator, 2026-10-24.)_
 - New admin permissions must be declared in `src/policies`. Undeclared policies
   are soft-deleted on every backend boot (see #692).
 
@@ -193,12 +183,12 @@ each put in, ranked 1–10.
   call.)_
 - Players must be logged in to enter. Accounts that are frozen or disabled
   cannot enter (existing account gates).
-- **Pending operator answer (Q3): who may enter.** Tickets have no cap and
+- **Who may enter (Q3, default kept by operator 2026-10-24).** Tickets have no cap and
   daily check-ins can be farmed across many accounts with no phone and no
   top-up (the reason daily-task cards got a sell/delivery lock on 2026-10-23).
   Won prize cards sell back as cash, so farmed accounts could turn check-ins
-  into RM 100k of withdrawable value. Default until answered: **entering needs
-  at least one settled real top-up** on the account. The page tells players
+  into RM 100k of withdrawable value. So **entering needs at least one settled
+  real top-up** on the account. The page tells players
   without one to top up first; earning and holding tickets stays open to
   everyone. The existing daily-task lock does not carry over to draw pulls (a
   draw pull has no task claim, and one entry mixes tickets from many tasks),
@@ -209,15 +199,15 @@ each put in, ranked 1–10.
 
 ### 6. The draw
 
-- **Pending operator answer (Q1):** what starts the draw. Default until
-  answered: **automatic**. A scheduled job checks every minute and draws each
+- **What starts the draw (Q1, default kept by operator 2026-10-24):
+  automatic.** A scheduled job checks every minute and draws each
   prize whose draw time has passed. No admin button decides the moment.
 - The draw uses only entries made **before** the draw time. That list of
   entries (handle, tickets) is frozen into the result.
 - One result per prize, enforced by a unique index in the database (same idea
   as `challenge_payout`). Running the job twice cannot draw twice.
 - If a prize has **no entries** at draw time: no winner, the result says "No
-  entries", and a card prize goes back to stock. _(My call.)_
+  entries", and nothing is paid. _(My call.)_
 - If the winner's account is disabled at draw time, the builder may either
   exclude disabled accounts from the snapshot before drawing (and refund them)
   or treat it as a normal win; excluding is the default. _(My call.)_
@@ -247,8 +237,8 @@ _(My call. The minimum — stored seed + frozen entry list — is a must. The pu
   with `source: 'reward'`, full bonus basis points). Under the 2026-10-15
   withdrawal rules, reward cards sell back as cash. The existing "no top-up = no
   withdraw/delivery" rule still applies.
-- **Credit prize:** **Pending operator answer (Q4).** Default until answered:
-  **bonus credit** (spend on packs, never withdrawable), paid like the weekly
+- **Credit prize (Q4, default kept by operator 2026-10-24):** **bonus credit**
+  (spend on packs, never withdrawable), paid like the weekly
   challenge (`mutateCreditAtomic` with `reward_credit` plus a `WP` ledger row,
   idempotency key per prize). This is the only credit path a job can pay today,
   and it matches the rule "weekly money prize stays bonus". Cash would need a
@@ -303,23 +293,18 @@ them, and it must land before 2026-11-01:
 - Deploys take about 16 minutes; leave room before 2026-11-01 for a deploy, an
   admin setting up the November event, and a fix round.
 
-## Pending operator answers
-
-Defaults above apply until answered.
+## Operator answers (2026-10-24)
 
 1. **Q1 — Draw trigger:** automatic at each prize's draw time (default: event
-   end, 30 Nov 23:59 MYT)?
-2. **Q2 — Prize cards:** only cards not in any live pack, with a physical unit
-   in stock (default)?
-3. **Q3 — Who may enter:** accounts with at least one real top-up (default), or
-   everyone?
-4. **Q4 — Credit prizes:** bonus credit (default) or withdrawable cash?
-5. **Q5 — Unused tickets at event end:** carry over (default) or expire?
+   end, 30 Nov 23:59 MYT).
+2. **Q2 — Prize cards:** work like today's reward cards; no extra rules.
+3. **Q3 — Who may enter:** accounts with at least one settled real top-up.
+4. **Q4 — Credit prizes:** bonus credit.
+5. **Q5 — Unused tickets at event end:** carry over.
 
 ## Left to the builder
 
 - Exact tables and columns, as long as the rules above hold.
-- How the stock hold reuses the existing stock-movement records.
 - Polling interval for the spin moment.
 - Admin page layout, following existing admin pages.
 - Whether tickets earned before an event starts can be entered once it starts
