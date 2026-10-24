@@ -39,7 +39,7 @@ export function TicketOpenIntro({ onDone }: { onDone: () => void }) {
           phase === 'out' && 'scale-110 opacity-0',
         )}
       >
-        <TicketArt width={240} priority />
+        <TicketArt width={240} eager />
         <p className="font-heading text-2xl text-white">LUCKY DRAW</p>
       </div>
     </div>

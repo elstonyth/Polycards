@@ -83,6 +83,9 @@ function useSoundPlayer() {
     gain: GainNode;
   } | null>(null);
   const celebrations = useRef(0);
+  // duck() holds, counted apart: silence() (tab hidden, mute) clears the
+  // reveals but must not drop a hold whose wheel is still on screen.
+  const ducks = useRef(0);
 
   const load = useCallback((name: SoundName, ac: AudioContext) => {
     let pending = buffers.current.get(name);
@@ -106,7 +109,7 @@ function useSoundPlayer() {
     const bed = music.current;
     if (!bed) return;
     bed.gain.gain.setTargetAtTime(
-      MUSIC_VOLUME * (celebrations.current > 0 ? 0.35 : 1),
+      MUSIC_VOLUME * (celebrations.current > 0 || ducks.current > 0 ? 0.35 : 1),
       bed.gain.context.currentTime,
       0.15,
     );
@@ -143,7 +146,9 @@ function useSoundPlayer() {
           return;
         const source = ac.createBufferSource();
         const gain = ac.createGain();
-        gain.gain.value = MUSIC_VOLUME * (celebrations.current > 0 ? 0.35 : 1);
+        gain.gain.value =
+          MUSIC_VOLUME *
+          (celebrations.current > 0 || ducks.current > 0 ? 0.35 : 1);
         source.buffer = buffer;
         source.loop = true;
         source.connect(gain).connect(ac.destination);
@@ -203,7 +208,7 @@ function useSoundPlayer() {
   // needs the room — the Lucky Draw wheel. Every duck(true) gets a duck(false).
   const duck = useCallback(
     (on: boolean) => {
-      celebrations.current = Math.max(0, celebrations.current + (on ? 1 : -1));
+      ducks.current = Math.max(0, ducks.current + (on ? 1 : -1));
       duckMusic();
     },
     [duckMusic],

@@ -121,6 +121,9 @@ export function PrizeWheel({
   const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  // Off-screen, the drifting ring skips its per-frame writes.
+  const visible = useRef(true);
 
   const open = useRef(0);
   const openTo = useRef(0);
@@ -156,7 +159,14 @@ export function PrizeWheel({
     read();
     const ro = new ResizeObserver(read);
     ro.observe(el);
-    return () => ro.disconnect();
+    const io = new IntersectionObserver((entries) => {
+      visible.current = entries.at(-1)?.isIntersecting ?? true;
+    });
+    io.observe(el);
+    return () => {
+      ro.disconnect();
+      io.disconnect();
+    };
   }, []);
 
   // Opening swaps the list for the details, so the focused row unmounts:
@@ -179,6 +189,14 @@ export function PrizeWheel({
     const turnNow = () =>
       openTo.current < 1 ? openTo.current : 1 + posTo.current;
     const setTurn = (t: number) => {
+      // A scroll never moves focus itself, but if it swaps the list and the
+      // details while focus is inside them, focus would fall to the body.
+      if (
+        openTo.current >= 0.5 !== t >= 0.5 &&
+        sectionRef.current?.contains(document.activeElement)
+      ) {
+        moveFocus.current = true;
+      }
       openTo.current = clamp(t, 0, 1);
       if (t <= 1) {
         posTo.current = 0;
@@ -190,9 +208,10 @@ export function PrizeWheel({
     const onWheel = (e: WheelEvent) => {
       // ctrl+wheel is a trackpad pinch: leave zoom to the browser.
       if (e.ctrlKey) return;
-      // Line- and page-mode wheels (some mice, Firefox) report in units, not px.
+      // Line- and page-mode wheels (some mice, Firefox) report in units, not px;
+      // ~40px a line (normalize-wheel) keeps a notch close to Chrome's ~100px.
       const px =
-        e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+        e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? el.clientHeight : 1;
       const from = turnNow();
       const to = clamp(from + (e.deltaY * px) / WHEEL_UNITS, 0, last + 1);
       if (to === from) return;
@@ -259,6 +278,7 @@ export function PrizeWheel({
     let drawn = '';
     const draw = (ts: number) => {
       frame = requestAnimationFrame(draw);
+      if (!visible.current) return;
       const dt = lastTs ? Math.min(ts - lastTs, 64) : 16;
       lastTs = ts;
       const ease = (cur: number, to: number) =>
@@ -319,8 +339,9 @@ export function PrizeWheel({
       // still zero, so nothing moves until `open` eases up.
       if (open.current < 0.05) pos.current = to;
       posTo.current = to;
+      // Already open (a neighbouring drum card): no swap, no focus to move.
+      moveFocus.current = openTo.current < 0.5;
       openTo.current = 1;
-      moveFocus.current = true;
       setOpened(true);
     },
     [last],
@@ -354,6 +375,7 @@ export function PrizeWheel({
 
   return (
     <section
+      ref={sectionRef}
       aria-label="Prizes"
       className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start lg:gap-8"
       onKeyDown={(e) => {
@@ -386,6 +408,10 @@ export function PrizeWheel({
           hovering.current = false;
         }}
         onPointerDown={(e) => {
+          // Primary button only (a right-click's menu eats its pointerup), and
+          // never from the overlay buttons: capturing would swallow their tap.
+          if (e.button !== 0) return;
+          if ((e.target as Element).closest('[data-wheel-control]')) return;
           drag.current = {
             x: e.clientX,
             y: e.clientY,
@@ -397,8 +423,17 @@ export function PrizeWheel({
         onPointerMove={(e) => {
           const g = drag.current;
           if (!g) return;
+          // No button held: its pointerup was missed. End the drag, don't hover-turn.
+          if (e.buttons === 0) {
+            if (g.moved && openTo.current === 1) {
+              posTo.current = Math.round(posTo.current);
+            }
+            drag.current = null;
+            return;
+          }
           if (!g.moved) {
-            if (Math.hypot(e.clientX - g.x, e.clientY - g.y) < 6) return;
+            // Past a finger's tap slop, so a slightly shaky tap still clicks.
+            if (Math.hypot(e.clientX - g.x, e.clientY - g.y) < 10) return;
             // Captured only once it is a drag, so a tap still clicks its card.
             g.moved = true;
             e.currentTarget.setPointerCapture(e.pointerId);
@@ -546,13 +581,17 @@ export function PrizeWheel({
             <button
               ref={closeRef}
               type="button"
+              data-wheel-control
               onClick={close}
               aria-label="Back to all prizes"
               className="absolute top-3 left-3 z-[200] flex h-10 w-10 items-center justify-center rounded-full bg-neutral-900/80 text-neutral-200 backdrop-blur outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-white/40"
             >
               <X className="h-5 w-5" aria-hidden />
             </button>
-            <div className="absolute top-1/2 right-3 z-[200] flex -translate-y-1/2 flex-col items-center gap-2">
+            <div
+              data-wheel-control
+              className="absolute top-1/2 right-3 z-[200] flex -translate-y-1/2 flex-col items-center gap-2"
+            >
               <button
                 type="button"
                 onClick={() => turn(-1)}

@@ -9,11 +9,12 @@ const RATIO = 960 / 674;
 export function TicketArt({
   width,
   className,
-  priority,
+  eager,
 }: {
   width: number;
   className?: string;
-  priority?: boolean;
+  /** Load now, not when scrolled near (Next 16 deprecates `priority`). */
+  eager?: boolean;
 }) {
   return (
     <Image
@@ -23,7 +24,7 @@ export function TicketArt({
       draggable={false}
       width={width}
       height={Math.round(width / RATIO)}
-      priority={priority}
+      loading={eager ? 'eager' : undefined}
       className={className}
     />
   );

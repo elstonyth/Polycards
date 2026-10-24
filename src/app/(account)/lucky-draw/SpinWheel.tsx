@@ -157,9 +157,11 @@ export function SpinWheel({
     const dust = createHoloDust(canvas);
     const timers: number[] = [];
     const end = WINDUP_MS + MAIN_MS + SETTLE_MS;
-    const t0 = performance.now();
+    // Timed from the first frame, not the mount: a result that arrives in a
+    // hidden tab (rAF paused) still spins on return, cues in order.
+    let t0 = -1;
     let raf = 0;
-    let last = t0;
+    let last = 0;
     let rotation = 0;
     let lastRot = 0;
     let lastIdx = segmentAt(segs, 0);
@@ -171,6 +173,7 @@ export function SpinWheel({
     let pVel = 0;
 
     const frame = (now: number) => {
+      if (t0 < 0) t0 = last = now;
       const t = now - t0;
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
