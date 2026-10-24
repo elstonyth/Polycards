@@ -219,6 +219,14 @@ describe('franchise categories', () => {
     ]);
   });
 
+  it('a category named like an Object property still gets a string icon', async () => {
+    seed({ packs: [row({ slug: 'x', category: 'constructor' })] });
+    const cats = await getPackCategories();
+    expect(cats.find((c) => c.id === 'constructor')?.icon).toBe(
+      '/pack-index-icons/pokemon.webp',
+    );
+  });
+
   it('pickCategory: the wanted category when it has packs, else the first that does', () => {
     const cat = (id: string, n: number) => ({
       id,

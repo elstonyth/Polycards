@@ -272,11 +272,19 @@ export default function CatalogClient({
    *  (it is not in `categories`). */
   freePack?: Exclude<FreePackState, { mode: 'hidden' }> | null;
 }) {
-  const [active, setActive] = useState<string>(initialCategory);
+  const [picked, setActive] = useState<string>(initialCategory);
+  // A refresh can drop the picked franchise; fall back to the first one left.
+  const active = categories.some((c) => c.id === picked)
+    ? picked
+    : (categories[0]?.id ?? '');
   const pick = (id: string) => {
     setActive(id);
     // Back from a pack page (and a shared link) lands on the same franchise.
-    window.history.replaceState(null, '', `?category=${id}`);
+    window.history.replaceState(
+      null,
+      '',
+      `?category=${encodeURIComponent(id)}`,
+    );
   };
 
   // One franchise at a time; the sections below regroup it by composition,

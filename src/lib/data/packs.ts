@@ -87,8 +87,10 @@ const titleCase = (key: string): string =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
-const iconOf = (key: string): string =>
-  (CAT_ICON as Record<string, string>)[key] ?? CAT_ICON.pokemon;
+// A Map, not an object lookup: a category named 'constructor' must not read
+// Object's.
+const CAT_ICONS = new Map<string, string>(Object.entries(CAT_ICON));
+const iconOf = (key: string): string => CAT_ICONS.get(key) ?? CAT_ICON.pokemon;
 
 /**
  * Pack catalog grouped by category, in the live-site category order. The packs

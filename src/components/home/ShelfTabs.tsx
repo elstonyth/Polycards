@@ -14,7 +14,11 @@ export default function ShelfTabs({
   categories: PackCategory[];
   panels: Record<string, ReactNode>;
 }) {
-  const [active, setActive] = useState(categories[0]?.id ?? '');
+  const [picked, setActive] = useState(categories[0]?.id ?? '');
+  // A refresh can drop the picked franchise; fall back to the first one left.
+  const active = categories.some((c) => c.id === picked)
+    ? picked
+    : (categories[0]?.id ?? '');
   return (
     <>
       {categories.length > 1 && (
