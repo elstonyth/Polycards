@@ -13,7 +13,6 @@ import {
   paymentStatus,
   percentChange,
   referralSeries,
-  staleDeposits,
 } from './dashboard';
 import type {
   GatewayDeposit,
@@ -259,30 +258,6 @@ describe('attentionWithdrawals', () => {
       amount: 0,
       oldest: null,
     });
-  });
-});
-
-describe('staleDeposits', () => {
-  it('counts only overdue rows and reports the oldest of them', () => {
-    const s = staleDeposits(
-      [
-        dep('a', '2026-10-14T01:00:00Z', true),
-        dep('b', '2026-10-14T02:00:00Z', true),
-        dep('c', '2026-10-14T03:00:00Z', false),
-      ],
-      3,
-    );
-    expect(s).toEqual({
-      count: 2,
-      capped: false,
-      oldest: '2026-10-14T01:00:00Z',
-    });
-  });
-  it('caps when a full page is all overdue and more exist', () => {
-    const rows = Array.from({ length: 50 }, (_, i) =>
-      dep(String(i), '2026-10-14T00:00:00Z', true),
-    );
-    expect(staleDeposits(rows, 80)).toMatchObject({ count: 50, capped: true });
   });
 });
 

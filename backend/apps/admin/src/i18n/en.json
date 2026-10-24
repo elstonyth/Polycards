@@ -526,11 +526,12 @@
     "title": "Deposits",
     "subtitle": "Gateway top-ups — what a customer started paying, and what actually settled.",
     "view": {
-      "pending": "Pending",
+      "resolved": "Settled + rejected",
+      "pending": "Awaiting payment",
       "settled": "Settled",
-      "failed": "Failed",
-      "expired": "Expired",
-      "all": "All"
+      "failed": "Rejected",
+      "expired": "Not paid",
+      "all": "All attempts"
     },
     "when": "Started",
     "customer": "Customer",
@@ -543,13 +544,11 @@
     "bankRef": "Bank ref",
     "uniqueRef": "Unique ref",
     "statusLabel": {
-      "pending": "Pending",
+      "pending": "Awaiting payment",
       "settled": "Settled",
-      "failed": "Failed",
-      "expired": "Expired"
+      "failed": "Rejected",
+      "expired": "Not paid"
     },
-    "statusStale": "Overdue",
-    "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the gateway back office before crediting anyone by hand.",
     "empty": "No deposits in this view.",
     "loadError": "Could not load deposits.",
     "tableLabel": "Deposits table",
@@ -1281,9 +1280,6 @@
     "withdrawalsToApprove_other": "{{shown}} withdrawals to approve",
     "withdrawalsDetail": "{{amount}} waiting · oldest {{age}}",
     "withdrawalsDetailCapped": "{{amount}} in the first 50 · oldest {{age}}",
-    "staleTopups_one": "{{shown}} top-up waiting too long",
-    "staleTopups_other": "{{shown}} top-ups waiting too long",
-    "staleDetail": "Paid, not credited yet · oldest {{age}}",
     "ordersToShip_one": "{{shown}} order to ship",
     "ordersToShip_other": "{{shown}} orders to ship",
     "ordersDetail": "New, packing or ready to ship",

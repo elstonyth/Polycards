@@ -85,7 +85,7 @@ const DEPOSIT_TONE: Record<
 const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
   pending: 'Pending',
   settled: 'Settled',
-  failed: 'Failed',
+  failed: 'Rejected',
   expired: 'Expired',
 };
 
@@ -238,16 +238,16 @@ const PackPurchases = () => {
   );
 };
 
-// Money IN. Same rows as the standalone /deposits screen (which keeps its
-// reconciliation tooling — the stale-pending warning, the status filter); this
-// tab exists so "All Orders" actually means all of them, and reuses that
-// screen's query rather than growing a second deposits endpoint.
+// Money IN. Same rows as the standalone /deposits screen's default view
+// (settled + rejected — pending/expired cashier sessions are noise here, and
+// /deposits keeps the filter that reaches them), reusing that screen's query
+// rather than growing a second deposits endpoint.
 // Read-only: a deposit is settled by the gateway callback or the sweep, never
 // by hand here.
 const Topups = () => {
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
-  const { data, isError } = useGatewayDeposits(page, 'all');
+  const { data, isError } = useGatewayDeposits(page, 'resolved');
   const deposits = data?.deposits ?? null;
 
   return (
@@ -312,14 +312,9 @@ const Topups = () => {
                       {d.customer_email ?? d.customer_id.slice(0, 8)}
                     </button>
                   </Table.Cell>
-                  {/* A pending row past the sweep's stale window is the one
-                      case that needs an operator — same signal the /deposits
-                      screen leads with. */}
                   <Table.Cell>
                     <StatusBadge color={DEPOSIT_TONE[d.status]}>
-                      {d.status === 'pending' && d.stale
-                        ? 'Stale'
-                        : DEPOSIT_STATUS_LABEL[d.status]}
+                      {DEPOSIT_STATUS_LABEL[d.status]}
                     </StatusBadge>
                   </Table.Cell>
                 </Table.Row>

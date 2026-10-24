@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom';
 import { Button, Container, Heading, Label, Switch, Text } from '@medusajs/ui';
 import {
   ArrowUpTray,
-  Clock,
   ExclamationCircle,
   Gift,
   TruckFast,
@@ -12,17 +11,12 @@ import {
 import {
   useDeliveryOrderCount,
   useGatewayAudit,
-  useGatewayDeposits,
   useGatewayWithdrawals,
   useReferralSettlements,
   usePricingHealth,
 } from '../../lib/queries';
 import { rm, timeAgo } from '../../lib/format';
-import {
-  attentionWithdrawals,
-  doublePayAcross,
-  staleDeposits,
-} from '../../lib/dashboard';
+import { attentionWithdrawals, doublePayAcross } from '../../lib/dashboard';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { isForbidden } from './helpers';
 import { SectionError } from './SectionState';
@@ -65,11 +59,15 @@ const Row = ({ item }: { item: Item }) => (
   </div>
 );
 
-/** Work waiting on an operator; each row links to the page that resolves it. */
+/**
+ * Work waiting on an operator; each row links to the page that resolves it.
+ * Pending top-ups are deliberately NOT here (removed 2026-10-25): an old pending
+ * deposit is almost always an abandoned cashier, the sweep resolves it, and the
+ * alarm + sound for it was noise the operator asked to drop.
+ */
 export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const { t } = useTranslation();
   const held = useGatewayWithdrawals(0, 'held');
-  const pending = useGatewayDeposits(0, 'pending');
   const requested = useDeliveryOrderCount('requested');
   const processed = useDeliveryOrderCount('processed');
   const ready = useDeliveryOrderCount('ready_to_ship');
@@ -81,7 +79,6 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const pricing = usePricingHealth();
   const queries = [
     held,
-    pending,
     requested,
     processed,
     ready,
@@ -96,9 +93,6 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const w = held.data
     ? attentionWithdrawals(held.data.withdrawals, held.data.total)
     : undefined;
-  const s = pending.data
-    ? staleDeposits(pending.data.deposits, pending.data.total)
-    : undefined;
   const toShip = shipping.every((q) => q.data !== undefined)
     ? shipping.reduce((n, q) => n + (q.data ?? 0), 0)
     : undefined;
@@ -108,7 +102,6 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   // Only queues that loaded are counted, so a failed read is never "zero".
   const counts: Record<string, number> = {};
   if (w) counts.withdrawals = w.count;
-  if (s) counts.deposits = s.count;
   if (toShip !== undefined) counts.orders = toShip;
   if (drafts) counts.referrals = drafts.length;
   if (twice) counts.doublePay = twice.count;
@@ -173,20 +166,6 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
       }),
       to: '/cards?pricing=attention',
       action: t('dashboard.review'),
-      urgent: true,
-    });
-  }
-  if (s && s.count > 0) {
-    const shown = s.capped ? `${s.count}+` : String(s.count);
-    items.push({
-      id: 'deposits',
-      icon: <Clock />,
-      title: t('dashboard.staleTopups', { count: s.count, shown }),
-      detail: t('dashboard.staleDetail', {
-        age: s.oldest ? timeAgo(s.oldest) : '—',
-      }),
-      to: '/deposits',
-      action: t('dashboard.check'),
       urgent: true,
     });
   }

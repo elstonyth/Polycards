@@ -66,8 +66,15 @@ describe('parseStatusFilter', () => {
     expect(parseStatusFilter(['settled'])).toBe('pending');
   });
 
-  it('accepts the four supported views', () => {
-    for (const s of ['pending', 'settled', 'failed', 'all']) {
+  it('accepts the supported views', () => {
+    for (const s of [
+      'resolved',
+      'pending',
+      'settled',
+      'failed',
+      'expired',
+      'all',
+    ]) {
       expect(parseStatusFilter(s)).toBe(s);
     }
   });
@@ -95,6 +102,16 @@ describe('GET /admin/payments/deposits', () => {
     expect(calls.filter).toEqual({});
     expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
     expect(out.body.total).toBe(2);
+  });
+
+  it('the "resolved" view lists only settled and refused rows, newest first', async () => {
+    const { res, out } = mkRes();
+    const { scope, calls } = mkScope([deposit(1, { status: 'settled' })]);
+    await GET({ scope, query: { status: 'resolved' } } as any, res);
+
+    expect(calls.filter).toEqual({ status: ['settled', 'failed'] });
+    expect(calls.opts.order).toEqual({ created_at: 'DESC', id: 'DESC' });
+    expect(out.body.status).toBe('resolved');
   });
 
   it('an explicit ?sort= overrides the status-dependent default, with id tiebreaker', async () => {

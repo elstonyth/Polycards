@@ -205,21 +205,6 @@ export const doublePayAcross = (
     : undefined;
 };
 
-/**
- * Pending deposits past the reconcile window. The route sorts pending oldest
- * first and flags `stale` with the sweep's own rule, so the overdue rows lead
- * the page; a full page of them with more behind is a floor, not a count.
- */
-export const staleDeposits = (rows: GatewayDeposit[], total: number) => {
-  const stale = rows.filter((r) => r.stale);
-  return {
-    count: stale.length,
-    capped:
-      stale.length === rows.length && total > rows.length && rows.length > 0,
-    oldest: oldestOf(stale),
-  };
-};
-
 export interface PaymentRow {
   id: string;
   kind: 'deposit' | 'withdrawal';

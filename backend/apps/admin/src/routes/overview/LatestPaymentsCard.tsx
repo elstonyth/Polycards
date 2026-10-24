@@ -20,7 +20,8 @@ export const LatestPaymentsCard = ({
   className?: string;
 }) => {
   const { t } = useTranslation();
-  // The newest few of each; the routes sort the 'all' view newest first.
+  // The newest few of each; the routes sort these views newest first.
+  // Deposits skip pending/expired rows (see useRecentGatewayDeposits).
   const deposits = useRecentGatewayDeposits(SHOWN);
   const withdrawals = useRecentGatewayWithdrawals(SHOWN);
   const forbidden =

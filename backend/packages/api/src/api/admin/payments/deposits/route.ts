@@ -31,7 +31,13 @@ import {
 // deposit the gateway never ruled on. It needs its own view precisely because
 // this page exists to answer "did somebody pay and not get credit?", and an
 // expired row is the strongest candidate for a yes.
+//
+// 'resolved' is a view too: only the rows the gateway has ruled on (settled or
+// refused). It is the dashboard's default since 2026-10-25 — the operator found
+// pending/expired rows (customers who opened the cashier and never paid) to be
+// noise, and the sweep chases those on its own.
 const STATUS_FILTERS = [
+  'resolved',
   'pending',
   'settled',
   'failed',
@@ -96,7 +102,11 @@ export async function GET(
   const order: Record<string, 'ASC' | 'DESC'> = { [key]: dir, id: dir };
 
   const [rows, total] = await packs.listAndCountGatewayDeposits(
-    status === 'all' ? {} : { status },
+    status === 'all'
+      ? {}
+      : status === 'resolved'
+        ? { status: ['settled', 'failed'] }
+        : { status },
     { skip: offset, take: limit, order },
   );
 
