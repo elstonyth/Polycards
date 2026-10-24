@@ -132,7 +132,7 @@ export const EventEditor = ({
           {creating && (
             <Section
               title="Prize pool"
-              description="Cards come from the inventory; picking one holds no stock. The event is created as a draft — publish it from the event page."
+              description="Cards come from the inventory; picking one holds no stock. The event is created as a draft — publish it from the Lucky Draw page."
             >
               <Field label="Cards from inventory">
                 <InventoryPicker
