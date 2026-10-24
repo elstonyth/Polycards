@@ -133,6 +133,7 @@ import {
   EFFECTIVE_GROUP_SQL,
   isDefaultPlayerGroup,
 } from './odds-sets';
+import { validateTaskTickets } from './lucky-draw';
 import {
   taskIsLive,
   taskPeriodKey,
@@ -2768,6 +2769,8 @@ class PacksModuleService extends MedusaService({
       title: string;
       requirement: HubRequirement;
       reward: HubReward;
+      /** Lucky Draw tickets a claim also pays (0 = none). */
+      tickets: number;
       progress: { current: number; target: number; completed: boolean };
       claimed: boolean;
     }[];
@@ -2997,6 +3000,7 @@ class PacksModuleService extends MedusaService({
           title: d.title,
           requirement: hubRequirement(requirement),
           reward: hubReward(d.reward as unknown as TaskReward),
+          tickets: d.tickets ?? 0,
           progress: taskProgress(kind, requirement, facts),
           claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
         };
@@ -3031,6 +3035,8 @@ class PacksModuleService extends MedusaService({
          *  slot spends — the tab sends the player to /slots/<pack>/spin with
          *  it. */
         claimId: string;
+        /** Lucky Draw tickets this claim paid (0 = the task pays none). */
+        tickets: number;
       }
     | {
         claimed: false;
@@ -3081,6 +3087,8 @@ class PacksModuleService extends MedusaService({
     }
     const requirement = def.requirement as unknown as TaskRequirement;
     const reward = def.reward as unknown as TaskReward;
+    // Rows from before the column existed read 0.
+    const tickets = def.tickets ?? 0;
 
     const facts = await this.taskFactsFor(
       { customerId: input.customerId, week, day },
@@ -3111,7 +3119,12 @@ class PacksModuleService extends MedusaService({
             customer_id: input.customerId,
             task_id: def.id,
             period_key: periodKey,
-            reward_snapshot: reward as unknown as Record<string, unknown>,
+            // Frozen with the reward: editing the task's tickets later must
+            // not change what this claim paid.
+            reward_snapshot: { ...reward, tickets } as unknown as Record<
+              string,
+              unknown
+            >,
           },
         ],
         sharedContext,
@@ -3125,6 +3138,23 @@ class PacksModuleService extends MedusaService({
         return { claimed: false, reason: 'already_claimed' };
       }
       throw e;
+    }
+
+    // Lucky Draw tickets ride the claim, in its transaction. The claim's
+    // unique index makes this once-only; (reason, ref) is the backstop.
+    // Deliberately BEFORE (and apart from) the reward chain below.
+    if (tickets > 0) {
+      await this.createLuckyDrawTickets(
+        [
+          {
+            customer_id: input.customerId,
+            delta: tickets,
+            reason: 'task_claim' as const,
+            ref: claimId,
+          },
+        ],
+        sharedContext,
+      );
     }
 
     let ref: string | null = null;
@@ -3220,7 +3250,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    return { claimed: true, reward, ref, claimId };
+    return { claimed: true, reward, ref, claimId, tickets };
   }
 
   // Admin CRUD for task definitions — validated + audited.
@@ -3234,6 +3264,10 @@ class PacksModuleService extends MedusaService({
       reward: unknown;
       active: boolean;
       sort: number;
+      /** Lucky Draw tickets a claim also pays. Omitted on an edit keeps the
+       *  stored value (Retire / the active toggle re-POST without it); on a
+       *  create it means 0. Validated by validateTaskTickets. */
+      tickets?: unknown;
       /** Optional run window; omitted means "unscheduled" (null/null). */
       startsAt?: Date | null;
       endsAt?: Date | null;
@@ -3248,6 +3282,7 @@ class PacksModuleService extends MedusaService({
         'title is required (1–120 chars).',
       );
     }
+    const newTickets = validateTaskTickets(input.tickets);
     if (
       input.startsAt &&
       input.endsAt &&
@@ -3356,6 +3391,10 @@ class PacksModuleService extends MedusaService({
       reward: reward as unknown as Record<string, unknown>,
       active: input.active,
       sort: input.sort,
+      tickets:
+        input.tickets === undefined && existing
+          ? (existing.tickets ?? 0)
+          : newTickets,
       starts_at: input.startsAt ?? null,
       ends_at: input.endsAt ?? null,
       // Stamped when the task goes OFF, cleared when it comes back on, kept
@@ -3377,6 +3416,7 @@ class PacksModuleService extends MedusaService({
         reward: existing.reward,
         active: existing.active,
         sort: existing.sort,
+        tickets: existing.tickets ?? 0,
         starts_at: existing.starts_at,
         ends_at: existing.ends_at,
       };
@@ -6069,6 +6109,23 @@ class PacksModuleService extends MedusaService({
       [customerId],
     );
     return rows.length > 0;
+  }
+
+  // A customer's Lucky Draw ticket balance: the sum of their live ledger rows
+  // (task claims +, entries -, refunds +). 0 when they have none.
+  @InjectManager()
+  async luckyDrawBalance(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ balance: string | number }[]>(
+      'SELECT COALESCE(SUM(delta), 0) AS balance FROM lucky_draw_ticket ' +
+        'WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+    return Number(rows[0]?.balance ?? 0);
   }
 
   // The live free welcome pack, or null when the operator has not published

@@ -146,6 +146,25 @@ describe('resolveTaskLabels — cadence wording (daily tasks, 2026-10-06)', () =
   });
 });
 
+describe('resolveTaskLabels — Lucky Draw tickets (2026-10-24)', () => {
+  it('appends the tickets to the reward label, singular for one, nothing for zero', async () => {
+    const credit = { type: 'credit', amount_myr: 5 };
+    const requirement = { type: 'checkin_days', days: 1 };
+    const out = await resolveTaskLabels(stub, [
+      { id: 'a', requirement, reward: credit, tickets: 50 },
+      { id: 'b', requirement, reward: credit, tickets: 1 },
+      { id: 'c', requirement, reward: credit, tickets: 0 },
+      { id: 'd', requirement, reward: credit },
+      { id: 'e', requirement, reward: { type: 'pack', pack_id: 'gold' }, tickets: 3 },
+    ]);
+    expect(out.get('a')!.reward).toBe('RM 5.00 bonus credit + 50 Lucky Draw tickets');
+    expect(out.get('b')!.reward).toBe('RM 5.00 bonus credit + 1 Lucky Draw ticket');
+    expect(out.get('c')!.reward).toBe('RM 5.00 bonus credit');
+    expect(out.get('d')!.reward).toBe('RM 5.00 bonus credit');
+    expect(out.get('e')!.reward).toBe('Free rip · Pack gold + 3 Lucky Draw tickets');
+  });
+});
+
 describe('resolveTaskLabels — top-up goals (2026-10-19)', () => {
   it('reads the amount in whole ringgit with the cadence', async () => {
     const credit = { type: 'credit', amount_myr: 1 };

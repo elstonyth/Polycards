@@ -82,6 +82,8 @@ export async function resolveTaskLabels(
     kind?: string;
     requirement: unknown;
     reward: unknown;
+    /** Lucky Draw tickets the claim also pays; > 0 is appended to the reward. */
+    tickets?: number;
   }[],
 ): Promise<Map<string, TaskLabels>> {
   const refs = collect(rows);
@@ -133,7 +135,11 @@ export async function resolveTaskLabels(
         packTitle,
         pixelName,
       ),
-      reward: rewardLabel(row.reward, packTitle, cardName),
+      reward:
+        rewardLabel(row.reward, packTitle, cardName) +
+        (row.tickets && row.tickets > 0
+          ? ` + ${plural(row.tickets, 'Lucky Draw ticket', 'Lucky Draw tickets')}`
+          : ''),
     });
   }
   return out;
