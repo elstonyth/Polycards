@@ -53,12 +53,14 @@ export async function enterLuckyDraw(
     { tickets },
   );
   if (!r.ok) {
+    // Only a 4xx is a refusal before anything was spent. A 5xx, a timeout or
+    // a 2xx we could not read may be an accepted entry: never invite a second
+    // tap that would spend the tickets again.
+    const refused = r.status !== undefined && r.status >= 400 && r.status < 500;
     const error =
       loggedOut(r) ??
-      (r.kind === 'invalid_shape'
-        ? // A 2xx we could not read may still be an accepted entry: never
-          // invite a second tap that would spend the tickets again.
-          'Something went wrong — refresh to see your tickets.'
+      (!refused
+        ? 'Something went wrong — refresh to see your tickets.'
         : r.kind === 'rate_limited'
           ? 'Too many tries — wait a moment and try again.'
           : r.status === 400
