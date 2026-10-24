@@ -1378,6 +1378,9 @@ export const TaskEntrySchema = z.looseObject({
     completed: z.boolean(),
   }),
   claimed: z.boolean(),
+  // Lucky Draw tickets this task also pays. A backend that predates the
+  // column omits it; an unreadable value reads as none — never a dropped row.
+  tickets: finite.catch(0),
 });
 export type TaskEntry = z.infer<typeof TaskEntrySchema>;
 

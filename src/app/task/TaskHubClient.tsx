@@ -15,6 +15,7 @@ import {
   PackageOpen,
   Sun,
   Target,
+  Ticket,
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
@@ -251,6 +252,22 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
         >
           {stubName(task.reward)}
         </p>
+        {/* The Lucky Draw tickets this task also pays; taps through to the
+            draw so the player sees where they go. */}
+        {task.tickets > 0 && (
+          <Link
+            href="/lucky-draw"
+            className={cn(
+              'mt-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap',
+              claimed
+                ? 'border-white/10 text-neutral-400'
+                : 'border-chase/40 text-chase',
+            )}
+          >
+            <Ticket className="h-3 w-3" aria-hidden />+{task.tickets}{' '}
+            {task.tickets === 1 ? 'ticket' : 'tickets'}
+          </Link>
+        )}
         {/* Only a prize that can be claimed gets a button; one still being
             worked for says so instead of showing a dead Claim. */}
         {claimable ? (
