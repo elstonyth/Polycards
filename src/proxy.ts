@@ -53,21 +53,50 @@ function implausibleCardPath(pathname: string): boolean {
   }
 }
 
+// Then it moved to made-up URLs (/leaderboard/sda, ~2,000 req/s across pods):
+// a URL no route serves still costs a full not-found render. Every page the app
+// serves is listed here (src/app/**/page.tsx + route.ts + metadata files; there
+// are no rewrites or redirects in next.config). Anything else gets the same
+// bare, cacheable 404 as an impossible card handle, before Next renders.
+// Adding a page? Add it here too, or it 404s (src/__tests__/proxy.test.ts
+// walks src/app and fails when a route is missing from this list).
+const KNOWN_ROUTE = [
+  /^\/$/,
+  /^\/(about|addresses|audio-preview|bank|bank-withdrawal|contact|download|fairness|healthz|how-it-works|leaderboard|lucky-draw|me|notifications|orders|privacy|referral|reset-password|settings|slots|task|transactions|vault|wallet)\/?$/,
+  /^\/vault\/history\/?$/,
+  /^\/auth\/google\/(callback|failed)\/?$/,
+  /^\/(card|profile|r)\/[^/]+\/?$/,
+  /^\/slots\/[^/]+(\/spin)?\/?$/,
+  /^\/(robots\.txt|sitemap\.xml|manifest\.webmanifest|favicon\.ico|icon\.png|apple-icon\.png)$/,
+];
+export const isKnownRoute = (pathname: string): boolean =>
+  KNOWN_ROUTE.some((re) => re.test(pathname));
+
+const notFound = () =>
+  new NextResponse('Not found', {
+    status: 404,
+    headers: { 'cache-control': 'public, max-age=300' },
+  });
+
 export function proxy(request: NextRequest) {
-  if (implausibleCardPath(request.nextUrl.pathname)) {
-    return new NextResponse('Not found', {
-      status: 404,
-      headers: { 'cache-control': 'public, max-age=300' },
-    });
-  }
-  if (POLLED_JSON.test(request.nextUrl.pathname)) {
+  const { pathname } = request.nextUrl;
+  if (implausibleCardPath(pathname)) return notFound();
+  if (POLLED_JSON.test(pathname)) {
     if (sameOriginFetch(request)) return;
     return new NextResponse(null, {
       status: 403,
       headers: { 'cache-control': 'no-store' },
     });
   }
-  if (request.method === 'POST') {
+  if (pathname.startsWith('/api/')) return;
+  if (!isKnownRoute(pathname)) return notFound();
+  if (
+    pathname === '/' &&
+    request.method === 'POST' &&
+    request.headers.get('content-type') ===
+      'application/x-www-form-urlencoded' &&
+    !request.headers.has('next-action')
+  ) {
     return new NextResponse(null, {
       status: 405,
       headers: { Allow: 'GET, HEAD' },
@@ -75,24 +104,11 @@ export function proxy(request: NextRequest) {
   }
 }
 
-// The matcher does the filtering so the proxy never runs for ordinary
-// traffic: only / with that exact content type (the same exact match Next uses
-// to call it a possible action) and no Next-Action header, plus the polled
-// public JSON routes.
+// Every page path (static files under public/ and /_next/ skipped), plus the
+// polled public JSON routes.
 export const config = {
   matcher: [
-    {
-      source: '/',
-      has: [
-        {
-          type: 'header',
-          key: 'content-type',
-          value: 'application/x-www-form-urlencoded',
-        },
-      ],
-      missing: [{ type: 'header', key: 'next-action' }],
-    },
-    '/card/:path*',
+    '/((?!_next/|api/|3dicons/|branding/|cdn/|fonts/|images/|pack-index-icons/|seo/|social/|sounds/|videos/).*)',
     '/api/pack-detail/:path*',
     '/api/cards/:path*',
     '/api/recent-pulls',
