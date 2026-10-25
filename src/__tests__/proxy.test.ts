@@ -65,3 +65,59 @@ describe('proxy handler', () => {
     ).toBeUndefined();
   });
 });
+
+describe('polled public JSON — same-origin fetches only', () => {
+  const get = (path: string, headers: Record<string, string> = {}) =>
+    proxy(
+      new NextRequest(`https://polycards.gg${path}`, {
+        headers: { host: 'polycards.gg', ...headers },
+      }),
+    );
+
+  it('matches the polled routes, and only them', () => {
+    expect(matches('/api/pack-detail/bronze-pack')).toBe(true);
+    expect(matches('/api/recent-pulls')).toBe(true);
+    expect(matches('/api/pull-gaps')).toBe(true);
+    expect(matches('/api/me')).toBe(false);
+    expect(matches('/api/presence')).toBe(false);
+  });
+
+  it("lets the page's own poll through (Fetch Metadata)", () => {
+    expect(
+      get('/api/pack-detail/bronze-pack', {
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-dest': 'empty',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('lets older Safari through on a same-origin Referer alone', () => {
+    expect(
+      get('/api/recent-pulls', {
+        referer: 'https://polycards.gg/slots/bronze-pack',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('refuses the 2026-10-25 flood shape: a direct navigation with no Referer', () => {
+    const res = get('/api/pack-detail/bronze-pack', {
+      'sec-fetch-site': 'none',
+      'sec-fetch-dest': 'document',
+    });
+    expect(res?.status).toBe(403);
+    expect(res?.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('refuses bare clients and cross-site callers, even with a spoofed Referer', () => {
+    expect(get('/api/recent-pulls')?.status).toBe(403);
+    expect(
+      get('/api/pull-gaps', { referer: 'https://evil.example/x' })?.status,
+    ).toBe(403);
+    expect(
+      get('/api/pack-detail/cr', {
+        'sec-fetch-site': 'cross-site',
+        referer: 'https://polycards.gg/slots/cr',
+      })?.status,
+    ).toBe(403);
+  });
+});
