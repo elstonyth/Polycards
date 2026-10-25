@@ -202,6 +202,42 @@ async function buildSharedPage(
   };
 }
 
+/** The cached shared half. One rebuild at a time: a stampede at the draw
+ *  minute shares one compute; a rejected compute rejects every waiter alike
+ *  and caches nothing. */
+async function sharedPage(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+): Promise<SharedPage> {
+  if (pageCache && pageCache.expires > Date.now()) return pageCache.body;
+  pageInFlight ??= buildSharedPage(req, packs)
+    .then((body) => {
+      pageCache = { expires: Date.now() + PAGE_TTL_MS, body };
+      return body;
+    })
+    .finally(() => {
+      pageInFlight = null;
+    });
+  return pageInFlight;
+}
+
+/** Is there a Lucky Draw to play right now: a running event with a prize not
+ *  drawn yet? The public answer the Games sheet needs before sign-in, from the
+ *  same cached page. An ended or fully drawn event still shows its results,
+ *  but the sheet calls that "Coming soon" (operator 2026-10-25: Coming soon
+ *  until the next one is set up). */
+export async function luckyDrawLive(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+): Promise<boolean> {
+  const { event, prizes } = await sharedPage(req, packs);
+  return (
+    event !== null &&
+    Date.parse(event.ends_at) > Date.now() &&
+    prizes.some((p) => p.result === null)
+  );
+}
+
 /** The Lucky Draw page for one viewer: the cached shared half plus their own
  *  balance and tickets, read live. */
 export async function luckyDrawPageFor(
@@ -213,22 +249,7 @@ export async function luckyDrawPageFor(
   event: SharedPage['event'];
   prizes: PrizeView[];
 }> {
-  let shared: SharedPage;
-  if (pageCache && pageCache.expires > Date.now()) {
-    shared = pageCache.body;
-  } else {
-    // One rebuild at a time: a stampede at the draw minute shares one compute.
-    // A rejected compute rejects every waiter alike and caches nothing.
-    pageInFlight ??= buildSharedPage(req, packs)
-      .then((body) => {
-        pageCache = { expires: Date.now() + PAGE_TTL_MS, body };
-        return body;
-      })
-      .finally(() => {
-        pageInFlight = null;
-      });
-    shared = await pageInFlight;
-  }
+  const shared = await sharedPage(req, packs);
   // Sequential: one manager per request, no parallel queries on it.
   const balance = await packs.luckyDrawBalance(customerId);
   const mine = await packs.luckyDrawMyTickets(

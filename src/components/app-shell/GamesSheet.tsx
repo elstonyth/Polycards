@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -9,13 +9,16 @@ import { X } from 'lucide-react';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { AmbientVideo } from '@/components/AmbientVideo';
+import { TicketArt } from '@/components/TicketArt';
+import { getLuckyDrawLive } from '@/lib/actions/lucky-draw';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { GLASS_SUBTLE, useLiquidGlass } from '@/lib/use-liquid-glass';
 import { GAMES_EVENT } from './games';
 
 /**
  * The game picker the Games tab opens (operator 2026-10-25): a bottom sheet
- * on phones, a centred dialog on desktop. Lucky Draw is live; Coin Flip is
+ * on phones, a centred dialog on desktop. Lucky Draw is live while an event is
+ * on and "Coming soon" when none is set up (operator 2026-10-25); Coin Flip is
  * coming soon. Swipe down, tap outside, X or Escape closes it.
  */
 export function GamesSheet() {
@@ -38,8 +41,15 @@ export function GamesSheet() {
     setOpenOn(null);
   };
 
+  // Asked on every open (the backend caches it), so a newly published event
+  // shows without a reload. null = not known yet or unreachable.
+  const [luckyDrawLive, setLuckyDrawLive] = useState<boolean | null>(null);
+
   useEffect(() => {
-    const show = () => setOpenOn(window.location.pathname);
+    const show = () => {
+      setOpenOn(window.location.pathname);
+      void getLuckyDrawLive().then(setLuckyDrawLive);
+    };
     window.addEventListener(GAMES_EVENT, show);
     return () => window.removeEventListener(GAMES_EVENT, show);
   }, []);
@@ -53,13 +63,21 @@ export function GamesSheet() {
           if (then) window.setTimeout(then, 0);
         }}
       >
-        {openOn === pathname && <Panel onClose={close} />}
+        {openOn === pathname && (
+          <Panel onClose={close} luckyDrawLive={luckyDrawLive} />
+        )}
       </AnimatePresence>
     </MotionConfig>
   );
 }
 
-function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
+function Panel({
+  onClose,
+  luckyDrawLive,
+}: {
+  onClose: (then?: () => void) => void;
+  luckyDrawLive: boolean | null;
+}) {
   const panelRef = useRef<HTMLDivElement>(null);
   const { customer, isLoading } = useAuth();
   useModalA11y(panelRef, true, onClose);
@@ -114,51 +132,60 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
 
         <ul className="mt-4 grid grid-cols-2 gap-3">
           <li>
-            <Link
-              href="/lucky-draw"
-              transitionTypes={['game-in']}
-              draggable={false}
-              onClick={(e) => {
-                // The draw is behind login: visitors get the signup modal.
-                if (!customer && !isLoading) {
-                  e.preventDefault();
-                  onClose(() => openAuth('signup'));
-                } else onClose();
-              }}
-              className="group relative flex min-h-[14rem] flex-col sm:aspect-[4/5] justify-end overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_35%,rgba(199,240,255,0.14),transparent_65%)] bg-neutral-900 p-3 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40"
-            >
-              <span className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                Live
-              </span>
-              <span className="absolute inset-x-0 top-6 flex justify-center">
-                {/* SnapGen Seedance loop of the ticket art, played forward then
+            {luckyDrawLive === false ? (
+              <SoonTile
+                title="LUCKY DRAW"
+                art={
+                  <TicketArt
+                    width={132}
+                    className="h-auto w-[80%] max-w-[132px] -rotate-6"
+                  />
+                }
+              />
+            ) : (
+              <Link
+                href="/lucky-draw"
+                transitionTypes={['game-in']}
+                draggable={false}
+                onClick={(e) => {
+                  // The draw is behind login: visitors get the signup modal.
+                  if (!customer && !isLoading) {
+                    e.preventDefault();
+                    onClose(() => openAuth('signup'));
+                  } else onClose();
+                }}
+                className="group relative flex min-h-[14rem] flex-col sm:aspect-[4/5] justify-end overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_35%,rgba(199,240,255,0.14),transparent_65%)] bg-neutral-900 p-3 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40"
+              >
+                {luckyDrawLive && (
+                  <span className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    Live
+                  </span>
+                )}
+                <span className="absolute inset-x-0 top-6 flex justify-center">
+                  {/* SnapGen Seedance loop of the ticket art, played forward then
                     back. Black backdrop + lighten lets the tile glow through. */}
-                <AmbientVideo
-                  mp4="/images/lucky-draw/ticket-loop.mp4"
-                  webm="/images/lucky-draw/ticket-loop.webm"
-                  poster="/images/lucky-draw/ticket-loop-poster.webp"
-                  fit="contain"
-                  className="aspect-[480/356] w-[94%] max-w-[155px] mix-blend-lighten transition-transform duration-300 group-hover:scale-105"
-                />
-              </span>
-              <span className="font-heading text-lg leading-tight text-white">
-                LUCKY DRAW
-              </span>
-              <span className="mt-0.5 text-xs text-neutral-400">
-                Win prizes with your tickets
-              </span>
-            </Link>
+                  <AmbientVideo
+                    mp4="/images/lucky-draw/ticket-loop.mp4"
+                    webm="/images/lucky-draw/ticket-loop.webm"
+                    poster="/images/lucky-draw/ticket-loop-poster.webp"
+                    fit="contain"
+                    className="aspect-[480/356] w-[94%] max-w-[155px] mix-blend-lighten transition-transform duration-300 group-hover:scale-105"
+                  />
+                </span>
+                <span className="font-heading text-lg leading-tight text-white">
+                  LUCKY DRAW
+                </span>
+                <span className="mt-0.5 text-xs text-neutral-400">
+                  Win prizes with your tickets
+                </span>
+              </Link>
+            )}
           </li>
           <li>
-            <div
-              aria-disabled="true"
-              className="relative flex min-h-[14rem] flex-col sm:aspect-[4/5] justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3"
-            >
-              <span className="absolute top-3 left-3 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-300 uppercase">
-                Soon
-              </span>
-              <span className="absolute inset-x-0 top-7 flex justify-center opacity-50 grayscale-[0.4]">
+            <SoonTile
+              title="COIN FLIP"
+              art={
                 <Image
                   src="/images/task/credits-coins.webp"
                   alt=""
@@ -166,17 +193,32 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
                   height={104}
                   className="h-auto w-[66%] max-w-[104px]"
                 />
-              </span>
-              <span className="font-heading text-lg leading-tight text-neutral-300">
-                COIN FLIP
-              </span>
-              <span className="mt-0.5 text-xs text-neutral-500">
-                Coming soon
-              </span>
-            </div>
+              }
+            />
           </li>
         </ul>
       </motion.div>
+    </div>
+  );
+}
+
+/** A game that isn't on yet: greyed out and not tappable. */
+function SoonTile({ title, art }: { title: string; art: ReactNode }) {
+  return (
+    <div
+      aria-disabled="true"
+      className="relative flex min-h-[14rem] flex-col sm:aspect-[4/5] justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3"
+    >
+      <span className="absolute top-3 left-3 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-300 uppercase">
+        Soon
+      </span>
+      <span className="absolute inset-x-0 top-7 flex justify-center opacity-50 grayscale-[0.4]">
+        {art}
+      </span>
+      <span className="font-heading text-lg leading-tight text-neutral-300">
+        {title}
+      </span>
+      <span className="mt-0.5 text-xs text-neutral-500">Coming soon</span>
     </div>
   );
 }

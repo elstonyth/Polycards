@@ -5,7 +5,7 @@ import { storeShim, backend } from '@/lib/__tests__/store-shim';
 // (src/lib/__tests__/store-shim.ts); only the network is fake.
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 
-import { enterLuckyDraw } from '../lucky-draw';
+import { enterLuckyDraw, getLuckyDrawLive } from '../lucky-draw';
 
 const ENTER = 'POST /store/lucky-draw/prizes/:id/enter';
 // Entries are final, so a failure that may have committed must not invite a
@@ -90,5 +90,25 @@ describe('enterLuckyDraw', () => {
       ok: false,
       error: 'Could not enter. Please try again.',
     });
+  });
+});
+
+describe('getLuckyDrawLive', () => {
+  const STATUS = 'GET /store/lucky-draw-status';
+
+  // Public: the Games sheet asks for signed-out visitors too.
+  it('answers for a visitor with no session', async () => {
+    backend({ [STATUS]: { body: { live: false } } }, { token: null });
+    expect(await getLuckyDrawLive()).toBe(false);
+  });
+
+  it('answers true while an event is on', async () => {
+    backend({ [STATUS]: { body: { live: true } } });
+    expect(await getLuckyDrawLive()).toBe(true);
+  });
+
+  it('is null when the backend fails, so the sheet keeps the tile', async () => {
+    backend({ [STATUS]: { status: 500, body: {} } });
+    expect(await getLuckyDrawLive()).toBeNull();
   });
 });
