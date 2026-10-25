@@ -1,6 +1,24 @@
 // Small formatting helpers shared across the mock app pages.
 
-// One USD/number formatter. prefix+toLocaleString for the "$"/"US$" family;
+// `n.toLocaleString(locale, options)` builds a fresh Intl.NumberFormat on EVERY
+// call: ~17µs against ~0.4µs for reusing one (Node 24). Every price on every
+// SSR render and poll goes through money(), and on 2026-10-25 that was the
+// storefront's hot path (pods blocked long enough to fail /healthz → 503s).
+// Same locale + options give byte-identical output, so reuse one per shape.
+const formatters = new Map<string, Intl.NumberFormat>();
+const numberFormat = (
+  key: string,
+  options: Intl.NumberFormatOptions,
+): Intl.NumberFormat => {
+  let f = formatters.get(key);
+  if (!f) {
+    f = new Intl.NumberFormat('en-US', options);
+    formatters.set(key, f);
+  }
+  return f;
+};
+
+// One USD/number formatter. prefix+formatted number for the "$"/"US$" family;
 // currency:true uses Intl currency style (kept for `usd`'s exact output).
 export function money(
   amount: number,
@@ -8,19 +26,19 @@ export function money(
 ): string {
   const { decimals = 2, prefix = '$', currency = false } = opts;
   if (currency) {
-    return amount.toLocaleString('en-US', {
+    return numberFormat(`usd:${decimals}`, {
       style: 'currency',
       currency: 'USD',
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
-    });
+    }).format(amount);
   }
   return (
     prefix +
-    amount.toLocaleString('en-US', {
+    numberFormat(`fixed:${decimals}`, {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
-    })
+    }).format(amount)
   );
 }
 
@@ -65,9 +83,12 @@ export function voucherLabel(grant: {
 }
 
 export const compact = (n: number) =>
-  n.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+  numberFormat('compact', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n);
 
-export const num = (n: number) => n.toLocaleString('en-US');
+export const num = (n: number) => numberFormat('num', {}).format(n);
 
 // Coarse relative time for the activity / recent-pulls feeds ("3h ago",
 // "2d ago"). Future and unparsable dates read as "just now"; `now` is injectable

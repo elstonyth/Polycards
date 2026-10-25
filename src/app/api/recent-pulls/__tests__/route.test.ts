@@ -252,6 +252,24 @@ describe('polling JSON compatibility aliases', () => {
       spriteImage: '/sprite.png',
     });
   });
+  it('pack detail: a miss answers 404 and is not memoised, so the pack shows on the next poll', async () => {
+    const { GET: packGet } = await import('@/app/api/pack-detail/[slug]/route');
+    const get = () =>
+      packGet(new Request('http://localhost/api/pack-detail/bronze-pack'), {
+        params: Promise.resolve({ slug: 'bronze-pack' }),
+      });
+    seed();
+    expect((await get()).status).toBe(404);
+
+    seed({
+      'GET /store/packs/:slug': {
+        body: { odds: [{ ...wire, marketPriceMyr: 5 }] },
+      },
+    });
+    const ok = await get();
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).detail.pool[0].value).toBe('RM 5.00');
+  });
   it('recent rows retain legacy prices and labels without replacing pull ids with card handles', async () => {
     seed({
       'GET /store/pulls/recent': {
