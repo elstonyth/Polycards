@@ -164,6 +164,7 @@ describe('polling JSON compatibility aliases', () => {
     const { GET: cardGet } = await import('@/app/api/cards/[handle]/route');
     const oldCard = {
       ...wire,
+      handle: 'charizard-4',
       marketPriceMyr: 1234.5,
       set: 'Base',
       grader: 'PSA',
@@ -173,12 +174,12 @@ describe('polling JSON compatibility aliases', () => {
     };
     seed({ 'GET /store/cards/:handle': { body: { card: oldCard } } });
     const response = await cardGet(
-      new Request('http://localhost/api/cards/charizard'),
-      { params: Promise.resolve({ handle: 'charizard' }) },
+      new Request('http://localhost/api/cards/charizard-4'),
+      { params: Promise.resolve({ handle: 'charizard-4' }) },
     );
     const { card } = await response.json();
     expect(card).toEqual({
-      handle: 'charizard',
+      handle: 'charizard-4',
       name: 'Charizard',
       image: '/card.png',
       slab_image: '/slab.png',
