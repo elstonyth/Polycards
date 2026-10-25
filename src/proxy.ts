@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { isPlausibleCardHandle } from '@/lib/card-handle';
 
 // A form-encoded POST to / skips the home page's route cache: Next treats any
 // `application/x-www-form-urlencoded` POST as a possible server action and
@@ -39,7 +40,26 @@ function sameOriginFetch(request: NextRequest): boolean {
   }
 }
 
+// The flood then moved to /card/adasdsad (~250 req/s reaching the backend): a
+// handle that cannot be a card gets a bare 404 here, before the page renders.
+// Cacheable, so an edge that honours it absorbs repeats of the same junk URL.
+function implausibleCardPath(pathname: string): boolean {
+  if (!pathname.startsWith('/card/')) return false;
+  const segment = pathname.slice('/card/'.length).split('/')[0] ?? '';
+  try {
+    return !isPlausibleCardHandle(decodeURIComponent(segment));
+  } catch {
+    return true;
+  }
+}
+
 export function proxy(request: NextRequest) {
+  if (implausibleCardPath(request.nextUrl.pathname)) {
+    return new NextResponse('Not found', {
+      status: 404,
+      headers: { 'cache-control': 'public, max-age=300' },
+    });
+  }
   if (POLLED_JSON.test(request.nextUrl.pathname)) {
     if (sameOriginFetch(request)) return;
     return new NextResponse(null, {
@@ -72,6 +92,7 @@ export const config = {
       ],
       missing: [{ type: 'header', key: 'next-action' }],
     },
+    '/card/:path*',
     '/api/pack-detail/:path*',
     '/api/cards/:path*',
     '/api/recent-pulls',
