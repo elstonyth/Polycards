@@ -1571,6 +1571,9 @@ const LuckyDrawPrizeSchema = z
   });
 export type LuckyDrawPrize = z.infer<typeof LuckyDrawPrizeSchema>;
 
+/** GET /store/lucky-draw-status — public: is a Lucky Draw on? */
+export const LuckyDrawStatusSchema = z.looseObject({ live: z.boolean() });
+
 /** GET /store/lucky-draw — the live event (null: none running). */
 export const LuckyDrawPageSchema = z.looseObject({
   balance: finite,

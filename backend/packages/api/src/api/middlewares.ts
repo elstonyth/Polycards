@@ -872,6 +872,15 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
     },
     {
+      // Is a Lucky Draw on? (GET /store/lucky-draw-status). Public — no
+      // authenticate: the Games sheet asks for visitors too. Read budget, keyed
+      // on the visitor the storefront vouches for; the answer is the shared
+      // page's cached boolean, so a hit costs nothing past the limiter.
+      matcher: '/store/lucky-draw-status',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
       // The Lucky Draw page (GET /store/lucky-draw). Its own entry because the
       // wildcard below does not match the bare path.
       matcher: '/store/lucky-draw',
