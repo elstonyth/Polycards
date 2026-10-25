@@ -593,6 +593,15 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: "__SECRET__GP365_MERCHANT_PRIVATE_KEY__"
+  # Lucky Draw seed secret (spec 2026-10-24 §7), added 2026-10-24. App-level
+  # so it reaches BOTH the service (publish hashes each prize seed) and the
+  # worker (the draw job re-derives the seed). Set it before any event is
+  # published and never change it while a published prize is undrawn: every
+  # such draw would refuse.
+  - key: LUCKY_DRAW_SEED_SECRET
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__LUCKY_DRAW_SEED_SECRET__
 
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and

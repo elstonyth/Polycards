@@ -2612,6 +2612,8 @@ export interface AdminTaskDefinition {
   reward: Record<string, unknown>;
   active: boolean;
   sort: number;
+  /** Lucky Draw tickets a claim also pays (0 = none). */
+  tickets: number;
   /** Optional run window (ISO). null/null = runs until retired. */
   starts_at: string | null;
   ends_at: string | null;
@@ -2638,11 +2640,166 @@ export async function saveTaskDefinition(input: {
   reward: Record<string, unknown>;
   active: boolean;
   sort: number;
+  /** Always sent: the backend keeps a stored value only when this is omitted. */
+  tickets: number;
   starts_at: string | null;
   ends_at: string | null;
   reason: string;
 }): Promise<{ id: string }> {
   return postJson<{ id: string }>('/admin/tasks', input);
+}
+
+// ── Lucky Draw (spec 2026-10-24) ─────────────────────────────────────────────
+// Mirrors AdminLuckyDrawEvent / AdminLuckyDrawPrize in the backend's packs
+// service. An undrawn prize has no seed anywhere in these shapes — only its
+// public `seed_hash`; `result.seed` exists once the draw has run.
+
+export interface AdminLuckyDrawPrize {
+  id: string;
+  kind: 'card' | 'credit';
+  card_handle: string | null;
+  credit_myr: number | null;
+  title: string;
+  image_url: string | null;
+  sort: number;
+  /** ISO. */
+  draw_at: string;
+  cancelled_at: string | null;
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
+  /** RM: the credit amount, or a card's current value (null if the card is gone). */
+  value_myr: number | null;
+  result: {
+    winner_customer_id: string | null;
+    winner_tickets: number;
+    total_tickets: number;
+    entrant_count: number;
+    drawn_at: string;
+    seed: string;
+    /** false only when a winner exists and nothing was minted / credited. */
+    granted: boolean;
+  } | null;
+}
+
+export interface AdminLuckyDrawEvent {
+  id: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  status: 'draft' | 'published' | 'cancelled';
+  prizes: AdminLuckyDrawPrize[];
+}
+
+export interface AdminLuckyDrawEventInput {
+  id?: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  /** A NEW event only (an edit with prizes is refused): its whole prize pool,
+   *  created with it in one transaction. */
+  prizes?: AdminLuckyDrawNewPrize[];
+}
+
+/** One prize as POST /admin/lucky-draw/prizes takes it (plus `reason`). Send
+ *  every field: an omitted sort resets to 0 and an omitted image to null. */
+export interface AdminLuckyDrawPrizeInput {
+  id?: string;
+  event_id: string;
+  kind: 'card' | 'credit';
+  card_handle: string | null;
+  credit_myr: number | null;
+  title: string;
+  image_url: string | null;
+  sort: number;
+  /** null = the event's end on create, the stored time on edit. */
+  draw_at: string | null;
+}
+
+/** One prize of a new event: the prize route's fields without the ids (the
+ *  event does not exist yet). Send every field. */
+export type AdminLuckyDrawNewPrize = Omit<
+  AdminLuckyDrawPrizeInput,
+  'id' | 'event_id'
+>;
+
+export async function listLuckyDraw(): Promise<AdminLuckyDrawEvent[]> {
+  const data = await getJson<{ events: AdminLuckyDrawEvent[] }>(
+    '/admin/lucky-draw',
+  );
+  return data.events;
+}
+
+export const saveLuckyDrawEvent = (
+  input: AdminLuckyDrawEventInput & { reason: string },
+) =>
+  postJson<{ id: string; prize_ids: string[] }>(
+    '/admin/lucky-draw/events',
+    input,
+  );
+
+export const publishLuckyDrawEvent = (id: string, reason: string) =>
+  postJson<{ id: string; status: 'published' }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(id)}/publish`,
+    { reason },
+  );
+
+export const saveLuckyDrawPrize = (
+  input: AdminLuckyDrawPrizeInput & { reason: string },
+) => postJson<{ id: string }>('/admin/lucky-draw/prizes', input);
+
+export const cancelLuckyDrawPrize = (id: string, reason: string) =>
+  postJson<{ refunded: number }>(
+    `/admin/lucky-draw/prizes/${encodeURIComponent(id)}/cancel`,
+    { reason },
+  );
+
+export interface AdminLuckyDrawEntrant {
+  customer_id: string;
+  tickets: number;
+}
+
+export async function listLuckyDrawEntries(
+  prizeId: string,
+): Promise<AdminLuckyDrawEntrant[]> {
+  const data = await getJson<{ entries: AdminLuckyDrawEntrant[] }>(
+    `/admin/lucky-draw/prizes/${encodeURIComponent(prizeId)}/entries`,
+  );
+  return data.entries;
+}
+
+export interface AdminLuckyDrawTicketHistory {
+  balance: number;
+  /** Newest first (the backend caps it at 200). */
+  rows: { delta: number; reason: string; ref: string; created_at: string }[];
+}
+
+export const getLuckyDrawTickets = (customerId: string) =>
+  getJson<AdminLuckyDrawTicketHistory>(
+    `/admin/lucky-draw/tickets?customer_id=${encodeURIComponent(customerId)}`,
+  );
+
+/** Give (positive) or take back (negative) a customer's Lucky Draw tickets.
+ *  The same idempotency key replays instead of granting twice. */
+export async function adjustCustomerTickets(
+  id: string,
+  tickets: number,
+  note: string,
+  idempotencyKey?: string,
+): Promise<{ tickets: number; balance: number }> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/lucky-draw-tickets`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets, note, idempotency_key: idempotencyKey }),
+    },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  return (await res.json()) as { tickets: number; balance: number };
 }
 
 // ── Announcement popup (spec 2026-10-06 §5) ──────────────────────────────────

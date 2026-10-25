@@ -150,6 +150,15 @@ import {
   listTaskDefinitions,
   saveTaskDefinition,
   type AdminTaskDefinition,
+  listLuckyDraw,
+  saveLuckyDrawEvent,
+  publishLuckyDrawEvent,
+  saveLuckyDrawPrize,
+  cancelLuckyDrawPrize,
+  listLuckyDrawEntries,
+  getLuckyDrawTickets,
+  adjustCustomerTickets,
+  type AdminLuckyDrawEvent,
   listAnnouncements,
   saveAnnouncement,
   deleteAnnouncement,
@@ -1876,6 +1885,87 @@ export const useSaveTaskDefinition = () => {
     mutationFn: (input: Parameters<typeof saveTaskDefinition>[0]) =>
       saveTaskDefinition(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.taskDefinitions }),
+  });
+};
+
+// ── Lucky Draw (spec 2026-10-24) ─────────────────────────────────────────────
+export type {
+  AdminLuckyDrawEvent,
+  AdminLuckyDrawPrize,
+} from './admin-rest';
+
+export const useLuckyDraw = (): UseQueryResult<AdminLuckyDrawEvent[]> =>
+  useQuery({ queryKey: qk.luckyDraw, queryFn: listLuckyDraw });
+
+// Every write refetches the overview: statuses, prize counts and the
+// ticket / entrant totals all hang off it.
+const useLuckyDrawWrite = <V, R>(fn: (vars: V) => Promise<R>) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.luckyDraw }),
+  });
+};
+
+export const useSaveLuckyDrawEvent = () =>
+  useLuckyDrawWrite((v: Parameters<typeof saveLuckyDrawEvent>[0]) =>
+    saveLuckyDrawEvent(v),
+  );
+
+export const usePublishLuckyDrawEvent = () =>
+  useLuckyDrawWrite((v: { id: string; reason: string }) =>
+    publishLuckyDrawEvent(v.id, v.reason),
+  );
+
+export const useSaveLuckyDrawPrize = () =>
+  useLuckyDrawWrite((v: Parameters<typeof saveLuckyDrawPrize>[0]) =>
+    saveLuckyDrawPrize(v),
+  );
+
+export const useCancelLuckyDrawPrize = () =>
+  useLuckyDrawWrite((v: { id: string; reason: string }) =>
+    cancelLuckyDrawPrize(v.id, v.reason),
+  );
+
+// `prizeId` null = drawer closed: nothing to fetch.
+export const useLuckyDrawEntries = (prizeId: string | null) =>
+  useQuery({
+    queryKey: qk.luckyDrawEntries(prizeId ?? ''),
+    queryFn: () => listLuckyDrawEntries(prizeId as string),
+    enabled: prizeId !== null,
+  });
+
+// Support lookup: only runs for a submitted id, and never caches a stale
+// balance for long — the operator is usually checking a live complaint.
+export const useLuckyDrawTickets = (customerId: string | null) =>
+  useQuery({
+    queryKey: qk.luckyDrawTickets(customerId ?? ''),
+    queryFn: () => getLuckyDrawTickets(customerId as string),
+    enabled: customerId !== null,
+    staleTime: 0,
+  });
+
+export const useAdjustTickets = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      id: string;
+      tickets: number;
+      note: string;
+      idempotencyKey?: string;
+    }) =>
+      adjustCustomerTickets(
+        vars.id,
+        vars.tickets,
+        vars.note,
+        vars.idempotencyKey,
+      ),
+    // Settled, not success: a lost response may still have committed.
+    onSettled: (_data, _error, vars) => {
+      qc.invalidateQueries({ queryKey: qk.luckyDrawTickets(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
 

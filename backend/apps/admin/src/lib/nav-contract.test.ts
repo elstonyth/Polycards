@@ -113,6 +113,7 @@ const GROUPS: Group[] = [
       { path: '/daily-rewards', label: 'pcNav.vipLevels' },
       { path: '/tasks', label: 'pcNav.tasks' },
       { path: '/challenge', label: 'pcNav.weeklyChallenge' },
+      { path: '/lucky-draw', label: 'pcNav.luckyDraw' },
     ],
   },
   {

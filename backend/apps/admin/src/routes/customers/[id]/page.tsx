@@ -61,6 +61,7 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
 import { GiftAndBonusPanels } from './gift-and-bonus';
+import { LuckyDrawTicketsPanel } from './lucky-draw-tickets';
 import { MoneySummary, PeriodsCard, PlayCard } from './MoneyCards';
 import { LevelTab } from './LevelTab';
 import { VaultTab } from './VaultTab';
@@ -1103,6 +1104,17 @@ const HistoryTab = ({
   const { t } = useTranslation();
 
   const { data: auditData, isError: auditError } = auditQ;
+  // Ticket grants are audited as a customer `edit`; `after` holds the change.
+  const ticketLabel = (after: unknown) => {
+    const a = after as { delta?: unknown; lucky_draw_tickets?: unknown } | null;
+    return typeof a?.delta === 'number' &&
+      typeof a.lucky_draw_tickets === 'number'
+      ? t('customer360.action.luckyDrawTickets', {
+          delta: `${a.delta > 0 ? '+' : ''}${a.delta.toLocaleString('en-US')}`,
+          balance: a.lucky_draw_tickets.toLocaleString('en-US'),
+        })
+      : null;
+  };
 
   const auditActions = (auditData?.actions ?? [])
     // ponytail: belt-and-suspenders — backend already orders DESC; sort client-side to guarantee newest-first regardless of fetch order
@@ -1226,7 +1238,8 @@ const HistoryTab = ({
                     </Table.Cell>
                     <Table.Cell>
                       {/* ponytail: t() falls back to raw action key if label missing */}
-                      {t(`customer360.action.${row.action}`, row.action)}
+                      {ticketLabel(row.after) ??
+                        t(`customer360.action.${row.action}`, row.action)}
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
                       {row.reason ?? '—'}
@@ -1505,6 +1518,9 @@ const Customer360Page = () => {
                   <DropdownMenu.Item onClick={() => setTab('gifts')}>
                     {t('playerMoney.bonusCredit')}
                   </DropdownMenu.Item>
+                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
+                    {t('playerMoney.luckyDrawTickets')}
+                  </DropdownMenu.Item>
                 </DropdownMenu.Content>
               </DropdownMenu>
             </div>
@@ -1654,7 +1670,13 @@ const Customer360Page = () => {
       )}
       {/* key={id}: an unsent note must not carry over to the next player. */}
       {tab === 'gifts' && customerId && (
-        <GiftAndBonusPanels key={id} customerId={customerId} />
+        <>
+          <GiftAndBonusPanels key={id} customerId={customerId} />
+          <LuckyDrawTicketsPanel
+            key={`tickets-${id}`}
+            customerId={customerId}
+          />
+        </>
       )}
       {tab === 'history' && (
         <HistoryTab

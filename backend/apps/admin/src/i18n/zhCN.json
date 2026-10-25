@@ -55,6 +55,9 @@
     "withdrawal_amount": "提现金额",
     "previous": "上一段 {{value}}"
   },
+  "pcNav": {
+    "luckyDraw": "幸运抽奖"
+  },
   "packs": {
     "tabs": {
       "lossless": "无损模式"

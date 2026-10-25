@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,6 +12,7 @@ import {
   Heading,
   Input,
   Label,
+  RadioGroup,
   StatusBadge,
   Text,
   Textarea,
@@ -28,12 +29,15 @@ import {
   createGroupCreditAdjustment,
   loadGroupCreditCustomers,
   parseGroupCreditAmount,
+  parseGroupTickets,
   runGroupCreditAdjustment,
   type GroupCreditAdjustment,
   type GroupCreditResults,
 } from '../lib/group-credit-edit';
 
 type Props = { data: { id: string; name: string } };
+
+const num = (n: number) => n.toLocaleString('en-US');
 
 function GroupCreditEditor({ data: group }: Props) {
   const { t } = useTranslation();
@@ -52,7 +56,13 @@ function GroupCreditEditor({ data: group }: Props) {
   // (operator rule 2026-10-11); null = box untouched.
   const [bonusChoice, setBonusChoice] = useState<boolean | null>(null);
   const bonus = isBonusGrant(bonusChoice, amountText);
+  // Credit (RM) or Lucky Draw tickets (operator 2026-10-25).
+  const [giving, setGiving] = useState<'credit' | 'tickets'>('credit');
+  const tickets = giving === 'tickets';
   const [busy, setBusy] = useState(false);
+  // A player waiting out the admin rate limit: shown so a long run of a big
+  // group doesn't look hung (and get reloaded, losing its retry keys).
+  const [waiting, setWaiting] = useState(false);
   const [batch, setBatch] = useState<GroupCreditAdjustment | null>(null);
   const [results, setResults] = useState<GroupCreditResults>({});
   const members = useQuery({
@@ -66,7 +76,26 @@ function GroupCreditEditor({ data: group }: Props) {
   const selectedCount = customers.filter((customer) =>
     selected.has(customer.id),
   ).length;
-  const amount = parseGroupCreditAmount(amountText);
+  const amount = tickets
+    ? parseGroupTickets(amountText)
+    : parseGroupCreditAmount(amountText);
+  // "RM 10.00 bonus credit" / "10 tickets" for one player, and the total.
+  const amountLabel = (b: GroupCreditAdjustment) =>
+    b.tickets
+      ? t('groupCredits.ticketsAmount', {
+          tickets: num(b.amount),
+          count: b.amount,
+        })
+      : t(b.bonus ? 'creditKind.bonusAmount' : 'creditKind.normalAmount', {
+          amount: rm(b.amount),
+        });
+  const totalLabel = (b: GroupCreditAdjustment) =>
+    b.tickets
+      ? t('groupCredits.ticketsAmount', {
+          tickets: num(b.amount * b.customers.length),
+          count: b.amount * b.customers.length,
+        })
+      : rm((Math.round(b.amount * 100) * b.customers.length) / 100);
   const succeeded = Object.values(results).filter(
     (result) => result.status === 'succeeded',
   ).length;
@@ -161,7 +190,13 @@ function GroupCreditEditor({ data: group }: Props) {
                   }
                 >
                   {result?.status === 'succeeded'
-                    ? t('groupCredits.applied', { balance: rm(result.balance) })
+                    ? batch?.tickets
+                      ? t('groupCredits.appliedTickets', {
+                          balance: num(result.balance),
+                        })
+                      : t('groupCredits.applied', {
+                          balance: rm(result.balance),
+                        })
                     : result?.status === 'failed'
                       ? result.message
                       : t('groupCredits.pending')}
@@ -181,8 +216,18 @@ function GroupCreditEditor({ data: group }: Props) {
     running.current = true;
     setBusy(true);
     try {
-      await runGroupCreditAdjustment(snapshot, previous, setResults);
+      await runGroupCreditAdjustment(
+        snapshot,
+        previous,
+        setResults,
+        async (ms) => {
+          setWaiting(true);
+          await new Promise<void>((done) => window.setTimeout(done, ms));
+          setWaiting(false);
+        },
+      );
       void queryClient.invalidateQueries({ queryKey: ['admin', 'customer'] });
+      void queryClient.invalidateQueries({ queryKey: qk.luckyDraw });
       void queryClient.invalidateQueries({ queryKey: qk.playersKey });
       void invalidateMoneyViews(queryClient);
     } finally {
@@ -190,6 +235,14 @@ function GroupCreditEditor({ data: group }: Props) {
       setBusy(false);
     }
   };
+
+  // Leaving mid-run drops the batch and its request keys; warn first.
+  useEffect(() => {
+    if (!busy) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [busy]);
 
   const confirm = async () => {
     if (!canSubmit || confirming.current) return;
@@ -199,6 +252,7 @@ function GroupCreditEditor({ data: group }: Props) {
       amountText,
       note,
       bonus,
+      tickets,
     );
     if (!snapshot) return;
     confirming.current = true;
@@ -210,14 +264,8 @@ function GroupCreditEditor({ data: group }: Props) {
         description: t('groupCredits.confirmDescription', {
           group: group.name,
           count: snapshot.customers.length,
-          amount: t(
-            snapshot.bonus ? 'creditKind.bonusAmount' : 'creditKind.normalAmount',
-            { amount: rm(snapshot.amount) },
-          ),
-          total: rm(
-            (Math.round(snapshot.amount * 100) * snapshot.customers.length) /
-              100,
-          ),
+          amount: amountLabel(snapshot),
+          total: totalLabel(snapshot),
           note: snapshot.note,
         }),
         confirmText: t('groupCredits.apply'),
@@ -355,18 +403,9 @@ function GroupCreditEditor({ data: group }: Props) {
                 <div className="flex flex-col gap-2" aria-live="polite">
                   <Text>
                     {t('groupCredits.batchSummary', {
-                      amount: t(
-                        batch.bonus
-                          ? 'creditKind.bonusAmount'
-                          : 'creditKind.normalAmount',
-                        { amount: rm(batch.amount) },
-                      ),
+                      amount: amountLabel(batch),
                       count: batch.customers.length,
-                      total: rm(
-                        (Math.round(batch.amount * 100) *
-                          batch.customers.length) /
-                          100,
-                      ),
+                      total: totalLabel(batch),
                     })}
                   </Text>
                   <Text size="small">
@@ -382,6 +421,7 @@ function GroupCreditEditor({ data: group }: Props) {
                         failed,
                       },
                     )}
+                    {busy && waiting && ` ${t('groupCredits.waiting')}`}
                   </Text>
                   {failed > 0 && (
                     <Text size="small" className="text-ui-fg-subtle">
@@ -391,18 +431,52 @@ function GroupCreditEditor({ data: group }: Props) {
                 </div>
               ) : (
                 <>
+                  <RadioGroup
+                    value={giving}
+                    onValueChange={(value) => {
+                      setGiving(value as 'credit' | 'tickets');
+                      setAmountText('');
+                    }}
+                    className="flex flex-wrap gap-6"
+                    aria-label={t('groupCredits.giving')}
+                  >
+                    {(['credit', 'tickets'] as const).map((kind) => (
+                      <label
+                        key={kind}
+                        htmlFor={`${fieldId}-giving-${kind}`}
+                        className="flex items-center gap-2"
+                      >
+                        <RadioGroup.Item
+                          id={`${fieldId}-giving-${kind}`}
+                          value={kind}
+                          disabled={busy}
+                        />
+                        <Text size="small" weight="plus">
+                          {t(
+                            kind === 'tickets'
+                              ? 'groupCredits.givingTickets'
+                              : 'groupCredits.givingCredit',
+                          )}
+                        </Text>
+                      </label>
+                    ))}
+                  </RadioGroup>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="flex flex-col gap-2">
                       <Label htmlFor={`${fieldId}-amount`}>
-                        {t('groupCredits.amount')}
+                        {t(
+                          tickets
+                            ? 'groupCredits.ticketsLabel'
+                            : 'groupCredits.amount',
+                        )}
                       </Label>
                       <Input
                         id={`${fieldId}-amount`}
                         type="number"
-                        step="0.01"
+                        step={tickets ? '1' : '0.01'}
                         min="-1000000"
                         max="1000000"
-                        placeholder="100.00"
+                        placeholder={tickets ? '10' : '100.00'}
                         value={amountText}
                         disabled={busy}
                         onChange={(event) => setAmountText(event.target.value)}
@@ -413,11 +487,19 @@ function GroupCreditEditor({ data: group }: Props) {
                         size="small"
                         className="text-ui-fg-subtle"
                       >
-                        {t('groupCredits.amountHint')}
+                        {t(
+                          tickets
+                            ? 'groupCredits.ticketsHint'
+                            : 'groupCredits.amountHint',
+                        )}
                       </Text>
                       {amountText && amount === null && (
                         <Text size="small" className="text-ui-fg-error">
-                          {t('groupCredits.invalidAmount')}
+                          {t(
+                            tickets
+                              ? 'groupCredits.invalidTickets'
+                              : 'groupCredits.invalidAmount',
+                          )}
                         </Text>
                       )}
                     </div>
@@ -435,11 +517,13 @@ function GroupCreditEditor({ data: group }: Props) {
                       />
                     </div>
                   </div>
-                  <BonusCreditToggle
-                    checked={bonus}
-                    onChange={setBonusChoice}
-                    disabled={busy}
-                  />
+                  {!tickets && (
+                    <BonusCreditToggle
+                      checked={bonus}
+                      onChange={setBonusChoice}
+                      disabled={busy}
+                    />
+                  )}
                   {members.isFetching ? (
                     <Text role="status">{t('groupCredits.loading')}</Text>
                   ) : members.isError ? (

@@ -27,7 +27,8 @@ const STATUS: Record<
 function paidLabel(p: PullHistoryItem): string {
   if (p.source === 'free') return 'Free pack';
   if (p.source === 'gift') return 'Gift';
-  if (p.source === 'reward') return p.challengePrize ? 'Prize' : 'Reward';
+  if (p.source === 'reward')
+    return p.challengePrize || p.luckyDrawPrize ? 'Prize' : 'Reward';
   return p.paid == null ? '—' : rm(p.paid);
 }
 
