@@ -20,6 +20,7 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
+  const miss = `pack detail miss: ${slug}`;
   try {
     return await cachedJson(
       `pack-detail-json:${slug}`,
@@ -28,7 +29,7 @@ export async function GET(
         const detail = await getPackDetail(slug);
         // Thrown, not returned: cached() evicts a rejection, so a 404 or outage
         // is never held for the window and garbage slugs keep no entry.
-        if (!detail) throw new Error(`pack detail miss: ${slug}`);
+        if (!detail) throw new Error(miss);
         // Older open tabs select by id and render the two-decimal value string.
         const withLegacyFields = (card: PackCard) => ({
           ...card,
@@ -44,7 +45,9 @@ export async function GET(
         };
       },
     );
-  } catch {
+  } catch (err) {
+    // Only the miss is a 404; anything else is a real bug and stays a 500.
+    if (!(err instanceof Error && err.message === miss)) throw err;
     return NextResponse.json({ message: 'not found' }, { status: 404 });
   }
 }

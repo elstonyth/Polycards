@@ -19,7 +19,11 @@ import { NextResponse, type NextRequest } from 'next/server';
 // ~270 KB body, and starved every pod into 503s. A real poll always carries
 // Sec-Fetch-Site: same-origin, or (older Safari, no Fetch Metadata) a
 // same-origin Referer under our strict-origin-when-cross-origin policy.
-const POLLED_JSON = /^\/api\/(pack-detail\/|recent-pulls$|pull-gaps$)/;
+// cards/, free-pack and announcements are only ever fetched by our own client
+// too (use-card-price, FreePackBadge, AnnouncementPopup); /api/cards costs the
+// backend 4 DB queries a hit, so it is the next cheapest drain.
+const POLLED_JSON =
+  /^\/api\/(pack-detail\/|cards\/|recent-pulls$|pull-gaps$|free-pack$|announcements$)/;
 
 function sameOriginFetch(request: NextRequest): boolean {
   const site = request.headers.get('sec-fetch-site');
@@ -69,7 +73,10 @@ export const config = {
       missing: [{ type: 'header', key: 'next-action' }],
     },
     '/api/pack-detail/:path*',
+    '/api/cards/:path*',
     '/api/recent-pulls',
     '/api/pull-gaps',
+    '/api/free-pack',
+    '/api/announcements',
   ],
 };

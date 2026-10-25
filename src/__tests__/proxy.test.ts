@@ -78,8 +78,20 @@ describe('polled public JSON — same-origin fetches only', () => {
     expect(matches('/api/pack-detail/bronze-pack')).toBe(true);
     expect(matches('/api/recent-pulls')).toBe(true);
     expect(matches('/api/pull-gaps')).toBe(true);
+    expect(matches('/api/cards/charizard-4')).toBe(true);
+    expect(matches('/api/free-pack')).toBe(true);
+    expect(matches('/api/announcements')).toBe(true);
     expect(matches('/api/me')).toBe(false);
     expect(matches('/api/presence')).toBe(false);
+  });
+
+  it('guards the card, free-pack and announcement polls the same way', () => {
+    expect(get('/api/cards/charizard-4')?.status).toBe(403);
+    expect(get('/api/free-pack')?.status).toBe(403);
+    expect(get('/api/announcements')?.status).toBe(403);
+    expect(
+      get('/api/cards/charizard-4', { 'sec-fetch-site': 'same-origin' }),
+    ).toBeUndefined();
   });
 
   it("lets the page's own poll through (Fetch Metadata)", () => {
