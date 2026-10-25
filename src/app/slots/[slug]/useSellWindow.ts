@@ -103,6 +103,9 @@ export function useSellWindow({
   // The batch whose states are live — a late sell answer from an earlier batch
   // must not land on this batch's card at the same index.
   const liveBatch = useRef(batchKey);
+  // Pulls whose sale has landed. A retry's refusal ("already sold back") or a
+  // second timeout for one of these must not toast an error over the success.
+  const soldPulls = useRef(new Set<string>());
   useEffect(() => {
     liveBatch.current = batchKey;
     pinged.current = false;
@@ -244,6 +247,8 @@ export function useSellWindow({
       // render, and re-resolving costs nothing.
       setStates((prev) => beginSellAt(resolvedStates(prev, expired), index));
       const report = (res: Awaited<ReturnType<SellBackFn>>): boolean => {
+        if (!res.ok && soldPulls.current.has(offer.pullId)) return false;
+        if (res.ok) soldPulls.current.add(offer.pullId);
         // A new spin has replaced this batch: its card states are gone, but a
         // sale that landed still reaches onSold below (balance + confirmation).
         if (liveBatch.current === batchKey)
@@ -301,6 +306,7 @@ export function useSellWindow({
         );
         return report({ ok: false, error: SELL_TIMEOUT_MESSAGE });
       } catch {
+        if (soldPulls.current.has(offer.pullId)) return false;
         const message = 'Something went wrong. Please try again.';
         if (liveBatch.current === batchKey)
           setStates((prev) => {

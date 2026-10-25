@@ -298,6 +298,48 @@ describe('useSellWindow — a sell nobody answers never hangs the stage', () => 
   });
 });
 
+describe('useSellWindow — no error toast over a sale that landed', () => {
+  type SellResult = Awaited<
+    ReturnType<Parameters<typeof useSellWindow>[0]['onSellBack']>
+  >;
+
+  test("a retry's refusal after the deadline does not toast over the late sale", async () => {
+    const answers: ((r: SellResult) => void)[] = [];
+    const onSellFailed = vi.fn();
+    const onSold = vi.fn();
+    const deadline = Date.now() + 80;
+    const hook = renderHook(() =>
+      useSellWindow({
+        offers: [offerAt(deadline)],
+        active: true,
+        onSellBack: vi.fn(
+          () => new Promise<SellResult>((r) => answers.push(r)),
+        ),
+        onSold,
+        onSellFailed,
+        sellTimeoutMs: 30,
+      }),
+    );
+    mounted = hook;
+
+    await act(async () => {
+      await hook.current.sell(0); // hangs, times out inside the window
+    });
+    let retry!: Promise<boolean>;
+    act(() => {
+      retry = hook.current.sell(0);
+    });
+    await act(async () => {
+      answers[0]!({ ok: true, amount: 70, percent: 70, balance: 170 });
+      await new Promise((r) => setTimeout(r, 100)); // cross the deadline
+      answers[1]!({ ok: false, error: 'This card was already sold back.' });
+      await retry;
+    });
+    expect(onSold).toHaveBeenCalledTimes(1);
+    expect(onSellFailed).not.toHaveBeenCalled();
+  });
+});
+
 describe('useSellWindow — a late answer never lands on the next batch', () => {
   type SellResult = Awaited<
     ReturnType<Parameters<typeof useSellWindow>[0]['onSellBack']>
