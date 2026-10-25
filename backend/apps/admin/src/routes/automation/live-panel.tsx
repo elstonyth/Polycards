@@ -474,7 +474,7 @@ export function LivePanel() {
         )}
         <Text size="xsmall" className="text-ui-fg-muted mt-4">
           Runs keep going when you close this page. Opening the page never
-          starts one. These accounts never count on the weekly prize board.
+          starts one. These accounts rank on the weekly prize board too.
         </Text>
       </Container>
 

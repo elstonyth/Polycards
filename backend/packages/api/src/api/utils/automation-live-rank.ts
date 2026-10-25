@@ -29,15 +29,15 @@ export function validateLiveRankTargets(
       ) ||
       !selected.includes(input.customerId) ||
       targets.some((row) => row.customerId === input.customerId) ||
-      // Automation accounts never rank on the weekly prize board
-      // (challengeWeekTop), so a weekly goal could only burn cycles.
+      // All-time only: weekly goals were dropped while automation accounts
+      // could not rank weekly (#827). Bringing them back is its own change.
       input.period !== 'alltime' ||
       !Number.isInteger(input.targetRank) ||
       input.targetRank < 1 ||
       input.targetRank > 10
     ) {
       throw new Error(
-        'Each live goal needs one distinct selected account, the all-time board, and rank 1–10. Automation accounts never rank on the weekly prize board.',
+        'Each live goal needs one distinct selected account, the all-time board, and rank 1–10.',
       );
     }
     targets.push({

@@ -59,7 +59,7 @@ it('accepts only distinct selected live customers and achievable Top N allocatio
   ).toEqual(alltime);
   const [goal] = alltime;
   for (const rankTargets of [
-    // Automation accounts never rank on the weekly prize board.
+    // Live goals stay on the all-time board only.
     config.rankTargets,
     [{ ...goal, customerId: 'cus_other' }],
     [goal, goal],
