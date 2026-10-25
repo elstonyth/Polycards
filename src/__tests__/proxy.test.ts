@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 import { readdirSync } from 'node:fs';
@@ -235,5 +235,43 @@ describe('card pages — a handle that cannot be a card never renders', () => {
     expect(
       get('/card/lugia-gx-100-psa-10-3468671?prize=weekly&_rsc=abc'),
     ).toBeUndefined();
+  });
+});
+
+describe('origin lock — only requests forwarded by our Cloudflare zone', () => {
+  const get = (path: string, headers: Record<string, string> = {}) =>
+    proxy(new NextRequest(`https://polycards.gg${path}`, { headers }));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('is off while EDGE_SHARED_SECRET is unset', () => {
+    vi.stubEnv('EDGE_SHARED_SECRET', '');
+    expect(get('/leaderboard')).toBeUndefined();
+  });
+
+  it('refuses a request without the edge header, or with a wrong one', () => {
+    vi.stubEnv('EDGE_SHARED_SECRET', 's3cret-value');
+    const attempts: Record<string, string>[] = [
+      {},
+      { 'x-polycards-edge': 'nope' },
+      { 'x-polycards-edge': 's3cret-valu' },
+    ];
+    for (const headers of attempts) {
+      const res = get('/leaderboard', headers);
+      expect(res?.status).toBe(403);
+      expect(res?.headers.get('cache-control')).toBe('no-store');
+    }
+    // Applies before every other rule, so junk paths and APIs are refused too.
+    expect(get('/leaderboard/sda')?.status).toBe(403);
+    expect(
+      get('/api/recent-pulls', { 'sec-fetch-site': 'same-origin' })?.status,
+    ).toBe(403);
+  });
+
+  it('serves a request carrying the right header, and always /healthz', () => {
+    vi.stubEnv('EDGE_SHARED_SECRET', 's3cret-value');
+    expect(
+      get('/leaderboard', { 'x-polycards-edge': 's3cret-value' }),
+    ).toBeUndefined();
+    expect(get('/healthz')).toBeUndefined();
   });
 });
