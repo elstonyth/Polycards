@@ -10,6 +10,7 @@ import {
   type PackCategory,
 } from '@/lib/packs-data';
 import { rm, rm0 } from '@/lib/format';
+import { isOptimizableImage } from '@/lib/optimizable-image';
 
 /** Display ladder: rounded price high→low; ties retain catalog order. */
 export const ladderOrder = (packs: Pack[]): Pack[] =>
@@ -119,9 +120,9 @@ function LadderRow({
           // Pack art is operator-entered and can live on any host (not in
           // next.config remotePatterns) — bypass the optimizer for remote art
           // like the detail hero does, else /_next/image 400s and the
-          // thumbnail breaks. Local /public art is optimized at its drawn size
-          // (~45×82 CSS px): raw 925×1666 decoded to ~6 MB each on phones.
-          unoptimized={!pack.image.startsWith('/')}
+          // thumbnail breaks. Local and own-media-host art is optimized at its
+          // drawn size (~45×82 CSS px): raw 925×1666 decoded to ~6 MB each.
+          unoptimized={!isOptimizableImage(pack.image)}
           className="h-[85%] w-auto object-contain"
         />
       </div>

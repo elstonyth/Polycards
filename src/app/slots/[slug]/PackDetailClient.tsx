@@ -62,6 +62,7 @@ import {
   type FreePackRequirement,
 } from '@/lib/packs-data';
 import { isPokemonPack } from '@/lib/resolve-card-pokemon';
+import { isOptimizableImage } from '@/lib/optimizable-image';
 
 /**
  * Shown where the gift offer would be, when this visitor cannot claim it.
@@ -163,15 +164,15 @@ function PackRail({
           >
             {/* Drawn ~20×36 CSS px. A local /public image goes through the
                 optimizer at that size: the raw 925×1666 art decoded to ~6 MB
-                each on phones (iOS tab memory, 2026-10-25). Remote art stays
-                unoptimized — its host may not be in remotePatterns. */}
+                each on phones (iOS tab memory, 2026-10-25). Art on a host
+                outside remotePatterns stays unoptimized. */}
             <Image
               src={p.image}
               alt=""
               aria-hidden
               width={41}
               height={72}
-              unoptimized={!p.image.startsWith('/')}
+              unoptimized={!isOptimizableImage(p.image)}
               className="h-9 w-auto object-contain"
             />
             <span className="w-full truncate text-[11px] font-medium leading-tight text-white">
