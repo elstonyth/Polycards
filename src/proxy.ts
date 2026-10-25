@@ -11,7 +11,38 @@ import { NextResponse, type NextRequest } from 'next/server';
 //
 // Scoped to / on purpose: other pages may receive legitimate form POSTs (a
 // payment gateway returning the browser to /transactions, for one).
+//
+// The public JSON the storefront's own pages poll is refused the same way when
+// the request is not a same-origin fetch. On 2026-10-25 a flood of ~160 req/s
+// from rotating proxy IPs hit /api/pack-detail/bronze-pack as direct
+// navigations (Sec-Fetch-Dest: document) with no Referer, each pulling a
+// ~270 KB body, and starved every pod into 503s. A real poll always carries
+// Sec-Fetch-Site: same-origin, or (older Safari, no Fetch Metadata) a
+// same-origin Referer under our strict-origin-when-cross-origin policy.
+const POLLED_JSON = /^\/api\/(pack-detail\/|recent-pulls$|pull-gaps$)/;
+
+function sameOriginFetch(request: NextRequest): boolean {
+  const site = request.headers.get('sec-fetch-site');
+  if (site) return site === 'same-origin';
+  const referer = request.headers.get('referer');
+  const host =
+    request.headers.get('x-forwarded-host') ?? request.headers.get('host');
+  if (!referer || !host) return false;
+  try {
+    return new URL(referer).host === host;
+  } catch {
+    return false;
+  }
+}
+
 export function proxy(request: NextRequest) {
+  if (POLLED_JSON.test(request.nextUrl.pathname)) {
+    if (sameOriginFetch(request)) return;
+    return new NextResponse(null, {
+      status: 403,
+      headers: { 'cache-control': 'no-store' },
+    });
+  }
   if (request.method === 'POST') {
     return new NextResponse(null, {
       status: 405,
@@ -22,7 +53,8 @@ export function proxy(request: NextRequest) {
 
 // The matcher does the filtering so the proxy never runs for ordinary
 // traffic: only / with that exact content type (the same exact match Next uses
-// to call it a possible action) and no Next-Action header.
+// to call it a possible action) and no Next-Action header, plus the polled
+// public JSON routes.
 export const config = {
   matcher: [
     {
@@ -36,5 +68,8 @@ export const config = {
       ],
       missing: [{ type: 'header', key: 'next-action' }],
     },
+    '/api/pack-detail/:path*',
+    '/api/recent-pulls',
+    '/api/pull-gaps',
   ],
 };
