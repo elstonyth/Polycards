@@ -8,6 +8,7 @@ import { store } from '@/lib/store';
 import { CardDetailEnvelopeSchema } from '@/lib/data/schemas';
 import { toCardView, type CardView } from '@/lib/card-view';
 import { createTtlCache } from '@/lib/ttl-cache';
+import { isPlausibleCardHandle } from '@/lib/card-handle';
 
 export interface CardPricePoint {
   date: string;
@@ -36,17 +37,16 @@ export type CardResult =
 
 // 2026-10-25: a flood hit /card/adasdsad at ~40 req/s per pod, and every hit
 // was an uncached backend 404 that backed up the backend (and admin with it).
-// Every real handle is a lowercase slug carrying the card's numeric id, so a
-// handle with no digit is answered here without a backend call. Lookups are
+// A handle that cannot be a card (see card-handle.ts) is answered here
+// without a backend call. Lookups are
 // memoised 30s (hits AND misses; errors never) in their own store, so a flood
 // of unique handles cannot evict the shared catalog/pack keys. Prices on the
 // page can be up to 30s older; the overlay's own refresh is 60s.
-const PLAUSIBLE_HANDLE = /^(?=.*\d)[a-z0-9-]{3,120}$/;
 const CARD_TTL_MS = 30_000;
 const cardMemo = createTtlCache(1024);
 
 export async function getCardResult(handle: string): Promise<CardResult> {
-  if (!PLAUSIBLE_HANDLE.test(handle)) return { status: 'notfound' };
+  if (!isPlausibleCardHandle(handle)) return { status: 'notfound' };
   try {
     return await cardMemo(`card:${handle}`, CARD_TTL_MS, async () => {
       const result = await fetchCardResult(handle);
