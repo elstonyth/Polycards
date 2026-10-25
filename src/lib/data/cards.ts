@@ -7,6 +7,7 @@
 import { store } from '@/lib/store';
 import { CardDetailEnvelopeSchema } from '@/lib/data/schemas';
 import { toCardView, type CardView } from '@/lib/card-view';
+import { createTtlCache } from '@/lib/ttl-cache';
 
 export interface CardPricePoint {
   date: string;
@@ -33,7 +34,32 @@ export type CardResult =
   | { status: 'notfound' }
   | { status: 'error' };
 
+// 2026-10-25: a flood hit /card/adasdsad at ~40 req/s per pod, and every hit
+// was an uncached backend 404 that backed up the backend (and admin with it).
+// Every real handle is a lowercase slug carrying the card's numeric id, so a
+// handle with no digit is answered here without a backend call. Lookups are
+// memoised 30s (hits AND misses; errors never) in their own store, so a flood
+// of unique handles cannot evict the shared catalog/pack keys. Prices on the
+// page can be up to 30s older; the overlay's own refresh is 60s.
+const PLAUSIBLE_HANDLE = /^(?=.*\d)[a-z0-9-]{3,120}$/;
+const CARD_TTL_MS = 30_000;
+const cardMemo = createTtlCache(1024);
+
 export async function getCardResult(handle: string): Promise<CardResult> {
+  if (!PLAUSIBLE_HANDLE.test(handle)) return { status: 'notfound' };
+  try {
+    return await cardMemo(`card:${handle}`, CARD_TTL_MS, async () => {
+      const result = await fetchCardResult(handle);
+      // Thrown so the memo evicts it: a backend blip is never held for 30s.
+      if (result.status === 'error') throw new Error('card lookup failed');
+      return result;
+    });
+  } catch {
+    return { status: 'error' };
+  }
+}
+
+async function fetchCardResult(handle: string): Promise<CardResult> {
   // Public route: no bearer, and `cache: 'auto'` (no cache key on the wire)
   // exactly as the bare sdk.client.fetch sent — an explicit no-store would
   // make any statically prerenderable caller dynamic.
