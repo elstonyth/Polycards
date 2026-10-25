@@ -161,13 +161,17 @@ function PackRail({
                 : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
             )}
           >
+            {/* Drawn ~20×36 CSS px. A local /public image goes through the
+                optimizer at that size: the raw 925×1666 art decoded to ~6 MB
+                each on phones (iOS tab memory, 2026-10-25). Remote art stays
+                unoptimized — its host may not be in remotePatterns. */}
             <Image
               src={p.image}
               alt=""
               aria-hidden
-              width={205}
-              height={360}
-              unoptimized
+              width={41}
+              height={72}
+              unoptimized={!p.image.startsWith('/')}
               className="h-9 w-auto object-contain"
             />
             <span className="w-full truncate text-[11px] font-medium leading-tight text-white">

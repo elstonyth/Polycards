@@ -114,12 +114,14 @@ function LadderRow({
         <Image
           src={pack.image}
           alt={pack.name}
-          width={128}
-          height={128}
+          width={64}
+          height={115}
           // Pack art is operator-entered and can live on any host (not in
-          // next.config remotePatterns) — bypass the optimizer like the detail
-          // hero does, else /_next/image 400s and the thumbnail breaks.
-          unoptimized
+          // next.config remotePatterns) — bypass the optimizer for remote art
+          // like the detail hero does, else /_next/image 400s and the
+          // thumbnail breaks. Local /public art is optimized at its drawn size
+          // (~45×82 CSS px): raw 925×1666 decoded to ~6 MB each on phones.
+          unoptimized={!pack.image.startsWith('/')}
           className="h-[85%] w-auto object-contain"
         />
       </div>
