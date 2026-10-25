@@ -5,6 +5,7 @@ import {
   rm0,
   rmAuto,
   num,
+  compact,
   relativeTime,
   timeUntil,
   pullTime,
@@ -12,6 +13,49 @@ import {
   mytClock,
   affordable,
 } from '../format';
+
+describe('cached formatters match toLocaleString byte for byte', () => {
+  const values = [
+    0,
+    -0,
+    1,
+    -1,
+    0.005,
+    0.015,
+    1.005,
+    1234.5,
+    -9876.543,
+    1e9,
+    12.345,
+    NaN,
+    Infinity,
+  ];
+  it.each(values)('%s', (n) => {
+    const fixed = (d: number) =>
+      n.toLocaleString('en-US', {
+        minimumFractionDigits: d,
+        maximumFractionDigits: d,
+      });
+    expect(rm(n)).toBe(`RM ${fixed(2)}`);
+    expect(rm0(n)).toBe(`RM ${fixed(0)}`);
+    expect(money(n, { decimals: 3 })).toBe(`$${fixed(3)}`);
+    expect(money(n, { currency: true })).toBe(
+      n.toLocaleString('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    );
+    expect(num(n)).toBe(n.toLocaleString('en-US'));
+    expect(compact(n)).toBe(
+      n.toLocaleString('en-US', {
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }),
+    );
+  });
+});
 
 describe('rmAuto', () => {
   it('drops .00 on whole ringgit and keeps sen when there are some', () => {
