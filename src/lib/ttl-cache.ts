@@ -20,7 +20,8 @@
 // STALENESS LADDER (worst case per layer; per instance, 2 instances of
 // each app since #473 — layers stack, they do not synchronize):
 //   backend route Map        30s (packs list/detail, leaderboard; pulls 5s)
-//   this storefront memo     30s (catalog, board) / 15s (pack detail) /
+//   this storefront memo     30s (catalog, board) / 15s (pack detail, plus
+//                            15s more for the /api/pack-detail body) /
 //                            60s (avatar frames)
 //   home route cache         15s (src/app/page.tsx revalidate)
 //   getPackHighlights        60s (unstable_cache, no tags)
@@ -60,12 +61,15 @@ export function cached<T>(
   if (hit && hit.expires > Date.now()) return hit.value as Promise<T>;
 
   const value = load();
+  // Delete first: Map.set on an existing key keeps its ORIGINAL position, so
+  // without this the hottest keys (inserted at boot, refreshed every window)
+  // sat at the front and were the first evicted under pressure.
+  store.delete(key);
   store.set(key, { expires: Date.now() + ttlMs, value });
   // Hard bound: keys can be attacker-influenced (recent-pulls' pack_id), and
   // expired entries are otherwise never removed. Map iterates in insertion
-  // order, so this evicts oldest-inserted first — not LRU, but the legit key
-  // population is tiny (catalog + a few fixed keys), so anything evicted
-  // under pressure is an attacker key or long-expired.
+  // order and a refresh re-inserts, so this evicts the least recently
+  // (re)loaded key — a hot key refreshed each window sits at the back.
   if (store.size > MAX_ENTRIES) {
     store.delete(store.keys().next().value as string);
   }
