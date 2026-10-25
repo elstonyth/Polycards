@@ -1,61 +1,67 @@
 import { describe, it, expect } from 'vitest';
 import { NextRequest } from 'next/server';
 import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
-import { config, proxy } from '@/proxy';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { config, isKnownRoute, proxy } from '@/proxy';
 
 const FORM = 'application/x-www-form-urlencoded';
 const matches = (url: string, headers: Record<string, string> = {}) =>
   unstable_doesMiddlewareMatch({ config, url, headers });
 
-describe('proxy matcher — runs only for the costly request shape', () => {
-  it('matches a form-encoded request to / without Next-Action', () => {
-    expect(matches('/', { 'content-type': FORM })).toBe(true);
+const post = (path: string, headers: Record<string, string>) =>
+  proxy(
+    new NextRequest(`http://localhost${path}`, {
+      method: 'POST',
+      headers,
+      body: 'a=1',
+    }),
+  );
+
+describe('proxy matcher — every page path, never static files', () => {
+  it('runs on pages, made-up paths and the polled APIs', () => {
+    expect(matches('/')).toBe(true);
+    expect(matches('/leaderboard/sda')).toBe(true);
+    expect(matches('/api/pack-detail/bronze-pack')).toBe(true);
   });
 
-  it('skips real server actions, which carry Next-Action', () => {
-    expect(
-      matches('/', { 'content-type': FORM, 'next-action': 'abc123' }),
-    ).toBe(false);
-  });
-
-  it('skips ordinary traffic and other content types', () => {
-    expect(matches('/')).toBe(false);
-    expect(
-      matches('/', { 'content-type': 'multipart/form-data; boundary=x' }),
-    ).toBe(false);
-    expect(matches('/', { 'content-type': 'text/plain;charset=UTF-8' })).toBe(
-      false,
-    );
-  });
-
-  it('matches the content type exactly, as Next does', () => {
-    // `has` values are anchored (^…$). Next only treats the bare type as a
-    // possible action; with a charset it answers 405 itself, without a render.
-    expect(matches('/', { 'content-type': `${FORM}; charset=UTF-8` })).toBe(
-      false,
-    );
-  });
-
-  it('never touches other pages (a gateway may POST a form to /transactions)', () => {
-    expect(matches('/transactions', { 'content-type': FORM })).toBe(false);
-    expect(matches('/slots/bronze-pack', { 'content-type': FORM })).toBe(false);
+  it('skips Next assets, public/ files and the other API routes', () => {
+    expect(matches('/_next/static/chunks/app.js')).toBe(false);
+    expect(matches('/images/polycards/gold-pack.webp')).toBe(false);
+    expect(matches('/videos/factory.mp4')).toBe(false);
+    expect(matches('/api/me')).toBe(false);
+    expect(matches('/api/presence')).toBe(false);
   });
 });
 
-describe('proxy handler', () => {
-  it('answers a POST with 405 before anything renders', () => {
-    const res = proxy(
-      new NextRequest('http://localhost/', {
-        method: 'POST',
-        headers: { 'content-type': FORM },
-        body: 'a=1',
-      }),
-    );
+describe('form POST to / — refused before rendering', () => {
+  it('answers a form-encoded POST to / without Next-Action with 405', () => {
+    const res = post('/', { 'content-type': FORM });
     expect(res?.status).toBe(405);
     expect(res?.headers.get('allow')).toBe('GET, HEAD');
   });
 
-  it('lets anything else through untouched', () => {
+  it('passes real server actions, other content types and charsets', () => {
+    expect(
+      post('/', { 'content-type': FORM, 'next-action': 'abc123' }),
+    ).toBeUndefined();
+    expect(
+      post('/', { 'content-type': 'text/plain;charset=UTF-8' }),
+    ).toBeUndefined();
+    // Next only treats the bare type as a possible action.
+    expect(
+      post('/', { 'content-type': `${FORM}; charset=UTF-8` }),
+    ).toBeUndefined();
+  });
+
+  it('never touches other pages (a gateway may POST a form to /transactions)', () => {
+    expect(post('/transactions', { 'content-type': FORM })).toBeUndefined();
+    expect(
+      post('/slots/bronze-pack', { 'content-type': FORM }),
+    ).toBeUndefined();
+  });
+
+  it('lets a GET to / through untouched', () => {
     expect(
       proxy(
         new NextRequest('http://localhost/', {
@@ -63,6 +69,79 @@ describe('proxy handler', () => {
         }),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('unknown routes — a cacheable 404 before rendering', () => {
+  const get = (path: string) =>
+    proxy(new NextRequest(`https://polycards.gg${path}`));
+
+  it('answers the 2026-10-25 flood paths and other made-up URLs', () => {
+    for (const path of [
+      '/leaderboard/sda',
+      '/random',
+      '/slots/a/b/c',
+      '/wp-admin',
+      '/vault/history/x',
+    ]) {
+      const res = get(path);
+      expect(res?.status, path).toBe(404);
+      expect(res?.headers.get('cache-control')).toBe('public, max-age=300');
+    }
+  });
+
+  it('passes every real page, with or without a trailing slash or query', () => {
+    for (const path of [
+      '/',
+      '/leaderboard',
+      '/leaderboard/',
+      '/slots',
+      '/slots/bronze-pack',
+      '/slots/bronze-pack/spin?count=3',
+      '/card/pikachu-tg05-psa-10-4080757',
+      '/profile/Collector7530',
+      '/r/ZE42A7WA',
+      '/vault',
+      '/vault/history',
+      '/auth/google/callback?state=x',
+      '/healthz',
+      '/robots.txt',
+      '/sitemap.xml',
+      '/manifest.webmanifest',
+      '/icon.png?291a1666e62a259d',
+      '/favicon.ico',
+      '/lucky-draw',
+      '/task',
+      '/transactions?ref=gateway',
+    ]) {
+      expect(get(path), path).toBeUndefined();
+    }
+  });
+
+  it('lists every route src/app serves (add new pages to KNOWN_ROUTE)', () => {
+    const root = join(process.cwd(), 'src', 'app');
+    const routes: string[] = [];
+    const walk = (dir: string, url: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === '__tests__' || entry.name.startsWith('_')) continue;
+        if (entry.isDirectory()) {
+          const seg = entry.name.startsWith('(')
+            ? ''
+            : entry.name.startsWith('[')
+              ? '/sample-segment-1'
+              : `/${entry.name}`;
+          walk(join(dir, entry.name), url + seg);
+        } else if (/^(page|route)\.tsx?$/.test(entry.name)) {
+          routes.push(url || '/');
+        }
+      }
+    };
+    walk(root, '');
+    expect(routes.length).toBeGreaterThan(30);
+    const missing = routes.filter(
+      (r) => !r.startsWith('/api/') && !isKnownRoute(r),
+    );
+    expect(missing).toEqual([]);
   });
 });
 
@@ -140,7 +219,7 @@ describe('card pages — a handle that cannot be a card never renders', () => {
 
   it('matches /card/*', () => {
     expect(matches('/card/adasdsad')).toBe(true);
-    expect(matches('/cards')).toBe(false);
+    expect(get('/cards')?.status).toBe(404); // not a route either
   });
 
   it('answers the 2026-10-25 flood handle with a bare, cacheable 404', async () => {
