@@ -298,6 +298,61 @@ describe('useSellWindow — a sell nobody answers never hangs the stage', () => 
   });
 });
 
+describe('useSellWindow — a late answer never lands on the next batch', () => {
+  type SellResult = Awaited<
+    ReturnType<Parameters<typeof useSellWindow>[0]['onSellBack']>
+  >;
+
+  test('credits the balance but leaves the new batch card untouched', async () => {
+    let answer!: (r: SellResult) => void;
+    const onSold = vi.fn();
+    const onSellBack = vi.fn(
+      () => new Promise<SellResult>((r) => (answer = r)),
+    );
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const box: { current?: ReturnType<typeof useSellWindow> } = {};
+    function Probe({ offer }: { offer: SellBackOffer }) {
+      const result = useSellWindow({
+        offers: [offer],
+        active: true,
+        onSellBack,
+        onSold,
+        sellTimeoutMs: 30,
+      });
+      useLayoutEffect(() => {
+        box.current = result;
+      });
+      return null;
+    }
+    let root!: Root;
+    const first = offerAt(Date.now() + 30_000);
+    const second = { ...offerAt(Date.now() + 30_000), pullId: 'pull_2' };
+    act(() => {
+      root = createRoot(container);
+      root.render(createElement(Probe, { offer: first }));
+    });
+    mounted = {
+      unmount: () => {
+        act(() => root.unmount());
+        container.remove();
+      },
+    };
+
+    await act(async () => {
+      await box.current!.sell(0); // times out
+    });
+    act(() => root.render(createElement(Probe, { offer: second }))); // next spin
+    expect(box.current!.states[0]).toEqual({ phase: 'idle' });
+
+    await act(async () => {
+      answer({ ok: true, amount: 70, percent: 70, balance: 170 });
+    });
+    expect(box.current!.states[0]).toEqual({ phase: 'idle' });
+    expect(onSold).toHaveBeenCalledWith(170, 70, 0);
+  });
+});
+
 describe('useSellWindow — the for-packs part of a sale', () => {
   async function sellOnce(offer: SellBackOffer, soldAmount: number) {
     const onSold = vi.fn();

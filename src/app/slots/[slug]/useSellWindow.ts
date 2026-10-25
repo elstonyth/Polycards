@@ -100,7 +100,11 @@ export function useSellWindow({
 
   // Reset per new batch (keyed by the first pullId).
   const batchKey = offers.find((o) => o !== null)?.pullId ?? null;
+  // The batch whose states are live — a late sell answer from an earlier batch
+  // must not land on this batch's card at the same index.
+  const liveBatch = useRef(batchKey);
   useEffect(() => {
+    liveBatch.current = batchKey;
     pinged.current = false;
     // Money path: the whole window (states, deadline, countdown, reveal ping)
     // restarts together when a new batch arrives, keyed on its first pullId.
@@ -240,16 +244,19 @@ export function useSellWindow({
       // render, and re-resolving costs nothing.
       setStates((prev) => beginSellAt(resolvedStates(prev, expired), index));
       const report = (res: Awaited<ReturnType<SellBackFn>>): boolean => {
-        setStates((prev) => {
-          // A sale that landed late is final: a retry's refusal ("already
-          // sold") must not paint it back to an error.
-          if (!res.ok && prev[index]?.phase === 'sold') return prev;
-          const next = [...prev];
-          next[index] = res.ok
-            ? { phase: 'sold', amount: res.amount }
-            : { phase: 'error', message: res.error };
-          return next;
-        });
+        // A new spin has replaced this batch: its card states are gone, but a
+        // sale that landed still reaches onSold below (balance + confirmation).
+        if (liveBatch.current === batchKey)
+          setStates((prev) => {
+            // A sale that landed late is final: a retry's refusal ("already
+            // sold") must not paint it back to an error.
+            if (!res.ok && prev[index]?.phase === 'sold') return prev;
+            const next = [...prev];
+            next[index] = res.ok
+              ? { phase: 'sold', amount: res.amount }
+              : { phase: 'error', message: res.error };
+            return next;
+          });
         // `amount` is passed alongside the balance so the caller can confirm
         // the sale OUTSIDE this stage. The in-card "+RM x credited" footer is
         // torn down with the reveal (auto-conclude, or expiry mid-flight), and
@@ -295,12 +302,13 @@ export function useSellWindow({
         return report({ ok: false, error: SELL_TIMEOUT_MESSAGE });
       } catch {
         const message = 'Something went wrong. Please try again.';
-        setStates((prev) => {
-          if (prev[index]?.phase === 'sold') return prev;
-          const next = [...prev];
-          next[index] = { phase: 'error', message };
-          return next;
-        });
+        if (liveBatch.current === batchKey)
+          setStates((prev) => {
+            if (prev[index]?.phase === 'sold') return prev;
+            const next = [...prev];
+            next[index] = { phase: 'error', message };
+            return next;
+          });
         if (sweptAway()) onSellFailed?.(message);
         return false;
       } finally {
@@ -316,6 +324,7 @@ export function useSellWindow({
       states,
       deadlineMs,
       sellTimeoutMs,
+      batchKey,
     ],
   );
 
