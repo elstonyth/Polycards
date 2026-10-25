@@ -133,3 +133,28 @@ describe('polled public JSON — same-origin fetches only', () => {
     ).toBe(403);
   });
 });
+
+describe('card pages — a handle that cannot be a card never renders', () => {
+  const get = (path: string) =>
+    proxy(new NextRequest(`https://polycards.gg${path}`));
+
+  it('matches /card/*', () => {
+    expect(matches('/card/adasdsad')).toBe(true);
+    expect(matches('/cards')).toBe(false);
+  });
+
+  it('answers the 2026-10-25 flood handle with a bare, cacheable 404', async () => {
+    const res = get('/card/adasdsad');
+    expect(res?.status).toBe(404);
+    expect(res?.headers.get('cache-control')).toBe('public, max-age=300');
+    expect(get('/card/%E0%A4%A')?.status).toBe(404); // undecodable
+    expect(get('/card/Pikachu-1')?.status).toBe(404); // uppercase is never a handle
+  });
+
+  it('passes a real handle (and its RSC fetch) through untouched', () => {
+    expect(get('/card/pikachu-tg05-psa-10-4080757')).toBeUndefined();
+    expect(
+      get('/card/lugia-gx-100-psa-10-3468671?prize=weekly&_rsc=abc'),
+    ).toBeUndefined();
+  });
+});
