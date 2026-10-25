@@ -517,6 +517,7 @@ export const PullHistoryItemSchema = z.looseObject({
   rolled_at: z.string().catch(''),
   pack_title: z.string().catch(''),
   challenge_prize: z.boolean().catch(false),
+  lucky_draw_prize: z.boolean().catch(false),
   source: z.enum(['pack', 'reward', 'free', 'gift', 'bonus']).catch('pack'),
   status: z.string().catch(''),
   card: z.looseObject({ name: z.string() }),

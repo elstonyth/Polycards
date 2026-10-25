@@ -5,6 +5,7 @@ import {
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { isChallengePrizePack } from '../../../../modules/packs/challenge-prize';
+import { isLuckyDrawPrizePack } from '../../../../modules/packs/lucky-draw';
 import { bestLiveTierByHandle } from '../../../../modules/packs/card-tier';
 import {
   cardByHandle,
@@ -119,7 +120,9 @@ export async function GET(
     p.source === 'reward' && !packBySlug.has(p.pack_id);
   const prizeTier = await bestLiveTierByHandle(
     packs,
-    pulls.filter(isSyntheticReward).map((p) => p.card_id),
+    pulls
+      .filter((p) => isSyntheticReward(p) && !isLuckyDrawPrizePack(p.pack_id))
+      .map((p) => p.card_id),
   );
 
   const items = pulls.map((p) => {
@@ -137,6 +140,8 @@ export async function GET(
       pack_id: p.pack_id,
       pack_title: pullPackTitle(p, packBySlug.get(p.pack_id)?.title),
       challenge_prize: isChallengePrizePack(p.pack_id),
+      // No tier frame on a Lucky Draw card, as in the vault.
+      lucky_draw_prize: isLuckyDrawPrizePack(p.pack_id),
       source: p.source ?? 'pack',
       status: p.status,
       // A card deleted after the pull (delete-card refuses only while copies
@@ -146,9 +151,11 @@ export async function GET(
         ? {
             ...toCardView(
               card,
-              isSyntheticReward(p)
-                ? (prizeTier.get(p.card_id) ?? '')
-                : rarityOf(p.pack_id, p.card_id),
+              isLuckyDrawPrizePack(p.pack_id)
+                ? ''
+                : isSyntheticReward(p)
+                  ? (prizeTier.get(p.card_id) ?? '')
+                  : rarityOf(p.pack_id, p.card_id),
             ),
             marketPriceMyr: priceNow,
           }

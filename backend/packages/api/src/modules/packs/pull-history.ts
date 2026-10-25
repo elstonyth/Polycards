@@ -1,4 +1,5 @@
 import { isChallengePrizePack } from './challenge-prize';
+import { isLuckyDrawPrizePack } from './lucky-draw';
 import { toMoney } from './money';
 
 // Shared by the customer's pull history (GET /store/pulls/history) and the
@@ -6,14 +7,16 @@ import { toMoney } from './money';
 // card was that, and what did it cost me" from the pull table alone.
 
 /** The pack name a customer reads for a pull. Reward pulls ride synthetic pack
- *  ids with no Pack row behind them (`challenge-<week>`, `task-reward`) — name
- *  where they came from instead of printing the raw id. */
+ *  ids with no Pack row behind them (`challenge-<week>`, `lucky-draw`,
+ *  `task-reward`) — name where they came from instead of printing the raw
+ *  id. */
 export function pullPackTitle(
   pull: { pack_id: string; source?: string | null },
   title: string | undefined,
 ): string {
   if (title) return title;
   if (isChallengePrizePack(pull.pack_id)) return 'Weekly Challenge';
+  if (isLuckyDrawPrizePack(pull.pack_id)) return 'Lucky Draw';
   if (pull.source === 'reward') return 'Task reward';
   return pull.pack_id;
 }

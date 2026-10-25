@@ -16,6 +16,10 @@ export const MAX_PRIZE_CREDIT_MYR = 50_000;
 
 // Synthetic pull.pack_id for prize cards, like 'task-reward'.
 export const LUCKY_DRAW_PULL_PACK_ID = 'lucky-draw';
+/** A card won in the Lucky Draw. It wears no tier frame anywhere it is held
+ *  (operator 2026-10-25: "no frame, so they know it's from the Lucky Draw"). */
+export const isLuckyDrawPrizePack = (packId: string | null | undefined) =>
+  packId === LUCKY_DRAW_PULL_PACK_ID;
 
 export interface DrawEntryRow {
   id: string;

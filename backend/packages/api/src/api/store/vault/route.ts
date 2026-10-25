@@ -16,6 +16,8 @@ import {
 } from '../../../modules/packs/buyback-rate';
 import { withLossless } from '../../../modules/packs/lossless';
 import { isChallengePrizePack } from '../../../modules/packs/challenge-prize';
+import { isLuckyDrawPrizePack } from '../../../modules/packs/lucky-draw';
+import { pullPackTitle } from '../../../modules/packs/pull-history';
 import { bestLiveTierByHandle } from '../../../modules/packs/card-tier';
 import {
   cardByHandle,
@@ -119,8 +121,9 @@ export async function GET(
   // is not in here: its odds rows resolve the tier normally.
   const isSyntheticReward = (p: { source?: string | null; pack_id: string }) =>
     p.source === 'reward' && !packBySlug.has(p.pack_id);
+  // A Lucky Draw card takes no tier at all (below), so it needs no lookup.
   const prizeHandles = normalPulls
-    .filter(isSyntheticReward)
+    .filter((p) => isSyntheticReward(p) && !isLuckyDrawPrizePack(p.pack_id))
     .map((p) => p.card_id);
   const prizeTier = await bestLiveTierByHandle(packs, prizeHandles);
 
@@ -133,6 +136,7 @@ export async function GET(
       if (!Number.isFinite(marketValue)) return null;
       const pack = packBySlug.get(p.pack_id);
       const prize = isChallengePrizePack(p.pack_id);
+      const luckyDraw = isLuckyDrawPrizePack(p.pack_id);
       // The free welcome pull and a daily task's card are unsellable until
       // the customer's first PAID open — the SAME rule buyback-pull.ts
       // refuses on. `locked` = neither sellable NOR shippable.
@@ -172,12 +176,15 @@ export async function GET(
         pack_id: p.pack_id,
         // The synthetic `challenge-<week>` id is not a pack title anyone should
         // read; name the surface it was won on instead.
-        pack_title: pack?.title ?? (prize ? 'Weekly Challenge' : p.pack_id),
+        pack_title: pullPackTitle(p, pack?.title),
         // A weekly-challenge prize keeps the challenge's own prism frame in the
         // vault instead of taking the card's pack tier — it was won there, not
         // pulled from a pack. Stated by the backend rather than left to the
         // storefront to infer from the synthetic pack id.
         challenge_prize: prize,
+        // A Lucky Draw card wears no tier frame and states no tier: won, not
+        // pulled, and the bare slab is how the vault says so.
+        lucky_draw_prize: luckyDraw,
         showcased: (p as unknown as { showcased: boolean }).showcased ?? false,
         card: {
           // A synthetic pack has no odds row, so rarityOf would answer
@@ -187,9 +194,11 @@ export async function GET(
           // resolved live tier.
           ...toCardView(
             card,
-            isSyntheticReward(p)
-              ? (prizeTier.get(p.card_id) ?? '')
-              : rarityOf(p.pack_id, p.card_id),
+            luckyDraw
+              ? ''
+              : isSyntheticReward(p)
+                ? (prizeTier.get(p.card_id) ?? '')
+                : rarityOf(p.pack_id, p.card_id),
           ),
           marketPriceMyr,
           // The linked sprite (Pokémon or One Piece), so the vault never has

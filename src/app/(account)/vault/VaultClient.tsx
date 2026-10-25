@@ -773,13 +773,21 @@ export default function VaultClient({
                     ~40px and it rendered as "IM…" / "COM…". Rarity is a signal
                     word — it either reads or it shouldn't be there. */}
                 <div className="mt-1 flex flex-col gap-0.5 text-[10px] sm:flex-row sm:items-center sm:justify-between sm:gap-1 sm:text-[11px]">
-                  {!item.challengePrize && (
-                    <span
-                      className="truncate font-bold uppercase tracking-wider"
-                      style={{ color: `rgb(${glow})` }}
-                    >
-                      {item.card.rarity}
+                  {item.luckyDrawPrize ? (
+                    // No tier and no frame: the bare slab and this word are
+                    // how a Lucky Draw win reads (operator 2026-10-25).
+                    <span className="truncate font-bold uppercase tracking-wider text-neutral-300">
+                      Lucky Draw
                     </span>
+                  ) : (
+                    !item.challengePrize && (
+                      <span
+                        className="truncate font-bold uppercase tracking-wider"
+                        style={{ color: `rgb(${glow})` }}
+                      >
+                        {item.card.rarity}
+                      </span>
+                    )
                   )}
                   <span className="font-heading shrink-0 whitespace-nowrap text-[12px] tabular-nums text-white sm:text-[13px]">
                     {/* `?? 0`: the vault has always shown RM 0.00 for an

@@ -194,6 +194,30 @@ describe('GET /store/pulls/history', () => {
     expect(listCreditTransactions).not.toHaveBeenCalled();
   });
 
+  it('names a Lucky Draw card and gives it no tier, even one a live pack holds', async () => {
+    listPackOdds.mockResolvedValue([
+      { pack_id: 'bronze', card_id: 'charizard', rarity: 'Legendary' },
+    ]);
+    listPulls.mockResolvedValueOnce([
+      pull({ id: 'p_pack' }),
+      pull({ id: 'p_ld', source: 'reward', pack_id: 'lucky-draw' }),
+    ]);
+    const { res, out } = mkRes();
+    await history(mkReq() as unknown as AuthenticatedMedusaRequest, res);
+
+    const items = (out.body as { items: Record<string, unknown>[] }).items;
+    expect(items[0]).toMatchObject({
+      lucky_draw_prize: false,
+      card: { rarity: 'Legendary' },
+    });
+    expect(items[1]).toMatchObject({
+      pack_title: 'Lucky Draw',
+      lucky_draw_prize: true,
+      challenge_prize: false,
+      card: { rarity: '' },
+    });
+  });
+
   it('keeps a pull whose card was since deleted, with its money trail', async () => {
     listPulls.mockResolvedValueOnce([
       pull({

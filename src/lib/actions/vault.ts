@@ -722,6 +722,8 @@ export type PullHistoryItem = {
   packTitle: string;
   /** Won in the weekly challenge — wears the prism frame, as in the vault. */
   challengePrize: boolean;
+  /** Won in the Lucky Draw — no tier, so no frame, as in the vault. */
+  luckyDrawPrize: boolean;
   source: VaultItem['source'];
   /** vaulted | bought_back | delivering | delivered (any string passes). */
   status: string;
@@ -765,6 +767,7 @@ export async function getPullHistory(
       rolledAt: i.rolled_at,
       packTitle: i.pack_title,
       challengePrize: i.challenge_prize,
+      luckyDrawPrize: i.lucky_draw_prize,
       source: i.source,
       status: i.status,
       card: toCardView(i.card),
