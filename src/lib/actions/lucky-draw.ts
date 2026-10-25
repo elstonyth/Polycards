@@ -15,6 +15,7 @@ import {
   LuckyDrawPageSchema,
   LuckyDrawResultDetailSchema,
   LuckyDrawResultsSchema,
+  LuckyDrawStatusSchema,
   type LuckyDrawMine,
   type LuckyDrawPage,
   type LuckyDrawResultDetail,
@@ -26,6 +27,15 @@ const loggedOut = (f: Failure): string | null =>
   f.kind === 'unauthenticated' && f.status === undefined
     ? 'Please log in first.'
     : null;
+
+/** Is a Lucky Draw on? Needs no sign-in (the Games sheet asks for visitors
+ *  too); null when the backend can't say. */
+export async function getLuckyDrawLive(): Promise<boolean | null> {
+  const r = await store.get('/store/lucky-draw-status', LuckyDrawStatusSchema, {
+    auth: 'none',
+  });
+  return r.ok ? r.data.live : null;
+}
 
 export async function getLuckyDraw(): Promise<LuckyDrawPage | null> {
   const r = await store.get('/store/lucky-draw', LuckyDrawPageSchema);
