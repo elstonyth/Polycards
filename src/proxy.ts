@@ -78,8 +78,37 @@ const notFound = () =>
     headers: { 'cache-control': 'public, max-age=300' },
   });
 
+// Origin lock. The storefront sits behind our Cloudflare zone, whose rules
+// (MY/SG only, rate limit, hosting-network challenge) are the real flood
+// defence, but DigitalOcean also serves the app on its own hostname and edge,
+// so a bot that calls those skips every rule. A Cloudflare Transform Rule adds
+// `x-polycards-edge: <secret>` to every request it forwards; once
+// EDGE_SHARED_SECRET is set on the app, anything without that header is refused
+// here. Unset = lock off (deploy the code first, add the Cloudflare rule,
+// then set the secret). /healthz stays open for DigitalOcean's own probes.
+const EDGE_HEADER = 'x-polycards-edge';
+
+function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function bypassedEdge(request: NextRequest): boolean {
+  const secret = process.env.EDGE_SHARED_SECRET;
+  if (!secret || request.nextUrl.pathname === '/healthz') return false;
+  return !sameSecret(request.headers.get(EDGE_HEADER) ?? '', secret);
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (bypassedEdge(request)) {
+    return new NextResponse(null, {
+      status: 403,
+      headers: { 'cache-control': 'no-store' },
+    });
+  }
   if (implausibleCardPath(pathname)) return notFound();
   if (POLLED_JSON.test(pathname)) {
     if (sameOriginFetch(request)) return;
