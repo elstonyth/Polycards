@@ -257,13 +257,13 @@ async function depositLegs(admin, cust) {
     (await balance(cust)).balance === afterD1,
   );
 
-  // ---- 4. Callback lost: the sweep requeries and credits (ERC20 this time)
+  // ---- 4. Callback lost: the sweep requeries and credits
   const d2 = await call('POST', '/store/credits/deposit', {
     token: cust,
-    body: { amount: 20, currency: 'USDT', payment_method_code: 'UERC' },
+    body: { amount: 20, currency: 'USDT', payment_method_code: 'UTRC' },
   });
   check(
-    '20 USDT (ERC20) quotes RM 83.58',
+    '20 USDT (TRC20) quotes RM 83.58',
     d2.json.amount === 83.58,
     `${d2.status} ${d2.json.amount} ${d2.json.message ?? ''}`,
   );

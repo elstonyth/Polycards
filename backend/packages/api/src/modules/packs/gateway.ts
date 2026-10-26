@@ -248,9 +248,12 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       env.GP365_ENABLED === 'true' && a3pay.a3payFamilyConfigured('gp365', env),
     configFromEnv: (env) => a3pay.a3payFamilyConfigFromEnv('gp365', env),
     needsCustomerContact: false,
-    // UTRC = USDT on Tron (TRC20), UERC = USDT on Ethereum (ERC20). No payer
-    // name: the doc requires FromCustomerAccountHolderName for SGD only.
-    depositMethods: ['UTRC', 'UERC'],
+    // UTRC = USDT on Tron (TRC20). No payer name: the doc requires
+    // FromCustomerAccountHolderName for SGD only. UERC (ERC20) is withdrawn:
+    // production CreatePayin refuses it ("unknown error"; all 3 live attempts
+    // and a test on 2026-10-26), so offering it only strands customers.
+    // Re-add it here and in the storefront rail once GlobePay365 opens it.
+    depositMethods: ['UTRC'],
     needsPayerName: false,
     // PROVISIONAL, up to 1 USDT: crypto cashiers make amounts unique with
     // larger tails than A3Pay's cent. Measure payinActualAmount on staging.
@@ -951,10 +954,7 @@ export function submitDeposit(
  * a later A3PAY_CURRENCY edit must not turn live payouts into refunds. Rows
  * from before the column (currency absent) keep the config's currency.
  */
-export function inRowCurrency(
-  config: GatewayConfig,
-  fx: RowFx,
-): GatewayConfig {
+export function inRowCurrency(config: GatewayConfig, fx: RowFx): GatewayConfig {
   const currency = typeof fx.currency === 'string' ? fx.currency : '';
   return currency &&
     'currencyCode' in config &&
