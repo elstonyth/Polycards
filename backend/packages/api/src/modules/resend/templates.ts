@@ -596,12 +596,15 @@ export const renderTemplate = (
     // A security alert that cannot name the account is worse than none — it
     // would tell the customer "something changed" with nothing to check.
     //
-    // EXACTLY four digits, not merely non-empty. The only producer
-    // (packs/saved-account-notice.ts) slices the last 4 off a digits-only
-    // number, so this can never refuse a well-formed payload — it is the
-    // backstop for a malformed one, where "non-empty" would happily print a
-    // FULL account number into an email and undo plan 087's whole point.
-    if (typeof last4 !== 'string' || !/^\d{4}$/.test(last4)) return undefined;
+    // EXACTLY four characters, not merely non-empty. The only producer
+    // (packs/saved-account-notice.ts) slices the last 4 off the saved number —
+    // digits for a bank or e-wallet, base58 letters too for a USDT wallet
+    // address, so the guard is alphanumeric (a digits-only one silently
+    // dropped every USDT alert). The length is what matters: "non-empty"
+    // would happily print a FULL account number into an email and undo plan
+    // 087's whole point.
+    if (typeof last4 !== 'string' || !/^[A-Za-z0-9]{4}$/.test(last4))
+      return undefined;
     if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
     return bankAccountAdded({
       bankName: typeof bankName === 'string' && bankName ? bankName : 'Bank',
@@ -617,9 +620,10 @@ export const renderTemplate = (
     const bankName = data?.bank_name;
     const last4 = data?.account_last4;
     const siteUrl = data?.site_url;
-    // Same EXACTLY-four-digits backstop as the added alert: "non-empty"
+    // Same EXACTLY-four-characters backstop as the added alert: "non-empty"
     // would happily print a FULL account number into an email.
-    if (typeof last4 !== 'string' || !/^\d{4}$/.test(last4)) return undefined;
+    if (typeof last4 !== 'string' || !/^[A-Za-z0-9]{4}$/.test(last4))
+      return undefined;
     if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
     return bankAccountRemoved({
       bankName: typeof bankName === 'string' && bankName ? bankName : 'Bank',
