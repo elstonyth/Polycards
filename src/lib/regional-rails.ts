@@ -71,8 +71,9 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     exactAmountNote:
       'Transfer the exact amount the next page shows, cents included. It can be a few cents more than this (for example S$100.01). A rounded amount can’t be matched to your top-up.',
   },
-  // USDT (GlobePay365): the two chains it takes, in the codes the backend
-  // allow-lists for that gateway (UTRC / UERC).
+  // USDT (GlobePay365): the chain it takes, in the code the backend
+  // allow-lists for that gateway (UTRC). ERC20 (UERC) is withdrawn until
+  // GlobePay365 opens it on production (backend gateway.ts says why).
   USDT: {
     symbol: 'USDT',
     // No country: Tether's own mark, so the picker still reads at a glance.
@@ -80,7 +81,7 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     unit: '1 USDT',
     name: 'Tether',
     country: 'USDT',
-    hint: 'TRC20 · ERC20',
+    hint: 'TRC20',
     presets: [20, 50, 100, 300],
     defaultAmount: '50',
     // GlobePay365 does not match USDT transfers against a payer name.
@@ -91,7 +92,6 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
         label: 'USDT · TRC20',
         hint: 'Tron network — low fees',
       },
-      { code: 'UERC', label: 'USDT · ERC20', hint: 'Ethereum network' },
     ],
     money: usdt,
     money0: usdt0,

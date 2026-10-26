@@ -109,7 +109,13 @@ export function a3payDepositCallback(kind: A3payKind): Handler {
       logger.warn(
         `${tag} rejected deposit callback: ${(error as Error).message}`,
       );
-      signatureMismatchAlert(req.scope, error, 'deposit callback', kind);
+      signatureMismatchAlert(
+        req.scope,
+        error,
+        'deposit callback',
+        kind,
+        config,
+      );
       res.status(400).send('rejected');
       return;
     }
@@ -298,7 +304,13 @@ export function a3payWithdrawalCallback(kind: A3payKind): Handler {
       logger.warn(
         `${tag} rejected withdrawal callback: ${(error as Error).message}`,
       );
-      signatureMismatchAlert(req.scope, error, 'withdrawal callback', kind);
+      signatureMismatchAlert(
+        req.scope,
+        error,
+        'withdrawal callback',
+        kind,
+        config,
+      );
       res.status(400).send('rejected');
       return;
     }
@@ -538,7 +550,13 @@ export function a3payPayoutVerify(kind: A3payKind): Handler {
       logger.warn(
         `${tag} rejected payout verification: ${(error as Error).message}`,
       );
-      signatureMismatchAlert(req.scope, error, 'payout verification', kind);
+      signatureMismatchAlert(
+        req.scope,
+        error,
+        'payout verification',
+        kind,
+        config,
+      );
       res.status(400).send('rejected');
       return;
     }

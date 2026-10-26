@@ -350,6 +350,19 @@ describe('the shared adapter, bound to GlobePay365', () => {
     expect(sent).toHaveLength(0);
   });
 
+  // Production CreatePayin refuses ERC20 (2026-10-26): TRC20 is the only
+  // USDT top-up chain until GlobePay365 opens it.
+  it('offers TRC20 only, and refuses ERC20 before any call', async () => {
+    expect(GATEWAYS.gp365.depositMethods).toEqual(['UTRC']);
+    await expect(
+      submitDeposit(depositInput('UERC'), config),
+    ).rejects.toMatchObject({
+      definite: true,
+      codes: ['A3PAY_UNSUPPORTED_METHOD'],
+    });
+    expect(sent).toHaveLength(0);
+  });
+
   it('pays a TRC20 wallet: network code, address, and MCustId as the holder', async () => {
     await submitWithdrawal(
       {

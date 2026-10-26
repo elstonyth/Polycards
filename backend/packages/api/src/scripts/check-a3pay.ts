@@ -12,6 +12,7 @@ import {
   type A3payConfig,
   type A3payKind,
 } from '../modules/packs/a3pay-client';
+import { isOwnPublicKey } from '../modules/packs/a3pay';
 import syncPaymentFxJob from '../jobs/sync-payment-fx';
 import { banksFor, gatewayBankCode } from '../modules/packs/banks';
 
@@ -36,6 +37,9 @@ import { banksFor, gatewayBankCode } from '../modules/packs/banks';
  * 4. GetPayinDetail / GetPayoutDetail for a reference that cannot exist: the
  *    answer must read as not-found (A3PAY_NOT_FOUND), because that answer is
  *    what lets the sweeps write off a stale deposit or refund a payout.
+ * 5. (Checked first, offline) their public key must not be our own
+ *    (isOwnPublicKey): no call here exercises it, and that mix-up refused
+ *    every GlobePay365 callback until 2026-10-26.
  *
  * Never prints a key. Not fully read-only: step 1 writes the FX row of the
  * database it runs against.
@@ -61,6 +65,14 @@ export default async function checkA3pay({ container, args }: ExecArgs) {
   logger.info(
     `${tag} base ${config.baseUrl}, MID ${config.merchantCode}, currency ${config.currencyCode}`,
   );
+  // No call below uses their key — only callbacks do — so this is the one
+  // place a wrong one shows before the first real payment.
+  const { envPrefix, label } = A3PAY_FAMILY[kind];
+  if (isOwnPublicKey(config.publicKey, config.privateKey)) {
+    logger.error(
+      `${tag} ${envPrefix}_PUBLIC_KEY is OUR public key (the public half of ${envPrefix}_MERCHANT_PRIVATE_KEY), not ${label}'s — every callback and payout verification will be refused`,
+    );
+  }
 
   try {
     const b = await checkAccBalance(config);

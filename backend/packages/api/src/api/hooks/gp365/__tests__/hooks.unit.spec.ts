@@ -168,6 +168,41 @@ describe('POST /hooks/gp365/deposit', () => {
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 
+  // Production 2026-10-23..26: GP365_PUBLIC_KEY held our own public key, so
+  // every real callback was refused 400 and the alert blamed a key leak.
+  it('names our own key in the GP365_PUBLIC_KEY slot as the cause', async () => {
+    const misfiled = pair();
+    process.env.GP365_MERCHANT_PRIVATE_KEY = misfiled.privateKey;
+    process.env.GP365_PUBLIC_KEY = misfiled.publicKey;
+    (alertOps as jest.Mock).mockClear();
+    const h = harness([usdtDeposit]);
+    const res = await run(deposit, h, message(payin()));
+    expect(res.statusCode).toBe(400);
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+    expect(alertOps).toHaveBeenCalledWith(
+      expect.anything(),
+      'gp365-signature-mismatch',
+      expect.stringContaining(
+        'GP365_PUBLIC_KEY is the public half of our own GP365_MERCHANT_PRIVATE_KEY',
+      ),
+      expect.anything(),
+    );
+  });
+
+  it('a wrong key that is not ours keeps the generic alert', async () => {
+    process.env.GP365_PUBLIC_KEY = pair().publicKey;
+    (alertOps as jest.Mock).mockClear();
+    const h = harness([usdtDeposit]);
+    const res = await run(deposit, h, message(payin()));
+    expect(res.statusCode).toBe(400);
+    expect(alertOps).toHaveBeenCalledWith(
+      expect.anything(),
+      'gp365-signature-mismatch',
+      expect.stringContaining('or our AES key has leaked'),
+      expect.anything(),
+    );
+  });
+
   it('refuses another currency or merchant from the signed copy', async () => {
     for (const over of [
       { CurrencyCode: 'SGD' },
