@@ -89,7 +89,7 @@ const WithdrawalsPage = () => {
   // The full number asks its own policy (api/admin-rbac.ts SECRET_READS): a
   // view-only role sees the masked number with no Reveal.
   const canReveal = usePermissions().hasPermission(
-    'payout_account:read' as Permission,
+    'customer_bank_account:read' as Permission,
   );
   // A SET, not one id: two reveals can be in flight at once. With a single
   // slot, clicking row A then row B overwrites the id, and A settling clears it

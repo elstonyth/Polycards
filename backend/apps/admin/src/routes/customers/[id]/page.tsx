@@ -820,7 +820,7 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
   // Full bank numbers ask their own policy (api/admin-rbac.ts SECRET_READS):
   // the view-only Support viewer gets no bank card and no request for it.
   const canSeeBank = usePermissions().hasPermission(
-    'payout_account:read' as Permission,
+    'customer_bank_account:read' as Permission,
   );
   const { data: payout, isError: payoutError } = usePayoutDetails(
     canSeeBank ? customerId : null,

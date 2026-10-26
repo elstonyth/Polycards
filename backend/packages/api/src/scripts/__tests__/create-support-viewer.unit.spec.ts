@@ -38,7 +38,7 @@ describe('Support viewer role', () => {
     expect(resources).not.toContain('profit_report');
     // Partner passwords and full bank numbers (api/admin-rbac.ts SECRET_READS).
     expect(resources).not.toContain('partner_credential');
-    expect(resources).not.toContain('payout_account');
+    expect(resources).not.toContain('customer_bank_account');
     expect(SUPPORT_VIEWER_ROLE).toBe('Support viewer');
   });
 });

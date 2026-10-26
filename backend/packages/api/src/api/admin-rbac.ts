@@ -137,13 +137,17 @@ export const CORE_PREFIX_WRITES: {
  *  overlapping entries — so the view-only Support viewer (player / customer /
  *  payment:read, scripts/create-support-viewer.ts) is refused, while `*:*`
  *  staff and the `*:read` desk bots pass as before. Declared in
- *  policies/admin-surfaces.ts. */
+ *  policies/admin-surfaces.ts. Resources must be NEW names: Mercur already
+ *  owns `payout_account` (its seller payouts, key-unique policy rows). */
 export const SECRET_READS = [
   { matcher: '/admin/players/export', resource: 'partner_credential' },
-  { matcher: '/admin/customers/*/payout-details', resource: 'payout_account' },
+  {
+    matcher: '/admin/customers/*/payout-details',
+    resource: 'customer_bank_account',
+  },
   {
     matcher: '/admin/payments/withdrawals/*/account',
-    resource: 'payout_account',
+    resource: 'customer_bank_account',
   },
 ] as const;
 
