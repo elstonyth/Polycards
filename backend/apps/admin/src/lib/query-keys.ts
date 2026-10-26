@@ -89,6 +89,11 @@ export const qk = {
   // The filter segment always renders, the customerPulls rule below.
   customerTransactions: (id: string, page: number, filter = 'all') =>
     ['admin', 'customer', id, 'transactions', page, filter] as const,
+  // The player page's Payments tab: one customer's gateway attempts.
+  customerDeposits: (id: string, page: number) =>
+    ['admin', 'customer', id, 'gateway-deposits', page] as const,
+  customerWithdrawals: (id: string, page: number) =>
+    ['admin', 'customer', id, 'gateway-withdrawals', page] as const,
   // The status segment always renders (defaulting to 'all', same shape as
   // qk.pulls' source segment) rather than being appended only when filtered:
   // an appended segment would make the unfiltered key a strict PREFIX of the

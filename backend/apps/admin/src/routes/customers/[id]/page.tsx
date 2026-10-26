@@ -66,6 +66,7 @@ import { MoneySummary, PeriodsCard, PlayCard } from './MoneyCards';
 import { LevelTab } from './LevelTab';
 import { VaultTab } from './VaultTab';
 import { WalletTab } from './WalletTab';
+import { PaymentsTab } from './PaymentsTab';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -104,6 +105,7 @@ type ModalKind = 'freeze' | 'unfreeze' | 'credits';
 
 type TabKey =
   | 'wallet'
+  | 'payments'
   | 'vault'
   | 'orders'
   | 'pulls'
@@ -741,10 +743,12 @@ const IdentityActions = ({
   const realName = state?.real_name ?? null;
 
   const editName = () => {
-    const next = window.prompt(
-      'Real name (exactly as on their Touch ’n Go eWallet):',
-      realName ?? '',
-    )?.trim();
+    const next = window
+      .prompt(
+        'Real name (exactly as on their Touch ’n Go eWallet):',
+        realName ?? '',
+      )
+      ?.trim();
     if (!next) return;
     const reason = window.prompt('Reason (audited):')?.trim();
     if (!reason) return;
@@ -758,14 +762,16 @@ const IdentityActions = ({
   };
 
   const changePhone = () => {
-    const next = window.prompt(
-      'New phone number in international format (e.g. +60123456789). The customer is emailed about the change.',
-      phone ?? '',
-    )?.trim();
+    const next = window
+      .prompt(
+        'New phone number in international format (e.g. +60123456789). The customer is emailed about the change.',
+        phone ?? '',
+      )
+      ?.trim();
     if (!next) return;
-    const reason = window.prompt(
-      'Reason (audited) — how was the customer’s identity checked?',
-    )?.trim();
+    const reason = window
+      .prompt('Reason (audited) — how was the customer’s identity checked?')
+      ?.trim();
     if (!reason) return;
     setPhone.mutate(
       { customerId, phone: next, reason },
@@ -1625,6 +1631,9 @@ const Customer360Page = () => {
               <Tabs.Trigger value="wallet">
                 {t('players.tabWallet')}
               </Tabs.Trigger>
+              <Tabs.Trigger value="payments">
+                {t('players.tabPayments')}
+              </Tabs.Trigger>
               <Tabs.Trigger value="vault">{t('players.tabVault')}</Tabs.Trigger>
               <Tabs.Trigger value="orders">
                 {t('players.tabOrders')}
@@ -1655,6 +1664,9 @@ const Customer360Page = () => {
       )}
       {tab === 'wallet' && customerId && (
         <WalletTab key={id} customerId={customerId} />
+      )}
+      {tab === 'payments' && customerId && (
+        <PaymentsTab key={id} customerId={customerId} />
       )}
       {tab === 'vault' && customerId && (
         <VaultTab key={id} customerId={customerId} />

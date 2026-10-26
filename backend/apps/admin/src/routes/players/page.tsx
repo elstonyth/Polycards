@@ -29,6 +29,7 @@ import {
 import CreatePlayerModal from './CreatePlayerModal';
 import { PeriodLeaders } from './PeriodLeaders';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useCustomerGroupsAdmin,
   useExportPartnerAccounts,
@@ -54,6 +55,11 @@ export const config: RouteConfig = {
   rank: 30,
   permissions: ['player:read' as Permission],
 };
+
+// The dashboard (/overview) sends a role without its figures here; a role
+// without the Players page either (the automation operator) goes on to the
+// one page it has.
+export const handle = { permissions: 'player:read', redirectTo: '/automation' };
 
 // The player the confirm modal is about. `disabled` here is the player's
 // CURRENT state; useSetPlayerDisabled takes the TARGET state, so the mutation
@@ -129,6 +135,12 @@ const joined = (iso: string): string => {
 // else (real name, pulls) is on the player's own page, one click away.
 const PlayersPage = () => {
   const { t } = useTranslation();
+  // A view-only role (Support viewer) reads players but changes nothing, and
+  // has no dashboard figures: hide the leaders board (GET /admin/stats) and
+  // the Generate button (POST /admin/players) rather than show it a 403.
+  const perms = usePermissions();
+  const canSeeStats = perms.hasPermission('stats:read' as Permission);
+  const canCreate = perms.hasPermission('player:update' as Permission);
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
@@ -222,7 +234,7 @@ const PlayersPage = () => {
 
   return (
     <div className="flex flex-col gap-y-3">
-      <PeriodLeaders />
+      {canSeeStats && <PeriodLeaders />}
       <Container className="p-0">
         <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
           <div>
@@ -289,13 +301,15 @@ const PlayersPage = () => {
                 setPage(0);
               }}
             />
-            <Button
-              size="base"
-              variant="secondary"
-              onClick={() => setCreateOpen(true)}
-            >
-              {t('players.generate')}
-            </Button>
+            {canCreate && (
+              <Button
+                size="base"
+                variant="secondary"
+                onClick={() => setCreateOpen(true)}
+              >
+                {t('players.generate')}
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenu.Trigger asChild>
                 <IconButton aria-label={t('players.more')}>
