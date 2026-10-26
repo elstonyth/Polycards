@@ -12,6 +12,7 @@ import {
   parsePaginationParams,
   parseSortParam,
 } from '../../../../utils/pagination';
+import { parseCustomerFilter } from '../customer-filter';
 
 // GET /admin/payments/deposits — operator visibility into the gateway
 // deposit table.
@@ -82,6 +83,11 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
   const status = parseStatusFilter(req.query.status);
+  const customer = parseCustomerFilter(req.query.customer_id);
+  if (customer === 'invalid') {
+    res.status(400).json({ message: 'customer_id must be a customer id.' });
+    return;
+  }
 
   // Pending sorts OLDEST first (the ['status','created_at'] index): the row most
   // likely to be a stranded payment is the one that has been waiting longest, so
@@ -110,7 +116,7 @@ export async function GET(
   const order: Record<string, 'ASC' | 'DESC'> = { [key]: dir, id: dir };
 
   const [rows, total] = await packs.listAndCountGatewayDeposits(
-    status === 'all' ? {} : { status },
+    { ...(status === 'all' ? {} : { status }), ...customer },
     { skip: offset, take: limit, order },
   );
 

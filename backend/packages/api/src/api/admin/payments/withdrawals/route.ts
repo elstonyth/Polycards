@@ -10,6 +10,7 @@ import {
   parsePaginationParams,
   parseSortParam,
 } from '../../../../utils/pagination';
+import { parseCustomerFilter } from '../customer-filter';
 
 // GET /admin/payments/withdrawals — operator visibility into the gateway
 // payout table, the money-OUT mirror of ../deposits.
@@ -112,6 +113,11 @@ export async function GET(
     { defaultLimit: 50, maxLimit: 100 },
   );
   const status = parseStatusFilter(req.query.status);
+  const customer = parseCustomerFilter(req.query.customer_id);
+  if (customer === 'invalid') {
+    res.status(400).json({ message: 'customer_id must be a customer id.' });
+    return;
+  }
 
   // Pending AND held oldest-first (the ['status','created_at'] index covers
   // both — it is not partial): for pending, the longest-waiting payout is the
@@ -136,7 +142,7 @@ export async function GET(
   const order: Record<string, 'ASC' | 'DESC'> = { [key]: dir, id: dir };
 
   const [rows, total] = await packs.listAndCountGatewayWithdrawals(
-    status === 'all' ? {} : { status },
+    { ...(status === 'all' ? {} : { status }), ...customer },
     { skip: offset, take: limit, order },
   );
 

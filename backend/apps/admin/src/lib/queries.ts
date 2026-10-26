@@ -377,13 +377,14 @@ export const useGatewayAudit = (
 export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
   useQuery({ queryKey: qk.paymentGateway, queryFn: getPaymentGateway });
 
-export const useWithdrawalControls = (): UseQueryResult<WithdrawalControlsView> =>
-  useQuery({
-    queryKey: qk.withdrawalControls,
-    queryFn: getWithdrawalControls,
-    // The status line ("closed until 6:00 AM") follows the clock.
-    refetchInterval: 60_000,
-  });
+export const useWithdrawalControls =
+  (): UseQueryResult<WithdrawalControlsView> =>
+    useQuery({
+      queryKey: qk.withdrawalControls,
+      queryFn: getWithdrawalControls,
+      // The status line ("closed until 6:00 AM") follows the clock.
+      refetchInterval: 60_000,
+    });
 
 export const useSaveWithdrawalControls = () => {
   const qc = useQueryClient();
@@ -1172,6 +1173,31 @@ export const useGatewayWithdrawals = (
     refetchInterval: 60_000,
   });
 
+// One customer's gateway top-ups / payouts, every status, newest first — the
+// player page's Payments tab ("is it still pending, rejected, paid out?").
+export const useCustomerGatewayDeposits = (
+  customerId: string,
+  page = 0,
+): UseQueryResult<GatewayDepositsResponse> =>
+  useQuery({
+    queryKey: qk.customerDeposits(customerId, page),
+    queryFn: () => getGatewayDeposits(page, 'all', 20, undefined, customerId),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+  });
+
+export const useCustomerGatewayWithdrawals = (
+  customerId: string,
+  page = 0,
+): UseQueryResult<GatewayWithdrawalsResponse> =>
+  useQuery({
+    queryKey: qk.customerWithdrawals(customerId, page),
+    queryFn: () =>
+      getGatewayWithdrawals(page, 'all', 20, undefined, customerId),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+  });
+
 // Claim a held withdrawal and submit it to the gateway. Three real outcomes
 // (classifyApproveResult) get three different toasts — a plain "Approved!"
 // on all of them would hide the two that need the operator's attention:
@@ -1889,10 +1915,7 @@ export const useSaveTaskDefinition = () => {
 };
 
 // ── Lucky Draw (spec 2026-10-24) ─────────────────────────────────────────────
-export type {
-  AdminLuckyDrawEvent,
-  AdminLuckyDrawPrize,
-} from './admin-rest';
+export type { AdminLuckyDrawEvent, AdminLuckyDrawPrize } from './admin-rest';
 
 export const useLuckyDraw = (): UseQueryResult<AdminLuckyDrawEvent[]> =>
   useQuery({ queryKey: qk.luckyDraw, queryFn: listLuckyDraw });

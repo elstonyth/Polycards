@@ -1127,7 +1127,8 @@
       "packs_one": "{{count}} pack",
       "packs_other": "{{count}} packs",
       "loadError": "Could not load"
-    }
+    },
+    "tabPayments": "Payments"
   },
   "oddsSets": {
     "title": "Player Groups",
@@ -1696,5 +1697,14 @@
       "stoppedNote": "Run stopped. No more draws or rank checks are scheduled.",
       "lastDecision": "Last decision before stop: {{reason}}"
     }
+  },
+  "playerPayments": {
+    "topUpsTitle": "Top-ups",
+    "topUpsSubtitle": "Every gateway top-up this player started: awaiting payment, cancelled / rejected, no gateway answer, or settled.",
+    "noTopUps": "No top-ups yet.",
+    "withdrawalsTitle": "Withdrawals",
+    "withdrawalsSubtitle": "Every payout this player asked for: held, pending at the gateway, paid out, or refunded.",
+    "noWithdrawals": "No withdrawals yet.",
+    "reason": "Reason"
   }
 }

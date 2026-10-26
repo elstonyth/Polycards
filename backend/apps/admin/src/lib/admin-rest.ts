@@ -271,7 +271,10 @@ export interface GroupCreditCustomer {
   last_name: string | null;
 }
 
-export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
+export const listGroupCreditCustomersPage = (
+  groupId: string,
+  offset: number,
+) => {
   const params = new URLSearchParams({
     groups: groupId,
     limit: '100',
@@ -578,13 +581,7 @@ export async function getProfitReport(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  | 'today'
-  | 'yesterday'
-  | '7d'
-  | '30d'
-  | 'month'
-  | 'last_month'
-  | 'custom';
+  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -841,9 +838,7 @@ export const acknowledgeAuditFinding = (body: {
     body,
   );
 
-export async function getGatewayAudit(
-  currency: string,
-): Promise<GatewayAudit> {
+export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
   return getJson<GatewayAudit>(
     `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
   );
@@ -878,8 +873,7 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    | Partial<GatewayPreflightRefusal>
-    | undefined;
+    Partial<GatewayPreflightRefusal> | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1634,6 +1628,8 @@ export function getGatewayDeposits(
   status: GatewayDepositView,
   pageSize = 50,
   sort?: string,
+  /** One customer's attempts only (the player page's Payments tab). */
+  customerId?: string,
 ): Promise<GatewayDepositsResponse> {
   const params = new URLSearchParams({
     status,
@@ -1644,9 +1640,8 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(
-    `/admin/payments/deposits?${params}`,
-  );
+  if (customerId) params.set('customer_id', customerId);
+  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
@@ -1725,6 +1720,8 @@ export function getGatewayWithdrawals(
   status: GatewayWithdrawalView,
   pageSize = 50,
   sort?: string,
+  /** One customer's payouts only (the player page's Payments tab). */
+  customerId?: string,
 ): Promise<GatewayWithdrawalsResponse> {
   const params = new URLSearchParams({
     status,
@@ -1733,6 +1730,7 @@ export function getGatewayWithdrawals(
   });
   // Same contract as getGatewayDeposits: omitted = status-dependent default.
   if (sort) params.set('sort', sort);
+  if (customerId) params.set('customer_id', customerId);
   return getJson<GatewayWithdrawalsResponse>(
     `/admin/payments/withdrawals?${params}`,
   );
