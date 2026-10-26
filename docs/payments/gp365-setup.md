@@ -103,6 +103,7 @@ Run from the office (egress IP 60.48.37.75, whitelisted by GlobePay365 that day;
 ## Production (2026-10-21/22)
 
 - **Merchant:** USDT is a channel on the existing **Polycard** merchant (`GP365_MERCHANT_CODE=Polycard`, `GP365_API_BASE=https://mapi.globepay365.com`). Its keys are that merchant's old pair, copied in the deploy secrets file from the `GLOBEPAY_*` entries into `GP365_AES_KEY` / `GP365_PUBLIC_KEY` / `GP365_MERCHANT_PRIVATE_KEY`. The pair generated on 2026-10-12 was never registered and is kept only as `GP365_MERCHANT_PRIVATE_KEY_UNUSED_1012`.
+- **`GP365_PUBLIC_KEY` was our own key (found 2026-10-26).** The copied `GLOBEPAY_PUBLIC_KEY` was the public half of our merchant private key, not GlobePay365's. So every production callback failed its signature check and got HTTP 400 ("signature verification failed"), and deposits were credited only by the requery sweep. The fix is GlobePay365's own platform public key for the Polycard merchant. The preflight now flags our own key in that slot, and so does the signature-mismatch alert.
 - **Whitelist:** 188.166.181.61, 188.166.181.204 and the office 60.48.37.75.
 - **Their costs:** top-up 1%; payout 0.2% + 1 USDT gas (`payoutFeePercent` / `payoutFlatFee`, which the payout float check reserves). Cashier window 600 s.
 - **Our fee (owner decision 2026-10-22):** top-up **1.5%**, withdrawal **2%**, saved in Admin → Settlement → USDT → Exchange rate. We keep 0.5% of a top-up, and about 1.8% of a payout minus the 1 USDT gas.
