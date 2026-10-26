@@ -358,7 +358,7 @@ const bankAccountRemoved = (d: {
       <a href="${site}/bank" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Review your bank accounts</a>
 
       <p style="margin:32px 0 0;font-size:12px;line-height:1.6;color:#737373;">
-        We only ever show the last four digits of a saved account.
+        We only ever show the last four characters of a saved account.
       </p>
     </div>
   </body>
@@ -429,7 +429,7 @@ const bankAccountAdded = (d: {
       <a href="${site}/bank" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Review your bank accounts</a>
 
       <p style="margin:32px 0 0;font-size:12px;line-height:1.6;color:#737373;">
-        We only ever show the last four digits of a saved account.
+        We only ever show the last four characters of a saved account.
       </p>
     </div>
   </body>
