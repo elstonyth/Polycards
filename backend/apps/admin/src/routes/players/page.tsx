@@ -137,10 +137,14 @@ const PlayersPage = () => {
   const { t } = useTranslation();
   // A view-only role (Support viewer) reads players but changes nothing, and
   // has no dashboard figures: hide the leaders board (GET /admin/stats) and
-  // the Generate button (POST /admin/players) rather than show it a 403.
+  // the Generate button (POST /admin/players) rather than show it a 403. The
+  // logins export carries partner passwords, so it asks its own policy.
   const perms = usePermissions();
   const canSeeStats = perms.hasPermission('stats:read' as Permission);
   const canCreate = perms.hasPermission('player:update' as Permission);
+  const canExport = perms.hasPermission(
+    'partner_credential:read' as Permission,
+  );
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
@@ -310,25 +314,27 @@ const PlayersPage = () => {
                 {t('players.generate')}
               </Button>
             )}
-            <DropdownMenu>
-              <DropdownMenu.Trigger asChild>
-                <IconButton aria-label={t('players.more')}>
-                  <EllipsisHorizontal />
-                </IconButton>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content align="end">
-                {/* The .xlsx of every generated partner login — the same rows
-                    the generator shows once, so a closed modal loses nothing. */}
-                <DropdownMenu.Item
-                  className="gap-x-2"
-                  disabled={exporter.isPending}
-                  onClick={exportLogins}
-                >
-                  <ArrowDownTray className="text-ui-fg-subtle" />
-                  {t('players.exportShort')}
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu>
+            {canExport && (
+              <DropdownMenu>
+                <DropdownMenu.Trigger asChild>
+                  <IconButton aria-label={t('players.more')}>
+                    <EllipsisHorizontal />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end">
+                  {/* The .xlsx of every generated partner login — the same rows
+                      the generator shows once, so a closed modal loses nothing. */}
+                  <DropdownMenu.Item
+                    className="gap-x-2"
+                    disabled={exporter.isPending}
+                    onClick={exportLogins}
+                  >
+                    <ArrowDownTray className="text-ui-fg-subtle" />
+                    {t('players.exportShort')}
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu>
+            )}
           </div>
         </div>
         <div className="px-6 pb-4">

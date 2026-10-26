@@ -19,16 +19,26 @@ describe('Support viewer role', () => {
       'payment',
       ...Object.values(CUSTOM_ADMIN_RESOURCES),
     ]);
-    for (const p of SUPPORT_VIEWER_POLICIES) expect(known.has(p.resource)).toBe(true);
+    for (const p of SUPPORT_VIEWER_POLICIES)
+      expect(known.has(p.resource)).toBe(true);
   });
 
   it('covers players, payments and delivery orders, and never the dashboard figures', () => {
     const resources = SUPPORT_VIEWER_POLICIES.map((p) => p.resource);
     expect(resources).toEqual(
-      expect.arrayContaining(['player', 'customer', 'payment', 'delivery_order', 'store']),
+      expect.arrayContaining([
+        'player',
+        'customer',
+        'payment',
+        'delivery_order',
+        'store',
+      ]),
     );
     expect(resources).not.toContain('stats');
     expect(resources).not.toContain('profit_report');
+    // Partner passwords and full bank numbers (api/admin-rbac.ts SECRET_READS).
+    expect(resources).not.toContain('partner_credential');
+    expect(resources).not.toContain('payout_account');
     expect(SUPPORT_VIEWER_ROLE).toBe('Support viewer');
   });
 });

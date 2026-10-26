@@ -1,5 +1,9 @@
 import { definePolicies } from '@medusajs/framework/utils';
-import { CUSTOM_ADMIN_RESOURCES, OPERATION_BY_METHOD } from '../api/admin-rbac';
+import {
+  CUSTOM_ADMIN_RESOURCES,
+  OPERATION_BY_METHOD,
+  SECRET_READS,
+} from '../api/admin-rbac';
 
 // The custom admin surfaces' policies (see api/admin-rbac.ts). Declared so the
 // boot-time sync keeps them (it soft-deletes every undeclared policy) and so a
@@ -15,4 +19,16 @@ export const adminSurfacePolicies = definePolicies(
       description: `${operation} on the Polycards admin ${resource} screens.`,
     })),
   ),
+);
+
+// The secret-bearing GETs' own read policies (api/admin-rbac.ts SECRET_READS):
+// partner passwords and full bank account numbers. Roles holding them: `*:*`
+// staff and the `*:read` desk bots; the Support viewer does not.
+export const secretReadPolicies = definePolicies(
+  [...new Set(SECRET_READS.map((s) => s.resource))].map((resource) => ({
+    name: `Polycards read ${resource}`,
+    resource,
+    operation: 'read',
+    description: `Read the secret-bearing ${resource} data.`,
+  })),
 );

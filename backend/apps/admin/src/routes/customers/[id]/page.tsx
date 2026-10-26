@@ -20,6 +20,8 @@ import {
   toast,
 } from '@medusajs/ui';
 import { ArrowLeft, EllipsisHorizontal } from '@medusajs/icons';
+import type { Permission } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useAdjustCredits,
   useCustomerAudit,
@@ -815,7 +817,14 @@ const IdentityActions = ({
 const ProfileTab = ({ customerId }: { customerId: string | null }) => {
   const { t } = useTranslation();
   const { data, isError } = useCustomerDetail(customerId);
-  const { data: payout, isError: payoutError } = usePayoutDetails(customerId);
+  // Full bank numbers ask their own policy (api/admin-rbac.ts SECRET_READS):
+  // the view-only Support viewer gets no bank card and no request for it.
+  const canSeeBank = usePermissions().hasPermission(
+    'payout_account:read' as Permission,
+  );
+  const { data: payout, isError: payoutError } = usePayoutDetails(
+    canSeeBank ? customerId : null,
+  );
   const customer = data?.customer;
   // metadata is Record<string, unknown> — the handle is only renderable once
   // it has been narrowed to a non-empty string.
@@ -871,31 +880,33 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
 
       {customerId && <ReferralCard customerId={customerId} />}
 
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('players.bankTitle')}</Heading>
-          <Text className="text-ui-fg-subtle mt-1" size="small">
-            {t('players.bankSubtitle')}
-          </Text>
-        </div>
-        {payoutError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
+      {canSeeBank && (
+        <Container className="p-0">
+          <div className="px-6 py-4">
+            <Heading level="h2">{t('players.bankTitle')}</Heading>
+            <Text className="text-ui-fg-subtle mt-1" size="small">
+              {t('players.bankSubtitle')}
             </Text>
           </div>
-        ) : !payout || !customerId ? (
-          <div className="border-t px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : (
-          // Mounted only once the saved row is in hand, so the three inputs can
-          // seed from useState initialisers. Seeding an already-mounted form
-          // needs an effect, and that effect races the operator's typing on
-          // every background refetch.
-          <BankForm customerId={customerId} seed={payout.details} />
-        )}
-      </Container>
+          {payoutError ? (
+            <div className="border-t px-6 py-6">
+              <Text size="small" className="text-ui-fg-error">
+                Failed to load.
+              </Text>
+            </div>
+          ) : !payout || !customerId ? (
+            <div className="border-t px-6 py-6">
+              <LoadingSkeleton />
+            </div>
+          ) : (
+            // Mounted only once the saved row is in hand, so the three inputs can
+            // seed from useState initialisers. Seeding an already-mounted form
+            // needs an effect, and that effect races the operator's typing on
+            // every background refetch.
+            <BankForm customerId={customerId} seed={payout.details} />
+          )}
+        </Container>
+      )}
     </>
   );
 };

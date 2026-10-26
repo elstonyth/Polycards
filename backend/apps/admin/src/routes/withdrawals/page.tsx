@@ -12,7 +12,8 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useGatewayWithdrawals,
   useApproveWithdrawal,
@@ -85,6 +86,11 @@ const WithdrawalsPage = () => {
   // server call, so it must not be re-fetched on a refocus, and it must not
   // outlive this page — navigating away drops them.
   const [revealed, setRevealed] = useState<Record<string, string>>({});
+  // The full number asks its own policy (api/admin-rbac.ts SECRET_READS): a
+  // view-only role sees the masked number with no Reveal.
+  const canReveal = usePermissions().hasPermission(
+    'payout_account:read' as Permission,
+  );
   // A SET, not one id: two reveals can be in flight at once. With a single
   // slot, clicking row A then row B overwrites the id, and A settling clears it
   // while B is still loading — B's button re-enables and can be clicked again.
@@ -331,7 +337,7 @@ const WithdrawalsPage = () => {
                         <span>
                           {w.bank_code} · {revealed[w.id] ?? w.account_number}
                         </span>
-                        {!revealed[w.id] && (
+                        {canReveal && !revealed[w.id] && (
                           <button
                             type="button"
                             className="text-ui-fg-interactive text-xs hover:underline disabled:opacity-50"
