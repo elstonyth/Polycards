@@ -126,8 +126,26 @@
       "label": "添加物品",
       "placeholder": "搜索已登记卡牌和目录商品",
       "none": "没有可添加的卡牌或目录商品。",
-      "noMatch": "没有匹配的物品。"
-    }
+      "noMatch": "没有匹配的物品。",
+      "loading": "正在加载库存…",
+      "loadError": "无法加载库存，请刷新重试。",
+      "more": "显示 {{shown}} / {{total}} 项 — 输入关键字缩小范围。"
+    },
+    "detail": {
+      "kind": {
+        "purchase": "采购",
+        "pull": "抽卡",
+        "vault_out": "出库",
+        "requested": "已请求",
+        "shipped": "已发货",
+        "completed": "已完成",
+        "adjustment": "调整",
+        "goods_receive": "收货"
+      }
+    },
+    "graded": "评级",
+    "raw": "未评级",
+    "sku": "SKU"
   },
   "grn": {
     "title": "收货单",

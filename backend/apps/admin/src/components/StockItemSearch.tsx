@@ -8,8 +8,9 @@ import { resolveImageUrl } from '../lib/image-url';
 export type StockSearchItem = {
   handle: string;
   name: string;
-  /** MYR. */
-  fmv: number;
+  /** MYR; null when the product has no FMV — the forms then leave the
+   *  FMV (and cost) empty for the operator instead of saving RM 0.00. */
+  fmv: number | null;
 };
 
 // Photos by handle, off the same GET /admin/inventory rows the Stock page
@@ -78,7 +79,10 @@ export const StockItemSearch = ({
   const { t } = useTranslation();
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState(false);
-  const { data } = useInventory();
+  // Keyboard cursor in the open list (combobox + aria-activedescendant: focus
+  // stays in the input, arrows move this, Enter picks it).
+  const [active, setActive] = useState(0);
+  const { data, isLoading, isError } = useInventory();
 
   const rows = useMemo(
     () =>
@@ -87,9 +91,9 @@ export const StockItemSearch = ({
       ),
     [data],
   );
-  const visible = useMemo(() => {
+  const hits = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const hits = q
+    return q
       ? rows.filter(
           (r) =>
             r.name.toLowerCase().includes(q) ||
@@ -97,8 +101,18 @@ export const StockItemSearch = ({
             r.handle.toLowerCase().includes(q),
         )
       : rows;
-    return hits.slice(0, 50);
   }, [rows, filter]);
+  const visible = hits.slice(0, 50);
+  const optionId = (i: number) => `${id}-opt-${i}`;
+
+  const pick = (r: (typeof visible)[number]) => {
+    onPick({ handle: r.handle, name: r.name, fmv: r.fmv });
+    setFilter('');
+    setActive(0);
+    // Close so the new line is visible under the box; a click or ArrowDown
+    // opens the list again for the next card.
+    setOpen(false);
+  };
 
   return (
     <div className="flex flex-col gap-y-2 border-t px-6 py-4">
@@ -111,22 +125,41 @@ export const StockItemSearch = ({
           type="search"
           autoComplete="off"
           role="combobox"
+          aria-autocomplete="list"
           aria-expanded={open}
           aria-controls={`${id}-list`}
+          aria-activedescendant={
+            open && visible.length > 0 ? optionId(active) : undefined
+          }
           placeholder={t('inventory.itemSearch.placeholder')}
           value={filter}
           onFocus={() => setOpen(true)}
           onClick={() => setOpen(true)}
           onBlur={() => setOpen(false)}
           onKeyDown={(e) => {
-            // preventDefault: Escape in a search box also clears the text,
-            // whose onChange would open the list straight back up.
-            if (e.key !== 'Escape') return;
-            e.preventDefault();
-            setOpen(false);
+            if (e.key === 'Escape') {
+              // preventDefault: Escape in a search box also clears the text,
+              // whose onChange would open the list straight back up.
+              e.preventDefault();
+              setOpen(false);
+            } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              if (!open) return setOpen(true);
+              const step = e.key === 'ArrowDown' ? 1 : -1;
+              setActive((i) =>
+                Math.min(
+                  Math.max(i + step, 0),
+                  Math.max(visible.length - 1, 0),
+                ),
+              );
+            } else if (e.key === 'Enter' && open && visible[active]) {
+              e.preventDefault(); // never submit the surrounding form
+              pick(visible[active]);
+            }
           }}
           onChange={(e) => {
             setFilter(e.target.value);
+            setActive(0);
             setOpen(true);
           }}
         />
@@ -134,25 +167,23 @@ export const StockItemSearch = ({
           <div
             id={`${id}-list`}
             role="listbox"
+            // On the whole list, not just the rows: a mousedown on its
+            // scrollbar or a divider would otherwise blur the input and close
+            // the list mid-scroll. Rows are never focused, so focus stays put.
+            onMouseDown={(e) => e.preventDefault()}
             className="bg-ui-bg-base shadow-elevation-flyout absolute z-20 mt-1 max-h-96 w-full divide-y overflow-y-auto rounded-lg border"
           >
-            {visible.map((r) => (
+            {visible.map((r, i) => (
               <button
                 key={r.handle}
+                id={optionId(i)}
                 type="button"
                 role="option"
-                aria-selected={false}
-                // Without this the mousedown blurs the input, which closes
-                // the list before the click lands.
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  onPick({ handle: r.handle, name: r.name, fmv: r.fmv ?? 0 });
-                  setFilter('');
-                  // Close so the new line is visible under the box; a click
-                  // on the box opens the list again for the next card.
-                  setOpen(false);
-                }}
-                className="hover:bg-ui-bg-base-hover flex w-full items-center gap-3 px-4 py-2 text-left"
+                tabIndex={-1}
+                aria-selected={i === active}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => pick(r)}
+                className={`flex w-full items-center gap-3 px-4 py-2 text-left ${i === active ? 'bg-ui-bg-base-hover' : ''}`}
               >
                 <Thumb photo={r.photo} />
                 <span className="flex min-w-0 flex-1 flex-col">
@@ -181,9 +212,20 @@ export const StockItemSearch = ({
             ))}
             {visible.length === 0 ? (
               <div className="text-ui-fg-subtle px-4 py-3 text-sm">
-                {rows.length === 0
-                  ? t('inventory.itemSearch.none')
-                  : t('inventory.itemSearch.noMatch')}
+                {isLoading
+                  ? t('inventory.itemSearch.loading')
+                  : isError
+                    ? t('inventory.itemSearch.loadError')
+                    : rows.length === 0
+                      ? t('inventory.itemSearch.none')
+                      : t('inventory.itemSearch.noMatch')}
+              </div>
+            ) : hits.length > visible.length ? (
+              <div className="text-ui-fg-muted px-4 py-2 text-xs">
+                {t('inventory.itemSearch.more', {
+                  shown: visible.length,
+                  total: hits.length,
+                })}
               </div>
             ) : null}
           </div>

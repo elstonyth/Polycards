@@ -882,7 +882,7 @@ export const useUploadImage = () =>
   });
 
 export const useUpdateDeliveryOrder = () => {
-  const qc = useQueryClient();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (vars: {
       id: string;
@@ -895,19 +895,21 @@ export const useUpdateDeliveryOrder = () => {
         tracking_number: vars.tracking_number,
         proof_images: vars.proof_images,
       }),
-    // Status filters + pages vary, so drop the whole delivery-orders namespace.
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
+    // Status filters + pages vary, so drop the whole delivery-orders
+    // namespace — and the Stock buckets and Procurement lists a status move
+    // changes (useInvalidateStock covers all of them).
+    onSuccess: () => invalidateStock(),
   });
 };
 
 export const useBulkUpdateDeliveryOrders = () => {
-  const qc = useQueryClient();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (vars: { ids: string[]; status: DeliveryStatus }) =>
       bulkUpdateDeliveryOrders(vars.ids, vars.status),
     // Partial success is the contract, so invalidate on SETTLE (not success):
     // a throw here can still leave earlier ids in the batch already moved.
-    onSettled: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
+    onSettled: () => invalidateStock(),
   });
 };
 
@@ -1621,7 +1623,12 @@ export const useCreatePurchaseInvoice = () => {
       qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey });
       invalidateStock();
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    // A refusal is often "that GRN is no longer open": refresh it so the form
+    // shows its real status instead of failing the same way again.
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+      invalidateStock();
+    },
   });
 };
 

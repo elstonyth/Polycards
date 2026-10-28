@@ -142,9 +142,9 @@ const NewPurchaseInvoicePage = () => {
       {
         card_handle: item.handle,
         card_name: item.name,
-        fmv_snapshot: item.fmv.toFixed(2),
+        fmv_snapshot: item.fmv?.toFixed(2) ?? '',
         qty: '1',
-        unit_cost: item.fmv.toFixed(2),
+        unit_cost: item.fmv?.toFixed(2) ?? '',
       },
     ]);
   };

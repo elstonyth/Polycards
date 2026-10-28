@@ -46,7 +46,7 @@ const NewGoodsReceiveNotePage = () => {
       {
         card_handle: item.handle,
         card_name: item.name,
-        fmv_snapshot: item.fmv.toFixed(2),
+        fmv_snapshot: item.fmv?.toFixed(2) ?? '',
         qty: '1',
       },
     ]);

@@ -1231,7 +1231,10 @@
       "label": "Add item",
       "placeholder": "Search registered cards and catalog products",
       "none": "No cards or catalog products to add.",
-      "noMatch": "No item matches that search."
+      "noMatch": "No item matches that search.",
+      "loading": "Loading stock…",
+      "loadError": "Could not load stock. Refresh to try again.",
+      "more": "Showing {{shown}} of {{total}} — type to narrow the list."
     },
     "detail": {
       "back": "Inventory",
@@ -1253,7 +1256,8 @@
         "requested": "Requested",
         "shipped": "Shipped",
         "completed": "Completed",
-        "adjustment": "Adjustment"
+        "adjustment": "Adjustment",
+        "goods_receive": "Goods received"
       }
     }
   },
