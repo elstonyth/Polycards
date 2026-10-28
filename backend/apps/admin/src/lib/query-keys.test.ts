@@ -517,6 +517,46 @@ describe('qk', () => {
     ).not.toEqual([...qk.inventoryItemKey]);
   });
 
+  it('keys GRNs, the open-GRN picker and procurement under invalidatable prefixes', () => {
+    expect(qk.goodsReceiveNotes(0)).toEqual([
+      'admin',
+      'goods-receive-notes',
+      0,
+      '',
+      'created_at:desc',
+      'all',
+    ]);
+    // The picker's key sits under the list prefix, so the one invalidation
+    // that refreshes the list also drops a transferred GRN from the picker.
+    for (const key of [
+      qk.goodsReceiveNotes(0),
+      qk.goodsReceiveNotes(0, undefined, 'created_at:desc', 'open'),
+    ]) {
+      expect(key.slice(0, qk.goodsReceiveNotesKey.length)).toEqual([
+        ...qk.goodsReceiveNotesKey,
+      ]);
+    }
+    expect(qk.goodsReceiveNotes(0)).not.toEqual(
+      qk.goodsReceiveNotes(0, undefined, undefined, 'open'),
+    );
+    expect(qk.goodsReceiveNote('grn_1')).toEqual([
+      'admin',
+      'goods-receive-note',
+      'grn_1',
+    ]);
+    expect(
+      qk.goodsReceiveNote('grn_1').slice(0, qk.goodsReceiveNoteKey.length),
+    ).toEqual([...qk.goodsReceiveNoteKey]);
+    for (const key of [qk.procurementToBuy, qk.procurementToShip]) {
+      expect(key.slice(0, qk.procurementKey.length)).toEqual([
+        ...qk.procurementKey,
+      ]);
+    }
+    expect(
+      qk.deliveryOrder('ord_1').slice(0, qk.deliveryOrderKey.length),
+    ).toEqual([...qk.deliveryOrderKey]);
+  });
+
   it('keys the dashboard counts and recent payments under the list prefixes', () => {
     // Approving a withdrawal or updating an order invalidates these prefixes,
     // so the Dashboard's light queries refresh with the full lists.

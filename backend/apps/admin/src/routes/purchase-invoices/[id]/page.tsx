@@ -1,4 +1,5 @@
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Badge, Container, Heading, Table, Text } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
 import { usePurchaseInvoice } from '../../../lib/queries';
@@ -10,6 +11,7 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 // customers/[id] and packs/[slug]).
 
 const PurchaseInvoiceDetailPage = () => {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data, isError, error } = usePurchaseInvoice(id ?? null);
@@ -67,6 +69,13 @@ const PurchaseInvoiceDetailPage = () => {
                   <Badge size="2xsmall" color="orange">
                     Reversal
                   </Badge>
+                ) : null}
+                {inv.from_grn_id && inv.from_grn_display_no ? (
+                  <Link to={`/goods-receive-notes/${inv.from_grn_id}`}>
+                    <Badge size="2xsmall" color="blue">
+                      {t('grn.fromBadge', { no: inv.from_grn_display_no })}
+                    </Badge>
+                  </Link>
                 ) : null}
               </div>
               {inv.reverses_invoice_id ? (

@@ -52,16 +52,19 @@ export const blankCredit = (): PoolCredit => ({
 });
 
 /** Cards with stock to give. Picking one reserves nothing (card prizes work
- *  like a challenge's card prize), so this only keeps the list honest. */
+ *  like a challenge's card prize), so this only keeps the list honest.
+ *  `counter`, not `on_hand`: the draw takes from the Medusa counter (received
+ *  minus won), while on_hand (received minus shipped) still counts cards
+ *  already won and sitting in vaults. */
 export const inStockCards = (rows: InventoryRow[]): InventoryRow[] =>
-  rows.filter((r) => r.is_card && (r.on_hand ?? 0) > 0);
+  rows.filter((r) => r.is_card && (r.counter ?? 0) > 0);
 
 export const poolCardFrom = (r: InventoryRow): PoolCard => ({
   handle: r.handle,
   name: r.name,
   photo: r.photo,
   value: r.price,
-  onHand: r.on_hand ?? 0,
+  onHand: r.counter ?? 0,
   title: r.name,
 });
 

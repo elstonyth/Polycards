@@ -30,9 +30,12 @@ const row = (over: Partial<InventoryRow> = {}): InventoryRow => ({
   price: 1200,
   cost: 900,
   created_at: '2026-10-01T00:00:00.000Z',
-  on_hand: 3,
+  to_procure: 0,
+  on_hand: 5,
+  counter: 3,
   in_vault: 0,
   requested: 0,
+  ready_to_ship: 0,
   shipped: 0,
   listing_count: 1,
   ...over,
@@ -66,12 +69,17 @@ describe('inStockCards', () => {
     const rows = [
       row({ handle: 'a' }),
       row({ handle: 'b', is_card: false }),
-      row({ handle: 'c', on_hand: 0 }),
-      row({ handle: 'd', on_hand: -2 }),
-      row({ handle: 'e', on_hand: null }),
-      row({ handle: 'f', on_hand: 1 }),
+      row({ handle: 'c', counter: 0 }),
+      row({ handle: 'd', counter: -2 }),
+      row({ handle: 'e', counter: null }),
+      row({ handle: 'f', counter: 1 }),
     ];
     expect(inStockCards(rows).map((r) => r.handle)).toEqual(['a', 'f']);
+  });
+
+  test('reads the counter, not physical on hand — won cards are not prizes', () => {
+    // 4 on the shelf, all 4 already won and vaulted: nothing left to give.
+    expect(inStockCards([row({ on_hand: 4, counter: 0 })])).toEqual([]);
   });
 });
 
@@ -85,7 +93,7 @@ describe('poolCardFrom', () => {
       onHand: 3,
       title: 'Charizard PSA 10',
     });
-    expect(poolCardFrom(row({ price: null, on_hand: null }))).toMatchObject({
+    expect(poolCardFrom(row({ price: null, counter: null }))).toMatchObject({
       value: null,
       onHand: 0,
     });

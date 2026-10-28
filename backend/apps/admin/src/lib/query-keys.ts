@@ -133,6 +133,9 @@ export const qk = {
   // 2-segment prefix — invalidates ALL delivery-order pages/filters in one call
   deliveryOrdersKey: ['admin', 'delivery-orders'] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
+  // Every cached order detail — the stock allocation moves orders to
+  // processed / ready_to_ship server-side after a GRN or invoice save.
+  deliveryOrderKey: ['admin', 'delivery-order'] as const,
   // Dashboard (spec §7): a count-only read per status, and the newest few
   // payments. Under the list prefixes so every invalidation of the full lists
   // (order updates, withdrawal approve/deny) refreshes these too.
@@ -272,4 +275,33 @@ export const qk = {
   // one cannot reach the other, so anything that mutates BOTH the list and a
   // detail — a purchase invoice, a bulk register — has to name both roots.
   inventoryItemKey: ['admin', 'inventory-item'] as const,
+  // ── Goods receive notes + procurement (spec 2026-10-28) ────────────────────
+  // q, sort and status ALWAYS render, same rule as qk.purchaseInvoices. The
+  // invoice form's open-GRN picker is status 'open' under this same prefix,
+  // so one invalidation refreshes the picker with the list.
+  goodsReceiveNotes: (
+    page: number,
+    q?: string,
+    sort?: string,
+    status?: string,
+  ) =>
+    [
+      'admin',
+      'goods-receive-notes',
+      page,
+      q ?? '',
+      sort ?? 'created_at:desc',
+      status ?? 'all',
+    ] as const,
+  goodsReceiveNotesKey: ['admin', 'goods-receive-notes'] as const,
+  // Sibling namespace like qk.purchaseInvoice — but a GRN detail is NOT
+  // immutable: status, invoice and reversed_by change on transfer and on
+  // reverse, so this root IS invalidated whenever stock moves.
+  goodsReceiveNote: (id: string) =>
+    ['admin', 'goods-receive-note', id] as const,
+  goodsReceiveNoteKey: ['admin', 'goods-receive-note'] as const,
+  // Both daily lists move whenever stock or an order status moves.
+  procurementToBuy: ['admin', 'procurement', 'to-buy'] as const,
+  procurementToShip: ['admin', 'procurement', 'to-ship'] as const,
+  procurementKey: ['admin', 'procurement'] as const,
 };

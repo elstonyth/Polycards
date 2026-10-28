@@ -62,17 +62,19 @@ type SortKey =
   | 'price'
   | 'cost'
   | 'created_at'
+  | 'to_procure'
   | 'on_hand'
   | 'in_vault'
   | 'requested'
+  | 'ready_to_ship'
   | 'shipped';
 
-// Nullable numerics all sort as -Infinity rather than a sentinel like -1:
-// on_hand can legitimately be NEGATIVE (oversold), and -1 would rank a real
-// deficit above "unknown". -Infinity keeps "unknown" strictly last on desc and
+// Nullable numerics (fmv, price, cost) all sort as -Infinity rather than a
+// sentinel like -1: -Infinity keeps "unknown" strictly last on desc and
 // strictly first on asc for every column, and two unknowns compare equal
 // without ever producing NaN (which is why this compares with < / > rather
-// than subtracting).
+// than subtracting). The six stock buckets are never null — on_hand can be
+// NEGATIVE (shipped more than was ever received), which sorts as itself.
 const sortValue = (r: InventoryRow, key: SortKey): number => {
   switch (key) {
     case 'fmv':
@@ -81,14 +83,18 @@ const sortValue = (r: InventoryRow, key: SortKey): number => {
       return r.price ?? Number.NEGATIVE_INFINITY;
     case 'cost':
       return r.cost ?? Number.NEGATIVE_INFINITY;
-    case 'on_hand':
-      return r.on_hand ?? Number.NEGATIVE_INFINITY;
     case 'created_at':
       return Date.parse(r.created_at);
+    case 'to_procure':
+      return r.to_procure;
+    case 'on_hand':
+      return r.on_hand;
     case 'in_vault':
       return r.in_vault;
     case 'requested':
       return r.requested;
+    case 'ready_to_ship':
+      return r.ready_to_ship;
     case 'shipped':
       return r.shipped;
     default:
@@ -408,9 +414,13 @@ const InventoryListPage = () => {
                 {sortHeader('price', t('inventory.price'), true)}
                 {sortHeader('cost', t('inventory.cost'), true)}
                 {sortHeader('created_at', t('inventory.created'), true)}
+                {/* The six stock columns, in the order spec 2026-10-28 fixes
+                    (the Excel export uses the same order). */}
+                {sortHeader('to_procure', t('inventory.toProcure'), true)}
                 {sortHeader('on_hand', t('inventory.onHand'), true)}
                 {sortHeader('in_vault', t('inventory.inVault'), true)}
                 {sortHeader('requested', t('inventory.requested'), true)}
+                {sortHeader('ready_to_ship', t('inventory.readyToShip'), true)}
                 {sortHeader('shipped', t('inventory.shipped'), true)}
                 <Table.HeaderCell className="text-right">
                   {t('inventory.listingShow')}
@@ -486,23 +496,27 @@ const InventoryListPage = () => {
                   <Table.Cell className="text-ui-fg-subtle text-right whitespace-nowrap">
                     {orderDateTime(r.created_at)}
                   </Table.Cell>
-                  {/* `??`, never `||`: on_hand 0 means "tracked, nothing
-                      shippable" and must render as 0, not as the untracked
-                      em dash. (null ?? 0) < 0 is false, so an untracked row is
-                      never coloured as a deficit. */}
+                  {/* Error colour = action needed: cards still to buy, or a
+                      negative on hand (shipped more than was ever received —
+                      missing receipt history). */}
                   <Table.Cell
-                    className={`text-right tabular-nums ${(r.on_hand ?? 0) < 0 ? 'text-ui-fg-error' : ''}`}
-                    title={
-                      r.on_hand === null ? t('inventory.noStock') : undefined
-                    }
+                    className={`text-right tabular-nums ${r.to_procure > 0 ? 'text-ui-fg-error' : ''}`}
                   >
-                    {r.on_hand ?? '—'}
+                    {r.to_procure}
+                  </Table.Cell>
+                  <Table.Cell
+                    className={`text-right tabular-nums ${r.on_hand < 0 ? 'text-ui-fg-error' : ''}`}
+                  >
+                    {r.on_hand}
                   </Table.Cell>
                   <Table.Cell className="text-right tabular-nums">
                     {r.in_vault}
                   </Table.Cell>
                   <Table.Cell className="text-right tabular-nums">
                     {r.requested}
+                  </Table.Cell>
+                  <Table.Cell className="text-right tabular-nums">
+                    {r.ready_to_ship}
                   </Table.Cell>
                   <Table.Cell className="text-right tabular-nums">
                     {r.shipped}

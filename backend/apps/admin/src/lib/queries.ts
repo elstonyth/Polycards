@@ -1606,17 +1606,20 @@ export const usePurchaseInvoice = (
 // movement, so on_hand and the weighted-average cost change on the list and the
 // movement history changes on the item detail. Without invalidating them the
 // dashboard's 90 s staleTime (with refetchOnWindowFocus off) shows On Hand 0 and
-// "No purchase history recorded" for stock the operator just bought.
+// "No purchase history recorded" for stock the operator just bought. Since spec
+// 2026-10-28 a save also re-runs the stock allocation (orders move to
+// ready_to_ship) and can close a GRN by transfer — useInvalidateStock covers
+// those caches along with both inventory roots.
 export const useCreatePurchaseInvoice = () => {
   const qc = useQueryClient();
-  const invalidateInventory = useInvalidateInventory();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (body: CreatePurchaseInvoiceBody) =>
       createPurchaseInvoice(body),
     onSuccess: () => {
       toast.success('Purchase invoice created');
       qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey });
-      invalidateInventory();
+      invalidateStock();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -2014,6 +2017,133 @@ export const useDeleteAnnouncement = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.announcements }),
   });
 };
+
+// ── Goods receive notes + procurement (spec 2026-10-28) ──────────────────────
+import {
+  createGoodsReceiveNote,
+  getGoodsReceiveNote,
+  getProcurementToBuy,
+  getProcurementToShip,
+  listGoodsReceiveNotes,
+  reverseGoodsReceiveNote,
+  type AdminGoodsReceiveNoteDetail,
+  type CreateGoodsReceiveNoteBody,
+  type GoodsReceiveNotesPage,
+  type ProcurementToBuyRow,
+} from './admin-rest';
+
+export type {
+  AdminGoodsReceiveNote,
+  AdminGoodsReceiveNoteDetail,
+  AdminGoodsReceiveNoteLine,
+  CreateGoodsReceiveNoteBody,
+  GoodsReceiveNotesPage,
+  GrnStatus,
+  ProcurementToBuyRow,
+} from './admin-rest';
+
+// Everything a GRN save, a GRN reversal or an invoice save can move: on hand
+// and the buckets (both inventory roots), the two daily lists, a GRN's status
+// (open -> transferred / reversed), and order statuses — the server re-runs
+// the oldest-first stock allocation after every save, moving orders to
+// processed / ready_to_ship. Returns the folded promise, like
+// useInvalidateInventory, so a caller can await the refetch.
+export const useInvalidateStock = () => {
+  const qc = useQueryClient();
+  return () =>
+    Promise.all(
+      [
+        qk.inventoryKey,
+        qk.inventoryItemKey,
+        qk.procurementKey,
+        qk.deliveryOrdersKey,
+        qk.deliveryOrderKey,
+        qk.goodsReceiveNotesKey,
+        qk.goodsReceiveNoteKey,
+      ].map((queryKey) => qc.invalidateQueries({ queryKey })),
+    );
+};
+
+export const useGoodsReceiveNotes = (
+  page = 0,
+  q?: string,
+  sort = 'created_at:desc',
+): UseQueryResult<GoodsReceiveNotesPage> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNotes(page, q, sort),
+    queryFn: () => listGoodsReceiveNotes(page, q, 50, sort),
+    placeholderData: keepPreviousData,
+  });
+
+// The invoice form's transfer picker: GRNs still waiting for their invoice,
+// newest first, one page of the route's max 100. Gated on `enabled` (the
+// picker being open, or a ?from_grn= deep link) — it is modal-only data.
+//
+// shortcut: an open GRN older than the newest 100 cannot be picked here; its
+// detail page's "Transfer to purchase invoice" button still reaches it.
+export const useOpenGoodsReceiveNotes = (
+  enabled: boolean,
+): UseQueryResult<GoodsReceiveNotesPage> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNotes(0, undefined, 'created_at:desc', 'open'),
+    queryFn: () =>
+      listGoodsReceiveNotes(0, undefined, 100, 'created_at:desc', 'open'),
+    enabled,
+  });
+
+export const useGoodsReceiveNote = (
+  id: string | null,
+): UseQueryResult<{ goods_receive_note: AdminGoodsReceiveNoteDetail }> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNote(id ?? ''),
+    queryFn: () => getGoodsReceiveNote(id as string),
+    enabled: !!id,
+  });
+
+export const useCreateGoodsReceiveNote = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: (body: CreateGoodsReceiveNoteBody) =>
+      createGoodsReceiveNote(body),
+    onSuccess: () => {
+      toast.success(t('grn.created'));
+      invalidateStock();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// The reverse route does not re-run the allocation, but on hand drops, so the
+// buckets and the to-buy list still move — same invalidation as a save.
+export const useReverseGoodsReceiveNote = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: (id: string) => reverseGoodsReceiveNote(id),
+    onSuccess: () => {
+      toast.success(t('grn.reversed'));
+      invalidateStock();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useProcurementToBuy = (): UseQueryResult<{
+  rows: ProcurementToBuyRow[];
+}> =>
+  useQuery({
+    queryKey: qk.procurementToBuy,
+    queryFn: getProcurementToBuy,
+  });
+
+export const useProcurementToShip = (): UseQueryResult<{
+  orders: AdminDeliveryOrder[];
+}> =>
+  useQuery({
+    queryKey: qk.procurementToShip,
+    queryFn: getProcurementToShip,
+  });
 
 // ── Dashboard (spec §7) ──────────────────────────────────────────────────────
 // Light reads for the home page: a count per delivery status (limit 1, only

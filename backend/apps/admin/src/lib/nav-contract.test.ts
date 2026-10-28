@@ -103,7 +103,10 @@ const GROUPS: Group[] = [
     children: [
       { path: '/products/from-pricecharting', label: 'pcNav.addStock' },
       { path: '/products/from-pc-collection', label: 'pcNav.importCollection' },
+      // GRN above Purchase invoices: cards arrive before their invoice.
+      { path: '/goods-receive-notes', label: 'pcNav.goodsReceiveNotes' },
       { path: '/purchase-invoices', label: 'pcNav.purchaseInvoices' },
+      { path: '/procurement', label: 'pcNav.procurement' },
     ],
   },
   {

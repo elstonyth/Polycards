@@ -56,7 +56,9 @@
     "previous": "上一段 {{value}}"
   },
   "pcNav": {
-    "luckyDraw": "幸运抽奖"
+    "luckyDraw": "幸运抽奖",
+    "goodsReceiveNotes": "收货单",
+    "procurement": "采购清单"
   },
   "packs": {
     "tabs": {
@@ -111,6 +113,104 @@
         "scheduled": "已安排无损模式",
         "cancelled": "已取消无损模式窗口"
       }
+    }
+  },
+  "inventory": {
+    "toProcure": "待采购数量",
+    "onHand": "现有库存",
+    "inVault": "保险库中",
+    "requested": "已请求+处理中",
+    "readyToShip": "待发货",
+    "shipped": "已发货",
+    "itemSearch": {
+      "label": "添加物品",
+      "placeholder": "搜索已登记卡牌和目录商品",
+      "none": "没有可添加的卡牌或目录商品。",
+      "noMatch": "没有匹配的物品。"
+    }
+  },
+  "grn": {
+    "title": "收货单",
+    "subtitle": "供应商发票到达之前先到货的卡牌。保存后计入现有库存；发票到达后转入采购发票。",
+    "searchPlaceholder": "搜索收货单号或供应商",
+    "new": "新建收货单",
+    "back": "收货单",
+    "loadError": "无法加载收货单。",
+    "detailLoadError": "无法加载此收货单。",
+    "notFound": "找不到此收货单。",
+    "empty": "暂无收货单。",
+    "noResults": "没有匹配的收货单。",
+    "col": {
+      "no": "收货单号",
+      "date": "日期",
+      "recorded": "录入时间",
+      "agent": "经办人",
+      "supplier": "供应商",
+      "status": "状态",
+      "item": "物品",
+      "fmv": "FMV",
+      "qty": "数量",
+      "lineFmv": "行 FMV",
+      "totalFmv": "FMV 合计"
+    },
+    "status": {
+      "open": "待转入",
+      "transferred": "已转入",
+      "reversed": "已冲销",
+      "reversal": "冲销单"
+    },
+    "qtyN": "数量 {{n}}",
+    "newTitle": "新建收货单",
+    "newSubtitle": "FMV 以马币计，最多 2 位小数。此处不填成本——成本填在转入的采购发票上。保存后计入现有库存。",
+    "date": "收货日期",
+    "dateHint": "按马来西亚（MYT）日历日记录。",
+    "supplierPlaceholder": "卡牌来自哪个供应商",
+    "noLines": "尚无明细——在上方搜索并选择物品。",
+    "linesLabel": "收货单明细",
+    "lineFmv": "第 {{n}} 行 FMV",
+    "lineQty": "第 {{n}} 行数量",
+    "removeLine": "删除第 {{n}} 行",
+    "save": "保存收货单",
+    "created": "收货单已创建",
+    "reversed": "收货单已冲销",
+    "transferTo": "转入采购发票",
+    "transferredTo": "已转入 {{no}}",
+    "reversedBy": "已被 {{no}} 冲销",
+    "reverses": "冲销 {{no}}",
+    "reverse": "冲销",
+    "cancel": "取消",
+    "reverseTitle": "冲销 {{no}}？",
+    "reverseDescription": "这会生成一张冲销收货单，把此单上的所有卡牌从现有库存中扣回。无法撤销，且此单之后不能再转入发票。",
+    "fromBadge": "来自 {{no}}",
+    "transfer": {
+      "button": "从收货单转入",
+      "pickerTitle": "等待发票的收货单",
+      "noneOpen": "没有等待发票的收货单。",
+      "from": "从 {{no}} 转入",
+      "clear": "取消转入",
+      "hint": "卡牌、数量和 FMV 来自收货单，不能修改。请为每一行填写单位成本。",
+      "notOpen": "{{no}} 状态为「{{status}}」——只有待转入的收货单可以转入。",
+      "loadError": "无法加载该收货单。",
+      "loading": "正在加载收货单……",
+      "noLines": "没有可转入的明细。"
+    }
+  },
+  "procurement": {
+    "title": "采购清单",
+    "subtitle": "每日两份清单，最早的订单优先：待采购卡牌给采购部，待寄送包裹给寄件部。",
+    "toBuy": "待采购",
+    "toShip": "待寄送",
+    "toBuyEmpty": "无需采购——所有等待中的订单都已有货。",
+    "toShipEmpty": "没有待发货的订单。",
+    "loadError": "无法加载此清单。",
+    "col": {
+      "card": "卡牌",
+      "need": "需要",
+      "oldestOrder": "最早订单",
+      "orderDate": "下单日期",
+      "customer": "客户",
+      "shipTo": "收件人",
+      "cards": "卡牌"
     }
   }
 }
