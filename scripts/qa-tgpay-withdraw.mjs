@@ -36,6 +36,10 @@ try {
   });
   const account = page.getByLabel('Saved bank account');
   await account.waitFor({ state: 'visible', timeout: 20000 });
+  // TGPay pays Malaysian banks: show Malaysia's accounts when a Singapore
+  // one is saved too (the picker lists one country at a time).
+  const myPill = page.getByRole('button', { name: 'Malaysia', exact: true });
+  if (await myPill.isVisible()) await myPill.click();
   const usable = await account
     .locator('option:not([disabled])')
     .first()

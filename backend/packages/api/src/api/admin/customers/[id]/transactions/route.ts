@@ -2,17 +2,27 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { parsePaginationParams } from '../../../../../utils/pagination';
+import { parseReasons } from './reasons';
 
 const ledgerRef = (row: { id: string; reason: string; source_transaction_id?: string | null; reference?: string | null }): string | null | undefined =>
   row.reason === 'coin_flip_win' ? row.reference : row.reason === 'pack_open' ? row.source_transaction_id : row.id;
 
 // GET /admin/customers/:id/transactions — paginated credit ledger for the
-// support view. Same row shape as the gacha route's `transactions` slice.
+// support view. Same row shape as the gacha route's `transactions` slice,
+// plus each row's bonus part. Optional ?reasons=topup,cashout keeps only those
+// reasons (the player page's Wallet filter); an unknown one is a 400.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const { id } = req.params;
+  const reasons = parseReasons(req.query.reasons);
+  if (reasons === 'invalid') {
+    res.status(400).json({
+      message: 'reasons must be a comma list of credit transaction reasons.',
+    });
+    return;
+  }
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },
     { defaultLimit: 25, maxLimit: 100 },
@@ -21,7 +31,7 @@ export async function GET(
   // `id` tiebreaker: offset pagination needs a unique secondary sort key or
   // rows sharing a `created_at` can appear on two pages or on neither.
   const [rows, total] = await packs.listAndCountCreditTransactions(
-    { customer_id: id },
+    reasons ? { customer_id: id, reason: reasons } : { customer_id: id },
     { order: { created_at: 'DESC', id: 'DESC' }, skip: offset, take: limit },
   );
   // Ledger display id where present (POLYCARD-BACK §4.3 Wallet tab). SP rows
@@ -55,6 +65,8 @@ export async function GET(
     items: rows.map((t) => ({
       id: t.id,
       amount: Number(t.amount),
+      // The spend-only bonus part of the row (signed like it), RM.
+      bonus: Number(t.bonus_cents ?? 0) / 100,
       reason: t.reason,
       reference: t.reference ?? null,
       created_at: t.created_at,

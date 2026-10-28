@@ -13,7 +13,8 @@ import {
   toast,
 } from '@medusajs/ui';
 import { CurrencyDollar } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   getCoinFlipSettings,
   listCoinFlips,
@@ -33,9 +34,15 @@ import { Pager } from '../../components/Pager';
 import { orderDateTime, rm } from '../../lib/format';
 
 export const config: RouteConfig = {
-  label: 'Coin flip',
+  label: 'pcNav.coinFlip',
+  translationNs: 'translation',
   icon: CurrencyDollar,
   rank: 32,
+  permissions: ['coin_flip:read' as Permission],
+};
+export const handle = {
+  permissions: 'coin_flip:read',
+  redirectTo: '/overview',
 };
 const settingsKey = ['coin-flip-settings'];
 
@@ -43,10 +50,12 @@ function Settings({
   saved,
   reload,
   active,
+  canEdit,
 }: {
   saved: CoinFlipSettings;
   reload: () => void;
   active: boolean;
+  canEdit: boolean;
 }) {
   const [draft, setDraft] = useState(() => coinFlipDraft(saved));
   const [reason, setReason] = useState('');
@@ -80,7 +89,7 @@ function Settings({
     },
   });
   function save() {
-    if (!active || !parsed || !reason.trim() || stale) return;
+    if (!canEdit || !active || !parsed || !reason.trim() || stale) return;
     mutation.mutate({
       ...parsed,
       expected_revision: saved.revision,
@@ -131,7 +140,7 @@ function Settings({
           <input
             type="checkbox"
             checked={draft.enabled}
-            disabled={mutation.isPending}
+            disabled={!canEdit || mutation.isPending}
             onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
             className="h-4 w-4"
           />
@@ -145,7 +154,7 @@ function Settings({
                 id={`coin-${field}`}
                 inputMode="decimal"
                 value={draft[field]}
-                disabled={mutation.isPending}
+                disabled={!canEdit || mutation.isPending}
                 onChange={(e) =>
                   setDraft({ ...draft, [field]: e.target.value })
                 }
@@ -194,32 +203,34 @@ function Settings({
           </div>
         )}
       </div>
-      <StickySaveBar
-        dirty={dirty}
-        saving={mutation.isPending}
-        canSave={active && !!parsed && reason.trim().length >= 1 && !stale}
-        message={
-          validation ||
-          (!reason.trim() && dirty ? 'Audit reason required' : undefined)
-        }
-        onSave={save}
-        onDiscard={() => {
-          setDraft(coinFlipDraft(saved));
-          setReason('');
-        }}
-      >
-        <div className="min-w-52 flex-1">
-          <Label htmlFor="coin-reason">Audit reason</Label>
-          <Input
-            id="coin-reason"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            maxLength={500}
-            placeholder="Why are these settings changing?"
-            className="mt-1"
-          />
-        </div>
-      </StickySaveBar>
+      {canEdit && (
+        <StickySaveBar
+          dirty={dirty}
+          saving={mutation.isPending}
+          canSave={active && !!parsed && reason.trim().length >= 1 && !stale}
+          message={
+            validation ||
+            (!reason.trim() && dirty ? 'Audit reason required' : undefined)
+          }
+          onSave={save}
+          onDiscard={() => {
+            setDraft(coinFlipDraft(saved));
+            setReason('');
+          }}
+        >
+          <div className="min-w-52 flex-1">
+            <Label htmlFor="coin-reason">Audit reason</Label>
+            <Input
+              id="coin-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={500}
+              placeholder="Why are these settings changing?"
+              className="mt-1"
+            />
+          </div>
+        </StickySaveBar>
+      )}
     </Container>
   );
 }
@@ -467,6 +478,9 @@ function History() {
 }
 
 export default function CoinFlipsPage() {
+  const canEdit = usePermissions().hasPermission(
+    'coin_flip:update' as Permission,
+  );
   const [tab, setTab] = useState('settings');
   const [reloadKey, setReloadKey] = useState(0);
   const query = useQuery({
@@ -497,6 +511,7 @@ export default function CoinFlipsPage() {
           ) : query.data ? (
             <Settings
               active={tab === 'settings'}
+              canEdit={canEdit}
               key={`${query.data.revision}:${reloadKey}`}
               saved={query.data}
               reload={() => {

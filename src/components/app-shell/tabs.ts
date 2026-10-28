@@ -1,5 +1,6 @@
 import {
   CircleUserRound,
+  Gamepad2,
   Home,
   ListChecks,
   Trophy,
@@ -15,12 +16,21 @@ export type Tab = {
   match?: string[];
   /** Requires auth — logged-out clicks open the signup modal instead of navigating. */
   gated?: boolean;
+  /** Opens a picker sheet instead of navigating (`href` is only its home). */
+  opens?: 'games';
 };
 
-/** The five app destinations, in the boss-specified order (Home center). */
+/** The six app destinations (operator 2026-10-25 added Games as the sixth). */
 export const TABS: Tab[] = [
   { label: 'Task', href: '/task', icon: ListChecks },
   { label: 'Ranks', href: '/leaderboard', icon: Trophy },
+  {
+    label: 'Games',
+    href: '/lucky-draw',
+    icon: Gamepad2,
+    opens: 'games',
+    match: ['/coin-flip', '/vault/coin-flip'],
+  },
   { label: 'Home', href: '/', icon: Home },
   { label: 'Vault', href: '/vault', icon: Vault, gated: true },
   {
@@ -46,6 +56,12 @@ export const TABS: Tab[] = [
 ];
 
 export function isTabActive(tab: Tab, pathname: string): boolean {
+  if (
+    tab.href === '/vault' &&
+    (pathname === '/vault/coin-flip' ||
+      pathname.startsWith('/vault/coin-flip/'))
+  )
+    return false;
   if (tab.href === '/') return pathname === '/';
   if (pathname === tab.href || pathname.startsWith(`${tab.href}/`)) return true;
   return (tab.match ?? []).some(

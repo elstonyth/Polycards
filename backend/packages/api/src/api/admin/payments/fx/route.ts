@@ -62,7 +62,8 @@ async function earnings(
       bindings: Record<string, string>,
     ) => Promise<{ rows: Record<string, string | null>[] }>;
   };
-  const { rows } = await pg.raw(`
+  const { rows } = await pg.raw(
+    `
     SELECT
       (SELECT count(*) FROM gateway_deposit d
          WHERE d.currency = :currency AND d.status = 'settled' AND d.deleted_at IS NULL) AS deposit_count,
@@ -172,6 +173,16 @@ export async function POST(
       return pct;
     },
   );
+  // Strict like fee_enabled: a string "true" must not silently clear a pin.
+  if (
+    body.manual_override !== undefined &&
+    typeof body.manual_override !== 'boolean'
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "'manual_override' must be true or false.",
+    );
+  }
   const manualOverride = body.manual_override === true;
   const manualRate =
     body.manual_rate === null ||
@@ -183,10 +194,7 @@ export async function POST(
   // Per-currency sanity band (PAYMENT_FX_FEEDS): SGD->MYR lives around
   // 3.0-3.6, so 1-10 still stops a fat-fingered 330 or 0.33 from repricing
   // every SGD payment.
-  if (
-    manualRate !== null &&
-    (manualRate < band.min || manualRate > band.max)
-  ) {
+  if (manualRate !== null && (manualRate < band.min || manualRate > band.max)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       `'manual_rate' must be between ${band.min} and ${band.max} (RM per 1 ${currency}).`,

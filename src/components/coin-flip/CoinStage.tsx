@@ -20,7 +20,7 @@ function Fallback(props: CoinSceneProps) {
     if (playbackId) onComplete();
   }, [playbackId, onComplete]);
   return (
-    <div className="flex h-64 items-center justify-center bg-neutral-950 sm:h-96">
+    <div className="flex h-72 items-center justify-center bg-neutral-950 sm:h-[400px]">
       <StaticCoin won={props.outcome !== 'lost'} />
     </div>
   );
@@ -28,7 +28,7 @@ function Fallback(props: CoinSceneProps) {
 const Scene = dynamic(() => import('./CoinScene').then((m) => m.CoinScene), {
   ssr: false,
   loading: () => (
-    <div className="flex h-64 items-center justify-center bg-neutral-950 sm:h-96">
+    <div className="flex h-72 items-center justify-center bg-neutral-950 sm:h-[400px]">
       <StaticCoin />
     </div>
   ),

@@ -53,3 +53,15 @@ git show ca43766b:public/images/claw/<file> > /tmp/<file>
 
 or restore the whole tree into a scratch dir and point the script's `DIR` at it.
 Current pack art lives in `public/images/polycards/` and on the Spaces CDN.
+
+## Operational utilities
+
+- `upload-pixel-sprites.mjs` — bulk-adds custom pixel sprites (the One Piece set)
+  to the admin pixel-Pokémon library: per manifest entry, `POST /admin/media`
+  (`kind=sprite`) then `POST /admin/pixel-pokemon`. Manifest entries carry the
+  deck: `franchise` (`pokemon`, numbered by `dex`, or `one-piece`, numbered by
+  `number`). Idempotent by deck + number + variant (deck + name + variant when
+  unnumbered), so a renamed entry is not created twice. Needs an admin JWT
+  (`ADMIN_TOKEN` or `QA_JWT_FILE`) and `BACKEND_URL`; `--dry-run` lists what it
+  would upload and writes nothing. Cards are then linked to the new rows in the admin card form's
+  sprite picker.

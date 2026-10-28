@@ -15,9 +15,9 @@ import { GATEWAY_STALE_AFTER_MS } from '../../../../modules/packs/gateway-reconc
 import { payerIpOf } from '../../../utils/payer-ip';
 import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
+  GATEWAYS,
   LEDGER_CURRENCY,
   gatewayUrls,
-  isLedgerGateway,
   resolveActiveGateway,
 } from '../../../../modules/packs/gateway';
 import { payerNameOnFile } from '../../../utils/payer-name';
@@ -109,12 +109,12 @@ export async function POST(
       gateway,
       // The name the sheet sent wins: it shows the one on file with
       // "Change", or asks when none is saved. Otherwise (an API caller, or a
-      // page from before the field) the saved account's holder. Only a
-      // regional (A3Pay, SGD) payin needs one.
+      // page from before the field) the saved account's holder. Only a rail
+      // that matches the payer's name (A3Pay, SGD) needs one.
       payerName:
         typeof body.payer_name === 'string' && body.payer_name.trim()
           ? body.payer_name
-          : !isLedgerGateway(gateway)
+          : GATEWAYS[gateway].needsPayerName
             ? (await payerNameOnFile(req.scope, customerId, gateway)).onFile
             : undefined,
       quotedRate: quotedRateOf(body.quoted_rate),

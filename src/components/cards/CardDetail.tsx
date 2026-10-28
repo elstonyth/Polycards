@@ -27,11 +27,14 @@ export function CardDetail({
   detail,
   buybackPercent = null,
   entrance = false,
+  pokemon,
 }: {
   seed: CardSeed;
   detail: CardDetailData | null;
   buybackPercent?: number | null;
   entrance?: boolean;
+  /** false when shown from a non-Pokémon pack: the badge never guesses one. */
+  pokemon?: boolean;
 }) {
   const rarity = seed.rarity ?? detail?.rarity ?? null;
   // A challenge prize keeps the challenge's prism frame here and shows no tier
@@ -128,6 +131,7 @@ export function CardDetail({
           }}
           rarity={rarity}
           frameVariant={frameVariant}
+          pokemon={pokemon}
           slabSrc={detail?.slabImage ?? seed.slabImage}
           className="w-[20%]"
         />

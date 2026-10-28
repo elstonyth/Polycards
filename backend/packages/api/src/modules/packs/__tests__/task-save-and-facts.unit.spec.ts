@@ -237,6 +237,66 @@ describe('taskFactsFor reads the VIP high-water mark', () => {
 });
 
 describe('taskFactsFor splits today out of the task week', () => {
+  it('untargeted pixel totals count Pokémon sprites only; One Piece stays per-id', async () => {
+    // "N Pokémon (pixel) cards" must not pay out for One Piece pulls — but a
+    // task that NAMES a One Piece sprite still sees its tally.
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
+    const now = new Date('2026-10-07T04:00:00Z');
+    Object.assign(svc, {
+      listDailyCheckins: jest.fn(async () => []),
+      listVipMemberStates: jest.fn(async () => []),
+    });
+    const execute = jest.fn(async (sql: string) => {
+      if (sql.includes('GROUP BY c.pixel_pokemon_id'))
+        return [
+          {
+            pixel_pokemon_id: 'px_25',
+            franchise: 'pokemon',
+            n: '4',
+            n_week: '2',
+            n_day: '1',
+          },
+          {
+            pixel_pokemon_id: 'op_1',
+            franchise: 'one-piece',
+            n: '7',
+            n_week: '5',
+            n_day: '3',
+          },
+          // library row since deleted → franchise unknown → counted as before
+          {
+            pixel_pokemon_id: 'px_gone',
+            franchise: null,
+            n: '1',
+            n_week: '1',
+            n_day: '0',
+          },
+        ];
+      if (sql.includes('FROM credit_transaction'))
+        return [{ week_sen: '0', day_sen: '0', total_sen: '0' }];
+      return [{ n: '0' }];
+    });
+    const facts: TaskFacts = await (
+      svc as unknown as {
+        taskFactsFor: (input: unknown, ctx: unknown) => Promise<TaskFacts>;
+      }
+    ).taskFactsFor(
+      { customerId: 'cus_1', week: taskWeekFor(now), day: taskDayFor(now) },
+      { manager: { execute } },
+    );
+    expect(facts.vaultPixelCount).toBe(5);
+    expect(facts.week.pixelPulls).toBe(3);
+    expect(facts.day.pixelPulls).toBe(1);
+    expect(facts.vaultPixelCountById.get('op_1')).toBe(7);
+    expect(facts.week.pixelPullsById.get('op_1')).toBe(5);
+    const pixelSql = execute.mock.calls.find(([sql]) =>
+      sql.includes('GROUP BY c.pixel_pokemon_id'),
+    )![0];
+    expect(pixelSql).toContain('LEFT JOIN pixel_pokemon pp');
+  });
+
   it('reads the day from the week rows — check-in dates and FILTERed counts', async () => {
     const svc = Object.create(
       PacksModuleService.prototype,
@@ -259,6 +319,8 @@ describe('taskFactsFor splits today out of the task week', () => {
         ];
       if (sql.includes('GROUP BY c.pixel_pokemon_id'))
         return [{ pixel_pokemon_id: 'px_1', n: '9', n_week: '3', n_day: '2' }];
+      if (sql.includes('FROM credit_transaction'))
+        return [{ week_sen: '15000', day_sen: '4050', total_sen: '90000' }];
       return [{ n: '20' }];
     });
     const facts: TaskFacts = await (
@@ -278,11 +340,49 @@ describe('taskFactsFor splits today out of the task week', () => {
     expect(facts.day.pixelPullsById.get('px_1')).toBe(2);
     expect(facts.vaultPixelCount).toBe(9);
     expect(facts.vaultCount).toBe(20);
+    expect(facts.week.topupMyr).toBe(150);
+    expect(facts.day.topupMyr).toBe(40.5);
+    expect(facts.topupMyrTotal).toBe(900);
+    // Real gateway money only: positive topup rows, never soft-deleted ones,
+    // and the normal part (a bonus slice is promo money, not a top-up).
+    const topupSql = execute.mock.calls.find(([sql]) =>
+      sql.includes('FROM credit_transaction'),
+    )![0];
+    expect(topupSql).toMatch(/reason = 'topup' AND amount > 0/);
+    expect(topupSql).toMatch(/deleted_at IS NULL/);
+    expect(topupSql).toMatch(/bonus_cents/);
     // The period pixel counts are paid pulls only; the lifetime one is not.
     const pixelSql = execute.mock.calls.find(([sql]) =>
       sql.includes('GROUP BY c.pixel_pokemon_id'),
     )![0];
     expect(pixelSql.match(/p\.source = 'pack'/g)).toHaveLength(2);
     expect(pixelSql).not.toMatch(/WHERE p\.customer_id = \? AND p\.source/);
+  });
+});
+
+describe('taskFactsFor top-up sums', () => {
+  it('a customer with no top-up rows reads 0, not NaN', async () => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
+    Object.assign(svc, {
+      listDailyCheckins: jest.fn(async () => []),
+      listVipMemberStates: jest.fn(async () => []),
+    });
+    const facts: TaskFacts = await (
+      svc as unknown as {
+        taskFactsFor: (input: unknown, ctx: unknown) => Promise<TaskFacts>;
+      }
+    ).taskFactsFor(
+      {
+        customerId: 'cus_1',
+        week: taskWeekFor(new Date()),
+        day: taskDayFor(new Date()),
+      },
+      { manager: { execute: jest.fn(async () => []) } },
+    );
+    expect(facts.week.topupMyr).toBe(0);
+    expect(facts.day.topupMyr).toBe(0);
+    expect(facts.topupMyrTotal).toBe(0);
   });
 });

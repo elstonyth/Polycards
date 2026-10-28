@@ -1,4 +1,7 @@
-import { bonusShareMyr } from '../../../../../modules/packs/bonus-credit';
+import {
+  bonusShareMyr,
+  sellbackHoldBp,
+} from '../../../../../modules/packs/bonus-credit';
 import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
@@ -60,7 +63,7 @@ export async function POST(
   // claim (nothing gates claiming on a never-spent account). So `free` is the
   // WRONG signal for the reveal's sell UI: it would suppress the sell on a pull
   // that GET /store/vault and buybackPullStep both treat as unlocked. Resolved
-  // live below from the same hasPaidOpen() read those two use.
+  // live below from the same lockedPullIds() rule those two use.
   //
   // Seeded as `isFree` so it is default-safe: if the enrichment below fails, the
   // response never advertises a sell that would then 400.
@@ -108,8 +111,10 @@ export async function POST(
     //
     // An UNLOCKED free pull (the customer had already paid-opened before
     // claiming) takes the normal quote path — buybackPullStep re-checks
-    // hasPaidOpen live and honours the sell, so the offer is real.
-    if (isFree) locked = !(await packsService.hasPaidOpen(customerId));
+    // lockedPullIds live and honours the sell, so the offer is real.
+    if (isFree)
+      locked = (await packsService.lockedPullIds(customerId, [result.pull]))
+        .size > 0;
     if (locked) {
       buyback = UNQUOTED_BUYBACK;
     } else {
@@ -126,11 +131,13 @@ export async function POST(
           instant_closed_at: result.pull.instant_closed_at,
         },
         marketPriceMyr,
+        undefined,
+        result.pull.source,
       );
 
-      // A bonus-funded pull: that share of its sale must be played through
-      // before it can be withdrawn (2026-10-09).
-      const bonusBp = Number(result.pull.bonus_bp ?? 0);
+      // A bonus-funded or welcome pull: that share of its sale must be played
+      // through before it can be withdrawn (2026-10-09; sellbackHoldBp).
+      const bonusBp = sellbackHoldBp(result.pull);
       buyback = {
         ...quoted,
         bonus: bonusShareMyr(quoted.amount, bonusBp),
@@ -179,9 +186,9 @@ export async function POST(
     // future promo pack could also be.
     free: isFree,
     // THE LOCK SIGNAL. The reveal suppresses its sell UI and shows the unlock
-    // note ("Purchase & open any pack to unlock selling & delivery") on THIS,
-    // never on `free`: a free pull claimed after a paid open is already
-    // unlocked and fully sellable. Mirrors GET /store/vault's per-item `locked`.
+    // note (FREE_PULL_LOCKED_MESSAGE, free-pack.ts) on THIS, never on `free`:
+    // a free pull claimed after a paid open is already unlocked and fully
+    // sellable. Mirrors GET /store/vault's per-item `locked`.
     locked,
   });
 }

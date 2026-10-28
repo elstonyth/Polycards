@@ -3,7 +3,10 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../modules/packs';
-import { REFERRAL_AUTO_APPROVE_MAX_LINE_MYR } from '../../../../modules/packs/referral';
+import {
+  REFERRAL_AUTO_APPROVE_MAX_LINE_MYR,
+  referralWeekFor,
+} from '../../../../modules/packs/referral';
 import type PacksModuleService from '../../../../modules/packs/service';
 
 const STATUSES = ['draft', 'approved', 'paid', 'void'] as const;
@@ -39,7 +42,9 @@ export async function GET(
   res.json({
     settlements: runs.map((r) => ({
       id: r.id,
-      week_start: new Date(r.week_start).toISOString().slice(0, 10),
+      // Stored as Tuesday 00:00 MYT (Monday 16:00 UTC): name it by the MYT
+      // date, not the UTC one a day early.
+      week_start: referralWeekFor(new Date(r.week_start)).weekStartIso,
       status: r.status,
       approved_by: r.approved_by,
       approved_at: r.approved_at,

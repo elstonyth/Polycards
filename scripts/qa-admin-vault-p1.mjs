@@ -1,0 +1,427 @@
+// Phase 1 check for the Vault admin redesign
+// (docs/superpowers/plans/2026-10-14-admin-vault-phase1.md, Task 4).
+// Logs in with a QA token (see qa-stats-shot.mjs), checks the sidebar, the
+// redirects, the Geist font and the Settings clean-up,
+// and screenshots every custom page plus the kept Settings pages.
+// Requires the backend on :9000 and this branch's admin dev server on :7000.
+//
+// Usage: QA_JWT_FILE=/path/qa-admin.jwt [OUT=dir] [ADMIN_URL=http://localhost:7001 QA_NO_CORS=1] node scripts/qa-admin-vault-p1.mjs
+import { chromium } from 'playwright';
+import { mkdirSync, readFileSync } from 'node:fs';
+
+const BACKEND = process.env.BACKEND_URL || 'http://localhost:9000';
+const ADMIN = `${process.env.ADMIN_URL || 'http://localhost:7000'}/dashboard`;
+const OUT = process.env.OUT || 'docs/research/admin-vault-p1';
+mkdirSync(OUT, { recursive: true });
+if (!process.env.QA_JWT_FILE) throw new Error('QA_JWT_FILE not set');
+const token = readFileSync(process.env.QA_JWT_FILE, 'utf8').trim();
+
+const TOP = [
+  'Dashboard',
+  'Orders',
+  'Payments',
+  'Players',
+  'Packs',
+  'Stock',
+  'Rewards',
+  'Storefront',
+];
+const REDIRECTS = [
+  ['/', '/overview'],
+  ['/orders', '/overview'],
+  ['/stats', '/overview'],
+  ['/customers', '/players'],
+  ['/reservations', '/inventory/list'],
+  ['/products', '/cards'],
+  ['/inventory', '/inventory/list'],
+  ['/payments', '/withdrawals'],
+  ['/rewards', '/daily-rewards'],
+  ['/site', '/announcements'],
+];
+const PAGES = [
+  '/overview',
+  '/deliveries',
+  '/withdrawals',
+  '/deposits',
+  '/ledger',
+  '/settlement',
+  '/economy',
+  '/players',
+  '/odds-sets',
+  '/referrals',
+  '/support',
+  '/packs',
+  '/cards',
+  '/tier-defaults',
+  '/pixel-pokemon',
+  '/inventory/list',
+  '/products/from-pricecharting',
+  '/products/from-pc-collection',
+  '/purchase-invoices',
+  '/purchase-invoices/new',
+  '/daily-rewards',
+  '/tasks',
+  '/challenge',
+  '/announcements',
+  '/storefront',
+  '/settings/users',
+  '/settings/regions',
+  '/settings/sales-channels',
+  '/settings/locations',
+  '/settings/publishable-api-keys',
+  '/settings/marketplace',
+  '/settings/profile',
+];
+const HIDDEN_SETTINGS = [
+  'tax-regions',
+  'return-reasons',
+  'refund-reasons',
+  'product-types',
+  'product-tags',
+  'attributes',
+  'commissions',
+  'secret-api-keys',
+];
+
+const failures = [];
+const check = (ok, msg) => {
+  if (!ok) failures.push(msg);
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${msg}`);
+};
+
+// QA_NO_CORS=1 lets a worktree's admin run beside the usual one on another
+// port: the local backend's admin CORS allows :7000 only. Test browser only.
+const browser = await chromium.launch({
+  args: process.env.QA_NO_CORS ? ['--disable-web-security'] : [],
+});
+const ctx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+});
+const session = await ctx.request.post(`${BACKEND}/auth/session`, {
+  headers: { authorization: `Bearer ${token}` },
+});
+if (!session.ok()) throw new Error(`POST /auth/session → ${session.status()}`);
+
+const page = await ctx.newPage();
+const errors = [];
+page.on('pageerror', (e) => errors.push(`${page.url()}: ${e.message}`));
+const here = () =>
+  new URL(page.url()).pathname.replace(/^\/dashboard/, '') || '/';
+const settle = async () => {
+  await page.waitForSelector('nav', { timeout: 60000 });
+  await page.waitForTimeout(1500);
+};
+
+for (const [from, to] of REDIRECTS) {
+  await page.goto(`${ADMIN}${from}`);
+  await page
+    .waitForURL((u) => u.pathname === `/dashboard${to}`, { timeout: 30000 })
+    .catch(() => {});
+  check(here() === to, `${from} → ${to} (got ${here()})`);
+}
+
+await page.goto(`${ADMIN}/overview`);
+await settle();
+const top = await page.$$eval(
+  '[data-testid="sidebar-core-routes"] a[data-testid^="sidebar-nav-link-"]',
+  (links) =>
+    links
+      .filter((a) => a.offsetParent !== null)
+      .map((a) => a.textContent.trim()),
+);
+check(
+  JSON.stringify(top) === JSON.stringify(TOP),
+  `sidebar = ${top.join(' · ')}`,
+);
+
+const geistLoaded = await page.evaluate(() =>
+  [...document.fonts].some(
+    (f) => f.family.replace(/["']/g, '') === 'Inter' && f.status === 'loaded',
+  ),
+);
+check(geistLoaded, 'Geist file loaded under the Inter family');
+
+const firstCustomer = await ctx.request
+  .get(`${BACKEND}/admin/customers?limit=1&fields=id`)
+  .then((r) => r.json())
+  .then((b) => b.customers?.[0]?.id)
+  .catch(() => undefined);
+const pages = firstCustomer ? [...PAGES, `/customers/${firstCustomer}`] : PAGES;
+check(
+  Boolean(firstCustomer),
+  'found a local customer for the profile screenshot',
+);
+
+for (const p of pages) {
+  await page.goto(`${ADMIN}${p}`);
+  await settle();
+  const name = p.slice(1).replace(/[/:]/g, '_') || 'root';
+  await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
+}
+
+await page.goto(`${ADMIN}/settings/users`);
+await settle();
+check(
+  await page
+    .locator('[data-testid="sidebar-nav-item-settings-users"]')
+    .isVisible(),
+  'settings/users still visible (positive control for the hide rules)',
+);
+for (const id of HIDDEN_SETTINGS) {
+  const visible = await page
+    .locator(`[data-testid="sidebar-nav-item-settings-${id}"]`)
+    .isVisible()
+    .catch(() => false);
+  check(!visible, `settings/${id} hidden`);
+}
+
+// Dashboard: every section renders and none shows its load error.
+await page.goto(`${ADMIN}/overview`);
+await settle();
+await page.waitForTimeout(1500);
+for (const heading of [
+  'Dashboard',
+  'Money in vs money out',
+  'Needs your attention',
+  'Referral commission per week',
+  'Latest payments',
+]) {
+  check(
+    await page.getByText(heading, { exact: true }).first().isVisible(),
+    `dashboard shows "${heading}"`,
+  );
+}
+check(
+  (await page.getByText("Couldn't load this section.").count()) === 0,
+  'no dashboard section failed to load',
+);
+
+// Medusa's bell is in the header (positive control) but hidden.
+const bell = page.locator('[data-testid="notifications-trigger-button"]');
+check((await bell.count()) > 0, 'notification bell still rendered by Medusa');
+check(!(await bell.first().isVisible()), 'notification bell hidden');
+
+// Attention alert: the tab title carries the waiting count, and the Sound
+// switch toggles and remembers its choice.
+const title = await page.title();
+check(/^(\(\d+\) )?Polycards Admin$/.test(title), `tab title "${title}"`);
+const sound = page.getByRole('switch', { name: 'Sound' });
+check(
+  (await sound.getAttribute('aria-checked')) === 'false',
+  'sound starts off',
+);
+await sound.click();
+check(
+  (await sound.getAttribute('aria-checked')) === 'true' &&
+    (await page.evaluate(() => localStorage.getItem('pc-dashboard-sound'))) ===
+      'on',
+  'sound switch turns on and is remembered',
+);
+await sound.click();
+await page.screenshot({ path: `${OUT}/overview-light.png`, fullPage: true });
+
+// The alert itself, without touching data: count the chime's oscillators,
+// then make one queue grow by answering its next read with one more order.
+await page.addInitScript(() => {
+  window.__osc = 0;
+  const Base = window.AudioContext;
+  window.AudioContext = class extends Base {
+    createOscillator() {
+      window.__osc += 1;
+      return super.createOscillator();
+    }
+  };
+});
+await page.goto(`${ADMIN}/overview`);
+await settle();
+await page.waitForTimeout(1500);
+const countIn = (t) => Number(/^\((\d+)\)/.exec(t)?.[1] ?? 0);
+const before = countIn(await page.title());
+await page.getByRole('switch', { name: 'Sound' }).click();
+const preview = await page.evaluate(() => window.__osc);
+check(preview === 2, `turning sound on plays a preview chime (${preview})`);
+await page.route('**/admin/delivery-orders?*', async (route) => {
+  const url = new URL(route.request().url());
+  if (url.searchParams.get('status') !== 'requested') return route.continue();
+  const response = await route.fetch();
+  const body = await response.json();
+  await route.fulfill({ response, json: { ...body, total: body.total + 1 } });
+});
+await page.evaluate(() =>
+  document.dispatchEvent(new Event('visibilitychange')),
+);
+await page.waitForTimeout(2500);
+const after = countIn(await page.title());
+const played = (await page.evaluate(() => window.__osc)) - preview;
+check(
+  after === before + 1,
+  `tab count rises on a new order (${before} → ${after})`,
+);
+check(played === 2, `a new order plays the chime (${played} oscillators)`);
+await page.unroute('**/admin/delivery-orders?*');
+await page.getByRole('switch', { name: 'Sound' }).click();
+
+// The same page in Medusa's dark theme (the operator's own choice).
+const dark = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  colorScheme: 'dark',
+});
+await dark.addInitScript(() =>
+  localStorage.setItem('medusa_admin_theme', 'dark'),
+);
+await dark.request.post(`${BACKEND}/auth/session`, {
+  headers: { authorization: `Bearer ${token}` },
+});
+const darkPage = await dark.newPage();
+await darkPage.goto(`${ADMIN}/overview`);
+await darkPage.waitForSelector('nav', { timeout: 60000 });
+await darkPage.waitForTimeout(3000);
+await darkPage.screenshot({ path: `${OUT}/overview-dark.png`, fullPage: true });
+await dark.close();
+
+// ── Phase 3: finance pages (spec 2026-10-14-admin-finance-pages) ───────────
+const shows = (text) =>
+  page.getByText(text, { exact: true }).first().isVisible();
+
+await page.goto(`${ADMIN}/economy`);
+await settle();
+for (const heading of [
+  'Cash kept',
+  'Still owed to players',
+  'Where the money moved',
+  'Pack payout rate',
+]) {
+  check(await shows(heading), `profit report shows "${heading}"`);
+}
+check(await shows('Real customers'), 'profit report opens on real customers');
+await page.screenshot({ path: `${OUT}/profit-light.png`, fullPage: true });
+await page.getByRole('switch', { name: 'All groups' }).click();
+await page.waitForTimeout(1500);
+check(
+  new URL(page.url()).searchParams.get('scope') === 'all',
+  'All groups puts scope=all in the URL',
+);
+check(await shows('Cash kept'), 'the all-groups view renders');
+await page.getByRole('button', { name: 'All time' }).click();
+await page.waitForTimeout(1500);
+check(
+  (await page.getByText('vs last period').count()) === 0,
+  'all time hides "vs last period"',
+);
+
+await page.goto(`${ADMIN}/overview?scope=all`);
+await settle();
+check(
+  (await page
+    .getByRole('switch', { name: 'All groups' })
+    .getAttribute('aria-checked')) === 'true',
+  'Dashboard ?scope=all turns its switch on',
+);
+
+await page.goto(`${ADMIN}/settlement`);
+await settle();
+check(await shows('Gateway check'), 'Settlement shows the gateway check');
+await page.getByRole('button', { name: 'Switch gateway…' }).click();
+const gatewayPanel = page.getByRole('dialog');
+await gatewayPanel.waitFor({ timeout: 10000 });
+check(
+  await gatewayPanel.getByText('Payment gateway').first().isVisible(),
+  'Switch gateway opens its side panel',
+);
+await page.keyboard.press('Escape');
+await gatewayPanel.waitFor({ state: 'detached', timeout: 5000 });
+await page.screenshot({ path: `${OUT}/settlement-rm.png`, fullPage: true });
+
+await page.goto(`${ADMIN}/settlement?currency=SGD`);
+await settle();
+const fxCard = page.getByTestId('fx-card-SGD');
+if ((await fxCard.count()) > 0) {
+  await fxCard.getByRole('button', { name: 'Edit rates' }).click();
+  const fxPanel = page.getByRole('dialog');
+  await fxPanel.waitFor({ timeout: 10000 });
+  check(
+    await fxPanel.getByTestId('fx-preview-SGD').isVisible(),
+    'Edit rates opens with the live preview',
+  );
+  await page.keyboard.press('Escape');
+} else {
+  check(false, 'the S$ tab has the exchange-rate card');
+}
+
+await page.goto(`${ADMIN}/ledger`);
+await settle();
+const ledgerFailures = [];
+const onLedger = (r) => {
+  if (r.url().includes('/admin/ledger') && r.status() >= 400)
+    ledgerFailures.push(r.status());
+};
+page.on('response', onLedger);
+await page.getByRole('combobox', { name: 'Type' }).click();
+await page.getByRole('option', { name: 'Referral' }).click();
+await page.waitForTimeout(1500);
+page.off('response', onLedger);
+check(
+  ledgerFailures.length === 0 &&
+    (await page.getByText("Couldn't load").count()) === 0,
+  'Transactions: the Referral filter loads',
+);
+await page.getByRole('button', { name: 'Date range' }).click();
+await page.waitForTimeout(400);
+check(
+  (await page.locator('[role="dialog"] input[type="date"]').count()) === 2,
+  'Transactions: the date popover has From and To',
+);
+await page.keyboard.press('Escape');
+
+await page.goto(`${ADMIN}/players`);
+await settle();
+await page.getByRole('combobox', { name: 'Group' }).click();
+const groupOptions = await page.getByRole('option').allInnerTexts();
+check(
+  groupOptions[0] === 'All groups' && groupOptions.length >= 2,
+  `Players: the group filter lists groups (${groupOptions.join(', ')})`,
+);
+await page.keyboard.press('Escape');
+await page.getByRole('button', { name: 'More actions' }).click();
+check(
+  (await page.getByRole('menuitem').allInnerTexts()).includes('Export logins'),
+  'Players: More actions holds Export logins',
+);
+await page.keyboard.press('Escape');
+
+// The four redesigned pages in Medusa's dark theme.
+const dark3 = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  colorScheme: 'dark',
+});
+await dark3.addInitScript(() =>
+  localStorage.setItem('medusa_admin_theme', 'dark'),
+);
+await dark3.request.post(`${BACKEND}/auth/session`, {
+  headers: { authorization: `Bearer ${token}` },
+});
+const darkPage3 = await dark3.newPage();
+darkPage3.on('pageerror', (e) =>
+  errors.push(`${darkPage3.url()}: ${e.message}`),
+);
+for (const [path, name] of [
+  ['/economy', 'profit-dark'],
+  ['/settlement?currency=SGD', 'settlement-sgd-dark'],
+  ['/ledger', 'ledger-dark'],
+  ['/players', 'players-dark'],
+]) {
+  await darkPage3.goto(`${ADMIN}${path}`);
+  await darkPage3.waitForSelector('nav', { timeout: 60000 });
+  await darkPage3.waitForTimeout(2500);
+  await darkPage3.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
+}
+await dark3.close();
+
+check(errors.length === 0, `no page errors (${errors.length})`);
+for (const e of errors) console.log(`  ${e}`);
+await browser.close();
+if (failures.length) {
+  console.error(`${failures.length} check(s) failed`);
+  process.exit(1);
+}
+console.log(`screenshots in ${OUT}`);

@@ -35,7 +35,7 @@ async function cardForFlip(service: PacksModuleService, customerId: string, pull
   if (!pull) return notFound();
   if (pull.status !== 'vaulted') refuse('This card is no longer available in your Vault.');
   if (!pull.flip_eligible_at) refuse('This card is still processing. Please try again later.');
-  if (pull.source === 'free' && !await service.hasPaidOpen(customerId, context)) refuse(FREE_PULL_LOCKED_MESSAGE);
+  if ((await service.lockedPullIds(customerId, [pull], context)).size) refuse(FREE_PULL_LOCKED_MESSAGE);
   return pull;
 }
 
@@ -129,8 +129,9 @@ export async function acceptCoinFlipOperation(
     }], context);
     creditId = credit.id;
   }
+  // Reward mints add no tracked vault liability; forfeiture cannot remove any.
   await service.recordLedgerEntry({ type: 'CF', customerId: input.customerId, refId: round.id,
-    walletDelta: status === 'won' ? amount : 0, vaultDelta: status === 'lost' ? -amount : 0,
+    walletDelta: status === 'won' ? amount : 0, vaultDelta: status === 'lost' && pull.source !== 'reward' ? -amount : 0,
     payload: { type: 'CF', round_id: round.id, pull_id: pull.id, card_handle: pull.card_id,
       outcome: status, value: amount, published_win_percent: round.snapshot.published_win_units / 10000 },
   }, context);

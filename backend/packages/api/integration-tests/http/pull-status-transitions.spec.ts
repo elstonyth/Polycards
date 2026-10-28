@@ -210,8 +210,29 @@ medusaIntegrationTestRunner({
               reason: 'buyback',
               external_funded_cents: 2700,
             },
+            // Withdrawals: two cashouts, one refunded (+cashout), so
+            // "Withdrawn" must net the refund out: 20, not 32.5.
+            {
+              customer_id: CUS,
+              amount: -20,
+              reason: 'cashout',
+              external_funded_cents: 0,
+            },
+            {
+              customer_id: CUS,
+              amount: -12.5,
+              reason: 'cashout',
+              external_funded_cents: 0,
+            },
+            {
+              customer_id: CUS,
+              amount: 12.5,
+              reason: 'cashout',
+              external_funded_cents: 0,
+            },
           ]);
           const sql = await packs.creditSummary(CUS);
+          expect(sql.withdrawnTotal).toBe(20);
           const rows = await packs.listCreditTransactions(
             { customer_id: CUS },
             { take: 100 },

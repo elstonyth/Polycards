@@ -51,6 +51,7 @@ import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { requireVouchedVisitor } from './utils/visitor-ip';
+import { adminRbacRoutes } from './admin-rbac';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -125,6 +126,11 @@ const tgpayCallbackAllowlist = createTgpayCallbackAllowlist('tgpay');
 const the7payCallbackAllowlist = createTgpayCallbackAllowlist('the7pay');
 // A3Pay's (SGD) source allowlist — same position, same reasoning.
 const a3payCallbackAllowlist = createA3payCallbackAllowlist();
+// GlobePay365's (USDT) — the same platform as A3Pay, its own address list.
+const gp365CallbackAllowlist = createA3payCallbackAllowlist(
+  process.env,
+  'gp365',
+);
 // Open the phone-OTP send budget's Redis connection at boot, like the
 // limiters above, not on the first code request: that store fails CLOSED in
 // production, so a connection still opening refused every fresh instance's
@@ -363,6 +369,13 @@ export default defineMiddlewares({
       middlewares: [gatewayHookRateLimit, a3payCallbackAllowlist],
     },
     {
+      // GlobePay365 (USDT) callbacks (src/api/hooks/gp365/*): A3Pay's
+      // platform and handlers, so the same exposure and the same reasoning.
+      matcher: '/hooks/gp365/*',
+      method: 'POST',
+      middlewares: [gatewayHookRateLimit, gp365CallbackAllowlist],
+    },
+    {
       // Desk reports (spec 2026-09-29-desk-reports-design.md): read-only
       // numbers for the staff Discord desk bots. A top-level prefix like
       // /hooks, so no publishable key and no session; each desk's own key is
@@ -588,6 +601,14 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // The signed-in storefront's heartbeat for the Dashboard's "online now"
+      // (utils/presence.ts): one ping per visible tab every 2 minutes, on the
+      // shared read budget.
+      matcher: '/store/presence',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // A Google sign-in whose email already has an account: attach the
       // identity instead of refusing (see the route). `allowUnregistered`
       // because the caller holds a REGISTER token — auth_identity_id, no actor
@@ -781,6 +802,14 @@ export default defineMiddlewares({
       ],
     },
     {
+      // The caller's own pull history (GET /store/pulls/history) — every card
+      // they pulled, sold or shipped ones included. Authenticated, unlike its
+      // public '/store/pulls/recent' sibling. Read budget: one paged list.
+      matcher: '/store/pulls/history',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // Credit balance + ledger (GET /store/credits).
       matcher: '/store/credits',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
@@ -859,6 +888,36 @@ export default defineMiddlewares({
       // Task reward claim (POST /store/tasks/:id/claim) — idempotent per
       // (task, period) via the task_claim unique index.
       matcher: '/store/tasks/*/claim',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+    },
+    {
+      // Is a Lucky Draw on? (GET /store/lucky-draw-status). Public — no
+      // authenticate: the Games sheet asks for visitors too. Read budget, keyed
+      // on the visitor the storefront vouches for; the answer is the shared
+      // page's cached boolean, so a hit costs nothing past the limiter.
+      matcher: '/store/lucky-draw-status',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
+      // The Lucky Draw page (GET /store/lucky-draw). Its own entry because the
+      // wildcard below does not match the bare path.
+      matcher: '/store/lucky-draw',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Every Lucky Draw read below the page: balance, me, results and
+      // results/:prizeId. GET-only, so the enter POST below is not caught.
+      matcher: '/store/lucky-draw/*',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Enter a Lucky Draw prize (POST /store/lucky-draw/prizes/:id/enter) —
+      // spends tickets, so it shares the task-action write budget.
+      matcher: '/store/lucky-draw/prizes/*/enter',
       method: 'POST',
       middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
     },
@@ -1091,6 +1150,13 @@ export default defineMiddlewares({
       middlewares: [requirePhoneVerified],
     },
     {
+      // GET /store/rewards/withdraw — today's prize-shipping allowance, read
+      // by the delivery sheet on open. The wildcard above is POST-only.
+      matcher: '/store/rewards/withdraw',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // Consolidated daily-rewards state (GET /store/daily) — the /daily
       // surface fetches it on load.
       matcher: '/store/daily',
@@ -1139,6 +1205,12 @@ export default defineMiddlewares({
       matcher: '/admin/*',
       middlewares: [refuseCrossOriginAdminWrite],
     },
+    // RBAC for every custom admin route (admin-rbac.ts): a policy per custom
+    // prefix and method, plus the write policy for custom writes under a core
+    // prefix. Policy-only entries — the framework adds the no-op handler and
+    // wraps it in its permission check. Guarded by
+    // __tests__/admin-rbac-coverage.unit.spec.ts.
+    ...adminRbacRoutes,
     // Admin money-mutation routes — already auth-protected by the framework
     // admin auth, so no explicit authenticate() entry is needed here. All share
     // one limiter instance (one budget + one Redis connection). The limiter keys
@@ -1302,6 +1374,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Lucky Draw tickets decide RM-valued prizes, so a grant shares the
+      // money-mutation budget like /credits (the group editor waits out a 429).
+      matcher: '/admin/customers/*/lucky-draw-tickets',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Gift packs to a customer / revoke one (spec 2026-10-07) — they mint
       // value like a credit grant, so they share the money-mutation budget.
       matcher: '/admin/customers/*/pack-gifts',
@@ -1414,6 +1493,47 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Schedule a Lossless Mode window (POST /admin/lossless-schedules) — it
+      // lifts a pack's instant sell to 100%, so it shares the admin money-
+      // mutation budget.
+      matcher: '/admin/lossless-schedules',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Cancel a window (POST /admin/lossless-schedules/:id/cancel); "*" spans
+      // "/" so it covers the nested path.
+      matcher: '/admin/lossless-schedules/*',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Lucky Draw event create / rename (POST /admin/lucky-draw/events).
+      matcher: '/admin/lucky-draw/events',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Publish an event (POST /admin/lucky-draw/events/:id/publish) — commits
+      // every prize's seed hash.
+      matcher: '/admin/lucky-draw/events/*/publish',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Lucky Draw prize create / edit (POST /admin/lucky-draw/prizes).
+      matcher: '/admin/lucky-draw/prizes',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Cancel a prize and refund its entrants' tickets
+      // (POST /admin/lucky-draw/prizes/:id/cancel).
+      matcher: '/admin/lucky-draw/prizes/*/cancel',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Challenge settings singleton patch (POST /admin/challenge/settings) —
       // retimes the reward cycle (cadence/reset), so it shares the admin
       // money-mutation budget.
@@ -1447,6 +1567,21 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      matcher: '/admin/automation/accounts',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/automation/sandbox',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/automation/live',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Active payment gateway switch (plan 130). Flips where every customer
       // pays and is paid out — same admin budget as the other settings writes.
       matcher: '/admin/payments/gateway',
@@ -1457,6 +1592,13 @@ export default defineMiddlewares({
       // SGD conversion rate + fees (A3Pay, payment-fx.ts). Reprices every
       // Singapore top-up and payout — same admin budget as the gateway switch.
       matcher: '/admin/payments/fx',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Withdraw / Touch 'n Go switches, schedules and TNG minimum. Opens or
+      // closes every customer's payouts — same budget as the gateway switch.
+      matcher: '/admin/payments/withdrawal-controls',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },
@@ -1499,6 +1641,14 @@ export default defineMiddlewares({
       // shared idempotency anchor allows, but it is still a ledger write
       // driven by an admin token.
       matcher: '/admin/payments/withdrawals/*/deny',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Settlement's Acknowledge: takes a gateway audit finding out of the
+      // "payments differ" count. Moves no money, but it can hide a warning,
+      // so it shares the admin action budget.
+      matcher: '/admin/payments/audit/acknowledge',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

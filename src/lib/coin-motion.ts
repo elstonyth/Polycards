@@ -5,16 +5,21 @@ const frame = z.tuple([n, n, n, n, n, n, n]);
 export const CoinTracesSchema = z
   .array(
     z.object({
-      profile: z.enum(['soft', 'firm']),
+      profile: z.number().min(0).max(1),
       won: z.boolean(),
       fps: z.literal(60),
       frames: z.array(frame).min(2).max(600),
       impacts: z.array(n.nonnegative()),
     }),
   )
-  .length(4);
+  .length(10);
 export type CoinTrace = z.infer<typeof CoinTracesSchema>[number];
-export type CoinGesture = 'soft' | 'firm';
+export type CoinGesture = number;
+export const COIN_CAMERA = {
+  fov: 44,
+  position: [0, 4.6, 6.4] as const,
+  target: [0, 1, 0.35] as const,
+};
 export function coinGesture(
   dx: number,
   dy: number,
@@ -28,7 +33,27 @@ export function coinGesture(
   )
     return null;
   const speed = -dy / milliseconds;
-  return speed >= 0.75 ? 'firm' : speed >= 0.25 ? 'soft' : null;
+  return speed >= 0.25 ? Math.min(1, (speed - 0.25) / 1.5) : null;
+}
+export function coinTraceFor(
+  traces: CoinTrace[],
+  won: boolean,
+  strength: CoinGesture,
+) {
+  const bounded = Math.max(
+    0,
+    Math.min(1, Number.isFinite(strength) ? strength : 0.5),
+  );
+  return traces
+    .filter((trace) => trace.won === won)
+    .reduce<CoinTrace | undefined>(
+      (nearest, trace) =>
+        !nearest ||
+        Math.abs(trace.profile - bounded) < Math.abs(nearest.profile - bounded)
+          ? trace
+          : nearest,
+      undefined,
+    );
 }
 export function sampleCoinTrace(trace: CoinTrace, seconds: number) {
   const index = Math.max(

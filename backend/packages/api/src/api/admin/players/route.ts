@@ -4,13 +4,23 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
-import type { ICustomerModuleService } from '@medusajs/framework/types';
+import type {
+  FilterableCustomerProps,
+  ICustomerModuleService,
+} from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import type { PlayerLedgerSort } from '../../../modules/packs/service';
+import {
+  PLAYER_SORTS,
+  type PlayerSort,
+} from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
+import { STATS_RANGES, statsWindows } from '../../../modules/packs/stats';
 import { isPartnerGroup } from '../../../modules/packs/group-policy';
-import { effectivePlayerGroup } from '../../../modules/packs/odds-sets';
+import {
+  effectivePlayerGroup,
+  isDefaultPlayerGroup,
+} from '../../../modules/packs/odds-sets';
 import {
   mintPartnerAccount,
   type PartnerAccountRow,
@@ -23,21 +33,21 @@ import {
 } from '../../../utils/pagination';
 
 // Sortable columns are an allowlist, not a passthrough. Two query shapes:
-// CUSTOMER_SORTS are real `customer` columns that go straight into the
-// customer query builder (`name` = first_name + last_name, in that order).
-// LEDGER_SORTS are money totals over the credit ledger, ordered in SQL over
-// every matching player by playerIdsByLedger (operator request, 2026-10-09).
-// Vault, pulls and VIP level stay unsortable.
-const LEDGER_SORTS: ReadonlySet<string> = new Set<PlayerLedgerSort>([
-  'wallet',
-  'spend',
-  'topup',
-  'withdrawn',
-  'contribution',
-]);
-const SORTABLE = new Set(['created_at', 'email', 'name', ...LEDGER_SORTS]);
+// created_at, email and name are real `customer` columns that go straight
+// into the customer query builder (`name` = first_name + last_name, in that
+// order). PLAYER_SORTS are ordered in SQL over every matching player by
+// playerIdsSorted: the ledger money totals (operator request, 2026-10-09),
+// and since 2026-10-23 every other column too: vault, VIP level, effective
+// group, status, and phone (there so a missing phone sorts last both ways).
+const SORTABLE = new Set(['created_at', 'email', 'name', ...PLAYER_SORTS]);
 
-// ponytail: a search sorted by a money column orders at most this many
+// ?range= takes the Dashboard's presets, plus all time (the default).
+const RANGES = ['all', ...STATS_RANGES] as const;
+
+const str = (v: unknown): string | undefined =>
+  typeof v === 'string' ? v : undefined;
+
+// ponytail: a search sorted by a SQL-sorted column orders at most this many
 // matches; page the search in SQL if a search ever matches more players.
 const MAX_SORTED_MATCHES = 5000;
 
@@ -70,8 +80,67 @@ export async function GET(
       ? rawQ.trim().slice(0, 100)
       : undefined;
 
+  // ?group= (spec 2026-10-14-admin-finance-pages §8): `default` is everyone
+  // outside a non-default group (the odds engine's rule, so ungrouped counts);
+  // a group id is that group's members. Anything else is refused, not ignored:
+  // a dropped filter would list every player as if it matched.
+  const rawGroup = req.query.group;
+  if (
+    rawGroup !== undefined &&
+    rawGroup !== '' &&
+    (typeof rawGroup !== 'string' ||
+      !(rawGroup === 'default' || /^cusgroup_[A-Za-z0-9]+$/.test(rawGroup)))
+  ) {
+    // The input is not echoed back: say what is accepted instead.
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Invalid `group` filter: use `default` or a customer group id.',
+    );
+  }
+  let group = typeof rawGroup === 'string' && rawGroup ? rawGroup : null;
+
+  // ?range= (2026-10-23): top-up, withdraw, contribution and turnover count
+  // only that window's ledger rows (the Stats windows: MYT, half-open);
+  // wallet, vault, level and status stay as of now. A repeated or unknown
+  // range is refused, never read as all time.
+  const rawRange = req.query.range;
+  if (rawRange !== undefined && typeof rawRange !== 'string') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `range must be one of ${RANGES.join(', ')}.`,
+    );
+  }
+  const range = rawRange || 'all';
+  const windows =
+    range === 'all'
+      ? null
+      : statsWindows(range, new Date(), str(req.query.from), str(req.query.to));
+  if (range !== 'all' && !windows) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `range must be one of ${RANGES.join(', ')}; custom needs from <= to as YYYY-MM-DD, starting no later than today.`,
+    );
+  }
+  const window = windows?.current ?? null;
+
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // The DEFAULT group's own id means `default` (everyone outside a
+  // non-default group, ungrouped included), never "its stored members":
+  // every sign-up joins it, so that list would be every customer. A group
+  // that is gone (or never was) has no members to list.
+  if (group && group !== 'default') {
+    const [found] = await customers.listCustomerGroups(
+      { id: group },
+      { select: ['id', 'name', 'metadata'] },
+    );
+    if (!found) {
+      res.json({ total: 0, offset, limit, window, players: [] });
+      return;
+    }
+    if (isDefaultPlayerGroup(found)) group = 'default';
+  }
 
   const { key: sortKey, dir: sortDir } = parseSortParam(
     req.query.sort,
@@ -107,37 +176,66 @@ export async function GET(
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
   // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
   // the set, so this holds; revisit only if a page ever short-counts.
-  const filters = byHandle
+  let filters: { id?: string[] | { $nin: string[] }; q?: string } = byHandle
     ? { id: [...new Set([byHandle, ...textIds])] }
     : q
       ? { q }
       : {};
-  const [page, total] = LEDGER_SORTS.has(sortKey)
-    ? await ledgerSortedPage()
-    : await customers.listAndCountCustomers(filters, {
+  // The group narrows whatever the search matched.
+  const include =
+    group && group !== 'default' ? await packs.groupMemberIds(group) : null;
+  const exclude =
+    group === 'default' ? new Set(await packs.nonDefaultMemberIds()) : null;
+  if (include) {
+    const members = new Set(include);
+    filters = Array.isArray(filters.id)
+      ? { id: filters.id.filter((id) => members.has(id)) }
+      : { ...filters, id: include };
+  } else if (exclude && exclude.size > 0) {
+    filters = Array.isArray(filters.id)
+      ? { id: filters.id.filter((id) => !exclude.has(id)) }
+      : { ...filters, id: { $nin: [...exclude] } };
+  }
+  // $nin is a real operator in Medusa's filter layer; its public type only
+  // declares the plain forms.
+  const customerFilters = filters as FilterableCustomerProps;
+  if (Array.isArray(filters.id) && filters.id.length === 0) {
+    res.json({ total: 0, offset, limit, window, players: [] });
+    return;
+  }
+  // Before the page: the vault sort orders by the value shown at this rate.
+  const fx = await resolveFxRate(packs);
+  const [page, total] = PLAYER_SORTS.has(sortKey)
+    ? await sqlSortedPage()
+    : await customers.listAndCountCustomers(customerFilters, {
         skip: offset,
         take: limit,
         order,
         relations: ['groups'],
       });
 
-  // The same filters, ordered by a ledger total: the sorted ids come from
-  // SQL, then the customers are loaded and put back in that order.
-  async function ledgerSortedPage() {
-    const scope =
-      filters.id ??
-      (q
-        ? (
-            await customers.listCustomers(
-              { q },
-              { select: ['id'], take: MAX_SORTED_MATCHES },
-            )
-          ).map((c) => c.id)
-        : null);
-    const sorted = await packs.playerIdsByLedger({
-      key: sortKey as PlayerLedgerSort,
+  // The same filters, ordered in SQL: the sorted ids come from SQL, then the
+  // customers are loaded and put back in that order.
+  async function sqlSortedPage() {
+    // An explicit id list (a handle match, or a group's members) is the
+    // scope; a text search resolves to its matches, the group included.
+    const scope = filters.q
+      ? (
+          await customers.listCustomers(customerFilters, {
+            select: ['id'],
+            take: MAX_SORTED_MATCHES,
+          })
+        ).map((c) => c.id)
+      : Array.isArray(filters.id)
+        ? filters.id
+        : null;
+    const sorted = await packs.playerIdsSorted({
+      key: sortKey as PlayerSort,
       dir: sortDir,
       ids: scope,
+      excludeIds: exclude ? [...exclude] : undefined,
+      window,
+      fx,
       limit,
       offset,
     });
@@ -154,13 +252,14 @@ export async function GET(
     ] as const;
   }
   const ids = page.map((c) => c.id);
-  const fx = await resolveFxRate(packs);
-  const agg = await packs.playersOverview(ids, fx);
+  const agg = await packs.playersOverview(ids, fx, window);
 
   res.json({
     total,
     offset,
     limit,
+    // The ?range= window the period columns cover; null = all time.
+    window,
     players: page.map((c) => {
       const w = agg.wallet.get(c.id);
       const v = agg.vault.get(c.id);
@@ -184,13 +283,17 @@ export async function GET(
         name,
         phone: c.phone ?? null,
         groups: (c.groups ?? []).map((g) => g.name),
+        // The EFFECTIVE player group (the odds engine's rule), null = the
+        // default group; groups[0] is just whichever membership came first.
+        player_group: effective?.name ?? null,
         vip_level: agg.vipLevel.get(c.id) ?? 1,
         wallet_balance: (w?.balanceCents ?? 0) / 100,
         vault_value: (v?.cents ?? 0) / 100,
         vault_count: v?.count ?? 0,
         total_spend: (w?.vipSpendCents ?? 0) / 100,
-        // Lifetime top-ups, withdrawals, and what the player has put in net of
-        // what they took out (top-ups minus withdrawals).
+        // Top-ups, withdrawals, and what the player has put in net of what
+        // they took out (top-ups minus withdrawals): lifetime, or over
+        // ?range=, as total_spend is.
         total_topup: (w?.topupCents ?? 0) / 100,
         total_withdrawn: (w?.withdrawnCents ?? 0) / 100,
         total_contribution:

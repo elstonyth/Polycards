@@ -4,6 +4,7 @@ import {
   getRecentPulls,
 } from '@/lib/data/packs';
 import { getLeaderboard } from '@/lib/data/leaderboard';
+import { cached } from '@/lib/ttl-cache';
 import type { PackCard } from '@/lib/packs-data';
 import HeroBoard from '@/components/home/HeroBoard';
 import PullsMarquee from '@/components/home/PullsMarquee';
@@ -34,10 +35,20 @@ export const revalidate = 15;
  *  see getPackHighlights; one backend request each only on a cold miss). */
 const CHASE_LOOKUPS = 16;
 
+// The route cache above does NOT cover every render: a form-encoded POST to /
+// (Next treats it as a possible server action) and a server action that sets
+// a cookie (login on /) both render this whole tree per request. Every other
+// read here has its own memo, so the feed needs one too — without it each such
+// render is one backend call to /store/pulls/recent. Same 5s window as
+// /api/recent-pulls, under its own key: that route caches a string body.
+// shortcut: getRecentPulls swallows a backend failure into an empty feed, so a
+// blip memoises "no pulls" for one window — the trade /api/recent-pulls makes.
+const FEED_TTL_MS = 5_000;
+
 export default async function HomePage() {
   const [categories, feed, topRippers] = await Promise.all([
     getPackCategories(),
-    getRecentPulls(),
+    cached('home:recent-pulls', FEED_TTL_MS, () => getRecentPulls()),
     // [] on any backend failure — TheGame hides the podium then.
     getLeaderboard('weekly'),
   ]);
@@ -88,7 +99,7 @@ export default async function HomePage() {
       <PullsMarquee pulls={pulls} />
 
       {/* 02 — tier-racked shelf */}
-      <TierShelf packs={packs} chaseByPack={chaseByPack} />
+      <TierShelf categories={categories} chaseByPack={chaseByPack} />
 
       {/* 03 — live proof */}
       <RecentPullsSection initial={feed} />

@@ -27,6 +27,7 @@
 import { z } from 'zod';
 import { isRarity } from '@/lib/packs-format';
 import type { Rarity } from '@/lib/packs-data';
+import { avatarForSeed } from '@/lib/avatar-seed';
 
 // Zod 4's JIT compiles schemas with `new Function(...)`; our CSP `script-src`
 // has no 'unsafe-eval' (see src/lib/security/csp.ts), so that probe fires a CSP
@@ -72,6 +73,7 @@ const rarity = z.custom<Rarity>((v) => typeof v === 'string' && isRarity(v));
 export const CardWireSchema = z.object({
   handle: z.string().catch(''),
   name: z.string().catch(''),
+  set: z.string().catch(''),
   image: z.string().catch(''),
   slab_image: z.string().nullable().catch(null),
   rarity: rarity.nullable().catch(null),
@@ -497,9 +499,8 @@ export const VaultItemSchema = z.looseObject({
     amount: finite,
     percent: finite,
     firm: z.boolean().optional(),
-    // MYR part of `amount` that came from bonus or gift play: paid as normal
-    // credit that must be played through once before it can be withdrawn.
-    // Optional: an older backend omits it.
+    // MYR part of `amount` held for packs (the bonus-paid share, or the
+    // welcome card). Optional: an older backend omits it.
     bonus: finite.optional(),
   }),
 });
@@ -508,6 +509,31 @@ export const VaultItemSchema = z.looseObject({
  *  VaultItemSchema: a failing row drops, never the customer's whole vault). */
 export const VaultPageSchema = z.looseObject({
   items: listOf(VaultItemSchema),
+});
+
+/** GET /store/pulls/history row — every pull, sold and shipped ones included.
+ *  Only the pull id and card name drop a row; each money figure is caught to
+ *  null on its own (null = unknown, rendered '—', never RM 0.00). `status` is
+ *  any string so a status added later still lists. */
+export const PullHistoryItemSchema = z.looseObject({
+  pull_id: z.string(),
+  rolled_at: z.string().catch(''),
+  pack_title: z.string().catch(''),
+  challenge_prize: z.boolean().catch(false),
+  lucky_draw_prize: z.boolean().catch(false),
+  source: z.enum(['pack', 'reward', 'free', 'gift', 'bonus']).catch('pack'),
+  status: z.string().catch(''),
+  card: z.looseObject({ name: z.string() }),
+  paid: finite.nullable().catch(null),
+  value: finite.nullable().catch(null),
+  sold_for: finite.nullable().catch(null),
+  sold_at: z.string().nullable().catch(null),
+});
+
+/** GET /store/pulls/history — one page (?limit=&offset=). */
+export const PullHistoryPageSchema = z.looseObject({
+  items: listOf(PullHistoryItemSchema),
+  has_more: z.boolean().catch(false),
 });
 
 // --- data/free-pack.ts ------------------------------------------------------
@@ -550,6 +576,11 @@ const CreditsSchema = z.looseObject({
   balance: finite,
   topup_total: finite,
   spend_total: finite,
+  // The history's split of spend_total (2026-10-15): all money spent on pack
+  // opens (bonus part included), and money withdrawn. Optional so an older
+  // backend still parses.
+  pack_spend_total: finite.optional(),
+  withdrawn_total: finite.optional(),
   has_more: z.boolean().optional(),
 });
 
@@ -591,6 +622,9 @@ export const PaymentConfigSchema = z.looseObject({
   withdrawals_enabled: z.boolean().optional(),
   // ISO instant a timed withdrawal pause ends (null/absent = no timed pause).
   withdrawals_paused_until: z.string().nullable().optional(),
+  // Closed by the admin (switch or daily hours) or a timed pause: the Withdraw
+  // button opens an "unavailable" popup. Absent (older backend) = not closed.
+  withdrawals_unavailable: z.boolean().optional(),
   // Regional rails beside the active gateway (A3Pay: SGD). Optional — an
   // older backend has none, and a malformed list must not fail the bands.
   regional: z
@@ -608,6 +642,12 @@ export const PaymentConfigSchema = z.looseObject({
           min: finite.nullable(),
           max: finite.nullable(),
         }),
+        // The RM a payout through this rail may take today. Optional: a
+        // backend older than this field leaves the form on the RM band.
+        withdrawal_rm: z
+          .looseObject({ min_rm: finite, max_rm: finite })
+          .optional()
+          .catch(undefined),
         rate: z.looseObject({ deposit: finite, payout: finite }).nullable(),
       }),
     )
@@ -637,6 +677,15 @@ export const CreditTransactionSchema = z.looseObject({
   // Signed bonus-credit part of `amount` (MYR). Optional for the same
   // older-backend reason; absent = no bonus part.
   bonus: finite.optional(),
+  // Signed move into (+) or out of (−) "Still to use on packs" (MYR): + a
+  // top-up, + a sell-back's free share (bonus, free-pack or prize pulls), −
+  // what a pack open used of it. Buyback-only before 2026-10-15. Optional for
+  // the same older-backend reason.
+  playthrough: finite.optional(),
+  // What a pack open bought / a sell-back sold: its pack and card names.
+  // Caught, not just optional: a malformed label must never drop a money row.
+  pack_title: z.string().nullable().optional().catch(undefined),
+  card_names: z.array(z.string()).optional().catch(undefined),
 });
 
 /** GET /store/credits as the Transactions page reads it. The totals are SOFT:
@@ -743,6 +792,10 @@ export const WithdrawStartSchema = z.looseObject({
   amount: finite,
   balance: finite,
   status: z.enum(['pending', 'held']).optional(),
+  // A regional payout (Singapore): the currency the bank is paid in and the
+  // amount it receives. Absent on an RM payout and on an older backend.
+  currency: z.string().optional().catch(undefined),
+  payAmount: finite.optional().catch(undefined),
 });
 
 /** GET /store/credits/withdraw/banks response — the payout bank picker. */
@@ -754,6 +807,26 @@ export const WithdrawBanksSchema = z.looseObject({
       // The currency that bank is paid in (SGD for Singapore banks via
       // A3Pay). Optional: an older backend sends none, meaning RM.
       currency: z.string().optional(),
+      accountLengths: z
+        .array(z.number().int().positive())
+        .nonempty()
+        .optional(),
+      accountPattern: z
+        .string()
+        .refine((pattern) => {
+          try {
+            new RegExp(pattern);
+            return true;
+          } catch {
+            return false;
+          }
+        })
+        .optional(),
+      accountHint: z.string().optional(),
+      // A USDT wallet (GlobePay365): the account is an address on this
+      // chain. A plain string, not an enum: a chain the backend adds before
+      // this build knows it must not fail the whole bank list.
+      wallet: z.string().optional(),
     }),
   ),
 });
@@ -785,6 +858,11 @@ export const SavedBankAccountsSchema = z.looseObject({
       // The bank's own payout floor (RM), e.g. Touch 'n Go 100; null/absent =
       // only the gateway's floor applies.
       minRm: z.number().nullish(),
+      // Why an unsupported account cannot be paid right now, when it is not
+      // the provider (e.g. the admin paused Touch 'n Go).
+      unavailableReason: z.string().nullish(),
+      // A USDT wallet's chain; absent for a bank.
+      wallet: z.string().optional(),
     }),
   ),
 });
@@ -849,7 +927,7 @@ export const OpenBuybackSchema = z.looseObject({
   vault_amount: finite.optional(),
   instant_deadline_ms: finite.optional(),
   firm: z.boolean().optional(),
-  // MYR part of `amount` that came from bonus or gift play: paid as normal credit that must be played through once before it can be withdrawn (2026-10-09).
+  // MYR part of `amount` held for packs (the bonus-paid share, or the welcome card).
   bonus: finite.optional(),
 });
 
@@ -1071,6 +1149,13 @@ export const WithdrawPrizeSchema = z.looseObject({
   status: z.enum(['requested', 'capped', 'invalid']),
 });
 
+/** GET /store/rewards/withdraw — today's prize-shipping allowance. */
+export const PrizeAllowanceSchema = z.looseObject({
+  per_day: finite,
+  used_today: finite,
+  remaining: finite,
+});
+
 /** GET /store/daily — the VIP voucher/frame grant state (packs/service.ts
  *  `DailyState`). The box and ship-prize halves went with the daily box
  *  (2026-08-25). */
@@ -1227,8 +1312,26 @@ export const ReferralSummarySchema = z.looseObject({
     partner: z.boolean(),
   }),
   history: z.array(SettlementHistoryRowSchema),
+  /** The player's own invited friends, newest first: public name + handle
+   *  and what each earned the player this week (cents, rounded down per
+   *  row), capped server-side (downline_count stays the full total).
+   *  Optional and caught (deploy-skew rule): an older backend or a malformed
+   *  list hides the list instead of blanking the page, and never tells a
+   *  player with referrals that they have none. */
+  friends: z
+    .array(
+      z.looseObject({
+        name: z.string(),
+        handle: z.string().nullable(),
+        joined_at: z.string(),
+        week_earned_cents: finite,
+      }),
+    )
+    .optional()
+    .catch(undefined),
 });
 export type ReferralSummary = z.infer<typeof ReferralSummarySchema>;
+export type ReferralFriend = NonNullable<ReferralSummary['friends']>[number];
 
 /** GET /store/referral/codes/:code — public owner-of-code check (display
  *  fields only; the backend never puts PII here). */
@@ -1247,7 +1350,16 @@ export const TaskEntrySchema = z.looseObject({
   id: z.string(),
   kind: z.enum(['daily', 'weekly', 'achievement']),
   title: z.string(),
-  requirement: z.looseObject({ type: z.string() }),
+  requirement: z.looseObject({
+    type: z.string(),
+    // What a narrowed goal names, so the row can SHOW it ("RIP [Bronze Pack]
+    // ×10"): a rip goal's pack, a pull goal's Pokémon. Same optional+nullable
+    // skew rule as the reward: absent/null falls back to the goal's icon.
+    pack_title: z.string().nullable().optional(),
+    pack_image: z.string().nullable().optional(),
+    pokemon_name: z.string().nullable().optional(),
+    pokemon_image: z.string().nullable().optional(),
+  }),
   reward: z.looseObject({
     type: z.string(),
     pack_id: z.string().optional(),
@@ -1272,6 +1384,9 @@ export const TaskEntrySchema = z.looseObject({
     completed: z.boolean(),
   }),
   claimed: z.boolean(),
+  // Lucky Draw tickets this task also pays. A backend that predates the
+  // column omits it; an unreadable value reads as none — never a dropped row.
+  tickets: finite.catch(0),
 });
 export type TaskEntry = z.infer<typeof TaskEntrySchema>;
 
@@ -1387,3 +1502,153 @@ export const PullGapsPollResponseSchema = z.object({
     }),
   ),
 });
+
+// --- actions/lucky-draw.ts ---------------------------------------------------
+// The Lucky Draw store routes (backend api/store/lucky-draw/view.ts is the
+// source of truth). Deploy-skew rule, as TaskHubSchema: every array is parsed
+// row by row, so one prize or row this build cannot read drops alone instead
+// of blanking the page; `looseObject` keeps unread fields (a drawn prize's
+// `seed` rides on its result, never read off the prize itself).
+
+/** A person (no id: "me" cannot be picked out of a list), mapped to what
+ *  FramedAvatar renders with the leaderboard's seed → pfp mapping. A disabled
+ *  account arrives as "Anonymous" from the backend. */
+const LuckyDrawPersonSchema = z
+  .looseObject({
+    who: z.string().catch('Anonymous'),
+    face_seed: finite.nullable().catch(null),
+    avatar_url: z.string().nullable().catch(null),
+    frame_url: z.string().nullable().catch(null),
+  })
+  .transform((p) => ({
+    who: p.who,
+    avatar:
+      p.avatar_url ?? (p.face_seed != null ? avatarForSeed(p.face_seed) : null),
+    frame: p.frame_url,
+  }));
+export type LuckyDrawPerson = z.infer<typeof LuckyDrawPersonSchema>;
+
+const LuckyDrawEntrySchema = z.looseObject({
+  person: LuckyDrawPersonSchema,
+  tickets: finite,
+});
+export type LuckyDrawEntry = z.infer<typeof LuckyDrawEntrySchema>;
+
+/** A drawn prize. `seed` exists only here, after the draw. */
+const LuckyDrawResultSchema = z.looseObject({
+  prize_id: z.string(),
+  title: z.string(),
+  image: z.string().nullable().catch(null),
+  value_myr: finite,
+  drawn_at: z.string(),
+  winner: LuckyDrawPersonSchema.nullable(),
+  winner_tickets: finite,
+  total_tickets: finite,
+  entrant_count: finite,
+  seed: z.string(),
+  seed_hash: z.string(),
+});
+export type LuckyDrawResult = z.infer<typeof LuckyDrawResultSchema>;
+
+const LuckyDrawPrizeSchema = z
+  .looseObject({
+    id: z.string(),
+    kind: z.string(),
+    title: z.string(),
+    image: z.string().nullable().catch(null),
+    value_myr: finite,
+    draw_at: z.string(),
+    seed_hash: z.string(),
+    total_tickets: finite,
+    entrant_count: finite,
+    my_tickets: finite.catch(0),
+    top: droppableArray(LuckyDrawEntrySchema).catch([]),
+    result: LuckyDrawResultSchema.nullable().catch(null),
+  })
+  // Defence in depth: a prize's seed is never on the page before its result
+  // exists; if a backend ever sent one loose, it must not ride on into the
+  // client payload.
+  .transform((p) => {
+    const prize = { ...p };
+    delete prize.seed;
+    return prize;
+  });
+export type LuckyDrawPrize = z.infer<typeof LuckyDrawPrizeSchema>;
+
+/** GET /store/lucky-draw-status — public: is a Lucky Draw on? */
+export const LuckyDrawStatusSchema = z.looseObject({ live: z.boolean() });
+
+/** GET /store/lucky-draw — the live event (null: none running). */
+export const LuckyDrawPageSchema = z.looseObject({
+  balance: finite,
+  event: z
+    .looseObject({
+      id: z.string(),
+      name: z.string(),
+      starts_at: z.string(),
+      ends_at: z.string(),
+    })
+    .nullable(),
+  prizes: droppableArray(LuckyDrawPrizeSchema),
+});
+export type LuckyDrawPage = z.infer<typeof LuckyDrawPageSchema>;
+
+/** GET /store/lucky-draw/results — newest draw first, cursor `next_before`. */
+export const LuckyDrawResultsSchema = z.looseObject({
+  results: droppableArray(LuckyDrawResultSchema),
+  next_before: z.string().nullable().catch(null),
+});
+export type LuckyDrawResults = z.infer<typeof LuckyDrawResultsSchema>;
+
+/** GET /store/lucky-draw/results/:prizeId — the frozen entry list in DRAW
+ *  order (never re-sorted: the fair-draw check counts through it) and the
+ *  winning ticket. `ticket_index` is not caught: a drifted one must not read
+ *  as "No entries". */
+export const LuckyDrawResultDetailSchema = z.looseObject({
+  result: LuckyDrawResultSchema,
+  entries: droppableArray(LuckyDrawEntrySchema),
+  ticket_index: finite.nullable(),
+});
+export type LuckyDrawResultDetail = z.infer<typeof LuckyDrawResultDetailSchema>;
+
+/** GET /store/lucky-draw/me — balance, ticket history, my entries. */
+export const LuckyDrawMineSchema = z.looseObject({
+  balance: finite,
+  history: droppableArray(
+    z.looseObject({
+      delta: finite,
+      reason: z.string(),
+      created_at: z.string(),
+    }),
+  ).catch([]),
+  entries: droppableArray(
+    z.looseObject({
+      prize_id: z.string(),
+      title: z.string(),
+      image: z.string().nullable().catch(null),
+      my_tickets: finite,
+      draw_at: z.string(),
+      status: z.string(),
+    }),
+  ).catch([]),
+});
+export type LuckyDrawMine = z.infer<typeof LuckyDrawMineSchema>;
+
+/** GET /store/lucky-draw/balance — the vault's tickets row. */
+export const LuckyDrawBalanceSchema = z.looseObject({ balance: finite });
+
+/** POST /store/lucky-draw/prizes/:id/enter. The accepted branch is lenient on
+ *  purpose: the tickets are already spent, so drifted numbers must never read
+ *  as a failure the player "tries again" on (and enters twice). Missing
+ *  numbers make the page re-read itself instead. */
+export const LuckyDrawEnterSchema = z.discriminatedUnion('entered', [
+  z.looseObject({
+    entered: z.literal(true),
+    balance: finite.optional().catch(undefined),
+    myTickets: finite.optional().catch(undefined),
+  }),
+  z.looseObject({
+    entered: z.literal(false),
+    reason: z.string().catch(''),
+  }),
+]);

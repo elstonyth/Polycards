@@ -74,4 +74,12 @@ describe('TaskHubSchema (task hub v2)', () => {
     expect(r.checkins_this_week).toBeUndefined();
     expect(r.tasks).toHaveLength(1);
   });
+
+  it('reads Lucky Draw tickets off a task row, 0 when absent or unreadable', () => {
+    const tickets = (row: Record<string, unknown>) =>
+      TaskHubSchema.parse(hub({ tasks: [task(row)] })).tasks[0]?.tickets;
+    expect(tickets({})).toBe(0);
+    expect(tickets({ tickets: 50 })).toBe(50);
+    expect(tickets({ tickets: 'x' })).toBe(0);
+  });
 });

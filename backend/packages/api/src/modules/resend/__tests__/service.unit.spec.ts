@@ -1,6 +1,7 @@
 import ResendNotificationProviderService from '../service';
 import {
   BANK_ACCOUNT_ADDED_TEMPLATE,
+  BANK_ACCOUNT_REMOVED_TEMPLATE,
   GOOGLE_LINKED_TEMPLATE,
   PASSWORD_RESET_TEMPLATE,
   PHONE_CHANGED_TEMPLATE,
@@ -308,4 +309,24 @@ describe('renderTemplate', () => {
     expect(rendered.text).toContain('before the time above');
     expect(rendered.text).not.toContain('right away');
   });
+
+  // A USDT wallet address ends in base58 letters, so a digits-only guard
+  // silently dropped every USDT alert. The length cap is what keeps a full
+  // number out of the email, and it must still hold.
+  it.each([BANK_ACCOUNT_ADDED_TEMPLATE, BANK_ACCOUNT_REMOVED_TEMPLATE])(
+    '%s renders a wallet-address tail and refuses anything but 4 chars',
+    (template) => {
+      const render = (last4: string) =>
+        renderTemplate(template, {
+          bank_name: 'USDT · TRC20 (Tron)',
+          account_last4: last4,
+          site_url: 'https://polycards.gg',
+        });
+
+      expect(render('xZ9k')?.text).toContain('xZ9k');
+      for (const bad of ['123', '12345', '1234567890123', 'ab-1', '']) {
+        expect(render(bad)).toBeUndefined();
+      }
+    },
+  );
 });

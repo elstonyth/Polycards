@@ -8,6 +8,8 @@ import {
   settlementSince,
 } from '../../../../modules/packs/gateway-settlement';
 import { paymentCurrencyParam } from '../../../utils/payment-currency';
+import { MedusaError } from '@medusajs/framework/utils';
+import { parseScope } from '../../../../modules/packs/real-customers';
 
 // GET /admin/payments/settlement — the gateway's weekly/monthly result, read
 // from OUR database (money-path-accuracy-audit-2026-08-17 B4). Calendar MYT
@@ -61,8 +63,17 @@ export async function GET(
   const periods = parsePeriods(req.query.periods);
   const since = settlementSince(granularity, periods, new Date());
   const currency = paymentCurrencyParam(req.query.currency);
+  // Every account by default — this report must match the gateway wallet.
+  // The Dashboard's real-customer switch sends scope=default.
+  const scope = parseScope(req.query.scope, 'all');
+  if (!scope) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'scope must be default or all.',
+    );
+  }
 
-  const rows = await packs.settlementRows(granularity, since, currency);
+  const rows = await packs.settlementRows(granularity, since, currency, scope);
   const report = mergeSettlementPeriods(
     rows.deposits,
     rows.withdrawals,
@@ -75,6 +86,7 @@ export async function GET(
   res.json({
     granularity,
     currency,
+    scope,
     periods_requested: periods,
     since: since.toISOString(),
     periods: report,

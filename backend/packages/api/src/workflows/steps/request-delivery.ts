@@ -5,9 +5,10 @@ import type PacksModuleService from '../../modules/packs/service';
 import {
   validateDeliveryRequest,
   snapshotAddress,
-  isMalaysianAddress,
+  isShippableCountry,
   isShippablePostcode,
-  MY_ONLY_MESSAGE,
+  SHIPPING_COUNTRIES_MESSAGE,
+  postcodeMessage,
 } from '../../modules/packs/delivery';
 import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
 import { NO_TOPUP_MESSAGE } from '../../modules/packs/withdrawable';
@@ -66,9 +67,8 @@ export const verdictError = (
         MedusaError.Types.NOT_ALLOWED,
         'One or more cards are no longer available to deliver.',
       );
-    // Only reachable if a caller hand-rolls a request against this path; the
-    // vault routes reward pulls to POST /store/rewards/withdraw itself. The
-    // old copy pointed at a rewards page that no longer exists.
+    // Unreachable from this step since prize cards ride in the vault order
+    // (it passes prizesShipHere); kept so the verdict switch stays total.
     case 'reward_source':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -104,14 +104,17 @@ export const requestDeliveryStep = createStep(
           { take: input.pull_ids.length },
         )
       : [];
-    // One indexed read for the whole batch: a free welcome pull can't ship
+    // One lock read for the whole batch: a free welcome pull can't ship
     // until this customer has opened a PAID pack (spec 2026-08-14).
-    const freeUnlocked = await packs.hasPaidOpen(input.customer_id);
+    const lockedIds = await packs.lockedPullIds(input.customer_id, pulls);
+    // Prize cards ride in the same parcel (one shipping fee); the daily prize
+    // cap is enforced under the credit lock in createDeliveryOrderWithLedger.
     const verdict = validateDeliveryRequest(
       pulls,
       input.pull_ids,
       input.customer_id,
-      freeUnlocked,
+      lockedIds,
+      { prizesShipHere: true },
     );
     if (verdict !== 'ok') throw verdictError(verdict);
 
@@ -141,19 +144,21 @@ export const requestDeliveryStep = createStep(
         'That address is missing required shipping fields.',
       );
     }
-    // Only MY rates exist (West RM15 / East RM35 — computeDeliveryFee), so a
-    // non-Malaysian address has no priceable shipment. Refuse up front rather
-    // than undercharge an international parcel.
-    if (!isMalaysianAddress(snapshot.ship_country_code)) {
-      throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
+    // Only Malaysian and Singapore rates exist (computeDeliveryFee), so any
+    // other country has no priceable shipment. Refuse up front rather than
+    // undercharge an international parcel.
+    if (!isShippableCountry(snapshot.ship_country_code)) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, SHIPPING_COUNTRIES_MESSAGE);
     }
     // The zone (and therefore the fee) is derived from the postcode, so an
     // unparseable one is refused rather than silently billed the cheaper West
     // rate (security review 2026-08-25).
-    if (!isShippablePostcode(snapshot.ship_postal_code)) {
+    if (
+      !isShippablePostcode(snapshot.ship_postal_code, snapshot.ship_country_code)
+    ) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        'Enter a valid 5-digit Malaysian postcode for this address.',
+        postcodeMessage(snapshot.ship_country_code),
       );
     }
     // The storefront's inline address form carries no phone field, so most

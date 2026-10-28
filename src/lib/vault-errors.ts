@@ -63,13 +63,15 @@ export const VAULT_RULES: ErrorRule[] = [
   // Our TGPay payout wallet is short (backend TGPAY_PAYOUT_FLOAT_EMPTY). The
   // backend copy already says it is our side and the bank details are fine;
   // without this rule it fell through to "Something went wrong. Please try
-  // again." — the retry loop this message exists to stop.
+  // again." — the retry loop this message exists to stop. The payout
+  // partner's no-provider refusal (2026-10-20) is worded to land here too.
   [/withdrawals are temporarily unavailable/i, (text) => text],
   // The timed pause (GATEWAY_WITHDRAWALS_PAUSED_UNTIL) names when to come
   // back — pass it through rather than flatten it to "not open yet".
   [/withdrawals are paused/i, (text) => text],
   // Every other withdrawal refusal. Each already names its cause AND its fix
-  // (spend RM X on packs, contact support, the RM figure you may take out,
+  // (the RM figure that is for opening packs, contact support, the RM figure
+  // you may take out,
   // which bank account and why), so they pass through verbatim. Before this
   // rule none of them matched and all fell to "Something went wrong. Please
   // try again." — a customer 5 ringgit short of playthrough was told to
@@ -82,17 +84,20 @@ export const VAULT_RULES: ErrorRule[] = [
   // phrases to add a link — reword one, update all three places.
   //
   // Above /amount/i and /not found|404/i, per the ORDER note.
+  // "withdrawals unlock once" is the current locked refusal; "is for opening
+  // packs" is the 2026-10-15 partial-hold text, kept for deploy skew. "more on
+  // packs" appears in both the current and the pre-2026-10-14 wording.
   [
-    /top up at least once|deposits must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|select a saved bank account|choose a bank from the list|valid account number|looks like a card number|account numbers are|account holder name|add an email address|withdrawal is no longer open/i,
+    /top up at least once|withdrawals unlock once|is for opening packs|more on packs|must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|select a saved bank account|choose a bank from the list|choose another bank|mobile number linked to PayNow|valid account number|looks like a card number|account numbers are|account holder name|add an email address|withdrawal is no longer open/i,
     (text) => text,
   ],
-  // Regional rail (A3Pay, SGD) refusals (gateway-deposit.ts,
-  // gateway-withdrawal.ts, payment-fx.ts, the deposit route): each names its
-  // cause and fix, and one carries the word "amount" ("Check the new
-  // amount…"), which the broad /amount/ rule below rewrote into a wrong
+  // Regional rails (A3Pay SGD, GlobePay365 USDT) and USDT wallets
+  // (gateway-deposit.ts, gateway-withdrawal.ts, the deposit route): each names
+  // its cause and fix, and several carry the word "amount" ("Check the new
+  // amount…"), which the broad /amount/ rule below would rewrite into a wrong
   // "Enter a valid amount (up to RM 10,000…)". Above it, per the ORDER note.
   [
-    /exchange rate just changed|must come to between|temporarily unavailable on our side|payments are paused|top-ups are not available|name on the bank account/i,
+    /exchange rate just changed|must come to between|temporarily unavailable on our side|payments are paused|top-ups are not available|name on the bank account|top-ups still waiting|not a valid (trc20|erc20)/i,
     (text) => text,
   ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],

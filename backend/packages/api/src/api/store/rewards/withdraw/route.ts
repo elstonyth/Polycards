@@ -5,9 +5,12 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
+import { resolveFxRateStrict } from '../../../../modules/packs/pricing';
 import {
-  isMalaysianAddress,
-  MY_ONLY_MESSAGE,
+  isShippableCountry,
+  isShippablePostcode,
+  SHIPPING_COUNTRIES_MESSAGE,
+  postcodeMessage,
 } from '../../../../modules/packs/delivery';
 
 // POST /store/rewards/withdraw — ship a vaulted reward-prize Pull as a physical
@@ -87,11 +90,22 @@ export async function POST(
       '`address` requires firstName, lastName, address1, city, postalCode, and countryCode.',
     );
   }
-  // MY-only shipping (2026-08-25) — same rule as the paid delivery flow.
-  // Reward prizes stay fee-exempt, but the geographic gate is a shipping rule,
-  // not a fee rule, so this path carries it too.
-  if (!isMalaysianAddress(fields.country_code as string)) {
-    throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
+  // Malaysia and Singapore only, with a postcode we can zone — the same rules
+  // as the paid delivery flow. Since 2026-10-14 a prize pays its zone's
+  // shipping too (recordRewardWithdrawal), so the zone must be priceable.
+  if (!isShippableCountry(fields.country_code as string)) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, SHIPPING_COUNTRIES_MESSAGE);
+  }
+  if (
+    !isShippablePostcode(
+      fields.postal_code as string,
+      fields.country_code as string,
+    )
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      postcodeMessage(fields.country_code as string),
+    );
   }
 
   // Optional lines of the saved address. The paid path snapshots them from the
@@ -101,7 +115,14 @@ export async function POST(
     typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const result = await packs.recordRewardWithdrawal(customerId, pullId, {
+  // Resolved before the transaction, as the paid path does: it values the
+  // prize for its mandatory insurance. STRICT — a real wallet debit is never
+  // priced on a cached/fallback rate.
+  const fx = await resolveFxRateStrict(packs);
+  const result = await packs.recordRewardWithdrawal(
+    customerId,
+    pullId,
+    {
     ...(fields as {
       first_name: string;
       last_name: string;
@@ -113,6 +134,30 @@ export async function POST(
     address_2: optional(addr?.address2),
     province: optional(addr?.province),
     phone: optional(addr?.phone),
-  });
+    },
+    fx,
+  );
   res.json(result);
+}
+
+// GET /store/rewards/withdraw — how many prize cards the customer can still
+// ship today (withdrawals_per_day less today's prize shipments), so the
+// delivery sheet prices and sends only those. Auth + rate limit come from its
+// own GET matcher in api/middlewares.ts (the '/store/rewards/*' wildcard is
+// POST-only).
+export async function GET(
+  req: AuthenticatedMedusaRequest,
+  res: MedusaResponse,
+): Promise<void> {
+  const customerId = req.auth_context?.actor_id;
+  if (!customerId) {
+    throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
+  }
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const allowance = await packs.rewardShippingAllowance(customerId);
+  res.json({
+    per_day: allowance.perDay,
+    used_today: allowance.usedToday,
+    remaining: allowance.remaining,
+  });
 }

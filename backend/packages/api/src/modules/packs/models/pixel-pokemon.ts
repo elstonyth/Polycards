@@ -7,11 +7,20 @@ import { model } from '@medusajs/framework/utils';
 // a Spaces-hosted sprite (the "sprite not loaded" root fix); null → the
 // storefront renders its poké-ball fallback. `types` is always written as a
 // string[] (possibly empty).
+//
+// `franchise` keeps the decks apart (a pack's category: 'pokemon' |
+// 'one-piece'). Pokémon rows are numbered by `dex`; every other franchise by
+// `number` (One Piece #001 Luffy…), which is NEVER read as a dex — the card
+// mirror only copies `dex` for Pokémon, so One Piece #25 can't become Pikachu.
+// Variants share their character's number (Gear 5 Luffy = One Piece #001,
+// variant 'gear-5'), like Pokémon forms share a dex.
 export const PixelPokemon = model
   .define('pixel_pokemon', {
     id: model.id().primaryKey(),
     name: model.text(),
     dex: model.number().nullable(),
+    franchise: model.text().default('pokemon'),
+    number: model.number().nullable(),
     variant: model.text().default('normal'),
     types: model.json(),
     image_url: model.text().nullable(),
@@ -29,6 +38,13 @@ export const PixelPokemon = model
       on: ['dex'],
       unique: true,
       where: "variant = 'normal' AND deleted_at IS NULL",
+    },
+    {
+      // One base ("normal") sprite per number within a non-Pokémon franchise.
+      name: 'UQ_pixel_pokemon_franchise_number_normal',
+      on: ['franchise', 'number'],
+      unique: true,
+      where: "variant = 'normal' AND number IS NOT NULL AND deleted_at IS NULL",
     },
   ]);
 

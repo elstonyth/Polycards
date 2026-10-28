@@ -22,6 +22,10 @@ export type BuybackRate = {
 // rate must beat, and the fallback when the source pack was deleted.
 export const FLAT_PERCENT = 90;
 
+// Instant rate while a Lossless Mode window is live (see ./lossless.ts). Only
+// the instant (30s reveal) sell is lifted to it; the vault stays at FLAT_PERCENT.
+export const LOSSLESS_PERCENT = 100;
+
 // The quote the open/open-batch routes return when post-commit enrichment fails
 // and the pull could not be priced at all.
 //

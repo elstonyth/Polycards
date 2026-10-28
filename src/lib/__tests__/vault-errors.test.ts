@@ -90,6 +90,16 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map(tngDown)).toBe(tngDown);
   });
 
+  it('passes the bank no-provider refusal through instead of blaming the bank details', () => {
+    // packs/gateway-withdrawal.ts: TGPay refused every bank payout from
+    // 2026-10-20 17:40 with "No payout provider is available for this order",
+    // and the "check your bank details" copy sent customers retrying 4–6 times.
+    const noProvider =
+      'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.';
+    expect(map(noProvider)).toBe(noProvider);
+    expect(map(noProvider)).not.toMatch(/check your bank details/i);
+  });
+
   it('points an unverified customer at the screen that clears the gate', () => {
     // Action-neutral copy: the same guard fires on topup AND withdrawal
     // (2026-08-05), so the message must not name either one.
@@ -135,11 +145,17 @@ describe('VAULT_RULES backend-message contract', () => {
     // The literal backend strings. Before 2026-10-03 every one of these fell
     // to VAULT_FALLBACK, so a customer short of playthrough was told to retry.
     const literals = [
-      // withdrawable.ts withdrawalGateError — freeze, no top-up, playthrough, cap
-      'Top up at least once to unlock withdrawals and deliveries.',
+      // withdrawable.ts withdrawalGateError — freeze, no top-up, locked, cap
       'Withdrawals are unavailable while your account is under review. Contact support.',
-      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
+      'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.',
+      "Withdrawals unlock once you've used RM 10.55 more on packs. Then your balance, except bonus credit, can be withdrawn.",
+      // the #793 wording (deploy skew), then the plain cap
+      'Top up at least once to unlock withdrawals and deliveries.',
+      'You can withdraw up to RM 28.40 right now. The other RM 10.55 is for opening packs.',
+      'Nothing is withdrawable yet. Your RM 60.00 is for opening packs.',
       'You can withdraw up to RM 12.34 right now.',
+      // the pre-2026-10-14 wording, still matched
+      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
       // service.ts withdrawForCashout
       'Daily withdrawal limit reached. You can withdraw RM 100.00 more today.',
       'This withdrawal is no longer open, so nothing was debited. Start a new one.',
@@ -160,21 +176,31 @@ describe('VAULT_RULES backend-message contract', () => {
       'Maybank account numbers are 12 digits. Check the number in your banking app.',
       'CIMB Bank account numbers are 10 or 14 digits. Check the number in your banking app.',
       'Enter the account holder name exactly as the bank has it.',
+      'Enter the mobile number linked to PayNow, with country code for overseas numbers (digits only).',
+      'Withdrawals to Alliance Bank (SG) are unavailable. Choose another bank.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });
 
-  it('passes regional-rail refusals through — never the wrong "amount" copy', () => {
+  it('passes regional-rail and wallet refusals through — never the wrong "amount" copy', () => {
     // The literal backend strings (gateway-deposit.ts, gateway-withdrawal.ts,
     // payment-fx.ts, the deposit route). The first one carries the word
     // "amount", which the broad /amount/ rule would rewrite.
     const literals = [
       'The exchange rate just changed. Check the new amount and try again.',
       'Withdrawals to this bank must come to between SGD 30 and SGD 10,000 (RM 90 is SGD 28.03).',
+      'Withdrawals to this bank must come to between USDT 10 and USDT 5,000 (RM 40 is USDT 8.88).',
       'Withdrawals to this bank are temporarily unavailable on our side — nothing was taken from your balance. Your bank details are fine. Please try again later.',
       'SGD payments are paused right now — please try again shortly.',
+      'USDT payments are paused right now — please try again shortly.',
       'SGD top-ups are not available right now.',
       'Enter the name on the bank account you are paying from.',
+      // The pending-cap refusal (gateway-deposit.ts): fell to the generic
+      // "Something went wrong" and hid why every retry failed.
+      'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',
+      'USDT top-ups are not available right now.',
+      'That is not a valid TRC20 (Tron) address. Copy it exactly from your wallet: it starts with T and is 34 characters long.',
+      'That is not a valid ERC20 (Ethereum) address. Copy it exactly from your wallet: it starts with 0x, and capital letters matter.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });

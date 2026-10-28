@@ -10,6 +10,7 @@
  *   GET  /store/vault              — vaulted pulls + live buyback offers
  *   POST /store/vault/:id/buyback  — instant sell-back (credits FMV × pack %)
  *   GET  /store/credits            — balance (Σ ledger) + recent transactions
+ *   GET  /store/pulls/history      — every pull, sold/shipped included
  *   POST /store/credits/topup      — buy credit via the mock gateway (demo)
  *
  * Every call goes through the `Store` port (src/lib/store.ts), which owns the
@@ -48,7 +49,9 @@ import {
   SavedBankAccountsSchema,
   CreditsPageSchema,
   PaymentConfigSchema,
+  PullHistoryPageSchema,
 } from '@/lib/data/schemas';
+import { toCardView, type CardView } from '@/lib/card-view';
 import { mapVaultItem, type BackendVaultItem } from './vault-map';
 import {
   DEFAULT_PAYMENT_LIMITS,
@@ -204,6 +207,7 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
     depositsEnabled: r.data.deposits_enabled ?? true,
     withdrawalsEnabled: r.data.withdrawals_enabled ?? true,
     withdrawalsPausedUntil: r.data.withdrawals_paused_until ?? null,
+    withdrawalsUnavailable: r.data.withdrawals_unavailable ?? false,
     regional: (r.data.regional ?? []).map((rail) => ({
       gateway: rail.gateway,
       currency: rail.currency,
@@ -211,6 +215,14 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
       withdrawalsEnabled: rail.withdrawals_enabled,
       deposit: rail.deposit,
       withdrawal: rail.withdrawal,
+      ...(rail.withdrawal_rm
+        ? {
+            withdrawalRm: {
+              minRm: rail.withdrawal_rm.min_rm,
+              maxRm: rail.withdrawal_rm.max_rm,
+            },
+          }
+        : {}),
       rate: rail.rate,
     })),
   };
@@ -275,13 +287,13 @@ export async function getRegionalPayer(
 export async function startDeposit(
   amount: number,
   paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
-  /** A regional top-up (Singapore): `amount` is then in `currency`, and the
+  /** A regional top-up (SGD, USDT): `amount` is then in `currency`, and the
    *  backend quotes the RM credit. `quotedRate` is the rate the sheet
    *  showed, which the backend refuses once it has moved. `payerName` is the
    *  name on the PAYING account, which A3Pay matches the transfer against:
-   *  always sent by the sheet (getRegionalPayer: the saved account's holder,
-   *  changeable, or what the customer typed); without it the backend uses the
-   *  saved account's holder. */
+   *  always sent by the sheet for such a rail (getRegionalPayer: the saved
+   *  account's holder, changeable, or what the customer typed); without it
+   *  the backend uses the saved account's holder. */
   regional?: { currency: unknown; quotedRate?: unknown; payerName?: unknown },
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.
@@ -357,6 +369,13 @@ export type WithdrawBank = {
   bankName: string;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;
+  /** Bank-specific account lengths from the backend's bank registry. */
+  accountLengths?: number[];
+  accountPattern?: string;
+  accountHint?: string;
+  /** A USDT wallet: the "account number" is an address on this chain
+   *  ('tron', 'evm', or one this build does not know yet). */
+  wallet?: string;
 };
 
 export type WithdrawBanksResult =
@@ -398,6 +417,11 @@ export type SavedBankAccount = {
   /** This destination's own payout floor (RM) when above the provider's —
    *  Touch 'n Go: 100. Null/absent = the provider's floor applies. */
   minRm?: number | null;
+  /** Why it is unavailable (e.g. invalid account details or paused Touch 'n Go);
+   *  absent = the provider cannot pay to it. */
+  unavailableReason?: string | null;
+  /** A USDT wallet's chain; absent for a bank account. */
+  wallet?: string;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;
 };
@@ -476,6 +500,9 @@ export type StartWithdrawalResult =
        *  submit outcome was ambiguous; either way the sweep/callback resolves
        *  it from here. Mirrors the backend's StartWithdrawalResult#status. */
       status: 'pending' | 'held';
+      /** What the bank receives when it is paid in another currency (a
+       *  Singapore payout: S$). Absent on an RM payout. */
+      payout?: { currency: string; amount: number };
     }
   | { ok: false; error: string; needsAuth?: boolean };
 
@@ -551,6 +578,11 @@ export async function startWithdrawal(input: {
     // pre-094 backend, which has no held state — 'pending' is the accurate
     // default there, not a guess.
     status: r.data.status ?? 'pending',
+    ...(r.data.currency &&
+    r.data.currency !== 'MYR' &&
+    r.data.payAmount !== undefined
+      ? { payout: { currency: r.data.currency, amount: r.data.payAmount } }
+      : {}),
   };
 }
 
@@ -608,6 +640,13 @@ export type CreditTxn = {
   // Signed bonus-credit part of `amount` (spend-only credit); 0 when none or
   // when an older backend omits it.
   bonus: number;
+  // Signed move into (+) or out of (−) "Still to use on packs" (top-up, a
+  // sell-back's free share, pack open); 0 otherwise.
+  playthrough: number;
+  // The pack and card(s) a pack open bought or a sell-back sold; null / []
+  // on every other row (and from an older backend).
+  packTitle: string | null;
+  cardNames: string[];
 };
 
 export type TransactionsResult =
@@ -616,6 +655,10 @@ export type TransactionsResult =
       balance: number;
       topupTotal: number;
       spendTotal: number;
+      // The split of spendTotal; null when an older backend omits it (the
+      // page then shows the single "Total spent" instead of a fake RM 0.00).
+      packSpendTotal: number | null;
+      withdrawnTotal: number | null;
       transactions: CreditTxn[];
       page: number;
       hasMore: boolean;
@@ -654,6 +697,8 @@ export async function getTransactions(
     balance: totals?.balance ?? 0,
     topupTotal: totals?.topup_total ?? 0,
     spendTotal: totals?.spend_total ?? 0,
+    packSpendTotal: totals?.pack_spend_total ?? null,
+    withdrawnTotal: totals?.withdrawn_total ?? null,
     transactions: rows.map((row) => ({
       id: row.id,
       amount: row.amount,
@@ -662,9 +707,77 @@ export async function getTransactions(
       reference: row.reference ?? null,
       gateway: row.gateway ?? null,
       bonus: row.bonus ?? 0,
+      playthrough: row.playthrough ?? 0,
+      packTitle: row.pack_title ?? null,
+      cardNames: row.card_names ?? [],
     })),
     page: safePage,
     hasMore: totals?.has_more ?? false,
+  };
+}
+
+export type PullHistoryItem = {
+  pullId: string;
+  rolledAt: string;
+  packTitle: string;
+  /** Won in the weekly challenge — wears the prism frame, as in the vault. */
+  challengePrize: boolean;
+  /** Won in the Lucky Draw — no tier, so no frame, as in the vault. */
+  luckyDrawPrize: boolean;
+  source: VaultItem['source'];
+  /** vaulted | bought_back | delivering | delivered (any string passes). */
+  status: string;
+  card: CardView;
+  /** RM this card cost: its open's charge split over the cards it paid for.
+   *  null = no charge links to it (free / gift / reward, or a pre-2a open). */
+  paid: number | null;
+  /** RM value when pulled (draw-time snapshot, else today's price). */
+  value: number | null;
+  /** RM credited when sold back, and when; null while not sold. */
+  soldFor: number | null;
+  soldAt: string | null;
+};
+
+export type PullHistoryResult =
+  | { ok: true; items: PullHistoryItem[]; page: number; hasMore: boolean }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+// Matches the backend default (PAGE_SIZE in store/pulls/history).
+const PULLS_PAGE_SIZE = 20;
+
+// Every card the customer ever pulled — sold and shipped ones included, which
+// the vault (held cards only) cannot show. One page, newest first.
+export async function getPullHistory(
+  page: number = 1,
+): Promise<PullHistoryResult> {
+  const safePage = sanePage(page);
+  const r = await store.get('/store/pulls/history', PullHistoryPageSchema, {
+    query: {
+      limit: PULLS_PAGE_SIZE,
+      offset: (safePage - 1) * PULLS_PAGE_SIZE,
+    },
+  });
+  if (!r.ok) {
+    return vaultFailure(r, 'Please log in to view your pulls.', VAULT_FALLBACK);
+  }
+  return {
+    ok: true,
+    items: r.data.items.map((i) => ({
+      pullId: i.pull_id,
+      rolledAt: i.rolled_at,
+      packTitle: i.pack_title,
+      challengePrize: i.challenge_prize,
+      luckyDrawPrize: i.lucky_draw_prize,
+      source: i.source,
+      status: i.status,
+      card: toCardView(i.card),
+      paid: i.paid,
+      value: i.value,
+      soldFor: i.sold_for,
+      soldAt: i.sold_at,
+    })),
+    page: safePage,
+    hasMore: r.data.has_more,
   };
 }
 

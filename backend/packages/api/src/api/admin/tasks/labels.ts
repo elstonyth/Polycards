@@ -1,4 +1,5 @@
 import type PacksModuleService from '../../../modules/packs/service';
+import { ticketsSuffix } from '../../../modules/packs/lucky-draw';
 import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
 import type {
   TaskKind,
@@ -82,6 +83,8 @@ export async function resolveTaskLabels(
     kind?: string;
     requirement: unknown;
     reward: unknown;
+    /** Lucky Draw tickets the claim also pays; > 0 is appended to the reward. */
+    tickets?: number;
   }[],
 ): Promise<Map<string, TaskLabels>> {
   const refs = collect(rows);
@@ -133,7 +136,9 @@ export async function resolveTaskLabels(
         packTitle,
         pixelName,
       ),
-      reward: rewardLabel(row.reward, packTitle, cardName),
+      reward:
+        rewardLabel(row.reward, packTitle, cardName) +
+        ticketsSuffix(row.tickets),
     });
   }
   return out;
@@ -146,7 +151,7 @@ function requirementLabel(
   pixelName: Map<string, string>,
 ): string {
   const r = (raw ?? {}) as Record<string, unknown>;
-  const n = Number(r.days ?? r.count ?? r.level ?? 0);
+  const n = Number(r.days ?? r.count ?? r.level ?? r.amount_myr ?? 0);
   // Daily/weekly goals count one period's activity; an achievement counts a
   // lifetime. Without a kind, check-ins and rips were weekly-only.
   const when =
@@ -178,6 +183,9 @@ function requirementLabel(
           : `${n} Pokémon (pixel) ${n === 1 ? 'card' : 'cards'}`;
       return when ? `Pull ${what} ${when}` : `Vault ${what}`;
     }
+    case 'topup_myr':
+      // Whole ringgit by validation, so no ".00" on a poster.
+      return `Top up RM ${n.toLocaleString('en-MY')} ${when ?? 'in total'}`;
     default:
       // A requirement type this build does not know cannot be evaluated
       // either — taskProgress fails it closed — so say so rather than

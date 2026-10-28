@@ -9,7 +9,6 @@ import {
   Textarea,
   toast,
 } from '@medusajs/ui';
-import { Photo } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useSaveSiteSettings,
@@ -287,7 +286,8 @@ const StorefrontPage = () => {
 export default StorefrontPage;
 
 export const config: RouteConfig = {
-  label: 'Storefront',
-  icon: Photo,
-  rank: 25,
+  label: 'pcNav.cardFrame',
+  translationNs: 'translation',
+  rank: 1,
+  nested: '/site',
 };

@@ -149,6 +149,101 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(401);
       });
 
+      // ?group= (spec 2026-10-14-admin-finance-pages §8): `default` is
+      // everyone outside a non-default group (B, ungrouped); a group id is
+      // that group's members (A, in GROUP_NAME). Both hold on the
+      // ledger-sorted path too, which pages its own ids in SQL.
+      it('?group= filters to Default or to one group, sorted or not', async () => {
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const [group] = await customers.listCustomerGroups({
+          name: GROUP_NAME,
+        });
+        const ids = (res: { data: { players: { id: string }[] } }) =>
+          res.data.players.map((p) => p.id);
+
+        const byDefault = await list('?group=default');
+        expect(byDefault.status).toBe(200);
+        expect(ids(byDefault)).toContain(bId);
+        expect(ids(byDefault)).not.toContain(aId);
+
+        const byGroup = await list(`?group=${group.id}`);
+        expect(ids(byGroup)).toEqual([aId]);
+        expect(byGroup.data.total).toBe(1);
+
+        const sorted = await list('?group=default&sort=wallet:desc');
+        expect(ids(sorted)).toContain(bId);
+        expect(ids(sorted)).not.toContain(aId);
+        const sortedGroup = await list(`?group=${group.id}&sort=topup:desc`);
+        expect(ids(sortedGroup)).toEqual([aId]);
+
+        const searched = await list(`?group=${group.id}&q=${B_EMAIL}`);
+        expect(ids(searched)).toEqual([]);
+
+        // A handle search (the byHandle id-list path) narrowed by the group.
+        expect(ids(await list(`?group=${group.id}&q=@${A_HANDLE}`))).toEqual([
+          aId,
+        ]);
+        expect(ids(await list(`?group=default&q=@${A_HANDLE}`))).not.toContain(
+          aId,
+        );
+        expect(ids(await list(`?group=default&q=@${B_HANDLE}`))).toContain(
+          bId,
+        );
+
+        expect((await list('?group=bogus')).status).toBe(400);
+      });
+
+      // The list's group chip names the EFFECTIVE player group (the odds
+      // engine's rule), not whichever membership came back first: null means
+      // the default group. B also joins DEFAULT, so a first-membership chip
+      // would be wrong either way round.
+      it('names the effective player group, null for the default', async () => {
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const [existingDefault] = await customers.listCustomerGroups({
+          name: 'DEFAULT',
+        });
+        const def =
+          existingDefault ??
+          (await customers.createCustomerGroups({ name: 'DEFAULT' }));
+        // A: Whales + DEFAULT; B: DEFAULT only. A first-membership chip
+        // would say 'DEFAULT' for B (not null) — this tells the rules apart.
+        await customers.addCustomerToGroup([
+          { customer_id: aId, customer_group_id: def.id },
+          { customer_id: bId, customer_group_id: def.id },
+        ]);
+        const res = await list();
+        expect(rowFor(res, aId).player_group).toBe(GROUP_NAME);
+        expect(rowFor(res, bId).groups).toEqual(['DEFAULT']);
+        expect(rowFor(res, bId).player_group).toBeNull();
+
+        // The DEFAULT group's own id means default (ungrouped included), not
+        // "its stored members".
+        const byDefaultId = await list(`?group=${def.id}`);
+        expect(byDefaultId.status).toBe(200);
+        const defaultIds = byDefaultId.data.players.map(
+          (p: { id: string }) => p.id,
+        );
+        expect(defaultIds).toContain(bId);
+        expect(defaultIds).not.toContain(aId);
+
+        // A group that is gone lists nobody, not its old members.
+        const [whales] = await customers.listCustomerGroups({
+          name: GROUP_NAME,
+        });
+        await customers.softDeleteCustomerGroups([whales.id]);
+        const gone = await list(`?group=${whales.id}`);
+        expect(gone.status).toBe(200);
+        expect(gone.data.players).toEqual([]);
+        expect(gone.data.total).toBe(0);
+
+        // Default + search reaches Medusa's filter as { q, id: { $nin } }.
+        const searched = await list(`?group=default&q=${B_EMAIL}`);
+        expect(searched.status).toBe(200);
+        expect(searched.data.players.map((p: { id: string }) => p.id)).toEqual([
+          bId,
+        ]);
+      });
+
       it('200 — lists both customers, newest first, with total', async () => {
         const res = await list();
         expect(res.status).toBe(200);
@@ -415,6 +510,94 @@ medusaIntegrationTestRunner({
         expect(narrowed.data.total).toBe(1);
         expect(ids(narrowed)).toEqual([aId]);
       });
+
+      it('?sort= orders vault, level, group, status and phone too', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ids = (res: any): string[] => res.data.players.map((p: any) => p.id);
+        // A: one vaulted card, level 3, a named group, a phone. B: none.
+        for (const key of ['vault', 'level', 'group', 'phone']) {
+          const desc = await list(`?sort=${key}:desc`);
+          expect(desc.status).toBe(200);
+          expect(desc.data.total).toBe(2);
+          expect(ids(desc)).toEqual([aId, bId]);
+        }
+        for (const key of ['vault', 'level', 'group']) {
+          expect(ids(await list(`?sort=${key}:asc`))).toEqual([bId, aId]);
+        }
+        // A missing phone sorts last both ways.
+        expect(ids(await list('?sort=phone:asc'))).toEqual([aId, bId]);
+
+        // Status: descending lists the disabled player first.
+        const disable = await unwrapResponse(
+          api.post(
+            `/admin/customers/${bId}/disable`,
+            { reason: 'players list sort test' },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(disable.status).toBe(200);
+        expect(ids(await list('?sort=status:desc'))).toEqual([bId, aId]);
+        expect(ids(await list('?sort=status:asc'))).toEqual([aId, bId]);
+        // The group filter still narrows a SQL-sorted page.
+        const grouped = await list('?group=default&sort=level:desc');
+        expect(ids(grouped)).toEqual([bId]);
+      });
+
+      it('?range= limits top-up, withdraw, contribution and turnover; wallet stays', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ids = (res: any): string[] => res.data.players.map((p: any) => p.id);
+        // A's rows were written just now: inside the last 7 days, outside
+        // a fixed range in the past (no MYT-midnight flake either way).
+        const week = await list('?range=7d');
+        expect(week.status).toBe(200);
+        expect(week.data.window).not.toBeNull();
+        expect(rowFor(week, aId)).toMatchObject({
+          total_topup: 100,
+          total_spend: 30,
+          wallet_balance: 70,
+        });
+
+        const past = await list('?range=custom&from=2026-01-01&to=2026-01-02');
+        expect(past.status).toBe(200);
+        expect(rowFor(past, aId)).toMatchObject({
+          total_topup: 0,
+          total_withdrawn: 0,
+          total_contribution: 0,
+          total_spend: 0,
+          // A balance, not a period figure.
+          wallet_balance: 70,
+          vault_count: 1,
+        });
+
+        // All time is the default, and says so.
+        expect((await list()).data.window).toBeNull();
+        expect(rowFor(await list('?range=all'), aId).total_topup).toBe(100);
+
+        // A period sort uses the period: both read 0 in the past range, so
+        // the tie goes to the id; this week A's top-up leads.
+        const tie = [aId, bId].sort().reverse();
+        expect(ids(await list('?range=custom&from=2026-01-01&to=2026-01-02&sort=topup:desc'))).toEqual(
+          tie,
+        );
+        expect(ids(await list('?range=7d&sort=topup:desc'))).toEqual([
+          aId,
+          bId,
+        ]);
+        // Wallet ignores the window.
+        expect(ids(await list('?range=custom&from=2026-01-01&to=2026-01-02&sort=wallet:desc'))).toEqual([
+          aId,
+          bId,
+        ]);
+
+        // Unknown, repeated and bad custom ranges are refused, not read as
+        // all time.
+        expect((await list('?range=fortnight')).status).toBe(400);
+        expect((await list('?range=today&range=7d')).status).toBe(400);
+        expect(
+          (await list('?range=custom&from=2026-10-10&to=2026-10-01')).status,
+        ).toBe(400);
+      });
+
 
       it('disabled (Task 1) flows through to the row', async () => {
         const disable = await unwrapResponse(

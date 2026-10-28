@@ -11,6 +11,7 @@ const {
   getWithdrawalAccount,
   getPurchaseInvoice,
   httpStatus,
+  getPricingHealth,
 } = await import('./admin-rest');
 
 const respondWith = (status: number, body: unknown) =>
@@ -27,6 +28,20 @@ const respondWith = (status: number, body: unknown) =>
   );
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('pricing health', () => {
+  test('reads the authenticated health endpoint without dropping pending prices', async () => {
+    const body = { fx: null, cards: { issues: [{ handle: 'mewtwo', reason: 'pending_confirmation', market_value: 875, proposed_value: 47.5 }] } };
+    respondWith(200, body);
+    expect(await getPricingHealth()).toEqual(body);
+    expect(fetch).toHaveBeenCalledWith('http://backend.test/admin/pricing/health', { credentials: 'include' });
+  });
+
+  test('rejects a failed health read instead of returning an empty queue', async () => {
+    respondWith(503, { message: 'Pricing unavailable' });
+    await expect(getPricingHealth()).rejects.toMatchObject({ status: 503, message: 'Pricing unavailable' });
+  });
+});
 
 // The whole chain the invoice detail page's "not found" copy rests on: the
 // response status has to survive from fetch, through the thrown Error, out of

@@ -21,6 +21,7 @@ import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
+import { sellbackHoldBp } from '../bonus-credit';
 import { clearFxDisplayCache } from '../pricing';
 import Pack from '../models/pack';
 import Card from '../models/card';
@@ -43,6 +44,7 @@ import ChallengeSettings from '../models/challenge-settings';
 import ChallengePayout from '../models/challenge-payout';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
+import AutomationMonitor from '../models/automation-monitor';
 
 jest.setTimeout(300 * 1000);
 
@@ -96,6 +98,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     ChallengePayout,
     LedgerEntry,
     LedgerSequence,
+    AutomationMonitor,
   ],
   testSuite: ({ service }) => {
     beforeEach(() => {
@@ -201,6 +204,41 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     describe('settleChallengeWeek', () => {
+      it('uses full bonus-funded value to unlock stages and pay the winner', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 700, [{ rank: 1, credits: 50 }]);
+        await seedPriorWeekPull('cus_normal', card, 100);
+        await service.createPulls([
+          {
+            customer_id: 'cus_bonus',
+            pack_id: 'bronze-pack',
+            card_id: card.handle,
+            rolled_at: priorWeekDate(),
+            source: 'bonus',
+            bonus_bp: 10000,
+            recorded_value_usd: 200,
+          },
+        ]);
+
+        const result = await service.settleChallengeWeek({});
+        expect(result.winners).toEqual([
+          expect.objectContaining({
+            customerId: 'cus_bonus',
+            rank: 1,
+            credits: 50,
+          }),
+        ]);
+        const [payout] = await service.listChallengePayouts({
+          customer_id: 'cus_bonus',
+        });
+        expect(payout.snapshot).toMatchObject({
+          pool_myr: 1200,
+          ranking: ['cus_bonus', 'cus_normal'],
+        });
+        expect((await service.settleChallengeWeek({})).settled).toBe(false);
+        expect(await service.creditBalance('cus_bonus')).toBe(50);
+      });
+
       it('settles once: credits paid, card minted, second run is a no-op', async () => {
         const { card } = await seedBase();
         await service.createChallengeStages([
@@ -237,8 +275,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         );
         expect(rewardPulls).toHaveLength(1);
         expect(rewardPulls[0]!.card_id).toBe(card.handle); // HANDLE, not id
-        // A prize is promo value: its whole sell-back is played through once.
+        // A prize is promo value (bonus_bp full, counts toward nothing), but
+        // a prize card's sale is withdrawable: nothing held (ADR 0012).
         expect(rewardPulls[0]!.bonus_bp).toBe(10000);
+        expect(sellbackHoldBp(rewardPulls[0]!)).toBe(0);
 
         const second = await service.settleChallengeWeek({});
         expect(second.settled).toBe(false);
@@ -670,6 +710,41 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await service.creditBalance('cus_c')).toBe(25);
       });
 
+      it('ranks and pays an Automation account like any other account', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 100, [
+          { rank: 1, credits: 100 },
+          { rank: 2, credits: 50 },
+        ]);
+        await seedPriorWeekPull('cus_house', card, 300);
+        await seedPriorWeekPull('cus_a', card, 200);
+        await seedPriorWeekPull('cus_b', card, 100);
+        await service.createAutomationMonitors([
+          {
+            id: 'global',
+            accounts: { customer_ids: ['cus_house'] },
+            updated_by: 'test',
+          },
+        ]);
+
+        expect(
+          (
+            await service.challengeWeekTop({ ...WEEK, weeksBack: 1, limit: 10 })
+          ).map((row) => row.customer_id),
+        ).toEqual(['cus_house', 'cus_a', 'cus_b']);
+        // Its pulls fill the community pool too: 600 USD × fx 4.
+        expect(await service.challengeWeekPool({ ...WEEK, weeksBack: 1 })).toBe(
+          2400,
+        );
+        const r = await service.settleChallengeWeek({});
+        expect(r.winners.map((w) => [w.customerId, w.rank])).toEqual([
+          ['cus_house', 1],
+          ['cus_a', 2],
+        ]);
+        expect(await service.creditBalance('cus_house')).toBe(100);
+        expect(await service.creditBalance('cus_a')).toBe(50);
+      });
+
       it('an admin anchor change cannot re-pay a week overlapping a paid one', async () => {
         const { card } = await seedBase();
         await seedStage(1, 100, [{ rank: 1, credits: 50 }]);
@@ -835,7 +910,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // The admin edit that used to strand cus_b: the only unlocked stage is
         // deleted between ticks, so nothing live backs the frozen table.
         await service.deleteChallengeStages(
-          (await service.listChallengeStages({}, { take: 10 })).map((r) => r.id),
+          (await service.listChallengeStages({}, { take: 10 })).map(
+            (r) => r.id,
+          ),
         );
 
         const tick2 = await service.settleChallengeWeek({});

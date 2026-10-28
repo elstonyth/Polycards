@@ -46,8 +46,9 @@ export const DeliveryOrder = model
     // Column name predates the processed/ready_to_ship/completed rename — it
     // now stamps when status hits 'completed', not a literal "delivered" status.
     delivered_at: model.dateTime().nullable(),
-    // True when this shipment fulfils a reward-economy prize (Pull.source='reward').
-    // Used by recordRewardWithdrawal for the daily withdrawal cap COUNT.
+    // True when this shipment carries a reward-economy prize (Pull.source='reward'):
+    // on its own (recordRewardWithdrawal) or riding in a vault order since
+    // 2026-10-23. The daily prize cap counts the prize pulls, not this flag.
     is_reward: model.boolean().default(false),
   })
   .indexes([

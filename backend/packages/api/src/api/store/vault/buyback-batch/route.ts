@@ -5,6 +5,7 @@ import {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
+import { FREE_PULL_LOCKED_MESSAGE } from '../../../../modules/packs/free-pack';
 import { buybackPullWorkflow } from '../../../../workflows/buyback-pull';
 
 // POST /store/vault/buyback-batch — sell MANY vaulted pulls in ONE request.
@@ -18,12 +19,12 @@ import { buybackPullWorkflow } from '../../../../workflows/buyback-pull';
 // clears in a single client round-trip and a single rate-limit hit.
 //
 // Money safety is unchanged and per-pull: each iteration is independently
-// atomic (credit row written first under the unique-pull_id guard, then the
-// pull is flipped; the step undoes the credit if the flip fails). A pull that
+// atomic (credit and ownership commit in one customer-locked transaction). A pull that
 // can't be sold — already sold, out for delivery, not owned, a frozen account,
 // or a free welcome pull still locked until the first paid open — is SKIPPED
 // with its reason and reported back; the others still sell. Every gate lives
-// in the step, so this route needs no pre-filter of its own. No pull ever
+// in the shared settlement; this route also skips locked cards before
+// running their workflows. No pull ever
 // leaves 'vaulted' without a matching credit, so a partial batch can never lose
 // a card without paying for it.
 //
@@ -105,10 +106,24 @@ export async function POST(
   // full-vault sell on a slow DB could approach a proxy timeout. Upgrade path if
   // that ever bites: chunk client-side (~100/req) or move to a background job +
   // poll. Not worth it for the realistic ≤~300-card case today.
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // ONE lock read for the selection, not one per pull. A locked pull is
+  // reported without a workflow run. The settlement rechecks under the credit
+  // lock, as a concurrent pack compensation can remove the first paid open.
+  // Only the caller's own pulls are read, so a foreign id still gets its 404.
+  const owned = await packs.listPulls(
+    { id: ids, customer_id: customerId },
+    { select: ['id', 'source'], take: ids.length },
+  );
+  const lockedIds = await packs.lockedPullIds(customerId, owned);
   const workflow = buybackPullWorkflow(req.scope);
   const results: PullResult[] = [];
   let credited = 0;
   for (const id of ids) {
+    if (lockedIds.has(id)) {
+      results.push({ pull_id: id, ok: false, error: FREE_PULL_LOCKED_MESSAGE });
+      continue;
+    }
     try {
       // throwOnError:false so a single un-sellable pull (already sold,
       // delivering, not owned, frozen) surfaces as an `errors` entry instead of
@@ -143,7 +158,6 @@ export async function POST(
   const sold = results.filter((r) => r.ok).length;
   // Authoritative post-batch balance (Σ ledger) — read once regardless of how
   // many sold, so the client shows the true new balance even if 0 succeeded.
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const balance = await packs.creditBalance(customerId);
 
   res.json({

@@ -216,6 +216,8 @@ medusaIntegrationTestRunner({
           { take: 1 },
         );
         expect(after.status).toBe('failed');
+        // A repeated reject agrees with the row: nothing to flag.
+        expect(after.audit_note).toBeNull();
         expect(await balance()).toBe(balanceAfterDebit + 50);
         const refunds = await packs().listCreditTransactions(
           {
@@ -239,6 +241,11 @@ medusaIntegrationTestRunner({
         );
         expect(after.status).toBe('failed');
         expect(await balance()).toBe(balanceAfterDebit + 50);
+        // Recorded on the row in the audit's own words, so the Settlement
+        // page and the Dashboard show it at once (2026-10-15): the ops alert
+        // alone reached nobody.
+        expect(after.audit_note).toMatch(/DOUBLE PAYMENT/);
+        expect(after.audited_at).toBeTruthy();
       });
     });
   },

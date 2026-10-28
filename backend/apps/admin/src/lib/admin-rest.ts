@@ -122,6 +122,47 @@ async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface PricingIssue {
+  handle: string;
+  name: string;
+  pc_product_id: string | null;
+  pc_grade: string | null;
+  market_value: number;
+  last_synced_at: string | null;
+  reason:
+    | 'pending_confirmation'
+    | 'sync_error'
+    | 'never_synced'
+    | 'stale'
+    | 'unlinked'
+    | 'missing_product';
+  proposed_value: number | null;
+  first_seen_at: string | null;
+  message: string | null;
+}
+
+export interface PricingHealth {
+  fx: {
+    rate: number;
+    source: string;
+    manual_override: boolean;
+    fetched_at: string | null;
+    age_hours: number | null;
+  } | null;
+  cards: {
+    linked: number;
+    never_synced: number;
+    stale_48h: number;
+    missing_product: string[];
+    pending_confirmation: number;
+    unlinked: number;
+    issues: PricingIssue[];
+  };
+}
+
+export const getPricingHealth = (): Promise<PricingHealth> =>
+  getJson('/admin/pricing/health');
+
 // Inventory products that can still be registered as gacha cards (no card with
 // their handle yet). The "Add card" picker is driven by this list.
 export interface EligibleProduct {
@@ -174,14 +215,21 @@ export interface SupportCustomer {
 export interface SupportTransaction {
   id: string;
   amount: number;
+  /** The row's spend-only bonus part, signed like it (RM). /transactions
+   *  only; absent on the /gacha slice. */
+  bonus?: number;
   reason: string;
   reference: string | null;
   created_at: string;
+  /** Ledger display id (TP…, SP…) where one exists. /transactions only. */
+  ledger_display_id?: string | null;
 }
 
 export interface SupportPull {
   id: string;
   pack_id: string;
+  /** The pack's title (/pulls only). */
+  pack_title?: string | null;
   rolled_at: string;
   status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered' | 'forfeited';
   buyback_amount: number | null;
@@ -262,9 +310,15 @@ export async function getCustomerGacha(id: string): Promise<CustomerGacha> {
   );
 }
 
-export const getCustomerTransactions = (id: string, page = 0, limit = 25) =>
+// `reasons` keeps only those ledger reasons (the Wallet tab's filter).
+export const getCustomerTransactions = (
+  id: string,
+  page = 0,
+  limit = 25,
+  reasons?: readonly string[],
+) =>
   getJson<{ items: SupportTransaction[]; total: number }>(
-    `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}`,
+    `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}${reasons?.length ? `&reasons=${reasons.join(',')}` : ''}`,
   );
 
 // `opts` narrows the history server-side (status = vaulted | bought_back |
@@ -274,13 +328,14 @@ export const getCustomerPulls = (
   id: string,
   page = 0,
   limit = 25,
-  opts?: { status?: string; source?: string },
+  opts?: { status?: string; source?: string; sort?: 'newest' | 'value' },
 ) => {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(page * limit),
   });
   if (opts?.status) params.set('status', opts.status);
+  if (opts?.sort && opts.sort !== 'newest') params.set('sort', opts.sort);
   if (opts?.source) params.set('source', opts.source);
   return getJson<{
     items: SupportPull[];
@@ -462,17 +517,84 @@ export interface EconomyReport {
   }[];
 }
 
-// Optional [from, to) ISO window scopes the ledger totals to a period; omit
-// both for all-time (the default). Liability + RTP are always current-state.
-export async function getEconomyReport(
-  from?: string,
-  to?: string,
-): Promise<EconomyReport> {
-  const qs = new URLSearchParams();
-  if (from) qs.set('from', from);
-  if (to) qs.set('to', to);
-  const q = qs.toString();
-  return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
+// ── Profit report (cash view, spec 2026-10-14-admin-finance-pages §4) ────────
+
+/** Real customers only ('default': no non-default group, not a generated
+ *  account) or every account. */
+export type CustomerScope = 'default' | 'all';
+
+/** One direction of real money through the gateway. `fees` covers only rows
+ *  whose net is on file; `missing_fees` counts the rest (fee = a minimum). */
+export interface ProfitCashSide {
+  count: number;
+  gross: number;
+  fees: number;
+  missing_fees: number;
+  /** Settled rows with no amount on file (settled by hand): gross is a floor. */
+  missing_gross: number;
+}
+
+export interface ProfitReport {
+  as_of: string;
+  scope: CustomerScope;
+  range: string;
+  /** ISO instants, half-open; null for all time. */
+  window: { from: string; to: string } | null;
+  previous: { from: string; to: string } | null;
+  cash: {
+    topups: ProfitCashSide;
+    withdrawals: ProfitCashSide;
+    /** The regional rails' FX spread (Settlement's "Conversion earned"). */
+    fx_earned: number;
+    kept: number;
+    /** null when there is no previous window (all time). */
+    previous_kept: number | null;
+  };
+  /** Right now, whatever the window. */
+  owed: {
+    wallet_cash: number;
+    wallet_bonus: number;
+    wallet_no_topup: number;
+    /** Payouts requested, not paid yet: already out of the wallets. */
+    payouts_in_flight: number;
+    /** Closed weeks' referral commission, not paid yet. */
+    commission_unpaid: number;
+    cards: { count: number; delivering: number; sellback: number };
+    /** Cards of players who never topped up: reported, not owed. */
+    cards_no_topup: { count: number; sellback: number };
+    total: number;
+    all_time_kept: number;
+    /** Cards delivered, all time: they left as goods, a cost. */
+    shipped: { count: number; value: number };
+    if_all_cashed_out: number;
+  };
+  activity: {
+    pack_sales: number;
+    sellbacks: number;
+    coin_flip_payouts: number;
+    promo_given: number;
+    delivery_fees: number;
+    referral_commission: number;
+    adjustments: number;
+  };
+  packs: EconomyReport['packs'];
+}
+
+export type ProfitRange = StatsRange | 'all';
+
+// `from`/`to` are inclusive MYT days (YYYY-MM-DD), sent only for 'custom'.
+export async function getProfitReport(
+  range: ProfitRange,
+  from: string,
+  to: string,
+  scope: CustomerScope,
+): Promise<ProfitReport> {
+  const qs = new URLSearchParams({ range, scope });
+  if (range === 'custom') {
+    qs.set('from', from);
+    qs.set('to', to);
+  }
+  return getJson<ProfitReport>(`/admin/profit-report?${qs.toString()}`);
 }
 
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
@@ -496,6 +618,7 @@ export interface StatsFigures {
 
 export interface StatsReport {
   as_of: string;
+  scope?: CustomerScope;
   /** ISO instants; windows are half-open [from, to). */
   current: { from: string; to: string; stats: StatsFigures };
   previous: { from: string; to: string; stats: StatsFigures };
@@ -506,13 +629,66 @@ export async function getStatsReport(
   range: StatsRange,
   from: string,
   to: string,
+  scope: CustomerScope = 'all',
 ): Promise<StatsReport> {
   const qs = new URLSearchParams({ range });
+  if (scope !== 'all') qs.set('scope', scope);
   if (range === 'custom') {
     qs.set('from', from);
     qs.set('to', to);
   }
   return getJson<StatsReport>(`/admin/stats?${qs.toString()}`);
+}
+
+/** One of GET /admin/stats/leaders' top players for a window. */
+export interface PeriodLeader {
+  customer_id: string;
+  name: string | null;
+  email: string | null;
+  /** MYR; null for draws, which are counted. */
+  amount: number | null;
+  /** Top-ups, payouts or pack opens behind it (1 for the biggest top-up). */
+  count: number;
+}
+
+export interface LeadersReport {
+  as_of: string;
+  scope: CustomerScope;
+  from: string;
+  to: string;
+  /** Each is null when nobody qualifies in the window. */
+  leaders: {
+    topped_up: PeriodLeader | null;
+    biggest_topup: PeriodLeader | null;
+    withdrawn: PeriodLeader | null;
+    draws: PeriodLeader | null;
+  };
+}
+
+export async function getLeaders(
+  range: StatsRange,
+  scope: CustomerScope = 'all',
+): Promise<LeadersReport> {
+  const qs = new URLSearchParams({ range });
+  if (scope !== 'all') qs.set('scope', scope);
+  return getJson<LeadersReport>(`/admin/stats/leaders?${qs.toString()}`);
+}
+
+/** GET /admin/stats/online: signed-in players with the storefront open in the
+ *  last `window_minutes`. `online` is null when the backend could not read
+ *  its presence store. */
+export interface OnlineNow {
+  as_of: string;
+  scope: CustomerScope;
+  window_minutes: number;
+  online: number | null;
+}
+
+export async function getOnlineNow(
+  scope: CustomerScope = 'all',
+): Promise<OnlineNow> {
+  const qs = scope === 'all' ? '' : `?scope=${scope}`;
+  return getJson<OnlineNow>(`/admin/stats/online${qs}`);
 }
 
 // ── Gateway settlement report (calendar weekly/monthly gateway result) ───────
@@ -559,9 +735,10 @@ export async function getSettlementReport(
   granularity: SettlementGranularity,
   periods: number,
   currency: string,
+  scope: CustomerScope = 'all',
 ): Promise<SettlementReport> {
   return getJson<SettlementReport>(
-    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}&currency=${encodeURIComponent(currency)}`,
+    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}&currency=${encodeURIComponent(currency)}${scope === 'all' ? '' : `&scope=${scope}`}`,
   );
 }
 
@@ -632,6 +809,14 @@ export interface GatewayAuditFinding {
   amount: number | null;
   note: string;
   audited_at: string | null;
+  /** Who acknowledged this finding on Settlement and when, while the note is
+   *  still the one they acknowledged. Absent from an older backend. */
+  acknowledged?: {
+    by: string | null;
+    at: string | null;
+    /** From the admin action log; absent from an older backend. */
+    reason?: string | null;
+  } | null;
 }
 
 export interface GatewayAudit {
@@ -640,7 +825,14 @@ export interface GatewayAudit {
    *  getGatewayBalance's. */
   gateway: HistoricalGatewayId;
   last_audited_at: string | null;
+  /** Rows the gateway disagrees with. */
   findings_total: number;
+  /** Rows from a retired gateway, which can never be checked again: listed,
+   *  counted apart. Absent from a backend older than this field. */
+  retired_total?: number;
+  /** Findings an operator acknowledged: listed last, greyed, never in
+   *  findings_total. Absent from a backend older than this field. */
+  acknowledged_total?: number;
   totals: { deposits: GatewayAuditTotals; withdrawals: GatewayAuditTotals };
   /** Settled totals of every OTHER gateway that ever moved money, so a switch
    *  never hides the previous gateway's history from this page. */
@@ -651,6 +843,19 @@ export interface GatewayAudit {
   }[];
   findings: GatewayAuditFinding[];
 }
+
+/** Settlement's Acknowledge: the note is the one on screen, so a finding the
+ *  audit has re-worded since is refused (409) rather than acknowledged blind. */
+export const acknowledgeAuditFinding = (body: {
+  kind: 'deposit' | 'withdrawal';
+  id: string;
+  note: string;
+  reason: string;
+}) =>
+  postJson<{ acknowledged: boolean }>(
+    '/admin/payments/audit/acknowledge',
+    body,
+  );
 
 export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
   return getJson<GatewayAudit>(
@@ -705,6 +910,54 @@ export async function savePaymentGateway(input: {
   force?: boolean;
 }): Promise<PaymentGatewaySetting> {
   return postJson<PaymentGatewaySetting>('/admin/payments/gateway', input);
+}
+
+// ── Withdrawal controls (2026-10-17) ────────────────────────────────────────
+// The Withdraw and Touch 'n Go switches, a daily closed window for each
+// (Malaysia time, may wrap past midnight) and the TNG minimum. Mirrors the
+// API's withdrawal-controls.ts.
+
+export interface DailyClosure {
+  on: boolean;
+  /** "HH:MM", Malaysia time. */
+  close_at: string | null;
+  reopen_at: string | null;
+}
+export interface ChannelControl {
+  open: boolean;
+  /** ISO instant a switched-off channel reopens by itself; null = only an
+   *  admin reopens it. */
+  off_until: string | null;
+  schedule: DailyClosure;
+}
+export interface WithdrawalControls {
+  withdrawals: ChannelControl;
+  tng: ChannelControl & { min_rm: number | null };
+}
+export interface ChannelStatus {
+  open: boolean;
+  /** ISO; null while closed = only an admin can reopen it. */
+  reopens_at: string | null;
+}
+export interface WithdrawalControlsView {
+  controls: WithdrawalControls;
+  status: { withdrawals: ChannelStatus; tng: ChannelStatus };
+  /** What the server config allows whatever the switches say. */
+  env: { withdrawals: boolean; tng: boolean };
+  tng_min_floor_rm: number;
+}
+
+export async function getWithdrawalControls(): Promise<WithdrawalControlsView> {
+  return getJson<WithdrawalControlsView>('/admin/payments/withdrawal-controls');
+}
+
+export async function saveWithdrawalControls(
+  input: WithdrawalControls & { reason: string },
+): Promise<WithdrawalControlsView> {
+  return postJson<WithdrawalControlsView>(
+    '/admin/payments/withdrawal-controls',
+    input,
+  );
 }
 
 // PriceCharting proxies (the API token lives server-side only). A 503 from the
@@ -1280,6 +1533,10 @@ export interface PixelPokemonRow {
   id: string;
   name: string;
   dex: number | null;
+  /** The deck ('pokemon' | 'one-piece'): Pokémon are numbered by `dex`,
+   *  every other franchise by `number`. */
+  franchise: string;
+  number: number | null;
   variant: string;
   types: string[];
   image_url: string | null;
@@ -1297,6 +1554,7 @@ export interface PixelPokemonPage {
 
 export interface PixelPokemonQuery {
   q?: string;
+  franchise?: string;
   type?: string;
   variant?: string;
   custom?: '' | 'true' | 'false';
@@ -1314,6 +1572,7 @@ export async function getPixelPokemon(
     offset: String((params.page ?? 0) * limit),
   });
   if (params.q) qs.set('q', params.q);
+  if (params.franchise) qs.set('franchise', params.franchise);
   if (params.type) qs.set('type', params.type);
   if (params.variant) qs.set('variant', params.variant);
   if (params.custom) qs.set('custom', params.custom);
@@ -1322,7 +1581,9 @@ export async function getPixelPokemon(
 
 export interface CreatePixelPokemonBody {
   name: string;
+  franchise?: string;
   dex?: number | null;
+  number?: number | null;
   variant?: string;
   types?: string[];
   image_url: string;
@@ -1334,8 +1595,10 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 
 // Gateway deposits (GET /admin/payments/deposits) — the operator's only
 // window into money-in. 'stale' means the row is still pending past the
-// reconciliation sweep's window, i.e. a payment that may have landed at the
-// gateway without ever being credited here.
+// reconciliation sweep's window — mostly a customer who walked away, which the
+// next sweep expires. 'stuck' is the narrow subset the dashboard flags: still
+// pending two sweeps later with a gateway id, i.e. possibly a payment that
+// landed at the gateway without ever being credited here.
 export type GatewayDepositView =
   'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
@@ -1368,6 +1631,7 @@ export interface GatewayDeposit {
   created_at: string;
   settled_at: string | null;
   stale: boolean;
+  stuck: boolean;
 }
 
 export interface GatewayDepositsResponse {
@@ -1383,6 +1647,8 @@ export function getGatewayDeposits(
   status: GatewayDepositView,
   pageSize = 50,
   sort?: string,
+  /** One customer's attempts only (the player page's Payments tab). */
+  customerId?: string,
 ): Promise<GatewayDepositsResponse> {
   const params = new URLSearchParams({
     status,
@@ -1393,6 +1659,7 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
+  if (customerId) params.set('customer_id', customerId);
   return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
 }
 
@@ -1472,6 +1739,8 @@ export function getGatewayWithdrawals(
   status: GatewayWithdrawalView,
   pageSize = 50,
   sort?: string,
+  /** One customer's payouts only (the player page's Payments tab). */
+  customerId?: string,
 ): Promise<GatewayWithdrawalsResponse> {
   const params = new URLSearchParams({
     status,
@@ -1480,6 +1749,7 @@ export function getGatewayWithdrawals(
   });
   // Same contract as getGatewayDeposits: omitted = status-dependent default.
   if (sort) params.set('sort', sort);
+  if (customerId) params.set('customer_id', customerId);
   return getJson<GatewayWithdrawalsResponse>(
     `/admin/payments/withdrawals?${params}`,
   );
@@ -1557,14 +1827,18 @@ export interface PlayerRow {
   phone: string | null;
   /** Customer-group names — the odds-set membership the operator sees. */
   groups: string[];
+  /** The EFFECTIVE player group's name (the odds engine's rule); null = the
+   *  default group. groups[0] is just whichever membership came first. */
+  player_group: string | null;
   vip_level: number;
   wallet_balance: number;
   vault_value: number;
   vault_count: number;
+  /** Turnover; this and the three below cover the list's `window`. */
   total_spend: number;
-  /** Lifetime top-ups (Σ topup ledger rows). */
+  /** Top-ups (Σ topup ledger rows). */
   total_topup: number;
-  /** Lifetime withdrawals (Σ cashout rows, positive; refunds net out). */
+  /** Withdrawals (Σ cashout rows, positive; refunds net out). */
   total_withdrawn: number;
   /** total_topup − total_withdrawn: cash the player has put in, net. */
   total_contribution: number;
@@ -1593,19 +1867,32 @@ export interface PlayersPage {
   total: number;
   offset: number;
   limit: number;
+  /** The period the turnover and money in/out columns cover; null = all time. */
+  window: { from: string; to: string } | null;
   players: PlayerRow[];
 }
 
-// `sort` is `<column>:<asc|desc>`; the route allowlists the column
-// (created_at | email | name) and falls back to created_at.
+/** GET /admin/players' ?range=: a Stats preset, or custom with its MYT days
+ *  (YYYY-MM-DD). None = all time. */
+export type PlayersPeriod = { range: StatsRange; from?: string; to?: string };
+
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column and falls
+// back to created_at. `group` is 'default' (everyone outside a non-default
+// group) or a group id.
 export const listPlayers = (
   page = 0,
   q?: string,
   limit = 50,
   sort = 'created_at:desc',
+  group?: string,
+  period?: PlayersPeriod,
 ) =>
   getJson<PlayersPage>(
-    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${group ? `&group=${encodeURIComponent(group)}` : ''}${
+      period
+        ? `&range=${period.range}${period.range === 'custom' ? `&from=${encodeURIComponent(period.from ?? '')}&to=${encodeURIComponent(period.to ?? '')}` : ''}`
+        : ''
+    }`,
   );
 
 /** One generated partner account — what POST /admin/players answers and what
@@ -1688,6 +1975,55 @@ export const getSpendReport = (id: string) =>
   getJson<{ periods: { period: string; spend: number }[] }>(
     `/admin/customers/${encodeURIComponent(id)}/spend-report`,
   );
+
+/** One window of a player's money: top-ups and withdrawal requests (net of
+ *  refunds) from the credit ledger, the Players list's own sums. */
+export interface CustomerMoneyPeriod {
+  topups: { count: number; amount: number };
+  withdrawals: { count: number; amount: number };
+  /** top-ups − withdrawals: the Players list's "Total contribution". */
+  contribution: number;
+}
+
+/** GET /admin/customers/:id/money: the player page's money card. `cash`,
+ *  `owed` and `activity` are the Profit report's, all time, for this
+ *  player alone. */
+export interface CustomerMoney {
+  as_of: string;
+  customer_id: string;
+  windows: Record<'today' | 'd7' | 'month', { from: string; to: string }>;
+  periods: Record<'today' | 'd7' | 'month' | 'all', CustomerMoneyPeriod>;
+  last: {
+    topup_at: string | null;
+    withdrawal_at: string | null;
+    open_at: string | null;
+  };
+  /** The wallet as the player's withdraw button sees it (walletSummary). */
+  wallet: {
+    balance: number;
+    withdrawable: number;
+    /** Spend-only bonus inside the balance. */
+    bonus: number;
+    frozen: boolean;
+    /** Never topped up = nothing may be withdrawn or shipped. */
+    has_topup: boolean;
+    /** Deposits must be spent on packs before they can leave. */
+    playthrough: { deposited: number; used: number; remaining: number };
+  };
+  cash: ProfitReport['cash'];
+  owed: ProfitReport['owed'];
+  activity: ProfitReport['activity'];
+  play: {
+    /** Cards real money won, at draw-time value × today's rate, each in its
+     *  normal (non-bonus) share: the leaderboard's basis. */
+    cards_won: { count: number; value: number };
+    /** cards_won as a percent of pack spend; null with no spend. */
+    return_pct: number | null;
+  };
+}
+
+export const getCustomerMoney = (id: string) =>
+  getJson<CustomerMoney>(`/admin/customers/${encodeURIComponent(id)}/money`);
 
 /** Core Medusa customer record (the Profile tab), not the gacha projection. */
 export interface AdminCustomerDetail {
@@ -2200,10 +2536,41 @@ export interface CustomerReferralCard {
   /** Non-null when the player's group is a partner group: its rate is what
    *  pays them and the manual control below is locked (spec 2026-09-09). */
   partner_group: { id: string; name: string; rate_bp: number } | null;
-  downline: { customer_id: string; since: string }[];
+  /** Direct referrals, uncapped — the downline list stops at 1000. */
+  downline_count: number;
+  /** The still-open settlement week, live — the same numbers the player's own
+   *  /referral page shows. rate_bp is the effective rate (group > manual >
+   *  tier); partner says it came from a group or manual rate. */
+  week: {
+    start: string;
+    turnover_cents: number;
+    rate_bp: number;
+    projected_cents: number;
+    partner: boolean;
+  };
+  /** What can stop a week's line paying on Wednesday: over
+   *  auto_approve_max_cents the run waits for an admin; over
+   *  line_ceiling_cents the close voids the line. */
+  payout_limits: {
+    auto_approve_max_cents: number;
+    line_ceiling_cents: number;
+  };
+  /** Spend is commission spend: the normal (non-bonus) part of pack opens,
+   *  net of reversals — the Players list's "total spend" rule. name/email are
+   *  null for a customer whose record is gone. */
+  downline: {
+    customer_id: string;
+    since: string;
+    name: string | null;
+    email: string | null;
+    week_spend_cents: number;
+    lifetime_spend_cents: number;
+  }[];
   lines: {
     id: string;
     settlement_id: string;
+    /** MYT Tuesday the line's week starts, 'YYYY-MM-DD'. */
+    week_start: string | null;
     basis_cents: number;
     rate_bp: number;
     amount_cents: number;
@@ -2263,6 +2630,8 @@ export interface AdminTaskDefinition {
   reward: Record<string, unknown>;
   active: boolean;
   sort: number;
+  /** Lucky Draw tickets a claim also pays (0 = none). */
+  tickets: number;
   /** Optional run window (ISO). null/null = runs until retired. */
   starts_at: string | null;
   ends_at: string | null;
@@ -2289,11 +2658,166 @@ export async function saveTaskDefinition(input: {
   reward: Record<string, unknown>;
   active: boolean;
   sort: number;
+  /** Always sent: the backend keeps a stored value only when this is omitted. */
+  tickets: number;
   starts_at: string | null;
   ends_at: string | null;
   reason: string;
 }): Promise<{ id: string }> {
   return postJson<{ id: string }>('/admin/tasks', input);
+}
+
+// ── Lucky Draw (spec 2026-10-24) ─────────────────────────────────────────────
+// Mirrors AdminLuckyDrawEvent / AdminLuckyDrawPrize in the backend's packs
+// service. An undrawn prize has no seed anywhere in these shapes — only its
+// public `seed_hash`; `result.seed` exists once the draw has run.
+
+export interface AdminLuckyDrawPrize {
+  id: string;
+  kind: 'card' | 'credit';
+  card_handle: string | null;
+  credit_myr: number | null;
+  title: string;
+  image_url: string | null;
+  sort: number;
+  /** ISO. */
+  draw_at: string;
+  cancelled_at: string | null;
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
+  /** RM: the credit amount, or a card's current value (null if the card is gone). */
+  value_myr: number | null;
+  result: {
+    winner_customer_id: string | null;
+    winner_tickets: number;
+    total_tickets: number;
+    entrant_count: number;
+    drawn_at: string;
+    seed: string;
+    /** false only when a winner exists and nothing was minted / credited. */
+    granted: boolean;
+  } | null;
+}
+
+export interface AdminLuckyDrawEvent {
+  id: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  status: 'draft' | 'published' | 'cancelled';
+  prizes: AdminLuckyDrawPrize[];
+}
+
+export interface AdminLuckyDrawEventInput {
+  id?: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  /** A NEW event only (an edit with prizes is refused): its whole prize pool,
+   *  created with it in one transaction. */
+  prizes?: AdminLuckyDrawNewPrize[];
+}
+
+/** One prize as POST /admin/lucky-draw/prizes takes it (plus `reason`). Send
+ *  every field: an omitted sort resets to 0 and an omitted image to null. */
+export interface AdminLuckyDrawPrizeInput {
+  id?: string;
+  event_id: string;
+  kind: 'card' | 'credit';
+  card_handle: string | null;
+  credit_myr: number | null;
+  title: string;
+  image_url: string | null;
+  sort: number;
+  /** null = the event's end on create, the stored time on edit. */
+  draw_at: string | null;
+}
+
+/** One prize of a new event: the prize route's fields without the ids (the
+ *  event does not exist yet). Send every field. */
+export type AdminLuckyDrawNewPrize = Omit<
+  AdminLuckyDrawPrizeInput,
+  'id' | 'event_id'
+>;
+
+export async function listLuckyDraw(): Promise<AdminLuckyDrawEvent[]> {
+  const data = await getJson<{ events: AdminLuckyDrawEvent[] }>(
+    '/admin/lucky-draw',
+  );
+  return data.events;
+}
+
+export const saveLuckyDrawEvent = (
+  input: AdminLuckyDrawEventInput & { reason: string },
+) =>
+  postJson<{ id: string; prize_ids: string[] }>(
+    '/admin/lucky-draw/events',
+    input,
+  );
+
+export const publishLuckyDrawEvent = (id: string, reason: string) =>
+  postJson<{ id: string; status: 'published' }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(id)}/publish`,
+    { reason },
+  );
+
+export const saveLuckyDrawPrize = (
+  input: AdminLuckyDrawPrizeInput & { reason: string },
+) => postJson<{ id: string }>('/admin/lucky-draw/prizes', input);
+
+export const cancelLuckyDrawPrize = (id: string, reason: string) =>
+  postJson<{ refunded: number }>(
+    `/admin/lucky-draw/prizes/${encodeURIComponent(id)}/cancel`,
+    { reason },
+  );
+
+export interface AdminLuckyDrawEntrant {
+  customer_id: string;
+  tickets: number;
+}
+
+export async function listLuckyDrawEntries(
+  prizeId: string,
+): Promise<AdminLuckyDrawEntrant[]> {
+  const data = await getJson<{ entries: AdminLuckyDrawEntrant[] }>(
+    `/admin/lucky-draw/prizes/${encodeURIComponent(prizeId)}/entries`,
+  );
+  return data.entries;
+}
+
+export interface AdminLuckyDrawTicketHistory {
+  balance: number;
+  /** Newest first (the backend caps it at 200). */
+  rows: { delta: number; reason: string; ref: string; created_at: string }[];
+}
+
+export const getLuckyDrawTickets = (customerId: string) =>
+  getJson<AdminLuckyDrawTicketHistory>(
+    `/admin/lucky-draw/tickets?customer_id=${encodeURIComponent(customerId)}`,
+  );
+
+/** Give (positive) or take back (negative) a customer's Lucky Draw tickets.
+ *  The same idempotency key replays instead of granting twice. */
+export async function adjustCustomerTickets(
+  id: string,
+  tickets: number,
+  note: string,
+  idempotencyKey?: string,
+): Promise<{ tickets: number; balance: number }> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/lucky-draw-tickets`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets, note, idempotency_key: idempotencyKey }),
+    },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  return (await res.json()) as { tickets: number; balance: number };
 }
 
 // ── Announcement popup (spec 2026-10-06 §5) ──────────────────────────────────

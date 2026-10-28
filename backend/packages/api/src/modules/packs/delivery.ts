@@ -65,14 +65,21 @@ export type DeliveryRequestVerdict =
 // the same caller-facing 404 upstream (no existence leak), but we distinguish
 // them here for precise logging/branching.
 //
-// `freeUnlocked` is the caller's hasPaidOpen(callerId) — resolved ONCE per
-// request, never stored on the pull, so the customer's first paid open lifts
-// the free-welcome lock with zero writes (spec 2026-08-14).
+// `lockedIds` is the caller's lockedPullIds(callerId, fetchedPulls) — the
+// ONE lock rule (free welcome pull, daily task card), resolved once per
+// request and never stored on the pull, so the customer's first paid open
+// lifts it with zero writes (spec 2026-08-14).
+//
+// `prizesShipHere` is the generic delivery path's flag: prize pulls ride in
+// the same parcel as the vault cards (2026-10-23) and pass on to the lock
+// check. recordRewardWithdrawal never sets it — it ships only what earns the
+// 'reward_source' verdict.
 export function validateDeliveryRequest(
   fetchedPulls: PullLike[],
   requestedIds: string[],
   callerId: string,
-  freeUnlocked: boolean,
+  lockedIds: ReadonlySet<string>,
+  opts: { prizesShipHere?: boolean } = {},
 ): DeliveryRequestVerdict {
   if (requestedIds.length === 0) return 'empty';
   if (new Set(requestedIds).size !== requestedIds.length) return 'duplicate';
@@ -90,14 +97,14 @@ export function validateDeliveryRequest(
       if (pull.status === 'bought_back') return 'bought_back';
       return 'not_vaulted';
     }
-    // Reward prizes ship ONLY via recordRewardWithdrawal (daily cap +
-    // is_reward stamping) — never via the generic delivery path. This is a
-    // ROUTING verdict, not a refusal: the vault sends these pulls to the
-    // reward path rather than showing the customer a wall.
-    if (pull.source === 'reward') return 'reward_source';
-    // The free welcome pull ships only after the customer's first PAID open —
-    // same lock the buyback step applies (modules/packs/free-pack.ts).
-    if (pull.source === 'free' && !freeUnlocked) return 'free_locked';
+    // Without the flag this is a ROUTING verdict, not a refusal: the caller
+    // (recordRewardWithdrawal) ships exactly the pulls that earn it.
+    if (pull.source === 'reward' && !opts.prizesShipHere) {
+      return 'reward_source';
+    }
+    // A locked pull ships only after the customer's first PAID open — same
+    // lock the buyback step applies (lockedPullIds).
+    if (lockedIds.has(pull.id)) return 'free_locked';
   }
   return 'ok';
 }
@@ -156,10 +163,14 @@ export function validateDeliveryStatusTransition(
 // West Malaysia RM15, East Malaysia RM35. Shipment protection is included up
 // to RM200 of order card value; above that, 5% insurance on the FULL order
 // value is MANDATORY (operator decision 2026-08-25 — the English brief said
-// "required", the optional reading was rejected). MY-only: the request step
-// refuses non-MY country codes, so a fee is always computable.
+// "required", the optional reading was rejected). Malaysia and Singapore only
+// (Singapore RM50 since 2026-10-14): the request steps refuse any other
+// country, so a fee is always computable.
 export const WEST_SHIPPING_MYR = 15;
 export const EAST_SHIPPING_MYR = 35;
+// Singapore, shipped direct (operator decision 2026-10-14): flat RM50, and
+// every delivery pays its zone's fee, prize cards included.
+export const SINGAPORE_SHIPPING_MYR = 50;
 export const PROTECTION_INCLUDED_MYR = 200;
 export const INSURANCE_RATE = 0.05;
 
@@ -170,12 +181,18 @@ export type DeliveryFee = {
   total: number;
 };
 
-// ONE copy of the MY-only rule for both write paths (request step + address
-// edit route) so the guard and its customer copy can't drift.
-export const MY_ONLY_MESSAGE = 'We currently ship within Malaysia only.';
-export function isMalaysianAddress(countryCode: string): boolean {
-  return countryCode.trim().toUpperCase() === 'MY';
+// ONE copy of the shipping-country rule for every write path (request step,
+// prize route, address edit route) so the guard and its copy can't drift.
+export const SHIPPING_COUNTRIES_MESSAGE =
+  'We currently ship within Malaysia and Singapore only.';
+/** The countries a delivery can go to: Malaysia and (since 2026-10-14)
+ *  Singapore, each with its own rate below. */
+export function isShippableCountry(countryCode: string): boolean {
+  const cc = countryCode.trim().toUpperCase();
+  return cc === 'MY' || cc === 'SG';
 }
+const isSingapore = (countryCode: string | null | undefined): boolean =>
+  (countryCode ?? '').trim().toUpperCase() === 'SG';
 
 // East Malaysia = Labuan 87xxx, Sabah 88xxx–91xxx, Sarawak 93xxx–98xxx — one
 // contiguous numeric range (92xxx is unassigned in Malaysia's plan).
@@ -190,11 +207,31 @@ export function isEastMalaysiaPostcode(postalCode: string): boolean {
 // zoned, and a zone that can't be derived used to fall through to the CHEAP
 // rate — so an unparseable postcode is refused at the door instead
 // (security review 2026-08-25).
-export function isShippablePostcode(postalCode: string): boolean {
-  return /^\d{5}$/.test(postalCode.trim());
+export function isShippablePostcode(
+  postalCode: string,
+  countryCode: string = 'MY',
+): boolean {
+  // Singapore postcodes are six digits; Malaysian ones five.
+  return (isSingapore(countryCode) ? /^\d{6}$/ : /^\d{5}$/).test(
+    postalCode.trim(),
+  );
 }
 
-export type DeliveryZone = 'west' | 'east';
+/** The refusal for a postcode isShippablePostcode rejects, per country. */
+export function postcodeMessage(countryCode: string): string {
+  return isSingapore(countryCode)
+    ? 'Enter a valid 6-digit Singapore postcode for this address.'
+    : 'Enter a valid 5-digit Malaysian postcode for this address.';
+}
+
+export type DeliveryZone = 'west' | 'east' | 'sg';
+
+// An address that names Singapore (or "Singapura", the Malay spelling) in its
+// state or city. Billed the Singapore rate whatever country code was typed,
+// the same way a Sabah address with a KL postcode is billed East: the dearer
+// reading wins. NOT matched on the street lines: a Malaysian "Jalan Singapura"
+// would be over-billed RM50 with no way to correct it.
+const SINGAPORE_PLACE_RE = /\b(singapore|singapura)\b/i;
 
 // The East Malaysian states + their major localities. Matched on the address's
 // province AND city because the postcode alone is customer-typed: a Sabah
@@ -212,11 +249,20 @@ export function deliveryZone(
   postalCode: string,
   province: string | null | undefined,
   city: string | null | undefined,
+  countryCode?: string | null,
 ): DeliveryZone {
-  if (isEastMalaysiaPostcode(postalCode)) return 'east';
   const place = [province, city].filter(Boolean).join(' ');
+  // Singapore is the dearest zone, so it is checked first.
+  if (isSingapore(countryCode) || SINGAPORE_PLACE_RE.test(place)) return 'sg';
+  if (isEastMalaysiaPostcode(postalCode)) return 'east';
   return EAST_PLACE_RE.test(place) ? 'east' : 'west';
 }
+
+export const ZONE_SHIPPING_MYR: Record<DeliveryZone, number> = {
+  west: WEST_SHIPPING_MYR,
+  east: EAST_SHIPPING_MYR,
+  sg: SINGAPORE_SHIPPING_MYR,
+};
 
 const toCents = (n: number) => Math.round(n * 100) / 100;
 
@@ -229,15 +275,36 @@ export function computeDeliveryFee(
   orderValueMyr: number,
   province?: string | null,
   city?: string | null,
+  countryCode?: string | null,
 ): DeliveryFee {
   const shipping =
-    deliveryZone(postalCode, province, city) === 'east'
-      ? EAST_SHIPPING_MYR
-      : WEST_SHIPPING_MYR;
+    ZONE_SHIPPING_MYR[deliveryZone(postalCode, province, city, countryCode)];
   const insurance =
     orderValueMyr > PROTECTION_INCLUDED_MYR
       ? toCents(orderValueMyr * INSURANCE_RATE)
       : 0;
+  return { shipping, insurance, total: toCents(shipping + insurance) };
+}
+
+// One parcel pays ONE shipping fee (2026-10-23): prize cards sent with vault
+// cards ride in the vault order instead of shipping as their own order and
+// paying the zone fee again. Insurance is kept exactly as the old split
+// charged it — the vault cards on their combined value, each prize on its own
+// value — so shipping them together never costs more than separately.
+export function computeParcelFee(
+  postalCode: string,
+  vaultValueMyr: number,
+  prizeValuesMyr: number[],
+  province?: string | null,
+  city?: string | null,
+  countryCode?: string | null,
+): DeliveryFee {
+  const fee = (value: number) =>
+    computeDeliveryFee(postalCode, value, province, city, countryCode);
+  const { shipping, insurance: vaultInsurance } = fee(vaultValueMyr);
+  const insurance = toCents(
+    prizeValuesMyr.reduce((sum, v) => sum + fee(v).insurance, vaultInsurance),
+  );
   return { shipping, insurance, total: toCents(shipping + insurance) };
 }
 

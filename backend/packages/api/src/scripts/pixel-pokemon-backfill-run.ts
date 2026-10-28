@@ -29,13 +29,13 @@ export default async function backfillRun({ container }: ExecArgs) {
   // Skip already-linked cards: since the 2026-07-11 manual-link era a link can
   // be an operator's deliberate pick (e.g. a custom sprite), and re-deriving
   // from the name would clobber it with the seeded normal entry.
-  const cards: { id: string; name: string }[] = [];
+  const cards: { id: string; name: string; set: string | null }[] = [];
   const PAGE = 1000;
   for (let skip = 0; ; skip += PAGE) {
     const batch = await packs.listCards({}, { skip, take: PAGE });
     for (const c of batch) {
       if (c.pixel_pokemon_id) continue;
-      cards.push({ id: c.id, name: c.name });
+      cards.push({ id: c.id, name: c.name, set: c.set ?? null });
     }
     if (batch.length < PAGE) break;
   }

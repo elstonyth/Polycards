@@ -33,7 +33,6 @@ export default async function BankWithdrawalPage() {
   // withdrawable.ts's order, where its tests pin it.
   const frozen = wallet?.isFrozen === true;
   const noTopup = wallet !== null && !wallet.hasTopup;
-  const playthrough = wallet?.playthrough ?? null;
   // Partner groups (spec 2026-09-09): a member of a group that blocks
   // withdrawals gets the notice instead of a form the backend
   // (blockGroupWithdrawals) would refuse on submit. UX only — the refusal
@@ -60,36 +59,31 @@ export default async function BankWithdrawalPage() {
               aria-hidden
             />
             <span>
-              Withdrawals are not available on this account. Your credit balance
-              stays spendable on packs.
+              Withdrawals are not available on this account. Your balance stays
+              spendable on packs.
             </span>
           </div>
         ) : WITHDRAWALS_OPEN ? (
           <WithdrawForm
             withdrawable={withdrawable}
+            available={wallet?.available ?? null}
             frozen={frozen}
             noTopup={noTopup}
-            playthrough={playthrough}
             bonus={wallet?.bonus ?? 0}
+            remaining={wallet?.playthrough.remaining ?? 0}
           />
         ) : (
-          <>
-            <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5 text-sm text-white/80">
-              <Landmark
-                className="mt-0.5 h-4 w-4 shrink-0 text-white/60"
-                aria-hidden
-              />
-              <span>
-                Bank withdrawals aren&apos;t open yet — payouts go live with the
-                payment gateway. Your credit balance is safe and stays spendable
-                on packs in the meantime.
-              </span>
-            </div>
-            <p className="mt-4 text-[13px] text-white/60">
-              Want value out today? Sell-back credits from your vault apply
-              instantly to your balance.
-            </p>
-          </>
+          <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5 text-sm text-white/80">
+            <Landmark
+              className="mt-0.5 h-4 w-4 shrink-0 text-white/60"
+              aria-hidden
+            />
+            <span>
+              Bank withdrawals aren&apos;t open yet — payouts go live with the
+              payment gateway. Your balance is safe and stays spendable on packs
+              in the meantime.
+            </span>
+          </div>
         )
       ) : (
         <>

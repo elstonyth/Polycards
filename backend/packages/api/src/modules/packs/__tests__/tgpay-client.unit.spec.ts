@@ -16,6 +16,7 @@ import {
   TGPAY_NOT_FOUND,
   TGPAY_PAYOUT_DISABLED,
   TGPAY_PAYOUT_FLOAT_EMPTY,
+  TGPAY_UPSTREAM_ERROR,
   type TgpayConfig,
 } from '../tgpay-client';
 
@@ -309,6 +310,43 @@ describe('createPayout / balances', () => {
     )) as TgpayError;
     expect(err.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(false);
     expect(err.definite).toBe(true);
+  });
+
+  // Production 2026-10-14 (PC-286fcc20…, RM 512.40): TGPay answered a JSON
+  // 400 whose text was THEIR upstream's 502 page. Read as a refusal, the
+  // payout was refunded at once; TGPay had created it and still held it
+  // PENDING hours later, after the customer's retry was paid. A wrapped
+  // server error says nothing about whether the payout exists, so it is
+  // ambiguous like any 5xx: the row stays pending for the sweep.
+  it('a 4xx that wraps an upstream 5xx or an HTML page is ambiguous, never a refusal', async () => {
+    const page =
+      'API error 502: <!DOCTYPE html>\n<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->';
+    for (const body of [
+      { statusCode: 400, message: page },
+      { statusCode: 400, errors: page },
+      { statusCode: 400, msg: 'API error 503: Service Unavailable' },
+      { statusCode: 400, message: '<html><body>Bad Gateway</body></html>' },
+    ]) {
+      stubFetch(body, 400);
+      const err = (await createPayout(payout, config).catch(
+        (e: unknown) => e,
+      )) as TgpayError;
+      expect(err.definite).toBe(false);
+      expect(err.has(TGPAY_UPSTREAM_ERROR)).toBe(true);
+      expect(err.httpStatus).toBe(400);
+    }
+    // Their own refusals keep being refusals, wrapped 4xx included.
+    for (const message of [
+      'No payout provider is available for this order',
+      'API error 400: invalid account',
+    ]) {
+      stubFetch({ statusCode: 400, message }, 400);
+      const err = (await createPayout(payout, config).catch(
+        (e: unknown) => e,
+      )) as TgpayError;
+      expect(err.definite).toBe(true);
+      expect(err.has(TGPAY_UPSTREAM_ERROR)).toBe(false);
+    }
   });
 
   it('reads both wallets', async () => {

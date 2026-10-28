@@ -16,12 +16,30 @@ export type TaskRequirement =
       /** A pixel_pokemon id — narrows the count to that one Pokémon.
        *  null/absent = any linked pixel card. */
       pixel_pokemon_id?: string | null;
-    };
+    }
+  /** Settled gateway top-ups, whole RM — per period for daily/weekly, in
+   *  total for an achievement. */
+  | { type: 'topup_myr'; amount_myr: number };
 
 export type TaskReward =
   | { type: 'credit'; amount_myr: number }
   | { type: 'pack'; pack_id: string }
   | { type: 'card'; card_handle: string };
+
+/** A requirement as GET /store/tasks sends it: a rip goal narrowed to one
+ *  pack also carries that pack's title and art, a pull goal narrowed to one
+ *  Pokémon its name and sprite — so the row can SHOW what to rip or pull, not
+ *  just say it. null = the row is gone or has no picture. */
+export type HubRequirement =
+  | TaskRequirement
+  | (Extract<TaskRequirement, { type: 'rip_count' }> & {
+      pack_title: string | null;
+      pack_image: string | null;
+    })
+  | (Extract<TaskRequirement, { type: 'vault_pixel_count' }> & {
+      pokemon_name: string | null;
+      pokemon_image: string | null;
+    });
 
 /** A reward as GET /store/tasks sends it: pack and card rewards also carry
  *  what they are, what they are worth (RM) and their picture, so the row can
@@ -56,15 +74,22 @@ export type TaskKind = (typeof TASK_KINDS)[number];
 // re-claim it every period. A per-period vault_count would be rip_count
 // without a pack filter, so it stays achievement-only too. Pixel pulls work
 // both ways: per period they count that period's paid pulls (see PeriodFacts).
+// Top-ups too: per period that period's top-ups, as an achievement the total.
 const PERIODIC_TYPES = new Set([
   'checkin_days',
   'rip_count',
   'vault_pixel_count',
+  'topup_myr',
 ]);
 const TYPES_BY_KIND: Record<TaskKind, Set<string>> = {
   daily: PERIODIC_TYPES,
   weekly: PERIODIC_TYPES,
-  achievement: new Set(['reach_level', 'vault_count', 'vault_pixel_count']),
+  achievement: new Set([
+    'reach_level',
+    'vault_count',
+    'vault_pixel_count',
+    'topup_myr',
+  ]),
 };
 
 /** The claim period a task's reward is once-per: the MYT day for a daily
@@ -85,6 +110,8 @@ export function taskPeriodKey(
 // Sanity ceiling on a single task's credit reward — same defensive stance as
 // the reward-box MAX_BOX_CREDIT_MYR cap.
 export const MAX_TASK_CREDIT_MYR = 10_000;
+// Sanity ceiling on a top-up goal, so a typo'd extra zero is refused.
+export const MAX_TASK_TOPUP_MYR = 100_000;
 
 const bad = (m: string): never => {
   throw new MedusaError(MedusaError.Types.INVALID_DATA, m);
@@ -144,6 +171,15 @@ export function validateTaskRequirement(
         count: r.count as number,
         pixel_pokemon_id: (r.pixel_pokemon_id as string | undefined) ?? null,
       };
+    case 'topup_myr':
+      if (
+        !posInt(r.amount_myr) ||
+        (r.amount_myr as number) > MAX_TASK_TOPUP_MYR
+      )
+        bad(
+          `topup_myr: amount_myr must be whole ringgit, 1..${MAX_TASK_TOPUP_MYR}.`,
+        );
+      return { type, amount_myr: r.amount_myr as number };
     default:
       return bad(`Unknown requirement type '${String(type)}'.`);
   }
@@ -191,6 +227,8 @@ export interface PeriodFacts {
   pixelPulls: number;
   /** Per-species tallies, keyed by pixel_pokemon_id. */
   pixelPullsById: Map<string, number>;
+  /** RM credited by settled gateway top-ups in the window. */
+  topupMyr: number;
 }
 
 /** The facts the service counts for one customer; the evaluator maps a
@@ -207,6 +245,8 @@ export interface TaskFacts {
   vaultPixelCount: number;
   /** Per-species tallies, keyed by pixel_pokemon_id. */
   vaultPixelCountById: Map<string, number>;
+  /** Lifetime RM credited by settled gateway top-ups. */
+  topupMyrTotal: number;
 }
 
 /** Is this definition inside its scheduled run window at `at`?
@@ -262,6 +302,10 @@ export function taskProgress(
       target = requirement.count;
       break;
     }
+    case 'topup_myr':
+      current = kind === 'achievement' ? facts.topupMyrTotal : period.topupMyr;
+      target = requirement.amount_myr;
+      break;
     default:
       // An unrecognised requirement (a row written before a union change, or
       // straight into the DB) leaves target at 0 — and `0 >= 0` would read as

@@ -1,6 +1,7 @@
 import {
   EMPTY_TOTALS,
   foldLedgerRow,
+  forPacksCents,
   totalsToUsd,
   type LedgerTotals,
 } from "../credit-summary";
@@ -78,6 +79,8 @@ describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
       vipSpendTotal: 125,
       depositedPlaythroughTotal: 100, // the RM100 topup carries a non-null basis
       bonusBalance: 0,
+      packSpendTotal: 125,
+      withdrawnTotal: 0,
     });
   });
 
@@ -182,5 +185,103 @@ describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
     expect(t.vipSpendCents).toBe(0); // turnover nets to zero on reversal too
     expect(t.externalBalanceCents).toBe(10000); // external balance fully restored
     expect(t.balanceCents).toBe(10000); // net wallet unchanged by the round-trip
+  });
+});
+
+// The history's per-row "for packs" marks (spec 2026-10-15 §5): each row's move
+// into (+) or out of (−) "still to use on packs". They must add up to the
+// wallet's playthrough.deposited − used, or the marks explain a number the
+// wallet does not show.
+describe("forPacksCents — per-row move of still-to-use-on-packs", () => {
+  it("a top-up with a basis adds its whole amount", () => {
+    expect(
+      forPacksCents({ amount: 50, reason: "topup", externalFundedCents: 5000 }),
+    ).toBe(5000);
+  });
+
+  it("a pre-1b top-up (NULL basis) is grandfathered out, like the wallet", () => {
+    expect(
+      forPacksCents({ amount: 50, reason: "topup", externalFundedCents: null }),
+    ).toBe(0);
+  });
+
+  it("a stamped sell-back adds its stamp; an unstamped one adds nothing", () => {
+    expect(
+      forPacksCents({ amount: 20, reason: "buyback", externalFundedCents: 2000 }),
+    ).toBe(2000);
+    expect(
+      forPacksCents({ amount: 30, reason: "buyback", externalFundedCents: 0 }),
+    ).toBe(0);
+    expect(
+      forPacksCents({ amount: 30, reason: "buyback", externalFundedCents: null }),
+    ).toBe(0);
+  });
+
+  it("a pack open takes the external money it consumed; its reversal gives it back", () => {
+    expect(
+      forPacksCents({ amount: -45, reason: "pack_open", externalFundedCents: -3000 }),
+    ).toBe(-3000);
+    expect(
+      forPacksCents({ amount: 45, reason: "pack_open", externalFundedCents: 3000 }),
+    ).toBe(3000);
+    // fully paid with bonus / winnings: no for-packs money moved
+    expect(
+      forPacksCents({ amount: -45, reason: "pack_open", externalFundedCents: 0 }),
+    ).toBe(0);
+  });
+
+  it("leaves every other row unmarked", () => {
+    for (const reason of ["cashout", "adjustment", "bonus_grant", "reward_credit", "delivery_fee"]) {
+      expect(
+        forPacksCents({ amount: -10, reason, externalFundedCents: 0 }),
+      ).toBe(0);
+    }
+  });
+
+  it("the marks add up to deposited − used (the spec example)", () => {
+    // Top up 50, open 45, sell the pull for 30 (not held), sell a free-pack
+    // pull for 20 (held in full) → RM 25 still to use on packs.
+    const rows = [
+      { amount: 50, reason: "topup", externalFundedCents: 5000 },
+      { amount: -45, reason: "pack_open", externalFundedCents: -4500 },
+      { amount: 30, reason: "buyback", externalFundedCents: 0 },
+      { amount: 20, reason: "buyback", externalFundedCents: 2000 },
+    ];
+    const t = rows.reduce(foldLedgerRow, EMPTY_TOTALS);
+    const marks = rows.reduce((s, r) => s + forPacksCents(r), 0);
+    expect(marks).toBe(2500);
+    expect(marks).toBe(t.depositedPlaythroughCents - t.externalFundedSpendCents);
+  });
+});
+
+describe("foldLedgerRow — the history's Spent on packs / Withdrawn split", () => {
+  const fold = (rows: Parameters<typeof foldLedgerRow>[1][]) =>
+    rows.reduce(foldLedgerRow, EMPTY_TOTALS);
+
+  it("Spent on packs counts the whole open, bonus part included, net of reversals", () => {
+    const t = fold([
+      // RM 45 pack: RM 15 bonus + RM 30 own money → RM 45 spent on packs.
+      { amount: -45, reason: "pack_open", externalFundedCents: -3000, bonusCents: -1500 },
+      // an aborted RM 10 open and its reversal net out
+      { amount: -10, reason: "pack_open", externalFundedCents: -1000 },
+      { amount: 10, reason: "pack_open", externalFundedCents: 1000 },
+      // delivery fees and withdrawals are not pack spend
+      { amount: -15, reason: "delivery_fee", externalFundedCents: 0 },
+      { amount: -100, reason: "cashout", externalFundedCents: 0 },
+    ]);
+    expect(t.packSpendCents).toBe(4500);
+    expect(t.vipSpendCents).toBe(3000); // VIP still counts the normal part only
+    expect(totalsToUsd(t).packSpendTotal).toBe(45);
+  });
+
+  it("Withdrawn counts cashouts and nets a refunded one back out", () => {
+    const t = fold([
+      { amount: -100, reason: "cashout", externalFundedCents: 0 },
+      { amount: -50, reason: "cashout", externalFundedCents: 0 },
+      { amount: 50, reason: "cashout", externalFundedCents: 0 }, // payout refused, refunded
+      { amount: -45, reason: "pack_open", externalFundedCents: 0 },
+    ]);
+    expect(t.withdrawnCents).toBe(10000);
+    expect(totalsToUsd(t).withdrawnTotal).toBe(100);
   });
 });

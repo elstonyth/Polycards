@@ -10,7 +10,6 @@ import {
   Tabs,
   toast,
 } from '@medusajs/ui';
-import { Star } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useRewardsSettings,
@@ -360,7 +359,8 @@ const SettingsTab = () => {
 export default DailyRewardsPage;
 
 export const config: RouteConfig = {
-  label: 'VIP',
-  icon: Star,
-  rank: 32,
+  label: 'pcNav.vipLevels',
+  translationNs: 'translation',
+  rank: 0,
+  nested: '/rewards',
 };

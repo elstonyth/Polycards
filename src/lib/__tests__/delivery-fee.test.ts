@@ -1,13 +1,56 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeDeliveryFee,
+  computeParcelFee,
   deliveryZone,
   isEastMalaysiaPostcode,
   isShippablePostcode,
   EAST_SHIPPING_MYR,
   WEST_SHIPPING_MYR,
+  isShippableCountry,
+  postcodeHint,
 } from '../delivery-fee';
-import { MY_STATES } from '@/lib/my-states';
+import { MY_STATES, stateAfterCountryChange, statesFor } from '@/lib/my-states';
+
+// Singapore (2026-10-14): shipped direct, flat RM50 — mirrors the backend.
+describe('Singapore delivery', () => {
+  it('ships to Malaysia and Singapore only', () => {
+    expect(isShippableCountry('MY')).toBe(true);
+    expect(isShippableCountry('sg')).toBe(true);
+    expect(isShippableCountry('TH')).toBe(false);
+  });
+
+  it('wants 6 digits for Singapore, 5 for Malaysia', () => {
+    expect(isShippablePostcode('018983', 'SG')).toBe(true);
+    expect(isShippablePostcode('18983', 'SG')).toBe(false);
+    expect(isShippablePostcode('50450', 'MY')).toBe(true);
+    expect(postcodeHint('SG')).toMatch(/6-digit Singapore/);
+    expect(postcodeHint('MY')).toMatch(/5-digit Malaysian/);
+  });
+
+  it('zones and prices Singapore at RM50, the dearer reading winning', () => {
+    expect(deliveryZone('018983', null, 'Singapore', 'SG')).toBe('sg');
+    expect(deliveryZone('50450', null, 'Singapore', 'MY')).toBe('sg');
+    expect(computeDeliveryFee('018983', 100, null, 'Singapore', 'SG')).toEqual({
+      shipping: 50,
+      insurance: 0,
+      total: 50,
+    });
+  });
+
+  it('offers Singapore as the only "state" for a Singapore address', () => {
+    expect(statesFor('SG')).toEqual(['Singapore']);
+    expect(statesFor('MY')).toBe(MY_STATES);
+    expect(statesFor('')).toBe(MY_STATES);
+  });
+
+  it('fills in Singapore and clears a state from the other country', () => {
+    expect(stateAfterCountryChange('SG', '')).toBe('Singapore');
+    expect(stateAfterCountryChange('SG', 'Selangor')).toBe('Singapore');
+    expect(stateAfterCountryChange('MY', 'Singapore')).toBe('');
+    expect(stateAfterCountryChange('MY', 'Selangor')).toBe('Selangor');
+  });
+});
 
 // Mirror of the backend spec (delivery-fee.unit.spec.ts) — keeps the client
 // preview honest against the authoritative backend charge.
@@ -102,6 +145,27 @@ describe('computeDeliveryFee', () => {
       shipping: WEST_SHIPPING_MYR,
       insurance: 16.67,
       total: 31.67,
+    });
+  });
+});
+
+// Mirror of the backend computeParcelFee spec (2026-10-23): one parcel, one
+// shipping fee; insurance as separate orders charged it.
+describe('computeParcelFee', () => {
+  it('charges one zone fee for vault cards plus prize cards', () => {
+    expect(computeParcelFee('50000', 120, [80])).toEqual({
+      shipping: WEST_SHIPPING_MYR,
+      insurance: 0,
+      total: WEST_SHIPPING_MYR,
+    });
+  });
+
+  it('insures the vault cards together and each prize on its own value', () => {
+    expect(computeParcelFee('50000', 190, [190]).insurance).toBe(0);
+    expect(computeParcelFee('50000', 250, [300, 100])).toEqual({
+      shipping: 15,
+      insurance: 27.5,
+      total: 42.5,
     });
   });
 });

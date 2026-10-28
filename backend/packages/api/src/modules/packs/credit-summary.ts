@@ -32,6 +32,12 @@ export interface LedgerTotals {
   // Bonus Balance (spec 2026-10-07): Σ bonus_cents — spend-only credit inside
   // balanceCents. vipSpendCents above counts only the normal part of opens.
   bonusBalanceCents: number;
+  // The history's "Spent on packs" (2026-10-15): net pack_open spend, its
+  // bonus part INCLUDED (unlike vipSpendCents); reversals net it down.
+  packSpendCents: number;
+  // The history's "Withdrawn": Σ cashout normal part negated
+  // (PLAYER_LEDGER_SUMS.withdrawn) — a refunded withdrawal (+cashout) nets out.
+  withdrawnCents: number;
 }
 
 // Frozen: this is the shared fold SEED. foldLedgerRow is non-mutating today, but
@@ -46,6 +52,8 @@ export const EMPTY_TOTALS: Readonly<LedgerTotals> = Object.freeze({
   vipSpendCents: 0,
   depositedPlaythroughCents: 0,
   bonusBalanceCents: 0,
+  packSpendCents: 0,
+  withdrawnCents: 0,
 });
 
 export function foldLedgerRow(
@@ -81,7 +89,8 @@ export function foldLedgerRow(
     // Mirrors SQL DEPOSITED_PT_SEN_SQL: a topup with amount>0 AND
     // external_funded_cents IS NOT NULL (a NULL-basis pre-1b topup is
     // grandfathered OUT — gate on `!= null`, not `> 0`), plus a buyback's
-    // stamped share from bonus or gift play (2026-10-09).
+    // stamped share from bonus or welcome play (2026-10-09; gift and reward
+    // sales stamp only before 2026-10-15, ADR 0012).
     depositedPlaythroughCents:
       acc.depositedPlaythroughCents +
       (cents > 0 &&
@@ -92,7 +101,32 @@ export function foldLedgerRow(
           ? ext
           : 0),
     bonusBalanceCents: acc.bonusBalanceCents + bonus,
+    packSpendCents:
+      acc.packSpendCents + (row.reason === "pack_open" ? -cents : 0),
+    withdrawnCents:
+      acc.withdrawnCents + (row.reason === "cashout" ? bonus - cents : 0),
   };
+}
+
+/** One ledger row's move into (+) or out of (−) the wallet's "still to use
+ *  on packs", in sen (spec 2026-10-15 §5), so the history can mark each row
+ *  and the marks add up to playthrough.deposited − used. Deposited side
+ *  mirrors DEPOSITED_PT_SEN_SQL (a top-up with a basis, a stamped sell-back);
+ *  used side mirrors used_cents (a pack open's stored, negative consumption —
+ *  its reversal row stores it back positive). Every other row is 0. */
+export function forPacksCents(row: {
+  amount: number;
+  reason: string;
+  externalFundedCents: number | null;
+}): number {
+  const ext = Math.round(row.externalFundedCents ?? 0);
+  if (row.reason === "topup")
+    return row.amount > 0 && row.externalFundedCents != null
+      ? Math.round(row.amount * 100)
+      : 0;
+  if (row.reason === "buyback") return Math.max(0, ext);
+  if (row.reason === "pack_open") return ext;
+  return 0;
 }
 
 export function totalsToUsd(t: LedgerTotals): {
@@ -103,6 +137,8 @@ export function totalsToUsd(t: LedgerTotals): {
   vipSpendTotal: number;
   depositedPlaythroughTotal: number;
   bonusBalance: number;
+  packSpendTotal: number;
+  withdrawnTotal: number;
 } {
   return {
     balance: t.balanceCents / 100,
@@ -112,5 +148,7 @@ export function totalsToUsd(t: LedgerTotals): {
     vipSpendTotal: t.vipSpendCents / 100,
     depositedPlaythroughTotal: t.depositedPlaythroughCents / 100,
     bonusBalance: t.bonusBalanceCents / 100,
+    packSpendTotal: t.packSpendCents / 100,
+    withdrawnTotal: t.withdrawnCents / 100,
   };
 }

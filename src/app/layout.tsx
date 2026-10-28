@@ -6,6 +6,7 @@ import AppHeader from '@/components/app-shell/AppHeader';
 import SiteFooter from '@/components/app-shell/SiteFooter';
 import InviteWelcome from '@/components/InviteWelcome';
 import TabBar from '@/components/app-shell/TabBar';
+import { GamesSheet } from '@/components/app-shell/GamesSheet';
 import { CreditDotProvider } from '@/components/app-shell/CreditDotProvider';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { VaultDotProvider } from '@/components/app-shell/VaultDotProvider';
@@ -111,6 +112,7 @@ export default async function RootLayout({
                   {/* Footer carries the TabBar clearance (pb-28) on phones. */}
                   <SiteFooter />
                   <TabBar />
+                  <GamesSheet />
                   {/* Site-wide free-pack badge; /slots renders its own copy from
                     server state, so the global one skips that route. */}
                   <GlobalFreePackBadge />

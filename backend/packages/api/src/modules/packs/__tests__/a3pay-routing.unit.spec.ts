@@ -10,9 +10,11 @@ import {
   regionalDepositGateway,
 } from '../gateway-deposit';
 import {
+  payoutCurrencyFor,
   payoutGatewayFor,
   regionalPayoutGateways,
 } from '../gateway-withdrawal';
+import { regionalDepositBand } from '../payment-fx';
 
 // A3Pay (SGD) runs BESIDE the active RM gateway and must never become it:
 // that would send every RM top-up to an SGD rail.
@@ -66,6 +68,17 @@ describe('routing to the regional rail', () => {
     expect(payoutGatewayFor('DBSSSGSG', 'tgpay', {})).toBe('tgpay');
   });
 
+  // The currency is the bank's, not the rail's state: a saved Singapore bank
+  // stays SGD while A3Pay is switched off, so the storefront files it under
+  // Singapore (shown unavailable) rather than under Malaysia.
+  it('a Singapore bank stays SGD whether or not its rail is open', () => {
+    expect(payoutCurrencyFor('DBSSSGSG', 'tgpay', A3PAY_ENV)).toBe('SGD');
+    expect(payoutCurrencyFor('DBSSSGSG', 'tgpay', {})).toBe('SGD');
+    expect(payoutCurrencyFor('ALLIANCESG', 'tgpay', {})).toBe('SGD');
+    expect(payoutCurrencyFor('MBBEMYKL', 'tgpay', {})).toBe('MYR');
+    expect(payoutCurrencyFor('NOT_A_BANK', 'tgpay', {})).toBe('MYR');
+  });
+
   it('A3Pay carries an SGD band and RM fences', () => {
     expect(GATEWAYS.a3pay.currency).toBe('SGD');
     expect(GATEWAYS.a3pay.currencyLimits?.depositMax).toBeGreaterThan(0);
@@ -73,9 +86,21 @@ describe('routing to the regional rail', () => {
     // floor A3Pay lowered for us on 2026-10-12.
     expect(GATEWAYS.a3pay.currencyLimits?.depositMin).toBe(30);
     expect(GATEWAYS.a3pay.currencyLimits?.withdrawalMin).toBe(30);
-    expect(GATEWAYS.a3pay.limits.depositMax).toBe(
+    // Its RM top-up ceiling sits above the RM gateway's (operator decision,
+    // 2026-10-14) so the S$ band reaches A3Pay's own S$5,000 at any rate
+    // under RM 4 per S$, nudge included.
+    expect(GATEWAYS.a3pay.limits.depositMax).toBeGreaterThan(
       GATEWAYS.tgpay.limits.depositMax,
     );
+    for (const depositRate of [3.0, 3.17, 3.5, 3.99]) {
+      expect(
+        regionalDepositBand(
+          { depositRate },
+          GATEWAYS.a3pay.currencyLimits!,
+          GATEWAYS.a3pay.limits,
+        ).max,
+      ).toBe(5000);
+    }
     expect(GATEWAYS.a3pay.hooks.payoutVerify).toBe(
       '/hooks/a3pay/payout-verify',
     );

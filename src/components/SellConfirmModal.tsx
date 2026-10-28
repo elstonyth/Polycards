@@ -4,7 +4,7 @@ import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
-import { rm } from '@/lib/format';
+import { rm, rmNbsp } from '@/lib/format';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -40,9 +40,9 @@ export default function SellConfirmModal({
   secondsLeft?: number;
   // Bulk sell-back: when set, fmv/netCredit are totals and the copy pluralizes.
   count?: number;
-  /** Part of netCredit from bonus or gift play: paid as normal credit that
-   *  must be played through once before it can be withdrawn. Above 0 the
-   *  confirm says so. */
+  /** Part of netCredit that is for opening packs (the quote's held part:
+   *  the bonus-credit share of a pull, or all of the welcome pull). Above 0
+   *  the confirm says so; at 0 it reads as before. */
   bonus?: number;
   busy?: boolean;
   onConfirm: () => void;
@@ -155,7 +155,7 @@ export default function SellConfirmModal({
           </div>
           {lockedSen > 0 && (
             <div className="flex justify-between">
-              <dt className="text-white/55">To play through</dt>
+              <dt className="text-white/55">For packs</dt>
               <dd className="text-white/85">{rm(lockedSen / 100)}</dd>
             </div>
           )}
@@ -167,9 +167,9 @@ export default function SellConfirmModal({
             : ''}
           Selling is permanent: the{' '}
           {bulk && plural ? 'cards leave' : 'card leaves'} your vault and the
-          amount is credited to your site balance.
+          amount is credited to your balance.
           {lockedSen > 0 &&
-            ` ${rm(lockedSen / 100)} of it came from bonus credit, a vault pack or a prize: spend that on packs once before you can withdraw it.`}
+            ` ${rmNbsp(lockedSen / 100)} of this sale is for opening packs (the part paid with bonus credit, or the welcome pack’s card). Selling it pauses withdrawals until this money is used on packs.`}
         </p>
 
         <div className="mt-5 flex gap-2">

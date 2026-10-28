@@ -122,7 +122,7 @@ describe('TopUpProvider — gateway deposit watch', () => {
     await nextPoll();
 
     expect(container.textContent).toContain('600');
-    expect(container.textContent).toContain('RM 500.00 added to your balance');
+    expect(container.textContent).toContain('RM 500.00 added');
     // Server-rendered money surfaces (ledger, /me, /wallet) must re-read.
     // (The money dot's refresh went with the dot itself on 2026-08-11 — see
     // the SUSPENDED banner in components/account/credit-dot.tsx.)
@@ -140,7 +140,7 @@ describe('TopUpProvider — gateway deposit watch', () => {
     await mount();
     await nextPoll();
 
-    expect(container.textContent).not.toContain('added to your balance');
+    expect(container.textContent).not.toMatch(/RM [\d,.]+ added/);
     expect(container.textContent).toContain('100');
   });
 
@@ -182,9 +182,9 @@ describe('TopUpProvider — gateway deposit watch', () => {
 
     await mount();
     await nextPoll();
-    expect(container.textContent).not.toContain('added to your balance');
+    expect(container.textContent).not.toMatch(/RM [\d,.]+ added/);
     await nextPoll();
-    expect(container.textContent).toContain('RM 500.00 added to your balance');
+    expect(container.textContent).toContain('RM 500.00 added');
   });
 
   // A cashier return whose very first read fails must still find out what is
@@ -202,7 +202,7 @@ describe('TopUpProvider — gateway deposit watch', () => {
     await mount();
     await nextPoll();
     await nextPoll();
-    expect(container.textContent).toContain('RM 500.00 added to your balance');
+    expect(container.textContent).toContain('RM 500.00 added');
   });
 
   // ...but not forever: an expired session answers nothing, every time.
@@ -260,8 +260,8 @@ describe('TopUpProvider — gateway deposit watch', () => {
 
     await mount();
     await nextPoll();
-    expect(container.textContent).not.toContain('added to your balance');
+    expect(container.textContent).not.toMatch(/RM [\d,.]+ added/);
     await nextPoll();
-    expect(container.textContent).toContain('RM 500.00 added to your balance');
+    expect(container.textContent).toContain('RM 500.00 added');
   });
 });

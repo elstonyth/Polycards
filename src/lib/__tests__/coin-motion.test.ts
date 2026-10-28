@@ -1,21 +1,63 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { CoinTracesSchema, coinGesture, sampleCoinTrace } from '../coin-motion';
+import { PerspectiveCamera, Quaternion, Vector3 } from 'three';
+import {
+  COIN_CAMERA,
+  CoinTracesSchema,
+  coinGesture,
+  coinTraceFor,
+  sampleCoinTrace,
+} from '../coin-motion';
 
 describe('physical coin motion', () => {
+  it('keeps the full coin inside the camera through every throw and landing', () => {
+    const camera = new PerspectiveCamera(COIN_CAMERA.fov, 1.1, 0.1, 40);
+    camera.position.set(...COIN_CAMERA.position);
+    camera.lookAt(...COIN_CAMERA.target);
+    camera.updateMatrixWorld();
+    const traces = CoinTracesSchema.parse(
+      JSON.parse(readFileSync('public/coin-flip/motion.json', 'utf8')),
+    );
+    let extent = 0;
+    for (const trace of traces)
+      for (const frame of trace.frames) {
+        const rotation = new Quaternion(...frame.slice(3));
+        for (const offset of [-0.65, 0.65])
+          for (let i = 0; i < 16; i++)
+            for (const face of [-0.07, 0.07]) {
+              const angle = (i * Math.PI) / 8;
+              const point = new Vector3(
+                Math.sin(angle) * 0.72,
+                face,
+                Math.cos(angle) * 0.72,
+              )
+                .applyQuaternion(rotation)
+                .add(new Vector3(frame[0] + offset, frame[1], frame[2]))
+                .project(camera);
+              extent = Math.max(extent, Math.abs(point.x), Math.abs(point.y));
+            }
+      }
+    expect(extent).toBeLessThan(0.95);
+  });
   it('ignores drags without a flick, cancellation and invalid samples', () => {
     expect(coinGesture(0, -8, 20)).toBeNull();
     expect(coinGesture(20, 50, 200)).toBeNull();
     expect(coinGesture(20, -100, 1500)).toBeNull();
     expect(coinGesture(NaN, -50, 80)).toBeNull();
-    expect(coinGesture(10, -100, 80)).toBe('firm');
-    expect(coinGesture(5, -50, 100)).toBe('soft');
+    expect(coinGesture(10, -100, 80)).toBeGreaterThan(
+      coinGesture(5, -50, 100)!,
+    );
+    expect(coinGesture(0, -500, 5)).toBe(1);
+    expect(coinGesture(0, -50, 200)).toBe(0);
   });
   it('all recorded traces have a physical stable face, bounded path and continuous quaternions', () => {
     const traces = CoinTracesSchema.parse(
       JSON.parse(readFileSync('public/coin-flip/motion.json', 'utf8')),
     );
-    for (const profile of ['soft', 'firm'])
+    expect(coinTraceFor(traces, true, 0.62)?.profile).toBe(0.5);
+    expect(coinTraceFor(traces, false, 4)?.profile).toBe(1);
+    expect(coinTraceFor(traces, true, NaN)?.profile).toBe(0.5);
+    for (const profile of [0, 0.25, 0.5, 0.75, 1])
       for (const won of [true, false]) {
         const trace = traces.find(
           (t) => t.profile === profile && t.won === won,
@@ -36,5 +78,16 @@ describe('physical coin motion', () => {
           expect(Math.hypot(b[0], b[2])).toBeLessThan(2);
         }
       }
+    for (const won of [true, false]) {
+      const heights = [0, 0.25, 0.5, 0.75, 1].map((strength) =>
+        Math.max(
+          ...coinTraceFor(traces, won, strength)!.frames.map(
+            (frame) => frame[1],
+          ),
+        ),
+      );
+      expect(heights).toEqual([...heights].sort((a, b) => a - b));
+      expect(heights[4]! - heights[0]!).toBeGreaterThan(1);
+    }
   });
 });

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Container, Heading, Input, Table, Text } from '@medusajs/ui';
-import { Sparkles } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { RARITIES, type TierRangeMap } from '@acme/odds-math';
 import { useSaveTierSettings, useTierSettings } from '../../lib/queries';
@@ -16,10 +15,10 @@ import { StickySaveBar } from '../../components/StickySaveBar';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Tier Defaults',
-  icon: Sparkles,
-  nested: '/products',
-  rank: 4,
+  label: 'pcNav.pricing',
+  translationNs: 'translation',
+  rank: 1,
+  nested: '/packs',
 };
 
 // One editable row per rarity: bounds as free-typed strings ('' = open side).

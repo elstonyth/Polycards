@@ -13,6 +13,14 @@ import type { SettlementState } from './gateway-types';
 export const GATEWAY_AUDIT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** A row is re-audited once this much time has passed since its last audit. */
 export const GATEWAY_AUDIT_REPEAT_MS = 24 * 60 * 60 * 1000;
+/** A row with an open finding is re-audited this often instead, at any age:
+ *  a refunded payout the gateway still holds may yet be paid twice
+ *  (2026-10-14), and the Settlement page should follow within the hour. */
+export const GATEWAY_AUDIT_FINDING_REPEAT_MS = 60 * 60 * 1000;
+/** Of each batch, at most this many go to open findings. Some never clear
+ *  (a rounding gap the gateway will always report), and a batch they could
+ *  fill would starve new rows of their first check again (#776). */
+export const GATEWAY_AUDIT_FINDING_BATCH = 10;
 /** Rows per kind per run — one gateway call each. */
 export const GATEWAY_AUDIT_BATCH = 50;
 
@@ -64,7 +72,10 @@ export function depositAuditNote(
   if (state === 'success') {
     return `gateway says PAID (${amount.toFixed(2)}) but the row is ${row.status} — customer paid and was not credited`;
   }
-  if (state === 'pending') {
+  // An expired top-up the gateway still shows pending was simply never paid:
+  // the gateway does not close abandoned orders. If the customer pays later,
+  // the re-check above reports PAID.
+  if (state === 'pending' && row.status !== 'expired') {
     return `gateway still reports pending for a row we marked ${row.status}`;
   }
   return null;
@@ -106,4 +117,23 @@ function rowMoney(amount: number | null): string {
   return amount === null
     ? 'nothing (row records no amount)'
     : amount.toFixed(2);
+}
+
+// The fields to write for a new audit note, used by every writer of
+// audit_note: the audit job and the TGPay-family and A3Pay payout callbacks.
+// An operator's acknowledgement (Settlement, 2026-10-15) is dropped when the
+// note it covered is not the one being written, so a new answer from the
+// gateway, agreement included, comes back unacknowledged.
+export function stampNote(
+  row: { audit_ack_note?: string | null },
+  note: string | null,
+): Record<string, unknown> {
+  return row.audit_ack_note != null && row.audit_ack_note !== note
+    ? {
+        audit_note: note,
+        audit_ack_note: null,
+        audit_ack_by: null,
+        audit_ack_at: null,
+      }
+    : { audit_note: note };
 }

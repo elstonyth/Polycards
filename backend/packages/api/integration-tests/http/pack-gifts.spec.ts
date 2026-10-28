@@ -3,15 +3,20 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { FREE_WELCOME_CATEGORY } from '../../src/modules/packs/free-pack';
+import { bonusShareSen } from '../../src/modules/packs/bonus-credit';
+import { clearLeaderboardCache } from '../../src/api/store/leaderboard/route';
+import { clearChallengeCache } from '../../src/api/store/challenge/route';
+import { clearRecentPullsCache } from '../../src/api/store/pulls/recent/route';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
 // Pack gifts and bonus credit end to end (spec 2026-10-07): an admin gifts
 // packs and bonus credit; the customer opens "Vault x1 + RM300"; a stale screen
-// is refused, never billed; gift and bonus cards sell back as normal credit
-// that must be played through once (2026-10-09), and count toward nothing; a
-// rolled-back open hands the gift back.
+// is refused, never billed; a bonus card's bonus share must be played through
+// once (2026-10-09), a gift card's sale is withdrawable (ADR 0012), and both
+// remain excluded from tasks. Bonus-funded opens count fully on boards and
+// public pull history; gifts do not. A rolled-back open hands the gift back.
 
 const PASSWORD = 'pack-gifts-password-1';
 const ADMIN_EMAIL = 'pack-gifts-admin@test.dev';
@@ -237,8 +242,9 @@ medusaIntegrationTestRunner({
       const [giftRoll, paidRoll] = res.data.rolls;
       expect(giftRoll.pull).toMatchObject({ source: 'gift', bonus_bp: 10000 });
       expect(paidRoll.pull).toMatchObject({ source: 'pack', bonus_bp: 0 });
-      // The gift's sell-back is all bonus; the paid one none.
-      expect(giftRoll.buyback.bonus).toBe(giftRoll.buyback.amount);
+      // Neither sale is held for packs: a gift's sale is withdrawable money
+      // (ADR 0012), like the paid one.
+      expect(giftRoll.buyback.bonus).toBe(0);
       expect(paidRoll.buyback.bonus).toBe(0);
 
       const debits = await openRows();
@@ -356,9 +362,46 @@ medusaIntegrationTestRunner({
         api.get(`/admin/customers/${customerId}/gacha`, { headers: admin() }),
       );
       expect(summary.data.bonus_balance).toBe(0);
+
+      // A bonus-paid pull's sale still stamps its bonus share (two rounds,
+      // ADR 0012 left these alone): in full for the all-bonus row, its share
+      // rounded up for the mixed one. The deposit is grandfathered, so the
+      // stamps are the whole hold.
+      let stamped = 0;
+      for (const [roll, bp] of [
+        [first, 10000],
+        [second, 3334],
+      ] as const) {
+        const sold = await unwrapResponse(
+          api.post(
+            `/store/vault/${roll.pull.id}/buyback`,
+            {},
+            { headers: authed() },
+          ),
+        );
+        expect(sold.status).toBe(200);
+        const [credit] = await packs().listCreditTransactions({
+          pull_id: roll.pull.id,
+        });
+        const heldSen = bonusShareSen(
+          Math.round(Number(credit.amount) * 100),
+          bp,
+        );
+        expect(heldSen).toBeGreaterThan(0);
+        expect(credit.external_funded_cents).toBe(heldSen);
+        stamped += heldSen;
+      }
+      const held = await wallet();
+      expect(held.playthrough.remaining).toBeCloseTo(stamped / 100, 2);
+      // Spend first (ADR 0013): while that is still to use on packs, even the
+      // RM 300 of plain cash cannot leave.
+      expect(held.withdrawable).toBe(0);
     });
 
-    it('sells a gifted card back as normal credit, withdrawable once played through', async () => {
+    it('sells a gifted card back as withdrawable money (ADR 0012)', async () => {
+      // One top-up first (no top-up, no withdrawal). Grandfathered: no basis,
+      // so it holds nothing itself.
+      await deposit(PRICE);
       await giftPacks(1, 'sell');
       const opened = await openBatch(1, 1);
       const pullId = opened.data.rolls[0].pull.id;
@@ -371,22 +414,23 @@ medusaIntegrationTestRunner({
         pull_id: pullId,
       });
       const sale = Number(credit.amount);
-      // Normal credit, the whole sale stamped for playthrough (2026-10-09).
+      // Normal credit, nothing stamped for playthrough.
       expect(credit.bonus_cents ?? 0).toBe(0);
-      expect(credit.external_funded_cents).toBe(Math.round(sale * 100));
-      const locked = await wallet();
-      expect(locked).toMatchObject({ bonus: 0, withdrawable: 0 });
-      expect(locked.playthrough.remaining).toBeCloseTo(sale, 2);
-
-      // One RM 300 open plays it through; what is left can then be withdrawn.
-      await deposit(PRICE);
-      expect((await openBatch(1, 0)).status).toBe(200);
-      const unlocked = await wallet();
-      expect(unlocked.playthrough.remaining).toBe(0);
-      expect(unlocked.withdrawable).toBeCloseTo(sale, 2);
+      expect(credit.external_funded_cents ?? 0).toBe(0);
+      const after = await wallet();
+      expect(after.playthrough.remaining).toBe(0);
+      expect(after.withdrawable).toBeCloseTo(PRICE + sale, 2);
+      // The history marks no hold on the sell-back row.
+      const history = await unwrapResponse(
+        api.get('/store/credits', { headers: authed() }),
+      );
+      const saleRow = history.data.transactions.find(
+        (t: { reason: string }) => t.reason === 'buyback',
+      );
+      expect(saleRow.playthrough ?? 0).toBeCloseTo(0, 2);
     });
 
-    it('counts gift and bonus pulls toward nothing', async () => {
+    it('shows bonus draws in the feed while excluding gifts and retaining achievement and welcome rules', async () => {
       const task = await unwrapResponse(
         api.post(
           '/admin/tasks',
@@ -412,12 +456,16 @@ medusaIntegrationTestRunner({
         api.get('/store/tasks', { headers: authed() }),
       );
       expect(hub.data.tasks[0].progress.completed).toBe(false);
+      clearRecentPullsCache();
       const recent = await unwrapResponse(
         api.get('/store/pulls/recent', { headers: storeHeaders }),
       );
       const pulls = JSON.stringify(recent.data);
       const mine = await packs().listPulls({ customer_id: customerId });
-      for (const p of mine) expect(pulls).not.toContain(p.id);
+      for (const p of mine) {
+        if (p.source === 'bonus') expect(pulls).toContain(p.id);
+        else expect(pulls).not.toContain(p.id);
+      }
     });
 
     it('revokes an unopened gift and refuses an opened one', async () => {
@@ -455,17 +503,31 @@ medusaIntegrationTestRunner({
       ).toEqual(['opened', 'revoked']);
     });
 
-    it('counts gifts and bonus toward the daily mint ceiling', async () => {
-      const before = process.env.ADJUST_DAILY_MINT_MAX_RM;
-      process.env.ADJUST_DAILY_MINT_MAX_RM = '500';
+    it('caps gifts in their own daily pool, apart from credit and bonus', async () => {
+      const keys = ['ADJUST_DAILY_MINT_MAX_RM', 'GIFT_DAILY_MINT_MAX_RM'];
+      const before = keys.map((k) => process.env[k]);
+      process.env.ADJUST_DAILY_MINT_MAX_RM = String(PRICE);
+      process.env.GIFT_DAILY_MINT_MAX_RM = String(PRICE);
       try {
         expect((await giftPacks(1, 'cap-gift')).status).toBe(201);
-        const refused = await grantBonus(PRICE, 'cap-bonus');
-        expect(refused.status).toBe(400);
-        expect(refused.data.message).toMatch(/Daily credit-adjustment limit/);
+        const giftRefused = await giftPacks(1, 'cap-gift-2');
+        expect(giftRefused.status).toBe(400);
+        expect(giftRefused.data.message).toMatch(/GIFT_DAILY_MINT_MAX_RM/);
+
+        // The gift ate none of the credit pool...
+        expect((await grantBonus(PRICE, 'cap-bonus')).status).toBe(200);
+        const bonusRefused = await grantBonus(1, 'cap-bonus-2');
+        expect(bonusRefused.status).toBe(400);
+        expect(bonusRefused.data.message).toMatch(/ADJUST_DAILY_MINT_MAX_RM/);
+
+        // ...and a full credit pool no longer blocks a gift (2026-10-17).
+        process.env.GIFT_DAILY_MINT_MAX_RM = String(PRICE * 2);
+        expect((await giftPacks(1, 'cap-gift-3')).status).toBe(201);
       } finally {
-        if (before === undefined) delete process.env.ADJUST_DAILY_MINT_MAX_RM;
-        else process.env.ADJUST_DAILY_MINT_MAX_RM = before;
+        keys.forEach((k, i) => {
+          if (before[i] === undefined) delete process.env[k];
+          else process.env[k] = before[i];
+        });
       }
     });
 
@@ -508,25 +570,72 @@ medusaIntegrationTestRunner({
       expect(await packs().hasPaidOpen(customerId)).toBe(true);
     });
 
-    it('weights pulled value on the boards by the real-money share', async () => {
-      await grantBonus(PRICE / 2, 'bonus-half');
-      await deposit(PRICE / 2);
-      const res = await openBatch(1, 0);
-      const pull = res.data.rolls[0].pull;
-      expect(pull).toMatchObject({ source: 'bonus', bonus_bp: 5000 });
+    it.each([0, 150, 300])(
+      'counts the full pull on every board with RM %i bonus funding',
+      async (bonus) => {
+        if (bonus > 0) await grantBonus(bonus, 'board-bonus');
+        if (bonus < PRICE) await deposit(PRICE - bonus);
+        const week = {
+          timezone: 'Asia/Kuala_Lumpur',
+          resetDay: 1,
+          resetHour: 0,
+        };
+        // Giving credit alone never adds pulled value.
+        expect(await packs().challengeWeekPool(week)).toBe(0);
+        const res = await openBatch(1, 0);
+        expect(res.status).toBe(200);
+        const pull = res.data.rolls[0].pull;
+        expect(pull).toMatchObject({
+          source: bonus >= PRICE / 2 ? 'bonus' : 'pack',
+          bonus_bp: (bonus / PRICE) * 10000,
+        });
 
-      const [row] = (
-        await packs().leaderboardTop({ sinceMs: null, limit: 50 })
-      ).filter((r) => r.customer_id === customerId);
-      // Half real money: half the spend and half the card's value count.
-      expect(row.points).toBe((PRICE / 2) * 100);
-      expect(row.volume).toBeCloseTo(
-        // A bigNumber may come back as a number or as its raw { value } form.
-        (Number(pull.recorded_value_usd?.value ?? pull.recorded_value_usd) * FX) /
-          2,
-        1,
-      );
-    });
+        // Gifts, welcome cards and reward prizes still do not enter the board.
+        await packs().createPulls(
+          (['gift', 'free', 'reward'] as const).map((source) => ({
+            customer_id: customerId,
+            pack_id: PACK,
+            card_id: CARD,
+            rolled_at: new Date(),
+            source,
+            bonus_bp: 10000,
+            recorded_value_usd: 9999,
+          })),
+        );
+
+        const [row] = (
+          await packs().leaderboardTop({ sinceMs: null, limit: 50 })
+        ).filter((r) => r.customer_id === customerId);
+        expect(row).toMatchObject({ points: 30000, volume: 200, pulls: 1 });
+
+        clearLeaderboardCache();
+        clearChallengeCache();
+        for (const period of ['weekly', 'alltime']) {
+          const board = await api.get(`/store/leaderboard?period=${period}`, {
+            headers: storeHeaders,
+          });
+          expect(board.data.entries).toEqual([
+            expect.objectContaining({ rank: 1, volume: 200, pulls: 1 }),
+          ]);
+        }
+        const mine = await api.get('/store/leaderboard/me', {
+          headers: authed(),
+        });
+        expect(mine.data).toMatchObject({ volume: 200, pulls: 1 });
+        const challenge = await api.get('/store/challenge', {
+          headers: storeHeaders,
+        });
+        expect(challenge.data.progress.pooledMyr).toBe(200);
+        expect(challenge.data.top).toEqual([
+          expect.objectContaining({ rank: 1, volumeMyr: 200, pulls: 1 }),
+        ]);
+
+        // Board parity does not turn bonus spend into VIP turnover.
+        expect((await packs().creditSummary(customerId)).vipSpendTotal).toBe(
+          PRICE - bonus,
+        );
+      },
+    );
 
     it('audits a bonus grant with the balance read under the credit lock', async () => {
       await grantBonus(20, 'audit-1');

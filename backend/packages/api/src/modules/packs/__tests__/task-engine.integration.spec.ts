@@ -2,6 +2,7 @@ import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
+import { sellbackHoldBp } from '../bonus-credit';
 import TaskDefinition from '../models/task-definition';
 import TaskClaim from '../models/task-claim';
 import DailyCheckin from '../models/daily-checkin';
@@ -13,9 +14,12 @@ import AdminActionAudit from '../models/admin-action-audit';
 import Pull from '../models/pull';
 import Card from '../models/card';
 import Pack from '../models/pack';
+import { PixelPokemon } from '../models/pixel-pokemon';
+import { asPixelPokemonCrud } from '../pixel-pokemon-service';
 import PackOdds from '../models/pack-odds';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
+import LuckyDrawTicket from '../models/lucky-draw-ticket';
 import { taskWeekFor } from '../referral';
 import { clearFxDisplayCache } from '../pricing';
 
@@ -37,8 +41,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Card,
     Pack,
     PackOdds,
+    PixelPokemon,
     LedgerEntry,
     LedgerSequence,
+    LuckyDrawTicket,
   ],
   testSuite: ({ service }) => {
     it('check-in is once per MYT day', async () => {
@@ -100,7 +106,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(wallet.withdrawable).toBe(0);
       // The finance reports count the bonus prize whole, not its RM 0 normal part.
       const totals = await service.ledgerReasonTotals();
-      expect(totals.find((r) => r.reason === 'reward_credit')?.amount).toBe(2.5);
+      expect(totals.find((r) => r.reason === 'reward_credit')?.amount).toBe(
+        2.5,
+      );
       // A reward_credit debit is floored against the BONUS balance it spends.
       await expect(
         service.mutateCreditAtomic({
@@ -202,8 +210,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(rewardPulls).toHaveLength(1);
       expect(rewardPulls[0].status).toBe('vaulted');
-      // A prize is promo value: its whole sell-back is played through once.
+      // A prize is promo value (bonus_bp full, counts toward nothing), but a
+      // prize card's sale is withdrawable: nothing held (ADR 0012).
       expect(rewardPulls[0].bonus_bp).toBe(10000);
+      expect(sellbackHoldBp(rewardPulls[0])).toBe(0);
       // The minted pull is what the route's post-commit take is keyed off.
       expect(claim.claimed && claim.ref).toBe(rewardPulls[0].id);
       // Achievements are once EVER — a re-claim is refused.
@@ -327,8 +337,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(pulls).toHaveLength(1);
         expect(pulls[0].pack_id).toBe('bronze');
         expect(pulls[0].card_id).toBe('rolled-card');
-        // A prize is promo value: its whole sell-back is played through once.
+        // A free rip is a task reward: promo value (bonus_bp full, counts
+        // toward nothing), but its sale is withdrawable (ADR 0012).
         expect(pulls[0].bonus_bp).toBe(10000);
+        expect(sellbackHoldBp(pulls[0])).toBe(0);
         // The taken unit is earmarked on the pull, so selling the card back
         // restores it (buyback-pull.ts restores earmarked pulls only).
         expect(takes).toBe(1);
@@ -848,6 +860,343 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(next.tasks.find((t) => t.id === ripDaily)!.progress.current).toBe(
         0,
       );
+    });
+
+    // The goal side of /task shows WHAT to rip or pull ("RIP [Bronze Pack]
+    // ×10"), so a narrowed goal carries its pack's / Pokémon's name and art.
+    it('a pack- or Pokémon-scoped goal carries its name and picture (2026-10-19)', async () => {
+      const [, , , gone] = await service.createPacks([
+        {
+          slug: 'goal-pack',
+          title: 'Goal Pack',
+          category: 'standard',
+          price: 30,
+          image: '/goal.webp',
+          display_image: '/images/polycards/bronze-factory.webp',
+          status: 'active',
+        },
+        {
+          // No product shot, only the pack page's factory hero.
+          slug: 'hero-only',
+          title: 'Hero Only',
+          category: 'standard',
+          price: 30,
+          image: '',
+          display_image: '/images/polycards/celebration-factory.webp',
+          status: 'active',
+        },
+        {
+          // Not on sale yet: its name and art must not reach customers.
+          slug: 'draft-pack',
+          title: 'Secret Pack',
+          category: 'standard',
+          price: 30,
+          image: '/secret.webp',
+          status: 'draft',
+        },
+        {
+          slug: 'gone-pack',
+          title: 'Gone Pack',
+          category: 'standard',
+          price: 30,
+          image: '/gone.webp',
+          status: 'active',
+        },
+      ]);
+      await asPixelPokemonCrud(service).createPixelPokemon([
+        {
+          id: 'px_goal',
+          name: 'Pikachu',
+          types: [] as unknown as Record<string, unknown>,
+          image_url: 'https://cdn.test/pika.png',
+        },
+      ]);
+      const save = async (
+        requirement: Record<string, unknown>,
+        reward: Record<string, unknown> = { type: 'credit', amount_myr: 1 },
+      ) =>
+        (
+          await service.saveTaskDefinition({
+            kind: 'weekly',
+            title: `goal ${String(requirement.type)}`,
+            requirement,
+            reward,
+            active: true,
+            sort: 0,
+            adminId: 'admin_1',
+            reason: 'seed',
+          })
+        ).id;
+      const rip = await save({
+        type: 'rip_count',
+        count: 10,
+        pack_id: 'goal-pack',
+      });
+      const pull = await save({
+        type: 'vault_pixel_count',
+        count: 10,
+        pixel_pokemon_id: 'px_goal',
+      });
+      const any = await save({ type: 'rip_count', count: 5 });
+      const heroOnly = await save(
+        { type: 'rip_count', count: 1, pack_id: 'hero-only' },
+        { type: 'pack', pack_id: 'hero-only' },
+      );
+      const draft = await save({
+        type: 'rip_count',
+        count: 1,
+        pack_id: 'draft-pack',
+      });
+      const deleted = await save({
+        type: 'rip_count',
+        count: 1,
+        pack_id: 'gone-pack',
+      });
+      await service.softDeletePacks([gone.id]);
+
+      const hub = await service.taskHubFor({ customerId: 'cus_goal_art' });
+      const req = (id: string) =>
+        hub.tasks.find((t) => t.id === id)!.requirement;
+      expect(req(rip)).toEqual({
+        type: 'rip_count',
+        count: 10,
+        pack_id: 'goal-pack',
+        pack_title: 'Goal Pack',
+        pack_image: '/goal.webp',
+      });
+      expect(req(pull)).toEqual({
+        type: 'vault_pixel_count',
+        count: 10,
+        pixel_pokemon_id: 'px_goal',
+        pokemon_name: 'Pikachu',
+        pokemon_image: 'https://cdn.test/pika.png',
+      });
+      // A tile never shows the wide factory hero, so no shot = no picture —
+      // on the goal and on the prize alike.
+      expect(req(heroOnly)).toMatchObject({ pack_image: null });
+      expect(hub.tasks.find((t) => t.id === heroOnly)!.reward).toMatchObject({
+        pack_image: null,
+      });
+      expect(req(draft)).toMatchObject({ pack_title: null, pack_image: null });
+      expect(req(deleted)).toMatchObject({
+        pack_title: null,
+        pack_image: null,
+      });
+      // Not narrowed: nothing to picture, sent as stored.
+      expect(req(any)).toEqual({
+        type: 'rip_count',
+        count: 5,
+        pack_id: null,
+      });
+    });
+
+    it('top-up goals count settled top-ups in their window (2026-10-19)', async () => {
+      const cus = 'cus_topup';
+      const now = new Date('2026-10-07T04:00:00Z'); // Wed 12:00 MYT
+      const at = async (row: { id: string }, when: string) => {
+        // created_at is a framework column the update type does not expose
+        // (same idiom as referral-close.integration.spec.ts).
+        await service.updateCreditTransactions({
+          selector: { id: row.id },
+          data: { created_at: new Date(when) } as never,
+        });
+      };
+      const [today, monday, lastWeek, deleted, reversal, adjustment] =
+        await service.createCreditTransactions([
+          { customer_id: cus, amount: 60, reason: 'topup' },
+          { customer_id: cus, amount: 30.5, reason: 'topup' },
+          { customer_id: cus, amount: 500, reason: 'topup' },
+          { customer_id: cus, amount: 1000, reason: 'topup' },
+          { customer_id: cus, amount: -20, reason: 'topup' },
+          { customer_id: cus, amount: 999, reason: 'adjustment' },
+        ]);
+      await at(today, '2026-10-07T03:00:00Z');
+      await at(monday, '2026-10-05T02:00:00Z'); // Mon 10:00 MYT
+      await at(lastWeek, '2026-10-03T02:00:00Z');
+      await at(deleted, '2026-10-07T03:00:00Z');
+      await at(reversal, '2026-10-07T03:00:00Z');
+      await at(adjustment, '2026-10-07T03:00:00Z');
+      await service.softDeleteCreditTransactions([deleted.id]);
+
+      const save = async (
+        kind: 'daily' | 'weekly' | 'achievement',
+        amount_myr: number,
+      ) =>
+        (
+          await service.saveTaskDefinition({
+            kind,
+            title: `Top up RM ${amount_myr}`,
+            requirement: { type: 'topup_myr', amount_myr },
+            reward: { type: 'credit', amount_myr: 1 },
+            active: true,
+            sort: 0,
+            adminId: 'admin_1',
+            reason: 'seed',
+          })
+        ).id;
+      const daily = await save('daily', 50);
+      const weekly = await save('weekly', 100);
+      const total = await save('achievement', 600);
+
+      const hub = await service.taskHubFor({ customerId: cus, now });
+      const progress = (id: string) =>
+        hub.tasks.find((t) => t.id === id)!.progress;
+      expect(progress(daily)).toEqual({
+        current: 50,
+        target: 50,
+        completed: true,
+      });
+      // 60 today + 30.5 Monday; last week, the deleted row, the reversal and
+      // the admin adjustment all stay out.
+      expect(progress(weekly)).toEqual({
+        current: 90.5,
+        target: 100,
+        completed: false,
+      });
+      expect(progress(total)).toEqual({
+        current: 590.5,
+        target: 600,
+        completed: false,
+      });
+      expect(
+        await service.claimTask({ customerId: cus, taskId: weekly, now }),
+      ).toEqual({ claimed: false, reason: 'not_completed' });
+      expect(
+        await service.claimTask({ customerId: cus, taskId: daily, now }),
+      ).toMatchObject({ claimed: true });
+
+      // Next Monday the week starts empty; the lifetime total does not.
+      const nextWeek = new Date('2026-10-12T04:00:00Z');
+      const next = await service.taskHubFor({ customerId: cus, now: nextWeek });
+      expect(next.tasks.find((t) => t.id === weekly)!.progress.current).toBe(0);
+      expect(next.tasks.find((t) => t.id === total)!.progress.current).toBe(
+        590.5,
+      );
+    });
+
+    describe('Lucky Draw tickets on tasks (2026-10-24)', () => {
+      const valid = {
+        kind: 'weekly' as const,
+        title: 'Check in 1 day',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      };
+
+      it('a claim pays the task tickets once, in the same claim', async () => {
+        const { id: taskId } = await service.saveTaskDefinition({
+          ...valid,
+          tickets: 50,
+        });
+        await service.checkInDaily({ customerId: 'cus_t1' });
+        const hub = await service.taskHubFor({ customerId: 'cus_t1' });
+        expect(hub.tasks[0].tickets).toBe(50);
+        expect(await service.luckyDrawBalance('cus_t1')).toBe(0);
+
+        const first = await service.claimTask({ customerId: 'cus_t1', taskId });
+        expect(first).toMatchObject({ claimed: true, tickets: 50 });
+        expect(await service.luckyDrawBalance('cus_t1')).toBe(50);
+        const again = await service.claimTask({ customerId: 'cus_t1', taskId });
+        expect(again).toEqual({ claimed: false, reason: 'already_claimed' });
+        expect(await service.luckyDrawBalance('cus_t1')).toBe(50);
+        // The ticket row is keyed by the claim; the normal reward still paid.
+        const [row] = await service.listLuckyDrawTickets({
+          customer_id: 'cus_t1',
+        });
+        expect(row).toMatchObject({
+          delta: 50,
+          reason: 'task_claim',
+          ref: (first as { claimId: string }).claimId,
+        });
+        expect(
+          await service.listCreditTransactions({
+            customer_id: 'cus_t1',
+            reason: 'reward_credit',
+          }),
+        ).toHaveLength(1);
+      });
+
+      it('editing tickets after a claim does not change what the claim paid', async () => {
+        const { id: taskId } = await service.saveTaskDefinition({
+          ...valid,
+          tickets: 50,
+        });
+        await service.checkInDaily({ customerId: 'cus_t2' });
+        await service.claimTask({ customerId: 'cus_t2', taskId });
+        await service.saveTaskDefinition({ ...valid, id: taskId, tickets: 5 });
+
+        const [claim] = await service.listTaskClaims({
+          customer_id: 'cus_t2',
+          task_id: taskId,
+        });
+        expect((claim.reward_snapshot as { tickets: number }).tickets).toBe(50);
+        expect(claim.reward_snapshot).toMatchObject({
+          type: 'credit',
+          amount_myr: 1,
+        });
+        expect(await service.luckyDrawBalance('cus_t2')).toBe(50);
+      });
+
+      it('a task with tickets 0 writes no ticket row', async () => {
+        const { id: taskId } = await service.saveTaskDefinition(valid);
+        await service.checkInDaily({ customerId: 'cus_t3' });
+        const result = await service.claimTask({
+          customerId: 'cus_t3',
+          taskId,
+        });
+        expect(result).toMatchObject({ claimed: true, tickets: 0 });
+        expect(
+          await service.listLuckyDrawTickets({ customer_id: 'cus_t3' }),
+        ).toHaveLength(0);
+        expect(await service.luckyDrawBalance('cus_t3')).toBe(0);
+        const [claim] = await service.listTaskClaims({
+          customer_id: 'cus_t3',
+        });
+        expect((claim.reward_snapshot as { tickets: number }).tickets).toBe(0);
+      });
+
+      it('saveTaskDefinition refuses tickets above MAX_TASK_TICKETS', async () => {
+        await expect(
+          service.saveTaskDefinition({ ...valid, tickets: 10_001 }),
+        ).rejects.toThrow(/tickets/);
+        await expect(
+          service.saveTaskDefinition({ ...valid, tickets: -1 }),
+        ).rejects.toThrow(/tickets/);
+      });
+
+      it('an edit that omits tickets keeps them; an explicit 0 clears them', async () => {
+        const { id } = await service.saveTaskDefinition({
+          ...valid,
+          tickets: 7,
+        });
+        await service.saveTaskDefinition({ ...valid, id, active: false });
+        let [def] = await service.listTaskDefinitions({ id });
+        expect(def.tickets).toBe(7);
+        await service.saveTaskDefinition({ ...valid, id, tickets: 0 });
+        [def] = await service.listTaskDefinitions({ id });
+        expect(def.tickets).toBe(0);
+      });
+
+      it("luckyDrawBalance sums only the customer's live rows", async () => {
+        await service.createLuckyDrawTickets([
+          { customer_id: 'cus_b', delta: 10, reason: 'task_claim', ref: 'c1' },
+          { customer_id: 'cus_b', delta: -4, reason: 'entry', ref: 'e1' },
+          { customer_id: 'cus_b', delta: 99, reason: 'task_claim', ref: 'c2' },
+          {
+            customer_id: 'cus_other',
+            delta: 5,
+            reason: 'task_claim',
+            ref: 'c3',
+          },
+        ]);
+        const [gone] = await service.listLuckyDrawTickets({ ref: 'c2' });
+        await service.softDeleteLuckyDrawTickets([gone.id]);
+        expect(await service.luckyDrawBalance('cus_b')).toBe(6);
+        expect(await service.luckyDrawBalance('cus_none')).toBe(0);
+      });
     });
   },
 });

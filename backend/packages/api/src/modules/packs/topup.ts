@@ -10,15 +10,20 @@ export const TOPUP_MAX_RM = 10_000;
 
 // Why a message-or-null helper instead of throwing: the step owns the
 // MedusaError type (NOT_ALLOWED vs INVALID_DATA), the rule only knows money.
-export function topUpAmountError(value: unknown): string | null {
+export function topUpAmountError(
+  value: unknown,
+  /** A regional rail (A3Pay) passes its own RM ceiling: its S$ band is what
+   *  limits it, and S$5,000 credits more than TOPUP_MAX_RM. */
+  maxRm: number = TOPUP_MAX_RM,
+): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return 'Amount must be a number.';
   }
   if (value <= 0) {
     return 'Amount must be greater than zero.';
   }
-  if (value > TOPUP_MAX_RM) {
-    return `Amount must be at most RM ${TOPUP_MAX_RM.toLocaleString('en-US')} per top-up.`;
+  if (value > maxRm) {
+    return `Amount must be at most RM ${maxRm.toLocaleString('en-US')} per top-up.`;
   }
   // 2dp max, checked against the binary representation: 0.07 * 100 is
   // 7.000000000000001, so an exact integer-cents comparison would reject

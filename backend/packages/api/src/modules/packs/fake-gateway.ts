@@ -1,5 +1,7 @@
 import { banksFor } from './banks';
 import type { GatewayAdapter } from './gateway';
+import { GatewayError } from './gateway-types';
+import { TGPAY_NOT_FOUND } from './tgpay-client';
 import type {
   DepositDetail,
   MerchantBalance,
@@ -76,6 +78,10 @@ const FAKE_BALANCE: MerchantBalance = {
 
 let script: FakeScript = {};
 let seq = 0;
+/** Payouts whose submit was DEFINITELY refused: like a real gateway, the
+ *  fake then holds no such payout, so an unscripted requery of one answers
+ *  "not found" (gateway-withdrawal asks before refunding a refusal). */
+const refused = new Set<string>();
 const calls: FakeCalls = {
   deposits: [],
   withdrawals: [],
@@ -124,13 +130,31 @@ const adapter: GatewayAdapter<FakeConfig> = {
 
   async submitWithdrawal(input) {
     calls.withdrawals.push(input);
-    return play(script.submitWithdrawal, () => ({
-      transactionId: `FAKE-W-${++seq}`,
-    }));
+    try {
+      return await play(script.submitWithdrawal, () => ({
+        transactionId: `FAKE-W-${++seq}`,
+      }));
+    } catch (error) {
+      if (error instanceof GatewayError && error.definite) {
+        refused.add(input.merchantTransactionId);
+      }
+      throw error;
+    }
   },
 
   async getWithdrawalDetail(merchantTransactionId) {
     calls.withdrawalDetails.push(merchantTransactionId);
+    if (
+      script.getWithdrawalDetail === undefined &&
+      refused.has(merchantTransactionId)
+    ) {
+      throw new GatewayError(
+        `fake: ${merchantTransactionId} not found`,
+        [TGPAY_NOT_FOUND],
+        404,
+        true,
+      );
+    }
     return play(script.getWithdrawalDetail, () => ({
       transactionId: `FAKE-W-${++seq}`,
       merchantTransactionId,
@@ -173,6 +197,7 @@ export const fakeGateway: GatewayAdapter<FakeConfig> & {
   reset() {
     script = {};
     seq = 0;
+    refused.clear();
     calls.deposits = [];
     calls.withdrawals = [];
     calls.depositDetails = [];

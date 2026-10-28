@@ -2,13 +2,12 @@ import {
   ADMIN_AUDIT_ACTIONS,
   ADMIN_AUDIT_ENTITY_TYPES,
 } from '../../models/admin-action-audit';
-// Always the LATEST migration that rewrites the CHECKs (each one re-emits the
-// full lists): Migration20261007120000 added 'pack_gift' and the gift/bonus
-// actions, on top of Migration20261006120000's 'set_real_name' / 'set_phone'.
-import * as migrationModule from '../Migration20261007120000';
+// Apply the latest action CHECK, then the coin migration's entity CHECK;
+// the latter must retain Lucky Draw and settlement audit entities.
+import * as migrationModule from '../Migration20261024130000';
 import { Migration20261028120000 } from '../Migration20261028120000';
 
-const { Migration20261007120000 } = migrationModule;
+const { Migration20261024130000 } = migrationModule;
 
 // The DB CHECKs on admin_action_audit are only rewritten by an explicit
 // migration (Migration20260906090000 learned this the hard way). A value the
@@ -21,8 +20,8 @@ const { Migration20261007120000 } = migrationModule;
 
 async function checkLists(): Promise<Record<string, string[]>> {
   const sql: string[] = [];
-  const m = Object.create(Migration20261007120000.prototype) as InstanceType<
-    typeof Migration20261007120000
+  const m = Object.create(Migration20261024130000.prototype) as InstanceType<
+    typeof Migration20261024130000
   > & {
     addSql: (s: string) => void;
   };
@@ -62,6 +61,11 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'customer',
       'announcement',
       'pack_gift',
+      'gateway_deposit',
+      'gateway_withdrawal',
+      'lucky_draw_event',
+      'lucky_draw_prize',
+      'coin_flip_config',
     ]) {
       expect(entity_type).toContain(t);
     }
@@ -80,12 +84,15 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'grant_pack_gift',
       'revoke_pack_gift',
       'grant_bonus_credit',
+      'release_reward_holds',
+      'acknowledge_finding',
+      'publish',
     ]) {
       expect(action).toContain(a);
     }
   });
 
   it('exports only the migration class (the loader instantiates the first export)', async () => {
-    expect(Object.keys(migrationModule)).toEqual(['Migration20261007120000']);
+    expect(Object.keys(migrationModule)).toEqual(['Migration20261024130000']);
   });
 });

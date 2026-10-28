@@ -31,6 +31,7 @@ export async function GET(
       reward: t.reward,
       active: t.active,
       sort: t.sort,
+      tickets: t.tickets ?? 0,
       starts_at: t.starts_at ? new Date(t.starts_at).toISOString() : null,
       ends_at: t.ends_at ? new Date(t.ends_at).toISOString() : null,
       labels: labels.get(t.id) ?? { requirement: '', reward: '' },
@@ -49,6 +50,7 @@ export async function POST(
     reward?: unknown;
     active?: unknown;
     sort?: unknown;
+    tickets?: unknown;
     starts_at?: unknown;
     ends_at?: unknown;
     reason?: unknown;
@@ -87,6 +89,7 @@ export async function POST(
     reward: b.reward,
     active: b.active !== false,
     sort: typeof b.sort === 'number' && Number.isInteger(b.sort) ? b.sort : 0,
+    tickets: b.tickets,
     startsAt: when(b.starts_at, 'starts_at'),
     endsAt: when(b.ends_at, 'ends_at'),
     adminId: req.auth_context.actor_id,

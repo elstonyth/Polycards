@@ -34,6 +34,7 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
+import AutomationMonitor from '../models/automation-monitor';
 
 jest.setTimeout(300 * 1000);
 
@@ -61,6 +62,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
+    AutomationMonitor,
   ],
   testSuite: ({ service }) => {
     beforeEach(() => {

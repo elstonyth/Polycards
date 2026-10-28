@@ -99,7 +99,7 @@ describe("adjustDailyMintError", () => {
     const msg = adjustDailyMintError(9_500_00, 1_000_00, CAP);
     expect(msg).toContain("ADJUST_DAILY_MINT_MAX_RM");
     expect(msg).toContain("9500.00"); // already granted in the window
-    expect(msg).toContain("500.00"); // remaining today
+    expect(msg).toContain("500.00 remaining in that 24h window");
   });
 
   it("never reports negative remaining headroom once the window is over cap", () => {
@@ -115,6 +115,14 @@ describe("adjustDailyMintError", () => {
     expect(adjustDailyMintError(50_000_00, -1_00, CAP)).toBeNull();
     expect(adjustDailyMintError(50_000_00, -50_000_00, 0)).toBeNull();
     expect(adjustDailyMintError(0, 0, 0)).toBeNull();
+  });
+
+  it("names the gift pool's own env var for a gift refusal", () => {
+    const msg = adjustDailyMintError(49_990_00, 45_00, 50_000_00, "gift");
+    expect(msg).toContain("GIFT_DAILY_MINT_MAX_RM");
+    expect(msg).not.toContain("ADJUST_DAILY_MINT_MAX_RM");
+    expect(msg).toContain("RM 49990.00 already gifted");
+    expect(msg).toContain("RM 10.00 remaining");
   });
 
   it("refuses every positive grant when the cap is 0 (incident stop lever)", () => {

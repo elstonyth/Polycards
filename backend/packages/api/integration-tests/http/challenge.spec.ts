@@ -540,6 +540,26 @@ medusaIntegrationTestRunner({
         expect(body.progress.pooledMyr).toBe(MYR(180));
       });
 
+      // Automation accounts rank like any other account (owner, 2026-10-26).
+      it('ranks Automation accounts in the top like everyone else', async () => {
+        await packs().createAutomationMonitors([
+          {
+            id: 'global',
+            accounts: { customer_ids: ['cus_sc_1'] },
+            updated_by: 'test',
+          },
+        ]);
+        clearChallengeCache();
+
+        const body = await getStore();
+        expect(body.top.map((t: { seed: number }) => t.seed)).toEqual([
+          seedOf('cus_sc_1'),
+          seedOf('cus_sc_2'),
+        ]);
+        expect(body.top[0]).toMatchObject({ rank: 1, volumeMyr: MYR(150) });
+        expect(body.progress.pooledMyr).toBe(MYR(180));
+      });
+
       // Both routes claim to render the SAME weekly board (see the leaderboard
       // route's header), and nothing enforces it: they hold separate TOP_N /
       // FETCH_N constants and call disabledCustomerIds independently, so a

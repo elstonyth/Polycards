@@ -26,6 +26,7 @@ const task = (
   reward: { type: 'credit', amount_myr: 5 },
   active: true,
   sort: 0,
+  tickets: 0,
   starts_at: null,
   ends_at: null,
   labels: { requirement: 'Check in on 3 days this week', reward: 'RM 5.00' },
@@ -52,11 +53,15 @@ describe('draftFrom → draftToPayload round-trips every requirement shape', () 
       'vault_pixel_count (scoped)',
       { type: 'vault_pixel_count', count: 3, pixel_pokemon_id: 'px_25' },
     ],
+    // Editing a saved top-up task must not reset it to RM 1.
+    ['topup_myr', { type: 'topup_myr', amount_myr: 250 }],
   ];
 
   test.each(cases)('%s', (_name, requirement) => {
     const kind =
-      requirement.type === 'checkin_days' || requirement.type === 'rip_count'
+      requirement.type === 'checkin_days' ||
+      requirement.type === 'rip_count' ||
+      requirement.type === 'topup_myr'
         ? ('weekly' as const)
         : ('achievement' as const);
     const payload = draftToPayload(draftFrom(task({ kind, requirement })));
@@ -114,6 +119,37 @@ describe('draftToPayload rejects what the backend would reject', () => {
     expect(
       draftToPayload(d({ rewardType: 'card', rewardValue: '' })),
     ).toBeNull();
+  });
+});
+
+describe('Lucky Draw tickets (2026-10-24)', () => {
+  const d = (over: Partial<Draft>): Draft => ({
+    ...blankDraft(),
+    rewardValue: '5',
+    ...over,
+  });
+
+  test('a saved task opens with its tickets, as the text the input edits', () => {
+    expect(draftFrom(task({ tickets: 50 })).tickets).toBe('50');
+    expect(blankDraft().tickets).toBe('0');
+  });
+
+  test('the payload always carries tickets, so a save never drops them', () => {
+    // The backend keeps a stored value only when the field is OMITTED.
+    expect(draftToPayload(draftFrom(task({ tickets: 50 })))!.tickets).toBe(50);
+    expect(draftToPayload(d({}))!.tickets).toBe(0);
+  });
+
+  test('a negative or fractional ticket count is refused', () => {
+    expect(draftToPayload(d({ tickets: '-1' }))).toBeNull();
+    expect(draftToPayload(d({ tickets: '1.5' }))).toBeNull();
+    expect(draftToPayload(d({ tickets: '' }))).toBeNull();
+    expect(draftToPayload(d({ tickets: 'lots' }))).toBeNull();
+  });
+
+  test('stops at the backend ceiling (10,000)', () => {
+    expect(draftToPayload(d({ tickets: '10000' }))!.tickets).toBe(10_000);
+    expect(draftToPayload(d({ tickets: '10001' }))).toBeNull();
   });
 });
 
@@ -276,3 +312,24 @@ describe('taskStatus', () => {
     );
   });
 });
+
+describe('topup_myr goal (2026-10-19)', () => {
+  test('offered for every cadence, labelled in RM', () => {
+    expect(REQUIREMENT_TYPES.daily).toContain('topup_myr');
+    expect(REQUIREMENT_TYPES.weekly).toContain('topup_myr');
+    expect(REQUIREMENT_TYPES.achievement).toContain('topup_myr');
+    expect(requirementLabel('weekly', 'topup_myr')).toBe('Top up RM N');
+  });
+
+  test('sends amount_myr, not count', () => {
+    const payload = draftToPayload({
+      ...blankDraft(),
+      kind: 'daily',
+      reqType: 'topup_myr',
+      reqN: '100',
+      rewardValue: '5',
+    });
+    expect(payload!.requirement).toEqual({ type: 'topup_myr', amount_myr: 100 });
+  });
+});
+

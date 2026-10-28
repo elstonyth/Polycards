@@ -12,7 +12,7 @@ import {
   Text,
   toast,
 } from '@medusajs/ui';
-import { BellAlert, XMark } from '@medusajs/icons';
+import { XMark } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useAnnouncements,
@@ -33,9 +33,10 @@ import { RowActions } from '../../components/RowActions';
 // dismissal on ids + updated_at). Writes are audited, so every save carries a
 // reason.
 export const config: RouteConfig = {
-  label: 'Announcements',
-  icon: BellAlert,
-  rank: 26, // after Storefront (25)
+  label: 'pcNav.announcements',
+  translationNs: 'translation',
+  rank: 0,
+  nested: '/site',
 };
 
 const TITLE_MAX = 80;

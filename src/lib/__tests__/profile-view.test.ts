@@ -79,6 +79,7 @@ describe('toProfileView — cards map through toCardView', () => {
     expect(toProfileView(profile).collection[0]).toEqual({
       handle: 'c1',
       name: 'Card',
+      set: '',
       image: '/x.webp',
       slabImage: null,
       rarity: 'Legendary',

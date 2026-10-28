@@ -114,7 +114,7 @@ components:
 
 ### Vault coin flip (2026-10-28)
 
-Lives under Vault at `/vault/coin-flip`; no sixth tab. Select exactly one card, review the server's value and published odds, explicitly confirm, then flick or tap. Coin B uses black titanium with official emblem on the winning face and wordmark on the losing face. A physically recorded landing presents the server receipt; gestures never determine the financial result. Green denotes credited money; red is reserved for destructive confirmation/errors. No confetti, neon, autoplay or countdown pressure.
+Lives at `/vault/coin-flip`, reached from the existing Games sheet or a single Vault card action. Preserve all six navigation items. A searchable Vault modal shows slab artwork and values; the chosen card sits to the right of the tabletop on desktop and below it on phones. Review the server's value and published odds, explicitly confirm, then flick or tap. Coin B uses brushed black titanium, beveled rims and fine reeding, with the official emblem on the winning face and wordmark on the losing face. Five recorded physical throw strengths respond to flick velocity; gestures never determine the financial result. Wins lift and light-sweep the retained card with a green credit receipt. Losses lower and desaturate the forfeited card. Reduced motion reveals the receipt directly. Green denotes credited money; red is reserved for destructive confirmation/errors. No confetti, neon, autoplay or countdown pressure.
 
 The primary action remains a white pill. Keep the card, exact RM amount, keep/forfeit consequences and published odds readable. Recovery precedes another stake; history includes forfeited cards. Reduced motion and WebGL failure retain the static face, keyboard/tap path and full receipt. The floating Telegram rail is hidden on Vault subroutes to protect financial controls.
 
@@ -161,6 +161,10 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 - **Paper White / Silver Text** (#fafafa / #a3a3a3): Primary / secondary text. Body text never drops below silver — #737373 gray on charcoal fails contrast and is prohibited for running text.
 
 **The Signal Rule.** Every non-neutral color on screen must mean something a collector can name: a tier, a rarity, money in, or danger. If a color is there "for energy", delete it.
+
+### Lucky Draw only — Holo foil (2026-10-24)
+
+- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on three things: the prize wheel's rim, the prize frame in the win reveal, and the win's dust. Never chrome, never buttons, never text, never another surface. No gold anywhere on the wheel (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` / `.holo-ring` in `globals.css` only turn the light and cut the ring (still under reduced motion).
 
 ## 3. Typography
 
@@ -216,10 +220,11 @@ Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ra
 
 ### Navigation
 
-- **Bottom tab bar (mobile, the primary nav):** 5 slots with the shipped labels **Task · Ranks · Home · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: #737373. All five tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
+- **Bottom tab bar (mobile, the primary nav):** 6 slots with the shipped labels **Task · Ranks · Games · Home · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; Games, added 2026-10-25, does not navigate: it opens the game picker sheet — Lucky Draw and Coin Flip live — and lights while a game page is open; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: #737373. All six tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
 - **Header:** Ink Black, logo left; right side balance chip (Graphite pill: "RM 4.49" + white "＋" disc) opening the top-up sheet, present on every screen.
-- **Desktop (≥1024px):** the tab bar hides and the same five destinations render as pills inside the header row (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
+- **Desktop (≥1024px):** the tab bar hides and the same six destinations render as pills inside the header row (Games opens the picker as a centred dialog) (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
 - **Surfaces without a slot of their own** are owned by a tab through its `match` prefixes, so something always lights up. Me owns the account tree (`/wallet`, `/settings`, `/orders`, `/transactions`, `/bank`, `/bank-withdrawal`, `/notifications`, `/addresses`) plus **`/referral`** — a top-level brand surface reached from the Me quick-access grid, not a sixth tab. Adding a route reachable from Me means adding it to that array in the same change; a route in no `match` array leaves the whole bar dark.
+- **Page transitions (2026-10-25):** every navigation animates through React `<ViewTransition>` (`src/components/PageTransition.tsx`, mounted by `app/template.tsx` and `app/(account)/template.tsx`): the old page fades out fast, the new one fades in with a 10px rise; entering a game from the Games sheet zooms the game up from 96% while the page behind pushes away, and leaving a game reverses it. The header and tab bar sit in the layout and never move. Reduced motion: pages swap instantly.
 
 ### Signature: Sticky Stat Card
 
@@ -266,6 +271,12 @@ The home page is a six-board editorial scroll story (spec:
   with one tile is dead air. (Note: supersedes the aspirational
   starter/silver/gold/diamond band in §2 — packs use the six-tier axis in
   shipped code.)
+- **Franchise switch** — the home ladder and the `/slots` catalog show ONE
+  pack category (Pokémon, One Piece, …) at a time, behind
+  `PackCategoryTabs.tsx`: the segmented pill sized up (48px, 56px at lg), with
+  the category icon (no pack count). Only categories with packs get a tab; with
+  one, the switch is hidden. A new franchise adds a tab, never a longer list.
+  `/slots` keeps the pick in `?category=`.
 
 ### Signature: Pull History (home board 03 + pack detail)
 
@@ -306,6 +317,27 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 - **Tabs** — Daily · Weekly · Achievements as the leaderboard's segmented
   pill. A tab holding something claimable carries a Chase Gold count badge,
   so the player never has to open every tab to find a reward.
+- **Challenge ticket (2026-10-19)** — every task row is a ticket: the
+  challenge on the left body, the prize on a tear-off stub at the right
+  (`.ticket-cut` in globals.css: two paper tones split at the stub, a notch
+  punched top and bottom of a dashed hairline perforation).
+  - **Body** — the goal reads as a sum a player gets at a glance: verb,
+    picture, amount — `RIP [Bronze Pack] ×10`, `PULL [Pikachu] ×10`,
+    `TOP UP [wallet] RM 100`, `REACH [icon] LV 10`. The picture is the pack
+    or Pokémon the goal names (the hub sends `pack_image` / `pokemon_image`
+    on the requirement — a pack's product shot only, never its factory hero
+    `display_image`, and nothing for a draft pack), else the goal's icon;
+    a Pokémon's animated sprite also falls back to the icon under reduced
+    motion. The picture's alt is that pack's or Pokémon's name. Below it:
+    the task's own title, progress as one pip per step for a count of 10 or
+    fewer (a bar otherwise; money never uses pips), a Nekst `3/10` (a money
+    goal shows only the RM in — its target is the headline), and a
+    "N more rips to go" line.
+  - **Stub** — the prize art (dimmed once claimed, its worth badge never),
+    its full name (wraps, never truncates), then the state: a white Claim
+    pill only when claimable, a quiet `Locked` chip while in progress, a
+    tilted `CLAIMED` stamp once taken.
+  - The list sits bare under its heading — no panel around the tickets.
 - **Prize art** — every task shows the prize itself on a neutral pedestal
   (white/4%): the card's slab lit by its own value tier (Glow Is Earned), the
   pack's shot, or the credit coins; the worth sits under it in Nekst.
@@ -319,6 +351,33 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
   `.claim-ring`, `.claim-sweep` in globals.css). Chase Gold only, only on
   claimable things, never ambient — it marks a real prize, which is why it is
   not the confetti/coin-shower the Don'ts ban. Reduced motion: still and lit.
+
+### Signature: Lucky Draw (/lucky-draw, 2026-10-24)
+
+Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
+**Games** tab (2026-10-25; Task no longer matches `/lucky-draw`).
+
+- **Tabs** — Prizes · Results · My tickets, the leaderboard's segmented pill.
+- **Prize card** — charcoal card: the prize on a 5:7 pedestal, RM value in
+  Chase Gold Nekst, draw time in MYT with a live countdown, tickets in /
+  entrants / my chance, the top 10 (framed avatars) and one white Enter
+  pill.
+- **The wheel** (style "K — Holo Foil") — matte black and graphite wedges
+  sized by tickets, hair-thin silver lines, the holo-foil rim, a pearl hub, a
+  slim silver pointer that flicks on each edge. Pull-back, ~7 s ease-out,
+  settle, landing inside the winner's wedge (never dead centre). Win: holo
+  dust rises from the wedge, the wheel dims, and the prize rises from the hub
+  in a thin holo frame. Decoration only — the result is stored before the
+  wheel turns. Reduced motion: the winner shows directly, no spin, no dust.
+  Sound (2026-10-25, `drawStart/drawTick/drawStop/drawWin` in
+  `src/lib/slot-sfx.ts`, header mute applies): a soft air swoosh on launch, a
+  light pawl click per wedge edge (at most one per 38 ms), a muted wooden
+  knock on the stop, and a glassy E-major shimmer with high sparkles as the
+  prize rises — quiet and premium, never a casino jingle.
+- **Results** — the winner, their tickets, a Watch-the-draw replay and the
+  frozen entry list in draw order with ticket ranges. The seed and its hash
+  stay off the page (operator 2026-10-25); the server still commits and
+  stores them.
 
 ## 6. Do's and Don'ts
 
@@ -342,3 +401,12 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 - **Don't** put body text below Silver (#a3a3a3) on dark surfaces; muted-gray-on-charcoal is the #1 legibility failure.
 - **Don't** round containers past 16px or add drop shadows to buttons/cards — matte surfaces, hairline edges, earned glow only.
 - **Don't** gate content behind animations; a reveal enhances an already-visible default.
+
+## Admin console
+
+The operator dashboard (`backend/apps/admin`) is a product-register surface built on Medusa UI. Source of truth: `docs/superpowers/specs/2026-10-14-admin-redesign-design.md`.
+
+- **Colours:** Medusa UI's own light and dark themes, chosen per operator in the user menu. The darker "Vault" palette was tried on 2026-10-14 and set aside by the operator in favour of the original colours.
+- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too.
+- **Navigation:** the 8-entry sidebar, with unused core Medusa tabs hidden through `src/_navigation.ts`.
+- **Signal colours** on custom pages follow the storefront's meanings: green for money in, red for alerts, gold for "needs action".

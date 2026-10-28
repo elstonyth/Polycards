@@ -443,7 +443,7 @@ export function positiveIntFromEnv(name: string, fallback: number): number {
 
 // Logs at most once per interval so a dead Redis doesn't flood the logs at
 // request rate (ioredis also emits 'error' on every reconnect attempt).
-function throttledWarn(
+export function throttledWarn(
   intervalMs: number,
 ): (msg: string, err?: unknown) => void {
   let last = 0;
@@ -459,7 +459,7 @@ function throttledWarn(
 // One Redis connection per store, each with its own connection name but
 // identical fail-fast semantics. Undefined when REDIS_URL is unset — the
 // caller picks its own fallback.
-function connectRedis(
+export function connectRedis(
   connectionName: string,
   warn: ReturnType<typeof throttledWarn>,
 ): Redis | undefined {

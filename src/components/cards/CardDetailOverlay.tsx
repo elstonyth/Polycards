@@ -41,10 +41,13 @@ export function CardDetailOverlay({
   seed,
   buybackPercent = null,
   onClose,
+  pokemon,
 }: {
   seed: CardSeed | null;
   buybackPercent?: number | null;
   onClose: () => void;
+  /** false when opened from a non-Pokémon pack (isPokemonPack). */
+  pokemon?: boolean;
 }) {
   const handle = seed?.handle ?? null;
   const open = handle !== null;
@@ -154,6 +157,7 @@ export function CardDetailOverlay({
             seed={seed}
             detail={detail}
             buybackPercent={buybackPercent}
+            pokemon={pokemon}
           />
         </motion.div>
       </div>

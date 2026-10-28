@@ -33,6 +33,6 @@ export async function GET(
       req.query.week === 'next'
         ? 'Next week: the tasks switched on whose run window covers next Monday 00:00 Malaysia time, as the /task page will show them then.'
         : 'Live tasks only (switched on and inside their run window), as the /task page shows them.'
-    } Achievements are claimed once per account; level is the VIP level a reach_level achievement needs. Daily tasks reset every day at 00:00 Malaysia time; weekly tasks every Monday 00:00; ends_at is when a task stops showing. value_myr is today's value as the page shows it: a credit's amount, a free rip's pack price, a card's market price today (it moves with the market). achievements_poster draws the VIP-level ladder.`,
+    } Achievements are claimed once per account; level is the VIP level a reach_level achievement needs. Daily tasks reset every day at 00:00 Malaysia time; weekly tasks every Monday 00:00; ends_at is when a task stops showing. value_myr is today's value as the page shows it: a credit's amount, a free rip's pack price, a card's market price today (it moves with the market). tickets is how many Lucky Draw tickets a claim also pays; prize already says so when it is above 0, and value_myr does not count them. achievements_poster draws the VIP-level ladder.`,
   });
 }

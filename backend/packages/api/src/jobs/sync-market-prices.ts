@@ -60,11 +60,19 @@ export default async function syncMarketPricesJob(
   let skipped = 0;
   let failed = 0;
   for (const card of cards) {
+    let observed: CardRow = card;
     try {
-      const r = await refreshCardPrice(card, {
+      // A catalog sweep takes minutes; honor edits/unlinks made since its first read.
+      const [current] = await packs.listCards({ id: card.id }, { take: 1 });
+      if (!current?.pc_product_id) {
+        skipped++;
+        continue;
+      }
+      observed = current;
+      const r = await refreshCardPrice(current, {
         pcFetch: pcFetchRaw,
-        updateCards: (u) => packs.updateCards(u),
-        now,
+        updateCards: ([update]) => packs.applyCardPriceSync(current, update),
+        now: new Date(),
       });
       if (r.changed) {
         changed++;
@@ -83,6 +91,18 @@ export default async function syncMarketPricesJob(
       logger.error(
         `[sync-market-prices] card ${card.handle || card.id} failed: ${(e as Error).message}`,
       );
+      try {
+        // Unexpected errors may contain upstream URLs; store only safe operator copy.
+        await packs.applyCardPriceSync(observed, {
+          id: card.id,
+          pc_pending_price: null,
+          pc_sync_error: 'Price sync failed; retry on the next scheduled sync.',
+        });
+      } catch {
+        logger.error(
+          `[sync-market-prices] could not persist failure for ${card.handle || card.id}`,
+        );
+      }
     } finally {
       await sleep(1100);
     }

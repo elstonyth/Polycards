@@ -98,13 +98,21 @@ function postOpsAlert(
  * until a customer complained, after 8 and 9 refused attempts.
  *
  * Never throws and never rejects: callers fire it without awaiting, after the
- * refund has committed, so the customer's answer does not wait on Telegram.
+ * refund has committed (or, with `refunded: false`, for a payout the gateway
+ * could not confirm and that stays pending), so the customer's answer does not
+ * wait on Telegram.
  * Carries our reference and the amount only — never the account number or the
  * holder name.
  */
 export function alertPayoutFloatEmpty(
   scope: Scope,
-  detail: { amount: number; ref: string; via: string; gateway?: string },
+  detail: {
+    amount: number;
+    ref: string;
+    via: string;
+    gateway?: string;
+    refunded?: boolean;
+  },
 ): Promise<void> {
   const name = detail.gateway ?? 'TGPay';
   return alertOps(
@@ -114,8 +122,11 @@ export function alertPayoutFloatEmpty(
     detail.gateway ? `payout-float-empty:${detail.gateway}` : 'payout-float-empty',
     `${name} payout wallet is short: payouts are being refused with ` +
       `"Insufficient payout credit balance". Latest: RM ${detail.amount} ` +
-      `(${detail.ref}, ${detail.via}), refunded to the customer. Every payout ` +
-      `fails until the ${name} payout wallet is topped up. Repeats muted for ` +
+      `(${detail.ref}, ${detail.via}), ` +
+      (detail.refunded === false
+        ? `left pending for the sweep (${name} could not confirm it holds no such payout). `
+        : 'refunded to the customer. ') +
+      `Every payout fails until the ${name} payout wallet is topped up. Repeats muted for ` +
       `${PAYOUT_FLOAT_ALERT_EVERY_MS / 60_000} min.`,
     { muteMs: PAYOUT_FLOAT_ALERT_EVERY_MS },
   );

@@ -214,7 +214,24 @@ try {
     'Coin page accessibility',
   );
   async function arm(p) {
-    await p.getByLabel('Card from your Vault').selectOption('pull_qa');
+    if (
+      !(await p
+        .getByRole('dialog', { name: 'Choose from your Vault' })
+        .isVisible())
+    ) {
+      const change = p.getByRole('button', {
+        name: 'Change card',
+        exact: true,
+      });
+      if (await change.isVisible()) await change.click();
+      else await p.getByRole('button', { name: /Choose from Vault/ }).click();
+    }
+    await p
+      .getByRole('button', {
+        name: 'Select Pikachu · PSA 10, RM 100.00',
+        exact: true,
+      })
+      .click();
     await p.getByRole('button', { name: 'Review card & odds' }).click();
     await p.getByRole('dialog').waitFor();
     await p.getByRole('button', { name: 'Confirm card', exact: true }).click();
@@ -231,7 +248,13 @@ try {
   assert.equal(accepts, 1);
   await page.screenshot({ path: `${out}/desktop-win.png`, fullPage: true });
   await page.getByRole('button', { name: 'Choose a card' }).click();
-  assert.equal(await page.getByLabel('Card from your Vault').inputValue(), '');
+  assert.equal(
+    await page
+      .getByRole('dialog', { name: 'Choose from your Vault' })
+      .isVisible(),
+    true,
+  );
+  assert.equal(await page.locator('select').count(), 0);
   outcome = 'lost';
   await arm(page);
   // Use real hit testing and pointer input, including drag + upward release.

@@ -21,11 +21,12 @@ export default async function propose({ container }: ExecArgs) {
 
   // Fetch ALL cards, paged — never silently truncate the review set (a fixed
   // `take` cap would drop cards past it, leaving them unlinked; 2 reviewers).
-  const cards: { id: string; name: string }[] = [];
+  const cards: { id: string; name: string; set: string | null }[] = [];
   const PAGE = 1000;
   for (let skip = 0; ; skip += PAGE) {
     const batch = await packs.listCards({}, { skip, take: PAGE });
-    for (const c of batch) cards.push({ id: c.id, name: c.name });
+    for (const c of batch)
+      cards.push({ id: c.id, name: c.name, set: c.set ?? null });
     if (batch.length < PAGE) break;
   }
   const rows: ReviewRow[] = cards.map((c) => proposeRow(c));

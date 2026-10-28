@@ -1,8 +1,8 @@
 // Browser pre-check, mirroring the server gate in
 // packages/api/src/api/admin/media/validate.ts. The SERVER is authoritative
-// (it also magic-byte-sniffs and rejects animated frames); this just gives the
-// operator instant feedback instead of a round-trip. KEEP THESE NUMBERS IN
-// SYNC with validate.ts.
+// (it also magic-byte-sniffs and rejects animated frames, except for 'display'
+// and 'sprite'); this just gives the operator instant feedback instead of a
+// round-trip. KEEP THESE NUMBERS IN SYNC with validate.ts.
 
 export type ImageKind =
   | 'pack'
@@ -59,6 +59,7 @@ const PROFILES: Record<
     minHeight: 64,
     targetRatio: 1,
     aspectTolerance: 0.25,
+    maxDimension: 1024,
   },
   frame: {
     minWidth: 400,

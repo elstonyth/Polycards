@@ -6,7 +6,6 @@ import {
   FocusModal,
   Heading,
   Input,
-  Label,
   Select,
   Switch,
   Table,
@@ -15,7 +14,7 @@ import {
   Tooltip,
   toast,
 } from "@medusajs/ui";
-import { CheckCircle, InformationCircleSolid } from "@medusajs/icons";
+import { InformationCircleSolid } from '@medusajs/icons';
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import {
   useCards,
@@ -47,6 +46,7 @@ import {
   type TaskKind,
   type TaskStatus,
 } from "./task-draft";
+import { Field, Section, StaleAwareSelect } from "../../components/form-bits";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 import { RowActions } from "../../components/RowActions";
 
@@ -61,102 +61,10 @@ import { RowActions } from "../../components/RowActions";
 // cadence, and the rows read as sentences (labels come from the server — see
 // api/admin/tasks/labels.ts).
 export const config: RouteConfig = {
-  label: "Tasks",
-  icon: CheckCircle,
-  rank: 36, // after Referrals (35)
-};
-
-// One labelled field. Every control in the form goes through this — the old
-// editor's worst habit was a bare numeric input with nothing naming it.
-const Field = ({
-  label,
-  htmlFor,
-  hint,
-  className,
-  children,
-}: {
-  label: string;
-  htmlFor?: string;
-  hint?: string;
-  className?: string;
-  children: React.ReactNode;
-}) => (
-  <div className={`flex flex-col gap-y-1 ${className ?? ""}`}>
-    <Label htmlFor={htmlFor} size="small" weight="plus">
-      {label}
-    </Label>
-    {children}
-    {hint && (
-      <Text size="small" className="text-ui-fg-subtle">
-        {hint}
-      </Text>
-    )}
-  </div>
-);
-
-const Section = ({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) => (
-  <div className="border-ui-border-base flex flex-col gap-y-3 border-t pt-4 first:border-t-0 first:pt-0">
-    <div>
-      <Text weight="plus">{title}</Text>
-      {description && (
-        <Text size="small" className="text-ui-fg-subtle">
-          {description}
-        </Text>
-      )}
-    </div>
-    {children}
-  </div>
-);
-
-/**
- * A select whose saved value may not be in the options any more (a renamed or
- * deleted pack / card / Pokémon). Without the extra item the control falls back
- * to its PLACEHOLDER, which reads as "nothing selected" and invites the
- * operator to overwrite a binding they never knew was set.
- */
-const StaleAwareSelect = ({
-  value,
-  onChange,
-  placeholder,
-  options,
-  className,
-  head,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  options: { value: string; label: string }[];
-  className?: string;
-  /** An always-present leading option, e.g. "Any pack". */
-  head?: { value: string; label: string };
-}) => {
-  const known = options.some((o) => o.value === value) || head?.value === value;
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <Select.Trigger className={className}>
-        <Select.Value placeholder={placeholder} />
-      </Select.Trigger>
-      <Select.Content>
-        {head && <Select.Item value={head.value}>{head.label}</Select.Item>}
-        {value !== "" && !known && (
-          <Select.Item value={value}>{value} — current, not listed</Select.Item>
-        )}
-        {options.map((o) => (
-          <Select.Item key={o.value} value={o.value}>
-            {o.label}
-          </Select.Item>
-        ))}
-      </Select.Content>
-    </Select>
-  );
+  label: "pcNav.tasks",
+  translationNs: "translation",
+  rank: 1,
+  nested: "/rewards",
 };
 
 function TaskEditor({
@@ -231,6 +139,7 @@ function TaskEditor({
         reward: payload.reward,
         active: draft.active,
         sort: Number(draft.sort) || 0,
+        tickets: payload.tickets,
         starts_at: toIso(draft.startsAt),
         ends_at: toIso(draft.endsAt),
         reason: reason.trim(),
@@ -395,7 +304,11 @@ function TaskEditor({
                   label={COUNT_LABEL[draft.reqType] ?? "Amount"}
                   htmlFor="task-count"
                   hint={
-                    draft.reqType === "checkin_days" ? "1 to 7." : undefined
+                    draft.reqType === "checkin_days"
+                      ? "1 to 7."
+                      : draft.reqType === "topup_myr"
+                        ? "Whole RM, real top-ups only."
+                        : undefined
                   }
                   className="w-32"
                 >
@@ -573,6 +486,24 @@ function TaskEditor({
                     </Field>
                   </>
                 )}
+
+                <Field
+                  label="Tickets"
+                  htmlFor="task-tickets"
+                  hint="Lucky Draw tickets paid with the reward. 0 = none."
+                  className="w-40"
+                >
+                  <Input
+                    id="task-tickets"
+                    type="number"
+                    min={0}
+                    max={10000}
+                    value={draft.tickets}
+                    onChange={(e) =>
+                      onChange({ ...draft, tickets: e.target.value })
+                    }
+                  />
+                </Field>
               </div>
             </Section>
 
@@ -754,6 +685,7 @@ const TasksPage = () => {
         reward: payload.reward,
         active: !t.active,
         sort: t.sort,
+        tickets: payload.tickets,
         starts_at: t.starts_at,
         ends_at: t.ends_at,
         reason: t.active ? "Retired from the task list" : "Reactivated",

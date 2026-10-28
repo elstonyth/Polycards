@@ -48,6 +48,8 @@ type CompensateData =
         pc_grade: string | null;
         market_multiplier: number;
         pc_synced_at: Date | null;
+        pc_pending_price: Record<string, unknown> | null;
+        pc_sync_error: string | null;
       };
       odds: OddsSnapshot[];
     }
@@ -127,6 +129,8 @@ export const deleteCardInvoke = async (
       pc_grade: card.pc_grade ?? null,
       market_multiplier: Number(card.market_multiplier ?? 1.2),
       pc_synced_at: card.pc_synced_at ?? null,
+      pc_pending_price: card.pc_pending_price ?? null,
+      pc_sync_error: card.pc_sync_error ?? null,
     },
     odds: oddsSnapshot,
   };

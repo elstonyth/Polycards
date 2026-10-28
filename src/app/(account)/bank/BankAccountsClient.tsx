@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Landmark, Trash2 } from 'lucide-react';
+import { Landmark, Trash2, Wallet } from 'lucide-react';
 import {
   addSavedBankAccount,
   fetchSavedBankAccounts,
@@ -12,14 +11,17 @@ import {
   type WithdrawBank,
 } from '@/lib/actions/vault';
 import { Pill, pillVariants } from '@/components/ui/pill';
+import { WithdrawLink } from '@/components/account/WithdrawLink';
+import { BankCountryToggle } from '@/components/account/BankCountryToggle';
 import { timeUntil } from '@/lib/format';
+import { bankCountryGroups } from '@/lib/regional-rails';
 import { cn } from '@/lib/utils';
 
 // Saved payout accounts — list, add, remove. This list is where withdrawals
 // GO: the withdraw form submits an account id and the server resolves the bank
 // details from here, so this page is the only place a payout destination is
 // chosen. The backend caps the list at 5 and validates with the payout-submit
-// rules, so anything saved here is guaranteed submittable.
+// rules. Existing accounts are rechecked when listed and used.
 //
 // A newly added account may have to wait out a cooling-off window before it can
 // receive money; the server says when via `usableFrom`. That state is rendered
@@ -41,10 +43,11 @@ function payoutStatus(
   now: Date,
 ): { label: string; ready: boolean } {
   if (account.supported === false) {
-    // Kept, not lost: the current payout provider cannot pay to this bank.
-    // It becomes usable again when a provider that serves it is active.
+    // Keep invalid or unavailable destinations visible with their remedy.
     return {
-      label: 'Not available with the current payout provider',
+      label:
+        account.unavailableReason ??
+        'Not available with the current payout provider',
       ready: false,
     };
   }
@@ -65,6 +68,7 @@ export function BankAccountsClient() {
 
   // Add-form state
   const [adding, setAdding] = useState(false);
+  const [country, setCountry] = useState('');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [holderName, setHolderName] = useState('');
@@ -87,23 +91,51 @@ export function BankAccountsClient() {
     };
   }, []);
 
+  // Require the customer's choice, even when only one country is available.
+  const countries = bankCountryGroups(banks ?? []);
+  const shown = countries.find((group) => group.country === country);
+  const selectedBank = shown?.items.find((bank) => bank.bankCode === bankCode);
+  // A USDT wallet takes an address and no holder name. Its checksum is the
+  // server's to judge (it says what is wrong); here only the shape.
+  const wallet = selectedBank?.wallet;
+  // The USDT group lists networks, not banks: word the form for a wallet
+  // as soon as it is picked, before a network is.
+  const walletGroup = shown?.items.some((bank) => bank.wallet) ?? false;
+  const offersWallets = countries.some((group) =>
+    group.items.some((bank) => bank.wallet),
+  );
+  const lengths = selectedBank?.accountLengths;
+  const accountNumberValid =
+    (wallet ? accountNumber !== '' : /^[0-9]{5,34}$/.test(accountNumber)) &&
+    (!lengths || lengths.includes(accountNumber.length)) &&
+    (!selectedBank?.accountPattern ||
+      new RegExp(selectedBank.accountPattern).test(accountNumber));
+  const numberHint =
+    selectedBank?.accountHint ??
+    (walletGroup
+      ? 'Choose the network your wallet uses first.'
+      : lengths && lengths.length <= 2
+        ? `${selectedBank.bankName} account numbers are ${lengths.join(' or ')} digits. Check your bank country and account number.`
+        : 'Check your bank country and use the account number shown in your banking app, not a card number.');
+  const numberInvalid =
+    selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
+
   const formValid =
-    bankCode !== '' &&
-    /^[0-9]{6,34}$/.test(accountNumber) &&
-    holderName.trim().length >= 2;
+    selectedBank !== undefined &&
+    accountNumberValid &&
+    (wallet !== undefined ||
+      (holderName.trim().length >= 2 && holderName.trim().length <= 120));
 
   async function submitAdd() {
     if (submitting || !formValid) return;
     setError(null);
     setSubmitting(true);
     try {
-      const bankName =
-        (banks ?? []).find((b) => b.bankCode === bankCode)?.bankName ?? '';
       const res = await addSavedBankAccount({
         bankCode,
-        bankName,
+        bankName: selectedBank.bankName,
         accountNumber,
-        accountHolderName: holderName.trim(),
+        accountHolderName: wallet ? '' : holderName.trim(),
       });
       if (!res.ok) {
         setError(res.error);
@@ -111,6 +143,7 @@ export function BankAccountsClient() {
       }
       setAccounts(res.accounts);
       setAdding(false);
+      setCountry('');
       setBankCode('');
       setAccountNumber('');
       setHolderName('');
@@ -167,15 +200,20 @@ export function BankAccountsClient() {
             className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-800">
-              <Landmark className="h-5 w-5 text-neutral-300" aria-hidden />
+              {account.wallet ? (
+                <Wallet className="h-5 w-5 text-neutral-300" aria-hidden />
+              ) : (
+                <Landmark className="h-5 w-5 text-neutral-300" aria-hidden />
+              )}
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-white">
                 {account.bankName}
               </p>
               <p className="text-[13px] text-neutral-400">
-                {maskAccount(account.accountNumber)} ·{' '}
-                {account.accountHolderName}
+                {maskAccount(account.accountNumber)}
+                {/* A wallet has no holder (its network name is stored). */}
+                {!account.wallet && ` · ${account.accountHolderName}`}
               </p>
               <p
                 className={cn(
@@ -210,18 +248,43 @@ export function BankAccountsClient() {
 
       {adding ? (
         <div className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
+          <BankCountryToggle
+            groups={countries}
+            value={shown?.country ?? ''}
+            onChange={(next) => {
+              setCountry(next);
+              setBankCode('');
+              setAccountNumber('');
+              setError(null);
+            }}
+            className="mb-3"
+            label={offersWallets ? 'Bank country or wallet' : undefined}
+          />
           <label className="block text-[13px] font-semibold text-neutral-300">
-            Bank
+            {walletGroup ? 'Network' : 'Bank'}
             <select
               value={bankCode}
-              onChange={(e) => setBankCode(e.target.value)}
-              aria-label="Bank"
+              onChange={(e) => {
+                setBankCode(e.target.value);
+                // Digits for a bank, an address for a wallet: never carry one
+                // over as the other.
+                setAccountNumber('');
+                setError(null);
+              }}
+              disabled={!shown}
+              aria-label={walletGroup ? 'Network' : 'Bank'}
               className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
             >
               <option value="" disabled>
-                {banks == null ? 'Loading banks…' : 'Choose your bank'}
+                {banks == null
+                  ? 'Loading banks…'
+                  : !shown
+                    ? 'Choose bank country first'
+                    : walletGroup
+                      ? 'Choose a network'
+                      : 'Choose your bank'}
               </option>
-              {(banks ?? []).map((bank) => (
+              {(shown?.items ?? []).map((bank) => (
                 <option key={bank.bankCode} value={bank.bankCode}>
                   {bank.bankName}
                 </option>
@@ -229,32 +292,101 @@ export function BankAccountsClient() {
             </select>
           </label>
 
-          <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-            Account number
-            <input
-              type="text"
-              inputMode="numeric"
-              value={accountNumber}
-              onChange={(e) =>
-                setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))
-              }
-              aria-label="Account number"
-              placeholder="Digits only"
-              className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
-            />
-          </label>
+          {walletGroup ? (
+            <>
+              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
+                Wallet address
+                <input
+                  type="text"
+                  disabled={!wallet}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={accountNumber}
+                  onChange={(e) =>
+                    setAccountNumber(e.target.value.replace(/\s/g, ''))
+                  }
+                  aria-label="Wallet address"
+                  aria-invalid={numberInvalid}
+                  aria-describedby={
+                    selectedBank
+                      ? 'bank-account-number-hint wallet-address-warning'
+                      : 'bank-account-number-hint'
+                  }
+                  placeholder={
+                    wallet === 'tron'
+                      ? 'Starts with T'
+                      : wallet === 'evm'
+                        ? 'Starts with 0x'
+                        : 'Paste your wallet address'
+                  }
+                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 font-mono text-[13px] text-white outline-none placeholder:font-sans placeholder:text-neutral-600 focus:border-white/25"
+                />
+              </label>
+              <p
+                id="bank-account-number-hint"
+                aria-live="polite"
+                className={cn(
+                  'mt-1.5 text-[13px]',
+                  numberInvalid ? 'text-red-300' : 'text-neutral-400',
+                )}
+              >
+                {numberHint}
+              </p>
+              {selectedBank && (
+                <p
+                  id="wallet-address-warning"
+                  className="mt-2 text-[12px] leading-snug text-amber-300/80"
+                >
+                  Paste the address from your wallet&apos;s receive screen for{' '}
+                  {selectedBank.bankName}. USDT sent to a wrong address or
+                  network can&apos;t be recovered.
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
+                Account number
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  disabled={!selectedBank}
+                  value={accountNumber}
+                  onChange={(e) =>
+                    setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))
+                  }
+                  aria-label="Account number"
+                  aria-invalid={numberInvalid}
+                  aria-describedby="bank-account-number-hint"
+                  placeholder="Digits only"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
+                />
+              </label>
+              <p
+                id="bank-account-number-hint"
+                aria-live="polite"
+                className={cn(
+                  'mt-1.5 text-[13px]',
+                  numberInvalid ? 'text-red-300' : 'text-neutral-400',
+                )}
+              >
+                {numberHint}
+              </p>
 
-          <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-            Account holder name
-            <input
-              type="text"
-              value={holderName}
-              onChange={(e) => setHolderName(e.target.value)}
-              aria-label="Account holder name"
-              placeholder="Exactly as the bank has it"
-              className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
-            />
-          </label>
+              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
+                Account holder name
+                <input
+                  type="text"
+                  value={holderName}
+                  onChange={(e) => setHolderName(e.target.value)}
+                  aria-label="Account holder name"
+                  placeholder="Exactly as the bank has it"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
+                />
+              </label>
+            </>
+          )}
 
           <div className="mt-4 flex gap-2">
             <Pill
@@ -280,12 +412,11 @@ export function BankAccountsClient() {
             <Pill onClick={() => setAdding(true)} size="lg" className="flex-1">
               Add bank account
             </Pill>
-            <Link
-              href="/bank-withdrawal"
+            <WithdrawLink
               className={cn(pillVariants({ variant: 'secondary', size: 'lg' }))}
             >
               Withdraw
-            </Link>
+            </WithdrawLink>
           </div>
         )
       )}

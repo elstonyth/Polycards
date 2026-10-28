@@ -4,6 +4,8 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import { cardByHandle, toCardView } from '../../../../modules/packs/card-view';
 import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
 import { toMoney } from '../../../../modules/packs/money';
+import { withLossless } from '../../../../modules/packs/lossless';
+import { losslessWindowsForDisplay } from '../lossless-display';
 import { pageAll } from '../../../utils/page-all';
 import { demoTierSplit } from '../../../../modules/packs/odds-sets';
 import {
@@ -38,7 +40,11 @@ import {
 // computes per window and ≤TTL cross-instance skew, display-only either
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
-const packCache = new Map<string, { expires: number; body: unknown }>();
+// Typed only as far as the Lossless overlay needs; the full body is stored.
+type DetailBody = {
+  pack: { slug: string; category: string; buyback_percent: unknown };
+};
+const packCache = new Map<string, { expires: number; body: DetailBody }>();
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
  *  one process, so test A's cached pack would be served to test B. */
@@ -54,9 +60,16 @@ export async function GET(
     req.scope.resolve(PACKS_MODULE);
   const { slug } = req.params;
 
+  // The cache holds the plain body; Lossless Mode is laid over a copy on every
+  // request (see store/packs/route.ts), never cached.
+  const send = async (body: DetailBody): Promise<void> => {
+    const windows = await losslessWindowsForDisplay(req);
+    res.json({ ...body, pack: withLossless(body.pack, windows, Date.now()) });
+  };
+
   const cached = packCache.get(slug);
   if (cached && cached.expires > Date.now()) {
-    res.json(cached.body);
+    await send(cached.body);
     return;
   }
 
@@ -173,5 +186,5 @@ export async function GET(
     demo_odds: demoOdds,
   };
   packCache.set(slug, { expires: Date.now() + CACHE_TTL_MS, body });
-  res.json(body);
+  await send(body);
 }

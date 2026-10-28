@@ -17,6 +17,11 @@ export const SiteSettings = model.define('site_settings', {
   // to the PAYMENT_GATEWAY env (then TGPay). Validated against GATEWAYS
   // in gateway.ts on write; read into a process cache, never per request.
   payment_gateway: model.text().nullable(),
+  // Admin withdrawal controls (2026-10-17): the Withdraw switch, the Touch 'n
+  // Go switch, a daily closed window for each and the TNG floor — the shape
+  // and the decision live in withdrawal-controls.ts. NULL = never edited:
+  // everything open, the env switches alone decide (today's behaviour).
+  withdrawal_controls: model.json().nullable(),
 });
 
 export default SiteSettings;

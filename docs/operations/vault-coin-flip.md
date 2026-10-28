@@ -32,7 +32,9 @@ Admin **History & forfeited cards** filters by outcome, customer, funding source
 
 ## Coin presentation
 
-Coin B uses the official logo, satin black faces, metallic rim/reeding, lighting and contact shadows in a lazy-loaded Three.js scene. `scripts/generate-coin-motion.mjs` runs Rapier at asset time and checks four naturally settled traces. Runtime selects the face matching the server receipt; gesture strength affects presentation only. The browser never decides money or ownership. Drag/flick, tap and keyboard all use the same acceptance path. Reduced motion, unavailable WebGL, context loss and Skip animation reveal the same receipt.
+Coin B uses the official logo, brushed black faces, beveled metallic rims/reeding, lighting and contact shadows in a lazy-loaded Three.js scene. `scripts/generate-coin-motion.mjs` runs Rapier at asset time and checks ten naturally settled traces: five strengths for each result. Runtime selects the face matching the server receipt; gesture strength affects presentation only. The browser never decides money or ownership. Drag/flick, tap and keyboard all use the same acceptance path. Reduced motion, unavailable WebGL, context loss and Skip animation reveal the same receipt.
+
+The Games sheet and single-card Vault action both open the coin page. The searchable Vault modal replaces the dropdown; the selected slab remains beside the coin through settlement. Wins lift the card and reveal credit; losses lower and desaturate it. Camera projection tests cover every trace and drag offset so landings remain in frame.
 
 Physics sources: [Rapier rigid bodies](https://rapier.rs/docs/user_guides/javascript/rigid_bodies/), [Three.js documentation](https://threejs.org/docs/).
 
@@ -42,15 +44,16 @@ Verified on 2026-10-28 in the retained `codex/vault-coin-flip` worktree:
 
 | Check | Result |
 | --- | --- |
-| Storefront unit/component tests | 144 files, 1,512 passed |
-| API source unit tests | 230 suites, 2,913 passed; 2 existing suites / 9 tests skipped |
-| Admin unit tests | 24 files, 284 passed |
-| PostgreSQL coin-flip integration | 26 passed |
-| Coin-flip and buyback HTTP integration | 8 passed |
+| Storefront unit/component tests | 161 files, 1,795 passed; final focused camera/focus tests also passed |
+| API source unit tests | 272 suites, 4,453 passed after corrected Wallet-filter rerun; 2 existing suites / 9 tests skipped |
+| Admin unit tests | 49 files, 531 passed |
+| PostgreSQL coin-flip / Lucky Draw integration | 32 / 67 passed |
+| Coin-flip, buyback, ledger, mixed delivery and reporting HTTP integration | 38 passed |
 | Storefront, API and admin production builds | Passed |
 | Changed storefront/admin lint and storefront formatting | Passed |
-| Storefront and admin browser QA | Passed, including mouse/touch flicks and axe |
-| Fresh independent branch review | Findings fixed and verified; no remaining findings |
+| Original storefront and admin browser QA | Passed before redesign, including mouse/touch flicks and axe |
+| Redesigned storefront browser QA | Games/Lucky Draw/Coin Flip navigation, visual Vault modal at desktop and phone widths, focus restoration, tap loss, upward-flick win, both settled faces, card removal/retention and admin settings save verified in disposable preview |
+| Original independent branch review | Findings fixed before latest-master integration |
 
 - Backend database integration covers simultaneous acceptance, stale card versions, buyback/delivery/freeze races, compensation, funding basis, strict migration checks and injected write failures.
 - HTTP integration covers authenticated customer/admin requests, stale settings revisions, private-field boundaries, payout replay, loss and history. Buyback regressions also run.

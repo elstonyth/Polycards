@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import Link from 'next/link';
 import { Trophy, Coins, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Challenge } from '@/lib/data/challenge';
@@ -8,7 +9,7 @@ import { ResetCountdown } from './ResetCountdown';
 
 // The standard's rules block (页面介绍) — rendered under the live content.
 const RULES = [
-  'Every eligible pack draw adds its pull value to your personal weekly ranking and the community pool.',
+  'Packs opened with normal or bonus credit add their full pull value to your personal weekly ranking and the community pool. Gift packs, the welcome pack and task or challenge reward cards do not count.',
   'As the community reaches each milestone, a new reward stage unlocks.',
   'Rewards are cumulative — a higher stage includes every reward from the stages before it.',
   'At the end of the week, the top 10 on the Weekly Pull Value board receive all rewards unlocked that week.',
@@ -198,7 +199,7 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
           {summary.unlockedCount === 0 ? (
             <p className="mt-2 text-sm text-neutral-400">
               No stages unlocked yet — the pool is climbing toward Stage 1.
-              Every eligible pull moves it.
+              Every pack you pay for moves it.
             </p>
           ) : (
             <>
@@ -290,6 +291,17 @@ export function ChallengeRules() {
           </li>
         ))}
       </ul>
+      <p className="mt-3 text-xs leading-relaxed text-neutral-400">
+        Prize cards and slabs sell back as cash you can withdraw once you’ve
+        topped up and used your money for packs; credit prizes are bonus credit
+        for packs.{' '}
+        <Link
+          href="/wallet"
+          className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"
+        >
+          How it works <span aria-hidden="true">&rarr;</span>
+        </Link>
+      </p>
     </section>
   );
 }

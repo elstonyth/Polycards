@@ -15,8 +15,21 @@ export type ReviewRow = {
   chosen_dex: number | null;
 };
 
-export function proposeRow(card: { id: string; name: string }): ReviewRow {
-  const matches = allPokemonMatches(card.name);
+// A One Piece card (set "One Piece …" / "One-Piece …", or an OP/ST/EB/PRB card
+// code) never gets a Pokémon proposed: "Bartholomew Kuma" contains "mew".
+// Same test as the admin's franchiseFor (backend/apps/admin/src/lib/
+// sprite-franchise.ts) — keep the two in step.
+const ONE_PIECE_RE =
+  /\bone[\s-]*piece\b|(?:^|[^a-z0-9])(?:OP|ST|EB|PRB)\d{2}-\d{3}(?!\d)/i;
+
+export function proposeRow(card: {
+  id: string;
+  name: string;
+  set?: string | null;
+}): ReviewRow {
+  const matches = ONE_PIECE_RE.test(`${card.set ?? ''} ${card.name}`)
+    ? []
+    : allPokemonMatches(card.name);
   const proposed = matches[0] ?? null;
   return {
     card_id: card.id,

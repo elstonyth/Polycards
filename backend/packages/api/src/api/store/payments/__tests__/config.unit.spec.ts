@@ -1,5 +1,9 @@
 import { GET } from '../config/route';
 import { setActiveGateway } from '../../../../modules/packs/gateway';
+import {
+  DEFAULT_WITHDRAWAL_CONTROLS,
+  type WithdrawalControls,
+} from '../../../../modules/packs/withdrawal-controls';
 
 const ORIGINAL = { ...process.env };
 
@@ -16,9 +20,13 @@ afterAll(() => {
   setActiveGateway(null);
 });
 
-function harness(setting: string | null) {
+function harness(
+  setting: string | null,
+  controls: WithdrawalControls = DEFAULT_WITHDRAWAL_CONTROLS,
+) {
   const packs = {
     siteSettings: jest.fn(async () => ({ payment_gateway: setting })),
+    withdrawalControls: jest.fn(async () => controls),
   };
   const req = { scope: { resolve: () => packs } };
   const res = {
@@ -38,6 +46,7 @@ type Body = {
   gateway: string;
   deposits_enabled: boolean;
   withdrawals_enabled: boolean;
+  withdrawals_unavailable: boolean;
   withdrawals_paused_until: string | null;
   deposit: { min_rm: number; max_rm: number };
   withdrawal: { min_rm: number; max_rm: number };
@@ -80,6 +89,72 @@ describe('GET /store/payments/config — the active gateway money bands', () => 
       const body = h.res.body as Body;
       expect(body.withdrawals_enabled).toBe(false);
       expect(body.withdrawals_paused_until).toBe('2998-12-31T22:00:00.000Z');
+    } finally {
+      delete process.env.GATEWAY_WITHDRAWALS_PAUSED_UNTIL;
+    }
+  });
+  it('is not unavailable while everything is open', async () => {
+    const h = harness(null);
+    await GET(h.req as never, h.res as never);
+    expect((h.res.body as Body).withdrawals_unavailable).toBe(false);
+  });
+
+  it('reports withdrawals unavailable, with no end, while the admin switch is off', async () => {
+    const h = harness(null, {
+      ...DEFAULT_WITHDRAWAL_CONTROLS,
+      withdrawals: {
+        ...DEFAULT_WITHDRAWAL_CONTROLS.withdrawals,
+        open: false,
+      },
+    });
+    await GET(h.req as never, h.res as never);
+    const body = h.res.body as Body;
+    expect(body.withdrawals_enabled).toBe(false);
+    expect(body.withdrawals_unavailable).toBe(true);
+    expect(body.withdrawals_paused_until).toBeNull();
+  });
+
+  it('names the reopen instant of a switch-off that has one', async () => {
+    const h = harness(null, {
+      ...DEFAULT_WITHDRAWAL_CONTROLS,
+      withdrawals: {
+        ...DEFAULT_WITHDRAWAL_CONTROLS.withdrawals,
+        open: false,
+        off_until: '2999-01-01T00:00:00.000Z',
+      },
+    });
+    await GET(h.req as never, h.res as never);
+    const body = h.res.body as Body;
+    expect(body.withdrawals_unavailable).toBe(true);
+    expect(body.withdrawals_paused_until).toBe('2999-01-01T00:00:00.000Z');
+  });
+
+  it('names the reopen instant inside the admin daily window', async () => {
+    jest.useFakeTimers({ now: Date.parse('2026-10-17T03:00:00+08:00') });
+    try {
+      const h = harness(null, {
+        ...DEFAULT_WITHDRAWAL_CONTROLS,
+        withdrawals: {
+          open: true,
+          off_until: null,
+          schedule: { on: true, close_at: '00:00', reopen_at: '06:00' },
+        },
+      });
+      await GET(h.req as never, h.res as never);
+      const body = h.res.body as Body;
+      expect(body.withdrawals_unavailable).toBe(true);
+      expect(body.withdrawals_paused_until).toBe('2026-10-16T22:00:00.000Z');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('reports the env timed pause as unavailable too', async () => {
+    process.env.GATEWAY_WITHDRAWALS_PAUSED_UNTIL = '2999-01-01T06:00:00+08:00';
+    try {
+      const h = harness(null);
+      await GET(h.req as never, h.res as never);
+      expect((h.res.body as Body).withdrawals_unavailable).toBe(true);
     } finally {
       delete process.env.GATEWAY_WITHDRAWALS_PAUSED_UNTIL;
     }

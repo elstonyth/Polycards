@@ -32,6 +32,7 @@ import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
 import { useSound } from '@/lib/use-sound';
 import { rm, affordable } from '@/lib/format';
+import { sellBackNotice } from '@/lib/buyback-copy';
 import { logger } from '@/lib/logger';
 import { trackPixel } from '@/lib/pixel';
 import { cn } from '@/lib/utils';
@@ -76,13 +77,14 @@ import {
   blastMs,
   type Phase,
 } from '@/lib/reveal-phase';
-import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
+import { isPokemonPack, resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
 import {
   buildDecoyPool,
   buildIdlePool,
   HREEL_IDLE_POOL_MAX,
+  NEUTRAL_CARD_SPRITE,
   type HReelCell,
 } from '@/lib/hreel';
 import { SlotStatusBar } from './SlotStatusBar';
@@ -115,21 +117,32 @@ function topRarityOf(cards: WonCard[]): Rarity {
 }
 
 /** Cosmetic reel-winner mapping for a won/demo card (decides nothing): rarity
- *  color + the column's Pokémon sprite (custom image ⇢ dex gif ⇢ Poké Ball). */
-function winnerFor(card: WonCard): ColumnWinner {
+ *  color + the column's Pokémon sprite (custom image ⇢ dex gif ⇢ Poké Ball).
+ *  In a non-Pokémon pack: custom image ⇢ neutral card-back — never a Pokémon. */
+function winnerFor(card: WonCard, pokemon: boolean): ColumnWinner {
   // resolveCardPokemon takes the wire's snake_case; the view is camelCase.
-  const r = resolveCardPokemon({
-    name: card.name,
-    pokemon_dex: card.pokemonDex,
-    sprite_image: card.spriteImage,
-  });
+  const r = resolveCardPokemon(
+    {
+      name: card.name,
+      set: card.set,
+      pokemon_dex: card.pokemonDex,
+      sprite_image: card.spriteImage,
+    },
+    { pokemon },
+  );
   const custom =
     card.spriteImage && card.spriteImage.trim() !== ''
       ? card.spriteImage
       : null;
   return {
     dex: r.dex,
-    image: custom ?? (r.dex === null ? POKEBALL_PLACEHOLDER : undefined),
+    image:
+      custom ??
+      (r.dex !== null
+        ? undefined
+        : pokemon
+          ? POKEBALL_PLACEHOLDER
+          : NEUTRAL_CARD_SPRITE),
     name: r.name ?? card.name,
     rarity: card.rarity as ColumnWinner['rarity'],
     rarityRgb: rarityRgb(card.rarity),
@@ -193,7 +206,8 @@ export default function SlotMachineClient({
   // A task's free rip. Like the welcome pack it is exactly ONE open at no cost,
   // but it spends an entitlement rather than a one-time eligibility, and the
   // card it yields is a reward pull — sellable on the spot like any pulled
-  // card (completing the task is the requirement; no welcome-pack lock).
+  // card, except a DAILY task's rip before the first paid open, which carries
+  // the welcome-pack lock (the backend's `locked` says which).
   const isFreeRip = freeRipClaimId !== null && freeRipClaimId !== '';
 
   // Which of the four routes a press takes — decided ONCE, here, by the seam
@@ -287,11 +301,14 @@ export default function SlotMachineClient({
   // has stays in the flicker (an all-Pikachu/Charizard pack across six tiers
   // flickers all six colors, not just the first card per species).
   // Empty → ReelStrip falls back to its curated set.
-  // ponytail: decoys render the dex sprite (spriteGif); for seeded entries that
-  // IS the linked sprite. A custom-uploaded (dex-less) sprite would only flicker
-  // via name-derive — threading the custom sprite_image into decoy cells is the
-  // upgrade path if that ever matters.
-  const basePool = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
+  // Pokémon cells render their dex sprite (spriteGif; for seeded entries that IS
+  // the linked sprite); a dex-less custom sprite (One Piece) rides on the cell as
+  // `image`, so a One Piece pack flickers its own characters, not the fallback.
+  const pokemonPack = isPokemonPack(pack.categoryId);
+  const basePool = useMemo<HReelCell[]>(
+    () => buildDecoyPool(pool, { pokemon: pokemonPack }),
+    [pool, pokemonPack],
+  );
   // Per-reel pools are sliced to HREEL_IDLE_POOL_MAX: the idle drift tiles one
   // full pool period + the visible window onto the strip, so a pool past the
   // cap can't wrap and ReelStrip rests the reel sharp — the "rails frozen" bug
@@ -514,7 +531,7 @@ export default function SlotMachineClient({
         !affordable(balance, paidCost)
       ) {
         setNeedsTopUp(true);
-        setError('Not enough credits to spin.');
+        setError('Not enough balance to spin.');
         return;
       }
     }
@@ -671,7 +688,8 @@ export default function SlotMachineClient({
     const winners: ColumnWinner[] = [];
     let mappingFailed = false;
     try {
-      for (const card of batch.cards) winners.push(winnerFor(card));
+      for (const card of batch.cards)
+        winners.push(winnerFor(card, pokemonPack));
     } catch (err) {
       logger.error('[slots] post-charge mapping failed', err);
       mappingFailed = true;
@@ -954,19 +972,21 @@ export default function SlotMachineClient({
     seq: number;
     tone: 'success' | 'error';
   } | null>(null);
-  const sellRun = useRef({ count: 0, total: 0, seq: 0 });
+  const sellRun = useRef({ count: 0, total: 0, held: 0, seq: 0 });
   const handleSold = useCallback(
-    (newBalance: number, amount: number) => {
+    (newBalance: number, amount: number, held: number) => {
       applyBalance(newBalance);
       const run = sellRun.current;
       run.count += 1;
       run.total += amount;
+      run.held += held;
       run.seq += 1;
+      const notice = sellBackNotice(run.total, run.held);
       setSellToast({
         text:
           run.count === 1
-            ? `Sold — ${rm(amount)} credited to your balance.`
-            : `Sold ${run.count} cards — ${rm(run.total)} credited to your balance.`,
+            ? `Sold — ${notice}`
+            : `Sold ${run.count} cards — ${notice}`,
         seq: run.seq,
         tone: 'success',
       });
@@ -991,7 +1011,12 @@ export default function SlotMachineClient({
   // is NOT reset — it only has to keep changing, and reusing a value could
   // collide with the key React is still holding.
   const closeSellToast = useCallback(() => {
-    sellRun.current = { count: 0, total: 0, seq: sellRun.current.seq };
+    sellRun.current = {
+      count: 0,
+      total: 0,
+      held: 0,
+      seq: sellRun.current.seq,
+    };
     setSellToast(null);
   }, []);
 

@@ -193,7 +193,7 @@ export function PhoneOnboardingModal() {
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-neutral-400">
           A verified phone number is required to finish setting up your account.
-          It secures your account and unlocks top-ups, withdrawals and
+          It secures your account and is needed for top-ups, withdrawals and
           deliveries. Get a verification code, or choose a call instead.
         </p>
 

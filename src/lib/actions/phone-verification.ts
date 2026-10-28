@@ -157,7 +157,7 @@ const SECURITY_CHECK_FAILED = /security check failed/i;
 const SECURITY_CHECK_COPY = 'Security check failed. Please try again.';
 
 const OUTSIDE_SERVED_COUNTRIES =
-  "Verification codes can only be requested from Malaysia. If you're using a VPN, turn it off and try again.";
+  "Verification codes can only be requested from Malaysia or Singapore. If you're using a VPN, turn it off and try again.";
 
 /** The ingress's client-IP header, or null without one. No request scope
  *  (tests, build) also reads as null. */

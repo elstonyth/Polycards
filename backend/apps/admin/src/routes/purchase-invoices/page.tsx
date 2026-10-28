@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Container, Heading, Input, Table, Text } from '@medusajs/ui';
-import { Plus, Receipt } from '@medusajs/icons';
+import { Plus } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePurchaseInvoices } from '../../lib/queries';
 import { orderDateTime, rm } from '../../lib/format';
@@ -9,12 +9,11 @@ import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
-// rank 2 puts this under Inventory, right after "Add from PriceCharting" (1).
 export const config: RouteConfig = {
-  label: 'Purchase Invoices',
-  icon: Receipt,
-  nested: '/inventory',
+  label: 'pcNav.purchaseInvoices',
+  translationNs: 'translation',
   rank: 2,
+  nested: '/inventory/list',
 };
 
 // EXACTLY the backend's SORTABLE allow-list (api/admin/purchase-invoices/
@@ -104,7 +103,9 @@ const PurchaseInvoicesPage = () => {
         ) : data.invoices.length === 0 ? (
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">
-              {q ? 'No invoices match that search.' : 'No purchase invoices yet.'}
+              {q
+                ? 'No invoices match that search.'
+                : 'No purchase invoices yet.'}
             </Text>
           </div>
         ) : (

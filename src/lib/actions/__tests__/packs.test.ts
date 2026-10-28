@@ -50,6 +50,7 @@ describe('openPack', () => {
       card: {
         handle: 'pikachu-base-58',
         name: 'Pikachu',
+        set: '',
         image: 'https://cdn/pikachu.png',
         slabImage: 'https://cdn/pikachu-slab.png',
         rarity: 'Rare',
@@ -118,7 +119,7 @@ describe('openPack', () => {
     });
     expect(await openPack('bronze')).toEqual({
       ok: false,
-      error: 'Not enough credits to open this pack.',
+      error: 'Not enough balance to open this pack.',
       needsAuth: false,
       needsTopUp: true,
     });
@@ -349,7 +350,7 @@ describe('openBatch', () => {
     });
     expect(await openBatch('bronze', 3)).toEqual({
       ok: false,
-      error: 'Not enough credits to open this pack.',
+      error: 'Not enough balance to open this pack.',
       needsAuth: false,
       needsTopUp: true,
     });

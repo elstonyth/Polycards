@@ -8,9 +8,11 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import {
   snapshotAddress,
   deliveryZone,
-  isMalaysianAddress,
+  isShippableCountry,
   isShippablePostcode,
-  MY_ONLY_MESSAGE,
+  SHIPPING_COUNTRIES_MESSAGE,
+  postcodeMessage,
+  ZONE_SHIPPING_MYR,
   CUSTOMER_STATUS_WORD,
 } from '../../../../../modules/packs/delivery';
 
@@ -68,31 +70,44 @@ export async function POST(
   }
   // Fee guards (2026-08-25): the shipping fee was charged at request time
   // from the ORIGINAL address, so an edit may not change what the customer
-  // should have paid. Non-MY is never shippable; a West<->East zone flip
-  // changes the RM15/RM35 rate — refuse both and point at the free cancel
-  // path (a cancel refunds the fee, so re-requesting re-prices cleanly).
-  // Pre-fee orders (shipping_fee NULL) skip the zone check — nothing was
-  // charged, so there is nothing to protect.
-  if (!isMalaysianAddress(snapshot.ship_country_code)) {
-    throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
+  // should have paid. Only Malaysia and Singapore ship; a change of zone
+  // (West RM15 / East RM35 / Singapore RM50) changes the rate — refuse both
+  // and point at the free cancel path (a cancel refunds the fee, so
+  // re-requesting re-prices cleanly).
+  if (!isShippableCountry(snapshot.ship_country_code)) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, SHIPPING_COUNTRIES_MESSAGE);
   }
-  if (!isShippablePostcode(snapshot.ship_postal_code)) {
+  if (
+    !isShippablePostcode(snapshot.ship_postal_code, snapshot.ship_country_code)
+  ) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'Enter a valid 5-digit Malaysian postcode for this address.',
+      postcodeMessage(snapshot.ship_country_code),
     );
   }
   // Compares the SAME composite zone the charge used (postcode + state/city),
   // not the postcode alone — otherwise re-pointing a KL-postcode order at a
   // Sabah address would keep the RM15 it paid.
+  // Orders that paid no fee (before fees existed, or a free prize before
+  // 2026-10-14) may still move to the same or a cheaper zone, but never a
+  // dearer one: otherwise one could be re-pointed at Singapore and ship there
+  // for nothing.
+  const toZone = deliveryZone(
+    snapshot.ship_postal_code,
+    snapshot.ship_province,
+    snapshot.ship_city,
+    snapshot.ship_country_code,
+  );
+  const fromZone = deliveryZone(
+    order.ship_postal_code,
+    order.ship_province,
+    order.ship_city,
+    order.ship_country_code,
+  );
   if (
-    order.shipping_fee != null &&
-    deliveryZone(
-      snapshot.ship_postal_code,
-      snapshot.ship_province,
-      snapshot.ship_city,
-    ) !==
-      deliveryZone(order.ship_postal_code, order.ship_province, order.ship_city)
+    toZone !== fromZone &&
+    (order.shipping_fee != null ||
+      ZONE_SHIPPING_MYR[toZone] > ZONE_SHIPPING_MYR[fromZone])
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

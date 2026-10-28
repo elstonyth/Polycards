@@ -79,7 +79,8 @@ The user chose independent actual and published configuration, matching packs; t
 ### Entry and quote
 
 - Add `Coin flip` to the existing Vault card action surface when exactly one card is selected. Preserve selection, buyback, and shipping behavior.
-- Route proposal: `/vault/coin-flip?pull=<id>`, owned by the Vault tab. Use the existing five-tab shell and Pill primitives; add no sixth tab.
+- Route: `/vault/coin-flip?pull=<id>`, reached through the Games sheet or Vault card action. Preserve the current six-tab shell (Task, Ranks, Games, Home, Vault, Me); Games is active on this page. Use existing Pill primitives.
+- Replace the dropdown with a searchable visual Vault modal. Keep the selected slab on the right of the tabletop on desktop, below it on phones. Five recorded throw strengths respond to flick velocity. Wins lift/light-sweep the retained card; losses lower and dim it. Both show an explicit receipt, with a static reduced-motion alternative.
 - Page starts with chosen card, live server quote, published win chance, and rules. Ineligible accounts get the existing specific explanation/remedy rather than a dead control.
 - Before arming the gesture, show a confirmation sheet: **Risk this card?** / **Win: keep your card + RM100.00 Credit.** / **Lose: this card leaves your Vault.** Values are from the quote. Include `Cancel` and `Confirm card` actions.
 - Confirmation arms only this quote. It does not settle the stake. Cancel/back before flick is harmless. While armed, show `Flick up to flip` and an equivalent `Flip coin` button. Mark this explicit acceptance boundary in copy: **Releasing a flick starts your round.**
@@ -132,7 +133,7 @@ The database need only persist `quoted`, `won`, and `lost`; expiry/rejection can
 - `coin_flip_round`: opaque unique ID (also the acceptance idempotency key), customer, Pull, quoted/terminal state, created/expiry/settled timestamps, source/bonus share, valuation snapshot, config revision, group/set snapshot, actual/published win units, random roll, outcome, credited amount, and nullable winning credit transaction ID. Public serializers never spread this record.
 - `pull`: add terminal `forfeited` enum and `flip_version` integer default 0. Quote snapshots version. Increment on every accepted flip, including wins, so two quotes prepared against the same card version cannot both settle. Preserve ownership history and funding tags.
 - `credit_transaction`: add `coin_flip_win` reason. Winning row uses `source_transaction_id = coin-flip:<round-id>` with database-backed uniqueness for this reason and `pull_id = null`. Existing `pull_id` is unique for buybacks: using it for wins would prevent repeated wins and later legitimate buyback. Link round → Pull separately.
-- Economic ledger: add an explicit coin-flip event type and sanitized customer receipt payload. Win: wallet delta +V, vault delta 0. Loss: wallet delta 0, vault delta −V. Internal probabilities live in protected round/config records, never the customer-visible ledger payload.
+- Economic ledger: add an explicit coin-flip event type and sanitized customer receipt payload. Win: wallet delta +V, vault delta 0. Loss: wallet delta 0; vault delta −V for tracked cards, or 0 for `source='reward'` cards whose mint added no tracked vault liability. Every loss retains full V in the receipt, event payload and forfeited-value report. Internal probabilities live in protected round/config records, never the customer-visible ledger payload.
 
 ### Acceptance transaction
 

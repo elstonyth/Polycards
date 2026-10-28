@@ -75,6 +75,15 @@ medusaIntegrationTestRunner({
       expect(gifts.data).toMatchObject({ count: 0, rounds: [], totals: { wins: 0, losses: 0, payouts: 0, forfeited_value: 0 } });
       expect((await unwrapResponse(api.get('/admin/coin-flips?source=invalid', { headers: adminHeaders }))).status).toBe(400);
       expect(await packs.listCreditTransactions({ customer_id: owner.id, reason: 'coin_flip_win' })).toHaveLength(1);
+      const profit = await api.get('/admin/profit-report?range=all&scope=all', { headers: adminHeaders });
+      expect(profit.data.activity).toMatchObject({ coin_flip_payouts: 100, sellbacks: 0, promo_given: 0 });
+      const money = await api.get(`/admin/customers/${owner.id}/money`, { headers: adminHeaders });
+      expect(money.data.activity).toMatchObject({ coin_flip_payouts: 100, sellbacks: 0, promo_given: 0 });
+      expect(money.data.wallet.withdrawable).toBe(100);
+      const transactions = await api.get(`/admin/customers/${owner.id}/transactions?reasons=coin_flip_win`, { headers: adminHeaders });
+      expect(transactions.data.total).toBe(1);
+      expect(transactions.data.items[0]).toMatchObject({ reason: 'coin_flip_win', amount: 100, bonus: 0 });
+      expect(transactions.data.items[0].ledger_display_id).toMatch(/^CF/);
     });
   },
 });

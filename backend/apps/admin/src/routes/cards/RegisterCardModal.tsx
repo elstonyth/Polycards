@@ -534,6 +534,7 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
                 patch(p);
               }}
               suggestionName={selected?.title ?? ''}
+              setName={fields.set || selected?.set}
             />
 
             <Text className="text-ui-fg-subtle text-xs">

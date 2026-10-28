@@ -27,7 +27,7 @@ const pcFetchReturning =
   (pennies: number) =>
   async (): Promise<{ kind: 'ok'; data: Record<string, unknown> }> => ({
     kind: 'ok',
-    data: { status: 'success', 'manual-only-price': pennies }, // PSA 10 field
+    data: { id: '6910', status: 'success', 'manual-only-price': pennies }, // PSA 10 field
   });
 
 medusaIntegrationTestRunner({
@@ -37,6 +37,7 @@ medusaIntegrationTestRunner({
       let storeHeaders: Record<string, string>;
 
       beforeEach(async () => {
+        clearPackDetailCache();
         const container = getContainer();
 
         const apiKeyModule = container.resolve(Modules.API_KEY);
@@ -119,7 +120,7 @@ medusaIntegrationTestRunner({
         const card = await loadCard();
         const r = await refreshCardPrice(card, {
           pcFetch: pcFetchReturning(pennies),
-          updateCards: (u) => packs.updateCards(u),
+          updateCards: ([update]) => packs.applyCardPriceSync(card, update),
           now,
         });
         await recordPriceHistory(packs, card.id, r);
@@ -180,6 +181,153 @@ medusaIntegrationTestRunner({
         const history = await listHistory();
         expect(history).toHaveLength(1);
         expect(Number(history[0].value)).toBe(100);
+      });
+
+      it('persists and confirms a large correction, then updates history and the customer price', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const before = await loadCard();
+        await packs.updateCards([{ id: before.id, market_value: 875 }]);
+        const first = await syncTick(4750, new Date('2026-10-16T03:00:00Z'));
+        expect(first.changed).toBe(false);
+        let card = await loadCard();
+        expect(Number(card.market_value)).toBe(875);
+        expect(card.pc_pending_price).toMatchObject({
+          proposed_value: 47.5,
+          baseline_value: 875,
+        });
+        expect(await listHistory()).toHaveLength(0);
+
+        const confirmed = await syncTick(
+          4750,
+          new Date('2026-10-17T03:00:00Z'),
+        );
+        expect(confirmed.changed).toBe(true);
+        card = await loadCard();
+        expect(Number(card.market_value)).toBe(47.5);
+        expect(card.pc_pending_price).toBeNull();
+        const history = await listHistory();
+        expect(history).toHaveLength(1);
+        expect(Number(history[0].value)).toBe(47.5);
+        clearPackDetailCache();
+        const after = await unwrapResponse(
+          api.get(`/store/packs/${PACK_SLUG}`, { headers: storeHeaders }),
+        );
+        expect(after.data.odds[0].marketPriceMyr).toBe(228);
+      });
+
+      it.each([
+        {
+          name: 'source and baseline',
+          edit: {
+            pc_product_id: '9999',
+            market_value: 300,
+            pc_pending_price: null,
+          },
+          pennies: 4750,
+          hasPending: true,
+        },
+        {
+          name: 'grade',
+          edit: { pc_grade: 'Ungraded', pc_pending_price: null },
+          pennies: 4750,
+          hasPending: true,
+        },
+        {
+          name: 'pending cancellation',
+          edit: { pc_pending_price: null },
+          pennies: 4750,
+          hasPending: true,
+        },
+        {
+          name: 'new pending observation',
+          edit: { market_value: 300 },
+          pennies: 4750,
+          hasPending: false,
+        },
+        {
+          name: 'invalid quote clearing',
+          edit: { pc_product_id: '9999', pc_sync_error: 'new source error' },
+          pennies: 0,
+          hasPending: true,
+        },
+      ])(
+        'does not overwrite a concurrent $name edit while the upstream request is in flight',
+        async ({ edit, pennies, hasPending }) => {
+          const packs =
+            getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+          const before = await loadCard();
+          const pending = {
+            product_id: '6910',
+            grade: 'PSA 10',
+            baseline_value: 875,
+            proposed_value: 47.5,
+            first_seen_at: '2026-10-16T03:00:00Z',
+          };
+          await packs.updateCards([
+            {
+              id: before.id,
+              market_value: 875,
+              pc_pending_price: hasPending ? pending : null,
+            },
+          ]);
+          const observed = await loadCard();
+          const result = await refreshCardPrice(observed, {
+            pcFetch: async () => {
+              await packs.updateCards([{ id: observed.id, ...edit }]);
+              return pcFetchReturning(pennies)();
+            },
+            updateCards: ([update]) =>
+              packs.applyCardPriceSync(observed, update),
+            now: new Date('2026-10-17T03:00:00Z'),
+          });
+          await recordPriceHistory(packs, observed.id, result);
+          expect(result).toMatchObject({
+            changed: false,
+            skippedReason: 'card changed during price check',
+          });
+          const current = await loadCard();
+          expect(current).toMatchObject(edit);
+          expect(Number(current.market_value)).toBe(
+            'market_value' in edit ? edit.market_value : 875,
+          );
+          expect(await listHistory()).toHaveLength(0);
+        },
+      );
+
+      it('only one concurrent confirmation can commit the same observed quote', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const before = await loadCard();
+        await packs.updateCards([
+          {
+            id: before.id,
+            market_value: 875,
+            pc_pending_price: {
+              product_id: '6910',
+              grade: 'PSA 10',
+              baseline_value: 875,
+              proposed_value: 47.5,
+              first_seen_at: '2026-10-16T03:00:00Z',
+            },
+          },
+        ]);
+        const observed = await loadCard();
+        const results = await Promise.all(
+          [1, 2].map(() =>
+            refreshCardPrice(observed, {
+              pcFetch: pcFetchReturning(4750),
+              updateCards: ([update]) =>
+                packs.applyCardPriceSync(observed, update),
+              now: new Date('2026-10-17T03:00:00Z'),
+            }),
+          ),
+        );
+        expect(results.filter((r) => r.changed)).toHaveLength(1);
+        expect(
+          results.filter(
+            (r) => r.skippedReason === 'card changed during price check',
+          ),
+        ).toHaveLength(1);
+        expect(Number((await loadCard()).market_value)).toBe(47.5);
       });
 
       it('refreshed value reaches the customer pack detail (Top Hits) at request time', async () => {

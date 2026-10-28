@@ -65,6 +65,7 @@ const vault: VaultResult = {
       packId: '',
       packTitle: '',
       challengePrize: false,
+      luckyDrawPrize: false,
       showcased: false,
       source: 'gift',
       locked: false,
@@ -132,11 +133,59 @@ function button(name: string) {
 }
 async function click(name: string) {
   await act(async () => {
+    button(name).focus();
     button(name).click();
   });
 }
 
 describe('coin flip confirmation and recovery', () => {
+  it('focuses review after selecting from an initially empty card panel', async () => {
+    await act(async () =>
+      root.render(
+        createElement(CoinFlipClient, {
+          customerId: 'c1',
+          initialVault: vault,
+          initialSettings: settings,
+        }),
+      ),
+    );
+    const trigger = [...document.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Choose from Vault'),
+    )!;
+    await act(async () => {
+      trigger.focus();
+      trigger.click();
+    });
+    await act(async () =>
+      document
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Select Pikachu, RM 100.00"]',
+        )!
+        .click(),
+    );
+    expect(document.activeElement).toBe(button('Review card & odds'));
+    expect(mocks.quote).not.toHaveBeenCalled();
+  });
+  it('opens a visual Vault picker, selects a card and restores focus without committing', async () => {
+    await render();
+    expect(document.querySelector('select')).toBeNull();
+    await click('Change card');
+    expect(document.querySelector('[role=dialog]')?.textContent).toContain(
+      'Choose from your Vault',
+    );
+    const card = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Select Pikachu, RM 100.00"]',
+    );
+    expect(card).toBeTruthy();
+    await act(async () => card!.click());
+    expect(document.querySelector('[role=dialog]')).toBeNull();
+    expect(
+      document.querySelector('[aria-label="Selected card"]')?.textContent,
+    ).toContain('Pikachu');
+    expect(document.activeElement).toBe(button('Change card'));
+    expect(mocks.quote).not.toHaveBeenCalled();
+    expect(mocks.accept).not.toHaveBeenCalled();
+  });
   it('allows exactly one selected card in the Vault entry', () => {
     const props = {
       selectedCount: 2,

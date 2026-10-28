@@ -142,6 +142,8 @@ const METHOD_LABEL: Record<string, string> = {
   BQR: 'QR / e-wallet',
   FPX: 'FPX',
   DN: 'DuitNow',
+  UTRC: 'USDT · TRC20',
+  UERC: 'USDT · ERC20',
 };
 
 type ReceiptData = {
@@ -356,7 +358,7 @@ const bankAccountRemoved = (d: {
       <a href="${site}/bank" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Review your bank accounts</a>
 
       <p style="margin:32px 0 0;font-size:12px;line-height:1.6;color:#737373;">
-        We only ever show the last four digits of a saved account.
+        We only ever show the last four characters of a saved account.
       </p>
     </div>
   </body>
@@ -427,7 +429,7 @@ const bankAccountAdded = (d: {
       <a href="${site}/bank" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Review your bank accounts</a>
 
       <p style="margin:32px 0 0;font-size:12px;line-height:1.6;color:#737373;">
-        We only ever show the last four digits of a saved account.
+        We only ever show the last four characters of a saved account.
       </p>
     </div>
   </body>
@@ -449,6 +451,8 @@ type WithdrawalReceiptData = {
   outcome: 'paid' | 'refunded';
   occurredAt: string;
   siteUrl: string;
+  /** A paid USDT payout: what the wallet received. */
+  usdtAmount?: number;
 };
 
 const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
@@ -457,9 +461,16 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
   const site = escapeHtml(d.siteUrl.replace(/\/+$/, ''));
   const logo = `${site}/branding/polycards-logo.png`;
   const paid = d.outcome === 'paid';
+  const usdt =
+    paid && d.usdtAmount !== undefined
+      ? `USDT ${d.usdtAmount.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`
+      : null;
 
   const heading = paid ? 'Withdrawal paid' : 'Withdrawal returned';
-  const lede = paid
+  const bankLede = paid
     ? 'Your bank transfer is complete — the money has left Polycards and reached your bank.'
     : // Cause-agnostic on purpose, same reasoning as copy.ts's withdrawal_refunded
       // (the storefront half of this same fix): this outcome fires on a denied
@@ -468,6 +479,10 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
       // empty merchant payout float) that is not the bank either. "Your bank
       // rejected this" was flatly false on both paths.
       'The transfer could not be completed, so the full amount is back in your Polycards balance. Nothing was lost.';
+  // A paid USDT payout reached a wallet, not a bank.
+  const lede = usdt
+    ? `Your USDT transfer is complete — ${usdt} has left Polycards and reached your wallet.`
+    : bankLede;
 
   return {
     subject: paid
@@ -479,6 +494,7 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
       lede,
       '',
       `Amount:     ${amount}`,
+      usdt ? `Sent:       ${usdt}` : '',
       `Reference:  ${d.reference}`,
       when ? `Date:       ${when}` : '',
       '',
@@ -502,6 +518,7 @@ const withdrawalReceipt = (d: WithdrawalReceiptData): Rendered => {
 
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;border-top:1px solid #404040;border-bottom:1px solid #404040;margin:0 0 32px;">
         ${row('Amount', amount, true)}
+        ${usdt ? row('Sent', usdt) : ''}
         ${row('Reference', d.reference)}
         ${when ? row('Date', when) : ''}
       </table>
@@ -579,12 +596,15 @@ export const renderTemplate = (
     // A security alert that cannot name the account is worse than none — it
     // would tell the customer "something changed" with nothing to check.
     //
-    // EXACTLY four digits, not merely non-empty. The only producer
-    // (packs/saved-account-notice.ts) slices the last 4 off a digits-only
-    // number, so this can never refuse a well-formed payload — it is the
-    // backstop for a malformed one, where "non-empty" would happily print a
-    // FULL account number into an email and undo plan 087's whole point.
-    if (typeof last4 !== 'string' || !/^\d{4}$/.test(last4)) return undefined;
+    // EXACTLY four characters, not merely non-empty. The only producer
+    // (packs/saved-account-notice.ts) slices the last 4 off the saved number —
+    // digits for a bank or e-wallet, base58 letters too for a USDT wallet
+    // address, so the guard is alphanumeric (a digits-only one silently
+    // dropped every USDT alert). The length is what matters: "non-empty"
+    // would happily print a FULL account number into an email and undo plan
+    // 087's whole point.
+    if (typeof last4 !== 'string' || !/^[A-Za-z0-9]{4}$/.test(last4))
+      return undefined;
     if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
     return bankAccountAdded({
       bankName: typeof bankName === 'string' && bankName ? bankName : 'Bank',
@@ -600,9 +620,10 @@ export const renderTemplate = (
     const bankName = data?.bank_name;
     const last4 = data?.account_last4;
     const siteUrl = data?.site_url;
-    // Same EXACTLY-four-digits backstop as the added alert: "non-empty"
+    // Same EXACTLY-four-characters backstop as the added alert: "non-empty"
     // would happily print a FULL account number into an email.
-    if (typeof last4 !== 'string' || !/^\d{4}$/.test(last4)) return undefined;
+    if (typeof last4 !== 'string' || !/^[A-Za-z0-9]{4}$/.test(last4))
+      return undefined;
     if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
     return bankAccountRemoved({
       bankName: typeof bankName === 'string' && bankName ? bankName : 'Bank',
@@ -626,12 +647,19 @@ export const renderTemplate = (
     }
     if (outcome !== 'paid' && outcome !== 'refunded') return undefined;
     if (typeof siteUrl !== 'string' || siteUrl.length === 0) return undefined;
+    const usdtAmount = data?.usdt_amount;
     return withdrawalReceipt({
       amount,
       reference,
       outcome,
       occurredAt: typeof occurredAt === 'string' ? occurredAt : '',
       siteUrl,
+      // Optional: a bad value drops back to the RM-and-bank wording.
+      ...(typeof usdtAmount === 'number' &&
+      Number.isFinite(usdtAmount) &&
+      usdtAmount > 0
+        ? { usdtAmount }
+        : {}),
     });
   }
 

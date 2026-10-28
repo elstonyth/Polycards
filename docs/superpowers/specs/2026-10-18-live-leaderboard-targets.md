@@ -1,0 +1,7 @@
+# Live leaderboard rank goals
+
+Add optional production goals: one selected customer, weekly or all-time public board, Top 1–10. With goals configured, only those customers draw. No targets are assigned automatically. Reach goals stop after two fresh observations confirm the rank; reaching the cycle limit ends the goal without claiming success. Existing Humanized timing, paid open/buyback workflows, settlement reconciliation and storefront publication remain authoritative.
+
+Reuse the rank decision engine with an explicit live mode. Live goals have no extra spend or wall-clock duration cap: configured 1–10 cycles remain the bound. Persist per-goal runtime in the existing live state JSON. Fetch uncached rankings using the public board's aggregates, ordering, challenge-week anchor and disabled filter; fetch each customer's own score even outside the top ten. Pause on stale data, stop on week rollover or unconfirmed own-pull updates, prevent selected-account rank contests and reject impossible Top N allocations. Never replay uncertain paid cycles.
+
+Admin controls require an explicit customer, board and rank, show current rank, goal result, gap, reason and last observation. Lock settings during running/paused/pending runs. Existing saved configurations remain compatible and unchanged. No dependencies or schema migrations. Do not start paid activity, check combined balances, or restart scheduled monitoring during delivery.

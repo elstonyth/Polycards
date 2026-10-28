@@ -1,4 +1,7 @@
-import { bonusShareMyr } from '../../../modules/packs/bonus-credit';
+import {
+  bonusShareMyr,
+  sellbackHoldBp,
+} from '../../../modules/packs/bonus-credit';
 import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
@@ -9,8 +12,12 @@ import {
   UNQUOTED_BUYBACK,
   buybackAmount,
   resolveBuybackRate,
+  revealGraceMs,
 } from '../../../modules/packs/buyback-rate';
+import { withLossless } from '../../../modules/packs/lossless';
 import { isChallengePrizePack } from '../../../modules/packs/challenge-prize';
+import { isLuckyDrawPrizePack } from '../../../modules/packs/lucky-draw';
+import { pullPackTitle } from '../../../modules/packs/pull-history';
 import { bestLiveTierByHandle } from '../../../modules/packs/card-tier';
 import {
   cardByHandle,
@@ -31,14 +38,15 @@ import {
 // buyback workflow runs, so the quote always matches the credit).
 //
 // Every item carries `source` and `locked`. `locked` is true ONLY for the free
-// welcome pull before the customer's first PAID open (hasPaidOpen, resolved once
-// per request): it can be neither sold nor delivered until then, so it carries
-// NO sellable quote — see the buyback block below.
+// welcome pull and a DAILY task's card, before the customer's first PAID open
+// (lockedPullIds, resolved once per request): they can be neither sold nor
+// delivered until then, so they carry NO sellable quote — see the buyback block
+// below.
 //
-// Reward pulls (source='reward' — weekly-challenge prizes, task free rips, task
-// card rewards) are included here with a live quote like any other card: they
-// sell (buyback-pull.ts no longer refuses them; completing the task is the
-// requirement) and ship via the reward withdraw path.
+// Every other reward pull (source='reward' — weekly-challenge prizes, weekly
+// and achievement task rewards) is included here with a live quote like any
+// other card: it sells (completing the task is the requirement) and ships via
+// the reward withdraw path.
 //
 // AUTH: matcher registered in src/api/middlewares.ts with authenticate(); the
 // customer id comes ONLY from the verified token, so a caller can never read
@@ -51,18 +59,18 @@ export async function GET(
 ): Promise<void> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const customerId = req.auth_context.actor_id;
-  // ONE hasPaidOpen read for the whole list (the unlock is computed, never
-  // stored — see modules/packs/free-pack.ts), resolved next to the FX read so
-  // it costs no extra round trip.
-  const [{ rate: fxRate, firm: fxFirm }, freeUnlocked] = await Promise.all([
+  // The pulls are read next to the FX read so they cost no extra round trip.
+  // Same for the Lossless windows: a pull still inside its instant window was
+  // rolled within the reveal grace, so nothing that ended before that can lift
+  // a quote here.
+  const [{ rate: fxRate, firm: fxFirm }, windows, pulls] = await Promise.all([
     resolveFxRateInfo(packs),
-    packs.hasPaidOpen(customerId),
+    packs.losslessWindows(Date.now() - revealGraceMs()),
+    packs.listPulls(
+      { customer_id: customerId, status: 'vaulted' },
+      { order: { rolled_at: 'DESC' }, take: VAULT_LIMIT },
+    ),
   ]);
-
-  const pulls = await packs.listPulls(
-    { customer_id: customerId, status: 'vaulted' },
-    { order: { rolled_at: 'DESC' }, take: VAULT_LIMIT },
-  );
 
   // EVERY pull now takes the card path. The old second branch rendered a pull
   // from its reward_draw prize_snapshot, which existed because a daily-box
@@ -78,7 +86,9 @@ export async function GET(
   const handles = [...new Set(normalPulls.map((p) => p.card_id))];
   const normalPackIds = [...new Set(normalPulls.map((p) => p.pack_id))];
 
-  const [cards, packRows, oddsRows] = await Promise.all([
+  // ONE lock read for the whole list (the unlock is computed, never stored —
+  // see lockedPullIds), next to the card reads.
+  const [cards, packRows, oddsRows, lockedIds] = await Promise.all([
     handles.length
       ? packs.listCards({ handle: handles }, { take: handles.length })
       : Promise.resolve([]),
@@ -88,6 +98,7 @@ export async function GET(
     handles.length
       ? packs.listPackOdds({ card_id: handles }, { take: 1000 })
       : Promise.resolve([]),
+    packs.lockedPullIds(customerId, normalPulls),
   ]);
 
   const byHandle = cardByHandle(cards);
@@ -110,8 +121,9 @@ export async function GET(
   // is not in here: its odds rows resolve the tier normally.
   const isSyntheticReward = (p: { source?: string | null; pack_id: string }) =>
     p.source === 'reward' && !packBySlug.has(p.pack_id);
+  // A Lucky Draw card takes no tier at all (below), so it needs no lookup.
   const prizeHandles = normalPulls
-    .filter(isSyntheticReward)
+    .filter((p) => isSyntheticReward(p) && !isLuckyDrawPrizePack(p.pack_id))
     .map((p) => p.card_id);
   const prizeTier = await bestLiveTierByHandle(packs, prizeHandles);
 
@@ -124,11 +136,11 @@ export async function GET(
       if (!Number.isFinite(marketValue)) return null;
       const pack = packBySlug.get(p.pack_id);
       const prize = isChallengePrizePack(p.pack_id);
-      // The free welcome pull is unsellable until the customer's first PAID
-      // open — the SAME rule buyback-pull.ts refuses on.
-      // `locked` = neither sellable NOR shippable. That is the free welcome
-      // pull before the first PAID open, and only that.
-      const locked = p.source === 'free' && !freeUnlocked;
+      const luckyDraw = isLuckyDrawPrizePack(p.pack_id);
+      // The free welcome pull and a daily task's card are unsellable until
+      // the customer's first PAID open — the SAME rule buyback-pull.ts
+      // refuses on. `locked` = neither sellable NOR shippable.
+      const locked = lockedIds.has(p.id);
       // `sellable` used to be narrower than `!locked` — buyback-pull.ts refused
       // every source='reward' pull that was not a challenge prize, so a task
       // reward quoted RM 0.00 in the vault forever. That refusal is gone (task
@@ -136,7 +148,14 @@ export async function GET(
       // task is the requirement), so the two facts coincide. The field stays:
       // the storefront keys its Sell affordance off it.
       const sellable = !locked;
-      const { percent, rate_type } = resolveBuybackRate(pack, {
+      // Lossless Mode at rolled_at, as the credit decides it (buyback-pull.ts).
+      const priced = withLossless(
+        pack,
+        windows,
+        new Date(p.rolled_at).getTime(),
+        p.source,
+      );
+      const { percent, rate_type } = resolveBuybackRate(priced, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
         // Reaching the vault means the reveal was left, so the window is closed
@@ -157,12 +176,15 @@ export async function GET(
         pack_id: p.pack_id,
         // The synthetic `challenge-<week>` id is not a pack title anyone should
         // read; name the surface it was won on instead.
-        pack_title: pack?.title ?? (prize ? 'Weekly Challenge' : p.pack_id),
+        pack_title: pullPackTitle(p, pack?.title),
         // A weekly-challenge prize keeps the challenge's own prism frame in the
         // vault instead of taking the card's pack tier — it was won there, not
         // pulled from a pack. Stated by the backend rather than left to the
         // storefront to infer from the synthetic pack id.
         challenge_prize: prize,
+        // A Lucky Draw card wears no tier frame and states no tier: won, not
+        // pulled, and the bare slab is how the vault says so.
+        lucky_draw_prize: luckyDraw,
         showcased: (p as unknown as { showcased: boolean }).showcased ?? false,
         card: {
           // A synthetic pack has no odds row, so rarityOf would answer
@@ -172,19 +194,26 @@ export async function GET(
           // resolved live tier.
           ...toCardView(
             card,
-            isSyntheticReward(p)
-              ? (prizeTier.get(p.card_id) ?? '')
-              : rarityOf(p.pack_id, p.card_id),
+            luckyDraw
+              ? ''
+              : isSyntheticReward(p)
+                ? (prizeTier.get(p.card_id) ?? '')
+                : rarityOf(p.pack_id, p.card_id),
           ),
           marketPriceMyr,
+          // The linked sprite (Pokémon or One Piece), so the vault never has
+          // to guess one from the card name ("Bartholomew Kuma" → Mew).
+          pokemon_dex: card.pokemon_dex ?? null,
+          sprite_image: card.sprite_image ?? null,
         },
         // How the pull was acquired. NOTE for UI code: a weekly-challenge prize
         // takes THIS path with source='reward' and a live, sellable quote — so
         // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
         source: p.source ?? 'pack',
         locked,
-        // Share of a sell-back paid as spend-only bonus credit (spec
-        // 2026-10-07): 10000 on a gift, the bonus share on a bonus open.
+        // Share of the pull's price paid as bonus or promo (spec 2026-10-07):
+        // 10000 on a gift, the bonus share on a bonus open. What of a sale is
+        // held is buyback.bonus (a reward's or gift's: none, ADR 0012).
         bonus_bp: Number(p.bonus_bp ?? 0),
         // Can this row be SOLD? Now exactly `!locked` — a reward card sells
         // like any other (and still ships via the reward path). Kept as its
@@ -211,11 +240,12 @@ export async function GET(
           : {
               percent,
               amount: buybackAmount(marketPriceMyr, percent),
-              // The part of that amount from bonus or gift play, which
-              // must be played through before it can be withdrawn.
+              // The part of that amount from bonus or welcome-pack play,
+              // which must be played through before it can be withdrawn.
+              // None for a reward or a gift (ADR 0012).
               bonus: bonusShareMyr(
                 buybackAmount(marketPriceMyr, percent),
-                Number(p.bonus_bp ?? 0),
+                sellbackHoldBp(p),
               ),
               rate_type,
               // false when amount was computed on the display FX fallback — the

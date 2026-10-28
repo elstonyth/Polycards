@@ -12,7 +12,9 @@ import {
   buybackAmount,
   instantDeadlineMs,
   resolveBuybackRate,
+  revealGraceMs,
 } from '../../../../../modules/packs/buyback-rate';
+import { withLossless } from '../../../../../modules/packs/lossless';
 
 // GET /admin/customers/:id/pulls — paginated pull history for the support
 // view. Same row shape as the gacha route's `pulls` slice, PLUS the
@@ -65,27 +67,58 @@ export async function GET(
       .json({ message: `source must be one of ${PULL_SOURCES.join(', ')}` });
     return;
   }
+  // ?sort=value: the most valuable first (the player page's Vault). Default
+  // newest first.
+  const sort =
+    req.query.sort === undefined || req.query.sort === ''
+      ? 'newest'
+      : req.query.sort;
+  if (sort !== 'newest' && sort !== 'value') {
+    res.status(400).json({ message: 'sort must be newest or value' });
+    return;
+  }
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },
     { defaultLimit: 25, maxLimit: 100 },
   );
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const { rate: fx, firm: fxFirm } = await resolveFxRateInfo(packs);
-  // Whole-list read (one indexed query): a free welcome pull is unsellable
-  // until this customer's first PAID open, so it must show no payable-now quote
-  // while locked — admin and customer refuse on the SAME rule.
-  const freeUnlocked = await packs.hasPaidOpen(id);
+  // Lossless windows for the payable-now quotes, read once — the same since
+  // bound as GET /store/vault, so the desk sees the customer's number.
+  const windows = await packs.losslessWindows(Date.now() - revealGraceMs());
   const filter: Record<string, unknown> = { customer_id: id };
   if (status) filter.status = status;
   if (source) filter.source = source;
-  // `id` tiebreaker: a batch open stamps every pull in the batch with the
-  // same `rolled_at` millisecond, so offset pagination needs a unique
-  // secondary sort key. Same rule as inventory/[handle]/route.ts:82.
-  const [rows, total] = await packs.listAndCountPulls(filter, {
-    order: { rolled_at: 'DESC', id: 'DESC' },
-    skip: offset,
-    take: limit,
-  });
+  // ?sort=value: ranked and paged in the database (pullIdsByValue), then
+  // the page's rows read back in that order.
+  // Newest: `id` tiebreaker — a batch open stamps every pull in the batch
+  // with the same `rolled_at` millisecond, so offset pagination needs a
+  // unique secondary sort key. Same rule as inventory/[handle]/route.ts:82.
+  const [rows, total] =
+    sort === 'value'
+      ? await (async () => {
+          const ranked = await packs.pullIdsByValue(
+            id,
+            { status, source } as { status?: string; source?: string },
+            { limit, offset },
+          );
+          const found = ranked.ids.length
+            ? await packs.listPulls(
+                { id: ranked.ids },
+                { take: ranked.ids.length },
+              )
+            : [];
+          const byId = new Map(found.map((p: any) => [p.id, p]));
+          return [
+            ranked.ids.map((i) => byId.get(i)).filter(Boolean),
+            ranked.total,
+          ] as const;
+        })()
+      : await packs.listAndCountPulls(filter, {
+          order: { rolled_at: 'DESC', id: 'DESC' },
+          skip: offset,
+          take: limit,
+        });
   const handles = [...new Set(rows.map((p: any) => p.card_id))];
   const cards = handles.length
     ? await packs.listCards({ handle: handles }, { take: handles.length })
@@ -97,17 +130,26 @@ export async function GET(
     ? await packs.listPacks({ slug: packIds }, { take: packIds.length })
     : [];
   const packBySlug = new Map(packRows.map((p: any) => [p.slug, p]));
+  // One read for the page: a free welcome pull or a daily task's card is
+  // unsellable until this customer's first PAID open, so it must show no
+  // payable-now quote while locked — admin and customer refuse on the SAME
+  // rule (lockedPullIds).
+  const lockedIds = await packs.lockedPullIds(
+    id,
+    rows as { id: string; source?: string | null }[],
+  );
   res.json({
     total,
     fx: { rate: fx, firm: fxFirm },
     items: rows.map((p: any) => {
       const card = cardByHandle.get(p.card_id);
       // Payable-now quote — vaulted card pulls only (a locked free welcome
-      // pull can't sell yet; other statuses have nothing to pay). Reward
-      // pulls — challenge prizes, task free rips, task card rewards — sell
-      // like any pulled card since 2026-09-03 and quote here too. Uses the
-      // per-card multiplier exactly like GET /store/vault, so this amount is
-      // the same number the customer sees on their sell button.
+      // pull or daily task card can't sell yet; other statuses have nothing
+      // to pay). Other reward pulls — challenge prizes, weekly and
+      // achievement task rewards — sell like any pulled card since
+      // 2026-09-03 and quote here too. Uses the per-card multiplier exactly
+      // like GET /store/vault, so this amount is the same number the
+      // customer sees on their sell button.
       let quote: {
         percent: number;
         amount: number;
@@ -115,18 +157,19 @@ export async function GET(
         firm: boolean;
         instant_deadline_ms: number;
       } | null = null;
-      if (
-        p.status === 'vaulted' &&
-        (p.source !== 'free' || freeUnlocked) &&
-        card
-      ) {
+      if (p.status === 'vaulted' && !lockedIds.has(p.id) && card) {
         const marketPriceMyr = displayMarketPrice(
           toMoney(card.market_value),
           fx,
           Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
         );
         const { percent, rate_type } = resolveBuybackRate(
-          packBySlug.get(p.pack_id),
+          withLossless(
+            packBySlug.get(p.pack_id),
+            windows,
+            new Date(p.rolled_at).getTime(),
+            p.source,
+          ),
           {
             rolled_at: p.rolled_at,
             revealed_at: p.revealed_at,
@@ -147,6 +190,7 @@ export async function GET(
       return {
         id: p.id,
         pack_id: p.pack_id,
+        pack_title: packBySlug.get(p.pack_id)?.title ?? null,
         rolled_at: p.rolled_at,
         status: p.status,
         buyback_amount:

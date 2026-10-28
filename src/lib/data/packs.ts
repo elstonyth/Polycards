@@ -87,6 +87,11 @@ const titleCase = (key: string): string =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
+// A Map, not an object lookup: a category named 'constructor' must not read
+// Object's.
+const CAT_ICONS = new Map<string, string>(Object.entries(CAT_ICON));
+const iconOf = (key: string): string => CAT_ICONS.get(key) ?? CAT_ICON.pokemon;
+
 /**
  * Pack catalog grouped by category, in the live-site category order. The packs
  * come entirely from the backend (ordered by rank) — the backend is the single
@@ -116,7 +121,8 @@ async function loadPackCategories(): Promise<PackCategory[]> {
   // Known categories keep the live-site order + presentational meta (empty
   // ones still render a chip; the client shows empty states). A backend pack
   // in a category the local meta doesn't know still renders — title-cased
-  // label + fallback icon — instead of silently disappearing.
+  // label + its icon (Pokémon's when it has none) — instead of silently
+  // disappearing.
   const known = CATEGORY_META.map((cat) => ({
     ...cat,
     packs: byCategory.get(cat.id) ?? [],
@@ -128,7 +134,7 @@ async function loadPackCategories(): Promise<PackCategory[]> {
       id,
       tab: titleCase(id),
       heading: `${titleCase(id)} Packs`,
-      icon: CAT_ICON.pokemon,
+      icon: iconOf(id),
       packs: list,
     }));
   return [...known, ...extras];
@@ -255,7 +261,7 @@ async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
       ...toPack(pack),
       categoryId: pack.category,
       categoryName: meta?.tab ?? titleCase(pack.category),
-      icon: meta?.icon ?? CAT_ICON.pokemon,
+      icon: meta?.icon ?? iconOf(pack.category),
     },
     siblings: [],
   };

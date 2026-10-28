@@ -18,7 +18,48 @@ import {
   WalletSchema,
   DeliveryOrderSchema,
   CREDIT_REASONS,
+  WithdrawBanksSchema,
 } from '../schemas';
+
+describe('withdrawal bank validation metadata', () => {
+  it('passes valid account patterns and rejects invalid regular expressions', () => {
+    const bank = {
+      bankCode: 'PAYNOWSG',
+      bankName: 'PayNow',
+      accountLengths: [8, 10],
+      accountPattern: '^[1-9][0-9]{6,14}$',
+      accountHint: 'Use your PayNow mobile number.',
+    };
+    expect(WithdrawBanksSchema.parse({ banks: [bank] }).banks[0]).toEqual(bank);
+    expect(
+      WithdrawBanksSchema.safeParse({
+        banks: [{ ...bank, accountPattern: '[' }],
+      }).success,
+    ).toBe(false);
+  });
+  const bank = {
+    bankCode: 'MBBESGSG',
+    bankName: 'Maybank (SG)',
+    currency: 'SGD',
+  };
+
+  it('keeps bank-specific lengths and accepts older responses without them', () => {
+    expect(
+      WithdrawBanksSchema.parse({
+        banks: [{ ...bank, accountLengths: [11] }, bank],
+      }).banks,
+    ).toEqual([{ ...bank, accountLengths: [11] }, bank]);
+  });
+
+  it.each(
+    [[], [0], [11.5], ['11']].map((accountLengths) => ({ accountLengths })),
+  )('rejects malformed length metadata %j', ({ accountLengths }) => {
+    expect(
+      WithdrawBanksSchema.safeParse({ banks: [{ ...bank, accountLengths }] })
+        .success,
+    ).toBe(false);
+  });
+});
 
 describe('parseList — drops invalid items, never throws', () => {
   it('returns [] for non-arrays (mirrors Array.isArray guard)', () => {
@@ -296,6 +337,30 @@ describe('CreditTransactionSchema — keeps every reason the backend emits', () 
     expect(parseList(CreditTransactionSchema, rows)[0]?.reason).toBe(
       'refund_x',
     );
+  });
+
+  // 2026-10-14: a sell-back row carries the part still to play through; an
+  // older backend omits it and the row must still parse.
+  it('reads a sell-back playthrough part, and parses without one', () => {
+    const rows = [
+      {
+        id: 'b',
+        amount: 31.63,
+        reason: 'buyback',
+        created_at: '2026-10-14T02:11:01Z',
+        playthrough: 10.55,
+      },
+      {
+        id: 'c',
+        amount: 13.67,
+        reason: 'buyback',
+        created_at: '2026-10-14T02:10:18Z',
+      },
+    ];
+    const parsed = parseList(CreditTransactionSchema, rows);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.playthrough).toBe(10.55);
+    expect(parsed[1]?.playthrough).toBeUndefined();
   });
 });
 

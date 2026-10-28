@@ -3,6 +3,7 @@ import {
   createGroupCreditAdjustment,
   loadGroupCreditCustomers,
   parseGroupCreditAmount,
+  parseGroupTickets,
   runGroupCreditAdjustment,
 } from './group-credit-edit';
 import type { GroupCreditCustomer } from './admin-rest';
@@ -82,7 +83,13 @@ describe('group credit editing', () => {
       createGroupCreditAdjustment(customers, new Set(), '5', 'Audit', true),
     ).toBeNull();
     expect(
-      createGroupCreditAdjustment(customers, new Set(['cus_1']), '5', '  ', true),
+      createGroupCreditAdjustment(
+        customers,
+        new Set(['cus_1']),
+        '5',
+        '  ',
+        true,
+      ),
     ).toBeNull();
     expect(
       createGroupCreditAdjustment(
@@ -164,5 +171,81 @@ describe('group credit editing', () => {
       kind: 'bonus',
       notify: false,
     });
+  });
+
+  it('accepts a nonzero whole number of tickets within ±10,000', () => {
+    for (const valid of ['5', '-3', '+20', '10000', '-10000']) {
+      expect(parseGroupTickets(valid)).toBe(Number(valid));
+    }
+    for (const invalid of ['', '0', '1.5', '1e3', '10.00', '10001', 'abc']) {
+      expect(parseGroupTickets(invalid)).toBeNull();
+    }
+    // A ticket batch parses the amount as tickets, never as RM.
+    expect(
+      createGroupCreditAdjustment(
+        [customer(1)],
+        new Set(['cus_1']),
+        '2.5',
+        'Gift',
+        false,
+        true,
+      ),
+    ).toBeNull();
+  });
+
+  it('sends a ticket batch to the Lucky Draw tickets route, never as bonus', async () => {
+    vi.stubGlobal('__BACKEND_URL__', 'http://backend.test');
+    const batch = createGroupCreditAdjustment(
+      [customer(1)],
+      new Set(['cus_1']),
+      '25',
+      'Launch gift',
+      true,
+      true,
+    );
+    if (!batch) throw new Error('Expected valid batch');
+    expect(batch).toMatchObject({ amount: 25, tickets: true, bonus: false });
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(json({ tickets: 25, balance: 40 }));
+    vi.stubGlobal('fetch', fetcher);
+    const results = await runGroupCreditAdjustment(batch, {}, vi.fn());
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe(
+      'http://backend.test/admin/customers/cus_1/lucky-draw-tickets',
+    );
+    expect(JSON.parse(init.body)).toEqual({
+      tickets: 25,
+      note: 'Launch gift',
+      idempotency_key: `${batch.id}:cus_1`,
+    });
+    expect(results).toEqual({ cus_1: { status: 'succeeded', balance: 40 } });
+  });
+
+  it('waits out a rate limit (429) and retries the same player with the same key', async () => {
+    vi.stubGlobal('__BACKEND_URL__', 'http://backend.test');
+    const batch = createGroupCreditAdjustment(
+      [customer(1)],
+      new Set(['cus_1']),
+      '5',
+      'Gift',
+      false,
+      true,
+    );
+    if (!batch) throw new Error('Expected valid batch');
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(json({ message: 'Too many admin requests.' }, 429))
+      .mockResolvedValueOnce(json({ tickets: 5, balance: 5 }));
+    vi.stubGlobal('fetch', fetcher);
+    const wait = vi.fn(async () => {});
+    const results = await runGroupCreditAdjustment(batch, {}, vi.fn(), wait);
+    expect(wait).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const keys = fetcher.mock.calls.map(
+      ([, init]) => JSON.parse(init.body).idempotency_key,
+    );
+    expect(keys[0]).toBe(keys[1]);
+    expect(results.cus_1).toEqual({ status: 'succeeded', balance: 5 });
   });
 });

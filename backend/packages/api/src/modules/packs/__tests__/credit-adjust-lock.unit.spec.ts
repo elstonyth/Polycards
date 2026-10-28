@@ -148,9 +148,10 @@ describe('PacksModuleService.adminAdjustCredit — mint-window lock', () => {
     await f.svc.adminAdjustCredit(grant(5), f.ctx);
 
     const [sql] = f.em.execute.mock.calls[1];
-    // Credit grants, bonus grants and gifted packs share the ceiling.
+    // Credit and bonus grants share the ceiling; gifted packs have their own
+    // pool (GIFT_DAILY_MINT_MAX_RM) since 2026-10-17.
     expect(sql).toContain("reason IN ('adjustment', 'bonus_grant')");
-    expect(sql).toContain('FROM pack_gift');
+    expect(sql).not.toContain('pack_gift');
     expect(sql).toContain('amount > 0'); // clawbacks never count
     expect(sql).toContain("created_at > now() - interval '24 hours'");
     expect(sql).toContain('deleted_at IS NULL'); // a compensated row must not count

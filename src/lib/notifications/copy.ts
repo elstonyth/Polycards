@@ -9,7 +9,7 @@ import {
   Trophy,
   type LucideIcon,
 } from 'lucide-react';
-import { rm } from '@/lib/format';
+import { rm, usdt } from '@/lib/format';
 
 /**
  * Whether the notification feed is allowed to raise a toast for a template.
@@ -141,7 +141,7 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
         // contradict it.
         return strOf(data, 'prize_kind') === 'voucher'
           ? `You won a ${rm(amount)} voucher.`
-          : `You won ${rm(amount)} in credit.`;
+          : `You won ${rm(amount)}.`;
       }
       return null;
     },
@@ -162,9 +162,10 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       const amount = numOf(data, 'amount_myr');
       const level = numOf(data, 'level');
       if (amount === null) return null;
+      // A VIP voucher pays bonus credit since 2026-10-11 (reasonCashSenSql).
       return level
-        ? `${rm(amount)} credited from your Level ${level} voucher.`
-        : `${rm(amount)} credited to your balance.`;
+        ? `${rm(amount)} bonus credit from your Level ${level} voucher. Use it on packs — it can’t be withdrawn.`
+        : `${rm(amount)} bonus credit added. Use it on packs — it can’t be withdrawn.`;
     },
     href: null,
     action: null,
@@ -178,7 +179,9 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     title: 'Top-up complete',
     body: (data) => {
       const amount = numOf(data, 'amount_myr');
-      return amount === null ? null : `${rm(amount)} added to your balance.`;
+      return amount === null
+        ? null
+        : `${rm(amount)} added. Withdrawals unlock once all your money for packs is used.`;
     },
     href: '/transactions',
     action: 'View ledger',
@@ -193,8 +196,11 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     title: 'Withdrawal paid',
     body: (data) => {
       const amount = numOf(data, 'amount_myr');
-      return amount === null
-        ? null
+      // Set only on a USDT payout: the wallet got USDT, not RM at a bank.
+      const sent = numOf(data, 'usdt_amount');
+      if (amount === null) return null;
+      return sent !== null && sent > 0
+        ? `${usdt(sent)} (${rm(amount)}) has been sent to your wallet.`
         : `${rm(amount)} has been sent to your bank.`;
     },
     href: '/transactions',
@@ -236,11 +242,12 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     body: (data) => {
       const bank = strOf(data, 'bank_name');
       const last4 = strOf(data, 'account_last4');
-      // EXACTLY four digits, matching the email renderer's guard
-      // (backend .../resend/templates.ts). A merely non-empty check would
+      // EXACTLY four characters, matching the email renderer's guard
+      // (backend .../resend/templates.ts) — alphanumeric, because a USDT
+      // wallet address ends in base58 letters. A merely non-empty check would
       // render a FULL account number into a toast if a malformed payload ever
       // reached here.
-      if (!last4 || !/^\d{4}$/.test(last4)) return null;
+      if (!last4 || !/^[A-Za-z0-9]{4}$/.test(last4)) return null;
       return `${bank ? `${bank} ` : ''}····${last4} was added to your withdrawal accounts. If this wasn't you, remove it and change your password.`;
     },
     href: '/bank',
@@ -261,10 +268,10 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     body: (data) => {
       const bank = strOf(data, 'bank_name');
       const last4 = strOf(data, 'account_last4');
-      // EXACTLY four digits, same guard as the added sibling and the email
+      // EXACTLY four characters, same guard as the added sibling and the email
       // renderer: a merely non-empty check would render a FULL account number
       // into a toast if a malformed payload ever reached here.
-      if (!last4 || !/^\d{4}$/.test(last4)) return null;
+      if (!last4 || !/^[A-Za-z0-9]{4}$/.test(last4)) return null;
       return `${bank ? `${bank} ` : ''}····${last4} was removed from your withdrawal accounts. If this wasn't you, change your password now.`;
     },
     href: '/bank',
@@ -288,7 +295,17 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       if (cards && cards > 0)
         parts.push(cards === 1 ? 'a featured card' : `${cards} featured cards`);
       if (parts.length === 0) return null;
-      return `You finished #${rank} — ${parts.join(' and ')} added to your account.`;
+      const credit =
+        credits && credits > 0
+          ? ' Use the bonus credit on packs — it can’t be withdrawn.'
+          : '';
+      const card =
+        cards && cards > 0
+          ? cards === 1
+            ? ' Ship the card (delivery fee applies) or sell it back.'
+            : ' Ship the cards (delivery fee applies) or sell them back.'
+          : '';
+      return `You finished #${rank} — ${parts.join(' and ')} added to your account.${credit}${card}`;
     },
     href: '/leaderboard',
     action: 'View challenge',
@@ -321,7 +338,7 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       const amount = numOf(data, 'amount');
       return amount === null || amount <= 0
         ? null
-        : `You received ${rm(amount)} bonus credit.`;
+        : `${rm(amount)} bonus credit added. Use it on packs — it can’t be withdrawn.`;
     },
     href: '/wallet',
     action: 'View wallet',

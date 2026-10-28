@@ -39,6 +39,7 @@ export function PoolByRarity({
   full,
   tierChances,
   onOpen,
+  pokemon,
 }: {
   /** Top-tier subset for the teaser rail, value-sorted. */
   rail: PackCard[];
@@ -48,6 +49,8 @@ export function PoolByRarity({
   /** Admin-published per-tier chances; null = this pack has no published odds. */
   tierChances: Partial<Record<Rarity, number>> | null;
   onOpen: (card: PackCard) => void;
+  /** false in a non-Pokémon pack: badges show only the cards' own sprites. */
+  pokemon?: boolean;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   // Mouse drag-to-scroll on the rail (touch swipes natively).
@@ -119,6 +122,7 @@ export function PoolByRarity({
                 card={c}
                 sizes="(max-width: 640px) 38vw, 160px"
                 onOpen={onOpen}
+                pokemon={pokemon}
               />
             </div>
           ))}
@@ -131,6 +135,7 @@ export function PoolByRarity({
         title={view.title}
         tierChances={tierChances}
         onOpen={onOpen}
+        pokemon={pokemon}
       />
     </div>
   );
@@ -146,6 +151,7 @@ function PoolModal({
   title,
   tierChances,
   onOpen,
+  pokemon,
 }: {
   open: boolean;
   onClose: () => void;
@@ -154,6 +160,7 @@ function PoolModal({
   title: string;
   tierChances: Partial<Record<Rarity, number>> | null;
   onOpen: (card: PackCard) => void;
+  pokemon?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
@@ -242,6 +249,7 @@ function PoolModal({
                       card={c}
                       sizes="(max-width: 640px) 45vw, 200px"
                       onOpen={onOpen}
+                      pokemon={pokemon}
                     />
                   ))}
                 </div>

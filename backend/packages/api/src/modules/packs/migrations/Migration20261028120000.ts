@@ -9,7 +9,7 @@ const entities = [
   'vip_levels', 'challenge_stages', 'challenge_settings', 'delivery_order',
   'purchase_invoice', 'tier_settings', 'referral_settings', 'weekly_settlement',
   'task_definition', 'customer_group', 'gateway_withdrawal', 'pack', 'card',
-  'announcement', 'pack_gift',
+  'announcement', 'pack_gift', 'gateway_deposit', 'lucky_draw_event', 'lucky_draw_prize',
 ];
 const list = (values: string[]) => values.map((v) => `'${v}'`).join(', ');
 

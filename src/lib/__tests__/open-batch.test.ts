@@ -239,6 +239,7 @@ describe('mapBatchRoll — field mapping', () => {
     expect(mapBatchRoll(roll)!.card).toEqual({
       handle: 'pikachu-holo',
       name: 'Pikachu Holo',
+      set: '',
       image: '/cards/pikachu-holo.webp',
       slabImage: null,
       rarity: 'Rare',

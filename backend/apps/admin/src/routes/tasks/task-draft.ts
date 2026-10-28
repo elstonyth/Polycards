@@ -11,11 +11,16 @@ export type TaskKind = AdminTaskDefinition['kind'];
 // Mirrors TYPES_BY_KIND in the backend's tasks.ts (the gate that matters):
 // daily and weekly share the repeating goals; lifetime ratchets (VIP level,
 // vault size) are achievement-only.
-const PERIODIC = ['checkin_days', 'rip_count', 'vault_pixel_count'] as const;
+const PERIODIC = [
+  'checkin_days',
+  'rip_count',
+  'vault_pixel_count',
+  'topup_myr',
+] as const;
 export const REQUIREMENT_TYPES: Record<TaskKind, readonly string[]> = {
   daily: PERIODIC,
   weekly: PERIODIC,
-  achievement: ['reach_level', 'vault_count', 'vault_pixel_count'],
+  achievement: ['reach_level', 'vault_count', 'vault_pixel_count', 'topup_myr'],
 };
 
 export const KIND_LABEL: Record<TaskKind, string> = {
@@ -30,6 +35,7 @@ export const REQUIREMENT_LABEL: Record<string, string> = {
   reach_level: 'Reach VIP level N',
   vault_count: 'Vault N cards',
   vault_pixel_count: 'Vault N Pokémon (pixel) cards',
+  topup_myr: 'Top up RM N',
 };
 
 /** The goal select's wording for one cadence. A daily check-in is a single
@@ -53,6 +59,7 @@ export const COUNT_LABEL: Record<string, string> = {
   reach_level: 'Level',
   vault_count: 'Cards',
   vault_pixel_count: 'Cards',
+  topup_myr: 'RM',
 };
 
 export const REWARD_TYPES = ['credit', 'pack', 'card'] as const;
@@ -83,6 +90,8 @@ export interface Draft {
   rewardValue: string;
   active: boolean;
   sort: string;
+  /** Lucky Draw tickets a claim also pays (whole number, 0 = none). */
+  tickets: string;
   /** datetime-local strings, same idiom as the Weekly Challenge schedule. */
   startsAt: string;
   endsAt: string;
@@ -99,6 +108,7 @@ export const blankDraft = (): Draft => ({
   rewardValue: '',
   active: true,
   sort: '0',
+  tickets: '0',
   startsAt: '',
   endsAt: '',
 });
@@ -125,6 +135,7 @@ export const draftFrom = (t: AdminTaskDefinition): Draft => {
     (req.days as number | undefined) ??
     (req.count as number | undefined) ??
     (req.level as number | undefined) ??
+    (req.amount_myr as number | undefined) ??
     1;
   return {
     id: t.id,
@@ -146,15 +157,26 @@ export const draftFrom = (t: AdminTaskDefinition): Draft => {
           : String(rew.card_handle ?? ''),
     active: t.active,
     sort: String(t.sort),
+    tickets: String(t.tickets ?? 0),
     startsAt: t.starts_at ? toLocalInput(new Date(t.starts_at)) : '',
     endsAt: t.ends_at ? toLocalInput(new Date(t.ends_at)) : '',
   };
 };
 
+// Mirrors MAX_TASK_TICKETS in the backend's lucky-draw.ts.
+const MAX_TICKETS = 10_000;
+
 export function draftToPayload(d: Draft): {
   requirement: Record<string, unknown>;
   reward: Record<string, unknown>;
+  tickets: number;
 } | null {
+  // Always sent: the backend keeps the stored value only when the field is
+  // omitted, so a save that left it out would be a silent "keep", not a "0".
+  const tickets = d.tickets.trim() === '' ? NaN : Number(d.tickets);
+  if (!Number.isInteger(tickets) || tickets < 0 || tickets > MAX_TICKETS) {
+    return null;
+  }
   // A goal with no count box (the daily check-in) must not be blocked by
   // whatever the hidden box last held — the operator could not fix it.
   const n = countApplies(d) ? Number(d.reqN) : 1;
@@ -188,6 +210,9 @@ export function draftToPayload(d: Draft): {
         pixel_pokemon_id: d.reqPixel === ANY ? null : d.reqPixel,
       };
       break;
+    case 'topup_myr':
+      requirement = { type: d.reqType, amount_myr: n };
+      break;
     default:
       requirement = { type: d.reqType, count: n };
   }
@@ -203,7 +228,7 @@ export function draftToPayload(d: Draft): {
     if (!d.rewardValue.trim()) return null;
     reward = { type: 'card', card_handle: d.rewardValue.trim() };
   }
-  return { requirement, reward };
+  return { requirement, reward, tickets };
 }
 
 /**

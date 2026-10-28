@@ -1,33 +1,31 @@
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { Container, Heading, Tabs, Text } from '@medusajs/ui';
-import { Receipt } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePaymentGateway } from '../../lib/queries';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { LEDGER_CURRENCY } from '../../lib/format';
-import { RailCard } from './RailCard';
-import { RegionalFxCard } from './RegionalFxCard';
+import { GatewayStrip } from './GatewayStrip';
+import { ExchangeRateCard } from './ExchangeRateCard';
 import { ReportCard } from './ReportCard';
-import { AuditCard } from './AuditCard';
+import { AuditFindings } from './AuditFindings';
 
 // Settlement — one tab per currency the site takes money in (RM, then each
 // regional rail: SGD today, USDT when it ships). Every tab reads the same way,
-// top to bottom: the gateway and its live wallet, the exchange rate (regional
-// rails only), the weekly/monthly result from this database, and the audit of
-// our rows against the gateway. The tab is in the URL (?currency=SGD), so each
+// top to bottom (spec 2026-10-14-admin-finance-pages §6): one strip with the
+// gateway, its live wallet and the audit's verdict; the exchange rate
+// (regional rails only); the monthly/weekly result from this database; and
+// the audit's findings, only when there are any. Edit forms open in side
+// panels. The tab is in the URL (?currency=SGD), so each
 // currency is a page an operator can link to.
 //
 // The tab list comes from the backend's gateway registry, so a new rail gets
 // its tab without a change here.
 export const config: RouteConfig = {
-  label: 'Settlement',
-  icon: Receipt,
-  // After the Economy (30) / Ledger (31) money-reporting cluster. NOT 32 —
-  // Daily rewards already holds that and a collision leaves the order
-  // tie-break-dependent; 34 sits after Weekly Challenge (33) in a slot
-  // nothing owns.
-  rank: 34,
+  label: 'pcNav.reconciliation',
+  translationNs: 'translation',
+  rank: 3,
+  nested: '/payments',
 };
 
 const SettlementPage = () => {
@@ -81,12 +79,12 @@ const SettlementPage = () => {
         // Keyed: a tab switch starts every card fresh, never with the other
         // currency's form state.
         <div key={currency} className="flex flex-col gap-y-3">
-          <RailCard currency={currency} />
+          <GatewayStrip currency={currency} />
           {currency !== LEDGER_CURRENCY ? (
-            <RegionalFxCard currency={currency} />
+            <ExchangeRateCard currency={currency} />
           ) : null}
           <ReportCard currency={currency} />
-          <AuditCard currency={currency} />
+          <AuditFindings currency={currency} />
         </div>
       )}
     </div>

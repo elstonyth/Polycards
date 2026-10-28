@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 await RAPIER.init();
 const traces = [];
-for (const profile of ['soft', 'firm']) {
+// Linear and angular velocity both grow with release strength.
+// https://rapier.rs/docs/user_guides/javascript/rigid_body_velocity/
+for (const profile of [0, 0.25, 0.5, 0.75, 1]) {
   for (const won of [true, false]) {
     for (let seed = 0; seed < 160; seed++) {
       const world = new RAPIER.World({ x: 0, y: -22, z: 0 });
@@ -19,8 +21,8 @@ for (const profile of ['soft', 'firm']) {
         RAPIER.RigidBodyDesc.dynamic()
           .setTranslation(0, 1, 0)
           .setRotation({ x: Math.sin(0.32), y: 0, z: 0, w: Math.cos(0.32) })
-          .setLinvel(0.15, profile === 'firm' ? 7.5 : 6, 0)
-          .setAngvel({ x: 20 + seed * 0.3, y: 0.7, z: 0.5 })
+          .setLinvel(0.1, 4.5 + profile * 4, 0)
+          .setAngvel({ x: 14 + profile * 12 + seed * 0.12, y: 0.5, z: 0.35 })
           .setLinearDamping(0.12)
           .setAngularDamping(0.4)
           .setCcdEnabled(true),
@@ -87,7 +89,7 @@ for (const profile of ['soft', 'firm']) {
 }
 assert.equal(
   traces.length,
-  4,
+  10,
   'Both faces must have a bounded, physically settled trace for every profile.',
 );
 await mkdir('public/coin-flip', { recursive: true });

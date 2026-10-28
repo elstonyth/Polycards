@@ -10,6 +10,8 @@ vi.mock('@/lib/store', () => ({ store: storeShim }));
 import {
   ackReportedDeposits,
   getPendingDeposits,
+  getPullHistory,
+  getTransactions,
   getUnreportedDeposits,
   getVault,
   readPendingDeposits,
@@ -67,6 +69,25 @@ describe('startWithdrawal — Idempotency-Key', () => {
       reference: 'PC-W1',
       status: 'pending',
     });
+  });
+
+  it('carries what a Singapore bank receives, and nothing for an RM payout', async () => {
+    backend({
+      'POST /store/credits/withdraw': {
+        body: { ...WITHDRAW_OK.body, currency: 'SGD', payAmount: 50.14 },
+      },
+    });
+    expect(
+      await startWithdrawal({ amount: 160, accountId: 'acct_1' }),
+    ).toMatchObject({ payout: { currency: 'SGD', amount: 50.14 } });
+    backend({
+      'POST /store/credits/withdraw': {
+        body: { ...WITHDRAW_OK.body, currency: 'MYR', payAmount: 50 },
+      },
+    });
+    expect(
+      await startWithdrawal({ amount: 50, accountId: 'acct_1' }),
+    ).not.toHaveProperty('payout');
   });
 });
 
@@ -254,5 +275,133 @@ describe('sellBackPull', () => {
       ok: false,
       error: 'Got an unexpected response. Please try again.',
     });
+  });
+});
+
+describe('getTransactions — the history totals', () => {
+  const PAGE = {
+    balance: 120,
+    topup_total: 200,
+    spend_total: 145,
+    transactions: [],
+    has_more: false,
+  };
+
+  it('carries the split totals when the backend sends them', async () => {
+    backend({
+      'GET /store/credits': {
+        body: { ...PAGE, pack_spend_total: 45, withdrawn_total: 100 },
+      },
+    });
+    expect(await getTransactions(1)).toMatchObject({
+      ok: true,
+      spendTotal: 145,
+      packSpendTotal: 45,
+      withdrawnTotal: 100,
+    });
+  });
+
+  // Deploy skew: an older backend sends only spend_total. The page must fall
+  // back to its single "Total spent" card, never show a made-up RM 0.00.
+  it('reports the split as unknown (null) when an older backend omits it', async () => {
+    backend({ 'GET /store/credits': { body: PAGE } });
+    expect(await getTransactions(1)).toMatchObject({
+      ok: true,
+      spendTotal: 145,
+      packSpendTotal: null,
+      withdrawnTotal: null,
+    });
+  });
+
+  it('carries the pack and card names; a malformed label never drops the money row', async () => {
+    backend({
+      'GET /store/credits': {
+        body: {
+          ...PAGE,
+          transactions: [
+            {
+              id: 't1',
+              amount: -45,
+              reason: 'pack_open',
+              created_at: '2026-10-20T10:00:00.000Z',
+              pack_title: 'Bronze Pack',
+              card_names: ['Charizard ex', 'Pikachu'],
+            },
+            {
+              id: 't2',
+              amount: 72,
+              reason: 'buyback',
+              created_at: '2026-10-20T10:01:00.000Z',
+              pack_title: 7,
+              card_names: 'Charizard ex',
+            },
+          ],
+        },
+      },
+    });
+    const r = await getTransactions(1);
+    expect(
+      r.ok && r.transactions.map((t) => [t.id, t.packTitle, t.cardNames]),
+    ).toEqual([
+      ['t1', 'Bronze Pack', ['Charizard ex', 'Pikachu']],
+      ['t2', null, []],
+    ]);
+  });
+});
+
+describe('getPullHistory', () => {
+  const ROW = {
+    pull_id: 'p1',
+    rolled_at: '2026-10-20T10:00:00.000Z',
+    pack_title: 'Bronze Pack',
+    source: 'pack',
+    status: 'bought_back',
+    card: { handle: 'charizard', name: 'Charizard ex', marketPriceMyr: 100 },
+    paid: 45,
+    value: 80,
+    sold_for: 72,
+    sold_at: '2026-10-20T10:01:00.000Z',
+  };
+
+  it('asks the backend for the page and maps each pull', async () => {
+    const mem = backend({
+      'GET /store/pulls/history': { body: { items: [ROW], has_more: true } },
+    });
+    const r = await getPullHistory(2);
+    expect(mem.requests[0]).toMatchObject({
+      path: '/store/pulls/history',
+      query: { limit: 20, offset: 20 },
+    });
+    expect(r).toMatchObject({
+      ok: true,
+      page: 2,
+      hasMore: true,
+      items: [
+        {
+          pullId: 'p1',
+          packTitle: 'Bronze Pack',
+          status: 'bought_back',
+          paid: 45,
+          value: 80,
+          soldFor: 72,
+          card: { name: 'Charizard ex', priceMyr: 100 },
+        },
+      ],
+    });
+  });
+
+  it('a bad figure reads as unknown (never RM 0); a row without a card drops', async () => {
+    backend({
+      'GET /store/pulls/history': {
+        body: {
+          items: [{ ...ROW, paid: 'lots' }, { pull_id: 'broken' }],
+          has_more: false,
+        },
+      },
+    });
+    const r = await getPullHistory(1);
+    expect(r.ok && r.items.map((i) => [i.pullId, i.paid])).toEqual([
+      ['p1', null],
+    ]);
   });
 });

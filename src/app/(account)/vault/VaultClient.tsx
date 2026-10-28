@@ -6,7 +6,9 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
-import { rm, rm0 } from '@/lib/format';
+import { TicketArt } from '@/components/TicketArt';
+import { num, rm, rm0 } from '@/lib/format';
+import { sellBackNotice } from '@/lib/buyback-copy';
 import {
   getVault,
   sellBackPullsBatch,
@@ -33,7 +35,7 @@ import {
   CardDetailOverlay,
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
-import { toggleSelectAll } from '@/lib/vault-selection';
+import { sellTotals, toggleSelectAll } from '@/lib/vault-selection';
 import { VaultActionBar } from '@/components/account/VaultActionBar';
 import { useConsent } from '@/lib/use-consent';
 
@@ -44,11 +46,14 @@ export default function VaultClient({
   initial,
   addresses,
   initialGifts,
+  tickets,
 }: {
   initial: VaultResult;
   addresses: AddressView[];
   /** Packs gifted into this vault, unopened — the Packs row above the cards. */
   initialGifts: PackGift[];
+  /** Lucky Draw tickets held; null when unreadable, which hides the row. */
+  tickets: number | null;
 }) {
   const router = useRouter();
   const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
@@ -61,7 +66,7 @@ export default function VaultClient({
   const [error, setError] = useState<string | null>(
     initial.ok ? null : initial.error,
   );
-  // Success confirmation (e.g. "Sold N cards for RM X — added to your balance").
+  // Success confirmation (e.g. "Sold N cards — RM X added.", sellBackNotice).
   // Distinct from `error` so a sale reads as a positive result, not a warning.
   const [notice, setNotice] = useState<string | null>(null);
   // Transient top-of-screen confirmation for shipping orders (auto-dismisses).
@@ -127,16 +132,10 @@ export default function VaultClient({
     (s, i) => s + (i.card.priceMyr ?? 0),
     0,
   );
-  const selectedBuyback = sellableSelected.reduce(
-    (s, i) => s + i.buyback.amount,
-    0,
-  );
-  // The part of that sale from bonus or gift play — the confirm says it must
-  // be played through before it can be withdrawn.
-  const selectedBonus = sellableSelected.reduce(
-    (s, i) => s + i.buyback.bonus,
-    0,
-  );
+  // The total, and the part of it that is for opening packs (bonus share, the
+  // welcome card) — the confirm and the sold notice both name it.
+  const { amount: selectedBuyback, held: selectedBonus } =
+    sellTotals(sellableSelected);
   // The vault buyback is a flat rate, uniform across all vaulted items (see the
   // footer copy + actions/vault.ts), so the first item's percent represents the
   // whole batch. The confirm's "You receive" total is the exact sum of per-item
@@ -348,10 +347,13 @@ export default function VaultClient({
         );
       } else {
         // Explicit money confirmation — the whole complaint was "sold, no money."
+        // Every selected card sold (failed === 0), so the confirm's for-packs
+        // total is this sale's.
         setNotice(
-          `Sold ${res.sold} card${res.sold === 1 ? '' : 's'} for ${rm(
+          `Sold ${res.sold} card${res.sold === 1 ? '' : 's'} — ${sellBackNotice(
             res.credited,
-          )} — added to your balance.`,
+            selectedBonus,
+          )}`,
         );
       }
     } finally {
@@ -387,6 +389,33 @@ export default function VaultClient({
           </div>
         ))}
       </div>
+
+      {/* Lucky Draw tickets: always shown when readable, so a player with none
+          is pointed at the tasks that pay them. */}
+      {tickets !== null && (
+        <section aria-label="Lucky Draw tickets" className="mt-4">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3">
+            <TicketArt width={64} className="shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-white">
+                Lucky Draw Tickets ×{num(tickets)}
+              </p>
+              <p className="mt-0.5 text-[12px] text-neutral-400">
+                {tickets > 0
+                  ? 'Put them on the prizes you want'
+                  : 'Earn tickets from tasks'}
+              </p>
+            </div>
+            <Link
+              href={tickets > 0 ? '/lucky-draw?open=1' : '/task'}
+              aria-label={tickets > 0 ? 'Open Lucky Draw' : undefined}
+              className={cn(pillVariants({ size: 'sm' }), 'px-5')}
+            >
+              {tickets > 0 ? 'Open' : 'Tasks'}
+            </Link>
+          </div>
+        </section>
+      )}
 
       {/* Packs gifted into the vault, unopened (spec 2026-10-07 §1). Open
           goes to the pack page, where the gift applies itself as Vault x1. */}
@@ -577,9 +606,10 @@ export default function VaultClient({
             // an unknown tier string did before the mapper guarded it.
             const glow = rarityRgb(item.card.rarity ?? '');
             // Locked = the backend refuses BOTH sell and ship — the free
-            // welcome pull before the first PAID open, and only that. NOT
-            // `source`: every reward card (task, achievement, challenge prize)
-            // is source='reward' and sells like any pulled card.
+            // welcome pull and a daily task's card before the first PAID open,
+            // and only those. NOT `source`: every other reward card (weekly
+            // task, achievement, challenge prize) is source='reward' too and
+            // sells like any pulled card.
             const showLock = item.locked && !lockDismissed.has(item.pullId);
             const art = (
               // Pass `rarity` so the slab renders its tier frame + halo, matching
@@ -745,13 +775,21 @@ export default function VaultClient({
                     ~40px and it rendered as "IM…" / "COM…". Rarity is a signal
                     word — it either reads or it shouldn't be there. */}
                 <div className="mt-1 flex flex-col gap-0.5 text-[10px] sm:flex-row sm:items-center sm:justify-between sm:gap-1 sm:text-[11px]">
-                  {!item.challengePrize && (
-                    <span
-                      className="truncate font-bold uppercase tracking-wider"
-                      style={{ color: `rgb(${glow})` }}
-                    >
-                      {item.card.rarity}
+                  {item.luckyDrawPrize ? (
+                    // No tier and no frame: the bare slab and this word are
+                    // how a Lucky Draw win reads (operator 2026-10-25).
+                    <span className="truncate font-bold uppercase tracking-wider text-neutral-300">
+                      Lucky Draw
                     </span>
+                  ) : (
+                    !item.challengePrize && (
+                      <span
+                        className="truncate font-bold uppercase tracking-wider"
+                        style={{ color: `rgb(${glow})` }}
+                      >
+                        {item.card.rarity}
+                      </span>
+                    )
                   )}
                   <span className="font-heading shrink-0 whitespace-nowrap text-[12px] tabular-nums text-white sm:text-[13px]">
                     {/* `?? 0`: the vault has always shown RM 0.00 for an
@@ -793,11 +831,14 @@ export default function VaultClient({
       )}
 
       <p className="mt-5 text-[12px] text-neutral-400">
-        Sell-back credits your site balance instantly at the flat{' '}
-        {FLAT_BUYBACK_PERCENT}% buyback rate. Shipping is RM15 (West Malaysia) /
-        RM35 (East Malaysia), with protection included up to RM200 — orders
-        above that add 5% insurance of card value. Fees are deducted from your
-        credit balance.
+        Cards sell back at the flat {FLAT_BUYBACK_PERCENT}% buyback rate.
+        Sell-back money reaches your balance at once. Money from the welcome
+        pack&rsquo;s card, and the bonus-credit part of any sale, is for packs.
+        Withdrawals unlock once your money for packs is used. Every delivery,
+        prize cards included, pays shipping: RM15 (West Malaysia), RM35 (East
+        Malaysia) or RM50 (Singapore), with protection included up to RM200 —
+        above that add 5% insurance of card value. Prize cards ship as separate
+        parcels. Fees are deducted from your balance (not bonus credit).
       </p>
 
       {items.length > 0 && consent !== null && (

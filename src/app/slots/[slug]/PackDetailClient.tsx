@@ -61,6 +61,8 @@ import {
   freePackVerifyMessage,
   type FreePackRequirement,
 } from '@/lib/packs-data';
+import { isPokemonPack } from '@/lib/resolve-card-pokemon';
+import { isOptimizableImage } from '@/lib/optimizable-image';
 
 /**
  * Shown where the gift offer would be, when this visitor cannot claim it.
@@ -160,13 +162,17 @@ function PackRail({
                 : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]',
             )}
           >
+            {/* Drawn ~20×36 CSS px. A local /public image goes through the
+                optimizer at that size: the raw 925×1666 art decoded to ~6 MB
+                each on phones (iOS tab memory, 2026-10-25). Art on a host
+                outside remotePatterns stays unoptimized. */}
             <Image
               src={p.image}
               alt=""
               aria-hidden
-              width={205}
-              height={360}
-              unoptimized
+              width={41}
+              height={72}
+              unoptimized={!isOptimizableImage(p.image)}
               className="h-9 w-auto object-contain"
             />
             <span className="w-full truncate text-[11px] font-medium leading-tight text-white">
@@ -272,6 +278,8 @@ export default function PackDetailClient({
   // siblings list is empty (it is not in the catalog), so `active` can never
   // become a different, paid pack.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+  // One Piece / sports packs: the prize badges never guess a Pokémon.
+  const pokemonPack = isPokemonPack(pack.categoryId);
   // The free pack, reached by someone who cannot claim it — a spent claim OR a
   // failed eligibility read, which the storefront cannot tell apart (hence the
   // neutral copy above; nothing here may assert a past claim). Every gift
@@ -426,7 +434,7 @@ export default function PackDetailClient({
     }
     if (!giftsPending && balance !== null && !affordable(balance, paidCost)) {
       setNeedsTopUp(true);
-      setOpenError('Not enough credits to open.');
+      setOpenError('Not enough balance to open.');
       return;
     }
     setOpenError(null);
@@ -437,9 +445,9 @@ export default function PackDetailClient({
   return (
     // pb clears the mobile sticky buy bar (fixed above the tab bar).
     <div className="mx-auto w-full px-fluid pb-28 pt-4 lg:pb-4">
-      {/* Back link */}
+      {/* Back link — to this pack's franchise tab */}
       <Link
-        href="/slots"
+        href={`/slots?category=${encodeURIComponent(pack.categoryId)}`}
         className="-mt-2.5 mb-1.5 inline-flex items-center gap-1.5 py-2.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
@@ -780,8 +788,7 @@ export default function PackDetailClient({
                   <>This pack is sold out right now.</>
                 ) : customer && balance !== null ? (
                   <>
-                    Each open costs {rm(priceNum)} in site credits — your
-                    balance:{' '}
+                    Each open costs {rm(priceNum)} from your balance — you have{' '}
                     <span
                       className={cn(
                         'font-bold',
@@ -793,7 +800,7 @@ export default function PackDetailClient({
                   </>
                 ) : (
                   <>
-                    Each open costs the pack price in site credits — one pack
+                    Each open costs the pack price from your balance — one pack
                     per open, recorded to your account.
                   </>
                 )}
@@ -833,6 +840,7 @@ export default function PackDetailClient({
                 full={pool}
                 tierChances={liveDetail?.publishedOdds?.tiers ?? null}
                 onOpen={(card) => setOpenCard(toSeed(card))}
+                pokemon={pokemonPack}
               />
             </Reveal>
           )}
@@ -1012,6 +1020,7 @@ export default function PackDetailClient({
         seed={openCard}
         buybackPercent={active.buybackPercent ?? FLAT_BUYBACK_PERCENT}
         onClose={() => setOpenCard(null)}
+        pokemon={pokemonPack}
       />
     </div>
   );

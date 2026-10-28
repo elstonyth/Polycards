@@ -27,7 +27,16 @@ export const ADJUST_NOTE_MAX = 512;
 // passes and a SECOND same-day max grant trips it.
 export const ADJUST_DAILY_MINT_MAX_RM_DEFAULT = 1_000_000;
 
-// Refusal rule for the rolling-24h mint ceiling. Pure so the boundary
+// Gifted packs have their OWN rolling-24h ceiling (operator decision
+// 2026-10-17). They used to share ADJUST_DAILY_MINT_MAX_RM, so one bulk group
+// bonus grant filled the day and blocked every RM 45 compensation gift. Gifts
+// are small (pack price x at most 10 per call), so a separate, much lower
+// ceiling still bounds them while the credit pool can never starve them.
+export const GIFT_DAILY_MINT_MAX_RM_DEFAULT = 50_000;
+
+export type MintPool = "credit" | "gift";
+
+// Refusal rule for a rolling-24h mint ceiling. Pure so the boundary
 // arithmetic is unit-testable without a container or a database.
 //
 // Deliberately positive-only: a clawback (negative adjustment) is never
@@ -35,13 +44,14 @@ export const ADJUST_DAILY_MINT_MAX_RM_DEFAULT = 1_000_000;
 // operator buy back headroom by deducting from one customer to mint to
 // another, which is exactly the move this bounds.
 //
-// The message names the env var and the window total but NEVER a customer id:
-// this is a global figure surfaced in admin UI and logs that are not
-// customer-scoped, so naming an account here would leak one.
+// The message names the pool's env var and the window total but NEVER a
+// customer id: this is a global figure surfaced in admin UI and logs that are
+// not customer-scoped, so naming an account here would leak one.
 export function adjustDailyMintError(
   windowCents: number,
   amountCents: number,
   capCents: number,
+  pool: MintPool = "credit",
 ): string | null {
   if (amountCents <= 0) return null;
   // Strict `>`: an adjustment landing exactly ON the ceiling is allowed, so a
@@ -52,9 +62,11 @@ export function adjustDailyMintError(
   // a negative amount the operator may still grant.
   const remaining = Math.max(0, capCents - windowCents) / 100;
   return (
-    'Daily credit-adjustment limit reached (ADJUST_DAILY_MINT_MAX_RM): ' +
-    `RM ${(windowCents / 100).toFixed(2)} already granted in the last 24h, ` +
-    `RM ${remaining.toFixed(2)} remaining today.`
+    (pool === "gift"
+      ? "Daily gift-pack limit reached (GIFT_DAILY_MINT_MAX_RM): "
+      : "Daily credit-adjustment limit reached (ADJUST_DAILY_MINT_MAX_RM): ") +
+    `RM ${(windowCents / 100).toFixed(2)} already ${pool === "gift" ? "gifted" : "granted"} in the last 24h, ` +
+    `RM ${remaining.toFixed(2)} remaining in that 24h window.`
   );
 }
 

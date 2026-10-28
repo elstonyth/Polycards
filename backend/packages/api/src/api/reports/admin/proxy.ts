@@ -8,8 +8,11 @@ import { Modules } from '@medusajs/framework/utils';
 // call on 2026-10-04 was "full access", read-only, for every desk bot. Any
 // desk key reads any admin dashboard screen except the blocked ones below.
 // The proxy itself only ever issues GET, and the token it mints carries one
-// role, DESK_BOT_ROLE, whose only policy is read on everything, so Medusa's
-// own RBAC refuses every write route. A GET handler can still record that it
+// role, DESK_BOT_ROLE, whose only policy is read on everything, so RBAC
+// refuses every write route: core's own, and every custom one through the
+// policies api/admin-rbac.ts attaches (before 2026-10-17 custom routes had
+// none, and only the GET-only proxy kept the bots off them). A GET handler can
+// still record that it
 // was read: a payout-details reveal writes its audit row (actor
 // DESK_BOT_ACTOR), which is that audit doing its job.
 

@@ -144,8 +144,10 @@ export type SpinTaskRewardResult =
       marketValue: number;
       /** Sell/deliver lock, the BACKEND's answer — never a client constant.
        *  A task reward sells like any pulled card, so this is false on a
-       *  current backend; it defaults true when absent so an older backend
-       *  can only under-offer, never advertise a sell that 400s. */
+       *  current backend — except a DAILY task's rip before the first paid
+       *  open, which carries the welcome-pack lock. It defaults true when
+       *  absent so an older backend can only under-offer, never advertise a
+       *  sell that 400s. */
       locked: boolean;
       /** The backend's instant sell-back quote — the same shape the paid open
        *  carries, so the reveal is one code path. Null when it sent none. */

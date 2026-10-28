@@ -2,6 +2,7 @@
 // No I/O here — the SVG renderer and layout join this module in a later task.
 
 import { LABEL_FONT_FAMILY } from './label-font';
+import { onePieceLabel } from './one-piece-label';
 
 // PSA's canonical 11-point grade scale. Qualifier half-grades (2.5–9.5) are
 // deliberately excluded (operator decision 2026-07-16): the catalog doesn't
@@ -157,6 +158,39 @@ export type LabelRun = {
 const estWidth = (text: string, fontSize: number): number =>
   text.length * fontSize * AVG_CHAR_PER_EM;
 
+// The three left and three right lines the label prints. A One Piece card
+// takes PSA's wording from its PriceCharting name + set (one-piece-label.ts);
+// the card's own label year / note, when set, still win.
+export function labelLines(f: SlabLabelFields): {
+  left: string[];
+  right: string[];
+} {
+  const year = (f.year ?? '').trim();
+  const note = (f.note ?? '').trim();
+  const grade = f.grade.trim();
+  const right = (number: string) => [number, psaDescriptor(grade) ?? '', grade];
+  const op = onePieceLabel(f);
+  if (op) {
+    return {
+      left: [
+        [year || op.year, op.setLine].filter(Boolean).join(' '),
+        op.name,
+        note || op.variety,
+      ],
+      right: right(op.number),
+    };
+  }
+  const { name, number } = parseCardName(f.name);
+  return {
+    left: [
+      [year, setAbbrev(f.set)].filter(Boolean).join(' '),
+      formatCardName(name),
+      note,
+    ],
+    right: right(number),
+  };
+}
+
 // Pure layout: three shared baselines, left column left-aligned, right column
 // right-aligned, EVERY element the same size + weight (§6 — verified against
 // the reference; an earlier draft that emphasised name/grade was measurably
@@ -166,16 +200,7 @@ export function layoutLabel(
   f: SlabLabelFields,
   box: { x: number; y: number; w: number; h: number },
 ): LabelRun[] {
-  const { name, number } = parseCardName(f.name);
-  const year = (f.year ?? '').trim();
-  const note = (f.note ?? '').trim();
-  const grade = f.grade.trim();
-  const left = [
-    [year, setAbbrev(f.set)].filter(Boolean).join(' '),
-    formatCardName(name),
-    note,
-  ];
-  const right = [number, psaDescriptor(grade) ?? '', grade];
+  const { left, right } = labelLines(f);
 
   const baseFs = (box.w * CAP_OF_WIDTH) / ARIMO_CAP_PER_EM;
   const leftX = Math.round(box.x + box.w * LEFT_MARGIN);

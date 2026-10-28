@@ -210,6 +210,14 @@ describe('delete-card audit', () => {
     pc_grade: null,
     market_multiplier: 1.2,
     pc_synced_at: null,
+    pc_pending_price: {
+      product_id: '6910',
+      grade: 'PSA 10',
+      baseline_value: 100,
+      proposed_value: 10,
+      first_seen_at: '2026-10-16T03:00:00Z',
+    },
+    pc_sync_error: 'upstream unavailable',
   };
   const odds = [
     row('rare-a', 'Rare', 220_000, { weight_2: 400_000, weight_3: 500_000 }),
@@ -256,5 +264,11 @@ describe('delete-card audit', () => {
     expect(
       (res.compensateInput as { odds: Record<string, unknown>[] }).odds[0],
     ).toMatchObject({ weight_2: 400_000, weight_3: 500_000 });
+    expect(
+      (res.compensateInput as { card: Record<string, unknown> }).card,
+    ).toMatchObject({
+      pc_pending_price: card.pc_pending_price,
+      pc_sync_error: card.pc_sync_error,
+    });
   });
 });

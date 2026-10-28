@@ -179,10 +179,10 @@ describe('body rendering', () => {
 
   it('money bodies format as RM', () => {
     expect(copyFor('topup_credited').body({ amount_myr: 50 })).toBe(
-      'RM 50.00 added to your balance.',
+      'RM 50.00 added. Withdrawals unlock once all your money for packs is used.',
     );
     expect(copyFor('voucher_claimed').body({ amount_myr: 5, level: 3 })).toBe(
-      'RM 5.00 credited from your Level 3 voucher.',
+      'RM 5.00 bonus credit from your Level 3 voucher. Use it on packs — it can’t be withdrawn.',
     );
     expect(copyFor('withdrawal_paid').body({ amount_myr: 50 })).toBe(
       'RM 50.00 has been sent to your bank.',
@@ -192,7 +192,17 @@ describe('body rendering', () => {
     );
   });
 
-  // Spec 2026-10-07 §1, verbatim.
+  it('a USDT payout says wallet and shows what the wallet got', () => {
+    expect(
+      copyFor('withdrawal_paid').body({ amount_myr: 300, usdt_amount: 71.07 }),
+    ).toBe('USDT 71.07 (RM 300.00) has been sent to your wallet.');
+    // A bad value falls back to the bank wording rather than "USDT NaN".
+    expect(
+      copyFor('withdrawal_paid').body({ amount_myr: 300, usdt_amount: 'x' }),
+    ).toBe('RM 300.00 has been sent to your bank.');
+  });
+
+  // Spec 2026-10-07 §1; the bonus line is spec 2026-10-15 §3.
   it('announces a gifted pack and bonus credit', () => {
     expect(
       copyFor('pack_gift_received').body({
@@ -203,7 +213,7 @@ describe('body rendering', () => {
     ).toBe('You received 2× Bronze Pack — open it from your Vault.');
     expect(copyFor('pack_gift_received').href).toBe('/vault');
     expect(copyFor('bonus_credit_received').body({ amount: 300 })).toBe(
-      'You received RM 300.00 bonus credit.',
+      'RM 300.00 bonus credit added. Use it on packs — it can’t be withdrawn.',
     );
     expect(copyFor('bonus_credit_received').href).toBe('/wallet');
     // A payload missing its facts degrades to no detail line.
@@ -222,13 +232,13 @@ describe('body rendering', () => {
   it('challenge_payout composes credits and cards naturally', () => {
     const body = copyFor('challenge_payout').body;
     expect(body({ rank: 1, credits: 150, card_count: 0 })).toBe(
-      'You finished #1 — RM 150.00 in bonus credit added to your account.',
+      'You finished #1 — RM 150.00 in bonus credit added to your account. Use the bonus credit on packs — it can’t be withdrawn.',
     );
     expect(body({ rank: 3, credits: 0, card_count: 2 })).toBe(
-      'You finished #3 — 2 featured cards added to your account.',
+      'You finished #3 — 2 featured cards added to your account. Ship the cards (delivery fee applies) or sell them back.',
     );
     expect(body({ rank: 2, credits: 50, card_count: 1 })).toBe(
-      'You finished #2 — RM 50.00 in bonus credit and a featured card added to your account.',
+      'You finished #2 — RM 50.00 in bonus credit and a featured card added to your account. Use the bonus credit on packs — it can’t be withdrawn. Ship the card (delivery fee applies) or sell it back.',
     );
     // Nothing granted (all cards skipped, no credits) → no detail line.
     expect(body({ rank: 4, credits: 0, card_count: 0 })).toBeNull();
@@ -245,7 +255,7 @@ describe('body rendering', () => {
       'You won a RM 5.00 voucher.',
     );
     expect(body({ prize_kind: 'credit', amount_myr: 5, title: '' })).toBe(
-      'You won RM 5.00 in credit.',
+      'You won RM 5.00.',
     );
     // A titled prize (product) still wins over both.
     expect(
@@ -279,4 +289,20 @@ describe('copyFor', () => {
     expect(c.policy).toBe('never');
     expect(c.href).toBeNull();
   });
+
+  // A USDT wallet address ends in base58 letters; the 4-char cap is what keeps
+  // a full number out of the toast.
+  it.each(['bank_account_added', 'bank_account_removed'])(
+    '%s names a wallet-address tail and refuses anything but 4 chars',
+    (template) => {
+      const body = copyFor(template).body;
+      const render = (last4: string) =>
+        body({ bank_name: 'USDT · TRC20 (Tron)', account_last4: last4 });
+
+      expect(render('xZ9k')).toContain('····xZ9k');
+      for (const bad of ['123', '12345', '1234567890123', 'ab-1']) {
+        expect(render(bad)).toBeNull();
+      }
+    },
+  );
 });

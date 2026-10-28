@@ -1,0 +1,141 @@
+.stage {
+  background: #0c0d0f;
+  isolation: isolate;
+}
+.cardArt {
+  transform-origin: center 80%;
+}
+.won .cardArt {
+  animation: card-kept 850ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.lost .cardArt {
+  animation: card-forfeited 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.won .receipt {
+  animation: credit-arrives 650ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.lost .receipt {
+  animation: loss-arrives 450ms ease-out both;
+}
+.sweep {
+  display: none;
+}
+.won .sweep {
+  display: block;
+  position: absolute;
+  inset: -30%;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 38%,
+    #ffffff40 49%,
+    transparent 60%
+  );
+  animation: card-sheen 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.winPulse,
+.lossPulse {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.winPulse {
+  box-shadow: inset 0 0 85px #2fbf6e25;
+  animation: table-win 1200ms ease-out both;
+}
+.lossPulse {
+  background: #0a0a0a;
+  animation: table-loss 800ms ease-out both;
+}
+@keyframes card-kept {
+  0% {
+    transform: translateY(0) rotate(0);
+  }
+  40% {
+    transform: translateY(-14px) rotate(-3deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0);
+  }
+}
+@keyframes card-forfeited {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+    filter: grayscale(0);
+  }
+  100% {
+    transform: translateY(16px) scale(0.94);
+    opacity: 0.38;
+    filter: grayscale(1);
+  }
+}
+@keyframes credit-arrives {
+  0% {
+    transform: translateY(12px) scale(0.96);
+    opacity: 0.3;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+@keyframes loss-arrives {
+  0% {
+    transform: translateY(6px);
+    opacity: 0.4;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes card-sheen {
+  0% {
+    transform: translateX(-85%);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(85%);
+    opacity: 0;
+  }
+}
+@keyframes table-win {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+@keyframes table-loss {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .won .cardArt,
+  .lost .cardArt,
+  .won .receipt,
+  .lost .receipt {
+    animation: none;
+  }
+  .won .sweep,
+  .winPulse,
+  .lossPulse {
+    display: none;
+  }
+  .lost .cardArt {
+    opacity: 0.5;
+    filter: grayscale(1);
+  }
+}

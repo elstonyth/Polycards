@@ -15,8 +15,8 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
-import { MY_STATES } from '@/lib/my-states';
-import { rm } from '@/lib/format';
+import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
+import { mytDate, rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -86,13 +86,6 @@ const isSafeMediaUrl = (u: string) => {
     return false;
   }
 };
-
-const orderDate = (value: string | Date) =>
-  new Date(value).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
 
 function DeliveryItems({ items }: { items: DeliveryOrderView['items'] }) {
   const first = items[0];
@@ -333,7 +326,7 @@ function EditAddressModal({
                 <option value="" disabled>
                   Select a state
                 </option>
-                {MY_STATES.map((s) => (
+                {statesFor(form.countryCode).map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -361,15 +354,18 @@ function EditAddressModal({
               <input
                 aria-label="Country code"
                 autoComplete="country"
-                placeholder="e.g. MY"
+                placeholder="MY or SG"
                 maxLength={2}
                 value={form.countryCode}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const countryCode = e.target.value.toUpperCase();
+                  // A state from the other country's list is never valid.
                   setForm((f) => ({
                     ...f,
-                    countryCode: e.target.value.toUpperCase(),
-                  }))
-                }
+                    countryCode,
+                    province: stateAfterCountryChange(countryCode, f.province),
+                  }));
+                }}
                 className={INPUT_CLASS}
               />
             </label>
@@ -550,7 +546,7 @@ function OrderDetailModal({
               Order #{shortId}
             </h2>
             <p className="mt-1 text-[13px] text-white/55">
-              Requested {orderDate(order.createdAt)}
+              Requested {mytDate(order.createdAt)}
             </p>
           </div>
           <Badge tone={STATUS_TONE[order.status] ?? 'neutral'}>
@@ -775,7 +771,7 @@ export default function OrdersClient({
                   </button>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-white/80">
-                  {orderDate(o.createdAt)}
+                  {mytDate(o.createdAt)}
                 </td>
                 <td className="px-4 py-3 text-white/80">
                   {o.trackingNumber ? (

@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lucky Draw Spin</title>
+<!-- Throwaway motion spike for the Lucky Draw wheel (style K, Holo Foil).
+     Not product code: the real build follows docs/superpowers/plans/2026-10-24-lucky-draw.md. -->
+<style>
+  @font-face { font-family: Nekst; src: url('../../../../public/fonts/Nekst-Black.woff2') format('woff2'); font-display: swap; }
+  :root {
+    --ink: #0a0a0a; --charcoal: #171717; --graphite: #262626; --hair: #ffffff1a;
+    --paper: #fafafa; --silver: #a3a3a3;
+    --holo: conic-gradient(from var(--holo-turn, 0deg), #c7f0ff, #d8c8ff, #ffc9e6, #e9ecf2, #b8f3ea, #cfd6ff, #ffd6f0, #c7f0ff);
+  }
+  @property --holo-turn { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--ink); color: var(--paper); font: 400 15px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  main { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 28px 16px 40px; gap: 22px; }
+  header { text-align: center; }
+  header p { margin: 0; color: var(--silver); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
+  header h1 { margin: 6px 0 0; font: 900 clamp(26px, 6vw, 38px)/1 Nekst, system-ui, sans-serif; letter-spacing: .01em; }
+
+  .stage { position: relative; width: min(88vw, 500px); aspect-ratio: 1; }
+  .stage > * { position: absolute; inset: 0; }
+  .wheel-wrap { transition: transform .9s cubic-bezier(.2,.8,.2,1), filter .9s ease; }
+  .wheel-wrap > * { position: absolute; inset: 0; }
+  /* Face radius 243 of a 260 half-box: the rim's outer edge sits at 247. */
+  .wheel-wrap > .rim, .wheel-wrap > .rim-shine, .pulse { inset: 2.5%; }
+  .stage.revealing .wheel-wrap { transform: scale(.86); filter: brightness(.38) saturate(.8); }
+
+  /* Holographic rim: a ring cut from a slowly turning conic gradient. It never
+     rotates with the wheel, so the foil light stays put like a real lamp. */
+  .rim { border-radius: 50%; background: var(--holo); animation: holo 9s linear infinite;
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px), #000 calc(100% - 1px), transparent 100%);
+            mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px), #000 calc(100% - 1px), transparent 100%);
+    filter: saturate(.9) brightness(.95); transition: filter .6s ease; }
+  .stage.won .rim { filter: saturate(1.25) brightness(1.15); }
+  @keyframes holo { to { --holo-turn: 360deg; } }
+  .rim-shine { border-radius: 50%; pointer-events: none;
+    background: radial-gradient(120% 70% at 30% 8%, #ffffff22, transparent 45%); }
+
+  svg { width: 100%; height: 100%; overflow: visible; }
+  .seg { stroke: #e4e4e7; stroke-opacity: .32; stroke-width: .5; }
+  .label { fill: #d4d4d8; font: 600 11.5px system-ui, sans-serif; letter-spacing: .02em; transition: opacity .2s; }
+  .dim { pointer-events: none; transition: opacity .6s ease; }
+
+
+  .pulse { border-radius: 50%; pointer-events: none; opacity: 0; background: var(--holo);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px), transparent 100%);
+            mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px), transparent 100%); }
+  .pulse.go { animation: pulse 1.6s cubic-bezier(.15,.7,.2,1) forwards; }
+  .pulse.go.p2 { animation-delay: .28s; }
+  @keyframes pulse { 0% { opacity: .85; transform: scale(1); } 100% { opacity: 0; transform: scale(1.38); } }
+
+  canvas.dust { pointer-events: none; inset: -20% -10% 20% -10%; width: 120%; height: 100%; }
+
+  /* Reveal: the prize card rises out of the hub. In the build this frame holds
+     the real prize art; here a neutral placeholder. */
+  .reveal { display: grid; place-items: center; pointer-events: none; opacity: 0; transform: translateY(18px) scale(.94);
+    transition: opacity .7s ease .15s, transform .9s cubic-bezier(.2,.8,.2,1) .15s; }
+  .stage.revealing .reveal { opacity: 1; transform: none; }
+  .frame { position: relative; width: 38%; aspect-ratio: 5/7; border-radius: 10px; padding: 1.5px; background: var(--holo); animation: holo 6s linear infinite;
+    box-shadow: 0 0 60px #c4b5fd33, 0 0 120px #67e8f922; }
+  .frame-in { width: 100%; height: 100%; border-radius: 9px; background:
+    radial-gradient(90% 60% at 50% 30%, #2a2a2e, #121214 70%); display: grid; place-items: center; color: var(--silver); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
+
+  .result { min-height: 64px; text-align: center; opacity: 0; transform: translateY(6px); transition: opacity .5s ease, transform .5s ease; }
+  .result.show { opacity: 1; transform: none; }
+  .result small { display: block; color: var(--silver); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+  .result strong { display: block; margin-top: 4px; font: 900 26px/1.1 Nekst, system-ui, sans-serif; }
+  .result span { display: block; margin-top: 4px; color: var(--silver); font-size: 13px; }
+
+  .controls { display: flex; flex-direction: column; align-items: center; gap: 14px; width: min(92vw, 520px); }
+  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .chips p { width: 100%; margin: 0 0 2px; text-align: center; color: var(--silver); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
+  .chip { border: 0; border-radius: 999px; background: var(--graphite); color: var(--paper); padding: 9px 14px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  .chip[aria-pressed='true'] { background: var(--paper); color: var(--ink); }
+  .spin { border: 0; border-radius: 999px; background: var(--paper); color: var(--ink); height: 52px; padding: 0 44px; font: 700 16px system-ui, sans-serif; cursor: pointer; }
+  .spin:disabled { background: var(--graphite); color: #737373; cursor: default; }
+  .note { max-width: 520px; color: var(--silver); font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p>Lucky Draw · Prize 3 of 8</p>
+    <h1>PSA 10 Charizard</h1>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="wheel-wrap">
+      <svg viewBox="-260 -260 520 520" aria-hidden="true">
+        <defs>
+          <radialGradient id="faceShade" cx="0" cy="0" r="250" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ffffff" stop-opacity=".05" />
+            <stop offset=".7" stop-color="#000000" stop-opacity="0" />
+            <stop offset="1" stop-color="#000000" stop-opacity=".45" />
+          </radialGradient>
+          <linearGradient id="holoFill" gradientUnits="userSpaceOnUse" x1="-120" y1="-240" x2="120" y2="0">
+            <stop offset="0" stop-color="#c7f0ff" /><stop offset=".35" stop-color="#d8c8ff" />
+            <stop offset=".65" stop-color="#ffc9e6" /><stop offset="1" stop-color="#b8f3ea" />
+            <animateTransform attributeName="gradientTransform" type="rotate" from="0 0 -120" to="360 0 -120" dur="5s" repeatCount="indefinite" />
+          </linearGradient>
+          <radialGradient id="pearl" cx="-6" cy="-8" r="34" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ffffff" /><stop offset=".45" stop-color="#e6e3f0" />
+            <stop offset=".8" stop-color="#b9c4d6" /><stop offset="1" stop-color="#7d8698" />
+          </radialGradient>
+          <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6" /></filter>
+        </defs>
+        <circle r="252" fill="#000" opacity=".6" filter="url(#soft)" transform="translate(0 10)" />
+        <g id="face"></g>
+        <circle r="243" fill="url(#faceShade)" pointer-events="none" />
+        <path id="dim" class="dim" fill="#000" opacity="0" fill-rule="evenodd" />
+        <circle r="26" fill="url(#pearl)" />
+        <circle r="26" fill="none" stroke="#ffffff" stroke-opacity=".35" stroke-width=".8" />
+        <g class="pointer" id="pointer">
+          <path d="M0 -262 L-7.5 -262 L0 -226 L7.5 -262 Z" fill="#d9dde3" />
+          <path d="M0 -262 L0 -226 L7.5 -262 Z" fill="#9aa1ab" />
+          <circle cy="-264" r="5" fill="#e9ecf0" stroke="#7d8698" stroke-width=".8" />
+        </g>
+      </svg>
+      <div class="rim"></div>
+      <div class="rim-shine"></div>
+    </div>
+    <div class="pulse" id="p1"></div>
+    <div class="pulse p2" id="p2"></div>
+    <canvas class="dust" id="dust"></canvas>
+    <div class="reveal" aria-hidden="true"><div class="frame"><div class="frame-in">Prize art</div></div></div>
+  </div>
+
+  <div class="result" id="result" aria-live="polite">
+    <small>Winner</small>
+    <strong id="winName">—</strong>
+    <span id="winOdds"></span>
+  </div>
+
+  <div class="controls">
+    <button class="spin" id="spin">Spin</button>
+    <div class="chips" id="effects">
+      <p>Win effect</p>
+      <button class="chip" data-fx="glow" aria-pressed="false">Segment glow</button>
+      <button class="chip" data-fx="pulse" aria-pressed="false">Ring pulse</button>
+      <button class="chip" data-fx="dust" aria-pressed="false">Holo dust</button>
+      <button class="chip" data-fx="reveal" aria-pressed="false">Prize reveal</button>
+      <button class="chip" data-fx="combo" aria-pressed="false">Glow + reveal</button>
+      <button class="chip" data-fx="dustreveal" aria-pressed="true">Dust + reveal</button>
+    </div>
+    <div class="chips" id="sizes">
+      <p>Entrants</p>
+      <button class="chip" data-n="6" aria-pressed="false">6</button>
+      <button class="chip" data-n="24" aria-pressed="true">24</button>
+      <button class="chip" data-n="120" aria-pressed="false">120</button>
+    </div>
+    <p class="note">Segment size = tickets put in. The server picks the winner first; the spin only replays it. Under reduced motion the result shows straight away.</p>
+  </div>
+</main>
+
+<script>
+const NAMES = ['Aiman', 'Wei Jie', 'Priya', 'Jason', 'Mei Ling', 'Hafiz', 'Daniel', 'Siti', 'Ken', 'Aisyah', 'Ravi', 'Chloe',
+  'Irfan', 'Sophia', 'Marcus', 'Nurul', 'Jun Hao', 'Ethan', 'Farah', 'Kelvin', 'Amira', 'Lucas', 'Yi Ting', 'Zul'];
+const R = 243, LABEL_R = 160;
+const face = document.getElementById('face');
+const dim = document.getElementById('dim');
+const pointer = document.getElementById('pointer');
+const stage = document.getElementById('stage');
+const spinBtn = document.getElementById('spin');
+const result = document.getElementById('result');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let entrants = [], segs = [], rotation = 0, fx = 'dustreveal', spinning = false;
+
+const pt = (a, r) => [r * Math.sin(a * Math.PI / 180), -r * Math.cos(a * Math.PI / 180)];
+const arc = (a0, a1, r) => {
+  const [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r);
+  return `M0 0 L${x0} ${y0} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1} ${y1} Z`;
+};
+
+function makeEntrants(n) {
+  // A few big holders and a long tail, like real ticket spreads.
+  return Array.from({ length: n }, (_, i) => ({
+    name: n <= NAMES.length ? NAMES[i] : `${NAMES[i % NAMES.length]} ${Math.floor(i / NAMES.length) + 1}`,
+    tickets: Math.max(2, Math.round(260 / Math.pow(i + 1.6, 0.9) + (i * 37) % 23)),
+  })).sort(() => 0.5 - ((n * 7919) % 13) / 13);
+}
+
+function build(n) {
+  entrants = makeEntrants(n);
+  const total = entrants.reduce((s, e) => s + e.tickets, 0);
+  let a = 0;
+  segs = entrants.map((e, i) => { const span = (e.tickets / total) * 360; const s = { ...e, a0: a, a1: a + span, i }; a += span; return s; });
+  face.innerHTML = '';
+  for (const s of segs) {
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', arc(s.a0, s.a1, R));
+    p.setAttribute('class', 'seg');
+    p.setAttribute('fill', s.i % 2 ? '#1b1b1d' : '#121213');
+    face.appendChild(p);
+    if (s.a1 - s.a0 >= 7.5) {
+      const mid = (s.a0 + s.a1) / 2;
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.textContent = s.name;
+      t.setAttribute('class', 'label');
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('dominant-baseline', 'middle');
+      // Read along the radius, outside-in, like a watch chapter ring.
+      t.setAttribute('transform', `rotate(${mid}) translate(0 ${-LABEL_R}) rotate(${mid > 180 ? 90 : -90})`);
+      face.appendChild(t);
+    }
+  }
+  const glow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  glow.id = 'glowSeg'; glow.setAttribute('fill', 'url(#holoFill)'); glow.setAttribute('opacity', '0');
+  glow.style.transition = 'opacity .7s ease';
+  face.appendChild(glow);
+  total_ = total;
+  resetFx();
+}
+let total_ = 0;
+
+function resetFx() {
+  stage.classList.remove('won', 'revealing');
+  dim.setAttribute('opacity', '0');
+  const g = document.getElementById('glowSeg'); if (g) g.setAttribute('opacity', '0');
+  document.querySelectorAll('.pulse').forEach((p) => p.classList.remove('go'));
+  result.classList.remove('show');
+  stopDust();
+}
+
+// Weighted pick stands in for the server result.
+function pickWinner() {
+  let roll = Math.random() * total_;
+  for (const s of segs) { roll -= s.tickets; if (roll < 0) return s; }
+  return segs[segs.length - 1];
+}
+
+const easeOutQuart = (t) => 1 - Math.pow(1 - t, 4);
+const easeInOut = (t) => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+function segUnderPointer(rot) {
+  const a = ((360 - (rot % 360)) % 360 + 360) % 360;
+  return segs.findIndex((s) => a >= s.a0 && a < s.a1);
+}
+
+// Pointer: a damped spring, kicked each time a segment edge passes.
+let pAngle = 0, pVel = 0;
+function kick(speed) { pAngle = Math.min(pAngle, -Math.min(16, 4 + speed * 0.9)); }
+function stepPointer(dt) {
+  const k = 520, c = 26; // stiffness, damping
+  pVel += (-k * pAngle - c * pVel) * dt; pAngle += pVel * dt;
+  // SVG attribute transforms rotate about the viewBox origin (the hub) — CSS
+  // transform-origin on SVG groups is unreliable across browsers.
+  pointer.setAttribute('transform', `rotate(${pAngle} 0 -264)`);
+}
+
+function spin() {
+  if (spinning) return;
+  resetFx();
+  const win = pickWinner();
+  const span = win.a1 - win.a0;
+  // Land inside the segment, away from its edges, so it never looks staged.
+  const landAt = win.a0 + span * (0.22 + Math.random() * 0.56);
+  const base = rotation % 360;
+  const turns = 6 + Math.floor(Math.random() * 2);
+  const target = rotation - base + turns * 360 + ((360 - landAt) % 360);
+  if (reduced) { rotation = target; face.setAttribute('transform', `rotate(${rotation})`); return finish(win); }
+
+  spinning = true; spinBtn.disabled = true;
+  const start = rotation, windup = 320, main = 6900, settle = 520, over = 1.4;
+  const t0 = performance.now();
+  let last = t0, lastIdx = segUnderPointer(rotation), lastRot = rotation;
+  const labels = face.querySelectorAll('.label');
+
+  function frame(now) {
+    const t = now - t0, dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (t < windup) rotation = start - 7 * easeInOut(t / windup);
+    else if (t < windup + main) rotation = (start - 7) + (target + over - start + 7) * easeOutQuart((t - windup) / main);
+    else if (t < windup + main + settle) rotation = target + over * (1 - easeInOut((t - windup - main) / settle));
+    else rotation = target;
+    face.setAttribute('transform', `rotate(${rotation})`);
+
+    const speed = Math.abs(rotation - lastRot) / Math.max(dt, 1e-3) / 60; lastRot = rotation; // deg per 60fps frame
+    labels.forEach((l) => { l.style.opacity = speed > 9 ? '.25' : speed > 4 ? '.6' : '1'; });
+    const idx = segUnderPointer(rotation);
+    if (idx !== lastIdx) { kick(speed); lastIdx = idx; }
+    stepPointer(dt);
+
+    if (t < windup + main + settle + 600) requestAnimationFrame(frame);
+    else { spinning = false; spinBtn.disabled = false; }
+    if (t >= windup + main + settle && !stage.dataset.done) { stage.dataset.done = '1'; finish(win); }
+  }
+  delete stage.dataset.done;
+  requestAnimationFrame(frame);
+}
+
+function finish(win) {
+  stage.classList.add('won');
+  document.getElementById('winName').textContent = win.name;
+  document.getElementById('winOdds').textContent = `${win.tickets.toLocaleString()} of ${total_.toLocaleString()} tickets`;
+  const glow = document.getElementById('glowSeg');
+  glow.setAttribute('d', arc(win.a0, win.a1, R));
+  // Dim everything but the winning wedge (evenodd cut-out, in face coordinates).
+  dim.setAttribute('d', `M-${R} 0 A${R} ${R} 0 1 0 ${R} 0 A${R} ${R} 0 1 0 -${R} 0 Z ` + arc(win.a0, win.a1, R));
+  dim.setAttribute('transform', `rotate(${rotation})`);
+  const reveals = fx === 'reveal' || fx === 'combo' || fx === 'dustreveal';
+  setTimeout(() => result.classList.add('show'), reveals ? 1000 : 200);
+
+  if (fx !== 'reveal') {
+    glow.setAttribute('opacity', fx === 'glow' || fx === 'combo' ? '.82' : '.45');
+    dim.setAttribute('opacity', fx === 'glow' || fx === 'combo' ? '.5' : '.3');
+  }
+  if (fx === 'pulse') document.querySelectorAll('.pulse').forEach((p) => { void p.offsetWidth; p.classList.add('go'); });
+  if (fx === 'dust' || fx === 'dustreveal') startDust();
+  if (reveals) setTimeout(() => {
+    stage.classList.add('revealing');
+    // Second, softer wave of dust off the card's top edge as it rises.
+    if (fx === 'dustreveal') frameDust();
+  }, fx === 'reveal' ? 150 : 900);
+}
+
+// Holo dust: glints rising out of the winning wedge for ~1.6 s, each with a
+// soft halo, twinkling as they drift up and fade.
+const canvas = document.getElementById('dust'), ctx = canvas.getContext('2d');
+const HUES = ['#c7f0ff', '#d8c8ff', '#ffc9e6', '#ffffff', '#b8f3ea'];
+let dustRaf = 0, motes = [], box = null, emitUntil = 0;
+const mote = (x, y, spreadX, spreadY, up) => ({
+  x: x + (Math.random() - .5) * spreadX, y: y + Math.random() * spreadY,
+  vx: (Math.random() - .5) * 22, vy: -(up * (0.45 + Math.random() * 1.0)), r: .55 + Math.random() * 1.15,
+  life: 0, max: 2.4 + Math.random() * 2.6, c: HUES[Math.floor(Math.random() * HUES.length)], tw: Math.random() * 6,
+  star: Math.random() < 0.14, // a few four-point glints among the dust
+});
+function ensureLoop() {
+  if (dustRaf) return;
+  let last = performance.now();
+  const tick = (now) => {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (now < emitUntil) {
+      // Emitter: the winning wedge sits just under the pointer, top centre.
+      const cx = box.width / 2, wedgeTop = box.height * 0.2 + box.width * 0.06;
+      if (Math.random() < 0.7) motes.push(mote(cx, wedgeTop, box.width * 0.16, box.width * 0.22, 30));
+    }
+    ctx.clearRect(0, 0, box.width, box.height);
+    motes = motes.filter((m) => m.life < m.max);
+    for (const m of motes) {
+      m.life += dt; m.x += m.vx * dt; m.y += m.vy * dt; m.vx *= 0.985; m.vy *= 0.997;
+      const a = Math.max(0, Math.sin(Math.PI * m.life / m.max) * (0.65 + 0.35 * Math.sin(m.tw + m.life * 8)));
+      ctx.fillStyle = m.c; ctx.strokeStyle = m.c;
+      ctx.globalAlpha = a * 0.16;
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 2.2, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = a;
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+      if (m.star) {
+        const L = m.r * 4.5; ctx.lineWidth = .6; ctx.globalAlpha = a * 0.8;
+        ctx.beginPath(); ctx.moveTo(m.x - L, m.y); ctx.lineTo(m.x + L, m.y); ctx.moveTo(m.x, m.y - L); ctx.lineTo(m.x, m.y + L); ctx.stroke();
+      }
+    }
+    if (motes.length || now < emitUntil) dustRaf = requestAnimationFrame(tick);
+    else dustRaf = 0;
+  };
+  dustRaf = requestAnimationFrame(tick);
+}
+function sizeCanvas() {
+  box = canvas.getBoundingClientRect(); const dpr = devicePixelRatio || 1;
+  canvas.width = box.width * dpr; canvas.height = box.height * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function startDust() { sizeCanvas(); motes = []; emitUntil = performance.now() + 1600; ensureLoop(); }
+function frameDust() {
+  if (!box) sizeCanvas();
+  // The canvas is 120% of the stage wide and starts 20% above it. The frame is
+  // 38% of the stage wide, 5:7, centred on the stage.
+  const S = box.width / 1.2, cx = box.width / 2;
+  const top = box.height * 0.2 + S * 0.5 - (S * 0.38 * 1.4) / 2;
+  for (let i = 0; i < 34; i++) motes.push(mote(cx, top - 4, S * 0.38, 6, 20));
+  ensureLoop();
+}
+function stopDust() { cancelAnimationFrame(dustRaf); dustRaf = 0; motes = []; emitUntil = 0; ctx.clearRect(0, 0, canvas.width, canvas.height); }
+
+const press = (group, btn) => group.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c === btn)));
+document.getElementById('effects').addEventListener('click', (e) => {
+  const b = e.target.closest('.chip'); if (!b || spinning) return; fx = b.dataset.fx; press(e.currentTarget, b); resetFx();
+});
+document.getElementById('sizes').addEventListener('click', (e) => {
+  const b = e.target.closest('.chip'); if (!b || spinning) return; press(e.currentTarget, b); build(Number(b.dataset.n));
+});
+spinBtn.addEventListener('click', spin);
+build(24);
+// ?fx=pulse&n=6&auto=1 drives the recordings.
+const q = new URLSearchParams(location.search);
+if (q.get('n')) document.querySelector(`#sizes [data-n="${q.get('n')}"]`)?.click();
+if (q.get('fx')) document.querySelector(`#effects [data-fx="${q.get('fx')}"]`)?.click();
+if (q.get('auto')) setTimeout(spin, 600);
+</script>
+</body>
+</html>

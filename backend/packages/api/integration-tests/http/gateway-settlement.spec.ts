@@ -440,6 +440,59 @@ medusaIntegrationTestRunner({
       // hand-settled rows — the very failure the settlement report's NULL
       // rule already counts. Integration, not unit: the counter is a SQL
       // FILTER, and only a real database can say it counts the right rows.
+      // 2026-10-14 prod: three rows from the retired GlobePay can never be
+      // checked again ("not configured here"), and they held the RM badge at
+      // "4 payments differ" with one real finding. They stay listed and are
+      // counted apart.
+      it('a retired gateway row is listed but not counted as a disagreement', async () => {
+        const audit = async () => {
+          const res = await unwrapResponse(
+            api.get('/admin/payments/audit', {
+              headers: { authorization: `Bearer ${adminToken}` },
+            }),
+          );
+          expect(res.status).toBe(200);
+          return res.data as {
+            gateway: string;
+            findings_total: number;
+            retired_total: number;
+            findings: { merchant_transaction_id: string }[];
+          };
+        };
+        const before = await audit();
+        await packs().createGatewayDeposits([
+          {
+            merchant_transaction_id: 'PC-audit-real-1',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 50,
+            amount_settled: 50,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: MID_MONTH,
+            gateway: before.gateway,
+            audit_note: 'gateway paid 49.00, row credited 50.00',
+          },
+          {
+            merchant_transaction_id: 'PC-audit-retired-1',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 50,
+            amount_settled: 50,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: MID_MONTH,
+            gateway: 'globepay',
+            audit_note: 'gateway "globepay" is not configured here — not audited',
+          },
+        ] as never);
+
+        const after = await audit();
+        expect(after.findings_total).toBe(before.findings_total + 1);
+        expect(after.retired_total).toBe((before.retired_total ?? 0) + 1);
+        expect(after.findings.map((f) => f.merchant_transaction_id)).toEqual(
+          expect.arrayContaining(['PC-audit-real-1', 'PC-audit-retired-1']),
+        );
+      });
+
       it('the audit totals count a hand-settled deposit out of gross — missing_gross', async () => {
         const auditTotals = async () => {
           const res = await unwrapResponse(

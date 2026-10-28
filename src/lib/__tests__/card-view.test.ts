@@ -26,6 +26,7 @@ describe('toCardView — shape', () => {
     expect(view).toEqual({
       handle: 'charizard-psa-10',
       name: 'Charizard PSA 10',
+      set: '',
       image: '/charizard.webp',
       slabImage: '/charizard-slab.webp',
       rarity: 'Legendary',
@@ -39,6 +40,7 @@ describe('toCardView — shape', () => {
     expect(toCardView({})).toEqual({
       handle: '',
       name: '',
+      set: '',
       image: '',
       slabImage: null,
       rarity: null,
@@ -124,6 +126,7 @@ describe('CardWireSchema', () => {
     expect(CardWireSchema.parse({})).toEqual({
       handle: '',
       name: '',
+      set: '',
       image: '',
       slab_image: null,
       rarity: null,

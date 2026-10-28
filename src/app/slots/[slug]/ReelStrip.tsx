@@ -224,6 +224,7 @@ export function ReelStrip({
     setView({
       cells: buildPressStrip({
         winnerDex,
+        winnerImage,
         winnerRarity,
         winIndex: idx,
         keepCells: keep,
@@ -290,6 +291,7 @@ export function ReelStrip({
     colIndex,
     count,
     winnerDex,
+    winnerImage,
     winnerRarity,
     cellSize,
     poolLen,
@@ -375,7 +377,7 @@ export function ReelStrip({
                     ? true
                     : i <= IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS
                 }
-                imageSrc={isWinnerCell ? winnerImage : undefined}
+                imageSrc={isWinnerCell ? winnerImage : cell.image}
                 glowRgb={litColor}
                 lit={done ? isWinnerCell : true}
                 landed={done && isWinnerCell}

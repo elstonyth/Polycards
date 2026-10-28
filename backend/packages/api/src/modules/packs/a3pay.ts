@@ -1,6 +1,8 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createPrivateKey,
+  createPublicKey,
   createSign,
   createVerify,
   pbkdf2Sync,
@@ -115,6 +117,28 @@ export function verifySignature(
     return createVerify('RSA-SHA1')
       .update(json, 'utf8')
       .verify(toPem(publicKey, 'PUBLIC KEY'), signature, 'base64');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when the key configured as THEIRS is the public half of OUR private
+ * key. No signature of theirs can ever verify against it, so every callback
+ * and payout verification is refused — GlobePay365 from go-live to 2026-10-26,
+ * because GP365_PUBLIC_KEY was copied from a GLOBEPAY_PUBLIC_KEY that held our
+ * own merchant key. Names the cause only: false on any parse error, never a
+ * gate.
+ */
+export function isOwnPublicKey(publicKey: string, privateKey: string): boolean {
+  try {
+    const theirs = createPublicKey(toPem(publicKey, 'PUBLIC KEY'));
+    const ours = createPublicKey(
+      createPrivateKey(toPem(privateKey, 'PRIVATE KEY')),
+    );
+    return theirs
+      .export({ type: 'spki', format: 'der' })
+      .equals(ours.export({ type: 'spki', format: 'der' }));
   } catch {
     return false;
   }

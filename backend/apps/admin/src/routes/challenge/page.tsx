@@ -12,7 +12,7 @@ import {
   Tabs,
   FocusModal,
 } from '@medusajs/ui';
-import { Trophy, TriangleDownMini, TriangleRightMini } from '@medusajs/icons';
+import { TriangleDownMini, TriangleRightMini } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useCards,
@@ -1385,7 +1385,8 @@ const ChallengePage = () => {
 export default ChallengePage;
 
 export const config: RouteConfig = {
-  label: 'Weekly Challenge',
-  icon: Trophy,
-  rank: 33,
+  label: 'pcNav.weeklyChallenge',
+  translationNs: 'translation',
+  rank: 2,
+  nested: '/rewards',
 };

@@ -2,14 +2,9 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import { ledgerTotals, packTheoreticalRtp } from '../../../modules/packs/economy';
-import { pageAll } from '../../utils/page-all';
-import { toMoney } from '../../../modules/packs/money';
-import {
-  resolveFxRate,
-  displayMarketPrice,
-  DEFAULT_MARKET_MULTIPLIER,
-} from '../../../modules/packs/pricing';
+import { ledgerTotals } from '../../../modules/packs/economy';
+import { resolveFxRate } from '../../../modules/packs/pricing';
+import { packRtpRows } from './pack-rtp';
 
 // Accept an ISO date string only when it parses; anything else → undefined (no
 // bound). ponytail: invalid input silently degrades to "no filter" — the admin
@@ -57,24 +52,8 @@ export async function GET(
 
   // Vault liability: display value of every card customers still hold, summed
   // in SQL (audit 2026-07-07 #5b) instead of paging every vaulted pull into
-  // Node. Same basis as the EV/RTP map below.
-  const allCards = await pageAll((opts) => packs.listCards({}, opts));
+  // Node. Same basis as the EV/RTP rows (card FMV is USD; MYR at the live FX).
   const fx = await resolveFxRate(packs);
-  // Card FMV is stored in USD; the economy report shows MYR at the live FX rate.
-  // EV/RTP use each card's DISPLAY value (FMV × market_multiplier, default +20%)
-  // because that is the value buyback percents apply to — multiplier 1 here
-  // understated the real payout per open by the markup (operator request
-  // 2026-07-23). RTP stays like-for-like: MYR EV ÷ MYR pack price.
-  const valueByHandle = new Map(
-    allCards.map((c) => [
-      c.handle,
-      displayMarketPrice(
-        toMoney(c.market_value),
-        fx,
-        toMoney(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
-      ),
-    ]),
-  );
   const { count: liabilityCount, liability } =
     await packs.vaultLiabilityMyr(fx);
 
@@ -83,40 +62,9 @@ export async function GET(
   const outstanding_voucher_liability_myr =
     await packs.outstandingVoucherLiabilityMyr();
 
-  // Per-pack theoretical RTP from current odds (active packs only — drafts
-  // aren't sellable, so their RTP is operator-noise).
-  const allPacks = await pageAll((opts) =>
-    packs.listPacks({ status: 'active' }, opts),
-  );
-  const allOdds = await pageAll((opts) => packs.listPackOdds({}, opts));
-  const oddsByPack = new Map<
-    string,
-    { weight: number; market_value: number }[]
-  >();
-  for (const o of allOdds) {
-    if (o.card_id == null) continue; // reward row — not a card, no FMV
-    const value = valueByHandle.get(o.card_id);
-    if (value === undefined) continue; // orphaned odds row
-    const list = oddsByPack.get(o.pack_id) ?? [];
-    list.push({ weight: o.weight, market_value: value });
-    oddsByPack.set(o.pack_id, list);
-  }
-  const packRows = allPacks
-    .map((p) => {
-      const rtp = packTheoreticalRtp(
-        oddsByPack.get(p.slug) ?? [],
-        toMoney(p.price),
-      );
-      return {
-        slug: p.slug,
-        title: p.title,
-        category: p.category,
-        price: toMoney(p.price),
-        ev: rtp?.ev ?? null,
-        rtp_pct: rtp?.rtp_pct ?? null,
-      };
-    })
-    .sort((a, b) => (b.rtp_pct ?? -1) - (a.rtp_pct ?? -1));
+  // Per-pack theoretical RTP from current odds (pack-rtp.ts, shared with the
+  // profit report).
+  const packRows = await packRtpRows(packs, fx);
 
   res.json({
     totals,

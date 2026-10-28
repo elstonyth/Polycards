@@ -17,7 +17,12 @@ import AdminActionAudit from '../models/admin-action-audit';
 import Pack from '../models/pack';
 import DeliveryOrder from '../models/delivery-order';
 import DeliveryOrderItem from '../models/delivery-order-item';
+import LosslessSchedule from '../models/lossless-schedule';
+import TaskDefinition from '../models/task-definition';
+import TaskClaim from '../models/task-claim';
+import RewardsSettings from '../models/rewards-settings';
 import { Migration20261028120000 } from '../migrations/Migration20261028120000';
+import { FREE_PULL_LOCKED_MESSAGE } from '../free-pack';
 
 jest.setTimeout(300_000);
 
@@ -25,7 +30,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [CoinFlipConfig, CoinFlipRound, Pull, Card, FxRate, CreditTransaction,
-    CustomerAccountState, LedgerEntry, LedgerSequence, AdminActionAudit, Pack, DeliveryOrder, DeliveryOrderItem],
+    CustomerAccountState, LedgerEntry, LedgerSequence, AdminActionAudit, Pack, DeliveryOrder, DeliveryOrderItem,
+    LosslessSchedule, TaskDefinition, TaskClaim, RewardsSettings],
   testSuite: ({ service, MikroOrmWrapper }) => {
     const settings = (win = 100) => ({ enabled: true, max_stake_amount: 1000,
       win_percent: win, win_percent_2: null, win_percent_3: null, published_win_percent: 50 });
@@ -33,7 +39,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       settings: settings(win), revision: (await service.coinFlipSettings()).revision,
       adminId: 'admin_coin', reason: 'Integration test configuration',
     });
-    const seed = async (source: 'pack' | 'gift' | 'bonus' | 'free' = 'pack') => {
+    const seed = async (source: 'pack' | 'gift' | 'bonus' | 'free' | 'reward' = 'pack') => {
       const customerId = `coin_${randomUUID()}`;
       const [card] = await service.createCards([{ handle: customerId, name: 'Pikachu', set: 'Base',
         grader: 'PSA', grade: '10', market_value: 20, market_multiplier: 1.25, image: '/pikachu.png' }]);
@@ -76,15 +82,29 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect((await service.walletSummary(input.customerId)).withdrawable).toBe(200);
     });
 
-    it('forfeits on loss without a credit or inventory return and preserves its receipt after pause', async () => {
+    it.each(['pack', 'gift', 'bonus', 'reward'] as const)('forfeits a %s loss without credit or inventory return, conserving tracked vault liability', async source => {
       await configure(0);
-      const input = await seed();
+      const input = await seed(source);
+      if (source === 'reward') {
+        await service.recordLedgerEntry({ type: 'WP', customerId: input.customerId, refId: input.pullId,
+          walletDelta: 0, vaultDelta: null,
+          payload: { type: 'WP', period: 'luckydraw:test', stage: 0, rank: 0, sku: input.customerId, value: 0 } });
+      }
       const q = await service.quoteCoinFlip(input);
       const result = await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id });
-      expect(result).toMatchObject({ status: 'lost', win_amount: 0 });
+      expect(result).toMatchObject({ status: 'lost', win_amount: 0, stake_amount: 100 });
       expect(await pullState(input.pullId)).toMatchObject({ status: 'forfeited', flip_version: 1, stock_earmarked: true });
       expect(await wins(input.customerId)).toHaveLength(0);
-      expect(await service.listLedgerEntries({ type: 'CF', customer_id: input.customerId })).toHaveLength(1);
+      const entries = await service.listLedgerEntries({ type: 'CF', customer_id: input.customerId });
+      expect(entries).toHaveLength(1);
+      expect(Number(entries[0].wallet_delta)).toBe(0);
+      expect(Number(entries[0].vault_delta)).toBe(source === 'reward' ? 0 : -100);
+      expect(entries[0].payload).toMatchObject({ outcome: 'lost', value: 100 });
+      expect(await service.coinFlipTotals({ customerId: input.customerId })).toMatchObject({ losses: 1, payouts: 0, forfeited_value: 100 });
+      if (source === 'reward') {
+        const history = await service.listLedgerEntries({ customer_id: input.customerId });
+        expect(history.reduce((sum, row) => sum + Number(row.vault_delta ?? 0), 0)).toBe(0);
+      }
       await service.saveCoinFlipSettings({ settings: { ...settings(), enabled: false },
         revision: (await service.coinFlipSettings()).revision, adminId: 'admin_coin', reason: 'Pause' });
       expect(await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })).toEqual(result);
@@ -172,15 +192,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect((await service.quoteCoinFlip(input)).status).toBe('quoted');
     });
 
-    it('can sell after a win, preserving the gift buyback playthrough rule', async () => {
+    it('can sell after a win, preserving the gift buyback cash rule', async () => {
       const input = await seed('gift');
       const q = await service.quoteCoinFlip(input);
       await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id });
       const sold = await service.buybackPullAtomic(input);
       expect(sold.amount).toBeGreaterThan(0);
       const [credit] = await service.listCreditTransactions({ id: sold.creditTransactionId });
-      expect(credit).toMatchObject({ reason: 'buyback', pull_id: input.pullId, external_funded_cents: Math.round(sold.amount * 100) });
-      expect((await service.walletSummary(input.customerId)).playthrough.remaining).toBe(sold.amount);
+      expect(credit).toMatchObject({ reason: 'buyback', pull_id: input.pullId });
+      expect(credit.external_funded_cents ?? 0).toBe(0);
+      expect((await service.walletSummary(input.customerId)).playthrough.remaining).toBe(0);
+      expect((await service.walletSummary(input.customerId)).withdrawable).toBe(100 + sold.amount);
       expect(await wins(input.customerId)).toHaveLength(1);
     });
 
@@ -197,6 +219,45 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const sales = await service.listCreditTransactions({ pull_id: input.pullId });
       expect(sales).toHaveLength(pull.status === 'bought_back' ? 1 : 0);
       expect(['bought_back', 'forfeited']).toContain(pull.status);
+    });
+
+    it('keeps bonus-funded sales held while reward sales are cash', async () => {
+      for (const source of ['bonus', 'reward'] as const) {
+        const input = await seed(source);
+        const sold = await service.buybackPullAtomic(input);
+        const [credit] = await service.listCreditTransactions({ id: sold.creditTransactionId });
+        expect(credit.external_funded_cents ?? 0).toBe(source === 'bonus' ? Math.round(sold.amount * 100) : 0);
+      }
+    });
+
+    it('rechecks the daily-task card lock for flipping, selling and delivery', async () => {
+      const input = await seed('reward');
+      const [task] = await service.createTaskDefinitions([{ kind: 'daily', title: 'Daily card',
+        requirement: { type: 'checkin' }, reward: { type: 'card' } }]);
+      await service.createTaskClaims([{ customer_id: input.customerId, task_id: task.id, claim_ref: input.pullId }]);
+      await expect(service.quoteCoinFlip(input)).rejects.toThrow(FREE_PULL_LOCKED_MESSAGE);
+      await expect(service.buybackPullAtomic(input)).rejects.toThrow(FREE_PULL_LOCKED_MESSAGE);
+      await expect(service.createDeliveryOrderWithLedger({ customerId: input.customerId, pullIds: [input.pullId], fx: 4,
+        snapshot: { ship_name: 'Test', ship_address_1: '1 Road', ship_address_2: null, ship_city: 'Kuala Lumpur',
+          ship_province: 'Kuala Lumpur', ship_postal_code: '50000', ship_country_code: 'my', ship_phone: null },
+      })).rejects.toThrow(/changed/i);
+      const pull = await pullState(input.pullId);
+      await service.createPulls([{ customer_id: input.customerId, card_id: pull.card_id,
+        pack_id: 'coin-test', rolled_at: new Date(), source: 'pack' }]);
+      expect((await service.quoteCoinFlip(input)).status).toBe('quoted');
+      expect((await service.buybackPullAtomic(input)).amount).toBeGreaterThan(0);
+    });
+
+    it('preserves the lossless instant offer in atomic buyback and closes it with the reveal', async () => {
+      await service.createPacks([{ slug: 'coin-test', title: 'Coin test', category: 'pokemon',
+        price: 10, image: '/pack.png', buyback_percent: 90 }]);
+      await service.createLosslessSchedules([{ starts_at: new Date(Date.now() - 60_000),
+        ends_at: new Date(Date.now() + 60_000), created_by: 'admin_coin' }]);
+      const open = await seed();
+      expect(await service.buybackPullAtomic(open)).toMatchObject({ amount: 100, percent: 100, rate_type: 'instant' });
+      const closed = await seed();
+      await service.updatePulls([{ id: closed.pullId, instant_closed_at: new Date() }]);
+      expect(await service.buybackPullAtomic(closed)).toMatchObject({ amount: 90, percent: 90, rate_type: 'vault' });
     });
 
     it('serializes a losing flip against delivery and never revives a later flipped card during cancel compensation', async () => {

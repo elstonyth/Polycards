@@ -115,6 +115,84 @@ const packsStub = () => ({
     ]),
 });
 
+describe('manual pricing edits', () => {
+  const pending = {
+    product_id: '6910',
+    grade: 'PSA 10',
+    baseline_value: 25,
+    proposed_value: 1,
+    first_seen_at: '2026-10-16T03:00:00Z',
+  };
+  const withPending = () => {
+    const packs = packsStub();
+    packs.listCards.mockResolvedValue([
+      {
+        ...CARD,
+        pc_product_id: '6910',
+        pc_grade: 'PSA 10',
+        pc_pending_price: pending,
+        pc_sync_error: 'previous failure',
+      },
+    ]);
+    return packs;
+  };
+
+  it.each([
+    { market_value: 1 },
+    { pc_product_id: '6911' },
+    { pc_grade: 'Ungraded' },
+    { pc_product_id: null, pc_grade: null },
+  ])('clears pending/error on price or link changes %j', async (change) => {
+    const packs = withPending();
+    const result = await updateCardInvoke(
+      { ...INPUT, ...change },
+      { container: buildContainer(packs) },
+    );
+    expect(packs.updateCards.mock.calls[0][0][0]).toMatchObject({
+      pc_pending_price: null,
+      pc_sync_error: null,
+    });
+    expect(result.compensateInput.card).toMatchObject({
+      pc_pending_price: pending,
+      pc_sync_error: 'previous failure',
+    });
+  });
+
+  it('leaves observations untouched for unrelated edits', async () => {
+    const packs = withPending();
+    await updateCardInvoke(
+      { ...INPUT, name: 'Renamed' },
+      { container: buildContainer(packs) },
+    );
+    expect(packs.updateCards.mock.calls[0][0][0]).not.toHaveProperty(
+      'pc_pending_price',
+    );
+    expect(packs.updateCards.mock.calls[0][0][0]).not.toHaveProperty(
+      'pc_sync_error',
+    );
+  });
+
+  it('restores pending/error when the mirrored product update fails', async () => {
+    const packs = withPending();
+    jest
+      .mocked(updateProductsWorkflow)
+      .mockReturnValueOnce({
+        run: jest.fn().mockRejectedValue(new Error('product failed')),
+      } as unknown as ReturnType<typeof updateProductsWorkflow>);
+    await expect(
+      updateCardInvoke(
+        { ...INPUT, market_value: 1 },
+        { container: buildContainer(packs) },
+      ),
+    ).rejects.toThrow('product failed');
+    expect(packs.updateCards.mock.calls[1][0][0]).toMatchObject({
+      market_value: 25,
+      pc_pending_price: pending,
+      pc_sync_error: 'previous failure',
+    });
+  });
+});
+
 describe('updateCardInvoke slab bake', () => {
   beforeEach(() => {
     jest.mocked(bakeSlabImage).mockReset().mockResolvedValue(null);
