@@ -247,6 +247,45 @@ medusaIntegrationTestRunner({
         expect(toBuy.rows.map((r) => r.handle)).toEqual(['alloc-stale']);
       });
 
+      it('each to-buy row carries its picture (graded: the baked slab) and the PriceCharting price with no markup', async () => {
+        await makeProduct('look-slab');
+        await makeProduct('look-raw');
+        await packs.createCards([
+          {
+            handle: 'look-slab',
+            name: 'Look Slab',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 12.34,
+            image: '/cdn/look-slab-card.webp',
+            slab_image: '/cdn/look-slab.webp',
+          },
+          {
+            handle: 'look-raw',
+            name: 'Look Raw',
+            set: 'Test Set',
+            grader: '',
+            grade: '',
+            market_value: 2,
+            image: '/cdn/look-raw.webp',
+            slab_image: '/cdn/never-shown.webp',
+          },
+        ]);
+        await requestOrder('cus_look', ['look-slab', 'look-raw']);
+        const rows = (await getToBuy()).rows as unknown as Array<{
+          handle: string;
+          image: string | null;
+          fmv_usd: number | null;
+          fmv: number | null;
+        }>;
+        // FX pinned at 4.5 above: RM = USD × 4.5, not × 1.2 on top.
+        expect(rows.map((r) => [r.handle, r.image, r.fmv_usd, r.fmv])).toEqual([
+          ['look-raw', '/cdn/look-raw.webp', 2, 9],
+          ['look-slab', '/cdn/look-slab.webp', 12.34, 55.53],
+        ]);
+      });
+
       it("moves a legacy 'packing' order to ready_to_ship through processed", async () => {
         await makeProduct('alloc-packing');
         const order = await requestOrder('cus_packing', ['alloc-packing']);

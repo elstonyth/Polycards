@@ -1338,8 +1338,10 @@
     "toShipEmpty": "No orders are ready to ship.",
     "loadError": "Could not load this list.",
     "col": {
+      "photo": "Photo",
       "card": "Card",
       "need": "Need",
+      "pricecharting": "PriceCharting",
       "oldestOrder": "Oldest order",
       "orderDate": "Order date",
       "customer": "Customer",

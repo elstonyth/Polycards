@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { Container, Heading, Table, Text } from '@medusajs/ui';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useProcurementToBuy, useProcurementToShip } from '../../lib/queries';
-import { mytDateTime, orderDateTime } from '../../lib/format';
+import { inCurrency, mytDateTime, orderDateTime, rm } from '../../lib/format';
+import { resolveImageUrl } from '../../lib/image-url';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 // The two daily lists (spec 2026-10-28 §5): cards to buy (purchasing) and
@@ -72,6 +73,9 @@ const ProcurementPage = () => {
               <Table.Header>
                 <Table.Row>
                   <Table.HeaderCell>
+                    {t('procurement.col.photo')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
                     {t('procurement.col.card')}
                   </Table.HeaderCell>
                   <Table.HeaderCell>{t('inventory.sku')}</Table.HeaderCell>
@@ -81,6 +85,9 @@ const ProcurementPage = () => {
                   <Table.HeaderCell className="text-right">
                     {t('inventory.onHand')}
                   </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('procurement.col.pricecharting')}
+                  </Table.HeaderCell>
                   <Table.HeaderCell>
                     {t('procurement.col.oldestOrder')}
                   </Table.HeaderCell>
@@ -89,6 +96,22 @@ const ProcurementPage = () => {
               <Table.Body>
                 {toBuy.data.rows.map((r) => (
                   <Table.Row key={r.handle}>
+                    {/* Owner 2026-10-29: big enough to read in a screenshot
+                        sent to the buyers' group chat. Graded = the baked
+                        slab, raw = the bare card, no tier frame either way.
+                        `r.image &&`: an empty string resolves to the page URL
+                        and gets refetched as an image. */}
+                    <Table.Cell>
+                      {r.image && (
+                        <img
+                          src={resolveImageUrl(r.image)}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          className="h-24 w-[68px] object-contain"
+                        />
+                      )}
+                    </Table.Cell>
                     <Table.Cell className="break-words">
                       <Link
                         to={`/inventory/list/${r.handle}`}
@@ -110,6 +133,14 @@ const ProcurementPage = () => {
                       className={`text-right tabular-nums ${r.on_hand < 0 ? 'text-ui-fg-error' : ''}`}
                     >
                       {r.on_hand}
+                    </Table.Cell>
+                    {/* PriceCharting's own number, then RM at the live rate —
+                        no 20% listing markup on this page. */}
+                    <Table.Cell className="whitespace-nowrap text-right tabular-nums">
+                      {r.fmv_usd === null ? '—' : inCurrency(r.fmv_usd, 'USD')}
+                      <span className="text-ui-fg-subtle block text-xs">
+                        {rm(r.fmv)}
+                      </span>
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
                       {r.oldest_order_at
