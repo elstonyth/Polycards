@@ -52,6 +52,9 @@ export const ADMIN_AUDIT_ENTITY_TYPES = [
   // create/edit/cancel — see Migration20261024130000.
   'lucky_draw_event',
   'lucky_draw_prize',
+  // Goods receive notes (spec 2026-10-28): create and reversal, both 'create'.
+  // See Migration20261028150000.
+  'goods_receive_note',
 ] as const;
 
 export const ADMIN_AUDIT_ACTIONS = [

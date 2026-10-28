@@ -108,6 +108,8 @@ import { gatewayEnvName } from './gateway-env';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
+import GoodsReceiveNote from './models/goods-receive-note';
+import GoodsReceiveNoteLine from './models/goods-receive-note-line';
 import {
   DEFAULT_REFERRAL_TIERS,
   lastClosedReferralWeek,
@@ -1236,6 +1238,8 @@ class PacksModuleService extends MedusaService({
   PurchaseInvoice,
   PurchaseInvoiceLine,
   StockMovement,
+  GoodsReceiveNote,
+  GoodsReceiveNoteLine,
   ReferralAttribution,
   ReferralSettings,
   WeeklySettlement,
