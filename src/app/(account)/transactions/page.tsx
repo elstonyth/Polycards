@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { CoinFlipHistory } from '@/components/coin-flip/CoinFlipHistory';
 import {
   AccountHeader,
   Badge,
@@ -88,6 +89,7 @@ export default async function TransactionsPage({
       {/* Above the table: an in-flight top-up is the thing the customer came
           to look for, and the ledger cannot show it until it settles. */}
       <PendingDeposits deposits={pending} />
+      <CoinFlipHistory />
       <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
         {rows.length === 0 ? (
           <div className="px-6 py-12 text-center">

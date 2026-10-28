@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
@@ -49,6 +50,7 @@ export default function VaultClient({
   /** Packs gifted into this vault, unopened — the Packs row above the cards. */
   initialGifts: PackGift[];
 }) {
+  const router = useRouter();
   const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
   const [items, setItems] = useState<VaultItem[]>(
     initial.ok ? initial.items : [],
@@ -799,7 +801,7 @@ export default function VaultClient({
       </p>
 
       {items.length > 0 && consent !== null && (
-        <div aria-hidden className="h-36" />
+        <div aria-hidden className="h-52" />
       )}
 
       {items.length > 0 && consent !== null && (
@@ -817,6 +819,13 @@ export default function VaultClient({
           }
           onSell={() => setConfirmBulkSell(true)}
           onDeliver={() => setDeliverOpen(true)}
+          onCoinFlip={() => {
+            const [pullId] = selected;
+            if (selected.size === 1 && pullId)
+              router.push(
+                `/vault/coin-flip?pull=${encodeURIComponent(pullId)}`,
+              );
+          }}
         />
       )}
 
