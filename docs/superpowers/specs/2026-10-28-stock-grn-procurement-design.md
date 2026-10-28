@@ -133,6 +133,9 @@ Work happens in a fresh worktree from `master`, never in the main checkout.
    must also carry the GRN's FMV unchanged.
 5. **Notifications:** automatic moves notify the customer exactly as a manual move would
    (same `notifyDeliveryChange` path).
+6. **Cancel window (operator, 2026-10-28):** customers can cancel or change the address only
+   while an order is requested / processed. An automatic move to ready_to_ship ends that window
+   as soon as the cards are on hand — accepted; no change to the cancel rules.
 
 ## Build notes (2026-10-28)
 
