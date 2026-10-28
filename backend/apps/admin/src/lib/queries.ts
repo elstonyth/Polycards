@@ -2077,7 +2077,8 @@ export const useGoodsReceiveNotes = (
 
 // The invoice form's transfer picker: GRNs still waiting for their invoice,
 // newest first, one page of the route's max 100. Gated on `enabled` (the
-// picker being open, or a ?from_grn= deep link) — it is modal-only data.
+// picker drawer being open) — it is modal-only data; a ?from_grn= deep link
+// loads its one GRN through useGoodsReceiveNote instead.
 //
 // shortcut: an open GRN older than the newest 100 cannot be picked here; its
 // detail page's "Transfer to purchase invoice" button still reaches it.

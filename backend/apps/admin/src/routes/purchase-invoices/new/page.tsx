@@ -391,9 +391,11 @@ const NewPurchaseInvoicePage = () => {
               {reversesId
                 ? 'Loading the invoice being reversed...'
                 : fromGrnId
-                  ? grn
-                    ? t('grn.transfer.noLines')
-                    : t('grn.transfer.loading')
+                  ? grnError
+                    ? t('grn.transfer.loadError')
+                    : grn
+                      ? t('grn.transfer.noLines')
+                      : t('grn.transfer.loading')
                   : 'No lines yet — search above and pick an item.'}
             </Text>
           </div>
