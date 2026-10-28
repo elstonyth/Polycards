@@ -10,6 +10,7 @@ import {
   gradeToGrader,
   graderFromInclude,
   orderDateTime,
+  mytDateTime,
   deliveryStatusLabel,
 } from './format';
 
@@ -230,6 +231,18 @@ describe('orderDateTime', () => {
   });
   it('returns an em dash for an unparseable date', () => {
     expect(orderDateTime('not-a-date')).toBe('—');
+  });
+});
+
+describe('mytDateTime', () => {
+  it('shows the 12am MYT cutoff as 12 AM the next calendar day', () => {
+    expect(mytDateTime('2026-10-28T16:00:05Z')).toBe('29-10-2026 12:00 AM');
+  });
+  it('shows a UTC afternoon as Malaysian evening', () => {
+    expect(mytDateTime('2026-10-28T12:07:00Z')).toBe('28-10-2026 08:07 PM');
+  });
+  it('returns an em dash for an unparseable date', () => {
+    expect(mytDateTime('not-a-date')).toBe('—');
   });
 });
 

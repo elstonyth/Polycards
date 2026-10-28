@@ -107,6 +107,17 @@ export function orderDateTime(iso: string): string {
   return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(h % 12 || 12)}:${p(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
+// orderDateTime's shape, but always in Malaysia time (UTC+8, no DST) whatever
+// the browser's timezone — for times tied to the 12am MYT cutoff.
+export function mytDateTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '—';
+  const d = new Date(t + 8 * 3600 * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const h = d.getUTCHours();
+  return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()} ${p(h % 12 || 12)}:${p(d.getUTCMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
 // Up to 4 decimals (the odds storage grain, 1 unit = 0.0001%), trailing
 // zeros trimmed: 0.68 -> "0.68%", 0.6842 -> "0.6842%", 12 -> "12%".
 export const fmtPct = (n: number): string =>

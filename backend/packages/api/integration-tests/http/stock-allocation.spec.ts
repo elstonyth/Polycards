@@ -7,7 +7,7 @@ import {
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { runStockAllocation } from '../../src/modules/packs/stock-allocation-run';
-import stockAllocationJob from '../../src/jobs/stock-allocation';
+import { runMidnightCutoff } from '../../src/jobs/stock-allocation';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -116,7 +116,9 @@ medusaIntegrationTestRunner({
           ),
         );
 
-      const midnight = () => stockAllocationJob(getContainer());
+      // now: the job's clock — a later night is simulated by passing one.
+      const midnight = (now?: Date) => runMidnightCutoff(getContainer(), now);
+      const nextNight = () => new Date(Date.now() + 24 * 3600 * 1000);
 
       it('a GRN save moves no order; the 12am run completes the oldest first and moves the rest to processed', async () => {
         await makeProduct('alloc-card');
@@ -185,6 +187,22 @@ medusaIntegrationTestRunner({
         expect(audit.reason).toBe(
           'stock allocation (nightly): all cards on hand',
         );
+      });
+
+      it('runs once per day: a second run the same day moves nothing and keeps the list', async () => {
+        await makeProduct('alloc-once');
+        await midnight();
+        const [first] = await packs.listProcurementSnapshots({}, { take: 5 });
+        // Placed after 12am, fully stocked: it waits for the next night.
+        const late = await requestOrder('cus_late', ['alloc-once']);
+        await receive('alloc-once', 1);
+        await midnight();
+        expect(await statusOf(late)).toBe('requested');
+        expect(
+          (await packs.listProcurementSnapshots({}, { take: 5 })).map(
+            (s) => s.id,
+          ),
+        ).toEqual([first.id]);
       });
 
       const getToBuy = async () =>
@@ -306,7 +324,7 @@ medusaIntegrationTestRunner({
 
         // The next 12am run picks the new card up: the order ships and the
         // newest list replaces the old one.
-        await midnight();
+        await midnight(nextNight());
         expect(await statusOf(first)).toBe('ready_to_ship');
         const next = await getToBuy();
         expect(next.taken_at! > frozen.taken_at!).toBe(true);
