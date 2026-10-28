@@ -53,6 +53,7 @@ const fakeService = (order: OrderRow, hasDebit = true) => {
         _params?: unknown[],
       ): Promise<Record<string, unknown>[]> => {
         ops.push('sql');
+        if (q.includes('FROM delivery_order')) return order ? [{ customer_id: order.customer_id ?? 'customer_1' }] : [];
         if (q.includes('ledger_entry')) {
           // numeric comes back from pg as a STRING — mirror that, so the
           // Number() coercion in the reversal is exercised, not bypassed.
@@ -139,8 +140,8 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
   it('takes the per-order advisory lock BEFORE the fresh status read', async () => {
     const f = fakeService({ id: 'do_1', status: 'requested' });
     await f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx);
-    expect(f.em.execute.mock.calls[0][0]).toContain('pg_advisory_xact_lock');
-    expect(f.em.execute.mock.calls[0][1]).toEqual(['delivery:do_1']);
+    const locks = f.em.execute.mock.calls.filter(([sql]) => sql.includes('pg_advisory_xact_lock'));
+    expect(locks.map(([, params]) => params)).toEqual([['credit:customer_1'], ['delivery:do_1']]);
     expect(f.ops.indexOf('sql')).toBeLessThan(f.ops.indexOf('read'));
   });
 
@@ -164,7 +165,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       cancelInput,
       f.ctx,
     );
-    expect(result).toEqual({ status: 'canceled' });
+    expect(result).toMatchObject({ status: 'canceled', pullVersions: {}, previous: { status: 'requested' } });
     expect(f.updateDeliveryOrders).toHaveBeenCalledWith(
       [expect.objectContaining({ id: 'do_1', status: 'canceled' })],
       f.ctx,
@@ -212,7 +213,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
     // row with no matching credit_transaction (ledger↔credit mirror break).
     const f = fakeService({ id: 'do_1', status: 'requested' });
     f.em.execute.mockImplementation(async (q: string) =>
-      q.includes('ledger_entry')
+      q.includes('FROM delivery_order') ? [{ customer_id: 'customer_1' }] : q.includes('ledger_entry')
         ? [
             {
               id: 'led_od_debit',
@@ -232,6 +233,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
   it('skips the wallet refund (but not the vault reversal) on a pre-fee debit row', async () => {
     const f = fakeService({ id: 'do_1', status: 'requested' });
     f.em.execute.mockImplementation(async (q: string) => {
+      if (q.includes('FROM delivery_order')) return [{ customer_id: 'customer_1' }];
       if (q.includes('ledger_entry')) {
         // Pre-fee CREATE row: wallet_delta 0 (or NULL in even older rows).
         return [
@@ -261,7 +263,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
     // so this is unreachable in normal operation).
     const f = fakeService({ id: 'do_1', status: 'requested' });
     f.em.execute.mockImplementation(async (q: string) =>
-      q.includes('ledger_entry')
+      q.includes('FROM delivery_order') ? [{ customer_id: 'customer_1' }] : q.includes('ledger_entry')
         ? [{ id: 'led_od_debit', vault_delta: 'not-a-number' }]
         : [],
     );

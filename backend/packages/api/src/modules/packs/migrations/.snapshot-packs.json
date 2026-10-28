@@ -4790,6 +4790,16 @@
           "nullable": false,
           "mappedType": "integer",
           "default": "0"
+        },
+        "flip_eligible_at": {
+          "name": "flip_eligible_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
         }
       },
       "name": "pull",

@@ -59,6 +59,7 @@ export class Migration20261028120000 extends Migration {
     this.addSql(`create index if not exists "IDX_coin_flip_round_pull" on "coin_flip_round" ("pull_id") where deleted_at is null;`);
     this.addSql(`create index if not exists "IDX_coin_flip_round_status_created" on "coin_flip_round" ("status", "created_at") where deleted_at is null;`);
     this.addSql(`alter table "pull" add column if not exists "flip_version" integer not null default 0;`);
+    this.addSql(`alter table "pull" add column if not exists "flip_eligible_at" timestamptz null;`);
     this.replaceCheck('pull', 'status', [...statuses, 'forfeited']);
     this.replaceCheck('credit_transaction', 'reason', [...reasons, 'coin_flip_win']);
     this.replaceCheck('ledger_entry', 'type', [...ledgerTypes, 'CF']);
@@ -86,6 +87,7 @@ export class Migration20261028120000 extends Migration {
     this.replaceCheck('ledger_entry', 'type', ledgerTypes);
     this.replaceCheck('admin_action_audit', 'entity_type', entities);
     this.addSql('alter table "pull" drop column if exists "flip_version";');
+    this.addSql('alter table "pull" drop column if exists "flip_eligible_at";');
     this.addSql('drop table if exists "coin_flip_round";');
     this.addSql('drop table if exists "coin_flip_config";');
   }

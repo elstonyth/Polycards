@@ -11,6 +11,7 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
+import { finalizeOpenPulls } from '../../../../../modules/packs/finalize-open-pulls';
 import { bonusShareMyr } from '../../../../../modules/packs/bonus-credit';
 import { STALE_GIFT_MESSAGE } from '../../../../../modules/packs/pack-gifts';
 import {
@@ -103,6 +104,7 @@ export async function POST(
     return;
   }
   const { result } = run;
+  await finalizeOpenPulls(packsService, run, { customerId, pullIds: result.pulls.map(pull => pull.id), expectedCount: count }, req.scope.resolve(ContainerRegistrationKeys.LOGGER));
 
   // ⚠ EVERYTHING BELOW IS POST-COMMIT — the workflow has ALREADY debited the
   // customer and written the pull rows, and nothing here can roll that back.

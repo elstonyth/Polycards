@@ -38,10 +38,12 @@ export const Pull = model
     // later from the vault page) flips it to bought_back and credits the customer.
     // vaulted → delivering (in an active delivery order) → delivered (terminal);
     // delivering → vaulted on order cancel. bought_back only reachable while vaulted.
-      status: model
-        .enum(['vaulted', 'bought_back', 'delivering', 'delivered', 'forfeited'])
+    status: model
+      .enum(['vaulted', 'bought_back', 'delivering', 'delivered', 'forfeited'])
       .default('vaulted'),
-      flip_version: model.number().default(0),
+    flip_version: model.number().default(0),
+    // Set only after the creating workflow can no longer compensate ownership.
+    flip_eligible_at: model.dateTime().nullable(),
     // USD pulled value (decimal) — a SNAPSHOT taken at DRAW time (card FMV ×
     // its market_multiplier, default baked in), same discipline as
     // buyback_amount below. The leaderboard/challenge "pulled value" aggregates
