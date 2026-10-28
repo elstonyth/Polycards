@@ -13,6 +13,7 @@ import {
 } from '../../../utils/pagination';
 import { coerceCreateGoodsReceiveNoteBody } from './validate';
 import { closedGrnIds, describeGrns } from './view';
+import { runStockAllocationAfterSave } from '../../../modules/packs/stock-allocation-run';
 
 // POST /admin/goods-receive-notes — record cards that arrived before their
 // invoice (spec 2026-10-28). Raises the Stock page's On hand and, like an
@@ -54,6 +55,8 @@ export async function POST(
       lines: body.lines,
     },
   });
+  // New cards on hand may complete waiting orders (oldest first).
+  await runStockAllocationAfterSave(req.scope);
   res.status(201).json({ goods_receive_note: result });
 }
 

@@ -15750,6 +15750,47 @@ class PacksModuleService extends MedusaService({
     await this.deletePurchaseInvoices(invoiceId, sharedContext);
   }
 
+  // Every open delivery order with one handle per pull — the input
+  // allocateStock (stock-allocation.ts) works on. Open = still waiting for
+  // cards (requested / processed / legacy 'packing') or holding them
+  // (ready_to_ship). Oldest first, id as the tie-break, like the allocation.
+  @InjectManager()
+  async openDeliveryOrdersForAllocation(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    { id: string; status: string; created_at: Date; handles: string[] }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      { id: string; status: string; created_at: Date; card_id: string }[]
+    >(
+      `SELECT dord.id, dord.status, dord.created_at, p.card_id
+         FROM delivery_order dord
+         JOIN delivery_order_item doi
+           ON doi.delivery_order_id = dord.id AND doi.deleted_at IS NULL
+         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
+        WHERE dord.deleted_at IS NULL
+          AND dord.status IN ('requested','processed','packing','ready_to_ship')
+        ORDER BY dord.created_at, dord.id`,
+    );
+    const byId = new Map<
+      string,
+      { id: string; status: string; created_at: Date; handles: string[] }
+    >();
+    for (const r of rows) {
+      const o = byId.get(r.id) ?? {
+        id: r.id,
+        status: r.status,
+        created_at: new Date(r.created_at),
+        handles: [],
+      };
+      o.handles.push(r.card_id);
+      byId.set(r.id, o);
+    }
+    return [...byId.values()];
+  }
+
   // ---- Goods receive notes (spec 2026-10-28) ----
 
   // One advisory lock per GRN, taken by everything that decides its fate — a

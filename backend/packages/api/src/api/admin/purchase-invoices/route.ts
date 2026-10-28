@@ -16,6 +16,7 @@ import {
   parseSortParam,
 } from '../../../utils/pagination';
 import { coerceCreatePurchaseInvoiceBody } from './validate';
+import { runStockAllocationAfterSave } from '../../../modules/packs/stock-allocation-run';
 
 // POST /admin/purchase-invoices — record a receipt (POLYCARD-BACK §3.5).
 // agent_user_id is server-derived (never client-supplied).
@@ -123,6 +124,8 @@ export async function POST(
     },
   });
 
+  // New cards on hand may complete waiting orders (oldest first).
+  await runStockAllocationAfterSave(req.scope);
   res.status(201).json({ invoice: result });
 }
 
