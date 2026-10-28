@@ -2511,18 +2511,22 @@ export const reverseGoodsReceiveNote = (id: string) =>
   );
 
 /** One card on the purchasing list: to_procure >= 1, oldest waiting order
- *  first (the route sorts). Money is MYR. */
+ *  first (the route sorts). image: graded = the baked slab, raw = the bare
+ *  card. fmv_usd = the PriceCharting price as is; fmv = that in MYR at the
+ *  live rate, no listing markup. */
 export interface ProcurementToBuyRow {
   handle: string;
   name: string;
   sku: string;
   photo: string | null;
+  image: string | null;
   graded: boolean;
   to_procure: number;
   on_hand: number;
   requested: number;
   ready_to_ship: number;
   fmv: number | null;
+  fmv_usd: number | null;
   oldest_order_at: string | null;
 }
 

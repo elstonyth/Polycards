@@ -224,8 +224,10 @@
     "toShipEmpty": "没有待发货的订单。",
     "loadError": "无法加载此清单。",
     "col": {
+      "photo": "图片",
       "card": "卡牌",
       "need": "需要",
+      "pricecharting": "PriceCharting 价格",
       "oldestOrder": "最早订单",
       "orderDate": "下单日期",
       "customer": "客户",

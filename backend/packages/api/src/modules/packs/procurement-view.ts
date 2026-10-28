@@ -1,8 +1,13 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import { loadInventoryRows, type InventoryRow } from './inventory-view';
 import { stockAutoAllocationEnabled } from './stock-allocation-run';
+import { displayMarketPrice, resolveFxRate } from './pricing';
+import { toOptionalMoney } from './money';
+import { isGraded } from './card-view';
+import { pageAll } from '../../api/utils/page-all';
 
 export type ToBuyRow = Pick<
   InventoryRow,
@@ -17,6 +22,71 @@ export type ToBuyRow = Pick<
   | 'ready_to_ship'
   | 'fmv'
 > & { oldest_order_at: string | null };
+
+// What the page gets (owner 2026-10-29): staff screenshot the list into the
+// buyers' group chat, so each row also carries the picture to look for and
+// the PriceCharting price as is. image: graded = the baked slab composite
+// (no tier frame), raw = the bare card. fmv_usd = PriceCharting's own number;
+// fmv = that at the live rate in RM, with no 20% listing markup.
+export type ToBuyListRow = ToBuyRow & {
+  image: string | null;
+  fmv_usd: number | null;
+};
+
+type CardLook = {
+  grader: string;
+  image: string;
+  slab_image: string | null;
+  market_value: unknown;
+};
+
+// Added when the list is served, not frozen into the 12am snapshot: the
+// snapshot fixes WHAT to buy, while the picture and the price are read fresh
+// — and lists frozen before this change get them too. GRADED/RAW is re-read
+// from the card as well, so the label and the picture always agree. A row
+// whose card row is gone keeps the product photo, its label and stored RM.
+export function addCardDetails(
+  rows: ToBuyRow[],
+  cards: ReadonlyMap<string, CardLook>,
+  fx: number,
+): ToBuyListRow[] {
+  return rows.map((r) => {
+    const card = cards.get(r.handle);
+    const usd = card ? toOptionalMoney(card.market_value) : null;
+    const graded = card ? isGraded(card) : r.graded;
+    return {
+      ...r,
+      graded,
+      // `||`, not `??`: an empty slab_image / image means "none" too.
+      image:
+        (graded ? card?.slab_image : null) || card?.image || r.photo || null,
+      fmv_usd: usd,
+      fmv: usd === null ? r.fmv : displayMarketPrice(usd, fx, 1),
+    };
+  });
+}
+
+async function withCardDetails(
+  container: MedusaContainer,
+  rows: ToBuyRow[],
+): Promise<ToBuyListRow[]> {
+  if (!rows.length) return [];
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+  const handles = rows.map((r) => r.handle);
+  // The picture and price are extras: a failed card read must not take the
+  // purchasing list down with it, so the rows go out with the product photo
+  // and stored RM instead.
+  let cards: (CardLook & { handle: string })[] = [];
+  try {
+    cards = await pageAll((page) => packs.listCards({ handle: handles }, page));
+  } catch (e) {
+    container
+      .resolve(ContainerRegistrationKeys.LOGGER)
+      .warn(`[procurement] to-buy served without card details: ${e}`);
+  }
+  const fx = await resolveFxRate(packs);
+  return addCardDetails(rows, new Map(cards.map((c) => [c.handle, c])), fx);
+}
 
 // The purchasing department's list (spec 2026-10-28): every card with Qty to
 // be procured >= 1, the card whose longest-waiting order is oldest first.
@@ -95,7 +165,7 @@ export function lastMidnightCutoff(now: Date): Date {
 export async function currentToBuyList(
   container: MedusaContainer,
   now: Date = new Date(),
-): Promise<{ rows: ToBuyRow[]; taken_at: string | null }> {
+): Promise<{ rows: ToBuyListRow[]; taken_at: string | null }> {
   if (stockAutoAllocationEnabled()) {
     const [snap] = await container
       .resolve<PacksModuleService>(PACKS_MODULE)
@@ -105,10 +175,16 @@ export async function currentToBuyList(
       );
     if (snap) {
       return {
-        rows: (snap.to_buy as { rows: ToBuyRow[] }).rows,
+        rows: await withCardDetails(
+          container,
+          (snap.to_buy as { rows: ToBuyRow[] }).rows,
+        ),
         taken_at: new Date(snap.taken_at).toISOString(),
       };
     }
   }
-  return { rows: await loadToBuyRows(container), taken_at: null };
+  return {
+    rows: await withCardDetails(container, await loadToBuyRows(container)),
+    taken_at: null,
+  };
 }

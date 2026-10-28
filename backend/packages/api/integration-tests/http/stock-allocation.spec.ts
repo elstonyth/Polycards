@@ -247,6 +247,77 @@ medusaIntegrationTestRunner({
         expect(toBuy.rows.map((r) => r.handle)).toEqual(['alloc-stale']);
       });
 
+      it('each to-buy row carries its picture (graded: the baked slab) and the PriceCharting price with no markup', async () => {
+        await makeProduct('look-slab');
+        await makeProduct('look-raw');
+        const [slabCard] = await packs.createCards([
+          {
+            handle: 'look-slab',
+            name: 'Look Slab',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 12.34,
+            image: '/cdn/look-slab-card.webp',
+            slab_image: '/cdn/look-slab.webp',
+          },
+          {
+            handle: 'look-raw',
+            name: 'Look Raw',
+            set: 'Test Set',
+            grader: '',
+            grade: '',
+            market_value: 2,
+            image: '/cdn/look-raw.webp',
+            slab_image: '/cdn/never-shown.webp',
+          },
+        ]);
+        await requestOrder('cus_look', ['look-slab', 'look-raw']);
+        type Looked = {
+          taken_at: string | null;
+          rows: Array<{
+            handle: string;
+            image: string | null;
+            fmv_usd: number | null;
+            fmv: number | null;
+          }>;
+        };
+        const look = async () => {
+          const list = (await getToBuy()) as unknown as Looked;
+          return {
+            taken_at: list.taken_at,
+            rows: list.rows.map((r) => [r.handle, r.image, r.fmv_usd, r.fmv]),
+          };
+        };
+        // FX pinned at 4.5 above: RM = USD × 4.5, not × 1.2 on top.
+        const expected = [
+          ['look-raw', '/cdn/look-raw.webp', 2, 9],
+          ['look-slab', '/cdn/look-slab.webp', 12.34, 55.53],
+        ];
+        expect((await look()).rows).toEqual(expected);
+
+        // The frozen 12am list carries them too: it fixes WHAT to buy, while
+        // the picture and the price are read when the page loads.
+        await midnight();
+        const frozen = await look();
+        expect(frozen.taken_at).not.toBeNull();
+        expect(frozen.rows).toEqual(expected);
+        await packs.updateCards([
+          {
+            id: slabCard.id,
+            market_value: 20,
+            slab_image: '/cdn/look-slab-rebaked.webp',
+          },
+        ]);
+        expect(await look()).toEqual({
+          taken_at: frozen.taken_at,
+          rows: [
+            expected[0],
+            ['look-slab', '/cdn/look-slab-rebaked.webp', 20, 90],
+          ],
+        });
+      });
+
       it("moves a legacy 'packing' order to ready_to_ship through processed", async () => {
         await makeProduct('alloc-packing');
         const order = await requestOrder('cus_packing', ['alloc-packing']);
