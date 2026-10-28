@@ -14,11 +14,18 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 // GRN reversal and a transfer into an invoice), and the Procurement to-buy
 // list (`procurement:read`; the to-ship list also needs `delivery_order:read`,
 // which the Order manager role carries). `store:read` because the admin shell
-// errors without it. Recording invoices shows purchase costs; otherwise not
-// included: "List to gacha card" on the Stock list (`gacha`, `card`), the
-// PriceCharting import pages (`pricecharting`), players, wallets and
-// payouts. A new role reaches the user at their next sign-in: role ids are
-// copied into the login session.
+// errors without it. 2026-10-28 owner, "full access on stock": also the
+// PriceCharting import pages, Add stock and Import collection, which bring a
+// new card into the catalog (`product` read + create — the pages sit under
+// core's /products guard and save through POST /admin/products/
+// from-pricecharting — plus `pricecharting:read`, `tcg:read` for card
+// details, `pricing:read` for the FX rate the prices are shown in, and
+// `media:update` for the image upload). Recording invoices shows purchase
+// costs. Not included: "List to gacha card" (`card:update` also edits card
+// prices on the Cards page, which moves the pack economy), changing the FX
+// rate, players, wallets and payouts. A new role reaches the user at their
+// next sign-in (role ids are copied into the login session); a policy added
+// to a role they already hold applies on the next request.
 export const STOCK_KEEPER_ROLE = 'Stock keeper';
 export const STOCK_KEEPER_POLICIES = [
   { resource: 'store', operation: 'read' },
@@ -31,6 +38,13 @@ export const STOCK_KEEPER_POLICIES = [
   { resource: 'purchase_invoice', operation: 'read' },
   { resource: 'purchase_invoice', operation: 'update' },
   { resource: 'procurement', operation: 'read' },
+  // Add stock / Import collection (PriceCharting import).
+  { resource: 'product', operation: 'read' },
+  { resource: 'product', operation: 'create' },
+  { resource: 'pricecharting', operation: 'read' },
+  { resource: 'tcg', operation: 'read' },
+  { resource: 'pricing', operation: 'read' },
+  { resource: 'media', operation: 'update' },
 ] as const;
 
 const ALLOWED_KEYS = new Set(
@@ -94,7 +108,7 @@ export async function stockKeeperRoleId(
     (await rbac.createRbacRoles({
       name: STOCK_KEEPER_ROLE,
       description:
-        'Stock: read the Stock list, read and record goods receive notes and purchase invoices, read the to-buy list.',
+        'Stock: read the Stock list, read and record goods receive notes and purchase invoices, read the to-buy list, import new cards from PriceCharting.',
     }));
   let added = 0;
   for (const policy of policies) {
