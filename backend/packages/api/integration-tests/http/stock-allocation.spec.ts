@@ -39,6 +39,8 @@ medusaIntegrationTestRunner({
       });
 
       beforeEach(async () => {
+        // The post-save run is off by default (stockAutoAllocationEnabled).
+        process.env.STOCK_AUTO_ALLOCATION = 'true';
         packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         token = await mintSuperAdmin(
           getContainer(),
@@ -149,6 +151,14 @@ medusaIntegrationTestRunner({
         expect(need('alloc-a')).toBe(1); // 2 wanted, 1 on hand
         expect(need('alloc-b')).toBe(1);
         expect(need('alloc-c')).toBe(0);
+      });
+
+      it('moves nothing on save while STOCK_AUTO_ALLOCATION is off', async () => {
+        process.env.STOCK_AUTO_ALLOCATION = 'false';
+        await makeProduct('alloc-off');
+        const order = await requestOrder('cus_off', ['alloc-off']);
+        expect((await receive('alloc-off', 1)).status).toBe(201);
+        expect(await statusOf(order)).toBe('requested');
       });
 
       it("moves a legacy 'packing' order to ready_to_ship through processed", async () => {

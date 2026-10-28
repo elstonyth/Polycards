@@ -16,6 +16,15 @@ export type StockAllocationRun = {
 
 const ACTOR = 'system:stock-allocation';
 
+// Off until the operator turns it on (decision 2026-10-28): the boss checks the
+// new Stock numbers against the shelf before orders start moving by
+// themselves. STOCK_AUTO_ALLOCATION=true enables the nightly job and the
+// post-save run; runStockAllocation itself and the to-buy / to-ship lists work
+// either way.
+export const stockAutoAllocationEnabled = (
+  env: NodeJS.ProcessEnv = process.env,
+): boolean => env.STOCK_AUTO_ALLOCATION?.trim().toLowerCase() === 'true';
+
 // Moves delivery orders by themselves (spec 2026-10-28):
 //  - an open order whose every card is on hand, oldest first, becomes
 //    ready_to_ship (from requested or legacy 'packing' it passes through
@@ -105,6 +114,7 @@ export async function runStockAllocation(
 export async function runStockAllocationAfterSave(
   container: MedusaContainer,
 ): Promise<void> {
+  if (!stockAutoAllocationEnabled()) return;
   try {
     await runStockAllocation(container, { nightly: false });
   } catch (e) {
