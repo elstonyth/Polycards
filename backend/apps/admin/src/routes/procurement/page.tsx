@@ -94,62 +94,71 @@ const ProcurementPage = () => {
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {toBuy.data.rows.map((r) => (
-                  <Table.Row key={r.handle}>
-                    {/* Owner 2026-10-29: big enough to read in a screenshot
+                {toBuy.data.rows.map((r) => {
+                  // '' when resolveImageUrl refuses the URL: no <img> then,
+                  // or the browser requests this page as the image.
+                  const src = r.image ? resolveImageUrl(r.image) : '';
+                  return (
+                    <Table.Row key={r.handle}>
+                      {/* Owner 2026-10-29: big enough to read in a screenshot
                         sent to the buyers' group chat. Graded = the baked
                         slab, raw = the bare card, no tier frame either way.
                         `r.image &&`: an empty string resolves to the page URL
                         and gets refetched as an image. Not lazy: a full-page
                         capture must not catch rows still empty. py-2 keeps a
                         gap between neighbouring cards in the shot. */}
-                    <Table.Cell className="py-2">
-                      {r.image && (
-                        <img
-                          src={resolveImageUrl(r.image)}
-                          alt=""
-                          decoding="async"
-                          className="h-24 w-[68px] object-contain"
-                        />
-                      )}
-                    </Table.Cell>
-                    <Table.Cell className="break-words">
-                      <Link
-                        to={`/inventory/list/${r.handle}`}
-                        className="text-ui-fg-interactive hover:underline"
+                      <Table.Cell className="py-2">
+                        {src && (
+                          <img
+                            src={src}
+                            alt=""
+                            decoding="async"
+                            className="h-24 w-[68px] object-contain"
+                          />
+                        )}
+                      </Table.Cell>
+                      <Table.Cell className="break-words">
+                        <Link
+                          to={`/inventory/list/${r.handle}`}
+                          className="text-ui-fg-interactive hover:underline"
+                        >
+                          {r.name}
+                        </Link>
+                        <span className="text-ui-fg-muted ml-2 text-xs">
+                          {r.graded
+                            ? t('inventory.graded')
+                            : t('inventory.raw')}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle break-words">
+                        {r.sku}
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-error text-right font-semibold tabular-nums">
+                        {r.to_procure}
+                      </Table.Cell>
+                      <Table.Cell
+                        className={`text-right tabular-nums ${r.on_hand < 0 ? 'text-ui-fg-error' : ''}`}
                       >
-                        {r.name}
-                      </Link>
-                      <span className="text-ui-fg-muted ml-2 text-xs">
-                        {r.graded ? t('inventory.graded') : t('inventory.raw')}
-                      </span>
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle break-words">
-                      {r.sku}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-error text-right font-semibold tabular-nums">
-                      {r.to_procure}
-                    </Table.Cell>
-                    <Table.Cell
-                      className={`text-right tabular-nums ${r.on_hand < 0 ? 'text-ui-fg-error' : ''}`}
-                    >
-                      {r.on_hand}
-                    </Table.Cell>
-                    {/* PriceCharting's own number, then RM at the live rate —
+                        {r.on_hand}
+                      </Table.Cell>
+                      {/* PriceCharting's own number, then RM at the live rate —
                         no 20% listing markup on this page. */}
-                    <Table.Cell className="whitespace-nowrap text-right tabular-nums">
-                      {r.fmv_usd === null ? '—' : inCurrency(r.fmv_usd, 'USD')}
-                      <span className="text-ui-fg-subtle block text-xs">
-                        {rm(r.fmv)}
-                      </span>
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
-                      {r.oldest_order_at
-                        ? orderDateTime(r.oldest_order_at)
-                        : '—'}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
+                      <Table.Cell className="whitespace-nowrap text-right tabular-nums">
+                        {/* `== null`: undefined too, from an API pod still on
+                          the old code during a rolling deploy. */}
+                        {r.fmv_usd == null ? '—' : inCurrency(r.fmv_usd, 'USD')}
+                        <span className="text-ui-fg-subtle block text-xs">
+                          {rm(r.fmv)}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
+                        {r.oldest_order_at
+                          ? orderDateTime(r.oldest_order_at)
+                          : '—'}
+                      </Table.Cell>
+                    </Table.Row>
+                  );
+                })}
               </Table.Body>
             </Table>
           </div>

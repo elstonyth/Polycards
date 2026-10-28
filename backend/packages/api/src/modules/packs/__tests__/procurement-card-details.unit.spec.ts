@@ -19,6 +19,7 @@ const row = (over: Partial<ToBuyRow> = {}): ToBuyRow => ({
 });
 const card = (over: Record<string, unknown> = {}) => ({
   handle: 'card-a',
+  grader: '',
   image: 'https://cdn/card.webp',
   slab_image: null as string | null,
   market_value: '10.00',
@@ -31,7 +32,7 @@ describe('addCardDetails', () => {
   it('graded: shows the baked slab', () => {
     const [r] = addCardDetails(
       [row({ graded: true })],
-      byHandle(card({ slab_image: 'https://cdn/slab.webp' })),
+      byHandle(card({ grader: 'PSA', slab_image: 'https://cdn/slab.webp' })),
       4.5,
     );
     expect(r.image).toBe('https://cdn/slab.webp');
@@ -42,7 +43,7 @@ describe('addCardDetails', () => {
     (slab) => {
       const [r] = addCardDetails(
         [row({ graded: true })],
-        byHandle(card({ slab_image: slab })),
+        byHandle(card({ grader: 'PSA', slab_image: slab })),
         4.5,
       );
       expect(r.image).toBe('https://cdn/card.webp');
@@ -96,12 +97,26 @@ describe('addCardDetails', () => {
     ) as ToBuyRow;
     const [r] = addCardDetails(
       [frozen],
-      byHandle(card({ slab_image: null, market_value: '20' })),
+      byHandle(card({ grader: 'PSA', slab_image: null, market_value: '20' })),
       4.5,
     );
     expect(r.image).toBe('https://cdn/card.webp');
     expect(r.fmv_usd).toBe(20);
     expect(r.fmv).toBe(90);
+  });
+
+  it('GRADED/RAW follows the card today, not the frozen row: label and picture agree', () => {
+    const [nowGraded] = addCardDetails(
+      [row({ graded: false })],
+      byHandle(card({ grader: 'PSA', slab_image: 'https://cdn/slab.webp' })),
+      4.5,
+    );
+    expect([nowGraded.graded, nowGraded.image]).toEqual([
+      true,
+      'https://cdn/slab.webp',
+    ]);
+    const [noCard] = addCardDetails([row({ graded: true })], new Map(), 4.5);
+    expect(noCard.graded).toBe(true);
   });
 
   it('no card and no photo: image is null, not undefined', () => {

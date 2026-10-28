@@ -6,6 +6,7 @@ import { loadInventoryRows, type InventoryRow } from './inventory-view';
 import { stockAutoAllocationEnabled } from './stock-allocation-run';
 import { displayMarketPrice, resolveFxRate } from './pricing';
 import { toOptionalMoney } from './money';
+import { isGraded } from './card-view';
 import { pageAll } from '../../api/utils/page-all';
 
 export type ToBuyRow = Pick<
@@ -33,6 +34,7 @@ export type ToBuyListRow = ToBuyRow & {
 };
 
 type CardLook = {
+  grader: string;
   image: string;
   slab_image: string | null;
   market_value: unknown;
@@ -40,8 +42,9 @@ type CardLook = {
 
 // Added when the list is served, not frozen into the 12am snapshot: the
 // snapshot fixes WHAT to buy, while the picture and the price are read fresh
-// — and lists frozen before this change get them too. A row whose card row is
-// gone keeps the product photo and its stored RM.
+// — and lists frozen before this change get them too. GRADED/RAW is re-read
+// from the card as well, so the label and the picture always agree. A row
+// whose card row is gone keeps the product photo, its label and stored RM.
 export function addCardDetails(
   rows: ToBuyRow[],
   cards: ReadonlyMap<string, CardLook>,
@@ -50,11 +53,13 @@ export function addCardDetails(
   return rows.map((r) => {
     const card = cards.get(r.handle);
     const usd = card ? toOptionalMoney(card.market_value) : null;
+    const graded = card ? isGraded(card) : r.graded;
     return {
       ...r,
+      graded,
       // `||`, not `??`: an empty slab_image / image means "none" too.
       image:
-        (r.graded ? card?.slab_image : null) || card?.image || r.photo || null,
+        (graded ? card?.slab_image : null) || card?.image || r.photo || null,
       fmv_usd: usd,
       fmv: usd === null ? r.fmv : displayMarketPrice(usd, fx, 1),
     };
