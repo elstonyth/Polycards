@@ -26,13 +26,22 @@ import { ANONYMOUS_PULLER, loadPullerProfiles } from '../pullers';
 // the empty chart before any ledger query (a draft pack's odds and ledger are
 // not public until it is active).
 const HITS_LIMIT = 20;
-const CACHE_TTL_MS = 5_000;
+// 30s, not the recent feed's 5s: the global scan reads the whole ledger
+// (~4.4s at 83k pulls on 2026-10-28, growing daily), so a 5s TTL kept each
+// pod rescanning almost back-to-back. A stats chart 30s behind is invisible.
+const CACHE_TTL_MS = 30_000;
 const MAX_ENTRIES = 256;
 const gapsCache = new Map<string, { expires: number; body: unknown }>();
+// One rebuild per key at a time — same herd guard as the recent route: every
+// request landing during a multi-second scan otherwise starts its own scan.
+const inflight = new Map<string, Promise<unknown>>();
+// An expired body this young is served while the rebuild runs; older waits.
+const STALE_SERVE_MS = 120_000;
 
 /** Test seam — see clearRecentPullsCache. */
 export function clearPullGapsCache(): void {
   gapsCache.clear();
+  inflight.clear();
 }
 
 export async function GET(
@@ -53,11 +62,33 @@ export async function GET(
   const cacheKey = `${packId ?? ''}|${rarity}`;
 
   const cached = gapsCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) {
+  const now = Date.now();
+  if (cached && cached.expires > now) {
     res.json(cached.body);
     return;
   }
 
+  let pending = inflight.get(cacheKey);
+  if (!pending) {
+    pending = buildGaps(req, packId, rarity, cacheKey).finally(() =>
+      inflight.delete(cacheKey),
+    );
+    inflight.set(cacheKey, pending);
+  }
+  if (cached && now - cached.expires < STALE_SERVE_MS) {
+    pending.catch(() => {});
+    res.json(cached.body);
+    return;
+  }
+  res.json(await pending);
+}
+
+async function buildGaps(
+  req: MedusaRequest,
+  packId: string | null,
+  rarity: Rarity,
+  cacheKey: string,
+): Promise<unknown> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
   // Gate the slug BEFORE the full-ledger scan below — same reason as the
@@ -79,8 +110,7 @@ export async function GET(
       hits: [],
     };
     remember(cacheKey, empty);
-    res.json(empty);
-    return;
+    return empty;
   }
 
   const gaps = await packs.pullGaps({ packId, rarity, limit: HITS_LIMIT });
@@ -113,7 +143,7 @@ export async function GET(
     hits,
   };
   remember(cacheKey, body);
-  res.json(body);
+  return body;
 }
 
 // ponytail: same bounded map as the recent route — see its `remember`.
