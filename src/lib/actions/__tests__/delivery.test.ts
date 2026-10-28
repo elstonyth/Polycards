@@ -159,6 +159,23 @@ describe('editDeliveryAddress', () => {
     });
   });
 
+  it('after the 12am cutoff, the zone refusal points to support, not to cancel', async () => {
+    backend({
+      'POST /store/delivery-orders/:id/address': {
+        status: 400,
+        body: {
+          message:
+            'That address changes the shipping fee zone, which can no longer change for this order — please contact support.',
+        },
+      },
+    });
+    expect(await editDeliveryAddress('do_1', 'addr_2')).toMatchObject({
+      ok: false,
+      error:
+        'That address is in a different delivery fee zone, which can no longer change for this order — please contact support.',
+    });
+  });
+
   it('surfaces the zone-change refusal rather than a generic one', async () => {
     backend({
       'POST /store/delivery-orders/:id/address': {

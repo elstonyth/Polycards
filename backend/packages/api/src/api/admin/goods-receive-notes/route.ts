@@ -14,12 +14,12 @@ import {
 } from '../../../utils/pagination';
 import { coerceCreateGoodsReceiveNoteBody } from './validate';
 import { closedGrnIds, describeGrns } from './view';
-import { runStockAllocationAfterSave } from '../../../modules/packs/stock-allocation-run';
 
 // POST /admin/goods-receive-notes — record cards that arrived before their
 // invoice (spec 2026-10-28). Raises the Stock page's On hand and, like an
 // invoice, the Medusa stock counter. Rate-limited with the other admin money
-// writers (middlewares.ts).
+// writers (middlewares.ts). Orders do not move on save: the 12am stock run
+// (jobs/stock-allocation.ts) picks the new cards up.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -61,11 +61,6 @@ export async function POST(
       lines: body.lines,
     },
   });
-  // New cards on hand may complete waiting orders (oldest first).
-  await runStockAllocationAfterSave(
-    req.scope,
-    `${result.display_no} by ${req.auth_context.actor_id}`,
-  );
   res.status(201).json({ goods_receive_note: result });
 }
 

@@ -1333,6 +1333,8 @@
     "toBuy": "To buy",
     "toShip": "To ship",
     "toBuyEmpty": "Nothing to buy — every waiting order is covered.",
+    "frozenAt": "As of {{time}} MYT — updates daily at 12am MYT, after order statuses update.",
+    "live": "Live — today's 12am list isn't frozen (the 12am update is off or hasn't run yet).",
     "toShipEmpty": "No orders are ready to ship.",
     "loadError": "Could not load this list.",
     "col": {

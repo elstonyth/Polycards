@@ -118,6 +118,6 @@ export async function GET(
           })),
       };
     }),
-    note: 'status_word is what the customer sees (completed reads as delivered). A customer can cancel or change the address only while an order is requested or processed. The delivery address and phone are never shown here. If has_tracking_number is true but tracking_number is null, the number has an unusual format: check it in the admin. Discuss an order only with the player named in player.',
+    note: 'status_word is what the customer sees (completed reads as delivered). A customer can cancel only while an order is requested (the 12am run moves it on), and change the address only while it is requested or processed. The delivery address and phone are never shown here. If has_tracking_number is true but tracking_number is null, the number has an unusual format: check it in the admin. Discuss an order only with the player named in player.',
   });
 }

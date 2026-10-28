@@ -7,6 +7,7 @@ import {
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { runStockAllocation } from '../../src/modules/packs/stock-allocation-run';
+import { runMidnightCutoff } from '../../src/jobs/stock-allocation';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -25,9 +26,10 @@ const ADDRESS = {
   ship_phone: null,
 };
 
-// Orders move by themselves (spec 2026-10-28): a GRN save completes the
-// oldest waiting order first, the nightly run moves the rest to processed,
-// and two runs at once never move one order twice.
+// Orders move by themselves, only at the 12am cutoff (spec 2026-10-28; owner
+// 2026-10-28): a GRN save moves nothing; the 00:00 job completes the oldest
+// waiting order first, moves the rest to processed and freezes that day's
+// to-buy list. Two runs at once never move one order twice.
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
@@ -39,7 +41,7 @@ medusaIntegrationTestRunner({
       });
 
       beforeEach(async () => {
-        // The post-save run is off by default (stockAutoAllocationEnabled).
+        // The 12am job is off by default (stockAutoAllocationEnabled).
         process.env.STOCK_AUTO_ALLOCATION = 'true';
         packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         token = await mintSuperAdmin(
@@ -114,19 +116,21 @@ medusaIntegrationTestRunner({
           ),
         );
 
-      it('a GRN completes the oldest order first; the nightly run moves the rest to processed', async () => {
+      // now: the job's clock — a later night is simulated by passing one.
+      const midnight = (now?: Date) => runMidnightCutoff(getContainer(), now);
+      const nextNight = () => new Date(Date.now() + 24 * 3600 * 1000);
+
+      it('a GRN save moves no order; the 12am run completes the oldest first and moves the rest to processed', async () => {
         await makeProduct('alloc-card');
         const older = await requestOrder('cus_old', ['alloc-card']);
         const newer = await requestOrder('cus_new', ['alloc-card']);
 
         expect((await receive('alloc-card', 1)).status).toBe(201);
-        expect(await statusOf(older)).toBe('ready_to_ship');
+        expect(await statusOf(older)).toBe('requested');
         expect(await statusOf(newer)).toBe('requested');
 
-        const nightly = await runStockAllocation(getContainer(), {
-          nightly: true,
-        });
-        expect(nightly).toEqual({ ready: [], processed: [newer], failed: [] });
+        await midnight();
+        expect(await statusOf(older)).toBe('ready_to_ship');
         expect(await statusOf(newer)).toBe('processed');
 
         // Both automatic moves are audited against the system actor.
@@ -147,8 +151,9 @@ medusaIntegrationTestRunner({
 
         await receive('alloc-a', 1);
         await receive('alloc-c', 1);
-        expect(await statusOf(older)).toBe('requested');
-        expect(await statusOf(sameCard)).toBe('requested');
+        await midnight();
+        expect(await statusOf(older)).toBe('processed');
+        expect(await statusOf(sameCard)).toBe('processed');
         expect(await statusOf(otherCard)).toBe('ready_to_ship');
 
         const list = (
@@ -161,14 +166,14 @@ medusaIntegrationTestRunner({
         expect(need('alloc-c')).toBe(0);
       });
 
-      it('keeps a tracking number staff already entered, and names the save in the audit reason', async () => {
+      it('keeps a tracking number staff already entered, and names the 12am run in the audit reason', async () => {
         await makeProduct('alloc-track');
         const order = await requestOrder('cus_track', ['alloc-track']);
         await packs.updateDeliveryOrders([
           { id: order, status: 'processed', tracking_number: 'TRK-123' },
         ]);
-        const saved = await receive('alloc-track', 1);
-        expect(saved.status).toBe(201);
+        expect((await receive('alloc-track', 1)).status).toBe(201);
+        await midnight();
         const [row] = await packs.listDeliveryOrders(
           { id: order },
           { take: 1 },
@@ -179,17 +184,67 @@ medusaIntegrationTestRunner({
           { entity_id: order, admin_id: 'system:stock-allocation' },
           { take: 1 },
         );
-        expect(audit.reason).toContain(
-          `after ${saved.data.goods_receive_note.display_no} by `,
+        expect(audit.reason).toBe(
+          'stock allocation (nightly): all cards on hand',
         );
       });
 
-      it('moves nothing on save while STOCK_AUTO_ALLOCATION is off', async () => {
-        process.env.STOCK_AUTO_ALLOCATION = 'false';
+      it('runs once per day: a second run the same day moves nothing and keeps the list', async () => {
+        await makeProduct('alloc-once');
+        await midnight();
+        const [first] = await packs.listProcurementSnapshots({}, { take: 5 });
+        // Placed after 12am, fully stocked: it waits for the next night.
+        const late = await requestOrder('cus_late', ['alloc-once']);
+        await receive('alloc-once', 1);
+        await midnight();
+        expect(await statusOf(late)).toBe('requested');
+        expect(
+          (await packs.listProcurementSnapshots({}, { take: 5 })).map(
+            (s) => s.id,
+          ),
+        ).toEqual([first.id]);
+      });
+
+      const getToBuy = async () =>
+        (await unwrapResponse(api.get('/admin/procurement/to-buy', headers())))
+          .data as {
+          taken_at: string | null;
+          rows: Array<{ handle: string; to_procure: number }>;
+        };
+
+      it('moves and freezes nothing while STOCK_AUTO_ALLOCATION is off; to-buy is live even with a snapshot from before', async () => {
         await makeProduct('alloc-off');
         const order = await requestOrder('cus_off', ['alloc-off']);
-        expect((await receive('alloc-off', 1)).status).toBe(201);
+        // Left over from while the switch was on.
+        await packs.createProcurementSnapshots({
+          taken_at: new Date(),
+          to_buy: { rows: [] },
+        });
+        process.env.STOCK_AUTO_ALLOCATION = 'false';
+        await midnight();
         expect(await statusOf(order)).toBe('requested');
+        expect(
+          await packs.listProcurementSnapshots({}, { take: 5 }),
+        ).toHaveLength(1);
+        const toBuy = (
+          await unwrapResponse(api.get('/admin/procurement/to-buy', headers()))
+        ).data;
+        expect(toBuy.taken_at).toBeNull();
+        expect(toBuy.rows.map((r: { handle: string }) => r.handle)).toEqual([
+          'alloc-off',
+        ]);
+      });
+
+      it('a snapshot from before the last 12am is not served: to-buy falls back to live', async () => {
+        await makeProduct('alloc-stale');
+        await requestOrder('cus_stale', ['alloc-stale']);
+        await packs.createProcurementSnapshots({
+          taken_at: new Date(Date.now() - 2 * 24 * 3600 * 1000),
+          to_buy: { rows: [] },
+        });
+        const toBuy = await getToBuy();
+        expect(toBuy.taken_at).toBeNull();
+        expect(toBuy.rows.map((r) => r.handle)).toEqual(['alloc-stale']);
       });
 
       it("moves a legacy 'packing' order to ready_to_ship through processed", async () => {
@@ -203,10 +258,11 @@ medusaIntegrationTestRunner({
             order,
           ]);
         expect((await receive('alloc-packing', 1)).status).toBe(201);
+        await midnight();
         expect(await statusOf(order)).toBe('ready_to_ship');
       });
 
-      it('two runs at once never move one order twice and never throw', async () => {
+      it('two 12am runs at once never move one order twice and never throw', async () => {
         await makeProduct('alloc-race');
         const order = await requestOrder('cus_race', ['alloc-race']);
         await packs.createGoodsReceiveNoteWithLines({
@@ -225,8 +281,8 @@ medusaIntegrationTestRunner({
         });
 
         const [a, b] = await Promise.all([
-          runStockAllocation(getContainer(), { nightly: false }),
-          runStockAllocation(getContainer(), { nightly: false }),
+          runStockAllocation(getContainer(), { nightly: true }),
+          runStockAllocation(getContainer(), { nightly: true }),
         ]);
         expect(await statusOf(order)).toBe('ready_to_ship');
         // Exactly one run made the final move; the other either found it
@@ -234,9 +290,11 @@ medusaIntegrationTestRunner({
         expect(
           [...a.ready, ...b.ready].filter((id) => id === order),
         ).toHaveLength(1);
+        // The whole job twice at once (statuses + snapshot) never throws.
+        await Promise.all([midnight(), midnight()]);
       });
 
-      it('to-buy lists short cards by oldest waiting order; to-ship lists ready orders oldest first', async () => {
+      it('to-buy is the list the 12am run froze, by oldest waiting order; to-ship lists ready orders oldest first', async () => {
         await makeProduct('buy-late');
         await makeProduct('buy-early');
         await makeProduct('ship-card');
@@ -245,22 +303,40 @@ medusaIntegrationTestRunner({
         const shipOld = await requestOrder('cus_p3', ['ship-card']);
         const shipNew = await requestOrder('cus_p4', ['ship-card']);
         await receive('ship-card', 2);
+        // Switch on, no 12am run yet: the live list.
+        expect((await getToBuy()).taken_at).toBeNull();
+        await midnight();
         expect(await statusOf(shipOld)).toBe('ready_to_ship');
         expect(await statusOf(shipNew)).toBe('ready_to_ship');
+        expect(await statusOf(first)).toBe('processed');
 
-        const toBuy = (
-          await unwrapResponse(api.get('/admin/procurement/to-buy', headers()))
-        ).data.rows as Array<{ handle: string; to_procure: number }>;
-        expect(toBuy.map((r) => [r.handle, r.to_procure])).toEqual([
+        const frozen = await getToBuy();
+        expect(frozen.taken_at).not.toBeNull();
+        expect(frozen.rows.map((r) => [r.handle, r.to_procure])).toEqual([
           ['buy-early', 1],
           ['buy-late', 2],
         ]);
-        expect(await statusOf(first)).toBe('requested');
+        // A card arriving during the day changes neither the list nor the
+        // order: both wait for the next 12am run.
+        await receive('buy-early', 1);
+        expect(await getToBuy()).toEqual(frozen);
+        expect(await statusOf(first)).toBe('processed');
+
+        // The next 12am run picks the new card up: the order ships and the
+        // newest list replaces the old one.
+        await midnight(nextNight());
+        expect(await statusOf(first)).toBe('ready_to_ship');
+        const next = await getToBuy();
+        expect(next.taken_at! > frozen.taken_at!).toBe(true);
+        expect(next.rows.map((r) => [r.handle, r.to_procure])).toEqual([
+          ['buy-late', 2],
+        ]);
 
         const toShip = (
           await unwrapResponse(api.get('/admin/procurement/to-ship', headers()))
         ).data.orders as Array<{ id: string; items: unknown[] }>;
-        expect(toShip.map((o) => o.id)).toEqual([shipOld, shipNew]);
+        // first shipped on the second 12am run; it is the oldest order.
+        expect(toShip.map((o) => o.id)).toEqual([first, shipOld, shipNew]);
         expect(toShip[0].items).toHaveLength(1);
       });
     });

@@ -2139,10 +2139,15 @@ export const useReverseGoodsReceiveNote = () => {
 
 export const useProcurementToBuy = (): UseQueryResult<{
   rows: ProcurementToBuyRow[];
+  taken_at: string | null;
 }> =>
   useQuery({
     queryKey: qk.procurementToBuy,
     queryFn: getProcurementToBuy,
+    // A page left open past 12am picks up the new list on return, or within
+    // ten minutes while it stays in front.
+    refetchOnWindowFocus: true,
+    refetchInterval: 10 * 60 * 1000,
   });
 
 export const useProcurementToShip = (): UseQueryResult<{

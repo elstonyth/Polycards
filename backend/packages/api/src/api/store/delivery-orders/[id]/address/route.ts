@@ -14,6 +14,7 @@ import {
   postcodeMessage,
   ZONE_SHIPPING_MYR,
   CUSTOMER_STATUS_WORD,
+  CUSTOMER_CANCELABLE,
 } from '../../../../../modules/packs/delivery';
 
 // POST /store/delivery-orders/:id/address — re-snapshot the shipping address
@@ -111,7 +112,12 @@ export async function POST(
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      'That address changes the shipping fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',
+      // Cancel-and-re-request is the customer's fix only while they can still
+      // cancel (requested, before the 12am cutoff — delivery.ts
+      // CUSTOMER_CANCELABLE); after it, only support can.
+      CUSTOMER_CANCELABLE.includes(order.status)
+        ? 'That address changes the shipping fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.'
+        : 'That address changes the shipping fee zone, which can no longer change for this order — please contact support.',
     );
   }
   // Same fallback as request-delivery: addresses saved by the storefront's

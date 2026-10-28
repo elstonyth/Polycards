@@ -86,13 +86,14 @@ describe('cancelDeliveryOrder', () => {
     expect(res).toEqual({ ok: true, status: 'canceled' });
   });
 
-  // The customer window closes at `processed`, so the backend refuses from
-  // `ready_to_ship` on — BEFORE the parcel physically ships. The copy has to be
+  // The customer window closes at the 12am cutoff, so the backend refuses from
+  // `processed` on — BEFORE the parcel physically ships. The copy has to be
   // true for every status it covers, hence "being prepared" rather than
   // "shipped": telling a customer their order shipped when it is still on the
   // packing bench is the kind of wrong that generates the support ticket it was
   // meant to pre-empt.
   it.each([
+    'This delivery is already processed and can no longer be canceled — please contact support.',
     'This delivery is already ready to ship and can no longer be canceled — please contact support.',
     'This delivery is already shipped and can no longer be canceled — please contact support.',
   ])(

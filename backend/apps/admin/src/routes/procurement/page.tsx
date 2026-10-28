@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Container, Heading, Table, Text } from '@medusajs/ui';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useProcurementToBuy, useProcurementToShip } from '../../lib/queries';
-import { orderDateTime } from '../../lib/format';
+import { mytDateTime, orderDateTime } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 // The two daily lists (spec 2026-10-28 §5): cards to buy (purchasing) and
@@ -35,6 +35,15 @@ const ProcurementPage = () => {
       <Container className="p-0">
         <div className="px-6 py-4">
           <Heading level="h2">{t('procurement.toBuy')}</Heading>
+          {toBuy.data && (
+            <Text className="text-ui-fg-subtle mt-1" size="small">
+              {toBuy.data.taken_at
+                ? t('procurement.frozenAt', {
+                    time: mytDateTime(toBuy.data.taken_at),
+                  })
+                : t('procurement.live')}
+            </Text>
+          )}
         </div>
         {toBuy.isError ? (
           <div className="border-t px-6 py-8">
