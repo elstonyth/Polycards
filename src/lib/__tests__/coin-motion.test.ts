@@ -10,6 +10,17 @@ import {
 } from '../coin-motion';
 
 describe('physical coin motion', () => {
+  it('tosses a slow or paused mouse drag using distance without changing touch flicks', () => {
+    expect(coinGesture(5, -100, 1500, 'mouse')).toBeCloseTo(72 / 172);
+    expect(coinGesture(5, -100, 10000, 'mouse')).toBeCloseTo(72 / 172);
+    expect(coinGesture(5, -100, 1500, 'touch')).toBeNull();
+    expect(coinGesture(0, -200, 3000, 'mouse')).toBe(1);
+    expect(coinGesture(0, -28, 2000, 'mouse')).toBe(0);
+    expect(coinGesture(0, -12, 100, 'mouse')).toBeNull();
+    expect(coinGesture(0, 80, 100, 'mouse')).toBeNull();
+    expect(coinGesture(120, -40, 100, 'mouse')).toBeNull();
+    expect(coinGesture(0, NaN, 100, 'mouse')).toBeNull();
+  });
   it('keeps the full coin inside the camera through every throw and landing', () => {
     const camera = new PerspectiveCamera(COIN_CAMERA.fov, 1.1, 0.1, 40);
     camera.position.set(...COIN_CAMERA.position);

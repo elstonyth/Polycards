@@ -36,6 +36,8 @@ Coin B uses the official logo, brushed black faces, beveled metallic rims/reedin
 
 The Games sheet and single-card Vault action both open the coin page. The searchable Vault modal replaces the dropdown; the selected slab remains beside the coin through settlement. Wins lift the card and reveal credit; losses lower and desaturate it. Camera projection tests cover every trace and drag offset so landings remain in frame.
 
+On PC, after confirming the card, hold the left mouse button on the coin, drag upward and release. The full upward drag distance retains throw strength even when the player pauses before release; touch still uses recent flick velocity. Clicks, downward/mostly sideways drags, cancellation and lost capture do not toss. Mouse capture keeps release events attached outside the coin ([Pointer Events](https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture)).
+
 Physics sources: [Rapier rigid bodies](https://rapier.rs/docs/user_guides/javascript/rigid_bodies/), [Three.js documentation](https://threejs.org/docs/).
 
 ## Verification

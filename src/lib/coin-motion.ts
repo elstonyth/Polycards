@@ -24,6 +24,7 @@ export function coinGesture(
   dx: number,
   dy: number,
   milliseconds: number,
+  pointerType = 'touch',
 ): CoinGesture | null {
   if (
     ![dx, dy, milliseconds].every(Number.isFinite) ||
@@ -33,6 +34,9 @@ export function coinGesture(
   )
     return null;
   const speed = -dy / milliseconds;
+  // Mouse users can pull and hold before releasing; distance retains the charge.
+  if (pointerType === 'mouse')
+    return Math.min(1, Math.max((-dy - 28) / 172, (speed - 0.25) / 1.5));
   return speed >= 0.25 ? Math.min(1, (speed - 0.25) / 1.5) : null;
 }
 export function coinTraceFor(

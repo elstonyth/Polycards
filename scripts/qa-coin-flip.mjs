@@ -270,6 +270,8 @@ try {
     canvas.y + canvas.height * 0.5 - 85,
     { steps: 4 },
   );
+  // A PC user may pause while holding the coin; release must still toss it.
+  await page.waitForTimeout(1000);
   await page.mouse.up();
   await page
     .getByRole('heading', { name: 'Card forfeited', exact: true })

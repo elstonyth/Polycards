@@ -283,6 +283,8 @@ export function CoinScene(props: CoinSceneProps) {
       id: number;
       x: number;
       y: number;
+      t: number;
+      pointerType: string;
       samples: { x: number; y: number; t: number }[];
     } | null = null;
     const raycaster = new THREE.Raycaster();
@@ -297,12 +299,18 @@ export function CoinScene(props: CoinSceneProps) {
       );
       raycaster.setFromCamera(pointer, camera);
       if (!raycaster.intersectObject(coin, true).length) return;
+      e.preventDefault();
+      // Capture keeps mouse movement/release attached when it leaves the coin.
+      // https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture
       canvas.setPointerCapture(e.pointerId);
+      const t = performance.now();
       drag = {
         id: e.pointerId,
         x: e.clientX,
         y: e.clientY,
-        samples: [{ x: e.clientX, y: e.clientY, t: performance.now() }],
+        t,
+        pointerType: e.pointerType,
+        samples: [{ x: e.clientX, y: e.clientY, t }],
       };
     };
     const move = (e: PointerEvent) => {
@@ -329,18 +337,21 @@ export function CoinScene(props: CoinSceneProps) {
     };
     const release = (e: PointerEvent) => {
       if (!drag || e.pointerId !== drag.id) return;
-      const start = drag.samples[0]!;
+      const start = drag.pointerType === 'mouse' ? drag : drag.samples[0]!;
       const profile =
         e.type === 'pointerup'
           ? coinGesture(
               e.clientX - start.x,
               e.clientY - start.y,
               performance.now() - start.t,
+              drag.pointerType,
             )
           : null;
       offset = profile != null ? coin.position.x : 0;
       launchLift = profile != null ? coin.position.y - 1 : 0;
       drag = null;
+      if (canvas.hasPointerCapture(e.pointerId))
+        canvas.releasePointerCapture(e.pointerId);
       coin.position.set(offset, 1 + launchLift, 0);
       dirty = true;
       if (profile != null && current.current.armed)
@@ -498,7 +509,11 @@ export function CoinScene(props: CoinSceneProps) {
     <div
       ref={host}
       role="img"
-      aria-label="Black titanium coin. Use the Flip coin button or flick the coin upward."
+      aria-label={
+        props.armed
+          ? 'Black titanium coin. With a mouse, hold the left button, drag upward and release to toss. Or use Flip coin.'
+          : 'Black titanium coin. Select and confirm a card to enable dragging.'
+      }
       className="h-72 w-full overflow-hidden bg-neutral-950 sm:h-[400px]"
     />
   );

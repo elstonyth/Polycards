@@ -359,10 +359,16 @@ export function CoinFlipClient({
                   <span className="flex items-center gap-2">
                     <ArrowUp size={16} aria-hidden />
                     {phase === 'armed' && live
-                      ? 'Flick upward. A stronger flick flies higher.'
-                      : 'Emblem wins · Wordmark loses'}
+                      ? 'Hold the coin, drag up, release to toss.'
+                      : phase === 'idle'
+                        ? selectedCard
+                          ? 'Review and confirm your card to enable dragging.'
+                          : 'Choose a card to get started.'
+                        : 'Emblem wins · Wordmark loses'}
                   </span>
-                  <span className="hidden lg:block">Drag or tap</span>
+                  <span className="hidden shrink-0 lg:block">
+                    Mouse or touch
+                  </span>
                 </>
               )}
             </div>
@@ -499,7 +505,7 @@ export function CoinFlipClient({
                   </p>
                   <p className="mt-2 text-xs leading-relaxed text-neutral-400">
                     {live
-                      ? 'Flick the coin or tap below to commit this card.'
+                      ? 'Mouse: click and hold the coin, drag upward, then release. Touch: flick upward. Releasing commits your card.'
                       : 'Review again for a fresh value and odds.'}
                   </p>
                   <Pill
@@ -592,7 +598,7 @@ export function CoinFlipClient({
           {config?.max_stake_amount != null
             ? ` Maximum card value ${rm(config.max_stake_amount)}.`
             : ''}{' '}
-          Flick strength changes the motion, not the odds.
+          Mouse drag distance and flick speed change the motion, not the odds.
         </p>
       </details>
       <CoinFlipHistory refresh={historyRevision} />
