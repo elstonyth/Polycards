@@ -3,12 +3,13 @@ import {
   ADMIN_AUDIT_ENTITY_TYPES,
 } from '../../models/admin-action-audit';
 // Always the LATEST migration that rewrites the CHECKs (each one re-emits the
-// full lists): Migration20261024130000 added 'lucky_draw_event', 'lucky_draw_prize'
+// full lists): Migration20261028150000 added 'goods_receive_note' on top of
+// Migration20261024130000, which added 'lucky_draw_event', 'lucky_draw_prize'
 // and 'publish', on top of Migration20261015160000's 'gateway_deposit' /
 // 'acknowledge_finding' and Migration20261015120000's 'release_reward_holds'.
-import * as migrationModule from '../Migration20261024130000';
+import * as migrationModule from '../Migration20261028150000';
 
-const { Migration20261024130000 } = migrationModule;
+const { Migration20261028150000 } = migrationModule;
 
 // The DB CHECKs on admin_action_audit are only rewritten by an explicit
 // migration (Migration20260906090000 learned this the hard way). A value the
@@ -21,8 +22,8 @@ const { Migration20261024130000 } = migrationModule;
 
 async function checkLists(): Promise<Record<string, string[]>> {
   const sql: string[] = [];
-  const m = Object.create(Migration20261024130000.prototype) as InstanceType<
-    typeof Migration20261024130000
+  const m = Object.create(Migration20261028150000.prototype) as InstanceType<
+    typeof Migration20261028150000
   > & {
     addSql: (s: string) => void;
   };
@@ -63,6 +64,7 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'gateway_withdrawal',
       'lucky_draw_event',
       'lucky_draw_prize',
+      'goods_receive_note',
     ]) {
       expect(entity_type).toContain(t);
     }
@@ -90,6 +92,6 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
   });
 
   it('exports only the migration class (the loader instantiates the first export)', async () => {
-    expect(Object.keys(migrationModule)).toEqual(['Migration20261024130000']);
+    expect(Object.keys(migrationModule)).toEqual(['Migration20261028150000']);
   });
 });

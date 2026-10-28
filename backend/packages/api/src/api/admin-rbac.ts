@@ -41,6 +41,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   'delivery-orders': 'delivery_order',
   economy: 'economy',
   gacha: 'gacha',
+  'goods-receive-notes': 'goods_receive_note',
   inventory: 'inventory',
   ledger: 'ledger',
   'lossless-schedules': 'lossless_schedule',
@@ -52,6 +53,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   players: 'player',
   pricecharting: 'pricecharting',
   pricing: 'pricing',
+  procurement: 'procurement',
   'profit-report': 'profit_report',
   pulls: 'pull',
   'purchase-invoices': 'purchase_invoice',
@@ -174,6 +176,15 @@ export const adminRbacRoutes: MiddlewareRoute[] = [
     matcher: '/admin/automation/accounts',
     methods: ['POST'],
     policies: [{ resource: 'customer', operation: 'read' }],
+  },
+  {
+    // The mailing list carries customer names, addresses, phones and emails:
+    // on top of procurement:read (the prefix entry below), ask the same
+    // permission the Orders page does, so a purchasing-only role cannot read
+    // customer details through it.
+    matcher: '/admin/procurement/to-ship',
+    methods: ['GET'],
+    policies: [{ resource: 'delivery_order', operation: 'read' }],
   },
   ...Object.entries(CUSTOM_ADMIN_RESOURCES).flatMap(([prefix, resource]) =>
     [`/admin/${prefix}`, `/admin/${prefix}/*`].flatMap((matcher) =>

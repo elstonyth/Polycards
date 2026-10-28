@@ -1640,6 +1640,18 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Goods receive notes (spec 2026-10-28) — raise the same stock counters
+      // as an invoice, and their reversal lowers them; same admin budget.
+      matcher: '/admin/goods-receive-notes',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/goods-receive-notes/*/reverse',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Delivery-orders bulk status transition — up to 100 order transitions +
       // 100 customer notifications per call; same admin budget.
       matcher: '/admin/delivery-orders/bulk',

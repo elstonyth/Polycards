@@ -156,7 +156,7 @@ export const InventoryPicker = ({
                     size="small"
                     className="text-ui-fg-subtle w-24 shrink-0 text-right"
                   >
-                    {r.on_hand} in stock
+                    {r.counter} in stock
                   </Text>
                 </label>
               </li>

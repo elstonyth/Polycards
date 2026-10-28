@@ -108,6 +108,8 @@ import { gatewayEnvName } from './gateway-env';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
+import GoodsReceiveNote from './models/goods-receive-note';
+import GoodsReceiveNoteLine from './models/goods-receive-note-line';
 import {
   DEFAULT_REFERRAL_TIERS,
   lastClosedReferralWeek,
@@ -1200,6 +1202,16 @@ function luckyDrawResultRow(
   };
 }
 
+// One line of a goods receive note / transfer invoice, compared as a multiset
+// by grnLineMismatch.
+type MirrorLine = {
+  card_handle: string;
+  qty: number;
+  fmv_snapshot?: unknown;
+  unit_cost?: unknown;
+};
+const rmKey = (v: unknown) => (Math.round(Number(v) * 100) / 100).toFixed(2);
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -1236,6 +1248,8 @@ class PacksModuleService extends MedusaService({
   PurchaseInvoice,
   PurchaseInvoiceLine,
   StockMovement,
+  GoodsReceiveNote,
+  GoodsReceiveNoteLine,
   ReferralAttribution,
   ReferralSettings,
   WeeklySettlement,
@@ -15601,6 +15615,9 @@ class PacksModuleService extends MedusaService({
       supplier: string;
       agent_user_id: string;
       reverses_invoice_id: string | null;
+      // "Transfer from goods receive note" (spec 2026-10-28). On a reversal
+      // the route copies it from the invoice being reversed.
+      from_grn_id?: string | null;
       lines: {
         card_handle: string;
         card_name: string;
@@ -15617,6 +15634,71 @@ class PacksModuleService extends MedusaService({
         input.lines,
         sharedContext,
       );
+      // A reversal carries the from_grn_id of the invoice it undoes. The
+      // route copies it; checking here makes it an invariant.
+      const [target] = await this.listPurchaseInvoices(
+        { id: input.reverses_invoice_id },
+        { take: 1 },
+        sharedContext,
+      );
+      if ((target?.from_grn_id ?? null) !== (input.from_grn_id ?? null)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          'A reversal must carry the from_grn_id of the invoice it reverses.',
+        );
+      }
+      if (target?.from_grn_id) {
+        // A transferred invoice is reversed whole or not at all. A full
+        // reversal re-opens its goods receive note (goodsReceiveNoteTransfer)
+        // for a corrected transfer — the one way to fix a wrong cost without
+        // counting the cards twice. A partial one would leave the note
+        // half-costed and still closed.
+        const targetLines = await pageAll((opts) =>
+          this.listPurchaseInvoiceLines(
+            { invoice_id: target.id },
+            opts,
+            sharedContext,
+          ),
+        );
+        const mismatch = this.grnLineMismatch(
+          targetLines.map((l) => ({
+            card_handle: l.card_handle,
+            qty: -Number(l.qty),
+            unit_cost: l.unit_cost,
+          })),
+          input.lines,
+          (l) => `${l.card_handle} x ${l.qty} @ cost ${rmKey(l.unit_cost)}`,
+          `invoice ${target.display_no}`,
+        );
+        if (mismatch) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            `An invoice transferred from a goods receive note can only be reversed in full: ${mismatch}`,
+          );
+        }
+      }
+    } else if (input.from_grn_id) {
+      // A transfer: the GRN must have no live transfer, and the invoice must
+      // carry exactly its cards, quantities and FMV — the cards are already
+      // on hand, the invoice only adds their cost. The GRN's lock serializes
+      // transfers, so only one can be live at a time.
+      const { grn, lines } = await this.lockOpenGoodsReceiveNote(
+        input.from_grn_id,
+        'transfer',
+        sharedContext,
+      );
+      const mismatch = this.grnLineMismatch(
+        lines,
+        input.lines,
+        (l) =>
+          `${l.card_handle} x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
+      );
+      if (mismatch) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `A transfer must carry every line of ${grn.display_no} unchanged: ${mismatch}`,
+        );
+      }
     }
 
     const em = (sharedContext.transactionManager ??
@@ -15636,6 +15718,7 @@ class PacksModuleService extends MedusaService({
           supplier: input.supplier,
           agent_user_id: input.agent_user_id,
           reverses_invoice_id: input.reverses_invoice_id,
+          from_grn_id: input.from_grn_id ?? null,
         },
       ],
       sharedContext,
@@ -15654,15 +15737,20 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    await this.createStockMovements(
-      lines.map((l) => ({
-        card_handle: l.card_handle,
-        kind: 'purchase' as const,
-        qty: l.qty,
-        ref_id: l.id,
-      })),
-      sharedContext,
-    );
+    // An invoice transferred from a goods receive note (or a reversal of
+    // one) moves no stock — the GRN's own 'goods_receive' rows already did —
+    // so it writes no 'purchase' movement either.
+    if (!input.from_grn_id) {
+      await this.createStockMovements(
+        lines.map((l) => ({
+          card_handle: l.card_handle,
+          kind: 'purchase' as const,
+          qty: l.qty,
+          ref_id: l.id,
+        })),
+        sharedContext,
+      );
+    }
 
     // The audit row rides this transaction with the invoice it describes.
     // admin_id IS agent_user_id: the route derives that field from
@@ -15678,7 +15766,9 @@ class PacksModuleService extends MedusaService({
         after: { display_no, lines: lines.length },
         reason: input.reverses_invoice_id
           ? `reversal of invoice ${input.reverses_invoice_id}`
-          : 'purchase invoice created',
+          : input.from_grn_id
+            ? `transferred from goods receive note ${input.from_grn_id}`
+            : 'purchase invoice created',
       },
       sharedContext,
     );
@@ -15722,6 +15812,300 @@ class PacksModuleService extends MedusaService({
     await this.deletePurchaseInvoices(invoiceId, sharedContext);
   }
 
+  // Every open delivery order with one handle per pull — the input
+  // allocateStock (stock-allocation.ts) works on. Open = still waiting for
+  // cards (requested / processed / legacy 'packing') or holding them
+  // (ready_to_ship). Oldest first, id as the tie-break, like the allocation.
+  @InjectManager()
+  async openDeliveryOrdersForAllocation(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      id: string;
+      status: string;
+      created_at: Date;
+      tracking_number: string | null;
+      handles: string[];
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      {
+        id: string;
+        status: string;
+        created_at: Date;
+        tracking_number: string | null;
+        card_id: string;
+      }[]
+    >(
+      `SELECT dord.id, dord.status, dord.created_at, dord.tracking_number, p.card_id
+         FROM delivery_order dord
+         JOIN delivery_order_item doi
+           ON doi.delivery_order_id = dord.id AND doi.deleted_at IS NULL
+         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
+        WHERE dord.deleted_at IS NULL
+          AND dord.status IN ('requested','processed','packing','ready_to_ship')
+        ORDER BY dord.created_at, dord.id`,
+    );
+    const byId = new Map<
+      string,
+      {
+        id: string;
+        status: string;
+        created_at: Date;
+        tracking_number: string | null;
+        handles: string[];
+      }
+    >();
+    for (const r of rows) {
+      const o = byId.get(r.id) ?? {
+        id: r.id,
+        status: r.status,
+        created_at: new Date(r.created_at),
+        tracking_number: r.tracking_number,
+        handles: [],
+      };
+      o.handles.push(r.card_id);
+      byId.set(r.id, o);
+    }
+    return [...byId.values()];
+  }
+
+  // ---- Goods receive notes (spec 2026-10-28) ----
+
+  // One advisory lock per GRN, taken by everything that decides its fate — a
+  // reversal (createGoodsReceiveNoteWithLines) and a transfer
+  // (createPurchaseInvoiceWithLines) — so a reverse and a transfer racing each
+  // other cannot both pass their "not yet" checks.
+  private async lockGoodsReceiveNote(
+    grnId: string,
+    sharedContext: Context,
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `grn:${grnId}`,
+    ]);
+  }
+
+  // The invoice a GRN is transferred into right now, or null. A transfer
+  // stops counting once a reversal undoes it — a transferred invoice can only
+  // be reversed in full (createPurchaseInvoiceWithLines) — which re-opens the
+  // note for a corrected transfer. Reversals carry the same from_grn_id.
+  @InjectManager()
+  async goodsReceiveNoteTransfer(
+    grnId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    const invoices = await pageAll((opts) =>
+      this.listPurchaseInvoices({ from_grn_id: grnId }, opts, sharedContext),
+    );
+    const reversed = new Set(invoices.map((i) => i.reverses_invoice_id));
+    return (
+      invoices.find((i) => !i.reverses_invoice_id && !reversed.has(i.id)) ??
+      null
+    );
+  }
+
+  // Loads a GRN for a reversal or a transfer, under its lock, and refuses one
+  // whose fate is already decided. Must run inside the caller's transaction.
+  private async lockOpenGoodsReceiveNote(
+    grnId: string,
+    use: 'reverse' | 'transfer',
+    sharedContext: Context,
+  ) {
+    await this.lockGoodsReceiveNote(grnId, sharedContext);
+    const [grn] = await this.listGoodsReceiveNotes(
+      { id: grnId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!grn) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Goods receive note '${grnId}' not found.`,
+      );
+    }
+    if (grn.reverses_grn_id) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${grn.display_no} is itself a reversal and cannot be ${use === 'reverse' ? 'reversed' : 'transferred'}.`,
+      );
+    }
+    const [reversal] = await this.listGoodsReceiveNotes(
+      { reverses_grn_id: grnId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (reversal) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${grn.display_no} was reversed by ${reversal.display_no}.`,
+      );
+    }
+    const invoice = await this.goodsReceiveNoteTransfer(grnId, sharedContext);
+    if (invoice) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${grn.display_no} was already transferred to ${invoice.display_no}.`,
+      );
+    }
+    const lines = await pageAll((opts) =>
+      this.listGoodsReceiveNoteLines({ grn_id: grnId }, opts, sharedContext),
+    );
+    return { grn, lines };
+  }
+
+  // Compares two line sets as a multiset of `key` (default card_handle x
+  // qty): a GRN reversal must carry every line negated, a transfer every line
+  // with its FMV, a transferred invoice's reversal every line with its cost.
+  // Returns the first mismatch as operator copy, or null.
+  private grnLineMismatch(
+    expected: MirrorLine[],
+    actual: MirrorLine[],
+    key: (l: MirrorLine) => string = (l) => `${l.card_handle} x ${l.qty}`,
+    source = 'the goods receive note',
+  ): string | null {
+    const left = new Map<string, number>();
+    for (const l of expected) left.set(key(l), (left.get(key(l)) ?? 0) + 1);
+    for (const l of actual) {
+      const n = left.get(key(l)) ?? 0;
+      if (n === 0) return `line '${key(l)}' is not on ${source}.`;
+      left.set(key(l), n - 1);
+    }
+    for (const [k, n] of left) {
+      if (n > 0) return `line '${k}' from ${source} is missing.`;
+    }
+    return null;
+  }
+
+  // Writes a GRN + lines + one 'goods_receive' stock_movement per line + the
+  // audit row, in one transaction (the createPurchaseInvoiceWithLines shape).
+  // A reversal (reverses_grn_id) must be the exact negation of an open GRN;
+  // the route builds those lines from the target, this re-checks them under
+  // the GRN's lock.
+  @InjectTransactionManager()
+  async createGoodsReceiveNoteWithLines(
+    input: {
+      date: string;
+      supplier: string;
+      agent_user_id: string;
+      reverses_grn_id: string | null;
+      lines: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: number;
+        qty: number;
+      }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    // The route validator already refuses these; repeated here because the
+    // method is public and a negative receipt would silently lower On hand.
+    if (!input.reverses_grn_id && input.lines.some((l) => !(l.qty > 0))) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Goods receive note lines need a quantity above 0; a correction is a reversal.',
+      );
+    }
+    if (input.reverses_grn_id) {
+      const { grn, lines } = await this.lockOpenGoodsReceiveNote(
+        input.reverses_grn_id,
+        'reverse',
+        sharedContext,
+      );
+      const mismatch = this.grnLineMismatch(
+        lines.map((l) => ({ card_handle: l.card_handle, qty: -l.qty })),
+        input.lines,
+      );
+      if (mismatch) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `A reversal must undo every line of ${grn.display_no}: ${mismatch}`,
+        );
+      }
+    }
+
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const [{ n }] = await em.execute<{ n: string }[]>(
+      "SELECT nextval('goods_receive_note_seq') AS n",
+    );
+    const display_no = `GRN-${String(n).padStart(5, '0')}`;
+
+    const [grn] = await this.createGoodsReceiveNotes(
+      [
+        {
+          display_no,
+          date: new Date(input.date),
+          supplier: input.supplier,
+          agent_user_id: input.agent_user_id,
+          reverses_grn_id: input.reverses_grn_id,
+        },
+      ],
+      sharedContext,
+    );
+    const lines = await this.createGoodsReceiveNoteLines(
+      input.lines.map((l) => ({
+        grn_id: grn.id,
+        card_handle: l.card_handle,
+        card_name: l.card_name,
+        fmv_snapshot: l.fmv_snapshot,
+        qty: l.qty,
+      })),
+      sharedContext,
+    );
+    await this.createStockMovements(
+      lines.map((l) => ({
+        card_handle: l.card_handle,
+        kind: 'goods_receive' as const,
+        qty: l.qty,
+        ref_id: l.id,
+      })),
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.agent_user_id,
+        entity_type: 'goods_receive_note',
+        entity_id: grn.id,
+        action: 'create',
+        before: null,
+        after: { display_no, lines: lines.length },
+        reason: input.reverses_grn_id
+          ? `reversal of goods receive note ${input.reverses_grn_id}`
+          : 'goods receive note created',
+      },
+      sharedContext,
+    );
+    return { ...grn, lines };
+  }
+
+  // Compensation-only hard delete, the twin of deletePurchaseInvoiceCascade:
+  // fires only when the create-goods-receive-note workflow rolls back.
+  @InjectTransactionManager()
+  async deleteGoodsReceiveNoteCascade(
+    grnId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const lines = await pageAll((opts) =>
+      this.listGoodsReceiveNoteLines({ grn_id: grnId }, opts, sharedContext),
+    );
+    const lineIds = lines.map((l) => l.id);
+    if (lineIds.length) {
+      const movements = await pageAll((opts) =>
+        this.listStockMovements({ ref_id: lineIds }, opts, sharedContext),
+      );
+      if (movements.length) {
+        await this.deleteStockMovements(
+          movements.map((m) => m.id),
+          sharedContext,
+        );
+      }
+      await this.deleteGoodsReceiveNoteLines(lineIds, sharedContext);
+    }
+    await this.deleteGoodsReceiveNotes(grnId, sharedContext);
+  }
+
   // ---- Inventory stock buckets (POLYCARD-BACK §3.2) ----
 
   // inVault / requested / shipped read the REAL owning tables — Pull for vault
@@ -15763,11 +16147,24 @@ class PacksModuleService extends MedusaService({
     handles: string[],
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
-    Map<string, { inVault: number; requested: number; shipped: number }>
+    Map<
+      string,
+      {
+        inVault: number;
+        requested: number;
+        readyToShip: number;
+        shipped: number;
+      }
+    >
   > {
     const out = new Map<
       string,
-      { inVault: number; requested: number; shipped: number }
+      {
+        inVault: number;
+        requested: number;
+        readyToShip: number;
+        shipped: number;
+      }
     >();
     if (handles.length === 0) return out;
     const em = (sharedContext.transactionManager ??
@@ -15782,38 +16179,90 @@ class PacksModuleService extends MedusaService({
          GROUP BY card_id`,
       handles,
     );
-    const requested = await em.execute<{ card_id: string; n: string }[]>(
-      `SELECT p.card_id, COUNT(DISTINCT p.id)::bigint AS n
+    // Stock page columns (spec 2026-10-28): "requested + processed" and
+    // "ready to ship" are separate, so ready_to_ship is no longer folded into
+    // requested. The legacy pre-rename tokens ('packing' = processed,
+    // 'delivered' = completed — see delivery.ts's ALLOWED overlay) count with
+    // their new names.
+    const orders = await em.execute<
+      { card_id: string; requested: string; rts: string; shipped: string }[]
+    >(
+      `SELECT p.card_id,
+              COUNT(DISTINCT p.id) FILTER (
+                WHERE dord.status IN ('requested','processed','packing')
+              )::bigint AS requested,
+              COUNT(DISTINCT p.id) FILTER (
+                WHERE dord.status = 'ready_to_ship'
+              )::bigint AS rts,
+              COUNT(DISTINCT p.id) FILTER (
+                WHERE dord.status IN ('shipped','completed','delivered')
+              )::bigint AS shipped
          FROM delivery_order_item doi
          JOIN delivery_order dord
            ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL
          JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
         WHERE doi.deleted_at IS NULL
-          AND dord.status IN ('requested','processed','ready_to_ship')
-          AND p.card_id IN (${ph})
-        GROUP BY p.card_id`,
-      handles,
-    );
-    const shipped = await em.execute<{ card_id: string; n: string }[]>(
-      `SELECT p.card_id, COUNT(DISTINCT p.id)::bigint AS n
-         FROM delivery_order_item doi
-         JOIN delivery_order dord
-           ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL
-         JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
-        WHERE doi.deleted_at IS NULL
-          AND dord.status IN ('shipped','completed')
           AND p.card_id IN (${ph})
         GROUP BY p.card_id`,
       handles,
     );
 
     // Pre-seed every requested handle: callers index this map by handle, so an
-    // unstocked card must read 0/0/0, never undefined.
+    // unstocked card must read all zeros, never undefined.
     for (const h of handles)
-      out.set(h, { inVault: 0, requested: 0, shipped: 0 });
+      out.set(h, { inVault: 0, requested: 0, readyToShip: 0, shipped: 0 });
     for (const r of vaulted) out.get(r.card_id)!.inVault = Number(r.n);
-    for (const r of requested) out.get(r.card_id)!.requested = Number(r.n);
-    for (const r of shipped) out.get(r.card_id)!.shipped = Number(r.n);
+    for (const r of orders) {
+      const b = out.get(r.card_id)!;
+      b.requested = Number(r.requested);
+      b.readyToShip = Number(r.rts);
+      b.shipped = Number(r.shipped);
+    }
+    return out;
+  }
+
+  // Physical receipts per handle — the "received" half of the Stock page's On
+  // hand (spec 2026-10-28: On hand = received − shipped). Every goods receive
+  // note line, plus every purchase-invoice line whose invoice was NOT
+  // transferred from a GRN: a transferred invoice's cards were already counted
+  // by that GRN, and a reversal of one inherits its from_grn_id, so it does not
+  // subtract them either. Reversal lines carry a negative qty and subtract
+  // themselves. Pulls never touch this: a card won into a vault is still on
+  // the shelf until it ships. Unrelated to the Medusa stock counter
+  // (card-stock.ts), which keeps its own "received minus won" meaning.
+  @InjectManager()
+  async receivedQtyByHandle(
+    handles: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (handles.length === 0) return out;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = handles.map(() => '?').join(',');
+    for (const h of handles) out.set(h, 0);
+
+    // Sequential — same pool rule as inventoryLifecycleBuckets above.
+    const grn = await em.execute<{ card_handle: string; n: string }[]>(
+      `SELECT l.card_handle, SUM(l.qty)::bigint AS n
+         FROM goods_receive_note_line l
+         JOIN goods_receive_note g ON g.id = l.grn_id AND g.deleted_at IS NULL
+        WHERE l.deleted_at IS NULL AND l.card_handle IN (${ph})
+        GROUP BY l.card_handle`,
+      handles,
+    );
+    const invoiced = await em.execute<{ card_handle: string; n: string }[]>(
+      `SELECT l.card_handle, SUM(l.qty)::bigint AS n
+         FROM purchase_invoice_line l
+         JOIN purchase_invoice i ON i.id = l.invoice_id AND i.deleted_at IS NULL
+        WHERE l.deleted_at IS NULL
+          AND i.from_grn_id IS NULL
+          AND l.card_handle IN (${ph})
+        GROUP BY l.card_handle`,
+      handles,
+    );
+    for (const r of [...grn, ...invoiced])
+      out.set(r.card_handle, (out.get(r.card_handle) ?? 0) + Number(r.n));
     return out;
   }
 
