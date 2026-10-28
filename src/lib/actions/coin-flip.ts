@@ -33,6 +33,7 @@ const rules: readonly ErrorRule[] = [
 function failure(f: Failure): CoinFlipFailure {
   return {
     ok: false,
+    missing: f.status === 404,
     error: friendlyFailure(
       f,
       rules,

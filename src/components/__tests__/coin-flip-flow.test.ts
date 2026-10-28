@@ -25,6 +25,7 @@ vi.mock('@/components/app-shell/TopUpProvider', () => ({
 vi.mock('@/components/coin-flip/StaticCoin', () => ({
   StaticCoin: () => null,
 }));
+vi.mock('@/components/coin-flip/CoinStage', () => ({ CoinStage: () => null }));
 vi.mock('@/components/coin-flip/CoinFlipHistory', () => ({
   CoinFlipHistory: () => null,
 }));
@@ -168,9 +169,11 @@ describe('coin flip confirmation and recovery', () => {
     );
     await click('Cancel');
     expect(mocks.accept).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(button('Review card & odds'));
     await click('Review card & odds');
     await click('Confirm card');
     expect(mocks.accept).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(button('Flip coin'));
   });
   it('double press submits one ID, a win never auto-stakes again', async () => {
     let resolve!: (v: unknown) => void;
@@ -196,6 +199,8 @@ describe('coin flip confirmation and recovery', () => {
         round: { ...round, status: 'won', win_amount: 100 },
       }),
     );
+    expect(host.textContent).toContain('Coin in flight');
+    await click('Skip animation');
     expect(host.textContent).toContain('+RM 100.00');
     expect(localStorage.getItem('polycards:coin-flip:c1')).toBeNull();
     await click('Choose a card');
@@ -232,5 +237,18 @@ describe('coin flip confirmation and recovery', () => {
     expect(localStorage.getItem('polycards:coin-flip:c1')).toBeNull();
     expect(button('Review card & odds')).toBeTruthy();
     expect(mocks.quote).not.toHaveBeenCalled();
+  });
+  it('a confirmed missing receipt clears recovery without staking', async () => {
+    localStorage.setItem('polycards:coin-flip:c1', 'missing');
+    mocks.read.mockResolvedValue({
+      ok: false,
+      uncertain: false,
+      missing: true,
+      error: 'This flip could not be found.',
+    });
+    await render();
+    expect(localStorage.getItem('polycards:coin-flip:c1')).toBeNull();
+    expect(button('Review card & odds').disabled).toBe(false);
+    expect(mocks.accept).not.toHaveBeenCalled();
   });
 });

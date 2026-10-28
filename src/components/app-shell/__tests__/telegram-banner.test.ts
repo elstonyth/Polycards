@@ -75,6 +75,12 @@ test('another customer never inherits dismissal', () => {
   render();
   expect(banner()).not.toBeNull();
 });
+test('coin flip controls own the floating rail', () => {
+  auth.customer = { id: 'customer-1' };
+  pathname = '/vault/coin-flip';
+  render();
+  expect(banner()).toBeNull();
+});
 
 test('auth hydration does not clear same-login dismissal', () => {
   auth.customer = { id: 'customer-1' };

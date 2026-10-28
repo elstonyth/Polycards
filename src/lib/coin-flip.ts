@@ -35,7 +35,12 @@ export const CoinFlipSettingsSchema = z.object({
 export type CoinFlipRound = z.infer<typeof CoinFlipRoundSchema>;
 export type CoinFlipSettings = z.infer<typeof CoinFlipSettingsSchema>;
 export type CoinFlipHistory = z.infer<typeof CoinFlipHistorySchema>;
-export type CoinFlipFailure = { ok: false; error: string; uncertain: boolean };
+export type CoinFlipFailure = {
+  ok: false;
+  error: string;
+  uncertain: boolean;
+  missing?: boolean;
+};
 export const quoteIsLive = (round: CoinFlipRound, now: number) =>
   round.status === 'quoted' && Date.parse(round.expires_at) > now;
 export const coinFlipPendingKey = (customerId: string) =>
