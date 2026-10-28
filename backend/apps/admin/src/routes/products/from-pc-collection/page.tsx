@@ -16,7 +16,7 @@ import {
   toast,
 } from '@medusajs/ui';
 import { XMark } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   getPriceChartingCollection,
   getPriceChartingProduct,
@@ -48,6 +48,9 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   rank: 1,
   nested: '/inventory/list',
+  // Hidden for stock-only roles (Stock keeper): these pages call the
+  // PriceCharting API, which asks pricecharting:read.
+  permissions: ['pricecharting:read' as Permission],
 };
 
 // Bulk sibling of /products/from-pricecharting: instead of searching PriceCharting

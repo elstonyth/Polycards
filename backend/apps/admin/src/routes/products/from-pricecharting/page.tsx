@@ -14,7 +14,7 @@ import {
   clx,
 } from '@medusajs/ui';
 import { XMark } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   searchPriceCharting,
   getPriceChartingProduct,
@@ -48,6 +48,9 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   rank: 0,
   nested: '/inventory/list',
+  // Hidden for stock-only roles (Stock keeper): these pages call the
+  // PriceCharting API, which asks pricecharting:read.
+  permissions: ['pricecharting:read' as Permission],
 };
 
 // NOTE: usdToMyr is display-only preview math showing the raw FMV in RM; the
