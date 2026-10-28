@@ -18,9 +18,9 @@ const ACTOR = 'system:stock-allocation';
 
 // Off until the operator turns it on (decision 2026-10-28): the boss checks the
 // new Stock numbers against the shelf before orders start moving by
-// themselves. STOCK_AUTO_ALLOCATION=true enables the nightly job and the
-// post-save run; runStockAllocation itself and the to-buy / to-ship lists work
-// either way.
+// themselves. STOCK_AUTO_ALLOCATION=true enables the 12am run and freezes the
+// to-buy list it leaves behind (procurement-snapshot.ts); runStockAllocation
+// itself and the live to-buy / to-ship lists work either way.
 export const stockAutoAllocationEnabled = (
   env: NodeJS.ProcessEnv = process.env,
 ): boolean => env.STOCK_AUTO_ALLOCATION?.trim().toLowerCase() === 'true';
@@ -31,8 +31,9 @@ export const stockAutoAllocationEnabled = (
 //    processed, the only legal path — delivery.ts ALLOWED);
 //  - on the nightly run, every requested order still short of cards becomes
 //    processed: it is on that night's to-buy list.
-// Runs from the 00:00 MYT job (nightly) and after every GRN / invoice save.
-// Never ships, never moves an order backwards.
+// Runs only from the 00:00 MYT job (owner, 2026-10-28: the 12am cutoff — a
+// GRN / invoice save no longer moves anything). Never ships, never moves an
+// order backwards.
 //
 // Every move goes through transitionDeliveryOrderStatus, which re-reads the
 // status under the order's own lock, so a second run racing this one fails
@@ -45,10 +46,7 @@ export const stockAutoAllocationEnabled = (
 // statuses (feed-events.ts), the same as when staff move an order by hand.
 export async function runStockAllocation(
   container: MedusaContainer,
-  // trigger: what caused a post-save run (e.g. "GRN-00012 by user_01..."),
-  // written into each moved order's audit reason so order history can say
-  // which save moved it.
-  opts: { nightly: boolean; trigger?: string },
+  opts: { nightly: boolean },
 ): Promise<StockAllocationRun> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
@@ -67,9 +65,7 @@ export async function runStockAllocation(
   const { ready, short } = allocateStock(onHand, orders);
   const statusOf = new Map(orders.map((o) => [o.id, o.status]));
   const trackingOf = new Map(orders.map((o) => [o.id, o.tracking_number]));
-  const why = opts.trigger
-    ? `stock allocation after ${opts.trigger}`
-    : 'stock allocation (nightly)';
+  const why = 'stock allocation (nightly)';
 
   const run: StockAllocationRun = { ready: [], processed: [], failed: [] };
   const move = async (orderId: string, to: DeliveryStatus, reason: string) =>
@@ -115,23 +111,4 @@ export async function runStockAllocation(
     }
   }
   return run;
-}
-
-// The post-save trigger: a GRN or invoice save must never fail because the
-// follow-up allocation did — the stock is already recorded, and the 00:00 run
-// retries.
-export async function runStockAllocationAfterSave(
-  container: MedusaContainer,
-  trigger: string,
-): Promise<void> {
-  if (!stockAutoAllocationEnabled()) return;
-  try {
-    await runStockAllocation(container, { nightly: false, trigger });
-  } catch (e) {
-    container
-      .resolve(ContainerRegistrationKeys.LOGGER)
-      .warn(
-        `[stock-allocation] post-save run failed: ${e instanceof Error ? e.message : String(e)}`,
-      );
-  }
 }

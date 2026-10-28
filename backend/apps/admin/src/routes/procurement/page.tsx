@@ -35,6 +35,15 @@ const ProcurementPage = () => {
       <Container className="p-0">
         <div className="px-6 py-4">
           <Heading level="h2">{t('procurement.toBuy')}</Heading>
+          {toBuy.data && (
+            <Text className="text-ui-fg-subtle mt-1" size="small">
+              {toBuy.data.taken_at
+                ? t('procurement.frozenAt', {
+                    time: orderDateTime(toBuy.data.taken_at),
+                  })
+                : t('procurement.live')}
+            </Text>
+          )}
         </div>
         {toBuy.isError ? (
           <div className="border-t px-6 py-8">

@@ -16,10 +16,11 @@ import {
   parseSortParam,
 } from '../../../utils/pagination';
 import { coerceCreatePurchaseInvoiceBody } from './validate';
-import { runStockAllocationAfterSave } from '../../../modules/packs/stock-allocation-run';
 
 // POST /admin/purchase-invoices — record a receipt (POLYCARD-BACK §3.5).
-// agent_user_id is server-derived (never client-supplied).
+// agent_user_id is server-derived (never client-supplied). Orders do not move
+// on save: the 12am stock run (jobs/stock-allocation.ts) picks the new cards
+// up.
 //
 // Cross-invoice reversal validation deliberately does NOT live here. It is a
 // read-then-write, so running it in this handler and the write in the
@@ -123,12 +124,6 @@ export async function POST(
       lines: body.lines,
     },
   });
-
-  // New cards on hand may complete waiting orders (oldest first).
-  await runStockAllocationAfterSave(
-    req.scope,
-    `${result.display_no} by ${req.auth_context.actor_id}`,
-  );
   res.status(201).json({ invoice: result });
 }
 

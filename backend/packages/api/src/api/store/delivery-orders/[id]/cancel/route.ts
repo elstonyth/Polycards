@@ -34,13 +34,14 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Order not found.');
   }
 
-  // The customer window closes at `processed` — once the order is picked for
-  // packing (`ready_to_ship` on) only the operator may cancel it, so
-  // CANCELABLE is deliberately NARROWER than delivery.ts's ALLOWED, which
-  // still routes ready_to_ship -> canceled for the admin surface.
-  // 'packing' = legacy expand-window token (~`processed`); it stays until the
-  // contract migration named in Migration20260727000000.
-  const CANCELABLE = ['requested', 'processed', 'packing'];
+  // The customer window closes at the 12am cutoff: the nightly stock run moves
+  // every `requested` order to `processed` (purchasing starts buying its
+  // cards) or straight to `ready_to_ship`, and from then on only the operator
+  // may cancel it (owner, 2026-10-28). CANCELABLE is deliberately NARROWER
+  // than delivery.ts's ALLOWED, which still routes processed/ready_to_ship ->
+  // canceled for the admin surface. The legacy 'packing' token (~`processed`)
+  // is closed with it.
+  const CANCELABLE = ['requested'];
   if (!CANCELABLE.includes(order.status)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

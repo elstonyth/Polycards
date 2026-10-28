@@ -2526,8 +2526,12 @@ export interface ProcurementToBuyRow {
   oldest_order_at: string | null;
 }
 
+// taken_at: when the 12am stock run froze the list; null = live (the run is
+// off, or has not run yet).
 export const getProcurementToBuy = () =>
-  getJson<{ rows: ProcurementToBuyRow[] }>('/admin/procurement/to-buy');
+  getJson<{ rows: ProcurementToBuyRow[]; taken_at: string | null }>(
+    '/admin/procurement/to-buy',
+  );
 
 // The mailing list: every ready_to_ship order, oldest first, in the Orders
 // page's own serialized shape (customer_email included).

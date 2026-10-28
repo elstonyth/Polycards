@@ -2139,6 +2139,7 @@ export const useReverseGoodsReceiveNote = () => {
 
 export const useProcurementToBuy = (): UseQueryResult<{
   rows: ProcurementToBuyRow[];
+  taken_at: string | null;
 }> =>
   useQuery({
     queryKey: qk.procurementToBuy,
