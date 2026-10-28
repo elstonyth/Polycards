@@ -125,8 +125,12 @@ Work happens in a fresh worktree from `master`, never in the main checkout.
 3. **Queue fairness:** strict oldest-first. An older order holds the units it can get, even when
    it cannot be completed yet; a newer order for the same card waits.
 4. **GRN → PI transfer:** whole GRN, card and qty locked; the operator only types unit cost. A
-   GRN transfers once. A reversed GRN cannot be transferred; a transferred GRN cannot be
-   reversed (fix the invoice instead).
+   GRN has at most one live transfer. A reversed GRN cannot be transferred; a transferred GRN
+   cannot be reversed. To correct a transferred GRN (wrong cost or qty), reverse its invoice —
+   a transferred invoice can only be reversed in full — which re-opens the GRN; then transfer
+   it again with the right cost, or reverse it and book a correct GRN. (Review fix 2026-10-28:
+   before this, re-entering the cost as a plain invoice counted the cards twice.) A transfer
+   must also carry the GRN's FMV unchanged.
 5. **Notifications:** automatic moves notify the customer exactly as a manual move would
    (same `notifyDeliveryChange` path).
 
@@ -142,5 +146,8 @@ Work happens in a fresh worktree from `master`, never in the main checkout.
 - **Lucky Draw** prize picker reads `counter` (the Medusa counter, received minus won), not the
   new physical `on_hand`, because the draw takes from that counter.
 - **Coin-flip branch:** its `Migration20261028120000` also rewrites the `admin_action_audit`
-  entity_type CHECK with a hard-coded list. Whichever branch merges second must add the other's
-  value (`goods_receive_note` / `coin_flip_config`) to its list and model enum.
+  entity_type CHECK with a hard-coded list. Pending migrations run in name order on a fresh DB but
+  in deploy order on prod, so EITHER can run last: once both branches are merged, BOTH
+  migrations' lists (and the model enum) must carry both values (`goods_receive_note` and
+  `coin_flip_config`). Codex was asked on 2026-10-28 to add ours to the coin-flip side; this
+  branch adds `coin_flip_config` when it rebases onto a master that has coin flip.
