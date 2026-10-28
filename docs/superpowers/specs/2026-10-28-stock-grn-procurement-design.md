@@ -129,3 +129,18 @@ Work happens in a fresh worktree from `master`, never in the main checkout.
    reversed (fix the invoice instead).
 5. **Notifications:** automatic moves notify the customer exactly as a manual move would
    (same `notifyDeliveryChange` path).
+
+## Build notes (2026-10-28)
+
+- **Switch:** automatic order moves (00:00 MYT job + the run after every GRN / invoice save)
+  only happen with `STOCK_AUTO_ALLOCATION=true` on the backend. Off by default, so the boss can
+  check the new Stock numbers against the shelf first. Turning it on in prod = add the env var
+  to the DigitalOcean backend app spec (edit `.do/backend.app.yaml` by script — the formatter
+  hook re-quotes secrets in that file). The to-buy / to-ship lists work either way.
+- **Column placement:** the six stock columns sit right after Title on the Stock page; the table
+  scrolls sideways and at the end they were off screen even at 1920px.
+- **Lucky Draw** prize picker reads `counter` (the Medusa counter, received minus won), not the
+  new physical `on_hand`, because the draw takes from that counter.
+- **Coin-flip branch:** its `Migration20261028120000` also rewrites the `admin_action_audit`
+  entity_type CHECK with a hard-coded list. Whichever branch merges second must add the other's
+  value (`goods_receive_note` / `coin_flip_config`) to its list and model enum.
