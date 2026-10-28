@@ -410,18 +410,19 @@ const InventoryListPage = () => {
                 {sortHeader('name', t('inventory.name'))}
                 <Table.HeaderCell>{t('inventory.sku')}</Table.HeaderCell>
                 <Table.HeaderCell>{t('inventory.titleCol')}</Table.HeaderCell>
-                {sortHeader('fmv', t('inventory.fmv'), true)}
-                {sortHeader('price', t('inventory.price'), true)}
-                {sortHeader('cost', t('inventory.cost'), true)}
-                {sortHeader('created_at', t('inventory.created'), true)}
                 {/* The six stock columns, in the order spec 2026-10-28 fixes
-                    (the Excel export uses the same order). */}
+                    (the Excel export uses the same order), right after Title so
+                    they stay on screen: the table scrolls sideways. */}
                 {sortHeader('to_procure', t('inventory.toProcure'), true)}
                 {sortHeader('on_hand', t('inventory.onHand'), true)}
                 {sortHeader('in_vault', t('inventory.inVault'), true)}
                 {sortHeader('requested', t('inventory.requested'), true)}
                 {sortHeader('ready_to_ship', t('inventory.readyToShip'), true)}
                 {sortHeader('shipped', t('inventory.shipped'), true)}
+                {sortHeader('fmv', t('inventory.fmv'), true)}
+                {sortHeader('price', t('inventory.price'), true)}
+                {sortHeader('cost', t('inventory.cost'), true)}
+                {sortHeader('created_at', t('inventory.created'), true)}
                 <Table.HeaderCell className="text-right">
                   {t('inventory.listingShow')}
                 </Table.HeaderCell>
@@ -477,25 +478,6 @@ const InventoryListPage = () => {
                   <Table.Cell className="whitespace-nowrap">
                     {r.graded ? t('inventory.graded') : t('inventory.raw')}
                   </Table.Cell>
-                  {/* rm() already renders null as an em dash and 0 as RM 0.00,
-                      so these stay unguarded — do NOT reintroduce a truthiness
-                      test here, `cost` 0 (bought and free) and `cost` null (no
-                      purchase history) are different facts. */}
-                  <Table.Cell className="text-right tabular-nums whitespace-nowrap">
-                    {rm(r.fmv)}
-                  </Table.Cell>
-                  <Table.Cell className="text-right tabular-nums whitespace-nowrap">
-                    {rm(r.price)}
-                  </Table.Cell>
-                  <Table.Cell
-                    className="text-right tabular-nums whitespace-nowrap"
-                    title={r.cost === null ? t('inventory.noCost') : undefined}
-                  >
-                    {rm(r.cost)}
-                  </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle text-right whitespace-nowrap">
-                    {orderDateTime(r.created_at)}
-                  </Table.Cell>
                   {/* Error colour = action needed: cards still to buy, or a
                       negative on hand (shipped more than was ever received —
                       missing receipt history). */}
@@ -520,6 +502,25 @@ const InventoryListPage = () => {
                   </Table.Cell>
                   <Table.Cell className="text-right tabular-nums">
                     {r.shipped}
+                  </Table.Cell>
+                  {/* rm() already renders null as an em dash and 0 as RM 0.00,
+                      so these stay unguarded — do NOT reintroduce a truthiness
+                      test here, `cost` 0 (bought and free) and `cost` null (no
+                      purchase history) are different facts. */}
+                  <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                    {rm(r.fmv)}
+                  </Table.Cell>
+                  <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                    {rm(r.price)}
+                  </Table.Cell>
+                  <Table.Cell
+                    className="text-right tabular-nums whitespace-nowrap"
+                    title={r.cost === null ? t('inventory.noCost') : undefined}
+                  >
+                    {rm(r.cost)}
+                  </Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle text-right whitespace-nowrap">
+                    {orderDateTime(r.created_at)}
                   </Table.Cell>
                   <Table.Cell className="text-right tabular-nums">
                     {r.listing_count}
