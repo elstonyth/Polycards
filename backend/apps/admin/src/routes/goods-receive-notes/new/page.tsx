@@ -22,6 +22,7 @@ import {
 } from '../../../lib/purchase-invoice-form';
 import {
   StockItemSearch,
+  StockLineItem,
   type StockSearchItem,
 } from '../../../components/StockItemSearch';
 
@@ -170,11 +171,8 @@ const NewGoodsReceiveNotePage = () => {
               <Table.Body>
                 {lines.map((l, i) => (
                   <Table.Row key={`${l.card_handle}-${i}`}>
-                    <Table.Cell className="break-words">
-                      {l.card_name}
-                      <span className="text-ui-fg-muted ml-2 text-xs">
-                        {l.card_handle}
-                      </span>
+                    <Table.Cell>
+                      <StockLineItem handle={l.card_handle} name={l.card_name} />
                     </Table.Cell>
                     <Table.Cell className="text-right">
                       <Input

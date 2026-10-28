@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { StockLineItem } from '../../../components/StockItemSearch';
 import { Badge, Container, Heading, Table, Text } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
 import { usePurchaseInvoice } from '../../../lib/queries';
@@ -139,11 +140,8 @@ const PurchaseInvoiceDetailPage = () => {
                 <Table.Body>
                   {inv.lines.map((l) => (
                     <Table.Row key={l.id}>
-                      <Table.Cell className="break-words">
-                        {l.card_name}
-                        <span className="text-ui-fg-muted ml-2 text-xs">
-                          {l.card_handle}
-                        </span>
+                      <Table.Cell>
+                        <StockLineItem handle={l.card_handle} name={l.card_name} />
                       </Table.Cell>
                       <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                         {rm(Number(l.fmv_snapshot))}
