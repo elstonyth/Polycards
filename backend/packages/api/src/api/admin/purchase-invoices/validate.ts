@@ -16,6 +16,9 @@ export type CreatePurchaseInvoiceBody = {
   date: string;
   supplier: string;
   reverses_invoice_id: string | null;
+  // "Transfer from goods receive note" (spec 2026-10-28). Never together with
+  // reverses_invoice_id: a reversal inherits it from the invoice it undoes.
+  from_grn_id: string | null;
   lines: PurchaseInvoiceLineBody[];
 };
 
@@ -94,6 +97,19 @@ export function coerceCreatePurchaseInvoiceBody(
     reverses_invoice_id = (b.reverses_invoice_id as string).trim();
   }
 
+  let from_grn_id: string | null = null;
+  if (b.from_grn_id !== undefined && b.from_grn_id !== null) {
+    if (typeof b.from_grn_id !== 'string' || b.from_grn_id.trim() === '') {
+      bad("'from_grn_id' must be a non-empty string or null.");
+    }
+    from_grn_id = (b.from_grn_id as string).trim();
+  }
+  if (from_grn_id !== null && reverses_invoice_id !== null) {
+    bad(
+      "'from_grn_id' cannot be set on a reversing invoice — it is copied from the invoice being reversed.",
+    );
+  }
+
   if (!Array.isArray(b.lines) || b.lines.length === 0) {
     bad("'lines' must be a non-empty array.");
   }
@@ -144,7 +160,13 @@ export function coerceCreatePurchaseInvoiceBody(
     }
   }
 
-  return { date: b.date as string, supplier, reverses_invoice_id, lines };
+  return {
+    date: b.date as string,
+    supplier,
+    reverses_invoice_id,
+    from_grn_id,
+    lines,
+  };
 }
 
 export default coerceCreatePurchaseInvoiceBody;
