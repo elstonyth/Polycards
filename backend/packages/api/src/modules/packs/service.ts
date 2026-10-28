@@ -59,6 +59,8 @@ import FxRate from './models/fx-rate';
 import PackOdds from './models/pack-odds';
 import Pull from './models/pull';
 import CreditTransaction from './models/credit-transaction';
+import CoinFlipConfig from './models/coin-flip-config';
+import CoinFlipRound from './models/coin-flip-round';
 import DeliveryOrder from './models/delivery-order';
 import DeliveryOrderItem from './models/delivery-order-item';
 import VipLevel from './models/vip-level';
@@ -673,6 +675,8 @@ class PacksModuleService extends MedusaService({
   PackOdds,
   Pull,
   CreditTransaction,
+  CoinFlipConfig,
+  CoinFlipRound,
   DeliveryOrder,
   DeliveryOrderItem,
   VipLevel,

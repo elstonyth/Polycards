@@ -32,6 +32,7 @@ export const CreditTransaction = model
       // Bonus credit (泥码, spec 2026-10-07): an admin grant (+) or take-back
       // (−) of spend-only credit. Its bonus_cents equals its amount in sen.
       'bonus_grant',
+      'coin_flip_win',
     ]),
     // The pull this credit came from (buyback rows only; null for top-ups).
     // UNIQUE — the DB itself guarantees a pull can never be credited twice,
@@ -63,6 +64,12 @@ export const CreditTransaction = model
   // Balance Σ + credits feed + admin gacha all read by customer_id ordered by
   // created_at; composite serves the filter + ORDER BY (+ pagination) in one scan.
   .indexes([
+    {
+      name: 'IDX_credit_coin_flip_round',
+      on: ['source_transaction_id'],
+      unique: true,
+      where: "reason = 'coin_flip_win' AND deleted_at IS NULL",
+    },
     {
       name: 'IDX_credit_transaction_customer_id_created_at',
       on: ['customer_id', 'created_at'],

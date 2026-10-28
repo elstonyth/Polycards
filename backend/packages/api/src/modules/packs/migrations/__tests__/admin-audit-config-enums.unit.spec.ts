@@ -6,6 +6,7 @@ import {
 // full lists): Migration20261007120000 added 'pack_gift' and the gift/bonus
 // actions, on top of Migration20261006120000's 'set_real_name' / 'set_phone'.
 import * as migrationModule from '../Migration20261007120000';
+import { Migration20261028120000 } from '../Migration20261028120000';
 
 const { Migration20261007120000 } = migrationModule;
 
@@ -27,9 +28,12 @@ async function checkLists(): Promise<Record<string, string[]>> {
   };
   m.addSql = (s: string) => sql.push(s);
   await m.up();
+  const coin = Object.create(Migration20261028120000.prototype) as Migration20261028120000;
+  coin.addSql = (s: string) => { sql.push(s); };
+  await coin.up();
   const lists: Record<string, string[]> = {};
   for (const s of sql) {
-    const hit = s.match(/check\("(\w+)" in \(([^)]*)\)\)/);
+    const hit = s.match(/check\s*\("(\w+)" in \(([^)]*)\)\)/);
     if (hit)
       lists[hit[1]] = [...hit[2].matchAll(/'([^']+)'/g)].map((x) => x[1]);
   }
