@@ -1,7 +1,7 @@
 // Local standalone UI contract test. Real settlement is covered by PostgreSQL/HTTP tests.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdir, symlink, access, writeFile } from 'node:fs/promises';
+import { mkdir, cp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
@@ -148,11 +148,7 @@ for (const [target, location] of [
   ['public', '.next/standalone/public'],
   ['.next/static', '.next/standalone/.next/static'],
 ]) {
-  try {
-    await access(location);
-  } catch {
-    await symlink(path.resolve(target), path.resolve(location), 'junction');
-  }
+  await cp(path.resolve(target), path.resolve(location), { recursive: true });
 }
 const app = spawn(process.execPath, ['.next/standalone/server.js'], {
   env: { ...process.env, PORT: '4020', HOSTNAME: '127.0.0.1' },
@@ -218,6 +214,7 @@ try {
     'Coin page accessibility',
   );
   async function arm(p) {
+    await p.getByLabel('Card from your Vault').selectOption('pull_qa');
     await p.getByRole('button', { name: 'Review card & odds' }).click();
     await p.getByRole('dialog').waitFor();
     await p.getByRole('button', { name: 'Confirm card', exact: true }).click();
@@ -234,6 +231,7 @@ try {
   assert.equal(accepts, 1);
   await page.screenshot({ path: `${out}/desktop-win.png`, fullPage: true });
   await page.getByRole('button', { name: 'Choose a card' }).click();
+  assert.equal(await page.getByLabel('Card from your Vault').inputValue(), '');
   outcome = 'lost';
   await arm(page);
   // Use real hit testing and pointer input, including drag + upward release.
@@ -296,6 +294,50 @@ try {
     'No phone horizontal overflow',
   );
   await phone.screenshot({ path: `${out}/phone-win.png`, fullPage: true });
+  const touchContext = await context({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const touchPhone = await touchContext.newPage();
+  touchPhone.on('pageerror', (e) => errors.push(e.message));
+  await touchPhone.goto('http://127.0.0.1:4020/vault/coin-flip?pull=pull_qa');
+  await arm(touchPhone);
+  await touchPhone.locator('canvas').waitFor();
+  await touchPhone.waitForTimeout(1000);
+  await touchPhone.locator('canvas').scrollIntoViewIfNeeded();
+  const touchCanvas = await touchPhone.locator('canvas').boundingBox();
+  assert(touchCanvas);
+  const touch = await touchContext.newCDPSession(touchPhone);
+  const x = touchCanvas.x + touchCanvas.width / 2;
+  const y = touchCanvas.y + touchCanvas.height / 2;
+  const beforeTouch = accepts;
+  await touch.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x, y }],
+  });
+  for (const distance of [20, 45, 85]) {
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: x + 8, y: y - distance }],
+    });
+  }
+  await touch.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
+  });
+  await touchPhone
+    .getByRole('heading', { name: '+RM 100.00', exact: true })
+    .waitFor();
+  assert.equal(
+    accepts,
+    beforeTouch + 1,
+    'One touch flick settles exactly once',
+  );
+  await touchPhone.screenshot({
+    path: `${out}/phone-touch-win.png`,
+    fullPage: true,
+  });
   await page.getByRole('button', { name: 'Choose a card' }).click();
   await arm(page);
   await page.evaluate(() =>
@@ -311,7 +353,7 @@ try {
     .waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    `PASS: desktop tap/flick, win/loss, response-loss reload recovery, reduced-motion keyboard, WebGL-loss fallback, axe, phone overflow; ${accepts} explicit commits.`,
+    `PASS: desktop tap/flick, mobile touch flick, win/loss, response-loss reload recovery, reduced-motion keyboard, WebGL-loss fallback, axe, phone overflow; ${accepts} explicit commits.`,
   );
   console.log('Optional shell requests:', [...unknown].join(', '));
 } finally {

@@ -165,13 +165,19 @@ export function CoinFlipClient({
     } catch {
       /* Use the receipt URL. */
     }
-    if (id) void recover(id);
-    else setPhase('idle');
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      if (id) void recover(id);
+      else setPhase('idle');
+    });
+    return () => {
+      active = false;
+    };
     // Recovery is bound to this authenticated page mount, never to changing UI state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId, initialRoundId]);
   useEffect(() => {
-    setNow(Date.now());
     if (phase !== 'armed' && phase !== 'confirm') return;
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
@@ -193,6 +199,8 @@ export function CoinFlipClient({
       const response = await quoteCoinFlip(selectedCard.pullId);
       if (response.ok) {
         setRound(response.round);
+        // Only invoked by the review button, after the server responds.
+        // eslint-disable-next-line react-hooks/purity
         setNow(Date.now());
         setPhase('confirm');
       } else {
@@ -345,6 +353,7 @@ export function CoinFlipClient({
                   onClick={() => {
                     setPhase('idle');
                     setRound(null);
+                    setSelected('');
                     setError('');
                   }}
                 >

@@ -17,13 +17,14 @@ export function CoinScene(props: CoinSceneProps) {
   const host = useRef<HTMLDivElement>(null);
   const current = useRef(props);
   const [failed, setFailed] = useState(false);
+  const { playbackId, onComplete } = props;
   const { sfx, vibrate } = useSound();
   useEffect(() => {
     current.current = props;
   }, [props]);
   useEffect(() => {
-    if (failed && props.playbackId) props.onComplete();
-  }, [failed, props.playbackId, props.onComplete]);
+    if (failed && playbackId) onComplete();
+  }, [failed, playbackId, onComplete]);
 
   useEffect(() => {
     if (failed || !host.current) return;
@@ -31,6 +32,8 @@ export function CoinScene(props: CoinSceneProps) {
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     } catch {
+      // GPU capability is only knowable after mounting the native renderer.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFailed(true);
       return;
     }

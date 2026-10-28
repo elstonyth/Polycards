@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from '@/lib/data/schemas';
 
 const money = z.number().finite().nonnegative();
 const percent = z.number().min(0).max(100);

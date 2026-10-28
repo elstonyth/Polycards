@@ -112,6 +112,12 @@ components:
 
 # Design System: Polycards
 
+### Vault coin flip (2026-10-28)
+
+Lives under Vault at `/vault/coin-flip`; no sixth tab. Select exactly one card, review the server's value and published odds, explicitly confirm, then flick or tap. Coin B uses black titanium with official emblem on the winning face and wordmark on the losing face. A physically recorded landing presents the server receipt; gestures never determine the financial result. Green denotes credited money; red is reserved for destructive confirmation/errors. No confetti, neon, autoplay or countdown pressure.
+
+The primary action remains a white pill. Keep the card, exact RM amount, keep/forfeit consequences and published odds readable. Recovery precedes another stake; history includes forfeited cards. Reduced motion and WebGL failure retain the static face, keyboard/tap path and full receipt. The floating Telegram rail is hidden on Vault subroutes to protect financial controls.
+
 ## 1. Overview
 
 **Creative North Star: "The Midnight Rip"**

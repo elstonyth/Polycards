@@ -15,9 +15,10 @@ export type CoinSceneProps = {
   onComplete: () => void;
 };
 function Fallback(props: CoinSceneProps) {
+  const { playbackId, onComplete } = props;
   useEffect(() => {
-    if (props.playbackId) props.onComplete();
-  }, [props.playbackId, props.onComplete]);
+    if (playbackId) onComplete();
+  }, [playbackId, onComplete]);
   return (
     <div className="flex h-64 items-center justify-center bg-neutral-950 sm:h-96">
       <StaticCoin won={props.outcome !== 'lost'} />

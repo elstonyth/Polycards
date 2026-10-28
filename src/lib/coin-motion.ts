@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from '@/lib/data/schemas';
 
 const n = z.number().finite();
 const frame = z.tuple([n, n, n, n, n, n, n]);

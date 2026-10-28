@@ -34,6 +34,9 @@ import type { Rarity } from '@/lib/packs-data';
 // Set here because this module is the app's sole `zod` importer.
 z.config({ jitless: true });
 
+// Feature schemas share the CSP-safe parser configuration.
+export { z };
+
 /** The schema type the `Store` port (src/lib/store-port.ts) takes — re-exported
  *  so no other module needs to import zod. */
 export type { ZodType } from 'zod';

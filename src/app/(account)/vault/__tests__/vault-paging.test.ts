@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { VaultItem } from '@/lib/actions/vault';
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 // The vault grid renders in windows of 30. Every search or rarity change has to
 // start again at the first window. That reset moved from an effect to an

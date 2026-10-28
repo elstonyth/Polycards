@@ -204,6 +204,7 @@ describe('coin flip confirmation and recovery', () => {
     expect(host.textContent).toContain('+RM 100.00');
     expect(localStorage.getItem('polycards:coin-flip:c1')).toBeNull();
     await click('Choose a card');
+    expect(button('Review card & odds').disabled).toBe(true);
     expect(mocks.quote).toHaveBeenCalledTimes(1);
   });
   it('lost response recovers original win without resubmitting', async () => {

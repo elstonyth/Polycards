@@ -651,16 +651,20 @@ export default defineMiddlewares({
       matcher: '/store/vault',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
-    ...['/store/coin-flips', '/store/coin-flips/*'].map(matcher => ({
-      matcher, method: 'GET' as const,
+    {
+      matcher: '/store/coin-flips', method: 'GET',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
-    })),
+    },
+    {
+      matcher: '/store/coin-flips/*', method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
     {
       matcher: '/store/coin-flips/quotes', method: 'POST',
       middlewares: [authenticate('customer', ['bearer']), rateLimit('coin-flip-quote'), requirePhoneVerified],
     },
     {
-      matcher: '/store/coin-flips/:id/accept', method: 'POST',
+      matcher: '/store/coin-flips/*/accept', method: 'POST',
       middlewares: [authenticate('customer', ['bearer']), rateLimit('coin-flip-accept'), requirePhoneVerified],
     },
     {
