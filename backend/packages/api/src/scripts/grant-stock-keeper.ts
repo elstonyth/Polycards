@@ -90,14 +90,21 @@ export async function grantStockKeeper(
   const query = scope.resolve(ContainerRegistrationKeys.QUERY);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const workflowService: any = scope.resolve(Modules.WORKFLOW_ENGINE);
-  const { data } = await query.graph({
+  const fields = ['id', 'email', 'rbac_roles.id'];
+  // The target by email, case-insensitively ($ilike, then an exact
+  // lower-case compare so a '_' or '%' in the address can't widen the match)
+  // — never by scanning one page of every user.
+  const { data: matches } = await query.graph({
     entity: 'user',
-    fields: ['id', 'email', 'rbac_roles.id'],
+    fields,
+    filters: { email: { $ilike: email } },
   });
-  const users = data as AdminUser[];
-  const user = users.find((u) => u.email === email);
+  const user = (matches as AdminUser[]).find(
+    (u) => u.email.toLowerCase() === email,
+  );
   if (!user) throw new Error(`${email} has no admin user. Nothing changed.`);
-  const actor = users.find((u) =>
+  const { data } = await query.graph({ entity: 'user', fields });
+  const actor = (data as AdminUser[]).find((u) =>
     u.rbac_roles?.some((r) => r.id === 'role_super_admin'),
   );
   if (!actor) throw new Error('No super admin user to assign as.');
@@ -116,7 +123,9 @@ export async function grantStockKeeper(
       actor: 'user',
     },
   });
-  return `added "${STOCK_KEEPER_ROLE}" (${roleId}) to ${email} (user=${user.id})`;
+  // Permissions are checked per request, but the admin page loads its menu
+  // permissions once — the user reloads it to see the new entries.
+  return `added "${STOCK_KEEPER_ROLE}" (${roleId}) to ${email} (user=${user.id}). Ask them to reload the admin page to see the Stock menu.`;
 }
 
 /** Run: STOCK_KEEPER_EMAIL=… medusa exec ./src/scripts/grant-stock-keeper.ts [apply]
