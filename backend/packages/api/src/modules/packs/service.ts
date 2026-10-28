@@ -782,11 +782,12 @@ class PacksModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async coinFlipTotals(input: { status?: 'won' | 'lost'; customerId?: string; from?: Date; to?: Date }, @MedusaContext() context: Context = {}): Promise<{ wins: number; losses: number; payouts: number; forfeited_value: number }> {
+  async coinFlipTotals(input: { status?: 'won' | 'lost'; customerId?: string; source?: string; from?: Date; to?: Date }, @MedusaContext() context: Context = {}): Promise<{ wins: number; losses: number; payouts: number; forfeited_value: number }> {
     const where = ["deleted_at IS NULL AND status IN ('won', 'lost')"];
     const params: unknown[] = [];
     if (input.status) { where.push('status = ?'); params.push(input.status); }
     if (input.customerId) { where.push('customer_id = ?'); params.push(input.customerId); }
+    if (input.source) { where.push("snapshot->>'source' = ?"); params.push(input.source); }
     if (input.from) { where.push('settled_at >= ?'); params.push(input.from); }
     if (input.to) { where.push('settled_at < ?'); params.push(input.to); }
     const [row] = await coinFlipManager(context).execute<{ wins: string; losses: string; paid: string; forfeited: string }[]>(

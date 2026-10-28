@@ -107,7 +107,9 @@ export const PullsTable = ({
                         <button
                           type="button"
                           className="text-ui-fg-interactive hover:underline"
-                          onClick={() => navigate(`/customers/${p.customer_id}`)}
+                          onClick={() =>
+                            navigate(`/customers/${p.customer_id}`)
+                          }
                         >
                           {p.customer_email ?? p.customer_id.slice(0, 8)}
                         </button>
@@ -122,11 +124,21 @@ export const PullsTable = ({
                   <Table.Cell>
                     {p.status === 'bought_back' ? (
                       <StatusBadge color="orange">
-                        {t('pulls.boughtBack', { amount: rm(p.buyback_amount) })}
+                        {t('pulls.boughtBack', {
+                          amount: rm(p.buyback_amount),
+                        })}
                       </StatusBadge>
                     ) : (
-                      <StatusBadge color="green">
-                        {t('pulls.vaulted')}
+                      <StatusBadge
+                        color={
+                          p.status === 'vaulted'
+                            ? 'green'
+                            : p.status === 'forfeited'
+                              ? 'red'
+                              : 'grey'
+                        }
+                      >
+                        {t(`pulls.${p.status}`)}
                       </StatusBadge>
                     )}
                   </Table.Cell>

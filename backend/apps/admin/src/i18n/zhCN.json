@@ -1,4 +1,11 @@
 {
+  "pulls": {
+    "forfeited": "已失去",
+    "delivering": "配送中",
+    "delivered": "已送达"
+  },
+  "economy": { "coinFlipPayouts": "抛硬币派彩" },
+  "ledger": { "typeCf": "抛硬币" },
   "statsBoard": {
     "title": "数据看板",
     "subtitle": "注册、充值与提现 · {{current}}（马来西亚时间）· 对比 {{previous}}",

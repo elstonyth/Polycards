@@ -69,6 +69,11 @@ medusaIntegrationTestRunner({
       const report = await api.get('/admin/coin-flips', { headers: adminHeaders });
       expect(report.data.totals).toEqual({ wins: 1, losses: 1, payouts: 100, forfeited_value: 100 });
       expect(report.data.rounds[0].snapshot.actual_win_units).toBe(0);
+      const funded = await api.get('/admin/coin-flips?source=gift', { headers: adminHeaders });
+      expect(funded.data.count).toBe(2);
+      const gifts = await api.get('/admin/coin-flips?source=pack', { headers: adminHeaders });
+      expect(gifts.data).toMatchObject({ count: 0, rounds: [], totals: { wins: 0, losses: 0, payouts: 0, forfeited_value: 0 } });
+      expect((await unwrapResponse(api.get('/admin/coin-flips?source=invalid', { headers: adminHeaders }))).status).toBe(400);
       expect(await packs.listCreditTransactions({ customer_id: owner.id, reason: 'coin_flip_win' })).toHaveLength(1);
     });
   },

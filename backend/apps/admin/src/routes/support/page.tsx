@@ -455,13 +455,15 @@ const SupportPage = () => {
                             </div>
                           ) : (
                             <div className="flex flex-col gap-0.5">
-                              <StatusBadge color="green">
-                                {t("pulls.vaulted")}
+                              <StatusBadge
+                                color={p.status === "vaulted" ? "green" : p.status === "forfeited" ? "red" : "grey"}
+                              >
+                                {t(`pulls.${p.status}`)}
                               </StatusBadge>
                               {/* Payable-now quote — the dispute desk's
                                   quote-vs-paid anchor (sim P1-3). Matches the
                                   customer's sell button exactly. */}
-                              {p.quote && (
+                              {p.status === "vaulted" && p.quote && (
                                 <span className="text-ui-fg-subtle text-[12px] tabular-nums">
                                   {p.quote.firm
                                     ? t("support.sellsNowFor", {

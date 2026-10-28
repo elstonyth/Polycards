@@ -116,6 +116,7 @@ const EconomyPage = () => {
     ? [
         { key: "revenue", value: rm(data.totals.revenue) },
         { key: "payouts", value: rm(data.totals.payouts) },
+        { key: "coinFlipPayouts", value: rm(data.totals.coinFlipPayouts) },
         {
           key: "net",
           value: rm(data.totals.net),

@@ -5,6 +5,23 @@
 
 import type { PullsResponse } from './packs-api';
 import type { GroupPolicy } from './player-groups';
+import {
+  coinHistoryQuery,
+  type AdminCoinHistory,
+  type CoinFlipSettings,
+  type CoinHistoryFilters,
+} from './coin-flips';
+
+export const getCoinFlipSettings = () =>
+  getJson<CoinFlipSettings>('/admin/coin-flips/settings');
+export const saveCoinFlipSettings = (
+  settings: Omit<CoinFlipSettings, 'revision'> & {
+    expected_revision: number;
+    reason: string;
+  },
+) => postJson<CoinFlipSettings>('/admin/coin-flips/settings', settings);
+export const listCoinFlips = (filters: CoinHistoryFilters) =>
+  getJson<AdminCoinHistory>(`/admin/coin-flips?${coinHistoryQuery(filters)}`);
 
 declare const __BACKEND_URL__: string;
 
@@ -166,7 +183,7 @@ export interface SupportPull {
   id: string;
   pack_id: string;
   rolled_at: string;
-  status: 'vaulted' | 'bought_back';
+  status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered' | 'forfeited';
   buyback_amount: number | null;
   /** When the sell-back was paid (bought_back only). Optional: the /gacha
    *  fallback rows don't carry the dispute fields — only /pulls does. */
@@ -223,7 +240,10 @@ export interface GroupCreditCustomer {
   last_name: string | null;
 }
 
-export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
+export const listGroupCreditCustomersPage = (
+  groupId: string,
+  offset: number,
+) => {
   const params = new URLSearchParams({
     groups: groupId,
     limit: '100',
@@ -420,6 +440,7 @@ export interface EconomyReport {
   totals: {
     revenue: number;
     payouts: number;
+    coinFlipPayouts: number;
     topups: number;
     adjustments: number;
     /** Shipping + insurance fees collected from customer wallets (fee line, not pack revenue). */
@@ -457,13 +478,7 @@ export async function getEconomyReport(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  | 'today'
-  | 'yesterday'
-  | '7d'
-  | '30d'
-  | 'month'
-  | 'last_month'
-  | 'custom';
+  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -637,9 +652,7 @@ export interface GatewayAudit {
   findings: GatewayAuditFinding[];
 }
 
-export async function getGatewayAudit(
-  currency: string,
-): Promise<GatewayAudit> {
+export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
   return getJson<GatewayAudit>(
     `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
   );
@@ -674,8 +687,7 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    | Partial<GatewayPreflightRefusal>
-    | undefined;
+    Partial<GatewayPreflightRefusal> | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1381,9 +1393,7 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(
-    `/admin/payments/deposits?${params}`,
-  );
+  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
@@ -1786,7 +1796,8 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 // ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────
 
 /** The ledger event types (POLYCARD-BACK §5.1). */
-export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF';
+export type LedgerType =
+  'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF' | 'CF';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw
