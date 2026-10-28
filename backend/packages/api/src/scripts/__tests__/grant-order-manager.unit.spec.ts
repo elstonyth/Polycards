@@ -14,7 +14,6 @@ describe('Order manager role', () => {
       'delivery_order:read',
       'delivery_order:update',
       'media:update',
-      'payment:read',
       'pull:read',
     ]);
     expect(ORDER_MANAGER_ROLE).toBe('Order manager');
@@ -36,6 +35,7 @@ describe('Order manager role', () => {
     );
     for (const k of [
       'customer:read',
+      'payment:read',
       'payment:update',
       'customer_bank_account:read',
       'partner_credential:read',
