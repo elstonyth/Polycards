@@ -1,4 +1,5 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import { loadInventoryRows, type InventoryRow } from './inventory-view';
@@ -67,9 +68,17 @@ async function withCardDetails(
   if (!rows.length) return [];
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const handles = rows.map((r) => r.handle);
-  const cards = await pageAll((page) =>
-    packs.listCards({ handle: handles }, page),
-  );
+  // The picture and price are extras: a failed card read must not take the
+  // purchasing list down with it, so the rows go out with the product photo
+  // and stored RM instead.
+  let cards: (CardLook & { handle: string })[] = [];
+  try {
+    cards = await pageAll((page) => packs.listCards({ handle: handles }, page));
+  } catch (e) {
+    container
+      .resolve(ContainerRegistrationKeys.LOGGER)
+      .warn(`[procurement] to-buy served without card details: ${e}`);
+  }
   const fx = await resolveFxRate(packs);
   return addCardDetails(rows, new Map(cards.map((c) => [c.handle, c])), fx);
 }

@@ -37,13 +37,31 @@ describe('addCardDetails', () => {
     expect(r.image).toBe('https://cdn/slab.webp');
   });
 
-  it('graded but not baked yet: falls back to the card picture', () => {
+  it.each([null, ''])(
+    'graded but not baked (slab_image %p): falls back to the card picture',
+    (slab) => {
+      const [r] = addCardDetails(
+        [row({ graded: true })],
+        byHandle(card({ slab_image: slab })),
+        4.5,
+      );
+      expect(r.image).toBe('https://cdn/card.webp');
+    },
+  );
+
+  it('card picture empty: falls back to the product photo', () => {
+    const [r] = addCardDetails([row()], byHandle(card({ image: '' })), 4.5);
+    expect(r.image).toBe('https://cdn/product-thumb.webp');
+  });
+
+  it('PriceCharting price 0 shows as 0, not as missing', () => {
     const [r] = addCardDetails(
-      [row({ graded: true })],
-      byHandle(card({ slab_image: '' })),
+      [row()],
+      byHandle(card({ market_value: 0 })),
       4.5,
     );
-    expect(r.image).toBe('https://cdn/card.webp');
+    expect(r.fmv_usd).toBe(0);
+    expect(r.fmv).toBe(0);
   });
 
   it('raw: shows the bare card, never a slab', () => {
@@ -72,10 +90,22 @@ describe('addCardDetails', () => {
     expect(r.fmv).toBe(99);
   });
 
-  it('a row frozen before this change (no image field) still gets one', () => {
-    const frozen = { ...row() } as Partial<ToBuyRow>;
-    delete frozen.photo;
-    const [r] = addCardDetails([frozen as ToBuyRow], new Map(), 4.5);
+  it('a row read back from a 12am snapshot gets the picture and today’s price', () => {
+    const frozen = JSON.parse(
+      JSON.stringify(row({ graded: true, fmv: 50 })),
+    ) as ToBuyRow;
+    const [r] = addCardDetails(
+      [frozen],
+      byHandle(card({ slab_image: null, market_value: '20' })),
+      4.5,
+    );
+    expect(r.image).toBe('https://cdn/card.webp');
+    expect(r.fmv_usd).toBe(20);
+    expect(r.fmv).toBe(90);
+  });
+
+  it('no card and no photo: image is null, not undefined', () => {
+    const [r] = addCardDetails([row({ photo: null })], new Map(), 4.5);
     expect(r.image).toBeNull();
   });
 });

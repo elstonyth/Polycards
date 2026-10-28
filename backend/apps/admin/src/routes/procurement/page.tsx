@@ -100,13 +100,14 @@ const ProcurementPage = () => {
                         sent to the buyers' group chat. Graded = the baked
                         slab, raw = the bare card, no tier frame either way.
                         `r.image &&`: an empty string resolves to the page URL
-                        and gets refetched as an image. */}
-                    <Table.Cell>
+                        and gets refetched as an image. Not lazy: a full-page
+                        capture must not catch rows still empty. py-2 keeps a
+                        gap between neighbouring cards in the shot. */}
+                    <Table.Cell className="py-2">
                       {r.image && (
                         <img
                           src={resolveImageUrl(r.image)}
                           alt=""
-                          loading="lazy"
                           decoding="async"
                           className="h-24 w-[68px] object-contain"
                         />
