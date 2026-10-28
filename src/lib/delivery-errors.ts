@@ -66,6 +66,13 @@ export const DELIVERY_RULES: ErrorRule[] = [
   // The backend names the postcode format the country needs (5 digits for
   // Malaysia, 6 for Singapore); its sentence is already the fix.
   [/\d-digit (Malaysian|Singapore) postcode/i, (text) => text],
+  // After the 12am cutoff the backend says the zone can no longer change
+  // (contact support); before it, cancel-and-re-request is the fix. The
+  // narrower rule must come first.
+  [
+    /fee zone, which can no longer change/i,
+    'That address is in a different delivery fee zone, which can no longer change for this order — please contact support.',
+  ],
   [
     /changes the shipping fee zone/i,
     'That address changes the delivery fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',

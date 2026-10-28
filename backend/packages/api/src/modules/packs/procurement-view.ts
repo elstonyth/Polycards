@@ -75,20 +75,32 @@ export async function takeProcurementSnapshot(
   return rows.length;
 }
 
+/** The most recent 12am Malaysia time (16:00 UTC, no DST) at or before now. */
+export function lastMidnightCutoff(now: Date): Date {
+  const cutoff = new Date(now);
+  cutoff.setUTCHours(16, 0, 0, 0);
+  if (cutoff > now) cutoff.setUTCDate(cutoff.getUTCDate() - 1);
+  return cutoff;
+}
+
 // What the Procurement page shows (owner, 2026-10-28: the list updates once a
 // day at 12am, after the order statuses do). While STOCK_AUTO_ALLOCATION is
-// on: the newest snapshot. While it is off nothing moves at 12am, so a frozen
+// on: tonight's snapshot. While it is off nothing moves at 12am, so a frozen
 // list would still hold `requested` orders the customer can cancel that day —
-// the live list is served instead, as it is before the first snapshot exists.
-// taken_at null = live.
+// the live list is served instead. Live too when no snapshot was taken since
+// the last 12am (switch just turned on, or a missed night): an older list
+// would hold orders canceled or shipped since. taken_at null = live.
+// Note: the switch is read here by the server AND by the job on the worker,
+// so it must be set on both (app-level env).
 export async function currentToBuyList(
   container: MedusaContainer,
+  now: Date = new Date(),
 ): Promise<{ rows: ToBuyRow[]; taken_at: string | null }> {
   if (stockAutoAllocationEnabled()) {
     const [snap] = await container
       .resolve<PacksModuleService>(PACKS_MODULE)
       .listProcurementSnapshots(
-        {},
+        { taken_at: { $gte: lastMidnightCutoff(now) } },
         { take: 1, order: { taken_at: 'DESC', id: 'DESC' } },
       );
     if (snap) {

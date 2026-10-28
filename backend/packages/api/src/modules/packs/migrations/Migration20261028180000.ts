@@ -9,6 +9,9 @@ export class Migration20261028180000 extends Migration {
       `create table if not exists "procurement_snapshot" ("id" text not null, "taken_at" timestamptz not null, "to_buy" jsonb not null, "created_at" timestamptz not null default now(), "updated_at" timestamptz not null default now(), "deleted_at" timestamptz null, constraint "procurement_snapshot_pkey" primary key ("id"));`,
     );
     this.addSql(
+      `CREATE INDEX IF NOT EXISTS "IDX_procurement_snapshot_deleted_at" ON "procurement_snapshot" ("deleted_at") WHERE deleted_at IS NULL;`,
+    );
+    this.addSql(
       `CREATE INDEX IF NOT EXISTS "IDX_procurement_snapshot_taken_at" ON "procurement_snapshot" ("taken_at") WHERE deleted_at IS NULL;`,
     );
   }

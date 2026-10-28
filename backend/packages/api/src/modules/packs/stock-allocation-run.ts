@@ -64,7 +64,6 @@ export async function runStockAllocation(
   );
   const { ready, short } = allocateStock(onHand, orders);
   const statusOf = new Map(orders.map((o) => [o.id, o.status]));
-  const trackingOf = new Map(orders.map((o) => [o.id, o.tracking_number]));
   const why = 'stock allocation (nightly)';
 
   const run: StockAllocationRun = { ready: [], processed: [], failed: [] };
@@ -72,9 +71,8 @@ export async function runStockAllocation(
     packs.transitionDeliveryOrderStatus({
       orderId,
       to,
-      // The seam writes this value as-is: pass the stored one, or the move
-      // would wipe a tracking number staff already entered.
-      trackingNumber: trackingOf.get(orderId) ?? null,
+      // No trackingNumber: the seam keeps the one it reads under the order's
+      // lock, so a number staff entered after this run's read survives.
       pullIds: [],
       audit: { adminId: ACTOR, action: 'bulk_status', reason },
     });

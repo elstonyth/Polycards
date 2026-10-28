@@ -24,7 +24,13 @@ import PacksModuleService from '../service';
  */
 
 type OrderRow =
-  | { id: string; status: string; customer_id?: string; is_reward?: boolean }
+  | {
+      id: string;
+      status: string;
+      customer_id?: string;
+      is_reward?: boolean;
+      tracking_number?: string | null;
+    }
   | undefined;
 
 // hasDebit models whether the CREATE-time OD debit row exists for this order.
@@ -350,6 +356,51 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       f.ctx,
     );
     expect(f.transitionPullStatus).not.toHaveBeenCalled();
+  });
+
+  it('customer cancel that lost the race to the 12am run: fresh read shows processed → refused, NOTHING written', async () => {
+    // The store route read `requested`; the stock run moved the order before
+    // this cancel got the lock. ALLOWED would let processed → canceled through.
+    const f = fakeService({ id: 'do_1', status: 'processed' });
+    await expect(
+      f.svc.transitionDeliveryOrderStatus(
+        { ...cancelInput, allowedFrom: ['requested'] },
+        f.ctx,
+      ),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/already processed .*contact support/),
+    });
+    expect(f.updateDeliveryOrders).not.toHaveBeenCalled();
+    expect(f.transitionPullStatus).not.toHaveBeenCalled();
+  });
+
+  it('allowedFrom still lets a requested order cancel', async () => {
+    const f = fakeService({ id: 'do_1', status: 'requested' });
+    await f.svc.transitionDeliveryOrderStatus(
+      { ...cancelInput, allowedFrom: ['requested'] },
+      f.ctx,
+    );
+    expect(f.updateDeliveryOrders).toHaveBeenCalledWith(
+      [expect.objectContaining({ status: 'canceled' })],
+      f.ctx,
+    );
+  });
+
+  it('omitted trackingNumber keeps the number read under the lock (12am run)', async () => {
+    const f = fakeService({
+      id: 'do_1',
+      status: 'processed',
+      tracking_number: 'TRK-STAFF',
+    });
+    await f.svc.transitionDeliveryOrderStatus(
+      { orderId: 'do_1', to: 'ready_to_ship', pullIds: [] },
+      f.ctx,
+    );
+    expect(f.updateDeliveryOrders).toHaveBeenCalledWith(
+      [expect.objectContaining({ tracking_number: 'TRK-STAFF' })],
+      f.ctx,
+    );
   });
 
   it('shipped without tracking refuses with INVALID_DATA before any write', async () => {

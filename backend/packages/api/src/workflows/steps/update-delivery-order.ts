@@ -21,6 +21,12 @@ export type UpdateDeliveryOrderInput = {
     action: 'edit' | 'bulk_status';
     reason: string;
   };
+  /**
+   * Passed straight through to transitionDeliveryOrderStatus's allowedFrom:
+   * the customer cancel route sends CUSTOMER_CANCELABLE so its window is
+   * re-checked under the order's lock.
+   */
+  allowed_from?: string[];
 };
 
 export type UpdateDeliveryOrderResult = {
@@ -133,6 +139,7 @@ export const updateDeliveryOrderInvoke = async (
     proofImages: input.proof_images,
     pullIds,
     audit: input.audit,
+    allowedFrom: input.allowed_from,
   });
 
   const prevPullStatus: 'delivering' | null =

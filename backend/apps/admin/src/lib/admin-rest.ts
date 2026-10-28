@@ -2527,7 +2527,7 @@ export interface ProcurementToBuyRow {
 }
 
 // taken_at: when the 12am stock run froze the list; null = live (the run is
-// off, or has not run yet).
+// off, or has not run since the last 12am).
 export const getProcurementToBuy = () =>
   getJson<{ rows: ProcurementToBuyRow[]; taken_at: string | null }>(
     '/admin/procurement/to-buy',

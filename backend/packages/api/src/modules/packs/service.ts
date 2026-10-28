@@ -32,6 +32,7 @@ import {
   computeParcelFee,
   isShippableCountry,
   isShippablePostcode,
+  customerCancelRefusal,
   type AddressSnapshot,
   type DeliveryStatus,
 } from './delivery';
@@ -11667,8 +11668,12 @@ class PacksModuleService extends MedusaService({
     input: {
       orderId: string;
       to: DeliveryStatus;
-      /** Resolved tracking number to persist (incoming or already-stored). */
-      trackingNumber: string | null;
+      /**
+       * Resolved tracking number to persist (incoming or already-stored).
+       * Omitted = keep the number read under the lock — the 12am stock run,
+       * whose own read is lock-free and could be stale.
+       */
+      trackingNumber?: string | null;
       /** Replaces the proof-photo set wholesale when provided. */
       proofImages?: string[];
       /** Every pull the order covers — flipped on completed/canceled. */
@@ -11687,6 +11692,14 @@ class PacksModuleService extends MedusaService({
         action: 'edit' | 'bulk_status';
         reason: string;
       };
+      /**
+       * Statuses this caller may move FROM, checked against the under-lock
+       * read — narrower than ALLOWED. The customer cancel passes
+       * CUSTOMER_CANCELABLE, so a cancel that read `requested` but lost the
+       * race to the 12am stock run is refused instead of canceling the order
+       * the run just moved.
+       */
+      allowedFrom?: readonly string[];
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: DeliveryStatus }> {
@@ -11707,11 +11720,24 @@ class PacksModuleService extends MedusaService({
       );
     }
 
+    if (input.allowedFrom && !input.allowedFrom.includes(order.status)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        input.to === 'canceled'
+          ? customerCancelRefusal(order.status)
+          : `Cannot move a ${order.status} order to ${input.to}.`,
+      );
+    }
+    const trackingNumber =
+      input.trackingNumber === undefined
+        ? (order.tracking_number ?? null)
+        : input.trackingNumber;
+
     // Validate against the under-lock read — the ONLY status that matters.
     const verdict = validateDeliveryStatusTransition(
       order.status,
       input.to,
-      !!input.trackingNumber,
+      !!trackingNumber,
     );
     if (verdict === 'invalid_transition') {
       throw new MedusaError(
@@ -11731,7 +11757,7 @@ class PacksModuleService extends MedusaService({
     const patch: Record<string, unknown> = {
       id: input.orderId,
       status: input.to,
-      tracking_number: input.trackingNumber,
+      tracking_number: trackingNumber,
     };
     if (input.proofImages !== undefined) patch.proof_images = input.proofImages;
     if (input.to === 'shipped') patch.shipped_at = new Date();

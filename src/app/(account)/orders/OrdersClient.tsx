@@ -419,10 +419,12 @@ function CancelOrderModal({
   order,
   onClose,
   onCanceled,
+  onRefused,
 }: {
   order: DeliveryOrderView;
   onClose: () => void;
   onCanceled: (status: DeliveryOrderView['status']) => void;
+  onRefused: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -439,6 +441,9 @@ function CancelOrderModal({
       const res = await cancelDeliveryOrder(order.id);
       if (!res.ok) {
         setError(res.error);
+        // The order may have moved on (e.g. the 12am cutoff passed while the
+        // page was open): refresh the rows so its Cancel button goes.
+        if (!res.needsAuth) onRefused();
         return;
       }
       onCanceled(res.status);
@@ -884,6 +889,13 @@ export default function OrdersClient({
             setCanceledIds((prev) => new Set(prev).add(canceling.id));
             setCanceling(null);
           }}
+          onRefused={() =>
+            void getDeliveryOrders()
+              .then((r) => {
+                if (r.ok) setOrders(r.orders);
+              })
+              .catch(() => {})
+          }
         />
       )}
     </>

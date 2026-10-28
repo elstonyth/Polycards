@@ -51,8 +51,13 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
 
     await cancelOrder(req as any, res);
 
+    // allowed_from re-checks the customer window under the order's lock.
     expect(run).toHaveBeenCalledWith({
-      input: { order_id: 'do_1', status: 'canceled' },
+      input: {
+        order_id: 'do_1',
+        status: 'canceled',
+        allowed_from: ['requested'],
+      },
     });
     expect(out.body.order.id).toBe('do_1');
   });

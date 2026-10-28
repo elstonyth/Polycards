@@ -2144,6 +2144,8 @@ export const useProcurementToBuy = (): UseQueryResult<{
   useQuery({
     queryKey: qk.procurementToBuy,
     queryFn: getProcurementToBuy,
+    // A page left open past 12am picks up the new list on return.
+    refetchOnWindowFocus: true,
   });
 
 export const useProcurementToShip = (): UseQueryResult<{

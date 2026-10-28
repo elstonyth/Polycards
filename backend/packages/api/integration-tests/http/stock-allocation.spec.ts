@@ -187,15 +187,27 @@ medusaIntegrationTestRunner({
         );
       });
 
-      it('moves and freezes nothing while STOCK_AUTO_ALLOCATION is off; to-buy stays live', async () => {
-        process.env.STOCK_AUTO_ALLOCATION = 'false';
+      const getToBuy = async () =>
+        (await unwrapResponse(api.get('/admin/procurement/to-buy', headers())))
+          .data as {
+          taken_at: string | null;
+          rows: Array<{ handle: string; to_procure: number }>;
+        };
+
+      it('moves and freezes nothing while STOCK_AUTO_ALLOCATION is off; to-buy is live even with a snapshot from before', async () => {
         await makeProduct('alloc-off');
         const order = await requestOrder('cus_off', ['alloc-off']);
+        // Left over from while the switch was on.
+        await packs.createProcurementSnapshots({
+          taken_at: new Date(),
+          to_buy: { rows: [] },
+        });
+        process.env.STOCK_AUTO_ALLOCATION = 'false';
         await midnight();
         expect(await statusOf(order)).toBe('requested');
-        expect(await packs.listProcurementSnapshots({}, { take: 1 })).toEqual(
-          [],
-        );
+        expect(
+          await packs.listProcurementSnapshots({}, { take: 5 }),
+        ).toHaveLength(1);
         const toBuy = (
           await unwrapResponse(api.get('/admin/procurement/to-buy', headers()))
         ).data;
@@ -203,6 +215,18 @@ medusaIntegrationTestRunner({
         expect(toBuy.rows.map((r: { handle: string }) => r.handle)).toEqual([
           'alloc-off',
         ]);
+      });
+
+      it('a snapshot from before the last 12am is not served: to-buy falls back to live', async () => {
+        await makeProduct('alloc-stale');
+        await requestOrder('cus_stale', ['alloc-stale']);
+        await packs.createProcurementSnapshots({
+          taken_at: new Date(Date.now() - 2 * 24 * 3600 * 1000),
+          to_buy: { rows: [] },
+        });
+        const toBuy = await getToBuy();
+        expect(toBuy.taken_at).toBeNull();
+        expect(toBuy.rows.map((r) => r.handle)).toEqual(['alloc-stale']);
       });
 
       it("moves a legacy 'packing' order to ready_to_ship through processed", async () => {
@@ -220,7 +244,7 @@ medusaIntegrationTestRunner({
         expect(await statusOf(order)).toBe('ready_to_ship');
       });
 
-      it('two runs at once never move one order twice and never throw', async () => {
+      it('two 12am runs at once never move one order twice and never throw', async () => {
         await makeProduct('alloc-race');
         const order = await requestOrder('cus_race', ['alloc-race']);
         await packs.createGoodsReceiveNoteWithLines({
@@ -239,8 +263,8 @@ medusaIntegrationTestRunner({
         });
 
         const [a, b] = await Promise.all([
-          runStockAllocation(getContainer(), { nightly: false }),
-          runStockAllocation(getContainer(), { nightly: false }),
+          runStockAllocation(getContainer(), { nightly: true }),
+          runStockAllocation(getContainer(), { nightly: true }),
         ]);
         expect(await statusOf(order)).toBe('ready_to_ship');
         // Exactly one run made the final move; the other either found it
@@ -248,6 +272,8 @@ medusaIntegrationTestRunner({
         expect(
           [...a.ready, ...b.ready].filter((id) => id === order),
         ).toHaveLength(1);
+        // The whole job twice at once (statuses + snapshot) never throws.
+        await Promise.all([midnight(), midnight()]);
       });
 
       it('to-buy is the list the 12am run froze, by oldest waiting order; to-ship lists ready orders oldest first', async () => {
@@ -259,20 +285,13 @@ medusaIntegrationTestRunner({
         const shipOld = await requestOrder('cus_p3', ['ship-card']);
         const shipNew = await requestOrder('cus_p4', ['ship-card']);
         await receive('ship-card', 2);
+        // Switch on, no 12am run yet: the live list.
+        expect((await getToBuy()).taken_at).toBeNull();
         await midnight();
         expect(await statusOf(shipOld)).toBe('ready_to_ship');
         expect(await statusOf(shipNew)).toBe('ready_to_ship');
         expect(await statusOf(first)).toBe('processed');
 
-        const getToBuy = async () =>
-          (
-            await unwrapResponse(
-              api.get('/admin/procurement/to-buy', headers()),
-            )
-          ).data as {
-            taken_at: string | null;
-            rows: Array<{ handle: string; to_procure: number }>;
-          };
         const frozen = await getToBuy();
         expect(frozen.taken_at).not.toBeNull();
         expect(frozen.rows.map((r) => [r.handle, r.to_procure])).toEqual([
@@ -285,10 +304,21 @@ medusaIntegrationTestRunner({
         expect(await getToBuy()).toEqual(frozen);
         expect(await statusOf(first)).toBe('processed');
 
+        // The next 12am run picks the new card up: the order ships and the
+        // newest list replaces the old one.
+        await midnight();
+        expect(await statusOf(first)).toBe('ready_to_ship');
+        const next = await getToBuy();
+        expect(next.taken_at! > frozen.taken_at!).toBe(true);
+        expect(next.rows.map((r) => [r.handle, r.to_procure])).toEqual([
+          ['buy-late', 2],
+        ]);
+
         const toShip = (
           await unwrapResponse(api.get('/admin/procurement/to-ship', headers()))
         ).data.orders as Array<{ id: string; items: unknown[] }>;
-        expect(toShip.map((o) => o.id)).toEqual([shipOld, shipNew]);
+        // first shipped on the second 12am run; it is the oldest order.
+        expect(toShip.map((o) => o.id)).toEqual([first, shipOld, shipNew]);
         expect(toShip[0].items).toHaveLength(1);
       });
     });

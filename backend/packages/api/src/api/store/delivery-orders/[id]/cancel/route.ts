@@ -7,7 +7,10 @@ import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { updateDeliveryOrderWorkflow } from '../../../../../workflows/update-delivery-order';
 import { serializeDeliveryOrders } from '../../../../../modules/packs/delivery-view';
-import { CUSTOMER_STATUS_WORD } from '../../../../../modules/packs/delivery';
+import {
+  CUSTOMER_CANCELABLE,
+  customerCancelRefusal,
+} from '../../../../../modules/packs/delivery';
 
 // POST /store/delivery-orders/:id/cancel — the customer cancels their OWN
 // delivery while it is still pre-ship. The covered pulls flip
@@ -34,28 +37,23 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Order not found.');
   }
 
-  // The customer window closes at the 12am cutoff: the nightly stock run moves
-  // every `requested` order to `processed` (purchasing starts buying its
-  // cards) or straight to `ready_to_ship`, and from then on only the operator
-  // may cancel it (owner, 2026-10-28). CANCELABLE is deliberately NARROWER
-  // than delivery.ts's ALLOWED, which still routes processed/ready_to_ship ->
-  // canceled for the admin surface. The legacy 'packing' token (~`processed`)
-  // is closed with it.
-  const CANCELABLE = ['requested'];
-  if (!CANCELABLE.includes(order.status)) {
+  // The customer window closes at the 12am cutoff (delivery.ts
+  // CUSTOMER_CANCELABLE). This early check gives the quick refusal; the same
+  // list is re-checked under the order's lock (allowed_from), which is what
+  // stops a cancel racing the 12am run.
+  if (!CUSTOMER_CANCELABLE.includes(order.status)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      order.status === 'canceled'
-        ? 'This delivery is already canceled.'
-        : // Human wording, never the raw enum: "completed" is operator
-          // vocabulary and "ready_to_ship" is snake_case (same rule as the
-          // address-edit lock).
-          `This delivery is already ${CUSTOMER_STATUS_WORD[order.status] ?? order.status} and can no longer be canceled — please contact support.`,
+      customerCancelRefusal(order.status),
     );
   }
 
   await updateDeliveryOrderWorkflow(req.scope).run({
-    input: { order_id: id, status: 'canceled' },
+    input: {
+      order_id: id,
+      status: 'canceled',
+      allowed_from: [...CUSTOMER_CANCELABLE],
+    },
   });
 
   const [refreshed] = await packs.listDeliveryOrders({ id }, { take: 1 });

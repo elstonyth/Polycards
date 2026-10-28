@@ -13,11 +13,14 @@ async function emitted(dir: 'up' | 'down'): Promise<string> {
 }
 
 describe('Migration20261028180000 (procurement snapshot)', () => {
-  it('creates the snapshot table with a taken_at index', async () => {
+  it('creates the snapshot table with the soft-delete and taken_at indexes', async () => {
     const up = await emitted('up');
     expect(up).toMatch(/create table if not exists "procurement_snapshot" \(/);
     expect(up).toMatch(/"taken_at" timestamptz not null/);
     expect(up).toMatch(/"to_buy" jsonb not null/);
+    expect(up).toMatch(
+      /CREATE INDEX IF NOT EXISTS "IDX_procurement_snapshot_deleted_at" ON "procurement_snapshot" \("deleted_at"\) WHERE deleted_at IS NULL;/,
+    );
     expect(up).toMatch(
       /CREATE INDEX IF NOT EXISTS "IDX_procurement_snapshot_taken_at" ON "procurement_snapshot" \("taken_at"\) WHERE deleted_at IS NULL;/,
     );
