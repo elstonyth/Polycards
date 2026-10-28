@@ -176,6 +176,38 @@ medusaIntegrationTestRunner({
           [...a.ready, ...b.ready].filter((id) => id === order),
         ).toHaveLength(1);
       });
+
+      it('to-buy lists short cards by oldest waiting order; to-ship lists ready orders oldest first', async () => {
+        await makeProduct('buy-late');
+        await makeProduct('buy-early');
+        await makeProduct('ship-card');
+        const first = await requestOrder('cus_p1', ['buy-early']);
+        await requestOrder('cus_p2', ['buy-late', 'buy-late']);
+        const shipOld = await requestOrder('cus_p3', ['ship-card']);
+        const shipNew = await requestOrder('cus_p4', ['ship-card']);
+        await receive('ship-card', 2);
+        expect(await statusOf(shipOld)).toBe('ready_to_ship');
+        expect(await statusOf(shipNew)).toBe('ready_to_ship');
+
+        const toBuy = (
+          await unwrapResponse(
+            api.get('/admin/procurement/to-buy', headers()),
+          )
+        ).data.rows as Array<{ handle: string; to_procure: number }>;
+        expect(toBuy.map((r) => [r.handle, r.to_procure])).toEqual([
+          ['buy-early', 1],
+          ['buy-late', 2],
+        ]);
+        expect(await statusOf(first)).toBe('requested');
+
+        const toShip = (
+          await unwrapResponse(
+            api.get('/admin/procurement/to-ship', headers()),
+          )
+        ).data.orders as Array<{ id: string; items: unknown[] }>;
+        expect(toShip.map((o) => o.id)).toEqual([shipOld, shipNew]);
+        expect(toShip[0].items).toHaveLength(1);
+      });
     });
   },
 });

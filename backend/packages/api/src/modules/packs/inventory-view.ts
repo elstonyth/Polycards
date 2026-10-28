@@ -84,7 +84,8 @@ async function skuByHandle(
 // units on the shelf is on_hand (received − shipped).
 export async function loadInventoryRows(
   container: MedusaContainer,
-  opts: { q?: string; handle?: string; maxRows?: number } = {},
+  // handle: one row (item detail) or several (the procurement to-buy list).
+  opts: { q?: string; handle?: string | string[]; maxRows?: number } = {},
 ): Promise<InventoryRow[]> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const productModule = container.resolve(Modules.PRODUCT);
