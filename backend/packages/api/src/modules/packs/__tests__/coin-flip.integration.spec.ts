@@ -160,6 +160,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await expect(service.quoteCoinFlip(await seed('free'))).rejects.toThrow();
     });
 
+    it('requires the effective partner group to allow withdrawals', async () => {
+      const input = await seed();
+      const q = await service.quoteCoinFlip(input);
+      const em = MikroOrmWrapper.forkManager();
+      await em.execute("INSERT INTO customer_group (id, name, metadata) VALUES ('blocked', 'Partner', '{\"partner_rate_bp\":100,\"withdrawals_blocked\":true}')");
+      await em.execute("INSERT INTO customer_group_customer (customer_id, customer_group_id) VALUES (?, 'blocked')", [input.customerId]);
+      await expect(service.quoteCoinFlip(input)).rejects.toThrow(/Withdrawals are not available/);
+      await expect(service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })).rejects.toThrow(/Withdrawals are not available/);
+      await em.execute("UPDATE customer_group SET metadata = '{\"withdrawals_blocked\":true}' WHERE id = 'blocked'");
+      expect((await service.quoteCoinFlip(input)).status).toBe('quoted');
+    });
+
     it('can sell after a win, preserving the gift buyback playthrough rule', async () => {
       const input = await seed('gift');
       const q = await service.quoteCoinFlip(input);

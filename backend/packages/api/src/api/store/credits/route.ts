@@ -101,13 +101,13 @@ export async function GET(
       // WHITELISTED by reason, not passed through: adjustment rows carry the
       // admin's free-text note (also the audit reason) in this column, and
       // reversal rows carry internal txn ids — neither may reach a customer.
-      const reference = isMoneyRow(t.reason) ? t.reference || null : null;
+      const reference = isMoneyRow(t.reason) || t.reason === 'coin_flip_win' ? t.reference || null : null;
       return {
         id: t.id,
         amount: Number(t.amount),
         reason: t.reason,
         reference,
-        gateway: reference ? (gatewayByRef.get(reference) ?? null) : null,
+        gateway: isMoneyRow(t.reason) && reference ? (gatewayByRef.get(reference) ?? null) : null,
         pull_id: t.pull_id,
         // The row's spend-only bonus part (MYR, spec 2026-10-07): a grant, a
         // bonus-funded open, or the bonus share of a sell-back.

@@ -27,7 +27,8 @@ export async function settleBuyback(
     throw new MedusaError(MedusaError.Types.NOT_ALLOWED, FREE_PULL_LOCKED_MESSAGE);
   }
   const [card] = await service.listCards({ handle: pull.card_id }, { take: 1 }, context);
-  if (!card || !Number.isFinite(Number(card.market_value)) || Number(card.market_value) < 0) {
+  if (!card) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'This card is no longer in the catalog.');
+  if (!Number.isFinite(Number(card.market_value)) || Number(card.market_value) < 0) {
     throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'This card has no valid market value and cannot be sold back.');
   }
   const [pack] = await service.listPacks({ slug: pull.pack_id }, { take: 1 }, context);

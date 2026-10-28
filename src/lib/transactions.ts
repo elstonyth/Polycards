@@ -19,6 +19,7 @@ const REASON_LABEL: Record<CreditReason, string> = {
   referral_commission: 'Referral commission',
   delivery_fee: 'Delivery fee',
   bonus_grant: 'Bonus credit',
+  coin_flip_win: 'Coin flip win',
 };
 
 /** Customer-facing wording for the gateway row's settlement outcome. */

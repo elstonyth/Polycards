@@ -39,7 +39,7 @@ type PullRecord = {
   rolled_at: Date;
   revealed_at: Date | null;
   stock_earmarked: boolean;
-  status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered';
+  status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered' | 'forfeited';
   recorded_value_usd: number | null;
   buyback_amount: number | null;
   buyback_at: Date | null;

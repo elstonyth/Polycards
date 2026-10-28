@@ -573,6 +573,7 @@ export const CREDIT_REASONS = [
   'delivery_fee',
   // Bonus credit (spec 2026-10-07): an admin grant (+) or take-back (−).
   'bonus_grant',
+  'coin_flip_win',
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 

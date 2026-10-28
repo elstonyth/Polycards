@@ -6,6 +6,7 @@ import type { LedgerSqlManager } from './claim';
 import { coerceOddsSet, EFFECTIVE_GROUP_SQL } from './odds-sets';
 import { DEFAULT_MARKET_MULTIPLIER, displayMarketPrice, resolveFxRateStrict } from './pricing';
 import { FREE_PULL_LOCKED_MESSAGE } from './free-pack';
+import { groupPolicyOf } from './group-policy';
 import {
   assertCoinFlipEligible, COIN_FLIP_CONFIG_ID, COIN_FLIP_QUOTE_MS, COIN_FLIP_SCALE,
   coinFlipSettingsView, coinFlipStakeCents, coinFlipWins, effectiveCoinWinUnits,
@@ -42,14 +43,15 @@ async function terms(customerId: string, context: Context) {
   // One statement is the group/config serialization point; a config writer waits
   // for this transaction. Group changes afterwards apply to the next quote.
   const [row] = await coinFlipManager(context).execute<(CoinFlipConfigRecord & {
-    group_id: string | null; odds_set: unknown; db_now: Date;
-  })[]>(`SELECT c.*, g.group_id, cg.metadata->>'odds_set' AS odds_set, clock_timestamp() AS db_now
+    group_id: string | null; group_name: string | null; group_metadata: Record<string, unknown> | null; odds_set: unknown; db_now: Date;
+  })[]>(`SELECT c.*, g.group_id, cg.name AS group_name, cg.metadata AS group_metadata, cg.metadata->>'odds_set' AS odds_set, clock_timestamp() AS db_now
     FROM coin_flip_config c
     LEFT JOIN (${EFFECTIVE_GROUP_SQL}) g ON g.customer_id = ?
     LEFT JOIN customer_group cg ON cg.id = g.group_id
     WHERE c.id = ? AND c.deleted_at IS NULL FOR SHARE OF c`, [customerId, COIN_FLIP_CONFIG_ID]);
   if (!row?.enabled) return refuse('Coin flip is currently paused.');
   if (!row.max_stake_cents || row.published_win_units == null) return refuse('Coin flip is not configured.');
+  if (groupPolicyOf({ name: row.group_name, metadata: row.group_metadata }).withdrawals_blocked) return refuse('Withdrawals are not available on this account.');
   const set = coerceOddsSet(row.odds_set);
   return { config: row, groupId: row.group_id, set, actual: effectiveCoinWinUnits(row, set), now: new Date(row.db_now) };
 }

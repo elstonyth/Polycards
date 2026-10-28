@@ -781,6 +781,21 @@ class PacksModuleService extends MedusaService({
     return readCoinFlipSettings(context);
   }
 
+  @InjectManager()
+  async coinFlipTotals(input: { status?: 'won' | 'lost'; customerId?: string; from?: Date; to?: Date }, @MedusaContext() context: Context = {}): Promise<{ wins: number; losses: number; payouts: number; forfeited_value: number }> {
+    const where = ["deleted_at IS NULL AND status IN ('won', 'lost')"];
+    const params: unknown[] = [];
+    if (input.status) { where.push('status = ?'); params.push(input.status); }
+    if (input.customerId) { where.push('customer_id = ?'); params.push(input.customerId); }
+    if (input.from) { where.push('settled_at >= ?'); params.push(input.from); }
+    if (input.to) { where.push('settled_at < ?'); params.push(input.to); }
+    const [row] = await coinFlipManager(context).execute<{ wins: string; losses: string; paid: string; forfeited: string }[]>(
+      "SELECT count(*) FILTER (WHERE status = 'won') AS wins, count(*) FILTER (WHERE status = 'lost') AS losses, " +
+      "coalesce(sum(stake_cents) FILTER (WHERE status = 'won'), 0) AS paid, coalesce(sum(stake_cents) FILTER (WHERE status = 'lost'), 0) AS forfeited " +
+      'FROM coin_flip_round WHERE ' + where.join(' AND '), params);
+    return { wins: Number(row.wins), losses: Number(row.losses), payouts: Number(row.paid) / 100, forfeited_value: Number(row.forfeited) / 100 };
+  }
+
   @InjectTransactionManager()
   async saveCoinFlipSettings(
     input: { settings: unknown; revision: number; adminId: string; reason: string },

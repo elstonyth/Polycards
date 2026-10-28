@@ -651,6 +651,22 @@ export default defineMiddlewares({
       matcher: '/store/vault',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
+    ...['/store/coin-flips', '/store/coin-flips/*'].map(matcher => ({
+      matcher, method: 'GET' as const,
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    })),
+    {
+      matcher: '/store/coin-flips/quotes', method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), rateLimit('coin-flip-quote'), requirePhoneVerified],
+    },
+    {
+      matcher: '/store/coin-flips/:id/accept', method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), rateLimit('coin-flip-accept'), requirePhoneVerified],
+    },
+    {
+      matcher: '/admin/coin-flips/settings', method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
     {
       // The customer's unopened gifted packs (GET /store/pack-gifts, spec
       // 2026-10-07): the vault Packs row and "Vault xN". Read budget.
