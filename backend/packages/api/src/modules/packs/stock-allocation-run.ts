@@ -18,8 +18,8 @@ const ACTOR = 'system:stock-allocation';
 
 // Moves delivery orders by themselves (spec 2026-10-28):
 //  - an open order whose every card is on hand, oldest first, becomes
-//    ready_to_ship (from requested it passes through processed, the only
-//    legal path — delivery.ts ALLOWED);
+//    ready_to_ship (from requested or legacy 'packing' it passes through
+//    processed, the only legal path — delivery.ts ALLOWED);
 //  - on the nightly run, every requested order still short of cards becomes
 //    processed: it is on that night's to-buy list.
 // Runs from the 00:00 MYT job (nightly) and after every GRN / invoice save.
@@ -67,7 +67,10 @@ export async function runStockAllocation(
 
   for (const id of ready) {
     try {
-      if (statusOf.get(id) === 'requested') {
+      // requested and the legacy 'packing' token may only step to
+      // processed first (delivery.ts ALLOWED).
+      const from = statusOf.get(id);
+      if (from === 'requested' || from === 'packing') {
         await move(id, 'processed', 'stock allocation: all cards on hand');
       }
       await move(id, 'ready_to_ship', 'stock allocation: all cards on hand');

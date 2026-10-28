@@ -1,5 +1,9 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
-import { Modules, ProductStatus } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  Modules,
+  ProductStatus,
+} from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { runStockAllocation } from '../../src/modules/packs/stock-allocation-run';
@@ -147,6 +151,20 @@ medusaIntegrationTestRunner({
         expect(need('alloc-c')).toBe(0);
       });
 
+      it("moves a legacy 'packing' order to ready_to_ship through processed", async () => {
+        await makeProduct('alloc-packing');
+        const order = await requestOrder('cus_packing', ['alloc-packing']);
+        // The model enum no longer lists 'packing'; the DB CHECK still allows
+        // it (Migration20260727000000's expand phase), so seed it raw.
+        await getContainer()
+          .resolve(ContainerRegistrationKeys.PG_CONNECTION)
+          .raw(`UPDATE delivery_order SET status = 'packing' WHERE id = ?`, [
+            order,
+          ]);
+        expect((await receive('alloc-packing', 1)).status).toBe(201);
+        expect(await statusOf(order)).toBe('ready_to_ship');
+      });
+
       it('two runs at once never move one order twice and never throw', async () => {
         await makeProduct('alloc-race');
         const order = await requestOrder('cus_race', ['alloc-race']);
@@ -190,9 +208,7 @@ medusaIntegrationTestRunner({
         expect(await statusOf(shipNew)).toBe('ready_to_ship');
 
         const toBuy = (
-          await unwrapResponse(
-            api.get('/admin/procurement/to-buy', headers()),
-          )
+          await unwrapResponse(api.get('/admin/procurement/to-buy', headers()))
         ).data.rows as Array<{ handle: string; to_procure: number }>;
         expect(toBuy.map((r) => [r.handle, r.to_procure])).toEqual([
           ['buy-early', 1],
@@ -201,9 +217,7 @@ medusaIntegrationTestRunner({
         expect(await statusOf(first)).toBe('requested');
 
         const toShip = (
-          await unwrapResponse(
-            api.get('/admin/procurement/to-ship', headers()),
-          )
+          await unwrapResponse(api.get('/admin/procurement/to-ship', headers()))
         ).data.orders as Array<{ id: string; items: unknown[] }>;
         expect(toShip.map((o) => o.id)).toEqual([shipOld, shipNew]);
         expect(toShip[0].items).toHaveLength(1);
