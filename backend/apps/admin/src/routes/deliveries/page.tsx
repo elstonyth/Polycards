@@ -17,6 +17,7 @@ import {
 } from '@medusajs/ui';
 import { TruckFast, XMark } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useBulkUpdateDeliveryOrders,
   useDeliveryOrders,
@@ -349,6 +350,12 @@ const DeliveriesPage = () => {
   // Which kind of record the page is showing. 'shipping' is everything the page
   // did before: status tabs, id search, bulk tool, Manage modal.
   const [kind, setKind] = useState<OrderKind>('shipping');
+  // Top-ups are customer money (GET /admin/payments/deposits asks
+  // payment:read). An order handler without it — the Order manager since
+  // 2026-10-28 — gets no tab rather than a tab that 403s.
+  const canSeeTopups = usePermissions().hasPermission(
+    'payment:read' as Permission,
+  );
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
@@ -569,7 +576,9 @@ const DeliveriesPage = () => {
           <Tabs.List aria-label="Record kind">
             <Tabs.Trigger value="shipping">Shipping</Tabs.Trigger>
             <Tabs.Trigger value="purchases">Pack purchases</Tabs.Trigger>
-            <Tabs.Trigger value="topups">Topups</Tabs.Trigger>
+            {canSeeTopups && (
+              <Tabs.Trigger value="topups">Topups</Tabs.Trigger>
+            )}
           </Tabs.List>
         </Tabs>
         {kind === 'shipping' && (
@@ -594,7 +603,7 @@ const DeliveriesPage = () => {
       </div>
 
       {kind === 'purchases' && <PackPurchases />}
-      {kind === 'topups' && <Topups />}
+      {kind === 'topups' && canSeeTopups && <Topups />}
 
       {kind === 'shipping' && selected.size > 0 && (
         <div
