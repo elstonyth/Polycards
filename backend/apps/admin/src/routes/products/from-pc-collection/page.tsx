@@ -48,9 +48,14 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   rank: 1,
   nested: '/inventory/list',
-  // Hidden for stock-only roles (Stock keeper): these pages call the
-  // PriceCharting API, which asks pricecharting:read.
-  permissions: ['pricecharting:read' as Permission],
+  // Shown only to a role that can use the page: it opens under core's
+  // /products route (product:read) and calls the PriceCharting API
+  // (pricecharting:read). Hides it from stock-only roles (Stock keeper).
+  permissions: [
+    'pricecharting:read' as Permission,
+    'product:read' as Permission,
+  ],
+  requireAll: true,
 };
 
 // Bulk sibling of /products/from-pricecharting: instead of searching PriceCharting

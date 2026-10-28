@@ -53,3 +53,97 @@ describe('Stock keeper role', () => {
     expect(keys.some((k) => k.endsWith(':delete'))).toBe(false);
   });
 });
+
+// stockKeeperRoleId against a fake RBAC service: the reuse guard (review
+// finding on #886) and the created / reused / links-added report.
+import { stockKeeperRoleId } from '../grant-stock-keeper';
+
+type Row = { id: string; [k: string]: unknown };
+const fakeScope = (opts: { roles: Row[]; links: Row[]; policies: Row[] }) => {
+  const created: { roles: Row[]; links: Row[] } = { roles: [], links: [] };
+  const rbac = {
+    listRbacRoles: async () => opts.roles,
+    listRbacPolicies: async (f: { id?: string[]; resource?: string; operation?: string }) =>
+      f.id
+        ? opts.policies.filter((p) => f.id!.includes(p.id))
+        : opts.policies.filter(
+            (p) => p.key === `${f.resource}:${f.operation}`,
+          ),
+    listRbacRolePolicies: async (f: { role_id: string; policy_id?: string }) =>
+      [...opts.links, ...created.links].filter(
+        (l) =>
+          l.role_id === f.role_id &&
+          (f.policy_id === undefined || l.policy_id === f.policy_id),
+      ),
+    createRbacRoles: async (r: Record<string, unknown>) => {
+      const role = { id: 'role_new', ...r };
+      created.roles.push(role);
+      return role;
+    },
+    createRbacRolePolicies: async (l: { role_id: string; policy_id: string }) => {
+      created.links.push({ id: `link_${created.links.length}`, ...l });
+    },
+  };
+  return {
+    scope: { resolve: () => rbac } as never,
+    created,
+  };
+};
+const allPolicies = STOCK_KEEPER_POLICIES.map((p, i) => ({
+  id: `pol_${i}`,
+  key: `${p.resource}:${p.operation}`,
+}));
+
+describe('stockKeeperRoleId', () => {
+  it('creates the role and links every policy when none exists', async () => {
+    const { scope, created } = fakeScope({
+      roles: [],
+      links: [],
+      policies: allPolicies,
+    });
+    expect(await stockKeeperRoleId(scope)).toEqual({
+      id: 'role_new',
+      created: true,
+      added: STOCK_KEEPER_POLICIES.length,
+    });
+    expect(created.roles).toHaveLength(1);
+  });
+
+  it('reuses a matching role and adds only missing links', async () => {
+    const { scope, created } = fakeScope({
+      roles: [{ id: 'role_sk' }],
+      links: [{ id: 'l0', role_id: 'role_sk', policy_id: 'pol_0' }],
+      policies: allPolicies,
+    });
+    expect(await stockKeeperRoleId(scope)).toEqual({
+      id: 'role_sk',
+      created: false,
+      added: STOCK_KEEPER_POLICIES.length - 1,
+    });
+    expect(created.roles).toHaveLength(0);
+  });
+
+  it('refuses a same-named role that holds anything extra, writing nothing', async () => {
+    const { scope, created } = fakeScope({
+      roles: [{ id: 'role_sk' }],
+      links: [{ id: 'l0', role_id: 'role_sk', policy_id: 'pol_x' }],
+      policies: [...allPolicies, { id: 'pol_x', key: 'customer:read' }],
+    });
+    await expect(stockKeeperRoleId(scope)).rejects.toThrow(
+      /outside this script's list: customer:read/,
+    );
+    expect(created.links).toHaveLength(0);
+  });
+
+  it('fails closed before any write when a declared policy row is missing', async () => {
+    const { scope, created } = fakeScope({
+      roles: [],
+      links: [],
+      policies: allPolicies.slice(1),
+    });
+    await expect(stockKeeperRoleId(scope)).rejects.toThrow(
+      /No live RBAC policy/,
+    );
+    expect(created.roles).toHaveLength(0);
+  });
+});

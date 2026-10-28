@@ -13,6 +13,7 @@ import {
 } from '@medusajs/ui';
 import { ArchiveBox } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useEligibleProducts,
   useInventory,
@@ -108,6 +109,14 @@ const InventoryListPage = () => {
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Selecting rows only feeds "List to gacha card", which reads
+  // /admin/gacha/eligible-products (gacha:read) and creates cards
+  // (card:update). A role without both (e.g. Stock keeper) gets no checkboxes
+  // instead of a 403 and a button that spins forever.
+  const canListToGacha = usePermissions().hasAllPermissions([
+    'gacha:read' as Permission,
+    'card:update' as Permission,
+  ]);
   const [exporting, setExporting] = useState(false);
   const { sort, sortHeader } = useTableSort<SortKey>({
     key: 'created_at',
@@ -397,15 +406,17 @@ const InventoryListPage = () => {
           <Table>
             <Table.Header>
               <Table.Row>
-                <Table.HeaderCell className="w-10">
-                  <Checkbox
-                    aria-label={t('inventory.selectAll')}
-                    checked={
-                      allOnPage ? true : someOnPage ? 'indeterminate' : false
-                    }
-                    onCheckedChange={toggleAll}
-                  />
-                </Table.HeaderCell>
+                {canListToGacha && (
+                  <Table.HeaderCell className="w-10">
+                    <Checkbox
+                      aria-label={t('inventory.selectAll')}
+                      checked={
+                        allOnPage ? true : someOnPage ? 'indeterminate' : false
+                      }
+                      onCheckedChange={toggleAll}
+                    />
+                  </Table.HeaderCell>
+                )}
                 <Table.HeaderCell>{t('inventory.photo')}</Table.HeaderCell>
                 {sortHeader('name', t('inventory.name'))}
                 <Table.HeaderCell>{t('inventory.sku')}</Table.HeaderCell>
@@ -441,16 +452,18 @@ const InventoryListPage = () => {
                       onCheckedChange: only the DOM event carries shiftKey, and
                       Radix checkboxes fire click for keyboard activation too,
                       so no second handler is needed. */}
-                  <Table.Cell
-                    className="select-none"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Checkbox
-                      aria-label={t('inventory.selectOne', { name: r.name })}
-                      checked={selected.has(r.handle)}
-                      onClick={(e) => handleRowCheck(r.handle, e.shiftKey)}
-                    />
-                  </Table.Cell>
+                  {canListToGacha && (
+                    <Table.Cell
+                      className="select-none"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        aria-label={t('inventory.selectOne', { name: r.name })}
+                        checked={selected.has(r.handle)}
+                        onClick={(e) => handleRowCheck(r.handle, e.shiftKey)}
+                      />
+                    </Table.Cell>
+                  )}
                   <Table.Cell>
                     {/* `r.photo &&`, not just a src: an empty string resolves to
                         the page URL and gets refetched as an image. */}

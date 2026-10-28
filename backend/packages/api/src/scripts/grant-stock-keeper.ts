@@ -14,9 +14,11 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 // GRN reversal and a transfer into an invoice), and the Procurement to-buy
 // list (`procurement:read`; the to-ship list also needs `delivery_order:read`,
 // which the Order manager role carries). `store:read` because the admin shell
-// errors without it. Not included: "List to gacha card" on the Stock list
-// (`gacha`, `card`), the PriceCharting import pages (`pricecharting`), and
-// anything about players or money.
+// errors without it. Recording invoices shows purchase costs; otherwise not
+// included: "List to gacha card" on the Stock list (`gacha`, `card`), the
+// PriceCharting import pages (`pricecharting`), players, wallets and
+// payouts. A new role reaches the user at their next sign-in: role ids are
+// copied into the login session.
 export const STOCK_KEEPER_ROLE = 'Stock keeper';
 export const STOCK_KEEPER_POLICIES = [
   { resource: 'store', operation: 'read' },
@@ -31,13 +33,50 @@ export const STOCK_KEEPER_POLICIES = [
   { resource: 'procurement', operation: 'read' },
 ] as const;
 
+const ALLOWED_KEYS = new Set(
+  STOCK_KEEPER_POLICIES.map((p) => `${p.resource}:${p.operation}`),
+);
+
+/** The live "Stock keeper" role and the policy keys linked to it, or null.
+ *  Read-only, so the dry run can show it. */
+async function existingStockKeeper(
+  scope: MedusaContainer,
+): Promise<{ id: string; keys: string[] } | null> {
+  const rbac = scope.resolve<IRbacModuleService>(Modules.RBAC);
+  const [role] = await rbac.listRbacRoles(
+    { name: STOCK_KEEPER_ROLE },
+    { take: 1 },
+  );
+  if (!role) return null;
+  const links = await rbac.listRbacRolePolicies(
+    { role_id: role.id },
+    { take: 500 },
+  );
+  const policies = links.length
+    ? await rbac.listRbacPolicies(
+        { id: links.map((l) => l.policy_id) },
+        { take: links.length },
+      )
+    : [];
+  return { id: role.id as string, keys: policies.map((p) => p.key).sort() };
+}
+
 /** The role, created on first use and linked to the DECLARED policy rows.
  *  Never creates a policy: the boot sync soft-deletes undeclared ones
- *  (policies/desk-bots.ts), so a missing row means the code is out of date. */
+ *  (policies/desk-bots.ts), so a missing row means the code is out of date.
+ *  Refuses to reuse a same-named role that holds anything beyond the list —
+ *  adding the role would hand the user those extras too. */
 export async function stockKeeperRoleId(
   scope: MedusaContainer,
-): Promise<string> {
+): Promise<{ id: string; created: boolean; added: number }> {
   const rbac = scope.resolve<IRbacModuleService>(Modules.RBAC);
+  const found = await existingStockKeeper(scope);
+  const extra = found?.keys.filter((k) => !ALLOWED_KEYS.has(k)) ?? [];
+  if (extra.length) {
+    throw new Error(
+      `A "${STOCK_KEEPER_ROLE}" role (${found!.id}) already exists with policies outside this script's list: ${extra.join(', ')}. Nothing changed.`,
+    );
+  }
   const policies = await Promise.all(
     STOCK_KEEPER_POLICIES.map(async ({ resource, operation }) => {
       const [policy] = await rbac.listRbacPolicies(
@@ -50,17 +89,14 @@ export async function stockKeeperRoleId(
       return policy;
     }),
   );
-  const [existing] = await rbac.listRbacRoles(
-    { name: STOCK_KEEPER_ROLE },
-    { order: { created_at: 'ASC' }, take: 1 },
-  );
   const role =
-    existing ??
+    (found && { id: found.id }) ??
     (await rbac.createRbacRoles({
       name: STOCK_KEEPER_ROLE,
       description:
         'Stock: read the Stock list, read and record goods receive notes and purchase invoices, read the to-buy list.',
     }));
+  let added = 0;
   for (const policy of policies) {
     const [link] = await rbac.listRbacRolePolicies(
       { role_id: role.id, policy_id: policy.id },
@@ -71,9 +107,10 @@ export async function stockKeeperRoleId(
         role_id: role.id,
         policy_id: policy.id,
       });
+      added++;
     }
   }
-  return role.id as string;
+  return { id: role.id as string, created: !found, added };
 }
 
 type AdminUser = { id: string; email: string; rbac_roles?: { id: string }[] };
@@ -99,9 +136,15 @@ export async function grantStockKeeper(
     fields,
     filters: { email: { $ilike: email } },
   });
-  const user = (matches as AdminUser[]).find(
+  const same = (matches as AdminUser[]).filter(
     (u) => u.email.toLowerCase() === email,
   );
+  if (same.length > 1) {
+    throw new Error(
+      `${same.length} admin users match ${email} ignoring case: ${same.map((u) => u.email).join(', ')}. Nothing changed.`,
+    );
+  }
+  const [user] = same;
   if (!user) throw new Error(`${email} has no admin user. Nothing changed.`);
   const { data } = await query.graph({ entity: 'user', fields });
   const actor = (data as AdminUser[]).find((u) =>
@@ -109,11 +152,16 @@ export async function grantStockKeeper(
   );
   if (!actor) throw new Error('No super admin user to assign as.');
   if (!apply) {
-    return `DRY RUN: would add "${STOCK_KEEPER_ROLE}" to ${email} (user=${user.id}, roles now: ${user.rbac_roles?.map((r) => r.id).join(',') || 'none'}). Pass "apply".`;
+    const found = await existingStockKeeper(scope);
+    const role = found
+      ? `existing role ${found.id} with ${found.keys.join(', ') || 'no policies'}`
+      : 'a new role (none exists yet)';
+    return `DRY RUN: would add "${STOCK_KEEPER_ROLE}" to ${email} (user=${user.id}, roles now: ${user.rbac_roles?.map((r) => r.id).join(',') || 'none'}) using ${role}. Pass "apply".`;
   }
-  const roleId = await stockKeeperRoleId(scope);
+  const { id: roleId, created, added } = await stockKeeperRoleId(scope);
+  const roleNote = `${created ? 'created' : 'reused'} role ${roleId}, ${added} policy link(s) added`;
   if (user.rbac_roles?.some((r) => r.id === roleId)) {
-    return `${email} already has "${STOCK_KEEPER_ROLE}" (${roleId}); its policy links were checked and any missing one added.`;
+    return `${email} already has "${STOCK_KEEPER_ROLE}" (${roleNote}).`;
   }
   await workflowService.run('assign-user-roles', {
     input: {
@@ -123,9 +171,10 @@ export async function grantStockKeeper(
       actor: 'user',
     },
   });
-  // Permissions are checked per request, but the admin page loads its menu
-  // permissions once — the user reloads it to see the new entries.
-  return `added "${STOCK_KEEPER_ROLE}" (${roleId}) to ${email} (user=${user.id}). Ask them to reload the admin page to see the Stock menu.`;
+  // Role ids are copied into the login session (generate-jwt-token +
+  // check-permissions read app_metadata.roles), so the new role applies from
+  // the user's next sign-in, not on reload.
+  return `added "${STOCK_KEEPER_ROLE}" to ${email} (user=${user.id}; ${roleNote}). They must sign out and back in to get it.`;
 }
 
 /** Run: STOCK_KEEPER_EMAIL=… medusa exec ./src/scripts/grant-stock-keeper.ts [apply]
