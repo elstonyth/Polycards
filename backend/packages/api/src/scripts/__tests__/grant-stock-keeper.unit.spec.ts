@@ -16,10 +16,16 @@ describe('Stock keeper role', () => {
       'goods_receive_note:update',
       'inventory:read',
       'inventory_item:read',
+      'media:update',
+      'pricecharting:read',
+      'pricing:read',
       'procurement:read',
+      'product:create',
+      'product:read',
       'purchase_invoice:read',
       'purchase_invoice:update',
       'store:read',
+      'tcg:read',
     ]);
     expect(STOCK_KEEPER_ROLE).toBe('Stock keeper');
   });
@@ -28,6 +34,7 @@ describe('Stock keeper role', () => {
     const known = new Set<string>([
       'store',
       'inventory_item',
+      'product',
       ...Object.values(CUSTOM_ADMIN_RESOURCES),
     ]);
     for (const p of STOCK_KEEPER_POLICIES) {
@@ -47,6 +54,8 @@ describe('Stock keeper role', () => {
       'partner_credential:read',
       'card:update',
       'gacha:update',
+      'pricing:update',
+      'product:update',
     ]) {
       expect(keys).not.toContain(k);
     }
