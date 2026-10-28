@@ -265,14 +265,16 @@ medusaIntegrationTestRunner({
         await tracked('st-tracked', 'ST Tracked', 0);
         await tracked('st-owed', 'ST Owed', -2);
 
+        // The Medusa counter rides on the inventory row as `counter` since
+        // the Stock page's on_hand became physical stock (spec 2026-10-28).
         const rows = (await admin('/admin/inventory')).data.rows as Array<{
           handle: string;
-          on_hand: number | null;
+          counter: number | null;
         }>;
-        expect(rows.find((r) => r.handle === 'st-tracked')!.on_hand).toBe(0);
-        expect(rows.find((r) => r.handle === 'st-owed')!.on_hand).toBe(-2);
+        expect(rows.find((r) => r.handle === 'st-tracked')!.counter).toBe(0);
+        expect(rows.find((r) => r.handle === 'st-owed')!.counter).toBe(-2);
         expect(
-          rows.find((r) => r.handle === 'st-untracked')!.on_hand,
+          rows.find((r) => r.handle === 'st-untracked')!.counter,
         ).toBeNull();
 
         const res = await report('stock');

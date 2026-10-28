@@ -2,9 +2,9 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { INVENTORY_COLUMNS } from '../route';
 import type { InventoryRow } from '../../../../../modules/packs/inventory-view';
 
-// What this spec exists for: `cost`/`on_hand`/`fmv`/`price` are THREE-STATE on
-// an InventoryRow -- null and 0 are different facts, not two spellings of
-// "nothing" (inventory-view.ts builds all four with `??` and never `||`, and
+// What this spec exists for: `cost`/`fmv`/`price` are THREE-STATE on an
+// InventoryRow -- null and 0 are different facts, not two spellings of
+// "nothing" (inventory-view.ts builds all three with `??` and never `||`, and
 // the list page renders null as an em dash and 0 as a real value). An export
 // that flattened null to 0 would tell the operator a card cost RM 0.00 when the
 // truth is that no purchase was ever recorded against it, and NO other gate in
@@ -30,14 +30,18 @@ const row = (over: Partial<InventoryRow>): InventoryRow => ({
   cost: 1,
   created_at: '2026-07-28T00:00:00.000Z',
   on_hand: 1,
+  counter: 1,
   in_vault: 0,
   requested: 0,
+  ready_to_ship: 0,
   shipped: 0,
+  to_procure: 0,
   listing_count: 0,
   ...over,
 });
 
-const NULLABLE = ['FMV', 'Price', 'Cost', 'On Hand'] as const;
+// On Hand is never null since spec 2026-10-28 (received − shipped).
+const NULLABLE = ['FMV', 'Price', 'Cost'] as const;
 
 const colIndex = (header: string): number => {
   const i = INVENTORY_COLUMNS.findIndex((c) => c.header === header);
@@ -102,8 +106,8 @@ describe('inventory export columns', () => {
   it('writes an EMPTY cell for a null money/count, and a real 0 for zero', async () => {
     // Row 2 is all-null, row 3 is all-zero (row 1 is the header).
     const xml = await sheetXml([
-      row({ fmv: null, price: null, cost: null, on_hand: null }),
-      row({ fmv: 0, price: 0, cost: 0, on_hand: 0 }),
+      row({ fmv: null, price: null, cost: null }),
+      row({ fmv: 0, price: 0, cost: 0 }),
     ]);
 
     for (const header of NULLABLE) {
@@ -134,9 +138,11 @@ describe('inventory export columns', () => {
       'Price',
       'Cost',
       'Created (UTC)',
+      'Qty To Be Procured',
       'On Hand',
       'In Vault',
-      'Requested',
+      'Requested + Processed',
+      'Ready To Ship',
       'Shipped',
       'Listing Show',
     ]);
