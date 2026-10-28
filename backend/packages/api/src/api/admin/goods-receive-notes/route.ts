@@ -6,6 +6,7 @@ import type {
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
+import { resolveFxRateStrict } from '../../../modules/packs/pricing';
 import { createGoodsReceiveNoteWorkflow } from '../../../workflows/create-goods-receive-note';
 import {
   parsePaginationParams,
@@ -24,6 +25,11 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const body = coerceCreateGoodsReceiveNoteBody(req.body);
+  // Same gate as a purchase invoice: the form's FMV prefill is priced off
+  // the FX rate, so refuse while that rate is unknown.
+  await resolveFxRateStrict(
+    req.scope.resolve<PacksModuleService>(PACKS_MODULE),
+  );
 
   // Same existence gate as purchase-invoices/route.ts: every line must name a
   // real product handle.
@@ -56,7 +62,10 @@ export async function POST(
     },
   });
   // New cards on hand may complete waiting orders (oldest first).
-  await runStockAllocationAfterSave(req.scope);
+  await runStockAllocationAfterSave(
+    req.scope,
+    `${result.display_no} by ${req.auth_context.actor_id}`,
+  );
   res.status(201).json({ goods_receive_note: result });
 }
 

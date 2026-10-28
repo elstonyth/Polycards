@@ -143,6 +143,28 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('GET', '/admin/referrals/settlements')).toEqual([
       'referral:read',
     ]);
+    // Stock writes (spec 2026-10-28).
+    expect(policyFor('POST', '/admin/goods-receive-notes')).toEqual([
+      'goods_receive_note:update',
+    ]);
+    expect(policyFor('POST', '/admin/goods-receive-notes/*/reverse')).toEqual([
+      'goods_receive_note:update',
+    ]);
+  });
+
+  it('the mailing list needs the Orders read policy on top of procurement', () => {
+    const policyFor = (method: string, url: string) =>
+      entries
+        .filter((e) => e.methods.includes(method) && e.re.test(url))
+        .flatMap((e) => e.policies.map((p) => `${p.resource}:${p.operation}`));
+    // It returns customer names, addresses and emails.
+    expect(policyFor('GET', '/admin/procurement/to-ship').sort()).toEqual([
+      'delivery_order:read',
+      'procurement:read',
+    ]);
+    expect(policyFor('GET', '/admin/procurement/to-buy')).toEqual([
+      'procurement:read',
+    ]);
   });
 
   it('secret-bearing GETs ask for their own declared read policy', () => {

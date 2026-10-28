@@ -45,7 +45,10 @@ export const stockAutoAllocationEnabled = (
 // statuses (feed-events.ts), the same as when staff move an order by hand.
 export async function runStockAllocation(
   container: MedusaContainer,
-  opts: { nightly: boolean },
+  // trigger: what caused a post-save run (e.g. "GRN-00012 by user_01..."),
+  // written into each moved order's audit reason so order history can say
+  // which save moved it.
+  opts: { nightly: boolean; trigger?: string },
 ): Promise<StockAllocationRun> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
@@ -63,13 +66,19 @@ export async function runStockAllocation(
   );
   const { ready, short } = allocateStock(onHand, orders);
   const statusOf = new Map(orders.map((o) => [o.id, o.status]));
+  const trackingOf = new Map(orders.map((o) => [o.id, o.tracking_number]));
+  const why = opts.trigger
+    ? `stock allocation after ${opts.trigger}`
+    : 'stock allocation (nightly)';
 
   const run: StockAllocationRun = { ready: [], processed: [], failed: [] };
   const move = async (orderId: string, to: DeliveryStatus, reason: string) =>
     packs.transitionDeliveryOrderStatus({
       orderId,
       to,
-      trackingNumber: null,
+      // The seam writes this value as-is: pass the stored one, or the move
+      // would wipe a tracking number staff already entered.
+      trackingNumber: trackingOf.get(orderId) ?? null,
       pullIds: [],
       audit: { adminId: ACTOR, action: 'bulk_status', reason },
     });
@@ -80,9 +89,9 @@ export async function runStockAllocation(
       // processed first (delivery.ts ALLOWED).
       const from = statusOf.get(id);
       if (from === 'requested' || from === 'packing') {
-        await move(id, 'processed', 'stock allocation: all cards on hand');
+        await move(id, 'processed', `${why}: all cards on hand`);
       }
-      await move(id, 'ready_to_ship', 'stock allocation: all cards on hand');
+      await move(id, 'ready_to_ship', `${why}: all cards on hand`);
       run.ready.push(id);
     } catch (e) {
       run.failed.push(id);
@@ -95,7 +104,7 @@ export async function runStockAllocation(
     for (const id of short) {
       if (statusOf.get(id) !== 'requested') continue;
       try {
-        await move(id, 'processed', 'stock allocation: on the to-buy list');
+        await move(id, 'processed', `${why}: on the to-buy list`);
         run.processed.push(id);
       } catch (e) {
         run.failed.push(id);
@@ -113,10 +122,11 @@ export async function runStockAllocation(
 // retries.
 export async function runStockAllocationAfterSave(
   container: MedusaContainer,
+  trigger: string,
 ): Promise<void> {
   if (!stockAutoAllocationEnabled()) return;
   try {
-    await runStockAllocation(container, { nightly: false });
+    await runStockAllocation(container, { nightly: false, trigger });
   } catch (e) {
     container
       .resolve(ContainerRegistrationKeys.LOGGER)

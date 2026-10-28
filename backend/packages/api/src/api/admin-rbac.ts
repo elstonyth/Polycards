@@ -177,6 +177,15 @@ export const adminRbacRoutes: MiddlewareRoute[] = [
     methods: ['POST'],
     policies: [{ resource: 'customer', operation: 'read' }],
   },
+  {
+    // The mailing list carries customer names, addresses, phones and emails:
+    // on top of procurement:read (the prefix entry below), ask the same
+    // permission the Orders page does, so a purchasing-only role cannot read
+    // customer details through it.
+    matcher: '/admin/procurement/to-ship',
+    methods: ['GET'],
+    policies: [{ resource: 'delivery_order', operation: 'read' }],
+  },
   ...Object.entries(CUSTOM_ADMIN_RESOURCES).flatMap(([prefix, resource]) =>
     [`/admin/${prefix}`, `/admin/${prefix}/*`].flatMap((matcher) =>
       Object.entries(METHODS_BY_OPERATION).map(([operation, methods]) => ({

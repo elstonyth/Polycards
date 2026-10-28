@@ -37,14 +37,15 @@ describe('Migration20261028150000 (goods receive notes)', () => {
     );
   });
 
-  it('adds purchase_invoice.from_grn_id, transferable once (reversals excluded)', async () => {
+  it('adds purchase_invoice.from_grn_id with a plain lookup index (one LIVE transfer is enforced under the GRN lock, not by a unique index)', async () => {
     const up = await emitted('up');
     expect(up).toMatch(
       /alter table if exists "purchase_invoice" add column if not exists "from_grn_id" text null;/,
     );
     expect(up).toMatch(
-      /CREATE UNIQUE INDEX IF NOT EXISTS "IDX_purchase_invoice_from_grn_unique" ON "purchase_invoice" \("from_grn_id"\) WHERE deleted_at IS NULL AND from_grn_id IS NOT NULL AND reverses_invoice_id IS NULL;/,
+      /CREATE INDEX IF NOT EXISTS "IDX_purchase_invoice_from_grn_id" ON "purchase_invoice" \("from_grn_id"\) WHERE deleted_at IS NULL AND from_grn_id IS NOT NULL;/,
     );
+    expect(up).not.toMatch(/UNIQUE INDEX[^;]*purchase_invoice/);
   });
 
   it("widens stock_movement.kind with 'goods_receive'", async () => {

@@ -1202,6 +1202,16 @@ function luckyDrawResultRow(
   };
 }
 
+// One line of a goods receive note / transfer invoice, compared as a multiset
+// by grnLineMismatch.
+type MirrorLine = {
+  card_handle: string;
+  qty: number;
+  fmv_snapshot?: unknown;
+  unit_cost?: unknown;
+};
+const rmKey = (v: unknown) => (Math.round(Number(v) * 100) / 100).toFixed(2);
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -15624,18 +15634,65 @@ class PacksModuleService extends MedusaService({
         input.lines,
         sharedContext,
       );
+      // A reversal carries the from_grn_id of the invoice it undoes. The
+      // route copies it; checking here makes it an invariant.
+      const [target] = await this.listPurchaseInvoices(
+        { id: input.reverses_invoice_id },
+        { take: 1 },
+        sharedContext,
+      );
+      if ((target?.from_grn_id ?? null) !== (input.from_grn_id ?? null)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          'A reversal must carry the from_grn_id of the invoice it reverses.',
+        );
+      }
+      if (target?.from_grn_id) {
+        // A transferred invoice is reversed whole or not at all. A full
+        // reversal re-opens its goods receive note (goodsReceiveNoteTransfer)
+        // for a corrected transfer — the one way to fix a wrong cost without
+        // counting the cards twice. A partial one would leave the note
+        // half-costed and still closed.
+        const targetLines = await pageAll((opts) =>
+          this.listPurchaseInvoiceLines(
+            { invoice_id: target.id },
+            opts,
+            sharedContext,
+          ),
+        );
+        const mismatch = this.grnLineMismatch(
+          targetLines.map((l) => ({
+            card_handle: l.card_handle,
+            qty: -Number(l.qty),
+            unit_cost: l.unit_cost,
+          })),
+          input.lines,
+          (l) => `${l.card_handle} x ${l.qty} @ cost ${rmKey(l.unit_cost)}`,
+          `invoice ${target.display_no}`,
+        );
+        if (mismatch) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            `An invoice transferred from a goods receive note can only be reversed in full: ${mismatch}`,
+          );
+        }
+      }
     } else if (input.from_grn_id) {
-      // A transfer: the GRN must still be open, and the invoice must carry
-      // exactly its cards and quantities — the cards are already on hand, the
-      // invoice only adds their cost. The once-only guarantee is
-      // IDX_purchase_invoice_from_grn_unique; the lock and check here turn a
-      // race into a clean message instead of a constraint error.
+      // A transfer: the GRN must have no live transfer, and the invoice must
+      // carry exactly its cards, quantities and FMV — the cards are already
+      // on hand, the invoice only adds their cost. The GRN's lock serializes
+      // transfers, so only one can be live at a time.
       const { grn, lines } = await this.lockOpenGoodsReceiveNote(
         input.from_grn_id,
         'transfer',
         sharedContext,
       );
-      const mismatch = this.grnLineMismatch(lines, input.lines);
+      const mismatch = this.grnLineMismatch(
+        lines,
+        input.lines,
+        (l) =>
+          `${l.card_handle} x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
+      );
       if (mismatch) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
@@ -15680,15 +15737,20 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    await this.createStockMovements(
-      lines.map((l) => ({
-        card_handle: l.card_handle,
-        kind: 'purchase' as const,
-        qty: l.qty,
-        ref_id: l.id,
-      })),
-      sharedContext,
-    );
+    // An invoice transferred from a goods receive note (or a reversal of
+    // one) moves no stock — the GRN's own 'goods_receive' rows already did —
+    // so it writes no 'purchase' movement either.
+    if (!input.from_grn_id) {
+      await this.createStockMovements(
+        lines.map((l) => ({
+          card_handle: l.card_handle,
+          kind: 'purchase' as const,
+          qty: l.qty,
+          ref_id: l.id,
+        })),
+        sharedContext,
+      );
+    }
 
     // The audit row rides this transaction with the invoice it describes.
     // admin_id IS agent_user_id: the route derives that field from
@@ -15758,14 +15820,26 @@ class PacksModuleService extends MedusaService({
   async openDeliveryOrdersForAllocation(
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
-    { id: string; status: string; created_at: Date; handles: string[] }[]
+    {
+      id: string;
+      status: string;
+      created_at: Date;
+      tracking_number: string | null;
+      handles: string[];
+    }[]
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<
-      { id: string; status: string; created_at: Date; card_id: string }[]
+      {
+        id: string;
+        status: string;
+        created_at: Date;
+        tracking_number: string | null;
+        card_id: string;
+      }[]
     >(
-      `SELECT dord.id, dord.status, dord.created_at, p.card_id
+      `SELECT dord.id, dord.status, dord.created_at, dord.tracking_number, p.card_id
          FROM delivery_order dord
          JOIN delivery_order_item doi
            ON doi.delivery_order_id = dord.id AND doi.deleted_at IS NULL
@@ -15776,13 +15850,20 @@ class PacksModuleService extends MedusaService({
     );
     const byId = new Map<
       string,
-      { id: string; status: string; created_at: Date; handles: string[] }
+      {
+        id: string;
+        status: string;
+        created_at: Date;
+        tracking_number: string | null;
+        handles: string[];
+      }
     >();
     for (const r of rows) {
       const o = byId.get(r.id) ?? {
         id: r.id,
         status: r.status,
         created_at: new Date(r.created_at),
+        tracking_number: r.tracking_number,
         handles: [],
       };
       o.handles.push(r.card_id);
@@ -15807,19 +15888,23 @@ class PacksModuleService extends MedusaService({
     ]);
   }
 
-  // The invoice a GRN was transferred into, or null. Only the ORIGINAL
-  // transfer counts: a reversal of that invoice carries the same from_grn_id.
+  // The invoice a GRN is transferred into right now, or null. A transfer
+  // stops counting once a reversal undoes it — a transferred invoice can only
+  // be reversed in full (createPurchaseInvoiceWithLines) — which re-opens the
+  // note for a corrected transfer. Reversals carry the same from_grn_id.
   @InjectManager()
   async goodsReceiveNoteTransfer(
     grnId: string,
     @MedusaContext() sharedContext: Context = {},
   ) {
-    const [invoice] = await this.listPurchaseInvoices(
-      { from_grn_id: grnId, reverses_invoice_id: null },
-      { take: 1 },
-      sharedContext,
+    const invoices = await pageAll((opts) =>
+      this.listPurchaseInvoices({ from_grn_id: grnId }, opts, sharedContext),
     );
-    return invoice ?? null;
+    const reversed = new Set(invoices.map((i) => i.reverses_invoice_id));
+    return (
+      invoices.find((i) => !i.reverses_invoice_id && !reversed.has(i.id)) ??
+      null
+    );
   }
 
   // Loads a GRN for a reversal or a transfer, under its lock, and refuses one
@@ -15871,24 +15956,25 @@ class PacksModuleService extends MedusaService({
     return { grn, lines };
   }
 
-  // A GRN mirrors as a multiset of (card_handle, qty): a reversal must carry
-  // every line negated, a transfer every line as-is. Returns the first
-  // mismatch as operator copy, or null.
+  // Compares two line sets as a multiset of `key` (default card_handle x
+  // qty): a GRN reversal must carry every line negated, a transfer every line
+  // with its FMV, a transferred invoice's reversal every line with its cost.
+  // Returns the first mismatch as operator copy, or null.
   private grnLineMismatch(
-    expected: { card_handle: string; qty: number }[],
-    actual: { card_handle: string; qty: number }[],
+    expected: MirrorLine[],
+    actual: MirrorLine[],
+    key: (l: MirrorLine) => string = (l) => `${l.card_handle} x ${l.qty}`,
+    source = 'the goods receive note',
   ): string | null {
-    const key = (l: { card_handle: string; qty: number }) =>
-      `${l.card_handle} x ${l.qty}`;
     const left = new Map<string, number>();
     for (const l of expected) left.set(key(l), (left.get(key(l)) ?? 0) + 1);
     for (const l of actual) {
       const n = left.get(key(l)) ?? 0;
-      if (n === 0) return `line '${key(l)}' is not on the goods receive note.`;
+      if (n === 0) return `line '${key(l)}' is not on ${source}.`;
       left.set(key(l), n - 1);
     }
     for (const [k, n] of left) {
-      if (n > 0) return `line '${k}' from the goods receive note is missing.`;
+      if (n > 0) return `line '${k}' from ${source} is missing.`;
     }
     return null;
   }
@@ -15914,6 +16000,14 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ) {
+    // The route validator already refuses these; repeated here because the
+    // method is public and a negative receipt would silently lower On hand.
+    if (!input.reverses_grn_id && input.lines.some((l) => !(l.qty > 0))) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Goods receive note lines need a quantity above 0; a correction is a reversal.',
+      );
+    }
     if (input.reverses_grn_id) {
       const { grn, lines } = await this.lockOpenGoodsReceiveNote(
         input.reverses_grn_id,

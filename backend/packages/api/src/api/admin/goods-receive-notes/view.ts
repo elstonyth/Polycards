@@ -18,6 +18,22 @@ type Grn = Awaited<
   ReturnType<PacksModuleService['listGoodsReceiveNotes']>
 >[number];
 type Ref = { id: string; display_no: string };
+type Invoice = Awaited<
+  ReturnType<PacksModuleService['listPurchaseInvoices']>
+>[number];
+
+// GRN id -> the invoice it is transferred into right now. Takes every invoice
+// carrying a from_grn_id, reversals included: a transfer whose invoice has
+// been reversed (always in full) no longer counts, and the GRN is open again
+// — the same rule as service.goodsReceiveNoteTransfer.
+const liveTransfers = (invoices: Invoice[]): Map<string, Invoice> => {
+  const reversed = new Set(invoices.map((i) => i.reverses_invoice_id));
+  return new Map(
+    invoices
+      .filter((i) => !i.reverses_invoice_id && !reversed.has(i.id))
+      .map((i) => [i.from_grn_id as string, i]),
+  );
+};
 
 // The ids no longer open: reversed ones and transferred ones. Feeds the list's
 // ?status=open filter (the invoice form's GRN picker).
@@ -34,13 +50,13 @@ export async function closedGrnIds(
   );
   const transfers = await pageAll((opts) =>
     packs.listPurchaseInvoices(
-      { from_grn_id: { $ne: null }, reverses_invoice_id: null },
-      { ...opts, select: ['id', 'from_grn_id'] },
+      { from_grn_id: { $ne: null } },
+      { ...opts, select: ['id', 'from_grn_id', 'reverses_invoice_id'] },
     ),
   );
   return [
     ...reversals.map((g) => g.reverses_grn_id as string),
-    ...transfers.map((i) => i.from_grn_id as string),
+    ...liveTransfers(transfers).keys(),
   ];
 }
 
@@ -61,10 +77,7 @@ export async function describeGrns(container: MedusaContainer, grns: Grn[]) {
     : [];
   const invoices = ids.length
     ? await pageAll((opts) =>
-        packs.listPurchaseInvoices(
-          { from_grn_id: ids, reverses_invoice_id: null },
-          opts,
-        ),
+        packs.listPurchaseInvoices({ from_grn_id: ids }, opts),
       )
     : [];
   const reversedTargets = [
@@ -92,7 +105,7 @@ export async function describeGrns(container: MedusaContainer, grns: Grn[]) {
     reversals.map((r) => [r.reverses_grn_id as string, ref(r)]),
   );
   const invoiceBy = new Map(
-    invoices.map((i) => [i.from_grn_id as string, ref(i)]),
+    [...liveTransfers(invoices)].map(([grnId, i]) => [grnId, ref(i)]),
   );
   const targetBy = new Map(targets.map((t) => [t.id, ref(t)]));
   const emailBy = new Map(agents.map((u) => [u.id, u.email]));

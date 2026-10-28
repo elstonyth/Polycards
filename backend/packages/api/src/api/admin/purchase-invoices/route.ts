@@ -125,7 +125,10 @@ export async function POST(
   });
 
   // New cards on hand may complete waiting orders (oldest first).
-  await runStockAllocationAfterSave(req.scope);
+  await runStockAllocationAfterSave(
+    req.scope,
+    `${result.display_no} by ${req.auth_context.actor_id}`,
+  );
   res.status(201).json({ invoice: result });
 }
 

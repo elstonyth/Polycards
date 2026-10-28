@@ -238,6 +238,14 @@ medusaIntegrationTestRunner({
         expect(late.status).toBe(400);
         expect(late.data.message).toMatch(/already transferred/);
 
+        // A transferred invoice is reversed in full or not at all.
+        const partial = await invoice({
+          reverses_invoice_id: pi.data.invoice.id,
+          lines: [{ ...line, qty: -1 }],
+        });
+        expect(partial.status).toBe(400);
+        expect(partial.data.message).toMatch(/can only be reversed in full/);
+
         // Fixing the invoice's cost must not take the cards back off the shelf.
         const undo = await invoice({
           reverses_invoice_id: pi.data.invoice.id,
@@ -248,6 +256,36 @@ medusaIntegrationTestRunner({
           on_hand: 2,
           counter: 2,
         });
+
+        // ...and the full reversal re-opens the note, so the corrected cost is
+        // a fresh transfer — not a plain invoice that would count the 2 cards
+        // a second time (review finding 2026-10-28).
+        expect((await detail(received.id)).status).toBe('open');
+        expect(await openIds()).toContain(received.id);
+        const fixed = await invoice({
+          from_grn_id: received.id,
+          lines: [{ ...line, unit_cost: 50 }],
+        });
+        expect(fixed.status).toBe(201);
+        expect(await stockOf('grn-transfer')).toEqual({
+          on_hand: 2,
+          counter: 2,
+          cost: 50,
+        });
+        const now = await detail(received.id);
+        expect(now.status).toBe('transferred');
+        expect(now.invoice.display_no).toBe(fixed.data.invoice.display_no);
+
+        // Cost-only invoices write no stock movement: the history shows the
+        // 2 cards once, from the GRN.
+        const history = await unwrapResponse(
+          api.get('/admin/inventory/grn-transfer', headers()),
+        );
+        expect(
+          history.data.movements.rows.map(
+            (m: { kind: string; qty: number }) => `${m.kind}:${m.qty}`,
+          ),
+        ).toEqual(['goods_receive:2']);
       });
 
       it('refuses a transfer whose lines differ from the GRN', async () => {
@@ -268,6 +306,23 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(400);
         expect(res.data.message).toMatch(/every line of GRN-\d{5} unchanged/);
         expect((await detail(received.id)).status).toBe('open');
+
+        // Same cards and qty but another FMV is refused too: only the cost is
+        // the operator's on a transfer.
+        const fmv = await invoice({
+          from_grn_id: received.id,
+          lines: [
+            {
+              card_handle: 'grn-mismatch',
+              card_name: 'grn-mismatch',
+              fmv_snapshot: 999,
+              qty: 2,
+              unit_cost: 60,
+            },
+          ],
+        });
+        expect(fmv.status).toBe(400);
+        expect(fmv.data.message).toMatch(/@ FMV 999\.00/);
       });
     });
   },

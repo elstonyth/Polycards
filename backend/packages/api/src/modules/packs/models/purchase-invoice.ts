@@ -22,9 +22,9 @@ export const PurchaseInvoice = model
     reverses_invoice_id: model.text().nullable(),
     // Set when this invoice was made with "transfer from goods receive note":
     // the cards were already counted on hand by that GRN, so this invoice adds
-    // cost only (never stock). A reversal of such an invoice inherits it. One
-    // non-reversal invoice per GRN — IDX_purchase_invoice_from_grn_unique
-    // (Migration20261028150000).
+    // cost only (never stock). A reversal of such an invoice inherits it and
+    // must be a full one, which re-opens the GRN for a corrected transfer.
+    // One live transfer per GRN, enforced under the GRN's advisory lock.
     from_grn_id: model.text().nullable(),
   })
   .indexes([

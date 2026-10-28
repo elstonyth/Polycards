@@ -48,6 +48,14 @@ medusaIntegrationTestRunner({
           ADMIN_EMAIL,
           PASSWORD,
         );
+        // A GRN save refuses without a firm FX rate (same gate as invoices).
+        await unwrapResponse(
+          api.post(
+            '/admin/pricing/fx',
+            { manual_override: true, manual_rate: 4.5, reason: 'pin for test' },
+            headers(),
+          ),
+        );
       });
 
       const makeProduct = (handle: string) =>
@@ -151,6 +159,29 @@ medusaIntegrationTestRunner({
         expect(need('alloc-a')).toBe(1); // 2 wanted, 1 on hand
         expect(need('alloc-b')).toBe(1);
         expect(need('alloc-c')).toBe(0);
+      });
+
+      it('keeps a tracking number staff already entered, and names the save in the audit reason', async () => {
+        await makeProduct('alloc-track');
+        const order = await requestOrder('cus_track', ['alloc-track']);
+        await packs.updateDeliveryOrders([
+          { id: order, status: 'processed', tracking_number: 'TRK-123' },
+        ]);
+        const saved = await receive('alloc-track', 1);
+        expect(saved.status).toBe(201);
+        const [row] = await packs.listDeliveryOrders(
+          { id: order },
+          { take: 1 },
+        );
+        expect(row.status).toBe('ready_to_ship');
+        expect(row.tracking_number).toBe('TRK-123');
+        const [audit] = await packs.listAdminActionAudits(
+          { entity_id: order, admin_id: 'system:stock-allocation' },
+          { take: 1 },
+        );
+        expect(audit.reason).toContain(
+          `after ${saved.data.goods_receive_note.display_no} by `,
+        );
       });
 
       it('moves nothing on save while STOCK_AUTO_ALLOCATION is off', async () => {

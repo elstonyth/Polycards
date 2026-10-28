@@ -4,10 +4,11 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 //  - goods_receive_note + goods_receive_note_line, and goods_receive_note_seq
 //    behind display_no's "GRN-00001" (same shape as purchase_invoice_seq);
 //  - one reversal per GRN (IDX_goods_receive_note_reverses_unique);
-//  - purchase_invoice.from_grn_id, "transfer from goods receive note". One
-//    NON-reversal invoice per GRN (IDX_purchase_invoice_from_grn_unique); a
-//    reversal of a transferred invoice carries the same from_grn_id, so it is
-//    left out of the index;
+//  - purchase_invoice.from_grn_id, "transfer from goods receive note". No
+//    unique index: a transfer reversed in full re-opens its GRN for a
+//    corrected transfer, so one GRN can carry several invoices over time;
+//    only one is live at once, enforced under the GRN's advisory lock
+//    (service.lockOpenGoodsReceiveNote);
 //  - stock_movement.kind gains 'goods_receive' (one row per GRN line);
 //  - admin_action_audit's entity_type CHECK gains 'goods_receive_note'. Both
 //    CHECK lists are re-emitted in full, as every CHECK-rewriting migration
@@ -148,7 +149,7 @@ export class Migration20261028150000 extends Migration {
       `alter table if exists "purchase_invoice" add column if not exists "from_grn_id" text null;`,
     );
     this.addSql(
-      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_purchase_invoice_from_grn_unique" ON "purchase_invoice" ("from_grn_id") WHERE deleted_at IS NULL AND from_grn_id IS NOT NULL AND reverses_invoice_id IS NULL;`,
+      `CREATE INDEX IF NOT EXISTS "IDX_purchase_invoice_from_grn_id" ON "purchase_invoice" ("from_grn_id") WHERE deleted_at IS NULL AND from_grn_id IS NOT NULL;`,
     );
 
     this.kinds(KINDS_AFTER);
@@ -170,7 +171,7 @@ export class Migration20261028150000 extends Migration {
       END $$;`);
     this.checks(ENTITY_TYPES_BEFORE, ACTIONS);
     this.kinds(KINDS_BEFORE);
-    this.addSql(`DROP INDEX IF EXISTS "IDX_purchase_invoice_from_grn_unique";`);
+    this.addSql(`DROP INDEX IF EXISTS "IDX_purchase_invoice_from_grn_id";`);
     this.addSql(
       `alter table if exists "purchase_invoice" drop column if exists "from_grn_id";`,
     );
