@@ -105,6 +105,7 @@ export function createVad(
     minSpeechMs?: number; // default 250: shorter bursts are not speech
     noSpeechMs?: number; // default 8000: nothing said this long = 'timeout'
     maxMs?: number; // default 60000: hard stop = 'ended'
+    sensitivity?: number; // default 1: below 1 needs louder speech (the bar is divided by it)
   } = {},
 ): { push(rms: number, frameMs: number): VadState } {
   const {
@@ -112,6 +113,7 @@ export function createVad(
     minSpeechMs = 250,
     noSpeechMs = 8000,
     maxMs = 60000,
+    sensitivity = 1,
   } = opts;
   let elapsed = 0;
   let calibrated = 0;
@@ -127,7 +129,10 @@ export function createVad(
       if (elapsed <= CALIBRATE_MS) {
         calibrated++;
         floor = Math.min(FLOOR_CAP, floor + (rms - floor) / calibrated);
-      } else if (rms > Math.max(floor * FLOOR_FACTOR, MIN_SPEECH_RMS)) {
+      } else if (
+        rms >
+        Math.max(floor * FLOOR_FACTOR, MIN_SPEECH_RMS) / sensitivity
+      ) {
         run += frameMs;
         silent = 0;
         if (run >= minSpeechMs) spoke = true;
@@ -192,6 +197,78 @@ class VoiceTap extends AudioWorkletProcessor {
 registerProcessor('voice-tap', VoiceTap);
 `;
 
+function rmsOf(frame: Float32Array): number {
+  let sum = 0;
+  for (const s of frame) sum += s * s;
+  return Math.sqrt(sum / frame.length);
+}
+
+// dB scale (-60..-10 dB) so quiet speech still moves the meter
+function toLevel(rms: number): number {
+  return Math.max(0, Math.min(1, (20 * Math.log10(rms + 1e-9) + 60) / 50));
+}
+
+/** Opens the mic (echoCancellation, noiseSuppression, autoGainControl, mono)
+ *  on a new context. Throws MicError('denied' | 'unavailable'). */
+async function openMic(): Promise<{ ctx: AudioContext; stream: MediaStream }> {
+  const Ctx = audioContextCtor();
+  // getUserMedia is missing outside a secure context (plain http)
+  if (!Ctx || !navigator.mediaDevices?.getUserMedia)
+    throw new MicError('unavailable');
+  // made before the permission await so iOS still counts the tap as the gesture
+  const ctx = new Ctx();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
+    });
+    return { ctx, stream };
+  } catch (err) {
+    void ctx.close();
+    const denied =
+      err instanceof DOMException &&
+      (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    throw new MicError(denied ? 'denied' : 'unavailable');
+  }
+}
+
+/** Feeds the mic to onFrame, FRAME samples at a time. */
+async function tapMic(
+  ctx: AudioContext,
+  stream: MediaStream,
+  onFrame: (frame: Float32Array) => void,
+): Promise<void> {
+  const source = ctx.createMediaStreamSource(stream);
+  let tap: AudioNode;
+  if (ctx.audioWorklet) {
+    const url = URL.createObjectURL(
+      new Blob([TAP_WORKLET], { type: 'text/javascript' }),
+    );
+    try {
+      await ctx.audioWorklet.addModule(url);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    const node = new AudioWorkletNode(ctx, 'voice-tap');
+    node.port.onmessage = (e: MessageEvent<Float32Array>) => onFrame(e.data);
+    tap = node;
+  } else {
+    // Safari < 14.1 has no AudioWorklet; the deprecated ScriptProcessorNode still works there
+    const node = ctx.createScriptProcessor(FRAME, 1, 1);
+    node.onaudioprocess = (e) =>
+      onFrame(e.inputBuffer.getChannelData(0).slice());
+    tap = node;
+  }
+  source.connect(tap);
+  // the tap outputs silence; it must reach destination or the browser won't run it
+  tap.connect(ctx.destination);
+  if (ctx.state === 'suspended') void ctx.resume();
+}
+
 /** Opens the mic (echoCancellation, noiseSuppression, autoGainControl, mono).
  *  With autoStop it ends by itself once the speaker goes quiet (createVad).
  *  onLevel gets 0..1 for a level meter about 20 times a second.
@@ -201,29 +278,7 @@ export async function startRecording(opts: {
   onLevel?: (level: number) => void;
   onSpeech?: () => void; // first time speech is detected
 }): Promise<Recording> {
-  const Ctx = audioContextCtor();
-  if (!Ctx || !navigator.mediaDevices?.getUserMedia)
-    throw new MicError('unavailable');
-  // made before the permission await so iOS still counts the tap as the gesture
-  const ctx = new Ctx();
-  let stream: MediaStream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      },
-    });
-  } catch (err) {
-    void ctx.close();
-    const denied =
-      err instanceof DOMException &&
-      (err.name === 'NotAllowedError' || err.name === 'SecurityError');
-    throw new MicError(denied ? 'denied' : 'unavailable');
-  }
-
+  const { ctx, stream } = await openMic();
   const rate = ctx.sampleRate;
   const frames: Float32Array[] = [];
   const vad = createVad();
@@ -235,6 +290,7 @@ export async function startRecording(opts: {
   const finish = (keep: boolean) => {
     if (finished) return;
     finished = true;
+    window.removeEventListener('pagehide', onHide);
     stream.getTracks().forEach((t) => t.stop());
     void ctx.close();
     // under minSpeechMs of speech the VAD never says 'speaking': nothing worth sending
@@ -249,17 +305,15 @@ export async function startRecording(opts: {
       bytesToBase64(encodeWav(downsample(all, rate, RECORD_RATE), RECORD_RATE)),
     );
   };
+  // leaving the page drops it, so a page back from the bfcache doesn't send it
+  const onHide = () => finish(false);
+  window.addEventListener('pagehide', onHide);
 
   const onFrame = (frame: Float32Array) => {
     if (finished) return;
     frames.push(frame);
-    let sum = 0;
-    for (const s of frame) sum += s * s;
-    const rms = Math.sqrt(sum / frame.length);
-    // dB scale (-60..-10 dB) so quiet speech still moves the meter
-    opts.onLevel?.(
-      Math.max(0, Math.min(1, (20 * Math.log10(rms + 1e-9) + 60) / 50)),
-    );
+    const rms = rmsOf(frame);
+    opts.onLevel?.(toLevel(rms));
     const state = vad.push(rms, (frame.length / rate) * 1000);
     if (state === 'speaking' && !heard) {
       heard = true;
@@ -270,32 +324,8 @@ export async function startRecording(opts: {
   };
 
   try {
-    const source = ctx.createMediaStreamSource(stream);
-    let tap: AudioNode;
-    if (ctx.audioWorklet) {
-      const url = URL.createObjectURL(
-        new Blob([TAP_WORKLET], { type: 'text/javascript' }),
-      );
-      try {
-        await ctx.audioWorklet.addModule(url);
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-      const node = new AudioWorkletNode(ctx, 'voice-tap');
-      node.port.onmessage = (e: MessageEvent<Float32Array>) => onFrame(e.data);
-      tap = node;
-    } else {
-      // Safari < 14.1 has no AudioWorklet; the deprecated ScriptProcessorNode still works there
-      const node = ctx.createScriptProcessor(FRAME, 1, 1);
-      node.onaudioprocess = (e) =>
-        onFrame(e.inputBuffer.getChannelData(0).slice());
-      tap = node;
-    }
-    source.connect(tap);
-    // the tap outputs silence; it must reach destination or the browser won't run it
-    tap.connect(ctx.destination);
-    if (ctx.state === 'suspended') void ctx.resume();
-    // mic unplugged or permission revoked mid-recording: no more frames would ever come
+    await tapMic(ctx, stream, onFrame);
+    // mic unplugged or permission revoked mid-recording: no more frames would ever come, keep what was said
     stream.getAudioTracks()[0]?.addEventListener('ended', () => finish(true));
   } catch {
     finish(false);
@@ -305,22 +335,109 @@ export async function startRecording(opts: {
   return { done, stop: () => finish(true), cancel: () => finish(false) };
 }
 
-/** Plays streamed PCM16 chunks gaplessly as they arrive. */
+// the bar is doubled: the answer leaking from the speakers past echo cancellation must not count
+const BARGE_IN_SENSITIVITY = 0.5;
+
+/** Listens while an answer plays and calls onSpeech once when the person talks
+ *  over it, then stops by itself. Keeps no audio.
+ *  Throws MicError('denied' | 'unavailable') when the mic can't open. */
+export async function startBargeIn(opts: {
+  onSpeech: () => void;
+  minSpeechMs?: number; // default 350
+}): Promise<{ stop(): void }> {
+  const { ctx, stream } = await openMic();
+  const vad = createVad({
+    sensitivity: BARGE_IN_SENSITIVITY,
+    minSpeechMs: opts.minSpeechMs ?? 350,
+    // it listens as long as the answer lasts
+    noSpeechMs: Infinity,
+    maxMs: Infinity,
+  });
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    window.removeEventListener('pagehide', stop);
+    stream.getTracks().forEach((t) => t.stop());
+    void ctx.close();
+  };
+  window.addEventListener('pagehide', stop);
+  try {
+    await tapMic(ctx, stream, (frame) => {
+      if (stopped) return;
+      const ms = (frame.length / ctx.sampleRate) * 1000;
+      if (vad.push(rmsOf(frame), ms) === 'speaking') {
+        stop();
+        opts.onSpeech();
+      }
+    });
+  } catch {
+    stop();
+    throw new MicError('unavailable');
+  }
+  return { stop };
+}
+
+// One playback context for every answer: iOS unlocks a context once, in a tap.
+let playCtx: AudioContext | undefined;
+
+function playbackContext(): AudioContext {
+  if (!playCtx) {
+    const Ctx = audioContextCtor();
+    if (!Ctx) throw new Error('Web Audio is not available');
+    playCtx = new Ctx();
+  }
+  return playCtx;
+}
+
+/** Call synchronously in a tap handler before answers play:
+ *  iOS/Safari only let audio start inside a gesture. */
+export function unlockAudio(): void {
+  if (!audioContextCtor()) return;
+  const ctx = playbackContext();
+  if (ctx.state !== 'running') void ctx.resume();
+  // a sound started in the gesture is what unlocks iOS; one silent sample is enough
+  const src = ctx.createBufferSource();
+  src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+  src.connect(ctx.destination);
+  src.start();
+}
+
+/** Plays streamed PCM16 chunks gaplessly as they arrive, on the shared context.
+ *  onLevel gets 0..1 about 20 times a second until it ends, then 0. */
 export class PcmPlayer {
   readonly ended: Promise<void>;
   private readonly ctx: AudioContext;
+  private readonly out: GainNode; // this answer's own bus, so stop() silences only it
+  private readonly onLevel?: (level: number) => void;
+  private readonly meter?: ReturnType<typeof setInterval>;
   private readonly sources = new Set<AudioBufferSourceNode>();
   private nextStart = 0;
   private carry: number | undefined; // odd trailing byte, completed by the next chunk
   private finished = false;
   private over = false;
   private resolveEnded: () => void = () => {};
+  private readonly onHide = () => this.stop();
 
-  constructor(private readonly sampleRate: number = PLAY_RATE) {
-    const Ctx = audioContextCtor();
-    if (!Ctx) throw new Error('Web Audio is not available');
-    // make the player inside the tap handler: iOS only unlocks audio for a context made in a gesture
-    this.ctx = new Ctx();
+  constructor(
+    private readonly sampleRate: number = PLAY_RATE,
+    opts: { onLevel?: (level: number) => void } = {},
+  ) {
+    this.ctx = playbackContext();
+    this.out = this.ctx.createGain();
+    this.out.connect(this.ctx.destination);
+    const { onLevel } = opts;
+    this.onLevel = onLevel;
+    if (onLevel) {
+      const analyser = this.ctx.createAnalyser();
+      this.out.connect(analyser);
+      const data = new Float32Array(analyser.fftSize);
+      this.meter = setInterval(() => {
+        analyser.getFloatTimeDomainData(data);
+        onLevel(toLevel(rmsOf(data)));
+      }, 50);
+    }
+    window.addEventListener('pagehide', this.onHide);
     this.ended = new Promise((resolve) => (this.resolveEnded = resolve));
   }
 
@@ -331,7 +448,8 @@ export class PcmPlayer {
 
   push(base64: string): void {
     if (this.over || this.finished) return;
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    // 'suspended', or Safari's 'interrupted' after a phone call
+    if (this.ctx.state !== 'running') void this.ctx.resume();
     let bytes = base64ToBytes(base64);
     if (this.carry !== undefined) {
       const joined = new Uint8Array(bytes.length + 1);
@@ -350,7 +468,7 @@ export class PcmPlayer {
     buffer.getChannelData(0).set(samples);
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
-    src.connect(this.ctx.destination);
+    src.connect(this.out);
     const at = Math.max(this.ctx.currentTime, this.nextStart);
     src.start(at);
     this.nextStart = at + buffer.duration;
@@ -378,7 +496,11 @@ export class PcmPlayer {
   private end(): void {
     if (this.over) return;
     this.over = true;
-    void this.ctx.close();
+    clearInterval(this.meter);
+    this.onLevel?.(0);
+    // the context is shared: unplug this answer, never close it
+    this.out.disconnect();
+    window.removeEventListener('pagehide', this.onHide);
     this.resolveEnded();
   }
 }

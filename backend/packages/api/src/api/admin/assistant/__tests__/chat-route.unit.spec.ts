@@ -82,6 +82,7 @@ const service = {
   listAssistantMessages: jest.fn(async () => []),
   createAssistantMessages: jest.fn(async () => ({ id: 'msg_1' })),
   updateAssistantConversations: jest.fn(async () => ({})),
+  softDeleteAssistantConversations: jest.fn(async () => ({})),
 };
 const logger = { info: jest.fn(), warn: jest.fn() };
 
@@ -135,6 +136,7 @@ it('gives the answer what is left of today’s cap', async () => {
   const p = post();
   await p.done;
   expect(runTurnMock.mock.calls[0][0].budgetUsd).toBe(5 - 1.25);
+  expect(runTurnMock.mock.calls[0][0].spoken).toBe(false);
   expect(p.events().at(-1)).toMatchObject({
     type: 'done',
     message_id: 'msg_1',
@@ -163,6 +165,7 @@ it('asks a spoken question as it was heard, and charges the listening with the a
   expect(runTurnMock.mock.calls[0][0]).toMatchObject({
     userText: 'how many packs today?',
     budgetUsd: 5 - 1.25 - 0.001,
+    spoken: true,
   });
   const calls = service.createAssistantMessages.mock.calls as unknown as [
     { role: string; content: string; cost_usd?: number },
@@ -174,11 +177,20 @@ it('asks a spoken question as it was heard, and charges the listening with the a
   expect(calls[1][0].cost_usd).toBeCloseTo(0.011);
 });
 
-it('says it did not catch a recording with no speech, and asks nothing', async () => {
+it('answers a typed Talk-mode follow-up for the ear only when spoken is true', async () => {
+  await post({ message: 'and yesterday?', spoken: true }).done;
+  await post({ message: 'and yesterday?', spoken: 'yes' }).done;
+  expect(runTurnMock.mock.calls.map(([o]) => o.spoken)).toEqual([true, false]);
+});
+
+it('says it did not catch a recording with no speech, asks nothing, and still charges the listening', async () => {
   (transcribe as jest.MockedFunction<typeof transcribe>).mockResolvedValueOnce({
     text: '',
     cost: 0.0002,
   });
+  service.createAssistantConversations.mockClear();
+  service.createAssistantMessages.mockClear();
+  service.softDeleteAssistantConversations.mockClear();
   const p = post({ audio: 'UklGRg==' });
   await p.done;
   expect(p.events()).toEqual([
@@ -186,7 +198,52 @@ it('says it did not catch a recording with no speech, and asks nothing', async (
     expect.objectContaining({ type: 'error', code: 'no_speech' }),
   ]);
   expect(runTurnMock).not.toHaveBeenCalled();
+  expect(service.createAssistantConversations).toHaveBeenCalledWith(
+    expect.objectContaining({ title: '(voice) nothing heard' }),
+  );
+  expect(service.createAssistantMessages.mock.calls).toEqual([
+    [
+      {
+        conversation_id: 'conv_1',
+        role: 'voice',
+        content: '',
+        model: 'google/gemini-3.5-flash-lite',
+        cost_usd: 0.0002,
+      },
+    ],
+  ]);
+  // Hidden from the staff list, still counted by spentToday (withDeleted).
+  expect(service.softDeleteAssistantConversations).toHaveBeenCalledWith([
+    'conv_1',
+  ]);
   expect(locks.size).toBe(0);
+});
+
+it('charges hearing nothing to the chat it was asked in, and keeps that chat', async () => {
+  (transcribe as jest.MockedFunction<typeof transcribe>).mockResolvedValueOnce({
+    text: '',
+    cost: 0.0003,
+  });
+  service.listAssistantConversations.mockResolvedValueOnce([
+    { id: 'conv_9', title: 'old' },
+  ] as never);
+  service.createAssistantConversations.mockClear();
+  service.createAssistantMessages.mockClear();
+  service.updateAssistantConversations.mockClear();
+  service.softDeleteAssistantConversations.mockClear();
+  await post({ audio: 'UklGRg==', conversation_id: 'conv_9' }).done;
+  expect(service.createAssistantConversations).not.toHaveBeenCalled();
+  expect(service.createAssistantMessages).toHaveBeenCalledWith(
+    expect.objectContaining({
+      conversation_id: 'conv_9',
+      role: 'voice',
+      cost_usd: 0.0003,
+    }),
+  );
+  expect(service.updateAssistantConversations).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'conv_9' }),
+  );
+  expect(service.softDeleteAssistantConversations).not.toHaveBeenCalled();
 });
 
 it('refuses a recording that is not base64', async () => {

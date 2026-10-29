@@ -1891,7 +1891,9 @@
       "refsAdd": "Add a reference",
       "refsRemove": "Remove reference",
       "refsUseDefault": "Back to the defaults",
-      "refsReplace": "Your own posts replace the built-in set. Remove all of yours to bring the built-in set back."
+      "refsReplace": "Your own posts replace the built-in set. Remove all of yours to bring the built-in set back.",
+      "hearVoice": "Hear it",
+      "stopVoice": "Stop"
     },
     "review": {
       "title": "Assistant conversations",
@@ -1904,7 +1906,12 @@
       "turns": "Questions",
       "failed": "Failed",
       "cost": "Cost",
-      "deleted": "Deleted"
+      "deleted": "Deleted",
+      "search": "Search titles and messages",
+      "allStaff": "All staff",
+      "noMatches": "No chats match.",
+      "readAloud": "Read aloud: {{count}}",
+      "voiceCost": "Voice: USD {{cost}} of this"
     },
     "deleteConfirm": "Delete this chat? It stays in the owner's review.",
     "stopped": "Stopped before an answer.",
@@ -1912,7 +1919,7 @@
       "talk": "Talk",
       "endTalk": "End talk",
       "talkHint": "Speak, then pause: the answer is read aloud.",
-      "tapToInterrupt": "Tap the orb to interrupt.",
+      "tapToInterrupt": "Just talk, or tap the orb, to interrupt.",
       "interrupt": "Interrupt and listen",
       "hearing": "🎙 Listening…",
       "nothingHeard": "I didn't catch that. Try again.",
@@ -1929,7 +1936,8 @@
         "ask": "Ask by voice",
         "denied": "Microphone blocked. Allow it in the browser’s site settings.",
         "unavailable": "No microphone could be opened."
-      }
+      },
+      "talkEndedSilent": "Talk ended: I didn’t hear anything."
     },
     "history": "History",
     "imageFailed": "The image could not be loaded.",
@@ -1982,6 +1990,22 @@
       "schedule_task": "Schedule task",
       "list_schedules": "Scheduled tasks",
       "cancel_schedule": "Cancel task"
-    }
+    },
+    "spend": {
+      "today": "USD {{spent}} / {{cap}} today",
+      "reached": "USD {{cap}} limit reached",
+      "resets": "Resets at 00:00 Malaysia time"
+    },
+    "markdown": {
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy"
+    },
+    "copy": "Copy",
+    "copied": "Copied.",
+    "copyFailed": "Could not copy.",
+    "tryAgain": "Try again",
+    "jumpToLatest": "Jump to latest",
+    "retryTextOnly": "Asked again with the text only: screenshots are not sent again."
   }
 }

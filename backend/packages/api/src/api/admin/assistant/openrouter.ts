@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from 'node:timers/promises';
+
 // OpenRouter's chat completions (OpenAI-compatible), streamed (spec
 // 2026-10-29). Tests point ASSISTANT_OPENROUTER_BASE at a local fake;
 // nothing else does.
@@ -79,9 +81,27 @@ export async function generationCost(
 export type ChatContent =
   | string
   | (
-      | { type: 'text'; text: string }
+      | { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }
       | { type: 'image_url'; image_url: { url: string } }
     )[];
+
+/** The system prompt, cacheable on Anthropic models: their cache covers the
+ *  tools and system text up to a cache_control mark, so the mark ends the
+ *  text before "Now:", the first line that changes between questions. Other
+ *  providers cache by themselves and OpenRouter's docs never say a mark is
+ *  harmless there, so they get the plain text. */
+export function systemContent(model: string, text: string): ChatContent {
+  const cut = text.indexOf('\nNow: ') + 1;
+  if (!/^anthropic\//i.test(model) || !cut) return text;
+  return [
+    {
+      type: 'text',
+      text: text.slice(0, cut),
+      cache_control: { type: 'ephemeral' },
+    },
+    { type: 'text', text: text.slice(cut) },
+  ];
+}
 
 export type ToolCall = { id: string; name: string; arguments: string };
 
@@ -139,6 +159,8 @@ type Chunk = {
   }[];
 };
 
+const BUSY = new Set([429, 502, 503, 504]);
+
 /** Streams one completion: text as it comes, then the tool calls it asked
  *  for (if any), then what it cost. */
 export async function* streamChat(opts: {
@@ -150,7 +172,7 @@ export async function* streamChat(opts: {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): AsyncGenerator<StreamEvent> {
-  const answer = await (opts.fetchImpl ?? fetch)(openRouterUrl(), {
+  const init: RequestInit = {
     method: 'POST',
     headers: {
       authorization: `Bearer ${opts.key}`,
@@ -167,7 +189,26 @@ export async function* streamChat(opts: {
       usage: { include: true },
     }),
     signal: opts.signal,
-  });
+  };
+  // One retry when OpenRouter is busy or out of reach: only before anything
+  // streamed (a started answer is billed) and never once the turn stopped.
+  let answer!: Response;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let wait = 800;
+    try {
+      answer = await (opts.fetchImpl ?? fetch)(openRouterUrl(), init);
+      if (attempt || !BUSY.has(answer.status)) break;
+      const after = Number(answer.headers.get('retry-after') ?? NaN);
+      if (after >= 0) wait = Math.min(after * 1000, 3000);
+      void answer.body?.cancel().catch(() => undefined);
+    } catch (err) {
+      if (attempt || opts.signal?.aborted) throw err;
+    }
+    // The signal's own reason, so a round timeout stays a TimeoutError.
+    await sleep(wait, undefined, { signal: opts.signal }).catch(() => {
+      throw opts.signal?.reason;
+    });
+  }
   if (!answer.ok || !answer.body) {
     const body = (await answer.json().catch(() => null)) as Chunk | null;
     throw new OpenRouterError(

@@ -10,6 +10,8 @@ export type AssistantMe = {
   key_set: boolean;
   chat_model: string;
   tools: AssistantTool[];
+  spent_today_usd: number;
+  daily_cap_usd: number;
 };
 
 export type ToolRun = { name: string; args: unknown; ok: boolean; ms: number };
@@ -151,10 +153,6 @@ export const assistantApi = {
         }
       | { ok: false; message: string }
     >('/admin/assistant-settings/test', { method: 'POST', body: '{}' }),
-  review: (offset = 0) =>
-    call<{ count: number; conversations: ReviewRow[] }>(
-      `/admin/assistant-review?limit=50&offset=${offset}`,
-    ),
   reviewThread: (id: string) =>
     call<{
       conversation: { id: string; title: string; user_id: string };
@@ -210,6 +208,20 @@ export function streamSpeech(
   return streamEvents(
     '/admin/assistant/speak',
     { message_id: messageId },
+    onEvent,
+    signal,
+  );
+}
+
+/** Speaks a short sample in a voice that may not be saved yet (Settings → AI). */
+export function streamVoiceTest(
+  body: { voice_model: string; voice: string; lang: 'en' | 'zh' },
+  onEvent: (e: SpeechEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  return streamEvents(
+    '/admin/assistant-settings/voice-test',
+    body,
     onEvent,
     signal,
   );

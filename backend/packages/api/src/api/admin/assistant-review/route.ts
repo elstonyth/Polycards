@@ -7,6 +7,9 @@ import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
 import { accessFor } from '../assistant/access';
 
+// Same escape as agent-tools: % and _ in the words match themselves.
+const like = (q: string) => ({ $ilike: `%${q.replace(/[%_\\]/g, '\\$&')}%` });
+
 // GET /admin/assistant-review (spec 2026-10-29, the owner's "review all the
 // questions users ask"): every staff member's chats, newest first, with who
 // asked and what each cost. Super admins only: checked here, because RBAC's
@@ -25,10 +28,31 @@ export async function GET(
     200,
   );
   const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const q = str(req.query.q);
+  const userId = str(req.query.user_id);
   const assistant = req.scope.resolve<AssistantModuleService>(ASSISTANT_MODULE);
+  // A word in any message: no cap here, or the paging total would be wrong.
+  const hits = q
+    ? await assistant.listAssistantMessages(
+        { content: like(q) },
+        { select: ['conversation_id'], withDeleted: true },
+      )
+    : [];
+  const hitIds = [...new Set(hits.map((m) => m.conversation_id))];
   const [conversations, count] =
     await assistant.listAndCountAssistantConversations(
-      {},
+      {
+        ...(userId ? { user_id: userId } : {}),
+        ...(q
+          ? {
+              $or: [
+                { title: like(q) },
+                ...(hitIds.length ? [{ id: hitIds }] : []),
+              ],
+            }
+          : {}),
+      },
       {
         order: { last_message_at: 'DESC' },
         take: limit,
@@ -60,6 +84,8 @@ export async function GET(
     offset,
     conversations: conversations.map((c) => {
       const own = messages.filter((m) => m.conversation_id === c.id);
+      // Voice rows are answers read aloud; spoken questions aren't marked.
+      const voice = own.filter((m) => m.role === 'voice');
       return {
         id: c.id,
         title: c.title,
@@ -68,6 +94,11 @@ export async function GET(
         questions: own.filter((m) => m.role === 'user').length,
         failed: own.filter((m) => m.role === 'assistant' && m.error).length,
         cost_usd: own.reduce((sum, m) => sum + Number(m.cost_usd ?? 0), 0),
+        read_aloud: voice.length,
+        voice_cost_usd: voice.reduce(
+          (sum, m) => sum + Number(m.cost_usd ?? 0),
+          0,
+        ),
         last_message_at: c.last_message_at,
         deleted: !!c.deleted_at,
       };

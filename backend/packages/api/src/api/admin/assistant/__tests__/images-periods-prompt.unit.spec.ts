@@ -186,6 +186,25 @@ describe('systemPrompt', () => {
     const p = systemPrompt(access(true), ['economy']);
     expect(p).toContain('full access');
     expect(p).toContain("pass group 'default'");
+    expect(p).not.toMatch(/read aloud/);
+  });
+  it('shapes a spoken question’s answer for the ear, and keeps access as it was', () => {
+    const p = systemPrompt(
+      access(false),
+      ['order', 'low_stock'],
+      new Date('2026-10-29T04:00:00Z'),
+      [],
+      true,
+    );
+    expect(p).toContain(
+      'They can only be answered from these tools: order, low_stock.',
+    );
+    expect(p).toContain('will be read aloud');
+    expect(p).toContain('1–3 short sentences');
+    expect(p).toContain('override the table rule');
+    expect(p).toContain('exact to the sen');
+    expect(p).toContain('offer the full breakdown');
+    expect(p).toContain('get every figure from your tools');
   });
 });
 

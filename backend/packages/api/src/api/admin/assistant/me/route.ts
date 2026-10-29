@@ -18,10 +18,14 @@ export async function GET(
   const tools = await allowedTools(access, TOOLS);
   const assistant = req.scope.resolve<AssistantModuleService>(ASSISTANT_MODULE);
   const settings = await assistant.settings();
+  // The header meter: today's spend (voice included) against the cap.
+  const spent = await assistant.spentToday(access.userId);
   res.json({
     super_admin: access.superAdmin,
     key_set: !!settings.openrouter_key_sealed,
     chat_model: settings.chat_model,
     tools: tools.map((t) => ({ name: t.name, label: t.label })),
+    spent_today_usd: spent,
+    daily_cap_usd: Number(settings.daily_cap_usd),
   });
 }

@@ -15,9 +15,22 @@ import {
 import { toast } from '@medusajs/ui';
 import { useTranslation } from 'react-i18next';
 import { imageToDataUrl } from '../../lib/assistant';
+import { classifyPaste } from './paste';
 import { MicIcon } from './VoiceIcons';
 
 const MAX_IMAGES = 4;
+
+// Read while the event lives (the object is dead after an await). `items`
+// and `files` mirror each other, but some sources fill only `items`.
+const imagesOf = (d: DataTransfer): File[] => {
+  const fromItems = [...d.items]
+    .filter((i) => i.kind === 'file' && i.type.startsWith('image/'))
+    .map((i) => i.getAsFile())
+    .filter((f): f is File => !!f);
+  return fromItems.length
+    ? fromItems
+    : [...d.files].filter((f) => f.type.startsWith('image/'));
+};
 
 // The question box (21st.dev "AI prompt input" + "border beam" patterns):
 // grows with the text, takes screenshots by paste, drop or the picture
@@ -32,8 +45,11 @@ export function Composer({
   seed,
   disabled,
   mic,
+  lastQuestion,
 }: {
   busy: boolean;
+  /** Put back by ArrowUp in an empty box. */
+  lastQuestion?: string;
   onSend: (text: string, images: string[]) => void;
   onStop: () => void;
   mic?: { listening: boolean; level: number; onClick: () => void };
@@ -84,6 +100,26 @@ export function Composer({
     }
   };
 
+  /** Pastes or drops: images attach, text stays (a sheet range: text only). */
+  const take = (d: DataTransfer) => {
+    const files = imagesOf(d);
+    const keep = classifyPaste({
+      html: d.getData('text/html'),
+      text: d.getData('text/plain'),
+      imageCount: files.length,
+    });
+    if (keep.files) void add(files);
+    else if (keep.inline.length) {
+      void Promise.all(
+        keep.inline.map(async (url) => {
+          const blob = await (await fetch(url)).blob();
+          return new File([blob], 'pasted', { type: blob.type });
+        }),
+      ).then(add, () => toast.error(t('assistant.imageUnreadable')));
+    }
+    return keep;
+  };
+
   const send = () => {
     const q = text.trim();
     if (!q || busy || disabled) return;
@@ -102,9 +138,12 @@ export function Composer({
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e: DragEvent) => {
+        // Always: a dropped file would otherwise open in the tab.
         e.preventDefault();
         setDragging(false);
-        void add(e.dataTransfer.files);
+        if (!take(e.dataTransfer).text) return;
+        const dropped = e.dataTransfer.getData('text/plain');
+        setText((v) => (v.trim() ? `${v}\n${dropped}` : dropped));
       }}
     >
       <div className="bg-ui-bg-base flex flex-col gap-y-2 rounded-[15px] p-3">
@@ -149,18 +188,32 @@ export function Composer({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onPaste={(e: ClipboardEvent) => {
-            // A copied spreadsheet range carries its text AND a picture of
-            // it: keep the text. Only a pasted picture becomes an image.
-            if (
-              e.clipboardData.files.length &&
-              !e.clipboardData.getData('text/plain').trim()
-            ) {
+            // Kept text is left to the browser's own paste: it lands at the
+            // cursor with its tabs and line breaks, so a sheet reads as one.
+            const keep = take(e.clipboardData);
+            if (!keep.text && (keep.files || keep.inline.length)) {
               e.preventDefault();
-              void add(e.clipboardData.files);
             }
           }}
           onKeyDown={(e) => {
             // keyCode 229: Safari's Enter that commits a Chinese IME word.
+            const plain =
+              !e.nativeEvent.isComposing &&
+              e.keyCode !== 229 &&
+              !e.shiftKey &&
+              !e.altKey &&
+              !e.ctrlKey &&
+              !e.metaKey;
+            if (plain && e.key === 'Escape' && busy) {
+              e.preventDefault();
+              onStop();
+              return;
+            }
+            if (plain && e.key === 'ArrowUp' && !text && lastQuestion) {
+              e.preventDefault();
+              setText(lastQuestion);
+              return;
+            }
             if (
               e.key === 'Enter' &&
               !e.shiftKey &&
@@ -215,7 +268,9 @@ export function Composer({
                   <span
                     aria-hidden
                     className="absolute inset-0 rounded-full bg-sky-400/40 motion-safe:transition-transform"
-                    style={{ transform: `scale(${1 + Math.min(mic.level, 1) * 0.6})` }}
+                    style={{
+                      transform: `scale(${1 + Math.min(mic.level, 1) * 0.6})`,
+                    }}
                   />
                 )}
                 <MicIcon className="relative" />

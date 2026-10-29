@@ -1,8 +1,42 @@
 import { Fragment, type ReactNode } from 'react';
+import { toast } from '@medusajs/ui';
+import { useTranslation } from 'react-i18next';
 import { mdBlocks, mdInline } from './markdown-parse';
 
 // The assistant's answer as React elements (markdown-parse.ts: no HTML, no
 // images, http(s) links only, opened in a new tab without a referrer).
+
+/** A cell as it reads, without the ** and ` markers. */
+const plain = (text: string) =>
+  mdInline(text)
+    .map((t) => t.text)
+    .join('');
+
+function CopyButton({ text }: { text: string }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        navigator.clipboard.writeText(text).then(
+          () =>
+            toast.success(
+              t('assistant.markdown.copied', { defaultValue: 'Copied' }),
+            ),
+          () =>
+            toast.error(
+              t('assistant.markdown.copyFailed', {
+                defaultValue: "Couldn't copy",
+              }),
+            ),
+        )
+      }
+      className="text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-base-hover w-fit self-end rounded-full px-2 py-0.5 text-[11px] transition-colors"
+    >
+      {t('assistant.markdown.copy', { defaultValue: 'Copy' })}
+    </button>
+  );
+}
 
 function inline(text: string): ReactNode {
   return mdInline(text).map((t, i) => {
@@ -42,10 +76,17 @@ function inline(text: string): ReactNode {
 
 const ALIGN = { left: 'text-left', right: 'text-right', center: 'text-center' };
 
-export function Markdown({ text }: { text: string }) {
+export function Markdown({
+  text,
+  streaming = false,
+}: {
+  text: string;
+  /** Still arriving: hold back a table until its rows are whole. */
+  streaming?: boolean;
+}) {
   return (
     <div className="text-ui-fg-base flex min-w-0 flex-col gap-y-3 break-words text-[13.5px] leading-relaxed [overflow-wrap:anywhere]">
-      {mdBlocks(text).map((b, i) => {
+      {mdBlocks(text, streaming).map((b, i) => {
         switch (b.kind) {
           case 'h':
             return (
@@ -53,8 +94,8 @@ export function Markdown({ text }: { text: string }) {
                 key={i}
                 className={
                   b.level === 1
-                    ? 'text-base font-semibold'
-                    : 'text-[14px] font-semibold'
+                    ? 'text-base font-semibold leading-snug'
+                    : 'text-[14px] font-semibold leading-snug'
                 }
               >
                 {inline(b.text)}
@@ -86,47 +127,54 @@ export function Markdown({ text }: { text: string }) {
           }
           case 'code':
             return (
-              <pre
-                key={i}
-                className="bg-ui-bg-component overflow-x-auto rounded-lg p-3 font-mono text-xs"
-              >
-                {b.text}
-              </pre>
+              <div key={i} className="flex min-w-0 flex-col gap-y-1">
+                <pre className="bg-ui-bg-component overflow-x-auto rounded-lg p-3 font-mono text-xs">
+                  {b.text}
+                </pre>
+                <CopyButton text={b.text} />
+              </div>
             );
           case 'table':
             return (
-              <div
-                key={i}
-                className="border-ui-border-base overflow-x-auto rounded-xl border"
-              >
-                <table className="w-full border-collapse text-[13px]">
-                  <thead className="bg-ui-bg-component">
-                    <tr>
-                      {b.head.map((h, j) => (
-                        <th
-                          key={j}
-                          className={`text-ui-fg-subtle whitespace-nowrap px-3 py-2 font-medium ${ALIGN[b.align[j] ?? 'left']}`}
-                        >
-                          {inline(h)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {b.rows.map((row, r) => (
-                      <tr key={r} className="border-ui-border-base border-t">
-                        {row.map((cell, j) => (
-                          <td
+              <div key={i} className="flex min-w-0 flex-col gap-y-1">
+                <div className="border-ui-border-base overflow-x-auto rounded-xl border">
+                  {/* overflow-wrap:anywhere would crush the columns to one
+                      letter; normal lets a wide table scroll in its box. */}
+                  <table className="w-full border-collapse text-[13px] [overflow-wrap:normal]">
+                    <thead className="bg-ui-bg-component">
+                      <tr>
+                        {b.head.map((h, j) => (
+                          <th
                             key={j}
-                            className={`px-3 py-1.5 tabular-nums ${ALIGN[b.align[j] ?? 'left']}`}
+                            className={`text-ui-fg-subtle whitespace-nowrap px-3 py-2 font-medium ${ALIGN[b.align[j] ?? 'left']}`}
                           >
-                            {inline(cell)}
-                          </td>
+                            {inline(h)}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {b.rows.map((row, r) => (
+                        <tr key={r} className="border-ui-border-base border-t">
+                          {row.map((cell, j) => (
+                            <td
+                              key={j}
+                              className={`px-3 py-1.5 tabular-nums ${ALIGN[b.align[j] ?? 'left']} ${b.align[j] === 'right' ? 'whitespace-nowrap' : ''}`}
+                            >
+                              {inline(cell)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Tab-separated: pastes into Google Sheets as cells. */}
+                <CopyButton
+                  text={[b.head, ...b.rows]
+                    .map((row) => row.map(plain).join('\t'))
+                    .join('\n')}
+                />
               </div>
             );
           default:

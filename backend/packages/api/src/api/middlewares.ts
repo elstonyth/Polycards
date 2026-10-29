@@ -1224,6 +1224,12 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },
+    {
+      // "Hear it" speaks a sample with OpenRouter credit (unsaved cost).
+      matcher: '/admin/assistant-settings/voice-test',
+      method: 'POST',
+      middlewares: [adminActionRateLimit, assistantChatRateLimit],
+    },
     // Admin money-mutation routes — already auth-protected by the framework
     // admin auth, so no explicit authenticate() entry is needed here. All share
     // one limiter instance (one budget + one Redis connection). The limiter keys

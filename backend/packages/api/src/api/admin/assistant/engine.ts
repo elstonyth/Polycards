@@ -3,6 +3,7 @@ import {
   generationCost,
   OpenRouterError,
   streamChat,
+  systemContent,
   type ChatContent,
   type ChatMessage,
 } from './openrouter';
@@ -67,6 +68,8 @@ export async function runTurn(opts: {
   memory?: string[];
   /** What the asker may still spend today, USD: the answer stops once spent. */
   budgetUsd?: number;
+  /** Asked by voice: the answer is shaped to be read aloud. */
+  spoken?: boolean;
   now?: Date;
   fetchImpl?: typeof fetch;
 }): Promise<TurnResult> {
@@ -112,11 +115,15 @@ export async function runTurn(opts: {
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: systemPrompt(
-        opts.access,
-        [...byName.keys()],
-        opts.now,
-        opts.memory,
+      content: systemContent(
+        opts.model,
+        systemPrompt(
+          opts.access,
+          [...byName.keys()],
+          opts.now,
+          opts.memory,
+          opts.spoken,
+        ),
       ),
     },
     ...opts.history,

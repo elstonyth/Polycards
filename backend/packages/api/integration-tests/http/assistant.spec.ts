@@ -653,7 +653,13 @@ medusaIntegrationTestRunner({
         script = (b) => (lastIsTool(b) ? [say(reply)] : [call(name, args)]);
       };
       const lastTool = () => String(received.at(-1)!.messages.at(-1)!.content);
-      const system = () => String(received.at(-1)!.messages[0].content);
+      // Anthropic models get the system prompt as cached content parts.
+      const system = () => {
+        const c = received.at(-1)!.messages[0].content;
+        return Array.isArray(c)
+          ? (c as { text?: string }[]).map((p) => p.text ?? '').join('')
+          : String(c);
+      };
 
       it('keeps notes per person, shares one only for an admin, and searches past chats', async () => {
         await saveKey();

@@ -15,6 +15,13 @@ export type UiMessage = {
   pending?: boolean;
   /** The saved answer's id: what "read aloud" asks for. */
   messageId?: string;
+  /** A question as asked (a spoken one's transcript): what Try again and
+   *  ArrowUp reuse. Unset while a spoken question is not heard yet. */
+  question?: string;
+  /** An answer stopped by the person before it finished. */
+  stopped?: boolean;
+  /** When the question went out: the thinking counter counts from it. */
+  since?: number;
 };
 
 // Tools that draw: while one runs, a scanning placeholder holds its place.
@@ -35,5 +42,7 @@ export const fromStored = (messages: StoredMessage[]): UiMessage[] =>
       ms: tool.ms,
     })),
     error: m.error === 'aborted' ? null : m.error,
+    stopped: m.error === 'aborted',
     messageId: m.role === 'assistant' ? m.id : undefined,
+    question: m.role === 'user' ? m.content : undefined,
   }));

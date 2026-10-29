@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MotionConfig } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
@@ -8,13 +8,17 @@ import {
   Container,
   Drawer,
   Heading,
+  Input,
   Table,
   Text,
+  Tooltip,
 } from '@medusajs/ui';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
-import { assistantApi } from '../../../lib/assistant';
+import { assistantApi, type ReviewRow } from '../../../lib/assistant';
 import { mytDateTime } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
+import { StaleAwareSelect } from '../../../components/form-bits';
+import { SpeakerIcon } from '../../../components/assistant/VoiceIcons';
 import { Thread } from '../../../components/assistant/Thread';
 import { fromStored } from '../../../components/assistant/thread-data';
 
@@ -35,15 +39,60 @@ export const handle = {
   redirectTo: '/assistant',
 };
 
+declare const __BACKEND_URL__: string;
+
 const PAGE = 50;
+
+type Row = ReviewRow & { read_aloud: number; voice_cost_usd: number };
+
+// Like lib/assistant's call(), plus the search and staff filters.
+async function fetchReview(offset: number, q: string, userId: string) {
+  const qs = new URLSearchParams({
+    limit: String(PAGE),
+    offset: String(offset),
+  });
+  if (q) qs.set('q', q);
+  if (userId) qs.set('user_id', userId);
+  const res = await fetch(`${__BACKEND_URL__}/admin/assistant-review?${qs}`, {
+    credentials: 'include',
+  });
+  const data = (await res.json().catch(() => null)) as {
+    count: number;
+    conversations: Row[];
+    message?: string;
+  } | null;
+  if (!res.ok) {
+    throw new Error(data?.message ?? `Request failed (${res.status}).`);
+  }
+  return data as { count: number; conversations: Row[] };
+}
 
 const ReviewPage = () => {
   const { t } = useTranslation();
   const [offset, setOffset] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+  const [userId, setUserId] = useState('');
+  // Everyone seen so far, so picking one person keeps the others listed.
+  const [staff, setStaff] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const id = setTimeout(() => setQ(search.trim()), 300);
+    return () => clearTimeout(id);
+  }, [search]);
   const list = useQuery({
-    queryKey: ['assistant', 'review', offset],
-    queryFn: () => assistantApi.review(offset),
+    queryKey: ['assistant', 'review', offset, q, userId],
+    queryFn: async () => {
+      const data = await fetchReview(offset, q, userId);
+      setStaff((s) => {
+        const next = { ...s };
+        for (const c of data.conversations) {
+          next[c.user_id] = c.user_email ?? c.user_id;
+        }
+        return next;
+      });
+      return data;
+    },
     placeholderData: keepPreviousData,
   });
   const thread = useQuery({
@@ -51,9 +100,12 @@ const ReviewPage = () => {
     queryFn: () => assistantApi.reviewThread(open as string),
     enabled: !!open,
   });
-  // The list never shrinks (deleted chats stay in the review), so a page
-  // can't fall past the end.
+  // The list never shrinks (deleted chats stay in the review) and a new
+  // filter starts on page one, so a page can't fall past the end.
   const count = list.data?.count ?? 0;
+  const allStaff = t('assistant.review.allStaff', {
+    defaultValue: 'All staff',
+  });
 
   return (
     <MotionConfig reducedMotion="user">
@@ -64,6 +116,37 @@ const ReviewPage = () => {
             <Text size="small" className="text-ui-fg-subtle mt-1">
               {t('assistant.review.subtitle')}
             </Text>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 border-t px-6 py-3">
+            <Input
+              type="search"
+              size="small"
+              className="w-72"
+              placeholder={t('assistant.review.search', {
+                defaultValue: 'Search titles and messages',
+              })}
+              aria-label={t('assistant.review.search', {
+                defaultValue: 'Search titles and messages',
+              })}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setOffset(0);
+              }}
+            />
+            <StaleAwareSelect
+              className="w-60"
+              value={userId || 'all'}
+              onChange={(v) => {
+                setUserId(v === 'all' ? '' : v);
+                setOffset(0);
+              }}
+              placeholder={allStaff}
+              head={{ value: 'all', label: allStaff }}
+              options={Object.entries(staff)
+                .map(([value, label]) => ({ value, label }))
+                .sort((a, b) => a.label.localeCompare(b.label))}
+            />
           </div>
           {list.isError ? (
             <div className="border-t px-6 py-8">
@@ -78,7 +161,11 @@ const ReviewPage = () => {
           ) : list.data.conversations.length === 0 ? (
             <div className="border-t px-6 py-8">
               <Text className="text-ui-fg-subtle">
-                {t('assistant.review.empty')}
+                {q || userId
+                  ? t('assistant.review.noMatches', {
+                      defaultValue: 'No chats match.',
+                    })
+                  : t('assistant.review.empty')}
               </Text>
             </div>
           ) : (
@@ -130,6 +217,21 @@ const ReviewPage = () => {
                           className="text-ui-fg-base hover:text-ui-fg-interactive flex max-w-full items-center gap-x-2 text-left"
                         >
                           <span className="truncate">{c.title}</span>
+                          {c.read_aloud > 0 && (
+                            <Badge
+                              size="2xsmall"
+                              color="blue"
+                              role="img"
+                              aria-label={t('assistant.review.readAloud', {
+                                count: c.read_aloud,
+                                defaultValue: 'Read aloud: {{count}}',
+                              })}
+                              className="shrink-0 gap-x-0.5"
+                            >
+                              <SpeakerIcon className="size-3" />
+                              {c.read_aloud}
+                            </Badge>
+                          )}
                           {c.deleted && (
                             <Badge size="2xsmall" color="grey">
                               {t('assistant.review.deleted')}
@@ -146,7 +248,20 @@ const ReviewPage = () => {
                         {c.failed}
                       </Table.Cell>
                       <Table.Cell className="text-right tabular-nums">
-                        USD {c.cost_usd.toFixed(3)}
+                        {c.voice_cost_usd > 0 ? (
+                          <Tooltip
+                            content={t('assistant.review.voiceCost', {
+                              cost: c.voice_cost_usd.toFixed(3),
+                              defaultValue: 'Voice: USD {{cost}} of this',
+                            })}
+                          >
+                            <span tabIndex={0} className="cursor-help">
+                              USD {c.cost_usd.toFixed(3)}
+                            </span>
+                          </Tooltip>
+                        ) : (
+                          <>USD {c.cost_usd.toFixed(3)}</>
+                        )}
                       </Table.Cell>
                     </Table.Row>
                   ))}

@@ -13,7 +13,12 @@ import {
   toast,
 } from '@medusajs/ui';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
-import { assistantApi, type AssistantSettings } from '../../../lib/assistant';
+import {
+  assistantApi,
+  streamVoiceTest,
+  type AssistantSettings,
+} from '../../../lib/assistant';
+import { PcmPlayer } from '../../../lib/voice';
 import { AiOrb } from '../../../components/assistant/AiOrb';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { ImageStyleCard } from './image-style';
@@ -321,18 +326,25 @@ const AiSettingsPage = () => {
               <Label size="small" htmlFor="ai-voice">
                 {t('assistant.settings.voice')}
               </Label>
-              <Select value={voiceName} onValueChange={setVoiceName}>
-                <Select.Trigger id="ai-voice">
-                  <Select.Value />
-                </Select.Trigger>
-                <Select.Content>
-                  {s.voices.map((v) => (
-                    <Select.Item key={v} value={v}>
-                      {v}
-                    </Select.Item>
-                  ))}
-                </Select.Content>
-              </Select>
+              <div className="flex items-center gap-x-2">
+                <Select value={voiceName} onValueChange={setVoiceName}>
+                  <Select.Trigger id="ai-voice" className="flex-1">
+                    <Select.Value />
+                  </Select.Trigger>
+                  <Select.Content>
+                    {s.voices.map((v) => (
+                      <Select.Item key={v} value={v}>
+                        {v}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select>
+                <HearVoice
+                  model={voiceModel}
+                  voice={voiceName}
+                  disabled={!s.openrouter_key.readable}
+                />
+              </div>
             </div>
           </div>
           <div>
@@ -357,5 +369,76 @@ const AiSettingsPage = () => {
     </div>
   );
 };
+
+/** "Hear it": plays a short sample in the form's voice, saved or not. */
+function HearVoice({
+  model,
+  voice,
+  disabled,
+}: {
+  model: string;
+  voice: string;
+  disabled: boolean;
+}) {
+  const { t, i18n } = useTranslation();
+  const [playing, setPlaying] = useState(false);
+  const stopRef = useRef<(() => void) | null>(null);
+
+  // Leaving the page stops the sample.
+  useEffect(() => () => stopRef.current?.(), []);
+
+  const play = async () => {
+    // Made in the click: iOS only plays audio from a context made in a gesture.
+    const player = new PcmPlayer();
+    const ctl = new AbortController();
+    const stop = () => {
+      ctl.abort();
+      player.stop();
+    };
+    stopRef.current = stop;
+    setPlaying(true);
+    try {
+      await streamVoiceTest(
+        {
+          voice_model: model.trim(),
+          voice,
+          lang: i18n.language.startsWith('zh') ? 'zh' : 'en',
+        },
+        (e) => {
+          if (e.type === 'audio') player.push(e.data);
+          else if (e.type === 'error') toast.error(e.message);
+        },
+        ctl.signal,
+      );
+      player.finish();
+    } catch {
+      // Stopped, or the connection dropped.
+      player.stop();
+    }
+    // A player whose audio never starts never ends.
+    await Promise.race([
+      player.ended,
+      new Promise((r) => setTimeout(r, 30_000)),
+    ]);
+    player.stop();
+    if (stopRef.current === stop) {
+      stopRef.current = null;
+      setPlaying(false);
+    }
+  };
+
+  return (
+    <Button
+      variant="secondary"
+      size="small"
+      disabled={!playing && disabled}
+      onClick={() => (playing ? stopRef.current?.() : void play())}
+    >
+      {playing
+        ? t('assistant.settings.stopVoice', { defaultValue: 'Stop' })
+        : t('assistant.settings.hearVoice', { defaultValue: 'Hear it' })}
+    </Button>
+  );
+}
 
 export default AiSettingsPage;

@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   bytesToBase64,
   createVad,
   decodePcm16,
   downsample,
   encodeWav,
+  MicError,
+  startBargeIn,
+  startRecording,
 } from '../voice';
 
 const ascii = (view: DataView, at: number, len: number) =>
@@ -127,5 +130,42 @@ describe('createVad', () => {
     const vad = createVad();
     feed(vad, LOUD, 300); // floor is capped, so it cannot swallow later speech
     expect(feed(vad, LOUD, 300).at(-1)).toBe('speaking');
+  });
+
+  it('needs louder speech at a lower sensitivity', () => {
+    // quiet room: the bar is MIN_SPEECH_RMS 0.01, divided by the sensitivity
+    const MID = 0.015;
+    const normal = createVad();
+    feed(normal, QUIET, 300);
+    expect(feed(normal, MID, 400).at(-1)).toBe('speaking');
+    const strict = createVad({ sensitivity: 0.5 });
+    feed(strict, QUIET, 300);
+    expect(feed(strict, MID, 400).every((s) => s === 'waiting')).toBe(true);
+    expect(feed(strict, LOUD, 400).at(-1)).toBe('speaking');
+  });
+
+  it('raises the bar over a noisy floor too', () => {
+    const NOISE = 0.006; // floor 0.006: bar 0.018 at 1, 0.036 at 0.5
+    const normal = createVad();
+    feed(normal, NOISE, 300);
+    expect(feed(normal, 0.025, 400).at(-1)).toBe('speaking');
+    const strict = createVad({ sensitivity: 0.5 });
+    feed(strict, NOISE, 300);
+    expect(feed(strict, 0.025, 400).every((s) => s === 'waiting')).toBe(true);
+  });
+});
+
+describe('opening the mic', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('rejects as unavailable without getUserMedia (non-secure context)', async () => {
+    vi.stubGlobal('AudioContext', class {});
+    vi.stubGlobal('navigator', {});
+    await expect(startRecording({ autoStop: true })).rejects.toEqual(
+      new MicError('unavailable'),
+    );
+    await expect(startBargeIn({ onSpeech: () => {} })).rejects.toMatchObject({
+      reason: 'unavailable',
+    });
   });
 });

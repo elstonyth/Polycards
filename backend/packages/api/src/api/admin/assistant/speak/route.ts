@@ -2,11 +2,15 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
+import { randomUUID } from 'node:crypto';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
+import { fetchBytes } from '../../../utils/image-fetch';
 import { accessFor } from '../access';
+import { isOwnOrigin } from '../agent-tools';
+import { storeImage } from '../images';
 import { generationCost, MODEL_RE } from '../openrouter';
 import { speak, speakable, VOICES } from '../voice';
 
@@ -15,9 +19,25 @@ import { speak, speakable, VOICES } from '../voice';
 //   audio {data: base64 PCM16, 24 kHz mono} … · error {code,message} ·
 //   done {cost_usd}
 // What it cost is saved as a hidden voice row, so it counts toward today's
-// cap whichever day the answer was written.
+// cap whichever day the answer was written. The speech is stored too (the
+// row's tools say where), so hearing it again with the same voice is free.
 
 type Body = { message_id?: unknown };
+type SpeechCache = {
+  message_id: string;
+  voice_model: string;
+  voice: string;
+  url: string;
+};
+// About 0.5 s of 24 kHz PCM16 per replayed audio event; even, so no
+// sample is split.
+const CHUNK = 24 * 1024;
+// One read-aloud at a time per staff member, so parallel reads can't all
+// pass the daily cap before any saves its cost.
+// shortcut: per process, so each of the 2 web instances has its own; move to
+// the chat route's Redis lock if staff start racing across instances.
+const speaking = new Set<string>();
+const SLOT_WAIT_MS = 10_000;
 
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
@@ -97,66 +117,158 @@ export async function POST(
     });
     return;
   }
-  const spent = await assistant.spentToday(access.userId);
-  if (spent >= Number(settings.daily_cap_usd)) {
+  const logger = scope.resolve(ContainerRegistrationKeys.LOGGER);
+
+  // Read before with this voice: play the stored speech, free. Only this
+  // conversation's voice rows, which the check above proved are the asker's.
+  const voiceRows = await assistant.listAssistantMessages(
+    { conversation_id: message.conversation_id, role: 'voice' },
+    { select: ['tools'], order: { created_at: 'DESC' } },
+  );
+  const cached = voiceRows
+    .map((r) => r.tools as unknown as Partial<SpeechCache> | null)
+    .find(
+      (t): t is SpeechCache =>
+        t?.message_id === id &&
+        t.voice_model === settings.voice_model &&
+        t.voice === settings.voice &&
+        typeof t.url === 'string',
+    );
+  const stored = cached
+    ? await fetchBytes(cached.url, undefined, isOwnOrigin)
+    : null;
+  if (stored) {
+    for (let at = 0; at < stored.length && !ctl.signal.aborted; at += CHUNK) {
+      send({
+        type: 'audio',
+        data: stored.subarray(at, at + CHUNK).toString('base64'),
+      });
+    }
+    logger.info(
+      `[assistant] spoke user=${access.userId} msg=${id} model=${settings.voice_model} cached`,
+    );
+    finish({ type: 'done', cost_usd: 0 });
+    return;
+  }
+  if (cached) {
+    logger.warn(`[assistant] stored speech unreadable, speaking again: ${id}`);
+  }
+
+  // A reading just stopped may still be saving its cost (the client stops
+  // one and starts the next at once): wait for its slot a little.
+  for (
+    let waited = 0;
+    speaking.has(access.userId) && waited < SLOT_WAIT_MS;
+    waited += 200
+  ) {
+    await new Promise((r) => setTimeout(r, 200));
+    if (ctl.signal.aborted) {
+      finish(); // the asker left while waiting
+      return;
+    }
+  }
+  if (speaking.has(access.userId)) {
     finish({
       type: 'error',
-      code: 'daily_cap',
-      message: `You reached today's assistant limit (USD ${Number(settings.daily_cap_usd).toFixed(2)}). It resets at 00:00 Malaysia time.`,
+      code: 'busy',
+      message: 'Another answer is being read aloud. Wait for it to finish.',
     });
     return;
   }
-
-  const logger = scope.resolve(ContainerRegistrationKeys.LOGGER);
+  speaking.add(access.userId);
   let cost = 0;
   let priced = false;
   let generation = '';
   let tokensIn = 0;
   let tokensOut = 0;
   let failure: string | null = null;
+  let spoke = false;
+  let saved: SpeechCache | null = null;
   try {
-    for await (const e of speak({
-      key,
-      model: settings.voice_model,
-      voice: settings.voice,
-      text,
-      signal: ctl.signal,
-    })) {
-      if (e.type === 'audio') send(e);
-      else if (e.type === 'generation') generation = e.id;
-      else {
-        cost += e.cost;
-        tokensIn += e.tokensIn;
-        tokensOut += e.tokensOut;
-        priced = true;
+    // Checked while holding the slot, so parallel reads can't all pass it.
+    const spent = await assistant.spentToday(access.userId);
+    if (spent >= Number(settings.daily_cap_usd)) {
+      finish({
+        type: 'error',
+        code: 'daily_cap',
+        message: `You reached today's assistant limit (USD ${Number(settings.daily_cap_usd).toFixed(2)}). It resets at 00:00 Malaysia time.`,
+      });
+      return;
+    }
+    spoke = true;
+    const pcm: Buffer[] = [];
+    try {
+      for await (const e of speak({
+        key,
+        model: settings.voice_model,
+        voice: settings.voice,
+        text,
+        signal: ctl.signal,
+      })) {
+        if (e.type === 'audio') {
+          send(e);
+          pcm.push(Buffer.from(e.data, 'base64'));
+        } else if (e.type === 'generation') generation = e.id;
+        else {
+          cost += e.cost;
+          tokensIn += e.tokensIn;
+          tokensOut += e.tokensOut;
+          priced = true;
+        }
+      }
+    } catch (err) {
+      if (!ctl.signal.aborted) failure = (err as Error)?.message ?? 'failed';
+    }
+    // Kept only when heard to the end (the bill comes last): a cut-short clip
+    // is never replayed. The name is random because the file store is public.
+    if (!failure && !ctl.signal.aborted && priced && pcm.length) {
+      const url = await storeImage(
+        scope,
+        Buffer.concat(pcm),
+        `assistant-voice-${randomUUID()}.pcm`,
+        'application/octet-stream',
+      ).catch((err: Error) => {
+        logger.warn(`[assistant] speech not stored: ${err?.message}`);
+        return null;
+      });
+      if (url) {
+        saved = {
+          message_id: id,
+          voice_model: settings.voice_model,
+          voice: settings.voice,
+          url,
+        };
       }
     }
-  } catch (err) {
-    if (!ctl.signal.aborted) failure = (err as Error)?.message ?? 'failed';
+  } finally {
+    if (spoke) {
+      // Stopped or failed before the bill arrived: OpenRouter still charges it.
+      if (!priced && generation) cost += await generationCost(key, generation);
+      await assistant
+        .createAssistantMessages({
+          conversation_id: message.conversation_id,
+          role: 'voice',
+          content: '',
+          model: settings.voice_model,
+          cost_usd: cost,
+          tokens_in: tokensIn,
+          tokens_out: tokensOut,
+          tools: saved,
+          error: failure,
+        })
+        .then(() =>
+          // spentToday finds today's costs through last_message_at.
+          assistant.updateAssistantConversations({
+            id: message.conversation_id,
+            last_message_at: new Date(),
+          }),
+        )
+        .catch((err: Error) =>
+          logger.warn(`[assistant] voice cost not saved: ${err?.message}`),
+        );
+    }
+    speaking.delete(access.userId);
   }
-  // Stopped or failed before the bill arrived: OpenRouter still charges it.
-  if (!priced && generation) cost += await generationCost(key, generation);
-  await assistant
-    .createAssistantMessages({
-      conversation_id: message.conversation_id,
-      role: 'voice',
-      content: '',
-      model: settings.voice_model,
-      cost_usd: cost,
-      tokens_in: tokensIn,
-      tokens_out: tokensOut,
-      error: failure,
-    })
-    .then(() =>
-      // spentToday finds today's costs through last_message_at.
-      assistant.updateAssistantConversations({
-        id: message.conversation_id,
-        last_message_at: new Date(),
-      }),
-    )
-    .catch((err: Error) =>
-      logger.warn(`[assistant] voice cost not saved: ${err?.message}`),
-    );
   logger.info(
     `[assistant] spoke user=${access.userId} msg=${id} model=${settings.voice_model} chars=${text.length} cost=${cost.toFixed(4)}${failure ? ` error=${failure}` : ''}`,
   );

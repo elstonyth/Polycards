@@ -23,9 +23,33 @@ export const MAX_AUDIO_BYTES = 2.5 * 1024 * 1024;
 const MAX_SPOKEN_CHARS = 1500;
 
 const LISTEN_PROMPT =
-  'You write down speech. Return exactly what the speaker said, in the language they spoke (English, Malay, Chinese or a mix), with punctuation. Do not translate, answer, summarise or comment. If nothing was said, return an empty reply.';
+  'You write down speech. Return exactly what the speaker said, in the language they spoke (English, Malay, Chinese or a mix), with punctuation. Do not translate, answer, summarise or comment. If nothing was said, return an empty reply. ' +
+  // House words the listening model would otherwise misspell.
+  'The speaker works at Polycards, a trading card shop. Spell these as written: Polycards, PSA, BGS, CGC, TNG, Maybank, Pokémon, One Piece, Pikachu, Charizard, slab, pack, vault, buyback, top-up, RM, sen. Write spoken numbers and amounts as digits (RM 1,250.50, 3 packs).';
 const SPEAK_PROMPT =
   "You are a voice. Read the user's text aloud exactly as written, naturally and warmly, in the text's own language. Say numbers and money the way people say them. Do not add, answer, comment or ask anything.";
+
+/** One more try, about 600 ms later, when OpenRouter could not be reached
+ *  or was busy (network error, 429, 5xx). Never after a stop or a timeout,
+ *  and only before any audio is sent. */
+async function retryOnce(
+  call: () => Promise<Response>,
+  signal?: AbortSignal,
+): Promise<Response> {
+  try {
+    const first = await call();
+    if (first.status !== 429 && first.status < 500) return first;
+    await first.body?.cancel().catch(() => undefined);
+  } catch (err) {
+    const name = (err as Error)?.name;
+    if (signal?.aborted || name === 'AbortError' || name === 'TimeoutError') {
+      throw err;
+    }
+  }
+  await new Promise((r) => setTimeout(r, 600));
+  signal?.throwIfAborted();
+  return call();
+}
 
 /** What was said in a WAV recording, and what writing it down cost. */
 export async function transcribe(opts: {
@@ -35,35 +59,39 @@ export async function transcribe(opts: {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<{ text: string; cost: number }> {
-  const answer = await (opts.fetchImpl ?? fetch)(openRouterUrl(), {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${opts.key}`,
-      'content-type': 'application/json',
-      'x-title': 'Polycards admin assistant',
-    },
-    body: JSON.stringify({
-      model: opts.model,
-      messages: [
-        { role: 'system', content: LISTEN_PROMPT },
-        {
-          role: 'user',
-          content: [
+  const answer = await retryOnce(
+    () =>
+      (opts.fetchImpl ?? fetch)(openRouterUrl(), {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${opts.key}`,
+          'content-type': 'application/json',
+          'x-title': 'Polycards admin assistant',
+        },
+        body: JSON.stringify({
+          model: opts.model,
+          messages: [
+            { role: 'system', content: LISTEN_PROMPT },
             {
-              type: 'input_audio',
-              input_audio: { data: opts.wavBase64, format: 'wav' },
+              role: 'user',
+              content: [
+                {
+                  type: 'input_audio',
+                  input_audio: { data: opts.wavBase64, format: 'wav' },
+                },
+              ],
             },
           ],
-        },
-      ],
-      temperature: 0,
-      usage: { include: true },
-    }),
-    signal: AbortSignal.any([
-      AbortSignal.timeout(45_000),
-      ...(opts.signal ? [opts.signal] : []),
-    ]),
-  });
+          temperature: 0,
+          usage: { include: true },
+        }),
+        signal: AbortSignal.any([
+          AbortSignal.timeout(45_000),
+          ...(opts.signal ? [opts.signal] : []),
+        ]),
+      }),
+    opts.signal,
+  );
   const body = (await answer.json().catch(() => null)) as {
     error?: { message?: string };
     usage?: { cost?: number };
@@ -100,7 +128,15 @@ export function speakable(markdown: string): string {
       }
       lines.push(
         cells
-          .map((c, i) => (header?.[i] && i > 0 ? `${header[i]} ${c}` : c))
+          // An empty or dash-only cell says nothing: skip it, not "Amount —".
+          .map((c, i) =>
+            /^[\s*_~—–-]*$/.test(c)
+              ? ''
+              : header?.[i] && i > 0
+                ? `${header[i]} ${c}`
+                : c,
+          )
+          .filter(Boolean)
           .join(', ') + '.',
       );
       continue;
@@ -114,6 +150,11 @@ export function speakable(markdown: string): string {
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/https?:\/\/\S+/g, '')
+    .replace(/<br\s*\/?>/gi, ', ')
+    .replace(/<\/?[a-z][^>]*>/gi, '')
+    // Dashes and arrows between words are a pause, not a symbol to read.
+    .replace(/\s*[—→]+\s*|\s+–\s+/g, ', ')
+    .replace(/~~/g, '') // strikethrough; one ~ is "about" and stays
     .replace(/[*_`#>]+/g, '')
     .replace(/^\s*[-•]\s+/gm, '')
     .replace(/\n{2,}/g, '\n')
@@ -145,26 +186,30 @@ export async function* speak(opts: {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): AsyncGenerator<SpeechEvent> {
-  const answer = await (opts.fetchImpl ?? fetch)(openRouterUrl(), {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${opts.key}`,
-      'content-type': 'application/json',
-      'x-title': 'Polycards admin assistant',
-    },
-    body: JSON.stringify({
-      model: opts.model,
-      messages: [
-        { role: 'system', content: SPEAK_PROMPT },
-        { role: 'user', content: opts.text },
-      ],
-      modalities: ['text', 'audio'],
-      audio: { voice: opts.voice, format: 'pcm16' },
-      stream: true,
-      usage: { include: true },
-    }),
-    signal: opts.signal,
-  });
+  const answer = await retryOnce(
+    () =>
+      (opts.fetchImpl ?? fetch)(openRouterUrl(), {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${opts.key}`,
+          'content-type': 'application/json',
+          'x-title': 'Polycards admin assistant',
+        },
+        body: JSON.stringify({
+          model: opts.model,
+          messages: [
+            { role: 'system', content: SPEAK_PROMPT },
+            { role: 'user', content: opts.text },
+          ],
+          modalities: ['text', 'audio'],
+          audio: { voice: opts.voice, format: 'pcm16' },
+          stream: true,
+          usage: { include: true },
+        }),
+        signal: opts.signal,
+      }),
+    opts.signal,
+  );
   if (!answer.ok || !answer.body) {
     const body = (await answer.json().catch(() => null)) as {
       error?: { message?: string };

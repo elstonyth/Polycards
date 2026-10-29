@@ -79,9 +79,39 @@ const BULLET = /^\s*[-*]\s+(.*)$/;
 const NUMBER = /^\s*\d+[.)]\s+(.*)$/;
 const BLOCK_START = /^(#{1,3}\s|\s*```|\s*[-*]\s|\s*\d+[.)]\s|\s*\|)/;
 const indent = (l: string) => /^\s*/.exec(l)![0].length;
+const isRow = (l: string | undefined) => !!l?.trim().startsWith('|');
 
-export function mdBlocks(text: string): Block[] {
+// An amount, count or percentage: RM 1,234.50, -RM 12, S$30, 12.5%, 3k.
+const NUMBER_CELL = /^[-+]?(RM|S\$|\$)?\s*[-+]?\d[\d,]*(\.\d+)?\s*[%km]?$/i;
+const numeric = (column: string[]) => {
+  const values = column
+    .map((c) => c.replace(/[*`]/g, '').trim())
+    .filter((c) => !/^[-—–]?$/.test(c));
+  return values.length > 0 && values.every((c) => NUMBER_CELL.test(c));
+};
+
+/**
+ * `streaming`: the answer is still arriving, so a trailing table line shows
+ * only once its newline has, and a header only once its |---| row has (no
+ * raw "| 项目 | 金额" flashing up before the table forms).
+ */
+export function mdBlocks(text: string, streaming = false): Block[] {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const last = lines.length - 1;
+  // Inside a still-open ``` fence a "|" line is code, not a table.
+  if (
+    streaming &&
+    lines.filter((l) => l.trim().startsWith('```')).length % 2 === 0
+  ) {
+    if (isRow(lines[last])) lines[last] = '';
+    if (
+      !lines[last].trim() &&
+      isRow(lines[last - 1]) &&
+      !isRow(lines[last - 2])
+    ) {
+      lines[last - 1] = '';
+    }
+  }
   const blocks: Block[] = [];
   let i = 0;
   while (i < lines.length) {
@@ -112,7 +142,7 @@ export function mdBlocks(text: string): Block[] {
     }
     if (line.trim().startsWith('|') && SEPARATOR.test(lines[i + 1] ?? '')) {
       const head = cells(line);
-      const align = cells(lines[i + 1]).map((c) =>
+      const set = cells(lines[i + 1]).map((c) =>
         c.startsWith(':') && c.endsWith(':')
           ? 'center'
           : c.endsWith(':')
@@ -126,6 +156,11 @@ export function mdBlocks(text: string): Block[] {
       while (i < lines.length && lines[i].trim().startsWith('|')) {
         rows.push(cells(lines[i++]));
       }
+      // A colon in the |---| row wins; an unset numeric column reads right.
+      const align = head.map(
+        (_, j) =>
+          set[j] ?? (numeric(rows.map((r) => r[j] ?? '')) ? 'right' : null),
+      );
       blocks.push({ kind: 'table', head, align, rows });
       continue;
     }

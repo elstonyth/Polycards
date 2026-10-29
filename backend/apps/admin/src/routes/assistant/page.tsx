@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
-import { PlusMini, Sparkles, Trash } from '@medusajs/icons';
+import { ArrowDownMini, PlusMini, Sparkles, Trash } from '@medusajs/icons';
 import { Drawer, toast } from '@medusajs/ui';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
@@ -14,11 +14,12 @@ import {
 import { timeAgo } from '../../lib/format';
 import { AiOrb } from '../../components/assistant/AiOrb';
 import { Composer } from '../../components/assistant/Composer';
+import { SpendMeter } from '../../components/assistant/SpendMeter';
 import { TalkPanel } from '../../components/assistant/TalkPanel';
 import { Thread } from '../../components/assistant/Thread';
 import { WaveIcon } from '../../components/assistant/VoiceIcons';
 import { useVoice } from '../../components/assistant/use-voice';
-import { MicError } from '../../lib/voice';
+import { MicError, unlockAudio } from '../../lib/voice';
 import {
   fromStored,
   type UiMessage,
@@ -125,6 +126,8 @@ const AssistantPage = () => {
   // Follow the answer as it grows (text, steps, a poster loading in) unless
   // the person scrolled up to read; sending or opening a chat follows again.
   const stick = useRef(true);
+  // `stick` as state, for the "Jump to latest" pill.
+  const [away, setAway] = useState(false);
   const [history, setHistory] = useState(false);
   const voice = useVoice();
   // Hands-free talk: listen, ask, read the answer aloud, listen again.
@@ -206,6 +209,7 @@ const AssistantPage = () => {
   }): Promise<string | null> => {
     const { selected, shown } = at.current;
     stick.current = true;
+    setAway(false);
     const ac = new AbortController();
     ctl.current = ac;
     setBusy(true);
@@ -217,6 +221,7 @@ const AssistantPage = () => {
         key: `u-${stamp}`,
         role: 'user',
         content: audio ? t('assistant.voice.hearing') : text,
+        question: audio ? undefined : text,
         attachments: images,
         images: [],
         steps: [],
@@ -229,6 +234,7 @@ const AssistantPage = () => {
         images: [],
         steps: [],
         pending: true,
+        since: stamp,
       },
     ]);
     const patch = (fn: (m: UiMessage) => UiMessage, k = key) =>
@@ -256,6 +262,7 @@ const AssistantPage = () => {
               (m) => ({
                 ...m,
                 content: e.text || t('assistant.voice.nothingHeard'),
+                question: e.text || undefined,
               }),
               `u-${stamp}`,
             );
@@ -308,6 +315,7 @@ const AssistantPage = () => {
       patch((m) => ({
         ...m,
         pending: false,
+        stopped: ac.signal.aborted && !finished,
         steps: m.steps.map((s) =>
           s.status === 'start' ? { ...s, status: 'error' } : s,
         ),
@@ -315,13 +323,42 @@ const AssistantPage = () => {
       setBusy(false);
       ctl.current = null;
       void qc.invalidateQueries({ queryKey: ['assistant', 'conversations'] });
+      // Today's spend in the header moves with each answer.
+      void qc.invalidateQueries({ queryKey: ['assistant', 'me'] });
     }
     return finished && !failed ? answered : null;
   };
 
+  // Try again: the same question, asked anew at the end of the same chat.
+  // Through a ref, so Thread's memoised messages get one stable handler.
+  const latestSend = useRef(send);
+  useEffect(() => {
+    latestSend.current = send;
+  });
+  const retry = useCallback(
+    (q: UiMessage) => {
+      if (!q.question || ctl.current) return;
+      // Text only: after a reload a question's screenshots are just a count.
+      const shots = Array.isArray(q.attachments)
+        ? q.attachments.length
+        : q.attachments;
+      if (shots > 0) {
+        toast(
+          t('assistant.retryTextOnly', {
+            defaultValue:
+              'Asked again with the text only: screenshots are not sent again.',
+          }),
+        );
+      }
+      void latestSend.current({ text: q.question, images: [] });
+    },
+    [t],
+  );
+
   /** The mic: ask one question by voice and hear the answer. A second tap
    *  ends the recording early. */
   const askByVoice = async () => {
+    unlockAudio(); // iOS/Safari: audio unlocks only inside the tap, before any await
     if (voice.state === 'listening') {
       voice.stopListening();
       return;
@@ -344,6 +381,7 @@ const AssistantPage = () => {
   };
 
   const startTalk = async () => {
+    unlockAudio(); // in the tap, before any await (iOS/Safari)
     if (talking.current || busy || loading) return;
     talking.current = true;
     setTalk(true);
@@ -367,7 +405,15 @@ const AssistantPage = () => {
         voice.setState('thinking');
         const id = await send({ text: '', images: [], audio: wav });
         voice.setState('idle');
-        if (talking.current && id) await voice.speak(id);
+        // Talking over the answer stops it; the loop then listens at once.
+        if (talking.current && id) await voice.speak(id, { bargeIn: true });
+      }
+      if (silent >= 3) {
+        toast(
+          t('assistant.voice.talkEndedSilent', {
+            defaultValue: 'Talk ended: I didn’t hear anything.',
+          }),
+        );
       }
     } finally {
       talking.current = false;
@@ -387,6 +433,7 @@ const AssistantPage = () => {
   const { speak: speakAnswer, stopSpeaking, reading } = voice;
   const readAloud = useCallback(
     (id: string) => {
+      unlockAudio(); // in the tap, before any await (iOS/Safari)
       if (reading === id) stopSpeaking();
       else void speakAnswer(id);
     },
@@ -535,6 +582,12 @@ const AssistantPage = () => {
               <WaveIcon />
               {talk ? t('assistant.voice.endTalk') : t('assistant.voice.talk')}
             </button>
+            {me.data && (
+              <SpendMeter
+                spent={me.data.spent_today_usd}
+                cap={me.data.daily_cap_usd}
+              />
+            )}
             {me.data?.chat_model && (
               <span className="border-ui-border-base text-ui-fg-subtle hidden rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] md:inline">
                 {me.data.chat_model}
@@ -563,6 +616,7 @@ const AssistantPage = () => {
               const el = e.currentTarget;
               stick.current =
                 el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              setAway(!stick.current);
             }}
             className="flex flex-1 flex-col overflow-y-auto"
           >
@@ -582,18 +636,51 @@ const AssistantPage = () => {
                   messages={messages}
                   onSpeak={readAloud}
                   reading={reading}
+                  onRetry={retry}
+                  canRetry={!busy && !loading && !talk}
                 />
               </div>
             )}
           </div>
 
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-y-2 px-5 pb-5 pt-2">
+          <div className="relative mx-auto flex w-full max-w-3xl flex-col gap-y-2 px-5 pb-5 pt-2">
+            {/* Scrolled up while an answer streams: one tap back to it. */}
+            {busy && away && (
+              <button
+                type="button"
+                onClick={() => {
+                  const el = scroller.current;
+                  if (!el) return;
+                  // Instant: a smooth scroll's in-between events unstick it.
+                  stick.current = true;
+                  setAway(false);
+                  el.scrollTop = el.scrollHeight;
+                }}
+                className="bg-ui-bg-base border-ui-border-base text-ui-fg-base hover:bg-ui-bg-base-hover absolute -top-10 left-1/2 z-10 flex -translate-x-1/2 items-center gap-x-1 rounded-full border px-3 py-1 text-xs shadow-md"
+              >
+                <ArrowDownMini />
+                {t('assistant.jumpToLatest', {
+                  defaultValue: 'Jump to latest',
+                })}
+              </button>
+            )}
             <AnimatePresence>
               {talk && (
                 <TalkPanel
                   key="talk"
                   state={voice.state}
                   level={voice.level}
+                  caption={
+                    voice.state === 'speaking'
+                      ? messages.find((m) => m.messageId === voice.reading)
+                          ?.content
+                      : voice.state === 'thinking'
+                        ? // the question (the last is its answer), once heard
+                          messages
+                            .at(-2)
+                            ?.content.replace(t('assistant.voice.hearing'), '')
+                        : undefined
+                  }
                   onInterrupt={voice.stopSpeaking}
                   onEnd={endTalk}
                 />
@@ -606,6 +693,9 @@ const AssistantPage = () => {
               autoFocus
               onSend={(text, images) => void send({ text, images })}
               onStop={() => ctl.current?.abort()}
+              lastQuestion={
+                [...messages].reverse().find((m) => m.question)?.question
+              }
               mic={
                 talk
                   ? undefined

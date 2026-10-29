@@ -1,5 +1,7 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { ArrowPathMini, SquareTwoStack } from '@medusajs/icons';
+import { toast } from '@medusajs/ui';
 import { useTranslation } from 'react-i18next';
 import { AiOrb } from './AiOrb';
 import { ImageCard, ImagePending } from './ImageCard';
@@ -12,20 +14,31 @@ export function Thread({
   messages,
   onSpeak,
   reading,
+  onRetry,
+  canRetry,
 }: {
   messages: UiMessage[];
   /** Read an answer aloud (by its saved id), or stop it. */
   onSpeak?: (messageId: string) => void;
   reading?: string | null;
+  /** Ask a failed answer's question again (stable: Message is memoised). */
+  onRetry?: (question: UiMessage) => void;
+  canRetry?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-y-6">
-      {messages.map((m) => (
+      {messages.map((m, i) => (
         <Message
           key={m.key}
           m={m}
           onSpeak={onSpeak}
           speaking={!!m.messageId && m.messageId === reading}
+          asked={
+            m.role === 'assistant' && messages[i - 1]?.role === 'user'
+              ? messages[i - 1]
+              : undefined
+          }
+          onRetry={canRetry ? onRetry : undefined}
         />
       ))}
     </div>
@@ -38,12 +51,32 @@ const Message = memo(function Message({
   m,
   onSpeak,
   speaking,
+  asked,
+  onRetry,
 }: {
   m: UiMessage;
   onSpeak?: (messageId: string) => void;
   speaking: boolean;
+  /** The question this answer is for. */
+  asked?: UiMessage;
+  onRetry?: (question: UiMessage) => void;
 }) {
   const { t } = useTranslation();
+  const finished = !m.pending && !!m.content;
+  const retry =
+    onRetry && !m.pending && (m.error || m.stopped) && asked?.question
+      ? asked
+      : undefined;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(m.content);
+      toast.success(t('assistant.copied', { defaultValue: 'Copied.' }));
+    } catch {
+      toast.error(
+        t('assistant.copyFailed', { defaultValue: 'Could not copy.' }),
+      );
+    }
+  };
   return m.role === 'user' ? (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -107,12 +140,10 @@ const Message = memo(function Message({
           </div>
         )}
         {m.content ? (
-          <Markdown text={m.content} />
+          <Markdown text={m.content} streaming={m.pending} />
         ) : m.pending ? (
           !m.steps.some((s) => s.status === 'start') && (
-            <span className="pc-ai-shimmer text-[13px] font-medium">
-              {t('assistant.thinking')}
-            </span>
+            <Thinking since={m.since} />
           )
         ) : (
           !m.error &&
@@ -127,20 +158,67 @@ const Message = memo(function Message({
             {m.error}
           </div>
         )}
-        {onSpeak && m.messageId && m.content && !m.pending && (
-          <button
-            type="button"
-            onClick={() => m.messageId && onSpeak(m.messageId)}
-            aria-pressed={speaking}
-            className={`flex w-fit items-center gap-x-1.5 rounded-full px-2 py-0.5 text-[11px] transition-colors ${speaking ? 'bg-sky-500/15 text-sky-500' : 'text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-base-hover'}`}
-          >
-            <SpeakerIcon />
-            {speaking
-              ? t('assistant.voice.stopReading')
-              : t('assistant.voice.readAloud')}
-          </button>
+        {(finished || retry) && (
+          <div className="flex flex-wrap items-center gap-x-1">
+            {onSpeak && m.messageId && finished && (
+              <button
+                type="button"
+                onClick={() => m.messageId && onSpeak(m.messageId)}
+                aria-pressed={speaking}
+                className={`flex w-fit items-center gap-x-1.5 rounded-full px-2 py-0.5 text-[11px] transition-colors ${speaking ? 'bg-sky-500/15 text-sky-500' : 'text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-base-hover'}`}
+              >
+                <SpeakerIcon />
+                {speaking
+                  ? t('assistant.voice.stopReading')
+                  : t('assistant.voice.readAloud')}
+              </button>
+            )}
+            {finished && (
+              <button
+                type="button"
+                onClick={() => void copy()}
+                className="text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-base-hover flex w-fit items-center gap-x-1.5 rounded-full px-2 py-0.5 text-[11px] transition-colors"
+              >
+                <SquareTwoStack />
+                {t('assistant.copy', { defaultValue: 'Copy' })}
+              </button>
+            )}
+            {retry && (
+              <button
+                type="button"
+                onClick={() => onRetry?.(retry)}
+                className="text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-base-hover flex w-fit items-center gap-x-1.5 rounded-full px-2 py-0.5 text-[11px] transition-colors"
+              >
+                <ArrowPathMini />
+                {t('assistant.tryAgain', { defaultValue: 'Try again' })}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </motion.div>
   );
 });
+
+// "Thinking… 4 s": counts from when the question went out, so the count
+// carries on after each tool step. No animation; the number is not read out.
+function Thinking({ since }: { since?: number }) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(since ?? 0);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secs = since ? Math.floor((now - since) / 1000) : 0;
+  return (
+    <span className="pc-ai-shimmer text-[13px] font-medium">
+      {t('assistant.thinking')}
+      {secs > 0 && (
+        <span aria-hidden className="tabular-nums">
+          {' '}
+          {t('assistant.seconds', { n: secs })}
+        </span>
+      )}
+    </span>
+  );
+}

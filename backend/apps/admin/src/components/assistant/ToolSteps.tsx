@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckMini, XMarkMini } from '@medusajs/icons';
 import { useTranslation } from 'react-i18next';
@@ -63,11 +64,13 @@ export function ToolSteps({ steps }: { steps: Step[] }) {
                   defaultValue: s.label ?? s.name,
                 })}
               </span>
+              {s.status === 'start' && <Running />}
               {s.ms !== undefined && (
                 <span className="text-ui-fg-muted tabular-nums">
-                  {s.ms < 1000
-                    ? `${s.ms} ms`
-                    : t('assistant.seconds', { n: (s.ms / 1000).toFixed(1) })}
+                  {/* Floor 0.1 s: a 20 ms lookup must not read "0.0 s". */}
+                  {t('assistant.seconds', {
+                    n: (Math.max(s.ms, 100) / 1000).toFixed(1),
+                  })}
                 </span>
               )}
             </motion.li>
@@ -76,4 +79,20 @@ export function ToolSteps({ steps }: { steps: Step[] }) {
       </ol>
     </div>
   );
+}
+
+// A running step counts up: with reduced motion its spinner stands still,
+// and a long run must not look frozen. Not read out (inside a live region).
+function Running() {
+  const { t } = useTranslation();
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSecs((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return secs > 0 ? (
+    <span aria-hidden className="text-ui-fg-muted tabular-nums">
+      {t('assistant.seconds', { n: secs })}
+    </span>
+  ) : null;
 }

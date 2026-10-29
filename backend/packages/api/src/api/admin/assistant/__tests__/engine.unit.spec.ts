@@ -7,6 +7,7 @@ import {
   type TurnEvent,
 } from '../engine';
 import { streamChat } from '../openrouter';
+import { systemPrompt } from '../prompt';
 import type { AssistantTool } from '../tools';
 
 const sse = (...chunks: (object | string)[]) =>
@@ -264,6 +265,143 @@ describe('streamChat tool-call pieces', () => {
       type: 'tool_calls',
       calls: [{ id: 'a', name: 'groups', arguments: '{}' }],
     });
+  });
+});
+
+describe('streamChat retry', () => {
+  const run = (responses: (() => Response)[], signal?: AbortSignal) => {
+    const out: unknown[] = [];
+    const fetchImpl = jest.fn(async () => {
+      const next = responses.shift();
+      if (!next) throw new Error('no more responses');
+      return next();
+    });
+    const done = (async () => {
+      for await (const e of streamChat({
+        key: 'k',
+        model: 'm',
+        messages: [],
+        tools: [],
+        signal,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }))
+        out.push(e);
+    })();
+    return { done, out, fetchImpl };
+  };
+
+  it('retries once on 503, then streams the answer', async () => {
+    const t = run([
+      () =>
+        new Response('{}', { status: 503, headers: { 'retry-after': '0' } }),
+      () => sse(say('ok')),
+    ]);
+    await t.done;
+    expect(t.out).toEqual([{ type: 'text', delta: 'ok' }]);
+    expect(t.fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a network error only once', async () => {
+    const down = () => {
+      throw new TypeError('fetch failed');
+    };
+    const t = run([down, down]);
+    await expect(t.done).rejects.toThrow('fetch failed');
+    expect(t.fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('never retries once the answer has started streaming', async () => {
+    const t = run([
+      () =>
+        new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(
+                new TextEncoder().encode(
+                  `data: ${JSON.stringify(say('Half'))}\n\n`,
+                ),
+              );
+              setTimeout(() => c.error(new TypeError('terminated')), 5);
+            },
+          }),
+        ),
+      () => sse(say('again')),
+    ]);
+    await expect(t.done).rejects.toThrow('terminated');
+    expect(t.out).toEqual([{ type: 'text', delta: 'Half' }]);
+    expect(t.fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('never retries once the turn is stopped', async () => {
+    const ctl = new AbortController();
+    const t = run(
+      [
+        () => {
+          ctl.abort();
+          return new Response('{}', { status: 503 });
+        },
+        () => sse(say('late')),
+      ],
+      ctl.signal,
+    );
+    await expect(t.done).rejects.toMatchObject({ name: 'AbortError' });
+    expect(t.fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('prompt caching', () => {
+  type Part = { text: string; cache_control?: { type: string } };
+  const firstBody = async (model: string, now: Date, memory: string[]) => {
+    const bodies: string[] = [];
+    await runTurn({
+      key: 'k',
+      model,
+      access,
+      tools: [],
+      history: [],
+      userText: 'q',
+      images: [],
+      ctx,
+      emit: () => undefined,
+      signal: new AbortController().signal,
+      now,
+      memory,
+      fetchImpl: (async (_url: unknown, init?: RequestInit) => {
+        bodies.push(String(init?.body));
+        return sse(say('ok'));
+      }) as unknown as typeof fetch,
+    });
+    return bodies[0];
+  };
+  const system = (body: string) =>
+    (JSON.parse(body) as { messages: { content: Part[] | string }[] })
+      .messages[0].content;
+
+  it('marks only the head that every question shares, for anthropic models', async () => {
+    const later = new Date('2026-10-30T09:41:00Z');
+    const a = system(
+      await firstBody(
+        'anthropic/claude-sonnet-5.5',
+        new Date('2026-10-29T01:00:00Z'),
+        [],
+      ),
+    ) as Part[];
+    const b = system(
+      await firstBody('anthropic/claude-sonnet-5.5', later, ['a saved note']),
+    ) as Part[];
+    // Another time and other notes: the cached block stays byte-identical.
+    expect(a[0]).toEqual(b[0]);
+    expect(b[0].cache_control).toEqual({ type: 'ephemeral' });
+    expect(b[1]).not.toHaveProperty('cache_control');
+    expect(b.map((p) => p.text).join('')).toBe(
+      systemPrompt(access, [], later, ['a saved note']),
+    );
+  });
+
+  it('sends other models the plain prompt, with no cache mark', async () => {
+    const body = await firstBody('openai/gpt-5', new Date(), []);
+    expect(body).not.toContain('cache_control');
+    expect(typeof system(body)).toBe('string');
   });
 });
 

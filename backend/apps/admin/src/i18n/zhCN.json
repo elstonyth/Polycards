@@ -318,7 +318,9 @@
       "refsAdd": "添加参考图",
       "refsRemove": "移除参考图",
       "refsUseDefault": "恢复默认参考图",
-      "refsReplace": "上传自己的帖子后，会替换整组内置参考图；把自己上传的全部移除，就会恢复内置的那组。"
+      "refsReplace": "上传自己的帖子后，会替换整组内置参考图；把自己上传的全部移除，就会恢复内置的那组。",
+      "hearVoice": "试听",
+      "stopVoice": "停止"
     },
     "review": {
       "title": "助手对话记录",
@@ -331,7 +333,12 @@
       "turns": "提问数",
       "failed": "失败",
       "cost": "费用",
-      "deleted": "已删除"
+      "deleted": "已删除",
+      "search": "搜索标题和消息",
+      "allStaff": "全部员工",
+      "noMatches": "没有匹配的对话。",
+      "readAloud": "朗读：{{count}} 次",
+      "voiceCost": "其中语音：USD {{cost}}"
     },
     "tools": {
       "economy": "经济总览",
@@ -379,7 +386,7 @@
       "talk": "语音对话",
       "endTalk": "结束对话",
       "talkHint": "说完停一下，答案会读出来。",
-      "tapToInterrupt": "点一下光球就能打断。",
+      "tapToInterrupt": "直接说话或点一下光球就能打断。",
       "interrupt": "打断并开始听",
       "hearing": "🎙 正在听…",
       "nothingHeard": "没听清楚，请再说一次。",
@@ -396,7 +403,8 @@
         "ask": "语音提问",
         "denied": "麦克风被阻止了。请在浏览器的网站设置里允许。",
         "unavailable": "打不开麦克风。"
-      }
+      },
+      "talkEndedSilent": "没听到声音，语音对话已结束。"
     },
     "history": "历史",
     "imageFailed": "图片加载失败。",
@@ -409,6 +417,22 @@
       "no_key": "助手还没有 AI 密钥，请管理员在 设置 → AI 助手 添加。",
       "busy": "上一个问题还在回答中，请等它完成再问。",
       "daily_cap": "你今天的助手额度已用完，马来西亚时间 00:00 重置。"
-    }
+    },
+    "spend": {
+      "today": "今日已用 USD {{spent}} / {{cap}}",
+      "reached": "已达 USD {{cap}} 额度上限",
+      "resets": "马来西亚时间 00:00 重置"
+    },
+    "markdown": {
+      "copy": "复制",
+      "copied": "已复制",
+      "copyFailed": "复制失败"
+    },
+    "copy": "复制",
+    "copied": "已复制。",
+    "copyFailed": "无法复制。",
+    "tryAgain": "重试",
+    "jumpToLatest": "跳到最新",
+    "retryTextOnly": "已仅用文字重新提问：截图不会再次发送。"
   }
 }

@@ -82,6 +82,8 @@ type Body = {
   images?: unknown;
   /** A spoken question: base64 16 kHz WAV (voice.ts). */
   audio?: unknown;
+  /** A typed follow-up in Talk mode: its answer is read aloud too. */
+  spoken?: unknown;
 };
 
 function parse(body: Body): {
@@ -89,6 +91,7 @@ function parse(body: Body): {
   text: string;
   images: string[];
   audio?: string;
+  spoken: boolean;
 } {
   let audio: string | undefined;
   if (body.audio !== undefined && body.audio !== null) {
@@ -125,6 +128,7 @@ function parse(body: Body): {
     text,
     images: images as string[],
     audio,
+    spoken: audio !== undefined || body.spoken === true,
   };
 }
 
@@ -234,8 +238,6 @@ export async function POST(
     }
 
     // A spoken question is written down first, then asked like a typed one.
-    // shortcut: a recording with no speech in it is not charged (no answer
-    // row to carry the cost); the chat rate limit bounds it.
     let listened = 0;
     if (input.audio) {
       if (!MODEL_RE.test(String(settings.stt_model ?? ''))) {
@@ -256,6 +258,8 @@ export async function POST(
           signal: ctl.signal,
         });
       } catch (err) {
+        // shortcut: a refused request is not charged by OpenRouter; one cut
+        // off mid-way may be, but transcribe() returns no generation id to price.
         finish({
           type: 'error',
           code: 'listen_failed',
@@ -267,6 +271,33 @@ export async function POST(
       input.text = heard.text.slice(0, MAX_TEXT);
       send({ type: 'transcript', text: input.text });
       if (!input.text) {
+        // Hearing nothing is still paid: a hidden voice row counts it toward
+        // the daily cap. A new chat made only to hold it is hidden at once.
+        if (listened > 0) {
+          const at = new Date();
+          const heldIn =
+            conversation ??
+            ((await assistant.createAssistantConversations({
+              user_id: access.userId,
+              title: '(voice) nothing heard',
+              last_message_at: at,
+            })) as { id: string; title: string });
+          await assistant.createAssistantMessages({
+            conversation_id: heldIn.id,
+            role: 'voice',
+            content: '',
+            model: settings.stt_model,
+            cost_usd: listened,
+          });
+          if (conversation) {
+            await assistant.updateAssistantConversations({
+              id: heldIn.id,
+              last_message_at: at,
+            });
+          } else {
+            await assistant.softDeleteAssistantConversations([heldIn.id]);
+          }
+        }
         finish({
           type: 'error',
           code: 'no_speech',
@@ -333,6 +364,7 @@ export async function POST(
       history,
       userText: input.text,
       images: input.images,
+      spoken: input.spoken,
       signal: ctl.signal,
       budgetUsd: Number(settings.daily_cap_usd) - spent - listened,
       memory: await memoryFor(assistant, access.userId),
