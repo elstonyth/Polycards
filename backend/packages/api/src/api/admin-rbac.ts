@@ -33,6 +33,9 @@ export const OPERATION_BY_METHOD = {
  *  them byte-identical to what the middleware entries check. */
 export const CUSTOM_ADMIN_RESOURCES = {
   announcements: 'announcement',
+  assistant: 'assistant',
+  'assistant-review': 'assistant_review',
+  'assistant-settings': 'assistant_setting',
   automation: 'automation',
   'avatar-frames': 'avatar_frame',
   cards: 'card',
