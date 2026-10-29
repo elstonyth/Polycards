@@ -195,7 +195,6 @@ export async function POST(
     let cost = 0;
     let rate = 0;
     const generations: string[] = [];
-    let chars = 0; // sent to be spoken: billed whether heard or not
     let failure: string | null = null;
     let spoke = false;
     let saved: SpeechCache | null = null;
@@ -258,10 +257,7 @@ export async function POST(
           } else if (e.type === 'format') {
             send(e);
             rate = e.rate;
-          } else {
-            generations.push(e.id);
-            chars += e.chars;
-          }
+          } else generations.push(e.id);
         }
       } catch (err) {
         // A timeout in speak() is a failure; only the asker leaving is not.
@@ -298,13 +294,18 @@ export async function POST(
       if (spoke) {
         // Speech returns no bill: count a safe overestimate now, so the next
         // reading's cap check sees it, and put OpenRouter's own figure in
-        // once it arrives. Every piece sent is charged, heard or not.
+        // once it arrives. The whole text, whatever was heard or what the
+        // headers said: a piece sent is charged whether heard or not. Only
+        // a reading refused outright (no audio, no generation) costs nothing.
         const heardSeconds = rate ? Buffer.concat(pcm).length / 2 / rate : 0;
-        cost = estimateSpeechCost(
-          (await speechModels())?.get(settings.voice_model),
-          chars,
-          Math.max(heardSeconds, spokenLength(text) / 10),
-        );
+        cost =
+          generations.length || pcm.length
+            ? estimateSpeechCost(
+                (await speechModels())?.get(settings.voice_model),
+                text.length,
+                Math.max(heardSeconds, spokenLength(text) / 10),
+              )
+            : 0;
         const row = await assistant
           .createAssistantMessages({
             conversation_id: message.conversation_id,

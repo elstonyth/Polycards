@@ -399,11 +399,11 @@ describe('speak', () => {
       })),
     );
     expect(events).toEqual([
-      { type: 'generation', id: 'gen-1', chars: pieces[0].length },
+      { type: 'generation', id: 'gen-1' },
       { type: 'format', rate: 24000 },
       { type: 'audio', data: b64([1, 0]) },
       { type: 'audio', data: b64([1, 1]) },
-      { type: 'generation', id: 'gen-2', chars: pieces[1].length },
+      { type: 'generation', id: 'gen-2' },
       { type: 'audio', data: b64([2, 0]) },
       { type: 'audio', data: b64([2, 1]) },
     ]);

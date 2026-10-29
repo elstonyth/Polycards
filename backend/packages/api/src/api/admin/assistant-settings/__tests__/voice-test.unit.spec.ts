@@ -145,10 +145,10 @@ it('streams the sample in the unsaved model and voice, then logs its cost', asyn
   asSuper(true);
   costMock.mockResolvedValueOnce(0.0004).mockResolvedValueOnce(0.0002);
   speakMock.mockImplementation(async function* () {
-    yield { type: 'generation', id: 'gen_1', chars: 20 };
+    yield { type: 'generation', id: 'gen_1' };
     yield { type: 'format', rate: 24000 };
     yield { type: 'audio', data: 'AAA=' };
-    yield { type: 'generation', id: 'gen_2', chars: 20 };
+    yield { type: 'generation', id: 'gen_2' };
     yield { type: 'audio', data: 'BBB=' };
   });
   const r = await post({
@@ -180,7 +180,7 @@ it('logs a stopped sample with its pieces’ cost', async () => {
   asSuper(true);
   costMock.mockResolvedValue(0.0007);
   speakMock.mockImplementation(async function* (opts) {
-    yield { type: 'generation', id: 'gen_9', chars: 30 };
+    yield { type: 'generation', id: 'gen_9' };
     yield { type: 'audio', data: 'AAA=' };
     lastRes.emit('close'); // Stop
     opts.signal?.throwIfAborted();
@@ -194,7 +194,7 @@ it('logs a stopped sample with its pieces’ cost', async () => {
 it('sends error codes: speak_failed with the reason, and no_audio', async () => {
   asSuper(true);
   speakMock.mockImplementation(async function* () {
-    yield { type: 'generation', id: 'gen_2', chars: 10 };
+    yield { type: 'generation', id: 'gen_2' };
     throw new Error('Provider down\nretry later');
   });
   let r = await post({});

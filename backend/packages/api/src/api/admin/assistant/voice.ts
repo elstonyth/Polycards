@@ -368,12 +368,12 @@ export function estimateSpeechCost(
 export type SpeechEvent =
   | { type: 'format'; rate: number }
   | { type: 'audio'; data: string }
-  | { type: 'generation'; id: string; chars: number };
+  | { type: 'generation'; id: string };
 
 /** Reads `text` aloud through /audio/speech, piece by piece (speechPieces):
  *  first its sample rate, then base64 PCM16 mono chunks as they arrive, and
- *  each piece's generation id and length (what it cost is looked up later:
- *  speech returns no usage). Throws when OpenRouter goes quiet for 30 s or
+ *  each piece's generation id (what it cost is looked up later: speech
+ *  returns no usage). Throws when OpenRouter goes quiet for 30 s or
  *  the reading runs past 3 minutes. */
 export async function* speak(opts: {
   key: string;
@@ -449,7 +449,7 @@ async function* speakUntil(
       );
     }
     const id = answer.headers.get('x-generation-id');
-    if (id) yield { type: 'generation', id, chars: piece.length };
+    if (id) yield { type: 'generation', id };
     const type = answer.headers.get('content-type') ?? '';
     if (!/^audio\/(pcm|l16)\b/i.test(type)) {
       await answer.body.cancel().catch(() => undefined);
