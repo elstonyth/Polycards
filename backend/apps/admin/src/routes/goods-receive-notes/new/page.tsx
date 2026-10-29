@@ -63,6 +63,12 @@ const NewGoodsReceiveNotePage = () => {
     (s, l) => s + Number(l.fmv_snapshot) * Number(l.qty),
     0,
   );
+  // Whole numbers only: a half-typed or fractional qty (refused at save) must
+  // not show NaN or float dust in the total.
+  const totalQty = lines.reduce((s, l) => {
+    const n = Number(l.qty);
+    return s + (Number.isInteger(n) ? n : 0);
+  }, 0);
 
   const submit = async () => {
     // Refuse rather than round — see draftError. Checked BEFORE the try, so
@@ -147,7 +153,7 @@ const NewGoodsReceiveNotePage = () => {
           </div>
         ) : (
           <div
-            className="overflow-x-auto border-t"
+            className="overflow-x-auto border-t [&_input]:scroll-mb-24"
             tabIndex={0}
             role="region"
             aria-label={t('grn.linesLabel')}
@@ -219,7 +225,15 @@ const NewGoodsReceiveNotePage = () => {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-end gap-8 border-t px-6 py-4">
+        {/* Sticky: a long receipt keeps its totals and Save in view. No z-index:
+            one would paint it over Radix portals (drawers, selects). */}
+        <div className="bg-ui-bg-base sticky bottom-0 flex flex-wrap items-center justify-end gap-8 rounded-b-lg border-t px-6 py-4">
+          <div className="text-right">
+            <Text className="text-ui-fg-subtle" size="small">
+              {t('grn.col.totalQty')}
+            </Text>
+            <Text className="tabular-nums">{totalQty}</Text>
+          </div>
           <div className="text-right">
             <Text className="text-ui-fg-subtle" size="small">
               {t('grn.col.totalFmv')}

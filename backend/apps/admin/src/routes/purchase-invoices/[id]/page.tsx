@@ -40,6 +40,8 @@ const PurchaseInvoiceDetailPage = () => {
     inv?.lines.reduce((s, l) => s + Number(l.line_total), 0) ?? 0;
   const totalFmv =
     inv?.lines.reduce((s, l) => s + Number(l.fmv_snapshot) * l.qty, 0) ?? 0;
+  // Signed, same fold as the list's total_qty: a reversal sums negative.
+  const totalQty = inv?.lines.reduce((s, l) => s + l.qty, 0) ?? 0;
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -161,7 +163,13 @@ const PurchaseInvoiceDetailPage = () => {
               </Table>
             </div>
 
-            <div className="flex justify-end gap-8 border-t px-6 py-4">
+            <div className="flex flex-wrap items-center justify-end gap-8 border-t px-6 py-4">
+              <div className="text-right">
+                <Text className="text-ui-fg-subtle" size="small">
+                  Total qty
+                </Text>
+                <Text className="tabular-nums">{totalQty}</Text>
+              </div>
               <div className="text-right">
                 <Text className="text-ui-fg-subtle" size="small">
                   Total FMV
