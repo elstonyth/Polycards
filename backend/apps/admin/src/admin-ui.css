@@ -308,14 +308,41 @@
 }
 .pc-admin .pc-ai-aurora {
   background:
-    radial-gradient(60% 50% at 20% 0%, rgba(124, 58, 237, 0.16), transparent 70%),
-    radial-gradient(50% 40% at 85% 10%, rgba(6, 182, 212, 0.12), transparent 70%);
+    radial-gradient(
+      60% 50% at 20% 0%,
+      rgba(124, 58, 237, 0.16),
+      transparent 70%
+    ),
+    radial-gradient(
+      50% 40% at 85% 10%,
+      rgba(6, 182, 212, 0.12),
+      transparent 70%
+    );
+}
+/* The orb's eyes blink (21st.dev odysseyui "AI Orb Avatar"). */
+@keyframes pc-ai-blink {
+  0%,
+  88%,
+  100% {
+    transform: scaleY(1);
+  }
+  93%,
+  97% {
+    transform: scaleY(0.07);
+  }
+}
+.pc-admin .pc-ai-eye {
+  animation: pc-ai-blink 3.6s ease-in-out infinite;
+}
+.pc-admin .pc-ai-eye + .pc-ai-eye {
+  animation-delay: 60ms;
 }
 @media (prefers-reduced-motion: reduce) {
   .pc-admin .pc-ai-spin,
   .pc-admin .pc-ai-shimmer,
   .pc-admin .pc-ai-scan,
-  .pc-admin .pc-ai-beam::before {
+  .pc-admin .pc-ai-beam::before,
+  .pc-admin .pc-ai-eye {
     animation: none;
   }
 }
