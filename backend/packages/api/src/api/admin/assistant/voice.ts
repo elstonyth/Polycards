@@ -9,13 +9,19 @@ import { openRouterUrl, OpenRouterError } from './openrouter';
 // Models and voice are set in Settings → AI assistant; costs count toward
 // the daily cap (transcribing on the answer, speaking on a voice row).
 
+// The voices OpenAI's audio models speak in through chat completions (the
+// older text-to-speech voices fable, onyx and nova are not among them).
 export const VOICES = [
   'alloy',
+  'ash',
+  'ballad',
+  'coral',
   'echo',
-  'fable',
-  'onyx',
-  'nova',
+  'sage',
   'shimmer',
+  'verse',
+  'marin',
+  'cedar',
 ] as const;
 // About 75 s of 16 kHz mono 16-bit WAV.
 export const MAX_AUDIO_BYTES = 2.5 * 1024 * 1024;

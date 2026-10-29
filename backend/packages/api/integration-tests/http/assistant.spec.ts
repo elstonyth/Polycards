@@ -313,7 +313,7 @@ medusaIntegrationTestRunner({
         }
         // A valid body, so only the super-admin check can refuse it.
         for (const [path, body] of [
-          ['/admin/assistant-settings', { voice: 'nova' }],
+          ['/admin/assistant-settings', { voice: 'coral' }],
           ['/admin/assistant-settings/voice-test', {}],
         ] as const) {
           const res = await api.post(path, body, {
@@ -578,13 +578,13 @@ medusaIntegrationTestRunner({
         expect(bad.status).toBe(400);
         const set = await api.post(
           '/admin/assistant-settings',
-          { voice: 'nova' },
+          { voice: 'coral' },
           admin,
         );
         expect(set.data.settings).toMatchObject({
           stt_model: 'google/gemini-3.5-flash-lite',
           voice_model: 'openai/gpt-audio-mini',
-          voice: 'nova',
+          voice: 'coral',
         });
 
         // "Hear it" takes no model that could fetch the web.
@@ -634,7 +634,7 @@ medusaIntegrationTestRunner({
         expect(voiceCalls[1]).toMatchObject({
           model: 'openai/gpt-audio-mini',
           modalities: ['text', 'audio'],
-          audio: { voice: 'nova', format: 'pcm16' },
+          audio: { voice: 'coral', format: 'pcm16' },
         });
         expect(String(voiceCalls[1].messages[1].content)).toBe(
           'There are 0 groups.',

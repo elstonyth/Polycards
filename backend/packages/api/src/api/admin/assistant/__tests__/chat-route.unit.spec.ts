@@ -430,6 +430,53 @@ it('keeps the listening cost when the turn fails', async () => {
   expect(locks.size).toBe(0);
 });
 
+it('keeps what the answer cost when saving the answer fails', async () => {
+  transcribeMock.mockResolvedValueOnce({
+    text: 'how many packs?',
+    cost: 0.002,
+  });
+  runTurnMock.mockResolvedValueOnce({ ...answer, cost: 0.01 });
+  service.createAssistantMessages
+    .mockImplementationOnce(async () => ({ id: 'msg_q' })) // the question
+    .mockImplementationOnce(async () => {
+      throw new Error('db down'); // the answer
+    });
+  const p = post({ audio: wav() });
+  await p.done;
+  const calls = service.createAssistantMessages.mock.calls as unknown as [
+    { role: string; cost_usd?: number; model?: string },
+  ][];
+  const voice = calls.filter(([m]) => m.role === 'voice');
+  // One row, holding the answer and the listening together, never twice.
+  expect(voice).toHaveLength(1);
+  expect(voice[0][0].cost_usd).toBeCloseTo(0.012);
+  expect(voice[0][0].model).toBe('anthropic/claude-sonnet-5.5');
+  expect(p.events().at(-1)).toMatchObject({ type: 'error' });
+});
+
+it('puts the listening cost in a hidden chat when its own chat cannot be bumped', async () => {
+  transcribeMock.mockResolvedValueOnce({ text: '', cost: 0.0003 });
+  service.listAssistantConversations.mockResolvedValueOnce([
+    { id: 'conv_9', title: 'old' },
+  ] as never);
+  // The chat was deleted in another tab meanwhile.
+  service.updateAssistantConversations.mockRejectedValueOnce(
+    new Error('not found'),
+  );
+  await post({ audio: wav(), conversation_id: 'conv_9' }).done;
+  expect(service.createAssistantConversations).toHaveBeenCalledTimes(1);
+  expect(service.createAssistantMessages).toHaveBeenCalledWith(
+    expect.objectContaining({
+      conversation_id: 'conv_1',
+      role: 'voice',
+      cost_usd: 0.0003,
+    }),
+  );
+  expect(service.softDeleteAssistantConversations).toHaveBeenCalledWith([
+    'conv_1',
+  ]);
+});
+
 it('still charges the listening of an asker who left while it was written down', async () => {
   let p!: ReturnType<typeof post>;
   transcribeMock.mockImplementationOnce(async () => {

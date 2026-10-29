@@ -213,7 +213,7 @@ describe('speak', () => {
     for await (const e of speak({
       key: 'k',
       model: 'openai/gpt-audio-mini',
-      voice: 'nova',
+      voice: 'coral',
       text: 'Hi',
       fetchImpl,
     })) {
@@ -222,7 +222,7 @@ describe('speak', () => {
     expect(sent).toMatchObject({
       model: 'openai/gpt-audio-mini',
       modalities: ['text', 'audio'],
-      audio: { voice: 'nova', format: 'pcm16' },
+      audio: { voice: 'coral', format: 'pcm16' },
       stream: true,
       // Bounded by what the text takes to say: 2 letters.
       max_tokens: 2 * 4 + 200,

@@ -55,7 +55,7 @@ const cacheRow = (
   tools: {
     message_id: 'aimsg_1',
     voice_model: 'openai/gpt-audio-mini',
-    voice: 'nova',
+    voice: 'coral',
     file_id,
     ...over,
   },
@@ -181,7 +181,7 @@ beforeEach(() => {
     openrouter_key_sealed: 'sealed',
     daily_cap_usd: 5,
     voice_model: 'openai/gpt-audio-mini',
-    voice: 'nova',
+    voice: 'coral',
   };
   speakMock.mockImplementation(spoken);
   costMock.mockResolvedValue(0);
@@ -224,7 +224,7 @@ it('speaks, stores the speech privately and records which file with the cost', a
       tools: {
         message_id: 'aimsg_1',
         voice_model: 'openai/gpt-audio-mini',
-        voice: 'nova',
+        voice: 'coral',
         file_id: 'file_new',
       },
     }),

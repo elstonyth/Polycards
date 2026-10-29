@@ -12,7 +12,7 @@ jest.mock('../../assistant/openrouter', () => ({
   generationCost: jest.fn(),
 }));
 jest.mock('../../assistant/voice', () => ({
-  VOICES: ['alloy', 'nova'],
+  VOICES: ['alloy', 'coral'],
   speak: jest.fn(),
 }));
 jest.mock('../../../../modules/assistant', () => ({
@@ -166,14 +166,14 @@ it('streams the sample in the unsaved model and voice', async () => {
   });
   const r = await post({
     voice_model: 'openai/gpt-audio',
-    voice: 'nova',
+    voice: 'coral',
     lang: 'zh',
   });
   expect(r.code).toBe(200);
   expect(speakMock.mock.calls[0][0]).toMatchObject({
     key: 'k',
     model: 'openai/gpt-audio',
-    voice: 'nova',
+    voice: 'coral',
     text: expect.stringContaining('128'),
   });
   expect(speakMock.mock.calls[0][0].text).toMatch(/助手/);
