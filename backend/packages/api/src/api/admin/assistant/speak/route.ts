@@ -8,7 +8,7 @@ import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
 import { accessFor } from '../access';
-import { generationCost, speechModels } from '../openrouter';
+import { generationCost, OpenRouterError, speechModels } from '../openrouter';
 import { userLock } from '../user-lock';
 import {
   estimateSpeechCost,
@@ -196,6 +196,8 @@ export async function POST(
     let rate = 0;
     const generations: string[] = [];
     let failure: string | null = null;
+    // OpenRouter answered no (an HTTP 4xx) before any audio: nothing billed
+    let refused = false;
     let spoke = false;
     let saved: SpeechCache | null = null;
     const pcm: Buffer[] = [];
@@ -265,6 +267,10 @@ export async function POST(
           failure = String((err as Error)?.message || 'failed')
             .split(key)
             .join('[key]');
+          refused =
+            err instanceof OpenRouterError &&
+            (err.status ?? 0) >= 400 &&
+            (err.status ?? 0) < 500;
         }
       }
       // Kept only when heard to the end: a cut-short clip is never replayed.
@@ -295,11 +301,13 @@ export async function POST(
         // Speech returns no bill: count a safe overestimate now, so the next
         // reading's cap check sees it, and put OpenRouter's own figure in
         // once it arrives. The whole text, whatever was heard or what the
-        // headers said: a piece sent is charged whether heard or not. Only
-        // a reading refused outright (no audio, no generation) costs nothing.
+        // headers said: a piece sent is charged whether heard or not. Only a
+        // reading OpenRouter refused before any audio or generation costs
+        // nothing; a stop, a timeout or a dropped connection may still be
+        // billed, so it is estimated too.
         const heardSeconds = rate ? Buffer.concat(pcm).length / 2 / rate : 0;
         cost =
-          generations.length || pcm.length
+          !refused || generations.length || pcm.length
             ? estimateSpeechCost(
                 (await speechModels())?.get(settings.voice_model),
                 text.length,

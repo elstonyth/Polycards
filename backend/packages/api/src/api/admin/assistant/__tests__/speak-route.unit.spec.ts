@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { DELETE } from '../conversations/[id]/route';
-import { generationCost, speechModels } from '../openrouter';
+import { generationCost, OpenRouterError, speechModels } from '../openrouter';
 import { POST } from '../speak/route';
 import { speak, speakable, type SpeechEvent } from '../voice';
 
@@ -529,10 +529,10 @@ it('counts the whole text even when OpenRouter names no generation', async () =>
   expect(costMock).not.toHaveBeenCalled();
 });
 
-it('charges nothing for a reading refused outright', async () => {
+it('charges nothing only for a reading OpenRouter refused outright', async () => {
   speakMock.mockImplementationOnce(async function* () {
     yield* [];
-    throw new Error('voice not available');
+    throw new OpenRouterError('voice not available', 400);
   });
   const p = post();
   await p.done;
@@ -541,6 +541,28 @@ it('charges nothing for a reading refused outright', async () => {
     error: 'voice not available',
   });
   expect(p.events().at(-1)).toMatchObject({ code: 'speak_failed' });
+});
+
+it('still estimates a reading that timed out or was stopped before any sound', async () => {
+  // a timeout: the request may have been generated and billed
+  speakMock.mockImplementationOnce(async function* () {
+    yield* [];
+    throw new DOMException('The operation timed out.', 'TimeoutError');
+  });
+  await post().done;
+  // a provider error with no answer status, then a stop before any audio
+  speakMock.mockImplementationOnce(async function* () {
+    yield* [];
+    throw new OpenRouterError('upstream reset');
+  });
+  await post().done;
+  speakMock.mockImplementationOnce(async function* (opts) {
+    lastRes.emit('close');
+    opts.signal?.throwIfAborted();
+    yield* [];
+  });
+  await post().done;
+  expect(savedRows().map((r) => r.cost_usd)).toEqual([EST, EST, EST]);
 });
 
 it("saves the cost and passes on OpenRouter's reason when speaking fails", async () => {
