@@ -98,6 +98,10 @@ medusaIntegrationTestRunner({
         await expect(
           packs.updatePacks([{ id: pack.id, pack_type: 'classic' }]),
         ).rejects.toThrow(/pack_language_original_check/);
+        // An untyped pack too: a NULL comparison must not slip through.
+        await expect(
+          packs.updatePacks([{ id: pack.id, pack_type: null }]),
+        ).rejects.toThrow(/pack_language_original_check/);
       });
     });
   },

@@ -24,7 +24,7 @@ test('up() adds both nullable columns with their closed sets and the original-on
     `add column if not exists "language" text check ("language" in ('en', 'jp')) null;`,
   );
   expect(sql).toContain(
-    `add constraint "pack_language_original_check" check ("language" is null or "pack_type" = 'original');`,
+    `add constraint "pack_language_original_check" check ("language" is null or ("pack_type" is not null and "pack_type" = 'original'));`,
   );
   expect(sql).not.toMatch(/\bupdate\b/i);
 });

@@ -16,11 +16,15 @@ export class Migration20261029120000 extends Migration {
     this.addSql(
       `alter table if exists "pack" drop constraint if exists "pack_language_original_check";`,
     );
+    // `is not null and`: a bare `"pack_type" = 'original'` is NULL for an
+    // untyped pack, and a CHECK lets NULL through.
     this.addSql(
-      `alter table if exists "pack" add constraint "pack_language_original_check" check ("language" is null or "pack_type" = 'original');`,
+      `alter table if exists "pack" add constraint "pack_language_original_check" check ("language" is null or ("pack_type" is not null and "pack_type" = 'original'));`,
     );
   }
 
+  // Rolling back drops every pack's tags with the columns. Re-tag the packs
+  // in the admin after up() runs again.
   override async down(): Promise<void> {
     this.addSql(
       `alter table if exists "pack" drop constraint if exists "pack_language_original_check";`,
