@@ -304,7 +304,7 @@
       "sttModel": "听写模型",
       "sttModelHelp": "把员工说的话写下来，必须支持音频输入。",
       "voiceModel": "朗读模型",
-      "voiceModelHelp": "把答案读出来，必须支持音频输出。",
+      "voiceModelHelp": "逐字把答案读出来：选 OpenRouter 的朗读模型。",
       "voice": "声音",
       "save": "保存",
       "saved": "已保存。",

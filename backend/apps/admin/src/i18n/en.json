@@ -1877,7 +1877,7 @@
       "sttModel": "Listening model",
       "sttModelHelp": "Writes down what staff say. Must accept audio input.",
       "voiceModel": "Speaking model",
-      "voiceModelHelp": "Reads answers aloud. Must give audio output.",
+      "voiceModelHelp": "Reads answers aloud word for word: one of OpenRouter's speaking models.",
       "voice": "Voice",
       "save": "Save",
       "saved": "Saved.",

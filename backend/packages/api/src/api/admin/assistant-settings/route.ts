@@ -10,8 +10,8 @@ import { accessFor } from '../assistant/access';
 import { isOwnOrigin } from '../assistant/agent-tools';
 import { DEFAULT_IMAGE_STYLE } from '../assistant/brand-style';
 import { DEFAULT_STYLE_REFS } from '../assistant/style-refs';
-import { MODEL_RE } from '../assistant/openrouter';
-import { VOICES } from '../assistant/voice';
+import { MODEL_RE, speechModels } from '../assistant/openrouter';
+import { DEFAULT_VOICE_MODEL, speechChoiceProblem } from '../assistant/voice';
 
 // GET/POST /admin/assistant-settings (spec 2026-10-29): Settings → AI. The
 // OpenRouter key is write-only — sealed on the way in, and only whether one
@@ -27,6 +27,7 @@ async function view(req: AuthenticatedMedusaRequest) {
   const s = await req.scope
     .resolve<AssistantModuleService>(ASSISTANT_MODULE)
     .settings();
+  const speech = await speechModels();
   return {
     openrouter_key: {
       set: !!s.openrouter_key_sealed,
@@ -42,7 +43,11 @@ async function view(req: AuthenticatedMedusaRequest) {
     stt_model: s.stt_model,
     voice_model: s.voice_model,
     voice: s.voice,
-    voices: VOICES,
+    // OpenRouter's speaking models and their voices; empty while the list
+    // can't be had (the page then takes a typed model id and voice).
+    speech_models: [...(speech ?? new Map()).entries()]
+      .map(([id, m]) => ({ id, voices: m.voices ?? [] }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
     daily_cap_usd: Number(s.daily_cap_usd),
     // The house look for AI images: what is saved (null = the default), and
     // the default itself so the page can show and restore it.
@@ -117,7 +122,7 @@ export async function POST(
     ['chat_model', 'anthropic/claude-sonnet-5.5'],
     ['image_model', 'google/gemini-3.1-flash-image'],
     ['stt_model', 'google/gemini-3.5-flash-lite'],
-    ['voice_model', 'openai/gpt-audio-mini'],
+    ['voice_model', DEFAULT_VOICE_MODEL],
   ] as const) {
     const v = body[field];
     if (v === undefined) continue;
@@ -129,14 +134,21 @@ export async function POST(
     }
     patch[field] = v.trim();
   }
-  if (body.voice !== undefined) {
-    if (!(VOICES as readonly unknown[]).includes(body.voice)) {
-      res
-        .status(400)
-        .json({ message: `voice must be one of ${VOICES.join(', ')}.` });
+  // The speaking model and its voice go together: a voice belongs to one
+  // model, so either one changing checks the pair.
+  if (body.voice_model !== undefined || body.voice !== undefined) {
+    const saved = await req.scope
+      .resolve<AssistantModuleService>(ASSISTANT_MODULE)
+      .settings();
+    const problem = await speechChoiceProblem(
+      patch.voice_model ?? saved.voice_model,
+      body.voice ?? saved.voice,
+    );
+    if (problem) {
+      res.status(400).json({ message: problem });
       return;
     }
-    patch.voice = body.voice;
+    if (body.voice !== undefined) patch.voice = body.voice;
   }
   // The house look: text, or null / empty to go back to the default.
   if (body.image_style !== undefined) {

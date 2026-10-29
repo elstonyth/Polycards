@@ -114,6 +114,7 @@ export function useVoice() {
           messageId,
           (e) => {
             if (e.type === 'audio') p.push(e.data);
+            else if (e.type === 'format') p.setRate(e.rate);
             else if (e.type === 'error') {
               toast.error(
                 e.code

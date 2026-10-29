@@ -23,10 +23,10 @@ describe('Migration20261029081358 (assistant voice)', () => {
       `add column if not exists "stt_model" text not null default 'google/gemini-3.5-flash-lite'`,
     );
     expect(up).toContain(
-      `add column if not exists "voice_model" text not null default 'openai/gpt-audio-mini'`,
+      `add column if not exists "voice_model" text not null default 'google/gemini-3.8-flash-lite-tts'`,
     );
     expect(up).toContain(
-      `add column if not exists "voice" text not null default 'alloy'`,
+      `add column if not exists "voice" text not null default 'Kore'`,
     );
   });
 

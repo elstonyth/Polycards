@@ -1,19 +1,13 @@
-import { speak, speakable, transcribe, type SpeechEvent } from '../voice';
-
-const sse = (...chunks: object[]) =>
-  new Response(
-    new ReadableStream({
-      start(c) {
-        const enc = new TextEncoder();
-        for (const ch of chunks) {
-          c.enqueue(enc.encode(`data: ${JSON.stringify(ch)}\n\n`));
-        }
-        c.enqueue(enc.encode('data: [DONE]\n\n'));
-        c.close();
-      },
-    }),
-    { status: 200, headers: { 'content-type': 'text/event-stream' } },
-  );
+import { forgetSpeechModels } from '../openrouter';
+import {
+  estimateSpeechCost,
+  speak,
+  speakable,
+  speechChoiceProblem,
+  speechPieces,
+  transcribe,
+  type SpeechEvent,
+} from '../voice';
 
 describe('speakable', () => {
   it('reads a table row by row with its headings, without symbols', () => {
@@ -22,7 +16,7 @@ describe('speakable', () => {
         '**Today** (default group):\n\n| Item | Amount |\n|---|---:|\n| Revenue | RM 0.00 |\n| Payouts | RM 1.50 |\n\nNothing opened yet.',
       ),
     ).toBe(
-      'Today (default group):\nRevenue, Amount RM 0.00.\nPayouts, Amount RM 1.50.\nNothing opened yet.',
+      'Today (default group):\nRevenue, Amount 0 ringgit.\nPayouts, Amount 1 ringgit 50 sen.\nNothing opened yet.',
     );
   });
 
@@ -47,10 +41,10 @@ describe('speakable', () => {
         '| **Item** | **Amount** | Note |\n|---|---:|---|\n| **Revenue** | RM 1,234.50 | — |\n| Payouts | | a<br>b |\n\nTop-up — up ~~10~~ → 12, packs 10–20.',
       ),
     ).toBe(
-      'Revenue, Amount RM 1,234.50.\nPayouts, Note a, b.\nTop-up, up 10, 12, packs 10–20.',
+      'Revenue, Amount 1,234 ringgit 50 sen.\nPayouts, Note a, b.\nTop-up, up 10, 12, packs 10–20.',
     );
     // One ~ means "about" and is kept; a Chinese —— is one pause.
-    expect(speakable('Sold ~RM 50——不错')).toBe('Sold ~RM 50, 不错');
+    expect(speakable('Sold ~RM 50——不错')).toBe('Sold ~50令吉, 不错');
   });
 
   it('cuts Chinese at a full stop, sooner, and closes in Chinese', () => {
@@ -78,8 +72,25 @@ describe('speakable', () => {
 
   it('says < and > between numbers as words', () => {
     expect(speakable('Packs 5 > 3, top-ups 2<RM 10.\n> quoted 7')).toBe(
-      'Packs 5 more than 3, top-ups 2 less than RM 10.\n quoted 7',
+      'Packs 5 more than 3, top-ups 2 less than 10 ringgit.\n quoted 7',
     );
+  });
+
+  // A speech model reads "RM 12.50" in an English sentence as dollars
+  // (tested 2026-10-29); "12 ringgit 50 sen" it reads right.
+  it('says ringgit amounts as people say them', () => {
+    expect(speakable('Paid RM12.50, RM 1,250, RM 0.05 and RM 7.5 in RM.')).toBe(
+      'Paid 12 ringgit 50 sen, 1,250 ringgit, 5 sen and 7 ringgit 50 sen in ringgit.',
+    );
+    expect(speakable('Packs cost RM 10–RM 20, from RM 5 to RM 8.50.')).toBe(
+      'Packs cost 10 to 20 ringgit, from 5 to 8.50 ringgit.',
+    );
+    // "to" only makes a range with a second amount in RM
+    expect(speakable('RM 10 to 20 packs')).toBe('10 ringgit to 20 packs');
+    expect(speakable('今天卖了 RM 3,480.20，退款 RM 0.50。')).toBe(
+      '今天卖了 3,480令吉20仙，退款 50仙。',
+    );
+    expect(speakable('FORM 7 and RMB')).toBe('FORM 7 and RMB');
   });
 });
 
@@ -194,123 +205,286 @@ describe('transcribe', () => {
   });
 });
 
-describe('speak', () => {
-  it('asks for pcm16 audio in the set voice and streams the chunks and cost', async () => {
-    let sent: Record<string, unknown> = {};
-    const fetchImpl = jest.fn(async (_url: unknown, init?: RequestInit) => {
-      sent = JSON.parse(String(init?.body));
-      return sse(
-        { id: 'gen-1', choices: [{ delta: { audio: { data: 'AAA=' } } }] },
-        { choices: [{ delta: { audio: { transcript: 'Hi' } } }] },
-        { choices: [{ delta: { audio: { data: 'BBB=' } } }] },
-        {
-          choices: [],
-          usage: { cost: 0.002, prompt_tokens: 40, completion_tokens: 300 },
-        },
-      );
-    }) as unknown as typeof fetch;
-    const events: SpeechEvent[] = [];
-    for await (const e of speak({
-      key: 'k',
-      model: 'openai/gpt-audio-mini',
-      voice: 'coral',
-      text: 'Hi',
-      fetchImpl,
-    })) {
-      events.push(e);
-    }
-    expect(sent).toMatchObject({
-      model: 'openai/gpt-audio-mini',
-      modalities: ['text', 'audio'],
-      audio: { voice: 'coral', format: 'pcm16' },
-      stream: true,
-      // Bounded by what the text takes to say: 2 letters.
-      max_tokens: 2 * 4 + 200,
-    });
-    expect(events).toEqual([
-      { type: 'generation', id: 'gen-1' },
-      { type: 'audio', data: 'AAA=' },
-      { type: 'audio', data: 'BBB=' },
-      { type: 'usage', cost: 0.002, tokensIn: 40, tokensOut: 300 },
+describe('speechPieces', () => {
+  it('keeps a short answer in one piece', () => {
+    expect(speechPieces('Sold 12 packs today. All good.')).toEqual([
+      'Sold 12 packs today. All good.',
     ]);
   });
 
-  it('throws an error chunk', async () => {
-    const fetchImpl = jest.fn(async () =>
-      sse({ error: { message: 'voice not available', code: 400 } }),
+  it('starts with a short piece, then longer ones, cut at sentence ends', () => {
+    const text = Array.from(
+      { length: 20 },
+      (_, i) => `Pack ${i + 1} sold 1,234.50 ringgit today.`,
+    ).join(' ');
+    const pieces = speechPieces(text);
+    expect(pieces.length).toBeGreaterThan(2);
+    expect(pieces[0].length).toBeLessThanOrEqual(120);
+    for (const p of pieces.slice(1)) expect(p.length).toBeLessThanOrEqual(360);
+    // every piece ends a sentence, and nothing is lost or split in a number
+    for (const p of pieces) expect(p).toMatch(/today\.$/);
+    expect(pieces.join(' ')).toBe(text);
+  });
+
+  it('weighs Chinese by how long it takes to say', () => {
+    const pieces = speechPieces('今天卖了很多卡。'.repeat(40));
+    // 8 characters at 3 each: 5 sentences fit in the first 120
+    expect(pieces[0]).toBe('今天卖了很多卡。'.repeat(5));
+    expect(pieces.join('')).toBe('今天卖了很多卡。'.repeat(40));
+  });
+
+  it('cuts a sentence longer than a piece at a comma', () => {
+    const long = `${'one card, '.repeat(30)}done.`;
+    const pieces = speechPieces(long);
+    expect(pieces[0].endsWith(',')).toBe(true);
+    expect(pieces[0].length).toBeLessThanOrEqual(120);
+    expect(pieces.join(' ')).toBe(long.replace(/, $/, ','));
+  });
+});
+
+describe('speechChoiceProblem', () => {
+  const list = jest.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: 'google/gemini-3.8-flash-lite-tts',
+              supported_voices: ['Kore', 'Puck'],
+              pricing: { prompt: '0.0000005', completion: '0.000006' },
+            },
+            { id: 'fish-audio/s2-pro', supported_voices: null, pricing: {} },
+          ],
+        }),
+      ),
+  ) as unknown as typeof fetch;
+  beforeEach(() => forgetSpeechModels());
+
+  it('takes a listed speaking model and one of its voices', async () => {
+    expect(
+      await speechChoiceProblem(
+        'google/gemini-3.8-flash-lite-tts',
+        'Kore',
+        list,
+      ),
+    ).toBeNull();
+    // a model that lists no voices takes any well-formed one
+    expect(
+      await speechChoiceProblem('fish-audio/s2-pro', 'narrator', list),
+    ).toBeNull();
+  });
+
+  it('refuses a chat voice model, another model’s voice and a malformed id', async () => {
+    expect(
+      await speechChoiceProblem('openai/gpt-audio-mini', 'alloy', list),
+    ).toMatch(/not one of OpenRouter's speaking models/);
+    expect(
+      await speechChoiceProblem(
+        'google/gemini-3.8-flash-lite-tts',
+        'sarah',
+        list,
+      ),
+    ).toMatch(/not a voice of/);
+    expect(await speechChoiceProblem('gpt-5:online', 'Kore', list)).toMatch(
+      /voice_model must be/,
+    );
+    expect(
+      await speechChoiceProblem(
+        'google/gemini-3.8-flash-lite-tts',
+        'a b',
+        list,
+      ),
+    ).toMatch(/voice must be/);
+  });
+
+  it('checks only the form while the list is out of reach', async () => {
+    const down = jest.fn(async () => {
+      throw new Error('ECONNRESET');
+    }) as unknown as typeof fetch;
+    expect(
+      await speechChoiceProblem('vendor/new-tts', 'Nova_2', down),
+    ).toBeNull();
+  });
+});
+
+describe('estimateSpeechCost', () => {
+  it('prices characters in and 25 audio tokens a second out', () => {
+    const gemini = { voices: null, prompt: 5e-7, completion: 6e-6 };
+    expect(estimateSpeechCost(gemini, 100, 10)).toBeCloseTo(
+      100 * 5e-7 + 250 * 6e-6,
+      10,
+    );
+    // per-character voices
+    expect(
+      estimateSpeechCost(
+        { voices: null, prompt: 4e-5, completion: 0 },
+        300,
+        20,
+      ),
+    ).toBeCloseTo(0.012, 10);
+    // unknown price: the dearest per-character rate
+    expect(estimateSpeechCost(undefined, 300, 20)).toBeCloseTo(0.012, 10);
+  });
+});
+
+describe('speak', () => {
+  // OpenRouter's /audio/speech: raw PCM bytes, the rate on the content type,
+  // the generation id in a header.
+  const pcm = (
+    chunks: number[][],
+    {
+      type = 'audio/pcm;rate=24000;channels=1',
+      gen = 'gen-1',
+    }: { type?: string; gen?: string | null } = {},
+  ) =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          for (const ch of chunks) c.enqueue(new Uint8Array(ch));
+          c.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          'content-type': type,
+          ...(gen ? { 'x-generation-id': gen } : {}),
+        },
+      },
+    );
+  const collect = async (opts: Partial<Parameters<typeof speak>[0]>) => {
+    const events: SpeechEvent[] = [];
+    for await (const e of speak({
+      key: 'k',
+      model: 'google/gemini-3.8-flash-lite-tts',
+      voice: 'Kore',
+      text: 'Hi.',
+      ...opts,
+    })) {
+      events.push(e);
+    }
+    return events;
+  };
+  const b64 = (bytes: number[]) => Buffer.from(bytes).toString('base64');
+
+  it('reads piece by piece from /audio/speech: the rate once, the audio, each piece’s id', async () => {
+    const sent: { url: string; body: Record<string, unknown> }[] = [];
+    let n = 0;
+    const fetchImpl = jest.fn(async (url: unknown, init?: RequestInit) => {
+      sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      n++;
+      return pcm(
+        [
+          [n, 0],
+          [n, 1],
+        ],
+        { gen: `gen-${n}` },
+      );
+    }) as unknown as typeof fetch;
+    const text =
+      `Hello there. ${'This is a longer sentence that keeps going. '.repeat(4)}`.trim();
+    const events = await collect({ text, fetchImpl });
+    const pieces = speechPieces(text);
+    expect(pieces).toHaveLength(2);
+    expect(sent.map((s) => s.url)).toEqual([
+      expect.stringMatching(/\/audio\/speech$/),
+      expect.stringMatching(/\/audio\/speech$/),
+    ]);
+    expect(sent.map((s) => s.body)).toEqual(
+      pieces.map((input) => ({
+        model: 'google/gemini-3.8-flash-lite-tts',
+        input,
+        voice: 'Kore',
+        response_format: 'pcm',
+      })),
+    );
+    expect(events).toEqual([
+      { type: 'generation', id: 'gen-1', chars: pieces[0].length },
+      { type: 'format', rate: 24000 },
+      { type: 'audio', data: b64([1, 0]) },
+      { type: 'audio', data: b64([1, 1]) },
+      { type: 'generation', id: 'gen-2', chars: pieces[1].length },
+      { type: 'audio', data: b64([2, 0]) },
+      { type: 'audio', data: b64([2, 1]) },
+    ]);
+  });
+
+  it('takes the rate from the content type, 24 kHz when it names none', async () => {
+    let fetchImpl = jest.fn(async () =>
+      pcm([[1, 2]], { type: 'audio/pcm; rate=16000', gen: null }),
     ) as unknown as typeof fetch;
-    const run = async () => {
-      for await (const e of speak({
-        key: 'k',
-        model: 'm/x',
-        voice: 'alloy',
-        text: 'Hi',
+    expect((await collect({ fetchImpl }))[0]).toEqual({
+      type: 'format',
+      rate: 16000,
+    });
+    fetchImpl = jest.fn(async () =>
+      pcm([[1, 2]], { type: 'audio/pcm' }),
+    ) as unknown as typeof fetch;
+    expect((await collect({ fetchImpl }))[1]).toEqual({
+      type: 'format',
+      rate: 24000,
+    });
+  });
+
+  it('refuses a model that sends MP3, and a rate that changes mid-answer', async () => {
+    let fetchImpl = jest.fn(async () =>
+      pcm([[1]], { type: 'audio/mpeg' }),
+    ) as unknown as typeof fetch;
+    await expect(collect({ fetchImpl })).rejects.toThrow(/not PCM/);
+    let n = 0;
+    fetchImpl = jest.fn(async () =>
+      pcm([[1, 2]], {
+        type: `audio/pcm;rate=${n++ ? 16000 : 24000}`,
+      }),
+    ) as unknown as typeof fetch;
+    await expect(
+      collect({
         fetchImpl,
-      })) {
-        void e;
-      }
-    };
-    await expect(run()).rejects.toThrow('voice not available');
-    // Audio may already have played: an error mid-stream is never retried.
+        text: `Hi. ${'More words to say in a second piece here. '.repeat(4)}`,
+      }),
+    ).rejects.toThrow(/changed its sample rate/);
+  });
+
+  it("throws OpenRouter's message on a refusal, without retrying it", async () => {
+    const fetchImpl = jest.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { message: 'voice not available' } }),
+          { status: 400 },
+        ),
+    ) as unknown as typeof fetch;
+    await expect(collect({ fetchImpl })).rejects.toThrow('voice not available');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('tries once more when the provider is busy before any audio', async () => {
+  it('tries once more when the provider is busy', async () => {
     const fetchImpl = jest
       .fn()
       .mockImplementationOnce(async () => new Response('{}', { status: 429 }))
       .mockImplementationOnce(async () =>
-        sse({ choices: [{ delta: { audio: { data: 'AAA=' } } }] }),
+        pcm([[1, 2]]),
       ) as unknown as typeof fetch;
-    const events: SpeechEvent[] = [];
-    for await (const e of speak({
-      key: 'k',
-      model: 'm/x',
-      voice: 'alloy',
-      text: 'Hi',
-      fetchImpl,
-    })) {
-      events.push(e);
-    }
-    expect(events).toEqual([{ type: 'audio', data: 'AAA=' }]);
+    const events = await collect({ fetchImpl });
+    expect(events.filter((e) => e.type === 'audio')).toEqual([
+      { type: 'audio', data: b64([1, 2]) },
+    ]);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it('gives Chinese text a bigger token budget', async () => {
-    let sent: Record<string, unknown> = {};
-    const fetchImpl = jest.fn(async (_url: unknown, init?: RequestInit) => {
-      sent = JSON.parse(String(init?.body));
-      return sse({ choices: [] });
-    }) as unknown as typeof fetch;
-    for await (const e of speak({
-      key: 'k',
-      model: 'm/x',
-      voice: 'alloy',
-      text: '你好。',
-      fetchImpl,
-    })) {
-      void e;
-    }
-    expect(sent.max_tokens).toBe((3 + 3 + 1) * 4 + 200);
-  });
-
   describe('time bounds', () => {
-    const line = (ch: object) =>
-      new TextEncoder().encode(`data: ${JSON.stringify(ch)}\n\n`);
-    const audio = { choices: [{ delta: { audio: { data: 'AAA=' } } }] };
     // A stream that sends what it is given, then nothing, and fails the way
     // fetch does when its signal aborts.
-    const stalled = (...chunks: object[]) =>
+    const stalled = (...chunks: number[][]) =>
       jest.fn(async (_url: unknown, init?: RequestInit) => {
         const signal = init?.signal as AbortSignal;
         return new Response(
           new ReadableStream({
             start(c) {
-              for (const ch of chunks) c.enqueue(line(ch));
+              for (const ch of chunks) c.enqueue(new Uint8Array(ch));
               signal.addEventListener('abort', () => c.error(signal.reason));
             },
           }),
-          { status: 200 },
+          { status: 200, headers: { 'content-type': 'audio/pcm' } },
         );
       }) as unknown as typeof fetch;
     const run = (fetchImpl: typeof fetch, signal?: AbortSignal) => {
@@ -319,8 +493,8 @@ describe('speak', () => {
         for await (const e of speak({
           key: 'k',
           model: 'm/x',
-          voice: 'alloy',
-          text: 'Hi',
+          voice: 'Kore',
+          text: 'Hi.',
           signal,
           fetchImpl,
         })) {
@@ -340,9 +514,11 @@ describe('speak', () => {
     afterEach(() => jest.useRealTimers());
 
     it('stops when no chunk arrives for 30 s', async () => {
-      const r = run(stalled(audio));
+      const r = run(stalled([1, 2]));
       await jest.advanceTimersByTimeAsync(29_000);
-      expect(r.events).toEqual([{ type: 'audio', data: 'AAA=' }]);
+      expect(r.events.filter((e) => e.type === 'audio')).toEqual([
+        { type: 'audio', data: b64([1, 2]) },
+      ]);
       await jest.advanceTimersByTimeAsync(1_500);
       await expect(r.done).rejects.toThrow('no audio for 30 seconds');
     });
@@ -353,14 +529,17 @@ describe('speak', () => {
         return new Response(
           new ReadableStream({
             start(c) {
-              const tick = setInterval(() => c.enqueue(line(audio)), 10_000);
+              const tick = setInterval(
+                () => c.enqueue(new Uint8Array([1, 2])),
+                10_000,
+              );
               signal.addEventListener('abort', () => {
                 clearInterval(tick);
                 c.error(signal.reason);
               });
             },
           }),
-          { status: 200 },
+          { status: 200, headers: { 'content-type': 'audio/pcm' } },
         );
       }) as unknown as typeof fetch;
       const r = run(fetchImpl);

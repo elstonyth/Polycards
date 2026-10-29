@@ -16,6 +16,80 @@ export const MODEL_RE =
   /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(?::(?:free|nitro|floor|extended|thinking|beta))?$/i;
 
 export const openRouterUrl = (): string => `${base()}/chat/completions`;
+export const speechUrl = (): string => `${base()}/audio/speech`;
+
+/** A speaking model as OpenRouter lists it: its voices (null when it lists
+ *  none) and its prices in USD — per input token or character (prompt) and
+ *  per output audio token or second (completion). */
+export type SpeechModel = {
+  voices: string[] | null;
+  prompt: number;
+  completion: number;
+};
+let speechList: {
+  at: number;
+  models: Map<string, SpeechModel> | null;
+} | null = null;
+
+/** OpenRouter's speaking models (a public list), kept an hour; a failed
+ *  fetch is kept a minute. null while it can't be had: callers then check
+ *  only the model id's form. */
+export async function speechModels(
+  fetchImpl: typeof fetch = fetch,
+): Promise<Map<string, SpeechModel> | null> {
+  if (
+    speechList &&
+    Date.now() - speechList.at < (speechList.models ? 3_600_000 : 60_000)
+  )
+    return speechList.models;
+  let models: Map<string, SpeechModel> | null = null;
+  try {
+    const answer = await fetchImpl(
+      `${base()}/models?output_modalities=speech`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    const body = answer.ok
+      ? ((await answer.json()) as {
+          data?: {
+            id?: string;
+            supported_voices?: unknown;
+            pricing?: { prompt?: string; completion?: string };
+          }[];
+        } | null)
+      : null;
+    if (Array.isArray(body?.data)) {
+      models = new Map(
+        body.data
+          .filter((m) => typeof m.id === 'string')
+          .map((m) => [
+            m.id as string,
+            {
+              voices:
+                Array.isArray(m.supported_voices) && m.supported_voices.length
+                  ? m.supported_voices.filter(
+                      (v): v is string => typeof v === 'string',
+                    )
+                  : null,
+              prompt: Number(m.pricing?.prompt ?? 0) || 0,
+              completion: Number(m.pricing?.completion ?? 0) || 0,
+            },
+          ]),
+      );
+    }
+  } catch {
+    // OpenRouter unreachable: the last good list, if any, stands in
+  }
+  speechList = {
+    at: Date.now(),
+    models: models ?? speechList?.models ?? null,
+  };
+  return speechList.models;
+}
+
+/** Tests only: drop the kept list. */
+export function forgetSpeechModels(): void {
+  speechList = null;
+}
 
 /** The key's own account: its label, credit used and credit left. */
 export async function keyInfo(
@@ -54,8 +128,10 @@ export async function generationCost(
   key: string,
   id: string,
   fetchImpl: typeof fetch = fetch,
+  // a spoken reading shows up about 7 s after it ends (measured 2026-10-29)
+  attempts = 2,
 ): Promise<number> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     // The generation can 404 for a moment after the stream stops.
     if (attempt) await new Promise((r) => setTimeout(r, 1500));
     try {

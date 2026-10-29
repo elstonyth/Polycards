@@ -170,10 +170,13 @@ folders… make sure you are also able to do the scheduled tasks."
 ### Voice (added 2026-10-29, `voice.ts`, `speak/route.ts`, admin `lib/voice.ts`)
 
 Owner: "make sure it's able to answer and reply, listening… using OpenRouter".
-Both halves go through OpenRouter chat completions. OpenRouter also has
-dedicated `/audio/speech` and `/audio/transcriptions` endpoints (checked
-2026-10-29); whether the chat voice model reads answers word for word is
-measured by a round-trip probe before deciding to move speaking there.
+Listening goes through OpenRouter chat completions; speaking through its
+`/audio/speech`. Measured 2026-10-29 by reading hostile samples aloud and
+writing them down again: the chat voice model `openai/gpt-audio-mini`
+answered a question it was given to read, told the joke a sentence asked
+for and added words to Chinese; dedicated speech models read the text as
+written. The listening model wrote the same questions and instructions down
+without answering them, so it stays on chat completions.
 
 - **Listening:** the admin records 16 kHz mono WAV (Web Audio, no MediaRecorder:
   OpenRouter takes wav, not webm), stops on silence (energy VAD), and posts it
@@ -182,13 +185,25 @@ measured by a round-trip probe before deciding to move speaking there.
   transcript is streamed back and asked like a typed question. Its cost is
   charged with the answer.
 - **Speaking:** `POST /admin/assistant/speak {message_id}` reads one of the
-  asker's answers aloud with the voice model (`voice_model`, default
-  `openai/gpt-audio-mini`; `voice` one of the chat-completions voices alloy,
-  ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar),
-  streamed as PCM16 24 kHz chunks the admin plays gaplessly. Markdown is made
-  speakable (tables row by row, no URLs), capped at 1,500 characters. The cost
-  is saved as a hidden `voice` message row, so it counts toward today's cap
-  whichever day the answer was written.
+  asker's answers aloud with a speaking model (`voice_model`, default
+  `google/gemini-3.8-flash-lite-tts`, voice `Kore`), streamed as PCM16 mono
+  chunks (the rate comes first, from the content type) the admin plays
+  gaplessly. Model and voice are checked against OpenRouter's list of speaking
+  models (`/models?output_modalities=speech`, kept an hour), so a chat voice
+  model can't be picked; while the list is out of reach only their form is.
+  - Markdown is made speakable (tables row by row, no URLs), capped at 1,500
+    characters. RM amounts are said as "12 ringgit 50 sen" (12令吉50仙 in
+    Chinese): the speech model read "RM 12.50" in English as dollars.
+  - A speech model's first sound comes later the more text it gets (4 s for a
+    line, 12-20 s for a full answer), so an answer is read in pieces cut at
+    sentence ends: a first of about 120 characters, then about 360, each
+    fetched while the last plays. Live 2026-10-29: first sound at 3.7 s, a
+    41 s reading all fetched in 17 s.
+  - Speech returns no bill: the hidden `voice` row gets a safe overestimate
+    at once (the model's listed prices; 4 cents per 1,000 characters when
+    unknown), so it counts toward today's cap whichever day the answer was
+    written, and OpenRouter's own figure replaces it once the generation
+    shows up (about 7 s later; looked up for ~18 s).
 - **UI:** a mic in the composer (one spoken question, answer read aloud), a
   Talk mode (hands-free: listen → answer → speak → listen; tap the orb to
   interrupt; three silent turns end it), and Read aloud on every answer.

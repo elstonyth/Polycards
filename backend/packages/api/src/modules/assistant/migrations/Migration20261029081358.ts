@@ -7,7 +7,7 @@ export class Migration20261029081358 extends Migration {
 
     this.addSql(`alter table if exists "assistant_message" add constraint "assistant_message_role_check" check("role" in ('user', 'assistant', 'voice'));`);
 
-    this.addSql(`alter table if exists "assistant_settings" add column if not exists "stt_model" text not null default 'google/gemini-3.5-flash-lite', add column if not exists "voice_model" text not null default 'openai/gpt-audio-mini', add column if not exists "voice" text not null default 'alloy';`);
+    this.addSql(`alter table if exists "assistant_settings" add column if not exists "stt_model" text not null default 'google/gemini-3.5-flash-lite', add column if not exists "voice_model" text not null default 'google/gemini-3.8-flash-lite-tts', add column if not exists "voice" text not null default 'Kore';`);
   }
 
   override async down(): Promise<void> {

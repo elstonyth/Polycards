@@ -86,14 +86,46 @@ const wav16k = (ms: number) => {
 let heardText = '';
 const voiceCalls: (FakeBody & {
   model?: string;
-  modalities?: string[];
-  audio?: { voice: string; format: string };
+  input?: string;
+  voice?: string;
+  response_format?: string;
 })[] = [];
 
 const fake = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (c) => (raw += c));
   req.on('end', () => {
+    // OpenRouter's speaking models: priced per character only, so a
+    // reading's estimate is its length x 0.00001.
+    if (req.url?.includes('/models?output_modalities=speech')) {
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          data: [
+            {
+              id: 'google/gemini-3.8-flash-lite-tts',
+              supported_voices: ['Kore', 'Puck'],
+              pricing: { prompt: '0.00001', completion: '0' },
+            },
+          ],
+        }),
+      );
+      return;
+    }
+    // A reading's own figure, looked up after it.
+    if (req.url?.includes('/generation?id=gen-voice')) {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ data: { total_cost: 0.002 } }));
+      return;
+    }
+    if (req.url?.endsWith('/audio/speech')) {
+      voiceCalls.push(JSON.parse(raw));
+      res.setHeader('content-type', 'audio/pcm;rate=24000;channels=1');
+      res.setHeader('x-generation-id', 'gen-voice');
+      res.write(Buffer.from('AAAA', 'base64'));
+      res.end(Buffer.from('BBBB', 'base64'));
+      return;
+    }
     if (req.url?.endsWith('/key')) {
       res.setHeader('content-type', 'application/json');
       res.end(
@@ -103,7 +135,7 @@ const fake = http.createServer((req, res) => {
       );
       return;
     }
-    const body = JSON.parse(raw) as FakeBody & { modalities?: string[] };
+    const body = JSON.parse(raw) as FakeBody;
     if (JSON.stringify(body.messages).includes('"input_audio"')) {
       voiceCalls.push(body);
       res.setHeader('content-type', 'application/json');
@@ -113,19 +145,6 @@ const fake = http.createServer((req, res) => {
           choices: [{ message: { content: heardText } }],
         }),
       );
-      return;
-    }
-    if (body.modalities?.includes('audio')) {
-      voiceCalls.push(body);
-      res.setHeader('content-type', 'text/event-stream');
-      for (const chunk of [
-        { id: 'gen-voice', choices: [{ delta: { audio: { data: 'AAAA' } } }] },
-        { choices: [{ delta: { audio: { data: 'BBBB' } } }] },
-        { choices: [], usage: { cost: 0.002, prompt_tokens: 30, completion_tokens: 200 } },
-      ]) {
-        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-      }
-      res.end('data: [DONE]\n\n');
       return;
     }
     received.push(body);
@@ -313,7 +332,7 @@ medusaIntegrationTestRunner({
         }
         // A valid body, so only the super-admin check can refuse it.
         for (const [path, body] of [
-          ['/admin/assistant-settings', { voice: 'coral' }],
+          ['/admin/assistant-settings', { voice: 'Puck' }],
           ['/admin/assistant-settings/voice-test', {}],
         ] as const) {
           const res = await api.post(path, body, {
@@ -569,22 +588,32 @@ medusaIntegrationTestRunner({
             .map((l) => JSON.parse(l) as Record<string, unknown>)
             .filter((e) => e.type !== 'ping');
 
-        // Settings: the voice is one of the listed ones.
+        // Settings: a voice of the speaking model, from OpenRouter's list; a
+        // chat voice model (it answers what it should read) is not one.
         const bad = await api.post(
           '/admin/assistant-settings',
           { voice: 'robot' },
           { ...admin, validateStatus: () => true },
         );
         expect(bad.status).toBe(400);
+        const chatVoice = await api.post(
+          '/admin/assistant-settings',
+          { voice_model: 'openai/gpt-audio-mini', voice: 'alloy' },
+          { ...admin, validateStatus: () => true },
+        );
+        expect(chatVoice.status).toBe(400);
         const set = await api.post(
           '/admin/assistant-settings',
-          { voice: 'coral' },
+          { voice: 'Puck' },
           admin,
         );
         expect(set.data.settings).toMatchObject({
           stt_model: 'google/gemini-3.5-flash-lite',
-          voice_model: 'openai/gpt-audio-mini',
-          voice: 'coral',
+          voice_model: 'google/gemini-3.8-flash-lite-tts',
+          voice: 'Puck',
+          speech_models: [
+            { id: 'google/gemini-3.8-flash-lite-tts', voices: ['Kore', 'Puck'] },
+          ],
         });
 
         // "Hear it" takes no model that could fetch the web.
@@ -626,19 +655,18 @@ medusaIntegrationTestRunner({
           { message_id: done.message_id },
           { ...admin, responseType: 'text', transformResponse: (d: string) => d },
         );
-        expect(lines(spoken.data as string).map((e) => e.type)).toEqual([
-          'audio',
-          'audio',
-          'done',
-        ]);
-        expect(voiceCalls[1]).toMatchObject({
-          model: 'openai/gpt-audio-mini',
-          modalities: ['text', 'audio'],
-          audio: { voice: 'coral', format: 'pcm16' },
+        const heard = lines(spoken.data as string);
+        expect(heard[0]).toEqual({ type: 'format', rate: 24000 });
+        expect(heard.at(-1)?.type).toBe('done');
+        expect(
+          heard.slice(1, -1).every((e) => e.type === 'audio'),
+        ).toBe(true);
+        expect(voiceCalls[1]).toEqual({
+          model: 'google/gemini-3.8-flash-lite-tts',
+          input: 'There are 0 groups.',
+          voice: 'Puck',
+          response_format: 'pcm',
         });
-        expect(String(voiceCalls[1].messages[1].content)).toBe(
-          'There are 0 groups.',
-        );
 
         // The thread shows the question as heard, never the voice row.
         const conv = (events[1] as { id: string }).id;
@@ -660,8 +688,15 @@ medusaIntegrationTestRunner({
         const assistant =
           container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
         const [row] = await assistant.listAssistantConversations({ id: conv });
-        const spent = await assistant.spentToday(row.user_id);
-        expect(spent).toBeCloseTo(0.001 * 2 + 0.0003 + 0.002, 6);
+        // The reading counts at once as an estimate, then as OpenRouter's
+        // own figure once it is looked up.
+        const expected = 0.001 * 2 + 0.0003 + 0.002;
+        let spent = await assistant.spentToday(row.user_id);
+        for (let i = 0; i < 50 && Math.abs(spent - expected) > 1e-9; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          spent = await assistant.spentToday(row.user_id);
+        }
+        expect(spent).toBeCloseTo(expected, 6);
 
         // Heard again in the same voice: the stored speech, free, no new call.
         const calls = voiceCalls.length;
@@ -678,13 +713,13 @@ medusaIntegrationTestRunner({
             )
           ).data as string,
         );
-        expect(again.length).toBeGreaterThan(1);
-        expect(again.slice(0, -1).every((e) => e.type === 'audio')).toBe(true);
+        expect(again[0]).toEqual({ type: 'format', rate: 24000 });
+        expect(again.slice(1, -1).every((e) => e.type === 'audio')).toBe(true);
         expect(again.at(-1)).toEqual({ type: 'done', cost_usd: 0 });
         expect(
           Buffer.concat(
             again
-              .slice(0, -1)
+              .slice(1, -1)
               .map((e) => Buffer.from(e.data as string, 'base64')),
           ),
         ).toEqual(

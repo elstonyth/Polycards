@@ -563,7 +563,7 @@ export class PcmPlayer {
   private readonly onHide = () => this.stop();
 
   constructor(
-    private readonly sampleRate: number = PLAY_RATE,
+    private sampleRate: number = PLAY_RATE,
     opts: { onLevel?: (level: number) => void } = {},
   ) {
     this.ctx = playbackContext();
@@ -585,6 +585,12 @@ export class PcmPlayer {
     if (this.over) return 0;
     this.analyser.getFloatTimeDomainData(this.probe);
     return rmsOf(this.probe);
+  }
+
+  /** The rate the speech comes at, from its stream's format event: only
+   *  before the first chunk, so one answer never changes speed midway. */
+  setRate(rate: number): void {
+    if (this.nextStart === 0 && rate > 0) this.sampleRate = rate;
   }
 
   /** true while sound is coming out */

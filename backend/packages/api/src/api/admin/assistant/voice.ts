@@ -1,29 +1,33 @@
-import { openRouterUrl, OpenRouterError } from './openrouter';
+import {
+  MODEL_RE,
+  openRouterUrl,
+  OpenRouterError,
+  speechModels,
+  speechUrl,
+  type SpeechModel,
+} from './openrouter';
 
-// Voice (owner, 2026-10-29: "able to answer and reply, listening"). Both
-// halves go through OpenRouter's chat completions (it also has dedicated
-// /audio/speech and /audio/transcriptions endpoints, not used here):
+// Voice (owner, 2026-10-29: "able to answer and reply, listening"):
 //  - transcribe(): the admin records the question as 16 kHz WAV; a listening
-//    model writes down what was said (input_audio), and that text is asked.
-//  - speak(): a voice model reads an answer aloud, streamed as raw PCM16
-//    (24 kHz mono) chunks the admin plays as they arrive.
+//    model writes down what was said (chat completions, input_audio), and
+//    that text is asked. Tested 2026-10-29 on questions and instructions: it
+//    writes them down, it does not answer them.
+//  - speak(): a speaking model reads an answer aloud through OpenRouter's
+//    /audio/speech, streamed as raw PCM16 mono the admin plays as it
+//    arrives. Not a chat voice model: tested 2026-10-29, gpt-audio-mini
+//    answered a question it was given to read and told the joke a sentence
+//    asked for; speech models read the text as written.
 // Models and voice are set in Settings → AI assistant; costs count toward
 // the daily cap (transcribing on the answer, speaking on a voice row).
 
-// The voices OpenAI's audio models speak in through chat completions (the
-// older text-to-speech voices fable, onyx and nova are not among them).
-export const VOICES = [
-  'alloy',
-  'ash',
-  'ballad',
-  'coral',
-  'echo',
-  'sage',
-  'shimmer',
-  'verse',
-  'marin',
-  'cedar',
-] as const;
+export const DEFAULT_VOICE_MODEL = 'google/gemini-3.8-flash-lite-tts';
+export const DEFAULT_VOICE = 'Kore';
+// A voice name as OpenRouter lists them (Kore, en_paul_neutral,
+// en-US-Harper:MAI-Voice-2.1).
+const VOICE_RE = /^[\w.:-]{1,80}$/;
+// Speech without a rate on its content type is 24 kHz, as all of
+// OpenRouter's PCM voices were on 2026-10-29.
+const DEFAULT_RATE = 24000;
 // About 75 s of 16 kHz mono 16-bit WAV.
 export const MAX_AUDIO_BYTES = 2.5 * 1024 * 1024;
 // Longer answers are cut at a sentence and the rest stays on screen. In
@@ -37,13 +41,18 @@ const spokenWeight = (ch: string) => (CJK.test(ch) ? 3 : 1);
 // the cap (a full-length answer is about 100 s of speech).
 const SPEAK_IDLE_MS = 30_000;
 const SPEAK_TOTAL_MS = 180_000;
+// A speech model's first sound comes later the more text it is given
+// (measured 2026-10-29: 4 s for a line, 12-20 s for a full answer), so an
+// answer is read in pieces: a short first one, so the voice starts soon,
+// then longer ones, each fetched while the one before plays. In spoken
+// length (spokenWeight).
+const FIRST_PIECE = 120;
+const PIECE = 360;
 
 const LISTEN_PROMPT =
-  'You write down speech. Return exactly what the speaker said, in the language they spoke (English, Malay, Chinese or a mix), with punctuation. Do not translate, answer, summarise or comment. If nothing was said, return an empty reply. ' +
+  'You write down speech. Return exactly what the speaker said, in the language they spoke (English, Malay, Chinese or a mix), with punctuation. Do not translate, answer, summarise or comment. If nothing was said, return an empty reply. Write Chinese in simplified characters. ' +
   // House words the listening model would otherwise misspell.
   'The speaker works at Polycards, a trading card shop. Spell these as written: Polycards, PSA, BGS, CGC, TNG, Maybank, Pokémon, One Piece, Pikachu, Charizard, slab, pack, vault, buyback, top-up, RM, sen. Write spoken numbers and amounts as digits (RM 1,250.50, 3 packs).';
-const SPEAK_PROMPT =
-  "You are a voice. Read the user's text aloud exactly as written, naturally and warmly, in the text's own language. Say numbers and money the way people say them. Do not add, answer, comment or ask anything.";
 
 /** One more try, about 600 ms later, when OpenRouter could not be reached
  *  or was busy (network error, 429, 5xx). Never after a stop or a timeout,
@@ -138,8 +147,45 @@ function stripTags(s: string): string {
   return out.replace(/[<>]/g, '');
 }
 
+const AMOUNT = String.raw`(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?`;
+const MONEY_RE = new RegExp(
+  String.raw`\bRM[ \t]?${AMOUNT}(?:[ \t]*(?:[–—-][ \t]*(?:RM[ \t]?)?|to[ \t]+RM[ \t]?)${AMOUNT})?`,
+  'g',
+);
+
+/** RM amounts as people say them: a speech model reads "RM 12.50" in an
+ *  English sentence as dollars (tested 2026-10-29), so 12 ringgit 50 sen,
+ *  in a Chinese line 12令吉50仙, and a range 10 to 20 ringgit. */
+function sayMoney(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const zh = CJK.test(line);
+      const unit = zh ? '令吉' : ' ringgit';
+      const sen = (cents?: string) => {
+        const n = cents ? Number(cents.padEnd(2, '0')) : 0;
+        return !n ? '' : zh ? `${n}仙` : ` ${n} sen`;
+      };
+      const exact = (whole: string, cents?: string) =>
+        cents ? `${whole}.${cents}` : whole;
+      return line
+        .replace(
+          MONEY_RE,
+          (_, a: string, ac?: string, b?: string, bc?: string) =>
+            b === undefined
+              ? a === '0' && sen(ac) // RM 0.50: 50 sen
+                ? sen(ac).trim()
+                : `${a}${unit}${sen(ac)}`
+              : `${exact(a, ac)}${zh ? '至' : ' to '}${exact(b, bc)}${unit}`,
+        )
+        .replace(/\bRM\b/g, zh ? '令吉' : 'ringgit');
+    })
+    .join('\n');
+}
+
 /** Markdown as it should be heard: no symbols, tables read row by row,
- *  links by their words, long answers cut at a sentence. */
+ *  links by their words, money as it is said, long answers cut at a
+ *  sentence. */
 export function speakable(markdown: string): string {
   const lines: string[] = [];
   let header: string[] | null = null;
@@ -173,19 +219,21 @@ export function speakable(markdown: string): string {
     header = null;
     lines.push(line);
   }
-  let text = stripTags(
-    lines
-      .join('\n')
-      // A < or > between numbers is a word, not a symbol to strip.
-      .replace(
-        /(\d)[ \t]*([<>])[ \t]*(?=(?:RM[ \t]*)?\d)/g,
-        (_, d: string, op: string) =>
-          `${d} ${op === '>' ? 'more than' : 'less than'} `,
-      )
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-      .replace(/https?:\/\/\S+/g, ''),
+  let text = sayMoney(
+    stripTags(
+      lines
+        .join('\n')
+        // A < or > between numbers is a word, not a symbol to strip.
+        .replace(
+          /(\d)[ \t]*([<>])[ \t]*(?=(?:RM[ \t]*)?\d)/g,
+          (_, d: string, op: string) =>
+            `${d} ${op === '>' ? 'more than' : 'less than'} `,
+        )
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/https?:\/\/\S+/g, ''),
+    ),
   )
     // Dashes and arrows between words are a pause, not a symbol to read.
     .replace(/\s*[—→]+\s*|\s+–\s+/g, ', ')
@@ -220,20 +268,113 @@ export function speakable(markdown: string): string {
   return text;
 }
 
-function spokenLength(s: string): number {
+export function spokenLength(s: string): number {
   let n = 0;
   for (const ch of s) n += spokenWeight(ch);
   return n;
 }
 
-export type SpeechEvent =
-  | { type: 'audio'; data: string }
-  | { type: 'usage'; cost: number; tokensIn: number; tokensOut: number }
-  | { type: 'generation'; id: string };
+/** Where to cut a sentence too long for one piece: the last comma or space
+ *  that fits in max, or as much as fits. Never 0, so cutting always moves on. */
+function cutAt(s: string, max: number): number {
+  let used = 0;
+  let at = 0;
+  let pause = 0;
+  for (const ch of s) {
+    const w = spokenWeight(ch);
+    if (used + w > max) break;
+    used += w;
+    at += ch.length;
+    if (/[,，;；、:：\s]/.test(ch)) pause = at;
+  }
+  return pause > at / 3 ? pause : Math.max(at, 1);
+}
 
-/** Reads `text` aloud: base64 PCM16 (24 kHz mono) chunks as they arrive,
- *  then what it cost. Throws when OpenRouter goes quiet for 30 s or the
- *  reading runs past 3 minutes. */
+/** The text in reading order, in pieces cut at sentence ends: the first at
+ *  most FIRST_PIECE in spoken length, the rest PIECE. A sentence longer than
+ *  that is cut at a comma or a space. */
+export function speechPieces(text: string): string[] {
+  const sentences: string[] = [];
+  let from = 0;
+  // A . ? ! before a space (not 1,234.50) or a Chinese stop ends a sentence.
+  for (const m of text.matchAll(/[.?!](?=\s)|[。？！\n]/g)) {
+    const end = m.index + m[0].length;
+    sentences.push(text.slice(from, end));
+    from = end;
+  }
+  sentences.push(text.slice(from));
+  const pieces: string[] = [];
+  let piece = '';
+  const limit = () => (pieces.length ? PIECE : FIRST_PIECE);
+  const flush = () => {
+    if (piece.trim()) pieces.push(piece.trim());
+    piece = '';
+  };
+  for (let sentence of sentences) {
+    while (spokenLength(piece + sentence) > limit()) {
+      if (piece.trim()) {
+        flush();
+        continue;
+      }
+      const cut = cutAt(sentence, limit());
+      piece = sentence.slice(0, cut);
+      sentence = sentence.slice(cut);
+      flush();
+    }
+    piece += sentence;
+  }
+  flush();
+  return pieces;
+}
+
+/** Why this speaking model and voice can't be used (a message for the
+ *  admin), or null when they can. Checked against OpenRouter's list of
+ *  speaking models when it can be had (a chat model like gpt-audio-mini is
+ *  not on it), else by form only. */
+export async function speechChoiceProblem(
+  model: unknown,
+  voice: unknown,
+  fetchImpl?: typeof fetch,
+): Promise<string | null> {
+  if (typeof model !== 'string' || model.length > 100 || !MODEL_RE.test(model))
+    return `voice_model must be an OpenRouter speaking model like ${DEFAULT_VOICE_MODEL}.`;
+  if (typeof voice !== 'string' || !VOICE_RE.test(voice))
+    return 'voice must be one of the speaking model’s voices.';
+  const models = await speechModels(fetchImpl);
+  if (!models) return null;
+  const found = models.get(model);
+  if (!found)
+    return `${model} is not one of OpenRouter's speaking models. Pick one from the list.`;
+  if (found.voices && !found.voices.includes(voice))
+    return `${voice} is not a voice of ${model}. Pick one of its voices.`;
+  return null;
+}
+
+/** A safe overestimate of what a reading cost, counted toward the daily cap
+ *  until OpenRouter's own figure arrives: the input at the model's prompt
+ *  price per character (it bills tokens or characters, never more of them
+ *  than characters), and the output at its completion price for 25 audio
+ *  tokens a second. Without the model's prices: 4 cents per 1,000
+ *  characters, the dearest per-character voices on OpenRouter. */
+export function estimateSpeechCost(
+  model: SpeechModel | undefined,
+  chars: number,
+  seconds: number,
+): number {
+  if (!model) return chars * 0.00004;
+  return model.prompt * chars + model.completion * 25 * seconds;
+}
+
+export type SpeechEvent =
+  | { type: 'format'; rate: number }
+  | { type: 'audio'; data: string }
+  | { type: 'generation'; id: string; chars: number };
+
+/** Reads `text` aloud through /audio/speech, piece by piece (speechPieces):
+ *  first its sample rate, then base64 PCM16 mono chunks as they arrive, and
+ *  each piece's generation id and length (what it cost is looked up later:
+ *  speech returns no usage). Throws when OpenRouter goes quiet for 30 s or
+ *  the reading runs past 3 minutes. */
 export async function* speak(opts: {
   key: string;
   model: string;
@@ -277,93 +418,62 @@ async function* speakUntil(
   },
   heard: () => void,
 ): AsyncGenerator<SpeechEvent> {
-  const answer = await retryOnce(
-    () =>
-      (opts.fetchImpl ?? fetch)(openRouterUrl(), {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${opts.key}`,
-          'content-type': 'application/json',
-          'x-title': 'Polycards admin assistant',
-        },
-        body: JSON.stringify({
-          model: opts.model,
-          messages: [
-            { role: 'system', content: SPEAK_PROMPT },
-            { role: 'user', content: opts.text },
-          ],
-          modalities: ['text', 'audio'],
-          audio: { voice: opts.voice, format: 'pcm16' },
-          // ~2.5x what the text takes to say (~20 audio tokens a second):
-          // text that tells the voice to go on can't make it talk forever.
-          max_tokens: spokenLength(opts.text) * 4 + 200,
-          stream: true,
-          usage: { include: true },
+  let rate = 0;
+  for (const piece of speechPieces(opts.text)) {
+    const answer = await retryOnce(
+      () =>
+        (opts.fetchImpl ?? fetch)(speechUrl(), {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${opts.key}`,
+            'content-type': 'application/json',
+            'x-title': 'Polycards admin assistant',
+          },
+          body: JSON.stringify({
+            model: opts.model,
+            input: piece,
+            voice: opts.voice,
+            response_format: 'pcm',
+          }),
+          signal: opts.signal,
         }),
-        signal: opts.signal,
-      }),
-    opts.signal,
-  );
-  if (!answer.ok || !answer.body) {
-    const body = (await answer.json().catch(() => null)) as {
-      error?: { message?: string };
-    } | null;
-    throw new OpenRouterError(
-      body?.error?.message ?? `OpenRouter answered ${answer.status}.`,
-      answer.status,
+      opts.signal,
     );
-  }
-  const decoder = new TextDecoder();
-  const reader = answer.body.getReader();
-  let buffer = '';
-  let generation = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    heard();
-    buffer += decoder.decode(value, { stream: !done });
-    let nl: number;
-    while ((nl = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') continue;
-      let chunk: {
-        id?: string;
-        error?: { message?: string; code?: number };
-        usage?: {
-          cost?: number;
-          prompt_tokens?: number;
-          completion_tokens?: number;
-        };
-        choices?: { delta?: { audio?: { data?: string } } }[];
-      };
-      try {
-        chunk = JSON.parse(data);
-      } catch {
-        continue;
-      }
-      if (chunk.error) {
-        throw new OpenRouterError(
-          chunk.error.message ?? 'OpenRouter stopped with an error.',
-          chunk.error.code,
-        );
-      }
-      if (chunk.id && !generation) {
-        generation = chunk.id;
-        yield { type: 'generation', id: chunk.id };
-      }
-      const audio = chunk.choices?.[0]?.delta?.audio?.data;
-      if (audio) yield { type: 'audio', data: audio };
-      if (chunk.usage) {
-        yield {
-          type: 'usage',
-          cost: Number(chunk.usage.cost ?? 0),
-          tokensIn: Number(chunk.usage.prompt_tokens ?? 0),
-          tokensOut: Number(chunk.usage.completion_tokens ?? 0),
-        };
-      }
+    if (!answer.ok || !answer.body) {
+      const body = (await answer.json().catch(() => null)) as {
+        error?: { message?: string };
+      } | null;
+      throw new OpenRouterError(
+        body?.error?.message ?? `OpenRouter answered ${answer.status}.`,
+        answer.status,
+      );
     }
-    if (done) break;
+    const id = answer.headers.get('x-generation-id');
+    if (id) yield { type: 'generation', id, chars: piece.length };
+    const type = answer.headers.get('content-type') ?? '';
+    if (!/^audio\/(pcm|l16)\b/i.test(type)) {
+      await answer.body.cancel().catch(() => undefined);
+      throw new OpenRouterError(
+        `The speaking model sent ${type || 'no'} audio, not PCM. Pick another speaking model.`,
+      );
+    }
+    const pieceRate = Number(/rate=(\d+)/i.exec(type)?.[1]) || DEFAULT_RATE;
+    if (!rate) {
+      rate = pieceRate;
+      yield { type: 'format', rate };
+    } else if (pieceRate !== rate) {
+      await answer.body.cancel().catch(() => undefined);
+      throw new OpenRouterError(
+        'The speaking model changed its sample rate mid-answer.',
+      );
+    }
+    const reader = answer.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      heard();
+      if (value?.length)
+        yield { type: 'audio', data: Buffer.from(value).toString('base64') };
+      if (done) break;
+    }
   }
 }

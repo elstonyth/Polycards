@@ -1,12 +1,13 @@
 import { EventEmitter } from 'node:events';
 import { DELETE } from '../conversations/[id]/route';
-import { generationCost } from '../openrouter';
+import { generationCost, speechModels } from '../openrouter';
 import { POST } from '../speak/route';
 import { speak, type SpeechEvent } from '../voice';
 
-// POST /admin/assistant/speak with the service, the voice model, the file
+// POST /admin/assistant/speak with the service, the speaking model, the file
 // store and the fetcher faked: the speech cache, the one-at-a-time slot and
-// the cost row on every path. And DELETE of a chat deleting its speech.
+// the cost row on every path (an estimate at once, OpenRouter's figure
+// after). And DELETE of a chat deleting its speech.
 
 jest.mock('../access', () => ({
   accessFor: (_scope: unknown, auth: { actor_id: string }) => ({
@@ -16,6 +17,7 @@ jest.mock('../access', () => ({
 jest.mock('../openrouter', () => ({
   ...jest.requireActual('../openrouter'),
   generationCost: jest.fn(),
+  speechModels: jest.fn(),
 }));
 jest.mock('../voice', () => ({
   ...jest.requireActual('../voice'),
@@ -30,6 +32,18 @@ jest.mock('../../../../modules/assistant/key-vault', () => ({
 
 const speakMock = speak as jest.MockedFunction<typeof speak>;
 const costMock = generationCost as jest.MockedFunction<typeof generationCost>;
+const listMock = speechModels as jest.MockedFunction<typeof speechModels>;
+// Priced per character only, so an estimate is chars x 0.00001: a reading
+// of 300 characters is estimated at 0.003.
+const MODEL = 'google/gemini-3.8-flash-lite-tts';
+const LIST = new Map([
+  [MODEL, { voices: ['Kore', 'Puck'], prompt: 1e-5, completion: 0 }],
+  [
+    'elevenlabs/eleven-flash-v2.5',
+    { voices: ['sarah'], prompt: 4e-5, completion: 0 },
+  ],
+]);
+const settled = () => new Promise((r) => setImmediate(r));
 
 const answerRow = {
   id: 'aimsg_1',
@@ -47,15 +61,20 @@ type Row = {
   cost_usd?: number;
 };
 const cacheRow = (
-  over: Partial<{ message_id: string; voice_model: string; voice: string }>,
+  over: Partial<{
+    message_id: string;
+    voice_model: string;
+    voice: string;
+    rate: number;
+  }>,
   file_id = 'file_a',
 ): Row => ({
   conversation_id: 'conv_1',
   role: 'voice',
   tools: {
     message_id: 'aimsg_1',
-    voice_model: 'openai/gpt-audio-mini',
-    voice: 'coral',
+    voice_model: MODEL,
+    voice: 'Kore',
     file_id,
     ...over,
   },
@@ -94,6 +113,7 @@ const service = {
     return { id: 'aimsg_v' };
   }),
   updateAssistantConversations: jest.fn(async () => ({})),
+  updateAssistantMessages: jest.fn(async () => ({})),
   softDeleteAssistantConversations: jest.fn(async () => undefined),
 };
 const files = {
@@ -159,10 +179,10 @@ function post(user = 'user_1') {
 
 const b64 = (bytes: number[]) => Buffer.from(bytes).toString('base64');
 async function* spoken(): AsyncGenerator<SpeechEvent> {
-  yield { type: 'generation', id: 'gen-1' };
+  yield { type: 'generation', id: 'gen-1', chars: 300 };
+  yield { type: 'format', rate: 24000 };
   yield { type: 'audio', data: b64([1, 2, 3, 4]) };
   yield { type: 'audio', data: b64([5, 6]) };
-  yield { type: 'usage', cost: 0.003, tokensIn: 10, tokensOut: 20 };
 }
 const audioOf = (events: Record<string, unknown>[]) =>
   Buffer.concat(
@@ -180,11 +200,12 @@ beforeEach(() => {
   settings = {
     openrouter_key_sealed: 'sealed',
     daily_cap_usd: 5,
-    voice_model: 'openai/gpt-audio-mini',
-    voice: 'coral',
+    voice_model: MODEL,
+    voice: 'Kore',
   };
   speakMock.mockImplementation(spoken);
   costMock.mockResolvedValue(0);
+  listMock.mockResolvedValue(LIST);
 });
 // A failed test must not leave fake timers behind for the next one.
 afterEach(() => jest.useRealTimers());
@@ -192,8 +213,8 @@ afterEach(() => jest.useRealTimers());
 it('speaks, stores the speech privately and records which file with the cost', async () => {
   // Same answer in another voice, another model or another answer: no match.
   rows = [
-    cacheRow({ voice: 'alloy' }, 'file_alloy'),
-    cacheRow({ voice_model: 'openai/gpt-audio' }, 'file_model'),
+    cacheRow({ voice: 'Puck' }, 'file_alloy'),
+    cacheRow({ voice_model: 'elevenlabs/eleven-flash-v2.5' }, 'file_model'),
     cacheRow({ message_id: 'aimsg_2' }, 'file_other'),
   ];
   stored = {
@@ -223,13 +244,55 @@ it('speaks, stores the speech privately and records which file with the cost', a
       error: null,
       tools: {
         message_id: 'aimsg_1',
-        voice_model: 'openai/gpt-audio-mini',
-        voice: 'coral',
+        voice_model: MODEL,
+        voice: 'Kore',
         file_id: 'file_new',
+        rate: 24000,
       },
     }),
   );
+  expect(p.events()[0]).toEqual({ type: 'format', rate: 24000 });
   expect(p.events().at(-1)).toEqual({ type: 'done', cost_usd: 0.003 });
+});
+
+it("puts OpenRouter's figure in place of the estimate once it arrives", async () => {
+  costMock.mockResolvedValueOnce(0.0012).mockResolvedValueOnce(0.0009);
+  speakMock.mockImplementationOnce(async function* () {
+    yield* spoken();
+    yield { type: 'generation', id: 'gen-2', chars: 200 };
+    yield { type: 'audio', data: b64([7, 8]) };
+  });
+  const p = post();
+  await p.done;
+  // counted at once, before the figure: 500 characters
+  expect(savedRows()[0]).toMatchObject({ cost_usd: 0.005 });
+  await settled();
+  expect(costMock).toHaveBeenCalledWith('sk-or-test', 'gen-1', undefined, 12);
+  expect(costMock).toHaveBeenCalledWith('sk-or-test', 'gen-2', undefined, 12);
+  expect(service.updateAssistantMessages).toHaveBeenCalledWith({
+    id: 'aimsg_v',
+    cost_usd: 0.0021,
+  });
+});
+
+it('keeps the estimate when a piece’s figure cannot be found', async () => {
+  costMock.mockResolvedValueOnce(0.0012).mockResolvedValueOnce(0);
+  speakMock.mockImplementationOnce(async function* () {
+    yield* spoken();
+    yield { type: 'generation', id: 'gen-2', chars: 200 };
+  });
+  await post().done;
+  await settled();
+  expect(service.updateAssistantMessages).not.toHaveBeenCalled();
+  expect(logger.warn).toHaveBeenCalledWith(
+    expect.stringContaining('estimate kept'),
+  );
+});
+
+it('estimates at the dearest per-character price when the model’s price is unknown', async () => {
+  listMock.mockResolvedValue(null); // OpenRouter's list out of reach
+  await post().done;
+  expect(savedRows()[0]).toMatchObject({ cost_usd: 300 * 0.00004 });
 });
 
 it('bumps last_message_at before speaking, so the cost counts today', async () => {
@@ -245,11 +308,13 @@ it('bumps last_message_at before speaking, so the cost counts today', async () =
 });
 
 it('plays stored speech again for free, read through the file module, in ~24 KB chunks', async () => {
-  rows = [cacheRow({ voice: 'alloy' }, 'file_alloy'), cacheRow({})];
+  rows = [cacheRow({ voice: 'Puck' }, 'file_alloy'), cacheRow({})];
   stored = { file_a: Buffer.alloc(30_000, 7) };
   const p = post();
   await p.done;
   expect(files.getAsBuffer).toHaveBeenCalledWith('file_a');
+  // stored before the rate was kept: 24 kHz
+  expect(p.events()[0]).toEqual({ type: 'format', rate: 24000 });
   const audio = p.events().filter((e) => e.type === 'audio');
   expect(audio).toHaveLength(2);
   expect(audioOf(p.events())).toEqual(stored.file_a);
@@ -331,10 +396,10 @@ it('answers busy while the same person is already being read to', async () => {
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   speakMock.mockImplementationOnce(async function* () {
-    yield { type: 'generation', id: 'gen-1' };
+    yield { type: 'generation', id: 'gen-1', chars: 100 };
+    yield { type: 'format', rate: 24000 };
     yield { type: 'audio', data: b64([1]) };
     await gate;
-    yield { type: 'usage', cost: 0.001, tokensIn: 1, tokensOut: 1 };
   });
   const first = post();
   try {
@@ -424,47 +489,37 @@ it('replays what the reading it waited for stored, instead of paying again', asy
   expect(second?.events().at(-1)).toEqual({ type: 'done', cost_usd: 0 });
 });
 
-it('still saves the looked-up cost when the listener stops mid-stream', async () => {
-  costMock.mockResolvedValue(0.0021);
+it('still charges what was sent when the listener stops mid-stream, and stores nothing', async () => {
+  costMock.mockResolvedValue(0.0018);
   speakMock.mockImplementationOnce(async function* (opts) {
-    yield { type: 'generation', id: 'gen-9' };
+    yield { type: 'generation', id: 'gen-9', chars: 210 };
+    yield { type: 'format', rate: 24000 };
     yield { type: 'audio', data: b64([1, 2]) };
     lastRes.emit('close'); // the admin stops listening
     opts.signal?.throwIfAborted();
   });
   const p = post();
   await p.done;
-  expect(costMock).toHaveBeenCalledWith('sk-or-test', 'gen-9');
   expect(files.createFiles).not.toHaveBeenCalled();
   expect(service.createAssistantMessages).toHaveBeenCalledWith(
     expect.objectContaining({
       role: 'voice',
-      cost_usd: 0.0021,
+      cost_usd: expect.closeTo(0.0021, 10),
       tools: null,
       error: null,
     }),
   );
-});
-
-it('stores nothing when the stream ends before its bill', async () => {
-  costMock.mockResolvedValue(0.0015);
-  speakMock.mockImplementationOnce(async function* () {
-    yield { type: 'generation', id: 'gen-5' };
-    yield { type: 'audio', data: b64([1, 2]) };
+  await settled();
+  expect(service.updateAssistantMessages).toHaveBeenCalledWith({
+    id: 'aimsg_v',
+    cost_usd: 0.0018,
   });
-  const p = post();
-  await p.done;
-  expect(files.createFiles).not.toHaveBeenCalled();
-  expect(costMock).toHaveBeenCalledWith('sk-or-test', 'gen-5');
-  expect(service.createAssistantMessages).toHaveBeenCalledWith(
-    expect.objectContaining({ cost_usd: 0.0015, tools: null }),
-  );
 });
 
-it("saves the looked-up cost and passes on OpenRouter's reason when speaking fails", async () => {
-  costMock.mockResolvedValue(0.0007);
+it("saves the cost and passes on OpenRouter's reason when speaking fails", async () => {
   speakMock.mockImplementationOnce(async function* () {
-    yield { type: 'generation', id: 'gen-3' };
+    yield { type: 'generation', id: 'gen-3', chars: 70 };
+    yield { type: 'format', rate: 24000 };
     yield { type: 'audio', data: b64([1, 2]) };
     // A timeout inside speak() fails the same way; the key never shows.
     throw new Error('voice not available for key sk-or-test');
@@ -472,10 +527,9 @@ it("saves the looked-up cost and passes on OpenRouter's reason when speaking fai
   const p = post();
   await p.done;
   expect(files.createFiles).not.toHaveBeenCalled();
-  expect(costMock).toHaveBeenCalledWith('sk-or-test', 'gen-3');
   expect(savedRows()).toEqual([
     expect.objectContaining({
-      cost_usd: 0.0007,
+      cost_usd: expect.closeTo(0.0007, 10),
       tools: null,
       error: 'voice not available for key [key]',
     }),
@@ -490,8 +544,8 @@ it("saves the looked-up cost and passes on OpenRouter's reason when speaking fai
 
 it('answers no_audio when the voice sent no sound, keeps the cost and stores nothing', async () => {
   speakMock.mockImplementationOnce(async function* () {
-    yield { type: 'generation', id: 'gen-4' };
-    yield { type: 'usage', cost: 0.0004, tokensIn: 5, tokensOut: 6 };
+    yield { type: 'generation', id: 'gen-4', chars: 40 };
+    yield { type: 'format', rate: 24000 };
   });
   const p = post();
   await p.done;
@@ -519,14 +573,37 @@ it('ends the stream with speak_failed when the database throws, and frees the sl
   expect(next.events().at(-1)).toEqual({ type: 'done', cost_usd: 0.003 });
 });
 
-it('answers bad_voice_model for a voice that is not allowed', async () => {
+it('answers bad_voice_model for a voice the model lacks, or a chat voice model', async () => {
   settings.voice = 'robot';
-  const p = post();
+  let p = post();
   await p.done;
   expect(p.events()).toEqual([
     expect.objectContaining({ type: 'error', code: 'bad_voice_model' }),
   ]);
+  // answered what it was given to read, 2026-10-29: not a speaking model
+  settings = {
+    ...settings,
+    voice_model: 'openai/gpt-audio-mini',
+    voice: 'alloy',
+  };
+  p = post();
+  await p.done;
+  expect(p.events()).toEqual([
+    expect.objectContaining({
+      type: 'error',
+      code: 'bad_voice_model',
+      reason: expect.stringMatching(/not one of OpenRouter/),
+    }),
+  ]);
   expect(speakMock).not.toHaveBeenCalled();
+});
+
+it('plays a stored reading at the rate it was made at', async () => {
+  rows = [cacheRow({ rate: 16000 })];
+  stored = { file_a: Buffer.from([1, 2]) };
+  const p = post();
+  await p.done;
+  expect(p.events()[0]).toEqual({ type: 'format', rate: 16000 });
 });
 
 describe('DELETE /admin/assistant/conversations/:id', () => {
@@ -552,7 +629,7 @@ describe('DELETE /admin/assistant/conversations/:id', () => {
   it("deletes the chat's stored speech files", async () => {
     rows = [
       cacheRow({}, 'file_a'),
-      cacheRow({ voice: 'alloy' }, 'file_b'),
+      cacheRow({ voice: 'Puck' }, 'file_b'),
       { conversation_id: 'conv_1', role: 'voice', tools: null },
       { ...cacheRow({}, 'file_x'), conversation_id: 'conv_2' },
     ];

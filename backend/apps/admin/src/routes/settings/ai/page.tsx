@@ -120,6 +120,8 @@ const AiSettingsPage = () => {
     capValue <= 1000;
   const sttModelOk = modelIdOk(sttModel);
   const voiceModelOk = modelIdOk(voiceModel);
+  const voicesOf = (id: string) =>
+    s?.speech_models.find((m) => m.id === id)?.voices ?? [];
 
   // Until the settings arrive, a blank form would read as "key lost".
   if (!s) {
@@ -325,11 +327,36 @@ const AiSettingsPage = () => {
               <Label size="small" htmlFor="ai-voice-model">
                 {t('assistant.settings.voiceModel')}
               </Label>
-              <Input
-                id="ai-voice-model"
-                value={voiceModel}
-                onChange={(e) => setVoiceModel(e.target.value)}
-              />
+              {s.speech_models.length ? (
+                <Select
+                  value={voiceModel}
+                  onValueChange={(id) => {
+                    setVoiceModel(id);
+                    // a voice belongs to one model: keep it only if the new one has it
+                    const voices = voicesOf(id);
+                    if (voices.length && !voices.includes(voiceName))
+                      setVoiceName(voices[0]);
+                  }}
+                >
+                  <Select.Trigger id="ai-voice-model">
+                    <Select.Value />
+                  </Select.Trigger>
+                  <Select.Content>
+                    {s.speech_models.map((m) => (
+                      <Select.Item key={m.id} value={m.id}>
+                        {m.id}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select>
+              ) : (
+                // OpenRouter's list is out of reach: a typed model id
+                <Input
+                  id="ai-voice-model"
+                  value={voiceModel}
+                  onChange={(e) => setVoiceModel(e.target.value)}
+                />
+              )}
               <Text
                 size="xsmall"
                 className={
@@ -344,18 +371,28 @@ const AiSettingsPage = () => {
                 {t('assistant.settings.voice')}
               </Label>
               <div className="flex items-center gap-x-2">
-                <Select value={voiceName} onValueChange={setVoiceName}>
-                  <Select.Trigger id="ai-voice" className="flex-1">
-                    <Select.Value />
-                  </Select.Trigger>
-                  <Select.Content>
-                    {s.voices.map((v) => (
-                      <Select.Item key={v} value={v}>
-                        {v}
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select>
+                {voicesOf(voiceModel).length ? (
+                  <Select value={voiceName} onValueChange={setVoiceName}>
+                    <Select.Trigger id="ai-voice" className="flex-1">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Content>
+                      {voicesOf(voiceModel).map((v) => (
+                        <Select.Item key={v} value={v}>
+                          {v}
+                        </Select.Item>
+                      ))}
+                    </Select.Content>
+                  </Select>
+                ) : (
+                  // a model that lists no voices, or no list: a typed name
+                  <Input
+                    id="ai-voice"
+                    className="flex-1"
+                    value={voiceName}
+                    onChange={(e) => setVoiceName(e.target.value.trim())}
+                  />
+                )}
                 <HearVoice
                   model={voiceModel}
                   voice={voiceName}
@@ -434,6 +471,7 @@ function HearVoice({
         },
         (e) => {
           if (e.type === 'audio') player.push(e.data);
+          else if (e.type === 'format') player.setRate(e.rate);
           else if (e.type === 'error') {
             // The server's text is English: translate by its code.
             toast.error(

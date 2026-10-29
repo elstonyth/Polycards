@@ -7,17 +7,18 @@ import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
 import { accessFor } from '../../assistant/access';
-import { generationCost, MODEL_RE } from '../../assistant/openrouter';
-import { speak, VOICES } from '../../assistant/voice';
+import { generationCost } from '../../assistant/openrouter';
+import { speak, speechChoiceProblem } from '../../assistant/voice';
 
 // POST /admin/assistant-settings/voice-test {voice_model?, voice?, lang?}:
 // Settings → AI's "Hear it". Speaks a fixed sample in the given (unsaved)
 // voice, or the saved one, as newline-delimited JSON like /assistant/speak:
-//   audio {data: base64 PCM16, 24 kHz mono} … · error {code,message,reason?} ·
-//   done {cost_usd}
-// Its cost is logged, not saved: a one-sentence sample is a fraction of a
-// cent, only super admins (who set the cap) can run it, it is rate limited,
-// and there is no conversation to hang a voice row on.
+//   format {rate} · audio {data: base64 PCM16 mono} … ·
+//   error {code,message,reason?} · done
+// Its cost is logged once OpenRouter has it, not saved: a one-sentence
+// sample is a fraction of a cent, only super admins (who set the cap) can
+// run it, it is rate limited, and there is no conversation to hang a voice
+// row on.
 
 const SAMPLES = {
   en: "Hi, I'm the Polycards assistant. Today we sold 128 packs.",
@@ -42,23 +43,12 @@ export async function POST(
   const body = req.body ?? {};
   const model = body.voice_model ?? settings.voice_model;
   const voice = body.voice ?? settings.voice;
-  if (
-    typeof model !== 'string' ||
-    model.length > 100 ||
-    !MODEL_RE.test(model.trim())
-  ) {
-    res.status(400).json({
-      code: 'bad_voice_model',
-      message:
-        'voice_model must be an OpenRouter model id like openai/gpt-audio-mini.',
-    });
-    return;
-  }
-  if (!(VOICES as readonly unknown[]).includes(voice)) {
-    res.status(400).json({
-      code: 'bad_voice_model',
-      message: `voice must be one of ${VOICES.join(', ')}.`,
-    });
+  const problem = await speechChoiceProblem(
+    typeof model === 'string' ? model.trim() : model,
+    voice,
+  );
+  if (problem || typeof model !== 'string') {
+    res.status(400).json({ code: 'bad_voice_model', message: problem });
     return;
   }
   const key = settings.openrouter_key_sealed
@@ -87,9 +77,7 @@ export async function POST(
     if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
   };
 
-  let cost = 0;
-  let priced = false;
-  let generation = '';
+  const generations: string[] = [];
   let heard = false;
   let failure: string | null = null;
   try {
@@ -100,13 +88,10 @@ export async function POST(
       text: body.lang === 'zh' ? SAMPLES.zh : SAMPLES.en,
       signal: ctl.signal,
     })) {
-      if (e.type === 'audio') {
-        send(e);
-        heard = true;
-      } else if (e.type === 'generation') generation = e.id;
+      if (e.type === 'generation') generations.push(e.id);
       else {
-        cost += e.cost;
-        priced = true;
+        send(e);
+        if (e.type === 'audio') heard = true;
       }
     }
   } catch (err) {
@@ -119,13 +104,16 @@ export async function POST(
       );
     }
   }
-  // Stopped or failed before the bill arrived: OpenRouter still charges it.
-  if (!priced && generation) cost += await generationCost(key, generation);
-  scope
-    .resolve(ContainerRegistrationKeys.LOGGER)
-    .info(
-      `[assistant] voice test user=${access.userId} model=${model.trim()} voice=${voice} cost=${cost.toFixed(4)}${failure ? ` error=${failure}` : ''}`,
-    );
+  // Speech returns no bill: OpenRouter's figure arrives some seconds after,
+  // so it is logged then, after the answer has gone.
+  const logger = scope.resolve(ContainerRegistrationKeys.LOGGER);
+  void Promise.all(
+    generations.map((g) => generationCost(key, g, undefined, 12)),
+  ).then((costs) =>
+    logger.info(
+      `[assistant] voice test user=${access.userId} model=${model.trim()} voice=${voice} cost=${costs.reduce((a, b) => a + b, 0).toFixed(4)}${failure ? ` error=${failure}` : ''}`,
+    ),
+  );
   send(
     failure
       ? {
@@ -141,7 +129,7 @@ export async function POST(
             message:
               'The voice model sent no sound. Pick another speaking model.',
           }
-        : { type: 'done', cost_usd: cost },
+        : { type: 'done' },
   );
   if (!res.writableEnded) res.end();
 }

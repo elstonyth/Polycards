@@ -438,6 +438,17 @@ describe('PcmPlayer', () => {
     ]);
   });
 
+  it('plays at the rate the stream names, set only before the first chunk', () => {
+    const p = new PcmPlayer();
+    p.setRate(16000);
+    p.push('AQID'); // 1 sample, an odd byte carried
+    expect(sources[0].buffer!.duration).toBeCloseTo(1 / 16000, 10);
+    p.setRate(48000); // too late: one answer never changes speed midway
+    p.push('BA==');
+    expect(sources[1].buffer!.duration).toBeCloseTo(1 / 16000, 10);
+    p.stop();
+  });
+
   it('ends on stop() before anything was pushed', async () => {
     const p = new PcmPlayer();
     p.stop();

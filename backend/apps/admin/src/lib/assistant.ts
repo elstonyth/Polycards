@@ -39,11 +39,13 @@ export type AssistantSettings = {
   chat_model: string;
   image_model: string;
   /** Voice: the model that writes down speech, the one that reads aloud,
-   *  and its voice (one of voices). */
+   *  and its voice. */
   stt_model: string;
   voice_model: string;
   voice: string;
-  voices: string[];
+  /** OpenRouter's speaking models and their voices; empty while the
+   *  server can't get the list. */
+  speech_models: { id: string; voices: string[] }[];
   daily_cap_usd: number;
   /** The house look for AI images; null = the default below. */
   image_style: string | null;
@@ -83,11 +85,12 @@ export type ChatEvent =
   | { type: 'done'; message_id: string; cost_usd: number }
   | { type: 'ping' };
 
-/** An answer read aloud: base64 PCM16 chunks (24 kHz mono), then done. */
+/** An answer read aloud: its sample rate, base64 PCM16 mono chunks, then done. */
 export type SpeechEvent =
+  | { type: 'format'; rate: number }
   | { type: 'audio'; data: string }
   | { type: 'error'; message: string; code?: string; reason?: string }
-  | { type: 'done'; cost_usd: number }
+  | { type: 'done'; cost_usd?: number }
   | { type: 'ping' };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {

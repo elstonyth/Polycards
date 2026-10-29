@@ -8,18 +8,26 @@ import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
 import { accessFor } from '../access';
-import { generationCost, MODEL_RE } from '../openrouter';
+import { generationCost, speechModels } from '../openrouter';
 import { userLock } from '../user-lock';
-import { speak, speakable, VOICES } from '../voice';
+import {
+  estimateSpeechCost,
+  speak,
+  speakable,
+  speechChoiceProblem,
+  spokenLength,
+} from '../voice';
 
 // POST /admin/assistant/speak {message_id} (voice.ts): reads one of the
 // asker's answers aloud, as newline-delimited JSON:
-//   audio {data: base64 PCM16, 24 kHz mono} … · error {code,message,reason?} ·
-//   done {cost_usd}
+//   format {rate} · audio {data: base64 PCM16 mono} … ·
+//   error {code,message,reason?} · done {cost_usd}
 // What it cost is saved as a hidden voice row, so it counts toward today's
-// cap whichever day the answer was written. The speech is stored too, as a
-// private file (the row's tools say which), so hearing it again with the same
-// voice is free; deleting the chat deletes it.
+// cap whichever day the answer was written: a safe overestimate at once,
+// then OpenRouter's own figure, which arrives some seconds after the
+// reading. The speech is stored too, as a private file (the row's tools say
+// which), so hearing it again with the same voice is free; deleting the chat
+// deletes it.
 
 type Body = { message_id?: unknown };
 type SpeechCache = {
@@ -27,14 +35,18 @@ type SpeechCache = {
   voice_model: string;
   voice: string;
   file_id: string;
+  rate?: number; // absent on readings stored before 2026-10-29: 24 kHz
 };
 // About 0.5 s of 24 kHz PCM16 per replayed audio event; even, so no
 // sample is split.
 const CHUNK = 24 * 1024;
 // One read-aloud at a time per staff member (user-lock.ts), so parallel reads
 // can't all pass the daily cap before any saves its cost. Longer than a
-// reading can run (voice.ts: 3 minutes) plus its cost lookup and file save.
+// reading can run (voice.ts: 3 minutes) plus its file save.
 const speaking = userLock('speaking', 240_000);
+// OpenRouter's figure for a reading is looked up this many times, 1.5 s
+// apart: it showed up about 7 s after a reading ended (2026-10-29).
+const COST_LOOKUPS = 12;
 const SLOT_WAIT_MS = 10_000;
 
 export async function POST(
@@ -107,15 +119,16 @@ export async function POST(
       });
       return;
     }
-    if (
-      !MODEL_RE.test(String(settings.voice_model ?? '')) ||
-      !(VOICES as readonly string[]).includes(settings.voice)
-    ) {
+    const problem = await speechChoiceProblem(
+      settings.voice_model,
+      settings.voice,
+    );
+    if (problem) {
       finish({
         type: 'error',
         code: 'bad_voice_model',
-        message:
-          'The voice in Settings → AI assistant is not allowed here. An admin must pick another.',
+        message: `The voice in Settings → AI assistant can't be used: ${problem} An admin must pick another.`,
+        reason: problem,
       });
       return;
     }
@@ -145,6 +158,7 @@ export async function POST(
         );
         return false;
       }
+      send({ type: 'format', rate: cached.rate ?? 24000 });
       for (let at = 0; at < stored.length && !ctl.signal.aborted; at += CHUNK) {
         send({
           type: 'audio',
@@ -179,14 +193,36 @@ export async function POST(
       return;
     }
     let cost = 0;
-    let priced = false;
-    let generation = '';
-    let tokensIn = 0;
-    let tokensOut = 0;
+    let rate = 0;
+    const generations: string[] = [];
+    let chars = 0; // sent to be spoken: billed whether heard or not
     let failure: string | null = null;
     let spoke = false;
     let saved: SpeechCache | null = null;
     const pcm: Buffer[] = [];
+    // OpenRouter's own figure for the pieces read, in place of the estimate;
+    // the estimate stays if any piece's figure can't be found.
+    const settleCost = async (rowId: string, ids: string[]) => {
+      try {
+        const costs = await Promise.all(
+          ids.map((g) => generationCost(key, g, undefined, COST_LOOKUPS)),
+        );
+        if (costs.some((c) => !c)) {
+          logger.warn(
+            `[assistant] reading cost not found, estimate kept: msg=${id}`,
+          );
+          return;
+        }
+        await assistant.updateAssistantMessages({
+          id: rowId,
+          cost_usd: costs.reduce((a, b) => a + b, 0),
+        });
+      } catch (err) {
+        logger.warn(
+          `[assistant] reading cost not updated: ${(err as Error)?.message}`,
+        );
+      }
+    };
     try {
       // The reading we waited for may have stored this very answer.
       if (await replayed()) return;
@@ -219,12 +255,12 @@ export async function POST(
           if (e.type === 'audio') {
             send(e);
             pcm.push(Buffer.from(e.data, 'base64'));
-          } else if (e.type === 'generation') generation = e.id;
-          else {
-            cost += e.cost;
-            tokensIn += e.tokensIn;
-            tokensOut += e.tokensOut;
-            priced = true;
+          } else if (e.type === 'format') {
+            send(e);
+            rate = e.rate;
+          } else {
+            generations.push(e.id);
+            chars += e.chars;
           }
         }
       } catch (err) {
@@ -235,9 +271,8 @@ export async function POST(
             .join('[key]');
         }
       }
-      // Kept only when heard to the end (the bill comes last): a cut-short clip
-      // is never replayed.
-      if (!failure && !ctl.signal.aborted && priced && pcm.length) {
+      // Kept only when heard to the end: a cut-short clip is never replayed.
+      if (!failure && !ctl.signal.aborted && pcm.length) {
         const file = await files
           .createFiles({
             filename: `assistant-voice-${id}.pcm`,
@@ -255,34 +290,43 @@ export async function POST(
             voice_model: settings.voice_model,
             voice: settings.voice,
             file_id: file.id,
+            rate,
           };
         }
       }
     } finally {
       if (spoke) {
-        // Stopped or failed before the bill arrived: OpenRouter still charges it.
-        if (!priced && generation)
-          cost += await generationCost(key, generation);
-        await assistant
+        // Speech returns no bill: count a safe overestimate now, so the next
+        // reading's cap check sees it, and put OpenRouter's own figure in
+        // once it arrives. Every piece sent is charged, heard or not.
+        const heardSeconds = rate ? Buffer.concat(pcm).length / 2 / rate : 0;
+        cost = estimateSpeechCost(
+          (await speechModels())?.get(settings.voice_model),
+          chars,
+          Math.max(heardSeconds, spokenLength(text) / 10),
+        );
+        const row = await assistant
           .createAssistantMessages({
             conversation_id: message.conversation_id,
             role: 'voice',
             content: '',
             model: settings.voice_model,
             cost_usd: cost,
-            tokens_in: tokensIn,
-            tokens_out: tokensOut,
+            tokens_in: 0,
+            tokens_out: 0,
             tools: saved,
             error: failure,
           })
-          .catch((err: Error) =>
-            logger.warn(`[assistant] voice cost not saved: ${err?.message}`),
-          );
+          .catch((err: Error) => {
+            logger.warn(`[assistant] voice cost not saved: ${err?.message}`);
+            return null;
+          });
+        if (row && generations.length) void settleCost(row.id, generations);
       }
       await release();
     }
     logger.info(
-      `[assistant] spoke user=${access.userId} msg=${id} model=${settings.voice_model} chars=${text.length} cost=${cost.toFixed(4)}${failure ? ` error=${failure}` : ''}`,
+      `[assistant] spoke user=${access.userId} msg=${id} model=${settings.voice_model} chars=${text.length} estimate=${cost.toFixed(4)}${failure ? ` error=${failure}` : ''}`,
     );
     if (failure) {
       finish({

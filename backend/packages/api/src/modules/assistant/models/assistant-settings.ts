@@ -21,8 +21,8 @@ export const AssistantSettings = model.define('assistant_settings', {
   // Voice (voice.ts): the model that writes down what staff say, the model
   // that reads answers aloud, and its voice.
   stt_model: model.text().default('google/gemini-3.5-flash-lite'),
-  voice_model: model.text().default('openai/gpt-audio-mini'),
-  voice: model.text().default('alloy'),
+  voice_model: model.text().default('google/gemini-3.8-flash-lite-tts'),
+  voice: model.text().default('Kore'),
   // The admin user id of the last change.
   updated_by: model.text().nullable(),
 });
