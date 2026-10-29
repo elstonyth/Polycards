@@ -29,7 +29,8 @@ export async function GET(
   }
   // The newest 500, oldest first: a long chat must still show its latest.
   const messages = await assistant.listAssistantMessages(
-    { conversation_id: conversation.id },
+    // Voice rows only carry what reading aloud cost.
+    { conversation_id: conversation.id, role: ['user', 'assistant'] },
     { order: { created_at: 'DESC' }, take: 500 },
   );
   res.json({

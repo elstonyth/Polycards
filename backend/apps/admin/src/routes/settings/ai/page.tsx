@@ -8,6 +8,7 @@ import {
   Heading,
   Input,
   Label,
+  Select,
   Text,
   toast,
 } from '@medusajs/ui';
@@ -38,6 +39,9 @@ const AiSettingsPage = () => {
   const [chatModel, setChatModel] = useState('');
   const [imageModel, setImageModel] = useState('');
   const [cap, setCap] = useState('');
+  const [sttModel, setSttModel] = useState('');
+  const [voiceModel, setVoiceModel] = useState('');
+  const [voiceName, setVoiceName] = useState('');
   const [saving, setSaving] = useState(false);
   const [test, setTest] = useState<string | null>(null);
 
@@ -49,6 +53,9 @@ const AiSettingsPage = () => {
     setChatModel(s.chat_model);
     setImageModel(s.image_model);
     setCap(String(s.daily_cap_usd));
+    setSttModel(s.stt_model);
+    setVoiceModel(s.voice_model);
+    setVoiceName(s.voice);
   }, [s]);
 
   const save = async (
@@ -274,6 +281,77 @@ const AiSettingsPage = () => {
           </Button>
         </div>
       </Container>
+
+      {s && (
+        <Container className="flex flex-col gap-y-4 px-6 py-5">
+          <div className="flex flex-col gap-y-1">
+            <Heading level="h3">{t('assistant.settings.voiceTitle')}</Heading>
+            <Text size="small" className="text-ui-fg-subtle">
+              {t('assistant.settings.voiceHelp')}
+            </Text>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="flex flex-col gap-y-1.5">
+              <Label size="small" htmlFor="ai-stt-model">
+                {t('assistant.settings.sttModel')}
+              </Label>
+              <Input
+                id="ai-stt-model"
+                value={sttModel}
+                onChange={(e) => setSttModel(e.target.value)}
+              />
+              <Text size="xsmall" className="text-ui-fg-muted">
+                {t('assistant.settings.sttModelHelp')}
+              </Text>
+            </div>
+            <div className="flex flex-col gap-y-1.5">
+              <Label size="small" htmlFor="ai-voice-model">
+                {t('assistant.settings.voiceModel')}
+              </Label>
+              <Input
+                id="ai-voice-model"
+                value={voiceModel}
+                onChange={(e) => setVoiceModel(e.target.value)}
+              />
+              <Text size="xsmall" className="text-ui-fg-muted">
+                {t('assistant.settings.voiceModelHelp')}
+              </Text>
+            </div>
+            <div className="flex flex-col gap-y-1.5">
+              <Label size="small" htmlFor="ai-voice">
+                {t('assistant.settings.voice')}
+              </Label>
+              <Select value={voiceName} onValueChange={setVoiceName}>
+                <Select.Trigger id="ai-voice">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {s.voices.map((v) => (
+                    <Select.Item key={v} value={v}>
+                      {v}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Button
+              variant="secondary"
+              disabled={saving}
+              onClick={() =>
+                void save({
+                  stt_model: sttModel.trim(),
+                  voice_model: voiceModel.trim(),
+                  voice: voiceName,
+                })
+              }
+            >
+              {t('assistant.settings.save')}
+            </Button>
+          </div>
+        </Container>
+      )}
 
       {s && <ImageStyleCard settings={s} save={save} />}
     </div>

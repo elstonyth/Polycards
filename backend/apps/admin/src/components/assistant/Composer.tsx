@@ -15,13 +15,15 @@ import {
 import { toast } from '@medusajs/ui';
 import { useTranslation } from 'react-i18next';
 import { imageToDataUrl } from '../../lib/assistant';
+import { MicIcon } from './VoiceIcons';
 
 const MAX_IMAGES = 4;
 
 // The question box (21st.dev "AI prompt input" + "border beam" patterns):
 // grows with the text, takes screenshots by paste, drop or the picture
 // button, sends on Enter (Shift+Enter for a new line), and turns into a stop
-// button while an answer streams.
+// button while an answer streams. The mic asks by voice: it records until
+// the speaker goes quiet (or a second tap) and the answer is read aloud.
 export function Composer({
   busy,
   onSend,
@@ -29,10 +31,12 @@ export function Composer({
   autoFocus,
   seed,
   disabled,
+  mic,
 }: {
   busy: boolean;
   onSend: (text: string, images: string[]) => void;
   onStop: () => void;
+  mic?: { listening: boolean; level: number; onClick: () => void };
   autoFocus?: boolean;
   /** Hold sending (a chat is still loading); typing stays open. */
   disabled?: boolean;
@@ -194,6 +198,29 @@ export function Composer({
             <span className="text-ui-fg-muted hidden text-[11px] sm:inline">
               {t('assistant.enterHint')}
             </span>
+            {mic && (
+              <button
+                type="button"
+                onClick={mic.onClick}
+                aria-pressed={mic.listening}
+                aria-disabled={!mic.listening && (busy || disabled)}
+                aria-label={
+                  mic.listening
+                    ? t('assistant.voice.stopMic')
+                    : t('assistant.voice.mic.ask')
+                }
+                className={`relative flex h-7 w-7 items-center justify-center rounded-full transition-colors aria-disabled:opacity-40 ${mic.listening ? 'bg-sky-500 text-white' : 'text-ui-fg-subtle hover:text-ui-fg-base hover:bg-ui-bg-base-hover'}`}
+              >
+                {mic.listening && (
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 rounded-full bg-sky-400/40 motion-safe:transition-transform"
+                    style={{ transform: `scale(${1 + Math.min(mic.level, 1) * 0.6})` }}
+                  />
+                )}
+                <MicIcon className="relative" />
+              </button>
+            )}
             {/* One button that turns into Stop, so a mouse send keeps focus;
                 aria-disabled (send() checks itself) so the end keeps it too. */}
             <button

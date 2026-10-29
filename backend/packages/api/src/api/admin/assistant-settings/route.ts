@@ -11,6 +11,7 @@ import { isOwnOrigin } from '../assistant/agent-tools';
 import { DEFAULT_IMAGE_STYLE } from '../assistant/brand-style';
 import { DEFAULT_STYLE_REFS } from '../assistant/style-refs';
 import { MODEL_RE } from '../assistant/openrouter';
+import { VOICES } from '../assistant/voice';
 
 // GET/POST /admin/assistant-settings (spec 2026-10-29): Settings → AI. The
 // OpenRouter key is write-only — sealed on the way in, and only whether one
@@ -37,6 +38,11 @@ async function view(req: AuthenticatedMedusaRequest) {
     },
     chat_model: s.chat_model,
     image_model: s.image_model,
+    // Voice (voice.ts): the listening model, the speaking model, its voice.
+    stt_model: s.stt_model,
+    voice_model: s.voice_model,
+    voice: s.voice,
+    voices: VOICES,
     daily_cap_usd: Number(s.daily_cap_usd),
     // The house look for AI images: what is saved (null = the default), and
     // the default itself so the page can show and restore it.
@@ -75,6 +81,9 @@ type Body = {
   openrouter_key?: unknown;
   chat_model?: unknown;
   image_model?: unknown;
+  stt_model?: unknown;
+  voice_model?: unknown;
+  voice?: unknown;
   daily_cap_usd?: unknown;
   image_style?: unknown;
   style_refs?: unknown;
@@ -103,7 +112,12 @@ export async function POST(
     patch.openrouter_key_sealed = sealKey(key, jwtSecret(req));
     patch.openrouter_key_last4 = last4(key);
   }
-  for (const field of ['chat_model', 'image_model'] as const) {
+  for (const field of [
+    'chat_model',
+    'image_model',
+    'stt_model',
+    'voice_model',
+  ] as const) {
     const v = body[field];
     if (v === undefined) continue;
     if (typeof v !== 'string' || v.length > 100 || !MODEL_RE.test(v.trim())) {
@@ -113,6 +127,15 @@ export async function POST(
       return;
     }
     patch[field] = v.trim();
+  }
+  if (body.voice !== undefined) {
+    if (!(VOICES as readonly unknown[]).includes(body.voice)) {
+      res
+        .status(400)
+        .json({ message: `voice must be one of ${VOICES.join(', ')}.` });
+      return;
+    }
+    patch.voice = body.voice;
   }
   // The house look: text, or null / empty to go back to the default.
   if (body.image_style !== undefined) {

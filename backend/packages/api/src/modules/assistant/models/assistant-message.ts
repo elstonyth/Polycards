@@ -4,11 +4,13 @@ import { model } from '@medusajs/framework/utils';
 // counts the screenshots sent with it; their bytes are not kept). An
 // assistant row holds the answer, the images it made (uploaded file URLs),
 // the tools it ran (name, args, ok, ms) and what it cost on OpenRouter.
+// A voice row is an answer read aloud (voice.ts): never shown, it only
+// carries the cost, so speaking counts on the day it happens.
 export const AssistantMessage = model
   .define('assistant_message', {
     id: model.id({ prefix: 'aimsg' }).primaryKey(),
     conversation_id: model.text(),
-    role: model.enum(['user', 'assistant']),
+    role: model.enum(['user', 'assistant', 'voice']),
     content: model.text(),
     attachments: model.number().default(0),
     images: model.json().nullable(),

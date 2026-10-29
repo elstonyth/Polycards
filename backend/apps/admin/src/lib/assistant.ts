@@ -36,6 +36,12 @@ export type AssistantSettings = {
   openrouter_key: { set: boolean; readable: boolean; last4: string | null };
   chat_model: string;
   image_model: string;
+  /** Voice: the model that writes down speech, the one that reads aloud,
+   *  and its voice (one of voices). */
+  stt_model: string;
+  voice_model: string;
+  voice: string;
+  voices: string[];
   daily_cap_usd: number;
   /** The house look for AI images; null = the default below. */
   image_style: string | null;
@@ -59,6 +65,8 @@ export type ReviewRow = ConversationSummary & {
 
 export type ChatEvent =
   | { type: 'conversation'; id: string; title: string }
+  /** A spoken question as it was heard. */
+  | { type: 'transcript'; text: string }
   | { type: 'text'; delta: string }
   | {
       type: 'tool';
@@ -71,6 +79,13 @@ export type ChatEvent =
   | { type: 'image'; url: string }
   | { type: 'error'; message: string; code?: string }
   | { type: 'done'; message_id: string; cost_usd: number }
+  | { type: 'ping' };
+
+/** An answer read aloud: base64 PCM16 chunks (24 kHz mono), then done. */
+export type SpeechEvent =
+  | { type: 'audio'; data: string }
+  | { type: 'error'; message: string; code?: string }
+  | { type: 'done'; cost_usd: number }
   | { type: 'ping' };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -113,6 +128,9 @@ export const assistantApi = {
     openrouter_key?: string | null;
     chat_model?: string;
     image_model?: string;
+    stt_model?: string;
+    voice_model?: string;
+    voice?: string;
     daily_cap_usd?: number;
     image_style?: string | null;
     style_refs?: string[] | null;
@@ -148,17 +166,19 @@ export const assistantApi = {
 
 /** Splits streamed text into whole JSON lines; the unfinished tail is kept
  *  for the next chunk. Lines that are not JSON are skipped. */
-export function takeEvents(buffer: string): {
-  events: ChatEvent[];
+export function takeEvents<E = ChatEvent>(
+  buffer: string,
+): {
+  events: E[];
   rest: string;
 } {
   const lines = buffer.split('\n');
   const rest = lines.pop() ?? '';
-  const events: ChatEvent[] = [];
+  const events: E[] = [];
   for (const line of lines) {
     if (!line.trim()) continue;
     try {
-      events.push(JSON.parse(line) as ChatEvent);
+      events.push(JSON.parse(line) as E);
     } catch {
       // A broken line is dropped, never shown.
     }
@@ -166,13 +186,42 @@ export function takeEvents(buffer: string): {
   return { events, rest };
 }
 
-/** Asks one question; every event is handed to onEvent as it arrives. */
-export async function streamChat(
-  body: { conversation_id?: string; message: string; images?: string[] },
+/** Asks one question, typed (message) or spoken (audio: base64 WAV); every
+ *  event is handed to onEvent as it arrives. */
+export function streamChat(
+  body: {
+    conversation_id?: string;
+    message?: string;
+    images?: string[];
+    audio?: string;
+  },
   onEvent: (e: ChatEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
-  const res = await fetch(`${__BACKEND_URL__}/admin/assistant/chat`, {
+  return streamEvents('/admin/assistant/chat', body, onEvent, signal);
+}
+
+/** Reads one of the asker's answers aloud, chunk by chunk. */
+export function streamSpeech(
+  messageId: string,
+  onEvent: (e: SpeechEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  return streamEvents(
+    '/admin/assistant/speak',
+    { message_id: messageId },
+    onEvent,
+    signal,
+  );
+}
+
+async function streamEvents<E>(
+  path: string,
+  body: object,
+  onEvent: (e: E | { type: 'error'; message: string }) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${__BACKEND_URL__}${path}`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -195,7 +244,7 @@ export async function streamChat(
   for (;;) {
     const { done, value } = await reader.read();
     buffer += decoder.decode(value, { stream: !done });
-    const { events, rest } = takeEvents(done ? `${buffer}\n` : buffer);
+    const { events, rest } = takeEvents<E>(done ? `${buffer}\n` : buffer);
     buffer = rest;
     events.forEach(onEvent);
     if (done) return;

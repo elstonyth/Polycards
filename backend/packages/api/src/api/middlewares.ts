@@ -1204,6 +1204,12 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit, assistantChatRateLimit],
     },
     {
+      // Reading an answer aloud (voice.ts) spends OpenRouter credit too.
+      matcher: '/admin/assistant/speak',
+      method: 'POST',
+      middlewares: [adminActionRateLimit, assistantChatRateLimit],
+    },
+    {
       matcher: '/admin/assistant/conversations/*',
       method: 'DELETE',
       middlewares: [adminActionRateLimit],

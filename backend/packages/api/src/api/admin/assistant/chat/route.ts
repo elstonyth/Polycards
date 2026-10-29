@@ -16,6 +16,7 @@ import { memoryFor } from '../agent-tools';
 import { MODEL_RE, type ChatMessage } from '../openrouter';
 import { SCHEDULED_PREFIX } from '../schedule';
 import { TOOLS } from '../tools';
+import { MAX_AUDIO_BYTES, transcribe } from '../voice';
 import { connectRedis, throttledWarn } from '../../../utils/rate-limit';
 
 // POST /admin/assistant/chat (spec 2026-10-29): one question, answered as a
@@ -23,6 +24,7 @@ import { connectRedis, throttledWarn } from '../../../utils/rate-limit';
 // tool steps arrive:
 //   conversation {id,title} · text {delta} · tool {id,name,label,status,ms}
 //   image {url} · error {message} · done {message_id,cost_usd} · ping
+//   transcript {text} — a spoken question (body.audio) as it was heard
 // The headers go out at once and a ping every 10 s keeps proxies from
 // timing the request out while a poster or a query runs. Read-only: the only
 // rows written are the conversation and its messages.
@@ -72,16 +74,34 @@ async function lock(userId: string): Promise<(() => Promise<void>) | null> {
 }
 
 const IMAGE_RE = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
+const AUDIO_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
-type Body = { conversation_id?: unknown; message?: unknown; images?: unknown };
+type Body = {
+  conversation_id?: unknown;
+  message?: unknown;
+  images?: unknown;
+  /** A spoken question: base64 16 kHz WAV (voice.ts). */
+  audio?: unknown;
+};
 
 function parse(body: Body): {
   conversationId?: string;
   text: string;
   images: string[];
+  audio?: string;
 } {
+  let audio: string | undefined;
+  if (body.audio !== undefined && body.audio !== null) {
+    if (typeof body.audio !== 'string' || !AUDIO_RE.test(body.audio)) {
+      throw new Error('The recording must be a base64 WAV.');
+    }
+    if ((body.audio.length * 3) / 4 > MAX_AUDIO_BYTES) {
+      throw new Error('A recording is at most about 75 seconds.');
+    }
+    audio = body.audio;
+  }
   const text = typeof body.message === 'string' ? body.message.trim() : '';
-  if (!text) throw new Error('Type a question.');
+  if (!text && !audio) throw new Error('Type a question.');
   if (text.length > MAX_TEXT) {
     throw new Error(`A question is at most ${MAX_TEXT} characters.`);
   }
@@ -100,7 +120,12 @@ function parse(body: Body): {
   if (id !== undefined && id !== null && typeof id !== 'string') {
     throw new Error('conversation_id must be a string.');
   }
-  return { conversationId: id || undefined, text, images: images as string[] };
+  return {
+    conversationId: id || undefined,
+    text,
+    images: images as string[],
+    audio,
+  };
 }
 
 const MIME: Record<string, string> = {
@@ -208,6 +233,49 @@ export async function POST(
       return;
     }
 
+    // A spoken question is written down first, then asked like a typed one.
+    // shortcut: a recording with no speech in it is not charged (no answer
+    // row to carry the cost); the chat rate limit bounds it.
+    let listened = 0;
+    if (input.audio) {
+      if (!MODEL_RE.test(String(settings.stt_model ?? ''))) {
+        finish({
+          type: 'error',
+          code: 'bad_model',
+          message:
+            'The listening model in Settings → AI assistant is not allowed here. An admin must pick another.',
+        });
+        return;
+      }
+      let heard: { text: string; cost: number };
+      try {
+        heard = await transcribe({
+          key,
+          model: settings.stt_model,
+          wavBase64: input.audio,
+          signal: ctl.signal,
+        });
+      } catch (err) {
+        finish({
+          type: 'error',
+          code: 'listen_failed',
+          message: `Could not listen to that recording: ${(err as Error).message}`,
+        });
+        return;
+      }
+      listened = heard.cost;
+      input.text = heard.text.slice(0, MAX_TEXT);
+      send({ type: 'transcript', text: input.text });
+      if (!input.text) {
+        finish({
+          type: 'error',
+          code: 'no_speech',
+          message: "I didn't catch that. Try again.",
+        });
+        return;
+      }
+    }
+
     const now = new Date();
     if (!conversation) {
       conversation = (await assistant.createAssistantConversations({
@@ -224,7 +292,7 @@ export async function POST(
     });
 
     const earlier = await assistant.listAssistantMessages(
-      { conversation_id: conversationId },
+      { conversation_id: conversationId, role: ['user', 'assistant'] },
       { order: { created_at: 'DESC' }, take: HISTORY },
     );
     const history: ChatMessage[] = earlier
@@ -266,7 +334,7 @@ export async function POST(
       userText: input.text,
       images: input.images,
       signal: ctl.signal,
-      budgetUsd: Number(settings.daily_cap_usd) - spent,
+      budgetUsd: Number(settings.daily_cap_usd) - spent - listened,
       memory: await memoryFor(assistant, access.userId),
       now,
       emit: send,
@@ -295,6 +363,8 @@ export async function POST(
         },
       },
     });
+    // Writing down a spoken question is paid for with its answer.
+    result.cost += listened;
     const saved = await assistant.createAssistantMessages({
       conversation_id: conversationId,
       role: 'assistant',

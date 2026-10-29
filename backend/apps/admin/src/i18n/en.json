@@ -1872,6 +1872,13 @@
       "imageModelHelp": "e.g. google/gemini-3.1-flash-image",
       "cap": "Daily limit per person (USD)",
       "capHelp": "From 0.5 to 1000. Resets at 00:00 Malaysia time.",
+      "voiceTitle": "Voice",
+      "voiceHelp": "Staff can ask by voice and hear answers. Both models run on OpenRouter; what they cost counts toward the daily limit.",
+      "sttModel": "Listening model",
+      "sttModelHelp": "Writes down what staff say. Must accept audio input.",
+      "voiceModel": "Speaking model",
+      "voiceModelHelp": "Reads answers aloud. Must give audio output.",
+      "voice": "Voice",
       "save": "Save",
       "saved": "Saved.",
       "styleTitle": "Image style",
@@ -1901,11 +1908,37 @@
     },
     "deleteConfirm": "Delete this chat? It stays in the owner's review.",
     "stopped": "Stopped before an answer.",
+    "voice": {
+      "talk": "Talk",
+      "endTalk": "End talk",
+      "talkHint": "Speak, then pause: the answer is read aloud.",
+      "tapToInterrupt": "Tap the orb to interrupt.",
+      "interrupt": "Interrupt and listen",
+      "hearing": "🎙 Listening…",
+      "nothingHeard": "I didn't catch that. Try again.",
+      "stopMic": "Stop recording",
+      "readAloud": "Read aloud",
+      "stopReading": "Stop reading",
+      "state": {
+        "idle": "Ready",
+        "listening": "Listening…",
+        "thinking": "Thinking…",
+        "speaking": "Speaking…"
+      },
+      "mic": {
+        "ask": "Ask by voice",
+        "denied": "Microphone blocked. Allow it in the browser’s site settings.",
+        "unavailable": "No microphone could be opened."
+      }
+    },
     "history": "History",
     "imageFailed": "The image could not be loaded.",
     "loadError": "Could not load: {{message}}",
     "err": {
       "bad_model": "The chat model in Settings → AI assistant is not allowed here (web-search models are off). An admin must pick another.",
+      "no_speech": "I didn't catch that. Try again.",
+      "listen_failed": "Could not listen to that recording. Try again.",
+      "speak_failed": "Could not read it aloud. Try again.",
       "no_key": "The assistant has no AI key yet. An admin adds it in Settings → AI assistant.",
       "busy": "Your previous question is still being answered. Wait for it, then ask again.",
       "daily_cap": "You reached today's assistant limit. It resets at 00:00 Malaysia time."

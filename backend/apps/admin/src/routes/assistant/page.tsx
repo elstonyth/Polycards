@@ -14,7 +14,11 @@ import {
 import { timeAgo } from '../../lib/format';
 import { AiOrb } from '../../components/assistant/AiOrb';
 import { Composer } from '../../components/assistant/Composer';
+import { TalkPanel } from '../../components/assistant/TalkPanel';
 import { Thread } from '../../components/assistant/Thread';
+import { WaveIcon } from '../../components/assistant/VoiceIcons';
+import { useVoice } from '../../components/assistant/use-voice';
+import { MicError } from '../../lib/voice';
 import {
   fromStored,
   type UiMessage,
@@ -122,6 +126,16 @@ const AssistantPage = () => {
   // the person scrolled up to read; sending or opening a chat follows again.
   const stick = useRef(true);
   const [history, setHistory] = useState(false);
+  const voice = useVoice();
+  // Hands-free talk: listen, ask, read the answer aloud, listen again.
+  const [talk, setTalk] = useState(false);
+  const talking = useRef(false);
+  // The chat a question goes to, read by the talk loop, which outlives the
+  // render it started in.
+  const at = useRef({ selected, shown });
+  useEffect(() => {
+    at.current = { selected, shown };
+  }, [selected, shown]);
 
   // The tool's name in the page's language (the server's label is English).
   const labelOf = useCallback(
@@ -179,7 +193,18 @@ const AssistantPage = () => {
     return () => watch.disconnect();
   }, [hasMessages]);
 
-  const send = async (text: string, images: string[]) => {
+  /** Asks one question, typed or spoken (audio: a WAV recording). Gives the
+   *  saved answer's id when it was answered in full, for reading aloud. */
+  const send = async ({
+    text,
+    images,
+    audio,
+  }: {
+    text: string;
+    images: string[];
+    audio?: string;
+  }): Promise<string | null> => {
+    const { selected, shown } = at.current;
     stick.current = true;
     const ac = new AbortController();
     ctl.current = ac;
@@ -191,7 +216,7 @@ const AssistantPage = () => {
       {
         key: `u-${stamp}`,
         role: 'user',
-        content: text,
+        content: audio ? t('assistant.voice.hearing') : text,
         attachments: images,
         images: [],
         steps: [],
@@ -206,18 +231,35 @@ const AssistantPage = () => {
         pending: true,
       },
     ]);
-    const patch = (fn: (m: UiMessage) => UiMessage) =>
-      setMessages((prev) => prev.map((m) => (m.key === key ? fn(m) : m)));
+    const patch = (fn: (m: UiMessage) => UiMessage, k = key) =>
+      setMessages((prev) => prev.map((m) => (m.key === k ? fn(m) : m)));
+    let answered: string | null = null;
     // An answer is whole only once `done` arrived; a stream that just stops
     // (a deploy, a dropped connection) is shown as cut off, never as complete.
     let finished = false;
     let failed = false;
     try {
       await streamChat(
-        { conversation_id: selected ?? undefined, message: text, images },
+        {
+          conversation_id: selected ?? undefined,
+          ...(audio ? { audio } : { message: text }),
+          images,
+        },
         (e) => {
-          if (e.type === 'done') finished = true;
-          if (e.type === 'conversation') {
+          if (e.type === 'done') {
+            finished = true;
+            answered = e.message_id;
+            patch((m) => ({ ...m, messageId: e.message_id }));
+          }
+          if (e.type === 'transcript') {
+            patch(
+              (m) => ({
+                ...m,
+                content: e.text || t('assistant.voice.nothingHeard'),
+              }),
+              `u-${stamp}`,
+            );
+          } else if (e.type === 'conversation') {
             // The screen is this chat now, unless it was showing another.
             if (shown === selected) setShown(e.id);
             if (e.id !== selected) setParams({ c: e.id });
@@ -274,10 +316,85 @@ const AssistantPage = () => {
       ctl.current = null;
       void qc.invalidateQueries({ queryKey: ['assistant', 'conversations'] });
     }
+    return finished && !failed ? answered : null;
   };
 
+  /** The mic: ask one question by voice and hear the answer. A second tap
+   *  ends the recording early. */
+  const askByVoice = async () => {
+    if (voice.state === 'listening') {
+      voice.stopListening();
+      return;
+    }
+    if (busy || loading || talking.current) return;
+    let wav: string | null;
+    try {
+      wav = await voice.listen(true);
+    } catch {
+      return; // the mic could not open (already said why)
+    }
+    if (!wav) {
+      toast(t('assistant.voice.nothingHeard'));
+      return;
+    }
+    voice.setState('thinking');
+    const id = await send({ text: '', images: [], audio: wav });
+    voice.setState('idle');
+    if (id) await voice.speak(id);
+  };
+
+  const startTalk = async () => {
+    if (talking.current || busy || loading) return;
+    talking.current = true;
+    setTalk(true);
+    // Three silent turns in a row (about 24 s) end the talk by themselves.
+    let silent = 0;
+    try {
+      while (talking.current && silent < 3) {
+        let wav: string | null;
+        try {
+          wav = await voice.listen(true);
+        } catch (err) {
+          if (err instanceof MicError) break;
+          throw err;
+        }
+        if (!talking.current) break;
+        if (!wav) {
+          silent += 1;
+          continue;
+        }
+        silent = 0;
+        voice.setState('thinking');
+        const id = await send({ text: '', images: [], audio: wav });
+        voice.setState('idle');
+        if (talking.current && id) await voice.speak(id);
+      }
+    } finally {
+      talking.current = false;
+      setTalk(false);
+      voice.setState('idle');
+    }
+  };
+
+  const endTalk = () => {
+    talking.current = false;
+    voice.cancelListening();
+    voice.stopSpeaking();
+    ctl.current?.abort();
+  };
+
+  // Read aloud (or stop) one answer from the thread.
+  const { speak: speakAnswer, stopSpeaking, reading } = voice;
+  const readAloud = useCallback(
+    (id: string) => {
+      if (reading === id) stopSpeaking();
+      else void speakAnswer(id);
+    },
+    [reading, speakAnswer, stopSpeaking],
+  );
+
   const newChat = () => {
-    if (busy) return;
+    if (busy || talk) return;
     setParams({});
     setMessages([]);
   };
@@ -408,8 +525,18 @@ const AssistantPage = () => {
                 </Drawer.Body>
               </Drawer.Content>
             </Drawer>
+            <button
+              type="button"
+              onClick={() => (talk ? endTalk() : void startTalk())}
+              aria-pressed={talk}
+              aria-disabled={!talk && (busy || loading)}
+              className={`flex items-center gap-x-1.5 rounded-full border px-3 py-1 text-xs transition-colors aria-disabled:opacity-40 lg:ml-auto ${talk ? 'border-sky-500 bg-sky-500 text-white' : 'border-ui-border-base text-ui-fg-subtle hover:text-ui-fg-base'}`}
+            >
+              <WaveIcon />
+              {talk ? t('assistant.voice.endTalk') : t('assistant.voice.talk')}
+            </button>
             {me.data?.chat_model && (
-              <span className="border-ui-border-base text-ui-fg-subtle hidden rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] md:inline lg:ml-auto">
+              <span className="border-ui-border-base text-ui-fg-subtle hidden rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] md:inline">
                 {me.data.chat_model}
               </span>
             )}
@@ -445,25 +572,49 @@ const AssistantPage = () => {
                 disabled={loading}
                 onPick={(text, now) =>
                   now
-                    ? void send(text, [])
+                    ? void send({ text, images: [] })
                     : setSeed((s) => ({ text, n: (s?.n ?? 0) + 1 }))
                 }
               />
             ) : (
               <div ref={content} className="mx-auto w-full max-w-3xl px-5 py-6">
-                <Thread messages={messages} />
+                <Thread
+                  messages={messages}
+                  onSpeak={readAloud}
+                  reading={reading}
+                />
               </div>
             )}
           </div>
 
-          <div className="mx-auto w-full max-w-3xl px-5 pb-5 pt-2">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-y-2 px-5 pb-5 pt-2">
+            <AnimatePresence>
+              {talk && (
+                <TalkPanel
+                  key="talk"
+                  state={voice.state}
+                  level={voice.level}
+                  onInterrupt={voice.stopSpeaking}
+                  onEnd={endTalk}
+                />
+              )}
+            </AnimatePresence>
             <Composer
               busy={busy}
-              disabled={loading}
+              disabled={loading || talk}
               seed={seed}
               autoFocus
-              onSend={(text, images) => void send(text, images)}
+              onSend={(text, images) => void send({ text, images })}
               onStop={() => ctl.current?.abort()}
+              mic={
+                talk
+                  ? undefined
+                  : {
+                      listening: voice.state === 'listening',
+                      level: voice.level,
+                      onClick: () => void askByVoice(),
+                    }
+              }
             />
             <p className="text-ui-fg-muted mt-2 text-center text-[11px]">
               {t('assistant.footnote')}

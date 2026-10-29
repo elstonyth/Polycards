@@ -167,6 +167,30 @@ folders… make sure you are also able to do the scheduled tasks."
   must quote the admin's current message; image fetches reach only our own
   hosts or URLs a pack or card holds, every redirect hop included.
 
+### Voice (added 2026-10-29, , , admin )
+
+Owner: "make sure it's able to answer and reply, listening… using OpenRouter".
+OpenRouter has no speech endpoints; both halves go through chat completions.
+
+- **Listening:** the admin records 16 kHz mono WAV (Web Audio, no MediaRecorder:
+  OpenRouter takes wav, not webm), stops on silence (energy VAD), and posts it
+  as  to the chat route. The listening model (, default
+  ) writes it down via ; the
+  transcript is streamed back and asked like a typed question. Its cost is
+  charged with the answer.
+- **Speaking:**  reads one of the
+  asker's answers aloud with the voice model (, default
+  ;  one of alloy/echo/fable/onyx/nova/shimmer),
+  streamed as PCM16 24 kHz chunks the admin plays gaplessly. Markdown is made
+  speakable (tables row by row, no URLs), capped at 1,500 characters. The cost
+  is saved as a hidden  message row, so it counts toward today's cap
+  whichever day the answer was written.
+- **UI:** a mic in the composer (one spoken question, answer read aloud), a
+  Talk mode (hands-free: listen → answer → speak → listen; tap the orb to
+  interrupt; three silent turns end it), and Read aloud on every answer.
+- Migration : role check gains ; three
+  settings columns with defaults. Additive.
+
 ### Admin (`backend/apps/admin`)
 
 - **Assistant page** (top-level sidebar, `assistant:use`): conversation list,

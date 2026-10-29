@@ -13,6 +13,8 @@ export type UiMessage = {
   steps: Step[];
   error?: string | null;
   pending?: boolean;
+  /** The saved answer's id: what "read aloud" asks for. */
+  messageId?: string;
 };
 
 // Tools that draw: while one runs, a scanning placeholder holds its place.
@@ -33,4 +35,5 @@ export const fromStored = (messages: StoredMessage[]): UiMessage[] =>
       ms: tool.ms,
     })),
     error: m.error === 'aborted' ? null : m.error,
+    messageId: m.role === 'assistant' ? m.id : undefined,
   }));

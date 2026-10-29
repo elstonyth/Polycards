@@ -58,6 +58,14 @@ const usage = {
   usage: { cost: 0.001, prompt_tokens: 50, completion_tokens: 5 },
 };
 
+// Voice: what the listening model "hears", and every voice request.
+let heardText = '';
+const voiceCalls: (FakeBody & {
+  model?: string;
+  modalities?: string[];
+  audio?: { voice: string; format: string };
+})[] = [];
+
 const fake = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (c) => (raw += c));
@@ -71,7 +79,31 @@ const fake = http.createServer((req, res) => {
       );
       return;
     }
-    const body = JSON.parse(raw) as FakeBody;
+    const body = JSON.parse(raw) as FakeBody & { modalities?: string[] };
+    if (JSON.stringify(body.messages).includes('"input_audio"')) {
+      voiceCalls.push(body);
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          usage: { cost: 0.0003 },
+          choices: [{ message: { content: heardText } }],
+        }),
+      );
+      return;
+    }
+    if (body.modalities?.includes('audio')) {
+      voiceCalls.push(body);
+      res.setHeader('content-type', 'text/event-stream');
+      for (const chunk of [
+        { id: 'gen-voice', choices: [{ delta: { audio: { data: 'AAAA' } } }] },
+        { choices: [{ delta: { audio: { data: 'BBBB' } } }] },
+        { choices: [], usage: { cost: 0.002, prompt_tokens: 30, completion_tokens: 200 } },
+      ]) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+      res.end('data: [DONE]\n\n');
+      return;
+    }
     received.push(body);
     res.setHeader('content-type', 'text/event-stream');
     for (const chunk of [...script(body), usage]) {
@@ -489,6 +521,104 @@ medusaIntegrationTestRunner({
           },
         );
         expect(res.status).toBe(403);
+      });
+
+      it('hears a spoken question, answers it, and reads the answer aloud within the cap', async () => {
+        await saveKey();
+        const container = getContainer();
+        const lines = (raw: string) =>
+          raw
+            .split('\n')
+            .filter(Boolean)
+            .map((l) => JSON.parse(l) as Record<string, unknown>)
+            .filter((e) => e.type !== 'ping');
+
+        // Settings: the voice is one of the listed ones.
+        const bad = await api.post(
+          '/admin/assistant-settings',
+          { voice: 'robot' },
+          { ...admin, validateStatus: () => true },
+        );
+        expect(bad.status).toBe(400);
+        const set = await api.post(
+          '/admin/assistant-settings',
+          { voice: 'nova' },
+          admin,
+        );
+        expect(set.data.settings).toMatchObject({
+          stt_model: 'google/gemini-3.5-flash-lite',
+          voice_model: 'openai/gpt-audio-mini',
+          voice: 'nova',
+        });
+
+        // A spoken question is written down, then asked like a typed one.
+        heardText = 'how many player groups?';
+        voiceCalls.length = 0;
+        script = (b) =>
+          lastIsTool(b) ? [say('There are 0 groups.')] : [call('groups', {})];
+        const events = await chat(admin, '', {
+          audio: Buffer.from('RIFF-test-recording').toString('base64'),
+        });
+        expect(events[0]).toEqual({
+          type: 'transcript',
+          text: 'how many player groups?',
+        });
+        expect(voiceCalls[0].model).toBe('google/gemini-3.5-flash-lite');
+        const done = events.at(-1) as { type: string; message_id: string };
+        expect(done.type).toBe('done');
+
+        // Read aloud in the set voice.
+        const spoken = await api.post(
+          '/admin/assistant/speak',
+          { message_id: done.message_id },
+          { ...admin, responseType: 'text', transformResponse: (d: string) => d },
+        );
+        expect(lines(spoken.data as string).map((e) => e.type)).toEqual([
+          'audio',
+          'audio',
+          'done',
+        ]);
+        expect(voiceCalls[1]).toMatchObject({
+          model: 'openai/gpt-audio-mini',
+          modalities: ['text', 'audio'],
+          audio: { voice: 'nova', format: 'pcm16' },
+        });
+        expect(String(voiceCalls[1].messages[1].content)).toBe(
+          'There are 0 groups.',
+        );
+
+        // The thread shows the question as heard, never the voice row.
+        const conv = (events[1] as { id: string }).id;
+        const thread = await api.get(
+          `/admin/assistant/conversations/${conv}`,
+          admin,
+        );
+        expect(
+          thread.data.messages.map((m: { role: string; content: string }) => [
+            m.role,
+            m.content,
+          ]),
+        ).toEqual([
+          ['user', 'how many player groups?'],
+          ['assistant', 'There are 0 groups.'],
+        ]);
+
+        // Listening, both answer rounds and the reading all count today.
+        const assistant =
+          container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
+        const [row] = await assistant.listAssistantConversations({ id: conv });
+        expect(await assistant.spentToday(row.user_id)).toBeCloseTo(
+          0.001 * 2 + 0.0003 + 0.002,
+          6,
+        );
+
+        // Someone else cannot have it read to them.
+        const other = await api.post(
+          '/admin/assistant/speak',
+          { message_id: done.message_id },
+          { ...anson, validateStatus: () => true },
+        );
+        expect(other.status).toBe(404);
       });
 
       it('reads a stock screen as Anson, and takes a screenshot of about 1 MB', async () => {

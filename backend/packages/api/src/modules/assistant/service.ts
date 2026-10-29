@@ -14,6 +14,9 @@ export type AssistantSettingsRow = {
   daily_cap_usd: number;
   image_style: string | null;
   style_refs: unknown;
+  stt_model: string;
+  voice_model: string;
+  voice: string;
   updated_by: string | null;
   updated_at: Date | string;
 };
@@ -44,8 +47,9 @@ class AssistantModuleService extends MedusaService({
       ))) as unknown as AssistantSettingsRow;
   }
 
-  /** What one admin user's assistant answers cost today (Malaysia day), USD.
-   *  Deleted chats count too: deleting one must not reset the cap. */
+  /** What one admin user's assistant answers cost today (Malaysia day), USD,
+   *  answers read aloud included. Deleted chats count too: deleting one must
+   *  not reset the cap. */
   async spentToday(userId: string, now: Date = new Date()): Promise<number> {
     const since = mytDayStart(now);
     const convs = await this.listAssistantConversations(
@@ -56,7 +60,7 @@ class AssistantModuleService extends MedusaService({
     const msgs = await this.listAssistantMessages(
       {
         conversation_id: convs.map((c) => c.id),
-        role: 'assistant',
+        role: ['assistant', 'voice'],
         created_at: { $gte: since },
       },
       { select: ['cost_usd'], withDeleted: true },

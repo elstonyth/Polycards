@@ -299,6 +299,13 @@
       "imageModelHelp": "例如 google/gemini-3.1-flash-image",
       "cap": "每人每日上限（USD）",
       "capHelp": "范围 0.5 到 1000。马来西亚时间 00:00 重置。",
+      "voiceTitle": "语音",
+      "voiceHelp": "员工可以用语音提问并听答案。两个模型都在 OpenRouter 上运行，费用计入每日上限。",
+      "sttModel": "听写模型",
+      "sttModelHelp": "把员工说的话写下来，必须支持音频输入。",
+      "voiceModel": "朗读模型",
+      "voiceModelHelp": "把答案读出来，必须支持音频输出。",
+      "voice": "声音",
       "save": "保存",
       "saved": "已保存。",
       "styleTitle": "图片风格",
@@ -368,11 +375,37 @@
     },
     "deleteConfirm": "删除这个对话？管理员的对话记录里仍会保留。",
     "stopped": "已停止，没有回答。",
+    "voice": {
+      "talk": "语音对话",
+      "endTalk": "结束对话",
+      "talkHint": "说完停一下，答案会读出来。",
+      "tapToInterrupt": "点一下光球就能打断。",
+      "interrupt": "打断并开始听",
+      "hearing": "🎙 正在听…",
+      "nothingHeard": "没听清楚，请再说一次。",
+      "stopMic": "停止录音",
+      "readAloud": "朗读",
+      "stopReading": "停止朗读",
+      "state": {
+        "idle": "就绪",
+        "listening": "正在听…",
+        "thinking": "正在想…",
+        "speaking": "正在说…"
+      },
+      "mic": {
+        "ask": "语音提问",
+        "denied": "麦克风被阻止了。请在浏览器的网站设置里允许。",
+        "unavailable": "打不开麦克风。"
+      }
+    },
     "history": "历史",
     "imageFailed": "图片加载失败。",
     "loadError": "加载失败：{{message}}",
     "err": {
       "bad_model": "设置 → AI 助手里的聊天模型不能在这里使用（联网搜索模型已关闭）。需要管理员换一个。",
+      "no_speech": "没听清楚，请再说一次。",
+      "listen_failed": "这段录音听不了，请再试一次。",
+      "speak_failed": "读不出来，请再试一次。",
       "no_key": "助手还没有 AI 密钥，请管理员在 设置 → AI 助手 添加。",
       "busy": "上一个问题还在回答中，请等它完成再问。",
       "daily_cap": "你今天的助手额度已用完，马来西亚时间 00:00 重置。"

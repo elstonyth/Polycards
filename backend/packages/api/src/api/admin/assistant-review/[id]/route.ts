@@ -31,7 +31,8 @@ export async function GET(
   }
   // Newest first, one extra to tell whether older ones were left out.
   const newest = await assistant.listAssistantMessages(
-    { conversation_id: conversation.id },
+    // Voice rows only carry what reading aloud cost (counted in the list).
+    { conversation_id: conversation.id, role: ['user', 'assistant'] },
     {
       order: { created_at: 'DESC' },
       take: MAX_MESSAGES + 1,

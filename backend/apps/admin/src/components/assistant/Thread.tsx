@@ -6,12 +6,27 @@ import { ImageCard, ImagePending } from './ImageCard';
 import { Markdown } from './Markdown';
 import { ToolSteps } from './ToolSteps';
 import { DRAWS, type UiMessage } from './thread-data';
+import { SpeakerIcon } from './VoiceIcons';
 
-export function Thread({ messages }: { messages: UiMessage[] }) {
+export function Thread({
+  messages,
+  onSpeak,
+  reading,
+}: {
+  messages: UiMessage[];
+  /** Read an answer aloud (by its saved id), or stop it. */
+  onSpeak?: (messageId: string) => void;
+  reading?: string | null;
+}) {
   return (
     <div className="flex flex-col gap-y-6">
       {messages.map((m) => (
-        <Message key={m.key} m={m} />
+        <Message
+          key={m.key}
+          m={m}
+          onSpeak={onSpeak}
+          speaking={!!m.messageId && m.messageId === reading}
+        />
       ))}
     </div>
   );
@@ -19,7 +34,15 @@ export function Thread({ messages }: { messages: UiMessage[] }) {
 
 // Memoised: a streamed delta replaces only the answer it grows, so the rest
 // of the thread does not re-parse its markdown.
-const Message = memo(function Message({ m }: { m: UiMessage }) {
+const Message = memo(function Message({
+  m,
+  onSpeak,
+  speaking,
+}: {
+  m: UiMessage;
+  onSpeak?: (messageId: string) => void;
+  speaking: boolean;
+}) {
   const { t } = useTranslation();
   return m.role === 'user' ? (
     <motion.div
@@ -103,6 +126,19 @@ const Message = memo(function Message({ m }: { m: UiMessage }) {
           <div className="border-ui-tag-red-border bg-ui-tag-red-bg text-ui-tag-red-text rounded-xl border px-3 py-2 text-xs">
             {m.error}
           </div>
+        )}
+        {onSpeak && m.messageId && m.content && !m.pending && (
+          <button
+            type="button"
+            onClick={() => m.messageId && onSpeak(m.messageId)}
+            aria-pressed={speaking}
+            className={`flex w-fit items-center gap-x-1.5 rounded-full px-2 py-0.5 text-[11px] transition-colors ${speaking ? 'bg-sky-500/15 text-sky-500' : 'text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-base-hover'}`}
+          >
+            <SpeakerIcon />
+            {speaking
+              ? t('assistant.voice.stopReading')
+              : t('assistant.voice.readAloud')}
+          </button>
         )}
       </div>
     </motion.div>

@@ -358,7 +358,8 @@
           "comment": null,
           "enumItems": [
             "user",
-            "assistant"
+            "assistant",
+            "voice"
           ],
           "mappedType": "enum"
         },
@@ -1002,6 +1003,54 @@
           "comment": null,
           "enumItems": [],
           "mappedType": "json"
+        },
+        "stt_model": {
+          "name": "stt_model",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "'google/gemini-3.5-flash-lite'",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "text"
+        },
+        "voice_model": {
+          "name": "voice_model",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "'openai/gpt-audio-mini'",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "text"
+        },
+        "voice": {
+          "name": "voice",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "'alloy'",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "text"
         },
         "updated_by": {
           "name": "updated_by",

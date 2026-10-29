@@ -18,6 +18,11 @@ export const AssistantSettings = model.define('assistant_settings', {
   // Uploaded images of the brand's own posts the image model matches;
   // null = the bundled key art of the posted posters.
   style_refs: model.json().nullable(),
+  // Voice (voice.ts): the model that writes down what staff say, the model
+  // that reads answers aloud, and its voice.
+  stt_model: model.text().default('google/gemini-3.5-flash-lite'),
+  voice_model: model.text().default('openai/gpt-audio-mini'),
+  voice: model.text().default('alloy'),
   // The admin user id of the last change.
   updated_by: model.text().nullable(),
 });

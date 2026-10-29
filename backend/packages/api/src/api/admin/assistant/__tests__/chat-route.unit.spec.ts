@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { POST } from '../chat/route';
 import { runTurn, type TurnResult } from '../engine';
+import { transcribe } from '../voice';
 
 // POST /admin/assistant/chat with the engine and the assistant service
 // faked: what budget an answer gets, and the one-answer-at-a-time lock.
@@ -18,6 +19,10 @@ jest.mock('../brand-style', () => ({
   styleRefs: async () => [],
 }));
 jest.mock('../images', () => ({ storeImage: jest.fn() }));
+jest.mock('../voice', () => ({
+  MAX_AUDIO_BYTES: 2.5 * 1024 * 1024,
+  transcribe: jest.fn(),
+}));
 jest.mock('../schedule', () => ({ SCHEDULED_PREFIX: 'Scheduled' }));
 jest.mock('../../../../modules/assistant', () => ({
   ASSISTANT_MODULE: 'assistant',
@@ -64,6 +69,7 @@ const service = {
     openrouter_key_sealed: 'sealed',
     daily_cap_usd: 5,
     chat_model: 'anthropic/claude-sonnet-5.5',
+    stt_model: 'google/gemini-3.5-flash-lite',
     image_model: 'i',
     image_style: '',
     style_refs: null,
@@ -79,7 +85,7 @@ const service = {
 };
 const logger = { info: jest.fn(), warn: jest.fn() };
 
-function post() {
+function post(body: Record<string, unknown> = { message: 'how many groups?' }) {
   const lines: string[] = [];
   const res = Object.assign(new EventEmitter(), {
     writableEnded: false,
@@ -101,7 +107,7 @@ function post() {
     },
   });
   const req = {
-    body: { message: 'how many groups?' },
+    body,
     auth_context: { actor_id: 'user_1' },
     socket: { localPort: 9000 },
     scope: {
@@ -136,11 +142,67 @@ it('gives the answer what is left of today’s cap', async () => {
   expect(locks.size).toBe(0);
 });
 
+it('asks a spoken question as it was heard, and charges the listening with the answer', async () => {
+  const transcribeMock = transcribe as jest.MockedFunction<typeof transcribe>;
+  transcribeMock.mockResolvedValueOnce({
+    text: 'how many packs today?',
+    cost: 0.001,
+  });
+  runTurnMock.mockResolvedValueOnce({ ...answer });
+  service.createAssistantMessages.mockClear();
+  const p = post({ audio: 'UklGRg==' });
+  await p.done;
+  expect(transcribeMock.mock.calls[0][0]).toMatchObject({
+    model: 'google/gemini-3.5-flash-lite',
+    wavBase64: 'UklGRg==',
+  });
+  expect(p.events()[0]).toEqual({
+    type: 'transcript',
+    text: 'how many packs today?',
+  });
+  expect(runTurnMock.mock.calls[0][0]).toMatchObject({
+    userText: 'how many packs today?',
+    budgetUsd: 5 - 1.25 - 0.001,
+  });
+  const calls = service.createAssistantMessages.mock.calls as unknown as [
+    { role: string; content: string; cost_usd?: number },
+  ][];
+  expect(calls.map(([m]) => [m.role, m.content])).toEqual([
+    ['user', 'how many packs today?'],
+    ['assistant', 'ok'],
+  ]);
+  expect(calls[1][0].cost_usd).toBeCloseTo(0.011);
+});
+
+it('says it did not catch a recording with no speech, and asks nothing', async () => {
+  (transcribe as jest.MockedFunction<typeof transcribe>).mockResolvedValueOnce({
+    text: '',
+    cost: 0.0002,
+  });
+  const p = post({ audio: 'UklGRg==' });
+  await p.done;
+  expect(p.events()).toEqual([
+    { type: 'transcript', text: '' },
+    expect.objectContaining({ type: 'error', code: 'no_speech' }),
+  ]);
+  expect(runTurnMock).not.toHaveBeenCalled();
+  expect(locks.size).toBe(0);
+});
+
+it('refuses a recording that is not base64', async () => {
+  const p = post({ audio: 'not base64!' });
+  await p.done;
+  expect(p.events()).toEqual([
+    { message: 'The recording must be a base64 WAV.' },
+  ]);
+});
+
 it('refuses a web-search model saved before the settings check existed', async () => {
   service.settings.mockResolvedValueOnce({
     openrouter_key_sealed: 'sealed',
     daily_cap_usd: 5,
     chat_model: 'openai/gpt-5:online',
+    stt_model: 'google/gemini-3.5-flash-lite',
     image_model: 'i',
     image_style: '',
     style_refs: null,
