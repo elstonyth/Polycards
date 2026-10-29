@@ -18,7 +18,7 @@ import {
   streamVoiceTest,
   type AssistantSettings,
 } from '../../../lib/assistant';
-import { PcmPlayer } from '../../../lib/voice';
+import { PcmPlayer, unlockAudio } from '../../../lib/voice';
 import { AiOrb } from '../../../components/assistant/AiOrb';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { ImageStyleCard } from './image-style';
@@ -67,7 +67,12 @@ const AiSettingsPage = () => {
     setCap(String(s.daily_cap_usd));
     setSttModel(s.stt_model);
     setVoiceModel(s.voice_model);
-    setVoiceName(s.voice);
+    // a saved voice the model no longer lists would show blank and fail Save
+    const voices =
+      s.speech_models.find((m) => m.id === s.voice_model)?.voices ?? [];
+    setVoiceName(
+      voices.length && !voices.includes(s.voice) ? voices[0] : s.voice,
+    );
   }, [s]);
 
   const save = async (
@@ -342,6 +347,13 @@ const AiSettingsPage = () => {
                     <Select.Value />
                   </Select.Trigger>
                   <Select.Content>
+                    {/* a saved model OpenRouter no longer lists still shows */}
+                    {voiceModel &&
+                      !s.speech_models.some((m) => m.id === voiceModel) && (
+                        <Select.Item value={voiceModel}>
+                          {voiceModel}
+                        </Select.Item>
+                      )}
                     {s.speech_models.map((m) => (
                       <Select.Item key={m.id} value={m.id}>
                         {m.id}
@@ -445,6 +457,8 @@ function HearVoice({
     // Made in the click: iOS only plays audio from a context made in a gesture.
     let player: PcmPlayer;
     try {
+      // in the click, before any await: lets iPhone play through the silent switch
+      unlockAudio();
       player = new PcmPlayer();
     } catch {
       // No Web Audio in this browser.

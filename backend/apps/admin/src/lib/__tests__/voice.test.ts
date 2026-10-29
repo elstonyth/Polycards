@@ -183,39 +183,52 @@ describe('createBargeInDetector', () => {
   // seeded, so every run sees the same trace
   const random = (seed: number) => () =>
     (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
-  // The answer's loudness: silent while it loads (1 s), then syllables with
-  // a pause every 2 s; each sentence fades in over 300 ms, as speech does.
-  const answerAt = (frame: number) => {
-    const t = frame * FRAME_MS - 1000;
-    const inSentence = t % 2000;
-    if (t < 0 || inSentence > 1700) return 0;
-    return (
-      (0.15 + 0.1 * Math.sin((2 * Math.PI * t) / 250)) *
-      Math.min(1, inSentence / 300)
-    );
-  };
-  /** When it fires (ms), or -1. The mic hears the room at `room` RMS and
-   *  the answer at `coupling` of its loudness, `delay` frames late, ±30%;
-   *  plus a person talking at `talk` = [from ms, to ms, rms]. */
+  /** When it fires (ms), or -1. The answer is silent while it loads (1 s),
+   *  then syllables at `level` (default 1) with a `pause` (default 300 ms)
+   *  every 2 s; each sentence fades in over `fade` ms (default 300), as
+   *  speech does. The mic hears the room at `room` RMS and the answer at
+   *  `coupling` of its loudness, `delay` frames late, ±30%; plus a person
+   *  talking at `talk` (and coughing at `cough`) = [from ms, to ms, rms],
+   *  and one frame's `click` = [ms, rms]. */
   const firesAt = (o: {
     coupling: number;
     delay: number;
     talk?: [number, number, number];
+    cough?: [number, number, number];
+    click?: [number, number];
     room?: number; // default 0.003, a quiet room
     quiet?: boolean; // nothing is playing
+    pause?: number;
+    fade?: number;
+    level?: number;
   }): number => {
+    const { pause = 300, fade = 300, level = 1 } = o;
+    const answerAt = (frame: number) => {
+      const t = frame * FRAME_MS - 1000;
+      const inSentence = t % 2000;
+      if (o.quiet || t < 0 || inSentence > 2000 - pause) return 0;
+      return (
+        level *
+        (0.15 + 0.1 * Math.sin((2 * Math.PI * t) / 250)) *
+        Math.min(1, inSentence / fade)
+      );
+    };
     const detector = createBargeInDetector();
     const next = random(7);
+    let clicked = false;
     for (let i = 0; i * FRAME_MS < 12_000; i++) {
       const t = i * FRAME_MS;
-      const answer = o.quiet ? 0 : answerAt(i);
       const echo = o.quiet
         ? 0
         : o.coupling * answerAt(i - o.delay) * (0.7 + 0.6 * next());
-      const [from, to, rms] = o.talk ?? [0, 0, 0];
-      const voice = t >= from && t < to ? rms * (0.8 + 0.4 * next()) : 0;
-      const mic = Math.hypot(echo, voice, o.room ?? 0.003);
-      if (detector.push(mic, answer, FRAME_MS)) return t;
+      const said = [o.talk, o.cough].find((s) => s && t >= s[0] && t < s[1]);
+      const voice = said ? said[2] * (0.8 + 0.4 * next()) : 0;
+      let mic = Math.hypot(echo, voice, o.room ?? 0.003);
+      if (o.click && !clicked && t >= o.click[0]) {
+        clicked = true;
+        mic = Math.hypot(mic, o.click[1]);
+      }
+      if (detector.push(mic, answerAt(i), FRAME_MS)) return t;
     }
     return -1;
   };
@@ -275,6 +288,67 @@ describe('createBargeInDetector', () => {
     });
     expect(t).toBeGreaterThanOrEqual(2000);
     expect(t).toBeLessThan(2700);
+  });
+
+  it('a cough, then talking over it, still interrupts', () => {
+    const t = firesAt({
+      coupling: 0.05,
+      delay: 3,
+      cough: [4000, 4150, 0.4],
+      talk: [6000, 7500, 0.15],
+    });
+    expect(t).toBeGreaterThanOrEqual(6000);
+    expect(t).toBeLessThan(6700);
+  });
+
+  it('does not take a noisy room heard in the answer’s pauses for talk', () => {
+    expect(firesAt({ coupling: 0.05, delay: 3, room: 0.03, pause: 1000 })).toBe(
+      -1,
+    );
+  });
+
+  it('hears talk over an answer too quiet to learn its echo from', () => {
+    const t = firesAt({
+      coupling: 0.05,
+      delay: 3,
+      level: 0.1,
+      talk: [4000, 5500, 0.3],
+    });
+    expect(t).toBeGreaterThanOrEqual(4000);
+    expect(t).toBeLessThan(4700);
+  });
+
+  it('subtracts a steady room from the echo it learns', () => {
+    const t = firesAt({
+      coupling: 0,
+      delay: 3,
+      room: 0.015,
+      // the bar over a 0.015 room is 0.09: talk clears it every frame
+      talk: [4000, 5500, 0.12],
+    });
+    expect(t).toBeGreaterThanOrEqual(4000);
+    expect(t).toBeLessThan(4700);
+  });
+
+  it('one click while learning does not set the coupling', () => {
+    const t = firesAt({
+      coupling: 0.05,
+      delay: 3,
+      click: [1200, 0.6],
+      talk: [4000, 5500, 0.15],
+    });
+    expect(t).toBeGreaterThanOrEqual(4000);
+    expect(t).toBeLessThan(4700);
+  });
+
+  it('talking a little over the echo is not talking over it', () => {
+    expect(
+      firesAt({ coupling: 0.3, delay: 3, talk: [4000, 5500, 0.0975] }),
+    ).toBe(-1);
+  });
+
+  it('a late echo after a long pause is not talk', () => {
+    expect(firesAt({ coupling: 1.2, delay: 10, pause: 1000 })).toBe(-1);
   });
 });
 
@@ -393,14 +467,21 @@ describe('PcmPlayer', () => {
   };
   // the player keeps one shared context for the whole module: every test sees these
   const sources: FakeSource[] = [];
+  let gain = { connect: vi.fn(), disconnect: vi.fn() };
+  let analyser = {};
   class FakePlayCtx {
     state = 'running';
     currentTime = 0;
     sampleRate = 24000;
     destination = {};
     resume = () => Promise.resolve();
-    createGain = () => ({ connect: vi.fn(), disconnect: vi.fn() });
-    createAnalyser = () => ({ fftSize: 32, getFloatTimeDomainData: vi.fn() });
+    createGain = () => (gain = { connect: vi.fn(), disconnect: vi.fn() });
+    // a steady 0.5 coming out, so loudness can be told from silence
+    createAnalyser = () =>
+      (analyser = {
+        fftSize: 32,
+        getFloatTimeDomainData: (probe: Float32Array) => probe.fill(0.5),
+      });
     createBuffer = (_ch: number, length: number, rate: number): FakeBuffer => {
       const data = new Float32Array(length);
       return { duration: length / rate, getChannelData: () => data };
@@ -447,6 +528,23 @@ describe('PcmPlayer', () => {
     p.push('BA==');
     expect(sources[1].buffer!.duration).toBeCloseTo(1 / 16000, 10);
     p.stop();
+  });
+
+  it('ignores a rate Web Audio cannot play', () => {
+    const p = new PcmPlayer();
+    p.setRate(1000);
+    p.setRate(500_000);
+    p.push('AAA='); // 1 sample
+    expect(sources[0].buffer!.duration).toBeCloseTo(1 / 24000, 10);
+    p.stop();
+  });
+
+  it('feeds its own bus to the analyser the echo gate reads', () => {
+    const p = new PcmPlayer();
+    expect(gain.connect).toHaveBeenCalledWith(analyser);
+    expect(p.loudness).toBeCloseTo(0.5, 6);
+    p.stop();
+    expect(p.loudness).toBe(0);
   });
 
   it('ends on stop() before anything was pushed', async () => {

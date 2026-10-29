@@ -47,6 +47,22 @@ const speaking = userLock('speaking', 240_000);
 // OpenRouter's figure for a reading is looked up this many times, 1.5 s
 // apart: it showed up about 7 s after a reading ended (2026-10-29).
 const COST_LOOKUPS = 12;
+// The file store (Spaces) sets no timeout of its own: a stalled read or
+// upload is given up after this, so the slot and the request move on.
+const STORE_MS = 30_000;
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`no answer in ${ms / 1000} s`)),
+        ms,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 const SLOT_WAIT_MS = 10_000;
 
 export async function POST(
@@ -133,6 +149,8 @@ export async function POST(
       return;
     }
     const files = scope.resolve<IFileModuleService>(Modules.FILE);
+    // Its prices, for the estimate (kept from the check above).
+    const listed = (await speechModels())?.get(settings.voice_model);
 
     // Read before with this voice: play the stored speech, free. Only this
     // conversation's voice rows, which the check above proved are the asker's.
@@ -151,7 +169,10 @@ export async function POST(
             typeof t.file_id === 'string',
         );
       if (!cached) return false;
-      const stored = await files.getAsBuffer(cached.file_id).catch(() => null);
+      const stored = await withTimeout(
+        files.getAsBuffer(cached.file_id),
+        STORE_MS,
+      ).catch(() => null);
       if (!stored?.length) {
         logger.warn(
           `[assistant] stored speech unreadable, speaking again: ${id}`,
@@ -176,7 +197,10 @@ export async function POST(
     // A reading just stopped may still be saving its cost (the client stops
     // one and starts the next at once): wait for its slot a little.
     let release = await speaking.take(access.userId);
-    for (let waited = 0; !release && waited < SLOT_WAIT_MS; waited += 200) {
+    for (
+      const until = Date.now() + SLOT_WAIT_MS;
+      !release && Date.now() < until;
+    ) {
       await new Promise((r) => setTimeout(r, 200));
       if (ctl.signal.aborted) {
         finish(); // the asker left while waiting
@@ -195,12 +219,16 @@ export async function POST(
     let cost = 0;
     let rate = 0;
     const generations: string[] = [];
+    let sent = 0; // pieces asked for: each may be billed
     let failure: string | null = null;
     // OpenRouter answered no (an HTTP 4xx) before any audio: nothing billed
     let refused = false;
-    let spoke = false;
+    // The voice row, saved with an overestimate before speaking, so the
+    // cost counts even if this process dies mid-reading.
+    let rowId: string | null = null;
     let saved: SpeechCache | null = null;
     const pcm: Buffer[] = [];
+    let bytes = 0;
     // OpenRouter's own figure for the pieces read, in place of the estimate;
     // the estimate stays if any piece's figure can't be found.
     const settleCost = async (rowId: string, ids: string[]) => {
@@ -244,7 +272,27 @@ export async function POST(
         id: message.conversation_id,
         last_message_at: new Date(),
       });
-      spoke = true;
+      if (ctl.signal.aborted) {
+        finish(); // left before anything was asked of OpenRouter: no cost
+        return;
+      }
+      rowId = (
+        await assistant.createAssistantMessages({
+          conversation_id: message.conversation_id,
+          role: 'voice',
+          content: '',
+          model: settings.voice_model,
+          cost_usd: estimateSpeechCost(
+            listed,
+            text.length,
+            spokenLength(text) / 10,
+          ),
+          tokens_in: 0,
+          tokens_out: 0,
+          tools: null,
+          error: null,
+        })
+      ).id;
       try {
         for await (const e of speak({
           key,
@@ -255,18 +303,23 @@ export async function POST(
         })) {
           if (e.type === 'audio') {
             send(e);
-            pcm.push(Buffer.from(e.data, 'base64'));
+            const chunk = Buffer.from(e.data, 'base64');
+            pcm.push(chunk);
+            bytes += chunk.length;
           } else if (e.type === 'format') {
             send(e);
             rate = e.rate;
-          } else generations.push(e.id);
+          } else if (e.type === 'piece') sent++;
+          else generations.push(e.id);
         }
       } catch (err) {
         // A timeout in speak() is a failure; only the asker leaving is not.
         if (!ctl.signal.aborted) {
+          // one line in the log, whatever OpenRouter's text holds
           failure = String((err as Error)?.message || 'failed')
             .split(key)
-            .join('[key]');
+            .join('[key]')
+            .replace(/[\r\n]+/g, ' ');
           refused =
             err instanceof OpenRouterError &&
             (err.status ?? 0) >= 400 &&
@@ -275,17 +328,18 @@ export async function POST(
       }
       // Kept only when heard to the end: a cut-short clip is never replayed.
       if (!failure && !ctl.signal.aborted && pcm.length) {
-        const file = await files
-          .createFiles({
+        const file = await withTimeout(
+          files.createFiles({
             filename: `assistant-voice-${id}.pcm`,
             mimeType: 'application/octet-stream',
             content: Buffer.concat(pcm).toString('base64'),
             access: 'private',
-          })
-          .catch((err: Error) => {
-            logger.warn(`[assistant] speech not stored: ${err?.message}`);
-            return null;
-          });
+          }),
+          STORE_MS,
+        ).catch((err: Error) => {
+          logger.warn(`[assistant] speech not stored: ${err?.message}`);
+          return null;
+        });
         if (file) {
           saved = {
             message_id: id,
@@ -297,40 +351,55 @@ export async function POST(
         }
       }
     } finally {
-      if (spoke) {
-        // Speech returns no bill: count a safe overestimate now, so the next
-        // reading's cap check sees it, and put OpenRouter's own figure in
-        // once it arrives. The whole text, whatever was heard or what the
-        // headers said: a piece sent is charged whether heard or not. Only a
-        // reading OpenRouter refused before any audio or generation costs
+      if (rowId) {
+        // Speech returns no bill: the row keeps a safe overestimate, and
+        // OpenRouter's own figure replaces it once every piece's is found.
+        // The whole text, whatever was heard or what the headers said: a
+        // piece asked for is charged whether heard or not. Only a reading
+        // never sent, or refused (4xx) before any audio or generation, costs
         // nothing; a stop, a timeout or a dropped connection may still be
         // billed, so it is estimated too.
-        const heardSeconds = rate ? Buffer.concat(pcm).length / 2 / rate : 0;
+        const heardSeconds = rate ? bytes / 2 / rate : 0;
         cost =
-          !refused || generations.length || pcm.length
-            ? estimateSpeechCost(
-                (await speechModels())?.get(settings.voice_model),
+          !sent || (refused && !generations.length && !bytes)
+            ? 0
+            : estimateSpeechCost(
+                listed,
                 text.length,
                 Math.max(heardSeconds, spokenLength(text) / 10),
-              )
-            : 0;
-        const row = await assistant
-          .createAssistantMessages({
-            conversation_id: message.conversation_id,
-            role: 'voice',
-            content: '',
-            model: settings.voice_model,
+              );
+        const kept = rowId;
+        await assistant
+          .updateAssistantMessages({
+            id: kept,
             cost_usd: cost,
-            tokens_in: 0,
-            tokens_out: 0,
             tools: saved,
             error: failure,
           })
-          .catch((err: Error) => {
-            logger.warn(`[assistant] voice cost not saved: ${err?.message}`);
-            return null;
-          });
-        if (row && generations.length) void settleCost(row.id, generations);
+          .catch((err: Error) =>
+            logger.warn(`[assistant] voice cost not saved: ${err?.message}`),
+          );
+        // The chat deleted while this read: its files went with it, so this
+        // one must too.
+        if (saved) {
+          const [still] = await assistant
+            .listAssistantConversations(
+              { id: message.conversation_id },
+              { take: 1 },
+            )
+            .catch(() => [true]);
+          if (!still) {
+            await files
+              .deleteFiles([saved.file_id])
+              .catch((err: Error) =>
+                logger.warn(`[assistant] orphan speech kept: ${err?.message}`),
+              );
+          }
+        }
+        // Only when every piece asked for has an id: one cut short before its
+        // headers may still be billed, so the estimate stays.
+        if (sent && generations.length === sent)
+          void settleCost(kept, generations);
       }
       await release();
     }

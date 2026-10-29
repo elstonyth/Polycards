@@ -27,27 +27,25 @@ export type SpeechModel = {
   completion: number;
 };
 let speechList: {
-  at: number;
+  until: number;
   models: Map<string, SpeechModel> | null;
 } | null = null;
 
-/** OpenRouter's speaking models (a public list), kept an hour; a failed
- *  fetch is kept a minute. null while it can't be had: callers then check
- *  only the model id's form. */
+/** OpenRouter's speaking models (a public list), kept an hour. When a fetch
+ *  fails, or the list comes back empty, the last good list (or null) stands
+ *  in and the fetch is tried again a minute later. null while none has been
+ *  had: callers then check only the model id's form. */
 export async function speechModels(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Map<string, SpeechModel> | null> {
-  if (
-    speechList &&
-    Date.now() - speechList.at < (speechList.models ? 3_600_000 : 60_000)
-  )
-    return speechList.models;
+  if (speechList && Date.now() < speechList.until) return speechList.models;
   let models: Map<string, SpeechModel> | null = null;
   try {
     const answer = await fetchImpl(
       `${base()}/models?output_modalities=speech`,
       { signal: AbortSignal.timeout(5000) },
     );
+    if (!answer.ok) await answer.body?.cancel().catch(() => undefined);
     const body = answer.ok
       ? ((await answer.json()) as {
           data?: {
@@ -57,7 +55,7 @@ export async function speechModels(
           }[];
         } | null)
       : null;
-    if (Array.isArray(body?.data)) {
+    if (Array.isArray(body?.data) && body.data.length) {
       models = new Map(
         body.data
           .filter((m) => typeof m.id === 'string')
@@ -79,10 +77,9 @@ export async function speechModels(
   } catch {
     // OpenRouter unreachable: the last good list, if any, stands in
   }
-  speechList = {
-    at: Date.now(),
-    models: models ?? speechList?.models ?? null,
-  };
+  speechList = models
+    ? { until: Date.now() + 3_600_000, models }
+    : { until: Date.now() + 60_000, models: speechList?.models ?? null };
   return speechList.models;
 }
 
@@ -142,11 +139,15 @@ export async function generationCost(
           signal: AbortSignal.timeout(3000),
         },
       );
-      if (!answer.ok) continue;
+      if (!answer.ok) {
+        // not found yet: free the connection before trying again
+        await answer.body?.cancel().catch(() => undefined);
+        continue;
+      }
       const body = (await answer.json()) as {
         data?: { total_cost?: number };
       } | null;
-      return Number(body?.data?.total_cost ?? 0) || 0;
+      return Math.max(0, Number(body?.data?.total_cost ?? 0) || 0);
     } catch {
       // Network error or timeout: try once more, then give up.
     }

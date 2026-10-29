@@ -89,7 +89,7 @@ export async function POST(
       signal: ctl.signal,
     })) {
       if (e.type === 'generation') generations.push(e.id);
-      else {
+      else if (e.type !== 'piece') {
         send(e);
         if (e.type === 'audio') heard = true;
       }
@@ -98,10 +98,10 @@ export async function POST(
     // Only Stop is quiet: a timeout inside speak() is a failure. One line in
     // the log, whatever OpenRouter's text holds.
     if (!ctl.signal.aborted) {
-      failure = String((err as Error)?.message ?? 'failed').replace(
-        /[\r\n]+/g,
-        ' ',
-      );
+      failure = String((err as Error)?.message || 'failed')
+        .split(key)
+        .join('[key]')
+        .replace(/[\r\n]+/g, ' ');
     }
   }
   // Speech returns no bill: OpenRouter's figure arrives some seconds after,
@@ -109,11 +109,13 @@ export async function POST(
   const logger = scope.resolve(ContainerRegistrationKeys.LOGGER);
   void Promise.all(
     generations.map((g) => generationCost(key, g, undefined, 12)),
-  ).then((costs) =>
-    logger.info(
-      `[assistant] voice test user=${access.userId} model=${model.trim()} voice=${voice} cost=${costs.reduce((a, b) => a + b, 0).toFixed(4)}${failure ? ` error=${failure}` : ''}`,
-    ),
-  );
+  )
+    .then((costs) =>
+      logger.info(
+        `[assistant] voice test user=${access.userId} model=${model.trim()} voice=${voice} cost=${costs.reduce((a, b) => a + b, 0).toFixed(4)}${failure ? ` error=${failure}` : ''}`,
+      ),
+    )
+    .catch(() => undefined);
   send(
     failure
       ? {

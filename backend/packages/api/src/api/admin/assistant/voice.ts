@@ -147,20 +147,44 @@ function stripTags(s: string): string {
   return out.replace(/[<>]/g, '');
 }
 
-const AMOUNT = String.raw`(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?`;
-const MONEY_RE = new RegExp(
-  String.raw`\bRM[ \t]?${AMOUNT}(?:[ \t]*(?:[–—-][ \t]*(?:RM[ \t]?)?|to[ \t]+RM[ \t]?)${AMOUNT})?`,
+// An amount: 1,250 or 1250, with up to 2 decimals, and not followed by
+// more digits (RM 12.505 is left alone rather than read as 12.50).
+const AMOUNT = String.raw`(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?!\d|[.,]\d)`;
+// A range: RM 10-20, RM 10–RM 20, RM 10 – RM 20, RM 10 to RM 20. A spaced
+// hyphen or an em dash is not one: RM 500 - RM 120 is a sum.
+const RANGE_RE = new RegExp(
+  String.raw`\bRM[ \t]*${AMOUNT}(?:[–-](?:RM[ \t]*)?|[ \t]+–[ \t]+RM[ \t]*|[ \t]+to[ \t]+RM[ \t]*)${AMOUNT}`,
   'g',
 );
+const MONEY_RE = new RegExp(
+  String.raw`\bRM[ \t]*(-)?[ \t]*${AMOUNT}(?:[ \t]?(million|mil|[mM]|billion|bn|thousand|[kK]|juta)(?![A-Za-z])|([万千亿]))?`,
+  'g',
+);
+const SCALE: Record<string, string> = {
+  million: 'million',
+  mil: 'million',
+  m: 'million',
+  billion: 'billion',
+  bn: 'billion',
+  thousand: 'thousand',
+  k: 'thousand',
+  juta: 'juta',
+};
+const HAN = /\p{Script=Han}/gu;
+const LATIN = /\p{Script=Latin}/gu;
 
 /** RM amounts as people say them: a speech model reads "RM 12.50" in an
  *  English sentence as dollars (tested 2026-10-29), so 12 ringgit 50 sen,
- *  in a Chinese line 12令吉50仙, and a range 10 to 20 ringgit. */
+ *  in a Chinese line 12令吉50仙, a range 10 to 20 ringgit, RM 2.5m 2.5
+ *  million ringgit. A line is Chinese when its Chinese characters outweigh
+ *  its Latin letters (a character takes ~3x a letter to say), so one name
+ *  in Chinese, or a Japanese card name, leaves an English line English. */
 function sayMoney(text: string): string {
   return text
     .split('\n')
     .map((line) => {
-      const zh = CJK.test(line);
+      const zh =
+        (line.match(HAN)?.length ?? 0) * 3 > (line.match(LATIN)?.length ?? 0);
       const unit = zh ? '令吉' : ' ringgit';
       const sen = (cents?: string) => {
         const n = cents ? Number(cents.padEnd(2, '0')) : 0;
@@ -170,13 +194,27 @@ function sayMoney(text: string): string {
         cents ? `${whole}.${cents}` : whole;
       return line
         .replace(
+          RANGE_RE,
+          (_, a: string, ac: string | undefined, b: string, bc?: string) =>
+            `${exact(a, ac)}${zh ? '至' : ' to '}${exact(b, bc)}${unit}`,
+        )
+        .replace(
           MONEY_RE,
-          (_, a: string, ac?: string, b?: string, bc?: string) =>
-            b === undefined
-              ? a === '0' && sen(ac) // RM 0.50: 50 sen
-                ? sen(ac).trim()
-                : `${a}${unit}${sen(ac)}`
-              : `${exact(a, ac)}${zh ? '至' : ' to '}${exact(b, bc)}${unit}`,
+          (
+            _,
+            minus: string | undefined,
+            a: string,
+            ac?: string,
+            scale?: string,
+            zhScale?: string,
+          ) => {
+            const sign = minus ? (zh ? '负' : 'minus ') : '';
+            if (scale || zhScale)
+              return `${sign}${exact(a, ac)}${zhScale ?? ` ${SCALE[(scale as string).toLowerCase()]}`}${unit}`;
+            // RM 0.50: 50 sen
+            if (a === '0' && sen(ac)) return `${sign}${sen(ac).trim()}`;
+            return `${sign}${a}${unit}${sen(ac)}`;
+          },
         )
         .replace(/\bRM\b/g, zh ? '令吉' : 'ringgit');
     })
@@ -274,18 +312,25 @@ export function spokenLength(s: string): number {
   return n;
 }
 
-/** Where to cut a sentence too long for one piece: the last comma or space
- *  that fits in max, or as much as fits. Never 0, so cutting always moves on. */
+/** Where to cut a sentence too long for one piece: the last pause that fits
+ *  in max, or as much as fits. Never 0, so cutting always moves on. A , ; or
+ *  : is a pause only before a space, so 12,345 and 10:30 stay whole. */
 function cutAt(s: string, max: number): number {
+  const chars = [...s];
   let used = 0;
   let at = 0;
   let pause = 0;
-  for (const ch of s) {
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
     const w = spokenWeight(ch);
     if (used + w > max) break;
     used += w;
     at += ch.length;
-    if (/[,，;；、:：\s]/.test(ch)) pause = at;
+    if (
+      /[，；、：\s]/.test(ch) ||
+      (/[,;:]/.test(ch) && /\s/.test(chars[i + 1] ?? ''))
+    )
+      pause = at;
   }
   return pause > at / 3 ? pause : Math.max(at, 1);
 }
@@ -350,30 +395,38 @@ export async function speechChoiceProblem(
   return null;
 }
 
+// The dearest per-character voices OpenRouter listed on 2026-10-29
+// (MiniMax Speech HD): the price of a reading whose own is unknown.
+const DEAREST_PER_CHAR = 0.0001;
+
 /** A safe overestimate of what a reading cost, counted toward the daily cap
  *  until OpenRouter's own figure arrives: the input at the model's prompt
  *  price per character (it bills tokens or characters, never more of them
  *  than characters), and the output at its completion price for 25 audio
- *  tokens a second. Without the model's prices: 4 cents per 1,000
- *  characters, the dearest per-character voices on OpenRouter. */
+ *  tokens a second. A model with no price listed, or a list out of reach,
+ *  counts at DEAREST_PER_CHAR: never 0, never negative. */
 export function estimateSpeechCost(
   model: SpeechModel | undefined,
   chars: number,
   seconds: number,
 ): number {
-  if (!model) return chars * 0.00004;
-  return model.prompt * chars + model.completion * 25 * seconds;
+  const listed = model
+    ? Math.max(0, model.prompt) * chars +
+      Math.max(0, model.completion) * 25 * seconds
+    : 0;
+  return listed > 0 ? listed : chars * DEAREST_PER_CHAR;
 }
 
 export type SpeechEvent =
+  | { type: 'piece' } // about to ask for the next piece: from here it may be billed
   | { type: 'format'; rate: number }
   | { type: 'audio'; data: string }
   | { type: 'generation'; id: string };
 
 /** Reads `text` aloud through /audio/speech, piece by piece (speechPieces):
- *  first its sample rate, then base64 PCM16 mono chunks as they arrive, and
- *  each piece's generation id (what it cost is looked up later: speech
- *  returns no usage). Throws when OpenRouter goes quiet for 30 s or
+ *  a piece event as each piece is asked for, its sample rate, base64 PCM16
+ *  mono chunks as they arrive, and each piece's generation id (what it cost
+ *  is looked up later: speech returns no usage). Throws when OpenRouter goes quiet for 30 s or
  *  the reading runs past 3 minutes. */
 export async function* speak(opts: {
   key: string;
@@ -420,6 +473,8 @@ async function* speakUntil(
 ): AsyncGenerator<SpeechEvent> {
   let rate = 0;
   for (const piece of speechPieces(opts.text)) {
+    opts.signal.throwIfAborted();
+    yield { type: 'piece' };
     const answer = await retryOnce(
       () =>
         (opts.fetchImpl ?? fetch)(speechUrl(), {
@@ -451,7 +506,8 @@ async function* speakUntil(
     const id = answer.headers.get('x-generation-id');
     if (id) yield { type: 'generation', id };
     const type = answer.headers.get('content-type') ?? '';
-    if (!/^audio\/(pcm|l16)\b/i.test(type)) {
+    // raw little-endian PCM16 only (audio/L16 would be big-endian)
+    if (!/^audio\/pcm\b/i.test(type)) {
       await answer.body.cancel().catch(() => undefined);
       throw new OpenRouterError(
         `The speaking model sent ${type || 'no'} audio, not PCM. Pick another speaking model.`,
@@ -468,12 +524,19 @@ async function* speakUntil(
       );
     }
     const reader = answer.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      heard();
-      if (value?.length)
-        yield { type: 'audio', data: Buffer.from(value).toString('base64') };
-      if (done) break;
+    let ended = false;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        heard();
+        if (value?.length)
+          yield { type: 'audio', data: Buffer.from(value).toString('base64') };
+        if (done) break;
+      }
+      ended = true;
+    } finally {
+      // a consumer that stops early must not leave the connection open
+      if (!ended) await reader.cancel().catch(() => undefined);
     }
   }
 }

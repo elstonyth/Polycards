@@ -142,7 +142,7 @@ export async function POST(
       .settings();
     const problem = await speechChoiceProblem(
       patch.voice_model ?? saved.voice_model,
-      body.voice ?? saved.voice,
+      body.voice === undefined ? saved.voice : body.voice,
     );
     if (problem) {
       res.status(400).json({ message: problem });

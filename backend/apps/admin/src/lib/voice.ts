@@ -100,7 +100,9 @@ const KEEP_MS = 120; // a short "yes" is worth keeping, though too short to end 
 type VadState = 'waiting' | 'speaking' | 'ended' | 'timeout';
 
 /** Energy-based end-of-speech detector, fed one frame at a time.
- *  heard: KEEP_MS of speech so far, a lower bar than 'speaking' (minSpeechMs). */
+ *  heard: KEEP_MS of speech so far, a lower bar than 'speaking' (minSpeechMs).
+ *  A null frame is one held back (the barge-in gate): quiet, but it says
+ *  nothing about the room, so the floor and calibration skip it. */
 export function createVad(
   opts: {
     silenceMs?: number; // default 1100: quiet this long after speech = ended
@@ -109,7 +111,10 @@ export function createVad(
     maxMs?: number; // default 60000: hard stop = 'ended'
     sensitivity?: number; // default 1: below 1 needs louder speech (the bar is divided by it)
   } = {},
-): { push(rms: number, frameMs: number): VadState; readonly heard: boolean } {
+): {
+  push(rms: number | null, frameMs: number): VadState;
+  readonly heard: boolean;
+} {
   const {
     silenceMs = 1100,
     minSpeechMs = 250,
@@ -118,6 +123,7 @@ export function createVad(
     sensitivity = 1,
   } = opts;
   let elapsed = 0;
+  let measured = 0; // ms of real frames: the calibration window
   let calibrated = 0;
   let floor = 0;
   let run = 0; // ms of back-to-back loud frames
@@ -125,6 +131,14 @@ export function createVad(
   let spoke = false;
   let heard = false;
   let result: 'ended' | 'timeout' | undefined;
+  const verdict = (): VadState => {
+    // A short reply ("yes") ends on the same pause as a long one, rather
+    // than waiting out the no-speech timeout.
+    if (((spoke || heard) && silent >= silenceMs) || elapsed >= maxMs)
+      return (result = 'ended');
+    if (!spoke && !heard && elapsed >= noSpeechMs) return (result = 'timeout');
+    return spoke ? 'speaking' : 'waiting';
+  };
   return {
     get heard() {
       return heard || spoke;
@@ -132,7 +146,13 @@ export function createVad(
     push(rms, frameMs) {
       if (result) return result;
       elapsed += frameMs;
-      const calibrating = elapsed <= CALIBRATE_MS;
+      if (rms === null) {
+        run = 0;
+        silent += frameMs;
+        return verdict();
+      }
+      measured += frameMs;
+      const calibrating = measured <= CALIBRATE_MS;
       if (calibrating) {
         calibrated++;
         floor = Math.min(FLOOR_CAP, floor + (rms - floor) / calibrated);
@@ -157,13 +177,7 @@ export function createVad(
             floor + (rms - floor) * (rms < floor ? FLOOR_FALL : FLOOR_RISE),
           );
       }
-      // A short reply ("yes") ends on the same pause as a long one, rather
-      // than waiting out the no-speech timeout.
-      if (((spoke || heard) && silent >= silenceMs) || elapsed >= maxMs)
-        return (result = 'ended');
-      if (!spoke && !heard && elapsed >= noSpeechMs)
-        return (result = 'timeout');
-      return spoke ? 'speaking' : 'waiting';
+      return verdict();
     },
   };
 }
@@ -426,6 +440,7 @@ const ECHO_MAX_COUPLING = 1.5; // past this, learning heard something other than
 const ANSWER_SOUNDING = 0.005; // the answer's RMS above which it can echo at all
 const ECHO_LEARN_FROM = 0.03; // learned only where the answer is loud: under it the room drowns its echo
 const ROOM_CAP = 0.02; // someone talking before the answer starts must not pass for the room
+const QUIET_ANSWER_MS = 2000; // an answer too quiet to learn from by now gets the worst-case echo
 
 /** Talking over an answer, one mic frame at a time: push() takes the mic's
  *  RMS and the answer's RMS coming out at that moment, and is true once the
@@ -437,8 +452,9 @@ export function createBargeInDetector(minSpeechMs = 400): {
   const vad = createVad({
     sensitivity: BARGE_IN_SENSITIVITY,
     minSpeechMs,
-    // it listens as long as the answer lasts
+    // it listens as long as the answer lasts: a cough and a pause never end it
     noSpeechMs: Infinity,
+    silenceMs: Infinity,
     maxMs: Infinity,
   });
   const recent: number[] = [];
@@ -449,7 +465,13 @@ export function createBargeInDetector(minSpeechMs = 400): {
   let top = 0;
   let coupling = 0;
   let learned = 0;
-  const gate = (mic: number, answer: number, frameMs: number): number => {
+  let sounding = 0; // ms the answer has sounded while learning
+  // null: held back, the echo could explain it
+  const gate = (
+    mic: number,
+    answer: number,
+    frameMs: number,
+  ): number | null => {
     recent.push(answer);
     if (recent.length > Math.ceil(ECHO_WINDOW_MS / frameMs)) recent.shift();
     const loudest = Math.max(...recent);
@@ -459,6 +481,7 @@ export function createBargeInDetector(minSpeechMs = 400): {
       return mic; // nothing to echo: an ordinary room
     }
     if (learned < ECHO_LEARN_MS) {
+      sounding += frameMs;
       if (loudest >= ECHO_LEARN_FROM) {
         learned += frameMs;
         // the room adds power, not amplitude: take it out the same way
@@ -467,9 +490,13 @@ export function createBargeInDetector(minSpeechMs = 400): {
         else coupling = Math.max(coupling, ratio);
         coupling = Math.min(ECHO_MAX_COUPLING, coupling);
       }
-      return 0;
+      if (learned < ECHO_LEARN_MS && sounding >= QUIET_ANSWER_MS) {
+        learned = ECHO_LEARN_MS;
+        coupling = ECHO_MAX_COUPLING;
+      }
+      return null;
     }
-    return mic > coupling * loudest * ECHO_MARGIN ? mic : 0;
+    return mic > coupling * loudest * ECHO_MARGIN ? mic : null;
   };
   return {
     push: (mic, answer, frameMs) =>
@@ -590,7 +617,9 @@ export class PcmPlayer {
   /** The rate the speech comes at, from its stream's format event: only
    *  before the first chunk, so one answer never changes speed midway. */
   setRate(rate: number): void {
-    if (this.nextStart === 0 && rate > 0) this.sampleRate = rate;
+    // createBuffer throws outside this range, which would silence the answer
+    if (this.nextStart === 0 && rate >= 3000 && rate <= 384000)
+      this.sampleRate = rate;
   }
 
   /** true while sound is coming out */

@@ -84,6 +84,7 @@ const wav16k = (ms: number) => {
 
 // Voice: what the listening model "hears", and every voice request.
 let heardText = '';
+let generationLookups = 0;
 const voiceCalls: (FakeBody & {
   model?: string;
   input?: string;
@@ -112,15 +113,22 @@ const fake = http.createServer((req, res) => {
       );
       return;
     }
-    // A reading's own figure, looked up after it.
+    // A reading's own figure, looked up after it: like OpenRouter, not
+    // found for the first moments.
     if (req.url?.includes('/generation?id=gen-voice')) {
+      if (++generationLookups <= 2) {
+        res.statusCode = 404;
+        res.end('{"error":{"message":"Generation not found"}}');
+        return;
+      }
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ data: { total_cost: 0.002 } }));
       return;
     }
     if (req.url?.endsWith('/audio/speech')) {
       voiceCalls.push(JSON.parse(raw));
-      res.setHeader('content-type', 'audio/pcm;rate=24000;channels=1');
+      // as OpenRouter documents it: no rate on the type (24 kHz)
+      res.setHeader('content-type', 'audio/pcm');
       res.setHeader('x-generation-id', 'gen-voice');
       res.write(Buffer.from('AAAA', 'base64'));
       res.end(Buffer.from('BBBB', 'base64'));
@@ -596,6 +604,12 @@ medusaIntegrationTestRunner({
           { ...admin, validateStatus: () => true },
         );
         expect(bad.status).toBe(400);
+        const noVoice = await api.post(
+          '/admin/assistant-settings',
+          { voice: null },
+          { ...admin, validateStatus: () => true },
+        );
+        expect(noVoice.status).toBe(400);
         const chatVoice = await api.post(
           '/admin/assistant-settings',
           { voice_model: 'openai/gpt-audio-mini', voice: 'alloy' },
@@ -692,7 +706,7 @@ medusaIntegrationTestRunner({
         // own figure once it is looked up.
         const expected = 0.001 * 2 + 0.0003 + 0.002;
         let spent = await assistant.spentToday(row.user_id);
-        for (let i = 0; i < 50 && Math.abs(spent - expected) > 1e-9; i++) {
+        for (let i = 0; i < 150 && Math.abs(spent - expected) > 1e-9; i++) {
           await new Promise((r) => setTimeout(r, 100));
           spent = await assistant.spentToday(row.user_id);
         }

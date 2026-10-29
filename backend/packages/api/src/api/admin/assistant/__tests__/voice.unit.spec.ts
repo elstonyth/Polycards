@@ -1,4 +1,8 @@
-import { forgetSpeechModels } from '../openrouter';
+import {
+  forgetSpeechModels,
+  generationCost,
+  speechModels,
+} from '../openrouter';
 import {
   estimateSpeechCost,
   speak,
@@ -44,7 +48,7 @@ describe('speakable', () => {
       'Revenue, Amount 1,234 ringgit 50 sen.\nPayouts, Note a, b.\nTop-up, up 10, 12, packs 10–20.',
     );
     // One ~ means "about" and is kept; a Chinese —— is one pause.
-    expect(speakable('Sold ~RM 50——不错')).toBe('Sold ~50令吉, 不错');
+    expect(speakable('Sold ~RM 50——不错')).toBe('Sold ~50 ringgit, 不错');
   });
 
   it('cuts Chinese at a full stop, sooner, and closes in Chinese', () => {
@@ -91,6 +95,47 @@ describe('speakable', () => {
       '今天卖了 3,480令吉20仙，退款 50仙。',
     );
     expect(speakable('FORM 7 and RMB')).toBe('FORM 7 and RMB');
+  });
+
+  it('reads sums, scales, signs and stray decimals right', () => {
+    // a spaced hyphen or an em dash is a sum or a pause, not a range
+    expect(speakable('Net: RM 500 - RM 120 = RM 380.')).toBe(
+      'Net: 500 ringgit - 120 ringgit = 380 ringgit.',
+    );
+    expect(speakable('RM 500 — 3 top-ups')).toBe('500 ringgit, 3 top-ups');
+    expect(speakable('Packs RM 10-20 or RM 10 – RM 20')).toBe(
+      'Packs 10 to 20 ringgit or 10 to 20 ringgit',
+    );
+    expect(
+      speakable('Revenue RM 1.2k, RM 2.5 million, RM 3.5M, RM 1.2 juta.'),
+    ).toBe(
+      'Revenue 1.2 thousand ringgit, 2.5 million ringgit, 3.5 million ringgit, 1.2 juta ringgit.',
+    );
+    expect(speakable('Refund RM -12.50 and RM  7.')).toBe(
+      'Refund minus 12 ringgit 50 sen and 7 ringgit.',
+    );
+    // more decimals than money has: left as written, never cut to 12.50
+    expect(speakable('Rate RM 12.505 each')).toBe('Rate ringgit 12.505 each');
+    expect(speakable('RM 5 bags')).toBe('5 ringgit bags');
+  });
+
+  it('keeps an English line English with a Chinese or Japanese name in it', () => {
+    expect(speakable('Collector 小明 spent RM 50 today.')).toBe(
+      'Collector 小明 spent 50 ringgit today.',
+    );
+    expect(speakable('Sold Pikachu ピカチュウ for RM 12.50')).toBe(
+      'Sold Pikachu ピカチュウ for 12 ringgit 50 sen',
+    );
+    expect(
+      speakable('最好的卡是 Charizard ex，价值 RM 89.90，价格 RM 10–RM 20。'),
+    ).toBe('最好的卡是 Charizard ex，价值 89令吉90仙，价格 10至20令吉。');
+    expect(speakable('今天收入 RM 3.5万')).toBe('今天收入 3.5万令吉');
+  });
+
+  it('cuts a long answer late, not at its first sentence', () => {
+    const out = speakable(`Hi. ${'word '.repeat(400)}`);
+    expect(out.length).toBeGreaterThan(1400);
+    expect(out.endsWith('The rest is on screen.')).toBe(true);
   });
 });
 
@@ -221,6 +266,10 @@ describe('speechPieces', () => {
     expect(pieces.length).toBeGreaterThan(2);
     expect(pieces[0].length).toBeLessThanOrEqual(120);
     for (const p of pieces.slice(1)) expect(p.length).toBeLessThanOrEqual(360);
+    // the later pieces are the longer ones
+    expect(Math.max(...pieces.slice(1).map((p) => p.length))).toBeGreaterThan(
+      120,
+    );
     // every piece ends a sentence, and nothing is lost or split in a number
     for (const p of pieces) expect(p).toMatch(/today\.$/);
     expect(pieces.join(' ')).toBe(text);
@@ -231,6 +280,26 @@ describe('speechPieces', () => {
     // 8 characters at 3 each: 5 sentences fit in the first 120
     expect(pieces[0]).toBe('今天卖了很多卡。'.repeat(5));
     expect(pieces.join('')).toBe('今天卖了很多卡。'.repeat(40));
+  });
+
+  it('cuts text with no pause anywhere by length, and loses nothing', () => {
+    const text = '今天卖了很多卡'.repeat(20);
+    const pieces = speechPieces(text);
+    expect(pieces.map((p) => p.length)).toEqual([40, 100]);
+    expect(pieces.join('')).toBe(text);
+    // a Chinese comma is a pause
+    const commas = '今天卖了很多卡，'.repeat(10);
+    expect(speechPieces(commas)[0].endsWith('，')).toBe(true);
+  });
+
+  it('never cuts inside a number or a time', () => {
+    for (let n = 100; n <= 115; n++) {
+      const text = `${'x'.repeat(n)} total 12,345 ringgit at 10:30 today.`;
+      for (const p of speechPieces(text)) {
+        expect(p).not.toMatch(/(^|\D)\d{1,3},$|^\d{3}\b|\d:$|^\d{2} today/);
+      }
+      expect(speechPieces(text).join(' ')).toBe(text);
+    }
   });
 
   it('cuts a sentence longer than a piece at a comma', () => {
@@ -322,8 +391,15 @@ describe('estimateSpeechCost', () => {
         20,
       ),
     ).toBeCloseTo(0.012, 10);
-    // unknown price: the dearest per-character rate
-    expect(estimateSpeechCost(undefined, 300, 20)).toBeCloseTo(0.012, 10);
+    // unknown price, or listed with none: the dearest per-character rate
+    expect(estimateSpeechCost(undefined, 300, 20)).toBeCloseTo(0.03, 10);
+    expect(
+      estimateSpeechCost({ voices: null, prompt: 0, completion: 0 }, 300, 20),
+    ).toBeCloseTo(0.03, 10);
+    // a negative price (OpenRouter's -1 for "varies") never lowers the cap
+    expect(
+      estimateSpeechCost({ voices: null, prompt: -1, completion: -1 }, 300, 20),
+    ).toBeCloseTo(0.03, 10);
   });
 });
 
@@ -399,10 +475,12 @@ describe('speak', () => {
       })),
     );
     expect(events).toEqual([
+      { type: 'piece' },
       { type: 'generation', id: 'gen-1' },
       { type: 'format', rate: 24000 },
       { type: 'audio', data: b64([1, 0]) },
       { type: 'audio', data: b64([1, 1]) },
+      { type: 'piece' },
       { type: 'generation', id: 'gen-2' },
       { type: 'audio', data: b64([2, 0]) },
       { type: 'audio', data: b64([2, 1]) },
@@ -413,17 +491,76 @@ describe('speak', () => {
     let fetchImpl = jest.fn(async () =>
       pcm([[1, 2]], { type: 'audio/pcm; rate=16000', gen: null }),
     ) as unknown as typeof fetch;
-    expect((await collect({ fetchImpl }))[0]).toEqual({
+    const format = (events: SpeechEvent[]) =>
+      events.find((e) => e.type === 'format');
+    expect(format(await collect({ fetchImpl }))).toEqual({
       type: 'format',
       rate: 16000,
     });
     fetchImpl = jest.fn(async () =>
       pcm([[1, 2]], { type: 'audio/pcm' }),
     ) as unknown as typeof fetch;
-    expect((await collect({ fetchImpl }))[1]).toEqual({
+    expect(format(await collect({ fetchImpl }))).toEqual({
       type: 'format',
       rate: 24000,
     });
+  });
+
+  it('names the billed piece, then refuses MP3 or L16 and closes the connection', async () => {
+    for (const type of ['audio/mpeg', 'audio/L16;rate=24000']) {
+      const cancel = jest.fn();
+      const fetchImpl = jest.fn(
+        async () =>
+          new Response(new ReadableStream({ cancel }), {
+            status: 200,
+            headers: { 'content-type': type, 'x-generation-id': 'gen-mp3' },
+          }),
+      ) as unknown as typeof fetch;
+      const events: SpeechEvent[] = [];
+      await expect(
+        (async () => {
+          for await (const e of speak({
+            key: 'k',
+            model: 'm/x',
+            voice: 'Kore',
+            text: 'Hi.',
+            fetchImpl,
+          }))
+            events.push(e);
+        })(),
+      ).rejects.toThrow(/not PCM/);
+      expect(events).toEqual([
+        { type: 'piece' },
+        { type: 'generation', id: 'gen-mp3' },
+      ]);
+      expect(cancel).toHaveBeenCalled();
+    }
+  });
+
+  it('closes the connection when the reader stops early', async () => {
+    const cancel = jest.fn();
+    const fetchImpl = jest.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new Uint8Array([1, 2]));
+            },
+            cancel,
+          }),
+          { status: 200, headers: { 'content-type': 'audio/pcm' } },
+        ),
+    ) as unknown as typeof fetch;
+    for await (const e of speak({
+      key: 'k',
+      model: 'm/x',
+      voice: 'Kore',
+      text: 'Hi.',
+      fetchImpl,
+    })) {
+      if (e.type === 'audio') break;
+    }
+    expect(cancel).toHaveBeenCalled();
   });
 
   it('refuses a model that sends MP3, and a rate that changes mid-answer', async () => {
@@ -515,7 +652,10 @@ describe('speak', () => {
 
     it('stops when no chunk arrives for 30 s', async () => {
       const r = run(stalled([1, 2]));
+      let over = false;
+      void r.done.finally(() => (over = true)).catch(() => undefined);
       await jest.advanceTimersByTimeAsync(29_000);
+      expect(over).toBe(false); // not sooner
       expect(r.events.filter((e) => e.type === 'audio')).toEqual([
         { type: 'audio', data: b64([1, 2]) },
       ]);
@@ -543,9 +683,13 @@ describe('speak', () => {
         );
       }) as unknown as typeof fetch;
       const r = run(fetchImpl);
+      let over = false;
+      void r.done.finally(() => (over = true)).catch(() => undefined);
       await jest.advanceTimersByTimeAsync(170_000);
       expect(r.events.length).toBeGreaterThan(10);
-      await jest.advanceTimersByTimeAsync(11_000);
+      await jest.advanceTimersByTimeAsync(9_000);
+      expect(over).toBe(false); // not before 3 minutes
+      await jest.advanceTimersByTimeAsync(2_000);
       await expect(r.done).rejects.toThrow('longer than 3 minutes');
     });
 
@@ -557,5 +701,97 @@ describe('speak', () => {
       await expect(r.done).rejects.toThrow();
       expect(jest.getTimerCount()).toBe(0); // no timer left behind
     });
+  });
+});
+
+describe('speechModels', () => {
+  const list = (data: object[]) =>
+    jest.fn(
+      async () => new Response(JSON.stringify({ data })),
+    ) as unknown as typeof fetch;
+  const one = [
+    { id: 'google/gemini-3.8-flash-lite-tts', supported_voices: ['Kore'] },
+  ];
+  beforeEach(() => {
+    forgetSpeechModels();
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+  });
+  afterEach(() => jest.useRealTimers());
+
+  it('keeps the list an hour', async () => {
+    const fetchImpl = list(one);
+    await speechModels(fetchImpl);
+    jest.advanceTimersByTime(59 * 60_000);
+    await speechModels(fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(2 * 60_000);
+    await speechModels(fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a failed fetch a minute, then tries again', async () => {
+    const down = jest.fn(async () => {
+      throw new Error('ECONNRESET');
+    }) as unknown as typeof fetch;
+    expect(await speechModels(down)).toBeNull();
+    await speechModels(down);
+    expect(down).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(61_000);
+    await speechModels(down);
+    expect(down).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the last good list through a failure or an empty list, retrying each minute', async () => {
+    await speechModels(list(one));
+    jest.advanceTimersByTime(61 * 60_000);
+    const empty = list([]);
+    const kept = await speechModels(empty);
+    expect(kept?.get('google/gemini-3.8-flash-lite-tts')?.voices).toEqual([
+      'Kore',
+    ]);
+    // still refuses another model's voice from the kept list
+    expect(
+      await speechChoiceProblem('google/gemini-3.8-flash-lite-tts', 'sarah'),
+    ).toMatch(/not a voice of/);
+    jest.advanceTimersByTime(61_000);
+    await speechModels(empty);
+    expect(empty).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats an empty first list as no list', async () => {
+    expect(await speechModels(list([]))).toBeNull();
+  });
+});
+
+describe('generationCost', () => {
+  beforeEach(() =>
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] }),
+  );
+  afterEach(() => jest.useRealTimers());
+
+  it('keeps looking while the generation is not found yet', async () => {
+    const cancel = jest.fn();
+    let n = 0;
+    const fetchImpl = jest.fn(async () =>
+      ++n <= 4
+        ? new Response(new ReadableStream({ cancel }), { status: 404 })
+        : new Response(JSON.stringify({ data: { total_cost: 0.002 } })),
+    ) as unknown as typeof fetch;
+    const found = generationCost('k', 'gen-1', fetchImpl, 12);
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(await found).toBe(0.002);
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
+    expect(cancel).toHaveBeenCalledTimes(4); // each 404 let go
+    n = 0;
+    const gaveUp = generationCost('k', 'gen-1', fetchImpl);
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(await gaveUp).toBe(0); // the default 2 tries
+  });
+
+  it('never returns a negative cost', async () => {
+    const fetchImpl = jest.fn(
+      async () => new Response(JSON.stringify({ data: { total_cost: -1 } })),
+    ) as unknown as typeof fetch;
+    expect(await generationCost('k', 'gen-1', fetchImpl)).toBe(0);
   });
 });
