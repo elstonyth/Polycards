@@ -85,6 +85,18 @@ export function requireReportKey() {
             null,
           )
         : null;
+    // The assistant's key is only ever sent by this process to itself
+    // (bridge.ts, 127.0.0.1): from anywhere else, even with the key, refused.
+    if (
+      caller === 'assistant' &&
+      (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(
+        req.socket?.remoteAddress ?? '',
+      ) ||
+        req.headers['x-forwarded-for'] !== undefined)
+    ) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
     // The assistant's key opens the desk reports and the SQL route only, never
     // the read-everything admin proxy: the assistant reads admin screens as
     // the person asking (bridge.ts adminReadAs).

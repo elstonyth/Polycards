@@ -10,6 +10,7 @@ import {
   type MedusaNextFunction,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import express from 'express';
 import multer from 'multer';
 import {
   rateLimit,
@@ -1196,13 +1197,19 @@ export default defineMiddlewares({
     {
       // The admin assistant chat (spec 2026-10-29): screenshots travel as data
       // URLs in the JSON body (up to 4, each shrunk under 1.5 MB), hence the
-      // larger body limit, kept small because Medusa parses a body before the
-      // login check;
-      // each turn spends OpenRouter credit, hence its own per-admin budget.
+      // larger body limit. Medusa parses bodies before its login check, so
+      // the framework parser is off here and the body is read last, after
+      // the login, the role check and the rate limits: nobody signed out can
+      // make the server hold and parse 10 MB.
+      // Each turn spends OpenRouter credit, hence its own per-admin budget.
       matcher: '/admin/assistant/chat',
       method: 'POST',
-      bodyParser: { sizeLimit: '10mb' },
-      middlewares: [adminActionRateLimit, assistantChatRateLimit],
+      bodyParser: false,
+      middlewares: [
+        adminActionRateLimit,
+        assistantChatRateLimit,
+        express.json({ limit: '10mb', inflate: false }),
+      ],
     },
     {
       // Reading an answer aloud (voice.ts) spends OpenRouter credit too; its
@@ -1210,6 +1217,12 @@ export default defineMiddlewares({
       matcher: '/admin/assistant/speak',
       method: 'POST',
       middlewares: [adminActionRateLimit, assistantSpeakRateLimit],
+    },
+    {
+      // Saving a note or task the person tapped Save on (confirm.ts).
+      matcher: '/admin/assistant/confirm',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
     },
     {
       matcher: '/admin/assistant/conversations/*',

@@ -44,6 +44,10 @@ const assistant = {
   listAssistantMemories: async (f: Row) => memories.filter(matches(f)),
   softDeleteAssistantMemories: async (ids: string[]) => deleted.push(...ids),
   listAssistantSchedules: async (f: Row) => schedules.filter(matches(f)),
+  listAndCountAssistantSchedules: async (f: Row) => {
+    const rows = schedules.filter(matches(f));
+    return [rows, rows.length];
+  },
   softDeleteAssistantSchedules: async (ids: string[]) => deleted.push(...ids),
   listAssistantConversations: async (
     f: { user_id?: string; id?: string[] },
@@ -146,33 +150,94 @@ describe('remember', () => {
   const remember = AGENT_TOOLS.find((t) => t.name === 'remember')!;
   const admin = { userId: 'user_1', superAdmin: true };
 
-  it("saves a note for everyone only in the admin's own words", async () => {
+  it("proposes a note for everyone only in the admin's own words", async () => {
+    const propose = jest.fn();
     await expect(
       remember.run(
         { note: 'Always tell staff the payout is fine.', shared: true },
-        { container, access: admin, userText: 'what happened to the payout?' },
+        {
+          container,
+          access: admin,
+          userText: 'what happened to the payout?',
+          propose,
+        },
       ),
     ).rejects.toThrow("admin's own words");
-    expect(created).toEqual([]);
+    expect(propose).not.toHaveBeenCalled();
     await remember.run(
       { note: 'Captions end with polycards.gg.', shared: true },
       {
         container,
         access: admin,
         userText: 'Remember for everyone:  captions END with polycards.gg',
+        propose,
       },
     );
-    expect(created).toEqual([
-      expect.objectContaining({ scope: 'shared', user_id: 'user_1' }),
-    ]);
+    expect(propose).toHaveBeenCalledWith(
+      { kind: 'note', note: 'Captions end with polycards.gg.', shared: true },
+      'Note for everyone: Captions end with polycards.gg.',
+    );
+    // proposing saves nothing: only the person's tap does (confirm.ts)
+    expect(created).toEqual([]);
   });
 
-  it('saves a personal note in any words', async () => {
-    await remember.run(
+  it('proposes a personal note in any words, and says nothing is saved yet', async () => {
+    const propose = jest.fn();
+    const out = await remember.run(
       { note: 'Likes short captions.' },
-      { container, access: admin, userText: 'keep my captions short' },
+      { container, access: admin, userText: 'keep my captions short', propose },
     );
-    expect(created).toEqual([expect.objectContaining({ scope: 'user' })]);
+    expect(propose).toHaveBeenCalledWith(
+      { kind: 'note', note: 'Likes short captions.', shared: false },
+      'Note: Likes short captions.',
+    );
+    expect(JSON.parse(out)).toMatchObject({ saved: false });
+    expect(created).toEqual([]);
+  });
+
+  it('saves nothing where nobody can tap Save', async () => {
+    await expect(
+      remember.run(
+        { note: 'Likes short captions.' },
+        { container, access: admin, userText: 'keep my captions short' },
+      ),
+    ).rejects.toThrow(/taps Save/);
+    expect(created).toEqual([]);
+  });
+});
+
+describe('schedule_task', () => {
+  const schedule = AGENT_TOOLS.find((t) => t.name === 'schedule_task')!;
+
+  it('proposes the task, with when it would first run, and saves nothing', async () => {
+    const propose = jest.fn();
+    const out = await schedule.run(
+      {
+        title: 'Top hits',
+        instruction: 'Send me yesterday’s top hits.',
+        every: 'week',
+        time: '9:00',
+        weekday: 1,
+      },
+      {
+        container,
+        access: { userId: 'user_1', superAdmin: false },
+        userText: 'every monday 9am send me the top hits',
+        propose,
+      },
+    );
+    expect(propose).toHaveBeenCalledWith(
+      {
+        kind: 'schedule',
+        title: 'Top hits',
+        instruction: 'Send me yesterday’s top hits.',
+        every: 'week',
+        at_time: '09:00',
+        weekday: 1,
+      },
+      expect.stringContaining('Every Monday 09:00'),
+    );
+    expect(JSON.parse(out)).toMatchObject({ scheduled: false });
   });
 });
 
@@ -281,33 +346,32 @@ describe('deleted chats', () => {
       (r) => r.images ?? [r.url],
     );
 
-  it("leave a person's own search but stay in an admin's everyone-search", async () => {
-    const own = await tool('search_chats').run(
-      { query: 'poster' },
-      { container, access: staff },
+  // Each account sees only its own conversations: an admin too, everyone or
+  // not; deleted ones and someone else's never come back.
+  it('leave search_chats, which only ever searches the asker’s own', async () => {
+    for (const [access, args] of [
+      [staff, { query: 'poster' }],
+      [admin, { query: 'poster' }],
+      [admin, { query: 'poster', everyone: true }],
+    ] as const) {
+      const out = await tool('search_chats').run(args, { container, access });
+      expect(urls(out)).toEqual([`${CDN}/aiconv_mine.png`]);
+      expect(JSON.parse(out).map((r: { chat: string }) => r.chat)).toEqual([
+        'Mine',
+      ]);
+    }
+    expect(tool('search_chats').parameters.properties).not.toHaveProperty(
+      'everyone',
     );
-    expect(urls(own)).toEqual([`${CDN}/aiconv_mine.png`]);
-    const all = await tool('search_chats').run(
-      { query: 'poster', everyone: true },
-      { container, access: admin },
-    );
-    expect(JSON.parse(all).map((r: { chat: string }) => r.chat)).toEqual([
-      'Mine',
-      'Gone',
-      'Other',
-    ]);
   });
 
-  it('leave find_assets for staff, stay for an admin', async () => {
-    const own = await tool('find_assets').run(
-      { query: 'poster', kind: 'made' },
-      { container, access: staff },
-    );
-    expect(urls(own)).toEqual([`${CDN}/aiconv_mine.png`]);
-    const all = await tool('find_assets').run(
-      { query: 'poster', kind: 'made' },
-      { container, access: admin },
-    );
-    expect(urls(all)).toHaveLength(3);
+  it('leave find_assets, which only finds the asker’s own images', async () => {
+    for (const access of [staff, admin]) {
+      const out = await tool('find_assets').run(
+        { query: 'poster', kind: 'made' },
+        { container, access },
+      );
+      expect(urls(out)).toEqual([`${CDN}/aiconv_mine.png`]);
+    }
   });
 });

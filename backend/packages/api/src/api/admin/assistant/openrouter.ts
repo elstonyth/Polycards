@@ -11,9 +11,10 @@ const base = (): string =>
 
 // A model id as Settings → AI assistant takes it: no suffix, or one that
 // changes only price or speed. `:online` would let the model fetch the web,
-// an outside channel.
+// an outside channel; so would a model with search built in (Perplexity's,
+// the *-search-* ones), so those are refused too.
 export const MODEL_RE =
-  /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(?::(?:free|nitro|floor|extended|thinking|beta))?$/i;
+  /^(?!perplexity\/)(?![^:]*search)[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(?::(?:free|nitro|floor|extended|thinking|beta))?$/i;
 
 export const openRouterUrl = (): string => `${base()}/chat/completions`;
 export const speechUrl = (): string => `${base()}/audio/speech`;
@@ -58,20 +59,24 @@ export async function speechModels(
     if (Array.isArray(body?.data) && body.data.length) {
       models = new Map(
         body.data
-          .filter((m) => typeof m.id === 'string')
-          .map((m) => [
-            m.id as string,
-            {
-              voices:
-                Array.isArray(m.supported_voices) && m.supported_voices.length
-                  ? m.supported_voices.filter(
-                      (v): v is string => typeof v === 'string',
-                    )
-                  : null,
-              prompt: Number(m.pricing?.prompt ?? 0) || 0,
-              completion: Number(m.pricing?.completion ?? 0) || 0,
-            },
-          ]),
+          .filter((m) => typeof m.id === 'string' && m.id.trim() !== '')
+          .map((m) => {
+            // an empty name would break the Settings picker (a select item
+            // can't have an empty value): never listed
+            const voices = Array.isArray(m.supported_voices)
+              ? m.supported_voices.filter(
+                  (v): v is string => typeof v === 'string' && v.trim() !== '',
+                )
+              : [];
+            return [
+              m.id as string,
+              {
+                voices: voices.length ? voices : null,
+                prompt: Number(m.pricing?.prompt ?? 0) || 0,
+                completion: Number(m.pricing?.completion ?? 0) || 0,
+              },
+            ] as const;
+          }),
       );
     }
   } catch {
@@ -86,6 +91,89 @@ export async function speechModels(
 /** Tests only: drop the kept list. */
 export function forgetSpeechModels(): void {
   speechList = null;
+}
+
+/** The model ids Settings → AI assistant offers in its dropdowns, by what
+ *  each setting needs: chat (answers and calls tools), image (draws), listen
+ *  (takes audio, writes text). Only ids MODEL_RE takes (no web search). */
+export type ModelCatalog = {
+  chat: string[];
+  image: string[];
+  listen: string[];
+};
+type Listed = {
+  id?: unknown;
+  supported_parameters?: unknown;
+  architecture?: { input_modalities?: unknown; output_modalities?: unknown };
+};
+let catalog: { until: number; value: ModelCatalog | null } | null = null;
+
+const has = (list: unknown, item: string) =>
+  Array.isArray(list) && list.includes(item);
+const idsOf = (rows: Listed[], keep: (m: Listed) => boolean): string[] =>
+  [
+    ...new Set(
+      rows
+        .filter(keep)
+        .map((m) => m.id)
+        .filter(
+          (id): id is string => typeof id === 'string' && MODEL_RE.test(id),
+        ),
+    ),
+  ].sort();
+
+/** OpenRouter's models (a public list), kept an hour; after a failure the
+ *  last good catalog (or null) stands in and it is tried again a minute
+ *  later. */
+export async function modelCatalog(
+  fetchImpl: typeof fetch = fetch,
+): Promise<ModelCatalog | null> {
+  if (catalog && Date.now() < catalog.until) return catalog.value;
+  const list = async (query: string): Promise<Listed[] | null> => {
+    const answer = await fetchImpl(`${base()}/models${query}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!answer.ok) {
+      await answer.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const body = (await answer.json()) as { data?: unknown } | null;
+    return Array.isArray(body?.data) ? (body.data as Listed[]) : null;
+  };
+  let value: ModelCatalog | null = null;
+  try {
+    const [text, image] = await Promise.all([
+      list(''),
+      list('?output_modalities=image').catch(() => null),
+    ]);
+    if (text?.length) {
+      const out = (m: Listed, kind: string) =>
+        has(m.architecture?.output_modalities, kind);
+      value = {
+        chat: idsOf(
+          text,
+          (m) => has(m.supported_parameters, 'tools') && out(m, 'text'),
+        ),
+        image: idsOf(image ?? text, (m) => out(m, 'image')),
+        listen: idsOf(
+          text,
+          (m) =>
+            has(m.architecture?.input_modalities, 'audio') && out(m, 'text'),
+        ),
+      };
+    }
+  } catch {
+    // OpenRouter unreachable: the last good catalog, if any, stands in
+  }
+  catalog = value
+    ? { until: Date.now() + 3_600_000, value }
+    : { until: Date.now() + 60_000, value: catalog?.value ?? null };
+  return catalog.value;
+}
+
+/** Tests only: drop the kept catalog. */
+export function forgetModelCatalog(): void {
+  catalog = null;
 }
 
 /** The key's own account: its label, credit used and credit left. */
@@ -360,7 +448,7 @@ export async function* streamChat(opts: {
       if (chunk.usage) {
         yield {
           type: 'usage',
-          cost: Number(chunk.usage.cost ?? 0),
+          cost: Math.max(0, Number(chunk.usage.cost ?? 0) || 0),
           tokensIn: Number(chunk.usage.prompt_tokens ?? 0),
           tokensOut: Number(chunk.usage.completion_tokens ?? 0),
         };

@@ -130,7 +130,7 @@ export async function transcribe(opts: {
   }
   return {
     text: String(body.choices[0]?.message?.content ?? '').trim(),
-    cost: Number(body.usage?.cost ?? 0),
+    cost: Math.max(0, Number(body.usage?.cost ?? 0) || 0),
   };
 }
 

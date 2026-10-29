@@ -2,7 +2,7 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { accessFor } from '../assistant/access';
 
 type Rows = { rows: Record<string, unknown>[] };
@@ -15,18 +15,15 @@ type Conversation = {
   deleted_at: Date | null;
 };
 
-/** The review's filter on assistant_conversation `c`, with its bindings.
- *  Deleted chats and messages match too: the owner reviews every question. */
+/** The review's filter on assistant_conversation `c`, with its bindings:
+ *  always the one account's own chats. Its deleted chats and messages match
+ *  too. */
 export function reviewFilter(
   q: string,
   userId: string,
 ): { sql: string; bindings: string[] } {
-  const where: string[] = [];
-  const bindings: string[] = [];
-  if (userId) {
-    where.push('c.user_id = ?');
-    bindings.push(userId);
-  }
+  const where = ['c.user_id = ?'];
+  const bindings = [userId];
   if (q) {
     // Same escape as agent-tools: % and _ in the words match themselves.
     const pattern = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
@@ -35,22 +32,24 @@ export function reviewFilter(
     );
     bindings.push(pattern, pattern);
   }
-  return { sql: where.length ? `where ${where.join(' and ')}` : '', bindings };
+  return { sql: `where ${where.join(' and ')}`, bindings };
 }
 
 // An answer read aloud: a voice row that worked and isn't a question heard
 // (tools.kind 'listen'). Failed and heard rows still count in the total cost.
 const READ_ALOUD = `role = 'voice' and coalesce(error, '') = '' and tools->>'kind' is distinct from 'listen'`;
 
-// GET /admin/assistant-review (spec 2026-10-29, the owner's "review all the
-// questions users ask"): every staff member's chats, newest first, with who
-// asked and what each cost. Super admins only: checked here, because RBAC's
-// assistant_review:read also passes `*:read` (the desk bots).
+// GET /admin/assistant-review: the signed-in account's own chats, deleted
+// ones too, newest first, with what each cost. Each account sees only its
+// own conversations (2026-10-29, replacing the owner's review of everyone's).
+// Super admins only: checked here, because RBAC's assistant_review:read also
+// passes `*:read` (the desk bots).
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  if (!accessFor(req.scope, req.auth_context).superAdmin) {
+  const access = accessFor(req.scope, req.auth_context);
+  if (!access.superAdmin) {
     res.status(403).json({ message: 'Only super admins review chats.' });
     return;
   }
@@ -62,10 +61,9 @@ export async function GET(
   const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   const q = str(req.query.q);
-  const userId = str(req.query.user_id);
   const pg = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION) as Pg;
   // One letter matches nearly every chat and scans every message: ignored.
-  const filter = reviewFilter(q.length >= 2 ? q : '', userId);
+  const filter = reviewFilter(q.length >= 2 ? q : '', access.userId);
   const counted = await pg.raw(
     `select count(*)::int as n from assistant_conversation c ${filter.sql}`,
     filter.bindings,
@@ -98,28 +96,16 @@ export async function GET(
       ).rows
     : [];
   const byId = new Map(stats.map((s) => [s.conversation_id as string, s]));
-  // Everyone who ever asked, whatever the filters: the staff picker's list.
-  const staffIds = (
-    await pg.raw('select distinct user_id from assistant_conversation')
-  ).rows.map((r) => r.user_id as string);
-  const users = staffIds.length
-    ? await req.scope
-        .resolve(Modules.USER)
-        .listUsers({ id: staffIds }, { select: ['id', 'email'] })
-    : [];
-  const email = new Map(users.map((u) => [u.id, u.email]));
   res.json({
     count: Number(counted.rows[0]?.n ?? 0),
     limit,
     offset,
-    staff: staffIds.map((id) => ({ id, email: email.get(id) ?? null })),
     conversations: conversations.map((c) => {
       const s = byId.get(c.id);
       return {
         id: c.id,
         title: c.title,
         user_id: c.user_id,
-        user_email: email.get(c.user_id) ?? null,
         questions: Number(s?.questions ?? 0),
         failed: Number(s?.failed ?? 0),
         cost_usd: Number(s?.cost_usd ?? 0),

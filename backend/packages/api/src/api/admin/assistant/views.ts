@@ -14,7 +14,10 @@ export const messageView = (m: {
   role: m.role,
   content: m.content,
   attachments: m.attachments,
-  images: m.images ?? [],
+  // the URL only: the file id is for deleting the chat
+  images: Array.isArray(m.images)
+    ? (m.images as { url?: unknown }[]).map((i) => ({ url: i?.url }))
+    : [],
   tools: m.tools ?? [],
   error: m.error,
   cost_usd: Number(m.cost_usd ?? 0),

@@ -9,20 +9,22 @@ import { messageView } from '../../assistant/views';
 
 const MAX_MESSAGES = 500;
 
-// GET /admin/assistant-review/:id — any staff member's chat, its latest 500
-// messages, for the super admins' review page. Checked here: RBAC's
+// GET /admin/assistant-review/:id — one of the signed-in account's own chats,
+// deleted or not, its latest 500 messages. Someone else's 404s, like one that
+// does not exist. Super admins only, checked here: RBAC's
 // assistant_review:read also passes `*:read` (the desk bots).
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  if (!accessFor(req.scope, req.auth_context).superAdmin) {
+  const access = accessFor(req.scope, req.auth_context);
+  if (!access.superAdmin) {
     res.status(403).json({ message: 'Only super admins review chats.' });
     return;
   }
   const assistant = req.scope.resolve<AssistantModuleService>(ASSISTANT_MODULE);
   const [conversation] = await assistant.listAssistantConversations(
-    { id: req.params.id },
+    { id: req.params.id, user_id: access.userId },
     { take: 1, withDeleted: true },
   );
   if (!conversation) {

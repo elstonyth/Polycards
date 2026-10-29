@@ -11,6 +11,7 @@ import {
   MAX_DECODE_PIXELS,
 } from '../../utils/image-fetch';
 import type { Need } from './access';
+import type { Proposal } from './confirm';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 
 // The assistant's own memory and search (owner, 2026-10-29: "it will search
@@ -19,8 +20,8 @@ import { MAX_SCHEDULES, nextRun } from './schedule';
 //  - remember / recall / forget: notes staff ask it to keep. Personal notes
 //    are seen only by the person who saved them; shared notes (super admins
 //    only) by everyone, and are put first in every chat's instructions.
-//  - search_chats: what was asked and answered before — the asker's own
-//    chats, or (super admins) everyone's.
+//  - search_chats: what was asked and answered before — only the asker's
+//    own chats (each account sees only its own conversations).
 //  - find_assets: the art to build with — pack art, card and slab images,
 //    and images the assistant made before — as URLs the image tools take.
 //  - schedule_task / list_schedules / cancel_schedule: tasks it does by
@@ -32,7 +33,22 @@ type Ctx = {
   access: { userId: string; superAdmin: boolean };
   /** The asker's message this turn. */
   userText?: string;
+  /** Shows the person a note or task to save with a tap (confirm.ts). */
+  propose?(proposal: Proposal, summary: string): void;
 };
+
+// Notes and tasks are saved only when the person taps Save (confirm.ts):
+// these tools propose. Without a chat to show the button in, nothing saves.
+const proposeOrRefuse = (ctx: Ctx, proposal: Proposal, summary: string) => {
+  if (!ctx.propose) {
+    throw new Error(
+      'This is saved only when the person taps Save in the chat; nothing was saved.',
+    );
+  }
+  ctx.propose(proposal, summary);
+};
+const WAITING =
+  'Nothing is saved yet: a Save button is under your answer, and it is kept only when the person taps it. Tell them so in one short line.';
 
 type AgentTool = {
   name: string;
@@ -89,13 +105,8 @@ export async function memoryFor(
   return out;
 }
 
-/** The person's own conversation ids, chats they deleted left out
- *  (everyone's, deleted ones included, for `all`). */
-async function conversationIds(
-  ctx: Ctx,
-  all: boolean,
-): Promise<string[] | null> {
-  if (all) return null;
+/** The person's own conversation ids, chats they deleted left out. */
+async function conversationIds(ctx: Ctx): Promise<string[]> {
   const convs = await assistantOf(ctx).listAssistantConversations(
     { user_id: ctx.access.userId },
     { select: ['id'], take: 1000 },
@@ -146,12 +157,12 @@ export const AGENT_TOOLS: AgentTool[] = [
           "A note for everyone must be the admin's own words from this message, copied exactly. Saved nothing.",
         );
       }
-      const saved = await assistantOf(ctx).createAssistantMemories({
-        scope: shared ? 'shared' : 'user',
-        user_id: ctx.access.userId,
-        content: note,
-      });
-      return JSON.stringify({ saved: true, id: saved.id, shared });
+      proposeOrRefuse(
+        ctx,
+        { kind: 'note', note, shared },
+        `${shared ? 'Note for everyone' : 'Note'}: ${note}`,
+      );
+      return JSON.stringify({ saved: false, waiting: WAITING, shared });
     },
   },
   {
@@ -228,15 +239,11 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'search_chats',
     label: 'Past chats',
     description:
-      'Search earlier assistant chats for a word or phrase: what was asked, what was answered, and the images made (their URLs, which the image tools can reuse). Use it when staff refer to something from before ("the poster we made last week", "what did you tell me about the challenge"). Searches this person\'s own chats; everyone true searches every staff member\'s (admins only).',
+      'Search earlier assistant chats for a word or phrase: what was asked, what was answered, and the images made (their URLs, which the image tools can reuse). Use it when staff refer to something from before ("the poster we made last week", "what did you tell me about the challenge"). Searches only this person\'s own chats.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'A word or phrase to look for.' },
-        everyone: {
-          type: 'boolean',
-          description: "true: every staff member's chats (admins only).",
-        },
       },
       required: ['query'],
       additionalProperties: false,
@@ -245,21 +252,17 @@ export const AGENT_TOOLS: AgentTool[] = [
     run: async (args, ctx) => {
       const q = str(args.query);
       if (!q) throw new Error('query is required.');
-      const all =
-        (args.everyone === true || args.everyone === 'true') &&
-        ctx.access.superAdmin;
-      const ids = await conversationIds(ctx, all);
-      if (ids && !ids.length) return '[]';
+      const ids = await conversationIds(ctx);
+      if (!ids.length) return '[]';
       const assistant = assistantOf(ctx);
       const hits = await assistant.listAssistantMessages(
-        { content: like(q), ...(ids ? { conversation_id: ids } : {}) },
-        { order: { created_at: 'DESC' }, take: 20, withDeleted: all },
+        { content: like(q), conversation_id: ids },
+        { order: { created_at: 'DESC' }, take: 20 },
       );
       const convs = hits.length
-        ? await assistant.listAssistantConversations(
-            { id: [...new Set(hits.map((h) => h.conversation_id))] },
-            { withDeleted: all },
-          )
+        ? await assistant.listAssistantConversations({
+            id: [...new Set(hits.map((h) => h.conversation_id))],
+          })
         : [];
       const title = new Map(convs.map((c) => [c.id, c.title]));
       return JSON.stringify(
@@ -343,12 +346,11 @@ export const AGENT_TOOLS: AgentTool[] = [
         }
       }
       if (kind === 'made' || kind === 'any') {
-        const all = ctx.access.superAdmin;
-        const ids = await conversationIds(ctx, all);
+        const ids = await conversationIds(ctx);
         const assistant = assistantOf(ctx);
         const convs = await assistant.listAssistantConversations(
-          { title: like(q), ...(ids ? { id: ids } : {}) },
-          { select: ['id', 'title'], take: 20, withDeleted: all },
+          { title: like(q), id: ids },
+          { select: ['id', 'title'], take: 20 },
         );
         const byTitle = new Map(convs.map((c) => [c.id, c.title]));
         const made = await assistant.listAssistantMessages(
@@ -361,9 +363,9 @@ export const AGENT_TOOLS: AgentTool[] = [
                 ? [{ conversation_id: [...byTitle.keys()] }]
                 : []),
             ],
-            ...(ids ? { conversation_id: ids } : {}),
+            conversation_id: ids,
           },
-          { order: { created_at: 'DESC' }, take: 8, withDeleted: all },
+          { order: { created_at: 'DESC' }, take: 8 },
         );
         for (const m of made) {
           for (const img of (m.images as { url: string }[] | null) ?? []) {
@@ -435,19 +437,19 @@ export const AGENT_TOOLS: AgentTool[] = [
           `This person already has ${MAX_SCHEDULES} scheduled tasks; cancel one first. Set nothing.`,
         );
       }
-      const saved = await assistant.createAssistantSchedules({
-        user_id: ctx.access.userId,
-        title,
-        instruction,
-        every,
-        at_time,
-        weekday,
-        next_run_at,
-      });
+      proposeOrRefuse(
+        ctx,
+        { kind: 'schedule', title, instruction, every, at_time, weekday },
+        `${
+          every === 'week'
+            ? `Every ${WEEKDAYS[(weekday ?? 1) - 1]} ${at_time}`
+            : `Every day ${at_time}`
+        } (Malaysia time) · ${title}: ${instruction}`,
+      );
       return JSON.stringify({
-        scheduled: true,
-        id: saved.id,
-        next_run: myt(next_run_at),
+        scheduled: false,
+        waiting: WAITING,
+        first_run_if_saved_now: myt(next_run_at),
       });
     },
   },
@@ -586,11 +588,9 @@ export async function assetDataUrls(
 // public host, so a URL the model wrote (say, after reading a customer field
 // that told it to) could carry what it read to any server (security review
 // 2026-10-29).
-const OWN_SITES = [
-  'https://polycards.gg',
-  'https://www.polycards.gg',
-  'https://admin.polycards.gg',
-];
+const OWN_SITES = ['https://polycards.gg', 'https://www.polycards.gg'];
+// admin.polycards.gg is the backend itself: only its public card images.
+const BACKEND_SITE = 'https://admin.polycards.gg';
 const originOf = (u: string | null | undefined) => {
   try {
     return u ? new URL(u).origin : null;
@@ -601,6 +601,13 @@ const originOf = (u: string | null | undefined) => {
 
 export const isOwnOrigin = (url: string) => {
   const origin = originOf(url);
+  if (origin === BACKEND_SITE) {
+    try {
+      return new URL(url).pathname.startsWith('/cdn/');
+    } catch {
+      return false;
+    }
+  }
   return (
     origin !== null &&
     // Never the backend's own origin (a GET there runs routes on the model's

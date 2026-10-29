@@ -10,7 +10,7 @@ import { accessFor } from '../assistant/access';
 import { isOwnOrigin } from '../assistant/agent-tools';
 import { DEFAULT_IMAGE_STYLE } from '../assistant/brand-style';
 import { DEFAULT_STYLE_REFS } from '../assistant/style-refs';
-import { MODEL_RE, speechModels } from '../assistant/openrouter';
+import { MODEL_RE, modelCatalog, speechModels } from '../assistant/openrouter';
 import { DEFAULT_VOICE_MODEL, speechChoiceProblem } from '../assistant/voice';
 
 // GET/POST /admin/assistant-settings (spec 2026-10-29): Settings → AI. The
@@ -27,7 +27,7 @@ async function view(req: AuthenticatedMedusaRequest) {
   const s = await req.scope
     .resolve<AssistantModuleService>(ASSISTANT_MODULE)
     .settings();
-  const speech = await speechModels();
+  const [speech, models] = await Promise.all([speechModels(), modelCatalog()]);
   return {
     openrouter_key: {
       set: !!s.openrouter_key_sealed,
@@ -43,6 +43,11 @@ async function view(req: AuthenticatedMedusaRequest) {
     stt_model: s.stt_model,
     voice_model: s.voice_model,
     voice: s.voice,
+    // OpenRouter's models each field can use, for its dropdown; empty while
+    // the list can't be had (the fields still take a typed id).
+    chat_models: models?.chat ?? [],
+    image_models: models?.image ?? [],
+    stt_models: models?.listen ?? [],
     // OpenRouter's speaking models and their voices; empty while the list
     // can't be had (the page then takes a typed model id and voice).
     speech_models: [...(speech ?? new Map()).entries()]

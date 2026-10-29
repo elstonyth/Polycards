@@ -5,6 +5,7 @@ import {
   nextRun,
   runDueSchedules,
   SCHEDULED_PREFIX,
+  serverUrl,
   STARTED_NOTE,
 } from '../schedule';
 
@@ -60,6 +61,30 @@ describe('nextRun', () => {
     expect(() =>
       nextRun({ every: 'week', at_time: '09:00', weekday: 8 }, now),
     ).toThrow('weekday');
+  });
+});
+
+describe('serverUrl', () => {
+  const env = { ...process.env };
+  afterEach(() => {
+    process.env = { ...env };
+  });
+  const at = (base: string) => {
+    delete process.env.ASSISTANT_SERVER_URL;
+    process.env.PAYMENT_CALLBACK_BASE = base;
+    return serverUrl();
+  };
+
+  it('sends the owner’s token only over https, to this machine or an internal name', () => {
+    expect(at('https://polycards-backend-x.ondigitalocean.app/')).toBe(
+      'https://polycards-backend-x.ondigitalocean.app',
+    );
+    expect(at('http://127.0.0.1:9000')).toBe('http://127.0.0.1:9000');
+    expect(at('http://backend:8080')).toBe('http://backend:8080');
+    // a tunnel or a plain public address never gets a super admin's token
+    expect(() => at('http://abc.trycloudflare.com')).toThrow(/https/);
+    expect(() => at('http://203.0.113.9')).toThrow(/https/);
+    expect(() => at('not a url')).toThrow(/https/);
   });
 });
 

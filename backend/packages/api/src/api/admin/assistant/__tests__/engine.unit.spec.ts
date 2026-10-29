@@ -736,8 +736,58 @@ describe('runTurn', () => {
       fetchImpl,
     });
     expect(result).toMatchObject({ text: 'Half', error: 'aborted' });
-    expect(result.cost).toBeCloseTo(0.02);
-    expect(urls.at(-1)).toContain('/generation?id=gen-1');
+    // counted at once at an estimate, its figure looked up later by the route
+    expect(result.cost).toBeGreaterThan(0.05);
+    expect(result.pending).toEqual([{ id: 'gen-1', estimate: result.cost }]);
+    expect(urls.some((u) => u.includes('/generation'))).toBe(false);
+  });
+
+  it('counts a round stopped before its first chunk, which names no generation', async () => {
+    const ctl = new AbortController();
+    // the asker stops while the request is out, before any chunk
+    const fetchImpl = (async (_url: unknown, init?: RequestInit) => {
+      ctl.abort();
+      (init?.signal as AbortSignal).throwIfAborted();
+      return new Response('');
+    }) as unknown as typeof fetch;
+    const result = await runTurn({
+      key: 'k',
+      model: 'm',
+      access,
+      tools: [],
+      history: [],
+      userText: 'q',
+      images: [],
+      ctx,
+      emit: () => undefined,
+      signal: ctl.signal,
+      fetchImpl,
+    });
+    expect(result.error).toBe('aborted');
+    expect(result.cost).toBeGreaterThan(0.05); // never free
+    expect(result.pending).toEqual([]); // nothing to look up: the estimate stays
+  });
+
+  it('charges nothing for a round OpenRouter refused outright', async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: { message: 'bad model' } }), {
+        status: 400,
+      })) as unknown as typeof fetch;
+    const result = await runTurn({
+      key: 'k',
+      model: 'm',
+      access,
+      tools: [],
+      history: [],
+      userText: 'q',
+      images: [],
+      ctx,
+      emit: () => undefined,
+      signal: new AbortController().signal,
+      fetchImpl,
+    });
+    expect(result.error).toBe('bad model');
+    expect(result.cost).toBe(0);
   });
 
   it('prices a round that ends without a usage chunk', async () => {
@@ -763,15 +813,18 @@ describe('runTurn', () => {
       fetchImpl,
     });
     expect(result.error).toBeUndefined();
-    expect(result.cost).toBeCloseTo(0.04);
-    expect(urls.filter((u) => u.includes('/generation?id=gen-2'))).toHaveLength(
-      1,
-    );
+    expect(result.cost).toBeGreaterThan(0.05);
+    expect(result.pending).toEqual([{ id: 'gen-2', estimate: result.cost }]);
+    // not looked up here: the answer goes out at once
+    expect(urls.filter((u) => u.includes('/generation'))).toHaveLength(0);
   });
 
   it('keeps a refused image’s cost', async () => {
     const t = turn(
-      [() => sse(toolCall('generate_image')), () => sse(say('ok'))],
+      [
+        () => sse(toolCall('generate_image'), usage(0)),
+        () => sse(say('ok'), usage(0)),
+      ],
       [
         tool('generate_image', async () => {
           throw Object.assign(new Error('refused'), { cost: 0.03 });
@@ -779,6 +832,25 @@ describe('runTurn', () => {
       ],
     );
     expect((await t.done).cost).toBeCloseTo(0.03);
+  });
+
+  it('keeps a stopped image’s cost too', async () => {
+    const ctl = new AbortController();
+    const t = turn(
+      [() => sse(toolCall('generate_image'), usage(0))],
+      [
+        tool('generate_image', async () => {
+          ctl.abort();
+          throw Object.assign(new DOMException('aborted', 'AbortError'), {
+            cost: 0.2,
+          });
+        }),
+      ],
+      ctl.signal,
+    );
+    const done = await t.done;
+    expect(done.error).toBe('aborted');
+    expect(done.cost).toBeCloseTo(0.2);
   });
 
   it('keeps the partial answer and marks it aborted when the asker leaves', async () => {

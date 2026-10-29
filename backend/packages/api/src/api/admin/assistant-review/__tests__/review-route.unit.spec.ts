@@ -2,25 +2,19 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { GET, reviewFilter } from '../route';
 import { accessFor } from '../../assistant/access';
 
-// GET /admin/assistant-review with pg and the user service faked: the search
-// and staff filters, the per-chat numbers, the staff list and the gate. The
-// SQL itself is pinned by text here; what it counts was checked on Postgres.
+// GET /admin/assistant-review with pg faked: always the signed-in account's
+// own chats, the search, the per-chat numbers and the gate. The SQL itself is
+// pinned by text here; what it counts was checked on Postgres.
 
 jest.mock('../../assistant/access', () => ({ accessFor: jest.fn() }));
 
 const accessMock = accessFor as jest.Mock;
 
-function setup(
-  stats: Record<string, unknown>[] = [],
-  staff: string[] = ['u1', 'u2'],
-) {
-  // Answers by the query's shape: count, per-chat numbers, staff, page.
+function setup(stats: Record<string, unknown>[] = []) {
+  // Answers by the query's shape: count, per-chat numbers, page.
   const raw = jest.fn(async (sql: string, _bindings?: unknown[]) => {
     if (sql.includes('as n from')) return { rows: [{ n: 1 }] };
     if (sql.includes('group by')) return { rows: stats };
-    if (sql.includes('distinct user_id')) {
-      return { rows: staff.map((user_id) => ({ user_id })) };
-    }
     return {
       rows: [
         {
@@ -33,7 +27,7 @@ function setup(
         {
           id: 'c2',
           title: 'Empty',
-          user_id: 'u2',
+          user_id: 'u1',
           last_message_at: new Date(),
           deleted_at: new Date(),
         },
@@ -45,12 +39,6 @@ function setup(
     if (!c) throw new Error(`no query with ${part}`);
     return { sql: c[0], bindings: c[1] };
   };
-  // u2 was deleted as a user: no email.
-  const users = {
-    listUsers: jest.fn(async (_filter: unknown) => [
-      { id: 'u1', email: 'a@x.com' },
-    ]),
-  };
   const res = { status: jest.fn(), json: jest.fn() };
   res.status.mockReturnValue(res);
   const run = (query: Record<string, unknown>) =>
@@ -58,48 +46,52 @@ function setup(
       {
         query,
         scope: {
-          resolve: (key: string) =>
-            key === ContainerRegistrationKeys.PG_CONNECTION ? { raw } : users,
+          resolve: (key: string) => {
+            if (key !== ContainerRegistrationKeys.PG_CONNECTION) {
+              throw new Error(`unexpected resolve ${key}`);
+            }
+            return { raw };
+          },
         },
         auth_context: {},
       } as never,
       res as never,
     );
-  return { raw, call, users, res, run };
+  return { raw, call, res, run };
 }
 
-beforeEach(() => accessMock.mockReturnValue({ superAdmin: true }));
+beforeEach(() =>
+  accessMock.mockReturnValue({ superAdmin: true, userId: 'u1' }),
+);
 
 describe('reviewFilter', () => {
   it('searches titles and every message, escaping % and _', () => {
-    const f = reviewFilter('50%_off', '');
+    const f = reviewFilter('50%_off', 'u1');
     expect(f.sql).toBe(
-      'where (c.title ilike ? or exists (select 1 from assistant_message m where m.conversation_id = c.id and m.content ilike ?))',
+      'where c.user_id = ? and (c.title ilike ? or exists (select 1 from assistant_message m where m.conversation_id = c.id and m.content ilike ?))',
     );
-    expect(f.bindings).toEqual(['%50\\%\\_off%', '%50\\%\\_off%']);
-    // Deleted messages count for the owner's review.
+    expect(f.bindings).toEqual(['u1', '%50\\%\\_off%', '%50\\%\\_off%']);
+    // The account's own deleted messages count too.
     expect(f.sql).not.toMatch(/deleted_at/);
   });
 
-  it('scopes to one staff member, alone or with a search', () => {
+  it('is always one account, even with no search', () => {
     expect(reviewFilter('', 'u1')).toEqual({
       sql: 'where c.user_id = ?',
       bindings: ['u1'],
     });
-    const both = reviewFilter('mew', 'u1');
-    expect(both.sql).toMatch(/^where c\.user_id = \? and \(c\.title ilike/);
-    expect(both.bindings).toEqual(['u1', '%mew%', '%mew%']);
-  });
-
-  it('is empty with no filters', () => {
-    expect(reviewFilter('', '')).toEqual({ sql: '', bindings: [] });
+    // No account: nobody's chats, never everyone's.
+    expect(reviewFilter('', '')).toEqual({
+      sql: 'where c.user_id = ?',
+      bindings: [''],
+    });
   });
 });
 
 describe('GET /admin/assistant-review', () => {
   it('counts and pages with the same filter, newest first with an id tiebreak', async () => {
     const { call, run } = setup();
-    await run({ q: ' 50%_off ', user_id: 'u1', limit: '20', offset: '40' });
+    await run({ q: ' 50%_off ', limit: '20', offset: '40' });
     const filter = reviewFilter('50%_off', 'u1');
     const count = call('as n from');
     expect(count.sql).toContain(filter.sql);
@@ -112,27 +104,24 @@ describe('GET /admin/assistant-review', () => {
     expect(page.bindings).toEqual([...filter.bindings, 20, 40]);
   });
 
+  it("shows only the signed-in account's chats, whatever user_id asks for", async () => {
+    const { raw, call, res, run } = setup();
+    await run({ user_id: 'u2' });
+    expect(call('as n from').bindings).toEqual(['u1']);
+    expect(call('order by').bindings).toEqual(['u1', 50, 0]);
+    // No list of who else ever asked.
+    for (const [sql] of raw.mock.calls) {
+      expect(sql).not.toMatch(/distinct user_id/);
+    }
+    const body = res.json.mock.calls[0][0];
+    expect(body.staff).toBeUndefined();
+    expect(body.conversations[0].user_email).toBeUndefined();
+  });
+
   it('ignores a one-letter search', async () => {
     const { raw, run } = setup();
     await run({ q: ' a ' });
     for (const [sql] of raw.mock.calls) expect(sql).not.toMatch(/ilike/);
-  });
-
-  it('lists every staff member who ever asked, whatever the filters', async () => {
-    const { call, users, res, run } = setup();
-    await run({ q: 'mew', user_id: 'u1' });
-    const staff = call('distinct user_id');
-    expect(staff.sql).toBe(
-      'select distinct user_id from assistant_conversation',
-    );
-    expect(staff.bindings).toBeUndefined();
-    expect(users.listUsers.mock.calls[0][0]).toEqual({ id: ['u1', 'u2'] });
-    const body = res.json.mock.calls[0][0];
-    expect(body.staff).toEqual([
-      { id: 'u1', email: 'a@x.com' },
-      { id: 'u2', email: null },
-    ]);
-    expect(body.conversations[0].user_email).toBe('a@x.com');
   });
 
   it("reads each page's numbers from one grouped query", async () => {
@@ -176,7 +165,6 @@ describe('GET /admin/assistant-review', () => {
     // A chat with no messages: zeros.
     expect(body.conversations[1]).toMatchObject({
       id: 'c2',
-      user_email: null,
       questions: 0,
       failed: 0,
       cost_usd: 0,
@@ -187,7 +175,7 @@ describe('GET /admin/assistant-review', () => {
   });
 
   it('refuses anyone but a super admin', async () => {
-    accessMock.mockReturnValue({ superAdmin: false });
+    accessMock.mockReturnValue({ superAdmin: false, userId: 'u1' });
     const { raw, res, run } = setup();
     await run({});
     expect(res.status).toHaveBeenCalledWith(403);

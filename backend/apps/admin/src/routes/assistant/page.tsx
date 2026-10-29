@@ -8,6 +8,7 @@ import { Drawer, toast } from '@medusajs/ui';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   assistantApi,
+  confirmProposal,
   streamChat,
   type AssistantMe,
 } from '../../lib/assistant';
@@ -22,6 +23,7 @@ import { useVoice } from '../../components/assistant/use-voice';
 import { MicError, unlockAudio } from '../../lib/voice';
 import {
   fromStored,
+  type Proposal,
   type UiMessage,
 } from '../../components/assistant/thread-data';
 
@@ -304,6 +306,19 @@ const AssistantPage = () => {
             });
           } else if (e.type === 'image') {
             patch((m) => ({ ...m, images: [...m.images, e.url] }));
+          } else if (e.type === 'confirm') {
+            patch((m) => ({
+              ...m,
+              proposals: [
+                ...(m.proposals ?? []),
+                {
+                  token: e.token,
+                  kind: e.kind,
+                  summary: e.summary,
+                  state: 'waiting',
+                },
+              ],
+            }));
           } else if (e.type === 'error') {
             failed = true;
             patch((m) => ({
@@ -371,6 +386,42 @@ const AssistantPage = () => {
       void latestSend.current({ text: q.question, images: [] });
       // The button unmounts once the answer starts; keep focus on the page.
       dock.current?.querySelector('textarea')?.focus();
+    },
+    [t],
+  );
+
+  // Save tapped on a proposed note or task: only now does the server keep it.
+  const saveProposal = useCallback(
+    async (key: string, token: string) => {
+      const mark = (state: Proposal['state']) =>
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.key === key
+              ? {
+                  ...m,
+                  proposals: m.proposals?.map((p) =>
+                    p.token === token ? { ...p, state } : p,
+                  ),
+                }
+              : m,
+          ),
+        );
+      mark('saving');
+      try {
+        await confirmProposal(token);
+        mark('saved');
+      } catch (err) {
+        const { message, code } = err as Error & { code?: string };
+        toast.error(
+          code
+            ? t(`assistant.err.${code}`, {
+                defaultValue: message,
+                reason: message,
+              })
+            : message,
+        );
+        mark('waiting');
+      }
     },
     [t],
   );
@@ -676,6 +727,7 @@ const AssistantPage = () => {
                   onSpeak={talk ? undefined : readAloud}
                   reading={reading}
                   onRetry={retry}
+                  onConfirm={saveProposal}
                   canRetry={
                     !busy && !loading && !talk && voice.state === 'idle'
                   }

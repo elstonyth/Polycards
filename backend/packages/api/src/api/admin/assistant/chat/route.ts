@@ -12,7 +12,8 @@ import { runTurn } from '../engine';
 import { storeImage } from '../images';
 import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
 import { memoryFor } from '../agent-tools';
-import { MODEL_RE, type ChatMessage } from '../openrouter';
+import { sealProposal } from '../confirm';
+import { generationCost, MODEL_RE, type ChatMessage } from '../openrouter';
 import { SCHEDULED_PREFIX } from '../schedule';
 import { TOOLS } from '../tools';
 import { MAX_AUDIO_BYTES, transcribe } from '../voice';
@@ -24,6 +25,7 @@ import { userLock } from '../user-lock';
 //   conversation {id,title} · text {delta} · tool {id,name,label,status,ms}
 //   image {url} · error {message} · done {message_id,cost_usd} · ping
 //   transcript {text} — a spoken question (body.audio) as it was heard
+//   confirm {kind,summary,token} — a note or task to save with a tap (confirm.ts)
 // The headers go out at once and a ping every 10 s keeps proxies from
 // timing the request out while a poster or a query runs. Read-only: the only
 // rows written are the conversation and its messages.
@@ -365,7 +367,7 @@ export async function POST(
       last_message_at: now,
     });
 
-    const images: { url: string }[] = [];
+    const images: { url: string; file_id: string }[] = [];
     const result = await runTurn({
       key,
       model: settings.chat_model,
@@ -394,18 +396,31 @@ export async function POST(
         imageStyle: settings.image_style?.trim() || DEFAULT_IMAGE_STYLE,
         styleRefs: await styleRefs(settings.style_refs),
         attachments: input.images,
+        // A note or task the person saves with a tap (confirm.ts); a
+        // scheduled run has nobody to tap, and no such tools.
+        propose: (proposal, summary) =>
+          send({
+            type: 'confirm',
+            kind: proposal.kind,
+            summary,
+            token: sealProposal(
+              proposal,
+              access.userId,
+              http.jwtSecret as string,
+            ),
+          }),
         showImage: async (image, name, mime) => {
           const type =
             mime ??
             MIME[(await sharp(image).metadata()).format ?? ''] ??
             'image/jpeg';
-          const url = await storeImage(
+          const { id: fileId, url } = await storeImage(
             scope,
             image,
             `assistant-${Date.now()}-${name}`,
             type,
           );
-          images.push({ url });
+          images.push({ url, file_id: fileId });
           send({ type: 'image', url });
           return url;
         },
@@ -434,6 +449,31 @@ export async function POST(
       error: result.error ?? null,
     });
     charged = true;
+    // Rounds cut off before their bill are in at an estimate: OpenRouter's
+    // own figure replaces it once every one has shown up (it can take ~7 s).
+    if (result.pending.length) {
+      const rowId = saved.id;
+      const charged = result.cost;
+      const pending = result.pending;
+      void (async () => {
+        try {
+          const found = await Promise.all(
+            pending.map((p) => generationCost(key, p.id, undefined, 12)),
+          );
+          if (found.some((c) => !c)) return; // the estimate stays
+          const estimated = pending.reduce((sum, p) => sum + p.estimate, 0);
+          const actual = found.reduce((sum, c) => sum + c, 0);
+          await assistant.updateAssistantMessages({
+            id: rowId,
+            cost_usd: Math.max(0, charged - estimated + actual),
+          });
+        } catch (err) {
+          logger.warn(
+            `[assistant] answer cost not updated: ${(err as Error)?.message}`,
+          );
+        }
+      })();
+    }
     // The chat may have been deleted in another tab meanwhile: the answer
     // is saved, so still finish with done.
     await assistant
