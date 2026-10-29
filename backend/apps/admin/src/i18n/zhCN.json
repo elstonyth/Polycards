@@ -58,7 +58,10 @@
   "pcNav": {
     "luckyDraw": "幸运抽奖",
     "goodsReceiveNotes": "收货单",
-    "procurement": "采购清单"
+    "procurement": "采购清单",
+    "assistant": "AI 助手",
+    "assistantReview": "对话记录",
+    "aiSettings": "AI 助手"
   },
   "packs": {
     "tabs": {
@@ -233,6 +236,82 @@
       "customer": "客户",
       "shipTo": "收件人",
       "cards": "卡牌"
+    }
+  },
+  "assistant": {
+    "title": "Polycards AI",
+    "hello": "想知道什么？",
+    "helloAdmin": "可以问销售、玩家、库存、订单、每周挑战，也可以叫它做海报或图片。答案来自实时数据。",
+    "helloLimited": "可以问你的权限范围内的事情。答案来自实时数据。",
+    "fullAccess": "完整权限 · 实时数据",
+    "limitedAccess": "你的权限：{{list}}",
+    "placeholder": "问任何问题…可以直接粘贴截图",
+    "attach": "截图",
+    "enterHint": "Enter 发送 · Shift+Enter 换行",
+    "send": "发送",
+    "stop": "停止",
+    "removeImage": "移除图片",
+    "tooManyImages": "每个问题最多 {{n}} 张图片。",
+    "imageUnreadable": "这张图片无法读取。",
+    "newChat": "新对话",
+    "noChats": "还没有对话。",
+    "delete": "删除对话",
+    "thinking": "思考中…",
+    "seconds": "{{n}} 秒",
+    "download": "下载",
+    "connectionLost": "回答还没完成连接就断了，请再问一次。",
+    "screenshotsSent_one": "已发送 {{count}} 张截图",
+    "screenshotsSent_other": "已发送 {{count}} 张截图",
+    "noKeyAdmin": "助手还没有 AI 密钥。",
+    "openSettings": "去 设置 → AI 添加",
+    "noKeyStaff": "助手还没设置好，请管理员添加 AI 密钥。",
+    "footnote": "答案来自实时数据，但仍可能出错——发布或付款前请先核对。",
+    "suggest": {
+      "salesToday": "今天的销售数据（只算 default group）",
+      "topPull": "昨天谁抽到最贵的卡？",
+      "challengePoster": "做下周每周挑战的推广图",
+      "packArt": "帮我设计一个新卡包的图，名字叫 ",
+      "lowStock": "哪些卡库存是 0 或欠货？",
+      "toBuy": "今天需要采购什么？列出卡和价格。",
+      "order": "订单号 #",
+      "account": "查一下这个玩家的账户状态："
+    },
+    "settings": {
+      "title": "AI 助手",
+      "subtitle": "管理后台助手用来回答问题和生成图片的密钥与模型。",
+      "keyTitle": "OpenRouter API 密钥",
+      "keyHelp": "回答和图片共用一个密钥，在 openrouter.ai/keys 创建。密钥加密保存，之后不会再显示。",
+      "keyNone": "未设置",
+      "keyUnreadable": "需要重新输入",
+      "keySet": "已设置 · ••••{{last4}}",
+      "saveKey": "保存密钥",
+      "test": "测试密钥",
+      "testing": "检查中…",
+      "testOk": "密钥可用。已用 USD {{used}}，剩余：{{left}}。",
+      "noLimit": "无上限",
+      "testFail": "密钥检查失败：{{message}}",
+      "remove": "移除密钥",
+      "removeConfirm": "确定移除 AI 密钥？保存新密钥之前助手将无法回答。",
+      "modelsTitle": "模型与上限",
+      "chatModel": "对话模型",
+      "chatModelHelp": "OpenRouter 模型 ID，例如 anthropic/claude-sonnet-5.5",
+      "imageModel": "图片模型",
+      "imageModelHelp": "例如 google/gemini-3.1-flash-image",
+      "cap": "每人每日上限（USD）",
+      "capHelp": "马来西亚时间 00:00 重置。",
+      "save": "保存",
+      "saved": "已保存。"
+    },
+    "review": {
+      "title": "助手对话记录",
+      "subtitle": "员工问过助手的所有问题，最新的在前。",
+      "empty": "还没有对话。",
+      "when": "最后消息",
+      "who": "员工",
+      "question": "第一个问题",
+      "turns": "提问数",
+      "failed": "失败",
+      "cost": "费用"
     }
   }
 }

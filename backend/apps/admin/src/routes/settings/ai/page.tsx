@@ -1,0 +1,233 @@
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Badge,
+  Button,
+  Container,
+  Heading,
+  Input,
+  Label,
+  Text,
+  toast,
+} from '@medusajs/ui';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { assistantApi, type AssistantSettings } from '../../../lib/assistant';
+import { AiOrb } from '../../../components/assistant/AiOrb';
+
+// Settings → AI (spec 2026-10-29): the OpenRouter key the assistant uses for
+// answers and images, which models, and the per-person daily spend limit.
+// The key is write-only: the server never sends it back, only its last 4.
+export const config: RouteConfig = {
+  label: 'pcNav.aiSettings',
+  translationNs: 'translation',
+  rank: 90,
+  permissions: ['assistant_setting:read' as Permission],
+};
+
+const KEY = ['assistant', 'settings'];
+
+const AiSettingsPage = () => {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const settings = useQuery({ queryKey: KEY, queryFn: assistantApi.settings });
+  const s = settings.data?.settings;
+  const [key, setKey] = useState('');
+  const [chatModel, setChatModel] = useState('');
+  const [imageModel, setImageModel] = useState('');
+  const [cap, setCap] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [test, setTest] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!s) return;
+    setChatModel(s.chat_model);
+    setImageModel(s.image_model);
+    setCap(String(s.daily_cap_usd));
+  }, [s]);
+
+  const save = async (
+    patch: Parameters<typeof assistantApi.saveSettings>[0],
+  ) => {
+    setSaving(true);
+    setTest(null);
+    try {
+      const res = await assistantApi.saveSettings(patch);
+      qc.setQueryData<{ settings: AssistantSettings }>(KEY, res);
+      void qc.invalidateQueries({ queryKey: ['assistant', 'me'] });
+      toast.success(t('assistant.settings.saved'));
+      return true;
+    } catch (err) {
+      toast.error((err as Error).message);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const runTest = async () => {
+    setTest(t('assistant.settings.testing'));
+    try {
+      const r = await assistantApi.testKey();
+      setTest(
+        r.ok
+          ? t('assistant.settings.testOk', {
+              used: r.account.usage.toFixed(2),
+              left:
+                r.account.limit_remaining === null
+                  ? t('assistant.settings.noLimit')
+                  : `USD ${r.account.limit_remaining.toFixed(2)}`,
+            })
+          : t('assistant.settings.testFail', { message: r.message }),
+      );
+    } catch (err) {
+      setTest(
+        t('assistant.settings.testFail', { message: (err as Error).message }),
+      );
+    }
+  };
+
+  const status = !s?.openrouter_key.set
+    ? { color: 'grey' as const, text: t('assistant.settings.keyNone') }
+    : !s.openrouter_key.readable
+      ? {
+          color: 'orange' as const,
+          text: t('assistant.settings.keyUnreadable'),
+        }
+      : {
+          color: 'green' as const,
+          text: t('assistant.settings.keySet', {
+            last4: s.openrouter_key.last4,
+          }),
+        };
+
+  return (
+    <div className="pc-admin flex flex-col gap-y-3">
+      <Container className="pc-ai-aurora flex items-center gap-x-4 px-6 py-5">
+        <AiOrb size={44} />
+        <div>
+          <Heading level="h2">{t('assistant.settings.title')}</Heading>
+          <Text size="small" className="text-ui-fg-subtle mt-1">
+            {t('assistant.settings.subtitle')}
+          </Text>
+        </div>
+      </Container>
+
+      <Container className="flex flex-col gap-y-4 px-6 py-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <Heading level="h3">{t('assistant.settings.keyTitle')}</Heading>
+            <Text size="small" className="text-ui-fg-subtle mt-1">
+              {t('assistant.settings.keyHelp')}
+            </Text>
+          </div>
+          <Badge color={status.color} size="small">
+            {status.text}
+          </Badge>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            type="password"
+            autoComplete="off"
+            placeholder="sk-or-v1-…"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            className="sm:flex-1"
+          />
+          <Button
+            disabled={saving || key.trim().length < 20}
+            onClick={async () => {
+              if (await save({ openrouter_key: key.trim() })) setKey('');
+            }}
+          >
+            {t('assistant.settings.saveKey')}
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={!s?.openrouter_key.readable}
+            onClick={() => void runTest()}
+          >
+            {t('assistant.settings.test')}
+          </Button>
+          <Button
+            variant="transparent"
+            size="small"
+            disabled={saving || !s?.openrouter_key.set}
+            onClick={() => {
+              if (window.confirm(t('assistant.settings.removeConfirm'))) {
+                void save({ openrouter_key: null });
+              }
+            }}
+          >
+            {t('assistant.settings.remove')}
+          </Button>
+          {test && (
+            <Text size="small" className="text-ui-fg-subtle">
+              {test}
+            </Text>
+          )}
+        </div>
+      </Container>
+
+      <Container className="flex flex-col gap-y-4 px-6 py-5">
+        <Heading level="h3">{t('assistant.settings.modelsTitle')}</Heading>
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="flex flex-col gap-y-1.5">
+            <Label size="small">{t('assistant.settings.chatModel')}</Label>
+            <Input
+              value={chatModel}
+              onChange={(e) => setChatModel(e.target.value)}
+            />
+            <Text size="xsmall" className="text-ui-fg-muted">
+              {t('assistant.settings.chatModelHelp')}
+            </Text>
+          </div>
+          <div className="flex flex-col gap-y-1.5">
+            <Label size="small">{t('assistant.settings.imageModel')}</Label>
+            <Input
+              value={imageModel}
+              onChange={(e) => setImageModel(e.target.value)}
+            />
+            <Text size="xsmall" className="text-ui-fg-muted">
+              {t('assistant.settings.imageModelHelp')}
+            </Text>
+          </div>
+          <div className="flex flex-col gap-y-1.5">
+            <Label size="small">{t('assistant.settings.cap')}</Label>
+            <Input
+              type="number"
+              min={0}
+              max={1000}
+              step="1"
+              value={cap}
+              onChange={(e) => setCap(e.target.value)}
+            />
+            <Text size="xsmall" className="text-ui-fg-muted">
+              {t('assistant.settings.capHelp')}
+            </Text>
+          </div>
+        </div>
+        <div>
+          <Button
+            variant="secondary"
+            disabled={saving || !s}
+            onClick={() =>
+              void save({
+                chat_model: chatModel.trim(),
+                image_model: imageModel.trim(),
+                daily_cap_usd: Number(cap),
+              })
+            }
+          >
+            {t('assistant.settings.save')}
+          </Button>
+        </div>
+      </Container>
+    </div>
+  );
+};
+
+export default AiSettingsPage;

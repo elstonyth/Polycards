@@ -52,9 +52,11 @@ const readConfig = (file: string): PageConfig | null => {
   };
 };
 
+// Pages under /settings/ live in the Settings layout's own sidebar, not here.
 const configs = pageFiles(ROUTES)
   .map(readConfig)
-  .filter((c): c is PageConfig => c !== null);
+  .filter((c): c is PageConfig => c !== null)
+  .filter((c) => !c.path.startsWith('/settings/'));
 const byRank = (a: PageConfig, b: PageConfig) => (a.rank ?? 0) - (b.rank ?? 0);
 
 type Entry = { path: string; label: string };
@@ -64,6 +66,13 @@ type Group = Entry & { children: Entry[] };
 // merges them.
 const GROUPS: Group[] = [
   { path: '/overview', label: 'pcNav.dashboard', children: [] },
+  // The AI assistant (2026-10-29): every role that may use it sees it; the
+  // conversation review under it is super-admin only.
+  {
+    path: '/assistant',
+    label: 'pcNav.assistant',
+    children: [{ path: '/assistant/review', label: 'pcNav.assistantReview' }],
+  },
   { path: '/deliveries', label: 'pcNav.orders', children: [] },
   {
     path: '/payments',
@@ -178,7 +187,7 @@ const entry = (c: PageConfig): Entry => ({
 });
 
 describe('sidebar contract (Vault spec §6)', () => {
-  it('shows exactly the 9 top-level entries, in order', () => {
+  it('shows exactly the 10 top-level entries, in order', () => {
     const top = configs.filter((c) => !c.nested).sort(byRank);
     expect(top.map(entry)).toEqual(
       GROUPS.map(({ path, label }) => ({ path, label })),
