@@ -25,7 +25,7 @@ __metadata:
     react: "npm:^18.3.1"
     react-dom: "npm:^18.3.1"
     react-i18next: "npm:13.5.0"
-    react-is: "npm:18.3.1"
+    react-is: "npm:19.3.1"
     react-router-dom: "npm:7.18.4"
     recharts: "npm:3.10.1"
     tailwindcss: "npm:^3.4.17"
@@ -2899,7 +2899,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jest/react-is-18@npm:react-is@^18.3.1, react-is-18@npm:react-is@^18.3.1, react-is@npm:18.3.1":
+"@jest/react-is-18@npm:react-is@^18.3.1, react-is-18@npm:react-is@^18.3.1":
   version: 18.3.1
   resolution: "react-is@npm:18.3.1"
   checksum: 10c0/f2f1e60010c683479e74c63f96b09fb41603527cd131a9959e2aee1e5a8b0caf270b365e5ca77d4a6b18aae659b60a86150bb3979073528877029b35aecd2072
@@ -16451,6 +16451,13 @@ __metadata:
     typescript:
       optional: true
   checksum: 10c0/4d13d396208927ed3c80eb62db011a98dae16d93fc951bb4cb220fc5a3a5dd2f0046244fdbd197f627f595230d6fa05cc5d1c6f52b6241acd63ff818dff63acb
+  languageName: node
+  linkType: hard
+
+"react-is@npm:19.3.1":
+  version: 19.3.1
+  resolution: "react-is@npm:19.3.1"
+  checksum: 10c0/428e02d986d56f1859c57756084489f6d2900fd686905003c405b32f1168738b78772bfa4bb6c706f5ac821199171522c28bf6434281f524f901459390a19606
   languageName: node
   linkType: hard
 
