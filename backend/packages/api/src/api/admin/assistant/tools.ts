@@ -37,6 +37,8 @@ export type ToolCtx = {
   /** True once any tool output is in this turn: what was read (a customer
    *  field, a past chat) may carry instructions, so a few writes refuse. */
   readOutside?: boolean;
+  /** The asker's message this turn. */
+  userText?: string;
   /** Adds an image model's cost to the turn. */
   addCost(usd: number): void;
   signal: AbortSignal;

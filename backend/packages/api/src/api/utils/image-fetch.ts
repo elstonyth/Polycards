@@ -143,10 +143,14 @@ const detail = (err: unknown): string =>
  * into the same value, which is right for the callers (they all just fall back)
  * but leaves an operator with no way to tell a firewall from a 404. Callers
  * that log (telegram.ts's apex board) pass a collector; bake-slab.ts ignores it.
+ *
+ * `allowHop` is an OPTIONAL stricter check on every redirect target, for a
+ * caller that fetches only from its own hosts (the admin assistant).
  */
 export const fetchBytes = async (
   url: string,
   onFail?: (reason: string) => void,
+  allowHop?: (url: string) => boolean,
 ): Promise<Buffer | null> => {
   const fail = (reason: string): null => {
     onFail?.(reason);
@@ -184,6 +188,8 @@ export const fetchBytes = async (
       }
       if (!isAllowedImageUrl(next.toString()))
         return fail('redirect to a blocked host');
+      if (allowHop && !allowHop(next.toString()))
+        return fail('redirect off the allowed hosts');
       target = next.toString();
       continue;
     }

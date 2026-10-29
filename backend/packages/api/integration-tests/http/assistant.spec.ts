@@ -508,7 +508,7 @@ medusaIntegrationTestRunner({
           note: 'Captions end with polycards.gg.',
           shared: true,
         });
-        await chat(admin, 'remember for everyone: captions end with the site');
+        await chat(admin, 'remember for everyone: Captions end with polycards.gg');
         expect(lastTool()).toContain('"shared":true');
         script = () => [say('ok')];
         await chat(anson, 'hello again');
@@ -535,7 +535,7 @@ medusaIntegrationTestRunner({
           return [say('ok')];
         };
         await chat(admin, 'check the groups');
-        expect(lastTool()).toContain('saved only as the first step');
+        expect(lastTool()).toContain('runs only as the first step');
       });
 
       it('finds the real pack and slab art to build a post with', async () => {

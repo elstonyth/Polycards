@@ -1,4 +1,4 @@
-import type { Access } from './access';
+import { LASTING_WRITES, type Access } from './access';
 import {
   OpenRouterError,
   streamChat,
@@ -80,6 +80,7 @@ export async function runTurn(opts: {
   const ctx: ToolCtx = {
     ...opts.ctx,
     access: opts.access,
+    userText: opts.userText,
     signal: opts.signal,
     addCost: (usd) => {
       result.cost += usd;
@@ -214,6 +215,10 @@ async function runTool(
   if (!tool) {
     result.tools.push({ name: call.name, args: null, ok: false, ms: 0 });
     return `No access: the asker's admin role does not include ${call.name}. Tell them plainly; do not estimate.`;
+  }
+  if (LASTING_WRITES.has(tool.name) && ctx.readOutside) {
+    result.tools.push({ name: tool.name, args: null, ok: false, ms: 0 });
+    return `Refused: ${tool.name} saves something that lasts, so it runs only as the first step of an answer, before any tool output (which may carry someone else's instructions). Nothing was saved. If the asker wants it, ask them to send that request on its own.`;
   }
   let args: Record<string, unknown>;
   try {

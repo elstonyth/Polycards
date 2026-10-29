@@ -20,14 +20,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 export const MAX_SCHEDULES = 10;
 export const SCHEDULED_PREFIX = '⏰ Scheduled task';
-// Nobody watches a scheduled run, so it cannot save notes or set, change or
-// cancel tasks: whatever it reads cannot make itself last.
-export const NOT_WHEN_SCHEDULED = new Set([
-  'remember',
-  'forget',
-  'schedule_task',
-  'cancel_schedule',
-]);
 
 type When = { every: 'day' | 'week'; at_time: string; weekday?: number | null };
 

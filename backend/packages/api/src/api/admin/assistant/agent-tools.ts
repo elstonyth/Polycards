@@ -29,8 +29,8 @@ import { MAX_SCHEDULES, nextRun } from './schedule';
 type Ctx = {
   container: MedusaContainer;
   access: { userId: string; superAdmin: boolean };
-  /** True once any tool output is in this turn (see ToolCtx). */
-  readOutside?: boolean;
+  /** The asker's message this turn. */
+  userText?: string;
 };
 
 type AgentTool = {
@@ -47,6 +47,13 @@ const IMAGES: Need = { resource: 'assistant_image', operation: 'create' };
 const USE: Need = { resource: 'assistant', operation: 'update' };
 const MAX_NOTE = 500;
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+// For comparing a note with the message it came from.
+const squash = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[\s.。!！]+$/, '')
+    .trim();
 const like = (q: string) => ({ $ilike: `%${q.replace(/[%_\\]/g, '\\$&')}%` });
 const assistantOf = (ctx: Ctx) =>
   ctx.container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
@@ -92,7 +99,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'remember',
     label: 'Remember',
     description:
-      'Save a note to remember in later chats: a fact, a preference or a rule staff told you ("captions always end with the website", "Crazy Sunday runs 10pm to midnight"). Keep it one short sentence. shared true makes it everyone\'s note (super admins only); otherwise only this person sees it. Save only what staff asked you to remember or clearly want kept, never passwords, keys or customer details.',
+      'Save a note to remember in later chats: a fact, a preference or a rule staff told you ("captions always end with the website", "Crazy Sunday runs 10pm to midnight"). Keep it one short sentence. shared true makes it everyone\'s note (super admins only, and only the admin\'s own words from this message, copied exactly); otherwise only this person sees it. Save only what staff asked you to remember or clearly want kept, never passwords, keys or customer details.',
     parameters: {
       type: 'object',
       properties: {
@@ -121,12 +128,13 @@ export const AGENT_TOOLS: AgentTool[] = [
           'Only an admin can save a note for everyone; saved nothing.',
         );
       }
-      // A note for everyone lands in every chat's instructions, so it comes
-      // from the admin's own words: never after tool output (a customer
-      // field, a past chat) is in the turn and could have asked for it.
-      if (shared && ctx.readOutside) {
+      // A note for everyone lands in every chat's instructions, so it must be
+      // the admin's own words from this message, not text an earlier answer
+      // or a customer field put in front of the model. (The engine already
+      // refuses every lasting write once tool output is in the turn.)
+      if (shared && !squash(ctx.userText ?? '').includes(squash(note))) {
         throw new Error(
-          'A note for everyone is saved only as the first step of an answer, before reading anything. Saved nothing: ask the admin to send the note on its own.',
+          "A note for everyone must be the admin's own words from this message, copied exactly. Saved nothing.",
         );
       }
       const saved = await assistantOf(ctx).createAssistantMemories({
@@ -563,21 +571,29 @@ const originOf = (u: string | undefined) => {
   }
 };
 
+const isOwnOrigin = (url: string) => {
+  const origin = originOf(url);
+  return (
+    origin !== null &&
+    [
+      ...OWN_SITES,
+      process.env.S3_FILE_URL,
+      process.env.PAYMENT_CALLBACK_BASE,
+      process.env.MEDUSA_BACKEND_URL ?? 'http://localhost:9000',
+      assetOrigin(),
+    ]
+      .map(originOf)
+      .includes(origin)
+  );
+};
+
 export async function isOwnAsset(
   url: string,
   container: MedusaContainer,
 ): Promise<boolean> {
   if (/^\/(?!\/)/.test(url)) return true; // storefront-relative
-  const origin = originOf(url);
-  if (!origin) return false;
-  const own = [
-    ...OWN_SITES,
-    process.env.S3_FILE_URL,
-    process.env.PAYMENT_CALLBACK_BASE,
-    process.env.MEDUSA_BACKEND_URL ?? 'http://localhost:9000',
-    assetOrigin(),
-  ].map(originOf);
-  if (own.includes(origin)) return true;
+  if (!originOf(url)) return false;
+  if (isOwnOrigin(url)) return true;
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const held = await packs.listPacks(
     { $or: [{ image: url }, { display_image: url }] },
@@ -602,7 +618,13 @@ export async function assetBytes(
     );
   }
   const reasons: string[] = [];
-  const bytes = await fetchBytes(url, (r) => reasons.push(r));
+  // Every redirect stays on our hosts or the host this URL already named.
+  const start = url.startsWith('/') ? `${assetOrigin()}${url}` : url;
+  const bytes = await fetchBytes(
+    url,
+    (r) => reasons.push(r),
+    (hop) => isOwnOrigin(hop) || originOf(hop) === originOf(start),
+  );
   if (!bytes) {
     throw new Error(
       `Could not load ${url.slice(0, 120)}: ${reasons[0] ?? 'unknown'}.`,

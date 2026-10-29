@@ -161,6 +161,11 @@ folders… make sure you are also able to do the scheduled tasks."
   lands while the person is mid-chat retries in 2 minutes; a deleted chat
   reruns in a new one; a person with no roles left gets the error recorded.
 - Every agent tool needs the assistant grant, so a role-less session gets none.
+- **Injection limits** (two security reviews, 2026-10-29): lasting writes
+  (`remember`, `forget`, `schedule_task`, `cancel_schedule`) run only before
+  any tool output is in the turn, and never in a scheduled run; a shared note
+  must quote the admin's current message; image fetches reach only our own
+  hosts or URLs a pack or card holds, every redirect hop included.
 
 ### Admin (`backend/apps/admin`)
 

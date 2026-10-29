@@ -1,6 +1,16 @@
 import { hasPermission } from '@medusajs/framework';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
+// Tools that save something that lasts. The engine runs them only before any
+// tool output is in the turn (what was read may carry someone else's
+// instructions), and a scheduled run, which nobody watches, never gets them.
+export const LASTING_WRITES = new Set([
+  'remember',
+  'forget',
+  'schedule_task',
+  'cancel_schedule',
+]);
+
 // Who is asking, and what their admin roles let the assistant do for them
 // (spec 2026-10-29: answers follow the asker's admin login, enforced here,
 // never by the prompt). Roles come from the session, like every other admin

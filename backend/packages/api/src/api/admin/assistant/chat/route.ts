@@ -7,13 +7,13 @@ import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
-import { accessFor, allowedTools } from '../access';
+import { accessFor, allowedTools, LASTING_WRITES } from '../access';
 import { runTurn } from '../engine';
 import { storeImage } from '../images';
 import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
 import { memoryFor } from '../agent-tools';
 import type { ChatMessage } from '../openrouter';
-import { NOT_WHEN_SCHEDULED, SCHEDULED_PREFIX } from '../schedule';
+import { SCHEDULED_PREFIX } from '../schedule';
 import { TOOLS } from '../tools';
 
 // POST /admin/assistant/chat (spec 2026-10-29): one question, answered as a
@@ -209,7 +209,7 @@ export async function POST(
         (t) =>
           !(
             input.text.startsWith(SCHEDULED_PREFIX) &&
-            NOT_WHEN_SCHEDULED.has(t.name)
+            LASTING_WRITES.has(t.name)
           ),
       ),
       history,
