@@ -383,6 +383,28 @@ export async function tickLive(
                 max_price: maxPrice,
               },
             });
+            // Only this newly committed draw is revealed; never scan past cycles.
+            try {
+              const revealed = await packs.revealPull(result.pull.id, customerId);
+              if (revealed.first_reveal) {
+                await container.resolve(Modules.EVENT_BUS).emit({
+                  name: 'pull.revealed',
+                  data: {
+                    pull_id: result.pull.id,
+                    pack_id: packSlug,
+                    card_id: result.card.handle,
+                    customer_id: customerId,
+                  },
+                });
+              }
+            } catch (error) {
+              // An announcement failure must not interrupt the paid draw's settlement.
+              container.resolve(ContainerRegistrationKeys.LOGGER).warn(
+                `Live automation announcement dropped for pull ${result.pull.id}: ${
+                  error instanceof Error ? error.message : 'reveal unavailable'
+                }`,
+              );
+            }
             return {
               pullId: result.pull.id,
               cardName: result.card.name,
