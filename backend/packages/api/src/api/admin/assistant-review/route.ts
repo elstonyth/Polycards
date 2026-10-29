@@ -1,0 +1,57 @@
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
+import { Modules } from '@medusajs/framework/utils';
+import { ASSISTANT_MODULE } from '../../../modules/assistant';
+import type AssistantModuleService from '../../../modules/assistant/service';
+
+// GET /admin/assistant-review (spec 2026-10-29, the owner's "review all the
+// questions users ask"): every staff member's chats, newest first, with who
+// asked and what each cost. RBAC (assistant_review:read) keeps it to super
+// admins.
+export async function GET(
+  req: AuthenticatedMedusaRequest,
+  res: MedusaResponse,
+): Promise<void> {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const assistant = req.scope.resolve<AssistantModuleService>(ASSISTANT_MODULE);
+  const [conversations, count] =
+    await assistant.listAndCountAssistantConversations(
+      {},
+      { order: { last_message_at: 'DESC' }, take: limit, skip: offset },
+    );
+  const ids = conversations.map((c) => c.id);
+  const messages = ids.length
+    ? await assistant.listAssistantMessages(
+        { conversation_id: ids },
+        { select: ['conversation_id', 'role', 'cost_usd', 'error'] },
+      )
+    : [];
+  const userIds = [...new Set(conversations.map((c) => c.user_id))];
+  const users = userIds.length
+    ? await req.scope
+        .resolve(Modules.USER)
+        .listUsers({ id: userIds }, { select: ['id', 'email'] })
+    : [];
+  const email = new Map(users.map((u) => [u.id, u.email]));
+  res.json({
+    count,
+    limit,
+    offset,
+    conversations: conversations.map((c) => {
+      const own = messages.filter((m) => m.conversation_id === c.id);
+      return {
+        id: c.id,
+        title: c.title,
+        user_id: c.user_id,
+        user_email: email.get(c.user_id) ?? null,
+        questions: own.filter((m) => m.role === 'user').length,
+        failed: own.filter((m) => m.role === 'assistant' && m.error).length,
+        cost_usd: own.reduce((sum, m) => sum + Number(m.cost_usd ?? 0), 0),
+        last_message_at: c.last_message_at,
+      };
+    }),
+  });
+}

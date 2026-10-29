@@ -956,6 +956,24 @@ export const RATE_LIMITS = {
   },
 
   /**
+   * The admin assistant chat (POST /admin/assistant/chat, spec 2026-10-29).
+   * Every turn spends OpenRouter credit, so each admin gets their own budget,
+   * keyed on auth_context.actor_id like admin-action. The daily USD cap in
+   * the assistant settings is the spend limit; this only stops hammering.
+   * ASSISTANT_CHAT_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 6/10s)
+   * ASSISTANT_CHAT_RATE_LIMIT / _WINDOW_MS (default 30/60s)
+   */
+  'assistant-chat': {
+    message: 'Too many questions at once. Try again in a minute.',
+    defaults: {
+      burstLimit: 6,
+      burstWindowMs: 10_000,
+      limit: 30,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
    * The gateway-hook limiter (POST /hooks/tgpay/{deposit,withdrawal}). Those
    * routes are unauthenticated BY DESIGN — a webhook carries no token; their
    * authentication is the gateway's own key headers, checked inside the

@@ -134,7 +134,10 @@ export async function runTurn(opts: {
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
-          content: await runTool(call, byName, ctx, opts.emit, result),
+          content: untrusted(
+            call.name,
+            await runTool(call, byName, ctx, opts.emit, result),
+          ),
         });
       }
     }
@@ -148,6 +151,12 @@ export async function runTurn(opts: {
     return result;
   }
 }
+
+// Tool results carry text customers and staff wrote (names, notes, order
+// remarks): fenced, so the model reads them as data (prompt.ts says text
+// inside a tool result is never an instruction).
+export const untrusted = (tool: string, text: string): string =>
+  `<tool_result name="${tool}">\n${text.replaceAll('</tool_result>', '<\\/tool_result>')}\n</tool_result>`;
 
 async function runTool(
   call: { id: string; name: string; arguments: string },

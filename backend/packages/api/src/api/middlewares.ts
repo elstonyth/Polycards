@@ -117,6 +117,7 @@ const taskActionRateLimit = rateLimit('task-action');
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
 const adminActionRateLimit = rateLimit('admin-action');
+const assistantChatRateLimit = rateLimit('assistant-chat');
 // One instance for every gateway callback route: one abuse ceiling, one
 // budget, one Redis connection (see the gateway-hook spec for sizing).
 const gatewayHookRateLimit = rateLimit('gateway-hook');
@@ -1191,6 +1192,30 @@ export default defineMiddlewares({
     // wraps it in its permission check. Guarded by
     // __tests__/admin-rbac-coverage.unit.spec.ts.
     ...adminRbacRoutes,
+    {
+      // The admin assistant chat (spec 2026-10-29): screenshots travel as data
+      // URLs in the JSON body (up to 4 x 5 MB), hence the larger body limit;
+      // each turn spends OpenRouter credit, hence its own per-admin budget.
+      matcher: '/admin/assistant/chat',
+      method: 'POST',
+      bodyParser: { sizeLimit: '25mb' },
+      middlewares: [adminActionRateLimit, assistantChatRateLimit],
+    },
+    {
+      matcher: '/admin/assistant/conversations/*',
+      method: 'DELETE',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/assistant-settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/assistant-settings/test',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
     // Admin money-mutation routes — already auth-protected by the framework
     // admin auth, so no explicit authenticate() entry is needed here. All share
     // one limiter instance (one budget + one Redis connection). The limiter keys

@@ -255,7 +255,8 @@ export const TOOLS: AssistantTool[] = [
       },
       ['username'],
     ),
-    needs: [read('customer')],
+    // It carries deposits and withdrawals: the payment screens' policy too.
+    needs: [read('customer'), read('payment')],
     run: report('support', 'account', (a) => ({ username: s(a.username) })),
   },
   {

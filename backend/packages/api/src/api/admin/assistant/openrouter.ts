@@ -1,10 +1,43 @@
 // OpenRouter's chat completions (OpenAI-compatible), streamed (spec
-// 2026-10-29). Tests point ASSISTANT_OPENROUTER_URL at a local fake; nothing
-// else does.
+// 2026-10-29). Tests point ASSISTANT_OPENROUTER_BASE at a local fake;
+// nothing else does.
 
-export const openRouterUrl = (): string =>
-  process.env.ASSISTANT_OPENROUTER_URL ||
-  'https://openrouter.ai/api/v1/chat/completions';
+const base = (): string =>
+  (
+    process.env.ASSISTANT_OPENROUTER_BASE || 'https://openrouter.ai/api/v1'
+  ).replace(/\/+$/, '');
+
+export const openRouterUrl = (): string => `${base()}/chat/completions`;
+
+/** The key's own account: its label, credit used and credit left. */
+export async function keyInfo(
+  key: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{
+  label: string | null;
+  usage: number;
+  limit_remaining: number | null;
+}> {
+  const answer = await fetchImpl(`${base()}/key`, {
+    headers: { authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const body = (await answer.json().catch(() => null)) as {
+    error?: { message?: string };
+    data?: { label?: string; usage?: number; limit_remaining?: number | null };
+  } | null;
+  if (!answer.ok || !body?.data) {
+    throw new OpenRouterError(
+      body?.error?.message ?? `OpenRouter answered ${answer.status}.`,
+      answer.status,
+    );
+  }
+  return {
+    label: body.data.label ?? null,
+    usage: Number(body.data.usage ?? 0),
+    limit_remaining: body.data.limit_remaining ?? null,
+  };
+}
 
 export type ChatContent =
   | string
