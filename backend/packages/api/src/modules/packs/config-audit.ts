@@ -61,6 +61,8 @@ export type PackConfig = {
   slug: string;
   title: string;
   category: string;
+  pack_type: string | null;
+  language: string | null;
   status: string;
   in_stock: boolean;
   price: number;
@@ -78,6 +80,8 @@ type PackLike = {
   slug: string;
   title: string;
   category: string;
+  pack_type?: string | null;
+  language?: string | null;
   status: string;
   in_stock?: boolean | null;
   price: unknown;
@@ -98,6 +102,8 @@ export function packConfig(p: PackLike): PackConfig {
     slug: p.slug,
     title: p.title,
     category: p.category,
+    pack_type: p.pack_type ?? null,
+    language: p.language ?? null,
     status: p.status,
     in_stock: p.in_stock ?? true,
     // bigNumber columns can come back as strings.

@@ -46,6 +46,8 @@ export async function GET(
       slug: pack.slug,
       title: pack.title,
       category: pack.category,
+      pack_type: pack.pack_type ?? null,
+      language: pack.language ?? null,
       price: pack.price,
       image: pack.image,
       display_image: pack.display_image ?? null,

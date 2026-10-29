@@ -18,6 +18,12 @@ export const Pack = model.define("pack", {
   slug: model.text().unique(),
   title: model.text(),
   category: model.text(),
+  // Admin-set pack tags (null = not tagged yet). classic = the Bronze→Diamond
+  // ladder, original = one set's own cards, special = the rest. `language` is
+  // an original pack's only (a DB check holds that); graded/raw is never set
+  // here — it is auto-detected from the pool (card-view compositionGroup).
+  pack_type: model.enum(["classic", "original", "special"]).nullable(),
+  language: model.enum(["en", "jp"]).nullable(),
   // MYR (RM) price as a DECIMAL (e.g. 4.99), never cents. bigNumber maps to a numeric
   // column (+ raw_price jsonb sidecar) like every other money field here
   // (card.market_value, pull.buyback_amount, credit_transaction.amount).
