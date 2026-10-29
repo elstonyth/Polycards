@@ -4,6 +4,7 @@ import {
 } from '../../../admin-rbac';
 import { assistantPolicies } from '../../../../policies/assistant';
 import type { Access } from '../access';
+import { AGENT_TOOLS } from '../agent-tools';
 import { TOOLS, type ToolCtx } from '../tools';
 
 // How each tool's arguments become the report request (the desks' own
@@ -185,12 +186,17 @@ const ROWS: Record<string, [Record<string, unknown>, Record<string, unknown>]> =
     ],
     brand_logo: [{}, {}],
     generate_image: [{ prompt: 'a pack' }, {}],
-  marketing_poster: [{ scene: 'a gold ring', headline: 'LOSSLESS MODE' }, {}],
+    marketing_poster: [{ scene: 'a gold ring', headline: 'LOSSLESS MODE' }, {}],
   };
 
 describe('assistant tools', () => {
   it('has a mapping row for every tool', () => {
-    expect(Object.keys(ROWS).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+    // The memory, chat, asset and schedule tools read the database: tested over HTTP
+    // (integration-tests/http/assistant.spec.ts).
+    const agent = AGENT_TOOLS.map((t) => t.name);
+    expect([...Object.keys(ROWS), ...agent].sort()).toEqual(
+      TOOLS.map((t) => t.name).sort(),
+    );
   });
 
   it.each(Object.entries(ROWS))(
@@ -254,7 +260,10 @@ describe('brand-style images', () => {
       { ...ctx, attachments: ['data:image/png;base64,SHOT'] },
     );
     const [arg] = images.generateImage.mock.calls[0];
-    expect(arg.references).toEqual([...ctx.styleRefs, 'data:image/png;base64,SHOT']);
+    expect(arg.references).toEqual([
+      ...ctx.styleRefs,
+      'data:image/png;base64,SHOT',
+    ]);
     expect(arg.prompt).toContain('Scene: a gold ring');
     expect(arg.prompt).toContain('HOUSE LOOK');
     expect(arg.prompt).toContain('first 2 attached images');
@@ -271,10 +280,17 @@ describe('brand-style images', () => {
 
   it('lays the brand type over the art for a marketing poster', async () => {
     await TOOLS.find((t) => t.name === 'marketing_poster')!.run(
-      { scene: 'a gold ring', headline: 'LOSSLESS MODE', gold: 'LOSSLESS', button: false },
+      {
+        scene: 'a gold ring',
+        headline: 'LOSSLESS MODE',
+        gold: 'LOSSLESS',
+        button: false,
+      },
       ctx,
     );
-    expect(images.generateImage.mock.calls[0][0].references).toEqual(ctx.styleRefs);
+    expect(images.generateImage.mock.calls[0][0].references).toEqual(
+      ctx.styleRefs,
+    );
     expect(posters.composePoster.mock.calls[0][1]).toMatchObject({
       headline: 'LOSSLESS MODE',
       gold: 'LOSSLESS',

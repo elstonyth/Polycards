@@ -62,6 +62,8 @@ export async function runTurn(opts: {
   ctx: Omit<ToolCtx, 'addCost' | 'signal' | 'access'>;
   emit: (e: TurnEvent) => void;
   signal: AbortSignal;
+  /** Saved notes for this person (shared and their own). */
+  memory?: string[];
   /** What the asker may still spend today, USD: the answer stops once spent. */
   budgetUsd?: number;
   now?: Date;
@@ -95,7 +97,12 @@ export async function runTurn(opts: {
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: systemPrompt(opts.access, [...byName.keys()], opts.now),
+      content: systemPrompt(
+        opts.access,
+        [...byName.keys()],
+        opts.now,
+        opts.memory,
+      ),
     },
     ...opts.history,
     { role: 'user', content: userContent },

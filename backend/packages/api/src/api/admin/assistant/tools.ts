@@ -5,6 +5,7 @@ import type { Access, Need } from './access';
 import { adminReadAs, callReport, type ReportImage } from './bridge';
 import { brandImage, generateImage } from './images';
 import { artPrompt } from './brand-style';
+import { AGENT_TOOLS, assetBytes, assetDataUrls } from './agent-tools';
 import {
   composePoster,
   posterCopyError,
@@ -670,6 +671,14 @@ export const TOOLS: AssistantTool[] = [
           description:
             'true: also show the image model the screenshots attached to this message (e.g. a pack to feature).',
         },
+        feature_url: str(
+          'Optional: a real pack or slab image URL from find_assets, stood unchanged in the middle of the poster. Then describe the scene as an EMPTY stage for it (a glowing plinth, a gold ring, an arch of light) with the centre left clear.',
+        ),
+        reference_urls: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional: up to 4 image URLs (find_assets, search_chats) the image model should follow for content, e.g. a past poster to vary.',
+        },
       },
       ['scene', 'headline'],
     ),
@@ -688,12 +697,20 @@ export const TOOLS: AssistantTool[] = [
       // Checked before the image is paid for.
       const bad = posterCopyError(copy);
       if (bad) throw new Error(bad);
-      const attached = b(args.use_attached) ? ctx.attachments : [];
+      const featureUrl = s(args.feature_url);
+      // Loaded before the image is paid for: a bad URL fails first.
+      const feature = featureUrl ? await assetBytes(featureUrl) : undefined;
+      const attached = [
+        ...(b(args.use_attached) ? ctx.attachments : []),
+        ...(await assetDataUrls(args.reference_urls)),
+      ];
       const { buffer, cost } = await generateImage({
         key: ctx.openrouterKey,
         model: ctx.imageModel,
         prompt: artPrompt(
-          scene,
+          feature
+            ? `${scene} Leave the centre of the image clear and empty: a real product will be placed there later, so draw only its stage.`
+            : scene,
           ctx.imageStyle,
           ctx.styleRefs.length,
           attached.length,
@@ -703,7 +720,7 @@ export const TOOLS: AssistantTool[] = [
       });
       ctx.addCost(cost);
       await ctx.showImage(
-        await composePoster(buffer, copy),
+        await composePoster(buffer, copy, feature),
         'poster.jpg',
         'image/jpeg',
       );
@@ -731,6 +748,11 @@ export const TOOLS: AssistantTool[] = [
           description:
             'false: no house look, draw exactly the prompt. Default true.',
         },
+        reference_urls: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional: up to 4 image URLs (find_assets, search_chats) to follow for content: a pack or card to show, or a past image to vary.',
+        },
       },
       ['prompt'],
     ),
@@ -738,7 +760,10 @@ export const TOOLS: AssistantTool[] = [
     run: async (args, ctx) => {
       const prompt = s(args.prompt);
       if (!prompt) throw new Error('prompt is required.');
-      const attached = b(args.use_attached) ? ctx.attachments : [];
+      const attached = [
+        ...(b(args.use_attached) ? ctx.attachments : []),
+        ...(await assetDataUrls(args.reference_urls)),
+      ];
       const brand = b(args.brand_style) !== false;
       const refs = brand ? ctx.styleRefs : [];
       const { buffer, cost } = await generateImage({
@@ -757,6 +782,8 @@ export const TOOLS: AssistantTool[] = [
       return 'The image is shown in the chat with a download button. Describe it in one line; it is a draft for a human to review.';
     },
   },
+  // Memory, past chats and assets (agent-tools.ts).
+  ...AGENT_TOOLS,
 ];
 
 export const toolSpecs = (tools: AssistantTool[]) =>

@@ -143,9 +143,13 @@ async function wrap(text: string, font: Font, max: number): Promise<string[]> {
   return [text];
 }
 
+/** The poster. `feature`: a real pack or slab image (find_assets), stood
+ *  unchanged between the headline and the footer with a gold glow behind
+ *  it — never redrawn by the image model. */
 export async function composePoster(
   art: Buffer,
   copy: PosterCopy,
+  feature?: Buffer,
 ): Promise<Buffer> {
   ensureBundledFonts();
   const bg = await sharp(art, { limitInputPixels: MAX_DECODE_PIXELS })
@@ -193,6 +197,7 @@ export async function composePoster(
   lines.forEach((line, i) => {
     parts.push(headlineEl(line, y + i * size * 1.02, headFont, gold));
   });
+  const headBottom = y + (lines.length - 1) * size * 1.02 + size * 0.5;
 
   // Bottom: the quiet line, then the pill.
   const button = copy.button !== false;
@@ -217,6 +222,20 @@ export async function composePoster(
       );
     });
   }
+  // The subline sits above the pill and runs up to 2 lines.
+  const footTop = bottom - (copy.subline?.trim() ? 2 * 42 + 20 : 0);
+
+  const placed = feature
+    ? await placeFeature(feature, headBottom + 40, footTop - 40)
+    : null;
+  if (placed) {
+    const cx = placed.left + placed.width / 2;
+    const cy = placed.top + placed.height / 2;
+    parts.push(
+      `<ellipse cx="${cx}" cy="${cy}" rx="${(placed.width * 0.95).toFixed(0)}" ry="${(placed.height * 0.62).toFixed(0)}" fill="url(#glow)"/>`,
+      `<ellipse cx="${cx}" cy="${placed.top + placed.height + 6}" rx="${(placed.width * 0.55).toFixed(0)}" ry="14" fill="#000" opacity="0.55"/>`,
+    );
+  }
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
@@ -225,13 +244,40 @@ export async function composePoster(
     `<linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3dfb4"/><stop offset="0.5" stop-color="${GOLD}"/><stop offset="1" stop-color="${GOLD_DEEP}"/></linearGradient>` +
     `<linearGradient id="hairL" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${GOLD}" stop-opacity="0"/><stop offset="1" stop-color="${GOLD}"/></linearGradient>` +
     `<linearGradient id="hairR" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${GOLD}"/><stop offset="1" stop-color="${GOLD}" stop-opacity="0"/></linearGradient>` +
+    `<radialGradient id="glow"><stop offset="0" stop-color="${GOLD}" stop-opacity="0.38"/><stop offset="1" stop-color="${GOLD}" stop-opacity="0"/></radialGradient>` +
     `</defs>${parts.join('')}</svg>`;
 
   return sharp(bg)
     .composite([
       { input: Buffer.from(svg), top: 0, left: 0 },
       { input: logo, top: 58, left: PAD },
+      ...(placed
+        ? [{ input: placed.image, top: placed.top, left: placed.left }]
+        : []),
     ])
     .jpeg({ quality: 90, chromaSubsampling: '4:4:4' })
     .toBuffer();
+}
+
+/** The feature image fitted into the band between `top` and `bottom`
+ *  (at most 560 wide), centred; null when there is no room. */
+async function placeFeature(
+  image: Buffer,
+  top: number,
+  bottom: number,
+): Promise<{ image: Buffer; top: number; left: number; width: number; height: number } | null> {
+  const room = Math.floor(bottom - top);
+  if (room < 200) return null;
+  const fitted = await sharp(image, { limitInputPixels: MAX_DECODE_PIXELS })
+    .resize({ width: 560, height: room, fit: 'inside' })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = fitted.info;
+  return {
+    image: fitted.data,
+    width,
+    height,
+    left: Math.round((W - width) / 2),
+    top: Math.round(top + (room - height) / 2),
+  };
 }

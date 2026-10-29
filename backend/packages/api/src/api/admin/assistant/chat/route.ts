@@ -11,6 +11,7 @@ import { accessFor, allowedTools } from '../access';
 import { runTurn } from '../engine';
 import { storeImage } from '../images';
 import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
+import { memoryFor } from '../agent-tools';
 import type { ChatMessage } from '../openrouter';
 import { TOOLS } from '../tools';
 
@@ -205,6 +206,7 @@ export async function POST(
       images: input.images,
       signal: ctl.signal,
       budgetUsd: Number(settings.daily_cap_usd) - spent,
+      memory: await memoryFor(assistant, access.userId),
       now,
       emit: send,
       ctx: {

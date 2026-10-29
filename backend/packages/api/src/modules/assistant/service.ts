@@ -1,6 +1,8 @@
 import { MedusaService } from '@medusajs/framework/utils';
 import AssistantConversation from './models/assistant-conversation';
+import AssistantMemory from './models/assistant-memory';
 import AssistantMessage from './models/assistant-message';
+import AssistantSchedule from './models/assistant-schedule';
 import AssistantSettings from './models/assistant-settings';
 
 export type AssistantSettingsRow = {
@@ -27,6 +29,8 @@ class AssistantModuleService extends MedusaService({
   AssistantSettings,
   AssistantConversation,
   AssistantMessage,
+  AssistantMemory,
+  AssistantSchedule,
 }) {
   /** The singleton settings row, created with the defaults on first read. */
   async settings(): Promise<AssistantSettingsRow> {

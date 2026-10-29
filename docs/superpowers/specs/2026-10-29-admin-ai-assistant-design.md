@@ -45,7 +45,9 @@ owner pastes the AI API keys.
 - Discord desks are not touched or switched off; they keep running until the
   owner retires them.
 - No web browsing tool (it is an exfiltration path and returned stale scrapes).
-- No scheduled posts (Growth's 12am / Monday cron stays on Hermes).
+- ~~No scheduled posts~~ — reversed the same day (owner: "make sure you are
+  also able to do the scheduled tasks"); see "Agent tools" below. The Hermes
+  crons keep running until the owner moves them.
 
 ## Anti-goals
 
@@ -132,6 +134,33 @@ Support viewer's 9 `:read` policies.
   `assistant_conversation` (user_id, title), `assistant_message` (role,
   content, tool calls, tokens, cost). Settings changes write an
   `admin_action_audit` row (new CHECK value; coin-flip clash rule applies).
+
+### Agent tools (added 2026-10-29, `agent-tools.ts`, `schedule.ts`)
+
+Owner: "search through its own memories or conversations… search through the
+folders… make sure you are also able to do the scheduled tasks."
+
+- **Memory** (`assistant_memory`): `remember` / `recall` / `forget`. Personal
+  notes are seen only by their writer; shared notes (super admin only) by
+  everyone. The newest notes (≈3,000 chars) go into every chat's instructions,
+  fenced as facts, not orders.
+- **Past chats**: `search_chats` — the asker's own chats; a super admin may
+  search everyone's.
+- **Assets**: `find_assets` (image grant only) — pack art + stage art, card and
+  slab images, images the assistant made before, as URLs `marketing_poster`
+  (`feature_url`) and `generate_image` (`reference_urls`) take.
+- **Scheduled tasks** (`assistant_schedule`): `schedule_task` /
+  `list_schedules` / `cancel_schedule`, daily or weekly at a Malaysia time,
+  at most 10 per person. The worker's minute job (`jobs/assistant-schedules.ts`)
+  claims each due task by moving its next run first (no double runs across
+  workers), then posts the instruction to the chat route **as the person who
+  set it, with their roles as they are at run time** — same access, daily cap,
+  limits and logs as a typed question. It calls the app's own origin
+  (`PAYMENT_CALLBACK_BASE`, override `ASSISTANT_SERVER_URL`), never
+  admin.polycards.gg (Cloudflare challenges machine calls there). A run that
+  lands while the person is mid-chat retries in 2 minutes; a deleted chat
+  reruns in a new one; a person with no roles left gets the error recorded.
+- Every agent tool needs the assistant grant, so a role-less session gets none.
 
 ### Admin (`backend/apps/admin`)
 

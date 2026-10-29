@@ -92,7 +92,18 @@ describe('assistant access', () => {
         'assistant_user',
         'assistant_browser',
       ]),
-    ).toEqual(['order', 'low_stock', 'admin_read']);
+    ).toEqual([
+      'order',
+      'low_stock',
+      'admin_read',
+      'remember',
+      'recall',
+      'forget',
+      'search_chats',
+      'schedule_task',
+      'list_schedules',
+      'cancel_schedule',
+    ]);
   });
 
   it('gives yu (Support viewer) one-customer tools only: no lists, no SQL', async () => {
@@ -100,6 +111,13 @@ describe('assistant access', () => {
       'player',
       'account',
       'order',
+      'remember',
+      'recall',
+      'forget',
+      'search_chats',
+      'schedule_task',
+      'list_schedules',
+      'cancel_schedule',
     ]);
   });
 

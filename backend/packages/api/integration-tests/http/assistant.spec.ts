@@ -13,9 +13,16 @@ import {
 } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../src/modules/assistant';
 import type AssistantModuleService from '../../src/modules/assistant/service';
+import { PACKS_MODULE } from '../../src/modules/packs';
+import type PacksModuleService from '../../src/modules/packs/service';
+import { runDueSchedules } from '../../src/api/admin/assistant/schedule';
 import { mintSuperAdmin } from './utils';
 
 jest.setTimeout(240 * 1000);
+// Several chats a test from the same people: lift the per-person chat limit
+// (6 per 10 s) for this suite. Read when the app boots, below.
+process.env.ASSISTANT_CHAT_RATE_BURST_LIMIT = '1000';
+process.env.ASSISTANT_CHAT_RATE_LIMIT = '1000';
 
 // A made-up key for the fake OpenRouter, not a credential.
 const KEY = 'sk-or-v1-test-0123456789abcdef-WXYZ'; // gitleaks:allow
@@ -280,6 +287,13 @@ medusaIntegrationTestRunner({
           'order',
           'low_stock',
           'admin_read',
+          'remember',
+          'recall',
+          'forget',
+          'search_chats',
+          'schedule_task',
+          'list_schedules',
+          'cancel_schedule',
         ]);
         // Even asked through admin_read, the economy screen answers as Anson: 403.
         const toolMsg = String(received[1].messages.at(-1)!.content);
@@ -461,6 +475,152 @@ medusaIntegrationTestRunner({
           type: string;
         }[];
         expect(question.map((p) => p.type)).toEqual(['text', 'image_url']);
+      });
+
+      // One tool call, then a short answer.
+      const once = (name: string, args: object, reply = 'ok') => {
+        script = (b) => (lastIsTool(b) ? [say(reply)] : [call(name, args)]);
+      };
+      const lastTool = () => String(received.at(-1)!.messages.at(-1)!.content);
+      const system = () => String(received.at(-1)!.messages[0].content);
+
+      it('keeps notes per person, shares one only for an admin, and searches past chats', async () => {
+        await saveKey();
+        once('remember', {
+          note: 'Restock the 151 boxes on Fridays.',
+          shared: true,
+        });
+        await chat(anson, 'remember for everyone: restock Fridays');
+        expect(lastTool()).toContain(
+          'Only an admin can save a note for everyone',
+        );
+        once('remember', { note: 'Restock the 151 boxes on Fridays.' });
+        await chat(anson, 'remember: restock Fridays');
+        expect(lastTool()).toContain('"saved":true');
+
+        script = () => [say('ok')];
+        await chat(anson, 'hello');
+        expect(system()).toContain('Restock the 151 boxes on Fridays.');
+        await chat(admin, 'hello');
+        expect(system()).not.toContain('Restock the 151 boxes');
+
+        once('remember', {
+          note: 'Captions end with polycards.gg.',
+          shared: true,
+        });
+        await chat(admin, 'remember for everyone: captions end with the site');
+        expect(lastTool()).toContain('"shared":true');
+        script = () => [say('ok')];
+        await chat(anson, 'hello again');
+        expect(system()).toContain('[shared] Captions end with polycards.gg.');
+
+        // An admin may search everyone's chats; anyone else only their own.
+        once('search_chats', { query: 'restock Fridays', everyone: true });
+        await chat(admin, 'what did anyone say about restocking?');
+        expect(lastTool()).toContain('remember: restock Fridays');
+        once('search_chats', { query: 'captions end', everyone: true });
+        await chat(anson, 'find what was said about captions');
+        expect(lastTool()).toMatch(/^<tool_result name="search_chats">\n\[\]/);
+      });
+
+      it('finds the real pack and slab art to build a post with', async () => {
+        await saveKey();
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPacks([
+          {
+            slug: 'ai-151',
+            title: 'Scarlet 151 Vault',
+            category: 'pokemon',
+            price: 45,
+            image: 'https://cdn.example.test/151.webp',
+            display_image: 'https://cdn.example.test/151-stage.webp',
+          },
+        ]);
+        await packs.createCards([
+          {
+            handle: 'ai-mew',
+            name: 'Mew ex 151',
+            set: 'S',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 10,
+            image: 'https://cdn.example.test/mew.webp',
+            slab_image: 'https://cdn.example.test/mew-slab.webp',
+          },
+        ]);
+        once('find_assets', { query: '151' });
+        await chat(admin, 'find the 151 art');
+        const found = lastTool();
+        expect(found).toContain('"url":"https://cdn.example.test/151.webp"');
+        expect(found).toContain(
+          '"stage_url":"https://cdn.example.test/151-stage.webp"',
+        );
+        expect(found).toContain(
+          '"url":"https://cdn.example.test/mew-slab.webp"',
+        );
+      });
+
+      it('runs a scheduled task by itself, as the person who set it', async () => {
+        await saveKey();
+        const container = getContainer();
+        once('schedule_task', {
+          title: 'Morning groups',
+          instruction: 'How many player groups are there?',
+          every: 'day',
+          time: '09:00',
+        });
+        await chat(admin, 'every morning at 9 tell me how many player groups');
+        expect(lastTool()).toContain('"scheduled":true');
+        const assistant =
+          container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
+        const [task] = await assistant.listAssistantSchedules({});
+        expect(task).toMatchObject({
+          title: 'Morning groups',
+          every: 'day',
+          at_time: '09:00',
+          enabled: true,
+        });
+
+        once('cancel_schedule', { id: task.id });
+        await chat(anson, 'cancel that task');
+        expect(lastTool()).toContain('No such scheduled task of yours');
+
+        // Due now: the job asks the chat as the admin, in a chat of its own.
+        await assistant.updateAssistantSchedules({
+          id: task.id,
+          next_run_at: new Date(Date.now() - 1000),
+        });
+        script = (b) =>
+          lastIsTool(b) ? [say('There are 3 groups.')] : [call('groups', {})];
+        expect(
+          await runDueSchedules(container, {
+            base: api.defaults.baseURL as string,
+          }),
+        ).toBe(1);
+        const [after] = await assistant.listAssistantSchedules({ id: task.id });
+        expect(after.last_error).toBeNull();
+        expect(after.conversation_id).toBeTruthy();
+        expect(new Date(after.next_run_at).getTime()).toBeGreaterThan(
+          Date.now(),
+        );
+        const thread = await api.get(
+          `/admin/assistant/conversations/${after.conversation_id}`,
+          admin,
+        );
+        expect(
+          thread.data.messages.map((m: { role: string; content: string }) => [
+            m.role,
+            m.content,
+          ]),
+        ).toEqual([
+          [
+            'user',
+            '⏰ Scheduled task “Morning groups”: How many player groups are there?',
+          ],
+          ['assistant', 'There are 3 groups.'],
+        ]);
+        // Nothing else is due.
+        expect(await runDueSchedules(container)).toBe(0);
       });
     });
   },

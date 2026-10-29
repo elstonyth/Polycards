@@ -354,7 +354,15 @@
       "top_pulls_poster": "最高抽卡海报",
       "brand_logo": "Logo",
       "generate_image": "AI 图片",
-      "marketing_poster": "营销海报"
+      "marketing_poster": "营销海报",
+      "remember": "记住",
+      "recall": "记忆",
+      "forget": "忘记",
+      "search_chats": "过往对话",
+      "find_assets": "查找素材",
+      "schedule_task": "定时任务",
+      "list_schedules": "定时任务列表",
+      "cancel_schedule": "取消任务"
     },
     "deleteConfirm": "删除这个对话？管理员的对话记录里仍会保留。",
     "history": "历史",
