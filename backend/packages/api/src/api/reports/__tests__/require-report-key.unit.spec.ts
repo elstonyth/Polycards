@@ -27,6 +27,8 @@ afterAll(() => {
 function run(
   url: string,
   headers: Record<string, string | string[] | undefined>,
+  // the in-process bridge calls from this machine
+  remoteAddress = '127.0.0.1',
 ) {
   const info = jest.fn();
   const res = {
@@ -52,6 +54,7 @@ function run(
     {
       originalUrl: url,
       headers,
+      socket: { remoteAddress },
       scope: { resolve: () => ({ info }) },
     } as never,
     res as never,
@@ -218,10 +221,32 @@ describe('requireReportKey', () => {
     expect(run(ECONOMY, { 'x-report-key': FINANCE }).res.statusCode).toBe(503);
   });
 
+  it('refuses the assistant key from anywhere but this machine', () => {
+    const key = { 'x-report-key': ASSISTANT_REPORT_KEY };
+    expect(run(ECONOMY, key, '10.244.3.7').res.statusCode).toBe(401);
+    expect(run(ECONOMY, key, '::ffff:10.0.0.1').next).not.toHaveBeenCalled();
+    // through the ingress: forwarded, even when the hop looks local
+    expect(
+      run(ECONOMY, { ...key, 'x-forwarded-for': '203.0.113.9' }).res.statusCode,
+    ).toBe(401);
+    expect(run(ECONOMY, key, '::1').next).toHaveBeenCalledTimes(1);
+    // the desk keys are unchanged: they come from outside by design
+    process.env.REPORT_KEY_FINANCE = FINANCE;
+  });
+
   it('keeps the assistant off the read-everything admin proxy, but lets it run SQL', () => {
-    const proxy = run('/reports/admin/read?path=/admin/users', { 'x-report-key': ASSISTANT_REPORT_KEY });
-    expect([proxy.res.statusCode, proxy.next.mock.calls.length]).toEqual([401, 0]);
-    expect(run('/reports/ADMIN/Read', { 'x-report-key': ASSISTANT_REPORT_KEY }).res.statusCode).toBe(401);
-    expect(run('/reports/admin/sql', { 'x-report-key': ASSISTANT_REPORT_KEY }).next).toHaveBeenCalledTimes(1);
+    const proxy = run('/reports/admin/read?path=/admin/users', {
+      'x-report-key': ASSISTANT_REPORT_KEY,
+    });
+    expect([proxy.res.statusCode, proxy.next.mock.calls.length]).toEqual([
+      401, 0,
+    ]);
+    expect(
+      run('/reports/ADMIN/Read', { 'x-report-key': ASSISTANT_REPORT_KEY }).res
+        .statusCode,
+    ).toBe(401);
+    expect(
+      run('/reports/admin/sql', { 'x-report-key': ASSISTANT_REPORT_KEY }).next,
+    ).toHaveBeenCalledTimes(1);
   });
 });

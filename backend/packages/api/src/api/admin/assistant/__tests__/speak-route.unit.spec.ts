@@ -61,6 +61,7 @@ type Row = {
   conversation_id: string;
   role: string;
   tools: unknown;
+  images?: unknown;
   cost_usd?: number;
   error?: string | null;
 };
@@ -94,11 +95,15 @@ let settings: Record<string, unknown> = {};
 
 const service = {
   listAssistantMessages: jest.fn(
-    async (filter: { id?: string; role: string; conversation_id?: string }) =>
-      filter.role === 'voice'
+    async (filter: {
+      id?: string;
+      role: string | string[];
+      conversation_id?: string;
+    }) =>
+      filter.conversation_id
         ? rows.filter(
             (r) =>
-              r.role === 'voice' &&
+              [filter.role].flat().includes(r.role) &&
               r.conversation_id === filter.conversation_id,
           )
         : filter.id === answerRow.id
@@ -847,11 +852,20 @@ describe('DELETE /admin/assistant/conversations/:id', () => {
     return { status, body };
   };
 
-  it("deletes the chat's stored speech files", async () => {
+  it("deletes the chat's stored speech and the images drawn in it", async () => {
     rows = [
       cacheRow({}, 'file_a'),
       cacheRow({ voice: 'Puck' }, 'file_b'),
       { conversation_id: 'conv_1', role: 'voice', tools: null },
+      {
+        conversation_id: 'conv_1',
+        role: 'assistant',
+        tools: [{ name: 'generate_image' }],
+        images: [
+          { url: 'https://cdn/x.jpg', file_id: 'img_1' },
+          { url: 'https://cdn/old.jpg' }, // saved before ids were kept
+        ],
+      },
       { ...cacheRow({}, 'file_x'), conversation_id: 'conv_2' },
     ];
     const out = await del('user_1', 'conv_1');
@@ -859,7 +873,11 @@ describe('DELETE /admin/assistant/conversations/:id', () => {
     expect(service.softDeleteAssistantConversations).toHaveBeenCalledWith([
       'conv_1',
     ]);
-    expect(files.deleteFiles).toHaveBeenCalledWith(['file_a', 'file_b']);
+    expect(files.deleteFiles).toHaveBeenCalledWith([
+      'file_a',
+      'file_b',
+      'img_1',
+    ]);
   });
 
   it('still deletes the chat when the files cannot be deleted', async () => {

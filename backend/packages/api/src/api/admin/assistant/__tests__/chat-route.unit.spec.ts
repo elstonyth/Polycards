@@ -1,12 +1,18 @@
 import { EventEmitter } from 'node:events';
 import { POST } from '../chat/route';
+import { openProposal } from '../confirm';
 import { runTurn, type TurnResult } from '../engine';
+import { generationCost } from '../openrouter';
 import { transcribe } from '../voice';
 
 // POST /admin/assistant/chat with the engine and the assistant service
 // faked: what budget an answer gets, and the one-answer-at-a-time lock.
 
 jest.mock('../engine', () => ({ runTurn: jest.fn() }));
+jest.mock('../openrouter', () => ({
+  ...jest.requireActual('../openrouter'),
+  generationCost: jest.fn(),
+}));
 jest.mock('../access', () => ({
   accessFor: () => ({ userId: 'user_1' }),
   allowedTools: async () => [],
@@ -79,6 +85,7 @@ const answer: TurnResult = {
   cost: 0.01,
   tokensIn: 1,
   tokensOut: 1,
+  pending: [],
 };
 
 const service = {
@@ -100,6 +107,7 @@ const service = {
   listAssistantMessages: jest.fn(async () => []),
   createAssistantMessages: jest.fn(async () => ({ id: 'msg_1' })),
   updateAssistantConversations: jest.fn(async () => ({})),
+  updateAssistantMessages: jest.fn(async () => ({})),
   softDeleteAssistantConversations: jest.fn(async () => ({})),
 };
 const logger = { info: jest.fn(), warn: jest.fn() };
@@ -514,4 +522,67 @@ it('does not start listening for an asker who already left', async () => {
   expect(transcribeMock).not.toHaveBeenCalled();
   expect(service.createAssistantMessages).not.toHaveBeenCalled();
   expect(locks.size).toBe(0);
+});
+
+it('shows a note to save with a tap, signed so only the asker can save it', async () => {
+  runTurnMock.mockImplementationOnce(async (opts) => {
+    opts.ctx.propose?.(
+      { kind: 'note', note: 'Likes short captions.', shared: false },
+      'Note: Likes short captions.',
+    );
+    return { ...answer };
+  });
+  const p = post();
+  await p.done;
+  const confirm = p.events().find((e) => e.type === 'confirm');
+  expect(confirm).toMatchObject({
+    kind: 'note',
+    summary: 'Note: Likes short captions.',
+  });
+  expect(openProposal(confirm?.token, 'user_1', 's')).toEqual({
+    kind: 'note',
+    note: 'Likes short captions.',
+    shared: false,
+  });
+  expect(openProposal(confirm?.token, 'user_2', 's')).toBeNull();
+});
+
+it('puts OpenRouter’s figure in place of a cut-off round’s estimate once it shows up', async () => {
+  const costMock = generationCost as jest.MockedFunction<typeof generationCost>;
+  costMock.mockResolvedValueOnce(0.05);
+  runTurnMock.mockResolvedValueOnce({
+    ...answer,
+    cost: 0.25,
+    pending: [{ id: 'gen-x', estimate: 0.2 }],
+  });
+  const p = post();
+  await p.done;
+  // saved at once with the estimate in it
+  expect(service.createAssistantMessages).toHaveBeenCalledWith(
+    expect.objectContaining({ cost_usd: 0.25 }),
+  );
+  await new Promise((r) => setImmediate(r));
+  expect(costMock).toHaveBeenCalledWith(
+    expect.any(String),
+    'gen-x',
+    undefined,
+    12,
+  );
+  expect(service.updateAssistantMessages).toHaveBeenCalledWith({
+    id: 'msg_1',
+    cost_usd: expect.closeTo(0.1, 10),
+  });
+});
+
+it('keeps the estimate when a cut-off round’s figure never shows up', async () => {
+  const costMock = generationCost as jest.MockedFunction<typeof generationCost>;
+  costMock.mockResolvedValueOnce(0);
+  runTurnMock.mockResolvedValueOnce({
+    ...answer,
+    cost: 0.25,
+    pending: [{ id: 'gen-x', estimate: 0.2 }],
+  });
+  await post().done;
+  await new Promise((r) => setImmediate(r));
+  expect(service.updateAssistantMessages).not.toHaveBeenCalled();
 });

@@ -46,6 +46,11 @@ export type AssistantSettings = {
   /** OpenRouter's speaking models and their voices; empty while the
    *  server can't get the list. */
   speech_models: { id: string; voices: string[] }[];
+  /** OpenRouter's models each field can use (its dropdown); empty while the
+   *  server can't get the list. */
+  chat_models: string[];
+  image_models: string[];
+  stt_models: string[];
   daily_cap_usd: number;
   /** The house look for AI images; null = the default below. */
   image_style: string | null;
@@ -81,6 +86,14 @@ export type ChatEvent =
       ms?: number;
     }
   | { type: 'image'; url: string }
+  /** A note or scheduled task the AI proposed: saved only when the asker
+   *  taps Save (confirmProposal), so text planted in data can't save one. */
+  | {
+      type: 'confirm';
+      kind: 'note' | 'schedule';
+      summary: string;
+      token: string;
+    }
   | { type: 'error'; message: string; code?: string; reason?: string }
   | { type: 'done'; message_id: string; cost_usd: number }
   | { type: 'ping' };
@@ -100,15 +113,24 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
   const data = (await res.json().catch(() => null)) as
-    (T & { message?: string }) | null;
+    (T & { message?: string; code?: string }) | null;
   if (!res.ok) {
     throw Object.assign(
       new Error(data?.message ?? `Request failed (${res.status}).`),
-      { status: res.status },
+      { status: res.status, code: data?.code },
     );
   }
   return data as T;
 }
+
+/** Saves a proposed note or task (the chat's `confirm` event) with its token.
+ *  A refusal throws with the server's `code`: confirm_expired or
+ *  confirm_refused. */
+export const confirmProposal = (token: string) =>
+  call<{ kind: 'note' | 'schedule'; next_run_at: string | null }>(
+    '/admin/assistant/confirm',
+    { method: 'POST', body: JSON.stringify({ token }) },
+  );
 
 export const assistantApi = {
   me: () => call<AssistantMe>('/admin/assistant/me'),

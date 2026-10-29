@@ -1,6 +1,5 @@
 import { LASTING_WRITES, type Access } from './access';
 import {
-  generationCost,
   OpenRouterError,
   streamChat,
   systemContent,
@@ -51,7 +50,18 @@ export type TurnResult = {
   tokensIn: number;
   tokensOut: number;
   error?: string;
+  /** Rounds cut off before their bill (Stop, a timeout): each is in cost as
+   *  an estimate; the caller swaps in OpenRouter's figure once it shows up. */
+  pending: { id: string; estimate: number }[];
 };
+
+// What a round cut off before its bill is counted at until OpenRouter's own
+// figure arrives (or for good, when it never names the round): the prompt at
+// $15 per million tokens (~3 characters a token) and $0.05 for what it said.
+// Above what the house models charge, so a stop never spends past the cap.
+function roundEstimate(messages: ChatMessage[]): number {
+  return (JSON.stringify(messages).length / 3) * 15e-6 + 0.05;
+}
 
 export async function runTurn(opts: {
   key: string;
@@ -79,6 +89,7 @@ export async function runTurn(opts: {
     cost: 0,
     tokensIn: 0,
     tokensOut: 0,
+    pending: [],
   };
   const byName = new Map(opts.tools.map((t) => [t.name, t]));
   // One deadline for the whole answer, tools included.
@@ -131,9 +142,19 @@ export async function runTurn(opts: {
   ];
 
   let drawn = 0;
-  // The round's generation until its usage arrives: a round cut off before
-  // then is still billed, so the catch looks its cost up.
+  // A round asked for and not yet billed (its usage chunk not seen), and its
+  // generation once named: one cut off is still billed, even before its
+  // first chunk, so it is counted at an estimate.
+  let open = false;
   let unpriced: string | undefined;
+  const chargeOpenRound = () => {
+    if (!open) return;
+    const estimate = roundEstimate(messages);
+    result.cost += estimate;
+    if (unpriced) result.pending.push({ id: unpriced, estimate });
+    open = false;
+    unpriced = undefined;
+  };
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       if (opts.budgetUsd !== undefined && result.cost >= opts.budgetUsd) {
@@ -144,6 +165,7 @@ export async function runTurn(opts: {
       const last = round === MAX_ROUNDS - 1;
       let roundText = '';
       let calls: { id: string; name: string; arguments: string }[] = [];
+      open = true;
       for await (const ev of streamChat({
         key: opts.key,
         model: opts.model,
@@ -163,6 +185,7 @@ export async function runTurn(opts: {
           result.text += ev.delta;
           opts.emit(ev);
         } else if (ev.type === 'usage') {
+          open = false;
           unpriced = undefined;
           result.cost += ev.cost;
           result.tokensIn += ev.tokensIn;
@@ -174,10 +197,7 @@ export async function runTurn(opts: {
         }
       }
       // A round that ended without a usage chunk is still billed.
-      if (unpriced) {
-        result.cost += await generationCost(opts.key, unpriced, opts.fetchImpl);
-        unpriced = undefined;
-      }
+      chargeOpenRound();
       if (!calls.length || last) {
         if (calls.length) {
           // The last round may not call tools; one that still does never answered.
@@ -239,9 +259,13 @@ export async function runTurn(opts: {
           : err instanceof OpenRouterError
             ? err.message
             : `The assistant stopped: ${(err as Error)?.message ?? String(err)}`;
-    if (unpriced) {
-      result.cost += await generationCost(opts.key, unpriced, opts.fetchImpl);
-    }
+    // Refused outright (a 4xx before anything was generated): not billed.
+    const refused =
+      err instanceof OpenRouterError &&
+      !unpriced &&
+      (err.status ?? 0) >= 400 &&
+      (err.status ?? 0) < 500;
+    if (!refused) chargeOpenRound();
     return result;
   }
 }
@@ -302,10 +326,11 @@ async function runTool(
     });
     return out;
   } catch (err) {
-    if (ctx.signal.aborted) throw err;
-    // A refused image is still billed (ImageRefused carries its cost).
+    // A refused, stopped or timed-out image is still billed (its error
+    // carries the cost), Stop included.
     const cost = Number((err as { cost?: unknown })?.cost ?? 0);
     if (cost > 0) ctx.addCost(cost);
+    if (ctx.signal.aborted) throw err;
     const ms = Date.now() - started;
     result.tools.push({ name: tool.name, args, ok: false, ms });
     emit({

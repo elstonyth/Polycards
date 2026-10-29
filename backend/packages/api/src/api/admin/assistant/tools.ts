@@ -2,6 +2,7 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 import { BRAND_LOGO_B64 } from '../../../modules/packs/pull-card-assets';
 import { capBody } from '../../reports/admin/proxy';
 import type { Access, Need } from './access';
+import type { Proposal } from './confirm';
 import { adminReadAs, callReport, type ReportImage } from './bridge';
 import { brandImage, generateImage } from './images';
 import { artPrompt } from './brand-style';
@@ -41,6 +42,8 @@ export type ToolCtx = {
   userText?: string;
   /** Adds an image model's cost to the turn. */
   addCost(usd: number): void;
+  /** Shows the person a note or task to save with a tap (confirm.ts). */
+  propose?(proposal: Proposal, summary: string): void;
   signal: AbortSignal;
 };
 
@@ -682,7 +685,8 @@ export const TOOLS: AssistantTool[] = [
         reference_urls: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional: up to 4 image URLs (find_assets, search_chats) the image model should follow for content, e.g. a past poster to vary.',
+          description:
+            'Optional: up to 4 image URLs (find_assets, search_chats) the image model should follow for content, e.g. a past poster to vary.',
         },
       },
       ['scene', 'headline'],
@@ -704,7 +708,9 @@ export const TOOLS: AssistantTool[] = [
       if (bad) throw new Error(bad);
       const featureUrl = s(args.feature_url);
       // Loaded before the image is paid for: a bad URL fails first.
-      const feature = featureUrl ? await assetBytes(featureUrl, ctx.container) : undefined;
+      const feature = featureUrl
+        ? await assetBytes(featureUrl, ctx.container)
+        : undefined;
       const attached = [
         ...(b(args.use_attached) ? ctx.attachments : []),
         ...(await assetDataUrls(args.reference_urls, ctx.container)),
@@ -756,7 +762,8 @@ export const TOOLS: AssistantTool[] = [
         reference_urls: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional: up to 4 image URLs (find_assets, search_chats) to follow for content: a pack or card to show, or a past image to vary.',
+          description:
+            'Optional: up to 4 image URLs (find_assets, search_chats) to follow for content: a pack or card to show, or a past image to vary.',
         },
       },
       ['prompt'],

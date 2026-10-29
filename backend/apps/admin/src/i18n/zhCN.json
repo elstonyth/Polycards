@@ -422,7 +422,9 @@
       "daily_cap": "你今天的助手额度已用完，马来西亚时间 00:00 重置。",
       "bad_voice_model": "设置 → AI 助手里的朗读模型或声音无法使用，需要管理员换一个。",
       "bad_stt_model": "设置 → AI 助手里的听写模型无法使用，需要管理员换一个。",
-      "no_audio": "朗读模型没有返回声音。请再试一次，或在设置 → AI 助手换一个朗读模型。"
+      "no_audio": "朗读模型没有返回声音。请再试一次，或在设置 → AI 助手换一个朗读模型。",
+      "confirm_expired": "已过期，请重新提问。",
+      "confirm_refused": "保存失败：{{reason}}"
     },
     "spend": {
       "today": "今日已用 USD {{spent}} / {{cap}}",
@@ -433,6 +435,13 @@
       "copy": "复制",
       "copied": "已复制",
       "copyFailed": "复制失败"
+    },
+    "confirm": {
+      "saveNote": "保存笔记",
+      "saveTask": "保存任务",
+      "saved": "已保存",
+      "taskSaved": "任务已保存",
+      "hint": "点保存才会保留。"
     },
     "copy": "复制",
     "copied": "已复制。",

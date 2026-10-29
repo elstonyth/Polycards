@@ -52,8 +52,14 @@ class AssistantModuleService extends MedusaService({
    *  not reset the cap. */
   async spentToday(userId: string, now: Date = new Date()): Promise<number> {
     const since = mytDayStart(now);
+    // A chat is bumped when an answer starts; one started before midnight
+    // and saved after must still count today, so chats bumped up to 30
+    // minutes earlier are looked at too (an answer runs at most 4).
     const convs = await this.listAssistantConversations(
-      { user_id: userId, last_message_at: { $gte: since } },
+      {
+        user_id: userId,
+        last_message_at: { $gte: new Date(since.getTime() - 30 * 60_000) },
+      },
       { select: ['id'], withDeleted: true },
     );
     if (!convs.length) return 0;

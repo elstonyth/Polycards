@@ -96,6 +96,34 @@ const fake = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (c) => (raw += c));
   req.on('end', () => {
+    // OpenRouter's other models, for the Settings dropdowns.
+    if (/\/models(\?output_modalities=image)?$/.test(req.url ?? '')) {
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          data: [
+            {
+              id: 'anthropic/claude-sonnet-5.5',
+              supported_parameters: ['tools'],
+              architecture: { output_modalities: ['text'] },
+            },
+            {
+              id: 'google/gemini-3.5-flash-lite',
+              supported_parameters: ['tools'],
+              architecture: {
+                input_modalities: ['text', 'audio'],
+                output_modalities: ['text'],
+              },
+            },
+            {
+              id: 'google/gemini-3.1-flash-image',
+              architecture: { output_modalities: ['image', 'text'] },
+            },
+          ],
+        }),
+      );
+      return;
+    }
     // OpenRouter's speaking models: priced per character only, so a
     // reading's estimate is its length x 0.00001.
     if (req.url?.includes('/models?output_modalities=speech')) {
@@ -586,6 +614,16 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(403);
       });
 
+      it('checks the login before reading a chat body', async () => {
+        // Signed out, with a body that would fail to parse: refused as signed
+        // out (401), so nobody signed out makes the server read 10 MB.
+        const res = await api.post('/admin/assistant/chat', '{"message": ', {
+          headers: { 'content-type': 'application/json' },
+          validateStatus: () => true,
+        });
+        expect(res.status).toBe(401);
+      });
+
       it('hears a spoken question, answers it, and reads the answer aloud within the cap', async () => {
         await saveKey();
         const container = getContainer();
@@ -625,8 +663,18 @@ medusaIntegrationTestRunner({
           stt_model: 'google/gemini-3.5-flash-lite',
           voice_model: 'google/gemini-3.8-flash-lite-tts',
           voice: 'Puck',
+          // each dropdown: the models that can do that field's job
+          chat_models: [
+            'anthropic/claude-sonnet-5.5',
+            'google/gemini-3.5-flash-lite',
+          ],
+          image_models: ['google/gemini-3.1-flash-image'],
+          stt_models: ['google/gemini-3.5-flash-lite'],
           speech_models: [
-            { id: 'google/gemini-3.8-flash-lite-tts', voices: ['Kore', 'Puck'] },
+            {
+              id: 'google/gemini-3.8-flash-lite-tts',
+              voices: ['Kore', 'Puck'],
+            },
           ],
         });
 
@@ -667,14 +715,16 @@ medusaIntegrationTestRunner({
         const spoken = await api.post(
           '/admin/assistant/speak',
           { message_id: done.message_id },
-          { ...admin, responseType: 'text', transformResponse: (d: string) => d },
+          {
+            ...admin,
+            responseType: 'text',
+            transformResponse: (d: string) => d,
+          },
         );
         const heard = lines(spoken.data as string);
         expect(heard[0]).toEqual({ type: 'format', rate: 24000 });
         expect(heard.at(-1)?.type).toBe('done');
-        expect(
-          heard.slice(1, -1).every((e) => e.type === 'audio'),
-        ).toBe(true);
+        expect(heard.slice(1, -1).every((e) => e.type === 'audio')).toBe(true);
         expect(voiceCalls[1]).toEqual({
           model: 'google/gemini-3.8-flash-lite-tts',
           input: 'There are 0 groups.',
@@ -796,6 +846,17 @@ medusaIntegrationTestRunner({
           : String(c);
       };
 
+      // A note or task is only proposed in the stream; the person's tap
+      // (POST /admin/assistant/confirm) saves it.
+      const tokenOf = (events: Record<string, unknown>[]) =>
+        String(events.find((e) => e.type === 'confirm')?.token ?? '');
+      const tap = (who: typeof admin, token: string) =>
+        api.post(
+          '/admin/assistant/confirm',
+          { token },
+          { ...who, validateStatus: () => true },
+        );
+
       it('keeps notes per person, shares one only for an admin, and searches past chats', async () => {
         await saveKey();
         once('remember', {
@@ -807,10 +868,18 @@ medusaIntegrationTestRunner({
           'Only an admin can save a note for everyone',
         );
         once('remember', { note: 'Restock the 151 boxes on Fridays.' });
-        await chat(anson, 'remember: restock Fridays');
-        expect(lastTool()).toContain('"saved":true');
-
+        const asked = await chat(anson, 'remember: restock Fridays');
+        expect(lastTool()).toContain('"saved":false');
         script = () => [say('ok')];
+        await chat(anson, 'hello');
+        // proposed only: not in his notes until he taps Save
+        expect(system()).not.toContain('Restock the 151 boxes on Fridays.');
+        // nobody else can save it for him
+        expect((await tap(admin, tokenOf(asked))).status).toBe(400);
+        const saved = await tap(anson, tokenOf(asked));
+        expect(saved.status).toBe(200);
+        expect(saved.data).toMatchObject({ saved: true, kind: 'note' });
+
         await chat(anson, 'hello');
         expect(system()).toContain('Restock the 151 boxes on Fridays.');
         await chat(admin, 'hello');
@@ -820,8 +889,12 @@ medusaIntegrationTestRunner({
           note: 'Captions end with polycards.gg.',
           shared: true,
         });
-        await chat(admin, 'remember for everyone: Captions end with polycards.gg');
+        const sharing = await chat(
+          admin,
+          'remember for everyone: Captions end with polycards.gg',
+        );
         expect(lastTool()).toContain('"shared":true');
+        expect((await tap(admin, tokenOf(sharing))).status).toBe(200);
         script = () => [say('ok')];
         await chat(anson, 'hello again');
         expect(system()).toContain('[shared] Captions end with polycards.gg.');
@@ -840,8 +913,9 @@ medusaIntegrationTestRunner({
 
         // An admin's own note stays out of Anson's recall.
         once('remember', { note: 'The float tops up on Mondays.' });
-        await chat(admin, 'remember: the float tops up on Mondays');
-        expect(lastTool()).toContain('"saved":true');
+        const own = await chat(admin, 'remember: the float tops up on Mondays');
+        expect(lastTool()).toContain('"saved":false');
+        expect((await tap(admin, tokenOf(own))).status).toBe(200);
         once('recall', {});
         await chat(anson, 'what do you remember?');
         expect(lastTool()).toContain('Restock the 151 boxes on Fridays.');
@@ -917,10 +991,17 @@ medusaIntegrationTestRunner({
           every: 'day',
           time: '09:00',
         });
-        await chat(admin, 'every morning at 9 tell me how many player groups');
-        expect(lastTool()).toContain('"scheduled":true');
+        const setting = await chat(
+          admin,
+          'every morning at 9 tell me how many player groups',
+        );
+        expect(lastTool()).toContain('"scheduled":false');
         const assistant =
           container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
+        // nothing runs until the admin taps Save
+        expect(await assistant.listAssistantSchedules({})).toEqual([]);
+        const saved = await tap(admin, tokenOf(setting));
+        expect(saved.data).toMatchObject({ saved: true, kind: 'schedule' });
         const [task] = await assistant.listAssistantSchedules({});
         expect(task).toMatchObject({
           title: 'Morning groups',

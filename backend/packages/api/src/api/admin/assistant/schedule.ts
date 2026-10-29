@@ -47,12 +47,34 @@ export function nextRun(when: When, after: Date): Date {
 }
 
 /** Where the worker reaches the web server. */
-export const serverUrl = (): string =>
-  (
+/** Where the worker sends the run, with a token carrying all the owner's
+ *  roles: over https, or plain http only to this machine or an internal
+ *  service name (no dot: the app's private network). Throws otherwise (a
+ *  tunnel or http address in PAYMENT_CALLBACK_BASE must never get it). */
+export const serverUrl = (): string => {
+  const url = (
     process.env.ASSISTANT_SERVER_URL?.trim() ||
     process.env.PAYMENT_CALLBACK_BASE?.trim() ||
     `http://127.0.0.1:${process.env.PORT || 9000}`
   ).replace(/\/+$/, '');
+  let safe = false;
+  try {
+    const { protocol, hostname } = new URL(url);
+    safe =
+      protocol === 'https:' ||
+      (protocol === 'http:' &&
+        (['127.0.0.1', 'localhost', '[::1]'].includes(hostname) ||
+          /^[a-z][a-z0-9-]*$/i.test(hostname)));
+  } catch {
+    // not a URL at all
+  }
+  if (!safe) {
+    throw new Error(
+      'The scheduled task server address must be https (ASSISTANT_SERVER_URL or PAYMENT_CALLBACK_BASE).',
+    );
+  }
+  return url;
+};
 
 // A failed chat call, with the chat it ran in (null = none yet) and how soon
 // to try again (0 = wait for the next slot).

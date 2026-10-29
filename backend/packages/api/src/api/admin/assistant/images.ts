@@ -22,15 +22,39 @@ export class ImageRefused extends Error {
   }
 }
 
-/** One image from an OpenRouter image model, as bytes, and its cost. */
-export async function generateImage(opts: {
+type DrawOpts = {
   key: string;
   model: string;
   prompt: string;
   references?: string[];
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
-}): Promise<{ buffer: Buffer; cost: number }> {
+};
+
+// A draw stopped, timed out or cut off may still be billed, and no figure
+// comes back for it: it counts at this, above what image models charge per
+// image, so stopping never draws past the daily cap.
+const IMAGE_CEILING_USD = 0.2;
+
+const costOf = (body: { usage?: { cost?: number } } | null) =>
+  Math.max(0, Number(body?.usage?.cost ?? 0) || 0);
+
+/** One image from an OpenRouter image model, as bytes, and its cost. A draw
+ *  that fails other than by refusal throws with `cost` set to the ceiling. */
+export async function generateImage(
+  opts: DrawOpts,
+): Promise<{ buffer: Buffer; cost: number }> {
+  try {
+    return await draw(opts);
+  } catch (err) {
+    if (err instanceof ImageRefused) throw err;
+    throw Object.assign(err instanceof Error ? err : new Error(String(err)), {
+      cost: IMAGE_CEILING_USD,
+    });
+  }
+}
+
+async function draw(opts: DrawOpts): Promise<{ buffer: Buffer; cost: number }> {
   const answer = await (opts.fetchImpl ?? fetch)(openRouterUrl(), {
     method: 'POST',
     headers: {
@@ -82,12 +106,12 @@ export async function generateImage(opts: {
     const said = body?.choices?.[0]?.message?.content?.trim();
     throw new ImageRefused(
       `The image model returned no image${said ? `: ${said.slice(0, 300)}` : '.'}`,
-      Number(body?.usage?.cost ?? 0),
+      costOf(body),
     );
   }
   return {
     buffer: Buffer.from(data, 'base64'),
-    cost: Number(body?.usage?.cost ?? 0),
+    cost: costOf(body),
   };
 }
 
@@ -127,13 +151,14 @@ export async function brandImage(
     .toBuffer();
 }
 
-/** Stores an image for the chat (public file storage) and gives its URL. */
+/** Stores an image for the chat (public file storage, so the chat can show
+ *  it) and gives its URL and file id (deleting the chat deletes it). */
 export async function storeImage(
   container: MedusaContainer,
   image: Buffer,
   filename: string,
   mimeType = 'image/jpeg',
-): Promise<string> {
+): Promise<{ id: string; url: string }> {
   const { result } = await uploadFilesWorkflow(container).run({
     input: {
       files: [
@@ -148,5 +173,5 @@ export async function storeImage(
   });
   const url = result?.[0]?.url;
   if (!url) throw new Error('The image could not be stored.');
-  return url;
+  return { id: result[0].id, url };
 }

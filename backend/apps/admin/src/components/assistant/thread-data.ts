@@ -22,6 +22,16 @@ export type UiMessage = {
   stopped?: boolean;
   /** When the question went out: the thinking counter counts from it. */
   since?: number;
+  /** Notes or tasks the AI proposed, kept only once tapped. This session
+   *  only: a reload drops them. */
+  proposals?: Proposal[];
+};
+
+export type Proposal = {
+  token: string;
+  kind: 'note' | 'schedule';
+  summary: string;
+  state: 'waiting' | 'saving' | 'saved';
 };
 
 // Tools that draw: while one runs, a scanning placeholder holds its place.

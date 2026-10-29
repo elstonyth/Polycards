@@ -1968,7 +1968,9 @@
       "daily_cap": "You reached today's assistant limit. It resets at 00:00 Malaysia time.",
       "bad_voice_model": "The speaking model or voice in Settings → AI assistant can't be used. An admin must pick another.",
       "bad_stt_model": "The listening model in Settings → AI assistant can't be used. An admin must pick another.",
-      "no_audio": "The voice model sent no sound. Try again, or pick another speaking model in Settings → AI assistant."
+      "no_audio": "The voice model sent no sound. Try again, or pick another speaking model in Settings → AI assistant.",
+      "confirm_expired": "This has expired. Ask again.",
+      "confirm_refused": "Could not save: {{reason}}"
     },
     "tools": {
       "economy": "Economy totals",
@@ -2019,6 +2021,13 @@
       "copy": "Copy",
       "copied": "Copied",
       "copyFailed": "Couldn't copy"
+    },
+    "confirm": {
+      "saveNote": "Save note",
+      "saveTask": "Save task",
+      "saved": "Saved",
+      "taskSaved": "Task saved",
+      "hint": "Nothing is kept until you tap save."
     },
     "copy": "Copy",
     "copied": "Copied.",

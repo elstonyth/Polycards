@@ -51,15 +51,21 @@ export async function DELETE(
     return;
   }
   await assistant.softDeleteAssistantConversations([conversation.id]);
-  // Its stored speech (speak/route.ts) goes too. Best effort: the chat is
-  // already gone for the asker either way.
+  // Its stored speech (speak/route.ts) and the images drawn in it (public
+  // files: a screenshot can carry customer data into one) go too. Best
+  // effort: the chat is already gone for the asker either way.
   try {
-    const voiceRows = await assistant.listAssistantMessages(
-      { conversation_id: conversation.id, role: 'voice' },
-      { select: ['tools'] },
+    const rows = await assistant.listAssistantMessages(
+      { conversation_id: conversation.id, role: ['voice', 'assistant'] },
+      { select: ['tools', 'images'] },
     );
-    const fileIds = voiceRows
-      .map((r) => (r.tools as { file_id?: unknown } | null)?.file_id)
+    const fileIds = rows
+      .flatMap((r) => [
+        (r.tools as { file_id?: unknown } | null)?.file_id,
+        ...(Array.isArray(r.images)
+          ? (r.images as { file_id?: unknown }[]).map((i) => i?.file_id)
+          : []),
+      ])
       .filter((f): f is string => typeof f === 'string');
     if (fileIds.length) {
       await req.scope
@@ -70,7 +76,7 @@ export async function DELETE(
     req.scope
       .resolve(ContainerRegistrationKeys.LOGGER)
       .warn(
-        `[assistant] stored speech not deleted: ${(err as Error)?.message}`,
+        `[assistant] stored speech or images not deleted: ${(err as Error)?.message}`,
       );
   }
   res.json({ id: conversation.id, deleted: true });

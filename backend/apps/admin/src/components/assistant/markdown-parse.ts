@@ -26,8 +26,11 @@ export type Block =
       rows: string[][];
     };
 
+// Bounded repeats: an unclosed [ or ** repeated thousands of times in an
+// answer (planted in data the model read) would otherwise take quadratic
+// time on every streamed chunk and freeze the tab.
 const INLINE =
-  /(\*\*([^*]+)\*\*)|(`([^`]+)`)|(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))/g;
+  /(\*\*([^*]{1,500})\*\*)|(`([^`]{1,500})`)|(\[([^\]]{1,500})\]\((https?:\/\/[^\s)]{1,2000})\))/g;
 
 /** polycards.gg, www or admin, over http(s): no other subdomain is ours. */
 const ownSite = (href: string): boolean => {
@@ -108,8 +111,9 @@ export function tableTsv(rows: string[][]): string {
             .join('')
             .replace(/[\t\r\n]/g, ' ');
           // A sheet would run =IMAGE("https://…?d=…") from text a customer
-          // typed: a leading ' keeps it text. Plain numbers stay numbers.
-          return /^\s*[=+\-@]/.test(text) &&
+          // typed: a leading ' keeps it text, also behind quotes a sheet
+          // unwraps on paste ("=IMAGE(…)"). Plain numbers stay numbers.
+          return /^[\s"']*[=+\-@]/.test(text) &&
             !/^[-+]?\d[\d,]*(\.\d+)?%?$/.test(text)
             ? `'${text}`
             : text;

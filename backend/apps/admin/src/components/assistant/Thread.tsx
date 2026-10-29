@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowPathMini, SquareTwoStack } from '@medusajs/icons';
+import { ArrowPathMini, CheckMini, SquareTwoStack } from '@medusajs/icons';
 import { toast } from '@medusajs/ui';
 import { useTranslation } from 'react-i18next';
 import { AiOrb } from './AiOrb';
@@ -16,6 +16,7 @@ export function Thread({
   reading,
   onRetry,
   canRetry,
+  onConfirm,
 }: {
   messages: UiMessage[];
   /** Read an answer aloud (by its saved id), or stop it. */
@@ -24,6 +25,8 @@ export function Thread({
   /** Ask a failed answer's question again (stable: Message is memoised). */
   onRetry?: (question: UiMessage) => void;
   canRetry?: boolean;
+  /** Save a proposed note or task (stable: Message is memoised). */
+  onConfirm?: (messageKey: string, token: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-y-6">
@@ -39,6 +42,7 @@ export function Thread({
               : undefined
           }
           onRetry={canRetry ? onRetry : undefined}
+          onConfirm={onConfirm}
         />
       ))}
     </div>
@@ -53,6 +57,7 @@ const Message = memo(function Message({
   speaking,
   asked,
   onRetry,
+  onConfirm,
 }: {
   m: UiMessage;
   onSpeak?: (messageId: string) => void;
@@ -60,6 +65,7 @@ const Message = memo(function Message({
   /** The question this answer is for. */
   asked?: UiMessage;
   onRetry?: (question: UiMessage) => void;
+  onConfirm?: (messageKey: string, token: string) => void;
 }) {
   const { t } = useTranslation();
   const finished = !m.pending && !!m.content;
@@ -148,7 +154,8 @@ const Message = memo(function Message({
             )
           ) : (
             !m.error &&
-            m.images.length === 0 && (
+            m.images.length === 0 &&
+            !m.proposals?.length && (
               <span className="text-ui-fg-muted text-[13px]">
                 {t('assistant.stopped')}
               </span>
@@ -160,6 +167,41 @@ const Message = memo(function Message({
             </div>
           )}
         </div>
+        {/* The summary is plain text, never markdown: planted data writes it. */}
+        {onConfirm &&
+          m.proposals?.map((p) => (
+            <div
+              key={p.token}
+              className="border-ui-border-base bg-ui-bg-base flex flex-col gap-y-2 rounded-xl border px-3 py-2.5"
+            >
+              <p className="text-ui-fg-base whitespace-pre-wrap break-words text-[13px]">
+                {p.summary}
+              </p>
+              <div className="flex flex-wrap items-center gap-x-2">
+                <button
+                  type="button"
+                  disabled={p.state !== 'waiting'}
+                  aria-busy={p.state === 'saving'}
+                  onClick={() => onConfirm(m.key, p.token)}
+                  className={`flex w-fit items-center gap-x-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${p.state === 'saved' ? 'border-transparent text-ui-tag-green-text' : 'border-ui-border-base text-ui-fg-base hover:bg-ui-bg-base-hover disabled:opacity-50'}`}
+                >
+                  {p.state === 'saved' && <CheckMini />}
+                  {p.state === 'saved'
+                    ? p.kind === 'note'
+                      ? t('assistant.confirm.saved')
+                      : t('assistant.confirm.taskSaved')
+                    : p.kind === 'note'
+                      ? t('assistant.confirm.saveNote')
+                      : t('assistant.confirm.saveTask')}
+                </button>
+                {p.state !== 'saved' && (
+                  <span className="text-ui-fg-muted text-[11px]">
+                    {t('assistant.confirm.hint')}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
         {/* Outside the live region: its buttons are not news to announce. */}
         {(finished || retry) && (
           <div className="flex flex-wrap items-center gap-x-1">

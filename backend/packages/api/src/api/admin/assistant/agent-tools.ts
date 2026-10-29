@@ -11,6 +11,7 @@ import {
   MAX_DECODE_PIXELS,
 } from '../../utils/image-fetch';
 import type { Need } from './access';
+import type { Proposal } from './confirm';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 
 // The assistant's own memory and search (owner, 2026-10-29: "it will search
@@ -32,7 +33,22 @@ type Ctx = {
   access: { userId: string; superAdmin: boolean };
   /** The asker's message this turn. */
   userText?: string;
+  /** Shows the person a note or task to save with a tap (confirm.ts). */
+  propose?(proposal: Proposal, summary: string): void;
 };
+
+// Notes and tasks are saved only when the person taps Save (confirm.ts):
+// these tools propose. Without a chat to show the button in, nothing saves.
+const proposeOrRefuse = (ctx: Ctx, proposal: Proposal, summary: string) => {
+  if (!ctx.propose) {
+    throw new Error(
+      'This is saved only when the person taps Save in the chat; nothing was saved.',
+    );
+  }
+  ctx.propose(proposal, summary);
+};
+const WAITING =
+  'Nothing is saved yet: a Save button is under your answer, and it is kept only when the person taps it. Tell them so in one short line.';
 
 type AgentTool = {
   name: string;
@@ -146,12 +162,12 @@ export const AGENT_TOOLS: AgentTool[] = [
           "A note for everyone must be the admin's own words from this message, copied exactly. Saved nothing.",
         );
       }
-      const saved = await assistantOf(ctx).createAssistantMemories({
-        scope: shared ? 'shared' : 'user',
-        user_id: ctx.access.userId,
-        content: note,
-      });
-      return JSON.stringify({ saved: true, id: saved.id, shared });
+      proposeOrRefuse(
+        ctx,
+        { kind: 'note', note, shared },
+        `${shared ? 'Note for everyone' : 'Note'}: ${note}`,
+      );
+      return JSON.stringify({ saved: false, waiting: WAITING, shared });
     },
   },
   {
@@ -435,19 +451,19 @@ export const AGENT_TOOLS: AgentTool[] = [
           `This person already has ${MAX_SCHEDULES} scheduled tasks; cancel one first. Set nothing.`,
         );
       }
-      const saved = await assistant.createAssistantSchedules({
-        user_id: ctx.access.userId,
-        title,
-        instruction,
-        every,
-        at_time,
-        weekday,
-        next_run_at,
-      });
+      proposeOrRefuse(
+        ctx,
+        { kind: 'schedule', title, instruction, every, at_time, weekday },
+        `${
+          every === 'week'
+            ? `Every ${WEEKDAYS[(weekday ?? 1) - 1]} ${at_time}`
+            : `Every day ${at_time}`
+        } (Malaysia time) · ${title}: ${instruction}`,
+      );
       return JSON.stringify({
-        scheduled: true,
-        id: saved.id,
-        next_run: myt(next_run_at),
+        scheduled: false,
+        waiting: WAITING,
+        first_run_if_saved_now: myt(next_run_at),
       });
     },
   },
@@ -586,11 +602,9 @@ export async function assetDataUrls(
 // public host, so a URL the model wrote (say, after reading a customer field
 // that told it to) could carry what it read to any server (security review
 // 2026-10-29).
-const OWN_SITES = [
-  'https://polycards.gg',
-  'https://www.polycards.gg',
-  'https://admin.polycards.gg',
-];
+const OWN_SITES = ['https://polycards.gg', 'https://www.polycards.gg'];
+// admin.polycards.gg is the backend itself: only its public card images.
+const BACKEND_SITE = 'https://admin.polycards.gg';
 const originOf = (u: string | null | undefined) => {
   try {
     return u ? new URL(u).origin : null;
@@ -601,6 +615,13 @@ const originOf = (u: string | null | undefined) => {
 
 export const isOwnOrigin = (url: string) => {
   const origin = originOf(url);
+  if (origin === BACKEND_SITE) {
+    try {
+      return new URL(url).pathname.startsWith('/cdn/');
+    } catch {
+      return false;
+    }
+  }
   return (
     origin !== null &&
     // Never the backend's own origin (a GET there runs routes on the model's

@@ -243,10 +243,11 @@ const AiSettingsPage = () => {
             <Label size="small" htmlFor="ai-chat-model">
               {t('assistant.settings.chatModel')}
             </Label>
-            <Input
+            <ModelSelect
               id="ai-chat-model"
               value={chatModel}
-              onChange={(e) => setChatModel(e.target.value)}
+              models={s?.chat_models ?? []}
+              onChange={setChatModel}
             />
             <Text size="xsmall" className="text-ui-fg-muted">
               {t('assistant.settings.chatModelHelp')}
@@ -256,10 +257,11 @@ const AiSettingsPage = () => {
             <Label size="small" htmlFor="ai-image-model">
               {t('assistant.settings.imageModel')}
             </Label>
-            <Input
+            <ModelSelect
               id="ai-image-model"
               value={imageModel}
-              onChange={(e) => setImageModel(e.target.value)}
+              models={s?.image_models ?? []}
+              onChange={setImageModel}
             />
             <Text size="xsmall" className="text-ui-fg-muted">
               {t('assistant.settings.imageModelHelp')}
@@ -316,10 +318,11 @@ const AiSettingsPage = () => {
               <Label size="small" htmlFor="ai-stt-model">
                 {t('assistant.settings.sttModel')}
               </Label>
-              <Input
+              <ModelSelect
                 id="ai-stt-model"
                 value={sttModel}
-                onChange={(e) => setSttModel(e.target.value)}
+                models={s.stt_models}
+                onChange={setSttModel}
               />
               <Text
                 size="xsmall"
@@ -435,6 +438,43 @@ const AiSettingsPage = () => {
     </div>
   );
 };
+
+/** A model field: a dropdown of every OpenRouter model that can do the job
+ *  (the saved one kept even when OpenRouter no longer lists it), or a typed
+ *  id while the list can't be had. */
+function ModelSelect({
+  id,
+  value,
+  models,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  models: string[];
+  onChange: (model: string) => void;
+}) {
+  if (!models.length) {
+    return (
+      <Input id={id} value={value} onChange={(e) => onChange(e.target.value)} />
+    );
+  }
+  const options =
+    !value || models.includes(value) ? models : [value, ...models];
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <Select.Trigger id={id}>
+        <Select.Value />
+      </Select.Trigger>
+      <Select.Content>
+        {options.map((m) => (
+          <Select.Item key={m} value={m}>
+            {m}
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select>
+  );
+}
 
 /** "Hear it": plays a short sample in the form's voice, saved or not. */
 function HearVoice({
