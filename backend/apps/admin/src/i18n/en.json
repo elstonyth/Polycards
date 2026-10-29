@@ -121,9 +121,19 @@
       "create": "Create free pack",
       "hint": "One active free pack at a time. Price is fixed at RM 0 — new accounts get one open; the won card stays locked until their first paid open."
     },
+    "packType": {
+      "classic": "Classic",
+      "original": "Original",
+      "special": "Special"
+    },
+    "language": {
+      "en": "EN",
+      "jp": "JP"
+    },
     "list": {
       "pack": "Pack",
       "category": "Category",
+      "packType": "Type",
       "status": "Status",
       "price": "Price",
       "order": "Order",
@@ -178,6 +188,9 @@
       "slugHint": "Unique, lowercase, kebab-case. Permanent — it keys the pack and its /claw URL.",
       "titleField": "Title",
       "category": "Category",
+      "packType": "Pack type",
+      "language": "Language",
+      "languageHint": "Original packs only (one set's own cards).",
       "statusField": "Status",
       "active": "Active",
       "soldOut": "Sold out",

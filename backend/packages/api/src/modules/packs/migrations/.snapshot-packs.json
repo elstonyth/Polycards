@@ -3847,6 +3847,33 @@
           "nullable": false,
           "mappedType": "text"
         },
+        "pack_type": {
+          "name": "pack_type",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "enumItems": [
+            "classic",
+            "original",
+            "special"
+          ],
+          "mappedType": "enum"
+        },
+        "language": {
+          "name": "language",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "enumItems": [
+            "en",
+            "jp"
+          ],
+          "mappedType": "enum"
+        },
         "price": {
           "name": "price",
           "type": "numeric",

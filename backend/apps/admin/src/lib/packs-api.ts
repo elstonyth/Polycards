@@ -23,10 +23,19 @@ export interface PublishedOdds {
   decimals: number;
 }
 
+/** Operator-set pack tags. Classic = the Bronze→Diamond ladder, Original =
+ *  one set's own cards (and the only type with a language), Special = the rest. */
+export type PackType = 'classic' | 'original' | 'special';
+export type PackLanguage = 'en' | 'jp';
+
 export interface AdminPack {
   slug: string;
   title: string;
   category: string;
+  /** Null = not tagged yet. */
+  pack_type: PackType | null;
+  /** Original packs only; null otherwise (or not set yet). */
+  language: PackLanguage | null;
   status: 'active' | 'draft';
   /** false = sold out (see lib/pack-status.ts). */
   in_stock: boolean;
@@ -72,6 +81,10 @@ export interface AdminPackWrite {
   slug?: string;
   title: string;
   category: string;
+  /** OMITTED = keep both stored tags; null = clear both. */
+  pack_type?: PackType | null;
+  /** Sent with pack_type; non-null only when pack_type is 'original'. */
+  language?: PackLanguage | null;
   price: number;
   image: string;
   /** Hero scene; null clears it (stage falls back to `image`). */
