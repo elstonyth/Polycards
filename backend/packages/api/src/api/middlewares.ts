@@ -1208,7 +1208,7 @@ export default defineMiddlewares({
       middlewares: [
         adminActionRateLimit,
         assistantChatRateLimit,
-        express.json({ limit: '10mb' }),
+        express.json({ limit: '10mb', inflate: false }),
       ],
     },
     {
