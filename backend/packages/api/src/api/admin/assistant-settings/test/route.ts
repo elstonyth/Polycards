@@ -6,14 +6,20 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
+import { accessFor } from '../../assistant/access';
 import { keyInfo } from '../../assistant/openrouter';
 
 // POST /admin/assistant-settings/test: checks the stored key with OpenRouter
-// and answers its account (credit used and left), never the key.
+// and answers its account (credit used and left), never the key. Super admins
+// only, like the settings themselves.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
+  if (!accessFor(req.scope, req.auth_context).superAdmin) {
+    res.status(403).json({ message: 'Only super admins test the AI key.' });
+    return;
+  }
   const s = await req.scope
     .resolve<AssistantModuleService>(ASSISTANT_MODULE)
     .settings();

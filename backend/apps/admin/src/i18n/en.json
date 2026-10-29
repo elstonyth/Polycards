@@ -1836,7 +1836,7 @@
     "screenshotsSent_one": "{{count}} screenshot sent",
     "screenshotsSent_other": "{{count}} screenshots sent",
     "noKeyAdmin": "The assistant has no AI key yet.",
-    "openSettings": "Add it in Settings → AI",
+    "openSettings": "Add it in Settings → AI assistant",
     "noKeyStaff": "The assistant is not set up yet. Ask an admin to add the AI key.",
     "footnote": "Answers come from live data and can still be wrong — check before you post or pay.",
     "suggest": {
@@ -1871,7 +1871,7 @@
       "imageModel": "Image model",
       "imageModelHelp": "e.g. google/gemini-3.1-flash-image",
       "cap": "Daily limit per person (USD)",
-      "capHelp": "Resets at 00:00 Malaysia time.",
+      "capHelp": "From 0.5 to 1000. Resets at 00:00 Malaysia time.",
       "save": "Save",
       "saved": "Saved.",
       "styleTitle": "Image style",
@@ -1883,10 +1883,12 @@
       "refsDefault": "Default: our posted posters",
       "refsAdd": "Add a reference",
       "refsRemove": "Remove reference",
-      "refsUseDefault": "Back to the defaults"
+      "refsUseDefault": "Back to the defaults",
+      "refsReplace": "Your own posts replace the built-in set. Remove all of yours to bring the built-in set back."
     },
     "review": {
       "title": "Assistant conversations",
+      "truncated": "Showing the newest 500 messages; older ones are not shown.",
       "subtitle": "Every question staff asked the assistant, newest first.",
       "empty": "No conversations yet.",
       "when": "Last message",
@@ -1898,10 +1900,13 @@
       "deleted": "Deleted"
     },
     "deleteConfirm": "Delete this chat? It stays in the owner's review.",
+    "stopped": "Stopped before an answer.",
     "history": "History",
     "imageFailed": "The image could not be loaded.",
+    "loadError": "Could not load: {{message}}",
     "err": {
-      "no_key": "The assistant has no AI key yet. An admin adds it in Settings → AI.",
+      "bad_model": "The chat model in Settings → AI assistant is not allowed here (web-search models are off). An admin must pick another.",
+      "no_key": "The assistant has no AI key yet. An admin adds it in Settings → AI assistant.",
       "busy": "Your previous question is still being answered. Wait for it, then ask again.",
       "daily_cap": "You reached today's assistant limit. It resets at 00:00 Malaysia time."
     },

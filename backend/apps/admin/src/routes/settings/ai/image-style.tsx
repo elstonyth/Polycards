@@ -113,6 +113,9 @@ export function ImageStyleCard({
             ? t('assistant.settings.refsHelp')
             : `${t('assistant.settings.refsDefault')} · ${t('assistant.settings.refsHelp')}`}
         </Text>
+        <Text size="small" className="text-ui-fg-subtle mt-1">
+          {t('assistant.settings.refsReplace')}
+        </Text>
       </div>
       <div className="flex flex-wrap gap-3">
         {shown.map((r, i) => (

@@ -1,7 +1,12 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
-import { nextRun, runDueSchedules, SCHEDULED_PREFIX } from '../schedule';
+import {
+  nextRun,
+  runDueSchedules,
+  SCHEDULED_PREFIX,
+  STARTED_NOTE,
+} from '../schedule';
 
 // 2026-10-29 is a Thursday; Malaysia time is UTC+8.
 const at = (iso: string) => new Date(iso);
@@ -80,37 +85,57 @@ describe('runDueSchedules', () => {
     body?: string;
     status?: number;
     first?: Response;
+    now?: Date;
+    fetchImpl?: jest.Mock;
   }) {
-    const claims: Record<string, unknown>[] = [];
-    const chain = {
-      where: () => chain,
-      whereNull: () => chain,
-      update: (v: Record<string, unknown>) => {
-        claims.push(v);
-        return chain;
-      },
-      returning: async () => (opts.claimed === false ? [] : [{ id: 'x' }]),
+    // Every pg query: what it filtered on and what it wrote. [0] is the claim.
+    type Query = {
+      where?: Record<string, unknown>;
+      whereNull?: string;
+      update?: Record<string, unknown>;
     };
-    const updates: Record<string, unknown>[] = [];
+    const queries: Query[] = [];
+    const pg = () => {
+      const q: Query = {};
+      queries.push(q);
+      const chain = {
+        where: (v: Record<string, unknown>) => ((q.where = v), chain),
+        whereNull: (c: string) => ((q.whereNull = c), chain),
+        update: (v: Record<string, unknown>) => ((q.update = v), chain),
+        returning: async () => (opts.claimed === false ? [] : [{ id: 'x' }]),
+      };
+      return chain;
+    };
+    let done!: () => void;
+    const finished = new Promise<void>((r) => (done = r));
+    const logger = {
+      info: jest.fn(() => done()),
+      warn: jest.fn(() => done()),
+      error: jest.fn(),
+    };
+    const list = jest.fn(async (_filter: unknown) => opts.tasks);
+    const graph = jest.fn(async (_query: unknown) => ({
+      data: [
+        {
+          id: 'user_1',
+          rbac_roles: (opts.roles ?? ['support_viewer']).map((id) => ({
+            id,
+          })),
+        },
+      ],
+    }));
     const deps: Record<string, unknown> = {
       [ASSISTANT_MODULE]: {
-        listAssistantSchedules: jest.fn(async () => opts.tasks),
-        updateAssistantSchedules: jest.fn(async (v) => updates.push(v)),
+        listAssistantSchedules: list,
+        // As Medusa does for a soft-deleted (cancelled) row: the job must not
+        // write through it.
+        updateAssistantSchedules: jest.fn(async () => {
+          throw new Error('AssistantSchedule with id: aisch_1 was not found');
+        }),
       },
-      [ContainerRegistrationKeys.PG_CONNECTION]: () => chain,
-      [ContainerRegistrationKeys.LOGGER]: { info: jest.fn(), warn: jest.fn() },
-      [ContainerRegistrationKeys.QUERY]: {
-        graph: jest.fn(async () => ({
-          data: [
-            {
-              id: 'user_1',
-              rbac_roles: (opts.roles ?? ['support_viewer']).map((id) => ({
-                id,
-              })),
-            },
-          ],
-        })),
-      },
+      [ContainerRegistrationKeys.PG_CONNECTION]: pg,
+      [ContainerRegistrationKeys.LOGGER]: logger,
+      [ContainerRegistrationKeys.QUERY]: { graph },
       [ContainerRegistrationKeys.CONFIG_MODULE]: {
         projectConfig: { http: { jwtSecret: 'test-secret', jwtOptions: {} } },
       },
@@ -119,31 +144,48 @@ describe('runDueSchedules', () => {
       resolve: (k: string) => deps[k],
     } as unknown as MedusaContainer;
     let first = opts.first;
-    const fetchImpl = jest.fn(
-      async () =>
-        (first ? ((r) => ((first = undefined), r))(first) : null) ??
-        new Response(
-          opts.body ??
-            '{"type":"conversation","id":"aiconv_9"}\n{"type":"text","delta":"hi"}\n{"type":"done"}\n',
-          { status: opts.status ?? 200 },
-        ),
-    );
-    const run = () =>
+    const fetchImpl =
+      opts.fetchImpl ??
+      jest.fn(
+        async () =>
+          (first ? ((r) => ((first = undefined), r))(first) : null) ??
+          new Response(
+            opts.body ??
+              '{"type":"conversation","id":"aiconv_9"}\n{"type":"text","delta":"hi"}\n{"type":"done"}\n',
+            { status: opts.status ?? 200 },
+          ),
+      );
+    const run = (extra: { wait?: boolean } = {}) =>
       runDueSchedules(container, {
-        now: NOW,
+        now: opts.now ?? NOW,
         base: 'http://srv',
         fetchImpl: fetchImpl as unknown as typeof fetch,
+        wait: true,
+        ...extra,
       });
-    return { run, fetchImpl, claims, updates };
+    return { run, fetchImpl, queries, list, graph, logger, finished };
   }
 
   it('asks the chat as the staff member, with their current roles', async () => {
     const s = setup({ tasks: [task()] });
     expect(await s.run()).toBe(1);
-    // Claimed by moving the next run to tomorrow first.
-    expect(s.claims[0]).toEqual({
-      next_run_at: at('2026-10-30T01:00:00Z'),
-      last_run_at: NOW,
+    expect(s.list.mock.calls[0][0]).toEqual({
+      enabled: true,
+      next_run_at: { $lte: NOW },
+    });
+    // Claimed by moving the next run to tomorrow first, only if no one else
+    // has, marked started until the result is in.
+    expect(s.queries[0]).toEqual({
+      where: { id: 'aisch_1', next_run_at: NOW },
+      whereNull: 'deleted_at',
+      update: {
+        next_run_at: at('2026-10-30T01:00:00Z'),
+        last_run_at: NOW,
+        last_error: STARTED_NOTE,
+      },
+    });
+    expect(s.graph.mock.calls[0][0]).toMatchObject({
+      filters: { id: 'user_1' },
     });
     const [url, init] = s.fetchImpl.mock.calls[0] as unknown as [
       string,
@@ -164,9 +206,14 @@ describe('runDueSchedules', () => {
       actor_type: 'user',
       app_metadata: { user_id: 'user_1', roles: ['support_viewer'] },
     });
-    expect(s.updates).toEqual([
-      { id: 'aisch_1', conversation_id: 'aiconv_9', last_error: null },
-    ]);
+    // It carries every role the owner has, so it lives only a minute.
+    expect(claims.exp - claims.iat).toBe(60);
+    // The started note is cleared with the result.
+    expect(s.queries[1]).toEqual({
+      where: { id: 'aisch_1' },
+      whereNull: 'deleted_at',
+      update: { conversation_id: 'aiconv_9', last_error: null },
+    });
   });
 
   it('skips a task another worker already claimed', async () => {
@@ -175,19 +222,42 @@ describe('runDueSchedules', () => {
     expect(s.fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('returns without waiting for the answer, and never starts it twice', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const s = setup({
+      tasks: [task({ id: 'aisch_slow' })],
+      fetchImpl: jest.fn(async () => {
+        await gate;
+        return new Response('{"type":"conversation","id":"aiconv_9"}\n');
+      }),
+    });
+    // As the job calls it: back at once, the answer still coming.
+    expect(await s.run({ wait: undefined })).toBe(1);
+    expect(s.queries).toHaveLength(1);
+    // Still running here: the next tick leaves it alone, unclaimed.
+    expect(await s.run({ wait: undefined })).toBe(0);
+    expect(s.queries).toHaveLength(1);
+    release();
+    await s.finished;
+    expect(s.fetchImpl).toHaveBeenCalledTimes(1);
+    expect(s.queries[1].update).toEqual({
+      conversation_id: 'aiconv_9',
+      last_error: null,
+    });
+  });
+
   it('retries in two minutes when the person is mid-chat', async () => {
     const s = setup({
       tasks: [task({ conversation_id: 'aiconv_9' })],
       body: '{"type":"error","code":"busy","message":"Your previous question is still being answered."}\n',
     });
     await s.run();
-    expect(s.updates).toEqual([
-      {
-        id: 'aisch_1',
-        last_error: 'Your previous question is still being answered.',
-        next_run_at: at('2026-10-29T01:02:00Z'),
-      },
-    ]);
+    expect(s.queries[1].update).toEqual({
+      last_error: 'Your previous question is still being answered.',
+      conversation_id: 'aiconv_9',
+      next_run_at: at('2026-10-29T01:02:00Z'),
+    });
   });
 
   it('records why a run failed and keeps the schedule', async () => {
@@ -196,16 +266,75 @@ describe('runDueSchedules', () => {
       body: '{"type":"error","code":"daily_cap","message":"Daily limit reached."}\n',
     });
     await s.run();
-    expect(s.updates).toEqual([
-      { id: 'aisch_1', last_error: 'Daily limit reached.' },
-    ]);
+    expect(s.queries[1].update).toEqual({
+      last_error: 'Daily limit reached.',
+      conversation_id: null,
+    });
+  });
+
+  it('keeps the chat a failed run made, and retries a hiccup in 5 minutes', async () => {
+    const s = setup({
+      tasks: [task()],
+      body: '{"type":"conversation","id":"aiconv_9"}\n{"type":"error","message":"The assistant hit a problem. Try again in a moment."}\n',
+    });
+    await s.run();
+    expect(s.queries[1].update).toEqual({
+      last_error: 'The assistant hit a problem. Try again in a moment.',
+      conversation_id: 'aiconv_9',
+      next_run_at: at('2026-10-29T01:05:00Z'),
+    });
+  });
+
+  it('retries a 5xx or 429 answer, not another 4xx', async () => {
+    for (const [status, retried] of [
+      [503, true],
+      [429, true],
+      [400, false],
+    ] as const) {
+      const s = setup({ tasks: [task()], status, body: '{"message":"no"}' });
+      await s.run();
+      expect(s.queries[1].update).toMatchObject({ last_error: 'no' });
+      expect(Boolean(s.queries[1].update?.next_run_at)).toBe(retried);
+    }
+  });
+
+  it('stops retrying 20 minutes after the slot', async () => {
+    for (const fail of [
+      {
+        fetchImpl: jest.fn(async () => {
+          throw new TypeError('fetch failed');
+        }),
+      },
+      {
+        body: '{"type":"error","code":"busy","message":"Still answering."}\n',
+      },
+    ]) {
+      const s = setup({
+        tasks: [task()],
+        now: at('2026-10-29T01:20:00Z'),
+        ...fail,
+      });
+      await s.run();
+      expect(s.queries[1].update).toHaveProperty('last_error');
+      expect(s.queries[1].update).not.toHaveProperty('next_run_at');
+    }
+  });
+
+  it('writes nothing, and throws nothing, for a task cancelled mid-run', async () => {
+    const s = setup({
+      tasks: [task()],
+      body: '{"type":"error","code":"daily_cap","message":"Daily limit reached."}\n',
+    });
+    await expect(s.run()).resolves.toBe(1);
+    expect(s.queries[1].whereNull).toBe('deleted_at');
+    expect(s.logger.error).not.toHaveBeenCalled();
   });
 
   it('refuses to run for someone who lost every role', async () => {
     const s = setup({ tasks: [task()], roles: [] });
     await s.run();
     expect(s.fetchImpl).not.toHaveBeenCalled();
-    expect(s.updates[0]).toMatchObject({
+    expect(s.queries[1].update).toEqual({
       last_error: expect.stringContaining('no longer has an admin role'),
     });
   });
@@ -225,8 +354,30 @@ describe('runDueSchedules', () => {
       'aiconv_gone',
       undefined,
     ]);
-    expect(s.updates).toEqual([
-      { id: 'aisch_1', conversation_id: 'aiconv_9', last_error: null },
-    ]);
+    expect(s.queries[1].update).toEqual({
+      conversation_id: 'aiconv_9',
+      last_error: null,
+    });
+  });
+
+  it('forgets the deleted chat when the run in a new one fails', async () => {
+    const s = setup({
+      tasks: [task({ conversation_id: 'aiconv_gone' })],
+      fetchImpl: jest
+        .fn()
+        .mockResolvedValueOnce(
+          new Response('{"message":"That conversation was not found."}', {
+            status: 404,
+          }),
+        )
+        .mockRejectedValueOnce(new TypeError('fetch failed')),
+    });
+    await s.run();
+    // A dropped connection: retried in 5 minutes, inside the slot's window.
+    expect(s.queries[1].update).toEqual({
+      last_error: 'fetch failed',
+      conversation_id: null,
+      next_run_at: at('2026-10-29T01:05:00Z'),
+    });
   });
 });

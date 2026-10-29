@@ -29,6 +29,12 @@ export const config: RouteConfig = {
   permissions: ['assistant_review:read' as Permission],
 };
 
+// A role without the review (a typed URL) goes to its own chat, not a 403.
+export const handle = {
+  permissions: 'assistant_review:read',
+  redirectTo: '/assistant',
+};
+
 const PAGE = 50;
 
 const ReviewPage = () => {
@@ -51,143 +57,156 @@ const ReviewPage = () => {
 
   return (
     <MotionConfig reducedMotion="user">
-    <div className="pc-admin flex flex-col gap-y-3">
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('assistant.review.title')}</Heading>
-          <Text size="small" className="text-ui-fg-subtle mt-1">
-            {t('assistant.review.subtitle')}
-          </Text>
-        </div>
-        {!list.data ? (
-          <div className="border-t px-6 py-8">
-            <LoadingSkeleton />
-          </div>
-        ) : list.data.conversations.length === 0 ? (
-          <div className="border-t px-6 py-8">
-            <Text className="text-ui-fg-subtle">
-              {t('assistant.review.empty')}
+      <div className="pc-admin flex flex-col gap-y-3">
+        <Container className="p-0">
+          <div className="px-6 py-4">
+            <Heading level="h2">{t('assistant.review.title')}</Heading>
+            <Text size="small" className="text-ui-fg-subtle mt-1">
+              {t('assistant.review.subtitle')}
             </Text>
           </div>
-        ) : (
-          <div className="overflow-x-auto border-t">
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>
-                    {t('assistant.review.when')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('assistant.review.who')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('assistant.review.question')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('assistant.review.turns')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('assistant.review.failed')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('assistant.review.cost')}
-                  </Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {list.data.conversations.map((c) => (
-                  <Table.Row
-                    key={c.id}
-                    className="cursor-pointer"
-                    onClick={() => setOpen(c.id)}
-                  >
-                    <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
-                      {mytDateTime(c.last_message_at)}
-                    </Table.Cell>
-                    <Table.Cell className="break-all">
-                      {c.user_email ?? c.user_id}
-                    </Table.Cell>
-                    <Table.Cell className="max-w-[420px]">
-                      {/* A real button, so the row opens from the keyboard too. */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpen(c.id);
-                        }}
-                        className="text-ui-fg-base hover:text-ui-fg-interactive flex max-w-full items-center gap-x-2 text-left"
-                      >
-                        <span className="truncate">{c.title}</span>
-                        {c.deleted && (
-                          <Badge size="2xsmall" color="grey">
-                            {t('assistant.review.deleted')}
-                          </Badge>
-                        )}
-                      </button>
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {c.questions}
-                    </Table.Cell>
-                    <Table.Cell
-                      className={`text-right tabular-nums ${c.failed ? 'text-ui-fg-error' : 'text-ui-fg-muted'}`}
-                    >
-                      {c.failed}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      USD {c.cost_usd.toFixed(3)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-        )}
-        {count > PAGE && (
-          <div className="flex items-center justify-end gap-x-2 border-t px-6 py-3">
-            <Text size="small" className="text-ui-fg-subtle">
-              {offset + 1}–{Math.min(offset + PAGE, count)} / {count}
-            </Text>
-            <Button
-              size="small"
-              variant="secondary"
-              disabled={offset === 0}
-              onClick={() => setOffset((o) => Math.max(0, o - PAGE))}
-            >
-              ‹
-            </Button>
-            <Button
-              size="small"
-              variant="secondary"
-              disabled={offset + PAGE >= count}
-              onClick={() => setOffset((o) => o + PAGE)}
-            >
-              ›
-            </Button>
-          </div>
-        )}
-      </Container>
-
-      <Drawer open={!!open} onOpenChange={(v) => !v && setOpen(null)}>
-        <Drawer.Content className="pc-admin max-w-2xl">
-          <Drawer.Header>
-            <Drawer.Title>
-              {thread.data?.conversation.title ?? '…'}
-            </Drawer.Title>
-          </Drawer.Header>
-          <Drawer.Body className="overflow-y-auto">
-            {thread.data ? (
-              <Thread
-                messages={fromStored(thread.data.messages, (name) =>
-                  t(`assistant.tools.${name}`, { defaultValue: name }),
-                )}
-              />
-            ) : (
+          {list.isError ? (
+            <div className="border-t px-6 py-8">
+              <Text className="text-ui-fg-subtle">
+                {t('assistant.loadError', { message: list.error.message })}
+              </Text>
+            </div>
+          ) : !list.data ? (
+            <div className="border-t px-6 py-8">
               <LoadingSkeleton />
-            )}
-          </Drawer.Body>
-        </Drawer.Content>
-      </Drawer>
-    </div>
+            </div>
+          ) : list.data.conversations.length === 0 ? (
+            <div className="border-t px-6 py-8">
+              <Text className="text-ui-fg-subtle">
+                {t('assistant.review.empty')}
+              </Text>
+            </div>
+          ) : (
+            <div className="overflow-x-auto border-t">
+              <Table>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.HeaderCell>
+                      {t('assistant.review.when')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('assistant.review.who')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('assistant.review.question')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">
+                      {t('assistant.review.turns')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">
+                      {t('assistant.review.failed')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">
+                      {t('assistant.review.cost')}
+                    </Table.HeaderCell>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {list.data.conversations.map((c) => (
+                    <Table.Row
+                      key={c.id}
+                      className="cursor-pointer"
+                      onClick={() => setOpen(c.id)}
+                    >
+                      <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
+                        {mytDateTime(c.last_message_at)}
+                      </Table.Cell>
+                      <Table.Cell className="break-all">
+                        {c.user_email ?? c.user_id}
+                      </Table.Cell>
+                      <Table.Cell className="max-w-[420px]">
+                        {/* A real button, so the row opens from the keyboard too. */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpen(c.id);
+                          }}
+                          className="text-ui-fg-base hover:text-ui-fg-interactive flex max-w-full items-center gap-x-2 text-left"
+                        >
+                          <span className="truncate">{c.title}</span>
+                          {c.deleted && (
+                            <Badge size="2xsmall" color="grey">
+                              {t('assistant.review.deleted')}
+                            </Badge>
+                          )}
+                        </button>
+                      </Table.Cell>
+                      <Table.Cell className="text-right tabular-nums">
+                        {c.questions}
+                      </Table.Cell>
+                      <Table.Cell
+                        className={`text-right tabular-nums ${c.failed ? 'text-ui-fg-error' : 'text-ui-fg-muted'}`}
+                      >
+                        {c.failed}
+                      </Table.Cell>
+                      <Table.Cell className="text-right tabular-nums">
+                        USD {c.cost_usd.toFixed(3)}
+                      </Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            </div>
+          )}
+          {count > PAGE && (
+            <div className="flex items-center justify-end gap-x-2 border-t px-6 py-3">
+              <Text size="small" className="text-ui-fg-subtle">
+                {offset + 1}–{Math.min(offset + PAGE, count)} / {count}
+              </Text>
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={offset === 0}
+                onClick={() => setOffset((o) => Math.max(0, o - PAGE))}
+              >
+                ‹
+              </Button>
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={offset + PAGE >= count}
+                onClick={() => setOffset((o) => o + PAGE)}
+              >
+                ›
+              </Button>
+            </div>
+          )}
+        </Container>
+
+        <Drawer open={!!open} onOpenChange={(v) => !v && setOpen(null)}>
+          <Drawer.Content className="pc-admin max-w-2xl">
+            <Drawer.Header>
+              <Drawer.Title>
+                {thread.data?.conversation.title ?? '…'}
+              </Drawer.Title>
+            </Drawer.Header>
+            <Drawer.Body className="overflow-y-auto">
+              {thread.isError ? (
+                <Text className="text-ui-fg-subtle">
+                  {t('assistant.loadError', { message: thread.error.message })}
+                </Text>
+              ) : thread.data ? (
+                <>
+                  {thread.data.truncated && (
+                    <Text size="small" className="text-ui-fg-muted px-6 pt-4">
+                      {t('assistant.review.truncated')}
+                    </Text>
+                  )}
+                  <Thread messages={fromStored(thread.data.messages)} />
+                </>
+              ) : (
+                <LoadingSkeleton />
+              )}
+            </Drawer.Body>
+          </Drawer.Content>
+        </Drawer>
+      </div>
     </MotionConfig>
   );
 };

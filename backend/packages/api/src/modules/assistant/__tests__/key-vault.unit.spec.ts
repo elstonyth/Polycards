@@ -30,6 +30,14 @@ describe('key vault', () => {
     expect(openKey(parts.join(':'), SECRET)).toBeNull();
   });
 
+  it('gives null for a cut-down auth tag (GCM would check only its bytes)', () => {
+    const parts = sealKey(KEY, SECRET).split(':');
+    parts[2] = Buffer.from(parts[2], 'base64')
+      .subarray(0, 12)
+      .toString('base64');
+    expect(openKey(parts.join(':'), SECRET)).toBeNull();
+  });
+
   it('gives null for text that is not a sealed key', () => {
     expect(openKey('not-sealed', SECRET)).toBeNull();
     expect(openKey('v1:a:b', SECRET)).toBeNull();

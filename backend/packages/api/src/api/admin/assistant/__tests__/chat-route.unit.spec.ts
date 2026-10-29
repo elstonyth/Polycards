@@ -1,0 +1,202 @@
+import { EventEmitter } from 'node:events';
+import { POST } from '../chat/route';
+import { runTurn, type TurnResult } from '../engine';
+
+// POST /admin/assistant/chat with the engine and the assistant service
+// faked: what budget an answer gets, and the one-answer-at-a-time lock.
+
+jest.mock('../engine', () => ({ runTurn: jest.fn() }));
+jest.mock('../access', () => ({
+  accessFor: () => ({ userId: 'user_1' }),
+  allowedTools: async () => [],
+  LASTING_WRITES: new Set(),
+}));
+jest.mock('../agent-tools', () => ({ memoryFor: async () => [] }));
+jest.mock('../tools', () => ({ TOOLS: [] }));
+jest.mock('../brand-style', () => ({
+  DEFAULT_IMAGE_STYLE: '',
+  styleRefs: async () => [],
+}));
+jest.mock('../images', () => ({ storeImage: jest.fn() }));
+jest.mock('../schedule', () => ({ SCHEDULED_PREFIX: 'Scheduled' }));
+jest.mock('../../../../modules/assistant', () => ({
+  ASSISTANT_MODULE: 'assistant',
+}));
+jest.mock('../../../../modules/assistant/key-vault', () => ({
+  openKey: () => 'k',
+}));
+// Redis as the other web instance sees it: one shared map of locks.
+jest.mock('../../../utils/rate-limit', () => {
+  const locks = new Map<string, string>();
+  return {
+    locks,
+    throttledWarn: () => () => undefined,
+    connectRedis: () => ({
+      set: async (key: string, token: string) => {
+        if (locks.has(key)) return null;
+        locks.set(key, token);
+        return 'OK';
+      },
+      eval: async (_lua: string, _n: number, key: string, token: string) => {
+        if (locks.get(key) !== token) return 0;
+        locks.delete(key);
+        return 1;
+      },
+    }),
+  };
+});
+
+const locks: Map<string, string> = jest.requireMock(
+  '../../../utils/rate-limit',
+).locks;
+const runTurnMock = runTurn as jest.MockedFunction<typeof runTurn>;
+const answer: TurnResult = {
+  text: 'ok',
+  tools: [],
+  cost: 0.01,
+  tokensIn: 1,
+  tokensOut: 1,
+};
+
+const service = {
+  listAssistantConversations: jest.fn(async () => []),
+  settings: jest.fn(async () => ({
+    openrouter_key_sealed: 'sealed',
+    daily_cap_usd: 5,
+    chat_model: 'anthropic/claude-sonnet-5.5',
+    image_model: 'i',
+    image_style: '',
+    style_refs: null,
+  })),
+  spentToday: jest.fn(async () => 1.25),
+  createAssistantConversations: jest.fn(async (c: { title: string }) => ({
+    id: 'conv_1',
+    title: c.title,
+  })),
+  listAssistantMessages: jest.fn(async () => []),
+  createAssistantMessages: jest.fn(async () => ({ id: 'msg_1' })),
+  updateAssistantConversations: jest.fn(async () => ({})),
+};
+const logger = { info: jest.fn(), warn: jest.fn() };
+
+function post() {
+  const lines: string[] = [];
+  const res = Object.assign(new EventEmitter(), {
+    writableEnded: false,
+    writableFinished: false,
+    status() {
+      return this;
+    },
+    json(body: unknown) {
+      lines.push(JSON.stringify(body));
+    },
+    setHeader: () => undefined,
+    flushHeaders: () => undefined,
+    write(chunk: string) {
+      lines.push(chunk.trim());
+      return true;
+    },
+    end() {
+      this.writableEnded = true;
+    },
+  });
+  const req = {
+    body: { message: 'how many groups?' },
+    auth_context: { actor_id: 'user_1' },
+    socket: { localPort: 9000 },
+    scope: {
+      resolve: (name: string) =>
+        name === 'assistant'
+          ? service
+          : name === 'configModule'
+            ? { projectConfig: { http: { jwtSecret: 's' } } }
+            : logger,
+    },
+  };
+  const done = POST(req as never, res as never);
+  return {
+    done,
+    events: () => lines.map((l) => JSON.parse(l) as Record<string, unknown>),
+  };
+}
+
+beforeEach(() => {
+  runTurnMock.mockReset().mockResolvedValue(answer);
+  locks.clear();
+});
+
+it('gives the answer what is left of today’s cap', async () => {
+  const p = post();
+  await p.done;
+  expect(runTurnMock.mock.calls[0][0].budgetUsd).toBe(5 - 1.25);
+  expect(p.events().at(-1)).toMatchObject({
+    type: 'done',
+    message_id: 'msg_1',
+  });
+  expect(locks.size).toBe(0);
+});
+
+it('refuses a web-search model saved before the settings check existed', async () => {
+  service.settings.mockResolvedValueOnce({
+    openrouter_key_sealed: 'sealed',
+    daily_cap_usd: 5,
+    chat_model: 'openai/gpt-5:online',
+    image_model: 'i',
+    image_style: '',
+    style_refs: null,
+  });
+  const p = post();
+  await p.done;
+  expect(p.events()).toEqual([
+    expect.objectContaining({ type: 'error', code: 'bad_model' }),
+  ]);
+  expect(runTurnMock).not.toHaveBeenCalled();
+});
+
+it('answers busy while the same person’s answer runs, then lets the next in', async () => {
+  let finish!: (r: TurnResult) => void;
+  let started!: () => void;
+  const running = new Promise<void>((r) => (started = r));
+  runTurnMock.mockImplementationOnce(() => {
+    started();
+    return new Promise<TurnResult>((r) => (finish = r));
+  });
+  const first = post();
+  await running;
+
+  const second = post();
+  await second.done;
+  expect(second.events()).toEqual([
+    expect.objectContaining({ type: 'error', code: 'busy' }),
+  ]);
+
+  finish(answer);
+  await first.done;
+  const third = post();
+  await third.done;
+  expect(third.events().at(-1)).toMatchObject({ type: 'done' });
+  expect(runTurnMock).toHaveBeenCalledTimes(2);
+});
+
+it('still finishes with done when the chat was deleted mid-answer', async () => {
+  service.updateAssistantConversations
+    .mockResolvedValueOnce({})
+    .mockRejectedValueOnce(new Error('deleted'));
+  const p = post();
+  await p.done;
+  expect(p.events().at(-1)).toMatchObject({ type: 'done' });
+  expect(logger.warn).toHaveBeenCalledWith(
+    expect.stringContaining('conversation update failed'),
+  );
+});
+
+it('answers busy while the other instance holds the lock, and leaves its lock', async () => {
+  locks.set('assistant:busy:user_1', 'other-instance');
+  const p = post();
+  await p.done;
+  expect(p.events()).toEqual([
+    expect.objectContaining({ type: 'error', code: 'busy' }),
+  ]);
+  expect(runTurnMock).not.toHaveBeenCalled();
+  expect(locks.get('assistant:busy:user_1')).toBe('other-instance');
+});

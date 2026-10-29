@@ -148,6 +148,8 @@ export async function adminReadAs(opts: {
   const { http } = opts.container.resolve(
     ContainerRegistrationKeys.CONFIG_MODULE,
   ).projectConfig;
+  return slot(async () => {
+  // Minted once the slot is ours: a read queued behind others keeps its 60 s.
   const token = generateJwtToken(
     {
       actor_id: opts.access.userId,
@@ -160,7 +162,6 @@ export async function adminReadAs(opts: {
     },
     { secret: http.jwtSecret, expiresIn: 60, jwtOptions: http.jwtOptions },
   );
-  return slot(async () => {
   const answer = await (opts.fetchImpl ?? fetch)(
     `http://127.0.0.1:${opts.port}${path}${query(opts.params ?? {})}`,
     {

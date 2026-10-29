@@ -5,17 +5,26 @@ import type {
 import { Modules } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
+import { accessFor } from '../assistant/access';
 
 // GET /admin/assistant-review (spec 2026-10-29, the owner's "review all the
 // questions users ask"): every staff member's chats, newest first, with who
-// asked and what each cost. RBAC (assistant_review:read) keeps it to super
-// admins.
+// asked and what each cost. Super admins only: checked here, because RBAC's
+// assistant_review:read also passes `*:read` (the desk bots).
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
-  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  if (!accessFor(req.scope, req.auth_context).superAdmin) {
+    res.status(403).json({ message: 'Only super admins review chats.' });
+    return;
+  }
+  // Whole numbers: Medusa drops a `take` that is not one and loads every row.
+  const limit = Math.min(
+    Math.max(Math.trunc(Number(req.query.limit)) || 50, 1),
+    200,
+  );
+  const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);
   const assistant = req.scope.resolve<AssistantModuleService>(ASSISTANT_MODULE);
   const [conversations, count] =
     await assistant.listAndCountAssistantConversations(

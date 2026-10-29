@@ -46,9 +46,11 @@ const SUGGESTIONS: { tool: string; key: string; send: boolean }[] = [
 function EmptyState({
   me,
   onPick,
+  disabled,
 }: {
   me: AssistantMe | undefined;
   onPick: (text: string, send: boolean) => void;
+  disabled: boolean;
 }) {
   const { t } = useTranslation();
   const tools = new Set(me?.tools.map((x) => x.name));
@@ -78,6 +80,7 @@ function EmptyState({
             <motion.button
               key={s.key}
               type="button"
+              disabled={disabled}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15 + i * 0.06, duration: 0.3 }}
@@ -110,9 +113,10 @@ const AssistantPage = () => {
   const [busy, setBusy] = useState(false);
   const [seed, setSeed] = useState<{ text: string; n: number }>();
   const ctl = useRef<AbortController | null>(null);
-  // The conversation the running answer created: already on screen, so
-  // selecting it must not reload it mid-stream.
-  const live = useRef<string | null>(null);
+  // The chat whose messages are on screen (null: a new one). Until it is the
+  // selected chat, that chat is loading and nothing can be sent.
+  const [shown, setShown] = useState<string | null>(null);
+  const loading = !!selected && selected !== shown;
   const scroller = useRef<HTMLDivElement>(null);
   // Follow the answer as it grows (text, steps, a poster loading in) unless
   // the person scrolled up to read; sending or opening a chat follows again.
@@ -129,12 +133,17 @@ const AssistantPage = () => {
     [me.data, t],
   );
 
+  // Back to no chat (browser back, or a chat that failed to load): clear it,
+  // while rendering rather than in an effect.
+  if (!selected && shown && !busy) {
+    setShown(null);
+    setMessages([]);
+  }
+
+  // Never under a streaming answer: a chat picked meanwhile, or one whose
+  // load lost the race to a question, loads once the answer ends.
   useEffect(() => {
-    if (!selected) {
-      if (!ctl.current) setMessages([]);
-      return;
-    }
-    if (live.current === selected) return;
+    if (busy || !selected || selected === shown) return;
     let gone = false;
     assistantApi
       .conversation(selected)
@@ -142,15 +151,18 @@ const AssistantPage = () => {
         // A question sent while this loaded owns the screen: never wipe it.
         if (gone || ctl.current) return;
         stick.current = true;
-        setMessages(fromStored(d.messages, labelOf));
+        setShown(selected);
+        setMessages(fromStored(d.messages));
       })
       .catch(() => !gone && setParams({}));
     return () => {
       gone = true;
     };
-    // labelOf changes once `me` loads; a thread already shown keeps its labels.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected]);
+  }, [selected, busy, shown, setParams]);
+
+  // Leaving the page stops the answer: it would keep billing and hold the
+  // server's one-answer-at-a-time lock.
+  useEffect(() => () => ctl.current?.abort(), []);
 
   const hasMessages = messages.length > 0;
   const content = useRef<HTMLDivElement>(null);
@@ -206,7 +218,8 @@ const AssistantPage = () => {
         (e) => {
           if (e.type === 'done') finished = true;
           if (e.type === 'conversation') {
-            live.current = e.id;
+            // The screen is this chat now, unless it was showing another.
+            if (shown === selected) setShown(e.id);
             if (e.id !== selected) setParams({ c: e.id });
           } else if (e.type === 'text') {
             patch((m) => ({ ...m, content: m.content + e.delta }));
@@ -215,9 +228,7 @@ const AssistantPage = () => {
               const step = {
                 id: e.id,
                 name: e.name,
-                label: t(`assistant.tools.${e.name}`, {
-                  defaultValue: e.label,
-                }),
+                label: e.label,
                 status: e.status,
                 ms: e.ms,
               };
@@ -261,7 +272,6 @@ const AssistantPage = () => {
       }));
       setBusy(false);
       ctl.current = null;
-      live.current = null;
       void qc.invalidateQueries({ queryKey: ['assistant', 'conversations'] });
     }
   };
@@ -339,7 +349,7 @@ const AssistantPage = () => {
                 aria-label={t('assistant.delete')}
                 disabled={busy}
                 onClick={() => void remove(c.id)}
-                className="text-ui-fg-muted hover:text-ui-fg-error mr-1 rounded p-1 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                className="text-ui-fg-muted hover:text-ui-fg-error mr-1 rounded p-1 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 <Trash />
               </button>
@@ -357,7 +367,7 @@ const AssistantPage = () => {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="pc-admin pc-ai-aurora bg-ui-bg-subtle border-ui-border-base flex h-[calc(100vh-6.5rem)] min-h-[560px] overflow-hidden rounded-2xl border">
+      <div className="pc-admin pc-ai-aurora bg-ui-bg-subtle border-ui-border-base flex h-[calc(100dvh-6.5rem)] min-h-[420px] overflow-hidden sm:min-h-[560px] rounded-2xl border">
         {/* Conversations */}
         <aside className="border-ui-border-base bg-ui-bg-base/60 hidden w-64 shrink-0 flex-col border-r backdrop-blur lg:flex">
           {list}
@@ -432,6 +442,7 @@ const AssistantPage = () => {
             {messages.length === 0 ? (
               <EmptyState
                 me={me.data}
+                disabled={loading}
                 onPick={(text, now) =>
                   now
                     ? void send(text, [])
@@ -439,13 +450,7 @@ const AssistantPage = () => {
                 }
               />
             ) : (
-              <div
-                ref={content}
-                role="log"
-                aria-live="polite"
-                aria-busy={busy}
-                className="mx-auto w-full max-w-3xl px-5 py-6"
-              >
+              <div ref={content} className="mx-auto w-full max-w-3xl px-5 py-6">
                 <Thread messages={messages} />
               </div>
             )}
@@ -454,6 +459,7 @@ const AssistantPage = () => {
           <div className="mx-auto w-full max-w-3xl px-5 pb-5 pt-2">
             <Composer
               busy={busy}
+              disabled={loading}
               seed={seed}
               autoFocus
               onSend={(text, images) => void send(text, images)}

@@ -42,6 +42,12 @@ describe('blockedReason', () => {
     ['/admin/INVITES', /staff invites/],
     ['/admin/Api-Keys', /API keys/],
     ['/admin/inventory/EXPORT.XLSX', /file exports/],
+    // Every staff member's assistant chats, deleted ones too, and its settings.
+    ['/admin/assistant-review', /assistant chats/],
+    ['/admin/assistant-review/aiconv_1', /assistant chats/],
+    ['/admin/assistant-settings/test', /assistant chats/],
+    ['/admin/assistant/conversations', /assistant chats/],
+    ['/admin/ASSISTANT-Settings', /assistant chats/],
   ])('blocks %s', (path, why) => {
     expect(blockedReason(path)).toMatch(why);
   });

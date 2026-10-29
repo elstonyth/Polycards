@@ -3,6 +3,7 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
+import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
@@ -12,9 +13,10 @@ import { runTurn } from '../engine';
 import { storeImage } from '../images';
 import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
 import { memoryFor } from '../agent-tools';
-import type { ChatMessage } from '../openrouter';
+import { MODEL_RE, type ChatMessage } from '../openrouter';
 import { SCHEDULED_PREFIX } from '../schedule';
 import { TOOLS } from '../tools';
+import { connectRedis, throttledWarn } from '../../../utils/rate-limit';
 
 // POST /admin/assistant/chat (spec 2026-10-29): one question, answered as a
 // stream of newline-delimited JSON events, so staff watch the answer and the
@@ -32,10 +34,42 @@ const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const HISTORY = 20;
 // One turn at a time per staff member, so parallel questions cannot all
-// pass the daily cap check before any of them has saved its cost. Per
-// process: with the backend on 2 web instances a person can have at most
-// 2 answers running, and each answer also stops at the cap (engine.ts).
+// pass the daily cap check before any of them has saved its cost. Redis
+// holds the lock across the 2 web instances; without REDIS_URL (dev, tests)
+// or while Redis fails, only the per-process set does.
 const busy = new Set<string>();
+const warn = throttledWarn(60_000);
+// Connected at load: a client still connecting refuses its first command.
+const redis = connectRedis('assistant-busy', warn);
+// Longer than an answer can run (engine.ts: 4 minutes), so a crashed
+// instance's lock frees itself.
+const BUSY_MS = 360_000;
+const RELEASE = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0`;
+
+/** Takes the asker's lock: its release, or null while an answer runs. */
+async function lock(userId: string): Promise<(() => Promise<void>) | null> {
+  if (busy.has(userId)) return null;
+  busy.add(userId);
+  const key = `assistant:busy:${userId}`;
+  const token = randomUUID();
+  try {
+    const held = (await redis?.set(key, token, 'PX', BUSY_MS, 'NX')) === 'OK';
+    if (redis && !held) {
+      busy.delete(userId);
+      return null;
+    }
+  } catch (err) {
+    warn('assistant lock: redis failed; per-process lock only', err);
+  }
+  return async () => {
+    busy.delete(userId);
+    // Only this answer's own token: an expired lock may be someone else's.
+    // Tried even when the SET reply was lost: it may still have landed.
+    await redis
+      ?.eval(RELEASE, 1, key, token)
+      .catch((err) => warn('assistant lock: release failed', err));
+  };
+}
 
 const IMAGE_RE = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
 
@@ -135,12 +169,23 @@ export async function POST(
       type: 'error',
       code: 'no_key',
       message: settings.openrouter_key_sealed
-        ? 'The AI key can no longer be read (the server secret changed). An admin must enter it again in Settings → AI.'
-        : 'The assistant has no AI key yet. An admin adds the OpenRouter key in Settings → AI.',
+        ? 'The AI key can no longer be read (the server secret changed). An admin must enter it again in Settings → AI assistant.'
+        : 'The assistant has no AI key yet. An admin adds the OpenRouter key in Settings → AI assistant.',
     });
     return;
   }
-  if (busy.has(access.userId)) {
+  // A model saved before the :online check existed must not run.
+  if (!MODEL_RE.test(String(settings.chat_model ?? ''))) {
+    finish({
+      type: 'error',
+      code: 'bad_model',
+      message:
+        'The chat model in Settings → AI assistant is not allowed here (web-search models are off). An admin must pick another.',
+    });
+    return;
+  }
+  const release = await lock(access.userId);
+  if (!release) {
     finish({
       type: 'error',
       code: 'busy',
@@ -149,7 +194,6 @@ export async function POST(
     });
     return;
   }
-  busy.add(access.userId);
   const ping = setInterval(() => send({ type: 'ping' }), 10_000);
   const logger = scope.resolve(ContainerRegistrationKeys.LOGGER);
 
@@ -198,6 +242,12 @@ export async function POST(
       role: 'user',
       content: input.text,
       attachments: input.images.length,
+    });
+    // spentToday finds today's costs by last_message_at: an old chat must
+    // count from the start of this answer.
+    await assistant.updateAssistantConversations({
+      id: conversationId,
+      last_message_at: now,
     });
 
     const images: { url: string }[] = [];
@@ -264,10 +314,18 @@ export async function POST(
       tokens_out: result.tokensOut,
       error: result.error ?? null,
     });
-    await assistant.updateAssistantConversations({
-      id: conversationId,
-      last_message_at: new Date(),
-    });
+    // The chat may have been deleted in another tab meanwhile: the answer
+    // is saved, so still finish with done.
+    await assistant
+      .updateAssistantConversations({
+        id: conversationId,
+        last_message_at: new Date(),
+      })
+      .catch((err: Error) =>
+        logger.warn(
+          `[assistant] conversation update failed conv=${conversationId}: ${err?.message}`,
+        ),
+      );
     // One line per answer, so a failing key or model shows in the logs.
     logger.info(
       `[assistant] answer user=${access.userId} conv=${conversationId} model=${settings.chat_model} tools=${result.tools.map((t) => `${t.name}:${t.ok ? 'ok' : 'fail'}`).join(',') || '-'} cost=${result.cost.toFixed(4)} ms=${Date.now() - now.getTime()}${result.error ? ` error=${result.error}` : ''}`,
@@ -286,6 +344,6 @@ export async function POST(
     });
   } finally {
     clearInterval(ping);
-    busy.delete(access.userId);
+    await release();
   }
 }

@@ -60,11 +60,23 @@ const tool = (name: string, run: AssistantTool['run']): AssistantTool => ({
   run,
 });
 
+const ctx = {
+  container: {} as never,
+  port: 9000,
+  openrouterKey: 'k',
+  imageModel: 'i',
+  imageStyle: '',
+  styleRefs: [],
+  attachments: [],
+  showImage: async () => 'u',
+};
+
 function turn(
   responses: (() => Response)[],
   tools: AssistantTool[],
   signal = new AbortController().signal,
   budgetUsd?: number,
+  images: string[] = [],
 ) {
   const bodies: Record<string, unknown>[] = [];
   const fetchImpl = jest.fn(async (_url: unknown, init?: RequestInit) => {
@@ -82,17 +94,8 @@ function turn(
     tools,
     history: [],
     userText: 'how many groups?',
-    images: [],
-    ctx: {
-      container: {} as never,
-      port: 9000,
-      openrouterKey: 'k',
-      imageModel: 'i',
-      imageStyle: '',
-      styleRefs: [],
-      attachments: [],
-      showImage: async () => 'u',
-    },
+    images,
+    ctx,
     emit: (e) => events.push(e),
     signal,
     budgetUsd,
@@ -224,6 +227,30 @@ describe('streamChat tool-call pieces', () => {
       calls: [
         { id: 'a', name: 'groups', arguments: '{}' },
         { id: 'b', name: 'economy', arguments: '{"period":"today"}' },
+      ],
+    });
+  });
+  it('sends later pieces of a reused index to the new call', async () => {
+    expect(
+      await run(
+        piece({
+          index: 0,
+          id: 'a',
+          function: { name: 'groups', arguments: '{' },
+        }),
+        piece({ index: 0, function: { arguments: '}' } }),
+        piece({
+          index: 0,
+          id: 'b',
+          function: { name: 'economy', arguments: '{"p"' },
+        }),
+        piece({ index: 0, function: { arguments: ':1}' } }),
+      ),
+    ).toEqual({
+      type: 'tool_calls',
+      calls: [
+        { id: 'a', name: 'groups', arguments: '{}' },
+        { id: 'b', name: 'economy', arguments: '{"p":1}' },
       ],
     });
   });
@@ -361,7 +388,8 @@ describe('runTurn', () => {
       Array.from({ length: MAX_ROUNDS }, () => () => sse(toolCall('groups'))),
       [tool('groups', groups)],
     );
-    await t.done;
+    const result = await t.done;
+    expect(result.error).toBe('The assistant gave no answer. Ask again.');
     expect(t.bodies).toHaveLength(MAX_ROUNDS);
     expect(t.bodies[0]).toMatchObject({ tool_choice: 'auto' });
     expect(t.bodies.at(-1)).toMatchObject({ tool_choice: 'none' });
@@ -425,6 +453,140 @@ describe('runTurn', () => {
     const result = await t.done;
     expect(t.bodies).toHaveLength(1);
     expect(result.error).toMatch(/limit/);
+  });
+
+  it('skips a draw once today’s budget is spent, even within one step', async () => {
+    let draws = 0;
+    const twoDraws = {
+      choices: [
+        {
+          delta: {
+            tool_calls: [0, 1].map((i) => ({
+              index: i,
+              id: `img${i}`,
+              function: { name: 'generate_image', arguments: '{}' },
+            })),
+          },
+        },
+      ],
+    };
+    const t = turn(
+      [() => sse(twoDraws, usage(0.1)), () => sse(say('ok'))],
+      [
+        tool('generate_image', async (_args, c) => {
+          draws++;
+          c.addCost(0.5);
+          return 'drawn';
+        }),
+      ],
+      new AbortController().signal,
+      0.4,
+    );
+    const result = await t.done;
+    expect(draws).toBe(1);
+    expect(result.error).toMatch(/limit/);
+  });
+
+  it('refuses a lasting write in a turn that carries screenshots', async () => {
+    const saved: string[] = [];
+    const t = turn(
+      [() => sse(toolCall('remember')), () => sse(say('ok'))],
+      [
+        tool('remember', async () => {
+          saved.push('note');
+          return 'saved';
+        }),
+      ],
+      undefined,
+      undefined,
+      ['data:image/png;base64,AAAA'],
+    );
+    await t.done;
+    expect(saved).toEqual([]);
+    expect(
+      (t.bodies[1].messages as { content: string }[]).at(-1)?.content,
+    ).toMatch(/^<tool_result name="remember">\nRefused/);
+  });
+
+  it('does not flag an answer that only shows an image', async () => {
+    const t = turn(
+      [() => sse(toolCall('generate_image')), () => sse(usage(0.01))],
+      [
+        tool('generate_image', async (_args, c) => {
+          await c.showImage(Buffer.from(''), 'x.jpg');
+          return 'shown';
+        }),
+      ],
+    );
+    expect((await t.done).error).toBeUndefined();
+  });
+
+  it('stops a tool still running at the answer’s deadline', async () => {
+    const deadline = new AbortController();
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = jest
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms) =>
+        ms === 240_000 ? deadline.signal : realTimeout(ms),
+      );
+    try {
+      const slow = tool(
+        'groups',
+        (_args, c) =>
+          new Promise<string>((_, reject) => {
+            c.signal.addEventListener('abort', () => reject(c.signal.reason));
+            deadline.abort(new DOMException('deadline', 'TimeoutError'));
+          }),
+      );
+      const result = await turn([() => sse(toolCall('groups'))], [slow]).done;
+      expect(result.error).toBe(
+        'The answer took too long. Ask a narrower question.',
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('prices a round cut off before its usage arrives', async () => {
+    const ctl = new AbortController();
+    const urls: string[] = [];
+    const fetchImpl = (async (url: unknown) => {
+      urls.push(String(url));
+      if (String(url).includes('/generation?id=gen-1')) {
+        return new Response(JSON.stringify({ data: { total_cost: 0.02 } }));
+      }
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(
+              new TextEncoder().encode(
+                `data: ${JSON.stringify({ id: 'gen-1', ...say('Half') })}\n\n`,
+              ),
+            );
+            setTimeout(() => {
+              ctl.abort();
+              c.error(new DOMException('aborted', 'AbortError'));
+            }, 5);
+          },
+        }),
+      );
+    }) as unknown as typeof fetch;
+    const result = await runTurn({
+      key: 'k',
+      model: 'm',
+      access,
+      tools: [],
+      history: [],
+      userText: 'q',
+      images: [],
+      ctx,
+      emit: () => undefined,
+      signal: ctl.signal,
+      fetchImpl,
+    });
+    expect(result).toMatchObject({ text: 'Half', error: 'aborted' });
+    expect(result.cost).toBeCloseTo(0.02);
+    expect(urls.at(-1)).toContain('/generation?id=gen-1');
   });
 
   it('keeps a refused image’s cost', async () => {

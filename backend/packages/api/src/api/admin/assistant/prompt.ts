@@ -20,7 +20,7 @@ export function systemPrompt(
   access: Access,
   toolNames: string[],
   now: Date = new Date(),
-  /** Saved notes (agent-tools.ts memoryFor), newest first. */
+  /** Saved notes (agent-tools.ts memoryFor): shared first, then the asker's own, each newest first. */
   memory: string[] = [],
 ): string {
   const scope = access.superAdmin

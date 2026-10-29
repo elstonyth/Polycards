@@ -27,7 +27,10 @@ jest.mock('../poster-compose', () => ({
   composePoster: jest.fn(async () => Buffer.from('poster')),
 }));
 jest.mock('../images', () => ({
-  generateImage: jest.fn(async () => ({ buffer: Buffer.from('x'), cost: 0 })),
+  generateImage: jest.fn(async () => ({
+    buffer: Buffer.from('x'),
+    cost: 0.04,
+  })),
   brandImage: jest.fn(async (b: Buffer) => b),
 }));
 
@@ -255,10 +258,13 @@ describe('brand-style images', () => {
   });
 
   it('sends the house look and the brand references first, then the attachments', async () => {
+    const addCost = jest.fn();
     await TOOLS.find((t) => t.name === 'generate_image')!.run(
       { prompt: 'a gold ring', use_attached: true },
-      { ...ctx, attachments: ['data:image/png;base64,SHOT'] },
+      { ...ctx, attachments: ['data:image/png;base64,SHOT'], addCost },
     );
+    // The image's spend counts toward the daily cap.
+    expect(addCost).toHaveBeenCalledWith(0.04);
     const [arg] = images.generateImage.mock.calls[0];
     expect(arg.references).toEqual([
       ...ctx.styleRefs,
@@ -279,6 +285,7 @@ describe('brand-style images', () => {
   });
 
   it('lays the brand type over the art for a marketing poster', async () => {
+    const addCost = jest.fn();
     await TOOLS.find((t) => t.name === 'marketing_poster')!.run(
       {
         scene: 'a gold ring',
@@ -286,8 +293,9 @@ describe('brand-style images', () => {
         gold: 'LOSSLESS',
         button: false,
       },
-      ctx,
+      { ...ctx, addCost },
     );
+    expect(addCost).toHaveBeenCalledWith(0.04);
     expect(images.generateImage.mock.calls[0][0].references).toEqual(
       ctx.styleRefs,
     );

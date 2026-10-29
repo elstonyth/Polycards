@@ -68,14 +68,19 @@ export function accessFor(
   };
 }
 
-/** The tools whose every need the asker meets, in catalog order. */
+/** The tools whose every need the asker meets, in catalog order. A tool
+ *  that names no need is offered to nobody ([].every() would say yes). */
 export async function allowedTools<T extends { needs: Need[] }>(
   access: Access,
   catalog: readonly T[],
 ): Promise<T[]> {
   const ok = await Promise.all(
-    catalog.map(async (tool) =>
-      (await Promise.all(tool.needs.map((n) => access.can(n)))).every(Boolean),
+    catalog.map(
+      async (tool) =>
+        tool.needs.length > 0 &&
+        (await Promise.all(tool.needs.map((n) => access.can(n)))).every(
+          Boolean,
+        ),
     ),
   );
   return catalog.filter((_, i) => ok[i]);

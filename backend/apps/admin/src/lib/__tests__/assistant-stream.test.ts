@@ -84,6 +84,9 @@ describe('markdown', () => {
     expect(mdInline('[x](https://polycards.gg.evil.example/)')).toEqual([
       { kind: 'text', text: '[x](https://polycards.gg.evil.example/)' },
     ]);
+    expect(mdInline('[x](https://evil.polycards.gg/?d=secret)')).toEqual([
+      { kind: 'text', text: '[x](https://evil.polycards.gg/?d=secret)' },
+    ]);
     expect(mdInline('[admin](https://admin.polycards.gg/x)')[0]).toMatchObject({
       kind: 'link',
     });

@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import { artPrompt, DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
-import { composePoster, posterCopyError } from '../poster-compose';
+import { composePoster, headlineEl, posterCopyError } from '../poster-compose';
+import { display } from '../../../../modules/packs/pull-card';
 import type { Access } from '../access';
 import { brandImage, generateImage, ImageRefused } from '../images';
 import { resolvePeriod } from '../periods';
@@ -14,6 +15,21 @@ describe('brandImage', () => {
       .png()
       .toBuffer();
     const out = await brandImage(square);
+    const meta = await sharp(out).metadata();
+    expect([meta.width, meta.height, meta.format]).toEqual([
+      1080,
+      1350,
+      'jpeg',
+    ]);
+  });
+
+  it('still fits and re-encodes to JPEG without the logo', async () => {
+    const exact = await sharp({
+      create: { width: 1080, height: 1350, channels: 3, background: '#000' },
+    })
+      .png()
+      .toBuffer();
+    const out = await brandImage(exact, false);
     const meta = await sharp(out).metadata();
     expect([meta.width, meta.height, meta.format]).toEqual([
       1080,
@@ -61,21 +77,22 @@ describe('generateImage', () => {
     expect(out.buffer.equals(png)).toBe(true);
   });
 
-  it('passes the model refusal on in words', async () => {
-    await expect(
-      generateImage({
-        key: 'k',
-        model: 'm',
-        prompt: 'p',
-        fetchImpl: answer({
-          choices: [{ message: { content: 'I cannot draw that.' } }],
-        }),
+  it('passes the model refusal on in words, with what it was billed', async () => {
+    const refused = generateImage({
+      key: 'k',
+      model: 'm',
+      prompt: 'p',
+      fetchImpl: answer({
+        usage: { cost: 0.03 },
+        choices: [{ message: { content: 'I cannot draw that.' } }],
       }),
-    ).rejects.toThrow(
+    });
+    await expect(refused).rejects.toThrow(
       new ImageRefused(
         'The image model returned no image: I cannot draw that.',
       ),
     );
+    await expect(refused).rejects.toMatchObject({ cost: 0.03 });
   });
 
   it('passes a provider error on', async () => {
@@ -206,5 +223,79 @@ describe('composePoster', () => {
     expect([meta.width, meta.height, meta.format]).toEqual([1080, 1350, 'jpeg']);
     expect(posterCopyError({ headline: '' })).toMatch(/required/);
     expect(posterCopyError({ headline: '周末无损' })).toMatch(/caption/);
+  });
+
+  it("takes the tool's own example copy: digits, % and ·", () => {
+    expect(posterCopyError({ headline: '3 CURRENCIES' })).toBeNull();
+    expect(
+      posterCopyError({
+        headline: 'EARN UP TO 2.5%',
+        gold: '100% BUYBACK',
+        eyebrow: 'New pack · Out now',
+        subline: 'Top up #1 +RM 10',
+      }),
+    ).toBeNull();
+  });
+
+  it('names the caption only for Chinese, and never metric', () => {
+    const accented = posterCopyError({ headline: 'Café ouvert' });
+    expect(accented).toMatch(/English letters/);
+    expect(accented).not.toMatch(/caption|metric/);
+    expect(posterCopyError({ headline: '无损 100%' })).not.toMatch(/metric/);
+  });
+
+  it('caps the eyebrow at 28 characters', () => {
+    expect(
+      posterCopyError({ headline: 'HI', eyebrow: 'E'.repeat(28) }),
+    ).toBeNull();
+    expect(
+      posterCopyError({ headline: 'HI', eyebrow: 'E'.repeat(40) }),
+    ).toMatch(/eyebrow must be 28 characters or fewer/);
+  });
+
+  it('keeps the corner on polycards.gg', () => {
+    for (const ok of [
+      'polycards.gg',
+      'POLYCARDS.GG',
+      'polycards.gg/referral',
+    ]) {
+      expect(posterCopyError({ headline: 'HI', corner: ok })).toBeNull();
+    }
+    for (const bad of [
+      'polycards-rewards.site/claim',
+      'polycards.gg.evil.com',
+      'polycards.gg/a/b',
+      '29 Oct',
+    ]) {
+      expect(posterCopyError({ headline: 'HI', corner: bad })).toMatch(
+        /corner/,
+      );
+    }
+  });
+
+  it('fits a long subline and eyebrow onto the canvas without throwing', async () => {
+    const art = await sharp({
+      create: { width: 800, height: 1000, channels: 3, background: '#111' },
+    })
+      .png()
+      .toBuffer();
+    const out = await composePoster(art, {
+      eyebrow: 'Every Saturday and Sunday all month long',
+      headline: 'LOSSLESS MODE',
+      subline: `${'Unbreakable'.repeat(10)} ${'x'.repeat(9)}`,
+    });
+    const meta = await sharp(out).metadata();
+    expect([meta.width, meta.height]).toEqual([1080, 1350]);
+  });
+
+  it('lights gold words with punctuation attached', () => {
+    const el = headlineEl(
+      'Real cards. Real PULLS.',
+      500,
+      display(80),
+      'pulls!',
+    );
+    expect(el).toContain('<tspan fill="url(#gold)">PULLS.</tspan>');
+    expect(el).not.toContain('<tspan fill="url(#gold)">cards.</tspan>');
   });
 });

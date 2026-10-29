@@ -6,15 +6,17 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import { last4, openKey, sealKey } from '../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../modules/assistant/service';
+import { accessFor } from '../assistant/access';
+import { isOwnOrigin } from '../assistant/agent-tools';
 import { DEFAULT_IMAGE_STYLE } from '../assistant/brand-style';
 import { DEFAULT_STYLE_REFS } from '../assistant/style-refs';
+import { MODEL_RE } from '../assistant/openrouter';
 
 // GET/POST /admin/assistant-settings (spec 2026-10-29): Settings → AI. The
 // OpenRouter key is write-only — sealed on the way in, and only whether one
-// is set (and readable) plus its last 4 characters ever come back. RBAC
-// (assistant_setting:read/update, admin-rbac.ts) keeps it to super admins.
-
-const MODEL_RE = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
+// is set (and readable) plus its last 4 characters ever come back. Super
+// admins only: checked in each handler, because RBAC's assistant_setting:read
+// also passes `*:read` (the desk bots).
 
 const jwtSecret = (req: AuthenticatedMedusaRequest) =>
   req.scope.resolve(ContainerRegistrationKeys.CONFIG_MODULE).projectConfig.http
@@ -53,18 +55,19 @@ async function view(req: AuthenticatedMedusaRequest) {
 const MAX_STYLE = 4000;
 const MAX_REFS = 6;
 
-/** A reference image URL: an upload of ours (https, or the local file
- *  provider's /static path in dev). */
+/** A reference image URL: an upload of ours (our sites, file store, or the
+ *  local file provider in dev). The image engine fetches it. */
 const refUrlOk = (u: unknown): u is string =>
-  typeof u === 'string' &&
-  u.length <= 500 &&
-  (/^https:\/\/[^\s]+$/.test(u) ||
-    /^http:\/\/localhost(:\d+)?\/static\//.test(u));
+  typeof u === 'string' && u.length <= 500 && isOwnOrigin(u);
 
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
+  if (!accessFor(req.scope, req.auth_context).superAdmin) {
+    res.status(403).json({ message: 'Only super admins see AI settings.' });
+    return;
+  }
   res.json({ settings: await view(req) });
 }
 
@@ -81,6 +84,10 @@ export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,
 ): Promise<void> {
+  if (!accessFor(req.scope, req.auth_context).superAdmin) {
+    res.status(403).json({ message: 'Only super admins change AI settings.' });
+    return;
+  }
   const body = req.body ?? {};
   const patch: Record<string, unknown> = {};
   if (body.openrouter_key === null) {

@@ -450,7 +450,7 @@ export const TOOLS: AssistantTool[] = [
     name: 'db_query',
     label: 'Database query',
     description:
-      "Run one read-only SQL query (PostgreSQL 16) on the live Polycards database, for any question the reports and admin screens do not answer directly (profit and margins, cohorts, one player's full history, rankings like the top 10 single top-ups). SELECT or WITH only; it runs in a read-only transaction, stops after 20 seconds and returns at most 500 rows, so aggregate in SQL (COUNT, SUM, GROUP BY) and name every output column. Times are stored in UTC: created_at AT TIME ZONE 'Asia/Kuala_Lumpur' gives Malaysia time. Soft-deleted rows have deleted_at set: add deleted_at IS NULL. Before filtering on a status, reason, type or source column, list its values with SELECT DISTINCT. The DEFAULT group = players in no customer_group other than DEFAULT. Main tables: customer (players: email, phone, metadata->>'handle', has_account), customer_account_state, credit_transaction (the wallet in RM: amount, reason), ledger_entry (type, wallet_delta, vault_delta), gateway_deposit (status, amount_requested, amount_settled, payment_method_code, gateway), gateway_withdrawal (status, failure_reason), pull (customer_id, pack_id, card_id, source, status, buyback_amount in RM, recorded_value_usd), pack (slug, title, price in RM, buyback_percent, status), pack_odds, card (name, grade, market_value in USD; fx_rate converts), delivery_order and delivery_order_item, challenge_stage, challenge_schedule, challenge_payout, task_definition, task_claim, daily_checkin, vip_level, vip_member_state, referral_attribution, weekly_settlement(_line), player_payout_details, admin_action_audit, customer_group and customer_group_customer, purchase_invoice, goods_receive_note, stock_movement. A table's columns: SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'pull'.",
+      "Run one read-only SQL query (PostgreSQL 16) on the live Polycards database, for any question the reports and admin screens do not answer directly (profit and margins, cohorts, one player's full history, rankings like the top 10 single top-ups). SELECT or WITH only; it runs in a read-only transaction, stops after 20 seconds and returns at most 500 rows, so aggregate in SQL (COUNT, SUM, GROUP BY) and name every output column. Times are stored in UTC: created_at AT TIME ZONE 'Asia/Kuala_Lumpur' gives Malaysia time. Soft-deleted rows have deleted_at set: add deleted_at IS NULL. Before filtering on a status, reason, type or source column, list its values with SELECT DISTINCT. The DEFAULT group = players in no customer_group other than DEFAULT. Money: credit_transaction.amount includes spend-only bonus credit, so never SUM(amount) for cash: a row's cash in sen is ROUND(amount * 100) - COALESCE(bonus_cents, 0); revenue = minus its sum over reason 'pack_open' and payouts = its sum over 'buyback', as the Economy page counts; bonus_grant, reward_credit, voucher_claim, daily_reward and referral_commission are promo credit, never revenue. Paid pulls: pull.source IN ('pack', 'bonus'); a pull's cash share is (10000 - bonus_bp) / 10000.0. Main tables: customer (players: email, phone, metadata->>'handle', has_account), customer_account_state, credit_transaction (the wallet in RM: amount, reason), ledger_entry (type, wallet_delta, vault_delta), gateway_deposit (status, amount_requested, amount_settled, payment_method_code, gateway), gateway_withdrawal (status, failure_reason), pull (customer_id, pack_id, card_id, source, status, buyback_amount in RM, recorded_value_usd), pack (slug, title, price in RM, buyback_percent, status), pack_odds, card (name, grade, market_value in USD; fx_rate converts), delivery_order and delivery_order_item, challenge_stage, challenge_schedule, challenge_payout, task_definition, task_claim, daily_checkin, vip_level, vip_member_state, referral_attribution, weekly_settlement(_line), player_payout_details, admin_action_audit, customer_group and customer_group_customer, purchase_invoice, goods_receive_note, stock_movement. A table's columns: SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'pull'.",
     parameters: object(
       {
         sql: str(
@@ -646,17 +646,17 @@ export const TOOLS: AssistantTool[] = [
     name: 'marketing_poster',
     label: 'Marketing poster',
     description:
-      "A finished post in Polycards' Instagram design (1080x1350): new AI key art in the house look (matte black, champagne-gold light, one hero object, matched to the brand's own past posts) with the brand's real type drawn over it — the logo top-left, polycards.gg top-right, a spaced gold eyebrow between two gold lines, a big Nekst headline (chosen words in gold), an optional quiet line and the white Open a pack button. Use it for announcements, promos, events and launches that need new art. Write copy like the posted posters: headline short and punchy, usually ALL CAPS (LOSSLESS MODE, 3 CURRENCIES, EARN UP TO) or two short sentence-case lines (Real cards. Real pulls.); eyebrow a short context line (Every Saturday & Sunday, Top up your way, New pack · Out now); gold = the words to light in gold (often the number or offer). Copy only what staff stated: never invent offers, numbers or dates. English letters only on the image: Chinese goes in the caption. For live challenge, tasks, top pulls, achievements or sign-up figures use those data posters instead.",
+      "A finished post in Polycards' Instagram design (1080x1350): new AI key art in the house look (matte black, champagne-gold light, one hero object, matched to the brand's own past posts) with the brand's real type drawn over it — the logo top-left, polycards.gg top-right, a spaced gold eyebrow between two gold lines, a big Nekst headline (chosen words in gold), an optional quiet line and the white Open a pack button. Use it for announcements, promos, events and launches that need new art. Write copy like the posted posters: headline short and punchy, usually ALL CAPS (LOSSLESS MODE, 3 CURRENCIES, EARN UP TO) or two short sentence-case lines (Real cards. Real pulls.); eyebrow a short context line (Every Saturday & Sunday, Top up your way, New pack · Out now); gold = the words to light in gold (often the number or offer). Copy only what staff stated: never invent offers, numbers or dates. English letters and digits only on the image: Chinese goes in the caption. For live challenge, tasks, top pulls, achievements or sign-up figures use those data posters instead.",
     parameters: object(
       {
         scene: str(
           'What the key art shows, in English: one hero object and its setting, e.g. "a single glowing gold ring floating above a glossy black floor". No text, no people, no Pokémon.',
         ),
         headline: str(
-          'The big line, up to 40 characters, English letters only.',
+          'The big line, up to 40 characters, English letters and digits only.',
         ),
         eyebrow: str(
-          'Optional small line above the headline, up to 40 characters.',
+          'Optional small line above the headline, up to 28 characters.',
         ),
         gold: str(
           'Optional: words of the headline to draw in gold, e.g. "100% BUYBACK".',
@@ -665,7 +665,7 @@ export const TOOLS: AssistantTool[] = [
           'Optional quiet line near the bottom, up to 120 characters.',
         ),
         corner: str(
-          'Optional top-right text. Default polycards.gg; e.g. polycards.gg/referral or a date.',
+          'Optional top-right text: polycards.gg (default) or one of its pages, e.g. polycards.gg/referral.',
         ),
         button: {
           type: 'boolean',
@@ -781,9 +781,8 @@ export const TOOLS: AssistantTool[] = [
         signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(120_000)]),
       });
       ctx.addCost(cost);
-      const logo = b(args.logo) !== false;
-      const out = logo ? await brandImage(buffer) : buffer;
-      await ctx.showImage(out, 'ai-image.jpg', logo ? 'image/jpeg' : undefined);
+      const out = await brandImage(buffer, b(args.logo) !== false);
+      await ctx.showImage(out, 'ai-image.jpg', 'image/jpeg');
       return 'The image is shown in the chat with a download button. Describe it in one line; it is a draft for a human to review.';
     },
   },

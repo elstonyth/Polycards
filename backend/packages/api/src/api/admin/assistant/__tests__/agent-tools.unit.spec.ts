@@ -1,7 +1,14 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { PACKS_MODULE } from '../../../../modules/packs';
-import { AGENT_TOOLS, assetBytes, isOwnAsset } from '../agent-tools';
+import type AssistantModuleService from '../../../../modules/assistant/service';
+import {
+  AGENT_TOOLS,
+  assetBytes,
+  isOwnAsset,
+  isOwnOrigin,
+  memoryFor,
+} from '../agent-tools';
 
 const fetchBytes = jest.fn(async () => Buffer.from('img'));
 jest.mock('../../../utils/image-fetch', () => ({
@@ -12,6 +19,53 @@ jest.mock('../../../utils/image-fetch', () => ({
 const CDN = 'https://polycards-media.sgp1.cdn.digitaloceanspaces.com';
 const held = new Set<string>();
 const created: Record<string, unknown>[] = [];
+const deleted: string[] = [];
+type Row = Record<string, unknown>;
+// Rows newest first; the mock matches plain equality filters only.
+let memories: Row[] = [];
+let schedules: Row[] = [];
+const matches = (f: Row) => (r: Row) =>
+  Object.entries(f).every(([k, v]) => r[k] === v);
+const CONVS = [
+  { id: 'aiconv_mine', user_id: 'user_1', title: 'Mine', deleted_at: null },
+  {
+    id: 'aiconv_gone',
+    user_id: 'user_1',
+    title: 'Gone',
+    deleted_at: '2026-10-28',
+  },
+  { id: 'aiconv_other', user_id: 'user_2', title: 'Other', deleted_at: null },
+];
+const assistant = {
+  createAssistantMemories: async (v: Row) => {
+    created.push(v);
+    return { id: 'aimem_1', ...v };
+  },
+  listAssistantMemories: async (f: Row) => memories.filter(matches(f)),
+  softDeleteAssistantMemories: async (ids: string[]) => deleted.push(...ids),
+  listAssistantSchedules: async (f: Row) => schedules.filter(matches(f)),
+  softDeleteAssistantSchedules: async (ids: string[]) => deleted.push(...ids),
+  listAssistantConversations: async (
+    f: { user_id?: string; id?: string[] },
+    c?: { withDeleted?: boolean },
+  ) =>
+    CONVS.filter(
+      (cv) =>
+        (c?.withDeleted || !cv.deleted_at) &&
+        (!f.user_id || cv.user_id === f.user_id) &&
+        (!f.id || f.id.includes(cv.id)),
+    ),
+  listAssistantMessages: async (f: { conversation_id?: string[] }) =>
+    CONVS.filter(
+      (cv) => !f.conversation_id || f.conversation_id.includes(cv.id),
+    ).map((cv) => ({
+      conversation_id: cv.id,
+      role: 'assistant',
+      content: `poster for ${cv.title}`,
+      images: [{ url: `${CDN}/${cv.id}.png` }],
+      created_at: '2026-10-27T00:00:00Z',
+    })),
+};
 const container = {
   resolve: (k: string) =>
     ({
@@ -21,19 +75,20 @@ const container = {
         listCards: async (f: { $or: { image?: string }[] }) =>
           held.has(String(f.$or[0].image)) ? [{ handle: 'c' }] : [],
       },
-      [ASSISTANT_MODULE]: {
-        createAssistantMemories: async (v: Record<string, unknown>) => {
-          created.push(v);
-          return { id: 'aimem_1', ...v };
-        },
-      },
+      [ASSISTANT_MODULE]: assistant,
     })[k],
 } as unknown as MedusaContainer;
+const tool = (name: string) => AGENT_TOOLS.find((t) => t.name === name)!;
+const admin = { userId: 'user_1', superAdmin: true };
+const staff = { userId: 'user_1', superAdmin: false };
 
 beforeEach(() => {
   process.env.S3_FILE_URL = CDN;
   held.clear();
   created.length = 0;
+  deleted.length = 0;
+  memories = [];
+  schedules = [];
   fetchBytes.mockClear();
 });
 afterAll(() => {
@@ -118,5 +173,141 @@ describe('remember', () => {
       { container, access: admin, userText: 'keep my captions short' },
     );
     expect(created).toEqual([expect.objectContaining({ scope: 'user' })]);
+  });
+});
+
+describe('isOwnOrigin', () => {
+  afterEach(() => {
+    delete process.env.MEDUSA_BACKEND_URL;
+    delete process.env.PAYMENT_CALLBACK_BASE;
+  });
+
+  it("never takes the backend's own origin, so the model cannot hit its routes", () => {
+    process.env.MEDUSA_BACKEND_URL = 'https://api.polycards.gg';
+    process.env.PAYMENT_CALLBACK_BASE = 'https://api.polycards.gg';
+    expect(isOwnOrigin('https://api.polycards.gg/admin/x')).toBe(false);
+    expect(isOwnOrigin('http://localhost:9000/static/a.png')).toBe(false);
+    expect(isOwnOrigin(`${CDN}/a.png`)).toBe(true);
+    expect(isOwnOrigin('https://polycards.gg/a.png')).toBe(true);
+  });
+
+  it('takes the local file store only in dev (no S3)', () => {
+    delete process.env.S3_FILE_URL;
+    expect(isOwnOrigin('http://localhost:9000/static/a.png')).toBe(true);
+  });
+});
+
+describe('forget', () => {
+  const forget = tool('forget');
+  const mine = { id: 'aimem_mine', scope: 'user', user_id: 'user_1' };
+  const theirs = { id: 'aimem_theirs', scope: 'user', user_id: 'user_2' };
+  const shared = { id: 'aimem_shared', scope: 'shared', user_id: 'user_2' };
+  const run = (id: string, access = admin, userText = 'forget that') =>
+    forget.run({ id }, { container, access, userText });
+
+  beforeEach(() => {
+    memories = [mine, theirs, shared];
+  });
+
+  it("deletes the asker's own note without its id in the message", async () => {
+    await run('aimem_mine', staff);
+    expect(deleted).toEqual(['aimem_mine']);
+  });
+
+  it("deletes a shared note or someone else's only when the admin typed its id", async () => {
+    await expect(run('aimem_shared')).rejects.toThrow('Deleted nothing');
+    await expect(run('aimem_theirs')).rejects.toThrow('Deleted nothing');
+    expect(deleted).toEqual([]);
+    await run('aimem_shared', admin, 'delete aimem_shared please');
+    await run('aimem_theirs', admin, 'delete aimem_theirs please');
+    expect(deleted).toEqual(['aimem_shared', 'aimem_theirs']);
+  });
+
+  it("never lets staff delete another person's or a shared note", async () => {
+    await expect(
+      run('aimem_shared', staff, 'delete aimem_shared'),
+    ).rejects.toThrow('No such note of yours');
+    expect(deleted).toEqual([]);
+  });
+});
+
+describe('cancel_schedule', () => {
+  const cancel = tool('cancel_schedule');
+  const run = (id: string, access = admin, userText = 'stop it') =>
+    cancel.run({ id }, { container, access, userText });
+
+  beforeEach(() => {
+    schedules = [
+      { id: 'aisch_mine', user_id: 'user_1', title: 'Mine' },
+      { id: 'aisch_theirs', user_id: 'user_2', title: 'Theirs' },
+    ];
+  });
+
+  it("cancels the asker's own task without its id in the message", async () => {
+    await run('aisch_mine', staff);
+    expect(deleted).toEqual(['aisch_mine']);
+  });
+
+  it("cancels someone else's task only when the admin typed its id", async () => {
+    await expect(run('aisch_theirs')).rejects.toThrow('Cancelled nothing');
+    await expect(
+      run('aisch_theirs', staff, 'cancel aisch_theirs'),
+    ).rejects.toThrow('No such scheduled task of yours');
+    expect(deleted).toEqual([]);
+    await run('aisch_theirs', admin, 'cancel aisch_theirs');
+    expect(deleted).toEqual(['aisch_theirs']);
+  });
+});
+
+describe('memoryFor', () => {
+  it('puts shared notes first, so newer personal notes cannot push them out', async () => {
+    memories = [
+      { scope: 'user', user_id: 'user_1', content: 'x'.repeat(40) },
+      { scope: 'shared', content: 'Captions end with polycards.gg.' },
+      { scope: 'user', user_id: 'user_2', content: 'not mine' },
+    ];
+    const notes = await memoryFor(
+      assistant as unknown as AssistantModuleService,
+      'user_1',
+      60,
+    );
+    expect(notes).toEqual(['[shared] Captions end with polycards.gg.']);
+  });
+});
+
+describe('deleted chats', () => {
+  const urls = (out: string) =>
+    (JSON.parse(out) as { url?: string; images?: string[] }[]).flatMap(
+      (r) => r.images ?? [r.url],
+    );
+
+  it("leave a person's own search but stay in an admin's everyone-search", async () => {
+    const own = await tool('search_chats').run(
+      { query: 'poster' },
+      { container, access: staff },
+    );
+    expect(urls(own)).toEqual([`${CDN}/aiconv_mine.png`]);
+    const all = await tool('search_chats').run(
+      { query: 'poster', everyone: true },
+      { container, access: admin },
+    );
+    expect(JSON.parse(all).map((r: { chat: string }) => r.chat)).toEqual([
+      'Mine',
+      'Gone',
+      'Other',
+    ]);
+  });
+
+  it('leave find_assets for staff, stay for an admin', async () => {
+    const own = await tool('find_assets').run(
+      { query: 'poster', kind: 'made' },
+      { container, access: staff },
+    );
+    expect(urls(own)).toEqual([`${CDN}/aiconv_mine.png`]);
+    const all = await tool('find_assets').run(
+      { query: 'poster', kind: 'made' },
+      { container, access: admin },
+    );
+    expect(urls(all)).toHaveLength(3);
   });
 });

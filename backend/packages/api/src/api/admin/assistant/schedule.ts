@@ -54,10 +54,29 @@ export const serverUrl = (): string =>
     `http://127.0.0.1:${process.env.PORT || 9000}`
   ).replace(/\/+$/, '');
 
+// A failed chat call, with the chat it ran in (null = none yet) and how soon
+// to try again (0 = wait for the next slot).
+class RunFailed extends Error {
+  constructor(
+    message: string,
+    readonly conversation: string | null,
+    readonly retryMs = 0,
+  ) {
+    super(message);
+  }
+}
 // The asker was mid-chat (one answer at a time each): try again shortly
 // rather than skip a whole day.
-class Busy extends Error {}
 const BUSY_RETRY_MS = 2 * 60_000;
+// A network, server or model hiccup: try again, but only within 20 minutes
+// of the slot, so a dead server can't keep it retrying.
+const RETRY_MS = 5 * 60_000;
+const RETRY_WINDOW_MS = 20 * 60_000;
+// Kept at claim, so a run a restart cut off doesn't look like a success.
+export const STARTED_NOTE =
+  'Started, no result yet (a restart may have cut it off).';
+// Runs in flight in this process, so a tick never starts one twice.
+const running = new Set<string>();
 
 type Row = {
   id: string;
@@ -71,11 +90,18 @@ type Row = {
   conversation_id: string | null;
 };
 
-/** Runs every due task once; gives how many ran. A task is claimed by moving
- *  its next run forward first, so two workers never run it twice. */
+/** Starts every due task once; gives how many started. A task is claimed by
+ *  moving its next run forward first, so two workers never run it twice. The
+ *  runs go on after it returns (the worker's only job slot must not wait out
+ *  minutes of answers); `wait` awaits them, for tests. */
 export async function runDueSchedules(
   container: MedusaContainer,
-  opts: { now?: Date; base?: string; fetchImpl?: typeof fetch } = {},
+  opts: {
+    now?: Date;
+    base?: string;
+    fetchImpl?: typeof fetch;
+    wait?: boolean;
+  } = {},
 ): Promise<number> {
   const now = opts.now ?? new Date();
   const assistant = container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
@@ -85,36 +111,66 @@ export async function runDueSchedules(
     { enabled: true, next_run_at: { $lte: now } },
     { order: { next_run_at: 'ASC' }, take: 5 },
   )) as unknown as Row[];
-  let ran = 0;
+  const started: Promise<void>[] = [];
   for (const task of due) {
+    if (running.has(task.id)) continue;
     const claimed = await pg('assistant_schedule')
       .where({ id: task.id, next_run_at: new Date(task.next_run_at) })
       .whereNull('deleted_at')
-      .update({ next_run_at: nextRun(task, now), last_run_at: now })
+      .update({
+        next_run_at: nextRun(task, now),
+        last_run_at: now,
+        last_error: STARTED_NOTE,
+      })
       .returning('id');
     if (!claimed.length) continue;
-    ran++;
-    try {
-      const conversation = await runOne(container, task, opts);
-      await assistant.updateAssistantSchedules({
-        id: task.id,
-        conversation_id: conversation ?? task.conversation_id,
-        last_error: null,
-      });
-      logger.info(`[assistant] schedule ${task.id} ran for ${task.user_id}`);
-    } catch (err) {
-      const message = (err as Error)?.message ?? String(err);
-      await assistant.updateAssistantSchedules({
-        id: task.id,
-        last_error: message.slice(0, 500),
-        ...(err instanceof Busy
-          ? { next_run_at: new Date(now.getTime() + BUSY_RETRY_MS) }
-          : {}),
-      });
-      logger.warn(`[assistant] schedule ${task.id} failed: ${message}`);
-    }
+    running.add(task.id);
+    // Live rows only: a task cancelled mid-run just gets nothing written.
+    const save = (fields: Record<string, unknown>) =>
+      pg('assistant_schedule')
+        .where({ id: task.id })
+        .whereNull('deleted_at')
+        .update(fields);
+    const run = (async () => {
+      try {
+        const conversation = await runOne(container, task, opts);
+        await save({
+          conversation_id: conversation ?? task.conversation_id,
+          last_error: null,
+        });
+        logger.info(`[assistant] schedule ${task.id} ran for ${task.user_id}`);
+      } catch (err) {
+        const message = (err as Error)?.message ?? String(err);
+        // The slot this run belongs to: the last scheduled time at or before now.
+        const slot = nextRun(
+          task,
+          new Date(now.getTime() - (task.every === 'week' ? 7 : 1) * DAY_MS),
+        );
+        const failed = err instanceof RunFailed ? err : null;
+        const retryMs =
+          failed && now.getTime() - slot.getTime() < RETRY_WINDOW_MS
+            ? failed.retryMs
+            : 0;
+        await save({
+          last_error: message.slice(0, 500),
+          ...(failed ? { conversation_id: failed.conversation } : {}),
+          ...(retryMs
+            ? { next_run_at: new Date(now.getTime() + retryMs) }
+            : {}),
+        });
+        logger.warn(`[assistant] schedule ${task.id} failed: ${message}`);
+      }
+    })()
+      .catch((err) =>
+        logger.error(
+          `[assistant] schedule ${task.id} bookkeeping failed: ${(err as Error)?.message}`,
+        ),
+      )
+      .finally(() => running.delete(task.id));
+    started.push(run);
   }
-  return ran;
+  if (opts.wait) await Promise.all(started);
+  return started.length;
 }
 
 async function runOne(
@@ -148,10 +204,19 @@ async function runOne(
     },
     {
       secret: http.jwtSecret as string,
-      expiresIn: 600,
+      // Checked only as the request starts; it carries all the owner's roles.
+      expiresIn: 60,
       jwtOptions: http.jwtOptions,
     },
   );
+  // A dropped connection or timeout: until the chat names one, the run's chat
+  // is the one it asked in.
+  const dropped = (err: unknown) =>
+    new RunFailed(
+      (err as Error)?.message ?? String(err),
+      task.conversation_id,
+      RETRY_MS,
+    );
   const answer = await (opts.fetchImpl ?? fetch)(
     `${opts.base ?? serverUrl()}/admin/assistant/chat`,
     {
@@ -166,9 +231,12 @@ async function runOne(
           : {}),
         message: `${SCHEDULED_PREFIX} “${task.title}”: ${task.instruction}`,
       }),
+      // 5 min is ample: the engine itself cuts a whole answer off at 240 s.
       signal: AbortSignal.timeout(5 * 60_000),
     },
-  );
+  ).catch((err) => {
+    throw dropped(err);
+  });
   if (answer.status === 404 && task.conversation_id) {
     // Its chat was deleted: run it in a new one.
     return runOne(container, { ...task, conversation_id: null }, opts);
@@ -177,11 +245,18 @@ async function runOne(
     const body = (await answer.json().catch(() => null)) as {
       message?: string;
     } | null;
-    throw new Error(body?.message ?? `The chat answered ${answer.status}.`);
+    throw new RunFailed(
+      body?.message ?? `The chat answered ${answer.status}.`,
+      task.conversation_id,
+      answer.status >= 500 || answer.status === 429 ? RETRY_MS : 0,
+    );
   }
   let conversation: string | null = null;
   let failure: { code?: string; message: string } | null = null;
-  for (const line of (await answer.text()).split('\n')) {
+  const text = await answer.text().catch((err) => {
+    throw dropped(err);
+  });
+  for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     try {
       const e = JSON.parse(line) as {
@@ -201,7 +276,16 @@ async function runOne(
       // not a JSON line
     }
   }
-  if (failure?.code === 'busy') throw new Busy(failure.message);
-  if (failure) throw new Error(failure.message);
+  if (failure) {
+    throw new RunFailed(
+      failure.message,
+      conversation ?? task.conversation_id,
+      failure.code === 'busy'
+        ? BUSY_RETRY_MS
+        : failure.code === 'daily_cap' || failure.code === 'no_key'
+          ? 0
+          : RETRY_MS,
+    );
+  }
   return conversation;
 }

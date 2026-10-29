@@ -1,5 +1,6 @@
 import { LASTING_WRITES, type Access } from './access';
 import {
+  generationCost,
   OpenRouterError,
   streamChat,
   type ChatContent,
@@ -77,11 +78,24 @@ export async function runTurn(opts: {
     tokensOut: 0,
   };
   const byName = new Map(opts.tools.map((t) => [t.name, t]));
+  // One deadline for the whole answer, tools included.
+  const turnSignal = AbortSignal.any([
+    opts.signal,
+    AbortSignal.timeout(TURN_TIMEOUT_MS),
+  ]);
+  let shown = 0;
   const ctx: ToolCtx = {
     ...opts.ctx,
     access: opts.access,
     userText: opts.userText,
-    signal: opts.signal,
+    signal: turnSignal,
+    // Screenshots may be text a customer wrote: no lasting writes this turn.
+    readOutside: opts.images.length > 0,
+    showImage: async (...args) => {
+      const url = await opts.ctx.showImage(...args);
+      shown++;
+      return url;
+    },
     addCost: (usd) => {
       result.cost += usd;
     },
@@ -109,16 +123,15 @@ export async function runTurn(opts: {
     { role: 'user', content: userContent },
   ];
 
-  const started = Date.now();
   let drawn = 0;
+  // The round's generation until its usage arrives: a round cut off before
+  // then is still billed, so the catch looks its cost up.
+  let unpriced: string | undefined;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      if (Date.now() - started > TURN_TIMEOUT_MS) {
-        result.error = 'The answer took too long. Ask a narrower question.';
-        return result;
-      }
       if (opts.budgetUsd !== undefined && result.cost >= opts.budgetUsd) {
-        result.error = "You reached today's assistant limit during this answer.";
+        result.error =
+          "You reached today's assistant limit during this answer.";
         return result;
       }
       const last = round === MAX_ROUNDS - 1;
@@ -133,7 +146,7 @@ export async function runTurn(opts: {
         tools: toolSpecs(opts.tools),
         toolChoice: last ? 'none' : 'auto',
         signal: AbortSignal.any([
-          opts.signal,
+          turnSignal,
           AbortSignal.timeout(ROUND_TIMEOUT_MS),
         ]),
         fetchImpl: opts.fetchImpl,
@@ -143,14 +156,23 @@ export async function runTurn(opts: {
           result.text += ev.delta;
           opts.emit(ev);
         } else if (ev.type === 'usage') {
+          unpriced = undefined;
           result.cost += ev.cost;
           result.tokensIn += ev.tokensIn;
           result.tokensOut += ev.tokensOut;
+        } else if (ev.type === 'generation') {
+          unpriced = ev.id;
         } else {
           calls = ev.calls;
         }
       }
-      if (!calls.length || last) return result;
+      if (!calls.length || last) {
+        // E.g. the last round still asked for tools: nothing to show.
+        if (!result.text.trim() && !shown) {
+          result.error = 'The assistant gave no answer. Ask again.';
+        }
+        return result;
+      }
       if (roundText && !roundText.endsWith('\n')) {
         // Text before a tool call ("Let me check...") stays its own paragraph.
         result.text += '\n\n';
@@ -169,6 +191,13 @@ export async function runTurn(opts: {
         let content: string;
         if (i >= MAX_CALLS_PER_ROUND) {
           content = `Skipped: at most ${MAX_CALLS_PER_ROUND} tool calls per step. Call the rest in the next step if still needed.`;
+        } else if (
+          DRAWS.test(call.name) &&
+          opts.budgetUsd !== undefined &&
+          result.cost >= opts.budgetUsd
+        ) {
+          content =
+            "Skipped: today's assistant limit is spent, so no more posters or images in this answer.";
         } else if (DRAWS.test(call.name) && drawn >= MAX_IMAGES_PER_TURN) {
           content = `Skipped: at most ${MAX_IMAGES_PER_TURN} posters or images per answer. Tell the asker to ask again for more.`;
         } else {
@@ -185,13 +214,19 @@ export async function runTurn(opts: {
     }
     return result;
   } catch (err) {
+    // The turn's deadline is a TimeoutError too: check it before a round's.
     result.error = opts.signal.aborted
       ? 'aborted'
-      : (err as Error)?.name === 'TimeoutError'
-        ? 'The AI model did not answer in time. Try again.'
-        : err instanceof OpenRouterError
-        ? err.message
-        : `The assistant stopped: ${(err as Error)?.message ?? String(err)}`;
+      : turnSignal.aborted
+        ? 'The answer took too long. Ask a narrower question.'
+        : (err as Error)?.name === 'TimeoutError'
+          ? 'The AI model did not answer in time. Try again.'
+          : err instanceof OpenRouterError
+            ? err.message
+            : `The assistant stopped: ${(err as Error)?.message ?? String(err)}`;
+    if (unpriced) {
+      result.cost += await generationCost(opts.key, unpriced, opts.fetchImpl);
+    }
     return result;
   }
 }

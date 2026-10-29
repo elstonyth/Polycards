@@ -52,11 +52,11 @@ const readConfig = (file: string): PageConfig | null => {
   };
 };
 
-// Pages under /settings/ live in the Settings layout's own sidebar, not here.
-const configs = pageFiles(ROUTES)
+const allConfigs = pageFiles(ROUTES)
   .map(readConfig)
-  .filter((c): c is PageConfig => c !== null)
-  .filter((c) => !c.path.startsWith('/settings/'));
+  .filter((c): c is PageConfig => c !== null);
+// Pages under /settings/ live in the Settings layout's own sidebar, not here.
+const configs = allConfigs.filter((c) => !c.path.startsWith('/settings/'));
 const byRank = (a: PageConfig, b: PageConfig) => (a.rank ?? 0) - (b.rank ?? 0);
 
 type Entry = { path: string; label: string };
@@ -198,7 +198,7 @@ describe('sidebar contract (Vault spec §6)', () => {
     // The sidebar shows an entry without `permissions` to EVERY role, so one
     // ungated page would appear for the automation operator. Nested entries
     // hide with their parent.
-    for (const c of configs.filter((x) => !x.nested)) {
+    for (const c of allConfigs.filter((x) => !x.nested)) {
       const body = configBody(join(ROUTES, c.path.slice(1), 'page.tsx'));
       expect(body, c.path).toMatch(/\bpermissions:\s*\[/);
     }
@@ -217,7 +217,7 @@ describe('sidebar contract (Vault spec §6)', () => {
   });
 
   it('labels every entry through i18n with an English string', () => {
-    for (const c of configs) {
+    for (const c of allConfigs) {
       expect(c.translationNs, c.path).toBe('translation');
       expect(typeof lookup(c.label ?? ''), `${c.path}: ${c.label}`).toBe(
         'string',

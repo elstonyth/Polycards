@@ -77,10 +77,11 @@ const REFUSED_FUNCTIONS = new RegExp(
   ].join('|')})\\b`,
   'i',
 );
-// Password hashes, API keys, invite, reset, verification and MFA tokens, and
-// notification contents (reset links).
+// Password hashes, API keys, invite, reset, verification and MFA tokens,
+// notification contents (reset links), and the staff assistant's chats,
+// memories, schedules and sealed key.
 const REFUSED_TABLES =
-  /\b(provider_identity|api_key|(?:member_)?invite|notification|workflow_execution|auth_(?:verification|mfa|password_reset)\w*)\b/i;
+  /\b(provider_identity|api_key|(?:member_)?invite|notification|workflow_execution|auth_(?:verification|mfa|password_reset)\w*|assistant_\w+)\b/i;
 // Partner logins keep their generated password in customer.metadata.
 const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
 // Real names (spec 2026-10-06): refused by NAME in the query, not only
@@ -113,7 +114,7 @@ export function sqlRefusal(sql: unknown): string | null {
   }
   const table = REFUSED_TABLES.exec(sql)?.[1];
   if (table) {
-    return `The ${table} table is not open to the desk bots: it holds passwords, login tokens or reset links.`;
+    return `The ${table} table is not open to the desk bots: it holds passwords, login tokens, reset links or staff chats.`;
   }
   if (PASSWORDS.test(sql)) return 'Passwords stay hidden from the desk bots.';
   if (REAL_NAMES.test(sql))

@@ -263,7 +263,7 @@
     "screenshotsSent_one": "已发送 {{count}} 张截图",
     "screenshotsSent_other": "已发送 {{count}} 张截图",
     "noKeyAdmin": "助手还没有 AI 密钥。",
-    "openSettings": "去 设置 → AI 添加",
+    "openSettings": "去 设置 → AI 助手 添加",
     "noKeyStaff": "助手还没设置好，请管理员添加 AI 密钥。",
     "footnote": "答案来自实时数据，但仍可能出错——发布或付款前请先核对。",
     "suggest": {
@@ -273,7 +273,7 @@
       "packArt": "帮我设计一个新卡包的图，名字叫 ",
       "lowStock": "哪些卡库存是 0 或欠货？",
       "toBuy": "今天需要采购什么？列出卡和价格。",
-      "order": "订单号 #",
+      "order": "这个订单现在到哪了？订单号 #",
       "account": "查一下这个玩家的账户状态："
     },
     "settings": {
@@ -298,7 +298,7 @@
       "imageModel": "图片模型",
       "imageModelHelp": "例如 google/gemini-3.1-flash-image",
       "cap": "每人每日上限（USD）",
-      "capHelp": "马来西亚时间 00:00 重置。",
+      "capHelp": "范围 0.5 到 1000。马来西亚时间 00:00 重置。",
       "save": "保存",
       "saved": "已保存。",
       "styleTitle": "图片风格",
@@ -310,10 +310,12 @@
       "refsDefault": "默认：我们已发布的海报",
       "refsAdd": "添加参考图",
       "refsRemove": "移除参考图",
-      "refsUseDefault": "恢复默认参考图"
+      "refsUseDefault": "恢复默认参考图",
+      "refsReplace": "上传自己的帖子后，会替换整组内置参考图；把自己上传的全部移除，就会恢复内置的那组。"
     },
     "review": {
       "title": "助手对话记录",
+      "truncated": "只显示最新的 500 条消息，更早的没有显示。",
       "subtitle": "员工问过助手的所有问题，最新的在前。",
       "empty": "还没有对话。",
       "when": "最后消息",
@@ -365,10 +367,13 @@
       "cancel_schedule": "取消任务"
     },
     "deleteConfirm": "删除这个对话？管理员的对话记录里仍会保留。",
+    "stopped": "已停止，没有回答。",
     "history": "历史",
     "imageFailed": "图片加载失败。",
+    "loadError": "加载失败：{{message}}",
     "err": {
-      "no_key": "助手还没有 AI 密钥，请管理员在 设置 → AI 添加。",
+      "bad_model": "设置 → AI 助手里的聊天模型不能在这里使用（联网搜索模型已关闭）。需要管理员换一个。",
+      "no_key": "助手还没有 AI 密钥，请管理员在 设置 → AI 助手 添加。",
       "busy": "上一个问题还在回答中，请等它完成再问。",
       "daily_cap": "你今天的助手额度已用完，马来西亚时间 00:00 重置。"
     }

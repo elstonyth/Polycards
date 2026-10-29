@@ -141,6 +141,8 @@ export const assistantApi = {
     call<{
       conversation: { id: string; title: string; user_id: string };
       messages: StoredMessage[];
+      /** Only the newest 500 messages came back. */
+      truncated?: boolean;
     }>(`/admin/assistant-review/${encodeURIComponent(id)}`),
 };
 

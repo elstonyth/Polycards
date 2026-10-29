@@ -14,14 +14,18 @@ export function ImageCard({ url }: { url: string }) {
   const src = resolveImageUrl(url);
   const download = async () => {
     try {
-      const blob = await (await fetch(src)).blob();
-      const href = URL.createObjectURL(blob);
+      const res = await fetch(src);
+      // An error page saved as .jpg is worse than opening the image.
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const href = URL.createObjectURL(await res.blob());
       const a = Object.assign(document.createElement('a'), {
         href,
-        download: url.split('/').pop() ?? 'polycards-image.jpg',
+        download:
+          url.split('/').pop()?.split(/[?#]/)[0] || 'polycards-image.jpg',
       });
       a.click();
-      URL.revokeObjectURL(href);
+      // Some browsers start the save after click() returns.
+      setTimeout(() => URL.revokeObjectURL(href), 1000);
     } catch {
       window.open(src, '_blank', 'noopener,noreferrer');
     }
@@ -51,7 +55,7 @@ export function ImageCard({ url }: { url: string }) {
       <button
         type="button"
         onClick={download}
-        className="absolute bottom-2 right-2 flex items-center gap-x-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs font-medium text-white opacity-0 backdrop-blur transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+        className="absolute bottom-2 right-2 flex items-center gap-x-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs font-medium text-white opacity-0 backdrop-blur transition-opacity focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
       >
         <ArrowDownTray />
         {t('assistant.download')}

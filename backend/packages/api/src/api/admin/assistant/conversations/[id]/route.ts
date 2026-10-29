@@ -27,13 +27,14 @@ export async function GET(
     res.status(404).json({ message: 'That conversation was not found.' });
     return;
   }
+  // The newest 500, oldest first: a long chat must still show its latest.
   const messages = await assistant.listAssistantMessages(
     { conversation_id: conversation.id },
-    { order: { created_at: 'ASC' }, take: 500 },
+    { order: { created_at: 'DESC' }, take: 500 },
   );
   res.json({
     conversation: { id: conversation.id, title: conversation.title },
-    messages: messages.map(messageView),
+    messages: messages.reverse().map(messageView),
   });
 }
 

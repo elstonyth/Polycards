@@ -94,9 +94,19 @@ export async function generateImage(opts: {
 const LOGO_WIDTH = Math.round(POSTER_W * 0.3);
 const LOGO_MARGIN = 56;
 
-/** The image at 1080x1350 with the official wordmark bottom-centre. */
-export async function brandImage(image: Buffer): Promise<Buffer> {
+/** The image as a 1080x1350 JPEG, with the official wordmark bottom-centre
+ *  unless `withLogo` is false. */
+export async function brandImage(
+  image: Buffer,
+  withLogo = true,
+): Promise<Buffer> {
   const fitted = await fitToFeed(image);
+  // fitToFeed returns an exact-size image as it came (maybe PNG): re-encode.
+  if (!withLogo) {
+    return sharp(fitted, { limitInputPixels: MAX_DECODE_PIXELS })
+      .jpeg({ quality: 90, chromaSubsampling: '4:4:4' })
+      .toBuffer();
+  }
   const logo = await sharp(Buffer.from(BRAND_LOGO_B64, 'base64'))
     .resize({ width: LOGO_WIDTH })
     .png()

@@ -29,11 +29,13 @@ export type Block =
 const INLINE =
   /(\*\*([^*]+)\*\*)|(`([^`]+)`)|(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))/g;
 
-/** polycards.gg or one of its subdomains, over http(s). */
+/** polycards.gg, www or admin, over http(s): no other subdomain is ours. */
 const ownSite = (href: string): boolean => {
   try {
     const host = new URL(href).hostname.toLowerCase();
-    return host === 'polycards.gg' || host.endsWith('.polycards.gg');
+    return ['polycards.gg', 'www.polycards.gg', 'admin.polycards.gg'].includes(
+      host,
+    );
   } catch {
     return false;
   }

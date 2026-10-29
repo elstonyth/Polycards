@@ -6,7 +6,8 @@ export type Step = {
   id: string;
   /** The tool's name, like challenge_poster. */
   name: string;
-  label: string;
+  /** The server's English label, on a step that streamed in live. */
+  label?: string;
   status: 'start' | 'done' | 'error';
   ms?: number;
 };
@@ -58,7 +59,9 @@ export function ToolSteps({ steps }: { steps: Step[] }) {
                     : 'text-ui-fg-subtle'
                 }
               >
-                {s.label}
+                {t(`assistant.tools.${s.name}`, {
+                  defaultValue: s.label ?? s.name,
+                })}
               </span>
               {s.ms !== undefined && (
                 <span className="text-ui-fg-muted tabular-nums">

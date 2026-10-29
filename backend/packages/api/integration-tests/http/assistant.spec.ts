@@ -218,6 +218,9 @@ medusaIntegrationTestRunner({
           ['get', '/admin/assistant-settings'],
           ['post', '/admin/assistant-settings'],
           ['get', '/admin/assistant-review'],
+          // Any id: admin-rbac.ts refuses on the path before the lookup.
+          ['get', '/admin/assistant-review/conv_does_not_matter'],
+          ['post', '/admin/assistant-settings/test'],
         ] as const) {
           const res = await api[method](
             path,
@@ -225,6 +228,30 @@ medusaIntegrationTestRunner({
               ? [{}, { ...anson, validateStatus: () => true }]
               : [{ ...anson, validateStatus: () => true }]),
           );
+          expect([path, res.status]).toEqual([path, 403]);
+        }
+        // Holding the review and settings policies (as the desk bots' *:read
+        // does) is not enough: these screens are for super admins only.
+        const container = getContainer();
+        const reviewerRole = await roleWith(container, 'Reviewer test', [
+          'assistant_review:read',
+          'assistant_setting:read',
+          'assistant_setting:update',
+        ]);
+        const reviewer = {
+          headers: {
+            authorization: `Bearer ${tokenFor(container, 'user_reviewer_test', [reviewerRole])}`,
+          },
+        };
+        for (const path of [
+          '/admin/assistant-settings',
+          '/admin/assistant-review',
+          '/admin/assistant-review/conv_does_not_matter',
+        ]) {
+          const res = await api.get(path, {
+            ...reviewer,
+            validateStatus: () => true,
+          });
           expect([path, res.status]).toEqual([path, 403]);
         }
       });
@@ -324,6 +351,16 @@ medusaIntegrationTestRunner({
           },
         );
         expect(peek.status).toBe(404);
+        const del = await api.delete(
+          `/admin/assistant/conversations/${mine.id}`,
+          { ...anson, validateStatus: () => true },
+        );
+        expect(del.status).toBe(404);
+        const still = await api.get(
+          `/admin/assistant/conversations/${mine.id}`,
+          admin,
+        );
+        expect(still.status).toBe(200);
         const other = await chat(anson, 'follow up', {
           conversation_id: mine.id,
         }).catch((e) => e);
@@ -387,17 +424,20 @@ medusaIntegrationTestRunner({
           '/admin/assistant-settings',
           {
             image_style: 'Neon blue only.',
-            style_refs: ['https://cdn.example.com/a.jpg'],
+            // Our own file store: other hosts are refused.
+            style_refs: ['http://localhost:9000/static/a.jpg'],
           },
           admin,
         );
         expect(saved.data.settings).toMatchObject({
           image_style: 'Neon blue only.',
-          style_refs: ['https://cdn.example.com/a.jpg'],
+          style_refs: ['http://localhost:9000/static/a.jpg'],
         });
 
         for (const bad of [
           { style_refs: ['http://169.254.169.254/x.jpg'] },
+          { style_refs: ['https://cdn.example.com/a.jpg'] },
+          { chat_model: 'openai/gpt-5:online' },
           {
             style_refs: Array.from(
               { length: 7 },
@@ -469,7 +509,8 @@ medusaIntegrationTestRunner({
         expect(events.at(-1)).toMatchObject({ type: 'done' });
         const toolMsg = String(received[1].messages.at(-1)!.content);
         expect(toolMsg).not.toContain('No access');
-        expect(toolMsg).toContain('truncated');
+        // capBody's whole-page wrapper around the inventory route's { rows }.
+        expect(toolMsg).toContain('"truncated":false,"data":{"rows":');
         // The screenshot reached the model with the question.
         const question = received[0].messages.at(-1)!.content as {
           type: string;
@@ -513,6 +554,27 @@ medusaIntegrationTestRunner({
         script = () => [say('ok')];
         await chat(anson, 'hello again');
         expect(system()).toContain('[shared] Captions end with polycards.gg.');
+
+        // Anson cannot delete the shared note, even naming its id.
+        const [shared] = await getContainer()
+          .resolve<AssistantModuleService>(ASSISTANT_MODULE)
+          .listAssistantMemories({ scope: 'shared' });
+        expect(shared).toBeTruthy();
+        once('forget', { id: shared.id });
+        await chat(anson, `forget note ${shared.id}`);
+        expect(lastTool()).toContain('No such note of yours');
+        script = () => [say('ok')];
+        await chat(anson, 'is it still there?');
+        expect(system()).toContain('[shared] Captions end with polycards.gg.');
+
+        // An admin's own note stays out of Anson's recall.
+        once('remember', { note: 'The float tops up on Mondays.' });
+        await chat(admin, 'remember: the float tops up on Mondays');
+        expect(lastTool()).toContain('"saved":true');
+        once('recall', {});
+        await chat(anson, 'what do you remember?');
+        expect(lastTool()).toContain('Restock the 151 boxes on Fridays.');
+        expect(lastTool()).not.toContain('The float tops up on Mondays.');
 
         // An admin may search everyone's chats; anyone else only their own.
         once('search_chats', { query: 'restock Fridays', everyone: true });
@@ -596,6 +658,14 @@ medusaIntegrationTestRunner({
           enabled: true,
         });
 
+        // everyone is for admins only: Anson still sees only his own (none).
+        once('list_schedules', { everyone: true });
+        await chat(anson, 'list everyone’s scheduled tasks');
+        expect(lastTool()).toMatch(
+          /^<tool_result name="list_schedules">\n\[\]/,
+        );
+        expect(lastTool()).not.toContain(task.id);
+
         once('cancel_schedule', { id: task.id });
         await chat(anson, 'cancel that task');
         expect(lastTool()).toContain('No such scheduled task of yours');
@@ -610,6 +680,7 @@ medusaIntegrationTestRunner({
         expect(
           await runDueSchedules(container, {
             base: api.defaults.baseURL as string,
+            wait: true,
           }),
         ).toBe(1);
         // Unwatched, the run cannot save notes or set or cancel tasks.

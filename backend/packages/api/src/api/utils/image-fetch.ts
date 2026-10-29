@@ -82,7 +82,7 @@ const isPrivateHost = (hostname: string): boolean => {
 // block, leaving graded cards unbaked. Gate this on S3_FILE_URL being unset — the
 // SAME condition that decides files live on the local provider — so prod (S3 set,
 // files on the public CDN) keeps loopback fully blocked with no NODE_ENV reliance.
-const localFileOrigin = (): string | null => {
+export const localFileOrigin = (): string | null => {
   if (process.env.S3_FILE_URL) return null; // prod: files are on the public CDN
   try {
     return new URL(process.env.MEDUSA_BACKEND_URL ?? 'http://localhost:9000')

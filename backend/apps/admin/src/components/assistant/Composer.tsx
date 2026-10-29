@@ -28,11 +28,14 @@ export function Composer({
   onStop,
   autoFocus,
   seed,
+  disabled,
 }: {
   busy: boolean;
   onSend: (text: string, images: string[]) => void;
   onStop: () => void;
   autoFocus?: boolean;
+  /** Hold sending (a chat is still loading); typing stays open. */
+  disabled?: boolean;
   /** Text to put in the box (a suggestion that needs a name first). */
   seed?: { text: string; n: number };
 }) {
@@ -79,7 +82,7 @@ export function Composer({
 
   const send = () => {
     const q = text.trim();
-    if (!q || busy) return;
+    if (!q || busy || disabled) return;
     onSend(q, images);
     setText('');
     setImages([]);
@@ -122,7 +125,7 @@ export function Composer({
                     onClick={() =>
                       setImages((p) => p.filter((_, j) => j !== i))
                     }
-                    className="bg-ui-bg-base border-ui-border-base text-ui-fg-subtle absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm"
+                    className="bg-ui-bg-base border-ui-border-base text-ui-fg-subtle absolute -right-1.5 -top-1.5 flex h-5 !min-h-0 w-5 items-center justify-center rounded-full border shadow-sm"
                   >
                     <XMarkMini />
                   </button>
@@ -191,26 +194,21 @@ export function Composer({
             <span className="text-ui-fg-muted hidden text-[11px] sm:inline">
               {t('assistant.enterHint')}
             </span>
-            {busy ? (
-              <button
-                type="button"
-                onClick={onStop}
-                aria-label={t('assistant.stop')}
-                className="text-ui-fg-base transition-transform hover:scale-105"
-              >
+            {/* One button that turns into Stop, so a mouse send keeps focus;
+                aria-disabled (send() checks itself) so the end keeps it too. */}
+            <button
+              type="button"
+              onClick={busy ? onStop : send}
+              aria-disabled={!busy && (!text.trim() || disabled)}
+              aria-label={busy ? t('assistant.stop') : t('assistant.send')}
+              className={`${busy ? 'text-ui-fg-base' : 'text-violet-500'} aria-disabled:text-ui-fg-disabled transition-transform hover:scale-105 aria-disabled:hover:scale-100`}
+            >
+              {busy ? (
                 <StopCircleSolid className="h-7 w-7" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={send}
-                disabled={!text.trim()}
-                aria-label={t('assistant.send')}
-                className="text-violet-500 transition-transform hover:scale-105 disabled:text-ui-fg-disabled disabled:hover:scale-100"
-              >
+              ) : (
                 <ArrowUpCircleSolid className="h-7 w-7" />
-              </button>
-            )}
+              )}
+            </button>
           </span>
         </div>
       </div>

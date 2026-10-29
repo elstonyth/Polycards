@@ -35,13 +35,15 @@ export function sealKey(plain: string, secret: string): string {
 export function openKey(sealed: string, secret: string): string | null {
   const [version, iv, tag, ct] = sealed.split(':');
   if (version !== VERSION || !iv || !tag || !ct) return null;
+  const ivBytes = Buffer.from(iv, 'base64');
+  const tagBytes = Buffer.from(tag, 'base64');
+  // A shorter tag would be checked only as far as it goes: sealKey writes 12 + 16.
+  if (ivBytes.length !== 12 || tagBytes.length !== 16) return null;
   try {
-    const decipher = createDecipheriv(
-      'aes-256-gcm',
-      derive(secret),
-      Buffer.from(iv, 'base64'),
-    );
-    decipher.setAuthTag(Buffer.from(tag, 'base64'));
+    const decipher = createDecipheriv('aes-256-gcm', derive(secret), ivBytes, {
+      authTagLength: 16,
+    });
+    decipher.setAuthTag(tagBytes);
     return Buffer.concat([
       decipher.update(Buffer.from(ct, 'base64')),
       decipher.final(),

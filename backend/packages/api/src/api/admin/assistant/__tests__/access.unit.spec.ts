@@ -46,6 +46,8 @@ const POLICIES: Record<string, string[]> = {
   desk_bots: ['*:read'],
 };
 
+// Like the real one, it answers yes for an empty role list: access.ts must
+// guard that itself.
 jest.mock('@medusajs/framework', () => ({
   hasPermission: jest.fn(
     async ({
@@ -55,6 +57,7 @@ jest.mock('@medusajs/framework', () => ({
       roles: string[];
       actions: { resource: string; operation: string };
     }) =>
+      roles.length === 0 ||
       roles.some((r) =>
         (POLICIES[r] ?? []).some((p) => {
           const [res, op] = p.split(':');
@@ -132,6 +135,21 @@ describe('assistant access', () => {
     expect(tools).not.toContain('db_query');
     expect(tools).not.toContain('generate_image');
     expect(tools).toContain('economy');
+  });
+
+  it('gives every tool at least one need', () => {
+    for (const tool of TOOLS)
+      expect([tool.name, tool.needs.length > 0]).toEqual([tool.name, true]);
+  });
+
+  it('offers a tool with no needs to nobody, super admins included', async () => {
+    const access = accessFor(container, {
+      actor_id: 'user_1',
+      app_metadata: { roles: ['role_super_admin'] },
+    });
+    expect(await allowedTools(access, [{ name: 'open', needs: [] }])).toEqual(
+      [],
+    );
   });
 
   it('carries the asker id and roles for the loopback token', () => {

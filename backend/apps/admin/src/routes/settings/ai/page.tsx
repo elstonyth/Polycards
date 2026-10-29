@@ -14,6 +14,7 @@ import {
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { assistantApi, type AssistantSettings } from '../../../lib/assistant';
 import { AiOrb } from '../../../components/assistant/AiOrb';
+import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { ImageStyleCard } from './image-style';
 
 // Settings → AI (spec 2026-10-29): the OpenRouter key the assistant uses for
@@ -98,6 +99,27 @@ const AiSettingsPage = () => {
     Number.isFinite(capValue) &&
     capValue >= 0.5 &&
     capValue <= 1000;
+
+  // Until the settings arrive, a blank form would read as "key lost".
+  if (!s) {
+    return (
+      <div className="pc-admin flex flex-col gap-y-3">
+        <Container className="pc-ai-aurora flex items-center gap-x-4 px-6 py-5">
+          <AiOrb size={44} />
+          <Heading level="h2">{t('assistant.settings.title')}</Heading>
+        </Container>
+        <Container className="px-6 py-5">
+          {settings.isError ? (
+            <Text size="small" className="text-ui-fg-error">
+              {t('assistant.loadError', { message: settings.error.message })}
+            </Text>
+          ) : (
+            <LoadingSkeleton />
+          )}
+        </Container>
+      </div>
+    );
+  }
 
   const status = !s?.openrouter_key.set
     ? { color: 'grey' as const, text: t('assistant.settings.keyNone') }
@@ -222,13 +244,16 @@ const AiSettingsPage = () => {
             <Input
               id="ai-cap"
               type="number"
-              min={0}
+              min={0.5}
               max={1000}
-              step="1"
+              step="any"
               value={cap}
               onChange={(e) => setCap(e.target.value)}
             />
-            <Text size="xsmall" className="text-ui-fg-muted">
+            <Text
+              size="xsmall"
+              className={capOk ? 'text-ui-fg-muted' : 'text-ui-fg-error'}
+            >
               {t('assistant.settings.capHelp')}
             </Text>
           </div>

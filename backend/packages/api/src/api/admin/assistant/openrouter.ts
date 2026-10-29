@@ -7,6 +7,12 @@ const base = (): string =>
     process.env.ASSISTANT_OPENROUTER_BASE || 'https://openrouter.ai/api/v1'
   ).replace(/\/+$/, '');
 
+// A model id as Settings → AI assistant takes it: no suffix, or one that
+// changes only price or speed. `:online` would let the model fetch the web,
+// an outside channel.
+export const MODEL_RE =
+  /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(?::(?:free|nitro|floor|extended|thinking|beta))?$/i;
+
 export const openRouterUrl = (): string => `${base()}/chat/completions`;
 
 /** The key's own account: its label, credit used and credit left. */
@@ -39,6 +45,37 @@ export async function keyInfo(
   };
 }
 
+/** What one generation cost, USD. OpenRouter bills a stream cut off before
+ *  its usage chunk, so a stopped round is priced here. Best effort: 0 when
+ *  unknown, never throws. */
+export async function generationCost(
+  key: string,
+  id: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // The generation can 404 for a moment after the stream stops.
+    if (attempt) await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const answer = await fetchImpl(
+        `${base()}/generation?id=${encodeURIComponent(id)}`,
+        {
+          headers: { authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(3000),
+        },
+      );
+      if (!answer.ok) continue;
+      const body = (await answer.json()) as {
+        data?: { total_cost?: number };
+      } | null;
+      return Number(body?.data?.total_cost ?? 0) || 0;
+    } catch {
+      // Network error or timeout: try once more, then give up.
+    }
+  }
+  return 0;
+}
+
 export type ChatContent =
   | string
   | (
@@ -69,7 +106,9 @@ export type ToolSpec = {
 export type StreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'tool_calls'; calls: ToolCall[] }
-  | { type: 'usage'; cost: number; tokensIn: number; tokensOut: number };
+  | { type: 'usage'; cost: number; tokensIn: number; tokensOut: number }
+  /** The generation's id, sent once, so a cut-off round can be priced. */
+  | { type: 'generation'; id: string };
 
 export class OpenRouterError extends Error {
   constructor(
@@ -81,6 +120,7 @@ export class OpenRouterError extends Error {
 }
 
 type Chunk = {
+  id?: string;
   error?: { message?: string; code?: number };
   usage?: {
     cost?: number;
@@ -137,6 +177,10 @@ export async function* streamChat(opts: {
   }
 
   const calls: { id: string; name: string; arguments: string }[] = [];
+  // Which call a provider's index now points at, once a reused index has
+  // moved on to a new call.
+  const slot = new Map<number, number>();
+  let generation = '';
   const decoder = new TextDecoder();
   let buffer = '';
   const reader = answer.body.getReader();
@@ -163,13 +207,24 @@ export async function* streamChat(opts: {
           chunk.error.code,
         );
       }
+      if (chunk.id && !generation) {
+        generation = chunk.id;
+        yield { type: 'generation', id: chunk.id };
+      }
       const delta = chunk.choices?.[0]?.delta;
       if (delta?.content) yield { type: 'text', delta: delta.content };
       for (const tc of delta?.tool_calls ?? []) {
-        // A new id starts a new call even when a provider reuses index 0;
-        // a fragment with no index and no id continues the last call.
-        let i = tc.index ?? Math.max(calls.length - 1, 0);
-        if (tc.id && calls[i]?.id && calls[i].id !== tc.id) i = calls.length;
+        // A new id starts a new call even when a provider reuses index 0,
+        // and later pieces at that index follow it; a fragment with no
+        // index and no id continues the last call.
+        let i =
+          tc.index === undefined
+            ? Math.max(calls.length - 1, 0)
+            : (slot.get(tc.index) ?? tc.index);
+        if (tc.id && calls[i]?.id && calls[i].id !== tc.id) {
+          i = calls.length;
+          if (tc.index !== undefined) slot.set(tc.index, i);
+        }
         calls[i] ??= { id: '', name: '', arguments: '' };
         if (tc.id) calls[i].id = tc.id;
         // Some providers repeat the name in every piece, others split it.

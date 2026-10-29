@@ -68,23 +68,30 @@ async function ensureRole(
     { name: spec.name },
     { order: { created_at: 'ASC' }, take: 1 },
   );
+  const links = existing
+    ? await rbac.listRbacRolePolicies({ role_id: existing.id })
+    : [];
+  // A same-named role holding more than the spec would hand that out too.
+  const wanted = new Set(policies.map((p) => p.id));
+  const foreign = links.filter((l) => !wanted.has(l.policy_id));
+  if (foreign.length) {
+    throw new Error(
+      `Role "${spec.name}" (${existing?.id}) also holds policies outside the assistant's: ${foreign.map((l) => l.policy_id).join(', ')}. Rename or trim that role first.`,
+    );
+  }
   const role =
     existing ??
     (await rbac.createRbacRoles({
       name: spec.name,
       description: spec.description,
     }));
+  const held = new Set(links.map((l) => l.policy_id));
   for (const policy of policies) {
-    const [link] = await rbac.listRbacRolePolicies(
-      { role_id: role.id, policy_id: policy.id },
-      { take: 1 },
-    );
-    if (!link) {
-      await rbac.createRbacRolePolicies({
-        role_id: role.id,
-        policy_id: policy.id,
-      });
-    }
+    if (held.has(policy.id)) continue;
+    await rbac.createRbacRolePolicies({
+      role_id: role.id,
+      policy_id: policy.id,
+    });
   }
   return role.id as string;
 }
@@ -118,9 +125,13 @@ export async function grantAssistant(
   if (!apply) {
     return `DRY RUN: would add ${specs.map((s) => `"${s.name}"`).join(' + ')} to ${email} (user=${user.id}, roles now: ${user.rbac_roles?.map((r) => r.id).join(',') || 'none'}). Pass "apply".`;
   }
-  const added: string[] = [];
+  // Every role checked before any is assigned: a refusal leaves no half grant.
+  const roles: { spec: RoleSpec; roleId: string }[] = [];
   for (const spec of specs) {
-    const roleId = await ensureRole(scope, spec);
+    roles.push({ spec, roleId: await ensureRole(scope, spec) });
+  }
+  const added: string[] = [];
+  for (const { spec, roleId } of roles) {
     if (user.rbac_roles?.some((r) => r.id === roleId)) continue;
     await workflowService.run('assign-user-roles', {
       input: {

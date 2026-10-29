@@ -7,6 +7,7 @@ import type PacksModuleService from '../../../modules/packs/service';
 import {
   assetOrigin,
   fetchBytes,
+  localFileOrigin,
   MAX_DECODE_PIXELS,
 } from '../../utils/image-fetch';
 import type { Need } from './access';
@@ -17,7 +18,7 @@ import { MAX_SCHEDULES, nextRun } from './schedule';
 // searching the folders for the information it needs"):
 //  - remember / recall / forget: notes staff ask it to keep. Personal notes
 //    are seen only by the person who saved them; shared notes (super admins
-//    only) by everyone, and are also put in every chat's instructions.
+//    only) by everyone, and are put first in every chat's instructions.
 //  - search_chats: what was asked and answered before — the asker's own
 //    chats, or (super admins) everyone's.
 //  - find_assets: the art to build with — pack art, card and slab images,
@@ -59,20 +60,27 @@ const assistantOf = (ctx: Ctx) =>
   ctx.container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
 const day = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
 
-/** The notes a person's chat starts with: everyone's shared notes and
- *  their own, newest first, within a size budget. */
+/** The notes a person's chat starts with: everyone's shared notes first,
+ *  then their own, each newest first, within a size budget. */
 export async function memoryFor(
   assistant: AssistantModuleService,
   userId: string,
   budget = 3000,
 ): Promise<string[]> {
-  const notes = await assistant.listAssistantMemories(
-    { $or: [{ scope: 'shared' }, { scope: 'user', user_id: userId }] },
-    { order: { created_at: 'DESC' }, take: 40 },
-  );
+  // Shared rules first, so newer personal notes cannot push them out.
+  const [shared, own] = await Promise.all([
+    assistant.listAssistantMemories(
+      { scope: 'shared' },
+      { order: { created_at: 'DESC' }, take: 40 },
+    ),
+    assistant.listAssistantMemories(
+      { scope: 'user', user_id: userId },
+      { order: { created_at: 'DESC' }, take: 40 },
+    ),
+  ]);
   const out: string[] = [];
   let used = 0;
-  for (const n of notes) {
+  for (const n of [...shared, ...own]) {
     const line = `${n.scope === 'shared' ? '[shared]' : '[yours]'} ${n.content}`;
     if (used + line.length > budget) break;
     out.push(line);
@@ -81,7 +89,8 @@ export async function memoryFor(
   return out;
 }
 
-/** The person's own conversation ids (everyone's for `all`). */
+/** The person's own conversation ids, chats they deleted left out
+ *  (everyone's, deleted ones included, for `all`). */
 async function conversationIds(
   ctx: Ctx,
   all: boolean,
@@ -89,7 +98,7 @@ async function conversationIds(
   if (all) return null;
   const convs = await assistantOf(ctx).listAssistantConversations(
     { user_id: ctx.access.userId },
-    { select: ['id'], take: 1000, withDeleted: true },
+    { select: ['id'], take: 1000 },
   );
   return convs.map((c) => c.id);
 }
@@ -203,6 +212,14 @@ export const AGENT_TOOLS: AgentTool[] = [
       if (!note || (!mine && !ctx.access.superAdmin)) {
         throw new Error('No such note of yours.');
       }
+      // A shared note or someone else's goes only on the admin's own say-so:
+      // its id typed or pasted in this message, not one an earlier answer
+      // printed and later text steered the model back to.
+      if (!mine && !(ctx.userText ?? '').includes(note.id)) {
+        throw new Error(
+          `To delete a shared note or someone else's, the admin must put its id (${note.id}) in their message. Deleted nothing.`,
+        );
+      }
       await assistant.softDeleteAssistantMemories([note.id]);
       return JSON.stringify({ deleted: true, id: note.id });
     },
@@ -236,12 +253,12 @@ export const AGENT_TOOLS: AgentTool[] = [
       const assistant = assistantOf(ctx);
       const hits = await assistant.listAssistantMessages(
         { content: like(q), ...(ids ? { conversation_id: ids } : {}) },
-        { order: { created_at: 'DESC' }, take: 20, withDeleted: true },
+        { order: { created_at: 'DESC' }, take: 20, withDeleted: all },
       );
       const convs = hits.length
         ? await assistant.listAssistantConversations(
             { id: [...new Set(hits.map((h) => h.conversation_id))] },
-            { withDeleted: true },
+            { withDeleted: all },
           )
         : [];
       const title = new Map(convs.map((c) => [c.id, c.title]));
@@ -280,7 +297,8 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['query'],
       additionalProperties: false,
     },
-    needs: [IMAGES],
+    // pack:read too: listPacks has no status filter, so it shows draft packs.
+    needs: [IMAGES, { resource: 'pack', operation: 'read' }],
     run: async (args, ctx) => {
       const q = str(args.query);
       if (!q) throw new Error('query is required.');
@@ -325,11 +343,12 @@ export const AGENT_TOOLS: AgentTool[] = [
         }
       }
       if (kind === 'made' || kind === 'any') {
-        const ids = await conversationIds(ctx, ctx.access.superAdmin);
+        const all = ctx.access.superAdmin;
+        const ids = await conversationIds(ctx, all);
         const assistant = assistantOf(ctx);
         const convs = await assistant.listAssistantConversations(
           { title: like(q), ...(ids ? { id: ids } : {}) },
-          { select: ['id', 'title'], take: 20, withDeleted: true },
+          { select: ['id', 'title'], take: 20, withDeleted: all },
         );
         const byTitle = new Map(convs.map((c) => [c.id, c.title]));
         const made = await assistant.listAssistantMessages(
@@ -344,7 +363,7 @@ export const AGENT_TOOLS: AgentTool[] = [
             ],
             ...(ids ? { conversation_id: ids } : {}),
           },
-          { order: { created_at: 'DESC' }, take: 8, withDeleted: true },
+          { order: { created_at: 'DESC' }, take: 8, withDeleted: all },
         );
         for (const m of made) {
           for (const img of (m.images as { url: string }[] | null) ?? []) {
@@ -500,6 +519,15 @@ export const AGENT_TOOLS: AgentTool[] = [
       ) {
         throw new Error('No such scheduled task of yours.');
       }
+      // Someone else's task goes only when the admin typed or pasted its id.
+      if (
+        task.user_id !== ctx.access.userId &&
+        !(ctx.userText ?? '').includes(task.id)
+      ) {
+        throw new Error(
+          `To cancel someone else's task, the admin must put its id (${task.id}) in their message. Cancelled nothing.`,
+        );
+      }
       await assistant.softDeleteAssistantSchedules([task.id]);
       return JSON.stringify({
         cancelled: true,
@@ -563,7 +591,7 @@ const OWN_SITES = [
   'https://www.polycards.gg',
   'https://admin.polycards.gg',
 ];
-const originOf = (u: string | undefined) => {
+const originOf = (u: string | null | undefined) => {
   try {
     return u ? new URL(u).origin : null;
   } catch {
@@ -571,17 +599,13 @@ const originOf = (u: string | undefined) => {
   }
 };
 
-const isOwnOrigin = (url: string) => {
+export const isOwnOrigin = (url: string) => {
   const origin = originOf(url);
   return (
     origin !== null &&
-    [
-      ...OWN_SITES,
-      process.env.S3_FILE_URL,
-      process.env.PAYMENT_CALLBACK_BASE,
-      process.env.MEDUSA_BACKEND_URL ?? 'http://localhost:9000',
-      assetOrigin(),
-    ]
+    // Never the backend's own origin (a GET there runs routes on the model's
+    // say-so); its file store only in dev, when uploads live there.
+    [...OWN_SITES, process.env.S3_FILE_URL, localFileOrigin(), assetOrigin()]
       .map(originOf)
       .includes(origin)
   );

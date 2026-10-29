@@ -18,10 +18,8 @@ export type UiMessage = {
 // Tools that draw: while one runs, a scanning placeholder holds its place.
 export const DRAWS = /(_poster|^generate_image|^brand_logo)$/;
 
-export const fromStored = (
-  messages: StoredMessage[],
-  labelOf: (name: string) => string,
-): UiMessage[] =>
+// Steps keep only the tool's name; ToolSteps puts it in the page's language.
+export const fromStored = (messages: StoredMessage[]): UiMessage[] =>
   messages.map((m) => ({
     key: m.id,
     role: m.role,
@@ -31,7 +29,6 @@ export const fromStored = (
     steps: m.tools.map((tool, i) => ({
       id: `${m.id}-${i}`,
       name: tool.name,
-      label: labelOf(tool.name),
       status: tool.ok ? 'done' : 'error',
       ms: tool.ms,
     })),

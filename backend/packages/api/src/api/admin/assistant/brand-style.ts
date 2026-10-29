@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { fetchBytes, MAX_DECODE_PIXELS } from '../../utils/image-fetch';
+import { isOwnOrigin } from './agent-tools';
 import { DEFAULT_STYLE_REFS } from './style-refs';
 
 // The house look for AI images (owner, 2026-10-29: "it should follow the
@@ -50,15 +51,18 @@ export function artPrompt(
  *  shrunk to 512 px; one that cannot be read is left out. */
 const fetched = new Map<string, Promise<string | null>>();
 export async function styleRefs(configured: unknown): Promise<string[]> {
+  // Our own uploads only, like every other image the assistant fetches.
   const urls = Array.isArray(configured)
-    ? configured.filter((u): u is string => typeof u === 'string')
+    ? configured.filter(
+        (u): u is string => typeof u === 'string' && isOwnOrigin(u),
+      )
     : [];
   if (!urls.length) return DEFAULT_STYLE_REFS.map((r) => r.url);
   const out = await Promise.all(
     urls.map((url) => {
       let got = fetched.get(url);
       if (!got) {
-        got = fetchBytes(url)
+        got = fetchBytes(url, undefined, isOwnOrigin)
           .then(async (bytes) => {
             if (!bytes) return null;
             const jpeg = await sharp(bytes, {
@@ -69,7 +73,12 @@ export async function styleRefs(configured: unknown): Promise<string[]> {
               .toBuffer();
             return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
           })
-          .catch(() => null);
+          .catch(() => null)
+          .then((ref) => {
+            // A failed fetch is retried next time, not cached until restart.
+            if (!ref) fetched.delete(url);
+            return ref;
+          });
         fetched.set(url, got);
       }
       return got;

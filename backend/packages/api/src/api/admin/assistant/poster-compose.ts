@@ -4,7 +4,6 @@ import { MAX_DECODE_PIXELS } from '../../utils/image-fetch';
 import {
   CTA_H,
   ctaRow,
-  posterTextError,
   POSTER_H,
   POSTER_W,
 } from '../../../modules/packs/brand-poster';
@@ -14,6 +13,7 @@ import {
   body,
   display,
   esc,
+  fit,
   measure,
   textEl,
   type Font,
@@ -63,11 +63,19 @@ export type PosterCopy = {
   button?: boolean;
 };
 
+// Unlike the brand poster (figures only from live data), a marketing post
+// states its own figures: "3 CURRENCIES", "100% BUYBACK".
+const COPY_TEXT = /^[A-Za-z0-9 .,'’!?&:;()"“”\-–—/%+·#]+$/;
+const CJK =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+// Only our own site in the corner, never a look-alike domain.
+const CORNER = /^polycards\.gg(\/[a-z0-9-]+)?$/i;
+
 /** What is wrong with the copy, or null: the brand fonts are Latin only. */
 export function posterCopyError(c: PosterCopy): string | null {
   const checks: [string, string | undefined, number][] = [
     ['headline', c.headline, 40],
-    ['eyebrow', c.eyebrow, 40],
+    ['eyebrow', c.eyebrow, 28],
     ['gold', c.gold, 30],
     ['subline', c.subline, 120],
     ['corner', c.corner, 32],
@@ -75,10 +83,19 @@ export function posterCopyError(c: PosterCopy): string | null {
   if (!c.headline?.trim()) return 'headline is required.';
   for (const [name, text, max] of checks) {
     if (!text) continue;
-    const bad = posterTextError(text, max);
-    if (bad) {
-      return `${name} ${bad} Chinese copy goes in the caption, not on the image.`;
+    const t = text.trim();
+    if (!t) return `${name} must not be empty.`;
+    if (t.length > max) return `${name} must be ${max} characters or fewer.`;
+    if (!COPY_TEXT.test(t)) {
+      return `${name} must be English letters, digits and punctuation only (the brand fonts have no other glyphs).${
+        CJK.test(t)
+          ? ' Chinese copy goes in the caption, not on the image.'
+          : ''
+      }`;
     }
+  }
+  if (c.corner && !CORNER.test(c.corner.trim())) {
+    return 'corner must be polycards.gg or one of its pages, e.g. polycards.gg/referral.';
   }
   return null;
 }
@@ -105,20 +122,26 @@ async function headlineLines(
     }
     if (best) return { lines: best, size };
   }
-  return { lines: [text], size: HEAD_MIN };
+  const font = display(HEAD_MIN, -0.02 * HEAD_MIN);
+  return { lines: [await fit(text, font, TEXT_W)], size: HEAD_MIN };
 }
 
+/** A word as gold matching sees it: "Pulls." is the gold word "pulls". */
+const bare = (word: string): string =>
+  word.replace(/[^\p{L}\p{N}%]/gu, '').toLowerCase();
+
 /** One centred headline line, gold where `gold` words appear. */
-function headlineEl(
+export function headlineEl(
   line: string,
   mid: number,
   font: Font,
-  gold: Set<string>,
+  gold: string,
 ): string {
+  const golden = new Set(gold.split(/\s+/).map(bare).filter(Boolean));
   const spans = line
     .split(/(\s+)/)
     .map((part) =>
-      gold.has(part.toLowerCase())
+      golden.has(bare(part))
         ? `<tspan fill="url(#gold)">${esc(part)}</tspan>`
         : esc(part),
     )
@@ -173,12 +196,17 @@ export async function composePoster(
 
   let y = 178;
   if (copy.eyebrow?.trim()) {
-    const eye = copy.eyebrow.trim().toUpperCase();
     const font = body(28, 9);
-    const w = await measure(eye, font);
-    const half = w / 2;
     const line = 70;
     const gap = 28;
+    // The hairlines either side take their room out of the canvas width.
+    const eye = await fit(
+      copy.eyebrow.trim().toUpperCase(),
+      font,
+      TEXT_W - 2 * (line + gap),
+    );
+    const w = await measure(eye, font);
+    const half = w / 2;
     parts.push(
       `<rect x="${(W / 2 - half - gap - line).toFixed(1)}" y="${y - 1}" width="${line}" height="2" fill="url(#hairL)"/>`,
       `<rect x="${(W / 2 + half + gap).toFixed(1)}" y="${y - 1}" width="${line}" height="2" fill="url(#hairR)"/>`,
@@ -191,11 +219,10 @@ export async function composePoster(
 
   const { lines, size } = await headlineLines(copy.headline.trim());
   const headFont = display(size, -0.02 * size);
-  const gold = new Set(
-    (copy.gold ?? '').toLowerCase().split(/\s+/).filter(Boolean),
-  );
   lines.forEach((line, i) => {
-    parts.push(headlineEl(line, y + i * size * 1.02, headFont, gold));
+    parts.push(
+      headlineEl(line, y + i * size * 1.02, headFont, copy.gold ?? ''),
+    );
   });
   const headBottom = y + (lines.length - 1) * size * 1.02 + size * 0.5;
 
@@ -208,7 +235,12 @@ export async function composePoster(
   }
   if (copy.subline?.trim()) {
     const font = body(30);
-    const sub = await wrap(copy.subline.trim(), font, TEXT_W);
+    // wrap leaves the rest, or one long word, as it is: fit each line.
+    const sub = await Promise.all(
+      (await wrap(copy.subline.trim(), font, TEXT_W)).map((l) =>
+        fit(l, font, TEXT_W),
+      ),
+    );
     sub.reverse().forEach((l, i) => {
       parts.push(
         textEl(
