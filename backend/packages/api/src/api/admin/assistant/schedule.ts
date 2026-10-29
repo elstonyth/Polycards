@@ -20,6 +20,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 export const MAX_SCHEDULES = 10;
 export const SCHEDULED_PREFIX = '⏰ Scheduled task';
+// Nobody watches a scheduled run, so it cannot save notes or set, change or
+// cancel tasks: whatever it reads cannot make itself last.
+export const NOT_WHEN_SCHEDULED = new Set([
+  'remember',
+  'forget',
+  'schedule_task',
+  'cancel_schedule',
+]);
 
 type When = { every: 'day' | 'week'; at_time: string; weekday?: number | null };
 
@@ -35,7 +43,7 @@ export function nextRun(when: When, after: Date): Date {
   let t = day0 + minutes * 60_000;
   if (when.every === 'week') {
     const wd = when.weekday ?? 1;
-    if (!(wd >= 1 && wd <= 7))
+    if (!Number.isInteger(wd) || wd < 1 || wd > 7)
       throw new Error('weekday must be 1 (Mon) to 7 (Sun).');
     const today = ((new Date(day0 + MYT_MS).getUTCDay() + 6) % 7) + 1; // 1..7
     t += ((wd - today + 7) % 7) * DAY_MS;

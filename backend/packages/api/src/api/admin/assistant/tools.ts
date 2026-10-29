@@ -34,6 +34,9 @@ export type ToolCtx = {
   attachments: string[];
   /** Stores an image, shows it in the chat, gives its URL. */
   showImage(image: Buffer, name: string, mime?: string): Promise<string>;
+  /** True once any tool output is in this turn: what was read (a customer
+   *  field, a past chat) may carry instructions, so a few writes refuse. */
+  readOutside?: boolean;
   /** Adds an image model's cost to the turn. */
   addCost(usd: number): void;
   signal: AbortSignal;
@@ -699,10 +702,10 @@ export const TOOLS: AssistantTool[] = [
       if (bad) throw new Error(bad);
       const featureUrl = s(args.feature_url);
       // Loaded before the image is paid for: a bad URL fails first.
-      const feature = featureUrl ? await assetBytes(featureUrl) : undefined;
+      const feature = featureUrl ? await assetBytes(featureUrl, ctx.container) : undefined;
       const attached = [
         ...(b(args.use_attached) ? ctx.attachments : []),
-        ...(await assetDataUrls(args.reference_urls)),
+        ...(await assetDataUrls(args.reference_urls, ctx.container)),
       ];
       const { buffer, cost } = await generateImage({
         key: ctx.openrouterKey,
@@ -762,7 +765,7 @@ export const TOOLS: AssistantTool[] = [
       if (!prompt) throw new Error('prompt is required.');
       const attached = [
         ...(b(args.use_attached) ? ctx.attachments : []),
-        ...(await assetDataUrls(args.reference_urls)),
+        ...(await assetDataUrls(args.reference_urls, ctx.container)),
       ];
       const brand = b(args.brand_style) !== false;
       const refs = brand ? ctx.styleRefs : [];

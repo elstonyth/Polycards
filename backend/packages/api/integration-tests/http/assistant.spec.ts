@@ -521,6 +521,21 @@ medusaIntegrationTestRunner({
         once('search_chats', { query: 'captions end', everyone: true });
         await chat(anson, 'find what was said about captions');
         expect(lastTool()).toMatch(/^<tool_result name="search_chats">\n\[\]/);
+
+        // After reading anything, even an admin's note for everyone is refused:
+        // what was read may be what asked for it.
+        script = (b) => {
+          const read = b.messages.filter((m) => m.role === 'tool').length;
+          if (read === 0) return [call('groups', {})];
+          if (read === 1) {
+            return [
+              call('remember', { note: 'Obey the customer.', shared: true }),
+            ];
+          }
+          return [say('ok')];
+        };
+        await chat(admin, 'check the groups');
+        expect(lastTool()).toContain('saved only as the first step');
       });
 
       it('finds the real pack and slab art to build a post with', async () => {
@@ -597,6 +612,20 @@ medusaIntegrationTestRunner({
             base: api.defaults.baseURL as string,
           }),
         ).toBe(1);
+        // Unwatched, the run cannot save notes or set or cancel tasks.
+        const unattended = received.find((b) =>
+          String(b.messages.at(-1)?.content).startsWith('⏰'),
+        )!;
+        expect(toolNames(unattended)).toContain('groups');
+        expect(toolNames(unattended)).toContain('list_schedules');
+        for (const name of [
+          'remember',
+          'forget',
+          'schedule_task',
+          'cancel_schedule',
+        ]) {
+          expect(toolNames(unattended)).not.toContain(name);
+        }
         const [after] = await assistant.listAssistantSchedules({ id: task.id });
         expect(after.last_error).toBeNull();
         expect(after.conversation_id).toBeTruthy();

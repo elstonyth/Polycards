@@ -13,6 +13,7 @@ import { storeImage } from '../images';
 import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
 import { memoryFor } from '../agent-tools';
 import type { ChatMessage } from '../openrouter';
+import { NOT_WHEN_SCHEDULED, SCHEDULED_PREFIX } from '../schedule';
 import { TOOLS } from '../tools';
 
 // POST /admin/assistant/chat (spec 2026-10-29): one question, answered as a
@@ -172,7 +173,11 @@ export async function POST(
       })) as { id: string; title: string };
     }
     const conversationId = conversation.id;
-    send({ type: 'conversation', id: conversationId, title: conversation.title });
+    send({
+      type: 'conversation',
+      id: conversationId,
+      title: conversation.title,
+    });
 
     const earlier = await assistant.listAssistantMessages(
       { conversation_id: conversationId },
@@ -200,7 +205,13 @@ export async function POST(
       key,
       model: settings.chat_model,
       access,
-      tools: await allowedTools(access, TOOLS),
+      tools: (await allowedTools(access, TOOLS)).filter(
+        (t) =>
+          !(
+            input.text.startsWith(SCHEDULED_PREFIX) &&
+            NOT_WHEN_SCHEDULED.has(t.name)
+          ),
+      ),
       history,
       userText: input.text,
       images: input.images,

@@ -179,6 +179,7 @@ export async function runTurn(opts: {
           tool_call_id: call.id,
           content: untrusted(call.name, content),
         });
+        ctx.readOutside = true;
       }
     }
     return result;

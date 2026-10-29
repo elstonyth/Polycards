@@ -1,9 +1,14 @@
+import type { MedusaContainer } from '@medusajs/framework/types';
 import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import { fetchBytes, MAX_DECODE_PIXELS } from '../../utils/image-fetch';
+import {
+  assetOrigin,
+  fetchBytes,
+  MAX_DECODE_PIXELS,
+} from '../../utils/image-fetch';
 import type { Need } from './access';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 
@@ -22,8 +27,10 @@ import { MAX_SCHEDULES, nextRun } from './schedule';
 //    able to do the scheduled tasks").
 
 type Ctx = {
-  container: import('@medusajs/framework/types').MedusaContainer;
+  container: MedusaContainer;
   access: { userId: string; superAdmin: boolean };
+  /** True once any tool output is in this turn (see ToolCtx). */
+  readOutside?: boolean;
 };
 
 type AgentTool = {
@@ -112,6 +119,14 @@ export const AGENT_TOOLS: AgentTool[] = [
       if (shared && !ctx.access.superAdmin) {
         throw new Error(
           'Only an admin can save a note for everyone; saved nothing.',
+        );
+      }
+      // A note for everyone lands in every chat's instructions, so it comes
+      // from the admin's own words: never after tool output (a customer
+      // field, a past chat) is in the turn and could have asked for it.
+      if (shared && ctx.readOutside) {
+        throw new Error(
+          'A note for everyone is saved only as the first step of an answer, before reading anything. Saved nothing: ask the admin to send the note on its own.',
         );
       }
       const saved = await assistantOf(ctx).createAssistantMemories({
@@ -503,14 +518,18 @@ const myt = (d: Date | string) =>
 /** Image URLs staff or find_assets gave, as data URLs for the image model
  *  (our CDN, the storefront, or the local file store; SSRF-guarded by
  *  fetchBytes). One that cannot be read throws, naming it. */
-export async function assetDataUrls(urls: unknown, max = 4): Promise<string[]> {
+export async function assetDataUrls(
+  urls: unknown,
+  container: MedusaContainer,
+  max = 4,
+): Promise<string[]> {
   const list = Array.isArray(urls)
     ? urls.filter((u): u is string => typeof u === 'string')
     : [];
   if (list.length > max) throw new Error(`At most ${max} reference images.`);
   return Promise.all(
     list.map(async (url) => {
-      const bytes = await assetBytes(url);
+      const bytes = await assetBytes(url, container);
       const jpeg = await sharp(bytes, { limitInputPixels: MAX_DECODE_PIXELS })
         .resize({
           width: 768,
@@ -526,8 +545,62 @@ export async function assetDataUrls(urls: unknown, max = 4): Promise<string[]> {
   );
 }
 
+// Where the assistant may fetch images from: our sites, media CDN and file
+// store, or a URL a pack or card already holds. fetchBytes alone allows every
+// public host, so a URL the model wrote (say, after reading a customer field
+// that told it to) could carry what it read to any server (security review
+// 2026-10-29).
+const OWN_SITES = [
+  'https://polycards.gg',
+  'https://www.polycards.gg',
+  'https://admin.polycards.gg',
+];
+const originOf = (u: string | undefined) => {
+  try {
+    return u ? new URL(u).origin : null;
+  } catch {
+    return null;
+  }
+};
+
+export async function isOwnAsset(
+  url: string,
+  container: MedusaContainer,
+): Promise<boolean> {
+  if (/^\/(?!\/)/.test(url)) return true; // storefront-relative
+  const origin = originOf(url);
+  if (!origin) return false;
+  const own = [
+    ...OWN_SITES,
+    process.env.S3_FILE_URL,
+    process.env.PAYMENT_CALLBACK_BASE,
+    process.env.MEDUSA_BACKEND_URL ?? 'http://localhost:9000',
+    assetOrigin(),
+  ].map(originOf);
+  if (own.includes(origin)) return true;
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+  const held = await packs.listPacks(
+    { $or: [{ image: url }, { display_image: url }] },
+    { take: 1, select: ['slug'] },
+  );
+  if (held.length) return true;
+  const cards = await packs.listCards(
+    { $or: [{ image: url }, { slab_image: url }] },
+    { take: 1, select: ['handle'] },
+  );
+  return cards.length > 0;
+}
+
 /** One asset's bytes, or an error naming it. */
-export async function assetBytes(url: string): Promise<Buffer> {
+export async function assetBytes(
+  url: string,
+  container: MedusaContainer,
+): Promise<Buffer> {
+  if (!(await isOwnAsset(url, container))) {
+    throw new Error(
+      `Not one of our images: ${url.slice(0, 120)}. Use find_assets, past chat images or an attached screenshot.`,
+    );
+  }
   const reasons: string[] = [];
   const bytes = await fetchBytes(url, (r) => reasons.push(r));
   if (!bytes) {
