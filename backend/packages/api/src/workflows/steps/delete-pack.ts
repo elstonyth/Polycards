@@ -46,6 +46,8 @@ type CompensateData =
         slug: string;
         title: string;
         category: string;
+        pack_type: 'classic' | 'original' | 'special' | null;
+        language: 'en' | 'jp' | null;
         price: number;
         image: string;
         boost: boolean;
@@ -99,6 +101,8 @@ export const deletePackInvoke = async (
       slug: pack.slug,
       title: pack.title,
       category: pack.category,
+      pack_type: pack.pack_type ?? null,
+      language: pack.language ?? null,
       price: pack.price,
       image: pack.image,
       boost: pack.boost,

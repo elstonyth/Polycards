@@ -40,6 +40,8 @@ const GoodsReceiveNoteDetailPage = () => {
   // Number(): bigNumber column, may arrive as a numeric string.
   const totalFmv =
     grn?.lines.reduce((s, l) => s + Number(l.fmv_snapshot) * l.qty, 0) ?? 0;
+  // Server-folded and signed, same as the list row: a reversal is negative.
+  const totalQty = grn?.total_qty ?? 0;
 
   const confirmReverse = async () => {
     if (!grn) return;
@@ -204,7 +206,13 @@ const GoodsReceiveNoteDetailPage = () => {
               </Table>
             </div>
 
-            <div className="flex justify-end gap-8 border-t px-6 py-4">
+            <div className="flex flex-wrap items-center justify-end gap-8 border-t px-6 py-4">
+              <div className="text-right">
+                <Text className="text-ui-fg-subtle" size="small">
+                  {t('grn.col.totalQty')}
+                </Text>
+                <Text className="tabular-nums">{totalQty}</Text>
+              </div>
               <div className="text-right">
                 <Text className="text-ui-fg-subtle" size="small">
                   {t('grn.col.totalFmv')}

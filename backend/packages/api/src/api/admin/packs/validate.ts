@@ -2,7 +2,11 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { RARITIES, type TierRangeMap } from '@acme/odds-math';
 import {
   MAX_PUBLISHED_DECIMALS,
+  PACK_LANGUAGES,
+  PACK_TYPES,
   PUBLISHED_DECIMALS_DEFAULT,
+  type PackLanguage,
+  type PackType,
   type PackWriteInput,
   type PublishedOdds,
 } from '../../../workflows/steps/create-pack';
@@ -147,6 +151,36 @@ const coerceTierRanges = (v: unknown): TierRangeMap | null | undefined => {
   return validateTierRangeMap(v);
 };
 
+const oneOf = <T extends string>(set: readonly T[], v: unknown): v is T =>
+  (set as readonly unknown[]).includes(v);
+
+// Pack tags, tri-state as a PAIR (a language only means something next to its
+// type): pack_type omitted → keep both stored values; null/'' → clear both;
+// a type → language checked against it (only an original pack has one).
+const coercePackTags = (
+  b: Record<string, unknown>,
+): { pack_type?: PackType | null; language?: PackLanguage | null } => {
+  const lang = b.language === '' ? null : b.language;
+  if (b.pack_type === undefined) {
+    if (lang != null) bad(`'language' must be sent with its 'pack_type'.`);
+    return {};
+  }
+  const type = b.pack_type === null || b.pack_type === '' ? null : b.pack_type;
+  if (type !== null && !oneOf(PACK_TYPES, type)) {
+    bad(`'pack_type' must be one of: ${PACK_TYPES.join(', ')}.`);
+  }
+  if (lang != null && !oneOf(PACK_LANGUAGES, lang)) {
+    bad(`'language' must be one of: ${PACK_LANGUAGES.join(', ')}.`);
+  }
+  if (lang != null && type !== 'original') {
+    bad('Only an original pack has a language.');
+  }
+  return {
+    pack_type: type as PackType | null,
+    language: (lang ?? null) as PackLanguage | null,
+  };
+};
+
 // Batch rank writes from the packs-list reorder arrows. Rank-only by design:
 // reordering must not travel through the full-payload update (whose activation
 // guard correctly rejects an active empty-pool pack and used to half-apply the
@@ -264,6 +298,7 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     slug,
     title: reqStr(b, 'title'),
     category,
+    ...coercePackTags(b),
     price,
     image: imageStr(b, 'image'),
     display_image: optImageStr(b, 'display_image'),

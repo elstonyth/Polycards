@@ -27,7 +27,12 @@ import {
   Gift,
 } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
-import { type AdminPack, type AdminPackWrite } from '../../lib/packs-api';
+import {
+  type AdminPack,
+  type AdminPackWrite,
+  type PackLanguage,
+  type PackType,
+} from '../../lib/packs-api';
 import {
   PACK_STATUS_COLOR,
   PACK_STATUS_LABEL,
@@ -94,6 +99,11 @@ const CATEGORIES = [
   'yugioh',
   'riftbound',
 ] as const;
+// Closed sets mirrored from the API validator (and its DB checks).
+const PACK_TYPES: readonly PackType[] = ['classic', 'original', 'special'];
+const PACK_LANGUAGES: readonly PackLanguage[] = ['en', 'jp'];
+// Radix Select can't hold an empty value, so "not set" travels as this.
+const NONE = 'none';
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Reserved category of the free welcome pack (mirrors FREE_WELCOME_CATEGORY in
@@ -104,7 +114,7 @@ const FREE_WELCOME_CATEGORY = 'free_welcome';
 
 // Columns in the packs table — the expander row spans all of them. Keep in
 // step with the <Table.Header> row below.
-const COLUMN_COUNT = 9;
+const COLUMN_COUNT = 10;
 
 // Pool composition (auto-detected server-side). Graded slabs read as the
 // premium tier, so they get the purple tag; a mixed pool gets its own colour
@@ -121,6 +131,8 @@ type FormState = {
   slug: string;
   title: string;
   category: string;
+  packType: PackType | null;
+  language: PackLanguage | null;
   price: string;
   image: string;
   displayImage: string;
@@ -134,6 +146,8 @@ const EMPTY_FORM: FormState = {
   slug: '',
   title: '',
   category: 'pokemon',
+  packType: null,
+  language: null,
   price: '',
   image: '',
   displayImage: '',
@@ -150,6 +164,8 @@ const formFromPack = (p: AdminPack): FormState => ({
   slug: p.slug,
   title: p.title,
   category: p.category,
+  packType: p.pack_type,
+  language: p.language,
   price: String(p.price),
   image: p.image,
   displayImage: p.display_image ?? '',
@@ -291,6 +307,13 @@ const PacksListPage = () => {
     const payload: AdminPackWrite = {
       title: form.title.trim(),
       category: form.category,
+      // The free pack has no tag fields (omitted = keep the stored ones).
+      ...(form.category === FREE_WELCOME_CATEGORY
+        ? {}
+        : {
+            pack_type: form.packType,
+            language: form.packType === 'original' ? form.language : null,
+          }),
       price: priceValue,
       image: form.image.trim(),
       display_image: form.displayImage.trim() || null,
@@ -436,6 +459,7 @@ const PacksListPage = () => {
                 <Table.HeaderCell>{t('packs.list.order')}</Table.HeaderCell>
                 {sortHeader('title', t('packs.list.pack'))}
                 {sortHeader('category', t('packs.list.category'))}
+                <Table.HeaderCell>{t('packs.list.packType')}</Table.HeaderCell>
                 {sortHeader('status', t('packs.list.status'))}
                 {sortHeader('group', 'Group')}
                 {/* Set 1 only — sets 2/3 and the published pair live in the row
@@ -506,6 +530,17 @@ const PacksListPage = () => {
                       <Table.Cell className="font-medium">{p.title}</Table.Cell>
                       <Table.Cell className="text-ui-fg-subtle">
                         {p.category}
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle">
+                        {p.pack_type ? (
+                          `${t(`packs.packType.${p.pack_type}`)}${
+                            p.language
+                              ? ` · ${t(`packs.language.${p.language}`)}`
+                              : ''
+                          }`
+                        ) : (
+                          <span className="text-ui-fg-muted">—</span>
+                        )}
                       </Table.Cell>
                       <Table.Cell>
                         <StatusBadge color={PACK_STATUS_COLOR[packStatusOf(p)]}>
@@ -996,6 +1031,70 @@ const PacksListPage = () => {
                     </>
                   )}
                 </div>
+                {form.category !== FREE_WELCOME_CATEGORY && (
+                  <>
+                    <div className="flex flex-col gap-y-2">
+                      <Label size="small" weight="plus" htmlFor="pack-type">
+                        {t('packs.form.packType')}
+                      </Label>
+                      <Select
+                        value={form.packType ?? NONE}
+                        onValueChange={(v) => {
+                          const packType =
+                            PACK_TYPES.find((x) => x === v) ?? null;
+                          patch({
+                            packType,
+                            // Only an original pack carries a language.
+                            language:
+                              packType === 'original' ? form.language : null,
+                          });
+                        }}
+                      >
+                        <Select.Trigger id="pack-type">
+                          <Select.Value />
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Item value={NONE}>—</Select.Item>
+                          {PACK_TYPES.map((x) => (
+                            <Select.Item key={x} value={x}>
+                              {t(`packs.packType.${x}`)}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-y-2">
+                      <Label size="small" weight="plus" htmlFor="pack-language">
+                        {t('packs.form.language')}
+                      </Label>
+                      <Select
+                        value={form.language ?? NONE}
+                        disabled={form.packType !== 'original'}
+                        onValueChange={(v) =>
+                          patch({
+                            language:
+                              PACK_LANGUAGES.find((x) => x === v) ?? null,
+                          })
+                        }
+                      >
+                        <Select.Trigger id="pack-language">
+                          <Select.Value />
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Item value={NONE}>—</Select.Item>
+                          {PACK_LANGUAGES.map((x) => (
+                            <Select.Item key={x} value={x}>
+                              {t(`packs.language.${x}`)}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select>
+                      <Text className="text-ui-fg-subtle text-xs">
+                        {t('packs.form.languageHint')}
+                      </Text>
+                    </div>
+                  </>
+                )}
                 <div className="flex flex-col gap-y-2">
                   <Label size="small" weight="plus" htmlFor="pack-price">
                     {t('packs.form.price')}
