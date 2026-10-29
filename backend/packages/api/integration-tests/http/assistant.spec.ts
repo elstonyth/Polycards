@@ -931,9 +931,13 @@ medusaIntegrationTestRunner({
         expect(lastTool()).toContain('Restock the 151 boxes on Fridays.');
         expect(lastTool()).not.toContain('The float tops up on Mondays.');
 
-        // An admin may search everyone's chats; anyone else only their own.
+        // Each account searches only its own chats, an admin too, even asked
+        // for everyone's: Anson's restock question stays his.
         once('search_chats', { query: 'restock Fridays', everyone: true });
         await chat(admin, 'what did anyone say about restocking?');
+        expect(lastTool()).toMatch(/^<tool_result name="search_chats">\n\[\]/);
+        once('search_chats', { query: 'restock Fridays' });
+        await chat(anson, 'what did I say about restocking?');
         expect(lastTool()).toContain('remember: restock Fridays');
         once('search_chats', { query: 'captions end', everyone: true });
         await chat(anson, 'find what was said about captions');

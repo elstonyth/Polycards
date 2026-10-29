@@ -219,7 +219,7 @@ export const TOOLS: AssistantTool[] = [
     name: 'economy',
     label: 'Economy totals',
     description:
-      'Money totals exactly like the admin Economy page, for one Malaysia-time window and player group. revenue = credits spent on packs; payouts = buybacks paid; net = revenue - payouts (the gacha margin); topups = deposits credited; cashout = withdrawals, a signed ledger sum (negative = money paid out to players; report it as an amount paid out); adjustments = admin credit changes (either sign); deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).',
+      'Money totals exactly like the admin Economy page, for one Malaysia-time window and player group. revenue = credits spent on packs; payouts = buybacks paid; net = revenue - payouts (the gacha margin); topups = deposits credited; cashout = withdrawals taken from wallets, a signed ledger sum (negative = money withdrawn; report it as an amount withdrawn, never as paid out: it includes withdrawals still pending at the gateway, and the payments tool tells settled from pending); adjustments = admin credit changes (either sign); deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).',
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
     needs: [read('economy')],
     run: windowed('finance', 'economy'),
@@ -266,7 +266,7 @@ export const TOOLS: AssistantTool[] = [
     name: 'player',
     label: "A player's money",
     description:
-      "One player's account by username (never email): join date, current player group, disabled flag, credit balance, vault cards and value, lifetime and last-30-days ledger totals (revenue = their pack spend, payouts = buybacks to them, cashout = their withdrawals as a signed sum, negative = paid out to them), and their deposits and withdrawals by status. last_30_days_window gives that rolling window's exact start and end as UTC instants; state it in Malaysia time. Amounts in RM (MYR).",
+      "One player's account by username (never email): join date, current player group, disabled flag, credit balance, vault cards and value, lifetime and last-30-days ledger totals (revenue = their pack spend, payouts = buybacks to them, cashout = their withdrawals as a signed sum, negative = taken from their wallet, pending ones included; their withdrawals by status say what was paid), and their deposits and withdrawals by status. last_30_days_window gives that rolling window's exact start and end as UTC instants; state it in Malaysia time. Amounts in RM (MYR).",
     parameters: object(
       {
         username: str(
