@@ -100,6 +100,27 @@ describe('sqlRefusal', () => {
       'SELECT context FROM workflow_execution',
       /workflow_execution table is not open/,
     ],
+    // Staff assistant chats, in any case or quoting.
+    [
+      'SELECT content FROM assistant_message',
+      /assistant_message table is not open/,
+    ],
+    [
+      'select * from ASSISTANT_SCHEDULE',
+      /ASSISTANT_SCHEDULE table is not open/,
+    ],
+    [
+      'SELECT * FROM public."assistant_memory"',
+      /assistant_memory table is not open/,
+    ],
+    [
+      'TABLE assistant_conversation',
+      /assistant_conversation table is not open/,
+    ],
+    [
+      'SELECT openrouter_key_sealed FROM "Assistant_Settings"',
+      /Assistant_Settings table is not open/,
+    ],
     [
       "SELECT metadata->'partner_credential' FROM customer",
       /Passwords stay hidden/,

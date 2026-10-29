@@ -1,3 +1,4 @@
+import { ASSISTANT_REPORT_KEY } from '../../admin/assistant/bridge';
 import { deskOf, requireReportKey } from '../require-report-key';
 
 const FINANCE = 'f'.repeat(40);
@@ -199,5 +200,28 @@ describe('requireReportKey', () => {
     expect(
       run(ECONOMY, { 'x-report-key': FINANCE }).next,
     ).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens reports with the in-process assistant key and logs it as assistant', () => {
+    const { next, info } = run(ECONOMY, {
+      'x-report-key': ASSISTANT_REPORT_KEY,
+    });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith(`[reports] assistant ${ECONOMY}`);
+  });
+
+  it('opens them for the assistant even where no desk key is set (local dev)', () => {
+    for (const n of NAMES) delete process.env[n];
+    expect(
+      run(ECONOMY, { 'x-report-key': ASSISTANT_REPORT_KEY }).next,
+    ).toHaveBeenCalledTimes(1);
+    expect(run(ECONOMY, { 'x-report-key': FINANCE }).res.statusCode).toBe(503);
+  });
+
+  it('keeps the assistant off the read-everything admin proxy, but lets it run SQL', () => {
+    const proxy = run('/reports/admin/read?path=/admin/users', { 'x-report-key': ASSISTANT_REPORT_KEY });
+    expect([proxy.res.statusCode, proxy.next.mock.calls.length]).toEqual([401, 0]);
+    expect(run('/reports/ADMIN/Read', { 'x-report-key': ASSISTANT_REPORT_KEY }).res.statusCode).toBe(401);
+    expect(run('/reports/admin/sql', { 'x-report-key': ASSISTANT_REPORT_KEY }).next).toHaveBeenCalledTimes(1);
   });
 });

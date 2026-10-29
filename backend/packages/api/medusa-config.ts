@@ -349,6 +349,11 @@ module.exports = defineConfig({
       resolve: path.join(__dirname, 'src/modules/packs'),
     },
     {
+      // The in-admin AI assistant (spec 2026-10-29): its settings and chat
+      // history. path.join for the same reason as packs above.
+      resolve: path.join(__dirname, 'src/modules/assistant'),
+    },
+    {
       resolve: '@mercurjs/core/modules/admin-ui',
       options: {
         appDir: path.join(__dirname, '../../apps/admin'),

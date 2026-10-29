@@ -1037,6 +1037,8 @@ describe('RATE_LIMITS', () => {
       'notification-read|20|10000|100|60000|Too many mark-read requests.||',
       'notification-read-all|5|10000|30|60000|Too many mark-all-read requests.||',
       'admin-action|30|10000|200|60000|Too many admin requests. Try again shortly.||',
+      'assistant-chat|6|10000|30|60000|Too many questions at once. Try again in a minute.||',
+      'assistant-speak|12|10000|60|60000|Too many read-aloud requests. Try again in a minute.||',
       'gateway-hook|100|10000|600|60000|Too many callback requests.|<function>|',
       'desk-reports|20|10000|120|60000|Too many report requests.|<function>|',
       'phone-otp-start-phone|1|30000|6|86400000|Too many code requests for this number.|phoneBodyKeyOf|',

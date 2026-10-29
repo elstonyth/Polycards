@@ -82,7 +82,7 @@ const isPrivateHost = (hostname: string): boolean => {
 // block, leaving graded cards unbaked. Gate this on S3_FILE_URL being unset — the
 // SAME condition that decides files live on the local provider — so prod (S3 set,
 // files on the public CDN) keeps loopback fully blocked with no NODE_ENV reliance.
-const localFileOrigin = (): string | null => {
+export const localFileOrigin = (): string | null => {
   if (process.env.S3_FILE_URL) return null; // prod: files are on the public CDN
   try {
     return new URL(process.env.MEDUSA_BACKEND_URL ?? 'http://localhost:9000')
@@ -143,10 +143,14 @@ const detail = (err: unknown): string =>
  * into the same value, which is right for the callers (they all just fall back)
  * but leaves an operator with no way to tell a firewall from a 404. Callers
  * that log (telegram.ts's apex board) pass a collector; bake-slab.ts ignores it.
+ *
+ * `allowHop` is an OPTIONAL stricter check on every redirect target, for a
+ * caller that fetches only from its own hosts (the admin assistant).
  */
 export const fetchBytes = async (
   url: string,
   onFail?: (reason: string) => void,
+  allowHop?: (url: string) => boolean,
 ): Promise<Buffer | null> => {
   const fail = (reason: string): null => {
     onFail?.(reason);
@@ -184,6 +188,8 @@ export const fetchBytes = async (
       }
       if (!isAllowedImageUrl(next.toString()))
         return fail('redirect to a blocked host');
+      if (allowHop && !allowHop(next.toString()))
+        return fail('redirect off the allowed hosts');
       target = next.toString();
       continue;
     }
