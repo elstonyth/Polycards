@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   bytesToBase64,
+  canTalkOver,
+  createBargeInDetector,
   createVad,
   decodePcm16,
   downsample,
@@ -176,6 +178,101 @@ describe('createVad', () => {
   });
 });
 
+describe('createBargeInDetector', () => {
+  const FRAME_MS = 2048 / 48; // one mic frame at 48 kHz, as the tap sends it
+  // seeded, so every run sees the same trace
+  const random = (seed: number) => () =>
+    (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+  // The answer's loudness: silent while it loads (1 s), then syllables with
+  // a pause every 2 s.
+  const answerAt = (frame: number) => {
+    const t = frame * FRAME_MS - 1000;
+    if (t < 0 || t % 2000 > 1700) return 0;
+    return 0.15 + 0.1 * Math.sin((2 * Math.PI * t) / 250);
+  };
+  /** When it fires (ms), or -1. The mic hears the answer at `coupling` of
+   *  its loudness, `delay` frames late, ±30%; plus a person talking at
+   *  `talk` = [from ms, to ms, rms]. */
+  const firesAt = (o: {
+    coupling: number;
+    delay: number;
+    talk?: [number, number, number];
+    quiet?: boolean; // nothing is playing
+  }): number => {
+    const detector = createBargeInDetector();
+    const next = random(7);
+    for (let i = 0; i * FRAME_MS < 12_000; i++) {
+      const t = i * FRAME_MS;
+      const answer = o.quiet ? 0 : answerAt(i);
+      const echo = o.quiet
+        ? 0
+        : o.coupling * answerAt(i - o.delay) * (0.7 + 0.6 * next());
+      const [from, to, rms] = o.talk ?? [0, 0, 0];
+      const voice = t >= from && t < to ? rms * (0.8 + 0.4 * next()) : 0;
+      const mic = Math.hypot(echo, voice, 0.003);
+      if (detector.push(mic, answer, FRAME_MS)) return t;
+    }
+    return -1;
+  };
+
+  it('never takes the answer’s own echo for someone talking', () => {
+    // 0.05: echo cancellation working; 1.2: loud speakers, none at all
+    for (const coupling of [0.05, 0.3, 0.8, 1.2])
+      for (const delay of [0, 3, 7])
+        // up to ~300 ms late
+        expect(firesAt({ coupling, delay }), `${coupling}/${delay}`).toBe(-1);
+  });
+
+  it('hears someone talking over it', () => {
+    const cancelled = firesAt({
+      coupling: 0.05,
+      delay: 3,
+      talk: [4000, 5500, 0.15],
+    });
+    expect(cancelled).toBeGreaterThanOrEqual(4000);
+    expect(cancelled).toBeLessThan(4700);
+    // speakers without echo cancellation: talking up over it still works
+    const loud = firesAt({ coupling: 0.3, delay: 7, talk: [4000, 5500, 0.3] });
+    expect(loud).toBeGreaterThanOrEqual(4000);
+    expect(loud).toBeLessThan(4700);
+  });
+
+  it('ignores a cough', () => {
+    expect(
+      firesAt({ coupling: 0.05, delay: 3, talk: [4000, 250 + 4000, 0.4] }),
+    ).toBe(-1);
+  });
+
+  it('is the plain voice detector while nothing plays', () => {
+    const t = firesAt({
+      coupling: 0,
+      delay: 0,
+      quiet: true,
+      talk: [2000, 3000, 0.15],
+    });
+    expect(t).toBeGreaterThanOrEqual(2000);
+    expect(t).toBeLessThan(2700);
+  });
+});
+
+describe('canTalkOver', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const on = (userAgent: string, maxTouchPoints = 0) =>
+    vi.stubGlobal('navigator', { userAgent, maxTouchPoints });
+
+  it('is a tap only on an iPhone or iPad', () => {
+    on('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)');
+    expect(canTalkOver()).toBe(false);
+    // iPadOS asks for the desktop site
+    on('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 5);
+    expect(canTalkOver()).toBe(false);
+    on('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)');
+    expect(canTalkOver()).toBe(true);
+    on('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0');
+    expect(canTalkOver()).toBe(true);
+  });
+});
+
 describe('opening the mic', () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -236,6 +333,17 @@ describe('opening the mic', () => {
     await startBargeIn({ onSpeech, signal });
     expect(mic.track.stop).toHaveBeenCalledTimes(2);
     expect(mic.close).toHaveBeenCalledTimes(2);
+  });
+
+  it('sets Safari’s audio session for recording, then back for playback', async () => {
+    fakeMic();
+    const session = { type: 'auto' };
+    (navigator as unknown as { audioSession: typeof session }).audioSession =
+      session;
+    const rec = await startRecording({ autoStop: false });
+    expect(session.type).toBe('play-and-record');
+    rec.cancel();
+    expect(session.type).toBe('playback');
   });
 
   it('releases the worklet when aborted while it loads', async () => {

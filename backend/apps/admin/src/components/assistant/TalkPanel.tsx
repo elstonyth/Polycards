@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { canTalkOver } from '../../lib/voice';
 import { AiOrb } from './AiOrb';
 import type { VoiceState } from './use-voice';
 
 // Hands-free talk: the orb listens (a ring follows the speaker's voice),
-// thinks, then speaks (the orb follows its own voice); tapping it while it
-// speaks interrupts and listens. Esc ends the talk.
+// thinks, then speaks (the orb follows its own voice); talking over it, or
+// tapping it, while it speaks interrupts and listens (a tap only, on an
+// iPhone or iPad). Esc ends the talk.
 export function TalkPanel({
   state,
   level,
@@ -98,9 +100,11 @@ export function TalkPanel({
           </p>
         )}
         <p className="text-ui-fg-muted text-[11px]">
-          {state === 'speaking'
-            ? t('assistant.voice.tapToInterrupt')
-            : t('assistant.voice.talkHint')}
+          {state !== 'speaking'
+            ? t('assistant.voice.talkHint')
+            : canTalkOver()
+              ? t('assistant.voice.tapToInterrupt')
+              : t('assistant.voice.tapOnlyToInterrupt')}
         </p>
       </div>
       <button

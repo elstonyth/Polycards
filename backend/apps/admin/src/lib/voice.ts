@@ -216,9 +216,43 @@ function toLevel(rms: number): number {
   return Math.max(0, Math.min(1, (20 * Math.log10(rms + 1e-9) + 60) / 50));
 }
 
+/** iPhone and iPad: while a mic is open, Safari plays everything through
+ *  the quiet earpiece (WebKit bugs 196539, 218012), so answers there play
+ *  with the mic shut and only a tap interrupts them. */
+export function canTalkOver(): boolean {
+  if (typeof navigator === 'undefined') return true;
+  const ua = navigator.userAgent ?? '';
+  // iPadOS asks for the desktop site: a touch "Macintosh"
+  return !(
+    /iPhone|iPad|iPod/.test(ua) ||
+    (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+  );
+}
+
+let micsOpen = 0;
+
+/** Safari 17+ (navigator.audioSession, elsewhere a no-op): 'playback' plays
+ *  answers through the silent switch, which mutes Web Audio by default;
+ *  'play-and-record' while a mic is open. */
+function syncAudioSession(): void {
+  const session = (navigator as { audioSession?: { type: string } })
+    .audioSession;
+  if (!session) return;
+  try {
+    session.type = micsOpen > 0 ? 'play-and-record' : 'playback';
+  } catch {
+    // a type this Safari doesn't know: keep its default
+  }
+}
+
 /** Opens the mic (echoCancellation, noiseSuppression, autoGainControl, mono)
- *  on a new context. Throws MicError('denied' | 'unavailable'). */
-async function openMic(): Promise<{ ctx: AudioContext; stream: MediaStream }> {
+ *  on a new context; close() stops it all.
+ *  Throws MicError('denied' | 'unavailable'). */
+async function openMic(): Promise<{
+  ctx: AudioContext;
+  stream: MediaStream;
+  close(): void;
+}> {
   // getUserMedia is missing outside a secure context (plain http), AudioWorklet before Safari 14.1
   if (
     typeof AudioWorkletNode === 'undefined' ||
@@ -227,6 +261,16 @@ async function openMic(): Promise<{ ctx: AudioContext; stream: MediaStream }> {
     throw new MicError('unavailable');
   // made before the permission await so iOS still counts the tap as the gesture
   const ctx = new AudioContext();
+  micsOpen++;
+  syncAudioSession();
+  let closed = false;
+  const shut = () => {
+    if (closed) return;
+    closed = true;
+    void ctx.close().catch(() => {});
+    micsOpen--;
+    syncAudioSession();
+  };
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -236,9 +280,16 @@ async function openMic(): Promise<{ ctx: AudioContext; stream: MediaStream }> {
         channelCount: 1,
       },
     });
-    return { ctx, stream };
+    return {
+      ctx,
+      stream,
+      close: () => {
+        stream.getTracks().forEach((t) => t.stop());
+        shut();
+      },
+    };
   } catch (err) {
-    void ctx.close().catch(() => {});
+    shut();
     const denied =
       err instanceof DOMException &&
       (err.name === 'NotAllowedError' || err.name === 'SecurityError');
@@ -288,7 +339,7 @@ export async function startRecording(opts: {
   onSpeech?: () => void; // first time speech is heard
   signal?: AbortSignal;
 }): Promise<Recording> {
-  const { ctx, stream } = await openMic();
+  const { ctx, stream, close } = await openMic();
   const rate = ctx.sampleRate;
   const frames: Float32Array[] = [];
   // the caller ends it, so the VAD must not stop listening by the clock
@@ -306,8 +357,7 @@ export async function startRecording(opts: {
     finished = true;
     window.removeEventListener('pagehide', onHide);
     release();
-    stream.getTracks().forEach((t) => t.stop());
-    void ctx.close().catch(() => {});
+    close();
     // under KEEP_MS of speech the VAD never says heard: nothing worth sending
     if (!keep || !heard) return resolveDone(null);
     const all = new Float32Array(frames.reduce((n, f) => n + f.length, 0));
@@ -365,26 +415,65 @@ export async function startRecording(opts: {
 
 // the bar is doubled: the answer leaking from the speakers past echo cancellation must not count
 const BARGE_IN_SENSITIVITY = 0.5;
+// Browser echo cancellation may not hear Web Audio playback, so on speakers
+// the answer comes back through the mic. How loud it comes back (the mic's
+// RMS per unit of the answer's) is learned from the answer's first moments,
+// when people rarely talk, and talking over it must beat that.
+const ECHO_WINDOW_MS = 500; // the answer reaches the mic up to this late (output buffers, Bluetooth)
+const ECHO_LEARN_MS = 800;
+const ECHO_MARGIN = 2; // talking over it is at least twice as loud as its echo
+const ECHO_MAX_COUPLING = 1.5; // past this, learning heard something other than the answer
+const ANSWER_SOUNDING = 0.005; // the answer's RMS above which it can echo at all
+
+/** Talking over an answer, one mic frame at a time: push() takes the mic's
+ *  RMS and the answer's RMS coming out at that moment, and is true once the
+ *  person has talked over it for minSpeechMs. Not while the answer's echo
+ *  is being learned, nor for anything the echo alone could explain. */
+export function createBargeInDetector(minSpeechMs = 400): {
+  push(mic: number, answer: number, frameMs: number): boolean;
+} {
+  const vad = createVad({
+    sensitivity: BARGE_IN_SENSITIVITY,
+    minSpeechMs,
+    // it listens as long as the answer lasts
+    noSpeechMs: Infinity,
+    maxMs: Infinity,
+  });
+  const recent: number[] = [];
+  let coupling = 0;
+  let learned = 0;
+  const gate = (mic: number, answer: number, frameMs: number): number => {
+    recent.push(answer);
+    if (recent.length > Math.ceil(ECHO_WINDOW_MS / frameMs)) recent.shift();
+    const loudest = Math.max(...recent);
+    if (loudest < ANSWER_SOUNDING) return mic; // nothing to echo: an ordinary room
+    if (learned < ECHO_LEARN_MS) {
+      learned += frameMs;
+      coupling = Math.min(ECHO_MAX_COUPLING, Math.max(coupling, mic / loudest));
+      return 0;
+    }
+    return mic > coupling * loudest * ECHO_MARGIN ? mic : 0;
+  };
+  return {
+    push: (mic, answer, frameMs) =>
+      vad.push(gate(mic, answer, frameMs), frameMs) === 'speaking',
+  };
+}
 
 /** Listens while an answer plays and calls onSpeech once when the person talks
- *  over it, then stops by itself. Keeps no audio.
+ *  over it, then stops by itself. Keeps no audio. answer() is the answer's
+ *  loudness right now (PcmPlayer.loudness), so its own echo never counts.
  *  signal aborts it while it is still starting: it then resolves already
  *  stopped (onSpeech never fires) and never throws AbortError. Once started,
  *  use stop().
  *  Throws MicError('denied' | 'unavailable') when the mic can't open. */
 export async function startBargeIn(opts: {
   onSpeech: () => void;
-  minSpeechMs?: number; // default 350
+  answer?: () => number;
   signal?: AbortSignal;
 }): Promise<{ stop(): void }> {
-  const { ctx, stream } = await openMic();
-  const vad = createVad({
-    sensitivity: BARGE_IN_SENSITIVITY,
-    minSpeechMs: opts.minSpeechMs ?? 350,
-    // it listens as long as the answer lasts
-    noSpeechMs: Infinity,
-    maxMs: Infinity,
-  });
+  const { ctx, stream, close } = await openMic();
+  const detector = createBargeInDetector();
   let stopped = false;
   let release = () => {};
   const stop = () => {
@@ -392,8 +481,7 @@ export async function startBargeIn(opts: {
     stopped = true;
     window.removeEventListener('pagehide', stop);
     release();
-    stream.getTracks().forEach((t) => t.stop());
-    void ctx.close().catch(() => {});
+    close();
   };
   window.addEventListener('pagehide', stop);
   if (opts.signal?.aborted) {
@@ -404,7 +492,7 @@ export async function startBargeIn(opts: {
     release = await tapMic(ctx, stream, (frame) => {
       if (stopped) return;
       const ms = (frame.length / ctx.sampleRate) * 1000;
-      if (vad.push(rmsOf(frame), ms) === 'speaking') {
+      if (detector.push(rmsOf(frame), opts.answer?.() ?? 0, ms)) {
         stop();
         opts.onSpeech();
       }
@@ -429,6 +517,7 @@ function playbackContext(): AudioContext {
  *  iOS/Safari only let audio start inside a gesture. */
 export function unlockAudio(): void {
   if (typeof AudioContext === 'undefined') return;
+  syncAudioSession();
   const ctx = playbackContext();
   if (ctx.state !== 'running') void ctx.resume().catch(() => {});
   // a sound started in the gesture is what unlocks iOS; one silent sample is enough
@@ -444,6 +533,8 @@ export class PcmPlayer {
   readonly ended: Promise<void>;
   private readonly ctx: AudioContext;
   private readonly out: GainNode; // this answer's own bus, so stop() silences only it
+  private readonly analyser: AnalyserNode;
+  private readonly probe: Float32Array<ArrayBuffer>;
   private readonly onLevel?: (level: number) => void;
   private readonly meter?: ReturnType<typeof setInterval>;
   private readonly sources = new Set<AudioBufferSourceNode>();
@@ -461,19 +552,22 @@ export class PcmPlayer {
     this.ctx = playbackContext();
     this.out = this.ctx.createGain();
     this.out.connect(this.ctx.destination);
+    this.analyser = this.ctx.createAnalyser();
+    this.out.connect(this.analyser);
+    this.probe = new Float32Array(this.analyser.fftSize);
     const { onLevel } = opts;
     this.onLevel = onLevel;
-    if (onLevel) {
-      const analyser = this.ctx.createAnalyser();
-      this.out.connect(analyser);
-      const data = new Float32Array(analyser.fftSize);
-      this.meter = setInterval(() => {
-        analyser.getFloatTimeDomainData(data);
-        onLevel(toLevel(rmsOf(data)));
-      }, 50);
-    }
+    if (onLevel)
+      this.meter = setInterval(() => onLevel(toLevel(this.loudness)), 50);
     window.addEventListener('pagehide', this.onHide);
     this.ended = new Promise((resolve) => (this.resolveEnded = resolve));
+  }
+
+  /** The answer's RMS coming out right now (0 once it has ended). */
+  get loudness(): number {
+    if (this.over) return 0;
+    this.analyser.getFloatTimeDomainData(this.probe);
+    return rmsOf(this.probe);
   }
 
   /** true while sound is coming out */

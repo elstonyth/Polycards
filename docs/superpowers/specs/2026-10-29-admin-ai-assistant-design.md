@@ -170,7 +170,10 @@ folders… make sure you are also able to do the scheduled tasks."
 ### Voice (added 2026-10-29, `voice.ts`, `speak/route.ts`, admin `lib/voice.ts`)
 
 Owner: "make sure it's able to answer and reply, listening… using OpenRouter".
-OpenRouter has no speech endpoints; both halves go through chat completions.
+Both halves go through OpenRouter chat completions. OpenRouter also has
+dedicated `/audio/speech` and `/audio/transcriptions` endpoints (checked
+2026-10-29); whether the chat voice model reads answers word for word is
+measured by a round-trip probe before deciding to move speaking there.
 
 - **Listening:** the admin records 16 kHz mono WAV (Web Audio, no MediaRecorder:
   OpenRouter takes wav, not webm), stops on silence (energy VAD), and posts it
@@ -180,7 +183,8 @@ OpenRouter has no speech endpoints; both halves go through chat completions.
   charged with the answer.
 - **Speaking:** `POST /admin/assistant/speak {message_id}` reads one of the
   asker's answers aloud with the voice model (`voice_model`, default
-  `openai/gpt-audio-mini`; `voice` one of alloy/echo/fable/onyx/nova/shimmer),
+  `openai/gpt-audio-mini`; `voice` one of the chat-completions voices alloy,
+  ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar),
   streamed as PCM16 24 kHz chunks the admin plays gaplessly. Markdown is made
   speakable (tables row by row, no URLs), capped at 1,500 characters. The cost
   is saved as a hidden `voice` message row, so it counts toward today's cap
@@ -188,6 +192,17 @@ OpenRouter has no speech endpoints; both halves go through chat completions.
 - **UI:** a mic in the composer (one spoken question, answer read aloud), a
   Talk mode (hands-free: listen → answer → speak → listen; tap the orb to
   interrupt; three silent turns end it), and Read aloud on every answer.
+- **One at a time:** one answer and one read-aloud per staff member, held in
+  Redis across both web instances (`user-lock.ts`; per process without
+  REDIS_URL), so parallel requests can't all pass the daily cap.
+- **iPhone/iPad:** an open mic sends Safari's output to the quiet earpiece, so
+  there answers play with the mic shut and only a tap interrupts. Safari 17+
+  gets `navigator.audioSession` 'playback' (plays through the silent switch)
+  and 'play-and-record' while a mic is open.
+- **Speakers:** talking over an answer must beat the answer's own echo. Its
+  loudness coming back through the mic is learned from its first 0.8 s and
+  speech has to be twice that for 0.4 s (`createBargeInDetector`), since
+  browser echo cancellation may not hear Web Audio playback.
 - Migration `Migration20261029081358`: role check gains `voice`; three
   settings columns with defaults. Additive.
 

@@ -1921,6 +1921,7 @@
       "endTalk": "End talk",
       "talkHint": "Speak, then pause: the answer is read aloud.",
       "tapToInterrupt": "Just talk, or tap the orb, to interrupt.",
+      "tapOnlyToInterrupt": "Tap the orb to interrupt.",
       "interrupt": "Interrupt and listen",
       "hearing": "🎙 Listening…",
       "nothingHeard": "I didn't catch that. Try again.",

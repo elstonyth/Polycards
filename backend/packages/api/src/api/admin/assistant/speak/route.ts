@@ -9,6 +9,7 @@ import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
 import { accessFor } from '../access';
 import { generationCost, MODEL_RE } from '../openrouter';
+import { userLock } from '../user-lock';
 import { speak, speakable, VOICES } from '../voice';
 
 // POST /admin/assistant/speak {message_id} (voice.ts): reads one of the
@@ -30,11 +31,10 @@ type SpeechCache = {
 // About 0.5 s of 24 kHz PCM16 per replayed audio event; even, so no
 // sample is split.
 const CHUNK = 24 * 1024;
-// One read-aloud at a time per staff member, so parallel reads can't all
-// pass the daily cap before any saves its cost.
-// shortcut: per process, so each of the 2 web instances has its own; move to
-// the chat route's Redis lock if staff start racing across instances.
-const speaking = new Set<string>();
+// One read-aloud at a time per staff member (user-lock.ts), so parallel reads
+// can't all pass the daily cap before any saves its cost. Longer than a
+// reading can run (voice.ts: 3 minutes) plus its cost lookup and file save.
+const speaking = userLock('speaking', 240_000);
 const SLOT_WAIT_MS = 10_000;
 
 export async function POST(
@@ -161,18 +161,16 @@ export async function POST(
 
     // A reading just stopped may still be saving its cost (the client stops
     // one and starts the next at once): wait for its slot a little.
-    for (
-      let waited = 0;
-      speaking.has(access.userId) && waited < SLOT_WAIT_MS;
-      waited += 200
-    ) {
+    let release = await speaking.take(access.userId);
+    for (let waited = 0; !release && waited < SLOT_WAIT_MS; waited += 200) {
       await new Promise((r) => setTimeout(r, 200));
       if (ctl.signal.aborted) {
         finish(); // the asker left while waiting
         return;
       }
+      release = await speaking.take(access.userId);
     }
-    if (speaking.has(access.userId)) {
+    if (!release) {
       finish({
         type: 'error',
         code: 'busy',
@@ -180,7 +178,6 @@ export async function POST(
       });
       return;
     }
-    speaking.add(access.userId);
     let cost = 0;
     let priced = false;
     let generation = '';
@@ -282,7 +279,7 @@ export async function POST(
             logger.warn(`[assistant] voice cost not saved: ${err?.message}`),
           );
       }
-      speaking.delete(access.userId);
+      await release();
     }
     logger.info(
       `[assistant] spoke user=${access.userId} msg=${id} model=${settings.voice_model} chars=${text.length} cost=${cost.toFixed(4)}${failure ? ` error=${failure}` : ''}`,

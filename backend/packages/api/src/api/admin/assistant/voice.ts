@@ -1,7 +1,8 @@
 import { openRouterUrl, OpenRouterError } from './openrouter';
 
 // Voice (owner, 2026-10-29: "able to answer and reply, listening"). Both
-// halves go through OpenRouter's chat completions, the only voice API it has:
+// halves go through OpenRouter's chat completions (it also has dedicated
+// /audio/speech and /audio/transcriptions endpoints, not used here):
 //  - transcribe(): the admin records the question as 16 kHz WAV; a listening
 //    model writes down what was said (input_audio), and that text is asked.
 //  - speak(): a voice model reads an answer aloud, streamed as raw PCM16

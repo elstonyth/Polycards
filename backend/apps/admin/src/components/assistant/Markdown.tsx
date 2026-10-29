@@ -12,22 +12,23 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={() =>
-        // navigator.clipboard is undefined off https: that throw lands in
-        // the failure toast instead of escaping the click.
-        Promise.resolve()
-          .then(() => navigator.clipboard.writeText(text))
-          .then(
-            () =>
-              toast.success(
-                t('assistant.markdown.copied', { defaultValue: 'Copied' }),
-              ),
-            () =>
-              toast.error(
-                t('assistant.markdown.copyFailed', {
-                  defaultValue: "Couldn't copy",
-                }),
-              ),
-          )
+        // Called in the click itself: Safari refuses a clipboard write made
+        // after it. navigator.clipboard is undefined off https: that throw
+        // lands in the failure toast instead of escaping the click.
+        new Promise<void>((resolve) =>
+          resolve(navigator.clipboard.writeText(text)),
+        ).then(
+          () =>
+            toast.success(
+              t('assistant.markdown.copied', { defaultValue: 'Copied' }),
+            ),
+          () =>
+            toast.error(
+              t('assistant.markdown.copyFailed', {
+                defaultValue: "Couldn't copy",
+              }),
+            ),
+        )
       }
       className="text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-base-hover w-fit self-end rounded-full px-2 py-0.5 text-[11px] transition-colors"
     >

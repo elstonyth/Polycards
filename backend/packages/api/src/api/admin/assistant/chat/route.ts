@@ -3,7 +3,6 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
-import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
@@ -17,7 +16,7 @@ import { MODEL_RE, type ChatMessage } from '../openrouter';
 import { SCHEDULED_PREFIX } from '../schedule';
 import { TOOLS } from '../tools';
 import { MAX_AUDIO_BYTES, transcribe } from '../voice';
-import { connectRedis, throttledWarn } from '../../../utils/rate-limit';
+import { userLock } from '../user-lock';
 
 // POST /admin/assistant/chat (spec 2026-10-29): one question, answered as a
 // stream of newline-delimited JSON events, so staff watch the answer and the
@@ -35,43 +34,10 @@ const MAX_IMAGES = 4;
 // sends it; the body limit (middlewares.ts) is sized to 4 of these.
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const HISTORY = 20;
-// One turn at a time per staff member, so parallel questions cannot all
-// pass the daily cap check before any of them has saved its cost. Redis
-// holds the lock across the 2 web instances; without REDIS_URL (dev, tests)
-// or while Redis fails, only the per-process set does.
-const busy = new Set<string>();
-const warn = throttledWarn(60_000);
-// Connected at load: a client still connecting refuses its first command.
-const redis = connectRedis('assistant-busy', warn);
-// Longer than an answer can run (engine.ts: 4 minutes), so a crashed
-// instance's lock frees itself.
+// One turn at a time per staff member (user-lock.ts). Longer than an answer
+// can run (engine.ts: 4 minutes), so a crashed instance's lock frees itself.
 const BUSY_MS = 360_000;
-const RELEASE = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0`;
-
-/** Takes the asker's lock: its release, or null while an answer runs. */
-async function lock(userId: string): Promise<(() => Promise<void>) | null> {
-  if (busy.has(userId)) return null;
-  busy.add(userId);
-  const key = `assistant:busy:${userId}`;
-  const token = randomUUID();
-  try {
-    const held = (await redis?.set(key, token, 'PX', BUSY_MS, 'NX')) === 'OK';
-    if (redis && !held) {
-      busy.delete(userId);
-      return null;
-    }
-  } catch (err) {
-    warn('assistant lock: redis failed; per-process lock only', err);
-  }
-  return async () => {
-    busy.delete(userId);
-    // Only this answer's own token: an expired lock may be someone else's.
-    // Tried even when the SET reply was lost: it may still have landed.
-    await redis
-      ?.eval(RELEASE, 1, key, token)
-      .catch((err) => warn('assistant lock: release failed', err));
-  };
-}
+const busy = userLock('busy', BUSY_MS);
 
 const IMAGE_RE = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
 const AUDIO_RE = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -227,7 +193,7 @@ export async function POST(
     });
     return;
   }
-  const release = await lock(access.userId);
+  const release = await busy.take(access.userId);
   if (!release) {
     finish({
       type: 'error',

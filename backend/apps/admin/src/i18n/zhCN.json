@@ -388,6 +388,7 @@
       "endTalk": "结束对话",
       "talkHint": "说完停一下，答案会读出来。",
       "tapToInterrupt": "直接说话或点一下光球就能打断。",
+      "tapOnlyToInterrupt": "点一下光球就能打断。",
       "interrupt": "打断并开始听",
       "hearing": "🎙 正在听…",
       "nothingHeard": "没听清楚，请再说一次。",

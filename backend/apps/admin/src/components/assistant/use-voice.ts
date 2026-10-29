@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { streamSpeech } from '../../lib/assistant';
 import {
+  canTalkOver,
   MicError,
   PcmPlayer,
   startBargeIn,
@@ -82,6 +83,11 @@ export function useVoice() {
   const speak = useCallback(
     async (messageId: string, opts?: { bargeIn?: boolean }) => {
       stopSpeaking();
+      // no Web Audio (an old or stripped-down browser): nothing could play it
+      if (typeof AudioContext === 'undefined') {
+        toast.error(t('assistant.settings.noPlayback'));
+        return { bargedIn: false };
+      }
       const n = ++turn.current;
       const ac = new AbortController();
       // level carries the voice's loudness while speaking (the talk orb)
@@ -92,15 +98,17 @@ export function useVoice() {
       setState('speaking');
       let bargedIn = false;
       // shortcut: words said before speech is noticed are not recorded; keep the barge-in mic's audio if that matters
-      const barge = opts?.bargeIn
-        ? startBargeIn({
-            onSpeech: () => {
-              bargedIn = true;
-              ac.abort();
-              p.stop();
-            },
-          }).catch(() => null) // no mic: the answer just plays on
-        : null;
+      const barge =
+        opts?.bargeIn && canTalkOver()
+          ? startBargeIn({
+              onSpeech: () => {
+                bargedIn = true;
+                ac.abort();
+                p.stop();
+              },
+              answer: () => p.loudness,
+            }).catch(() => null) // no mic: the answer just plays on
+          : null;
       try {
         await streamSpeech(
           messageId,
