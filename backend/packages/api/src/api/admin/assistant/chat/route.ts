@@ -26,6 +26,12 @@ const MAX_TEXT = 4000;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const HISTORY = 20;
+// One turn at a time per staff member, so parallel questions cannot all
+// pass the daily cap check before any of them has saved its cost. Per
+// process: the backend runs one web instance; a second would only let a
+// person run one turn per instance.
+const busy = new Set<string>();
+
 const IMAGE_RE = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
 
 type Body = { conversation_id?: unknown; message?: unknown; images?: unknown };
@@ -122,66 +128,72 @@ export async function POST(
     });
     return;
   }
-  const spent = await assistant.spentToday(access.userId);
-  if (spent >= Number(settings.daily_cap_usd)) {
+  if (busy.has(access.userId)) {
     finish({
       type: 'error',
-      code: 'daily_cap',
-      message: `You reached today's assistant limit (USD ${Number(settings.daily_cap_usd).toFixed(2)}). It resets at 00:00 Malaysia time.`,
+      code: 'busy',
+      message:
+        'Your previous question is still being answered. Wait for it, then ask again.',
     });
     return;
   }
-
-  const now = new Date();
-  if (!conversation) {
-    conversation = (await assistant.createAssistantConversations({
-      user_id: access.userId,
-      title: input.text.replace(/\s+/g, ' ').slice(0, 80),
-      last_message_at: now,
-    })) as { id: string; title: string };
-  }
-  send({
-    type: 'conversation',
-    id: conversation.id,
-    title: conversation.title,
-  });
-
-  const earlier = await assistant.listAssistantMessages(
-    { conversation_id: conversation.id },
-    { order: { created_at: 'DESC' }, take: HISTORY },
-  );
-  const history: ChatMessage[] = earlier
-    .reverse()
-    .filter((m) => m.content)
-    .map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content:
-        m.role === 'user' && m.attachments
-          ? `${m.content}\n[${m.attachments} screenshot(s) were attached]`
-          : m.content,
-    }));
-  await assistant.createAssistantMessages({
-    conversation_id: conversation.id,
-    role: 'user',
-    content: input.text,
-    attachments: input.images.length,
-  });
-
+  busy.add(access.userId);
   const ctl = new AbortController();
   res.on('close', () => {
     if (!res.writableFinished) ctl.abort();
   });
   const ping = setInterval(() => send({ type: 'ping' }), 10_000);
-  const images: { url: string }[] = [];
   const logger = scope.resolve(ContainerRegistrationKeys.LOGGER);
 
   try {
-    const tools = await allowedTools(access, TOOLS);
+    const spent = await assistant.spentToday(access.userId);
+    if (spent >= Number(settings.daily_cap_usd)) {
+      finish({
+        type: 'error',
+        code: 'daily_cap',
+        message: `You reached today's assistant limit (USD ${Number(settings.daily_cap_usd).toFixed(2)}). It resets at 00:00 Malaysia time.`,
+      });
+      return;
+    }
+
+    const now = new Date();
+    if (!conversation) {
+      conversation = (await assistant.createAssistantConversations({
+        user_id: access.userId,
+        title: input.text.replace(/\s+/g, ' ').slice(0, 80),
+        last_message_at: now,
+      })) as { id: string; title: string };
+    }
+    const conversationId = conversation.id;
+    send({ type: 'conversation', id: conversationId, title: conversation.title });
+
+    const earlier = await assistant.listAssistantMessages(
+      { conversation_id: conversationId },
+      { order: { created_at: 'DESC' }, take: HISTORY },
+    );
+    const history: ChatMessage[] = earlier
+      .reverse()
+      .filter((m) => m.content)
+      .map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content:
+          m.role === 'user' && m.attachments
+            ? `${m.content}\n[${m.attachments} screenshot(s) were attached]`
+            : m.content,
+      }));
+    await assistant.createAssistantMessages({
+      conversation_id: conversationId,
+      role: 'user',
+      content: input.text,
+      attachments: input.images.length,
+    });
+
+    const images: { url: string }[] = [];
     const result = await runTurn({
       key,
       model: settings.chat_model,
       access,
-      tools,
+      tools: await allowedTools(access, TOOLS),
       history,
       userText: input.text,
       images: input.images,
@@ -212,12 +224,18 @@ export async function POST(
       },
     });
     const saved = await assistant.createAssistantMessages({
-      conversation_id: conversation.id,
+      conversation_id: conversationId,
       role: 'assistant',
       content: result.text,
-      // json columns: arrays stored as they are.
-      images: (images.length ? images : null) as unknown as Record<string, unknown> | null,
-      tools: (result.tools.length ? result.tools : null) as unknown as Record<string, unknown> | null,
+      // json columns: the arrays are stored as they are.
+      images: (images.length ? images : null) as unknown as Record<
+        string,
+        unknown
+      > | null,
+      tools: (result.tools.length ? result.tools : null) as unknown as Record<
+        string,
+        unknown
+      > | null,
       model: settings.chat_model,
       cost_usd: result.cost,
       tokens_in: result.tokensIn,
@@ -225,7 +243,7 @@ export async function POST(
       error: result.error ?? null,
     });
     await assistant.updateAssistantConversations({
-      id: conversation.id,
+      id: conversationId,
       last_message_at: new Date(),
     });
     if (result.error && result.error !== 'aborted') {
@@ -240,5 +258,6 @@ export async function POST(
     });
   } finally {
     clearInterval(ping);
+    busy.delete(access.userId);
   }
 }

@@ -154,9 +154,11 @@ export async function runTurn(opts: {
 
 // Tool results carry text customers and staff wrote (names, notes, order
 // remarks): fenced, so the model reads them as data (prompt.ts says text
-// inside a tool result is never an instruction).
+// inside a tool result is never an instruction). Every < and > inside is
+// escaped, so nothing in the data can close the fence or open another tag;
+// the name comes from the model, so only a plain tool name goes in.
 export const untrusted = (tool: string, text: string): string =>
-  `<tool_result name="${tool}">\n${text.replaceAll('</tool_result>', '<\\/tool_result>')}\n</tool_result>`;
+  `<tool_result name="${/^[a-z0-9_]{1,64}$/.test(tool) ? tool : 'unknown'}">\n${text.replaceAll('<', '&lt;').replaceAll('>', '&gt;')}\n</tool_result>`;
 
 async function runTool(
   call: { id: string; name: string; arguments: string },
