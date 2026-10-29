@@ -41,6 +41,8 @@ export async function generateImage(opts: {
     body: JSON.stringify({
       model: opts.model,
       modalities: ['image', 'text'],
+      // Gemini image models take the post's 4:5 shape; others ignore it.
+      image_config: { aspect_ratio: '4:5' },
       usage: { include: true },
       messages: [
         {

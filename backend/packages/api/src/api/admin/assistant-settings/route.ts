@@ -6,6 +6,8 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import { last4, openKey, sealKey } from '../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../modules/assistant/service';
+import { DEFAULT_IMAGE_STYLE } from '../assistant/brand-style';
+import { DEFAULT_STYLE_REFS } from '../assistant/style-refs';
 
 // GET/POST /admin/assistant-settings (spec 2026-10-29): Settings → AI. The
 // OpenRouter key is write-only — sealed on the way in, and only whether one
@@ -34,10 +36,30 @@ async function view(req: AuthenticatedMedusaRequest) {
     chat_model: s.chat_model,
     image_model: s.image_model,
     daily_cap_usd: Number(s.daily_cap_usd),
+    // The house look for AI images: what is saved (null = the default), and
+    // the default itself so the page can show and restore it.
+    image_style: s.image_style,
+    image_style_default: DEFAULT_IMAGE_STYLE,
+    style_refs: Array.isArray(s.style_refs) ? (s.style_refs as string[]) : [],
+    style_refs_default: DEFAULT_STYLE_REFS.map((r) => ({
+      note: r.note,
+      url: r.url,
+    })),
     updated_by: s.updated_by,
     updated_at: s.updated_at,
   };
 }
+
+const MAX_STYLE = 4000;
+const MAX_REFS = 6;
+
+/** A reference image URL: an upload of ours (https, or the local file
+ *  provider's /static path in dev). */
+const refUrlOk = (u: unknown): u is string =>
+  typeof u === 'string' &&
+  u.length <= 500 &&
+  (/^https:\/\/[^\s]+$/.test(u) ||
+    /^http:\/\/localhost(:\d+)?\/static\//.test(u));
 
 export async function GET(
   req: AuthenticatedMedusaRequest,
@@ -51,6 +73,8 @@ type Body = {
   chat_model?: unknown;
   image_model?: unknown;
   daily_cap_usd?: unknown;
+  image_style?: unknown;
+  style_refs?: unknown;
 };
 
 export async function POST(
@@ -82,6 +106,31 @@ export async function POST(
       return;
     }
     patch[field] = v.trim();
+  }
+  // The house look: text, or null / empty to go back to the default.
+  if (body.image_style !== undefined) {
+    const v = body.image_style;
+    if (v !== null && (typeof v !== 'string' || v.length > MAX_STYLE)) {
+      res.status(400).json({
+        message: `image_style must be text of at most ${MAX_STYLE} characters.`,
+      });
+      return;
+    }
+    patch.image_style = typeof v === 'string' && v.trim() ? v.trim() : null;
+  }
+  // Reference images: up to 6 of our own uploads, or [] / null = default.
+  if (body.style_refs !== undefined) {
+    const v = body.style_refs;
+    if (
+      v !== null &&
+      (!Array.isArray(v) || v.length > MAX_REFS || !v.every(refUrlOk))
+    ) {
+      res.status(400).json({
+        message: `style_refs must be at most ${MAX_REFS} uploaded image URLs.`,
+      });
+      return;
+    }
+    patch.style_refs = Array.isArray(v) && v.length ? v : null;
   }
   if (body.daily_cap_usd !== undefined) {
     // A real number from 0.5 to 1000: an empty field (null, '') must never

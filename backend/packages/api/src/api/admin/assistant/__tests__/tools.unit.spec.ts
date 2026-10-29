@@ -21,6 +21,10 @@ jest.mock('../bridge', () => ({
     return { ok: true };
   }),
 }));
+jest.mock('../poster-compose', () => ({
+  ...jest.requireActual('../poster-compose'),
+  composePoster: jest.fn(async () => Buffer.from('poster')),
+}));
 jest.mock('../images', () => ({
   generateImage: jest.fn(async () => ({ buffer: Buffer.from('x'), cost: 0 })),
   brandImage: jest.fn(async (b: Buffer) => b),
@@ -32,6 +36,8 @@ const ctx: ToolCtx = {
   access: { userId: 'u1', roles: [], superAdmin: true } as unknown as Access,
   openrouterKey: 'k',
   imageModel: 'm',
+  imageStyle: 'HOUSE LOOK',
+  styleRefs: ['data:image/jpeg;base64,REF1', 'data:image/jpeg;base64,REF2'],
   attachments: [],
   showImage: async () => 'url',
   addCost: () => undefined,
@@ -179,6 +185,7 @@ const ROWS: Record<string, [Record<string, unknown>, Record<string, unknown>]> =
     ],
     brand_logo: [{}, {}],
     generate_image: [{ prompt: 'a pack' }, {}],
+  marketing_poster: [{ scene: 'a gold ring', headline: 'LOSSLESS MODE' }, {}],
   };
 
 describe('assistant tools', () => {
@@ -226,5 +233,62 @@ describe('assistant tools', () => {
         ]);
       }
     }
+  });
+});
+
+describe('brand-style images', () => {
+  const images = jest.requireMock('../images') as {
+    generateImage: jest.Mock;
+  };
+  const posters = jest.requireMock('../poster-compose') as {
+    composePoster: jest.Mock;
+  };
+  beforeEach(() => {
+    images.generateImage.mockClear();
+    posters.composePoster.mockClear();
+  });
+
+  it('sends the house look and the brand references first, then the attachments', async () => {
+    await TOOLS.find((t) => t.name === 'generate_image')!.run(
+      { prompt: 'a gold ring', use_attached: true },
+      { ...ctx, attachments: ['data:image/png;base64,SHOT'] },
+    );
+    const [arg] = images.generateImage.mock.calls[0];
+    expect(arg.references).toEqual([...ctx.styleRefs, 'data:image/png;base64,SHOT']);
+    expect(arg.prompt).toContain('Scene: a gold ring');
+    expect(arg.prompt).toContain('HOUSE LOOK');
+    expect(arg.prompt).toContain('first 2 attached images');
+  });
+
+  it('drops the house look when staff ask for something else', async () => {
+    await TOOLS.find((t) => t.name === 'generate_image')!.run(
+      { prompt: 'a watercolour cat', brand_style: 'false' },
+      ctx,
+    );
+    const [arg] = images.generateImage.mock.calls[0];
+    expect(arg).toMatchObject({ prompt: 'a watercolour cat', references: [] });
+  });
+
+  it('lays the brand type over the art for a marketing poster', async () => {
+    await TOOLS.find((t) => t.name === 'marketing_poster')!.run(
+      { scene: 'a gold ring', headline: 'LOSSLESS MODE', gold: 'LOSSLESS', button: false },
+      ctx,
+    );
+    expect(images.generateImage.mock.calls[0][0].references).toEqual(ctx.styleRefs);
+    expect(posters.composePoster.mock.calls[0][1]).toMatchObject({
+      headline: 'LOSSLESS MODE',
+      gold: 'LOSSLESS',
+      button: false,
+    });
+  });
+
+  it('refuses poster copy the brand fonts cannot draw before paying for art', async () => {
+    await expect(
+      TOOLS.find((t) => t.name === 'marketing_poster')!.run(
+        { scene: 'a gold ring', headline: '无损模式' },
+        ctx,
+      ),
+    ).rejects.toThrow(/caption/);
+    expect(images.generateImage).not.toHaveBeenCalled();
   });
 });

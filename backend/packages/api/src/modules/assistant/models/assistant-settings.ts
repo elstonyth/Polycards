@@ -12,6 +12,12 @@ export const AssistantSettings = model.define('assistant_settings', {
   image_model: model.text().default('google/gemini-3.1-flash-image'),
   // Per staff member, per Malaysia day, in USD (OpenRouter bills in USD).
   daily_cap_usd: model.float().default(20),
+  // The house look for AI images; null = the default written from the
+  // brand's posted posters (api/admin/assistant/brand-style.ts).
+  image_style: model.text().nullable(),
+  // Uploaded images of the brand's own posts the image model matches;
+  // null = the bundled key art of the posted posters.
+  style_refs: model.json().nullable(),
   // The admin user id of the last change.
   updated_by: model.text().nullable(),
 });

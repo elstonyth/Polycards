@@ -14,6 +14,7 @@ import {
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { assistantApi, type AssistantSettings } from '../../../lib/assistant';
 import { AiOrb } from '../../../components/assistant/AiOrb';
+import { ImageStyleCard } from './image-style';
 
 // Settings → AI (spec 2026-10-29): the OpenRouter key the assistant uses for
 // answers and images, which models, and the per-person daily spend limit.
@@ -93,7 +94,10 @@ const AiSettingsPage = () => {
   // A cap from 0.5 to 1000; an empty field would otherwise save as 0.
   const capValue = Number(cap);
   const capOk =
-    cap.trim() !== '' && Number.isFinite(capValue) && capValue >= 0.5 && capValue <= 1000;
+    cap.trim() !== '' &&
+    Number.isFinite(capValue) &&
+    capValue >= 0.5 &&
+    capValue <= 1000;
 
   const status = !s?.openrouter_key.set
     ? { color: 'grey' as const, text: t('assistant.settings.keyNone') }
@@ -245,6 +249,8 @@ const AiSettingsPage = () => {
           </Button>
         </div>
       </Container>
+
+      {s && <ImageStyleCard settings={s} save={save} />}
     </div>
   );
 };

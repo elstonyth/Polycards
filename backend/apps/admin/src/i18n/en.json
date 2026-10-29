@@ -1873,7 +1873,17 @@
       "cap": "Daily limit per person (USD)",
       "capHelp": "Resets at 00:00 Malaysia time.",
       "save": "Save",
-      "saved": "Saved."
+      "saved": "Saved.",
+      "styleTitle": "Image style",
+      "styleHelp": "Every AI image and marketing poster follows these rules and matches the reference posts below, so new images look like our Instagram.",
+      "styleSave": "Save style",
+      "styleReset": "Use the default",
+      "refsTitle": "Reference posts",
+      "refsHelp": "The image model matches these (up to 6). Upload the posts that did best.",
+      "refsDefault": "Default: our posted posters",
+      "refsAdd": "Add a reference",
+      "refsRemove": "Remove reference",
+      "refsUseDefault": "Back to the defaults"
     },
     "review": {
       "title": "Assistant conversations",
@@ -1924,7 +1934,8 @@
       "tasks_poster": "Tasks poster",
       "top_pulls_poster": "Top pulls poster",
       "brand_logo": "Logo",
-      "generate_image": "AI image"
+      "generate_image": "AI image",
+      "marketing_poster": "Marketing poster"
     }
   }
 }

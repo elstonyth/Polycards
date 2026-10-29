@@ -1,4 +1,6 @@
 import sharp from 'sharp';
+import { artPrompt, DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
+import { composePoster, posterCopyError } from '../poster-compose';
 import type { Access } from '../access';
 import { brandImage, generateImage, ImageRefused } from '../images';
 import { resolvePeriod } from '../periods';
@@ -167,5 +169,42 @@ describe('systemPrompt', () => {
     const p = systemPrompt(access(true), ['economy']);
     expect(p).toContain('full access');
     expect(p).toContain("pass group 'default'");
+  });
+});
+
+describe('artPrompt', () => {
+  it('puts the scene first, then the house look, and never asks for text', async () => {
+    const p = artPrompt('a gold ring', '', 3, 1);
+    expect(p.indexOf('Scene: a gold ring')).toBeLessThan(p.indexOf('matte black'));
+    expect(p).toContain(DEFAULT_IMAGE_STYLE.split('\n')[1]);
+    expect(p).toContain('first 3 attached images');
+    expect(p).toContain('The 1 image after them');
+    expect(p).toMatch(/no text/i);
+  });
+
+  it('uses the bundled posted-poster references when none are uploaded', async () => {
+    const refs = await styleRefs(null);
+    expect(refs).toHaveLength(3);
+    for (const r of refs) expect(r).toMatch(/^data:image\/jpeg;base64,/);
+  });
+});
+
+describe('composePoster', () => {
+  it('draws the post at 1080x1350 over any art shape', async () => {
+    const art = await sharp({
+      create: { width: 1024, height: 1536, channels: 3, background: '#111' },
+    })
+      .png()
+      .toBuffer();
+    const out = await composePoster(art, {
+      eyebrow: 'Every Saturday & Sunday',
+      headline: 'LOSSLESS MODE',
+      gold: 'LOSSLESS',
+      subline: 'Sell any pull back at full value.',
+    });
+    const meta = await sharp(out).metadata();
+    expect([meta.width, meta.height, meta.format]).toEqual([1080, 1350, 'jpeg']);
+    expect(posterCopyError({ headline: '' })).toMatch(/required/);
+    expect(posterCopyError({ headline: '周末无损' })).toMatch(/caption/);
   });
 });

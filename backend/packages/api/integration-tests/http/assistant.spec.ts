@@ -361,6 +361,55 @@ medusaIntegrationTestRunner({
         ]);
       });
 
+      it('keeps an image style and reference posts, and goes back to the defaults', async () => {
+        const before = (await api.get('/admin/assistant-settings', admin)).data
+          .settings;
+        expect(before.image_style).toBeNull();
+        expect(before.image_style_default).toContain('champagne gold');
+        expect(before.style_refs).toEqual([]);
+        expect(before.style_refs_default).toHaveLength(3);
+
+        const saved = await api.post(
+          '/admin/assistant-settings',
+          {
+            image_style: 'Neon blue only.',
+            style_refs: ['https://cdn.example.com/a.jpg'],
+          },
+          admin,
+        );
+        expect(saved.data.settings).toMatchObject({
+          image_style: 'Neon blue only.',
+          style_refs: ['https://cdn.example.com/a.jpg'],
+        });
+
+        for (const bad of [
+          { style_refs: ['http://169.254.169.254/x.jpg'] },
+          {
+            style_refs: Array.from(
+              { length: 7 },
+              (_, i) => `https://cdn.example.com/${i}.jpg`,
+            ),
+          },
+          { image_style: 'x'.repeat(4001) },
+        ]) {
+          const res = await api.post('/admin/assistant-settings', bad, {
+            ...admin,
+            validateStatus: () => true,
+          });
+          expect(res.status).toBe(400);
+        }
+
+        const reset = await api.post(
+          '/admin/assistant-settings',
+          { image_style: '', style_refs: [] },
+          admin,
+        );
+        expect(reset.data.settings).toMatchObject({
+          image_style: null,
+          style_refs: [],
+        });
+      });
+
       it('refuses an empty or zero daily cap instead of stopping everyone', async () => {
         for (const cap of [null, '', 0]) {
           const res = await api.post(

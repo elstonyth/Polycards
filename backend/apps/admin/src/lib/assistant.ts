@@ -37,6 +37,12 @@ export type AssistantSettings = {
   chat_model: string;
   image_model: string;
   daily_cap_usd: number;
+  /** The house look for AI images; null = the default below. */
+  image_style: string | null;
+  image_style_default: string;
+  /** Uploaded references; [] = the default ones below. */
+  style_refs: string[];
+  style_refs_default: { note: string; url: string }[];
   updated_by: string | null;
   updated_at: string;
 };
@@ -108,6 +114,8 @@ export const assistantApi = {
     chat_model?: string;
     image_model?: string;
     daily_cap_usd?: number;
+    image_style?: string | null;
+    style_refs?: string[] | null;
   }) =>
     call<{ settings: AssistantSettings }>('/admin/assistant-settings', {
       method: 'POST',

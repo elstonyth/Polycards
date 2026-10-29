@@ -300,7 +300,17 @@
       "cap": "每人每日上限（USD）",
       "capHelp": "马来西亚时间 00:00 重置。",
       "save": "保存",
-      "saved": "已保存。"
+      "saved": "已保存。",
+      "styleTitle": "图片风格",
+      "styleHelp": "所有 AI 图片和营销海报都按这些规则生成，并参考下面的帖子，让新图和我们的 Instagram 风格一致。",
+      "styleSave": "保存风格",
+      "styleReset": "恢复默认",
+      "refsTitle": "参考帖子",
+      "refsHelp": "图片模型会参考这些图（最多 6 张）。上传效果最好的帖子。",
+      "refsDefault": "默认：我们已发布的海报",
+      "refsAdd": "添加参考图",
+      "refsRemove": "移除参考图",
+      "refsUseDefault": "恢复默认参考图"
     },
     "review": {
       "title": "助手对话记录",
@@ -343,7 +353,8 @@
       "tasks_poster": "任务海报",
       "top_pulls_poster": "最高抽卡海报",
       "brand_logo": "Logo",
-      "generate_image": "AI 图片"
+      "generate_image": "AI 图片",
+      "marketing_poster": "营销海报"
     },
     "deleteConfirm": "删除这个对话？管理员的对话记录里仍会保留。",
     "history": "历史",

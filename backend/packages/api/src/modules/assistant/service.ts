@@ -10,6 +10,8 @@ export type AssistantSettingsRow = {
   chat_model: string;
   image_model: string;
   daily_cap_usd: number;
+  image_style: string | null;
+  style_refs: unknown;
   updated_by: string | null;
   updated_at: Date | string;
 };

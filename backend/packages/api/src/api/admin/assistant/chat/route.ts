@@ -10,6 +10,7 @@ import type AssistantModuleService from '../../../../modules/assistant/service';
 import { accessFor, allowedTools } from '../access';
 import { runTurn } from '../engine';
 import { storeImage } from '../images';
+import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
 import type { ChatMessage } from '../openrouter';
 import { TOOLS } from '../tools';
 
@@ -211,6 +212,8 @@ export async function POST(
         port: req.socket.localPort as number,
         openrouterKey: key,
         imageModel: settings.image_model,
+        imageStyle: settings.image_style?.trim() || DEFAULT_IMAGE_STYLE,
+        styleRefs: await styleRefs(settings.style_refs),
         attachments: input.images,
         showImage: async (image, name, mime) => {
           const type =

@@ -4,6 +4,12 @@ import { capBody } from '../../reports/admin/proxy';
 import type { Access, Need } from './access';
 import { adminReadAs, callReport, type ReportImage } from './bridge';
 import { brandImage, generateImage } from './images';
+import { artPrompt } from './brand-style';
+import {
+  composePoster,
+  posterCopyError,
+  type PosterCopy,
+} from './poster-compose';
 import { PERIODS, resolvePeriod } from './periods';
 
 // What the assistant can look up or make (spec 2026-10-29). The data tools
@@ -19,6 +25,10 @@ export type ToolCtx = {
   access: Access;
   openrouterKey: string;
   imageModel: string;
+  /** The house look for AI images (Settings → AI, or brand-style.ts). */
+  imageStyle: string;
+  /** The brand's own past posts the image model matches, as data URLs. */
+  styleRefs: string[];
   /** This turn's screenshots, as data URLs. */
   attachments: string[];
   /** Stores an image, shows it in the chat, gives its URL. */
@@ -99,7 +109,11 @@ const n = (v: unknown) => {
   return typeof x === 'number' && Number.isFinite(x) ? x : undefined;
 };
 const b = (v: unknown) =>
-  v === true || v === 'true' ? true : v === false || v === 'false' ? false : undefined;
+  v === true || v === 'true'
+    ? true
+    : v === false || v === 'false'
+      ? false
+      : undefined;
 
 /** A windowed report: the period resolves here, like the desks' tools. */
 const windowed =
@@ -623,10 +637,84 @@ export const TOOLS: AssistantTool[] = [
     },
   },
   {
+    name: 'marketing_poster',
+    label: 'Marketing poster',
+    description:
+      "A finished post in Polycards' Instagram design (1080x1350): new AI key art in the house look (matte black, champagne-gold light, one hero object, matched to the brand's own past posts) with the brand's real type drawn over it — the logo top-left, polycards.gg top-right, a spaced gold eyebrow between two gold lines, a big Nekst headline (chosen words in gold), an optional quiet line and the white Open a pack button. Use it for announcements, promos, events and launches that need new art. Write copy like the posted posters: headline short and punchy, usually ALL CAPS (LOSSLESS MODE, 3 CURRENCIES, EARN UP TO) or two short sentence-case lines (Real cards. Real pulls.); eyebrow a short context line (Every Saturday & Sunday, Top up your way, New pack · Out now); gold = the words to light in gold (often the number or offer). Copy only what staff stated: never invent offers, numbers or dates. English letters only on the image: Chinese goes in the caption. For live challenge, tasks, top pulls, achievements or sign-up figures use those data posters instead.",
+    parameters: object(
+      {
+        scene: str(
+          'What the key art shows, in English: one hero object and its setting, e.g. "a single glowing gold ring floating above a glossy black floor". No text, no people, no Pokémon.',
+        ),
+        headline: str(
+          'The big line, up to 40 characters, English letters only.',
+        ),
+        eyebrow: str(
+          'Optional small line above the headline, up to 40 characters.',
+        ),
+        gold: str(
+          'Optional: words of the headline to draw in gold, e.g. "100% BUYBACK".',
+        ),
+        subline: str(
+          'Optional quiet line near the bottom, up to 120 characters.',
+        ),
+        corner: str(
+          'Optional top-right text. Default polycards.gg; e.g. polycards.gg/referral or a date.',
+        ),
+        button: {
+          type: 'boolean',
+          description: 'false: leave off the Open a pack button. Default true.',
+        },
+        use_attached: {
+          type: 'boolean',
+          description:
+            'true: also show the image model the screenshots attached to this message (e.g. a pack to feature).',
+        },
+      },
+      ['scene', 'headline'],
+    ),
+    needs: [IMAGES],
+    run: async (args, ctx) => {
+      const scene = s(args.scene);
+      if (!scene) throw new Error('scene is required.');
+      const copy: PosterCopy = {
+        headline: s(args.headline) ?? '',
+        eyebrow: s(args.eyebrow),
+        gold: s(args.gold),
+        subline: s(args.subline),
+        corner: s(args.corner),
+        button: b(args.button) !== false,
+      };
+      // Checked before the image is paid for.
+      const bad = posterCopyError(copy);
+      if (bad) throw new Error(bad);
+      const attached = b(args.use_attached) ? ctx.attachments : [];
+      const { buffer, cost } = await generateImage({
+        key: ctx.openrouterKey,
+        model: ctx.imageModel,
+        prompt: artPrompt(
+          scene,
+          ctx.imageStyle,
+          ctx.styleRefs.length,
+          attached.length,
+        ),
+        references: [...ctx.styleRefs, ...attached],
+        signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(120_000)]),
+      });
+      ctx.addCost(cost);
+      await ctx.showImage(
+        await composePoster(buffer, copy),
+        'poster.jpg',
+        'image/jpeg',
+      );
+      return 'The poster is shown in the chat with a download button: new key art in the brand look with the brand type. Give a one-line description and offer a caption (English, plus Chinese if staff write Chinese). It is a draft for a human to review.';
+    },
+  },
+  {
     name: 'generate_image',
     label: 'AI image',
     description:
-      'Draw a new image with the AI image model, for art no poster tool makes: pack designs, atmosphere backgrounds, social visuals. Describe the scene in detail in English. The result is fitted to 1080x1350 (the 4:5 feed size) with the official logo added (logo false leaves it off). use_attached true passes the screenshots attached to this message as references. For posters with live figures, prizes or winners use the poster tools instead: they carry the real card art. Image models refuse some brand-specific prompts (Pokémon names): describe generic collecting scenes instead.',
+      "Draw a new image with the AI image model, in Polycards' house look by default (matte black, champagne-gold light, cinematic, matched to the brand's own past posts), fitted to 1080x1350 with the official logo added (logo false leaves it off). Use it for art without words: pack designs, backgrounds, key art. For a post with a headline use marketing_poster instead, and for posters with live figures, prizes or winners use the data poster tools. Describe the scene in detail in English. brand_style false drops the house look when staff ask for something else. use_attached true passes the screenshots attached to this message. Image models refuse brand-specific prompts (Pokémon names): describe generic collecting scenes instead.",
     parameters: object(
       {
         prompt: str('What to draw, in detail, in English.'),
@@ -638,6 +726,11 @@ export const TOOLS: AssistantTool[] = [
           type: 'boolean',
           description: 'false: leave the logo off. Default true.',
         },
+        brand_style: {
+          type: 'boolean',
+          description:
+            'false: no house look, draw exactly the prompt. Default true.',
+        },
       },
       ['prompt'],
     ),
@@ -645,21 +738,22 @@ export const TOOLS: AssistantTool[] = [
     run: async (args, ctx) => {
       const prompt = s(args.prompt);
       if (!prompt) throw new Error('prompt is required.');
+      const attached = b(args.use_attached) ? ctx.attachments : [];
+      const brand = b(args.brand_style) !== false;
+      const refs = brand ? ctx.styleRefs : [];
       const { buffer, cost } = await generateImage({
         key: ctx.openrouterKey,
         model: ctx.imageModel,
-        prompt,
-        references: b(args.use_attached) ? ctx.attachments : [],
+        prompt: brand
+          ? artPrompt(prompt, ctx.imageStyle, refs.length, attached.length)
+          : prompt,
+        references: [...refs, ...attached],
         signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(120_000)]),
       });
       ctx.addCost(cost);
       const logo = b(args.logo) !== false;
       const out = logo ? await brandImage(buffer) : buffer;
-      await ctx.showImage(
-        out,
-        'ai-image.jpg',
-        logo ? 'image/jpeg' : undefined,
-      );
+      await ctx.showImage(out, 'ai-image.jpg', logo ? 'image/jpeg' : undefined);
       return 'The image is shown in the chat with a download button. Describe it in one line; it is a draft for a human to review.';
     },
   },

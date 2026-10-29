@@ -88,6 +88,8 @@ function turn(
       port: 9000,
       openrouterKey: 'k',
       imageModel: 'i',
+      imageStyle: '',
+      styleRefs: [],
       attachments: [],
       showImage: async () => 'u',
     },
