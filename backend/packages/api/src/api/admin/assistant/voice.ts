@@ -152,6 +152,9 @@ export function speakable(markdown: string): string {
     .replace(/https?:\/\/\S+/g, '')
     .replace(/<br\s*\/?>/gi, ', ')
     .replace(/<\/?[a-z][^>]*>/gi, '')
+    // Then any angle bracket left, so no tag fragment survives (the text
+    // goes to a voice, never into HTML, but leave nothing tag-shaped).
+    .replace(/[<>]/g, '')
     // Dashes and arrows between words are a pause, not a symbol to read.
     .replace(/\s*[—→]+\s*|\s+–\s+/g, ', ')
     .replace(/~~/g, '') // strikethrough; one ~ is "about" and stays
