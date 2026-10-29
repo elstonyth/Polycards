@@ -115,10 +115,14 @@ const AssistantPage = () => {
   const live = useRef<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
+  // The tool's name in the page's language (the server's label is English).
   const labelOf = useCallback(
     (name: string) =>
-      me.data?.tools.find((x) => x.name === name)?.label ?? name,
-    [me.data],
+      t(`assistant.tools.${name}`, {
+        defaultValue:
+          me.data?.tools.find((x) => x.name === name)?.label ?? name,
+      }),
+    [me.data, t],
   );
 
   useEffect(() => {
@@ -139,15 +143,26 @@ const AssistantPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
+  // Follow the answer as it grows (text, steps, a poster loading in) unless
+  // the person scrolled up to read; sending a question follows again.
+  const stick = useRef(true);
+  const hasMessages = messages.length > 0;
+  const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scroller.current;
-    if (!el) return;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    }
-  }, [messages]);
+    const body = content.current;
+    if (!el || !body) return;
+    const follow = () => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    };
+    const watch = new ResizeObserver(follow);
+    watch.observe(body);
+    follow();
+    return () => watch.disconnect();
+  }, [hasMessages]);
 
   const send = async (text: string, images: string[]) => {
+    stick.current = true;
     const ac = new AbortController();
     ctl.current = ac;
     setBusy(true);
@@ -189,7 +204,7 @@ const AssistantPage = () => {
               const step = {
                 id: e.id,
                 name: e.name,
-                label: e.label,
+                label: labelOf(e.name),
                 status: e.status,
                 ms: e.ms,
               };
@@ -245,7 +260,9 @@ const AssistantPage = () => {
     }
   };
 
-  const toolLabels = [...new Set(me.data?.tools.map((x) => x.label) ?? [])];
+  const toolLabels = [
+    ...new Set(me.data?.tools.map((x) => labelOf(x.name)) ?? []),
+  ];
 
   return (
     <div className="pc-admin pc-ai-aurora bg-ui-bg-subtle border-ui-border-base flex h-[calc(100vh-6.5rem)] min-h-[560px] overflow-hidden rounded-2xl border">
@@ -349,7 +366,15 @@ const AssistantPage = () => {
           </div>
         )}
 
-        <div ref={scroller} className="flex flex-1 flex-col overflow-y-auto">
+        <div
+          ref={scroller}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            stick.current =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          }}
+          className="flex flex-1 flex-col overflow-y-auto"
+        >
           {messages.length === 0 ? (
             <EmptyState
               me={me.data}
@@ -360,7 +385,7 @@ const AssistantPage = () => {
               }
             />
           ) : (
-            <div className="mx-auto w-full max-w-3xl px-5 py-6">
+            <div ref={content} className="mx-auto w-full max-w-3xl px-5 py-6">
               <Thread messages={messages} />
             </div>
           )}

@@ -312,6 +312,37 @@
       "turns": "提问数",
       "failed": "失败",
       "cost": "费用"
+    },
+    "tools": {
+      "economy": "经济总览",
+      "daily_economy": "每日经济",
+      "payments": "充值与提款",
+      "pack_sales": "各卡包销售",
+      "groups": "玩家分组",
+      "player": "玩家资金",
+      "account": "账户状态",
+      "order": "配送订单",
+      "challenge": "每周挑战",
+      "challenge_results": "上周结果",
+      "signups": "注册人数",
+      "packs_opened": "开包数",
+      "top_pulls": "最高抽卡",
+      "tasks": "任务与成就",
+      "packs": "卡包",
+      "pack": "单个卡包",
+      "low_stock": "低库存",
+      "admin_read": "后台页面",
+      "db_query": "数据库查询",
+      "challenge_poster": "挑战海报",
+      "challenge_stages_poster": "挑战阶段海报",
+      "challenge_results_poster": "结果海报",
+      "challenge_standings_poster": "排名海报",
+      "brand_poster": "品牌海报",
+      "achievements_poster": "成就海报",
+      "tasks_poster": "任务海报",
+      "top_pulls_poster": "最高抽卡海报",
+      "brand_logo": "Logo",
+      "generate_image": "AI 图片"
     }
   }
 }

@@ -149,7 +149,9 @@ const ReviewPage = () => {
           <Drawer.Body className="overflow-y-auto">
             {thread.data ? (
               <Thread
-                messages={fromStored(thread.data.messages, (name) => name)}
+                messages={fromStored(thread.data.messages, (name) =>
+                  t(`assistant.tools.${name}`, { defaultValue: name }),
+                )}
               />
             ) : (
               <LoadingSkeleton />
