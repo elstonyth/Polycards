@@ -109,6 +109,19 @@ export async function transcribe(opts: {
   };
 }
 
+/** HTML a model slipped into its answer, as words: <br> is a pause, tags go.
+ *  Repeated until nothing changes, then any stray angle bracket goes too, so
+ *  no tag fragment survives (the text goes to a voice, never into HTML). */
+function stripTags(s: string): string {
+  let out = s.replace(/<br\s*\/?>/gi, ', ');
+  let prev: string;
+  do {
+    prev = out;
+    out = out.replace(/<\/?[a-z][^<>]*>/gi, '');
+  } while (out !== prev);
+  return out.replace(/[<>]/g, '');
+}
+
 /** Markdown as it should be heard: no symbols, tables read row by row,
  *  links by their words, long answers cut at a sentence. */
 export function speakable(markdown: string): string {
@@ -144,17 +157,14 @@ export function speakable(markdown: string): string {
     header = null;
     lines.push(line);
   }
-  let text = lines
-    .join('\n')
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/<br\s*\/?>/gi, ', ')
-    .replace(/<\/?[a-z][^>]*>/gi, '')
-    // Then any angle bracket left, so no tag fragment survives (the text
-    // goes to a voice, never into HTML, but leave nothing tag-shaped).
-    .replace(/[<>]/g, '')
+  let text = stripTags(
+    lines
+      .join('\n')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/https?:\/\/\S+/g, ''),
+  )
     // Dashes and arrows between words are a pause, not a symbol to read.
     .replace(/\s*[—→]+\s*|\s+–\s+/g, ', ')
     .replace(/~~/g, '') // strikethrough; one ~ is "about" and stays
