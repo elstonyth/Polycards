@@ -424,6 +424,8 @@ const ECHO_LEARN_MS = 800;
 const ECHO_MARGIN = 2; // talking over it is at least twice as loud as its echo
 const ECHO_MAX_COUPLING = 1.5; // past this, learning heard something other than the answer
 const ANSWER_SOUNDING = 0.005; // the answer's RMS above which it can echo at all
+const ECHO_LEARN_FROM = 0.03; // learned only where the answer is loud: under it the room drowns its echo
+const ROOM_CAP = 0.02; // someone talking before the answer starts must not pass for the room
 
 /** Talking over an answer, one mic frame at a time: push() takes the mic's
  *  RMS and the answer's RMS coming out at that moment, and is true once the
@@ -440,16 +442,31 @@ export function createBargeInDetector(minSpeechMs = 400): {
     maxMs: Infinity,
   });
   const recent: number[] = [];
+  let room = 0; // the room's own RMS, heard before the answer starts
+  let roomFrames = 0;
+  // the two highest echo ratios: the second is the coupling, so one click
+  // while learning can't set it
+  let top = 0;
   let coupling = 0;
   let learned = 0;
   const gate = (mic: number, answer: number, frameMs: number): number => {
     recent.push(answer);
     if (recent.length > Math.ceil(ECHO_WINDOW_MS / frameMs)) recent.shift();
     const loudest = Math.max(...recent);
-    if (loudest < ANSWER_SOUNDING) return mic; // nothing to echo: an ordinary room
+    if (loudest < ANSWER_SOUNDING) {
+      if (learned < ECHO_LEARN_MS)
+        room = Math.min(ROOM_CAP, room + (mic - room) / ++roomFrames);
+      return mic; // nothing to echo: an ordinary room
+    }
     if (learned < ECHO_LEARN_MS) {
-      learned += frameMs;
-      coupling = Math.min(ECHO_MAX_COUPLING, Math.max(coupling, mic / loudest));
+      if (loudest >= ECHO_LEARN_FROM) {
+        learned += frameMs;
+        // the room adds power, not amplitude: take it out the same way
+        const ratio = Math.sqrt(Math.max(0, mic * mic - room * room)) / loudest;
+        if (ratio > top) [top, coupling] = [ratio, top];
+        else coupling = Math.max(coupling, ratio);
+        coupling = Math.min(ECHO_MAX_COUPLING, coupling);
+      }
       return 0;
     }
     return mic > coupling * loudest * ECHO_MARGIN ? mic : 0;

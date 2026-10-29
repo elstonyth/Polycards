@@ -184,19 +184,24 @@ describe('createBargeInDetector', () => {
   const random = (seed: number) => () =>
     (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
   // The answer's loudness: silent while it loads (1 s), then syllables with
-  // a pause every 2 s.
+  // a pause every 2 s; each sentence fades in over 300 ms, as speech does.
   const answerAt = (frame: number) => {
     const t = frame * FRAME_MS - 1000;
-    if (t < 0 || t % 2000 > 1700) return 0;
-    return 0.15 + 0.1 * Math.sin((2 * Math.PI * t) / 250);
+    const inSentence = t % 2000;
+    if (t < 0 || inSentence > 1700) return 0;
+    return (
+      (0.15 + 0.1 * Math.sin((2 * Math.PI * t) / 250)) *
+      Math.min(1, inSentence / 300)
+    );
   };
-  /** When it fires (ms), or -1. The mic hears the answer at `coupling` of
-   *  its loudness, `delay` frames late, ±30%; plus a person talking at
-   *  `talk` = [from ms, to ms, rms]. */
+  /** When it fires (ms), or -1. The mic hears the room at `room` RMS and
+   *  the answer at `coupling` of its loudness, `delay` frames late, ±30%;
+   *  plus a person talking at `talk` = [from ms, to ms, rms]. */
   const firesAt = (o: {
     coupling: number;
     delay: number;
     talk?: [number, number, number];
+    room?: number; // default 0.003, a quiet room
     quiet?: boolean; // nothing is playing
   }): number => {
     const detector = createBargeInDetector();
@@ -209,7 +214,7 @@ describe('createBargeInDetector', () => {
         : o.coupling * answerAt(i - o.delay) * (0.7 + 0.6 * next());
       const [from, to, rms] = o.talk ?? [0, 0, 0];
       const voice = t >= from && t < to ? rms * (0.8 + 0.4 * next()) : 0;
-      const mic = Math.hypot(echo, voice, 0.003);
+      const mic = Math.hypot(echo, voice, o.room ?? 0.003);
       if (detector.push(mic, answer, FRAME_MS)) return t;
     }
     return -1;
@@ -235,6 +240,24 @@ describe('createBargeInDetector', () => {
     const loud = firesAt({ coupling: 0.3, delay: 7, talk: [4000, 5500, 0.3] });
     expect(loud).toBeGreaterThanOrEqual(4000);
     expect(loud).toBeLessThan(4700);
+  });
+
+  it('does not take a noisy room heard under the answer’s fade-in for its echo', () => {
+    // headphones (no echo) and echo cancellation working, in an office
+    for (const coupling of [0, 0.05]) {
+      const t = firesAt({
+        coupling,
+        delay: 3,
+        room: 0.01,
+        talk: [4000, 5500, 0.15],
+      });
+      expect(t, `${coupling}`).toBeGreaterThanOrEqual(4000);
+      expect(t, `${coupling}`).toBeLessThan(4700);
+    }
+    for (const coupling of [0.05, 0.3, 0.8, 1.2])
+      expect(firesAt({ coupling, delay: 3, room: 0.01 }), `${coupling}`).toBe(
+        -1,
+      );
   });
 
   it('ignores a cough', () => {
