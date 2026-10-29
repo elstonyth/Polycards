@@ -456,7 +456,7 @@ medusaIntegrationTestRunner({
         });
       });
 
-      it("keeps each person's chats to themselves; the review lists everyone's", async () => {
+      it("keeps each person's chats to themselves, the review included", async () => {
         await saveKey();
         script = () => [say('ok')];
         const mine = (await chat(admin, 'admin question'))[0] as { id: string };
@@ -489,15 +489,25 @@ medusaIntegrationTestRunner({
         }).catch((e) => e);
         expect(other.response?.status ?? other.status).toBe(404);
 
-        const review = await api.get('/admin/assistant-review', admin);
-        expect(
-          review.data.conversations.map((c: { id: string }) => c.id).sort(),
-        ).toEqual([mine.id, his.id].sort());
-        expect(
-          review.data.conversations.find(
-            (c: { id: string }) => c.id === mine.id,
-          ).user_email,
-        ).toBe('ai-admin@test.dev');
+        // The super admin's review is their own chats too, asked for
+        // someone else's or not.
+        for (const path of [
+          '/admin/assistant-review',
+          `/admin/assistant-review?user_id=${his.id}`,
+        ]) {
+          const review = await api.get(path, admin);
+          expect(
+            review.data.conversations.map((c: { id: string }) => c.id),
+          ).toEqual([mine.id]);
+          expect(review.data.staff).toBeUndefined();
+        }
+        const theirs = await api.get(`/admin/assistant-review/${his.id}`, {
+          ...admin,
+          validateStatus: () => true,
+        });
+        expect(theirs.status).toBe(404);
+        const own = await api.get(`/admin/assistant-review/${mine.id}`, admin);
+        expect(own.data.conversation.id).toBe(mine.id);
       });
 
       it('adds up the day’s spend, and deleting a chat does not reset it', async () => {
@@ -528,7 +538,7 @@ medusaIntegrationTestRunner({
         expect(await chat(admin, 'third')).toEqual([
           expect.objectContaining({ type: 'error', code: 'daily_cap' }),
         ]);
-        // The owner still sees the deleted chat in the review.
+        // The admin still sees their own deleted chat in the review.
         const review = await api.get('/admin/assistant-review', admin);
         expect(review.data.conversations).toEqual([
           expect.objectContaining({ id: first.id, deleted: true }),

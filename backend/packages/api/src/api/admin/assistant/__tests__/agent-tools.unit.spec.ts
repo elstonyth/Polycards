@@ -346,33 +346,32 @@ describe('deleted chats', () => {
       (r) => r.images ?? [r.url],
     );
 
-  it("leave a person's own search but stay in an admin's everyone-search", async () => {
-    const own = await tool('search_chats').run(
-      { query: 'poster' },
-      { container, access: staff },
+  // Each account sees only its own conversations: an admin too, everyone or
+  // not; deleted ones and someone else's never come back.
+  it('leave search_chats, which only ever searches the asker’s own', async () => {
+    for (const [access, args] of [
+      [staff, { query: 'poster' }],
+      [admin, { query: 'poster' }],
+      [admin, { query: 'poster', everyone: true }],
+    ] as const) {
+      const out = await tool('search_chats').run(args, { container, access });
+      expect(urls(out)).toEqual([`${CDN}/aiconv_mine.png`]);
+      expect(JSON.parse(out).map((r: { chat: string }) => r.chat)).toEqual([
+        'Mine',
+      ]);
+    }
+    expect(tool('search_chats').parameters.properties).not.toHaveProperty(
+      'everyone',
     );
-    expect(urls(own)).toEqual([`${CDN}/aiconv_mine.png`]);
-    const all = await tool('search_chats').run(
-      { query: 'poster', everyone: true },
-      { container, access: admin },
-    );
-    expect(JSON.parse(all).map((r: { chat: string }) => r.chat)).toEqual([
-      'Mine',
-      'Gone',
-      'Other',
-    ]);
   });
 
-  it('leave find_assets for staff, stay for an admin', async () => {
-    const own = await tool('find_assets').run(
-      { query: 'poster', kind: 'made' },
-      { container, access: staff },
-    );
-    expect(urls(own)).toEqual([`${CDN}/aiconv_mine.png`]);
-    const all = await tool('find_assets').run(
-      { query: 'poster', kind: 'made' },
-      { container, access: admin },
-    );
-    expect(urls(all)).toHaveLength(3);
+  it('leave find_assets, which only finds the asker’s own images', async () => {
+    for (const access of [staff, admin]) {
+      const out = await tool('find_assets').run(
+        { query: 'poster', kind: 'made' },
+        { container, access },
+      );
+      expect(urls(out)).toEqual([`${CDN}/aiconv_mine.png`]);
+    }
   });
 });

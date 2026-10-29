@@ -17,14 +17,14 @@ import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { assistantApi, type ReviewRow } from '../../../lib/assistant';
 import { mytDateTime } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
-import { StaleAwareSelect } from '../../../components/form-bits';
 import { SpeakerIcon } from '../../../components/assistant/VoiceIcons';
 import { Thread } from '../../../components/assistant/Thread';
 import { fromStored } from '../../../components/assistant/thread-data';
 
-// Every question every staff member asked the assistant (owner, 2026-10-29:
-// "review all the questions users ask"), newest first, with who asked, how
-// many turns failed and what it cost. Super admins only (assistant_review).
+// The signed-in account's own chats with the assistant, deleted ones too,
+// newest first, with how many turns failed and what each cost. Each account
+// sees only its own conversations (2026-10-29). Super admins only
+// (assistant_review).
 export const config: RouteConfig = {
   label: 'pcNav.assistantReview',
   translationNs: 'translation',
@@ -44,30 +44,26 @@ declare const __BACKEND_URL__: string;
 const PAGE = 50;
 
 type Row = ReviewRow & { read_aloud: number; voice_cost_usd: number };
-// Everyone who ever asked, whatever the filters (the staff picker).
-type Staff = { id: string; email: string | null };
 
-// Like lib/assistant's call(), plus the search and staff filters.
-async function fetchReview(offset: number, q: string, userId: string) {
+// Like lib/assistant's call(), plus the search.
+async function fetchReview(offset: number, q: string) {
   const qs = new URLSearchParams({
     limit: String(PAGE),
     offset: String(offset),
   });
   if (q) qs.set('q', q);
-  if (userId) qs.set('user_id', userId);
   const res = await fetch(`${__BACKEND_URL__}/admin/assistant-review?${qs}`, {
     credentials: 'include',
   });
   const data = (await res.json().catch(() => null)) as {
     count: number;
     conversations: Row[];
-    staff: Staff[];
     message?: string;
   } | null;
   if (!res.ok) {
     throw new Error(data?.message ?? `Request failed (${res.status}).`);
   }
-  return data as { count: number; conversations: Row[]; staff: Staff[] };
+  return data as { count: number; conversations: Row[] };
 }
 
 const ReviewPage = () => {
@@ -76,14 +72,13 @@ const ReviewPage = () => {
   const [open, setOpen] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
-  const [userId, setUserId] = useState('');
   useEffect(() => {
     const id = setTimeout(() => setQ(search.trim()), 300);
     return () => clearTimeout(id);
   }, [search]);
   const list = useQuery({
-    queryKey: ['assistant', 'review', offset, q, userId],
-    queryFn: () => fetchReview(offset, q, userId),
+    queryKey: ['assistant', 'review', offset, q],
+    queryFn: () => fetchReview(offset, q),
     placeholderData: keepPreviousData,
   });
   const thread = useQuery({
@@ -94,9 +89,6 @@ const ReviewPage = () => {
   // The list never shrinks (deleted chats stay in the review) and a new
   // filter starts on page one, so a page can't fall past the end.
   const count = list.data?.count ?? 0;
-  const allStaff = t('assistant.review.allStaff', {
-    defaultValue: 'All staff',
-  });
 
   return (
     <MotionConfig reducedMotion="user">
@@ -125,19 +117,6 @@ const ReviewPage = () => {
                 setOffset(0);
               }}
             />
-            <StaleAwareSelect
-              className="w-60"
-              value={userId || 'all'}
-              onChange={(v) => {
-                setUserId(v === 'all' ? '' : v);
-                setOffset(0);
-              }}
-              placeholder={allStaff}
-              head={{ value: 'all', label: allStaff }}
-              options={(list.data?.staff ?? [])
-                .map((s) => ({ value: s.id, label: s.email ?? s.id }))
-                .sort((a, b) => a.label.localeCompare(b.label))}
-            />
           </div>
           {list.isError ? (
             <div className="border-t px-6 py-8">
@@ -152,7 +131,7 @@ const ReviewPage = () => {
           ) : list.data.conversations.length === 0 ? (
             <div className="border-t px-6 py-8">
               <Text className="text-ui-fg-subtle">
-                {q || userId
+                {q
                   ? t('assistant.review.noMatches', {
                       defaultValue: 'No chats match.',
                     })
@@ -166,9 +145,6 @@ const ReviewPage = () => {
                   <Table.Row>
                     <Table.HeaderCell>
                       {t('assistant.review.when')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('assistant.review.who')}
                     </Table.HeaderCell>
                     <Table.HeaderCell>
                       {t('assistant.review.question')}
@@ -193,9 +169,6 @@ const ReviewPage = () => {
                     >
                       <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
                         {mytDateTime(c.last_message_at)}
-                      </Table.Cell>
-                      <Table.Cell className="break-all">
-                        {c.user_email ?? c.user_id}
                       </Table.Cell>
                       <Table.Cell className="max-w-[420px]">
                         {/* A real button, so the row opens from the keyboard too. */}

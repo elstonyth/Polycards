@@ -327,17 +327,15 @@
     "review": {
       "title": "助手对话记录",
       "truncated": "只显示最新的 500 条消息，更早的没有显示。",
-      "subtitle": "员工问过助手的所有问题，最新的在前。",
+      "subtitle": "你自己和助手的对话，包括已删除的，最新的在前。",
       "empty": "还没有对话。",
       "when": "最后消息",
-      "who": "员工",
       "question": "第一个问题",
       "turns": "提问数",
       "failed": "失败",
       "cost": "费用",
       "deleted": "已删除",
       "search": "搜索标题和消息",
-      "allStaff": "全部员工",
       "noMatches": "没有匹配的对话。",
       "readAloud": "朗读：{{count}} 次",
       "voiceCost": "其中语音：USD {{cost}}"
@@ -382,7 +380,7 @@
       "list_schedules": "定时任务列表",
       "cancel_schedule": "取消任务"
     },
-    "deleteConfirm": "删除这个对话？管理员的对话记录里仍会保留。",
+    "deleteConfirm": "删除这个对话？",
     "stopped": "已停止，没有回答。",
     "voice": {
       "talk": "语音对话",

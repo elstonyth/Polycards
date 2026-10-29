@@ -20,8 +20,8 @@ import { MAX_SCHEDULES, nextRun } from './schedule';
 //  - remember / recall / forget: notes staff ask it to keep. Personal notes
 //    are seen only by the person who saved them; shared notes (super admins
 //    only) by everyone, and are put first in every chat's instructions.
-//  - search_chats: what was asked and answered before — the asker's own
-//    chats, or (super admins) everyone's.
+//  - search_chats: what was asked and answered before — only the asker's
+//    own chats (each account sees only its own conversations).
 //  - find_assets: the art to build with — pack art, card and slab images,
 //    and images the assistant made before — as URLs the image tools take.
 //  - schedule_task / list_schedules / cancel_schedule: tasks it does by
@@ -105,13 +105,8 @@ export async function memoryFor(
   return out;
 }
 
-/** The person's own conversation ids, chats they deleted left out
- *  (everyone's, deleted ones included, for `all`). */
-async function conversationIds(
-  ctx: Ctx,
-  all: boolean,
-): Promise<string[] | null> {
-  if (all) return null;
+/** The person's own conversation ids, chats they deleted left out. */
+async function conversationIds(ctx: Ctx): Promise<string[]> {
   const convs = await assistantOf(ctx).listAssistantConversations(
     { user_id: ctx.access.userId },
     { select: ['id'], take: 1000 },
@@ -244,15 +239,11 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'search_chats',
     label: 'Past chats',
     description:
-      'Search earlier assistant chats for a word or phrase: what was asked, what was answered, and the images made (their URLs, which the image tools can reuse). Use it when staff refer to something from before ("the poster we made last week", "what did you tell me about the challenge"). Searches this person\'s own chats; everyone true searches every staff member\'s (admins only).',
+      'Search earlier assistant chats for a word or phrase: what was asked, what was answered, and the images made (their URLs, which the image tools can reuse). Use it when staff refer to something from before ("the poster we made last week", "what did you tell me about the challenge"). Searches only this person\'s own chats.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'A word or phrase to look for.' },
-        everyone: {
-          type: 'boolean',
-          description: "true: every staff member's chats (admins only).",
-        },
       },
       required: ['query'],
       additionalProperties: false,
@@ -261,21 +252,17 @@ export const AGENT_TOOLS: AgentTool[] = [
     run: async (args, ctx) => {
       const q = str(args.query);
       if (!q) throw new Error('query is required.');
-      const all =
-        (args.everyone === true || args.everyone === 'true') &&
-        ctx.access.superAdmin;
-      const ids = await conversationIds(ctx, all);
-      if (ids && !ids.length) return '[]';
+      const ids = await conversationIds(ctx);
+      if (!ids.length) return '[]';
       const assistant = assistantOf(ctx);
       const hits = await assistant.listAssistantMessages(
-        { content: like(q), ...(ids ? { conversation_id: ids } : {}) },
-        { order: { created_at: 'DESC' }, take: 20, withDeleted: all },
+        { content: like(q), conversation_id: ids },
+        { order: { created_at: 'DESC' }, take: 20 },
       );
       const convs = hits.length
-        ? await assistant.listAssistantConversations(
-            { id: [...new Set(hits.map((h) => h.conversation_id))] },
-            { withDeleted: all },
-          )
+        ? await assistant.listAssistantConversations({
+            id: [...new Set(hits.map((h) => h.conversation_id))],
+          })
         : [];
       const title = new Map(convs.map((c) => [c.id, c.title]));
       return JSON.stringify(
@@ -359,12 +346,11 @@ export const AGENT_TOOLS: AgentTool[] = [
         }
       }
       if (kind === 'made' || kind === 'any') {
-        const all = ctx.access.superAdmin;
-        const ids = await conversationIds(ctx, all);
+        const ids = await conversationIds(ctx);
         const assistant = assistantOf(ctx);
         const convs = await assistant.listAssistantConversations(
-          { title: like(q), ...(ids ? { id: ids } : {}) },
-          { select: ['id', 'title'], take: 20, withDeleted: all },
+          { title: like(q), id: ids },
+          { select: ['id', 'title'], take: 20 },
         );
         const byTitle = new Map(convs.map((c) => [c.id, c.title]));
         const made = await assistant.listAssistantMessages(
@@ -377,9 +363,9 @@ export const AGENT_TOOLS: AgentTool[] = [
                 ? [{ conversation_id: [...byTitle.keys()] }]
                 : []),
             ],
-            ...(ids ? { conversation_id: ids } : {}),
+            conversation_id: ids,
           },
-          { order: { created_at: 'DESC' }, take: 8, withDeleted: all },
+          { order: { created_at: 'DESC' }, take: 8 },
         );
         for (const m of made) {
           for (const img of (m.images as { url: string }[] | null) ?? []) {

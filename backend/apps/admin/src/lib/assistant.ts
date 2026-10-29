@@ -64,11 +64,10 @@ export type AssistantSettings = {
 
 export type ReviewRow = ConversationSummary & {
   user_id: string;
-  user_email: string | null;
   questions: number;
   failed: number;
   cost_usd: number;
-  /** Deleted by the staff member: kept for the owner's review. */
+  /** Deleted from the chat list: still in this account's review. */
   deleted: boolean;
 };
 
