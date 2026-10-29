@@ -325,20 +325,92 @@ medusaIntegrationTestRunner({
         ).toBe('ai-admin@test.dev');
       });
 
-      it('stops at the daily cap until 00:00 Malaysia time', async () => {
+      it('adds up the day’s spend, and deleting a chat does not reset it', async () => {
         await saveKey();
         await api.post(
           '/admin/assistant-settings',
-          { daily_cap_usd: 0 },
+          { daily_cap_usd: 0.5 },
           admin,
         );
-        const events = await chat(admin, 'anything');
-        expect(events).toEqual([
-          expect.objectContaining({ type: 'error', code: 'daily_cap' }),
-        ]);
+        script = () => [say('ok')];
+        const first = (await chat(admin, 'first'))[0] as { id: string };
+        // What the first answer cost, as if it had been an expensive one.
         const assistant =
           getContainer().resolve<AssistantModuleService>(ASSISTANT_MODULE);
-        expect(await assistant.listAssistantConversations({})).toHaveLength(0);
+        const [answer] = await assistant.listAssistantMessages({
+          conversation_id: first.id,
+          role: 'assistant',
+        });
+        await assistant.updateAssistantMessages({
+          id: answer.id,
+          cost_usd: 0.6,
+        });
+
+        expect(await chat(admin, 'second')).toEqual([
+          expect.objectContaining({ type: 'error', code: 'daily_cap' }),
+        ]);
+        await api.delete(`/admin/assistant/conversations/${first.id}`, admin);
+        expect(await chat(admin, 'third')).toEqual([
+          expect.objectContaining({ type: 'error', code: 'daily_cap' }),
+        ]);
+        // The owner still sees the deleted chat in the review.
+        const review = await api.get('/admin/assistant-review', admin);
+        expect(review.data.conversations).toEqual([
+          expect.objectContaining({ id: first.id, deleted: true }),
+        ]);
+      });
+
+      it('refuses an empty or zero daily cap instead of stopping everyone', async () => {
+        for (const cap of [null, '', 0]) {
+          const res = await api.post(
+            '/admin/assistant-settings',
+            { daily_cap_usd: cap },
+            { ...admin, validateStatus: () => true },
+          );
+          expect([cap, res.status]).toEqual([cap, 400]);
+        }
+      });
+
+      it('refuses the chat to a role without the assistant grant', async () => {
+        const container = getContainer();
+        const plain = await roleWith(container, 'Store only', ['store:read']);
+        const res = await api.post(
+          '/admin/assistant/chat',
+          { message: 'hi' },
+          {
+            headers: {
+              authorization: `Bearer ${tokenFor(container, 'user_plain', [plain])}`,
+            },
+            validateStatus: () => true,
+          },
+        );
+        expect(res.status).toBe(403);
+      });
+
+      it('reads a stock screen as Anson, and takes a screenshot of about 1 MB', async () => {
+        await saveKey();
+        script = (b) =>
+          lastIsTool(b)
+            ? [say('Stock checked.')]
+            : [
+                call('admin_read', {
+                  path: '/admin/inventory',
+                  params: { limit: 5 },
+                }),
+              ];
+        const shot = `data:image/jpeg;base64,${Buffer.alloc(1_000_000, 7).toString('base64')}`;
+        const events = await chat(anson, 'what is in stock?', {
+          images: [shot],
+        });
+        expect(events.at(-1)).toMatchObject({ type: 'done' });
+        const toolMsg = String(received[1].messages.at(-1)!.content);
+        expect(toolMsg).not.toContain('No access');
+        expect(toolMsg).toContain('truncated');
+        // The screenshot reached the model with the question.
+        const question = received[0].messages.at(-1)!.content as {
+          type: string;
+        }[];
+        expect(question.map((p) => p.type)).toEqual(['text', 'image_url']);
       });
     });
   },

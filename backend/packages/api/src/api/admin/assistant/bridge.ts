@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { MedusaContainer } from '@medusajs/framework/types';
 import {
   ContainerRegistrationKeys,
@@ -24,6 +24,33 @@ import type { Access } from './access';
 //    in the dashboard (unlike the desk bots' proxy, which reads as `*:read`).
 
 export const ASSISTANT_REPORT_KEY = randomBytes(32).toString('hex');
+
+/** Whether a request carries the assistant's key (constant-time). */
+export function isAssistantKey(given: unknown): boolean {
+  if (typeof given !== 'string') return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(ASSISTANT_REPORT_KEY);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// At most 2 reads at a time per process (review 2026-10-29): every report
+// and admin screen runs its queries on the same small DB pool customers
+// use, and several staff asking at once must not starve it.
+const MAX_READS = 2;
+let reading = 0;
+const queued: (() => void)[] = [];
+async function slot<T>(read: () => Promise<T>): Promise<T> {
+  while (reading >= MAX_READS) {
+    await new Promise<void>((go) => queued.push(go));
+  }
+  reading++;
+  try {
+    return await read();
+  } finally {
+    reading--;
+    queued.shift()?.();
+  }
+}
 
 export type ReportImage = {
   buffer: Buffer;
@@ -58,15 +85,21 @@ export async function callReport(opts: {
   post?: unknown;
   image?: boolean;
   timeoutMs?: number;
+  /** The turn: when the asker leaves, the read stops too. */
+  signal?: AbortSignal;
+  /** Who asked: their own report rate-limit budget (rate-limit.ts). */
+  userId?: string;
   fetchImpl?: typeof fetch;
 }): Promise<unknown | ReportImage> {
   const f = opts.fetchImpl ?? fetch;
+  return slot(async () => {
   const answer = await f(
     `http://127.0.0.1:${opts.port}/reports/${opts.desk}/${opts.path}${query(opts.params ?? {})}`,
     {
       method: opts.post === undefined ? 'GET' : 'POST',
       headers: {
         'x-report-key': ASSISTANT_REPORT_KEY,
+        'x-assistant-user': opts.userId ?? '',
         accept: opts.image ? 'image/*' : 'application/json',
         ...(opts.post === undefined
           ? {}
@@ -74,9 +107,10 @@ export async function callReport(opts: {
       },
       body: opts.post === undefined ? undefined : JSON.stringify(opts.post),
       redirect: 'manual',
-      signal: AbortSignal.timeout(
-        opts.timeoutMs ?? (opts.image ? 60_000 : 45_000),
-      ),
+      signal: AbortSignal.any([
+        AbortSignal.timeout(opts.timeoutMs ?? (opts.image ? 60_000 : 45_000)),
+        ...(opts.signal ? [opts.signal] : []),
+      ]),
     },
   );
   if (!answer.ok) throw await failure(answer);
@@ -92,6 +126,7 @@ export async function callReport(opts: {
     };
   }
   return answer.json();
+  });
 }
 
 /** An admin screen's answer, read as the asker. */
@@ -101,6 +136,7 @@ export async function adminReadAs(opts: {
   access: Access;
   path: unknown;
   params?: Params;
+  signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<unknown> {
   const bad = adminPathError(opts.path);
@@ -124,18 +160,23 @@ export async function adminReadAs(opts: {
     },
     { secret: http.jwtSecret, expiresIn: 60, jwtOptions: http.jwtOptions },
   );
+  return slot(async () => {
   const answer = await (opts.fetchImpl ?? fetch)(
     `http://127.0.0.1:${opts.port}${path}${query(opts.params ?? {})}`,
     {
       headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
       redirect: 'manual',
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.any([
+        AbortSignal.timeout(30_000),
+        ...(opts.signal ? [opts.signal] : []),
+      ]),
     },
   );
-  if (answer.status === 401 || answer.status === 403) {
-    throw new Error(
-      `No access: your admin role cannot open ${path} (${answer.status}).`,
-    );
+  if (answer.status === 403) {
+    throw new Error(`No access: your admin role cannot open ${path} (403).`);
+  }
+  if (answer.status === 401) {
+    throw new Error('The admin API refused the sign-in for this read (401).');
   }
   if (
     !(answer.headers.get('content-type') ?? '').includes('application/json')
@@ -144,4 +185,5 @@ export async function adminReadAs(opts: {
   }
   if (!answer.ok) throw await failure(answer);
   return capBody(redact(await answer.json()));
+  });
 }

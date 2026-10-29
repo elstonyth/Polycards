@@ -38,20 +38,22 @@ class AssistantModuleService extends MedusaService({
       ))) as unknown as AssistantSettingsRow;
   }
 
-  /** What one admin user's assistant answers cost today (Malaysia day), USD. */
+  /** What one admin user's assistant answers cost today (Malaysia day), USD.
+   *  Deleted chats count too: deleting one must not reset the cap. */
   async spentToday(userId: string, now: Date = new Date()): Promise<number> {
+    const since = mytDayStart(now);
     const convs = await this.listAssistantConversations(
-      { user_id: userId },
-      { select: ['id'] },
+      { user_id: userId, last_message_at: { $gte: since } },
+      { select: ['id'], withDeleted: true },
     );
     if (!convs.length) return 0;
     const msgs = await this.listAssistantMessages(
       {
         conversation_id: convs.map((c) => c.id),
         role: 'assistant',
-        created_at: { $gte: mytDayStart(now) },
+        created_at: { $gte: since },
       },
-      { select: ['cost_usd'] },
+      { select: ['cost_usd'], withDeleted: true },
     );
     return msgs.reduce((sum, m) => sum + Number(m.cost_usd ?? 0), 0);
   }

@@ -10,6 +10,7 @@ import { resolveImageUrl } from '../../lib/image-url';
 export function ImageCard({ url }: { url: string }) {
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
   const src = resolveImageUrl(url);
   const download = async () => {
     try {
@@ -33,11 +34,18 @@ export function ImageCard({ url }: { url: string }) {
       transition={{ duration: 0.35, ease: 'easeOut' }}
       className="border-ui-border-base bg-ui-bg-component group relative w-full max-w-[320px] overflow-hidden rounded-2xl border shadow-sm"
     >
-      {!loaded && <div className="pc-ai-scan aspect-[4/5] w-full" />}
+      {failed ? (
+        <div className="text-ui-fg-muted flex aspect-[4/5] w-full items-center justify-center p-6 text-center text-xs">
+          {t('assistant.imageFailed')}
+        </div>
+      ) : (
+        !loaded && <div className="pc-ai-scan aspect-[4/5] w-full" />
+      )}
       <img
         src={src}
         alt=""
         onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
         className={loaded ? 'block w-full' : 'absolute h-0 w-0 opacity-0'}
       />
       <button

@@ -13,7 +13,11 @@ export type Inline =
 export type Block =
   | { kind: 'p'; lines: string[] }
   | { kind: 'h'; level: 1 | 2 | 3; text: string }
-  | { kind: 'ul' | 'ol'; items: string[] }
+  | {
+      kind: 'ul' | 'ol';
+      start: number;
+      items: { text: string; sub: string[] }[];
+    }
   | { kind: 'code'; text: string }
   | {
       kind: 'table';
@@ -24,6 +28,16 @@ export type Block =
 
 const INLINE =
   /(\*\*([^*]+)\*\*)|(`([^`]+)`)|(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))/g;
+
+/** polycards.gg or one of its subdomains, over http(s). */
+const ownSite = (href: string): boolean => {
+  try {
+    const host = new URL(href).hostname.toLowerCase();
+    return host === 'polycards.gg' || host.endsWith('.polycards.gg');
+  } catch {
+    return false;
+  }
+};
 
 export function mdInline(text: string): Inline[] {
   const out: Inline[] = [];
@@ -38,8 +52,10 @@ export function mdInline(text: string): Inline[] {
     push({ kind: 'text', text: text.slice(at, start) });
     if (m[2] !== undefined) push({ kind: 'bold', text: m[2] });
     else if (m[4] !== undefined) push({ kind: 'code', text: m[4] });
-    else if (text[start - 1] === '!') {
-      // ![alt](url) is an image: kept as the text it is.
+    else if (text[start - 1] === '!' || !ownSite(m[7])) {
+      // ![alt](url) is an image, and a link off our own site could carry
+      // customer data out in its query (text a customer typed can steer the
+      // model): both stay the text they are.
       push({ kind: 'text', text: m[0] });
     } else push({ kind: 'link', text: m[6], href: m[7] });
     at = start + m[0].length;
@@ -59,7 +75,8 @@ const cells = (line: string) =>
 const SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const BULLET = /^\s*[-*]\s+(.*)$/;
 const NUMBER = /^\s*\d+[.)]\s+(.*)$/;
-const BLOCK_START = /^(#{1,3}\s|```|\s*[-*]\s|\s*\d+[.)]\s|\s*\|)/;
+const BLOCK_START = /^(#{1,3}\s|\s*```|\s*[-*]\s|\s*\d+[.)]\s|\s*\|)/;
+const indent = (l: string) => /^\s*/.exec(l)![0].length;
 
 export function mdBlocks(text: string): Block[] {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
@@ -112,11 +129,33 @@ export function mdBlocks(text: string): Block[] {
     }
     const list = BULLET.test(line) ? BULLET : NUMBER.test(line) ? NUMBER : null;
     if (list) {
-      const items: string[] = [];
-      while (i < lines.length && list.test(lines[i])) {
-        items.push(list.exec(lines[i++])![1]);
+      // One list until its items stop: a blank line between items keeps it
+      // going (a ranked list keeps counting 1, 2, 3), and deeper-indented
+      // lines are sub-points of the item above.
+      const base = indent(line);
+      const start = list === NUMBER ? Number(/\d+/.exec(line)![0]) : 1;
+      const items: { text: string; sub: string[] }[] = [];
+      while (i < lines.length) {
+        const l = lines[i];
+        const top = indent(l) <= base + 1;
+        if (top && list.test(l)) {
+          items.push({ text: list.exec(l)![1], sub: [] });
+        } else if (items.length && l.trim() && !top) {
+          items
+            .at(-1)!
+            .sub.push((BULLET.exec(l) ?? NUMBER.exec(l))?.[1] ?? l.trim());
+        } else if (
+          !l.trim() &&
+          list.test(lines[i + 1] ?? '') &&
+          indent(lines[i + 1]) <= base + 1
+        ) {
+          // A blank line between two items of the same list.
+        } else {
+          break;
+        }
+        i++;
       }
-      blocks.push({ kind: list === BULLET ? 'ul' : 'ol', items });
+      blocks.push({ kind: list === BULLET ? 'ul' : 'ol', start, items });
       continue;
     }
     // A paragraph runs until a blank line or the start of another block.

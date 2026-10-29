@@ -9,6 +9,7 @@ import { E164_RE, type PhoneOtpChannel } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
 import { visitorBucket, vouchedVisitorIp } from './visitor-ip';
 import { deskOf } from '../reports/require-report-key';
+import { isAssistantKey } from '../admin/assistant/bridge';
 
 const PHONE_OTP_COOLDOWN_MS = 30_000;
 
@@ -1043,8 +1044,13 @@ export const RATE_LIMITS = {
    */
   'desk-reports': {
     message: 'Too many report requests.',
+    // The admin assistant calls over loopback, so every staff member would
+    // share 127.0.0.1's bucket: with its in-process key it is keyed by the
+    // admin user it reads for (bridge.ts sends x-assistant-user).
     keyOf: (req) =>
-      `${deskOf(req.originalUrl) ?? 'none'}:ip:${callbackSourceIp(req) || 'unknown'}`,
+      isAssistantKey(req.headers['x-report-key'])
+        ? `${deskOf(req.originalUrl) ?? 'none'}:assistant:${String(req.headers['x-assistant-user'] ?? '').slice(0, 80)}`
+        : `${deskOf(req.originalUrl) ?? 'none'}:ip:${callbackSourceIp(req) || 'unknown'}`,
     defaults: {
       burstLimit: 20,
       burstWindowMs: 10_000,

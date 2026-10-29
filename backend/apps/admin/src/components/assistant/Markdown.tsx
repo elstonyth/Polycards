@@ -44,7 +44,7 @@ const ALIGN = { left: 'text-left', right: 'text-right', center: 'text-center' };
 
 export function Markdown({ text }: { text: string }) {
   return (
-    <div className="text-ui-fg-base flex flex-col gap-y-3 text-[13.5px] leading-relaxed">
+    <div className="text-ui-fg-base flex min-w-0 flex-col gap-y-3 break-words text-[13.5px] leading-relaxed [overflow-wrap:anywhere]">
       {mdBlocks(text).map((b, i) => {
         switch (b.kind) {
           case 'h':
@@ -66,10 +66,20 @@ export function Markdown({ text }: { text: string }) {
             return (
               <List
                 key={i}
+                start={b.kind === 'ol' ? b.start : undefined}
                 className={`flex flex-col gap-y-1 pl-5 ${b.kind === 'ul' ? 'list-disc' : 'list-decimal'}`}
               >
                 {b.items.map((item, j) => (
-                  <li key={j}>{inline(item)}</li>
+                  <li key={j}>
+                    {inline(item.text)}
+                    {item.sub.length > 0 && (
+                      <ul className="mt-1 flex list-[circle] flex-col gap-y-0.5 pl-5">
+                        {item.sub.map((s, k) => (
+                          <li key={k}>{inline(s)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
                 ))}
               </List>
             );

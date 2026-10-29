@@ -85,6 +85,16 @@ export function requireReportKey() {
             null,
           )
         : null;
+    // The assistant's key opens the desk reports and the SQL route only, never
+    // the read-everything admin proxy: the assistant reads admin screens as
+    // the person asking (bridge.ts adminReadAs).
+    if (caller === 'assistant' && desk === 'admin') {
+      const path = req.originalUrl.split(/[?#]/, 1)[0].toLowerCase();
+      if (path !== '/reports/admin/sql') {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+      }
+    }
     if (!keys.length && caller !== 'assistant') {
       res.status(503).json({ message: 'Reports are not configured.' });
       return;

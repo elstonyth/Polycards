@@ -1884,7 +1884,47 @@
       "question": "First question",
       "turns": "Questions",
       "failed": "Failed",
-      "cost": "Cost"
+      "cost": "Cost",
+      "deleted": "Deleted"
+    },
+    "deleteConfirm": "Delete this chat? It stays in the owner's review.",
+    "history": "History",
+    "imageFailed": "The image could not be loaded.",
+    "err": {
+      "no_key": "The assistant has no AI key yet. An admin adds it in Settings → AI.",
+      "busy": "Your previous question is still being answered. Wait for it, then ask again.",
+      "daily_cap": "You reached today's assistant limit. It resets at 00:00 Malaysia time."
+    },
+    "tools": {
+      "economy": "Economy totals",
+      "daily_economy": "Economy per day",
+      "payments": "Top-ups and withdrawals",
+      "pack_sales": "Sales per pack",
+      "groups": "Player groups",
+      "player": "A player's money",
+      "account": "Account status",
+      "order": "Delivery order",
+      "challenge": "Weekly challenge",
+      "challenge_results": "Last week's results",
+      "signups": "Sign-ups",
+      "packs_opened": "Packs opened",
+      "top_pulls": "Top pulls",
+      "tasks": "Tasks and achievements",
+      "packs": "Packs",
+      "pack": "One pack",
+      "low_stock": "Low stock",
+      "admin_read": "Admin screen",
+      "db_query": "Database query",
+      "challenge_poster": "Challenge poster",
+      "challenge_stages_poster": "Challenge stages poster",
+      "challenge_results_poster": "Results poster",
+      "challenge_standings_poster": "Standings poster",
+      "brand_poster": "Brand poster",
+      "achievements_poster": "Achievements poster",
+      "tasks_poster": "Tasks poster",
+      "top_pulls_poster": "Top pulls poster",
+      "brand_logo": "Logo",
+      "generate_image": "AI image"
     }
   }
 }

@@ -1194,11 +1194,13 @@ export default defineMiddlewares({
     ...adminRbacRoutes,
     {
       // The admin assistant chat (spec 2026-10-29): screenshots travel as data
-      // URLs in the JSON body (up to 4 x 5 MB), hence the larger body limit;
+      // URLs in the JSON body (up to 4, each shrunk under 1.5 MB), hence the
+      // larger body limit, kept small because Medusa parses a body before the
+      // login check;
       // each turn spends OpenRouter credit, hence its own per-admin budget.
       matcher: '/admin/assistant/chat',
       method: 'POST',
-      bodyParser: { sizeLimit: '25mb' },
+      bodyParser: { sizeLimit: '10mb' },
       middlewares: [adminActionRateLimit, assistantChatRateLimit],
     },
     {

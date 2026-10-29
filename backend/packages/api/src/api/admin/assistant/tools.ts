@@ -92,8 +92,14 @@ const text = (body: unknown, label?: string) =>
   );
 
 const s = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined);
-const n = (v: unknown) =>
-  typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+// The model sometimes sends numbers and booleans as strings ("20",
+// "false"): read them as what they say, never drop or flip them.
+const n = (v: unknown) => {
+  const x = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof x === 'number' && Number.isFinite(x) ? x : undefined;
+};
+const b = (v: unknown) =>
+  v === true || v === 'true' ? true : v === false || v === 'false' ? false : undefined;
 
 /** A windowed report: the period resolves here, like the desks' tools. */
 const windowed =
@@ -104,6 +110,8 @@ const windowed =
       port: ctx.port,
       desk,
       path,
+      signal: ctx.signal,
+      userId: ctx.access.userId,
       params: {
         from: w.from,
         to: w.to,
@@ -127,6 +135,8 @@ const report =
         port: ctx.port,
         desk,
         path,
+        signal: ctx.signal,
+        userId: ctx.access.userId,
         params: params(args) as Record<string, string | number | undefined>,
       }),
     );
@@ -150,6 +160,8 @@ const poster =
       port: ctx.port,
       desk: 'growth',
       path,
+      signal: ctx.signal,
+      userId: ctx.access.userId,
       params: params(args) as Record<string, string | number | undefined>,
       image: true,
     })) as ReportImage;
@@ -204,7 +216,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       'Payment-gateway deposits and withdrawals created in the window, counted and summed per status, plus what is open right now whatever the window. Deposit statuses: pending, settled, failed, expired. Withdrawal statuses: pending, settled, failed, held (held = waiting for admin approval). Amounts in RM (MYR).',
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
-    needs: [read('economy')],
+    // Gateway money: the payment screens' policy as well as the economy's.
+    needs: [read('economy'), read('payment')],
     run: windowed('finance', 'payments'),
   },
   {
@@ -256,7 +269,7 @@ export const TOOLS: AssistantTool[] = [
       ['username'],
     ),
     // It carries deposits and withdrawals: the payment screens' policy too.
-    needs: [read('customer'), read('payment')],
+    needs: [read('customer'), read('payment'), read('delivery_order')],
     run: report('support', 'account', (a) => ({ username: s(a.username) })),
   },
   {
@@ -403,6 +416,7 @@ export const TOOLS: AssistantTool[] = [
           container: ctx.container,
           port: ctx.port,
           access: ctx.access,
+          signal: ctx.signal,
           path: args.path,
           params:
             args.params && typeof args.params === 'object'
@@ -432,6 +446,8 @@ export const TOOLS: AssistantTool[] = [
           port: ctx.port,
           desk: 'admin',
           path: 'sql',
+          signal: ctx.signal,
+          userId: ctx.access.userId,
           post: { sql: args.sql },
           timeoutMs: 60_000,
         }),
@@ -457,7 +473,7 @@ export const TOOLS: AssistantTool[] = [
     needs: [IMAGES, read('challenge')],
     run: poster('challenge-poster', (a) => ({
       stage: n(a.stage),
-      leaders: a.leaders === undefined ? undefined : a.leaders ? 1 : 0,
+      leaders: b(a.leaders) === undefined ? undefined : b(a.leaders) ? 1 : 0,
       week: s(a.week),
     })),
   },
@@ -633,15 +649,16 @@ export const TOOLS: AssistantTool[] = [
         key: ctx.openrouterKey,
         model: ctx.imageModel,
         prompt,
-        references: args.use_attached ? ctx.attachments : [],
-        signal: ctx.signal,
+        references: b(args.use_attached) ? ctx.attachments : [],
+        signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(120_000)]),
       });
       ctx.addCost(cost);
-      const out = args.logo === false ? buffer : await brandImage(buffer);
+      const logo = b(args.logo) !== false;
+      const out = logo ? await brandImage(buffer) : buffer;
       await ctx.showImage(
         out,
         'ai-image.jpg',
-        args.logo === false ? undefined : 'image/jpeg',
+        logo ? 'image/jpeg' : undefined,
       );
       return 'The image is shown in the chat with a download button. Describe it in one line; it is a draft for a human to review.';
     },

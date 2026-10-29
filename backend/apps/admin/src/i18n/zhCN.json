@@ -311,7 +311,8 @@
       "question": "第一个问题",
       "turns": "提问数",
       "failed": "失败",
-      "cost": "费用"
+      "cost": "费用",
+      "deleted": "已删除"
     },
     "tools": {
       "economy": "经济总览",
@@ -343,6 +344,14 @@
       "top_pulls_poster": "最高抽卡海报",
       "brand_logo": "Logo",
       "generate_image": "AI 图片"
+    },
+    "deleteConfirm": "删除这个对话？管理员的对话记录里仍会保留。",
+    "history": "历史",
+    "imageFailed": "图片加载失败。",
+    "err": {
+      "no_key": "助手还没有 AI 密钥，请管理员在 设置 → AI 添加。",
+      "busy": "上一个问题还在回答中，请等它完成再问。",
+      "daily_cap": "你今天的助手额度已用完，马来西亚时间 00:00 重置。"
     }
   }
 }

@@ -217,4 +217,11 @@ describe('requireReportKey', () => {
     ).toHaveBeenCalledTimes(1);
     expect(run(ECONOMY, { 'x-report-key': FINANCE }).res.statusCode).toBe(503);
   });
+
+  it('keeps the assistant off the read-everything admin proxy, but lets it run SQL', () => {
+    const proxy = run('/reports/admin/read?path=/admin/users', { 'x-report-key': ASSISTANT_REPORT_KEY });
+    expect([proxy.res.statusCode, proxy.next.mock.calls.length]).toEqual([401, 0]);
+    expect(run('/reports/ADMIN/Read', { 'x-report-key': ASSISTANT_REPORT_KEY }).res.statusCode).toBe(401);
+    expect(run('/reports/admin/sql', { 'x-report-key': ASSISTANT_REPORT_KEY }).next).toHaveBeenCalledTimes(1);
+  });
 });

@@ -24,12 +24,14 @@ import { TOOLS } from '../tools';
 
 const MAX_TEXT = 4000;
 const MAX_IMAGES = 4;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+// The admin shrinks a screenshot to 1600px JPEG (well under 1 MB) before it
+// sends it; the body limit (middlewares.ts) is sized to 4 of these.
+const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const HISTORY = 20;
 // One turn at a time per staff member, so parallel questions cannot all
 // pass the daily cap check before any of them has saved its cost. Per
-// process: the backend runs one web instance; a second would only let a
-// person run one turn per instance.
+// process: with the backend on 2 web instances a person can have at most
+// 2 answers running, and each answer also stops at the cap (engine.ts).
 const busy = new Set<string>();
 
 const IMAGE_RE = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
@@ -54,7 +56,7 @@ function parse(body: Body): {
     const m = typeof img === 'string' ? IMAGE_RE.exec(img) : null;
     if (!m) throw new Error('Images must be PNG, JPEG or WebP.');
     if ((m[2].length * 3) / 4 > MAX_IMAGE_BYTES) {
-      throw new Error('Each image must be 5 MB or smaller.');
+      throw new Error('Each image must be 1.5 MB or smaller.');
     }
   }
   const id = body.conversation_id;
@@ -81,6 +83,12 @@ export async function POST(
     res.status(400).json({ message: (err as Error).message });
     return;
   }
+  // Listening from the start: a person who leaves during the first awaits
+  // must not leave an answer running (and paid for) behind them.
+  const ctl = new AbortController();
+  res.on('close', () => {
+    if (!res.writableFinished) ctl.abort();
+  });
   const scope = req.scope;
   const assistant = scope.resolve<AssistantModuleService>(ASSISTANT_MODULE);
   const access = accessFor(scope, req.auth_context);
@@ -98,6 +106,14 @@ export async function POST(
     conversation = own;
   }
 
+  const settings = await assistant.settings();
+  const { http } = scope.resolve(
+    ContainerRegistrationKeys.CONFIG_MODULE,
+  ).projectConfig;
+  const key = settings.openrouter_key_sealed
+    ? openKey(settings.openrouter_key_sealed, http.jwtSecret as string)
+    : null;
+
   res.status(200);
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -111,13 +127,6 @@ export async function POST(
     if (!res.writableEnded) res.end();
   };
 
-  const settings = await assistant.settings();
-  const { http } = scope.resolve(
-    ContainerRegistrationKeys.CONFIG_MODULE,
-  ).projectConfig;
-  const key = settings.openrouter_key_sealed
-    ? openKey(settings.openrouter_key_sealed, http.jwtSecret as string)
-    : null;
   if (!key) {
     finish({
       type: 'error',
@@ -138,10 +147,6 @@ export async function POST(
     return;
   }
   busy.add(access.userId);
-  const ctl = new AbortController();
-  res.on('close', () => {
-    if (!res.writableFinished) ctl.abort();
-  });
   const ping = setInterval(() => send({ type: 'ping' }), 10_000);
   const logger = scope.resolve(ContainerRegistrationKeys.LOGGER);
 
@@ -198,6 +203,7 @@ export async function POST(
       userText: input.text,
       images: input.images,
       signal: ctl.signal,
+      budgetUsd: Number(settings.daily_cap_usd) - spent,
       now,
       emit: send,
       ctx: {
@@ -246,12 +252,18 @@ export async function POST(
       id: conversationId,
       last_message_at: new Date(),
     });
+    // One line per answer, so a failing key or model shows in the logs.
+    logger.info(
+      `[assistant] answer user=${access.userId} conv=${conversationId} model=${settings.chat_model} tools=${result.tools.map((t) => `${t.name}:${t.ok ? 'ok' : 'fail'}`).join(',') || '-'} cost=${result.cost.toFixed(4)} ms=${Date.now() - now.getTime()}${result.error ? ` error=${result.error}` : ''}`,
+    );
     if (result.error && result.error !== 'aborted') {
       send({ type: 'error', message: result.error });
     }
     finish({ type: 'done', message_id: saved.id, cost_usd: result.cost });
   } catch (err) {
-    logger.warn(`[assistant] turn failed: ${(err as Error)?.message}`);
+    logger.warn(
+      `[assistant] turn failed user=${access.userId}: ${(err as Error)?.message}`,
+    );
     finish({
       type: 'error',
       message: 'The assistant hit a problem. Try again in a moment.',

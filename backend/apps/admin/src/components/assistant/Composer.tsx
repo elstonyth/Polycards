@@ -132,20 +132,28 @@ export function Composer({
           value={text}
           autoFocus={autoFocus}
           placeholder={t('assistant.placeholder')}
+          aria-label={t('assistant.placeholder')}
           onChange={(e) => setText(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onPaste={(e: ClipboardEvent) => {
-            if (e.clipboardData.files.length) {
+            // A copied spreadsheet range carries its text AND a picture of
+            // it: keep the text. Only a pasted picture becomes an image.
+            if (
+              e.clipboardData.files.length &&
+              !e.clipboardData.getData('text/plain').trim()
+            ) {
               e.preventDefault();
               void add(e.clipboardData.files);
             }
           }}
           onKeyDown={(e) => {
+            // keyCode 229: Safari's Enter that commits a Chinese IME word.
             if (
               e.key === 'Enter' &&
               !e.shiftKey &&
-              !e.nativeEvent.isComposing
+              !e.nativeEvent.isComposing &&
+              e.keyCode !== 229
             ) {
               e.preventDefault();
               send();

@@ -12,7 +12,15 @@ import { openRouterUrl } from './openrouter';
 // unchanged — what the Growth desk's Hermes hook (stamp-logo.py) did, so a
 // generated image is ready to post like every desk poster.
 
-export class ImageRefused extends Error {}
+export class ImageRefused extends Error {
+  constructor(
+    message: string,
+    /** What the refused call was still billed, USD. */
+    readonly cost = 0,
+  ) {
+    super(message);
+  }
+}
 
 /** One image from an OpenRouter image model, as bytes, and its cost. */
 export async function generateImage(opts: {
@@ -72,6 +80,7 @@ export async function generateImage(opts: {
     const said = body?.choices?.[0]?.message?.content?.trim();
     throw new ImageRefused(
       `The image model returned no image${said ? `: ${said.slice(0, 300)}` : '.'}`,
+      Number(body?.usage?.cost ?? 0),
     );
   }
   return {

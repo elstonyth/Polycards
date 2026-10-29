@@ -14,6 +14,15 @@ import { toolSpecs, type AssistantTool, type ToolCtx } from './tools';
 // a call to any other name is answered "no access", never executed.
 
 export const MAX_ROUNDS = 8;
+// Limits on one answer (review 2026-10-29): a step may run at most 6 tools,
+// an answer may draw at most 4 posters or images, one model call may take
+// 90 s (OpenRouter keep-alives would otherwise hold a stuck call open) and
+// the whole answer 4 minutes.
+export const MAX_CALLS_PER_ROUND = 6;
+export const MAX_IMAGES_PER_TURN = 4;
+const ROUND_TIMEOUT_MS = 90_000;
+const TURN_TIMEOUT_MS = 240_000;
+const DRAWS = /(_poster|^generate_image)$/;
 
 export type TurnEvent =
   | { type: 'text'; delta: string }
@@ -53,6 +62,8 @@ export async function runTurn(opts: {
   ctx: Omit<ToolCtx, 'addCost' | 'signal' | 'access'>;
   emit: (e: TurnEvent) => void;
   signal: AbortSignal;
+  /** What the asker may still spend today, USD: the answer stops once spent. */
+  budgetUsd?: number;
   now?: Date;
   fetchImpl?: typeof fetch;
 }): Promise<TurnResult> {
@@ -90,8 +101,18 @@ export async function runTurn(opts: {
     { role: 'user', content: userContent },
   ];
 
+  const started = Date.now();
+  let drawn = 0;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      if (Date.now() - started > TURN_TIMEOUT_MS) {
+        result.error = 'The answer took too long. Ask a narrower question.';
+        return result;
+      }
+      if (opts.budgetUsd !== undefined && result.cost >= opts.budgetUsd) {
+        result.error = "You reached today's assistant limit during this answer.";
+        return result;
+      }
       const last = round === MAX_ROUNDS - 1;
       let roundText = '';
       let calls: { id: string; name: string; arguments: string }[] = [];
@@ -99,8 +120,14 @@ export async function runTurn(opts: {
         key: opts.key,
         model: opts.model,
         messages,
-        tools: last ? [] : toolSpecs(opts.tools),
-        signal: opts.signal,
+        // The last round keeps the tool list (a history holding tool calls
+        // needs it) but may not call one: it must answer.
+        tools: toolSpecs(opts.tools),
+        toolChoice: last ? 'none' : 'auto',
+        signal: AbortSignal.any([
+          opts.signal,
+          AbortSignal.timeout(ROUND_TIMEOUT_MS),
+        ]),
         fetchImpl: opts.fetchImpl,
       })) {
         if (ev.type === 'text') {
@@ -115,7 +142,7 @@ export async function runTurn(opts: {
           calls = ev.calls;
         }
       }
-      if (!calls.length) return result;
+      if (!calls.length || last) return result;
       if (roundText && !roundText.endsWith('\n')) {
         // Text before a tool call ("Let me check...") stays its own paragraph.
         result.text += '\n\n';
@@ -130,14 +157,20 @@ export async function runTurn(opts: {
           function: { name: c.name, arguments: c.arguments || '{}' },
         })),
       });
-      for (const call of calls) {
+      for (const [i, call] of calls.entries()) {
+        let content: string;
+        if (i >= MAX_CALLS_PER_ROUND) {
+          content = `Skipped: at most ${MAX_CALLS_PER_ROUND} tool calls per step. Call the rest in the next step if still needed.`;
+        } else if (DRAWS.test(call.name) && drawn >= MAX_IMAGES_PER_TURN) {
+          content = `Skipped: at most ${MAX_IMAGES_PER_TURN} posters or images per answer. Tell the asker to ask again for more.`;
+        } else {
+          if (DRAWS.test(call.name)) drawn++;
+          content = await runTool(call, byName, ctx, opts.emit, result);
+        }
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
-          content: untrusted(
-            call.name,
-            await runTool(call, byName, ctx, opts.emit, result),
-          ),
+          content: untrusted(call.name, content),
         });
       }
     }
@@ -145,7 +178,9 @@ export async function runTurn(opts: {
   } catch (err) {
     result.error = opts.signal.aborted
       ? 'aborted'
-      : err instanceof OpenRouterError
+      : (err as Error)?.name === 'TimeoutError'
+        ? 'The AI model did not answer in time. Try again.'
+        : err instanceof OpenRouterError
         ? err.message
         : `The assistant stopped: ${(err as Error)?.message ?? String(err)}`;
     return result;
@@ -205,6 +240,9 @@ async function runTool(
     return out;
   } catch (err) {
     if (ctx.signal.aborted) throw err;
+    // A refused image is still billed (ImageRefused carries its cost).
+    const cost = Number((err as { cost?: unknown })?.cost ?? 0);
+    if (cost > 0) ctx.addCost(cost);
     const ms = Date.now() - started;
     result.tools.push({ name: tool.name, args, ok: false, ms });
     emit({

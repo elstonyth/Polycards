@@ -47,6 +47,8 @@ export type ReviewRow = ConversationSummary & {
   questions: number;
   failed: number;
   cost_usd: number;
+  /** Deleted by the staff member: kept for the owner's review. */
+  deleted: boolean;
 };
 
 export type ChatEvent =

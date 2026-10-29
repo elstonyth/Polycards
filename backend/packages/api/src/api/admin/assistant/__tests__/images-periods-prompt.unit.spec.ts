@@ -115,6 +115,25 @@ describe('resolvePeriod (same as the desk tools)', () => {
     );
     expect(() => resolvePeriod('fortnight', {}, now)).toThrow('Unknown period');
   });
+  it('reads last week, both months and the rolling windows like the desks', () => {
+    expect(resolvePeriod('last_week', {}, now)).toMatchObject({
+      from: '2026-10-18T16:00:00.000Z',
+      to: '2026-10-25T16:00:00.000Z',
+    });
+    expect(resolvePeriod('this_month', {}, now)).toMatchObject({
+      from: '2026-09-30T16:00:00.000Z',
+      to: '2026-10-31T16:00:00.000Z',
+    });
+    const jan = Date.parse('2026-01-15T12:00:00+08:00');
+    expect(resolvePeriod('last_month', {}, jan)).toMatchObject({
+      from: '2025-11-30T16:00:00.000Z',
+      to: '2025-12-31T16:00:00.000Z',
+    });
+    expect(resolvePeriod('last_7_days', {}, now)).toMatchObject({
+      from: new Date(now - 7 * 864e5).toISOString(),
+      to: new Date(now).toISOString(),
+    });
+  });
   it('leaves all time open', () => {
     expect(resolvePeriod('all_time', {}, now)).toEqual({
       from: null,

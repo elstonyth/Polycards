@@ -53,6 +53,42 @@ describe('markdown', () => {
     ]);
   });
 
+  it('keeps a ranked list counting across blank lines, with sub-points', () => {
+    const [list, ...rest] = mdBlocks(
+      '1. Ace\n   - RM 900\n\n2. Bo\n\n3. Cy\n\nDone.',
+    );
+    expect(list).toEqual({
+      kind: 'ol',
+      start: 1,
+      items: [
+        { text: 'Ace', sub: ['RM 900'] },
+        { text: 'Bo', sub: [] },
+        { text: 'Cy', sub: [] },
+      ],
+    });
+    expect(rest).toEqual([{ kind: 'p', lines: ['Done.'] }]);
+    expect(mdBlocks('4. four\n5. five')[0]).toMatchObject({ start: 4 });
+  });
+
+  it('starts a code block at an indented fence', () => {
+    expect(mdBlocks('text\n  ```\ncode\n  ```').map((b) => b.kind)).toEqual([
+      'p',
+      'code',
+    ]);
+  });
+
+  it('links only to our own site', () => {
+    expect(mdInline('[x](https://evil.example/?d=secret)')).toEqual([
+      { kind: 'text', text: '[x](https://evil.example/?d=secret)' },
+    ]);
+    expect(mdInline('[x](https://polycards.gg.evil.example/)')).toEqual([
+      { kind: 'text', text: '[x](https://polycards.gg.evil.example/)' },
+    ]);
+    expect(mdInline('[admin](https://admin.polycards.gg/x)')[0]).toMatchObject({
+      kind: 'link',
+    });
+  });
+
   it('reads bold and inline code', () => {
     expect(mdInline('**RM 1,234** in `pull`')).toEqual([
       { kind: 'bold', text: 'RM 1,234' },

@@ -1,7 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { MotionConfig } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Button, Container, Drawer, Heading, Table, Text } from '@medusajs/ui';
+import {
+  Badge,
+  Button,
+  Container,
+  Drawer,
+  Heading,
+  Table,
+  Text,
+} from '@medusajs/ui';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { assistantApi } from '../../../lib/assistant';
 import { mytDateTime } from '../../../lib/format';
@@ -36,8 +45,14 @@ const ReviewPage = () => {
     enabled: !!open,
   });
   const count = list.data?.count ?? 0;
+  // Never stay on a page past the end (the list can shrink).
+  useEffect(() => {
+    if (offset > 0 && offset >= count && list.data)
+      setOffset(Math.max(0, count - PAGE));
+  }, [count, offset, list.data]);
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="pc-admin flex flex-col gap-y-3">
       <Container className="p-0">
         <div className="px-6 py-4">
@@ -94,8 +109,23 @@ const ReviewPage = () => {
                     <Table.Cell className="break-all">
                       {c.user_email ?? c.user_id}
                     </Table.Cell>
-                    <Table.Cell className="max-w-[420px] truncate">
-                      {c.title}
+                    <Table.Cell className="max-w-[420px]">
+                      {/* A real button, so the row opens from the keyboard too. */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpen(c.id);
+                        }}
+                        className="text-ui-fg-base hover:text-ui-fg-interactive flex max-w-full items-center gap-x-2 text-left"
+                      >
+                        <span className="truncate">{c.title}</span>
+                        {c.deleted && (
+                          <Badge size="2xsmall" color="grey">
+                            {t('assistant.review.deleted')}
+                          </Badge>
+                        )}
+                      </button>
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums">
                       {c.questions}
@@ -160,6 +190,7 @@ const ReviewPage = () => {
         </Drawer.Content>
       </Drawer>
     </div>
+    </MotionConfig>
   );
 };
 

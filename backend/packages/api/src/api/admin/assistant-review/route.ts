@@ -20,13 +20,22 @@ export async function GET(
   const [conversations, count] =
     await assistant.listAndCountAssistantConversations(
       {},
-      { order: { last_message_at: 'DESC' }, take: limit, skip: offset },
+      {
+        order: { last_message_at: 'DESC' },
+        take: limit,
+        skip: offset,
+        // Chats staff deleted stay here: the owner reviews every question.
+        withDeleted: true,
+      },
     );
   const ids = conversations.map((c) => c.id);
   const messages = ids.length
     ? await assistant.listAssistantMessages(
         { conversation_id: ids },
-        { select: ['conversation_id', 'role', 'cost_usd', 'error'] },
+        {
+          select: ['conversation_id', 'role', 'cost_usd', 'error'],
+          withDeleted: true,
+        },
       )
     : [];
   const userIds = [...new Set(conversations.map((c) => c.user_id))];
@@ -51,6 +60,7 @@ export async function GET(
         failed: own.filter((m) => m.role === 'assistant' && m.error).length,
         cost_usd: own.reduce((sum, m) => sum + Number(m.cost_usd ?? 0), 0),
         last_message_at: c.last_message_at,
+        deleted: !!c.deleted_at,
       };
     }),
   });

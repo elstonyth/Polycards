@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -39,8 +39,11 @@ const AiSettingsPage = () => {
   const [saving, setSaving] = useState(false);
   const [test, setTest] = useState<string | null>(null);
 
+  // Filled once from the server: saving the key must not wipe unsaved edits.
+  const seeded = useRef(false);
   useEffect(() => {
-    if (!s) return;
+    if (!s || seeded.current) return;
+    seeded.current = true;
     setChatModel(s.chat_model);
     setImageModel(s.image_model);
     setCap(String(s.daily_cap_usd));
@@ -87,6 +90,11 @@ const AiSettingsPage = () => {
     }
   };
 
+  // A cap from 0.5 to 1000; an empty field would otherwise save as 0.
+  const capValue = Number(cap);
+  const capOk =
+    cap.trim() !== '' && Number.isFinite(capValue) && capValue >= 0.5 && capValue <= 1000;
+
   const status = !s?.openrouter_key.set
     ? { color: 'grey' as const, text: t('assistant.settings.keyNone') }
     : !s.openrouter_key.readable
@@ -127,8 +135,10 @@ const AiSettingsPage = () => {
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
+            id="ai-key"
+            aria-label={t('assistant.settings.keyTitle')}
             type="password"
-            autoComplete="off"
+            autoComplete="new-password"
             placeholder="sk-or-v1-…"
             value={key}
             onChange={(e) => setKey(e.target.value)}
@@ -176,8 +186,11 @@ const AiSettingsPage = () => {
         <Heading level="h3">{t('assistant.settings.modelsTitle')}</Heading>
         <div className="grid gap-4 md:grid-cols-3">
           <div className="flex flex-col gap-y-1.5">
-            <Label size="small">{t('assistant.settings.chatModel')}</Label>
+            <Label size="small" htmlFor="ai-chat-model">
+              {t('assistant.settings.chatModel')}
+            </Label>
             <Input
+              id="ai-chat-model"
               value={chatModel}
               onChange={(e) => setChatModel(e.target.value)}
             />
@@ -186,8 +199,11 @@ const AiSettingsPage = () => {
             </Text>
           </div>
           <div className="flex flex-col gap-y-1.5">
-            <Label size="small">{t('assistant.settings.imageModel')}</Label>
+            <Label size="small" htmlFor="ai-image-model">
+              {t('assistant.settings.imageModel')}
+            </Label>
             <Input
+              id="ai-image-model"
               value={imageModel}
               onChange={(e) => setImageModel(e.target.value)}
             />
@@ -196,8 +212,11 @@ const AiSettingsPage = () => {
             </Text>
           </div>
           <div className="flex flex-col gap-y-1.5">
-            <Label size="small">{t('assistant.settings.cap')}</Label>
+            <Label size="small" htmlFor="ai-cap">
+              {t('assistant.settings.cap')}
+            </Label>
             <Input
+              id="ai-cap"
               type="number"
               min={0}
               max={1000}
@@ -213,7 +232,7 @@ const AiSettingsPage = () => {
         <div>
           <Button
             variant="secondary"
-            disabled={saving || !s}
+            disabled={saving || !s || !capOk}
             onClick={() =>
               void save({
                 chat_model: chatModel.trim(),

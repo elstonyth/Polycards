@@ -15,7 +15,7 @@ export async function GET(
   const assistant = req.scope.resolve<AssistantModuleService>(ASSISTANT_MODULE);
   const [conversation] = await assistant.listAssistantConversations(
     { id: req.params.id },
-    { take: 1 },
+    { take: 1, withDeleted: true },
   );
   if (!conversation) {
     res.status(404).json({ message: 'That conversation was not found.' });
@@ -23,7 +23,7 @@ export async function GET(
   }
   const messages = await assistant.listAssistantMessages(
     { conversation_id: conversation.id },
-    { order: { created_at: 'ASC' }, take: 500 },
+    { order: { created_at: 'ASC' }, take: 500, withDeleted: true },
   );
   res.json({
     conversation: {

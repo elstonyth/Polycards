@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { PlusMini, Sparkles, Trash } from '@medusajs/icons';
-import { toast } from '@medusajs/ui';
+import { Drawer, toast } from '@medusajs/ui';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   assistantApi,
@@ -114,6 +114,10 @@ const AssistantPage = () => {
   // selecting it must not reload it mid-stream.
   const live = useRef<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  // Follow the answer as it grows (text, steps, a poster loading in) unless
+  // the person scrolled up to read; sending or opening a chat follows again.
+  const stick = useRef(true);
+  const [history, setHistory] = useState(false);
 
   // The tool's name in the page's language (the server's label is English).
   const labelOf = useCallback(
@@ -134,7 +138,12 @@ const AssistantPage = () => {
     let gone = false;
     assistantApi
       .conversation(selected)
-      .then((d) => !gone && setMessages(fromStored(d.messages, labelOf)))
+      .then((d) => {
+        // A question sent while this loaded owns the screen: never wipe it.
+        if (gone || ctl.current) return;
+        stick.current = true;
+        setMessages(fromStored(d.messages, labelOf));
+      })
       .catch(() => !gone && setParams({}));
     return () => {
       gone = true;
@@ -143,9 +152,6 @@ const AssistantPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  // Follow the answer as it grows (text, steps, a poster loading in) unless
-  // the person scrolled up to read; sending a question follows again.
-  const stick = useRef(true);
   const hasMessages = messages.length > 0;
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -190,10 +196,15 @@ const AssistantPage = () => {
     ]);
     const patch = (fn: (m: UiMessage) => UiMessage) =>
       setMessages((prev) => prev.map((m) => (m.key === key ? fn(m) : m)));
+    // An answer is whole only once `done` arrived; a stream that just stops
+    // (a deploy, a dropped connection) is shown as cut off, never as complete.
+    let finished = false;
+    let failed = false;
     try {
       await streamChat(
         { conversation_id: selected ?? undefined, message: text, images },
         (e) => {
+          if (e.type === 'done') finished = true;
           if (e.type === 'conversation') {
             live.current = e.id;
             if (e.id !== selected) setParams({ c: e.id });
@@ -204,7 +215,9 @@ const AssistantPage = () => {
               const step = {
                 id: e.id,
                 name: e.name,
-                label: labelOf(e.name),
+                label: t(`assistant.tools.${e.name}`, {
+                  defaultValue: e.label,
+                }),
                 status: e.status,
                 ms: e.ms,
               };
@@ -220,11 +233,20 @@ const AssistantPage = () => {
           } else if (e.type === 'image') {
             patch((m) => ({ ...m, images: [...m.images, e.url] }));
           } else if (e.type === 'error') {
-            patch((m) => ({ ...m, error: e.message }));
+            failed = true;
+            patch((m) => ({
+              ...m,
+              error: e.code
+                ? t(`assistant.err.${e.code}`, { defaultValue: e.message })
+                : e.message,
+            }));
           }
         },
         ac.signal,
       );
+      if (!finished && !failed && !ac.signal.aborted) {
+        patch((m) => ({ ...m, error: t('assistant.connectionLost') }));
+      }
     } catch {
       if (!ac.signal.aborted) {
         patch((m) => ({ ...m, error: t('assistant.connectionLost') }));
@@ -251,6 +273,7 @@ const AssistantPage = () => {
   };
 
   const remove = async (id: string) => {
+    if (busy || !window.confirm(t('assistant.deleteConfirm'))) return;
     try {
       await assistantApi.remove(id);
       if (id === selected) newChat();
@@ -264,147 +287,185 @@ const AssistantPage = () => {
     ...new Set(me.data?.tools.map((x) => labelOf(x.name)) ?? []),
   ];
 
-  return (
-    <div className="pc-admin pc-ai-aurora bg-ui-bg-subtle border-ui-border-base flex h-[calc(100vh-6.5rem)] min-h-[560px] overflow-hidden rounded-2xl border">
-      {/* Conversations */}
-      <aside className="border-ui-border-base bg-ui-bg-base/60 hidden w-64 shrink-0 flex-col border-r backdrop-blur lg:flex">
-        <div className="p-3">
-          <button
-            type="button"
-            onClick={newChat}
-            disabled={busy}
-            className="border-ui-border-base text-ui-fg-base hover:bg-ui-bg-base-hover flex w-full items-center justify-center gap-x-1.5 rounded-xl border px-3 py-2 text-[13px] font-medium disabled:opacity-50"
-          >
-            <PlusMini />
-            {t('assistant.newChat')}
-          </button>
-        </div>
-        <nav className="flex-1 overflow-y-auto px-2 pb-3">
-          <AnimatePresence initial={false}>
-            {conversations.data?.conversations.map((c) => (
-              <motion.div
-                key={c.id}
-                layout
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, height: 0 }}
-                className={`group flex items-center rounded-lg ${
-                  c.id === selected
-                    ? 'bg-ui-bg-component'
-                    : 'hover:bg-ui-bg-base-hover'
-                }`}
-              >
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setParams({ c: c.id })}
-                  className="min-w-0 flex-1 px-3 py-2 text-left"
-                >
-                  <span className="text-ui-fg-base block truncate text-[13px]">
-                    {c.title}
-                  </span>
-                  <span className="text-ui-fg-muted text-[11px]">
-                    {timeAgo(c.last_message_at)}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={t('assistant.delete')}
-                  onClick={() => void remove(c.id)}
-                  className="text-ui-fg-muted hover:text-ui-fg-error mr-1 rounded p-1 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                  <Trash />
-                </button>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-          {conversations.data?.conversations.length === 0 && (
-            <p className="text-ui-fg-muted px-3 py-2 text-xs">
-              {t('assistant.noChats')}
-            </p>
-          )}
-        </nav>
-      </aside>
-
-      {/* Chat */}
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="border-ui-border-base flex items-center gap-x-3 border-b px-5 py-3">
-          <AiOrb size={30} active={busy} />
-          <div className="min-w-0">
-            <p className="text-ui-fg-base text-sm font-semibold">
-              {t('assistant.title')}
-            </p>
-            <p className="text-ui-fg-muted truncate text-[11px]">
-              {me.data?.super_admin
-                ? t('assistant.fullAccess')
-                : toolLabels.length
-                  ? t('assistant.limitedAccess', {
-                      list: toolLabels.join(' · '),
-                    })
-                  : ''}
-            </p>
-          </div>
-          {me.data?.chat_model && (
-            <span className="border-ui-border-base text-ui-fg-subtle ml-auto hidden rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] md:inline">
-              {me.data.chat_model}
-            </span>
-          )}
-        </header>
-
-        {me.data && !me.data.key_set && (
-          <div className="border-ui-tag-orange-border bg-ui-tag-orange-bg text-ui-tag-orange-text mx-5 mt-4 rounded-xl border px-4 py-2.5 text-xs">
-            {me.data.super_admin ? (
-              <>
-                {t('assistant.noKeyAdmin')}{' '}
-                <Link to="/settings/ai" className="font-semibold underline">
-                  {t('assistant.openSettings')}
-                </Link>
-              </>
-            ) : (
-              t('assistant.noKeyStaff')
-            )}
-          </div>
-        )}
-
-        <div
-          ref={scroller}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            stick.current =
-              el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  const list = (
+    <>
+      <div className="p-3">
+        <button
+          type="button"
+          onClick={() => {
+            newChat();
+            setHistory(false);
           }}
-          className="flex flex-1 flex-col overflow-y-auto"
+          disabled={busy}
+          className="border-ui-border-base text-ui-fg-base hover:bg-ui-bg-base-hover flex w-full items-center justify-center gap-x-1.5 rounded-xl border px-3 py-2 text-[13px] font-medium disabled:opacity-50"
         >
-          {messages.length === 0 ? (
-            <EmptyState
-              me={me.data}
-              onPick={(text, now) =>
-                now
-                  ? void send(text, [])
-                  : setSeed((s) => ({ text, n: (s?.n ?? 0) + 1 }))
-              }
-            />
-          ) : (
-            <div ref={content} className="mx-auto w-full max-w-3xl px-5 py-6">
-              <Thread messages={messages} />
+          <PlusMini />
+          {t('assistant.newChat')}
+        </button>
+      </div>
+      <nav className="flex-1 overflow-y-auto px-2 pb-3">
+        <AnimatePresence initial={false}>
+          {conversations.data?.conversations.map((c) => (
+            <motion.div
+              key={c.id}
+              layout
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, height: 0 }}
+              className={`group flex items-center rounded-lg ${
+                c.id === selected
+                  ? 'bg-ui-bg-component'
+                  : 'hover:bg-ui-bg-base-hover'
+              }`}
+            >
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setParams({ c: c.id });
+                  setHistory(false);
+                }}
+                className="min-w-0 flex-1 px-3 py-2 text-left"
+              >
+                <span className="text-ui-fg-base block truncate text-[13px]">
+                  {c.title}
+                </span>
+                <span className="text-ui-fg-muted text-[11px]">
+                  {timeAgo(c.last_message_at)}
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label={t('assistant.delete')}
+                disabled={busy}
+                onClick={() => void remove(c.id)}
+                className="text-ui-fg-muted hover:text-ui-fg-error mr-1 rounded p-1 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <Trash />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        {conversations.data?.conversations.length === 0 && (
+          <p className="text-ui-fg-muted px-3 py-2 text-xs">
+            {t('assistant.noChats')}
+          </p>
+        )}
+      </nav>
+    </>
+  );
+
+  return (
+    <MotionConfig reducedMotion="user">
+      <div className="pc-admin pc-ai-aurora bg-ui-bg-subtle border-ui-border-base flex h-[calc(100vh-6.5rem)] min-h-[560px] overflow-hidden rounded-2xl border">
+        {/* Conversations */}
+        <aside className="border-ui-border-base bg-ui-bg-base/60 hidden w-64 shrink-0 flex-col border-r backdrop-blur lg:flex">
+          {list}
+        </aside>
+
+        {/* Chat */}
+        <section className="flex min-w-0 flex-1 flex-col">
+          <header className="border-ui-border-base flex items-center gap-x-3 border-b px-5 py-3">
+            <AiOrb size={30} active={busy} />
+            <div className="min-w-0">
+              <p className="text-ui-fg-base text-sm font-semibold">
+                {t('assistant.title')}
+              </p>
+              <p className="text-ui-fg-muted truncate text-[11px]">
+                {me.data?.super_admin
+                  ? t('assistant.fullAccess')
+                  : toolLabels.length
+                    ? t('assistant.limitedAccess', {
+                        list: toolLabels.join(' · '),
+                      })
+                    : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHistory(true)}
+              className="border-ui-border-base text-ui-fg-subtle hover:text-ui-fg-base ml-auto rounded-full border px-3 py-1 text-xs lg:hidden"
+            >
+              {t('assistant.history')}
+            </button>
+            <Drawer open={history} onOpenChange={setHistory}>
+              <Drawer.Content className="pc-admin max-w-xs">
+                <Drawer.Header>
+                  <Drawer.Title>{t('assistant.history')}</Drawer.Title>
+                </Drawer.Header>
+                <Drawer.Body className="flex flex-col overflow-y-auto p-0">
+                  {list}
+                </Drawer.Body>
+              </Drawer.Content>
+            </Drawer>
+            {me.data?.chat_model && (
+              <span className="border-ui-border-base text-ui-fg-subtle hidden rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] md:inline lg:ml-auto">
+                {me.data.chat_model}
+              </span>
+            )}
+          </header>
+
+          {me.data && !me.data.key_set && (
+            <div className="border-ui-tag-orange-border bg-ui-tag-orange-bg text-ui-tag-orange-text mx-5 mt-4 rounded-xl border px-4 py-2.5 text-xs">
+              {me.data.super_admin ? (
+                <>
+                  {t('assistant.noKeyAdmin')}{' '}
+                  <Link to="/settings/ai" className="font-semibold underline">
+                    {t('assistant.openSettings')}
+                  </Link>
+                </>
+              ) : (
+                t('assistant.noKeyStaff')
+              )}
             </div>
           )}
-        </div>
 
-        <div className="mx-auto w-full max-w-3xl px-5 pb-5 pt-2">
-          <Composer
-            busy={busy}
-            seed={seed}
-            autoFocus
-            onSend={(text, images) => void send(text, images)}
-            onStop={() => ctl.current?.abort()}
-          />
-          <p className="text-ui-fg-muted mt-2 text-center text-[11px]">
-            {t('assistant.footnote')}
-          </p>
-        </div>
-      </section>
-    </div>
+          <div
+            ref={scroller}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              stick.current =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            }}
+            className="flex flex-1 flex-col overflow-y-auto"
+          >
+            {messages.length === 0 ? (
+              <EmptyState
+                me={me.data}
+                onPick={(text, now) =>
+                  now
+                    ? void send(text, [])
+                    : setSeed((s) => ({ text, n: (s?.n ?? 0) + 1 }))
+                }
+              />
+            ) : (
+              <div
+                ref={content}
+                role="log"
+                aria-live="polite"
+                aria-busy={busy}
+                className="mx-auto w-full max-w-3xl px-5 py-6"
+              >
+                <Thread messages={messages} />
+              </div>
+            )}
+          </div>
+
+          <div className="mx-auto w-full max-w-3xl px-5 pb-5 pt-2">
+            <Composer
+              busy={busy}
+              seed={seed}
+              autoFocus
+              onSend={(text, images) => void send(text, images)}
+              onStop={() => ctl.current?.abort()}
+            />
+            <p className="text-ui-fg-muted mt-2 text-center text-[11px]">
+              {t('assistant.footnote')}
+            </p>
+          </div>
+        </section>
+      </div>
+    </MotionConfig>
   );
 };
 

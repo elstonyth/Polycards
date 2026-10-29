@@ -1,5 +1,11 @@
 import type { Access } from '../access';
-import { MAX_ROUNDS, runTurn, type TurnEvent } from '../engine';
+import {
+  MAX_CALLS_PER_ROUND,
+  MAX_IMAGES_PER_TURN,
+  MAX_ROUNDS,
+  runTurn,
+  type TurnEvent,
+} from '../engine';
 import { streamChat } from '../openrouter';
 import type { AssistantTool } from '../tools';
 
@@ -58,6 +64,7 @@ function turn(
   responses: (() => Response)[],
   tools: AssistantTool[],
   signal = new AbortController().signal,
+  budgetUsd?: number,
 ) {
   const bodies: Record<string, unknown>[] = [];
   const fetchImpl = jest.fn(async (_url: unknown, init?: RequestInit) => {
@@ -86,6 +93,7 @@ function turn(
     },
     emit: (e) => events.push(e),
     signal,
+    budgetUsd,
     fetchImpl,
   });
   return { done, events, bodies, fetchImpl };
@@ -178,6 +186,38 @@ describe('streamChat', () => {
   });
 });
 
+describe('streamChat tool-call pieces', () => {
+  const run = async (...chunks: object[]) => {
+    const fetchImpl = (async () => sse(...chunks)) as unknown as typeof fetch;
+    const out: unknown[] = [];
+    for await (const e of streamChat({ key: 'k', model: 'm', messages: [], tools: [], fetchImpl })) out.push(e);
+    return out.at(-1);
+  };
+  const piece = (tc: object) => ({ choices: [{ delta: { tool_calls: [tc] } }] });
+  it('starts a new call when a provider reuses index 0 for a new id', async () => {
+    expect(
+      await run(
+        piece({ index: 0, id: 'a', function: { name: 'groups', arguments: '{}' } }),
+        piece({ index: 0, id: 'b', function: { name: 'economy', arguments: '{\"period\":\"today\"}' } }),
+      ),
+    ).toEqual({
+      type: 'tool_calls',
+      calls: [
+        { id: 'a', name: 'groups', arguments: '{}' },
+        { id: 'b', name: 'economy', arguments: '{"period":"today"}' },
+      ],
+    });
+  });
+  it('keeps a name repeated in every piece once, and joins pieces with no index', async () => {
+    expect(
+      await run(
+        piece({ id: 'a', function: { name: 'groups', arguments: '{' } }),
+        piece({ function: { name: 'groups', arguments: '}' } }),
+      ),
+    ).toEqual({ type: 'tool_calls', calls: [{ id: 'a', name: 'groups', arguments: '{}' }] });
+  });
+});
+
 describe('runTurn', () => {
   it('runs the tool the model asks for and streams the final answer', async () => {
     const groups = jest.fn(async () => '{"groups":3}');
@@ -253,20 +293,89 @@ describe('runTurn', () => {
     expect(content?.match(/<\/tool_result>/g)).toHaveLength(1);
   });
 
-  it(`stops after ${MAX_ROUNDS} rounds and offers no tools on the last one`, async () => {
+  it(`stops after ${MAX_ROUNDS} rounds: the last keeps the tools but may not call one`, async () => {
+    const groups = jest.fn(async () => '{}');
     const t = turn(
-      Array.from({ length: MAX_ROUNDS }, (_, i) =>
-        i === MAX_ROUNDS - 1
-          ? () => sse(say('Done.'))
-          : () => sse(toolCall('groups')),
-      ),
+      // Even if the model still asks for a tool on the last round, none runs.
+      Array.from({ length: MAX_ROUNDS }, () => () => sse(toolCall('groups'))),
+      [tool('groups', groups)],
+    );
+    await t.done;
+    expect(t.bodies).toHaveLength(MAX_ROUNDS);
+    expect(t.bodies[0]).toMatchObject({ tool_choice: 'auto' });
+    expect(t.bodies.at(-1)).toMatchObject({ tool_choice: 'none' });
+    expect(t.bodies.at(-1)).toHaveProperty('tools');
+    expect(groups).toHaveBeenCalledTimes(MAX_ROUNDS - 1);
+  });
+
+  it(`runs at most ${MAX_CALLS_PER_ROUND} tools in one step`, async () => {
+    const groups = jest.fn(async () => '{}');
+    const many = {
+      choices: [
+        {
+          delta: {
+            tool_calls: Array.from(
+              { length: MAX_CALLS_PER_ROUND + 2 },
+              (_, i) => ({
+                index: i,
+                id: `c${i}`,
+                function: { name: 'groups', arguments: '{}' },
+              }),
+            ),
+          },
+        },
+      ],
+    };
+    const t = turn(
+      [() => sse(many), () => sse(say('ok'))],
+      [tool('groups', groups)],
+    );
+    await t.done;
+    expect(groups).toHaveBeenCalledTimes(MAX_CALLS_PER_ROUND);
+    const skipped = (t.bodies[1].messages as { content: string }[]).at(
+      -1,
+    )?.content;
+    expect(skipped).toContain('Skipped: at most');
+  });
+
+  it(`draws at most ${MAX_IMAGES_PER_TURN} images in one answer`, async () => {
+    const draw = jest.fn(async () => 'drawn');
+    const t = turn(
+      [
+        ...Array.from(
+          { length: MAX_IMAGES_PER_TURN + 1 },
+          (_, i) => () => sse(toolCall('generate_image', '{}', `img${i}`)),
+        ),
+        () => sse(say('ok')),
+      ],
+      [tool('generate_image', draw)],
+    );
+    await t.done;
+    expect(draw).toHaveBeenCalledTimes(MAX_IMAGES_PER_TURN);
+  });
+
+  it('stops once the answer has spent what is left of today’s budget', async () => {
+    const t = turn(
+      [() => sse(toolCall('groups'), usage(0.5)), () => sse(say('more'))],
       [tool('groups', async () => '{}')],
+      new AbortController().signal,
+      0.4,
     );
     const result = await t.done;
-    expect(t.bodies).toHaveLength(MAX_ROUNDS);
-    expect(t.bodies.at(-1)).not.toHaveProperty('tools');
-    expect(t.bodies[0]).toHaveProperty('tools');
-    expect(result.text).toBe('Done.');
+    expect(t.bodies).toHaveLength(1);
+    expect(result.error).toMatch(/limit/);
+  });
+
+  it('keeps a refused image’s cost', async () => {
+    const t = turn(
+      [() => sse(toolCall('generate_image')), () => sse(say('ok'))],
+      [
+        tool('generate_image', async () => {
+          throw Object.assign(new Error('refused'), { cost: 0.03 });
+        }),
+      ],
+    );
+    expect((await t.done).cost).toBeCloseTo(0.03);
   });
 
   it('keeps the partial answer and marks it aborted when the asker leaves', async () => {
@@ -274,6 +383,34 @@ describe('runTurn', () => {
     ctl.abort();
     const result = await turn([], [], ctl.signal).done;
     expect(result.error).toBe('aborted');
+  });
+
+  it('keeps text already streamed when the asker leaves mid-answer', async () => {
+    const ctl = new AbortController();
+    const t = turn(
+      [
+        () =>
+          new Response(
+            new ReadableStream({
+              start(c) {
+                c.enqueue(
+                  new TextEncoder().encode(
+                    `data: ${JSON.stringify(say('Half'))}\n\n`,
+                  ),
+                );
+                setTimeout(() => {
+                  ctl.abort();
+                  c.error(new DOMException('aborted', 'AbortError'));
+                }, 5);
+              },
+            }),
+          ),
+      ],
+      [],
+      ctl.signal,
+    );
+    const result = await t.done;
+    expect(result).toMatchObject({ text: 'Half', error: 'aborted' });
   });
 
   it('sends a plain question as text, and no tools when the asker has none', async () => {

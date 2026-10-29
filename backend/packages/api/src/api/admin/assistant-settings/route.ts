@@ -84,11 +84,17 @@ export async function POST(
     patch[field] = v.trim();
   }
   if (body.daily_cap_usd !== undefined) {
-    const cap = Number(body.daily_cap_usd);
-    if (!Number.isFinite(cap) || cap < 0 || cap > 1000) {
+    // A real number from 0.5 to 1000: an empty field (null, '') must never
+    // save as 0, which would stop every staff member's assistant.
+    const raw = body.daily_cap_usd;
+    const cap =
+      typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== '')
+        ? Number(raw)
+        : NaN;
+    if (!Number.isFinite(cap) || cap < 0.5 || cap > 1000) {
       res
         .status(400)
-        .json({ message: 'daily_cap_usd must be between 0 and 1000.' });
+        .json({ message: 'daily_cap_usd must be between 0.5 and 1000.' });
       return;
     }
     patch.daily_cap_usd = cap;

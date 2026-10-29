@@ -18,57 +18,59 @@ export function ToolSteps({ steps }: { steps: Step[] }) {
   const { t } = useTranslation();
   if (!steps.length) return null;
   return (
-    <ol className="relative flex flex-col gap-y-1.5 pl-1">
+    <div className="relative">
       <span
         aria-hidden
-        className="bg-ui-border-base absolute bottom-2 left-[11px] top-2 w-px"
+        className="bg-ui-border-base absolute bottom-2 left-[15px] top-2 w-px"
       />
-      <AnimatePresence initial={false}>
-        {steps.map((s) => (
-          <motion.li
-            key={s.id}
-            layout
-            initial={{ opacity: 0, x: -6 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="relative flex items-center gap-x-2.5 text-xs"
-          >
-            <span
-              className={`relative z-[1] flex h-[22px] w-[22px] items-center justify-center rounded-full border ${
-                s.status === 'error'
-                  ? 'border-ui-tag-red-border bg-ui-tag-red-bg text-ui-tag-red-icon'
-                  : s.status === 'done'
-                    ? 'border-ui-tag-green-border bg-ui-tag-green-bg text-ui-tag-green-icon'
-                    : 'border-ui-border-interactive bg-ui-bg-base'
-              }`}
+      <ol className="relative flex flex-col gap-y-1.5 pl-1">
+        <AnimatePresence initial={false}>
+          {steps.map((s) => (
+            <motion.li
+              key={s.id}
+              layout
+              initial={{ opacity: 0, x: -6 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="relative flex items-center gap-x-2.5 text-xs"
             >
-              {s.status === 'start' ? (
-                <span className="pc-ai-spin h-2.5 w-2.5 rounded-full border-2 border-violet-400 border-t-transparent" />
-              ) : s.status === 'done' ? (
-                <CheckMini />
-              ) : (
-                <XMarkMini />
-              )}
-            </span>
-            <span
-              className={
-                s.status === 'start'
-                  ? 'pc-ai-shimmer font-medium'
-                  : 'text-ui-fg-subtle'
-              }
-            >
-              {s.label}
-            </span>
-            {s.ms !== undefined && (
-              <span className="text-ui-fg-muted tabular-nums">
-                {s.ms < 1000
-                  ? `${s.ms} ms`
-                  : t('assistant.seconds', { n: (s.ms / 1000).toFixed(1) })}
+              <span
+                className={`relative z-[1] flex h-[22px] w-[22px] items-center justify-center rounded-full border ${
+                  s.status === 'error'
+                    ? 'border-ui-tag-red-border bg-ui-tag-red-bg text-ui-tag-red-icon'
+                    : s.status === 'done'
+                      ? 'border-ui-tag-green-border bg-ui-tag-green-bg text-ui-tag-green-icon'
+                      : 'border-ui-border-interactive bg-ui-bg-base'
+                }`}
+              >
+                {s.status === 'start' ? (
+                  <span className="pc-ai-spin h-2.5 w-2.5 rounded-full border-2 border-violet-400 border-t-transparent" />
+                ) : s.status === 'done' ? (
+                  <CheckMini />
+                ) : (
+                  <XMarkMini />
+                )}
               </span>
-            )}
-          </motion.li>
-        ))}
-      </AnimatePresence>
-    </ol>
+              <span
+                className={
+                  s.status === 'start'
+                    ? 'pc-ai-shimmer font-medium'
+                    : 'text-ui-fg-subtle'
+                }
+              >
+                {s.label}
+              </span>
+              {s.ms !== undefined && (
+                <span className="text-ui-fg-muted tabular-nums">
+                  {s.ms < 1000
+                    ? `${s.ms} ms`
+                    : t('assistant.seconds', { n: (s.ms / 1000).toFixed(1) })}
+                </span>
+              )}
+            </motion.li>
+          ))}
+        </AnimatePresence>
+      </ol>
+    </div>
   );
 }

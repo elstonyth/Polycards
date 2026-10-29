@@ -106,6 +106,7 @@ export async function* streamChat(opts: {
   model: string;
   messages: ChatMessage[];
   tools: ToolSpec[];
+  toolChoice?: 'auto' | 'none';
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): AsyncGenerator<StreamEvent> {
@@ -119,7 +120,9 @@ export async function* streamChat(opts: {
     body: JSON.stringify({
       model: opts.model,
       messages: opts.messages,
-      ...(opts.tools.length ? { tools: opts.tools } : {}),
+      ...(opts.tools.length
+        ? { tools: opts.tools, tool_choice: opts.toolChoice ?? 'auto' }
+        : {}),
       stream: true,
       usage: { include: true },
     }),
@@ -163,10 +166,15 @@ export async function* streamChat(opts: {
       const delta = chunk.choices?.[0]?.delta;
       if (delta?.content) yield { type: 'text', delta: delta.content };
       for (const tc of delta?.tool_calls ?? []) {
-        const i = tc.index ?? calls.length;
+        // A new id starts a new call even when a provider reuses index 0;
+        // a fragment with no index and no id continues the last call.
+        let i = tc.index ?? Math.max(calls.length - 1, 0);
+        if (tc.id && calls[i]?.id && calls[i].id !== tc.id) i = calls.length;
         calls[i] ??= { id: '', name: '', arguments: '' };
         if (tc.id) calls[i].id = tc.id;
-        if (tc.function?.name) calls[i].name += tc.function.name;
+        // Some providers repeat the name in every piece, others split it.
+        const name = tc.function?.name;
+        if (name && calls[i].name !== name) calls[i].name += name;
         if (tc.function?.arguments) calls[i].arguments += tc.function.arguments;
       }
       if (chunk.usage) {
