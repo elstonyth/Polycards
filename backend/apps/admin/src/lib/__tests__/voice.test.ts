@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   bytesToBase64,
   createVad,
@@ -6,6 +6,7 @@ import {
   downsample,
   encodeWav,
   MicError,
+  PcmPlayer,
   startBargeIn,
   startRecording,
 } from '../voice';
@@ -110,6 +111,26 @@ describe('createVad', () => {
     feed(vad, QUIET, 300);
     const states = [...feed(vad, LOUD, 60), ...feed(vad, QUIET, 2000)];
     expect(states.every((s) => s === 'waiting')).toBe(true);
+    expect(vad.heard).toBe(false);
+  });
+
+  it('keeps a short reply and ends on the pause after it', () => {
+    const vad = createVad();
+    feed(vad, QUIET, 300);
+    const states = [...feed(vad, LOUD, 200), ...feed(vad, QUIET, 2000)];
+    // never 'speaking' (too short), but it ends after the usual pause
+    // instead of waiting out the 8 s no-speech timeout
+    expect(states).not.toContain('speaking');
+    expect(states).toContain('ended');
+    expect(states).not.toContain('timeout');
+    expect(vad.heard).toBe(true);
+  });
+
+  it('hears a short reply said during calibration', () => {
+    const vad = createVad();
+    feed(vad, LOUD, 200);
+    feed(vad, QUIET, 2000);
+    expect(vad.heard).toBe(true);
   });
 
   it('times out when nothing is said', () => {
@@ -167,5 +188,149 @@ describe('opening the mic', () => {
     await expect(startBargeIn({ onSpeech: () => {} })).rejects.toMatchObject({
       reason: 'unavailable',
     });
+  });
+
+  // a mic whose worklet runs whileLoading as it loads
+  const fakeMic = (whileLoading = () => {}) => {
+    const track = { stop: vi.fn(), addEventListener: vi.fn() };
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
+    const port = { onmessage: null as unknown, close: vi.fn() };
+    const source = { connect: vi.fn(), disconnect: vi.fn() };
+    const close = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    vi.stubGlobal('navigator', {
+      mediaDevices: { getUserMedia: () => Promise.resolve(stream) },
+    });
+    vi.stubGlobal(
+      'AudioWorkletNode',
+      class {
+        port = port;
+        connect = vi.fn();
+      },
+    );
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        sampleRate = 48000;
+        state = 'running';
+        destination = {};
+        audioWorklet = { addModule: async () => whileLoading() };
+        close = close;
+        resume = () => Promise.resolve();
+        createMediaStreamSource = () => source;
+        addEventListener = vi.fn();
+      },
+    );
+    return { track, port, source, close };
+  };
+
+  it('comes back cancelled when aborted while the mic opens', async () => {
+    const mic = fakeMic();
+    const signal = AbortSignal.abort();
+    const rec = await startRecording({ autoStop: true, signal });
+    await expect(rec.done).resolves.toBeNull();
+    const onSpeech = vi.fn();
+    await startBargeIn({ onSpeech, signal });
+    expect(mic.track.stop).toHaveBeenCalledTimes(2);
+    expect(mic.close).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases the worklet when aborted while it loads', async () => {
+    const ac = new AbortController();
+    const mic = fakeMic(() => ac.abort());
+    const rec = await startRecording({ autoStop: false, signal: ac.signal });
+    await expect(rec.done).resolves.toBeNull();
+    expect(mic.port.onmessage).toBeNull();
+    expect(mic.port.close).toHaveBeenCalled();
+    expect(mic.source.disconnect).toHaveBeenCalled();
+    expect(mic.track.stop).toHaveBeenCalled();
+    expect(mic.close).toHaveBeenCalled();
+  });
+});
+
+describe('PcmPlayer', () => {
+  type FakeBuffer = { duration: number; getChannelData(): Float32Array };
+  type FakeSource = {
+    buffer: FakeBuffer | null;
+    onended: (() => void) | null;
+    connect: () => void;
+    start: () => void;
+    stop: ReturnType<typeof vi.fn>;
+  };
+  // the player keeps one shared context for the whole module: every test sees these
+  const sources: FakeSource[] = [];
+  class FakePlayCtx {
+    state = 'running';
+    currentTime = 0;
+    sampleRate = 24000;
+    destination = {};
+    resume = () => Promise.resolve();
+    createGain = () => ({ connect: vi.fn(), disconnect: vi.fn() });
+    createAnalyser = () => ({ fftSize: 32, getFloatTimeDomainData: vi.fn() });
+    createBuffer = (_ch: number, length: number, rate: number): FakeBuffer => {
+      const data = new Float32Array(length);
+      return { duration: length / rate, getChannelData: () => data };
+    };
+    createBufferSource = () => {
+      const src: FakeSource = {
+        buffer: null,
+        onended: null,
+        connect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+      };
+      sources.push(src);
+      return src;
+    };
+  }
+
+  beforeEach(() => {
+    sources.length = 0;
+    vi.stubGlobal('AudioContext', FakePlayCtx);
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('carries an odd trailing byte into the next chunk', () => {
+    const p = new PcmPlayer();
+    p.push('AQID'); // bytes 1 2 3
+    p.push('BA=='); // byte 4
+    expect(sources.map((s) => Array.from(s.buffer!.getChannelData()))).toEqual([
+      [0x0201 / 32768],
+      [0x0403 / 32768],
+    ]);
+  });
+
+  it('ends on stop() before anything was pushed', async () => {
+    const p = new PcmPlayer();
+    p.stop();
+    await expect(p.ended).resolves.toBeUndefined();
+  });
+
+  it('ends on finish() with nothing queued', async () => {
+    const onLevel = vi.fn();
+    const p = new PcmPlayer(undefined, { onLevel });
+    p.finish();
+    await expect(p.ended).resolves.toBeUndefined();
+    expect(onLevel).toHaveBeenLastCalledWith(0);
+  });
+
+  it('stop() silences only its own answer', () => {
+    const a = new PcmPlayer();
+    const b = new PcmPlayer();
+    a.push('AAA=');
+    b.push('AAA=');
+    a.stop();
+    expect(sources[0].stop).toHaveBeenCalled();
+    expect(sources[1].stop).not.toHaveBeenCalled();
+    expect(a.playing).toBe(false);
+    expect(b.playing).toBe(true);
+    b.stop();
   });
 });

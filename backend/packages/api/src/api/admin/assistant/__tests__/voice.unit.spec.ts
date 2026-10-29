@@ -53,9 +53,33 @@ describe('speakable', () => {
     expect(speakable('Sold ~RM 50——不错')).toBe('Sold ~RM 50, 不错');
   });
 
-  it('cuts Chinese at a full stop', () => {
+  it('cuts Chinese at a full stop, sooner, and closes in Chinese', () => {
     const out = speakable('今天卖了很多卡。'.repeat(300));
-    expect(out.endsWith('。 The rest is on screen.')).toBe(true);
+    expect(out.endsWith('卡。其余内容请看屏幕。')).toBe(true);
+    // A character takes ~3x a letter to say: ~500 of them, not 1,500.
+    expect(out.length).toBeLessThan(560);
+  });
+
+  it('cuts at a question or exclamation mark, not inside a number', () => {
+    expect(
+      speakable('Was RM 1,234.50 sold? '.repeat(100)).endsWith(
+        'sold? The rest is on screen.',
+      ),
+    ).toBe(true);
+    expect(
+      speakable('Sold out! '.repeat(200)).endsWith(
+        'out! The rest is on screen.',
+      ),
+    ).toBe(true);
+    expect(
+      speakable('卖完了吗？'.repeat(200)).endsWith('吗？其余内容请看屏幕。'),
+    ).toBe(true);
+  });
+
+  it('says < and > between numbers as words', () => {
+    expect(speakable('Packs 5 > 3, top-ups 2<RM 10.\n> quoted 7')).toBe(
+      'Packs 5 more than 3, top-ups 2 less than RM 10.\n quoted 7',
+    );
   });
 });
 
@@ -200,6 +224,8 @@ describe('speak', () => {
       modalities: ['text', 'audio'],
       audio: { voice: 'nova', format: 'pcm16' },
       stream: true,
+      // Bounded by what the text takes to say: 2 letters.
+      max_tokens: 2 * 4 + 200,
     });
     expect(events).toEqual([
       { type: 'generation', id: 'gen-1' },
@@ -248,5 +274,109 @@ describe('speak', () => {
     }
     expect(events).toEqual([{ type: 'audio', data: 'AAA=' }]);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives Chinese text a bigger token budget', async () => {
+    let sent: Record<string, unknown> = {};
+    const fetchImpl = jest.fn(async (_url: unknown, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return sse({ choices: [] });
+    }) as unknown as typeof fetch;
+    for await (const e of speak({
+      key: 'k',
+      model: 'm/x',
+      voice: 'alloy',
+      text: '你好。',
+      fetchImpl,
+    })) {
+      void e;
+    }
+    expect(sent.max_tokens).toBe((3 + 3 + 1) * 4 + 200);
+  });
+
+  describe('time bounds', () => {
+    const line = (ch: object) =>
+      new TextEncoder().encode(`data: ${JSON.stringify(ch)}\n\n`);
+    const audio = { choices: [{ delta: { audio: { data: 'AAA=' } } }] };
+    // A stream that sends what it is given, then nothing, and fails the way
+    // fetch does when its signal aborts.
+    const stalled = (...chunks: object[]) =>
+      jest.fn(async (_url: unknown, init?: RequestInit) => {
+        const signal = init?.signal as AbortSignal;
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              for (const ch of chunks) c.enqueue(line(ch));
+              signal.addEventListener('abort', () => c.error(signal.reason));
+            },
+          }),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch;
+    const run = (fetchImpl: typeof fetch, signal?: AbortSignal) => {
+      const events: SpeechEvent[] = [];
+      const done = (async () => {
+        for await (const e of speak({
+          key: 'k',
+          model: 'm/x',
+          voice: 'alloy',
+          text: 'Hi',
+          signal,
+          fetchImpl,
+        })) {
+          events.push(e);
+        }
+      })();
+      done.catch(() => undefined); // checked by each test
+      return { events, done };
+    };
+
+    // Only the clock is faked: streams and promises run as usual.
+    beforeEach(() =>
+      jest.useFakeTimers({
+        doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+      }),
+    );
+    afterEach(() => jest.useRealTimers());
+
+    it('stops when no chunk arrives for 30 s', async () => {
+      const r = run(stalled(audio));
+      await jest.advanceTimersByTimeAsync(29_000);
+      expect(r.events).toEqual([{ type: 'audio', data: 'AAA=' }]);
+      await jest.advanceTimersByTimeAsync(1_500);
+      await expect(r.done).rejects.toThrow('no audio for 30 seconds');
+    });
+
+    it('stops a reading that runs past 3 minutes, even while chunks keep coming', async () => {
+      const fetchImpl = jest.fn(async (_url: unknown, init?: RequestInit) => {
+        const signal = init?.signal as AbortSignal;
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              const tick = setInterval(() => c.enqueue(line(audio)), 10_000);
+              signal.addEventListener('abort', () => {
+                clearInterval(tick);
+                c.error(signal.reason);
+              });
+            },
+          }),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch;
+      const r = run(fetchImpl);
+      await jest.advanceTimersByTimeAsync(170_000);
+      expect(r.events.length).toBeGreaterThan(10);
+      await jest.advanceTimersByTimeAsync(11_000);
+      await expect(r.done).rejects.toThrow('longer than 3 minutes');
+    });
+
+    it("still stops on the asker's own signal", async () => {
+      const ctl = new AbortController();
+      const r = run(stalled(), ctl.signal);
+      await jest.advanceTimersByTimeAsync(1_000);
+      ctl.abort();
+      await expect(r.done).rejects.toThrow();
+      expect(jest.getTimerCount()).toBe(0); // no timer left behind
+    });
   });
 });

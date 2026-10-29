@@ -101,6 +101,20 @@ function parse(body: Body): {
     if ((body.audio.length * 3) / 4 > MAX_AUDIO_BYTES) {
       throw new Error('A recording is at most about 75 seconds.');
     }
+    // The byte cap is a duration cap only at the format the admin records:
+    // 16 kHz mono 16-bit PCM, fmt chunk right after the RIFF header.
+    const h = Buffer.from(body.audio.slice(0, 60), 'base64');
+    if (
+      h.length < 44 ||
+      h.toString('latin1', 0, 4) !== 'RIFF' ||
+      h.toString('latin1', 8, 16) !== 'WAVEfmt ' ||
+      h.readUInt16LE(20) !== 1 ||
+      h.readUInt16LE(22) !== 1 ||
+      h.readUInt32LE(24) !== 16000 ||
+      h.readUInt16LE(34) !== 16
+    ) {
+      throw new Error('The recording must be 16 kHz mono 16-bit WAV.');
+    }
     audio = body.audio;
   }
   const text = typeof body.message === 'string' ? body.message.trim() : '';
@@ -225,6 +239,51 @@ export async function POST(
   }
   const ping = setInterval(() => send({ type: 'ping' }), 10_000);
   const logger = scope.resolve(ContainerRegistrationKeys.LOGGER);
+  // What writing down a spoken question cost, and whether a row holds it
+  // yet (its own or the answer's), so it is counted once and never lost.
+  let listened = 0;
+  let charged = false;
+  // Listening is paid even when no answer follows: a hidden voice row counts
+  // it toward the daily cap. A new chat made only to hold it is hidden at once.
+  const chargeListening = async (
+    title: string,
+    cost = listened,
+    model = settings.stt_model,
+  ) => {
+    const at = new Date();
+    // Bumped first: spentToday finds today's rows by last_message_at. A chat
+    // deleted meanwhile can't be bumped, so the cost goes to a hidden one.
+    let heldIn = conversation;
+    if (heldIn) {
+      const held = heldIn;
+      heldIn = await assistant
+        .updateAssistantConversations({ id: held.id, last_message_at: at })
+        .then(() => held)
+        .catch(() => undefined);
+    }
+    const hidden = !heldIn;
+    heldIn ??= (await assistant.createAssistantConversations({
+      user_id: access.userId,
+      title,
+      last_message_at: at,
+    })) as { id: string; title: string };
+    await assistant.createAssistantMessages({
+      conversation_id: heldIn.id,
+      role: 'voice',
+      content: '',
+      // Not a read-aloud row (speak/route.ts): the review counts it as cost only.
+      tools: { kind: 'listen' },
+      model,
+      cost_usd: cost,
+    });
+    charged = true;
+    if (hidden) {
+      await assistant.softDeleteAssistantConversations([heldIn.id]);
+    }
+  };
+  // What the answer cost once it ran, until its row is saved: a failure
+  // after the turn must not lose it.
+  let unsaved = 0;
 
   try {
     const spent = await assistant.spentToday(access.userId);
@@ -238,66 +297,57 @@ export async function POST(
     }
 
     // A spoken question is written down first, then asked like a typed one.
-    let listened = 0;
     if (input.audio) {
       if (!MODEL_RE.test(String(settings.stt_model ?? ''))) {
         finish({
           type: 'error',
-          code: 'bad_model',
+          code: 'bad_stt_model',
           message:
             'The listening model in Settings → AI assistant is not allowed here. An admin must pick another.',
         });
         return;
       }
+      // Gone already: start nothing that would be paid for.
+      if (ctl.signal.aborted) {
+        finish();
+        return;
+      }
       let heard: { text: string; cost: number };
       try {
+        // No abort signal: a cut-off request is still billed, and only a
+        // finished one says what it cost. transcribe() stops itself at 45 s.
         heard = await transcribe({
           key,
           model: settings.stt_model,
           wavBase64: input.audio,
-          signal: ctl.signal,
         });
       } catch (err) {
-        // shortcut: a refused request is not charged by OpenRouter; one cut
-        // off mid-way may be, but transcribe() returns no generation id to price.
+        // shortcut: a refused request is not charged by OpenRouter; a
+        // TimeoutError may be, but no usage came back to count.
+        const reason = (err as Error).message;
+        logger.warn(
+          `[assistant] listen failed user=${access.userId} model=${settings.stt_model}: ${reason}`,
+        );
         finish({
           type: 'error',
           code: 'listen_failed',
-          message: `Could not listen to that recording: ${(err as Error).message}`,
+          reason,
+          message: `Could not listen to that recording: ${reason}`,
         });
         return;
       }
       listened = heard.cost;
+      // The asker left while it was written down: keep its cost, ask nothing.
+      if (ctl.signal.aborted) {
+        if (listened > 0)
+          await chargeListening('(voice) left before the answer');
+        finish();
+        return;
+      }
       input.text = heard.text.slice(0, MAX_TEXT);
       send({ type: 'transcript', text: input.text });
       if (!input.text) {
-        // Hearing nothing is still paid: a hidden voice row counts it toward
-        // the daily cap. A new chat made only to hold it is hidden at once.
-        if (listened > 0) {
-          const at = new Date();
-          const heldIn =
-            conversation ??
-            ((await assistant.createAssistantConversations({
-              user_id: access.userId,
-              title: '(voice) nothing heard',
-              last_message_at: at,
-            })) as { id: string; title: string });
-          await assistant.createAssistantMessages({
-            conversation_id: heldIn.id,
-            role: 'voice',
-            content: '',
-            model: settings.stt_model,
-            cost_usd: listened,
-          });
-          if (conversation) {
-            await assistant.updateAssistantConversations({
-              id: heldIn.id,
-              last_message_at: at,
-            });
-          } else {
-            await assistant.softDeleteAssistantConversations([heldIn.id]);
-          }
-        }
+        if (listened > 0) await chargeListening('(voice) nothing heard');
         finish({
           type: 'error',
           code: 'no_speech',
@@ -397,6 +447,7 @@ export async function POST(
     });
     // Writing down a spoken question is paid for with its answer.
     result.cost += listened;
+    unsaved = result.cost;
     const saved = await assistant.createAssistantMessages({
       conversation_id: conversationId,
       role: 'assistant',
@@ -416,6 +467,7 @@ export async function POST(
       tokens_out: result.tokensOut,
       error: result.error ?? null,
     });
+    charged = true;
     // The chat may have been deleted in another tab meanwhile: the answer
     // is saved, so still finish with done.
     await assistant
@@ -440,6 +492,20 @@ export async function POST(
     logger.warn(
       `[assistant] turn failed user=${access.userId}: ${(err as Error)?.message}`,
     );
+    // What was already paid for (the recording, and the answer if it ran)
+    // still counts toward the cap.
+    const lost = Math.max(unsaved, listened);
+    if (lost > 0 && !charged) {
+      await chargeListening(
+        '(voice) answer failed',
+        lost,
+        unsaved > 0 ? settings.chat_model : settings.stt_model,
+      ).catch((e: Error) =>
+        logger.warn(
+          `[assistant] cost not saved user=${access.userId} cost=${lost}: ${e?.message}`,
+        ),
+      );
+    }
     finish({
       type: 'error',
       message: 'The assistant hit a problem. Try again in a moment.',

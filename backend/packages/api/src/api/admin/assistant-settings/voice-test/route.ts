@@ -7,13 +7,13 @@ import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
 import { accessFor } from '../../assistant/access';
-import { MODEL_RE } from '../../assistant/openrouter';
+import { generationCost, MODEL_RE } from '../../assistant/openrouter';
 import { speak, VOICES } from '../../assistant/voice';
 
 // POST /admin/assistant-settings/voice-test {voice_model?, voice?, lang?}:
 // Settings → AI's "Hear it". Speaks a fixed sample in the given (unsaved)
 // voice, or the saved one, as newline-delimited JSON like /assistant/speak:
-//   audio {data: base64 PCM16, 24 kHz mono} … · error {code,message} ·
+//   audio {data: base64 PCM16, 24 kHz mono} … · error {code,message,reason?} ·
 //   done {cost_usd}
 // Its cost is logged, not saved: a one-sentence sample is a fraction of a
 // cent, only super admins (who set the cap) can run it, it is rate limited,
@@ -48,15 +48,17 @@ export async function POST(
     !MODEL_RE.test(model.trim())
   ) {
     res.status(400).json({
+      code: 'bad_voice_model',
       message:
         'voice_model must be an OpenRouter model id like openai/gpt-audio-mini.',
     });
     return;
   }
   if (!(VOICES as readonly unknown[]).includes(voice)) {
-    res
-      .status(400)
-      .json({ message: `voice must be one of ${VOICES.join(', ')}.` });
+    res.status(400).json({
+      code: 'bad_voice_model',
+      message: `voice must be one of ${VOICES.join(', ')}.`,
+    });
     return;
   }
   const key = settings.openrouter_key_sealed
@@ -86,6 +88,9 @@ export async function POST(
   };
 
   let cost = 0;
+  let priced = false;
+  let generation = '';
+  let heard = false;
   let failure: string | null = null;
   try {
     for await (const e of speak({
@@ -95,12 +100,27 @@ export async function POST(
       text: body.lang === 'zh' ? SAMPLES.zh : SAMPLES.en,
       signal: ctl.signal,
     })) {
-      if (e.type === 'audio') send(e);
-      else if (e.type === 'usage') cost += e.cost;
+      if (e.type === 'audio') {
+        send(e);
+        heard = true;
+      } else if (e.type === 'generation') generation = e.id;
+      else {
+        cost += e.cost;
+        priced = true;
+      }
     }
   } catch (err) {
-    if (!ctl.signal.aborted) failure = (err as Error)?.message ?? 'failed';
+    // Only Stop is quiet: a timeout inside speak() is a failure. One line in
+    // the log, whatever OpenRouter's text holds.
+    if (!ctl.signal.aborted) {
+      failure = String((err as Error)?.message ?? 'failed').replace(
+        /[\r\n]+/g,
+        ' ',
+      );
+    }
   }
+  // Stopped or failed before the bill arrived: OpenRouter still charges it.
+  if (!priced && generation) cost += await generationCost(key, generation);
   scope
     .resolve(ContainerRegistrationKeys.LOGGER)
     .info(
@@ -112,8 +132,16 @@ export async function POST(
           type: 'error',
           code: 'speak_failed',
           message: `Could not play the sample: ${failure}`,
+          reason: failure,
         }
-      : { type: 'done', cost_usd: cost },
+      : !heard
+        ? {
+            type: 'error',
+            code: 'no_audio',
+            message:
+              'The voice model sent no sound. Pick another speaking model.',
+          }
+        : { type: 'done', cost_usd: cost },
   );
   if (!res.writableEnded) res.end();
 }

@@ -112,17 +112,18 @@ export async function POST(
     patch.openrouter_key_sealed = sealKey(key, jwtSecret(req));
     patch.openrouter_key_last4 = last4(key);
   }
-  for (const field of [
-    'chat_model',
-    'image_model',
-    'stt_model',
-    'voice_model',
+  // Each with an example of its own kind of model.
+  for (const [field, example] of [
+    ['chat_model', 'anthropic/claude-sonnet-5.5'],
+    ['image_model', 'google/gemini-3.1-flash-image'],
+    ['stt_model', 'google/gemini-3.5-flash-lite'],
+    ['voice_model', 'openai/gpt-audio-mini'],
   ] as const) {
     const v = body[field];
     if (v === undefined) continue;
     if (typeof v !== 'string' || v.length > 100 || !MODEL_RE.test(v.trim())) {
       res.status(400).json({
-        message: `${field} must be an OpenRouter model id like anthropic/claude-sonnet-5.5.`,
+        message: `${field} must be an OpenRouter model id like ${example}.`,
       });
       return;
     }

@@ -320,7 +320,8 @@
       "refsUseDefault": "恢复默认参考图",
       "refsReplace": "上传自己的帖子后，会替换整组内置参考图；把自己上传的全部移除，就会恢复内置的那组。",
       "hearVoice": "试听",
-      "stopVoice": "停止"
+      "stopVoice": "停止",
+      "noPlayback": "这个浏览器无法播放声音。"
     },
     "review": {
       "title": "助手对话记录",
@@ -412,11 +413,14 @@
     "err": {
       "bad_model": "设置 → AI 助手里的聊天模型不能在这里使用（联网搜索模型已关闭）。需要管理员换一个。",
       "no_speech": "没听清楚，请再说一次。",
-      "listen_failed": "这段录音听不了，请再试一次。",
-      "speak_failed": "读不出来，请再试一次。",
+      "listen_failed": "这段录音听不了。{{reason}}",
+      "speak_failed": "读不出来。{{reason}}",
       "no_key": "助手还没有 AI 密钥，请管理员在 设置 → AI 助手 添加。",
       "busy": "上一个问题还在回答中，请等它完成再问。",
-      "daily_cap": "你今天的助手额度已用完，马来西亚时间 00:00 重置。"
+      "daily_cap": "你今天的助手额度已用完，马来西亚时间 00:00 重置。",
+      "bad_voice_model": "设置 → AI 助手里的朗读模型或声音无法使用，需要管理员换一个。",
+      "bad_stt_model": "设置 → AI 助手里的听写模型无法使用，需要管理员换一个。",
+      "no_audio": "朗读模型没有返回声音。请再试一次，或在设置 → AI 助手换一个朗读模型。"
     },
     "spend": {
       "today": "今日已用 USD {{spent}} / {{cap}}",

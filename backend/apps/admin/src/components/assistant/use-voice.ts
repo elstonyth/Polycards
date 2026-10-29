@@ -24,6 +24,12 @@ export function useVoice() {
   const rec = useRef<Recording | null>(null);
   const player = useRef<PcmPlayer | null>(null);
   const speech = useRef<AbortController | null>(null);
+  // Set while the mic opens (a permission prompt can hold it for a while).
+  const starting = useRef(false);
+  // Cancelled before the mic finished opening: drop it as soon as it opens.
+  const cancelled = useRef(false);
+  // Bumped by each speak(): only the latest one resets reading and state.
+  const turn = useRef(0);
 
   const stopSpeaking = useCallback(() => {
     speech.current?.abort();
@@ -34,17 +40,28 @@ export function useVoice() {
 
   const listen = useCallback(
     async (autoStop: boolean): Promise<string | null> => {
+      // One mic at a time: a double tap, or a mic tap and then Talk.
+      if (starting.current || rec.current) return null;
+      starting.current = true;
+      cancelled.current = false;
       stopSpeaking();
+      // Listening from the tap on, so the page refuses a second start while
+      // the mic opens.
+      setState('listening');
       let r: Recording;
       try {
         r = await startRecording({ autoStop, onLevel: setLevel });
       } catch (err) {
+        setState('idle');
         const reason = err instanceof MicError ? err.reason : 'unavailable';
         toast.error(t(`assistant.voice.mic.${reason}`));
         throw err;
+      } finally {
+        starting.current = false;
       }
       rec.current = r;
-      setState('listening');
+      // Ended (End talk, leaving the page) while the mic was opening.
+      if (cancelled.current) r.cancel();
       // A recorder whose audio never starts gets no frames, so its own
       // silence timers never run: stop it by the clock.
       const guard = setTimeout(() => r.stop(), 75_000);
@@ -52,7 +69,7 @@ export function useVoice() {
         return await r.done;
       } finally {
         clearTimeout(guard);
-        rec.current = null;
+        if (rec.current === r) rec.current = null;
         setLevel(0);
         setState((s) => (s === 'listening' ? 'idle' : s));
       }
@@ -65,6 +82,7 @@ export function useVoice() {
   const speak = useCallback(
     async (messageId: string, opts?: { bargeIn?: boolean }) => {
       stopSpeaking();
+      const n = ++turn.current;
       const ac = new AbortController();
       // level carries the voice's loudness while speaking (the talk orb)
       const p = new PcmPlayer(undefined, { onLevel: setLevel });
@@ -91,7 +109,10 @@ export function useVoice() {
             else if (e.type === 'error') {
               toast.error(
                 e.code
-                  ? t(`assistant.err.${e.code}`, { defaultValue: e.message })
+                  ? t(`assistant.err.${e.code}`, {
+                      defaultValue: e.message,
+                      reason: e.reason ?? '',
+                    })
                   : e.message,
               );
             }
@@ -112,8 +133,11 @@ export function useVoice() {
         player.current = null;
         speech.current = null;
       }
-      setReading((r) => (r === messageId ? null : r));
-      setState((s) => (s === 'speaking' ? 'idle' : s));
+      // A newer speak() owns reading and state now.
+      if (turn.current === n) {
+        setReading(null);
+        setState((s) => (s === 'speaking' ? 'idle' : s));
+      }
       // Reading aloud is paid for: the header's spend moves.
       void qc.invalidateQueries({ queryKey: ['assistant', 'me'] });
       return { bargedIn };
@@ -124,6 +148,7 @@ export function useVoice() {
   // Leaving the page stops the mic and the voice.
   useEffect(
     () => () => {
+      cancelled.current = true; // a mic still opening
       rec.current?.cancel();
       stopSpeaking();
     },
@@ -140,7 +165,10 @@ export function useVoice() {
     /** Ends the recording now and keeps it. */
     stopListening: useCallback(() => rec.current?.stop(), []),
     /** Ends the recording and drops it. */
-    cancelListening: useCallback(() => rec.current?.cancel(), []),
+    cancelListening: useCallback(() => {
+      if (rec.current) rec.current.cancel();
+      else if (starting.current) cancelled.current = true;
+    }, []),
     speak,
     stopSpeaking,
   };

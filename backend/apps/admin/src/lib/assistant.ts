@@ -79,14 +79,14 @@ export type ChatEvent =
       ms?: number;
     }
   | { type: 'image'; url: string }
-  | { type: 'error'; message: string; code?: string }
+  | { type: 'error'; message: string; code?: string; reason?: string }
   | { type: 'done'; message_id: string; cost_usd: number }
   | { type: 'ping' };
 
 /** An answer read aloud: base64 PCM16 chunks (24 kHz mono), then done. */
 export type SpeechEvent =
   | { type: 'audio'; data: string }
-  | { type: 'error'; message: string; code?: string }
+  | { type: 'error'; message: string; code?: string; reason?: string }
   | { type: 'done'; cost_usd: number }
   | { type: 'ping' };
 
@@ -97,8 +97,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
   const data = (await res.json().catch(() => null)) as
-    | (T & { message?: string })
-    | null;
+    (T & { message?: string }) | null;
   if (!res.ok) {
     throw Object.assign(
       new Error(data?.message ?? `Request failed (${res.status}).`),
@@ -230,7 +229,9 @@ export function streamVoiceTest(
 async function streamEvents<E>(
   path: string,
   body: object,
-  onEvent: (e: E | { type: 'error'; message: string }) => void,
+  onEvent: (
+    e: E | { type: 'error'; message: string; code?: string; reason?: string },
+  ) => void,
   signal: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${__BACKEND_URL__}${path}`, {
@@ -243,10 +244,15 @@ async function streamEvents<E>(
   if (!res.ok || !res.body) {
     const data = (await res.json().catch(() => null)) as {
       message?: string;
+      code?: string;
+      reason?: string;
     } | null;
+    // A refusal before streaming still carries its code, so it is translated.
     onEvent({
       type: 'error',
       message: data?.message ?? `Request failed (${res.status}).`,
+      ...(data?.code ? { code: data.code } : {}),
+      ...(data?.reason ? { reason: data.reason } : {}),
     });
     return;
   }
@@ -271,7 +277,13 @@ export async function imageToDataUrl(file: File): Promise<string> {
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    // JPEG has no alpha: transparent pixels would export black, not white.
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  }
   bitmap.close();
   return canvas.toDataURL('image/jpeg', 0.88);
 }

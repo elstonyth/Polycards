@@ -123,6 +123,8 @@ const AssistantPage = () => {
   const [shown, setShown] = useState<string | null>(null);
   const loading = !!selected && selected !== shown;
   const scroller = useRef<HTMLDivElement>(null);
+  // Holds the composer: Try again hands focus back to its textarea.
+  const dock = useRef<HTMLDivElement>(null);
   // Follow the answer as it grows (text, steps, a poster loading in) unless
   // the person scrolled up to read; sending or opening a chat follows again.
   const stick = useRef(true);
@@ -178,8 +180,16 @@ const AssistantPage = () => {
   }, [selected, busy, shown, setParams]);
 
   // Leaving the page stops the answer: it would keep billing and hold the
-  // server's one-answer-at-a-time lock.
-  useEffect(() => () => ctl.current?.abort(), []);
+  // server's one-answer-at-a-time lock. `alive` keeps a voice question that
+  // ended because the page closed from toasting on the next page.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      ctl.current?.abort();
+    };
+  }, []);
 
   const hasMessages = messages.length > 0;
   const content = useRef<HTMLDivElement>(null);
@@ -207,7 +217,9 @@ const AssistantPage = () => {
     images: string[];
     audio?: string;
   }): Promise<string | null> => {
-    const { selected, shown } = at.current;
+    // One answer at a time: a second stream would take Stop from the first.
+    if (ctl.current) return null;
+    const { selected: chatId, shown: onScreen } = at.current;
     stick.current = true;
     setAway(false);
     const ac = new AbortController();
@@ -247,7 +259,7 @@ const AssistantPage = () => {
     try {
       await streamChat(
         {
-          conversation_id: selected ?? undefined,
+          conversation_id: chatId ?? undefined,
           ...(audio ? { audio } : { message: text }),
           images,
         },
@@ -268,8 +280,8 @@ const AssistantPage = () => {
             );
           } else if (e.type === 'conversation') {
             // The screen is this chat now, unless it was showing another.
-            if (shown === selected) setShown(e.id);
-            if (e.id !== selected) setParams({ c: e.id });
+            if (onScreen === chatId) setShown(e.id);
+            if (e.id !== chatId) setParams({ c: e.id });
           } else if (e.type === 'text') {
             patch((m) => ({ ...m, content: m.content + e.delta }));
           } else if (e.type === 'tool') {
@@ -281,13 +293,13 @@ const AssistantPage = () => {
                 status: e.status,
                 ms: e.ms,
               };
-              const at = m.steps.findIndex((s) => s.id === e.id);
+              const idx = m.steps.findIndex((s) => s.id === e.id);
               return {
                 ...m,
                 steps:
-                  at < 0
+                  idx < 0
                     ? [...m.steps, step]
-                    : m.steps.map((s, i) => (i === at ? step : s)),
+                    : m.steps.map((s, i) => (i === idx ? step : s)),
               };
             });
           } else if (e.type === 'image') {
@@ -297,7 +309,13 @@ const AssistantPage = () => {
             patch((m) => ({
               ...m,
               error: e.code
-                ? t(`assistant.err.${e.code}`, { defaultValue: e.message })
+                ? t(`assistant.err.${e.code}`, {
+                    defaultValue: e.message,
+                    reason:
+                      'reason' in e && typeof e.reason === 'string'
+                        ? e.reason
+                        : '',
+                  })
                 : e.message,
             }));
           }
@@ -351,6 +369,8 @@ const AssistantPage = () => {
         );
       }
       void latestSend.current({ text: q.question, images: [] });
+      // The button unmounts once the answer starts; keep focus on the page.
+      dock.current?.querySelector('textarea')?.focus();
     },
     [t],
   );
@@ -371,7 +391,7 @@ const AssistantPage = () => {
       return; // the mic could not open (already said why)
     }
     if (!wav) {
-      toast(t('assistant.voice.nothingHeard'));
+      if (alive.current) toast(t('assistant.voice.nothingHeard'));
       return;
     }
     voice.setState('thinking');
@@ -382,7 +402,9 @@ const AssistantPage = () => {
 
   const startTalk = async () => {
     unlockAudio(); // in the tap, before any await (iOS/Safari)
-    if (talking.current || busy || loading) return;
+    // listening: the mic's own recording is running or opening
+    if (talking.current || busy || loading || voice.state === 'listening')
+      return;
     talking.current = true;
     setTalk(true);
     // Three silent turns in a row (about 24 s) end the talk by themselves.
@@ -429,6 +451,15 @@ const AssistantPage = () => {
     ctl.current?.abort();
   };
 
+  // Leaving the page ends the talk: its loop would reopen the mic on another
+  // page and ask (billed) questions there.
+  useEffect(
+    () => () => {
+      talking.current = false;
+    },
+    [],
+  );
+
   // Read aloud (or stop) one answer from the thread.
   const { speak: speakAnswer, stopSpeaking, reading } = voice;
   const readAloud = useCallback(
@@ -450,7 +481,12 @@ const AssistantPage = () => {
     if (busy || !window.confirm(t('assistant.deleteConfirm'))) return;
     try {
       await assistantApi.remove(id);
-      if (id === selected) newChat();
+      if (id === selected) {
+        // Talk would ask on in the deleted chat (and newChat refuses during it).
+        if (talking.current) endTalk();
+        setParams({});
+        setMessages([]);
+      }
       void qc.invalidateQueries({ queryKey: ['assistant', 'conversations'] });
     } catch (err) {
       toast.error((err as Error).message);
@@ -582,12 +618,15 @@ const AssistantPage = () => {
               <WaveIcon />
               {talk ? t('assistant.voice.endTalk') : t('assistant.voice.talk')}
             </button>
-            {me.data && (
-              <SpendMeter
-                spent={me.data.spent_today_usd}
-                cap={me.data.daily_cap_usd}
-              />
-            )}
+            {/* An older pod (rolling deploy) may not send the cap yet. */}
+            {me.data &&
+              typeof me.data.daily_cap_usd === 'number' &&
+              me.data.daily_cap_usd > 0 && (
+                <SpendMeter
+                  spent={me.data.spent_today_usd ?? 0}
+                  cap={me.data.daily_cap_usd}
+                />
+              )}
             {me.data?.chat_model && (
               <span className="border-ui-border-base text-ui-fg-subtle hidden rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] md:inline">
                 {me.data.chat_model}
@@ -623,7 +662,7 @@ const AssistantPage = () => {
             {messages.length === 0 ? (
               <EmptyState
                 me={me.data}
-                disabled={loading}
+                disabled={loading || voice.state === 'listening'}
                 onPick={(text, now) =>
                   now
                     ? void send({ text, images: [] })
@@ -634,16 +673,21 @@ const AssistantPage = () => {
               <div ref={content} className="mx-auto w-full max-w-3xl px-5 py-6">
                 <Thread
                   messages={messages}
-                  onSpeak={readAloud}
+                  onSpeak={talk ? undefined : readAloud}
                   reading={reading}
                   onRetry={retry}
-                  canRetry={!busy && !loading && !talk}
+                  canRetry={
+                    !busy && !loading && !talk && voice.state === 'idle'
+                  }
                 />
               </div>
             )}
           </div>
 
-          <div className="relative mx-auto flex w-full max-w-3xl flex-col gap-y-2 px-5 pb-5 pt-2">
+          <div
+            ref={dock}
+            className="relative mx-auto flex w-full max-w-3xl flex-col gap-y-2 px-5 pb-5 pt-2"
+          >
             {/* Scrolled up while an answer streams: one tap back to it. */}
             {busy && away && (
               <button
@@ -688,11 +732,11 @@ const AssistantPage = () => {
             </AnimatePresence>
             <Composer
               busy={busy}
-              disabled={loading || talk}
+              disabled={loading || talk || voice.state === 'listening'}
               seed={seed}
               autoFocus
               onSend={(text, images) => void send({ text, images })}
-              onStop={() => ctl.current?.abort()}
+              onStop={talk ? endTalk : () => ctl.current?.abort()}
               lastQuestion={
                 [...messages].reverse().find((m) => m.question)?.question
               }

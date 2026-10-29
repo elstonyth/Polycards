@@ -2,6 +2,8 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
+import type { IFileModuleService } from '@medusajs/framework/types';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../../../modules/assistant';
 import type AssistantModuleService from '../../../../../modules/assistant/service';
 import { messageView } from '../../views';
@@ -49,5 +51,27 @@ export async function DELETE(
     return;
   }
   await assistant.softDeleteAssistantConversations([conversation.id]);
+  // Its stored speech (speak/route.ts) goes too. Best effort: the chat is
+  // already gone for the asker either way.
+  try {
+    const voiceRows = await assistant.listAssistantMessages(
+      { conversation_id: conversation.id, role: 'voice' },
+      { select: ['tools'] },
+    );
+    const fileIds = voiceRows
+      .map((r) => (r.tools as { file_id?: unknown } | null)?.file_id)
+      .filter((f): f is string => typeof f === 'string');
+    if (fileIds.length) {
+      await req.scope
+        .resolve<IFileModuleService>(Modules.FILE)
+        .deleteFiles(fileIds);
+    }
+  } catch (err) {
+    req.scope
+      .resolve(ContainerRegistrationKeys.LOGGER)
+      .warn(
+        `[assistant] stored speech not deleted: ${(err as Error)?.message}`,
+      );
+  }
   res.json({ id: conversation.id, deleted: true });
 }

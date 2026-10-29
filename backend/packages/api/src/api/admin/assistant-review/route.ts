@@ -2,13 +2,45 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { Modules } from '@medusajs/framework/utils';
-import { ASSISTANT_MODULE } from '../../../modules/assistant';
-import type AssistantModuleService from '../../../modules/assistant/service';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { accessFor } from '../assistant/access';
 
-// Same escape as agent-tools: % and _ in the words match themselves.
-const like = (q: string) => ({ $ilike: `%${q.replace(/[%_\\]/g, '\\$&')}%` });
+type Rows = { rows: Record<string, unknown>[] };
+type Pg = { raw: (sql: string, bindings?: unknown[]) => Promise<Rows> };
+type Conversation = {
+  id: string;
+  title: string;
+  user_id: string;
+  last_message_at: Date;
+  deleted_at: Date | null;
+};
+
+/** The review's filter on assistant_conversation `c`, with its bindings.
+ *  Deleted chats and messages match too: the owner reviews every question. */
+export function reviewFilter(
+  q: string,
+  userId: string,
+): { sql: string; bindings: string[] } {
+  const where: string[] = [];
+  const bindings: string[] = [];
+  if (userId) {
+    where.push('c.user_id = ?');
+    bindings.push(userId);
+  }
+  if (q) {
+    // Same escape as agent-tools: % and _ in the words match themselves.
+    const pattern = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
+    where.push(
+      '(c.title ilike ? or exists (select 1 from assistant_message m where m.conversation_id = c.id and m.content ilike ?))',
+    );
+    bindings.push(pattern, pattern);
+  }
+  return { sql: where.length ? `where ${where.join(' and ')}` : '', bindings };
+}
+
+// An answer read aloud: a voice row that worked and isn't a question heard
+// (tools.kind 'listen'). Failed and heard rows still count in the total cost.
+const READ_ALOUD = `role = 'voice' and coalesce(error, '') = '' and tools->>'kind' is distinct from 'listen'`;
 
 // GET /admin/assistant-review (spec 2026-10-29, the owner's "review all the
 // questions users ask"): every staff member's chats, newest first, with who
@@ -22,7 +54,7 @@ export async function GET(
     res.status(403).json({ message: 'Only super admins review chats.' });
     return;
   }
-  // Whole numbers: Medusa drops a `take` that is not one and loads every row.
+  // Whole numbers: a fraction would reach the SQL.
   const limit = Math.min(
     Math.max(Math.trunc(Number(req.query.limit)) || 50, 1),
     200,
@@ -31,74 +63,68 @@ export async function GET(
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   const q = str(req.query.q);
   const userId = str(req.query.user_id);
-  const assistant = req.scope.resolve<AssistantModuleService>(ASSISTANT_MODULE);
-  // A word in any message: no cap here, or the paging total would be wrong.
-  const hits = q
-    ? await assistant.listAssistantMessages(
-        { content: like(q) },
-        { select: ['conversation_id'], withDeleted: true },
-      )
-    : [];
-  const hitIds = [...new Set(hits.map((m) => m.conversation_id))];
-  const [conversations, count] =
-    await assistant.listAndCountAssistantConversations(
-      {
-        ...(userId ? { user_id: userId } : {}),
-        ...(q
-          ? {
-              $or: [
-                { title: like(q) },
-                ...(hitIds.length ? [{ id: hitIds }] : []),
-              ],
-            }
-          : {}),
-      },
-      {
-        order: { last_message_at: 'DESC' },
-        take: limit,
-        skip: offset,
-        // Chats staff deleted stay here: the owner reviews every question.
-        withDeleted: true,
-      },
-    );
+  const pg = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION) as Pg;
+  // One letter matches nearly every chat and scans every message: ignored.
+  const filter = reviewFilter(q.length >= 2 ? q : '', userId);
+  const counted = await pg.raw(
+    `select count(*)::int as n from assistant_conversation c ${filter.sql}`,
+    filter.bindings,
+  );
+  const page = await pg.raw(
+    `select c.id, c.title, c.user_id, c.last_message_at, c.deleted_at
+     from assistant_conversation c ${filter.sql}
+     order by c.last_message_at desc, c.id desc
+     limit ? offset ?`,
+    [...filter.bindings, limit, offset],
+  );
+  const conversations = page.rows as Conversation[];
   const ids = conversations.map((c) => c.id);
-  const messages = ids.length
-    ? await assistant.listAssistantMessages(
-        { conversation_id: ids },
-        {
-          select: ['conversation_id', 'role', 'cost_usd', 'error'],
-          withDeleted: true,
-        },
-      )
+  // Each chat's numbers in one pass, deleted messages included. numeric keeps
+  // the stored reals as written (0.1, not float8's 0.10000000149).
+  const stats = ids.length
+    ? (
+        await pg.raw(
+          `select conversation_id,
+             count(*) filter (where role = 'user')::int as questions,
+             count(*) filter (where role = 'assistant' and coalesce(error, '') <> '')::int as failed,
+             coalesce(sum(cost_usd::numeric), 0) as cost_usd,
+             count(*) filter (where ${READ_ALOUD})::int as read_aloud,
+             coalesce(sum(cost_usd::numeric) filter (where ${READ_ALOUD}), 0) as voice_cost_usd
+           from assistant_message
+           where conversation_id = any(?)
+           group by conversation_id`,
+          [ids],
+        )
+      ).rows
     : [];
-  const userIds = [...new Set(conversations.map((c) => c.user_id))];
-  const users = userIds.length
+  const byId = new Map(stats.map((s) => [s.conversation_id as string, s]));
+  // Everyone who ever asked, whatever the filters: the staff picker's list.
+  const staffIds = (
+    await pg.raw('select distinct user_id from assistant_conversation')
+  ).rows.map((r) => r.user_id as string);
+  const users = staffIds.length
     ? await req.scope
         .resolve(Modules.USER)
-        .listUsers({ id: userIds }, { select: ['id', 'email'] })
+        .listUsers({ id: staffIds }, { select: ['id', 'email'] })
     : [];
   const email = new Map(users.map((u) => [u.id, u.email]));
   res.json({
-    count,
+    count: Number(counted.rows[0]?.n ?? 0),
     limit,
     offset,
+    staff: staffIds.map((id) => ({ id, email: email.get(id) ?? null })),
     conversations: conversations.map((c) => {
-      const own = messages.filter((m) => m.conversation_id === c.id);
-      // Voice rows are answers read aloud; spoken questions aren't marked.
-      const voice = own.filter((m) => m.role === 'voice');
+      const s = byId.get(c.id);
       return {
         id: c.id,
         title: c.title,
         user_id: c.user_id,
         user_email: email.get(c.user_id) ?? null,
-        questions: own.filter((m) => m.role === 'user').length,
-        failed: own.filter((m) => m.role === 'assistant' && m.error).length,
-        cost_usd: own.reduce((sum, m) => sum + Number(m.cost_usd ?? 0), 0),
-        read_aloud: voice.length,
-        voice_cost_usd: voice.reduce(
-          (sum, m) => sum + Number(m.cost_usd ?? 0),
-          0,
-        ),
+        questions: Number(s?.questions ?? 0),
+        failed: Number(s?.failed ?? 0),
+        cost_usd: Number(s?.cost_usd ?? 0),
+        read_aloud: Number(s?.read_aloud ?? 0),
+        voice_cost_usd: Number(s?.voice_cost_usd ?? 0),
         last_message_at: c.last_message_at,
         deleted: !!c.deleted_at,
       };

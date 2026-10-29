@@ -1,16 +1,10 @@
 import { Fragment, type ReactNode } from 'react';
 import { toast } from '@medusajs/ui';
 import { useTranslation } from 'react-i18next';
-import { mdBlocks, mdInline } from './markdown-parse';
+import { mdBlocks, mdInline, tableTsv } from './markdown-parse';
 
 // The assistant's answer as React elements (markdown-parse.ts: no HTML, no
 // images, http(s) links only, opened in a new tab without a referrer).
-
-/** A cell as it reads, without the ** and ` markers. */
-const plain = (text: string) =>
-  mdInline(text)
-    .map((t) => t.text)
-    .join('');
 
 function CopyButton({ text }: { text: string }) {
   const { t } = useTranslation();
@@ -18,18 +12,22 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={() =>
-        navigator.clipboard.writeText(text).then(
-          () =>
-            toast.success(
-              t('assistant.markdown.copied', { defaultValue: 'Copied' }),
-            ),
-          () =>
-            toast.error(
-              t('assistant.markdown.copyFailed', {
-                defaultValue: "Couldn't copy",
-              }),
-            ),
-        )
+        // navigator.clipboard is undefined off https: that throw lands in
+        // the failure toast instead of escaping the click.
+        Promise.resolve()
+          .then(() => navigator.clipboard.writeText(text))
+          .then(
+            () =>
+              toast.success(
+                t('assistant.markdown.copied', { defaultValue: 'Copied' }),
+              ),
+            () =>
+              toast.error(
+                t('assistant.markdown.copyFailed', {
+                  defaultValue: "Couldn't copy",
+                }),
+              ),
+          )
       }
       className="text-ui-fg-muted hover:text-ui-fg-base hover:bg-ui-bg-base-hover w-fit self-end rounded-full px-2 py-0.5 text-[11px] transition-colors"
     >
@@ -170,11 +168,7 @@ export function Markdown({
                   </table>
                 </div>
                 {/* Tab-separated: pastes into Google Sheets as cells. */}
-                <CopyButton
-                  text={[b.head, ...b.rows]
-                    .map((row) => row.map(plain).join('\t'))
-                    .join('\n')}
-                />
+                <CopyButton text={tableTsv([b.head, ...b.rows])} />
               </div>
             );
           default:

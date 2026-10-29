@@ -141,6 +141,15 @@
           "expression": "CREATE INDEX IF NOT EXISTS \"IDX_assistant_conversation_user_id\" ON \"assistant_conversation\" (\"user_id\", \"last_message_at\") WHERE deleted_at IS NULL"
         },
         {
+          "keyName": "IDX_assistant_conversation_user_all",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_assistant_conversation_user_all\" ON \"assistant_conversation\" (\"user_id\", \"last_message_at\")"
+        },
+        {
           "keyName": "assistant_conversation_pkey",
           "columnNames": [
             "id"
@@ -576,6 +585,15 @@
           "primary": false,
           "unique": false,
           "expression": "CREATE INDEX IF NOT EXISTS \"IDX_assistant_message_conversation_id\" ON \"assistant_message\" (\"conversation_id\", \"created_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_assistant_message_conversation_role_all",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_assistant_message_conversation_role_all\" ON \"assistant_message\" (\"conversation_id\", \"role\", \"created_at\")"
         },
         {
           "keyName": "assistant_message_pkey",

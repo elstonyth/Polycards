@@ -66,13 +66,19 @@ export function mdInline(text: string): Inline[] {
   return out;
 }
 
-const cells = (line: string) =>
-  line
-    .trim()
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((c) => c.trim());
+// A row splits on "|", but not on an escaped \| (read as "|") or one inside
+// a closed `code` span.
+const cells = (line: string) => {
+  const row = [''];
+  const body = line.trim().replace(/^\|/, '');
+  for (const [part] of body.matchAll(/`[^`]*`|\\\||[\s\S]/g)) {
+    if (part === '|') row.push('');
+    else row[row.length - 1] += part.replace(/\\\|/g, '|');
+  }
+  // The closing "|" leaves an empty last cell.
+  if (row.length > 1 && row.at(-1) === '') row.pop();
+  return row.map((c) => c.trim());
+};
 
 const SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const BULLET = /^\s*[-*]\s+(.*)$/;
@@ -89,6 +95,29 @@ const numeric = (column: string[]) => {
     .filter((c) => !/^[-—–]?$/.test(c));
   return values.length > 0 && values.every((c) => NUMBER_CELL.test(c));
 };
+
+/** A table as tab-separated text, which pastes into Google Sheets as cells. */
+export function tableTsv(rows: string[][]): string {
+  return rows
+    .map((row) =>
+      row
+        .map((cell) => {
+          // The cell as it reads (no ** or ` markers), on one line.
+          const text = mdInline(cell)
+            .map((t) => t.text)
+            .join('')
+            .replace(/[\t\r\n]/g, ' ');
+          // A sheet would run =IMAGE("https://…?d=…") from text a customer
+          // typed: a leading ' keeps it text. Plain numbers stay numbers.
+          return /^\s*[=+\-@]/.test(text) &&
+            !/^[-+]?\d[\d,]*(\.\d+)?%?$/.test(text)
+            ? `'${text}`
+            : text;
+        })
+        .join('\t'),
+    )
+    .join('\n');
+}
 
 /**
  * `streaming`: the answer is still arriving, so a trailing table line shows

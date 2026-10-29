@@ -27,6 +27,13 @@ export const AssistantMessage = model
       on: ['conversation_id', 'created_at'],
       where: 'deleted_at IS NULL',
     },
+    {
+      // The daily cap and the review read deleted rows too (withDeleted):
+      // unscoped, as on assistant_conversation.
+      name: 'IDX_assistant_message_conversation_role_all',
+      on: ['conversation_id', 'role', 'created_at'],
+      where: null as unknown as string,
+    },
   ]);
 
 export default AssistantMessage;

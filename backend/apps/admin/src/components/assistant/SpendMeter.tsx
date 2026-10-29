@@ -19,7 +19,9 @@ export function SpendMeter({ spent, cap }: { spent: number; cap: number }) {
       })
     : t('assistant.spend.today', {
         defaultValue: 'USD {{spent}} / {{cap}} today',
-        spent: spent.toFixed(2),
+        // Down to the cent, so 4.996 of 5 never reads "5.00 / 5"; the
+        // epsilon keeps 4.35 (434.999… cents) from reading 4.34.
+        spent: (Math.floor(spent * 100 + 1e-9) / 100).toFixed(2),
         cap: +cap.toFixed(2),
       });
   return (

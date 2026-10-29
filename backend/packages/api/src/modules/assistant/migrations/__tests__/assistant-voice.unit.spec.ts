@@ -30,9 +30,15 @@ describe('Migration20261029081358 (assistant voice)', () => {
     );
   });
 
-  it('narrows the role check and drops the columns on down', async () => {
+  it('drops the voice rows, narrows the role check and drops the columns on down', async () => {
     const down = await emitted('down');
-    expect(down).toContain(`check("role" in ('user', 'assistant'))`);
+    const del = down.indexOf(
+      `delete from "assistant_message" where "role" = 'voice';`,
+    );
+    const narrow = down.indexOf(`check("role" in ('user', 'assistant'))`);
+    // Rows first, or the narrower check fails on them.
+    expect(del).toBeGreaterThan(-1);
+    expect(narrow).toBeGreaterThan(del);
     expect(down).toContain('drop column if exists "stt_model"');
   });
 });

@@ -35,6 +35,13 @@ export const config: RouteConfig = {
 
 const KEY = ['assistant', 'settings'];
 
+// Copied from the server's MODEL_RE (packages/api/src/api/admin/assistant/
+// openrouter.ts), so Save stays off for an id the server would refuse.
+const MODEL_RE =
+  /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(?::(?:free|nitro|floor|extended|thinking|beta))?$/i;
+const modelIdOk = (v: string) =>
+  v.trim().length <= 100 && MODEL_RE.test(v.trim());
+
 const AiSettingsPage = () => {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -111,6 +118,8 @@ const AiSettingsPage = () => {
     Number.isFinite(capValue) &&
     capValue >= 0.5 &&
     capValue <= 1000;
+  const sttModelOk = modelIdOk(sttModel);
+  const voiceModelOk = modelIdOk(voiceModel);
 
   // Until the settings arrive, a blank form would read as "key lost".
   if (!s) {
@@ -305,7 +314,10 @@ const AiSettingsPage = () => {
                 value={sttModel}
                 onChange={(e) => setSttModel(e.target.value)}
               />
-              <Text size="xsmall" className="text-ui-fg-muted">
+              <Text
+                size="xsmall"
+                className={sttModelOk ? 'text-ui-fg-muted' : 'text-ui-fg-error'}
+              >
                 {t('assistant.settings.sttModelHelp')}
               </Text>
             </div>
@@ -318,7 +330,12 @@ const AiSettingsPage = () => {
                 value={voiceModel}
                 onChange={(e) => setVoiceModel(e.target.value)}
               />
-              <Text size="xsmall" className="text-ui-fg-muted">
+              <Text
+                size="xsmall"
+                className={
+                  voiceModelOk ? 'text-ui-fg-muted' : 'text-ui-fg-error'
+                }
+              >
                 {t('assistant.settings.voiceModelHelp')}
               </Text>
             </div>
@@ -350,7 +367,7 @@ const AiSettingsPage = () => {
           <div>
             <Button
               variant="secondary"
-              disabled={saving}
+              disabled={saving || !sttModelOk || !voiceModelOk}
               onClick={() =>
                 void save({
                   stt_model: sttModel.trim(),
@@ -389,7 +406,18 @@ function HearVoice({
 
   const play = async () => {
     // Made in the click: iOS only plays audio from a context made in a gesture.
-    const player = new PcmPlayer();
+    let player: PcmPlayer;
+    try {
+      player = new PcmPlayer();
+    } catch {
+      // No Web Audio in this browser.
+      toast.error(
+        t('assistant.settings.noPlayback', {
+          defaultValue: "This browser can't play audio.",
+        }),
+      );
+      return;
+    }
     const ctl = new AbortController();
     const stop = () => {
       ctl.abort();
@@ -406,7 +434,17 @@ function HearVoice({
         },
         (e) => {
           if (e.type === 'audio') player.push(e.data);
-          else if (e.type === 'error') toast.error(e.message);
+          else if (e.type === 'error') {
+            // The server's text is English: translate by its code.
+            toast.error(
+              e.code
+                ? t(`assistant.err.${e.code}`, {
+                    defaultValue: e.message,
+                    reason: e.reason ?? '',
+                  })
+                : e.message,
+            );
+          }
         },
         ctl.signal,
       );

@@ -87,9 +87,11 @@ export type ChatContent =
 
 /** The system prompt, cacheable on Anthropic models: their cache covers the
  *  tools and system text up to a cache_control mark, so the mark ends the
- *  text before "Now:", the first line that changes between questions. Other
- *  providers cache by themselves and OpenRouter's docs never say a mark is
- *  harmless there, so they get the plain text. */
+ *  text before "Now:", the first line that changes between questions. Only
+ *  anthropic/* models get marks here (streamChat adds a second, top-level
+ *  one). OpenAI, DeepSeek, Grok and Groq cache by themselves and Gemini 2.5+
+ *  implicitly; Gemini's explicit cache and Qwen's (Alibaba) need marks too,
+ *  which this does not send. */
 export function systemContent(model: string, text: string): ChatContent {
   const cut = text.indexOf('\nNow: ') + 1;
   if (!/^anthropic\//i.test(model) || !cut) return text;
@@ -184,6 +186,11 @@ export async function* streamChat(opts: {
       messages: opts.messages,
       ...(opts.tools.length
         ? { tools: opts.tools, tool_choice: opts.toolChoice ?? 'auto' }
+        : {}),
+      // Anthropic's automatic breakpoint on the last block, so a tool loop's
+      // growing history is cached too (2 marks with the system one).
+      ...(/^anthropic\//i.test(opts.model)
+        ? { cache_control: { type: 'ephemeral' } }
         : {}),
       stream: true,
       usage: { include: true },

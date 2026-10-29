@@ -386,9 +386,13 @@ describe('prompt caching', () => {
         [],
       ),
     ) as Part[];
-    const b = system(
-      await firstBody('anthropic/claude-sonnet-5.5', later, ['a saved note']),
-    ) as Part[];
+    const bodyB = await firstBody('anthropic/claude-sonnet-5.5', later, [
+      'a saved note',
+    ]);
+    const b = system(bodyB) as Part[];
+    // The top-level mark caches the growing history: 2 marks in all.
+    expect(JSON.parse(bodyB).cache_control).toEqual({ type: 'ephemeral' });
+    expect(bodyB.match(/cache_control/g)).toHaveLength(2);
     // Another time and other notes: the cached block stays byte-identical.
     expect(a[0]).toEqual(b[0]);
     expect(b[0].cache_control).toEqual({ type: 'ephemeral' });
@@ -522,12 +526,21 @@ describe('runTurn', () => {
   it(`stops after ${MAX_ROUNDS} rounds: the last keeps the tools but may not call one`, async () => {
     const groups = jest.fn(async () => '{}');
     const t = turn(
-      // Even if the model still asks for a tool on the last round, none runs.
-      Array.from({ length: MAX_ROUNDS }, () => () => sse(toolCall('groups'))),
+      // Even if the model still asks for a tool on the last round, none runs;
+      // text from an earlier step is no answer.
+      Array.from(
+        { length: MAX_ROUNDS },
+        (_, i) => () =>
+          i
+            ? sse(toolCall('groups'))
+            : sse(say('Let me check'), toolCall('groups')),
+      ),
       [tool('groups', groups)],
     );
     const result = await t.done;
-    expect(result.error).toBe('The assistant gave no answer. Ask again.');
+    expect(result.error).toBe(
+      'The assistant ran out of steps. Ask a narrower question.',
+    );
     expect(t.bodies).toHaveLength(MAX_ROUNDS);
     expect(t.bodies[0]).toMatchObject({ tool_choice: 'auto' });
     expect(t.bodies.at(-1)).toMatchObject({ tool_choice: 'none' });
@@ -725,6 +738,35 @@ describe('runTurn', () => {
     expect(result).toMatchObject({ text: 'Half', error: 'aborted' });
     expect(result.cost).toBeCloseTo(0.02);
     expect(urls.at(-1)).toContain('/generation?id=gen-1');
+  });
+
+  it('prices a round that ends without a usage chunk', async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (url: unknown) => {
+      urls.push(String(url));
+      if (String(url).includes('/generation?id=gen-2')) {
+        return new Response(JSON.stringify({ data: { total_cost: 0.04 } }));
+      }
+      return sse({ id: 'gen-2', ...say('Hi') });
+    }) as unknown as typeof fetch;
+    const result = await runTurn({
+      key: 'k',
+      model: 'm',
+      access,
+      tools: [],
+      history: [],
+      userText: 'q',
+      images: [],
+      ctx,
+      emit: () => undefined,
+      signal: new AbortController().signal,
+      fetchImpl,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.cost).toBeCloseTo(0.04);
+    expect(urls.filter((u) => u.includes('/generation?id=gen-2'))).toHaveLength(
+      1,
+    );
   });
 
   it('keeps a refused image’s cost', async () => {

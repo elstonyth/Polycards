@@ -44,6 +44,8 @@ declare const __BACKEND_URL__: string;
 const PAGE = 50;
 
 type Row = ReviewRow & { read_aloud: number; voice_cost_usd: number };
+// Everyone who ever asked, whatever the filters (the staff picker).
+type Staff = { id: string; email: string | null };
 
 // Like lib/assistant's call(), plus the search and staff filters.
 async function fetchReview(offset: number, q: string, userId: string) {
@@ -59,12 +61,13 @@ async function fetchReview(offset: number, q: string, userId: string) {
   const data = (await res.json().catch(() => null)) as {
     count: number;
     conversations: Row[];
+    staff: Staff[];
     message?: string;
   } | null;
   if (!res.ok) {
     throw new Error(data?.message ?? `Request failed (${res.status}).`);
   }
-  return data as { count: number; conversations: Row[] };
+  return data as { count: number; conversations: Row[]; staff: Staff[] };
 }
 
 const ReviewPage = () => {
@@ -74,25 +77,13 @@ const ReviewPage = () => {
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
   const [userId, setUserId] = useState('');
-  // Everyone seen so far, so picking one person keeps the others listed.
-  const [staff, setStaff] = useState<Record<string, string>>({});
   useEffect(() => {
     const id = setTimeout(() => setQ(search.trim()), 300);
     return () => clearTimeout(id);
   }, [search]);
   const list = useQuery({
     queryKey: ['assistant', 'review', offset, q, userId],
-    queryFn: async () => {
-      const data = await fetchReview(offset, q, userId);
-      setStaff((s) => {
-        const next = { ...s };
-        for (const c of data.conversations) {
-          next[c.user_id] = c.user_email ?? c.user_id;
-        }
-        return next;
-      });
-      return data;
-    },
+    queryFn: () => fetchReview(offset, q, userId),
     placeholderData: keepPreviousData,
   });
   const thread = useQuery({
@@ -143,8 +134,8 @@ const ReviewPage = () => {
               }}
               placeholder={allStaff}
               head={{ value: 'all', label: allStaff }}
-              options={Object.entries(staff)
-                .map(([value, label]) => ({ value, label }))
+              options={(list.data?.staff ?? [])
+                .map((s) => ({ value: s.id, label: s.email ?? s.id }))
                 .sort((a, b) => a.label.localeCompare(b.label))}
             />
           </div>

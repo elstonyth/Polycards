@@ -975,6 +975,23 @@ export const RATE_LIMITS = {
   },
 
   /**
+   * Reading an assistant answer aloud (POST /admin/assistant/speak). Looser
+   * than assistant-chat: Talk mode reads every answer and Read aloud replays
+   * are free, while the daily USD cap still bounds the spend.
+   * ASSISTANT_SPEAK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 12/10s)
+   * ASSISTANT_SPEAK_RATE_LIMIT / _WINDOW_MS (default 60/60s)
+   */
+  'assistant-speak': {
+    message: 'Too many read-aloud requests. Try again in a minute.',
+    defaults: {
+      burstLimit: 12,
+      burstWindowMs: 10_000,
+      limit: 60,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
    * The gateway-hook limiter (POST /hooks/tgpay/{deposit,withdrawal}). Those
    * routes are unauthenticated BY DESIGN — a webhook carries no token; their
    * authentication is the gateway's own key headers, checked inside the

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { AiOrb } from './AiOrb';
@@ -30,14 +30,20 @@ export function TalkPanel({
     .replace(/\s+/g, ' ')
     .trim();
 
+  // Through a ref: the page hands a new onEnd each render, and the Esc
+  // listener should not be re-attached each time.
+  const end = useRef(onEnd);
+  useEffect(() => {
+    end.current = onEnd;
+  });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // an open drawer or dialog takes its own Esc (Radix prevents default)
-      if (e.key === 'Escape' && !e.defaultPrevented) onEnd();
+      if (e.key === 'Escape' && !e.defaultPrevented) end.current();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onEnd]);
+  }, []);
 
   return (
     <motion.div
@@ -48,7 +54,9 @@ export function TalkPanel({
     >
       <button
         type="button"
-        onClick={state === 'speaking' ? onInterrupt : undefined}
+        onClick={onInterrupt}
+        // only an answer being spoken can be interrupted
+        disabled={state !== 'speaking'}
         aria-label={
           state === 'speaking'
             ? t('assistant.voice.interrupt')

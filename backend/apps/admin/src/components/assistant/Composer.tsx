@@ -85,17 +85,32 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [text]);
 
-  const add = async (files: FileList | File[]) => {
-    const list = [...files].filter((f) => f.type.startsWith('image/'));
-    if (!list.length) return;
+  // Pictures still decoding: send waits for them, so a paste then a quick
+  // Enter neither drops the picture nor hands it to the next question.
+  const [decoding, setDecoding] = useState(0);
+
+  /** Image files, or data: URLs lifted from pasted HTML. */
+  const add = async (picks: (File | string)[]) => {
+    if (!picks.length) return;
     const room = MAX_IMAGES - images.length;
-    if (list.length > room) {
+    if (picks.length > room) {
       toast.warning(t('assistant.tooManyImages', { n: MAX_IMAGES }));
     }
-    try {
-      const urls = await Promise.all(list.slice(0, room).map(imageToDataUrl));
-      setImages((prev) => [...prev, ...urls].slice(0, MAX_IMAGES));
-    } catch {
+    setDecoding((n) => n + 1);
+    // Capped before any fetch; one bad picture does not lose the rest.
+    const results = await Promise.allSettled(
+      picks.slice(0, room).map(async (p) => {
+        if (typeof p !== 'string') return imageToDataUrl(p);
+        const blob = await (await fetch(p)).blob();
+        return imageToDataUrl(new File([blob], 'pasted', { type: blob.type }));
+      }),
+    );
+    setDecoding((n) => n - 1);
+    const urls = results.flatMap((r) =>
+      r.status === 'fulfilled' ? [r.value] : [],
+    );
+    setImages((prev) => [...prev, ...urls].slice(0, MAX_IMAGES));
+    if (urls.length < results.length) {
       toast.error(t('assistant.imageUnreadable'));
     }
   };
@@ -109,20 +124,13 @@ export function Composer({
       imageCount: files.length,
     });
     if (keep.files) void add(files);
-    else if (keep.inline.length) {
-      void Promise.all(
-        keep.inline.map(async (url) => {
-          const blob = await (await fetch(url)).blob();
-          return new File([blob], 'pasted', { type: blob.type });
-        }),
-      ).then(add, () => toast.error(t('assistant.imageUnreadable')));
-    }
+    else if (keep.inline.length) void add(keep.inline);
     return keep;
   };
 
   const send = () => {
     const q = text.trim();
-    if (!q || busy || disabled) return;
+    if (!q || busy || disabled || decoding > 0) return;
     onSend(q, images);
     setText('');
     setImages([]);
@@ -138,9 +146,11 @@ export function Composer({
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e: DragEvent) => {
-        // Always: a dropped file would otherwise open in the tab.
-        e.preventDefault();
         setDragging(false);
+        // Text dragged within the box: the browser moves it itself.
+        if (e.target === area.current && !e.dataTransfer.files.length) return;
+        // Else always: a dropped file would otherwise open in the tab.
+        e.preventDefault();
         if (!take(e.dataTransfer).text) return;
         const dropped = e.dataTransfer.getData('text/plain');
         setText((v) => (v.trim() ? `${v}\n${dropped}` : dropped));
@@ -243,7 +253,13 @@ export function Composer({
             multiple
             hidden
             onChange={(e) => {
-              if (e.target.files) void add(e.target.files);
+              if (e.target.files) {
+                void add(
+                  [...e.target.files].filter((f) =>
+                    f.type.startsWith('image/'),
+                  ),
+                );
+              }
               e.target.value = '';
             }}
           />
@@ -281,7 +297,9 @@ export function Composer({
             <button
               type="button"
               onClick={busy ? onStop : send}
-              aria-disabled={!busy && (!text.trim() || disabled)}
+              aria-disabled={
+                !busy && (!text.trim() || disabled || decoding > 0)
+              }
               aria-label={busy ? t('assistant.stop') : t('assistant.send')}
               className={`${busy ? 'text-ui-fg-base' : 'text-violet-500'} aria-disabled:text-ui-fg-disabled transition-transform hover:scale-105 aria-disabled:hover:scale-100`}
             >

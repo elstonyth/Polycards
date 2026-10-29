@@ -15,6 +15,14 @@ export const AssistantConversation = model
       on: ['user_id', 'last_message_at'],
       where: 'deleted_at IS NULL',
     },
+    {
+      // The daily cap reads deleted chats too (withDeleted), so it needs an
+      // index without the deleted_at scope: Medusa drops it only for null
+      // (transformIndexWhere), which the types don't allow.
+      name: 'IDX_assistant_conversation_user_all',
+      on: ['user_id', 'last_message_at'],
+      where: null as unknown as string,
+    },
   ]);
 
 export default AssistantConversation;

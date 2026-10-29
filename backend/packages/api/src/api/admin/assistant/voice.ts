@@ -19,8 +19,17 @@ export const VOICES = [
 ] as const;
 // About 75 s of 16 kHz mono 16-bit WAV.
 export const MAX_AUDIO_BYTES = 2.5 * 1024 * 1024;
-// Longer answers are cut at a sentence and the rest stays on screen.
-const MAX_SPOKEN_CHARS = 1500;
+// Longer answers are cut at a sentence and the rest stays on screen. In
+// spoken length: a Chinese, Japanese or Korean character takes about three
+// times as long to say as a letter, so either way it is under ~2 minutes.
+const MAX_SPOKEN = 1500;
+const CJK =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const spokenWeight = (ch: string) => (CJK.test(ch) ? 3 : 1);
+// A reading stops when OpenRouter sends nothing for this long, or runs past
+// the cap (a full-length answer is about 100 s of speech).
+const SPEAK_IDLE_MS = 30_000;
+const SPEAK_TOTAL_MS = 180_000;
 
 const LISTEN_PROMPT =
   'You write down speech. Return exactly what the speaker said, in the language they spoke (English, Malay, Chinese or a mix), with punctuation. Do not translate, answer, summarise or comment. If nothing was said, return an empty reply. ' +
@@ -160,6 +169,12 @@ export function speakable(markdown: string): string {
   let text = stripTags(
     lines
       .join('\n')
+      // A < or > between numbers is a word, not a symbol to strip.
+      .replace(
+        /(\d)[ \t]*([<>])[ \t]*(?=(?:RM[ \t]*)?\d)/g,
+        (_, d: string, op: string) =>
+          `${d} ${op === '>' ? 'more than' : 'less than'} `,
+      )
       .replace(/```[\s\S]*?```/g, '')
       .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
       .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
@@ -172,16 +187,36 @@ export function speakable(markdown: string): string {
     .replace(/^\s*[-•]\s+/gm, '')
     .replace(/\n{2,}/g, '\n')
     .trim();
-  if (text.length > MAX_SPOKEN_CHARS) {
-    const cut = text.slice(0, MAX_SPOKEN_CHARS);
-    const end = Math.max(
-      cut.lastIndexOf('. '),
-      cut.lastIndexOf('。'),
-      cut.lastIndexOf('\n'),
-    );
-    text = `${cut.slice(0, end > 200 ? end + 1 : MAX_SPOKEN_CHARS)} The rest is on screen.`;
+  // Where the spoken budget runs out, and whether what is read is mostly
+  // Chinese (the closing line follows it).
+  let used = 0;
+  let cjk = 0;
+  let at = 0;
+  for (const ch of text) {
+    const w = spokenWeight(ch);
+    if (used + w > MAX_SPOKEN) break;
+    used += w;
+    if (w > 1) cjk += w;
+    at += ch.length;
+  }
+  if (at < text.length) {
+    const cut = text.slice(0, at);
+    let end = -1;
+    // A . ? ! before a space (not 1,234.50) or a Chinese stop ends a sentence.
+    for (const m of cut.matchAll(/[.?!](?=\s)|[。？！\n]/g)) end = m.index;
+    const kept = cut.slice(0, end > 200 ? end + 1 : at);
+    text =
+      cjk * 2 > used
+        ? `${kept}其余内容请看屏幕。`
+        : `${kept} The rest is on screen.`;
   }
   return text;
+}
+
+function spokenLength(s: string): number {
+  let n = 0;
+  for (const ch of s) n += spokenWeight(ch);
+  return n;
 }
 
 export type SpeechEvent =
@@ -190,7 +225,8 @@ export type SpeechEvent =
   | { type: 'generation'; id: string };
 
 /** Reads `text` aloud: base64 PCM16 (24 kHz mono) chunks as they arrive,
- *  then what it cost. */
+ *  then what it cost. Throws when OpenRouter goes quiet for 30 s or the
+ *  reading runs past 3 minutes. */
 export async function* speak(opts: {
   key: string;
   model: string;
@@ -199,6 +235,41 @@ export async function* speak(opts: {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): AsyncGenerator<SpeechEvent> {
+  const timeout = new AbortController();
+  const stopAfter = (ms: number, why: string) =>
+    setTimeout(() => timeout.abort(new Error(why)), ms);
+  const total = stopAfter(
+    SPEAK_TOTAL_MS,
+    'Reading aloud took longer than 3 minutes.',
+  );
+  const quiet = 'OpenRouter sent no audio for 30 seconds.';
+  let idle = stopAfter(SPEAK_IDLE_MS, quiet);
+  const signal = AbortSignal.any([
+    timeout.signal,
+    ...(opts.signal ? [opts.signal] : []),
+  ]);
+  try {
+    yield* speakUntil({ ...opts, signal }, () => {
+      clearTimeout(idle);
+      idle = stopAfter(SPEAK_IDLE_MS, quiet);
+    });
+  } finally {
+    clearTimeout(total);
+    clearTimeout(idle);
+  }
+}
+
+async function* speakUntil(
+  opts: {
+    key: string;
+    model: string;
+    voice: string;
+    text: string;
+    signal: AbortSignal;
+    fetchImpl?: typeof fetch;
+  },
+  heard: () => void,
+): AsyncGenerator<SpeechEvent> {
   const answer = await retryOnce(
     () =>
       (opts.fetchImpl ?? fetch)(openRouterUrl(), {
@@ -216,6 +287,9 @@ export async function* speak(opts: {
           ],
           modalities: ['text', 'audio'],
           audio: { voice: opts.voice, format: 'pcm16' },
+          // ~2.5x what the text takes to say (~20 audio tokens a second):
+          // text that tells the voice to go on can't make it talk forever.
+          max_tokens: spokenLength(opts.text) * 4 + 200,
           stream: true,
           usage: { include: true },
         }),
@@ -238,6 +312,7 @@ export async function* speak(opts: {
   let generation = '';
   for (;;) {
     const { done, value } = await reader.read();
+    heard();
     buffer += decoder.decode(value, { stream: !done });
     let nl: number;
     while ((nl = buffer.indexOf('\n')) >= 0) {

@@ -1893,7 +1893,8 @@
       "refsUseDefault": "Back to the defaults",
       "refsReplace": "Your own posts replace the built-in set. Remove all of yours to bring the built-in set back.",
       "hearVoice": "Hear it",
-      "stopVoice": "Stop"
+      "stopVoice": "Stop",
+      "noPlayback": "This browser can't play audio."
     },
     "review": {
       "title": "Assistant conversations",
@@ -1945,11 +1946,14 @@
     "err": {
       "bad_model": "The chat model in Settings → AI assistant is not allowed here (web-search models are off). An admin must pick another.",
       "no_speech": "I didn't catch that. Try again.",
-      "listen_failed": "Could not listen to that recording. Try again.",
-      "speak_failed": "Could not read it aloud. Try again.",
+      "listen_failed": "Could not listen to that recording. {{reason}}",
+      "speak_failed": "Could not read it aloud. {{reason}}",
       "no_key": "The assistant has no AI key yet. An admin adds it in Settings → AI assistant.",
       "busy": "Your previous question is still being answered. Wait for it, then ask again.",
-      "daily_cap": "You reached today's assistant limit. It resets at 00:00 Malaysia time."
+      "daily_cap": "You reached today's assistant limit. It resets at 00:00 Malaysia time.",
+      "bad_voice_model": "The speaking model or voice in Settings → AI assistant can't be used. An admin must pick another.",
+      "bad_stt_model": "The listening model in Settings → AI assistant can't be used. An admin must pick another.",
+      "no_audio": "The voice model sent no sound. Try again, or pick another speaking model in Settings → AI assistant."
     },
     "tools": {
       "economy": "Economy totals",

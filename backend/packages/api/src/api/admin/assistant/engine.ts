@@ -173,9 +173,17 @@ export async function runTurn(opts: {
           calls = ev.calls;
         }
       }
+      // A round that ended without a usage chunk is still billed.
+      if (unpriced) {
+        result.cost += await generationCost(opts.key, unpriced, opts.fetchImpl);
+        unpriced = undefined;
+      }
       if (!calls.length || last) {
-        // E.g. the last round still asked for tools: nothing to show.
-        if (!result.text.trim() && !shown) {
+        if (calls.length) {
+          // The last round may not call tools; one that still does never answered.
+          result.error =
+            'The assistant ran out of steps. Ask a narrower question.';
+        } else if (!result.text.trim() && !shown) {
           result.error = 'The assistant gave no answer. Ask again.';
         }
         return result;

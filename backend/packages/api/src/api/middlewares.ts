@@ -118,6 +118,7 @@ const taskActionRateLimit = rateLimit('task-action');
 // across all mutation routes together).
 const adminActionRateLimit = rateLimit('admin-action');
 const assistantChatRateLimit = rateLimit('assistant-chat');
+const assistantSpeakRateLimit = rateLimit('assistant-speak');
 // One instance for every gateway callback route: one abuse ceiling, one
 // budget, one Redis connection (see the gateway-hook spec for sizing).
 const gatewayHookRateLimit = rateLimit('gateway-hook');
@@ -1204,10 +1205,11 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit, assistantChatRateLimit],
     },
     {
-      // Reading an answer aloud (voice.ts) spends OpenRouter credit too.
+      // Reading an answer aloud (voice.ts) spends OpenRouter credit too; its
+      // own looser budget, so Talk mode never hits "too many questions".
       matcher: '/admin/assistant/speak',
       method: 'POST',
-      middlewares: [adminActionRateLimit, assistantChatRateLimit],
+      middlewares: [adminActionRateLimit, assistantSpeakRateLimit],
     },
     {
       matcher: '/admin/assistant/conversations/*',

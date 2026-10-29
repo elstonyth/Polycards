@@ -23,6 +23,9 @@ jest.setTimeout(240 * 1000);
 // (6 per 10 s) for this suite. Read when the app boots, below.
 process.env.ASSISTANT_CHAT_RATE_BURST_LIMIT = '1000';
 process.env.ASSISTANT_CHAT_RATE_LIMIT = '1000';
+// Reading aloud has its own limit: lift it the same way.
+process.env.ASSISTANT_SPEAK_RATE_BURST_LIMIT = '1000';
+process.env.ASSISTANT_SPEAK_RATE_LIMIT = '1000';
 
 // A made-up key for the fake OpenRouter, not a credential.
 const KEY = 'sk-or-v1-test-0123456789abcdef-WXYZ'; // gitleaks:allow
@@ -56,6 +59,27 @@ const call = (name: string, args: object) => ({
 const usage = {
   choices: [],
   usage: { cost: 0.001, prompt_tokens: 50, completion_tokens: 5 },
+};
+
+// A real recording as the browser sends it: 16 kHz mono 16-bit WAV of
+// silence, base64.
+const wav16k = (ms: number) => {
+  const n = 32 * ms;
+  const b = Buffer.alloc(44 + n);
+  b.write('RIFF', 0);
+  b.writeUInt32LE(36 + n, 4);
+  b.write('WAVE', 8);
+  b.write('fmt ', 12);
+  b.writeUInt32LE(16, 16);
+  b.writeUInt16LE(1, 20); // PCM
+  b.writeUInt16LE(1, 22); // mono
+  b.writeUInt32LE(16000, 24);
+  b.writeUInt32LE(32000, 28);
+  b.writeUInt16LE(2, 32);
+  b.writeUInt16LE(16, 34);
+  b.write('data', 36);
+  b.writeUInt32LE(n, 40);
+  return b.toString('base64');
 };
 
 // Voice: what the listening model "hears", and every voice request.
@@ -253,6 +277,7 @@ medusaIntegrationTestRunner({
           // Any id: admin-rbac.ts refuses on the path before the lookup.
           ['get', '/admin/assistant-review/conv_does_not_matter'],
           ['post', '/admin/assistant-settings/test'],
+          ['post', '/admin/assistant-settings/voice-test'],
         ] as const) {
           const res = await api[method](
             path,
@@ -281,6 +306,17 @@ medusaIntegrationTestRunner({
           '/admin/assistant-review/conv_does_not_matter',
         ]) {
           const res = await api.get(path, {
+            ...reviewer,
+            validateStatus: () => true,
+          });
+          expect([path, res.status]).toEqual([path, 403]);
+        }
+        // A valid body, so only the super-admin check can refuse it.
+        for (const [path, body] of [
+          ['/admin/assistant-settings', { voice: 'nova' }],
+          ['/admin/assistant-settings/voice-test', {}],
+        ] as const) {
+          const res = await api.post(path, body, {
             ...reviewer,
             validateStatus: () => true,
           });
@@ -551,14 +587,31 @@ medusaIntegrationTestRunner({
           voice: 'nova',
         });
 
+        // "Hear it" takes no model that could fetch the web.
+        const online = await api.post(
+          '/admin/assistant-settings/voice-test',
+          { voice_model: 'openai/gpt-5:online' },
+          { ...admin, validateStatus: () => true },
+        );
+        expect(online.status).toBe(400);
+        expect(online.data.message).toMatch(/voice_model/);
+
+        // Anything but a 16 kHz mono 16-bit WAV is refused before listening.
+        const notWav = await api.post(
+          '/admin/assistant/chat',
+          { message: '', audio: Buffer.from('hello').toString('base64') },
+          { ...admin, validateStatus: () => true },
+        );
+        expect(notWav.status).toBe(400);
+        expect(notWav.data.message).toMatch(/16 ?kHz/i);
+        expect(notWav.data.message).toMatch(/wav/i);
+
         // A spoken question is written down, then asked like a typed one.
         heardText = 'how many player groups?';
         voiceCalls.length = 0;
         script = (b) =>
           lastIsTool(b) ? [say('There are 0 groups.')] : [call('groups', {})];
-        const events = await chat(admin, '', {
-          audio: Buffer.from('RIFF-test-recording').toString('base64'),
-        });
+        const events = await chat(admin, '', { audio: wav16k(500) });
         expect(events[0]).toEqual({
           type: 'transcript',
           text: 'how many player groups?',
@@ -607,12 +660,45 @@ medusaIntegrationTestRunner({
         const assistant =
           container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
         const [row] = await assistant.listAssistantConversations({ id: conv });
-        expect(await assistant.spentToday(row.user_id)).toBeCloseTo(
-          0.001 * 2 + 0.0003 + 0.002,
-          6,
-        );
+        const spent = await assistant.spentToday(row.user_id);
+        expect(spent).toBeCloseTo(0.001 * 2 + 0.0003 + 0.002, 6);
 
-        // Someone else cannot have it read to them.
+        // Heard again in the same voice: the stored speech, free, no new call.
+        const calls = voiceCalls.length;
+        const again = lines(
+          (
+            await api.post(
+              '/admin/assistant/speak',
+              { message_id: done.message_id },
+              {
+                ...admin,
+                responseType: 'text',
+                transformResponse: (d: string) => d,
+              },
+            )
+          ).data as string,
+        );
+        expect(again.length).toBeGreaterThan(1);
+        expect(again.slice(0, -1).every((e) => e.type === 'audio')).toBe(true);
+        expect(again.at(-1)).toEqual({ type: 'done', cost_usd: 0 });
+        expect(
+          Buffer.concat(
+            again
+              .slice(0, -1)
+              .map((e) => Buffer.from(e.data as string, 'base64')),
+          ),
+        ).toEqual(
+          Buffer.concat([
+            Buffer.from('AAAA', 'base64'),
+            Buffer.from('BBBB', 'base64'),
+          ]),
+        );
+        expect(voiceCalls.length).toBe(calls);
+        expect(await assistant.spentToday(row.user_id)).toBeCloseTo(spent, 6);
+
+        // Someone else cannot have it read to them, even with chats of his own.
+        script = () => [say('ok')];
+        await chat(anson, 'anson question');
         const other = await api.post(
           '/admin/assistant/speak',
           { message_id: done.message_id },

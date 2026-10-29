@@ -113,51 +113,54 @@ const Message = memo(function Message({
       className="flex gap-x-3"
     >
       <AiOrb size={28} active={m.pending} />
-      {/* Only answers are live, and a region's first content is not read:
+      <div className="flex min-w-0 flex-1 flex-col gap-y-3 pt-0.5">
+        {/* Only answers are live, and a region's first content is not read:
           opening a chat stays quiet, a new answer is read once it is whole. */}
-      <div
-        aria-live="polite"
-        aria-busy={m.pending}
-        className="flex min-w-0 flex-1 flex-col gap-y-3 pt-0.5"
-      >
-        <ToolSteps steps={m.steps} />
-        {m.pending &&
-          m.steps
-            .filter((s) => s.status === 'start' && DRAWS.test(s.name))
-            .map((s) => (
-              <ImagePending
-                key={s.id}
-                label={t(`assistant.tools.${s.name}`, {
-                  defaultValue: s.label ?? s.name,
-                })}
-              />
-            ))}
-        {m.images.length > 0 && (
-          <div className="flex flex-wrap gap-3">
-            {m.images.map((url) => (
-              <ImageCard key={url} url={url} />
-            ))}
-          </div>
-        )}
-        {m.content ? (
-          <Markdown text={m.content} streaming={m.pending} />
-        ) : m.pending ? (
-          !m.steps.some((s) => s.status === 'start') && (
-            <Thinking since={m.since} />
-          )
-        ) : (
-          !m.error &&
-          m.images.length === 0 && (
-            <span className="text-ui-fg-muted text-[13px]">
-              {t('assistant.stopped')}
-            </span>
-          )
-        )}
-        {m.error && (
-          <div className="border-ui-tag-red-border bg-ui-tag-red-bg text-ui-tag-red-text rounded-xl border px-3 py-2 text-xs">
-            {m.error}
-          </div>
-        )}
+        <div
+          aria-live="polite"
+          aria-busy={m.pending}
+          className="flex flex-col gap-y-3"
+        >
+          <ToolSteps steps={m.steps} />
+          {m.pending &&
+            m.steps
+              .filter((s) => s.status === 'start' && DRAWS.test(s.name))
+              .map((s) => (
+                <ImagePending
+                  key={s.id}
+                  label={t(`assistant.tools.${s.name}`, {
+                    defaultValue: s.label ?? s.name,
+                  })}
+                />
+              ))}
+          {m.images.length > 0 && (
+            <div className="flex flex-wrap gap-3">
+              {m.images.map((url) => (
+                <ImageCard key={url} url={url} />
+              ))}
+            </div>
+          )}
+          {m.content ? (
+            <Markdown text={m.content} streaming={m.pending} />
+          ) : m.pending ? (
+            !m.steps.some((s) => s.status === 'start') && (
+              <Thinking since={m.since} />
+            )
+          ) : (
+            !m.error &&
+            m.images.length === 0 && (
+              <span className="text-ui-fg-muted text-[13px]">
+                {t('assistant.stopped')}
+              </span>
+            )
+          )}
+          {m.error && (
+            <div className="border-ui-tag-red-border bg-ui-tag-red-bg text-ui-tag-red-text rounded-xl border px-3 py-2 text-xs">
+              {m.error}
+            </div>
+          )}
+        </div>
+        {/* Outside the live region: its buttons are not news to announce. */}
         {(finished || retry) && (
           <div className="flex flex-wrap items-center gap-x-1">
             {onSpeak && m.messageId && finished && (
@@ -204,7 +207,8 @@ const Message = memo(function Message({
 // carries on after each tool step. No animation; the number is not read out.
 function Thinking({ since }: { since?: number }) {
   const { t } = useTranslation();
-  const [now, setNow] = useState(since ?? 0);
+  // Now, not `since`: remounted after a tool step, it must not read 0 s.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
