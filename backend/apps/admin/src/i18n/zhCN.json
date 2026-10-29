@@ -169,7 +169,8 @@
       "fmv": "FMV",
       "qty": "数量",
       "lineFmv": "行 FMV",
-      "totalFmv": "FMV 合计"
+      "totalFmv": "FMV 合计",
+      "totalQty": "数量合计"
     },
     "status": {
       "open": "待转入",

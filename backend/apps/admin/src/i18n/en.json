@@ -1283,7 +1283,8 @@
       "fmv": "FMV",
       "qty": "Qty",
       "lineFmv": "Line FMV",
-      "totalFmv": "Total FMV"
+      "totalFmv": "Total FMV",
+      "totalQty": "Total qty"
     },
     "status": {
       "open": "Open",
