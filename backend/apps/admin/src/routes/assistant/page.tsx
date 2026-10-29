@@ -14,11 +14,11 @@ import {
 import { timeAgo } from '../../lib/format';
 import { AiOrb } from '../../components/assistant/AiOrb';
 import { Composer } from '../../components/assistant/Composer';
+import { Thread } from '../../components/assistant/Thread';
 import {
   fromStored,
-  Thread,
   type UiMessage,
-} from '../../components/assistant/Thread';
+} from '../../components/assistant/thread-data';
 
 // The AI assistant (spec 2026-10-29): one chat for everything the Discord
 // desks did. What it can answer follows the asker's admin roles — the server

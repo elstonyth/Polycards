@@ -44,10 +44,15 @@ export function Composer({
   const area = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!seed) return;
+  // A new suggestion replaces the text while rendering (React's "adjust
+  // state when a prop changes"), not in an effect.
+  const [seededN, setSeededN] = useState(seed?.n);
+  if (seed && seed.n !== seededN) {
+    setSeededN(seed.n);
     setText(seed.text);
-    area.current?.focus();
+  }
+  useEffect(() => {
+    if (seed) area.current?.focus();
   }, [seed]);
 
   useEffect(() => {

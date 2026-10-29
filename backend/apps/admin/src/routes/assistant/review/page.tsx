@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { MotionConfig } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
@@ -15,7 +15,8 @@ import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { assistantApi } from '../../../lib/assistant';
 import { mytDateTime } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
-import { fromStored, Thread } from '../../../components/assistant/Thread';
+import { Thread } from '../../../components/assistant/Thread';
+import { fromStored } from '../../../components/assistant/thread-data';
 
 // Every question every staff member asked the assistant (owner, 2026-10-29:
 // "review all the questions users ask"), newest first, with who asked, how
@@ -44,12 +45,9 @@ const ReviewPage = () => {
     queryFn: () => assistantApi.reviewThread(open as string),
     enabled: !!open,
   });
+  // The list never shrinks (deleted chats stay in the review), so a page
+  // can't fall past the end.
   const count = list.data?.count ?? 0;
-  // Never stay on a page past the end (the list can shrink).
-  useEffect(() => {
-    if (offset > 0 && offset >= count && list.data)
-      setOffset(Math.max(0, count - PAGE));
-  }, [count, offset, list.data]);
 
   return (
     <MotionConfig reducedMotion="user">

@@ -1,7 +1,8 @@
 import { last4, openKey, sealKey } from '../key-vault';
 
 const SECRET = 'jwt-secret-for-tests-only-0123456789';
-const KEY = 'sk-or-v1-0123456789abcdefabcd1234';
+// A made-up key for the tests, not a credential.
+const KEY = 'sk-or-v1-0123456789abcdefabcd1234'; // gitleaks:allow
 
 describe('key vault', () => {
   it('opens what it sealed', () => {

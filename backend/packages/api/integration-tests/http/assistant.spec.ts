@@ -17,7 +17,8 @@ import { mintSuperAdmin } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-const KEY = 'sk-or-v1-test-0123456789abcdef-WXYZ';
+// A made-up key for the fake OpenRouter, not a credential.
+const KEY = 'sk-or-v1-test-0123456789abcdef-WXYZ'; // gitleaks:allow
 
 type FakeBody = {
   model: string;

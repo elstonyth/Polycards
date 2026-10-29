@@ -1,45 +1,10 @@
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import type { StoredMessage } from '../../lib/assistant';
 import { AiOrb } from './AiOrb';
 import { ImageCard, ImagePending } from './ImageCard';
 import { Markdown } from './Markdown';
-import { ToolSteps, type Step } from './ToolSteps';
-
-export type UiMessage = {
-  key: string;
-  role: 'user' | 'assistant';
-  content: string;
-  /** Screenshots sent with a question: data URLs this session, a count after. */
-  attachments: string[] | number;
-  images: string[];
-  steps: Step[];
-  error?: string | null;
-  pending?: boolean;
-};
-
-// Tools that draw: while one runs, a scanning placeholder holds its place.
-const DRAWS = /(_poster|^generate_image|^brand_logo)$/;
-
-export const fromStored = (
-  messages: StoredMessage[],
-  labelOf: (name: string) => string,
-): UiMessage[] =>
-  messages.map((m) => ({
-    key: m.id,
-    role: m.role,
-    content: m.content,
-    attachments: m.attachments,
-    images: m.images.map((i) => i.url),
-    steps: m.tools.map((tool, i) => ({
-      id: `${m.id}-${i}`,
-      name: tool.name,
-      label: labelOf(tool.name),
-      status: tool.ok ? 'done' : 'error',
-      ms: tool.ms,
-    })),
-    error: m.error === 'aborted' ? null : m.error,
-  }));
+import { ToolSteps } from './ToolSteps';
+import { DRAWS, type UiMessage } from './thread-data';
 
 export function Thread({ messages }: { messages: UiMessage[] }) {
   const { t } = useTranslation();
