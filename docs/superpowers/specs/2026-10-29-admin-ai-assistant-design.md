@@ -167,28 +167,28 @@ folders… make sure you are also able to do the scheduled tasks."
   must quote the admin's current message; image fetches reach only our own
   hosts or URLs a pack or card holds, every redirect hop included.
 
-### Voice (added 2026-10-29, , , admin )
+### Voice (added 2026-10-29, `voice.ts`, `speak/route.ts`, admin `lib/voice.ts`)
 
 Owner: "make sure it's able to answer and reply, listening… using OpenRouter".
 OpenRouter has no speech endpoints; both halves go through chat completions.
 
 - **Listening:** the admin records 16 kHz mono WAV (Web Audio, no MediaRecorder:
   OpenRouter takes wav, not webm), stops on silence (energy VAD), and posts it
-  as  to the chat route. The listening model (, default
-  ) writes it down via ; the
+  as `audio` to the chat route. The listening model (`stt_model`, default
+  `google/gemini-3.5-flash-lite`) writes it down via `input_audio`; the
   transcript is streamed back and asked like a typed question. Its cost is
   charged with the answer.
-- **Speaking:**  reads one of the
-  asker's answers aloud with the voice model (, default
-  ;  one of alloy/echo/fable/onyx/nova/shimmer),
+- **Speaking:** `POST /admin/assistant/speak {message_id}` reads one of the
+  asker's answers aloud with the voice model (`voice_model`, default
+  `openai/gpt-audio-mini`; `voice` one of alloy/echo/fable/onyx/nova/shimmer),
   streamed as PCM16 24 kHz chunks the admin plays gaplessly. Markdown is made
   speakable (tables row by row, no URLs), capped at 1,500 characters. The cost
-  is saved as a hidden  message row, so it counts toward today's cap
+  is saved as a hidden `voice` message row, so it counts toward today's cap
   whichever day the answer was written.
 - **UI:** a mic in the composer (one spoken question, answer read aloud), a
   Talk mode (hands-free: listen → answer → speak → listen; tap the orb to
   interrupt; three silent turns end it), and Read aloud on every answer.
-- Migration : role check gains ; three
+- Migration `Migration20261029081358`: role check gains `voice`; three
   settings columns with defaults. Additive.
 
 ### Admin (`backend/apps/admin`)
