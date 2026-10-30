@@ -4,13 +4,13 @@ import {
   blankCredit,
   creditAmount,
   creditTitle,
-  inStockCards,
   newEventPayload,
   patchCredit,
   poolCardFrom,
   poolMoney,
   poolSummary,
   poolTotal,
+  prizeCards,
   type PoolCard,
   type PoolCredit,
 } from './prize-pool';
@@ -46,7 +46,6 @@ const card = (over: Partial<PoolCard> = {}): PoolCard => ({
   name: 'Charizard PSA 10',
   photo: null,
   value: 1200,
-  onHand: 3,
   title: 'Charizard PSA 10',
   ...over,
 });
@@ -64,22 +63,25 @@ const draft: EventDraft = {
   endsAt: '2026-12-31T23:00',
 };
 
-describe('inStockCards', () => {
-  test('keeps cards with stock; drops non-cards, zero, negative and unknown stock', () => {
+describe('prizeCards', () => {
+  // Spec 2026-10-24: the operator picks any card. On prod 10-30 only 1 of
+  // 1,200 cards had a counter above 0, so a stock gate left one card to pick.
+  test('keeps every registered card whatever its stock; drops non-cards', () => {
     const rows = [
       row({ handle: 'a' }),
       row({ handle: 'b', is_card: false }),
-      row({ handle: 'c', counter: 0 }),
-      row({ handle: 'd', counter: -2 }),
+      row({ handle: 'c', counter: 0, on_hand: 0 }),
+      row({ handle: 'd', counter: -2, on_hand: -1 }),
       row({ handle: 'e', counter: null }),
       row({ handle: 'f', counter: 1 }),
     ];
-    expect(inStockCards(rows).map((r) => r.handle)).toEqual(['a', 'f']);
-  });
-
-  test('reads the counter, not physical on hand — won cards are not prizes', () => {
-    // 4 on the shelf, all 4 already won and vaulted: nothing left to give.
-    expect(inStockCards([row({ on_hand: 4, counter: 0 })])).toEqual([]);
+    expect(prizeCards(rows).map((r) => r.handle)).toEqual([
+      'a',
+      'c',
+      'd',
+      'e',
+      'f',
+    ]);
   });
 });
 
@@ -90,12 +92,10 @@ describe('poolCardFrom', () => {
       name: 'Charizard PSA 10',
       photo: '/static/charizard.png',
       value: 1200,
-      onHand: 3,
       title: 'Charizard PSA 10',
     });
     expect(poolCardFrom(row({ price: null, counter: null }))).toMatchObject({
       value: null,
-      onHand: 0,
     });
   });
 });
@@ -156,10 +156,7 @@ describe('poolMoney / poolTotal / poolSummary', () => {
 
   test('sums stay in whole sen', () => {
     expect(
-      poolTotal(
-        [card({ value: 0.1 }), card({ handle: 'b', value: 0.2 })],
-        [],
-      ),
+      poolTotal([card({ value: 0.1 }), card({ handle: 'b', value: 0.2 })], []),
     ).toBe(0.3);
   });
 
@@ -168,7 +165,10 @@ describe('poolMoney / poolTotal / poolSummary', () => {
       card({ handle: `c${i}`, value: 16_000 }),
     );
     expect(
-      poolSummary(cards, [credit({ amount: '1000' }), credit({ amount: '1400' })]),
+      poolSummary(cards, [
+        credit({ amount: '1000' }),
+        credit({ amount: '1400' }),
+      ]),
     ).toBe('8 prizes · RM 98,400');
     expect(poolSummary([card({ value: 50 })], [])).toBe('1 prize · RM 50');
     expect(poolSummary([], [])).toBe('No prizes yet');
@@ -203,7 +203,10 @@ describe('patchCredit', () => {
   test('keeps what was typed after the patch was prepared (a late upload only sets its image)', () => {
     const row = credit({ amount: '10', imageUrl: '' });
     // The row is edited while the upload is still running...
-    const edited = patchCredit([row], row.key, { amount: '99', title: 'Typed' });
+    const edited = patchCredit([row], row.key, {
+      amount: '99',
+      title: 'Typed',
+    });
     // ...and the upload then lands on the latest list, not the old row.
     expect(patchCredit(edited, row.key, { imageUrl: '/up.png' })).toEqual([
       { ...row, amount: '99', title: 'Typed', imageUrl: '/up.png' },
@@ -300,9 +303,7 @@ describe('newEventPayload', () => {
     ['more than the ceiling', { amount: '50001' }],
     ['a fraction of a sen', { amount: '10.005' }],
   ])('a credit row with %s makes the whole payload null', (_, over) => {
-    expect(
-      newEventPayload(draft, [card()], [credit(over)]),
-    ).toBeNull();
+    expect(newEventPayload(draft, [card()], [credit(over)])).toBeNull();
   });
 
   test('a credit row with no image is fine (players see coins)', () => {
@@ -320,7 +321,9 @@ describe('newEventPayload', () => {
   test('more than the most the backend takes is null', () => {
     const many = (n: number) =>
       Array.from({ length: n }, (_, i) => card({ handle: `c${i}` }));
-    expect(newEventPayload(draft, many(MAX_NEW_EVENT_PRIZES), [])).not.toBeNull();
+    expect(
+      newEventPayload(draft, many(MAX_NEW_EVENT_PRIZES), []),
+    ).not.toBeNull();
     expect(
       newEventPayload(draft, many(MAX_NEW_EVENT_PRIZES), [credit()]),
     ).toBeNull();
