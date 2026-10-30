@@ -11700,6 +11700,9 @@ class PacksModuleService extends MedusaService({
        * the run just moved.
        */
       allowedFrom?: readonly string[];
+      /** ISO delivered_at for a move to completed (the shipment tracker
+       *  passes the carrier's time). Omitted or unparsable = now. */
+      deliveredAt?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: DeliveryStatus }> {
@@ -11762,7 +11765,10 @@ class PacksModuleService extends MedusaService({
     if (input.proofImages !== undefined) patch.proof_images = input.proofImages;
     if (input.to === 'shipped') patch.shipped_at = new Date();
     // delivered_at doubles as completed_at post-rename.
-    if (input.to === 'completed') patch.delivered_at = new Date();
+    if (input.to === 'completed') {
+      const at = new Date(input.deliveredAt ?? Date.now());
+      patch.delivered_at = Number.isNaN(at.getTime()) ? new Date() : at;
+    }
     await this.updateDeliveryOrders([patch], sharedContext);
 
     // Pull side-effects ride the SAME transaction: completed → delivered

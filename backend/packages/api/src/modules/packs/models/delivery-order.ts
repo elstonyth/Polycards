@@ -29,6 +29,10 @@ export const DeliveryOrder = model
     ship_phone: model.text().nullable(),
     // Operator-entered (manual) — no carrier integration in v1.
     tracking_number: model.text().nullable(),
+    // Last carrier check by the shipment tracker (shipment-tracking.ts
+    // TrackingSnapshot). Written only by the tracker; carries the number it
+    // checked, so a later staff edit of tracking_number makes it stale.
+    tracking_snapshot: model.json().nullable(),
     // Proof-of-delivery photos (operator-uploaded /admin/media URLs). Stored as a
     // string[] — visible to the customer on their orders page. Array (not object)
     // so an update replaces it wholesale (Medusa's assign merges POJOs but

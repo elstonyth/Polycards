@@ -1,0 +1,294 @@
+<!-- trimmed from a real ecommerceportal.dhl.com page, 2026-10-30 -->
+<div id="trackItNowForm:publicEmailSubsMessages" class="ui-messages ui-messages-noicon ui-widget" style="display: none;" aria-live="polite"><div class="ui-messages-error ui-corner-all"><ul><li role="alert" aria-atomic="true"><span class="ui-messages-error-summary">No result found. This could be due to missing shipment or tracking details. Please try again later.</span></li></ul></div></div><div id="trackItNowForm:publicExportReportMessages" class="ui-messages ui-messages-noicon ui-widget" style="display: none;" aria-live="polite"><div class="ui-messages-error ui-corner-all"><ul><li role="alert" aria-atomic="true"><span class="ui-messages-error-summary">No result found. This could be due to missing shipment or tracking details. Please try again later.</span></li></ul></div></div>
+					</div>
+				</div>
+			</div>
+		</div><input id="trackItNowForm:trackingHidden" type="hidden" name="trackItNowForm:trackingHidden" value="0000000000000000" /></div>
+
+	
+	<script type="text/javascript">
+		//<![CDATA[
+		window.trackingContext = {
+			trackingNumbers: window.trackingContext?.trackingNumbers || new Set(),
+			tracking: '0000000000000000'
+		};
+
+		function reInitTrackingContext() {
+			const ctx = window.trackingContext;
+
+			// Reassign DOM elements every time
+			ctx.trackingList = document.getElementById('trackingList');
+			ctx.trackingInput = document.getElementById('trackingInput');
+			ctx.labelTracking = document.getElementById('labelTracking');
+			ctx.labelInput = document.getElementById('labelInput');
+			ctx.hiddenInput = document.getElementById('trackItNowForm:trackingHidden');
+			ctx.clearButton = document.getElementById('clearButton');
+
+			// Remove previous listeners (if any) then add again
+			if (ctx.trackingInput) {
+				ctx.trackingInput.removeEventListener("blur", handleBlur);
+				ctx.trackingInput.addEventListener("blur", handleBlur);
+			}
+
+			updateSearchBox(); // restore from hidden field
+		}
+
+		// Reload Tracking IDs when move between pages
+		document.addEventListener("DOMContentLoaded", reInitTrackingContext);
+		window.addEventListener("load", reInitTrackingContext);
+
+		function handleBlur() {
+			const ctx = window.trackingContext;
+			const hasInput = ctx.trackingInput?.value;
+			const hasTrackingNumbers = ctx.trackingNumbers.size !== 0;
+
+			if (hasInput || hasTrackingNumbers) {
+				setLabelText("Enter your tracking number(s)");
+				showLabel(false, true);
+			} else if (ctx.tracking) {
+				setLabelText("Enter your tracking number(s)");
+				showLabel(true, false);
+			} else {
+				setLabelText("Track up to 50 shipments. Enter tracking numbers, one per line.");
+				showLabel(true, false);
+			}
+		}
+
+		function setLabelText(text) {
+			const ctx = window.trackingContext;
+			if (ctx.labelInput) ctx.labelInput.textContent = text;
+			if (ctx.labelTracking) ctx.labelTracking.textContent = text;
+		}
+
+		function showLabel(inputVisible, trackingVisible) {
+			const ctx = window.trackingContext;
+			if (ctx.labelInput) ctx.labelInput.style.display = inputVisible ? 'block' : 'none';
+			if (ctx.labelTracking) ctx.labelTracking.style.display = trackingVisible ? 'block' : 'none';
+		}
+
+		function updateLabel() {
+			if (window.trackingContext.trackingNumbers.size !== 0) return;
+			setLabelText("Enter your tracking number(s)");
+		}
+
+		function focusTagInput() {
+			document.getElementById('trackingInput').focus();
+		}
+
+		// Handle paste from clipboard
+		function handlePaste(event) {
+			event.preventDefault();
+			let paste = (event.clipboardData || window.clipboardData).getData('text');
+			addTrackingNumbers(paste);
+		}
+
+		// Keyboard input processing (click Enter)
+		function handleKeyPress(event) {
+			const ctx = window.trackingContext;
+			const key = event.key;
+			const hasAccent = key.normalize("NFD").match(/[\u0300-\u036f]/);
+
+			if (ctx.trackingInput?.value) {
+				if (hasAccent) {
+					event.preventDefault(); // Do not enter accented characters
+				}
+
+				if (["Enter", "Tab", " "].includes(key)) {
+					event.preventDefault();
+					addShipment();
+				}
+			}
+
+			if (ctx.trackingNumbers.size > 0 && key === "Enter") {
+				event.preventDefault(); // Prevent default submission
+				let btn = document.getElementById("trackItNowForm:trackBtn");
+				let btnNext = document.getElementById("trackItNowForm:trackBtnNext");
+
+				if (btn && btn.offsetParent !== null) {
+					btn.click();
+				} else if (btnNext && btnNext.offsetParent !== null) {
+					btnNext.click();
+				}
+			}
+		}
+
+		function prepareTrackingInput(id) {
+			const ctx = window.trackingContext;
+			if (!ctx.trackingInput) return true;
+
+			let value = ctx.trackingInput.value.trim().toUpperCase();
+			ctx.trackingInput.value = value;
+
+			if (value === "" && ctx.trackingNumbers.size === 0) {
+				if (id === 'trackBtnNext') {
+					if (typeof updateTrackButtons === 'function') {
+						setTimeout(function () {
+							updateTrackButtons();
+						}, 300);
+					}
+				}
+				return true;
+			}
+			addShipment();
+			return true;
+		}
+
+		// Add tracking numbers to the list
+		function addTrackingNumbers(input) {
+			const ctx = window.trackingContext;
+
+			let values = input.split(/[\s,]+/).filter(v => v.trim() !== '');
+			let remainingSlots = 50 - ctx.trackingNumbers.size;
+			if (remainingSlots <= 0) {
+				// alert("You can only add up to 50 tracking IDs.");
+				updateTrackingInputVisibility(); // Hide input if limit reached
+				return;
+			}
+
+			// Convert all values ​​to standard form and duplicate type
+			let newValues = values.map(v => v.trim().toUpperCase())
+				.filter((v, i, self) => self.indexOf(v) === i)
+				.filter(v => !ctx.trackingNumbers.has(v));
+
+			// Limit the number of additions according to remainingSlots
+			newValues.slice(0, remainingSlots).forEach(value => ctx.trackingNumbers.add(value));
+
+			updateUI();
+			focusTagInput();
+			updateTrackingInputVisibility(); // Hide input if limit reached
+		}
+
+		// When pressing the Track button
+		function addShipment() {
+			const ctx = window.trackingContext;
+			addTrackingNumbers(ctx.trackingInput?.value || '');
+			if (ctx.trackingInput) ctx.trackingInput.value = '';
+		}
+
+		// Update UI
+		function updateUI() {
+			const ctx = window.trackingContext;
+			if (!ctx.trackingList || !ctx.trackingInput) return;
+
+			ctx.trackingList.innerHTML = '';
+
+			ctx.trackingNumbers.forEach(num => {
+				let badge = document.createElement('span');
+				badge.className = 'badge bg-secondary-subtle text-black-100 fw-normal p-2 d-flex align-items-center border-tracking-search';
+
+				let textSpan = document.createElement('span');
+				textSpan.className = 'me-3 text-uppercase fs-6';
+				textSpan.textContent = num;
+
+				let removeSpan = document.createElement('span');
+				removeSpan.className = 'text-black-100 fs-4 align-self-start ms-auto';
+				removeSpan.style.cursor = 'pointer';
+				removeSpan.style.lineHeight = '0.6';
+				removeSpan.textContent = '×';
+				removeSpan.onclick = () => removeTracking(num);
+
+				badge.appendChild(textSpan);
+				badge.appendChild(removeSpan);
+
+				ctx.trackingList.appendChild(badge);
+			});
+
+			updateTrackingHiddenInput();
+
+			if (ctx.trackingInput instanceof Node) {
+				ctx.trackingList.appendChild(ctx.trackingInput);
+			}
+			if (ctx.trackingNumbers.size === 0 && ctx.labelInput instanceof Node) {
+				ctx.trackingList.appendChild(ctx.labelInput);
+			}
+
+			ctx.clearButton?.classList.toggle('d-none', ctx.trackingNumbers.size === 0);
+		}
+
+		// Remove 1 tracking number
+		function removeTracking(num) {
+			window.trackingContext.trackingNumbers.delete(num);
+			updateUI();
+			updateTrackingInputVisibility();
+		}
+
+		// Remove all tracking numbers
+		function clearAllTracking() {
+			const ctx = window.trackingContext;
+			if (!ctx.trackingInput) return;
+
+			ctx.trackingInput.style.display = 'block';
+			ctx.trackingList.style.marginTop = ctx.trackingNumbers.size >= 1 ? '22px' : '0px';
+			ctx.trackingList.style.paddingTop = ctx.trackingNumbers.size === 0 ? '1.75rem' : '0.25rem';
+			ctx.trackingNumbers.clear();
+			updateUI();
+			focusTagInput();
+			updateTrackingInputVisibility();
+		}
+
+		function updateTrackingHiddenInput() {
+			const ctx = window.trackingContext;
+			if (ctx.hiddenInput) {
+				ctx.hiddenInput.value = ctx.trackingNumbers.size > 0
+					? Array.from(ctx.trackingNumbers).join(", ")
+					: "";
+			}
+		}
+
+		function updateTrackingInputVisibility() {
+			const ctx = window.trackingContext;
+			if (!ctx.trackingInput) return;
+
+			ctx.trackingInput.style.display = ctx.trackingNumbers.size >= 50 ? 'none' : 'block';
+			ctx.trackingList.style.marginTop = ctx.trackingNumbers.size >= 1 ? '22px' : '0px';
+			ctx.trackingList.style.paddingTop = ctx.trackingNumbers.size === 0 ? '1.75rem' : '0.25rem';
+		}
+
+		function handleAjaxEvent(data) {
+			if (data.status === 'begin') {
+				PF('blockUIWidget').show();
+			} else if (data.status === 'success' || data.status === 'complete') {
+				PF('blockUIWidget').hide();
+				// EA-2949 START
+				// grecaptcha.reset(); // Removed from main search
+				// EA-2949 END
+				reInitTrackingContext();
+				window.scrollTo(0, 0);
+			}
+		}
+
+		function updateSearchBox() {
+			const ctx = window.trackingContext;
+			if (!ctx.hiddenInput || !ctx.hiddenInput.value) return;
+
+			let values = ctx.hiddenInput.value.split(',').map(item => item.trim());
+			values.forEach(val => ctx.trackingNumbers.add(val.toUpperCase()));
+
+			updateUI();
+			handleBlur();
+			updateTrackingInputVisibility();
+		}
+
+		function showSuccessMessage(type) {
+			let containerId;
+			if (type === 'subscribe') {
+				containerId = 'publicEmailSubsMessages';
+			} else if (type === 'export') {
+				containerId = 'publicExportReportMessages';
+			}
+			const container = document.getElementById("trackItNowForm:" + containerId);
+			if (container) {
+				container.style.display = 'block';
+			}
+		}
+		//]]>
+	</script></div>
+					</div>
+				</div></span><div id="trackItNowForm:shipmentNotFound"></div><div id="trackItNowForm:shipmentInfo" class="bg-origin-destination">
+						<div id="noResultFound" class="container mt-4 mb-5 p-0 d-flex align-items-center" style="min-height: 196px !important;">
+							<div class="card p-4 shadow-sm w-100" style="min-height: 116px !important;">
+								<div class="mt-1 d-flex align-items-start gap-3">
+									<img src="/track/resources/ui-template-0.4/img/exclamation_icon.svg?version=9.2.0" class="text-black-100" alt="Exclamation Icon" style="height: 30px; width: 30px; position: relative; top: -2px;" />
+									<div>
+										<h4 class="text-black-100 fw-bold mb-2">No result found</h4>
+										<p class="mb-0 text-grey-80">No result found. This could be due to missing shipment or tracking details. Please try again later.</p>

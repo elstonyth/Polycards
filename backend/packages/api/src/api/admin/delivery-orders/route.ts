@@ -75,9 +75,12 @@ export async function GET(
     total,
     offset,
     limit,
-    orders: serialized.map((o) => ({
+    orders: serialized.map((o, i) => ({
       ...o,
       customer_email: emailById.get(o.customer_id) ?? null,
+      // Admin-only (the storefront shares serializeDeliveryOrders): the
+      // shipment tracker's last carrier check. serialized keeps orders' order.
+      tracking_snapshot: orders[i].tracking_snapshot ?? null,
     })),
   });
 }

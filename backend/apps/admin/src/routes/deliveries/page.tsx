@@ -20,6 +20,7 @@ import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePermissions } from '@mercurjs/admin';
 import {
   useBulkUpdateDeliveryOrders,
+  useCheckDeliveryTracking,
   useDeliveryOrders,
   useGatewayDeposits,
   usePulls,
@@ -30,6 +31,7 @@ import type {
   AdminDeliveryItem,
   AdminDeliveryOrder,
   DeliveryStatus,
+  DeliveryTrackingSnapshot,
   GatewayDeposit,
 } from '../../lib/admin-rest';
 import {
@@ -37,6 +39,7 @@ import {
   deliveryStatusLabel,
   orderDateTime,
   rm,
+  timeAgo,
 } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
 import { useTableSort } from '../../lib/use-table-sort';
@@ -93,6 +96,52 @@ const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
 // scans for "which card", the full manifest lives in the Manage modal.
+const CARRIER_NAME: Record<
+  NonNullable<DeliveryTrackingSnapshot['carrier']>,
+  string
+> = { ninjavan: 'Ninja Van', poslaju: 'Pos Laju' };
+
+// What the shipment tracker last heard from the carrier, under a shipped
+// order's status. A snapshot for a different number (staff re-entered it
+// since) is stale and reads as not checked yet.
+const TrackingLine = ({ order }: { order: AdminDeliveryOrder }) => {
+  if (order.status !== 'shipped' || !order.tracking_number) return null;
+  const snap = order.tracking_snapshot;
+  if (!snap || snap.tracking_number !== order.tracking_number) {
+    return (
+      <Text size="xsmall" className="text-ui-fg-muted mt-1">
+        Tracking not checked yet
+      </Text>
+    );
+  }
+  if (snap.state === 'unknown_carrier') {
+    return (
+      <Text size="xsmall" className="text-ui-fg-muted mt-1">
+        Unknown carrier, complete by hand
+      </Text>
+    );
+  }
+  const carrier = snap.carrier ? CARRIER_NAME[snap.carrier] : 'Carrier';
+  const what =
+    snap.state === 'not_found'
+      ? 'no record yet'
+      : (snap.event ?? 'no events yet');
+  return (
+    <Text
+      size="xsmall"
+      className={
+        snap.state === 'problem'
+          ? 'text-ui-fg-error mt-1 max-w-64'
+          : 'text-ui-fg-subtle mt-1 max-w-64'
+      }
+      title={snap.tracking_number}
+    >
+      {snap.state === 'problem' ? 'Problem: ' : ''}
+      {carrier}: {what} · checked {timeAgo(snap.checked_at)}
+    </Text>
+  );
+};
+
 const ItemCell = ({ items }: { items: AdminDeliveryItem[] }) => {
   const first = items[0];
   if (!first) {
@@ -383,6 +432,7 @@ const DeliveriesPage = () => {
   const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
   const bulk = useBulkUpdateDeliveryOrders();
+  const track = useCheckDeliveryTracking();
   const uploadImg = useUploadImage();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
   const [nextStatus, setNextStatus] = useState<DeliveryStatus>('processed');
@@ -447,6 +497,22 @@ const DeliveriesPage = () => {
   // belongs in the summary line; everything else is a real refusal — a missing
   // order or an illegal transition — and gets a red toast, capped at 5 so a
   // 100-id mistake doesn't bury the screen.
+  const checkTracking = async () => {
+    try {
+      const r = await track.mutateAsync();
+      const parts = [
+        `${r.completed.length} completed`,
+        r.problems.length > 0 && `${r.problems.length} need attention`,
+        r.failed.length > 0 && `${r.failed.length} could not be checked`,
+      ].filter(Boolean);
+      toast.success(
+        `Checked ${r.checked} shipped orders: ${parts.join(', ')}`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const applyBulk = async () => {
     // Clearing the selection on every view change isn't enough on its own:
     // `keepPreviousData` keeps the OLD rows rendered and checkable for the whole
@@ -555,18 +621,28 @@ const DeliveriesPage = () => {
             </Text>
           </div>
           {kind === 'shipping' && (
-            <Input
-              type="search"
-              className="w-64"
-              placeholder="Search order id"
-              aria-label="Search orders by id"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
-                clearSelection();
-              }}
-            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={checkTracking}
+                isLoading={track.isPending}
+              >
+                Check tracking
+              </Button>
+              <Input
+                type="search"
+                className="w-64"
+                placeholder="Search order id"
+                aria-label="Search orders by id"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(0);
+                  clearSelection();
+                }}
+              />
+            </div>
           )}
         </div>
         {/* Two tablists now, so each needs its own name to tell them apart.
@@ -718,6 +794,7 @@ const DeliveriesPage = () => {
                       <StatusBadge color={TONE[o.status] ?? 'grey'}>
                         {deliveryStatusLabel(o.status)}
                       </StatusBadge>
+                      <TrackingLine order={o} />
                     </Table.Cell>
                     <Table.Cell className="text-right">
                       <Button

@@ -1713,6 +1713,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // "Check tracking" — one carrier call per shipped order (Ninja Van) or
+      // per 20 (Pos Laju), plus any completions; same admin budget.
+      matcher: '/admin/delivery-orders/track',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Pack list reorder — batch rank write across the packs list; same admin
       // budget.
       matcher: '/admin/packs/reorder',

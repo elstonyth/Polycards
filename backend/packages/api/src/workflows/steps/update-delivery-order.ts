@@ -27,6 +27,11 @@ export type UpdateDeliveryOrderInput = {
    * re-checked under the order's lock.
    */
   allowed_from?: string[];
+  /**
+   * ISO time to stamp as delivered_at on a move to completed — the carrier's
+   * own delivery time, from the shipment tracker. Omitted = now.
+   */
+  delivered_at?: string;
 };
 
 export type UpdateDeliveryOrderResult = {
@@ -140,6 +145,7 @@ export const updateDeliveryOrderInvoke = async (
     pullIds,
     audit: input.audit,
     allowedFrom: input.allowed_from,
+    deliveredAt: input.delivered_at,
   });
 
   const prevPullStatus: 'delivering' | null =
