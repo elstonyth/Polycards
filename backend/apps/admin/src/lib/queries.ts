@@ -23,6 +23,7 @@ import {
 import {
   adjustCustomerCredits,
   bulkUpdateDeliveryOrders,
+  checkDeliveryTracking,
   createProductFromPriceCharting,
   deleteCard,
   deletePack,
@@ -909,6 +910,16 @@ export const useBulkUpdateDeliveryOrders = () => {
       bulkUpdateDeliveryOrders(vars.ids, vars.status),
     // Partial success is the contract, so invalidate on SETTLE (not success):
     // a throw here can still leave earlier ids in the batch already moved.
+    onSettled: () => invalidateStock(),
+  });
+};
+
+// Completions flip stock (shipped cards leave the shelf count) the same way a
+// bulk move does, so it invalidates the same keys.
+export const useCheckDeliveryTracking = () => {
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: checkDeliveryTracking,
     onSettled: () => invalidateStock(),
   });
 };
