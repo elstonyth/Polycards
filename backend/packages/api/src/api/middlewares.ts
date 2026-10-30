@@ -1792,6 +1792,14 @@ export default defineMiddlewares({
       matcher: '/store/sellers*',
       middlewares: [blockUnusedSurface],
     },
+    {
+      // Core's returns route: nothing here calls it, it asks for no login, and it
+      // runs an unbounded `items` array through zod, so it is a cheap anonymous CPU
+      // drain. No method pin, or this would sort beside core's validator and run
+      // after it. The `*` stops short of /store/return-reasons.
+      matcher: '/store/returns*',
+      middlewares: [blockUnusedSurface],
+    },
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a
