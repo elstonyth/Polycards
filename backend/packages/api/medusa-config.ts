@@ -222,6 +222,18 @@ module.exports = defineConfig({
     // overrides the default with no patching. Keep it — dropping it silently
     // restores sameSite:'none' in production.
     cookieOptions: { sameSite: 'lax' },
+    // Admin logins renew while they are used (express-session 'rolling'): the
+    // framework's 10-hour session maxAge then counts from the LAST request,
+    // not from sign-in. Without it a login died mid-shift and every save
+    // answered 401 "Unauthorized" (Anson's delivery photos, 2026-10-30). An
+    // admin left idle for 10 hours still has to sign in again, and no login
+    // lasts past 24 hours (src/api/utils/admin-session-cap.ts).
+    //
+    // resave: false (the framework default is true): with rolling, a request
+    // still running when the admin signs out would save the destroyed session
+    // back and re-send its cookie. connect-redis still slides the store TTL
+    // through touch() on every request.
+    sessionOptions: { rolling: true, resave: false },
     http: {
       storeCors: process.env.STORE_CORS!,
       adminCors: process.env.ADMIN_CORS!,
