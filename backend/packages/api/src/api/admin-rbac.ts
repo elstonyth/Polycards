@@ -171,14 +171,16 @@ const METHODS_BY_OPERATION = Object.entries(OPERATION_BY_METHOD).reduce<
  *
  *  Automation reads and runs on `automation:*` alone, so the automation
  *  operator role (scripts/create-automation-operator.ts) works without
- *  `customer:read`. Saving the account list also asks `customer:read`: it
+ *  `customer:read`. Saving the account list also asks `customer:update`: it
  *  accepts ANY registered customer's email, and a live run then opens packs on
- *  that customer's wallet. Only staff choose which accounts automation touches. */
+ *  that customer's wallet. Only staff choose which accounts automation touches.
+ *  Not `customer:read`, which a view-only role beside the operator role holds
+ *  (scripts/grant-support-viewer.ts). */
 export const adminRbacRoutes: MiddlewareRoute[] = [
   {
     matcher: '/admin/automation/accounts',
     methods: ['POST'],
-    policies: [{ resource: 'customer', operation: 'read' }],
+    policies: [{ resource: 'customer', operation: 'update' }],
   },
   {
     // The mailing list carries customer names, addresses, phones and emails:

@@ -187,10 +187,10 @@ medusaIntegrationTestRunner({
           expect({ path, status: res.status }).toEqual({ path, status: 200 });
         }
         // The account list takes any customer's email and a live run spends
-        // that customer's wallet, so only staff (customer:read) may change it.
+        // that customer's wallet, so only staff (customer:update) may change it.
         const save = await call('post', '/admin/automation/accounts', token);
         expect(save.status).toBe(403);
-        expect(save.data.message).toContain('customer:read');
+        expect(save.data.message).toContain('customer:update');
 
         for (const path of [
           '/admin/customers',
