@@ -139,12 +139,21 @@ try {
     // 127.0.0.1 origin fails PokemonToken's crossOrigin measure. Upgrade by
     // allowlisting the CI origin on the Spaces bucket.
     const MEDIA = 'polycards-media.sgp1.cdn.digitaloceanspaces.com';
+    const isMedia = (url) => {
+      try {
+        return new URL(url).hostname === MEDIA;
+      } catch {
+        return false;
+      }
+    };
     spinPage.on('console', (m) => {
       if (m.type() !== 'error') return;
       const t = m.text();
-      if (t.includes('blocked by CORS policy') && t.includes(MEDIA)) return;
-      if (t.includes('net::ERR_FAILED') && m.location().url.includes(MEDIA))
-        return;
+      const blocked = t.match(
+        /Access to \S+ at '([^']+)'.*blocked by CORS policy/,
+      );
+      if (blocked && isMedia(blocked[1])) return;
+      if (t.includes('net::ERR_FAILED') && isMedia(m.location().url)) return;
       spinErrors.push(`console: ${t}`);
     });
     try {
