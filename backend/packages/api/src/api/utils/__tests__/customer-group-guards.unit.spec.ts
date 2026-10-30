@@ -1,20 +1,20 @@
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
   blockGroupWithdrawals,
-  GROUP_FIELDS_MESSAGE,
   GROUP_ODDS_SET_METADATA_MESSAGE,
   GROUP_POLICY_METADATA_MESSAGE,
-  refuseGroupFields,
+  PRIVATE_FIELDS_MESSAGE,
+  refusePrivateFields,
   rejectGroupOddsSetUpdate,
   rejectGroupPolicyMetadata,
   stripAdditionalData,
   WITHDRAWALS_BLOCKED_MESSAGE,
 } from '../customer-group-guards';
 
-describe('refuseGroupFields', () => {
+describe('refusePrivateFields', () => {
   const run = (fields: unknown) =>
     new Promise<unknown>((resolve) => {
-      refuseGroupFields({ query: { fields } } as never, {} as never, resolve);
+      refusePrivateFields({ query: { fields } } as never, {} as never, resolve);
     });
 
   it.each([
@@ -23,6 +23,10 @@ describe('refuseGroupFields', () => {
     'customer_groups.*',
     'customer_group_link.customer_group.metadata',
     'GROUPS.*',
+    'seller.*',
+    '*seller',
+    'id,sellers.email',
+    'SELLER.members.*',
     // A repeated `fields` parses to an array or an object, never a string.
     ['id', '+groups.metadata'],
     { a: 'groups.metadata' },
@@ -30,7 +34,7 @@ describe('refuseGroupFields', () => {
     const err = (await run(fields)) as MedusaError;
     expect(err).toBeInstanceOf(MedusaError);
     expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
-    expect(err.message).toBe(GROUP_FIELDS_MESSAGE);
+    expect(err.message).toBe(PRIVATE_FIELDS_MESSAGE);
   });
 
   // The storefront's session read sends '+metadata'; a refusal here logs out

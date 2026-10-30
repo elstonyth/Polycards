@@ -128,32 +128,31 @@ export function rejectGroupOddsSetUpdate(
   next();
 }
 
-export const GROUP_FIELDS_MESSAGE =
-  'Customer group fields are not available on this API.';
+export const PRIVATE_FIELDS_MESSAGE =
+  'Those fields are not available on this API.';
 
 /**
- * Blanket '/store/*' entry: refuse a `fields` query that names customer groups.
- * Group metadata holds private settings (odds_set, the withdrawal block), and
- * core enforces a route's `allowed` list only behind the rbac_filter_fields
- * flag. So `fields` reached it on the customer, address, order and payment
- * collection routes, and anonymously on /store/sellers (Mercur's
- * seller.customer_groups link).
+ * Blanket '/store/*' entry: refuse a `fields` query that names customer groups or
+ * the seller. Group metadata holds private settings (odds_set, the withdrawal
+ * block), and the seller holds staff and payment details. Core enforces a route's
+ * `allowed` list only behind the rbac_filter_fields flag, so `fields` reached them
+ * from the customer, address, order and payment collection routes.
  *
- * Matches the word, not a route list: every relation into customer_group has
- * "group" in its alias (groups, customer_groups, customer_group_link), and
+ * Matches the words, not a route list: every relation into them has the word in
+ * its alias (groups, customer_groups, customer_group_link; seller, sellers), and
  * wildcards (`*`, `*customer`, `customer.*`) stop at scalar columns. Pinned by
  * integration-tests/http/store-group-fields.spec.ts.
  *
  * JSON.stringify because a repeated `fields` parses to an array or an object.
  */
-export function refuseGroupFields(
+export function refusePrivateFields(
   req: MedusaRequest,
   _res: MedusaResponse,
   next: MedusaNextFunction,
 ): void {
-  if (/group/i.test(JSON.stringify(req.query.fields))) {
+  if (/group|seller/i.test(JSON.stringify(req.query.fields))) {
     next(
-      new MedusaError(MedusaError.Types.INVALID_DATA, GROUP_FIELDS_MESSAGE),
+      new MedusaError(MedusaError.Types.INVALID_DATA, PRIVATE_FIELDS_MESSAGE),
     );
     return;
   }

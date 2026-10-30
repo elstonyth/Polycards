@@ -36,7 +36,7 @@ import {
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
   blockGroupWithdrawals,
-  refuseGroupFields,
+  refusePrivateFields,
   rejectGroupOddsSetUpdate,
   rejectGroupPolicyMetadata,
   stripAdditionalData,
@@ -1781,9 +1781,15 @@ export default defineMiddlewares({
     {
       // Core's cart routes. Nothing here calls them (packs are bought through
       // /store/packs/*), and even a bare POST /store/carts answers with
-      // customer.groups.id in its default fields, which refuseGroupFields cannot
+      // customer.groups.id in its default fields, which refusePrivateFields cannot
       // see. No method pin, and the trailing `*` takes every sub-route.
       matcher: '/store/carts*',
+      middlewares: [blockUnusedSurface],
+    },
+    {
+      // Mercur's seller routes: nothing here calls them, and they answer with no
+      // login. There is one house seller, so there is nothing to browse.
+      matcher: '/store/sellers*',
       middlewares: [blockUnusedSurface],
     },
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
@@ -1801,14 +1807,14 @@ export default defineMiddlewares({
     // traffic, which the guard passes straight through. That also means this
     // covers the framework-authed routes that have no entry in this array
     // (/store/customers/me and its addresses), which per-matcher wiring would
-    // have missed. refuseGroupFields shares the entry for the same reason: core
-    // and Mercur routes with no entry here are where `fields` reached groups.
+    // have missed. refusePrivateFields shares the entry for the same reason: core
+    // and Mercur routes with no entry here are where `fields` reached them.
     {
       matcher: '/store/*',
       middlewares: [
         noStoreForAuthenticatedStore,
         blockDisabledCustomerSession,
-        refuseGroupFields,
+        refusePrivateFields,
       ],
     },
     // The /admin twin of the entry above — read the two as a pair. Same

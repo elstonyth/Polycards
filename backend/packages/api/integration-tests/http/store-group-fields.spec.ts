@@ -8,20 +8,21 @@ jest.setTimeout(240 * 1000);
 const PASSWORD = 'group-fields-test-password-1';
 const GROUP_NAME = 'group-fields-secret-name';
 const GROUP_SECRET = 'group-fields-secret-value';
+const SELLER_EMAIL = 'house@polycards.local';
 
 // Exact body, not just the 400: a repeated `fields` already gets a 400 from
 // core's validator, so a status-only check would stay green with the guard gone.
 const REFUSED = {
   type: 'invalid_data',
-  message: 'Customer group fields are not available on this API.',
+  message: 'Those fields are not available on this API.',
 };
 
 // customer_group.metadata holds private settings (odds_set, the withdrawal
-// block). Every path below returned it to the caller until refuseGroupFields
-// and the /store/carts* block (middlewares.ts) went in: core only enforces a
-// route's `allowed` list behind the rbac_filter_fields flag, and the /store
-// routes here have no `disallowed` entry for groups. Unwire either and this
-// file goes red.
+// block), and the seller holds staff and payment details. Every path below
+// returned them to the caller until refusePrivateFields and the /store/carts* and
+// /store/sellers* blocks (middlewares.ts) went in: core only enforces a route's
+// `allowed` list behind the rbac_filter_fields flag, and the /store routes here
+// have no `disallowed` entry for them. Unwire any of these and this file goes red.
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
@@ -136,7 +137,7 @@ medusaIntegrationTestRunner({
           {
             name: 'House',
             handle: 'house',
-            email: 'house@polycards.local',
+            email: SELLER_EMAIL,
             currency_code: 'myr',
             status: SellerStatus.OPEN,
           },
@@ -156,6 +157,10 @@ medusaIntegrationTestRunner({
           items: [{ title: 'Pack', quantity: 1, unit_price: 1 }],
         });
         orderId = order.id;
+        await link.create({
+          [Modules.ORDER]: { order_id: orderId },
+          [MercurModules.SELLER]: { seller_id: sellerId },
+        });
 
         const cart = await container.resolve(Modules.CART).createCarts({
           email,
@@ -283,22 +288,39 @@ medusaIntegrationTestRunner({
         }
       });
 
-      it('refuses the anonymous seller routes', async () => {
-        for (const fields of [
-          'customer_groups.metadata',
-          '%2Bcustomer_groups.metadata',
-          '*customer_groups',
-          'customer_groups.*',
-          'customer_group_link.customer_group.metadata',
-          '*customer_group_link',
+      // The anonymous one matters most: an order id is all it takes.
+      it('refuses seller fields wherever they are reachable', async () => {
+        for (const fields of ['seller.*', '*seller', 'id,seller.email', 'SELLER.*']) {
+          await expectRefused('get', `/store/orders/${orderId}?fields=${fields}`, anon);
+          await expectRefused('get', `/store/orders?fields=${fields}`, authed);
+          await expectRefused('get', `/store/products?fields=${fields}`, anon);
+        }
+        await expectRefused('get', '/store/customers/me?fields=sellers.*', authed);
+        await expectRefused('get', '/store/customers/me?fields=*sellers', authed);
+      });
+
+      it('closes /store/sellers* outright, and the guard covers any route like it', async () => {
+        for (const path of [
+          '/store/sellers',
+          '/STORE/SELLERS',
+          '/store/sellers?fields=id',
+          '/store/sellers?fields=*',
+          '/store/sellers?fields=*customer_groups',
+          `/store/sellers/${sellerId}`,
+          `/store/sellers/${sellerId}?fields=customer_groups.*`,
         ]) {
-          await expectRefused('get', `/store/sellers?fields=${fields}`, anon);
-          await expectRefused(
-            'get',
-            `/store/sellers/${sellerId}?fields=${fields}`,
-            anon,
+          const res = await send('get', path, anon);
+          expect({ path, status: res.status, message: res.data?.message }).toEqual(
+            { path, status: 404, message: 'Not found' },
           );
         }
+        // Fields naming groups are refused before any route runs, so a future
+        // route with the same relation is covered too.
+        await expectRefused(
+          'get',
+          '/store/regions?fields=customer_groups.metadata',
+          anon,
+        );
       });
 
       it('closes /store/carts* outright', async () => {
@@ -338,14 +360,18 @@ medusaIntegrationTestRunner({
           ['/store/customers/me/addresses?fields=customer.*', authed],
           ['/store/orders?fields=*customer', authed],
           [`/store/orders/${orderId}?fields=customer.*`, anon],
-          ['/store/sellers?fields=*', anon],
+          [`/store/orders/${orderId}`, anon],
+          [`/store/orders/${orderId}?fields=*`, anon],
         ] as const) {
           const res = await send('get', path, headers);
           const seen = JSON.stringify(res.data);
           expect({
             path,
             status: res.status,
-            leaked: seen.includes(GROUP_SECRET) || seen.includes(GROUP_NAME),
+            leaked:
+              seen.includes(GROUP_SECRET) ||
+              seen.includes(GROUP_NAME) ||
+              seen.includes(SELLER_EMAIL),
           }).toEqual({ path, status: 200, leaked: false });
         }
         for (const query of [
@@ -392,12 +418,6 @@ medusaIntegrationTestRunner({
         );
         expect(addresses.status).toBe(200);
         expect(addresses.data.addresses).toHaveLength(1);
-
-        const sellers = await send('get', '/store/sellers?fields=id', anon);
-        expect(sellers.status).toBe(200);
-        expect(sellers.data.sellers.map((s: { id: string }) => s.id)).toEqual([
-          sellerId,
-        ]);
       });
     });
   },
