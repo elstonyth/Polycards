@@ -36,6 +36,7 @@ import {
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
   blockGroupWithdrawals,
+  refuseGroupFields,
   rejectGroupOddsSetUpdate,
   rejectGroupPolicyMetadata,
   stripAdditionalData,
@@ -209,7 +210,7 @@ const mediaUploadMiddleware = (
 // dormant here (single house seller, no staff invites) and intentionally
 // closed. When P2P/staff onboarding is built, re-open /register behind the
 // invite-gating rather than removing this block wholesale.
-const blockUnusedVendorSelfRegistration = (
+const blockUnusedSurface = (
   _req: MedusaRequest,
   _res: MedusaResponse,
   next: MedusaNextFunction,
@@ -278,11 +279,11 @@ export default defineMiddlewares({
       middlewares: [redirectRootToDashboard],
     },
     {
-      // See blockUnusedVendorSelfRegistration above — refuse anonymous seller
+      // See blockUnusedSurface above — refuse anonymous seller
       // self-registration (the money-irrelevant but prod-DB-polluting surface).
       matcher: '/vendor/sellers',
       method: 'POST',
-      middlewares: [blockUnusedVendorSelfRegistration],
+      middlewares: [blockUnusedSurface],
     },
     {
       // Defense-in-depth: refuse new `member`-actor self-registration too, so no
@@ -291,7 +292,7 @@ export default defineMiddlewares({
       // seeded house seller needs it for the /seller vendor dashboard.
       matcher: '/auth/member/emailpass/register',
       method: 'POST',
-      middlewares: [blockUnusedVendorSelfRegistration],
+      middlewares: [blockUnusedSurface],
     },
     {
       // Validated admin image upload (POST /admin/media). /admin/* is already
@@ -1777,6 +1778,14 @@ export default defineMiddlewares({
     // retier), and from-pricecharting matches the recorded convention that
     // only money-mutation routes carry this limiter. See the coverage-guard
     // spec's EXEMPT list for the one-line reason on each.
+    {
+      // Core's cart routes. Nothing here calls them (packs are bought through
+      // /store/packs/*), and even a bare POST /store/carts answers with
+      // customer.groups.id in its default fields, which refuseGroupFields cannot
+      // see. No method pin, and the trailing `*` takes every sub-route.
+      matcher: '/store/carts*',
+      middlewares: [blockUnusedSurface],
+    },
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a
@@ -1792,10 +1801,15 @@ export default defineMiddlewares({
     // traffic, which the guard passes straight through. That also means this
     // covers the framework-authed routes that have no entry in this array
     // (/store/customers/me and its addresses), which per-matcher wiring would
-    // have missed.
+    // have missed. refuseGroupFields shares the entry for the same reason: core
+    // and Mercur routes with no entry here are where `fields` reached groups.
     {
       matcher: '/store/*',
-      middlewares: [noStoreForAuthenticatedStore, blockDisabledCustomerSession],
+      middlewares: [
+        noStoreForAuthenticatedStore,
+        blockDisabledCustomerSession,
+        refuseGroupFields,
+      ],
     },
     // The /admin twin of the entry above — read the two as a pair. Same
     // blanket-matcher rationale: the framework registers

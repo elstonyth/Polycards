@@ -128,6 +128,38 @@ export function rejectGroupOddsSetUpdate(
   next();
 }
 
+export const GROUP_FIELDS_MESSAGE =
+  'Customer group fields are not available on this API.';
+
+/**
+ * Blanket '/store/*' entry: refuse a `fields` query that names customer groups.
+ * Group metadata holds private settings (odds_set, the withdrawal block), and
+ * core enforces a route's `allowed` list only behind the rbac_filter_fields
+ * flag. So `fields` reached it on the customer, address, order and payment
+ * collection routes, and anonymously on /store/sellers (Mercur's
+ * seller.customer_groups link).
+ *
+ * Matches the word, not a route list: every relation into customer_group has
+ * "group" in its alias (groups, customer_groups, customer_group_link), and
+ * wildcards (`*`, `*customer`, `customer.*`) stop at scalar columns. Pinned by
+ * integration-tests/http/store-group-fields.spec.ts.
+ *
+ * JSON.stringify because a repeated `fields` parses to an array or an object.
+ */
+export function refuseGroupFields(
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  if (/group/i.test(JSON.stringify(req.query.fields))) {
+    next(
+      new MedusaError(MedusaError.Types.INVALID_DATA, GROUP_FIELDS_MESSAGE),
+    );
+    return;
+  }
+  next();
+}
+
 export const WITHDRAWALS_BLOCKED_MESSAGE =
   'Withdrawals are not available on this account.';
 

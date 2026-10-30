@@ -1,13 +1,47 @@
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
   blockGroupWithdrawals,
+  GROUP_FIELDS_MESSAGE,
   GROUP_ODDS_SET_METADATA_MESSAGE,
   GROUP_POLICY_METADATA_MESSAGE,
+  refuseGroupFields,
   rejectGroupOddsSetUpdate,
   rejectGroupPolicyMetadata,
   stripAdditionalData,
   WITHDRAWALS_BLOCKED_MESSAGE,
 } from '../customer-group-guards';
+
+describe('refuseGroupFields', () => {
+  const run = (fields: unknown) =>
+    new Promise<unknown>((resolve) => {
+      refuseGroupFields({ query: { fields } } as never, {} as never, resolve);
+    });
+
+  it.each([
+    '+groups.metadata',
+    '*customer.groups',
+    'customer_groups.*',
+    'customer_group_link.customer_group.metadata',
+    'GROUPS.*',
+    // A repeated `fields` parses to an array or an object, never a string.
+    ['id', '+groups.metadata'],
+    { a: 'groups.metadata' },
+  ])('refuses %j', async (fields) => {
+    const err = (await run(fields)) as MedusaError;
+    expect(err).toBeInstanceOf(MedusaError);
+    expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+    expect(err.message).toBe(GROUP_FIELDS_MESSAGE);
+  });
+
+  // The storefront's session read sends '+metadata'; a refusal here logs out
+  // every customer (getCustomerSession treats any non-2xx as logged out).
+  it.each([undefined, '', '+metadata', 'id,email', '*customer', ['id', 'email']])(
+    'passes %j',
+    async (fields) => {
+      expect(await run(fields)).toBeUndefined();
+    },
+  );
+});
 
 describe('rejectGroupOddsSetUpdate', () => {
   const run = (path: string, body: unknown) =>
