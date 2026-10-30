@@ -48,4 +48,13 @@ describe('sentryDataCollection', () => {
       request.deny.some((term) => header.toLowerCase().includes(term)),
     ).toBe(true);
   });
+
+  // Same-origin requests send the page's whole URL as Referer, so a reset link's
+  // token would reach server spans through this header.
+  it('filters the Referer request header', () => {
+    const request = (
+      sentryDataCollection?.httpHeaders as { request: { deny: string[] } }
+    ).request;
+    expect(request.deny.some((term) => 'referer'.includes(term))).toBe(true);
+  });
 });
