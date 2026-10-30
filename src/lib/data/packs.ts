@@ -27,11 +27,14 @@ import {
   PackDetailPageSchema,
   RecentPullsPageSchema,
   PullGapsSchema,
+  TicketOddsRowSchema,
+  parseList,
   type ZodType,
 } from '@/lib/data/schemas';
 import {
   CATEGORIES as CATEGORY_META,
   CAT_ICON,
+  ticketCard,
   type Pack,
   type PackCategory,
   type PackCard,
@@ -60,6 +63,7 @@ interface BackendPack {
   in_stock?: boolean;
   group?: 'GRADED' | 'RAW' | 'MIX' | null;
   psa10?: boolean;
+  prize_type?: 'cards' | 'tickets';
 }
 
 const toPack = (p: BackendPack): Pack => ({
@@ -68,7 +72,9 @@ const toPack = (p: BackendPack): Pack => ({
   priceMyr: p.price,
   image: p.image,
   displayImage: p.display_image || undefined,
-  boost: p.boost || undefined,
+  // `boost` is only ever a buyback badge, and a ticket has no buyback.
+  boost: (p.prize_type !== 'tickets' && p.boost) || undefined,
+  prizeType: p.prize_type === 'tickets' ? 'tickets' : undefined,
   buybackPercent:
     typeof p.buyback_percent === 'number' ? p.buyback_percent : undefined,
   inStock: p.in_stock === false ? false : undefined,
@@ -339,6 +345,19 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
   const row = await packRow(slug, 'pack-detail', PackDetailPageSchema);
   if (!row) return null;
   const { published_odds, demo_odds } = row;
+  if (row.prize_type === 'tickets') {
+    const pool = parseList(TicketOddsRowSchema, row.odds).map((o) =>
+      ticketCard(o.tickets, o.rarity),
+    );
+    return pool.length === 0
+      ? null
+      : {
+          topHits: [],
+          pool,
+          publishedOdds: parsePublishedOdds(published_odds),
+          demoOdds: parsePublishedOdds(demo_odds),
+        };
+  }
   const valid = row.odds as unknown as BackendOddsEntry[];
   if (valid.length === 0) return null;
 

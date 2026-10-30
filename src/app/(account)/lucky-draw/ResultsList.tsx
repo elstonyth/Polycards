@@ -5,14 +5,22 @@ import { Pill } from '@/components/ui/pill';
 import { UnavailablePanel } from '@/components/task-ui';
 import { num } from '@/lib/format';
 import { getLuckyDrawResults } from '@/lib/actions/lucky-draw';
+import { eventRowId } from '@/lib/lucky-draw';
 import type { LuckyDrawResult } from '@/lib/data/schemas';
 import { mytWhen, PersonChip, PrizeArt } from './PrizeCard';
 
 type Loaded = { rows: LuckyDrawResult[]; next: string | null };
 
 /** Every past draw across events, newest first (spec §9), a page at a time
- *  through `next_before`. Read when the tab opens, so a fresh draw shows. */
-export function ResultsList({ onOpen }: { onOpen: (prizeId: string) => void }) {
+ *  through `next_before`: one row per one-winner event, one per old prize. Read
+ *  when the tab opens, so a fresh draw shows. */
+export function ResultsList({
+  onOpen,
+  onOpenEvent,
+}: {
+  onOpen: (prizeId: string) => void;
+  onOpenEvent: (eventId: string, eventName: string) => void;
+}) {
   const [loaded, setLoaded] = useState<Loaded | null | 'failed'>(null);
   const [more, startMore] = useTransition();
 
@@ -63,48 +71,57 @@ export function ResultsList({ onOpen }: { onOpen: (prizeId: string) => void }) {
   return (
     <div>
       <ul className="space-y-2">
-        {loaded.rows.map((r) => (
-          <li key={r.prize_id}>
-            <button
-              type="button"
-              onClick={() => onOpen(r.prize_id)}
-              className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3 text-left transition-colors outline-none hover:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-white/40"
-            >
-              <span className="relative aspect-[5/7] w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
-                <span className="relative block h-full w-full">
-                  <PrizeArt src={r.image} />
-                </span>
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-white">
-                  {r.title}
-                </span>
-                {r.winner ? (
-                  <PersonChip
-                    person={r.winner}
-                    size={20}
-                    className="mt-1 text-xs text-neutral-300"
-                  />
-                ) : (
-                  <span className="mt-1 block text-xs text-neutral-400">
-                    No entries
+        {loaded.rows.map((r) => {
+          const eventId = eventRowId(r);
+          const title = (eventId && r.event_name) || r.title;
+          return (
+            <li key={eventId ?? r.prize_id}>
+              <button
+                type="button"
+                onClick={() =>
+                  eventId ? onOpenEvent(eventId, title) : onOpen(r.prize_id)
+                }
+                className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3 text-left transition-colors outline-none hover:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-white/40"
+              >
+                <span className="relative aspect-[5/7] w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
+                  <span className="relative block h-full w-full">
+                    <PrizeArt src={r.image} />
                   </span>
-                )}
-                <span className="mt-1 block text-[11px] text-neutral-400 tabular-nums">
-                  {r.winner
-                    ? `${num(r.winner_tickets)} of ${num(r.total_tickets)} tickets · `
-                    : ''}
-                  {num(r.entrant_count)}{' '}
-                  {r.entrant_count === 1 ? 'entrant' : 'entrants'} ·{' '}
-                  {mytWhen(r.drawn_at)}
                 </span>
-              </span>
-              <span aria-hidden className="shrink-0 text-neutral-400">
-                &rarr;
-              </span>
-            </button>
-          </li>
-        ))}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-white">
+                    {title}
+                  </span>
+                  {r.winner ? (
+                    <PersonChip
+                      person={r.winner}
+                      size={20}
+                      className="mt-1 text-xs text-neutral-300"
+                    />
+                  ) : (
+                    <span className="mt-1 block text-xs text-neutral-400">
+                      No entries
+                    </span>
+                  )}
+                  <span className="mt-1 block text-[11px] text-neutral-400 tabular-nums">
+                    {eventId && r.prize_count != null
+                      ? `${num(r.prize_count)} ${r.prize_count === 1 ? 'prize' : 'prizes'} · `
+                      : ''}
+                    {r.winner
+                      ? `${num(r.winner_tickets)} of ${num(r.total_tickets)} tickets · `
+                      : ''}
+                    {num(r.entrant_count)}{' '}
+                    {r.entrant_count === 1 ? 'entrant' : 'entrants'} ·{' '}
+                    {mytWhen(r.drawn_at)}
+                  </span>
+                </span>
+                <span aria-hidden className="shrink-0 text-neutral-400">
+                  &rarr;
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
       {loaded.next && (
         <div className="mt-4 flex justify-center">

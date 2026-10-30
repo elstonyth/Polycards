@@ -4,10 +4,12 @@ import {
   MAX_PUBLISHED_DECIMALS,
   PACK_LANGUAGES,
   PACK_TYPES,
+  PRIZE_TYPES,
   PUBLISHED_DECIMALS_DEFAULT,
   type PackLanguage,
   type PackType,
   type PackWriteInput,
+  type PrizeType,
   type PublishedOdds,
 } from '../../../workflows/steps/create-pack';
 import { FLAT_PERCENT } from '../../../modules/packs/buyback-rate';
@@ -294,11 +296,24 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     bad('Only the free welcome pack may have a price of 0.');
   }
 
+  // What a spin wins. Neither reserved category is ever bought, and tickets must
+  // be: a spin at price 0 would be free tickets.
+  if (b.prize_type !== undefined && !oneOf(PRIZE_TYPES, b.prize_type)) {
+    bad(`'prize_type' must be one of: ${PRIZE_TYPES.join(', ')}.`);
+  }
+  if (
+    b.prize_type === 'tickets' &&
+    (category === FREE_WELCOME_CATEGORY || category === 'reward_box')
+  ) {
+    bad(`A '${category}' pack cannot be a ticket pack.`);
+  }
+
   return {
     slug,
     title: reqStr(b, 'title'),
     category,
     ...coercePackTags(b),
+    prize_type: b.prize_type as PrizeType | undefined,
     price,
     image: imageStr(b, 'image'),
     display_image: optImageStr(b, 'display_image'),

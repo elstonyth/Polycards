@@ -906,6 +906,13 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
     },
     {
+      // Enter a one_winner event (POST /store/lucky-draw/events/:id/enter) — the
+      // same spend, so the same budget.
+      matcher: '/store/lucky-draw/events/*/enter',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+    },
+    {
       // The customer's in-app notification feed (GET /store/notifications).
       // receiver_id is scoped to the verified bearer token in the route handler —
       // never from query/body — so this entry is the auth + rate-limit gate only.
@@ -1563,6 +1570,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Withdraw a one_winner event and refund every entrant
+      // (POST /admin/lucky-draw/events/:id/withdraw).
+      matcher: '/admin/lucky-draw/events/*/withdraw',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Lucky Draw prize create / edit (POST /admin/lucky-draw/prizes).
       matcher: '/admin/lucky-draw/prizes',
       method: 'POST',
@@ -1745,6 +1759,13 @@ export default defineMiddlewares({
       // Pack members write (POST /admin/packs/:slug/members) — rewrites which
       // cards a pack can pull; same admin money-mutation budget.
       matcher: '/admin/packs/*/members',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Ticket pack table write (POST /admin/packs/:slug/ticket-prizes) — the
+      // same pull table, for a pack that sells tickets; same budget.
+      matcher: '/admin/packs/*/ticket-prizes',
       method: ['POST'],
       middlewares: [adminActionRateLimit],
     },

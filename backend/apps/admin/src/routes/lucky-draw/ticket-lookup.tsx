@@ -6,8 +6,8 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { whenLabel } from './lucky-draw-draft';
 
 /** Support lookup: a customer id in, their ticket balance and newest ledger
- *  rows out. Tickets only ever come from task claims and refunds, so the
- *  history reads as a statement. */
+ *  rows out. Tickets only ever come from task claims, Lucky Packs, gifts and
+ *  refunds, so the history reads as a statement. */
 export const TicketLookup = () => {
   const [input, setInput] = useState('');
   const [customerId, setCustomerId] = useState<string | null>(null);
@@ -102,7 +102,9 @@ export const TicketLookup = () => {
                       {r.delta > 0 ? '+' : ''}
                       {r.delta.toLocaleString()}
                     </Table.Cell>
-                    <Table.Cell>{r.reason}</Table.Cell>
+                    <Table.Cell>
+                      {r.reason === 'pack_spin' ? 'Lucky Pack' : r.reason}
+                    </Table.Cell>
                     <Table.Cell className="text-ui-fg-muted break-all">
                       {r.ref}
                     </Table.Cell>

@@ -78,6 +78,7 @@ export type CustomerWallet = Pick<
   | 'listCards'
   | 'listPacks'
   | 'listPulls'
+  | 'listTicketSpins'
   | 'mutateCustomerMetadata'
   | 'otherPayoutAccountHolders'
   | 'walletSummary'

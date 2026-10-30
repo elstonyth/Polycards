@@ -203,9 +203,9 @@ interface NormalizedRoll {
 /**
  * The sell-back offer for one roll — the ONLY place one is built.
  *
- * A null `pullId` (demo card, regressed response) is the only thing that
- * yields no offer. Everything else gets one, falling back to the flat catalog
- * rate when an older backend quoted nothing.
+ * A null `pullId` (demo card, ticket roll, regressed response) is the only thing
+ * that yields no offer. Everything else gets one, falling back to the flat
+ * catalog rate when an older backend quoted nothing.
  */
 function buildOffer(
   roll: NormalizedRoll,

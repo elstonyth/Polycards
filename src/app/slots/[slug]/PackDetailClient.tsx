@@ -31,6 +31,7 @@ import {
   FREE_PULL_LOCKED_MESSAGE,
   factoryVideo,
   groupPacks,
+  isTicketPack,
 } from '@/lib/packs-data';
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
@@ -278,6 +279,10 @@ export default function PackDetailClient({
   // siblings list is empty (it is not in the catalog), so `active` can never
   // become a different, paid pack.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+  // Pays Lucky Draw tickets: no card to show or sell, so every section below
+  // that assumes one goes. The odds panel's value rows need no check of their
+  // own, because a ticket row has no price (see ticketCard).
+  const ticketPack = isTicketPack(pack);
   // One Piece / sports packs: the prize badges never guess a Pokémon.
   const pokemonPack = isPokemonPack(pack.categoryId);
   // The free pack, reached by someone who cannot claim it — a spent claim OR a
@@ -557,15 +562,17 @@ export default function PackDetailClient({
                   {freeClaimUnavailable ? 'Unavailable' : 'Free'}
                 </span>
               ) : (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
-                  {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% instant
-                  buyback
-                  <Info className="h-3 w-3 opacity-80" aria-hidden />
-                </span>
+                !ticketPack && (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
+                    {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% instant
+                    buyback
+                    <Info className="h-3 w-3 opacity-80" aria-hidden />
+                  </span>
+                )
               )}
             </div>
 
-            {!isFreePack && (
+            {!isFreePack && !ticketPack && (
               <p className="px-5 pt-4 text-[12px] leading-relaxed text-neutral-400">
                 The pack rate applies during the reveal countdown. Leaving the
                 reveal or letting the timer expire changes buyback to{' '}
@@ -833,7 +840,7 @@ export default function PackDetailClient({
               back to the full pool under an "All cards" header, so the pool
               keeps an entry point instead of vanishing under an odds panel
               with nothing to point at. */}
-          {pool.length > 0 && (
+          {pool.length > 0 && !ticketPack && (
             <Reveal as="section">
               <PoolByRarity
                 rail={topPool}
@@ -870,27 +877,29 @@ export default function PackDetailClient({
           </Reveal>
         )}
 
-        <Reveal as="section" delay={90} className="h-full min-w-0">
-          <div className="mb-3 flex items-center gap-2">
-            <Clock className="h-4 w-4 text-white/50" aria-hidden />
-            <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-              Recent Pulls
-            </h2>
-          </div>
-          {/* THIS pack's history — seeded from the server snapshot, then
-              polled so anyone's pull shows up here without a reload. Sibling
-              links load the selected pack's route and its own history seed. */}
-          <PullHistory
-            initial={recentPulls}
-            packSlug={active.id}
-            // A feed row IS a card seed (one view). Its pokemonDex/spriteImage
-            // are null: /store/pulls/recent doesn't send them, so threading
-            // them is a backend change, not an omission. The badge falls to
-            // name-derivation for a card opened from this feed — visible only
-            // on a card whose admin-configured sprite differs from its name.
-            onSelect={setOpenCard}
-          />
-        </Reveal>
+        {!ticketPack && (
+          <Reveal as="section" delay={90} className="h-full min-w-0">
+            <div className="mb-3 flex items-center gap-2">
+              <Clock className="h-4 w-4 text-white/50" aria-hidden />
+              <h2 className="font-heading text-lg font-bold tracking-tight text-white">
+                Recent Pulls
+              </h2>
+            </div>
+            {/* THIS pack's history — seeded from the server snapshot, then
+                polled so anyone's pull shows up here without a reload. Sibling
+                links load the selected pack's route and its own history seed. */}
+            <PullHistory
+              initial={recentPulls}
+              packSlug={active.id}
+              // A feed row IS a card seed (one view). Its pokemonDex/spriteImage
+              // are null: /store/pulls/recent doesn't send them, so threading
+              // them is a backend change, not an omission. The badge falls to
+              // name-derivation for a card opened from this feed — visible only
+              // on a card whose admin-configured sprite differs from its name.
+              onSelect={setOpenCard}
+            />
+          </Reveal>
+        )}
       </div>
 
       {/* ===== Mobile buy dock =====
@@ -931,7 +940,9 @@ export default function PackDetailClient({
                       ? qty > vaultGifts
                         ? `+ ${rm(paidCost)}`
                         : 'Gift from Polycards'
-                      : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
+                      : ticketPack
+                        ? 'Lucky Draw tickets'
+                        : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
             </p>
           </div>
           <div

@@ -12,7 +12,7 @@ import { model } from "@medusajs/framework/utils";
 // storefront's packs-data.ts so /claw/[slug] keeps resolving until Phase 5
 // wires the detail page to the backend). `category` is a stable key
 // (pokemon | one-piece | basketball | baseball | football | soccer | yugioh |
-// riftbound) that the storefront maps to presentational labels/icons.
+// riftbound | poly) that the storefront maps to presentational labels/icons.
 export const Pack = model.define("pack", {
   id: model.id().primaryKey(),
   slug: model.text().unique(),
@@ -24,6 +24,10 @@ export const Pack = model.define("pack", {
   // here — it is auto-detected from the pool (card-view compositionGroup).
   pack_type: model.enum(["classic", "original", "special"]).nullable(),
   language: model.enum(["en", "jp"]).nullable(),
+  // What a spin of this pack wins: 'cards' (pack_odds rows, a pull per spin) or
+  // 'tickets' (ticket_prize rows, a ticket_spin per spin, no card anywhere). Set
+  // at creation, fixed after.
+  prize_type: model.enum(["cards", "tickets"]).default("cards"),
   // MYR (RM) price as a DECIMAL (e.g. 4.99), never cents. bigNumber maps to a numeric
   // column (+ raw_price jsonb sidecar) like every other money field here
   // (card.market_value, pull.buyback_amount, credit_transaction.amount).

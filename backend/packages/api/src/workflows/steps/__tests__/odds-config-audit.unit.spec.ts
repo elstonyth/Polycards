@@ -225,9 +225,23 @@ describe('delete-card audit', () => {
   const packsWith = () => ({
     listCards: jest.fn().mockResolvedValue([card]),
     listPulls: jest.fn().mockResolvedValue([]),
+    luckyDrawEventHoldingCard: jest.fn().mockResolvedValue(null),
     listPackOdds: jest.fn(paged(odds)),
     deletePackOdds: jest.fn(),
     deleteCards: jest.fn(),
+  });
+
+  it('refuses a card still owed by a published, undrawn Lucky Draw event', async () => {
+    const packs = packsWith();
+    packs.luckyDrawEventHoldingCard.mockResolvedValue('November Draw');
+    await expect(
+      deleteCardInvoke(
+        { handle: 'rare-a', admin_id: 'user_admin' },
+        { container: containerWith(packs) },
+      ),
+    ).rejects.toThrow(/November Draw/);
+    expect(packs.deleteCards).not.toHaveBeenCalled();
+    expect(packs.deletePackOdds).not.toHaveBeenCalled();
   });
 
   it('records the card and every odds row it held, attributed to the admin', async () => {

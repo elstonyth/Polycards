@@ -58,15 +58,9 @@ describe('getPackCategories cache contract', () => {
   it('a failed fetch is NOT cached: returns [] and the next call re-fetches', async () => {
     const catalog = queued('GET /store/packs');
     catalog.push({ status: 502, body: { message: 'backend down' } });
-    expect(await getPackCategories()).toEqual([
-      {
-        id: 'pokemon',
-        tab: 'Pokémon',
-        heading: 'Pokémon Packs',
-        icon: '/pack-index-icons/pokemon.webp',
-        packs: [],
-      },
-    ]);
+    const cats = await getPackCategories();
+    expect(cats.map((c) => c.id)).toEqual(['pokemon', 'one-piece', 'poly']);
+    expect(cats.flatMap((c) => c.packs)).toEqual([]);
 
     catalog.push({ body: { packs: [] } });
     await getPackCategories();

@@ -13,7 +13,8 @@ import { mytWhen, PrizeArt } from './PrizeCard';
 
 const REASON: Record<string, string> = {
   task_claim: 'Task reward',
-  entry: 'Entered a prize',
+  pack_spin: 'Lucky Pack',
+  entry: 'Entered a draw',
   refund: 'Refund',
 };
 
@@ -35,8 +36,9 @@ function Heading({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** My balance, the prizes I entered with their outcome, and my ticket
- *  history (spec §9). Read when the tab opens, so a fresh entry shows. */
+/** My balance, the prizes and one-winner events I entered with their outcome,
+ *  and my ticket history (spec §9). Read when the tab opens, so a fresh entry
+ *  shows. */
 export function MyTickets() {
   const [mine, setMine] = useState<LuckyDrawMine | null | 'failed'>(null);
 
@@ -85,7 +87,7 @@ export function MyTickets() {
       <Heading>My entries</Heading>
       {mine.entries.length === 0 ? (
         <p className="text-sm text-neutral-400">
-          You haven&rsquo;t entered a prize yet.
+          You haven&rsquo;t entered a draw yet.
         </p>
       ) : (
         <ul className="space-y-2">
@@ -99,7 +101,11 @@ export function MyTickets() {
               >
                 <span className="relative aspect-[5/7] w-10 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
                   <span className="relative block h-full w-full">
-                    <PrizeArt src={e.image} />
+                    {/* An event row with no art takes the gift, not the coins. */}
+                    <PrizeArt
+                      src={e.image}
+                      kind={e.event_id ? 'card' : undefined}
+                    />
                   </span>
                 </span>
                 <div className="min-w-0 flex-1">

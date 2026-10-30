@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { num, rmAuto } from '@/lib/format';
 import {
   enterLuckyDraw,
+  enterLuckyDrawEvent,
   type EnterLuckyDrawResult,
 } from '@/lib/actions/lucky-draw';
 import {
@@ -24,24 +25,41 @@ const noop = () => {};
 
 export type Entered = Extract<EnterLuckyDrawResult, { entered: true }>;
 
+/** What tickets go into: a prize, or a one-winner event dressed as its pot
+ *  (the event's id and name, the hero's art, the pot's value and tickets). */
+export type EnterTarget = Pick<
+  LuckyDrawPrize,
+  | 'id'
+  | 'title'
+  | 'image'
+  | 'kind'
+  | 'value_myr'
+  | 'my_tickets'
+  | 'total_tickets'
+>;
+
 const stepBtn =
   'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-neutral-800 text-white transition-colors outline-none hover:bg-neutral-700 focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40';
 
 /**
- * Pick how many tickets go on one prize (spec §5): a stepper with Max, my
- * chance after entering, then one confirm. Entries are final, so the confirm
- * locks while the entry is in flight and a refusal is answered in words.
+ * Pick how many tickets go on one prize (spec §5), or into a one-winner event's
+ * pot: a stepper with Max, my chance after entering, then one confirm. Entries
+ * are final, so the confirm locks while the entry is in flight and a refusal is
+ * answered in words.
  */
 export function EnterSheet({
   prize,
+  pot = false,
   balance,
   onClose,
   onEntered,
 }: {
-  prize: LuckyDrawPrize;
+  prize: EnterTarget;
+  /** `prize` is a one-winner event: post to the event's route, not a prize's. */
+  pot?: boolean;
   balance: number;
   onClose: () => void;
-  onEntered: (prize: LuckyDrawPrize, tickets: number, res: Entered) => void;
+  onEntered: (prize: EnterTarget, tickets: number, res: Entered) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pending, startTransition] = useTransition();
@@ -67,11 +85,14 @@ export function EnterSheet({
   const confirm = () =>
     startTransition(async () => {
       setError(null);
-      const res = await enterLuckyDraw(prize.id, amount);
+      const res = await (pot ? enterLuckyDrawEvent : enterLuckyDraw)(
+        prize.id,
+        amount,
+      );
       if (!res.ok) setError({ text: res.error, topUp: false });
       else if (!res.entered) {
         setError({
-          text: refusalCopy(res.reason),
+          text: refusalCopy(res.reason, pot),
           topUp: res.reason === 'no_topup',
         });
       } else onEntered(prize, amount, res);
@@ -103,7 +124,7 @@ export function EnterSheet({
               id="enter-sheet-title"
               className="text-base leading-snug font-semibold text-white"
             >
-              Enter {prize.title}
+              {pot ? 'Put tickets in' : 'Enter'} {prize.title}
             </h2>
             <p className="font-heading mt-0.5 text-lg text-chase tabular-nums">
               {rmAuto(prize.value_myr)}
@@ -188,7 +209,9 @@ export function EnterSheet({
           </p>
         )}
         <p className="mt-1 text-xs leading-relaxed text-neutral-400">
-          Entries are final — tickets on a prize can&rsquo;t be taken back.
+          {pot
+            ? 'Entries are final — tickets you put in can’t be taken back. One winner takes every prize.'
+            : 'Entries are final — tickets on a prize can’t be taken back.'}
         </p>
 
         {error && (
@@ -216,7 +239,7 @@ export function EnterSheet({
         >
           {pending
             ? 'Entering…'
-            : `Enter ${num(amount)} ${amount === 1 ? 'ticket' : 'tickets'}`}
+            : `${pot ? 'Put in' : 'Enter'} ${num(amount)} ${amount === 1 ? 'ticket' : 'tickets'}`}
         </Pill>
       </div>
     </div>

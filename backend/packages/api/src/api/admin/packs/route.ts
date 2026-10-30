@@ -206,6 +206,7 @@ export async function computePackListBody(req: MedusaRequest) {
         category: p.category,
         pack_type: p.pack_type ?? null,
         language: p.language ?? null,
+        prize_type: p.prize_type,
         status: p.status,
         rank: p.rank,
         price: p.price,

@@ -77,7 +77,14 @@ export type Pack = {
    *  a PSA 9 or a BGS slab is GRADED but NOT psa10. Absent/false on an older
    *  backend, which errs in the never-overclaim direction. */
   psa10?: boolean;
+  /** Set when the pack pays Lucky Draw tickets instead of cards. Absent on a
+   *  card pack and on an older backend. */
+  prizeType?: 'tickets';
 };
+
+/** A ticket pack has no card to show, value or sell (spec 2026-10-30). */
+export const isTicketPack = (p: Pick<Pack, 'prizeType'>): boolean =>
+  p.prizeType === 'tickets';
 
 /** Membership rule for the catalog's "Graded (Guaranteed PSA 10)" section —
  *  BOTH gates: every pooled card graded AND every one a PSA 10. Everything
@@ -159,6 +166,7 @@ export const CAT_ICON = {
   soccer: '/pack-index-icons/soccer.webp',
   yugioh: '/pack-index-icons/yugioh.webp',
   riftbound: '/pack-index-icons/riftbound.webp',
+  poly: '/pack-index-icons/poly.webp',
 } as const;
 
 /** The category a pack list opens on: `wanted` when it has packs, else the
@@ -172,6 +180,8 @@ export const pickCategory = (
   categories.find((c) => c.packs.length > 0)?.id;
 
 // Category chrome only — getPackCategories fills `packs` from the backend.
+// Listed order is tab order (operator 2026-10-30): Pokémon, One Piece, Poly on
+// the far right. Each always has a tab; see packTabs.
 export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [
   {
     id: 'pokemon',
@@ -179,7 +189,38 @@ export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [
     heading: 'Pokémon Packs',
     icon: CAT_ICON.pokemon,
   },
+  {
+    id: 'one-piece',
+    tab: 'One Piece',
+    heading: 'One Piece Packs',
+    icon: CAT_ICON['one-piece'],
+  },
+  {
+    id: 'poly',
+    tab: 'Poly',
+    heading: 'Poly Packs',
+    icon: CAT_ICON.poly,
+  },
 ];
+
+export type PackTab = Pick<PackCategory, 'id' | 'tab' | 'icon'> & {
+  /** No active pack yet: shown as "Coming soon", can't be picked. */
+  soon: boolean;
+};
+
+/** The franchise switch's tabs. A category with no active pack stays on the row
+ *  as "Coming soon" and opens by itself once admin activates a pack in it. Empty
+ *  when no category has a pack: a backend outage empties them all, and that must
+ *  not announce every franchise as coming soon. */
+export const packTabs = (categories: PackCategory[]): PackTab[] =>
+  categories.some((c) => c.packs.length > 0)
+    ? categories.map(({ id, tab, icon, packs }) => ({
+        id,
+        tab,
+        icon,
+        soon: packs.length === 0,
+      }))
+    : [];
 
 export type ResolvedPack = Pack & {
   categoryId: string;
@@ -244,8 +285,37 @@ export type Rarity =
 /** A card of a pack's prize pool (and, since the reveal shows the same shape,
  *  a won card — `WonCard` in actions/packs.ts is this type). The pool row's
  *  tier is REQUIRED: the odds schema drops a row without one, so unlike the
- *  base `CardView` this never renders frameless. */
-export type PackCard = CardView & { rarity: Rarity };
+ *  base `CardView` this never renders frameless. `tickets` is set only on a
+ *  ticket pack's row: the amount it pays, and what tells the reel and the reveal
+ *  this is no card. */
+export type PackCard = CardView & { rarity: Rarity; tickets?: number };
+
+export const TICKET_ART = '/images/lucky-draw/ticket.webp';
+
+/** "1 ticket", "1,000 tickets". */
+export const ticketCount = (n: number): string =>
+  `${n.toLocaleString('en-US')} ${n === 1 ? 'ticket' : 'tickets'}`;
+
+/** Tickets a batch paid; 0 means it was cards. */
+export const ticketTotal = (cards: readonly Pick<PackCard, 'tickets'>[]) =>
+  cards.reduce((sum, c) => sum + (c.tickets ?? 0), 0);
+
+/** A ticket amount in the one shape the reel, the demo and the reveal read. No
+ *  price on purpose: every value sum in the storefront skips an unpriced row, so
+ *  a ticket can't reach Expected value, the value ranges or a home highlight. */
+export function ticketCard(tickets: number, rarity: Rarity): PackCard {
+  return {
+    handle: `tickets-${tickets}`,
+    name: ticketCount(tickets),
+    image: TICKET_ART,
+    slabImage: null,
+    rarity,
+    priceMyr: null,
+    pokemonDex: null,
+    spriteImage: TICKET_ART,
+    tickets,
+  };
+}
 
 // Per-rarity pull odds — the statically-PUBLISHED display, decoupled by design
 // from the backend's secret per-card weights (admin-configurable in Step 4).

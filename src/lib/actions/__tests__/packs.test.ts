@@ -459,3 +459,54 @@ describe('every post-2xx failure path says where the card went — none says try
     expect(!r.ok && r.error).not.toMatch(/try again/i);
   });
 });
+
+describe('openBatch — ticket packs', () => {
+  const TICKET_ROLL = {
+    pull: null,
+    card: null,
+    buyback: null,
+    ticket_spin: {
+      id: 'tksp_1',
+      tickets: 100,
+      rarity: 'Rare',
+      rolled_at: '2026-10-30T00:00:00.000Z',
+    },
+  };
+
+  it('maps the ticket response to a roll with nothing to sell', async () => {
+    backend({
+      'POST /store/packs/:slug/open-batch': {
+        body: {
+          prize_type: 'tickets',
+          rolls: [TICKET_ROLL],
+          price: 10,
+          total_charged: 10,
+          balance: 90,
+          ticket_balance: 140,
+          gifts_used: 0,
+        },
+      },
+    });
+    const r = await openBatch('lucky-pack', 1);
+    expect(r).toMatchObject({
+      ok: true,
+      balance: 90,
+      rolls: [{ card: { tickets: 100 }, pullId: null, buyback: null }],
+    });
+  });
+
+  // The two post-charge refusals. A ticket pack has no vault card to point at,
+  // and "try again" would charge twice.
+  it.each([
+    ['a roll that cannot map', { prize_type: 'tickets', rolls: [{}] }],
+    ['no rolls array', { prize_type: 'tickets' }],
+  ])('names the Lucky Draw balance on %s', async (_name, body) => {
+    backend({ 'POST /store/packs/:slug/open-batch': { body } });
+    const r = await openBatch('lucky-pack', 1);
+    expect(r).toMatchObject({
+      ok: false,
+      error:
+        "Your spin went through and your tickets are in your Lucky Draw balance, but we couldn't show them here.",
+    });
+  });
+});

@@ -3,7 +3,11 @@ import { MedusaError } from '@medusajs/framework/utils';
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import { hasRollablePool } from '../../modules/packs/rollable-pool';
+import {
+  hasRollablePool,
+  hasRollableTicketTable,
+} from '../../modules/packs/rollable-pool';
+import { FREE_WELCOME_CATEGORY } from '../../modules/packs/free-pack';
 import {
   configAuditRow,
   packConfig,
@@ -63,17 +67,42 @@ export const updatePackInvoke = async (
     );
   }
 
+  // Fixed at creation: a pack's sold prizes must not change under its history.
+  // An older admin bundle doesn't send it, and that keeps the stored type.
+  if (input.prize_type !== undefined && input.prize_type !== pack.prize_type) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "A pack's prize type is fixed when it is created.",
+    );
+  }
+  const isTickets = pack.prize_type === 'tickets';
+  if (
+    isTickets &&
+    (input.category === FREE_WELCOME_CATEGORY ||
+      input.category === 'reward_box')
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `A ticket pack cannot move to the '${input.category}' category.`,
+    );
+  }
+
   // Activating (or keeping active) requires a rollable prize pool — an active
   // pack with no positive-weight card odds fails every storefront spin.
   // reward_box packs are internal draw pools (reward rows, card_id null) and
   // are never opened via the pack path, so they are exempt.
   if (input.status === 'active' && input.category !== 'reward_box') {
-    const rollable = await hasRollablePool(packs, input.slug);
+    const rollable = isTickets
+      ? await hasRollableTicketTable(packs, input.slug)
+      : await hasRollablePool(packs, input.slug);
     if (!rollable) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        `Pack '${input.slug}' has no cards in its prize pool. ` +
-          'Add cards and set win rates on the pack page, then activate it.',
+        isTickets
+          ? `Pack '${input.slug}' has no ticket amounts. ` +
+            'Add amounts and set win rates on the pack page, then activate it.'
+          : `Pack '${input.slug}' has no cards in its prize pool. ` +
+            'Add cards and set win rates on the pack page, then activate it.',
       );
     }
   }

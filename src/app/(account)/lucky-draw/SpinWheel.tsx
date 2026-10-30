@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { num } from '@/lib/format';
+import { num, rmAuto } from '@/lib/format';
 import { useSound } from '@/lib/use-sound';
 import {
   HOLO_STOPS,
@@ -106,7 +106,9 @@ export function SpinWheel({
   detail: LuckyDrawResultDetail;
   reduced: boolean;
 }) {
-  const { result, entries } = detail;
+  const { result, entries, prizes } = detail;
+  // A one-winner pot: the hero rises with the next two tucked behind it.
+  const fan = prizes?.slice(1, 3) ?? [];
   // An entry list that does not add up cannot be walked: no landing.
   const intact = entriesIntact(entries, result);
   const win = intact ? winnerIndex(entries, detail.ticket_index) : -1;
@@ -414,14 +416,31 @@ export function SpinWheel({
               : 'translate-y-[18px] scale-94 opacity-0',
           )}
         >
-          <div
-            className="holo-turn aspect-[5/7] w-[38%] rounded-[10px] p-[1.5px] [--holo-period:6s]"
-            style={{ background: holoConic, boxShadow: HOLO_FRAME_GLOW }}
-          >
-            <div className="relative h-full w-full overflow-hidden rounded-[9px] bg-[radial-gradient(90%_60%_at_50%_30%,#2a2a2e,#121214_70%)] p-2">
-              <span className="relative block h-full w-full">
-                <PrizeArt src={result.image} />
-              </span>
+          <div className="relative aspect-[5/7] w-[38%]">
+            {fan.map((p, i) => (
+              <div
+                key={i}
+                className={cn(
+                  'absolute inset-0 scale-90 overflow-hidden rounded-[9px] border border-white/15 bg-[radial-gradient(90%_60%_at_50%_30%,#2a2a2e,#121214_70%)] p-2',
+                  i === 0
+                    ? '-translate-x-[38%] -rotate-[9deg]'
+                    : 'translate-x-[38%] rotate-[9deg]',
+                )}
+              >
+                <span className="relative block h-full w-full">
+                  <PrizeArt src={p.image} kind={p.kind} />
+                </span>
+              </div>
+            ))}
+            <div
+              className="holo-turn absolute inset-0 rounded-[10px] p-[1.5px] [--holo-period:6s]"
+              style={{ background: holoConic, boxShadow: HOLO_FRAME_GLOW }}
+            >
+              <div className="relative h-full w-full overflow-hidden rounded-[9px] bg-[radial-gradient(90%_60%_at_50%_30%,#2a2a2e,#121214_70%)] p-2">
+                <span className="relative block h-full w-full">
+                  <PrizeArt src={result.image} kind={prizes?.[0]?.kind} />
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -450,6 +469,29 @@ export function SpinWheel({
               <p className="mt-1 text-xs text-neutral-400">
                 Entry list couldn&rsquo;t be read — refresh.
               </p>
+            )}
+            {prizes && prizes.length > 0 && (
+              <div className="mx-auto mt-4 max-w-xs text-left">
+                <p className="flex items-baseline justify-between gap-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
+                  <span>Takes every prize</span>
+                  <span className="font-heading text-base tracking-normal text-chase tabular-nums normal-case">
+                    {rmAuto(result.value_myr)}
+                  </span>
+                </p>
+                <ul className="mt-1.5 space-y-1">
+                  {prizes.map((p, i) => (
+                    <li
+                      key={i}
+                      className="flex items-baseline justify-between gap-3 text-sm text-neutral-200"
+                    >
+                      <span className="min-w-0 truncate">{p.title}</span>
+                      <span className="shrink-0 text-xs text-neutral-400 tabular-nums">
+                        {rmAuto(p.value_myr)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </>
         )}

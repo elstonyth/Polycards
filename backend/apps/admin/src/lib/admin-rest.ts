@@ -2859,6 +2859,14 @@ export interface AdminLuckyDrawEvent {
   starts_at: string;
   ends_at: string;
   status: 'draft' | 'published' | 'cancelled';
+  /** one_winner: one customer wins every prize at the end. per_prize: the old
+   *  rules, each prize drawn on its own. A draft becomes one_winner on publish. */
+  draw_mode: 'per_prize' | 'one_winner';
+  /** The event's own commitment. null until published, and on a per_prize
+   *  event, whose hashes are per prize. */
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
   prizes: AdminLuckyDrawPrize[];
 }
 
@@ -2915,6 +2923,14 @@ export const publishLuckyDrawEvent = (id: string, reason: string) =>
     { reason },
   );
 
+/** Cancels a one-winner event and refunds every entrant. Refused once a result
+ *  exists. */
+export const withdrawLuckyDrawEvent = (id: string, reason: string) =>
+  postJson<{ refunded: number }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(id)}/withdraw`,
+    { reason },
+  );
+
 export const saveLuckyDrawPrize = (
   input: AdminLuckyDrawPrizeInput & { reason: string },
 ) => postJson<{ id: string }>('/admin/lucky-draw/prizes', input);
@@ -2938,6 +2954,50 @@ export async function listLuckyDrawEntries(
   );
   return data.entries;
 }
+
+export async function listLuckyDrawEventEntrants(
+  eventId: string,
+): Promise<AdminLuckyDrawEntrant[]> {
+  const data = await getJson<{ entries: AdminLuckyDrawEntrant[] }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(eventId)}/entrants`,
+  );
+  return data.entries;
+}
+
+// ── Ticket pack prizes (spec 2026-10-30 Lucky Pack §2) ──────────────────────
+
+/** A saved row, in the storage units of `pack_odds` (1,000,000 = 100%). */
+export interface AdminTicketPrize {
+  tickets: number;
+  rarity: string;
+  weight: number;
+  /** null = this amount inherits the previous set. */
+  weight_2: number | null;
+  weight_3: number | null;
+  locked: boolean;
+}
+
+/** A row to save, with win % in the units POST /admin/packs/:slug/odds takes.
+ *  The server balances it with the same @acme/odds-math. */
+export interface AdminTicketPrizeEntry {
+  tickets: number;
+  rarity: string;
+  locked: boolean;
+  pct: number;
+  /** null = inherit the previous set. */
+  pct_2: number | null;
+  pct_3: number | null;
+}
+
+const ticketPrizesPath = (slug: string) =>
+  `/admin/packs/${encodeURIComponent(slug)}/ticket-prizes`;
+
+export const getTicketPrizes = (slug: string) =>
+  getJson<{ rows: AdminTicketPrize[] }>(ticketPrizesPath(slug));
+
+/** Replaces the pack's whole table: a row left out is removed. */
+export const saveTicketPrizes = (slug: string, rows: AdminTicketPrizeEntry[]) =>
+  postJson<unknown>(ticketPrizesPath(slug), { rows });
 
 export interface AdminLuckyDrawTicketHistory {
   balance: number;

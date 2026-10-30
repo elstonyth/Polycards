@@ -1,26 +1,44 @@
 import { Link } from 'react-router-dom';
 import { Badge, Drawer, Table, Text } from '@medusajs/ui';
-import { useLuckyDrawEntries, type AdminLuckyDrawPrize } from '../../lib/queries';
+import type { AdminLuckyDrawEntrant } from '../../lib/admin-rest';
+import {
+  useLuckyDrawEntries,
+  useLuckyDrawEventEntrants,
+  type AdminLuckyDrawEvent,
+  type AdminLuckyDrawPrize,
+} from '../../lib/queries';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { eventResult } from './one-winner';
 
-/** Who entered one prize, most tickets first. The API returns customer ids
- *  only, so each row links to the player page for the name. */
-export const EntrantsDrawer = ({
-  prize,
+/** Who entered, most tickets first. The API returns customer ids only, so each
+ *  row links to the player page for the name. */
+const EntrantsList = ({
+  title,
+  emptyText,
+  refundNote,
+  winnerId,
+  data,
+  isLoading,
+  isError,
   onClose,
 }: {
-  prize: AdminLuckyDrawPrize;
+  title: string;
+  emptyText: string;
+  /** Said after the totals once the tickets have gone back. */
+  refundNote: string | null;
+  winnerId: string | null;
+  data: AdminLuckyDrawEntrant[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
   onClose: () => void;
 }) => {
-  const { data, isLoading, isError } = useLuckyDrawEntries(prize.id);
   const total = (data ?? []).reduce((n, e) => n + e.tickets, 0);
-  const winnerId = prize.result?.winner_customer_id ?? null;
 
   return (
     <Drawer open onOpenChange={(open) => !open && onClose()}>
       <Drawer.Content>
         <Drawer.Header>
-          <Drawer.Title>Entrants — {prize.title}</Drawer.Title>
+          <Drawer.Title>Entrants — {title}</Drawer.Title>
         </Drawer.Header>
         <Drawer.Body className="overflow-y-auto p-0">
           {isError ? (
@@ -33,14 +51,14 @@ export const EntrantsDrawer = ({
             </div>
           ) : data.length === 0 ? (
             <Text size="small" className="text-ui-fg-muted p-6">
-              Nobody has entered this prize.
+              {emptyText}
             </Text>
           ) : (
             <>
               <Text size="small" className="text-ui-fg-subtle px-6 py-3">
                 {data.length} {data.length === 1 ? 'entrant' : 'entrants'} ·{' '}
                 {total.toLocaleString()} tickets
-                {prize.cancelled_at ? ' (refunded when the prize was cancelled)' : ''}
+                {refundNote ? ` (${refundNote})` : ''}
               </Text>
               <Table>
                 <Table.Header>
@@ -89,5 +107,56 @@ export const EntrantsDrawer = ({
         </Drawer.Body>
       </Drawer.Content>
     </Drawer>
+  );
+};
+
+export const EntrantsDrawer = ({
+  prize,
+  onClose,
+}: {
+  prize: AdminLuckyDrawPrize;
+  onClose: () => void;
+}) => {
+  const { data, isLoading, isError } = useLuckyDrawEntries(prize.id);
+  return (
+    <EntrantsList
+      data={data}
+      isLoading={isLoading}
+      isError={isError}
+      title={prize.title}
+      emptyText="Nobody has entered this prize."
+      refundNote={
+        prize.cancelled_at ? 'refunded when the prize was cancelled' : null
+      }
+      winnerId={prize.result?.winner_customer_id ?? null}
+      onClose={onClose}
+    />
+  );
+};
+
+/** The same list for a one-winner event, whose entries are on the event. */
+export const EventEntrantsDrawer = ({
+  event,
+  onClose,
+}: {
+  event: AdminLuckyDrawEvent;
+  onClose: () => void;
+}) => {
+  const { data, isLoading, isError } = useLuckyDrawEventEntrants(event.id);
+  return (
+    <EntrantsList
+      data={data}
+      isLoading={isLoading}
+      isError={isError}
+      title={event.name}
+      emptyText="Nobody has entered this event."
+      refundNote={
+        event.status === 'cancelled'
+          ? 'refunded when the event was withdrawn'
+          : null
+      }
+      winnerId={eventResult(event)?.winner_customer_id ?? null}
+      onClose={onClose}
+    />
   );
 };

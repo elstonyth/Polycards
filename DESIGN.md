@@ -214,10 +214,10 @@ Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ra
 
 ### Navigation
 
-- **Bottom tab bar (mobile, the primary nav):** 6 slots with the shipped labels **Task · Ranks · Games · Home · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; Games, added 2026-10-25, does not navigate: it opens the game picker sheet — Lucky Draw live, Coin Flip coming soon — and lights while a game page is open; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: #737373. All six tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
+- **Bottom tab bar (mobile, the primary nav):** 7 slots with the shipped labels **Task · Ranks · Games · Home · Draw · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; Games, added 2026-10-25, does not navigate: it opens the game picker sheet — Coin Flip coming soon — and lights while a game page is open; Draw, moved out of Games 2026-10-30, goes to `/lucky-draw` and sits right of Home so Home stays in the middle; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: #737373. All six tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
 - **Header:** Ink Black, logo left; right side balance chip (Graphite pill: "RM 4.49" + white "＋" disc) opening the top-up sheet, present on every screen.
-- **Desktop (≥1024px):** the tab bar hides and the same six destinations render as pills inside the header row (Games opens the picker as a centred dialog) (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
-- **Surfaces without a slot of their own** are owned by a tab through its `match` prefixes, so something always lights up. Me owns the account tree (`/wallet`, `/settings`, `/orders`, `/transactions`, `/bank`, `/bank-withdrawal`, `/notifications`, `/addresses`) plus **`/referral`** — a top-level brand surface reached from the Me quick-access grid, not a sixth tab. Adding a route reachable from Me means adding it to that array in the same change; a route in no `match` array leaves the whole bar dark.
+- **Desktop (≥1024px):** the tab bar hides and the same seven destinations render as pills inside the header row (Games opens the picker as a centred dialog) (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
+- **Surfaces without a slot of their own** are owned by a tab through its `match` prefixes, so something always lights up. Me owns the account tree (`/wallet`, `/settings`, `/orders`, `/transactions`, `/bank`, `/bank-withdrawal`, `/notifications`, `/addresses`) plus **`/referral`** — a top-level brand surface reached from the Me quick-access grid, not a tab of its own. Adding a route reachable from Me means adding it to that array in the same change; a route in no `match` array leaves the whole bar dark.
 - **Page transitions (2026-10-25):** every navigation animates through React `<ViewTransition>` (`src/components/PageTransition.tsx`, mounted by `app/template.tsx` and `app/(account)/template.tsx`): the old page fades out fast, the new one fades in with a 10px rise; entering a game from the Games sheet zooms the game up from 96% while the page behind pushes away, and leaving a game reverses it. The header and tab bar sit in the layout and never move. Reduced motion: pages swap instantly.
 
 ### Signature: Sticky Stat Card
@@ -348,8 +348,8 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 
 ### Signature: Lucky Draw (/lucky-draw, 2026-10-24)
 
-Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
-**Games** tab (2026-10-25; Task no longer matches `/lucky-draw`).
+Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
+**Draw** tab (2026-10-30; it sat under Games from 2026-10-25, under Task before that).
 
 - **Tabs** — Prizes · Results · My tickets, the leaderboard's segmented pill.
 - **Prize card** — charcoal card: the prize on a 5:7 pedestal, RM value in

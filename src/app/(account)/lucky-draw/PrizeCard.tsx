@@ -6,7 +6,11 @@ import { Pill } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
 import { mytClock, mytDate, num, rmAuto } from '@/lib/format';
 import { chancePercent, drawCountdown } from '@/lib/lucky-draw';
-import type { LuckyDrawPerson, LuckyDrawPrize } from '@/lib/data/schemas';
+import type {
+  LuckyDrawEntry,
+  LuckyDrawPerson,
+  LuckyDrawPrize,
+} from '@/lib/data/schemas';
 
 const CREDIT_ART = '/images/task/credits-coins.webp';
 
@@ -58,7 +62,7 @@ export function PersonChip({
   );
 }
 
-function Figure({ label, value }: { label: string; value: string }) {
+export function Figure({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-neutral-950/60 px-3 py-2">
       <p className="text-[10px] font-semibold tracking-wide text-neutral-400 uppercase">
@@ -67,6 +71,50 @@ function Figure({ label, value }: { label: string; value: string }) {
       <p className="font-heading mt-0.5 text-base text-white tabular-nums">
         {value}
       </p>
+    </div>
+  );
+}
+
+/** The ranked entrants of a prize or a pot, top 10 from the backend. */
+export function TopEntrants({
+  top,
+  totalTickets = 0,
+  className,
+}: {
+  top: LuckyDrawEntry[];
+  /** Tickets in the pot, newer than `top` right after your own entry. */
+  totalTickets?: number;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <p className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
+        Top entrants
+      </p>
+      {top.length === 0 ? (
+        <p className="mt-2 text-sm text-neutral-400">
+          {totalTickets > 0
+            ? 'Updating the list…'
+            : 'No entries yet — be the first.'}
+        </p>
+      ) : (
+        <ol className="mt-2 space-y-1.5">
+          {top.map((e, i) => (
+            <li
+              key={i}
+              className="flex items-center gap-2 text-sm text-neutral-200"
+            >
+              <span className="w-5 shrink-0 text-right text-xs text-neutral-400 tabular-nums">
+                {i + 1}
+              </span>
+              <PersonChip person={e.person} className="flex-1" />
+              <span className="shrink-0 text-xs text-neutral-400 tabular-nums">
+                {num(e.tickets)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
@@ -147,33 +195,7 @@ export function PrizeCard({
         </span>
       </p>
 
-      <div className="mt-4">
-        <p className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
-          Top entrants
-        </p>
-        {prize.top.length === 0 ? (
-          <p className="mt-2 text-sm text-neutral-400">
-            No entries yet — be the first.
-          </p>
-        ) : (
-          <ol className="mt-2 space-y-1.5">
-            {prize.top.map((e, i) => (
-              <li
-                key={i}
-                className="flex items-center gap-2 text-sm text-neutral-200"
-              >
-                <span className="w-5 shrink-0 text-right text-xs text-neutral-400 tabular-nums">
-                  {i + 1}
-                </span>
-                <PersonChip person={e.person} className="flex-1" />
-                <span className="shrink-0 text-xs text-neutral-400 tabular-nums">
-                  {num(e.tickets)}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+      <TopEntrants top={prize.top} className="mt-4" />
 
       <div className="mt-auto pt-4">
         {result ? (

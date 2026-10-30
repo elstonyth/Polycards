@@ -154,11 +154,16 @@ import {
   listLuckyDraw,
   saveLuckyDrawEvent,
   publishLuckyDrawEvent,
+  withdrawLuckyDrawEvent,
   saveLuckyDrawPrize,
   cancelLuckyDrawPrize,
   listLuckyDrawEntries,
+  listLuckyDrawEventEntrants,
   getLuckyDrawTickets,
   adjustCustomerTickets,
+  getTicketPrizes,
+  saveTicketPrizes,
+  type AdminTicketPrizeEntry,
   type AdminLuckyDrawEvent,
   listAnnouncements,
   saveAnnouncement,
@@ -651,6 +656,9 @@ export const useUpdatePack = () => {
   return useMutation({
     mutationFn: (vars: { slug: string } & AdminPackWrite) => {
       const { slug, ...payload } = vars;
+      // Fixed at creation. Callers spread a whole AdminPack in here, and the
+      // route refuses to change it, so it never travels.
+      delete payload.prize_type;
       return packsApi.admin.packs.$slug.mutate({ $slug: slug, ...payload });
     },
     // The pack's status also renders on its odds-editor page (activate /
@@ -731,6 +739,25 @@ export const useSaveOdds = () =>
         target_rtp_bps: vars.target_rtp_bps,
       }),
   });
+
+export const useTicketPrizes = (slug: string) =>
+  useQuery({
+    queryKey: qk.ticketPrizes(slug),
+    queryFn: () => getTicketPrizes(slug),
+    enabled: !!slug,
+  });
+
+export const useSaveTicketPrizes = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { slug: string; rows: AdminTicketPrizeEntry[] }) =>
+      saveTicketPrizes(vars.slug, vars.rows),
+    // A save can add or remove rows, so the editor reseeds. Returned so
+    // mutateAsync resolves only after the refetch.
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: qk.ticketPrizes(vars.slug) }),
+  });
+};
 
 export const useSaveMembers = () => {
   const qc = useQueryClient();
@@ -1961,6 +1988,11 @@ export const usePublishLuckyDrawEvent = () =>
     publishLuckyDrawEvent(v.id, v.reason),
   );
 
+export const useWithdrawLuckyDrawEvent = () =>
+  useLuckyDrawWrite((v: { id: string; reason: string }) =>
+    withdrawLuckyDrawEvent(v.id, v.reason),
+  );
+
 export const useSaveLuckyDrawPrize = () =>
   useLuckyDrawWrite((v: Parameters<typeof saveLuckyDrawPrize>[0]) =>
     saveLuckyDrawPrize(v),
@@ -1977,6 +2009,12 @@ export const useLuckyDrawEntries = (prizeId: string | null) =>
     queryKey: qk.luckyDrawEntries(prizeId ?? ''),
     queryFn: () => listLuckyDrawEntries(prizeId as string),
     enabled: prizeId !== null,
+  });
+
+export const useLuckyDrawEventEntrants = (eventId: string) =>
+  useQuery({
+    queryKey: [...qk.luckyDraw, 'event-entrants', eventId],
+    queryFn: () => listLuckyDrawEventEntrants(eventId),
   });
 
 // Support lookup: only runs for a submitted id, and never caches a stale

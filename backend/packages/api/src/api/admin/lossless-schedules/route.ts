@@ -100,12 +100,20 @@ export async function POST(
       (
         await packs.listPacks(
           { slug: packSlugs },
-          { select: ['slug', 'category'] },
+          { select: ['slug', 'category', 'prize_type'] },
         )
-      ).map((p) => [p.slug, p.category]),
+      ).map((p) => [p.slug, p]),
     );
+    const ticketPack = packSlugs.find(
+      (slug) => found.get(slug)?.prize_type === 'tickets',
+    );
+    if (ticketPack !== undefined)
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${ticketPack} is a ticket pack. It has no buyback, so it cannot get a Lossless window.`,
+      );
     const bad = packSlugs.find((slug) => {
-      const category = found.get(slug);
+      const category = found.get(slug)?.category;
       return (
         category === undefined ||
         category === FREE_WELCOME_CATEGORY ||

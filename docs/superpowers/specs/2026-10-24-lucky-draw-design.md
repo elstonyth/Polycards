@@ -60,7 +60,9 @@ each put in, ranked 1–10.
 - No buying tickets directly with money or credit. Tickets come only from
   tasks _(my call: keeps this a task reward, not a lottery sale)_ and, since
   2026-10-25, from admin grants (one customer or a whole customer group, like
-  credit; ledger reason `admin_grant`, audited).
+  credit; ledger reason `admin_grant`, audited). **Changed 2026-10-30:** Lucky
+  Packs sell a spin that pays tickets (`2026-10-30-lucky-pack-ticket-spin-design.md`),
+  and new events have one winner (`2026-10-30-lucky-draw-one-winner-design.md`).
 - No new "More" tab or homepage "Game" section. Those are separate roadmap
   items (nav redesign). v1 entry points are the vault ticket row and the task
   hub; since 2026-10-25 the Games tab's picker links here too.

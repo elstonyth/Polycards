@@ -169,6 +169,8 @@ const GachaCardsPage = () => {
     isError: packsError,
     refetch: refetchPacks,
   } = usePacks({ enabled: pickerOpen });
+  // A ticket pack takes no cards: its editor would silently drop the staged ones.
+  const cardPacks = packs?.filter((p) => p.prize_type !== 'tickets') ?? null;
   const fileRef = useRef<HTMLInputElement>(null);
   const uploading = uploadImg.isPending;
   const saving = updateCard.isPending;
@@ -749,15 +751,15 @@ const GachaCardsPage = () => {
                     Retry
                   </Button>
                 </div>
-              ) : packs === null ? (
+              ) : cardPacks === null ? (
                 <LoadingSkeleton />
-              ) : packs.length === 0 ? (
+              ) : cardPacks.length === 0 ? (
                 <Text className="text-ui-fg-subtle">
                   {t('cards.bulk.noPacks')}
                 </Text>
               ) : (
                 <div className="divide-y rounded-lg border">
-                  {packs.map((p) => (
+                  {cardPacks.map((p) => (
                     <button
                       key={p.slug}
                       type="button"

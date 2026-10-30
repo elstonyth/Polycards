@@ -4,6 +4,7 @@ import { ArrowRight } from 'lucide-react';
 import Reveal from '@/components/Reveal';
 import ShelfTabs, { ShelfHeader } from '@/components/home/ShelfTabs';
 import {
+  packTabs,
   packHref,
   type Pack,
   type PackCard,
@@ -49,7 +50,7 @@ export default function TierShelf({
       ) : (
         <ShelfTabs
           // Tab chrome only — the packs travel inside the server-rendered panels.
-          categories={shelves.map(({ id, tab, icon }) => ({ id, tab, icon }))}
+          categories={packTabs(categories)}
           panels={Object.fromEntries(
             shelves.map((c) => [
               c.id,

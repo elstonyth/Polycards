@@ -12,6 +12,7 @@ import VipMemberState from '../models/vip-member-state';
 import VipLevel from '../models/vip-level';
 import AdminActionAudit from '../models/admin-action-audit';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
 import Card from '../models/card';
 import Pack from '../models/pack';
 import { PixelPokemon } from '../models/pixel-pokemon';
@@ -38,6 +39,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipLevel,
     AdminActionAudit,
     Pull,
+    TicketSpin,
     Card,
     Pack,
     PackOdds,

@@ -135,6 +135,8 @@ export async function readLive(
       .filter(
         (pack) =>
           !['reward_box', 'free_welcome'].includes(pack.category) &&
+          // A cycle needs a pull and a card to sell. A spin has neither.
+          pack.prize_type !== 'tickets' &&
           Number.isFinite(Number(pack.price)) &&
           Number(pack.price) > 0,
       )
@@ -176,7 +178,9 @@ async function liveRoundSettings(
   );
   const mix = config.packMix ?? [{ packSlug: config.packSlug, weightBp: 1 }];
   if (mix.some((row) => !catalog.has(row.packSlug)))
-    throw new Error('Choose available paid packs.');
+    throw new Error(
+      'Choose available paid card packs: active, in stock, not a ticket pack.',
+    );
   const packPricesCents = Object.fromEntries(
     mix.map((row) => [row.packSlug, catalog.get(row.packSlug)!]),
   );

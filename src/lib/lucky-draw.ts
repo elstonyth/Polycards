@@ -5,6 +5,10 @@
  * No zod, no store, no React: client components import this, so it must not
  * drag the data layer into their bundle.
  */
+import type {
+  LuckyDrawEventDetail,
+  LuckyDrawResultDetail,
+} from '@/lib/data/schemas';
 
 /** Why the enter route turned an entry away (backend `EnterRefusal`). */
 export const ENTER_REFUSALS = [
@@ -24,10 +28,110 @@ export const ENTER_REFUSAL_COPY: Record<EnterRefusal, string> = {
   no_topup: 'Top up at least once to enter the Lucky Draw.',
 };
 
+/** The sentences that would say "this prize" on a one-winner event. */
+const POT_REFUSAL_COPY: Partial<Record<EnterRefusal, string>> = {
+  not_found: 'This Lucky Draw is no longer available.',
+  closed: 'Entries for this Lucky Draw are closed.',
+};
+
 /** A refusal this build does not know yet (deploy skew) still gets a sentence. */
-export const refusalCopy = (reason: string): string =>
+export const refusalCopy = (reason: string, pot = false): string =>
+  (pot ? POT_REFUSAL_COPY[reason as EnterRefusal] : undefined) ??
   ENTER_REFUSAL_COPY[reason as EnterRefusal] ??
-  'Could not enter this prize. Please try again later.';
+  (pot
+    ? 'Could not enter this Lucky Draw. Please try again later.'
+    : 'Could not enter this prize. Please try again later.');
+
+const RULES_START = 'Tickets come from tasks, Lucky Packs and Polycards gifts.';
+
+/** The small print under the page, by the event's rule. */
+export const rulesCopy = (mode: 'per_prize' | 'one_winner'): string =>
+  mode === 'one_winner'
+    ? `${RULES_START} Entering needs at least one top-up, and entries are final: losing tickets are gone, and tickets you keep carry over to the next draw. More tickets means a better chance, and one ticket can still win. When the draw ends, one winner takes every prize: cards go to their vault and sell back like task rewards; credit is bonus credit for packs. The winner is drawn from a seed fixed before entries open. All times are Malaysia time (MYT).`
+    : `${RULES_START} Entering needs at least one top-up, and entries are final. Card prizes go to your vault and sell back like task rewards; credit prizes are bonus credit for packs. Every winner is drawn from a seed fixed before entries open. All times are Malaysia time (MYT).`;
+
+/** What /lucky-draw shows. The per-prize page is today's, for any event that
+ *  is not one-winner (a card-era payload has no mode). A stored result decides
+ *  before the clock, and with no clock yet (the server render) the pot reads
+ *  open, so hydration agrees. */
+export type LuckyDrawView =
+  | 'unavailable'
+  | 'coming_soon'
+  | 'per_prize'
+  | 'pot_open'
+  | 'pot_drawing'
+  | 'pot_drawn';
+
+export function luckyDrawView(
+  page: {
+    event: { draw_mode?: string; ends_at: string; result?: unknown } | null;
+  } | null,
+  nowMs: number | null,
+): LuckyDrawView {
+  if (!page) return 'unavailable';
+  const { event } = page;
+  if (!event) return 'coming_soon';
+  if (event.draw_mode !== 'one_winner') return 'per_prize';
+  if (event.result) return 'pot_drawn';
+  return nowMs != null && nowMs >= Date.parse(event.ends_at)
+    ? 'pot_drawing'
+    : 'pot_open';
+}
+
+/** Every prize added up, in sen: 0.1 + 0.2 must not print a float tail. */
+export const potTotal = (prizes: { value_myr: number }[]): number =>
+  prizes.reduce((sen, p) => sen + Math.round(p.value_myr * 100), 0) / 100;
+
+/** The pot's face: the most valuable card, because the card is the hero; only
+ *  a pot with no card shows its biggest credit prize. */
+export function heroPrize<T extends { kind?: string; value_myr: number }>(
+  prizes: T[],
+): T | null {
+  const best = (list: T[]) =>
+    list.reduce<T | null>(
+      (top, p) => (!top || p.value_myr > top.value_myr ? p : top),
+      null,
+    );
+  return best(prizes.filter((p) => p.kind === 'card')) ?? best(prizes);
+}
+
+/** The pot in showing order: the hero leads, the rest keep theirs. */
+export function heroFirst<T extends { kind?: string; value_myr: number }>(
+  prizes: T[],
+): T[] {
+  const hero = heroPrize(prizes);
+  return hero ? [hero, ...prizes.filter((p) => p !== hero)] : prizes;
+}
+
+/** A one-winner event as the wheel and the result sheet read a result: named
+ *  for the event, worth the pot, wearing the hero's art, its prizes hero first.
+ *  The name comes from the caller: the page and the results row both have it. */
+export function eventResultDetail(
+  eventId: string,
+  eventName: string,
+  raw: LuckyDrawEventDetail,
+): LuckyDrawResultDetail {
+  const prizes = heroFirst(raw.prizes);
+  return {
+    result: {
+      ...raw.result,
+      prize_id: eventId,
+      title: eventName,
+      image: prizes[0]?.image ?? null,
+      value_myr: potTotal(prizes),
+    },
+    entries: raw.entries,
+    ticket_index: raw.ticket_index,
+    prizes,
+  };
+}
+
+/** The event a results row opens, or null for an old per-prize row. */
+export const eventRowId = (row: {
+  draw_mode?: string;
+  event_id?: string;
+}): string | null =>
+  row.draw_mode === 'one_winner' && row.event_id ? row.event_id : null;
 
 /** The most tickets one entry may carry (backend MAX_ENTRY_TICKETS). */
 export const MAX_ENTRY_TICKETS = 1_000_000;

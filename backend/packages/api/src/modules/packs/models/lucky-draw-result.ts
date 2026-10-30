@@ -7,6 +7,10 @@ import { model } from '@medusajs/framework/utils';
 //
 // winner_customer_id is null when nobody entered. `entries` is the DrawEntrant[]
 // in draw order; `excluded` the customer ids refunded as disabled accounts.
+//
+// A one_winner draw also writes one row here per prize (the event's winner, the
+// same seed, empty `entries`), so payout and history keep working per prize. The
+// proof of that draw, with the frozen entries, is lucky_draw_event_result.
 export const LuckyDrawResult = model
   .define('lucky_draw_result', {
     id: model.id({ prefix: 'ldrs' }).primaryKey(),

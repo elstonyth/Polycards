@@ -8,6 +8,9 @@ import { model } from '@medusajs/framework/utils';
 // and the desk bots can read this table, so a stored seed would leak the winner
 // before the draw.
 //
+// On a one_winner event the event holds the commitment: seed_nonce and seed_hash
+// stay null here, and draw_at is the event's end.
+//
 // Exactly one of card_handle / credit_myr is set, per `kind`.
 export const LuckyDrawPrize = model
   .define('lucky_draw_prize', {

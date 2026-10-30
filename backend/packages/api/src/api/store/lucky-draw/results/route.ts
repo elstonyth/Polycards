@@ -5,7 +5,7 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
-import { resultViewsFor } from '../view';
+import { resultFeedFor } from '../view';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -14,9 +14,9 @@ const bad = (message: string): never => {
   throw new MedusaError(MedusaError.Types.INVALID_DATA, message);
 };
 
-// GET /store/lucky-draw/results?before=<iso>&limit=<1..50> — drawn prizes
-// across every event, newest draw first. `next_before` is the cursor for the
-// next page (null on the last).
+// GET /store/lucky-draw/results?before=<iso>&limit=<1..50> — newest draw first,
+// one row per one_winner event plus each drawn old-rule prize. `next_before` is
+// the cursor for the next page (null on the last).
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -47,7 +47,7 @@ export async function GET(
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const page = await packs.luckyDrawResultPage({ before, limit });
   res.json({
-    results: await resultViewsFor(req, packs, page.prizeIds),
+    results: await resultFeedFor(req, packs, page.rows),
     next_before: page.nextBefore,
   });
 }
