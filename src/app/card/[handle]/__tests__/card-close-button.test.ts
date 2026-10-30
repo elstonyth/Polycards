@@ -132,17 +132,19 @@ describe('CardPage', () => {
     expect(container.querySelector('button')).toBeNull();
   });
 
-  it('keeps the prize marker through a failed load retry', async () => {
+  it('keeps Close and the prize marker through a failed load', async () => {
     cardResult = { status: 'error' };
     await renderPage({ prize: 'weekly' });
+    expect(container.querySelector('button')?.textContent).toContain('Close');
     expect(container.querySelector('a')?.getAttribute('href')).toBe(
       '/card/mewtwo?prize=weekly',
     );
   });
 
-  it('adds no prize marker to an ordinary retry', async () => {
+  it('adds neither to an ordinary failed load', async () => {
     cardResult = { status: 'error' };
     await renderPage({});
+    expect(container.querySelector('button')).toBeNull();
     expect(container.querySelector('a')?.getAttribute('href')).toBe(
       '/card/mewtwo',
     );

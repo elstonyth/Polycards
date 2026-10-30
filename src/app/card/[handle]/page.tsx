@@ -54,6 +54,7 @@ export default async function CardPage({
   if (result.status === 'error') {
     return (
       <div className="mx-auto w-full px-fluid py-16">
+        {frameVariant && <CardCloseButton />}
         <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-neutral-900 px-6 py-12 text-center">
           <h1 className="font-heading text-2xl text-white">
             Couldn&apos;t load this card
