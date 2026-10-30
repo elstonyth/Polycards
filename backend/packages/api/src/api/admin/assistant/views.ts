@@ -1,3 +1,5 @@
+import { cutToolMarkup } from './openrouter';
+
 // A stored message as the admin pages read it (own chats and the review).
 export const messageView = (m: {
   id: string;
@@ -12,7 +14,7 @@ export const messageView = (m: {
 }) => ({
   id: m.id,
   role: m.role,
-  content: m.content,
+  content: cutToolMarkup(m.content),
   attachments: m.attachments,
   // the URL only: the file id is for deleting the chat
   images: Array.isArray(m.images)

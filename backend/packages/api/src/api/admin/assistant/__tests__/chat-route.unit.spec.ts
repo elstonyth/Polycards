@@ -174,6 +174,28 @@ it('gives the answer what is left of today’s cap', async () => {
   expect(locks.size).toBe(0);
 });
 
+it('never replays tool calls a model wrote as text into the next question', async () => {
+  (service.listAssistantMessages as jest.Mock).mockResolvedValueOnce([
+    {
+      role: 'assistant',
+      content: '\n\n<｜DSML｜ calls>SELECT 1</｜DSML｜ calls>',
+    },
+    { role: 'user', content: 'what happened?' },
+    {
+      role: 'assistant',
+      content: 'RM 0: all bonus <｜DSML｜ calls>',
+    },
+    { role: 'user', content: 'why RM 0?' },
+  ]);
+  const p = post();
+  await p.done;
+  expect(runTurnMock.mock.calls[0][0].history).toEqual([
+    { role: 'user', content: 'why RM 0?' },
+    { role: 'assistant', content: 'RM 0: all bonus' },
+    { role: 'user', content: 'what happened?' },
+  ]);
+});
+
 it('asks a spoken question as it was heard, and charges the listening with the answer', async () => {
   transcribeMock.mockResolvedValueOnce({
     text: 'how many packs today?',

@@ -1187,6 +1187,24 @@ export interface AdminDeliveryOrder {
   delivered_at: string | null;
   created_at: string;
   items: AdminDeliveryItem[];
+  /** The shipment tracker's last carrier check (list route only). */
+  tracking_snapshot?: DeliveryTrackingSnapshot | null;
+}
+
+/** Mirrors the backend TrackingSnapshot (modules/packs/shipment-tracking.ts). */
+export interface DeliveryTrackingSnapshot {
+  tracking_number: string;
+  carrier: 'ninjavan' | 'poslaju' | 'dhl_ecommerce' | null;
+  state:
+    | 'delivered'
+    | 'in_transit'
+    | 'problem'
+    | 'not_found'
+    | 'unknown_carrier';
+  event: string | null;
+  event_at: string | null;
+  delivered_at: string | null;
+  checked_at: string;
 }
 
 export interface DeliveryOrdersPage {
@@ -1230,6 +1248,16 @@ export const bulkUpdateDeliveryOrders = (
     '/admin/delivery-orders/bulk',
     { ids, status },
   );
+
+// Check every shipped order with its carrier now and complete the delivered
+// ones — the same run as the 2-hourly job.
+export const checkDeliveryTracking = () =>
+  postJson<{
+    checked: number;
+    completed: string[];
+    problems: string[];
+    failed: string[];
+  }>('/admin/delivery-orders/track', {});
 
 export async function getDeliveryOrder(
   id: string,

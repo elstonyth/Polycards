@@ -8,7 +8,12 @@ import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
 import { accessFor } from '../access';
-import { generationCost, OpenRouterError, speechModels } from '../openrouter';
+import {
+  cutToolMarkup,
+  generationCost,
+  OpenRouterError,
+  speechModels,
+} from '../openrouter';
 import { userLock } from '../user-lock';
 import {
   estimateSpeechCost,
@@ -91,7 +96,7 @@ export async function POST(
     res.status(404).json({ message: 'That answer was not found.' });
     return;
   }
-  const text = speakable(message.content);
+  const text = speakable(cutToolMarkup(message.content));
   if (!text) {
     res.status(400).json({ message: 'That answer has nothing to read aloud.' });
     return;

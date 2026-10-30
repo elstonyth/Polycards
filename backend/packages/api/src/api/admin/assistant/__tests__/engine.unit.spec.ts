@@ -548,6 +548,100 @@ describe('runTurn', () => {
     expect(groups).toHaveBeenCalledTimes(MAX_ROUNDS - 1);
   });
 
+  // Rounds that spend every step on tools, then `lastRound` as the last one.
+  const spentRounds = (groups: AssistantTool['run'], ...lastRound: object[]) =>
+    turn(
+      Array.from({ length: MAX_ROUNDS }, (_, i) =>
+        i < MAX_ROUNDS - 1
+          ? () =>
+              sse(
+                ...(i ? [] : [say('Let me check')]),
+                toolCall('groups', '{}', `c${i}`),
+              )
+          : () => sse(...lastRound),
+      ),
+      [tool('groups', groups)],
+    );
+  const shownText = (events: TurnEvent[]) =>
+    events.flatMap((e) => (e.type === 'text' ? [e.delta] : [])).join('');
+  const LEAK =
+    '<｜DSML｜ calls>\n<｜DSML｜ invoke name="db_query">\n<｜DSML｜ parameter name="sql" string="true">SELECT 1</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>';
+
+  it('tells the model on the last round that it must answer now', async () => {
+    const t = spentRounds(async () => '{}', say('RM 0: all bonus'));
+    const result = await t.done;
+    const asked = (body: Record<string, unknown>) =>
+      (body.messages as { role: string; content: string }[]).at(-1);
+    expect(asked(t.bodies[MAX_ROUNDS - 2])?.role).toBe('tool');
+    expect(asked(t.bodies[MAX_ROUNDS - 1])).toMatchObject({ role: 'user' });
+    expect(asked(t.bodies[MAX_ROUNDS - 1])?.content).toContain(
+      'last tool step',
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.text).toContain('RM 0: all bonus');
+  });
+
+  it('never shows or saves tool calls a model wrote as text', async () => {
+    const t = spentRounds(async () => '{}', say(`\n\n${LEAK}`));
+    const result = await t.done;
+    expect(shownText(t.events)).not.toContain('DSML');
+    expect(result.text).not.toContain('DSML');
+    expect(result.text).toBe(shownText(t.events));
+    expect(result.error).toBe(
+      'The assistant ran out of steps. Ask a narrower question.',
+    );
+  });
+
+  it('keeps the answer written before leaked tool calls, even split mid-token', async () => {
+    const t = turn(
+      [() => sse(say('RM 0: all bonus <'), say('｜DSML'), say('｜ calls>'))],
+      [],
+    );
+    const result = await t.done;
+    expect(shownText(t.events)).toBe('RM 0: all bonus ');
+    expect(result.text).toBe('RM 0: all bonus ');
+    expect(result.error).toBeUndefined();
+  });
+
+  it('keeps a plain < in an answer, at the end of a piece or of the answer', async () => {
+    const t = turn([() => sse(say('A <'), say(' B <'))], []);
+    const result = await t.done;
+    expect(shownText(t.events)).toBe('A < B <');
+    expect(result.text).toBe('A < B <');
+  });
+
+  it('still runs a real tool call in a round that also leaked text', async () => {
+    const groups = jest.fn(async () => '{}');
+    const t = turn(
+      [() => sse(say(LEAK), toolCall('groups')), () => sse(say('2 groups'))],
+      [tool('groups', groups)],
+    );
+    const result = await t.done;
+    expect(groups).toHaveBeenCalledTimes(1);
+    expect(result.text).toBe('2 groups');
+  });
+
+  it('counts a silent last round as no answer, whatever an earlier step said', async () => {
+    const t = spentRounds(async () => '{}', usage(0.01));
+    const result = await t.done;
+    expect(result.text.trim()).toBe('Let me check');
+    expect(result.error).toBe(
+      'The assistant ran out of steps. Ask a narrower question.',
+    );
+  });
+
+  it('counts a silent answer after a tool as no answer, whatever an earlier step said', async () => {
+    const t = turn(
+      [
+        () => sse(say('Let me check'), toolCall('groups')),
+        () => sse(usage(0.01)),
+      ],
+      [tool('groups', async () => '{}')],
+    );
+    const result = await t.done;
+    expect(result.error).toBe('The assistant gave no answer. Ask again.');
+  });
+
   it(`runs at most ${MAX_CALLS_PER_ROUND} tools in one step`, async () => {
     const groups = jest.fn(async () => '{}');
     const many = {

@@ -328,8 +328,19 @@ type Chunk = {
 
 const BUSY = new Set([429, 502, 503, 504]);
 
-/** Streams one completion: text as it comes, then the tool calls it asked
- *  for (if any), then what it cost. */
+// DeepSeek's special tokens start like this. Barred from calling a tool (the
+// last round), it writes the calls it still wants as text: <｜DSML｜ invoke ...>.
+// That is never an answer, and the rest of what it says is more of the same.
+// shortcut: DeepSeek's prefix only; add another model's when one is seen leaking.
+const TOOL_MARKUP = '<｜';
+
+export const cutToolMarkup = (text: string): string => {
+  const at = text.indexOf(TOOL_MARKUP);
+  return at < 0 ? text : text.slice(0, at).trimEnd();
+};
+
+/** Streams one completion: text as it comes (up to any leaked tool markup),
+ *  then the tool calls it asked for (if any), then what it cost. */
 export async function* streamChat(opts: {
   key: string;
   model: string;
@@ -394,6 +405,9 @@ export async function* streamChat(opts: {
   // moved on to a new call.
   const slot = new Map<number, number>();
   let generation = '';
+  // A trailing '<' waits for the next piece: it may start TOOL_MARKUP.
+  let held = '';
+  let leaked = false;
   const decoder = new TextDecoder();
   let buffer = '';
   const reader = answer.body.getReader();
@@ -425,7 +439,14 @@ export async function* streamChat(opts: {
         yield { type: 'generation', id: chunk.id };
       }
       const delta = chunk.choices?.[0]?.delta;
-      if (delta?.content) yield { type: 'text', delta: delta.content };
+      if (delta?.content && !leaked) {
+        const text = held + delta.content;
+        const clean = cutToolMarkup(text);
+        leaked = clean !== text;
+        held = !leaked && clean.endsWith('<') ? '<' : '';
+        const out = held ? clean.slice(0, -1) : clean;
+        if (out) yield { type: 'text', delta: out };
+      }
       for (const tc of delta?.tool_calls ?? []) {
         // A new id starts a new call even when a provider reuses index 0,
         // and later pieces at that index follow it; a fragment with no
@@ -456,6 +477,7 @@ export async function* streamChat(opts: {
     }
     if (done) break;
   }
+  if (held) yield { type: 'text', delta: held };
   const asked = calls.filter((c) => c && c.name);
   if (asked.length) {
     yield {
