@@ -3,7 +3,7 @@ import { Input, Label, Prompt, Text } from '@medusajs/ui';
 
 /**
  * A confirm dialog that also asks for the audit reason every Lucky Draw write
- * needs (publish, cancel). Mount it only while it is wanted: the reason is
+ * needs (publish, cancel, withdraw). Mount it only while it is wanted: the reason is
  * local state, so a fresh mount is a blank box — no reset effect.
  *
  * The action does not close the dialog itself (`preventDefault` below): on a

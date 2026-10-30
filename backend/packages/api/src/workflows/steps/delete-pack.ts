@@ -8,6 +8,7 @@ import {
   configAuditRow,
   oddsSnapshot,
   packConfig,
+  ticketPrizeSnapshot,
 } from '../../modules/packs/config-audit';
 
 // admin_id is the acting admin (auth_context.actor_id) for the audit row.
@@ -48,6 +49,7 @@ type CompensateData =
         category: string;
         pack_type: 'classic' | 'original' | 'special' | null;
         language: 'en' | 'jp' | null;
+        prize_type: 'cards' | 'tickets';
         price: number;
         image: string;
         boost: boolean;
@@ -68,6 +70,21 @@ type CompensateData =
         tier_ranges: Record<string, unknown> | null;
       };
       odds: OddsSnapshot[];
+      ticketPrizes: {
+        pack_id: string;
+        tickets: number;
+        rarity:
+          | 'Immortal'
+          | 'Legendary'
+          | 'Mythical'
+          | 'Rare'
+          | 'Uncommon'
+          | 'Common';
+        weight: number;
+        weight_2: number | null;
+        weight_3: number | null;
+        locked: boolean;
+      }[];
     }
   | undefined;
 
@@ -96,6 +113,15 @@ export const deletePackInvoke = async (
     packs.listPackOdds({ pack_id: input.slug }, opts),
   );
 
+  // A ticket pack's table goes with it, or the slug's next pack would inherit
+  // these rates. Read only for a ticket pack: a card pack has none.
+  const prizeRows =
+    pack.prize_type === 'tickets'
+      ? await pageAll((opts) =>
+          packs.listTicketPrizes({ pack_id: input.slug }, opts),
+        )
+      : [];
+
   const snapshot: CompensateData = {
     pack: {
       slug: pack.slug,
@@ -103,6 +129,7 @@ export const deletePackInvoke = async (
       category: pack.category,
       pack_type: pack.pack_type ?? null,
       language: pack.language ?? null,
+      prize_type: pack.prize_type,
       price: pack.price,
       image: pack.image,
       boost: pack.boost,
@@ -131,10 +158,22 @@ export const deletePackInvoke = async (
       product_handle: o.product_handle,
       credit_amount: o.credit_amount != null ? Number(o.credit_amount) : null,
     })),
+    ticketPrizes: prizeRows.map((r) => ({
+      pack_id: r.pack_id,
+      tickets: r.tickets,
+      rarity: r.rarity,
+      weight: r.weight,
+      weight_2: r.weight_2 ?? null,
+      weight_3: r.weight_3 ?? null,
+      locked: r.locked,
+    })),
   };
 
   if (oddsRows.length) {
     await packs.deletePackOdds(oddsRows.map((o) => o.id));
+  }
+  if (prizeRows.length) {
+    await packs.deleteTicketPrizes(prizeRows.map((r) => r.id));
   }
   await packs.deletePacks([pack.id]);
 
@@ -143,7 +182,11 @@ export const deletePackInvoke = async (
     entityType: 'pack',
     entityId: pack.slug,
     action: 'delete',
-    before: { pack: packConfig(pack), ...oddsSnapshot(oddsRows) },
+    before: {
+      pack: packConfig(pack),
+      ...oddsSnapshot(oddsRows),
+      ...(prizeRows.length ? ticketPrizeSnapshot(prizeRows) : {}),
+    },
     after: null,
   });
 
@@ -159,6 +202,9 @@ export const deletePackStep = createStep(
     await packs.createPacks([data.pack]);
     if (data.odds.length) {
       await packs.createPackOdds(data.odds);
+    }
+    if (data.ticketPrizes.length) {
+      await packs.createTicketPrizes(data.ticketPrizes);
     }
   },
 );

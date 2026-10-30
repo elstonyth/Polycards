@@ -48,6 +48,7 @@ export async function GET(
       category: pack.category,
       pack_type: pack.pack_type ?? null,
       language: pack.language ?? null,
+      prize_type: pack.prize_type,
       price: pack.price,
       image: pack.image,
       display_image: pack.display_image ?? null,

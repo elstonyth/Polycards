@@ -6,7 +6,11 @@ import {
   type RollDeps,
   type RollRequest,
 } from '../roll-batch';
-import { FLAT_BUYBACK_PERCENT, type PackCard } from '@/lib/packs-data';
+import {
+  FLAT_BUYBACK_PERCENT,
+  ticketCard,
+  type PackCard,
+} from '@/lib/packs-data';
 import { SELL_COUNTDOWN_SECS } from '@/lib/sell-countdown';
 import type { WonCard } from '@/lib/actions/packs';
 
@@ -583,5 +587,55 @@ describe('rollBatch — paid open', () => {
     expect(openBatch).toHaveBeenCalledTimes(1);
     expect(res).toEqual({ ok: false, kind: 'unreachable' });
     errorLog.mockRestore();
+  });
+});
+
+describe('rollBatch — ticket packs', () => {
+  const rare = ticketCard(100, 'Rare');
+
+  it('a paid ticket roll keeps its one server call and builds no sell offer', async () => {
+    const d = deps({
+      openBatch: vi.fn(async () => ({
+        ok: true as const,
+        rolls: [{ card: rare, pullId: null, marketValue: 0, buyback: null }],
+        price: 10,
+        total: 10,
+        balance: 90,
+        giftsUsed: 0,
+      })),
+    });
+    const res = await rollBatch(req({ packId: 'lucky-pack' }), d);
+    expect(d.openBatch).toHaveBeenCalledTimes(1);
+    expect(res).toMatchObject({
+      ok: true,
+      batch: {
+        cards: [{ tickets: 100 }],
+        offers: [null],
+        locked: false,
+        balance: 90,
+      },
+    });
+  });
+
+  it('a guest demo samples the ticket rows with no server call', async () => {
+    const d = deps();
+    const res = await rollBatch(
+      req({
+        mode: 'demo',
+        forId: null,
+        reels: 2,
+        demoPool: [rare],
+        demoOdds: [{ rarity: 'Rare', chance: '100%' }],
+      }),
+      d,
+    );
+    expect(d.openBatch).not.toHaveBeenCalled();
+    expect(res).toMatchObject({
+      ok: true,
+      batch: {
+        cards: [{ tickets: 100 }, { tickets: 100 }],
+        offers: [null, null],
+      },
+    });
   });
 });

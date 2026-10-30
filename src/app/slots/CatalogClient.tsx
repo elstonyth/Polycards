@@ -24,6 +24,7 @@ import {
   pickCategory,
   CATALOG_GROUP_HEADING,
   CATALOG_GROUP_ORDER,
+  isTicketPack,
   type CatalogGroup,
   type Pack,
   type PackCategory,
@@ -197,7 +198,9 @@ function PackRow({
           </span>
         ) : (
           <span className="mt-1 block text-[11px] text-white/60">
-            {categoryName} · {buyback}% instant buyback
+            {isTicketPack(pack)
+              ? categoryName
+              : `${categoryName} · ${buyback}% instant buyback`}
           </span>
         )}
       </div>
@@ -319,11 +322,13 @@ export default function CatalogClient({
     >
       {freePack && <FreePackBadge state={freePack} />}
 
-      <p className="mb-4 text-[12px] leading-relaxed text-neutral-400">
-        Instant buyback rates apply during the reveal countdown. Leaving the
-        reveal or letting its timer expire changes buyback to{' '}
-        {BUYBACK_RATE_LABEL} of card value in your vault.
-      </p>
+      {!entries.every((e) => isTicketPack(e.pack)) && (
+        <p className="mb-4 text-[12px] leading-relaxed text-neutral-400">
+          Instant buyback rates apply during the reveal countdown. Leaving the
+          reveal or letting its timer expire changes buyback to{' '}
+          {BUYBACK_RATE_LABEL} of card value in your vault.
+        </p>
+      )}
 
       {/* Franchise switch — only once there are two to pick from. Not sticky:
           the app header is sticky itself and would cover it. */}

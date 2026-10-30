@@ -6,6 +6,7 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import {
+  commitDrawSeed,
   deriveDrawSeed,
   drawSeedHash,
 } from '../../src/modules/packs/lucky-draw';
@@ -117,11 +118,20 @@ medusaIntegrationTestRunner({
           ...over,
         });
 
-        // Event + one card prize + one credit prize, published, through the routes.
+        // An old-rule event with one card prize and one credit prize. A publish
+        // now makes a one_winner event, so the event is seeded; its prizes go
+        // through the route, which commits them at creation.
         const publishedEvent = async () => {
-          const ev = await post('/admin/lucky-draw/events', eventBody());
-          expect(ev.status).toBe(200);
-          const eventId = ev.data.id as string;
+          const [ev] = await packs.createLuckyDrawEvents([
+            {
+              name: 'November Lucky Draw',
+              starts_at: new Date(Date.now() - HOUR),
+              ends_at: new Date(Date.now() + 48 * HOUR),
+              status: 'published',
+              created_by: 'user_t',
+            },
+          ]);
+          const eventId = ev.id;
           const card = await post(
             '/admin/lucky-draw/prizes',
             cardPrizeBody(eventId),
@@ -131,11 +141,6 @@ medusaIntegrationTestRunner({
             creditPrizeBody(eventId),
           );
           expect([card.status, credit.status]).toEqual([200, 200]);
-          const published = await post(
-            `/admin/lucky-draw/events/${eventId}/publish`,
-            { reason: 'go live' },
-          );
-          expect(published.status).toBe(200);
           return {
             eventId,
             cardId: card.data.id as string,
@@ -193,7 +198,24 @@ medusaIntegrationTestRunner({
         });
 
         it('audits each admin write (the CHECK lists accept the new entity types)', async () => {
-          const { eventId, cardId } = await publishedEvent();
+          const ev = await post(
+            '/admin/lucky-draw/events',
+            eventBody({
+              starts_at: new Date(Date.now() + HOUR).toISOString(),
+            }),
+          );
+          const eventId = ev.data.id as string;
+          const card = await post(
+            '/admin/lucky-draw/prizes',
+            cardPrizeBody(eventId),
+          );
+          const cardId = card.data.id as string;
+          await post('/admin/lucky-draw/prizes', creditPrizeBody(eventId));
+          const published = await post(
+            `/admin/lucky-draw/events/${eventId}/publish`,
+            { reason: 'go live' },
+          );
+          expect(published.status).toBe(200);
           const cancelled = await post(
             `/admin/lucky-draw/prizes/${cardId}/cancel`,
             { reason: 'pulled' },
@@ -263,7 +285,7 @@ medusaIntegrationTestRunner({
             credit_myr: 25,
             image_url: '/cdn/ld-credit.webp',
           });
-          // Each prize draws at the event's end unless told otherwise.
+          // Each prize draws at the event's end.
           for (const p of ev.prizes) expect(p.draw_at).toBe(ev.ends_at);
 
           // A pool made this way publishes like any other draft.
@@ -407,9 +429,6 @@ medusaIntegrationTestRunner({
           for (const body of [
             cardPrizeBody(eventId, { card_handle: 'no-such-card' }),
             creditPrizeBody(eventId, { credit_myr: 999_999 }),
-            creditPrizeBody(eventId, {
-              draw_at: new Date(Date.now() + 99 * HOUR).toISOString(),
-            }),
             creditPrizeBody(eventId, { kind: 'cash' }),
           ]) {
             expect((await post('/admin/lucky-draw/prizes', body)).status).toBe(
@@ -602,38 +621,33 @@ medusaIntegrationTestRunner({
         const adminPost = (path: string, body: unknown) =>
           unwrapResponse(api.post(path, body, { headers: adminHeaders }));
 
-        // A live event (opened an hour ago, draws in 48h) with one credit
-        // prize, published through the admin routes.
-        const publishLive = async (
-          prize: Record<string, unknown> = {},
-          event: Record<string, unknown> = {},
-        ) => {
-          const ev = await adminPost('/admin/lucky-draw/events', {
-            name: 'November Lucky Draw',
-            starts_at: new Date(Date.now() - HOUR).toISOString(),
-            ends_at: new Date(Date.now() + 48 * HOUR).toISOString(),
-            reason: 'ld store test',
-            ...event,
-          });
-          expect(ev.status).toBe(200);
-          const eventId = ev.data.id as string;
-          const created = await adminPost('/admin/lucky-draw/prizes', {
-            event_id: eventId,
-            kind: 'credit',
-            credit_myr: 25,
-            title: 'RM 25 credit',
-            image_url: '/cdn/ld-credit.webp',
-            sort: 1,
-            reason: 'ld store test',
-            ...prize,
-          });
-          expect(created.status).toBe(200);
-          const published = await adminPost(
-            `/admin/lucky-draw/events/${eventId}/publish`,
-            { reason: 'go live' },
-          );
-          expect(published.status).toBe(200);
-          return { eventId, prizeId: created.data.id as string };
+        // A live old-rule event (opened an hour ago, draws in 48h) with one
+        // credit prize. Seeded: a publish now makes a one_winner event.
+        const publishLive = async (prize: Record<string, unknown> = {}) => {
+          const endsAt = new Date(Date.now() + 48 * HOUR);
+          const [ev] = await packs.createLuckyDrawEvents([
+            {
+              name: 'November Lucky Draw',
+              starts_at: new Date(Date.now() - HOUR),
+              ends_at: endsAt,
+              status: 'published',
+              created_by: 'user_t',
+            },
+          ]);
+          const [created] = await packs.createLuckyDrawPrizes([
+            {
+              event_id: ev.id,
+              kind: 'credit',
+              credit_myr: 25,
+              title: 'RM 25 credit',
+              image_url: '/cdn/ld-credit.webp',
+              sort: 1,
+              draw_at: endsAt,
+              ...commitDrawSeed(process.env.LUCKY_DRAW_SEED_SECRET!),
+              ...prize,
+            },
+          ]);
+          return { eventId: ev.id, prizeId: created.id };
         };
 
         // A published event straight from the module, for windows the admin
@@ -833,7 +847,12 @@ medusaIntegrationTestRunner({
         it('picks the live event, else one that ended within 7 days, else null', async () => {
           const none = await get('/store/lucky-draw', adaHeaders());
           expect(none.status).toBe(200);
-          expect(none.data).toEqual({ balance: 0, event: null, prizes: [] });
+          expect(none.data).toEqual({
+            balance: 0,
+            event: null,
+            prizes: [],
+            next_event: null,
+          });
 
           // Ended 10 days ago: too old.
           await publishedPastEvent('Old draw', 12, 10);

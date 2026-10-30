@@ -15,6 +15,8 @@ import { toIso, toLocalInput } from '../tasks/task-draft';
 const MAX_EVENT_NAME = 80;
 export const MAX_PRIZE_TITLE = 120;
 const MAX_PRIZE_CREDIT_MYR = 50_000;
+/** The backend's lead on a draw time. */
+export const LUCKY_DRAW_MIN_LEAD_MS = 2 * 60 * 1000;
 
 /** A credit amount as typed, or null if the backend would refuse it: not a
  *  number, not above 0, over the ceiling, or not whole sen. */
@@ -167,7 +169,7 @@ export type PrizeState =
   | 'open';
 
 /** The draw job ticks every minute; past this, a missing result is a problem. */
-const OVERDUE_AFTER_MS = 2 * 60 * 1000;
+export const OVERDUE_AFTER_MS = 2 * 60 * 1000;
 
 /** Cancelled beats drawn: a cancelled prize never has a result (the backend
  *  refuses to cancel a drawn one), but if both ever showed, the refund is the

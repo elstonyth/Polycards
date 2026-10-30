@@ -69,6 +69,8 @@ export const PACK_TYPES = ['classic', 'original', 'special'] as const;
 export const PACK_LANGUAGES = ['en', 'jp'] as const;
 export type PackType = (typeof PACK_TYPES)[number];
 export type PackLanguage = (typeof PACK_LANGUAGES)[number];
+export const PRIZE_TYPES = ['cards', 'tickets'] as const;
+export type PrizeType = (typeof PRIZE_TYPES)[number];
 
 export type PackWriteInput = {
   slug: string;
@@ -79,6 +81,9 @@ export type PackWriteInput = {
   // type is 'original'.
   pack_type?: PackType | null;
   language?: PackLanguage | null;
+  // What a spin wins. Fixed at creation (default cards): undefined on an update
+  // keeps it, and update-pack refuses a different value.
+  prize_type?: PrizeType;
   price: number;
   image: string;
   // Optional pack-page hero (wide stage/"factory" render). Tri-state like
@@ -146,6 +151,7 @@ export const createPackInvoke = async (
       category: input.category,
       pack_type: input.pack_type ?? null,
       language: input.language ?? null,
+      prize_type: input.prize_type ?? 'cards',
       price: input.price,
       image: input.image,
       display_image: input.display_image ?? null,

@@ -14,11 +14,14 @@ import {
   prizeDraftToPayload,
   type PrizeDraft,
 } from './lucky-draw-draft';
+import { usesOneWinnerView } from './one-winner';
 
 /** Add or edit one prize. On a published event the kind, card, amount and draw
  *  time are what customers entered for, so an existing prize locks them (the
  *  backend refuses a change; this just says so up front). Title, art and order
- *  stay editable, and a NEW prize on a published event is fine. */
+ *  stay editable, and a NEW prize on a published event is fine. A one-winner
+ *  event's prizes all draw at its end, so there is no draw time here, and
+ *  nothing locks: the page only opens this before the start. */
 export const PrizeEditor = ({
   draft,
   event,
@@ -42,7 +45,8 @@ export const PrizeEditor = ({
     onChange((d) => ({ ...d, ...changes }));
   const { data: cards } = useCards({ enabled: draft.kind === 'card' });
 
-  const locked = event.status === 'published' && Boolean(draft.id);
+  const oneWinner = usesOneWinnerView(event);
+  const locked = !oneWinner && event.status === 'published' && Boolean(draft.id);
 
   // Same search-then-select the Tasks card reward uses: useCards already holds
   // the whole list, so it is filtered client-side.
@@ -63,7 +67,7 @@ export const PrizeEditor = ({
     }));
 
   const payload = prizeDraftToPayload(draft, event.id);
-  const timeProblem = drawTimeProblem(draft, event);
+  const timeProblem = oneWinner ? null : drawTimeProblem(draft, event);
   const valid = payload !== null && timeProblem === null && reason.trim() !== '';
 
   const handleFile = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -93,7 +97,7 @@ export const PrizeEditor = ({
         ...payload,
         // Locked: don't re-post the time at all (null = keep the stored one),
         // so a draw time with stray seconds can't read as a change.
-        ...(locked ? { draw_at: null } : {}),
+        ...(locked || oneWinner ? { draw_at: null } : {}),
         reason: reason.trim(),
       },
       {
@@ -261,20 +265,22 @@ export const PrizeEditor = ({
                 onChange={(e) => patch({ sort: e.target.value })}
               />
             </Field>
-            <Field
-              label="Draw time"
-              htmlFor="ld-draw-at"
-              hint="Your browser’s time zone. Blank = when the event ends."
-              className="w-56"
-            >
-              <Input
-                id="ld-draw-at"
-                type="datetime-local"
-                value={draft.drawAt}
-                disabled={locked}
-                onChange={(e) => patch({ drawAt: e.target.value })}
-              />
-            </Field>
+            {!oneWinner && (
+              <Field
+                label="Draw time"
+                htmlFor="ld-draw-at"
+                hint="Your browser’s time zone. Blank = when the event ends."
+                className="w-56"
+              >
+                <Input
+                  id="ld-draw-at"
+                  type="datetime-local"
+                  value={draft.drawAt}
+                  disabled={locked}
+                  onChange={(e) => patch({ drawAt: e.target.value })}
+                />
+              </Field>
+            )}
           </div>
           {timeProblem && (
             <Text size="small" className="text-ui-fg-error -mt-3">

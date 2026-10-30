@@ -57,6 +57,31 @@ export function oddsSnapshot(rows: readonly OddsLike[]): {
   };
 }
 
+/** A ticket pack's table as it stood: oddsSnapshot for a pack with no cards. */
+export function ticketPrizeSnapshot(
+  rows: readonly {
+    tickets: number;
+    rarity: string;
+    weight: number;
+    weight_2?: number | null;
+    weight_3?: number | null;
+    locked: boolean;
+  }[],
+) {
+  return {
+    ticket_prizes: rows
+      .map((r) => ({
+        tickets: r.tickets,
+        rarity: r.rarity,
+        weight: r.weight,
+        weight_2: r.weight_2 ?? null,
+        weight_3: r.weight_3 ?? null,
+        locked: r.locked,
+      }))
+      .sort((a, b) => a.tickets - b.tickets),
+  };
+}
+
 export type PackConfig = {
   slug: string;
   title: string;

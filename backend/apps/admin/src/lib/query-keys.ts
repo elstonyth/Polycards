@@ -5,6 +5,8 @@ export const qk = {
   losslessSchedules: ['admin', 'lossless-schedules'] as const,
   pack: (slug: string) => ['admin', 'pack', slug] as const,
   packOdds: (slug: string) => ['admin', 'pack', slug, 'odds'] as const,
+  ticketPrizes: (slug: string) =>
+    ['admin', 'pack', slug, 'ticket-prizes'] as const,
   cards: ['admin', 'cards'] as const,
   pricingHealth: ['admin', 'pricing-health'] as const,
   // The customer segment always renders (defaulting to 'all', same rule as the

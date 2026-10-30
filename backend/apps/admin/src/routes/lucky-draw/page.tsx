@@ -15,6 +15,7 @@ import {
   useCards,
   useLuckyDraw,
   usePublishLuckyDrawEvent,
+  useWithdrawLuckyDrawEvent,
   type AdminLuckyDrawEvent,
   type AdminLuckyDrawPrize,
 } from '../../lib/queries';
@@ -23,7 +24,7 @@ import { rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { RowActions } from '../../components/RowActions';
 import { toLocalInput } from '../tasks/task-draft';
-import { EntrantsDrawer } from './entrants-drawer';
+import { EntrantsDrawer, EventEntrantsDrawer } from './entrants-drawer';
 import { EventEditor } from './event-editor';
 import { PrizeEditor } from './prize-editor';
 import { ReasonPrompt } from './reason-prompt';
@@ -40,12 +41,25 @@ import {
   type PrizeDraft,
   type PrizeState,
 } from './lucky-draw-draft';
+import {
+  canRemovePrize,
+  canWithdraw,
+  convertsOnPublish,
+  eventPhase,
+  eventResult,
+  potPrizeState,
+  prizeLock,
+  publishErrorText,
+  showsEventTotals,
+  usesOneWinnerView,
+  type EventPhase,
+} from './one-winner';
 
-// Lucky Draw — the monthly prize draw (spec 2026-10-24). An event holds a few
-// prizes; players spend tickets (earned from tasks) to enter each one, and a
-// prize is drawn at its own draw time from a seed committed — as a hash — when
-// the event is published. Every write here is audited, so every one carries a
-// reason.
+// Lucky Draw (specs 2026-10-24 and 2026-10-30). An event holds a few prizes;
+// players put tickets into the event, and when it ends one winner takes every
+// prize, drawn from a seed committed — as a hash — when the event is published.
+// Events published before that rule keep a draw per prize and their old screens
+// until they finish. Every write here is audited, so every one carries a reason.
 export const config: RouteConfig = {
   label: 'pcNav.luckyDraw',
   translationNs: 'translation',
@@ -57,6 +71,35 @@ const EVENT_COLOR: Record<
   AdminLuckyDrawEvent['status'],
   'orange' | 'green' | 'grey'
 > = { draft: 'orange', published: 'green', cancelled: 'grey' };
+
+const PHASE_COLOR: Record<
+  EventPhase,
+  'orange' | 'blue' | 'green' | 'red' | 'grey'
+> = {
+  draft: 'orange',
+  upcoming: 'blue',
+  running: 'green',
+  drawing: 'blue',
+  overdue: 'red',
+  drawn: 'green',
+  withdrawn: 'grey',
+};
+
+const PHASE_LINE: Record<EventPhase, string> = {
+  draft:
+    'Draft: nothing is visible to players yet. Publishing commits a seed hash and takes the event live. When it ends, one winner takes every prize.',
+  upcoming:
+    'Published and not started. Prizes can still change until the start. When it ends, one winner takes every prize.',
+  running:
+    'Running: players can put tickets in until the end. One winner then takes every prize.',
+  drawing: 'Ended: the draw runs within a minute or two.',
+  overdue: 'The end has passed with no result. Check the draw job log.',
+  drawn: 'Drawn: the result below is final.',
+  withdrawn: 'Withdrawn: every entrant was refunded and nothing was drawn.',
+};
+
+const OLD_DRAFT_NOTE =
+  'This draft was made under the old rules. Publishing switches it to one winner, and every prize’s draw time moves to the event’s end.';
 
 const PRIZE_COLOR: Record<PrizeState, 'blue' | 'green' | 'grey' | 'red'> = {
   open: 'blue',
@@ -132,6 +175,73 @@ const PrizeOutcome = ({
   );
 };
 
+/** A prize's Status on the one-winner screen. The winner and seed are the
+ *  event's, shown once by EventOutcome, not on every row. */
+const PotPrizeStatus = ({
+  prize,
+  state,
+}: {
+  prize: AdminLuckyDrawPrize;
+  state: PrizeState;
+}) => (
+  <div className="flex flex-col items-start gap-y-1">
+    <StatusBadge color={PRIZE_COLOR[state]}>
+      {state === 'open' ? 'in the pool' : PRIZE_LABEL[state]}
+    </StatusBadge>
+    {state === 'cancelled' && prize.cancelled_at && (
+      <Text size="small" className="text-ui-fg-muted">
+        {whenLabel(prize.cancelled_at)}
+      </Text>
+    )}
+    {state === 'ungranted' && (
+      <Text size="small" className="text-ui-fg-error">
+        Drawn, but nothing was minted or credited — fulfil by hand
+      </Text>
+    )}
+  </div>
+);
+
+/** A one-winner event's commitment and, once drawn, its winner and revealed
+ *  seed: what anyone needs to recompute the draw. */
+const EventOutcome = ({ event }: { event: AdminLuckyDrawEvent }) => {
+  const result = eventResult(event);
+  return (
+    <div className="flex flex-col gap-y-1 px-6 pb-4">
+      {result &&
+        (result.winner_customer_id ? (
+          <Text size="small">
+            Winner{' '}
+            <Link
+              to={`/customers/${result.winner_customer_id}`}
+              className="text-ui-fg-interactive break-all hover:underline"
+            >
+              {result.winner_customer_id}
+            </Link>{' '}
+            <span className="text-ui-fg-subtle">
+              · {result.winner_tickets.toLocaleString()} of{' '}
+              {result.total_tickets.toLocaleString()} tickets ·{' '}
+              {whenLabel(result.drawn_at)}
+            </span>
+          </Text>
+        ) : (
+          <Text size="small" className="text-ui-fg-subtle">
+            No entries — no winner, nothing paid · {whenLabel(result.drawn_at)}
+          </Text>
+        ))}
+      {event.seed_hash && (
+        <Text size="xsmall" className="text-ui-fg-muted break-all">
+          seed hash {event.seed_hash}
+        </Text>
+      )}
+      {result && (
+        <Text size="xsmall" className="text-ui-fg-muted break-all">
+          seed {result.seed}
+        </Text>
+      )}
+    </div>
+  );
+};
+
 const PrizeTable = ({
   event,
   onEdit,
@@ -143,6 +253,9 @@ const PrizeTable = ({
   onEntrants: (p: AdminLuckyDrawPrize) => void;
   onCancel: (p: AdminLuckyDrawPrize) => void;
 }) => {
+  const oneWinner = usesOneWinnerView(event);
+  const lock = oneWinner ? prizeLock(event) : null;
+  const removable = oneWinner && canRemovePrize(event);
   // A card prize shows the card's own art unless an override was uploaded;
   // only fetch the catalogue when some row actually needs it.
   const needsCards = event.prizes.some((p) => p.kind === 'card' && !p.image_url);
@@ -161,10 +274,18 @@ const PrizeTable = ({
             <Table.HeaderCell>Prize</Table.HeaderCell>
             <Table.HeaderCell>Kind</Table.HeaderCell>
             <Table.HeaderCell className="text-right">Value</Table.HeaderCell>
-            <Table.HeaderCell>Draws</Table.HeaderCell>
-            <Table.HeaderCell className="text-right">Tickets</Table.HeaderCell>
-            <Table.HeaderCell className="text-right">Entrants</Table.HeaderCell>
-            <Table.HeaderCell>Seed hash</Table.HeaderCell>
+            {!oneWinner && (
+              <>
+                <Table.HeaderCell>Draws</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  Tickets
+                </Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  Entrants
+                </Table.HeaderCell>
+                <Table.HeaderCell>Seed hash</Table.HeaderCell>
+              </>
+            )}
             <Table.HeaderCell>Status</Table.HeaderCell>
             <Table.HeaderCell />
           </Table.Row>
@@ -172,25 +293,39 @@ const PrizeTable = ({
         <Table.Body>
           {event.prizes.map((p) => {
             const art = artOf(p);
-            const state = prizeState(p);
+            const state = oneWinner ? potPrizeState(p) : prizeState(p);
             // An overdue prize stays editable and cancellable: cancelling is
             // how staff refund a draw that keeps failing.
             const undrawn = state === 'open' || state === 'overdue';
-            const actions = [
-              ...(undrawn && event.status !== 'cancelled'
-                ? [{ label: 'Edit', onSelect: () => onEdit(p) }]
-                : []),
-              { label: 'Entrants', onSelect: () => onEntrants(p) },
-              ...(undrawn
+            const actions = oneWinner
+              ? state === 'open' && lock === null
                 ? [
+                    { label: 'Edit', onSelect: () => onEdit(p) },
                     {
-                      label: 'Cancel prize…',
+                      label: removable
+                        ? 'Remove prize…'
+                        : 'Can’t remove the last prize',
                       danger: true,
+                      disabled: !removable,
                       onSelect: () => onCancel(p),
                     },
                   ]
-                : []),
-            ];
+                : []
+              : [
+                  ...(undrawn && event.status !== 'cancelled'
+                    ? [{ label: 'Edit', onSelect: () => onEdit(p) }]
+                    : []),
+                  { label: 'Entrants', onSelect: () => onEntrants(p) },
+                  ...(undrawn
+                    ? [
+                        {
+                          label: 'Cancel prize…',
+                          danger: true,
+                          onSelect: () => onCancel(p),
+                        },
+                      ]
+                    : []),
+                ];
             return (
               <Table.Row key={p.id}>
                 <Table.Cell>
@@ -223,26 +358,36 @@ const PrizeTable = ({
                 <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                   {rm(p.value_myr)}
                 </Table.Cell>
-                <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
-                  {whenLabel(p.draw_at)}
-                </Table.Cell>
-                <Table.Cell className="text-right tabular-nums">
-                  {p.total_tickets.toLocaleString()}
-                </Table.Cell>
-                <Table.Cell className="text-right tabular-nums">
-                  {p.entrant_count.toLocaleString()}
-                </Table.Cell>
-                <Table.Cell className="text-ui-fg-muted font-mono text-xs">
-                  {/* Only the commitment — an undrawn prize has no seed to show. */}
-                  <span title={p.seed_hash ?? undefined}>
-                    {shortHash(p.seed_hash)}
-                  </span>
-                </Table.Cell>
+                {!oneWinner && (
+                  <>
+                    <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
+                      {whenLabel(p.draw_at)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {p.total_tickets.toLocaleString()}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {p.entrant_count.toLocaleString()}
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-muted font-mono text-xs">
+                      {/* Only the commitment — an undrawn prize has no seed to show. */}
+                      <span title={p.seed_hash ?? undefined}>
+                        {shortHash(p.seed_hash)}
+                      </span>
+                    </Table.Cell>
+                  </>
+                )}
                 <Table.Cell>
-                  <PrizeOutcome prize={p} state={state} />
+                  {oneWinner ? (
+                    <PotPrizeStatus prize={p} state={state} />
+                  ) : (
+                    <PrizeOutcome prize={p} state={state} />
+                  )}
                 </Table.Cell>
                 <Table.Cell className="text-right">
-                  <RowActions subject={p.title} actions={actions} />
+                  {actions.length > 0 && (
+                    <RowActions subject={p.title} actions={actions} />
+                  )}
                 </Table.Cell>
               </Table.Row>
             );
@@ -257,6 +402,7 @@ const LuckyDrawPage = () => {
   const { data, isLoading, isError } = useLuckyDraw();
   const publish = usePublishLuckyDrawEvent();
   const cancel = useCancelLuckyDrawPrize();
+  const withdraw = useWithdrawLuckyDrawEvent();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
@@ -264,6 +410,8 @@ const LuckyDrawPage = () => {
   const [publishing, setPublishing] = useState(false);
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [entrantsId, setEntrantsId] = useState<string | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [eventEntrants, setEventEntrants] = useState(false);
 
   const events = data ?? [];
   // The newest event until the operator picks another; a stale id (the event
@@ -272,6 +420,8 @@ const LuckyDrawPage = () => {
   const livePrizes = selected?.prizes.filter((p) => !p.cancelled_at) ?? [];
   const cancelPrize = selected?.prizes.find((p) => p.id === cancelId);
   const entrantsPrize = selected?.prizes.find((p) => p.id === entrantsId);
+  const oneWinner = selected ? usesOneWinnerView(selected) : false;
+  const lock = selected && oneWinner ? prizeLock(selected) : null;
 
   return (
     <div className="flex flex-col gap-y-4">
@@ -280,12 +430,17 @@ const LuckyDrawPage = () => {
           <div>
             <Heading level="h2">Lucky Draw</Heading>
             <Text size="small" className="text-ui-fg-subtle mt-1">
-              The monthly prize draw. Players spend tickets earned from tasks to
-              enter each prize; a prize is drawn at its draw time from a seed
-              committed (as a hash) when the event is published.
+              Players put tickets into the running event. When it ends, one
+              winner takes every prize, drawn from a seed committed (as a hash)
+              when the event is published. Events published under the old rules
+              finish prize by prize.
             </Text>
           </div>
-          <Button size="small" onClick={() => setEventDraft(blankEventDraft())}>
+          <Button
+            size="small"
+            className="shrink-0"
+            onClick={() => setEventDraft(blankEventDraft())}
+          >
             New event
           </Button>
         </div>
@@ -310,12 +465,67 @@ const LuckyDrawPage = () => {
                 <Table.HeaderCell>Runs</Table.HeaderCell>
                 <Table.HeaderCell>Status</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">Prizes</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Tickets</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Entrants</Table.HeaderCell>
+                <Table.HeaderCell>Seed hash</Table.HeaderCell>
+                <Table.HeaderCell>Winner</Table.HeaderCell>
                 <Table.HeaderCell />
               </Table.Row>
             </Table.Header>
             <Table.Body>
               {events.map((e) => {
                 const live = e.prizes.filter((p) => !p.cancelled_at).length;
+                const phase = eventPhase(e);
+                const newRules = usesOneWinnerView(e);
+                const totals = showsEventTotals(e);
+                const result = totals ? eventResult(e) : null;
+                const actions = [
+                  ...(e.status !== 'cancelled'
+                    ? [
+                        {
+                          label: 'Edit',
+                          onSelect: () => setEventDraft(eventDraftFrom(e)),
+                        },
+                      ]
+                    : []),
+                  ...(e.status === 'draft'
+                    ? [
+                        {
+                          label: 'Publish…',
+                          // The backend refuses an event with no
+                          // live prize; say so by not offering it.
+                          disabled: live === 0,
+                          onSelect: () => {
+                            setSelectedId(e.id);
+                            setPublishing(true);
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(totals
+                    ? [
+                        {
+                          label: 'Entrants',
+                          onSelect: () => {
+                            setSelectedId(e.id);
+                            setEventEntrants(true);
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(canWithdraw(e)
+                    ? [
+                        {
+                          label: 'Withdraw event…',
+                          danger: true,
+                          onSelect: () => {
+                            setSelectedId(e.id);
+                            setWithdrawing(true);
+                          },
+                        },
+                      ]
+                    : []),
+                ];
                 return (
                   <Table.Row
                     key={e.id}
@@ -340,38 +550,43 @@ const LuckyDrawPage = () => {
                       {whenLabel(e.starts_at)} → {whenLabel(e.ends_at)}
                     </Table.Cell>
                     <Table.Cell>
-                      <StatusBadge color={EVENT_COLOR[e.status]}>
-                        {e.status}
+                      <StatusBadge
+                        color={newRules ? PHASE_COLOR[phase] : EVENT_COLOR[e.status]}
+                      >
+                        {newRules ? phase : e.status}
                       </StatusBadge>
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums">
                       {live}
                     </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {totals ? e.total_tickets.toLocaleString() : '—'}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {totals ? e.entrant_count.toLocaleString() : '—'}
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-muted font-mono text-xs">
+                      <span title={(totals && e.seed_hash) || undefined}>
+                        {totals ? shortHash(e.seed_hash) : '—'}
+                      </span>
+                    </Table.Cell>
+                    <Table.Cell>
+                      {result?.winner_customer_id ? (
+                        <Link
+                          to={`/customers/${result.winner_customer_id}`}
+                          className="text-ui-fg-interactive break-all hover:underline"
+                        >
+                          {result.winner_customer_id}
+                        </Link>
+                      ) : (
+                        <span className="text-ui-fg-subtle">
+                          {result ? 'No entries' : '—'}
+                        </span>
+                      )}
+                    </Table.Cell>
                     <Table.Cell className="text-right">
-                      {e.status !== 'cancelled' && (
-                        <RowActions
-                          subject={e.name}
-                          actions={[
-                            {
-                              label: 'Edit',
-                              onSelect: () => setEventDraft(eventDraftFrom(e)),
-                            },
-                            ...(e.status === 'draft'
-                              ? [
-                                  {
-                                    label: 'Publish…',
-                                    // The backend refuses an event with no
-                                    // live prize; say so by not offering it.
-                                    disabled: live === 0,
-                                    onSelect: () => {
-                                      setSelectedId(e.id);
-                                      setPublishing(true);
-                                    },
-                                  },
-                                ]
-                              : []),
-                          ]}
-                        />
+                      {actions.length > 0 && (
+                        <RowActions subject={e.name} actions={actions} />
                       )}
                     </Table.Cell>
                   </Table.Row>
@@ -388,23 +603,36 @@ const LuckyDrawPage = () => {
             <div>
               <Heading level="h2">Prizes — {selected.name}</Heading>
               <Text size="small" className="text-ui-fg-subtle mt-1">
-                {selected.status === 'draft'
-                  ? 'Draft: nothing is visible to players yet. Publishing commits every prize’s seed hash and takes the event live.'
+                {oneWinner
+                  ? PHASE_LINE[eventPhase(selected)]
                   : selected.status === 'published'
                     ? 'Published: kind, card, amount and draw time are fixed. New prizes can still be added.'
                     : 'Cancelled: this event is closed.'}
               </Text>
+              {lock && (
+                <Text size="small" className="text-ui-fg-subtle mt-1">
+                  {lock}
+                </Text>
+              )}
+              {convertsOnPublish(selected) && (
+                <Text size="small" className="text-ui-fg-subtle mt-1">
+                  {OLD_DRAFT_NOTE}
+                </Text>
+              )}
             </div>
             {selected.status !== 'cancelled' && (
               <div className="flex items-center gap-x-2">
                 <Button
                   size="small"
                   variant="secondary"
+                  disabled={lock !== null}
                   onClick={() =>
                     setPrizeDraft({
                       ...blankPrizeDraft(),
                       // Shown, so the operator sees what a blank would mean.
-                      drawAt: toLocalInput(new Date(selected.ends_at)),
+                      ...(oneWinner
+                        ? {}
+                        : { drawAt: toLocalInput(new Date(selected.ends_at)) }),
                     })
                   }
                 >
@@ -422,6 +650,7 @@ const LuckyDrawPage = () => {
               </div>
             )}
           </div>
+          {showsEventTotals(selected) && <EventOutcome event={selected} />}
           {selected.prizes.length === 0 ? (
             <Text size="small" className="text-ui-fg-muted px-6 pb-4">
               No prizes yet. Add at least one before publishing.
@@ -472,12 +701,50 @@ const LuckyDrawPage = () => {
         />
       )}
 
+      {eventEntrants && selected && (
+        <EventEntrantsDrawer
+          event={selected}
+          onClose={() => setEventEntrants(false)}
+        />
+      )}
+
+      {withdrawing && selected && (
+        <ReasonPrompt
+          danger
+          title={`Withdraw ${selected.name}?`}
+          description={`Every entrant is refunded at once (${selected.total_tickets.toLocaleString()} tickets from ${selected.entrant_count.toLocaleString()} ${
+            selected.entrant_count === 1 ? 'player' : 'players'
+          }), every prize is cancelled and no draw runs. This cannot be undone.`}
+          confirmLabel="Withdraw event"
+          pending={withdraw.isPending}
+          onClose={() => setWithdrawing(false)}
+          onConfirm={(reason) =>
+            withdraw.mutate(
+              { id: selected.id, reason },
+              {
+                onSuccess: ({ refunded }) => {
+                  toast.success(
+                    `Event withdrawn — ${refunded} ${
+                      refunded === 1 ? 'player' : 'players'
+                    } refunded.`,
+                  );
+                  setWithdrawing(false);
+                },
+                onError: (e) => toast.error(e.message),
+              },
+            )
+          }
+        />
+      )}
+
       {publishing && selected && (
         <ReasonPrompt
           title={`Publish ${selected.name}?`}
-          description={`This commits a seed hash for each of its ${livePrizes.length} ${
+          description={`${
+            convertsOnPublish(selected) ? `${OLD_DRAFT_NOTE} ` : ''
+          }This commits the event’s seed hash and takes it live with ${livePrizes.length} ${
             livePrizes.length === 1 ? 'prize' : 'prizes'
-          } and takes the event live. Afterwards the event window, and every prize’s kind, card, amount and draw time, can no longer change. This cannot be undone.`}
+          }. The window can no longer change, and the prizes lock at the start. When it ends, one winner takes them all. To stop it after publishing, withdraw it and every entrant is refunded. Publishing cannot be undone.`}
           confirmLabel="Publish"
           pending={publish.isPending}
           onClose={() => setPublishing(false)}
@@ -489,7 +756,7 @@ const LuckyDrawPage = () => {
                   toast.success('Event published.');
                   setPublishing(false);
                 },
-                onError: (e) => toast.error(e.message),
+                onError: (e) => toast.error(publishErrorText(e)),
               },
             )
           }
@@ -499,11 +766,15 @@ const LuckyDrawPage = () => {
       {cancelPrize && (
         <ReasonPrompt
           danger
-          title={`Cancel ${cancelPrize.title}?`}
-          description={`The prize is withdrawn before its draw and every entrant’s tickets are refunded at once (${cancelPrize.total_tickets.toLocaleString()} tickets from ${cancelPrize.entrant_count.toLocaleString()} ${
-            cancelPrize.entrant_count === 1 ? 'player' : 'players'
-          }). This cannot be undone.`}
-          confirmLabel="Cancel prize"
+          title={`${oneWinner ? 'Remove' : 'Cancel'} ${cancelPrize.title}?`}
+          description={
+            oneWinner
+              ? 'The prize leaves the event’s pool. Players can’t enter before the start, so there is nothing to refund. This cannot be undone.'
+              : `The prize is withdrawn before its draw and every entrant’s tickets are refunded at once (${cancelPrize.total_tickets.toLocaleString()} tickets from ${cancelPrize.entrant_count.toLocaleString()} ${
+                  cancelPrize.entrant_count === 1 ? 'player' : 'players'
+                }). This cannot be undone.`
+          }
+          confirmLabel={oneWinner ? 'Remove prize' : 'Cancel prize'}
           pending={cancel.isPending}
           onClose={() => setCancelId(null)}
           onConfirm={(reason) =>
@@ -512,9 +783,11 @@ const LuckyDrawPage = () => {
               {
                 onSuccess: ({ refunded }) => {
                   toast.success(
-                    `Prize cancelled — ${refunded} ${
-                      refunded === 1 ? 'player' : 'players'
-                    } refunded.`,
+                    oneWinner
+                      ? 'Prize removed.'
+                      : `Prize cancelled — ${refunded} ${
+                          refunded === 1 ? 'player' : 'players'
+                        } refunded.`,
                   );
                   setCancelId(null);
                 },

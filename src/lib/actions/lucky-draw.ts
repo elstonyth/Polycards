@@ -8,9 +8,11 @@
  * result object, never an exception.
  */
 import { store, type Failure } from '@/lib/store';
+import { eventResultDetail } from '@/lib/lucky-draw';
 import {
   LuckyDrawBalanceSchema,
   LuckyDrawEnterSchema,
+  LuckyDrawEventDetailSchema,
   LuckyDrawMineSchema,
   LuckyDrawPageSchema,
   LuckyDrawResultDetailSchema,
@@ -57,11 +59,28 @@ export async function enterLuckyDraw(
   prizeId: string,
   tickets: number,
 ): Promise<EnterLuckyDrawResult> {
-  const r = await store.post(
+  return postEntry(
     `/store/lucky-draw/prizes/${encodeURIComponent(prizeId)}/enter`,
-    LuckyDrawEnterSchema,
-    { tickets },
+    tickets,
   );
+}
+
+/** A one-winner event: tickets go on the event, not on a prize. */
+export async function enterLuckyDrawEvent(
+  eventId: string,
+  tickets: number,
+): Promise<EnterLuckyDrawResult> {
+  return postEntry(
+    `/store/lucky-draw/events/${encodeURIComponent(eventId)}/enter`,
+    tickets,
+  );
+}
+
+async function postEntry(
+  path: string,
+  tickets: number,
+): Promise<EnterLuckyDrawResult> {
+  const r = await store.post(path, LuckyDrawEnterSchema, { tickets });
   if (!r.ok) {
     // Only a 4xx is a refusal before anything was spent. A 5xx, a timeout or
     // a 2xx we could not read may be an accepted entry: never invite a second
@@ -108,6 +127,19 @@ export async function getLuckyDrawResult(
     LuckyDrawResultDetailSchema,
   );
   return r.ok ? r.data : null;
+}
+
+/** One drawn one-winner event, read as a result the wheel and the sheet know;
+ *  null until it is drawn (a 404). */
+export async function getLuckyDrawEventResult(
+  eventId: string,
+  eventName: string,
+): Promise<LuckyDrawResultDetail | null> {
+  const r = await store.get(
+    `/store/lucky-draw/results/events/${encodeURIComponent(eventId)}`,
+    LuckyDrawEventDetailSchema,
+  );
+  return r.ok ? eventResultDetail(eventId, eventName, r.data) : null;
 }
 
 export async function getMyLuckyDraw(): Promise<LuckyDrawMine | null> {

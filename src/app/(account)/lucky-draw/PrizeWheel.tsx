@@ -44,7 +44,12 @@ import { ChevronDown, ChevronRight, ChevronUp, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { num, rmAuto } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
-import { countdownClock, drawCountdown, nextDraw } from '@/lib/lucky-draw';
+import {
+  countdownClock,
+  drawCountdown,
+  nextDraw,
+  potTotal,
+} from '@/lib/lucky-draw';
 import type { LuckyDrawPrize } from '@/lib/data/schemas';
 import { PrizeArt } from './PrizeCard';
 
@@ -107,12 +112,20 @@ export function PrizeWheel({
   prizes,
   nowMs,
   details,
+  pot = false,
+  lead,
 }: {
   prizes: LuckyDrawPrize[];
   /** Null until mounted: the countdowns are client-only (hydration). */
   nowMs: number | null;
   /** The full prize card for the front prize. */
   details: (prize: LuckyDrawPrize) => ReactNode;
+  /** A one-winner event: one draw for every prize, so the hub says so and the
+   *  rows carry what each prize is, not its own countdown. */
+  pot?: boolean;
+  /** Above the list and under the front prize's details: under the wheel on
+   *  mobile, beside it on desktop. */
+  lead?: ReactNode;
 }) {
   const reduced = usePrefersReducedMotion();
   const stageRef = useRef<HTMLDivElement>(null);
@@ -373,8 +386,16 @@ export function PrizeWheel({
     hub?.kind === 'next' && nowMs != null
       ? countdownClock(hub.at, nowMs)
       : null;
-  const pool = prizes.reduce((n, p) => n + p.value_myr, 0);
+  const pool = potTotal(prizes);
   const half = metrics.half;
+  const hubLabel =
+    hub?.kind === 'done'
+      ? 'All drawn'
+      : !pot
+        ? 'Next draw'
+        : hub?.kind === 'drawing'
+          ? 'One winner'
+          : 'Draws in';
   const front = prizes[clamp(active, 0, last)];
 
   return (
@@ -487,7 +508,7 @@ export function PrizeWheel({
               className="font-semibold tracking-[0.24em] text-neutral-400 uppercase"
               style={{ fontSize: Math.max(10, half * 0.055) }}
             >
-              {hub?.kind === 'done' ? 'All drawn' : 'Next draw'}
+              {hubLabel}
             </p>
             {hub?.kind === 'drawing' ? (
               <p
@@ -502,7 +523,7 @@ export function PrizeWheel({
                 role="timer"
                 aria-label={
                   hub?.kind === 'next' && nowMs != null
-                    ? `Next draw in ${drawCountdown(hub.at, nowMs)}`
+                    ? `${pot ? 'Draws' : 'Next draw'} in ${drawCountdown(hub.at, nowMs)}`
                     : undefined
                 }
                 style={{
@@ -622,10 +643,10 @@ export function PrizeWheel({
         )}
       </div>
 
-      <div className="mt-4 lg:mt-0">
-        {opened && front ? (
-          details(front)
-        ) : (
+      <div className="mt-4 space-y-4 lg:mt-0">
+        {opened && front && details(front)}
+        {lead}
+        {!(opened && front) && (
           <ol className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
             {prizes.map((p, i) => (
               <li key={p.id}>
@@ -643,17 +664,26 @@ export function PrizeWheel({
                     </span>
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-white">
+                    <span
+                      className={cn(
+                        'text-sm font-semibold text-white',
+                        pot ? 'line-clamp-2' : 'block truncate',
+                      )}
+                    >
                       {p.title}
                     </span>
                     <span className="block truncate text-xs text-neutral-400 tabular-nums">
-                      {p.result
-                        ? p.result.winner
-                          ? `Won by ${p.result.winner.who}`
-                          : 'No entries'
-                        : nowMs != null
-                          ? drawCountdown(p.draw_at, nowMs)
-                          : ' '}
+                      {pot
+                        ? p.kind === 'credit'
+                          ? 'Bonus credit'
+                          : 'Card'
+                        : p.result
+                          ? p.result.winner
+                            ? `Won by ${p.result.winner.who}`
+                            : 'No entries'
+                          : nowMs != null
+                            ? drawCountdown(p.draw_at, nowMs)
+                            : ' '}
                       {p.my_tickets > 0 && ` · You: ${num(p.my_tickets)}`}
                     </span>
                   </span>

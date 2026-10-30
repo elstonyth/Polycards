@@ -159,7 +159,14 @@
       "floored": "{{tiers}}: more cards than the share allows, so each sits at the {{min}} floor and the tier costs more than its share.",
       "zeroed": "{{tiers}}: share is 0%, so those cards can never be pulled.",
       "overspent": "{{tiers}}: locked rates already exceed the share, so the tier costs more than its number says.",
-      "noBalancer": "No unlocked Common to absorb the remainder — set one card to Common and leave it unlocked."
+      "noBalancer": "No unlocked Common to absorb the remainder — set one card to Common and leave it unlocked.",
+      "tickets": {
+        "perCard": "{{n}} amounts · {{pct}} each",
+        "perCardEmpty": "no amounts",
+        "floored": "{{tiers}}: more amounts than the share allows, so each sits at the {{min}} floor and the tier costs more than its share.",
+        "zeroed": "{{tiers}}: share is 0%, so those amounts can never be won.",
+        "noBalancer": "No unlocked Common to absorb the remainder — set one amount to Common and leave it unlocked."
+      }
     },
     "published": {
       "title": "Published odds (public)",
@@ -178,6 +185,7 @@
       "createTitle": "New pack",
       "editTitle": "Edit pack",
       "subtitle": "Sets the pack's storefront listing. A new pack starts with an empty prize pool — open it afterwards to add cards.",
+      "subtitleTickets": "Sets the pack's storefront listing. A new pack starts with no ticket amounts — open it afterwards to add them.",
       "image": "Image",
       "uploadImage": "Upload image",
       "imageUrlPlaceholder": "Image URL or /storefront/path.webp",
@@ -206,7 +214,13 @@
       "save": "Save",
       "cancel": "Cancel",
       "missing": "Still needed: {{fields}}",
-      "statusCreateHint": "New packs start as drafts. Add cards to the prize pool on the pack page, then activate."
+      "statusCreateHint": "New packs start as drafts. Add cards to the prize pool on the pack page, then activate.",
+      "prizes": "Prizes",
+      "prizesCards": "Cards",
+      "prizesTickets": "Tickets",
+      "prizesHint": "Fixed once the pack is created.",
+      "poolHintTickets": "After creating, open the pack to add ticket amounts and their win rates.",
+      "statusCreateHintTickets": "New packs start as drafts. Add ticket amounts on the pack page, then activate."
     },
     "delete": {
       "title": "Delete pack?",
@@ -251,6 +265,21 @@
       "saved": "Tier ranges saved.",
       "badNumber": "{{tier}}: bounds must be numbers between 0 and 100,000,000.",
       "badOrder": "{{tier}}: min must not exceed max."
+    },
+    "tickets": {
+      "subtitle": "Set each ticket amount's rarity for this pack. Unlocked amounts follow the default odds above; lock one to type its own rate. Secret — customers never see these.",
+      "amount": "Tickets",
+      "add": "Add amount",
+      "remove": "Remove this amount",
+      "region": "Ticket amounts",
+      "count_one": "{{count}} amount",
+      "count_other": "{{count}} amounts",
+      "empty": "No amounts yet. Add one, then save win rates.",
+      "invalid": "Whole number from 1 to 10,000",
+      "duplicate": "Already in this pack",
+      "activateNeedsRows": "Add an amount and save win rates first.",
+      "draftBanner": "Draft — hidden from the storefront. Add ticket amounts, save win rates, then activate.",
+      "draftReadyBanner": "Draft — hidden from the storefront. Activate when the win rates look right."
     },
     "editor": {
       "title": "Win rates",
@@ -804,7 +833,7 @@
     },
     "tickets": {
       "title": "Lucky Draw tickets",
-      "subtitle": "Give tickets as a gift or compensation, or take back tickets given by mistake. Players put tickets on the Lucky Draw prizes they want; tickets cannot be bought or withdrawn.",
+      "subtitle": "Give tickets as a gift or compensation, or take back tickets given by mistake. Players put tickets into a Lucky Draw event. Tickets come from tasks, Lucky Packs and gifts, and cannot be withdrawn.",
       "balance": "Ticket balance",
       "amount": "Tickets (e.g. 10 to give, -10 to take back)",
       "note": "Note (required, audit trail)",

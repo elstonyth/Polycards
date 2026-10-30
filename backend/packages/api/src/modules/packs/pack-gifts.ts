@@ -47,14 +47,21 @@ export function giftState(
 }
 
 /** Why a pack cannot be gifted, or null. Free-welcome and reward-box packs
- *  are reserved categories with their own entitlement paths; a draft pack
- *  cannot be opened at all. */
+ *  are reserved categories with their own entitlement paths; a ticket pack has
+ *  no card to give; a draft pack cannot be opened at all. */
 export function giftablePackError(
-  pack: { status?: string | null; category?: string | null } | undefined,
+  pack:
+    | {
+        status?: string | null;
+        category?: string | null;
+        prize_type?: string | null;
+      }
+    | undefined,
 ): string | null {
   if (!pack) return 'That pack does not exist.';
   if (pack.category === FREE_WELCOME_CATEGORY || pack.category === 'reward_box')
     return 'That pack cannot be gifted.';
+  if (pack.prize_type === 'tickets') return 'A ticket pack cannot be gifted.';
   if (pack.status !== 'active') return 'Only an active pack can be gifted.';
   return null;
 }

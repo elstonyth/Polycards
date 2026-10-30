@@ -100,6 +100,10 @@ function TaskEditor({
     value: p.slug,
     label: p.title,
   }));
+  // A free rip rolls a card: a ticket pack can be a rip goal, never the reward.
+  const rewardPackOptions = (packs ?? [])
+    .filter((p) => p.prize_type !== "tickets")
+    .map((p) => ({ value: p.slug, label: p.title }));
   // Cards are unbounded; a raw list of every one is the least usable control on
   // the screen. Filtered client-side — useCards already holds the whole list.
   const cardOptions = (cards ?? [])
@@ -451,7 +455,7 @@ function TaskEditor({
                         onChange({ ...draft, rewardValue })
                       }
                       placeholder="Pick a pack"
-                      options={packOptions}
+                      options={rewardPackOptions}
                     />
                   </Field>
                 )}

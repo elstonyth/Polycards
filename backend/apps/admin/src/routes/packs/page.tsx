@@ -31,6 +31,7 @@ import {
   type AdminPack,
   type AdminPackWrite,
   type PackLanguage,
+  type PackPrizeType,
   type PackType,
 } from '../../lib/packs-api';
 import {
@@ -98,6 +99,7 @@ const CATEGORIES = [
   'soccer',
   'yugioh',
   'riftbound',
+  'poly',
 ] as const;
 // Closed sets mirrored from the API validator (and its DB checks).
 const PACK_TYPES: readonly PackType[] = ['classic', 'original', 'special'];
@@ -131,6 +133,7 @@ type FormState = {
   slug: string;
   title: string;
   category: string;
+  prizeType: PackPrizeType;
   packType: PackType | null;
   language: PackLanguage | null;
   price: string;
@@ -146,6 +149,7 @@ const EMPTY_FORM: FormState = {
   slug: '',
   title: '',
   category: 'pokemon',
+  prizeType: 'cards',
   packType: null,
   language: null,
   price: '',
@@ -164,6 +168,7 @@ const formFromPack = (p: AdminPack): FormState => ({
   slug: p.slug,
   title: p.title,
   category: p.category,
+  prizeType: p.prize_type ?? 'cards',
   packType: p.pack_type,
   language: p.language,
   price: String(p.price),
@@ -307,6 +312,8 @@ const PacksListPage = () => {
     const payload: AdminPackWrite = {
       title: form.title.trim(),
       category: form.category,
+      // Fixed at creation, so an edit never sends it.
+      ...(mode === 'create' ? { prize_type: form.prizeType } : {}),
       // The free pack has no tag fields (omitted = keep the stored ones).
       ...(form.category === FREE_WELCOME_CATEGORY
         ? {}
@@ -800,7 +807,11 @@ const PacksListPage = () => {
                 </FocusModal.Title>
                 <FocusModal.Description asChild>
                   <Text className="text-ui-fg-subtle mt-1" size="small">
-                    {t('packs.form.subtitle')}
+                    {t(
+                      form.prizeType === 'tickets'
+                        ? 'packs.form.subtitleTickets'
+                        : 'packs.form.subtitle',
+                    )}
                   </Text>
                 </FocusModal.Description>
               </div>
@@ -990,7 +1001,11 @@ const PacksListPage = () => {
                         disabled
                       />
                       <Text className="text-ui-fg-subtle text-xs">
-                        {t('packs.form.statusCreateHint')}
+                        {t(
+                          form.prizeType === 'tickets'
+                            ? 'packs.form.statusCreateHintTickets'
+                            : 'packs.form.statusCreateHint',
+                        )}
                       </Text>
                     </>
                   ) : (
@@ -1033,6 +1048,51 @@ const PacksListPage = () => {
                 </div>
                 {form.category !== FREE_WELCOME_CATEGORY && (
                   <>
+                    <div className="flex flex-col gap-y-2">
+                      <Label size="small" weight="plus" htmlFor="pack-prizes">
+                        {t('packs.form.prizes')}
+                      </Label>
+                      {/* Fixed once saved — same disabled-Input treatment as
+                          the immutable slug. */}
+                      {mode === 'create' ? (
+                        <>
+                          <Select
+                            value={form.prizeType}
+                            onValueChange={(v) =>
+                              patch({
+                                prizeType:
+                                  v === 'tickets' ? 'tickets' : 'cards',
+                              })
+                            }
+                          >
+                            <Select.Trigger id="pack-prizes">
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              <Select.Item value="cards">
+                                {t('packs.form.prizesCards')}
+                              </Select.Item>
+                              <Select.Item value="tickets">
+                                {t('packs.form.prizesTickets')}
+                              </Select.Item>
+                            </Select.Content>
+                          </Select>
+                          <Text className="text-ui-fg-subtle text-xs">
+                            {t('packs.form.prizesHint')}
+                          </Text>
+                        </>
+                      ) : (
+                        <Input
+                          id="pack-prizes"
+                          value={t(
+                            form.prizeType === 'tickets'
+                              ? 'packs.form.prizesTickets'
+                              : 'packs.form.prizesCards',
+                          )}
+                          disabled
+                        />
+                      )}
+                    </div>
                     <div className="flex flex-col gap-y-2">
                       <Label size="small" weight="plus" htmlFor="pack-type">
                         {t('packs.form.packType')}
@@ -1124,23 +1184,29 @@ const PacksListPage = () => {
                     onChange={(e) => patch({ rank: e.target.value })}
                   />
                 </div>
-                <div className="flex flex-col gap-y-2">
-                  <Label size="small" weight="plus" htmlFor="pack-buyback">
-                    {t('packs.form.buybackPercent')}
-                  </Label>
-                  <Input
-                    id="pack-buyback"
-                    type="number"
-                    min={90}
-                    max={100}
-                    step={1}
-                    value={form.buybackPercent}
-                    onChange={(e) => patch({ buybackPercent: e.target.value })}
-                  />
-                  <Text className="text-ui-fg-subtle text-xs">
-                    {t('packs.form.buybackHint')}
-                  </Text>
-                </div>
+                {/* Tickets can't be sold back. The default stays in the payload,
+                    which the validator still requires. */}
+                {form.prizeType !== 'tickets' && (
+                  <div className="flex flex-col gap-y-2">
+                    <Label size="small" weight="plus" htmlFor="pack-buyback">
+                      {t('packs.form.buybackPercent')}
+                    </Label>
+                    <Input
+                      id="pack-buyback"
+                      type="number"
+                      min={90}
+                      max={100}
+                      step={1}
+                      value={form.buybackPercent}
+                      onChange={(e) =>
+                        patch({ buybackPercent: e.target.value })
+                      }
+                    />
+                    <Text className="text-ui-fg-subtle text-xs">
+                      {t('packs.form.buybackHint')}
+                    </Text>
+                  </div>
+                )}
               </div>
 
               <div className="bg-ui-bg-subtle flex items-center justify-between rounded-lg px-4 py-3">
@@ -1161,7 +1227,11 @@ const PacksListPage = () => {
 
               {mode === 'create' && (
                 <Text className="text-ui-fg-subtle text-xs">
-                  {t('packs.form.poolHint')}
+                  {t(
+                    form.prizeType === 'tickets'
+                      ? 'packs.form.poolHintTickets'
+                      : 'packs.form.poolHint',
+                  )}
                 </Text>
               )}
             </div>

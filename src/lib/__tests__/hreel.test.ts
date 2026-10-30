@@ -17,6 +17,7 @@ import {
   shuffleCells,
   type HReelCell,
 } from '@/lib/hreel';
+import { TICKET_ART, ticketCard } from '@/lib/packs-data';
 
 describe('decoyRarity', () => {
   test('cycles the full 6-tier palette (varied flicker)', () => {
@@ -689,5 +690,76 @@ describe('review fixes (#842): every card flickers its own sprite', () => {
     });
     const spun = press.slice(12, 29).map((c) => c.rarity);
     expect(new Set(spun).size).toBeGreaterThan(2);
+  });
+});
+
+describe('ticket cells', () => {
+  test('a tickets-1000 odds row builds a labelled cell', () => {
+    expect(
+      buildDecoyPool([ticketCard(1000, 'Immortal')], { pokemon: false }),
+    ).toEqual([
+      { dex: 0, rarity: 'Immortal', image: TICKET_ART, label: 'x1000' },
+    ]);
+  });
+
+  // Same art, same tier: only the amount tells them apart.
+  test('two amounts in one tier stay two cells', () => {
+    const pool = buildDecoyPool(
+      [ticketCard(10, 'Common'), ticketCard(50, 'Common')],
+      { pokemon: false },
+    );
+    expect(pool.map((c) => c.label)).toEqual(['x10', 'x50']);
+  });
+
+  // Admin picks the category, so a ticket pack can sit under Pokémon.
+  test('never resolves a Pokémon, even in a Pokémon category', () => {
+    expect(buildDecoyPool([ticketCard(5, 'Rare')], { pokemon: true })).toEqual([
+      { dex: 0, rarity: 'Rare', image: TICKET_ART, label: 'x5' },
+    ]);
+  });
+
+  const pool: HReelCell[] = [10, 50, 100, 1000].map((n) => ({
+    dex: 0,
+    rarity: 'Common',
+    image: TICKET_ART,
+    label: `x${n}`,
+  }));
+
+  test('the press strip pins the winner with its own amount', () => {
+    const cells = buildPressStrip({
+      winnerDex: null,
+      winnerImage: TICKET_ART,
+      winnerLabel: 'x1000',
+      winnerRarity: 'Immortal',
+      winIndex: 40,
+      keepCells: 12,
+      seed: 0,
+      rngSeed: 7,
+      decoyCards: pool,
+    });
+    expect(cells[40]).toEqual({
+      dex: 0,
+      rarity: 'Immortal',
+      image: TICKET_ART,
+      label: 'x1000',
+    });
+    // Every cell shares one image, so the repeat checks must key on the amount.
+    expect(cells[39]?.label).not.toBe('x1000');
+    expect(cells[41]?.label).not.toBe('x1000');
+    for (let i = 13; i < cells.length; i++) {
+      expect(cells[i]?.label).not.toBe(cells[i - 1]?.label);
+    }
+  });
+
+  test('a card winner carries no label', () => {
+    const cells = buildPressStrip({
+      winnerDex: 25,
+      winnerRarity: 'Rare',
+      winIndex: 40,
+      keepCells: 12,
+      seed: 0,
+      rngSeed: 7,
+    });
+    expect(cells[40]).toEqual({ dex: 25, rarity: 'Rare' });
   });
 });
