@@ -49,6 +49,7 @@ import {
   noStoreForAuthenticatedStore,
 } from './utils/cache-headers';
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
+import { capAdminSessionAge } from './utils/admin-session-cap';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { requireVouchedVisitor } from './utils/visitor-ip';
@@ -1187,6 +1188,13 @@ export default defineMiddlewares({
     {
       matcher: '/admin/*',
       middlewares: [refuseCrossOriginAdminWrite],
+    },
+    // One admin login lasts at most 24 h however often it is used: rolling
+    // sessions (medusa-config) would otherwise never expire, and a session
+    // keeps the roles it signed in with (utils/admin-session-cap.ts).
+    {
+      matcher: '/admin/*',
+      middlewares: [capAdminSessionAge],
     },
     // RBAC for every custom admin route (admin-rbac.ts): a policy per custom
     // prefix and method, plus the write policy for custom writes under a core
