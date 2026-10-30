@@ -160,9 +160,9 @@ const SUBTITLE: Record<string, string> = {
 
 export function AutomationPage() {
   const { t } = useTranslation();
-  // Saving the list asks customer:read (api/admin-rbac.ts): the automation
+  // Saving the list asks customer:update (api/admin-rbac.ts): the automation
   // operator runs the accounts staff chose but cannot change them.
-  const canEditAccounts = usePermissions().hasPermission('customer:read');
+  const canEditAccounts = usePermissions().hasPermission('customer:update');
   const [tab, setTab] = useState('overview');
   const activity = useAutomationActivity(7);
   const recent = new Map(
