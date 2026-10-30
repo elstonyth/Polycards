@@ -89,7 +89,7 @@ medusaIntegrationTestRunner({
         expect(reasons.status).toBe(200);
         expect(Array.isArray(reasons.data.return_reasons)).toBe(true);
 
-        // The first call the storefront's home page makes.
+        // The storefront's public pack list (src/lib/data/packs.ts).
         const packs = await send('get', '/store/packs', anon);
         expect(packs.status).toBe(200);
         expect(Array.isArray(packs.data.packs)).toBe(true);
