@@ -45,7 +45,9 @@ export type TrackingResult = Omit<
 export const normalizeTrackingNumber = (raw: string): string =>
   raw.replace(/\s+/g, '').toUpperCase();
 
-const NINJA_RE = /^NV[A-Z0-9]{6,}$/;
+// Staff sometimes drop the NV (3 prod orders on 2026-10-30, MYNINJA002617442);
+// the lookup only finds it with the prefix, so fetchNinjaVan puts it back.
+const NINJA_RE = /^(NV[A-Z0-9]{6,}|(MY|SG)NINJA\d+)$/;
 // Pos Laju: 2-3 letters, 8-10 digits, MY (prod has EHE315326262MY, ENE…MY).
 const POS_RE = /^[A-Z]{2,3}\d{8,10}MY$/;
 // DHL eCommerce MY: 16 digits starting 712 (DHL's own tracking FAQ and
@@ -317,10 +319,11 @@ async function fetchNinjaVan(
   fetchFn: FetchFn,
   retried = false,
 ): Promise<TrackingResult> {
+  const id = n.startsWith('NV') ? n : `NV${n}`;
   // NVSG… numbers live on the SG tenant; everything else we ship is NVMY….
-  const region = n.startsWith('NVSG') ? 'sg' : 'my';
+  const region = id.startsWith('NVSG') ? 'sg' : 'my';
   const res = await fetchFn(
-    `https://api.ninjavan.co/${region}/dash/1.2/public/orders?tracking_id=${encodeURIComponent(n)}`,
+    `https://api.ninjavan.co/${region}/dash/1.2/public/orders?tracking_id=${encodeURIComponent(id)}`,
     { headers: HEADERS, signal: AbortSignal.timeout(TIMEOUT_MS) },
   );
   if (res.status === 404) {

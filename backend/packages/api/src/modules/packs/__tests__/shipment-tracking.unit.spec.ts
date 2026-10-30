@@ -65,6 +65,7 @@ describe('detectCarrier', () => {
     ['EHE315326262MY', 'poslaju'],
     ['ENE200026365MY', 'poslaju'],
     ['ER123456789MY', 'poslaju'],
+    ['MYNINJA002617442', 'ninjavan'],
     ['7125109956829386', 'dhl_ecommerce'],
     ['7128100488960676', 'dhl_ecommerce'],
     ['7135109956829386', null],
@@ -439,6 +440,21 @@ describe('trackShipments', () => {
       json(404, '<html>moved</html>')) as unknown as typeof fetch;
     const out = await trackShipments(['NVMYNINJA000000002'], fetchFn);
     expect(out.get('NVMYNINJA000000002')).toBeInstanceOf(Error);
+  });
+
+  it('looks a number up with the NV prefix staff sometimes drop', async () => {
+    const fetchFn = jest.fn(async () =>
+      json(200, ninjaDelivered),
+    ) as unknown as jest.Mock;
+    const out = await trackShipments(
+      ['MYNINJA002617442'],
+      fetchFn as unknown as typeof fetch,
+    );
+    expect(String(fetchFn.mock.calls[0][0])).toContain(
+      'tracking_id=NVMYNINJA002617442',
+    );
+    // Keyed by the number as stored, so the run finds its answer.
+    expect(out.get('MYNINJA002617442')).toMatchObject({ state: 'delivered' });
   });
 
   it('starts no carrier call after the deadline', async () => {
