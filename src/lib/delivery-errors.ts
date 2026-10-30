@@ -44,6 +44,9 @@ export const DELIVERY_RULES: ErrorRule[] = [
   // No top-up ever (2026-10-11): the refusal names its own fix. Above the
   // broad /not allowed|409/ rule, which would misread it as a card problem.
   [/top up at least once/i, (text) => text],
+  // Daily prize cap (2026-10-23): prize cards ride in the delivery order and
+  // the backend refuses the whole parcel past the cap; its sentence is the fix.
+  [/prize cards ship \d+ per day/i, (text) => text],
   // Delivery-fee rules (2026-08-25) — must precede the generic /not allowed/
   // and /invalid|400/ rules, which would flatten them into wrong diagnoses.
   [
@@ -63,6 +66,13 @@ export const DELIVERY_RULES: ErrorRule[] = [
   // The backend names the postcode format the country needs (5 digits for
   // Malaysia, 6 for Singapore); its sentence is already the fix.
   [/\d-digit (Malaysian|Singapore) postcode/i, (text) => text],
+  // After the 12am cutoff the backend says the zone can no longer change
+  // (contact support); before it, cancel-and-re-request is the fix. The
+  // narrower rule must come first.
+  [
+    /fee zone, which can no longer change/i,
+    'That address is in a different delivery fee zone, which can no longer change for this order — please contact support.',
+  ],
   [
     /changes the shipping fee zone/i,
     'That address changes the delivery fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',

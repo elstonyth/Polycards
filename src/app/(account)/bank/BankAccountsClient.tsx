@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Landmark, Trash2 } from 'lucide-react';
+import { Landmark, Trash2, Wallet } from 'lucide-react';
 import {
   addSavedBankAccount,
   fetchSavedBankAccounts,
@@ -95,25 +95,36 @@ export function BankAccountsClient() {
   const countries = bankCountryGroups(banks ?? []);
   const shown = countries.find((group) => group.country === country);
   const selectedBank = shown?.items.find((bank) => bank.bankCode === bankCode);
+  // A USDT wallet takes an address and no holder name. Its checksum is the
+  // server's to judge (it says what is wrong); here only the shape.
+  const wallet = selectedBank?.wallet;
+  // The USDT group lists networks, not banks: word the form for a wallet
+  // as soon as it is picked, before a network is.
+  const walletGroup = shown?.items.some((bank) => bank.wallet) ?? false;
+  const offersWallets = countries.some((group) =>
+    group.items.some((bank) => bank.wallet),
+  );
   const lengths = selectedBank?.accountLengths;
   const accountNumberValid =
-    /^[0-9]{5,34}$/.test(accountNumber) &&
+    (wallet ? accountNumber !== '' : /^[0-9]{5,34}$/.test(accountNumber)) &&
     (!lengths || lengths.includes(accountNumber.length)) &&
     (!selectedBank?.accountPattern ||
       new RegExp(selectedBank.accountPattern).test(accountNumber));
   const numberHint =
     selectedBank?.accountHint ??
-    (lengths && lengths.length <= 2
-      ? `${selectedBank.bankName} account numbers are ${lengths.join(' or ')} digits. Check your bank country and account number.`
-      : 'Check your bank country and use the account number shown in your banking app, not a card number.');
+    (walletGroup
+      ? 'Choose the network your wallet uses first.'
+      : lengths && lengths.length <= 2
+        ? `${selectedBank.bankName} account numbers are ${lengths.join(' or ')} digits. Check your bank country and account number.`
+        : 'Check your bank country and use the account number shown in your banking app, not a card number.');
   const numberInvalid =
     selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
   const formValid =
     selectedBank !== undefined &&
     accountNumberValid &&
-    holderName.trim().length >= 2 &&
-    holderName.trim().length <= 120;
+    (wallet !== undefined ||
+      (holderName.trim().length >= 2 && holderName.trim().length <= 120));
 
   async function submitAdd() {
     if (submitting || !formValid) return;
@@ -124,7 +135,7 @@ export function BankAccountsClient() {
         bankCode,
         bankName: selectedBank.bankName,
         accountNumber,
-        accountHolderName: holderName.trim(),
+        accountHolderName: wallet ? '' : holderName.trim(),
       });
       if (!res.ok) {
         setError(res.error);
@@ -189,15 +200,20 @@ export function BankAccountsClient() {
             className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-neutral-800">
-              <Landmark className="h-5 w-5 text-neutral-300" aria-hidden />
+              {account.wallet ? (
+                <Wallet className="h-5 w-5 text-neutral-300" aria-hidden />
+              ) : (
+                <Landmark className="h-5 w-5 text-neutral-300" aria-hidden />
+              )}
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-white">
                 {account.bankName}
               </p>
               <p className="text-[13px] text-neutral-400">
-                {maskAccount(account.accountNumber)} ·{' '}
-                {account.accountHolderName}
+                {maskAccount(account.accountNumber)}
+                {/* A wallet has no holder (its network name is stored). */}
+                {!account.wallet && ` · ${account.accountHolderName}`}
               </p>
               <p
                 className={cn(
@@ -242,18 +258,21 @@ export function BankAccountsClient() {
               setError(null);
             }}
             className="mb-3"
+            label={offersWallets ? 'Bank country or wallet' : undefined}
           />
           <label className="block text-[13px] font-semibold text-neutral-300">
-            Bank
+            {walletGroup ? 'Network' : 'Bank'}
             <select
               value={bankCode}
               onChange={(e) => {
                 setBankCode(e.target.value);
+                // Digits for a bank, an address for a wallet: never carry one
+                // over as the other.
                 setAccountNumber('');
                 setError(null);
               }}
               disabled={!shown}
-              aria-label="Bank"
+              aria-label={walletGroup ? 'Network' : 'Bank'}
               className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
             >
               <option value="" disabled>
@@ -261,7 +280,9 @@ export function BankAccountsClient() {
                   ? 'Loading banks…'
                   : !shown
                     ? 'Choose bank country first'
-                    : 'Choose your bank'}
+                    : walletGroup
+                      ? 'Choose a network'
+                      : 'Choose your bank'}
               </option>
               {(shown?.items ?? []).map((bank) => (
                 <option key={bank.bankCode} value={bank.bankCode}>
@@ -271,45 +292,101 @@ export function BankAccountsClient() {
             </select>
           </label>
 
-          <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-            Account number
-            <input
-              type="text"
-              inputMode="numeric"
-              disabled={!selectedBank}
-              value={accountNumber}
-              onChange={(e) =>
-                setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))
-              }
-              aria-label="Account number"
-              aria-invalid={numberInvalid}
-              aria-describedby="bank-account-number-hint"
-              placeholder="Digits only"
-              className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
-            />
-          </label>
-          <p
-            id="bank-account-number-hint"
-            aria-live="polite"
-            className={cn(
-              'mt-1.5 text-[13px]',
-              numberInvalid ? 'text-red-300' : 'text-neutral-400',
-            )}
-          >
-            {numberHint}
-          </p>
+          {walletGroup ? (
+            <>
+              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
+                Wallet address
+                <input
+                  type="text"
+                  disabled={!wallet}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={accountNumber}
+                  onChange={(e) =>
+                    setAccountNumber(e.target.value.replace(/\s/g, ''))
+                  }
+                  aria-label="Wallet address"
+                  aria-invalid={numberInvalid}
+                  aria-describedby={
+                    selectedBank
+                      ? 'bank-account-number-hint wallet-address-warning'
+                      : 'bank-account-number-hint'
+                  }
+                  placeholder={
+                    wallet === 'tron'
+                      ? 'Starts with T'
+                      : wallet === 'evm'
+                        ? 'Starts with 0x'
+                        : 'Paste your wallet address'
+                  }
+                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 font-mono text-[13px] text-white outline-none placeholder:font-sans placeholder:text-neutral-600 focus:border-white/25"
+                />
+              </label>
+              <p
+                id="bank-account-number-hint"
+                aria-live="polite"
+                className={cn(
+                  'mt-1.5 text-[13px]',
+                  numberInvalid ? 'text-red-300' : 'text-neutral-400',
+                )}
+              >
+                {numberHint}
+              </p>
+              {selectedBank && (
+                <p
+                  id="wallet-address-warning"
+                  className="mt-2 text-[12px] leading-snug text-amber-300/80"
+                >
+                  Paste the address from your wallet&apos;s receive screen for{' '}
+                  {selectedBank.bankName}. USDT sent to a wrong address or
+                  network can&apos;t be recovered.
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
+                Account number
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  disabled={!selectedBank}
+                  value={accountNumber}
+                  onChange={(e) =>
+                    setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))
+                  }
+                  aria-label="Account number"
+                  aria-invalid={numberInvalid}
+                  aria-describedby="bank-account-number-hint"
+                  placeholder="Digits only"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
+                />
+              </label>
+              <p
+                id="bank-account-number-hint"
+                aria-live="polite"
+                className={cn(
+                  'mt-1.5 text-[13px]',
+                  numberInvalid ? 'text-red-300' : 'text-neutral-400',
+                )}
+              >
+                {numberHint}
+              </p>
 
-          <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-            Account holder name
-            <input
-              type="text"
-              value={holderName}
-              onChange={(e) => setHolderName(e.target.value)}
-              aria-label="Account holder name"
-              placeholder="Exactly as the bank has it"
-              className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
-            />
-          </label>
+              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
+                Account holder name
+                <input
+                  type="text"
+                  value={holderName}
+                  onChange={(e) => setHolderName(e.target.value)}
+                  aria-label="Account holder name"
+                  placeholder="Exactly as the bank has it"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
+                />
+              </label>
+            </>
+          )}
 
           <div className="mt-4 flex gap-2">
             <Pill

@@ -271,7 +271,10 @@ export interface GroupCreditCustomer {
   last_name: string | null;
 }
 
-export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
+export const listGroupCreditCustomersPage = (
+  groupId: string,
+  offset: number,
+) => {
   const params = new URLSearchParams({
     groups: groupId,
     limit: '100',
@@ -578,13 +581,7 @@ export async function getProfitReport(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  | 'today'
-  | 'yesterday'
-  | '7d'
-  | '30d'
-  | 'month'
-  | 'last_month'
-  | 'custom';
+  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -841,9 +838,7 @@ export const acknowledgeAuditFinding = (body: {
     body,
   );
 
-export async function getGatewayAudit(
-  currency: string,
-): Promise<GatewayAudit> {
+export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
   return getJson<GatewayAudit>(
     `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
   );
@@ -878,8 +873,7 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    | Partial<GatewayPreflightRefusal>
-    | undefined;
+    Partial<GatewayPreflightRefusal> | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1193,6 +1187,24 @@ export interface AdminDeliveryOrder {
   delivered_at: string | null;
   created_at: string;
   items: AdminDeliveryItem[];
+  /** The shipment tracker's last carrier check (list route only). */
+  tracking_snapshot?: DeliveryTrackingSnapshot | null;
+}
+
+/** Mirrors the backend TrackingSnapshot (modules/packs/shipment-tracking.ts). */
+export interface DeliveryTrackingSnapshot {
+  tracking_number: string;
+  carrier: 'ninjavan' | 'poslaju' | 'dhl_ecommerce' | null;
+  state:
+    | 'delivered'
+    | 'in_transit'
+    | 'problem'
+    | 'not_found'
+    | 'unknown_carrier';
+  event: string | null;
+  event_at: string | null;
+  delivered_at: string | null;
+  checked_at: string;
 }
 
 export interface DeliveryOrdersPage {
@@ -1236,6 +1248,16 @@ export const bulkUpdateDeliveryOrders = (
     '/admin/delivery-orders/bulk',
     { ids, status },
   );
+
+// Check every shipped order with its carrier now and complete the delivered
+// ones — the same run as the 2-hourly job.
+export const checkDeliveryTracking = () =>
+  postJson<{
+    checked: number;
+    completed: string[];
+    problems: string[];
+    failed: string[];
+  }>('/admin/delivery-orders/track', {});
 
 export async function getDeliveryOrder(
   id: string,
@@ -1520,6 +1542,10 @@ export interface PixelPokemonRow {
   id: string;
   name: string;
   dex: number | null;
+  /** The deck ('pokemon' | 'one-piece'): Pokémon are numbered by `dex`,
+   *  every other franchise by `number`. */
+  franchise: string;
+  number: number | null;
   variant: string;
   types: string[];
   image_url: string | null;
@@ -1537,6 +1563,7 @@ export interface PixelPokemonPage {
 
 export interface PixelPokemonQuery {
   q?: string;
+  franchise?: string;
   type?: string;
   variant?: string;
   custom?: '' | 'true' | 'false';
@@ -1554,6 +1581,7 @@ export async function getPixelPokemon(
     offset: String((params.page ?? 0) * limit),
   });
   if (params.q) qs.set('q', params.q);
+  if (params.franchise) qs.set('franchise', params.franchise);
   if (params.type) qs.set('type', params.type);
   if (params.variant) qs.set('variant', params.variant);
   if (params.custom) qs.set('custom', params.custom);
@@ -1562,7 +1590,9 @@ export async function getPixelPokemon(
 
 export interface CreatePixelPokemonBody {
   name: string;
+  franchise?: string;
   dex?: number | null;
+  number?: number | null;
   variant?: string;
   types?: string[];
   image_url: string;
@@ -1574,8 +1604,10 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 
 // Gateway deposits (GET /admin/payments/deposits) — the operator's only
 // window into money-in. 'stale' means the row is still pending past the
-// reconciliation sweep's window, i.e. a payment that may have landed at the
-// gateway without ever being credited here.
+// reconciliation sweep's window — mostly a customer who walked away, which the
+// next sweep expires. 'stuck' is the narrow subset the dashboard flags: still
+// pending two sweeps later with a gateway id, i.e. possibly a payment that
+// landed at the gateway without ever being credited here.
 export type GatewayDepositView =
   'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
@@ -1608,6 +1640,7 @@ export interface GatewayDeposit {
   created_at: string;
   settled_at: string | null;
   stale: boolean;
+  stuck: boolean;
 }
 
 export interface GatewayDepositsResponse {
@@ -1623,6 +1656,8 @@ export function getGatewayDeposits(
   status: GatewayDepositView,
   pageSize = 50,
   sort?: string,
+  /** One customer's attempts only (the player page's Payments tab). */
+  customerId?: string,
 ): Promise<GatewayDepositsResponse> {
   const params = new URLSearchParams({
     status,
@@ -1633,9 +1668,8 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(
-    `/admin/payments/deposits?${params}`,
-  );
+  if (customerId) params.set('customer_id', customerId);
+  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
@@ -1714,6 +1748,8 @@ export function getGatewayWithdrawals(
   status: GatewayWithdrawalView,
   pageSize = 50,
   sort?: string,
+  /** One customer's payouts only (the player page's Payments tab). */
+  customerId?: string,
 ): Promise<GatewayWithdrawalsResponse> {
   const params = new URLSearchParams({
     status,
@@ -1722,6 +1758,7 @@ export function getGatewayWithdrawals(
   });
   // Same contract as getGatewayDeposits: omitted = status-dependent default.
   if (sort) params.set('sort', sort);
+  if (customerId) params.set('customer_id', customerId);
   return getJson<GatewayWithdrawalsResponse>(
     `/admin/payments/withdrawals?${params}`,
   );
@@ -1806,10 +1843,11 @@ export interface PlayerRow {
   wallet_balance: number;
   vault_value: number;
   vault_count: number;
+  /** Turnover; this and the three below cover the list's `window`. */
   total_spend: number;
-  /** Lifetime top-ups (Σ topup ledger rows). */
+  /** Top-ups (Σ topup ledger rows). */
   total_topup: number;
-  /** Lifetime withdrawals (Σ cashout rows, positive; refunds net out). */
+  /** Withdrawals (Σ cashout rows, positive; refunds net out). */
   total_withdrawn: number;
   /** total_topup − total_withdrawn: cash the player has put in, net. */
   total_contribution: number;
@@ -1838,21 +1876,32 @@ export interface PlayersPage {
   total: number;
   offset: number;
   limit: number;
+  /** The period the turnover and money in/out columns cover; null = all time. */
+  window: { from: string; to: string } | null;
   players: PlayerRow[];
 }
 
-// `sort` is `<column>:<asc|desc>`; the route allowlists the column
-// (created_at | email | name) and falls back to created_at.
-// `group` is 'default' (everyone outside a non-default group) or a group id.
+/** GET /admin/players' ?range=: a Stats preset, or custom with its MYT days
+ *  (YYYY-MM-DD). None = all time. */
+export type PlayersPeriod = { range: StatsRange; from?: string; to?: string };
+
+// `sort` is `<column>:<asc|desc>`; the route allowlists the column and falls
+// back to created_at. `group` is 'default' (everyone outside a non-default
+// group) or a group id.
 export const listPlayers = (
   page = 0,
   q?: string,
   limit = 50,
   sort = 'created_at:desc',
   group?: string,
+  period?: PlayersPeriod,
 ) =>
   getJson<PlayersPage>(
-    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${group ? `&group=${encodeURIComponent(group)}` : ''}`,
+    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${group ? `&group=${encodeURIComponent(group)}` : ''}${
+      period
+        ? `&range=${period.range}${period.range === 'custom' ? `&from=${encodeURIComponent(period.from ?? '')}&to=${encodeURIComponent(period.to ?? '')}` : ''}`
+        : ''
+    }`,
   );
 
 /** One generated partner account — what POST /admin/players answers and what
@@ -2179,6 +2228,11 @@ export interface AdminPurchaseInvoice {
   /** Joined from the user module; null if the admin account was removed. */
   agent_email: string | null;
   reverses_invoice_id: string | null;
+  /** The goods receive note this invoice was transferred from (spec
+   *  2026-10-28). A reversal of a transferred invoice carries the same id —
+   *  the server copies it — so both read "From GRN-…". */
+  from_grn_id: string | null;
+  from_grn_display_no: string | null;
   created_at: string;
   total_qty: number;
   subtotal: number;
@@ -2232,6 +2286,10 @@ export interface CreatePurchaseInvoiceBody {
   date: string;
   supplier: string;
   reverses_invoice_id?: string | null;
+  /** Transfer from an open GRN. The lines must equal the GRN's as a multiset
+   *  of (card_handle, qty); only unit_cost is the operator's. Never together
+   *  with reverses_invoice_id — the server refuses the pair. */
+  from_grn_id?: string | null;
   lines: CreatePurchaseInvoiceLineBody[];
 }
 
@@ -2248,13 +2306,22 @@ export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
  *  Card row still gets a row — that is exactly what the "List to gacha card"
  *  bulk tool acts on, and `is_card` tells the two apart.
  *
- *  `cost` and `on_hand` are THREE-STATE and the distinction is load-bearing:
+ *  `cost` and `counter` are THREE-STATE and the distinction is load-bearing:
  *  `null` = no purchase history / tracks no inventory at all; `0` = bought and
  *  free / tracked with nothing shippable. The route builds both with `??` and
- *  never `||` (inventory-view.ts says so in as many words, and
- *  inventory-detail.spec pins all four states) — so nothing on this side may
- *  collapse them with a truthiness test either. `fmv`/`price` are null when the
- *  product carries no FMV at all, never NaN and never 0-by-accident.
+ *  never `||` (inventory-view.ts says so in as many words) — so nothing on this
+ *  side may collapse them with a truthiness test either. `fmv`/`price` are null
+ *  when the product carries no FMV at all, never NaN and never 0-by-accident.
+ *
+ *  Stock buckets (spec 2026-10-28), in the Stock page's column order:
+ *  `to_procure` = max(0, requested + ready_to_ship − on_hand); `on_hand` = the
+ *  PHYSICAL cards on the shelf, received (GRN lines + invoice lines not
+ *  transferred from a GRN) minus shipped — never null, and negative only when
+ *  more shipped than was ever received (missing history), which the pages show
+ *  in the error colour; `requested` = orders in requested + processed;
+ *  `ready_to_ship`; `shipped`. `counter` is the OLD Medusa stock counter,
+ *  received minus WON (negative = units owed to winners) — what prize takes
+ *  draw from, so the Lucky Draw picker reads it, not `on_hand`.
  *
  *  All money is MYR and arrives as plain JS numbers (the route folds through
  *  displayMarketPrice / weightedAverageCost, not through a bigNumber getter),
@@ -2273,9 +2340,12 @@ export interface InventoryRow {
   price: number | null;
   cost: number | null;
   created_at: string;
-  on_hand: number | null;
+  to_procure: number;
+  on_hand: number;
+  counter: number | null;
   in_vault: number;
   requested: number;
+  ready_to_ship: number;
   shipped: number;
   listing_count: number;
 }
@@ -2314,7 +2384,7 @@ export interface InventoryStockMovement {
 
 /** GET /admin/inventory/:handle (spec §3.4) — the same row the list renders,
  *  plus where the card is listed and its paged movement history. `item` is a
- *  whole InventoryRow, so the same three-state `cost` / `on_hand` rules apply
+ *  whole InventoryRow, so the same three-state `cost` / `counter` rules apply
  *  here verbatim: null and 0 are different facts, and nothing may collapse
  *  them with a truthiness test. */
 export interface InventoryDetail {
@@ -2375,6 +2445,130 @@ export async function exportInventoryXlsx(q?: string): Promise<void> {
   // first, while still releasing it (a leaked object URL lives until reload).
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+// ── Goods receive notes + procurement (spec 2026-10-28) ──────────────────────
+
+/** open = waiting for its invoice; transferred = an invoice was made from it;
+ *  reversed = undone by a reversal GRN; reversal = this GRN IS that undo. */
+export type GrnStatus = 'open' | 'transferred' | 'reversed' | 'reversal';
+
+export interface GrnRef {
+  id: string;
+  display_no: string;
+}
+
+/** One row of GET /admin/goods-receive-notes. Totals are folded server-side;
+ *  the list carries no lines. A GRN has no cost — only FMV. */
+export interface AdminGoodsReceiveNote {
+  id: string;
+  display_no: string;
+  date: string;
+  supplier: string;
+  agent_user_id: string;
+  agent_email: string | null;
+  created_at: string;
+  status: GrnStatus;
+  invoice: GrnRef | null;
+  reversed_by: GrnRef | null;
+  reverses: GrnRef | null;
+  total_qty: number;
+  total_fmv: number;
+}
+
+/** `fmv_snapshot` is a bigNumber column the route spreads from the ORM row, so
+ *  it may arrive as a numeric string — Number() it before any arithmetic, the
+ *  same rule as AdminPurchaseInvoiceLine. `qty` is signed (negative on a
+ *  reversal GRN). */
+export interface AdminGoodsReceiveNoteLine {
+  id: string;
+  grn_id: string;
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number | string;
+  qty: number;
+}
+
+export interface AdminGoodsReceiveNoteDetail extends AdminGoodsReceiveNote {
+  lines: AdminGoodsReceiveNoteLine[];
+}
+
+export interface GoodsReceiveNotesPage {
+  total: number;
+  offset: number;
+  limit: number;
+  goods_receive_notes: AdminGoodsReceiveNote[];
+}
+
+// Same `sort` / `q` contract as listPurchaseInvoices. `status: 'open'` keeps
+// only GRNs still waiting for their invoice (the invoice form's picker); the
+// route allows no other value.
+export const listGoodsReceiveNotes = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+  status?: 'open',
+) =>
+  getJson<GoodsReceiveNotesPage>(
+    `/admin/goods-receive-notes?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${status ? `&status=${status}` : ''}`,
+  );
+
+export const getGoodsReceiveNote = (id: string) =>
+  getJson<{ goods_receive_note: AdminGoodsReceiveNoteDetail }>(
+    `/admin/goods-receive-notes/${encodeURIComponent(id)}`,
+  );
+
+export interface CreateGoodsReceiveNoteBody {
+  date: string;
+  supplier: string;
+  /** qty is a whole number above 0; fmv_snapshot is MYR, at most 2dp. */
+  lines: Omit<CreatePurchaseInvoiceLineBody, 'unit_cost'>[];
+}
+
+// The workflow returns the bare record, not the list's described row — only
+// the id is read from it.
+export const createGoodsReceiveNote = (body: CreateGoodsReceiveNoteBody) =>
+  postJson<{ goods_receive_note: GrnRef }>('/admin/goods-receive-notes', body);
+
+// Only an OPEN GRN can be reversed; anything else is a 400 with a readable
+// message, which the mutation toasts.
+export const reverseGoodsReceiveNote = (id: string) =>
+  postJson<{ goods_receive_note: GrnRef }>(
+    `/admin/goods-receive-notes/${encodeURIComponent(id)}/reverse`,
+    {},
+  );
+
+/** One card on the purchasing list: to_procure >= 1, oldest waiting order
+ *  first (the route sorts). image: graded = the baked slab, raw = the bare
+ *  card. fmv_usd = the PriceCharting price as is; fmv = that in MYR at the
+ *  live rate, no listing markup. */
+export interface ProcurementToBuyRow {
+  handle: string;
+  name: string;
+  sku: string;
+  photo: string | null;
+  image: string | null;
+  graded: boolean;
+  to_procure: number;
+  on_hand: number;
+  requested: number;
+  ready_to_ship: number;
+  fmv: number | null;
+  fmv_usd: number | null;
+  oldest_order_at: string | null;
+}
+
+// taken_at: when the 12am stock run froze the list; null = live (the run is
+// off, or has not run since the last 12am).
+export const getProcurementToBuy = () =>
+  getJson<{ rows: ProcurementToBuyRow[]; taken_at: string | null }>(
+    '/admin/procurement/to-buy',
+  );
+
+// The mailing list: every ready_to_ship order, oldest first, in the Orders
+// page's own serialized shape (customer_email included).
+export const getProcurementToShip = () =>
+  getJson<{ orders: AdminDeliveryOrder[] }>('/admin/procurement/to-ship');
 
 // ── Referral rebuild (spec 2026-08-24) ───────────────────────────────────────
 
@@ -2589,6 +2783,8 @@ export interface AdminTaskDefinition {
   reward: Record<string, unknown>;
   active: boolean;
   sort: number;
+  /** Lucky Draw tickets a claim also pays (0 = none). */
+  tickets: number;
   /** Optional run window (ISO). null/null = runs until retired. */
   starts_at: string | null;
   ends_at: string | null;
@@ -2615,11 +2811,226 @@ export async function saveTaskDefinition(input: {
   reward: Record<string, unknown>;
   active: boolean;
   sort: number;
+  /** Always sent: the backend keeps a stored value only when this is omitted. */
+  tickets: number;
   starts_at: string | null;
   ends_at: string | null;
   reason: string;
 }): Promise<{ id: string }> {
   return postJson<{ id: string }>('/admin/tasks', input);
+}
+
+// ── Lucky Draw (spec 2026-10-24) ─────────────────────────────────────────────
+// Mirrors AdminLuckyDrawEvent / AdminLuckyDrawPrize in the backend's packs
+// service. An undrawn prize has no seed anywhere in these shapes — only its
+// public `seed_hash`; `result.seed` exists once the draw has run.
+
+export interface AdminLuckyDrawPrize {
+  id: string;
+  kind: 'card' | 'credit';
+  card_handle: string | null;
+  credit_myr: number | null;
+  title: string;
+  image_url: string | null;
+  sort: number;
+  /** ISO. */
+  draw_at: string;
+  cancelled_at: string | null;
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
+  /** RM: the credit amount, or a card's current value (null if the card is gone). */
+  value_myr: number | null;
+  result: {
+    winner_customer_id: string | null;
+    winner_tickets: number;
+    total_tickets: number;
+    entrant_count: number;
+    drawn_at: string;
+    seed: string;
+    /** false only when a winner exists and nothing was minted / credited. */
+    granted: boolean;
+  } | null;
+}
+
+export interface AdminLuckyDrawEvent {
+  id: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  status: 'draft' | 'published' | 'cancelled';
+  /** one_winner: one customer wins every prize at the end. per_prize: the old
+   *  rules, each prize drawn on its own. A draft becomes one_winner on publish. */
+  draw_mode: 'per_prize' | 'one_winner';
+  /** The event's own commitment. null until published, and on a per_prize
+   *  event, whose hashes are per prize. */
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
+  prizes: AdminLuckyDrawPrize[];
+}
+
+export interface AdminLuckyDrawEventInput {
+  id?: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  /** A NEW event only (an edit with prizes is refused): its whole prize pool,
+   *  created with it in one transaction. */
+  prizes?: AdminLuckyDrawNewPrize[];
+}
+
+/** One prize as POST /admin/lucky-draw/prizes takes it (plus `reason`). Send
+ *  every field: an omitted sort resets to 0 and an omitted image to null. */
+export interface AdminLuckyDrawPrizeInput {
+  id?: string;
+  event_id: string;
+  kind: 'card' | 'credit';
+  card_handle: string | null;
+  credit_myr: number | null;
+  title: string;
+  image_url: string | null;
+  sort: number;
+  /** null = the event's end on create, the stored time on edit. */
+  draw_at: string | null;
+}
+
+/** One prize of a new event: the prize route's fields without the ids (the
+ *  event does not exist yet). Send every field. */
+export type AdminLuckyDrawNewPrize = Omit<
+  AdminLuckyDrawPrizeInput,
+  'id' | 'event_id'
+>;
+
+export async function listLuckyDraw(): Promise<AdminLuckyDrawEvent[]> {
+  const data = await getJson<{ events: AdminLuckyDrawEvent[] }>(
+    '/admin/lucky-draw',
+  );
+  return data.events;
+}
+
+export const saveLuckyDrawEvent = (
+  input: AdminLuckyDrawEventInput & { reason: string },
+) =>
+  postJson<{ id: string; prize_ids: string[] }>(
+    '/admin/lucky-draw/events',
+    input,
+  );
+
+export const publishLuckyDrawEvent = (id: string, reason: string) =>
+  postJson<{ id: string; status: 'published' }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(id)}/publish`,
+    { reason },
+  );
+
+/** Cancels a one-winner event and refunds every entrant. Refused once a result
+ *  exists. */
+export const withdrawLuckyDrawEvent = (id: string, reason: string) =>
+  postJson<{ refunded: number }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(id)}/withdraw`,
+    { reason },
+  );
+
+export const saveLuckyDrawPrize = (
+  input: AdminLuckyDrawPrizeInput & { reason: string },
+) => postJson<{ id: string }>('/admin/lucky-draw/prizes', input);
+
+export const cancelLuckyDrawPrize = (id: string, reason: string) =>
+  postJson<{ refunded: number }>(
+    `/admin/lucky-draw/prizes/${encodeURIComponent(id)}/cancel`,
+    { reason },
+  );
+
+export interface AdminLuckyDrawEntrant {
+  customer_id: string;
+  tickets: number;
+}
+
+export async function listLuckyDrawEntries(
+  prizeId: string,
+): Promise<AdminLuckyDrawEntrant[]> {
+  const data = await getJson<{ entries: AdminLuckyDrawEntrant[] }>(
+    `/admin/lucky-draw/prizes/${encodeURIComponent(prizeId)}/entries`,
+  );
+  return data.entries;
+}
+
+export async function listLuckyDrawEventEntrants(
+  eventId: string,
+): Promise<AdminLuckyDrawEntrant[]> {
+  const data = await getJson<{ entries: AdminLuckyDrawEntrant[] }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(eventId)}/entrants`,
+  );
+  return data.entries;
+}
+
+// ── Ticket pack prizes (spec 2026-10-30 Lucky Pack §2) ──────────────────────
+
+/** A saved row, in the storage units of `pack_odds` (1,000,000 = 100%). */
+export interface AdminTicketPrize {
+  tickets: number;
+  rarity: string;
+  weight: number;
+  /** null = this amount inherits the previous set. */
+  weight_2: number | null;
+  weight_3: number | null;
+  locked: boolean;
+}
+
+/** A row to save, with win % in the units POST /admin/packs/:slug/odds takes.
+ *  The server balances it with the same @acme/odds-math. */
+export interface AdminTicketPrizeEntry {
+  tickets: number;
+  rarity: string;
+  locked: boolean;
+  pct: number;
+  /** null = inherit the previous set. */
+  pct_2: number | null;
+  pct_3: number | null;
+}
+
+const ticketPrizesPath = (slug: string) =>
+  `/admin/packs/${encodeURIComponent(slug)}/ticket-prizes`;
+
+export const getTicketPrizes = (slug: string) =>
+  getJson<{ rows: AdminTicketPrize[] }>(ticketPrizesPath(slug));
+
+/** Replaces the pack's whole table: a row left out is removed. */
+export const saveTicketPrizes = (slug: string, rows: AdminTicketPrizeEntry[]) =>
+  postJson<unknown>(ticketPrizesPath(slug), { rows });
+
+export interface AdminLuckyDrawTicketHistory {
+  balance: number;
+  /** Newest first (the backend caps it at 200). */
+  rows: { delta: number; reason: string; ref: string; created_at: string }[];
+}
+
+export const getLuckyDrawTickets = (customerId: string) =>
+  getJson<AdminLuckyDrawTicketHistory>(
+    `/admin/lucky-draw/tickets?customer_id=${encodeURIComponent(customerId)}`,
+  );
+
+/** Give (positive) or take back (negative) a customer's Lucky Draw tickets.
+ *  The same idempotency key replays instead of granting twice. */
+export async function adjustCustomerTickets(
+  id: string,
+  tickets: number,
+  note: string,
+  idempotencyKey?: string,
+): Promise<{ tickets: number; balance: number }> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/lucky-draw-tickets`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets, note, idempotency_key: idempotencyKey }),
+    },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  return (await res.json()) as { tickets: number; balance: number };
 }
 
 // ── Announcement popup (spec 2026-10-06 §5) ──────────────────────────────────

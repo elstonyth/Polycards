@@ -5,6 +5,7 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
+import { ASSISTANT_REPORT_KEY } from '../admin/assistant/bridge';
 
 // The desk-reports lock (spec 2026-09-29-desk-reports-design.md). Each staff
 // desk bot holds its OWN key (REPORT_KEY_<DESK>) and sends it in
@@ -24,7 +25,11 @@ export type ReportDesk = (typeof REPORT_AREAS)[number];
 // The desks holding a key: every report desk, plus Developer, which has no
 // reports of its own.
 const KEY_OWNERS = [...REPORT_DESKS, 'developer'] as const;
-export type ReportCaller = (typeof KEY_OWNERS)[number];
+// The in-admin assistant (spec 2026-10-29) reads the same reports over
+// loopback with a key made fresh in this process (admin/assistant/bridge.ts):
+// it never leaves the process, so it needs no deploy secret and works where
+// no desk key is set.
+export type ReportCaller = (typeof KEY_OWNERS)[number] | 'assistant';
 const MIN_KEY_LENGTH = 32;
 
 // Whose key opened this request: the log line names it, and the Growth
@@ -66,21 +71,46 @@ export function requireReportKey() {
       const key = process.env[`REPORT_KEY_${owner.toUpperCase()}`]?.trim();
       return key && key.length >= MIN_KEY_LENGTH ? [{ owner, key }] : [];
     });
-    if (!keys.length) {
-      res.status(503).json({ message: 'Reports are not configured.' });
-      return;
-    }
     const raw = req.headers['x-report-key'];
     const given = Array.isArray(raw) ? raw[0] : raw;
     // Every configured key is compared, so the time taken does not say which
     // one matched.
     const caller =
       typeof given === 'string'
-        ? keys.reduce<ReportCaller | null>(
+        ? [
+            ...keys,
+            { owner: 'assistant' as const, key: ASSISTANT_REPORT_KEY },
+          ].reduce<ReportCaller | null>(
             (found, k) => (sameKey(given, k.key) ? k.owner : found),
             null,
           )
         : null;
+    // The assistant's key is only ever sent by this process to itself
+    // (bridge.ts, 127.0.0.1): from anywhere else, even with the key, refused.
+    if (
+      caller === 'assistant' &&
+      (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(
+        req.socket?.remoteAddress ?? '',
+      ) ||
+        req.headers['x-forwarded-for'] !== undefined)
+    ) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+    // The assistant's key opens the desk reports and the SQL route only, never
+    // the read-everything admin proxy: the assistant reads admin screens as
+    // the person asking (bridge.ts adminReadAs).
+    if (caller === 'assistant' && desk === 'admin') {
+      const path = req.originalUrl.split(/[?#]/, 1)[0].toLowerCase();
+      if (path !== '/reports/admin/sql') {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+      }
+    }
+    if (!keys.length && caller !== 'assistant') {
+      res.status(503).json({ message: 'Reports are not configured.' });
+      return;
+    }
     if (!caller) {
       res.status(401).json({ message: 'Unauthorized' });
       return;

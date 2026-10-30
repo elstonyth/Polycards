@@ -128,6 +128,21 @@ describe('POST /store/delivery-orders/:id/address', () => {
     expect(updateDeliveryOrders).not.toHaveBeenCalled();
   });
 
+  it('after the 12am cutoff, the zone refusal sends the customer to support, not to cancel', async () => {
+    await expect(
+      editAddress(
+        mkReq([order({ status: 'processed' })], 'cus_1', SG_ADDRESS) as any,
+        mkRes().res,
+      ),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(
+        /changes the shipping fee zone, which can no longer change .*contact support/,
+      ),
+    });
+    expect(updateDeliveryOrders).not.toHaveBeenCalled();
+  });
+
   it('refuses any zone change on an order that paid a fee', async () => {
     const paidEast = order({
       ship_city: 'Kota Kinabalu',

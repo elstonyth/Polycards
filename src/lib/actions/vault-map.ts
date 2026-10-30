@@ -16,6 +16,9 @@ export type VaultItem = {
    *  challenge's prism frame here instead of taking the card's pack tier — it
    *  was won there, not pulled from a pack. */
   challengePrize: boolean;
+  /** Won in the Lucky Draw: the backend sends no tier, so the slab wears no
+   *  frame, and the tile says "Lucky Draw" where a tier would sit. */
+  luckyDrawPrize: boolean;
   showcased: boolean;
   /** How the pull was acquired. Display/telemetry only — see `locked`.
    *  'gift' = opened from a vault pack, 'bonus' = paid with bonus credit. */
@@ -74,6 +77,8 @@ export interface BackendVaultItem {
   pack_title: string;
   /** Absent on an older backend → false (the pre-prism behaviour). */
   challenge_prize?: boolean;
+  /** Absent on an older backend → false. */
+  lucky_draw_prize?: boolean;
   /** Guarded by VaultItemSchema (optional there too) — declared here so the
    *  mapper reads it directly instead of casting past its own input type. */
   showcased?: boolean;
@@ -103,6 +108,7 @@ export function mapVaultItem(i: BackendVaultItem): VaultItem {
     packId: i.pack_id,
     packTitle: i.pack_title,
     challengePrize: i.challenge_prize ?? false,
+    luckyDrawPrize: i.lucky_draw_prize ?? false,
     showcased: i.showcased ?? false,
     source: i.source ?? 'pack',
     locked: i.locked ?? false,

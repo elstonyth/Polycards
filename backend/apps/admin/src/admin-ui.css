@@ -228,3 +228,122 @@
 [data-testid='notifications-trigger-button'] {
   display: none;
 }
+
+/* --- AI assistant (spec 2026-10-29) ------------------------------------- */
+/*
+ * The chat page's motion, after 21st.dev's AI patterns: a border beam that
+ * circles the composer (faster while it is focused or answering), a shimmer
+ * on the step that is running, and a scan over an image still being drawn.
+ * All of it stops under prefers-reduced-motion.
+ */
+@keyframes pc-ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pc-ai-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.pc-admin .pc-ai-spin {
+  animation: pc-ai-spin 0.8s linear infinite;
+}
+.pc-admin .pc-ai-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--fg-subtle) 0%,
+    var(--fg-base) 40%,
+    #a78bfa 50%,
+    var(--fg-base) 60%,
+    var(--fg-subtle) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: pc-ai-shimmer 2.2s linear infinite;
+}
+.pc-admin .pc-ai-scan {
+  background: linear-gradient(
+    110deg,
+    var(--bg-component) 30%,
+    rgba(124, 58, 237, 0.22) 45%,
+    rgba(6, 182, 212, 0.22) 55%,
+    var(--bg-component) 70%
+  );
+  background-size: 250% 100%;
+  animation: pc-ai-shimmer 1.6s linear infinite;
+}
+.pc-admin .pc-ai-beam {
+  position: relative;
+  overflow: hidden;
+  background: var(--border-base);
+}
+.pc-admin .pc-ai-beam::before {
+  content: '';
+  position: absolute;
+  inset: -150%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 68%,
+    #7c3aed 78%,
+    #06b6d4 87%,
+    #f472b6 94%,
+    transparent 100%
+  );
+  animation: pc-ai-spin 7s linear infinite;
+  opacity: 0.45;
+  transition: opacity 0.3s;
+}
+.pc-admin .pc-ai-beam[data-active='true']::before {
+  opacity: 1;
+  animation-duration: 2.6s;
+}
+.pc-admin .pc-ai-beam > * {
+  position: relative;
+}
+/* Both classes sit on the page root; an image only, so bg-ui-bg-subtle stays. */
+.pc-admin.pc-ai-aurora {
+  background-image:
+    radial-gradient(
+      60% 50% at 20% 0%,
+      rgba(124, 58, 237, 0.16),
+      transparent 70%
+    ),
+    radial-gradient(
+      50% 40% at 85% 10%,
+      rgba(6, 182, 212, 0.12),
+      transparent 70%
+    );
+}
+/* The orb's eyes blink (21st.dev odysseyui "AI Orb Avatar"). */
+@keyframes pc-ai-blink {
+  0%,
+  88%,
+  100% {
+    transform: scaleY(1);
+  }
+  93%,
+  97% {
+    transform: scaleY(0.07);
+  }
+}
+.pc-admin .pc-ai-eye {
+  animation: pc-ai-blink 3.6s ease-in-out infinite;
+}
+.pc-admin .pc-ai-eye + .pc-ai-eye {
+  animation-delay: 60ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pc-admin .pc-ai-spin,
+  .pc-admin .pc-ai-shimmer,
+  .pc-admin .pc-ai-scan,
+  .pc-admin .pc-ai-beam::before,
+  .pc-admin .pc-ai-eye {
+    animation: none;
+  }
+}

@@ -22,6 +22,15 @@ describe('CountryFlag', () => {
     expect(my.match(/points="([^"]+)"/)?.[1]?.split(' ')).toHaveLength(28);
   });
 
+  it('draws USDT as the Tether mark in the same 3:2 box as Singapore', () => {
+    const usdt = renderToStaticMarkup(
+      createElement(CountryFlag, { country: 'USDT' }),
+    );
+    expect(usdt).toContain('viewBox="0 0 30 20"');
+    expect(usdt).toContain('fill="#26A17B"');
+    expect(usdt).not.toContain('<polygon');
+  });
+
   it('is decoration: hidden from screen readers', () => {
     const html = renderToStaticMarkup(
       createElement(CountryFlag, { country: 'MY' }),

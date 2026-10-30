@@ -12,6 +12,7 @@ import VipMemberState from '../models/vip-member-state';
 import VipLevel from '../models/vip-level';
 import AdminActionAudit from '../models/admin-action-audit';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
 import Card from '../models/card';
 import Pack from '../models/pack';
 import { PixelPokemon } from '../models/pixel-pokemon';
@@ -19,6 +20,7 @@ import { asPixelPokemonCrud } from '../pixel-pokemon-service';
 import PackOdds from '../models/pack-odds';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
+import LuckyDrawTicket from '../models/lucky-draw-ticket';
 import { taskWeekFor } from '../referral';
 import { clearFxDisplayCache } from '../pricing';
 
@@ -37,12 +39,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipLevel,
     AdminActionAudit,
     Pull,
+    TicketSpin,
     Card,
     Pack,
     PackOdds,
     PixelPokemon,
     LedgerEntry,
     LedgerSequence,
+    LuckyDrawTicket,
   ],
   testSuite: ({ service }) => {
     it('check-in is once per MYT day', async () => {
@@ -1070,6 +1074,131 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(next.tasks.find((t) => t.id === total)!.progress.current).toBe(
         590.5,
       );
+    });
+
+    describe('Lucky Draw tickets on tasks (2026-10-24)', () => {
+      const valid = {
+        kind: 'weekly' as const,
+        title: 'Check in 1 day',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      };
+
+      it('a claim pays the task tickets once, in the same claim', async () => {
+        const { id: taskId } = await service.saveTaskDefinition({
+          ...valid,
+          tickets: 50,
+        });
+        await service.checkInDaily({ customerId: 'cus_t1' });
+        const hub = await service.taskHubFor({ customerId: 'cus_t1' });
+        expect(hub.tasks[0].tickets).toBe(50);
+        expect(await service.luckyDrawBalance('cus_t1')).toBe(0);
+
+        const first = await service.claimTask({ customerId: 'cus_t1', taskId });
+        expect(first).toMatchObject({ claimed: true, tickets: 50 });
+        expect(await service.luckyDrawBalance('cus_t1')).toBe(50);
+        const again = await service.claimTask({ customerId: 'cus_t1', taskId });
+        expect(again).toEqual({ claimed: false, reason: 'already_claimed' });
+        expect(await service.luckyDrawBalance('cus_t1')).toBe(50);
+        // The ticket row is keyed by the claim; the normal reward still paid.
+        const [row] = await service.listLuckyDrawTickets({
+          customer_id: 'cus_t1',
+        });
+        expect(row).toMatchObject({
+          delta: 50,
+          reason: 'task_claim',
+          ref: (first as { claimId: string }).claimId,
+        });
+        expect(
+          await service.listCreditTransactions({
+            customer_id: 'cus_t1',
+            reason: 'reward_credit',
+          }),
+        ).toHaveLength(1);
+      });
+
+      it('editing tickets after a claim does not change what the claim paid', async () => {
+        const { id: taskId } = await service.saveTaskDefinition({
+          ...valid,
+          tickets: 50,
+        });
+        await service.checkInDaily({ customerId: 'cus_t2' });
+        await service.claimTask({ customerId: 'cus_t2', taskId });
+        await service.saveTaskDefinition({ ...valid, id: taskId, tickets: 5 });
+
+        const [claim] = await service.listTaskClaims({
+          customer_id: 'cus_t2',
+          task_id: taskId,
+        });
+        expect((claim.reward_snapshot as { tickets: number }).tickets).toBe(50);
+        expect(claim.reward_snapshot).toMatchObject({
+          type: 'credit',
+          amount_myr: 1,
+        });
+        expect(await service.luckyDrawBalance('cus_t2')).toBe(50);
+      });
+
+      it('a task with tickets 0 writes no ticket row', async () => {
+        const { id: taskId } = await service.saveTaskDefinition(valid);
+        await service.checkInDaily({ customerId: 'cus_t3' });
+        const result = await service.claimTask({
+          customerId: 'cus_t3',
+          taskId,
+        });
+        expect(result).toMatchObject({ claimed: true, tickets: 0 });
+        expect(
+          await service.listLuckyDrawTickets({ customer_id: 'cus_t3' }),
+        ).toHaveLength(0);
+        expect(await service.luckyDrawBalance('cus_t3')).toBe(0);
+        const [claim] = await service.listTaskClaims({
+          customer_id: 'cus_t3',
+        });
+        expect((claim.reward_snapshot as { tickets: number }).tickets).toBe(0);
+      });
+
+      it('saveTaskDefinition refuses tickets above MAX_TASK_TICKETS', async () => {
+        await expect(
+          service.saveTaskDefinition({ ...valid, tickets: 10_001 }),
+        ).rejects.toThrow(/tickets/);
+        await expect(
+          service.saveTaskDefinition({ ...valid, tickets: -1 }),
+        ).rejects.toThrow(/tickets/);
+      });
+
+      it('an edit that omits tickets keeps them; an explicit 0 clears them', async () => {
+        const { id } = await service.saveTaskDefinition({
+          ...valid,
+          tickets: 7,
+        });
+        await service.saveTaskDefinition({ ...valid, id, active: false });
+        let [def] = await service.listTaskDefinitions({ id });
+        expect(def.tickets).toBe(7);
+        await service.saveTaskDefinition({ ...valid, id, tickets: 0 });
+        [def] = await service.listTaskDefinitions({ id });
+        expect(def.tickets).toBe(0);
+      });
+
+      it("luckyDrawBalance sums only the customer's live rows", async () => {
+        await service.createLuckyDrawTickets([
+          { customer_id: 'cus_b', delta: 10, reason: 'task_claim', ref: 'c1' },
+          { customer_id: 'cus_b', delta: -4, reason: 'entry', ref: 'e1' },
+          { customer_id: 'cus_b', delta: 99, reason: 'task_claim', ref: 'c2' },
+          {
+            customer_id: 'cus_other',
+            delta: 5,
+            reason: 'task_claim',
+            ref: 'c3',
+          },
+        ]);
+        const [gone] = await service.listLuckyDrawTickets({ ref: 'c2' });
+        await service.softDeleteLuckyDrawTickets([gone.id]);
+        expect(await service.luckyDrawBalance('cus_b')).toBe(6);
+        expect(await service.luckyDrawBalance('cus_none')).toBe(0);
+      });
     });
   },
 });

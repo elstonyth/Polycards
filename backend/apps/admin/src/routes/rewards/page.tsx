@@ -1,4 +1,4 @@
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { Star } from '@medusajs/icons';
 import { Navigate } from 'react-router-dom';
 
@@ -8,6 +8,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: Star,
   rank: 60,
+  permissions: ['rewards_setting:read' as Permission],
 };
 
 const RewardsGroup = () => <Navigate to="/daily-rewards" replace />;

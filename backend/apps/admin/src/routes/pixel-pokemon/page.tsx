@@ -18,6 +18,12 @@ import {
 } from '../../lib/queries';
 import { validateImageFile } from '../../lib/image-validation';
 import { resolveImageUrl } from '../../lib/image-url';
+import {
+  FRANCHISE_LABEL,
+  entryNumber,
+  onePieceSearchTerm,
+  type SpriteFranchise,
+} from '../../lib/sprite-franchise';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -35,11 +41,16 @@ const PAGE_SIZE = 60;
 const PixelPokedexPage = () => {
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
+  // Deck filter — Pokémon and One Piece sprites live in one library; the page
+  // opens on the Pokémon deck so the two never mix by default.
+  const [franchise, setFranchise] = useState<'' | SpriteFranchise>('pokemon');
   const [custom, setCustom] = useState<'' | 'true'>('');
   const [page, setPage] = useState(0);
 
   const { data, isError } = usePixelPokemon({
-    q,
+    // One Piece searches understand the TCG spellings ("Big Mom", "Law").
+    q: franchise === 'pokemon' ? q : onePieceSearchTerm(q),
+    franchise,
     type,
     custom,
     page,
@@ -63,6 +74,9 @@ const PixelPokedexPage = () => {
   // ── Upload custom pixel-pokémon ──────────────────────────────────────────
   const [showUpload, setShowUpload] = useState(false);
   const [name, setName] = useState('');
+  // The deck the new sprite joins; opens on the deck being browsed.
+  const [deck, setDeck] = useState<SpriteFranchise>('pokemon');
+  // Dex # for a Pokémon, the deck's own number for any other franchise.
   const [dex, setDex] = useState('');
   const [variant, setVariant] = useState('');
   const [types, setTypes] = useState('');
@@ -108,17 +122,22 @@ const PixelPokedexPage = () => {
       return;
     }
     const dexNum = dex.trim() ? Number(dex) : null;
+    const max = deck === 'pokemon' ? 1025 : 99999;
     if (
       dexNum !== null &&
-      (!Number.isInteger(dexNum) || dexNum < 1 || dexNum > 1025)
+      (!Number.isInteger(dexNum) || dexNum < 1 || dexNum > max)
     ) {
-      toast.error('Dex # must be a whole number 1–1025, or left blank.');
+      toast.error(
+        `${deck === 'pokemon' ? 'Dex #' : 'Number'} must be a whole number 1–${max}, or left blank.`,
+      );
       return;
     }
     try {
       await createMut.mutateAsync({
         name: name.trim(),
-        dex: dexNum,
+        franchise: deck,
+        dex: deck === 'pokemon' ? dexNum : null,
+        number: deck === 'pokemon' ? null : dexNum,
         variant: variant.trim() || 'custom',
         types: types
           .split(',')
@@ -139,19 +158,20 @@ const PixelPokedexPage = () => {
         <div className="flex flex-col gap-3 px-6 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <Heading level="h2">Pixel Pokédex</Heading>
+              <Heading level="h2">Pixel sprites</Heading>
               <Text className="text-ui-fg-subtle mt-1" size="small">
-                Browse the pixel-Pokémon library
-                {data
-                  ? ` (${data.total.toLocaleString('en-US')} entries)`
-                  : ''}
+                Browse the pixel sprite library
+                {data ? ` (${data.total.toLocaleString('en-US')} entries)` : ''}
                 . Cards link to these by id.
               </Text>
             </div>
             <Button
               size="small"
               variant={showUpload ? 'secondary' : 'primary'}
-              onClick={() => setShowUpload((v) => !v)}
+              onClick={() => {
+                if (!showUpload) setDeck(franchise || 'pokemon');
+                setShowUpload((v) => !v);
+              }}
             >
               {showUpload ? 'Close' : 'Upload pixel Pokémon'}
             </Button>
@@ -159,9 +179,28 @@ const PixelPokedexPage = () => {
 
           {showUpload && (
             <div className="border-ui-border-base bg-ui-bg-subtle flex flex-col gap-3 rounded-lg border p-4">
-              <Text size="small" weight="plus">
-                New custom pixel Pokémon
-              </Text>
+              <div className="flex items-center justify-between gap-2">
+                <Text size="small" weight="plus">
+                  New custom sprite
+                </Text>
+                <div
+                  role="group"
+                  aria-label="Deck of the new sprite"
+                  className="flex gap-1"
+                >
+                  {(['pokemon', 'one-piece'] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      aria-pressed={deck === f}
+                      className={chip(deck === f)}
+                      onClick={() => setDeck(f)}
+                    >
+                      {FRANCHISE_LABEL[f]}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
                   <Label size="small" htmlFor="pp-name">
@@ -169,19 +208,29 @@ const PixelPokedexPage = () => {
                   </Label>
                   <Input
                     id="pp-name"
-                    placeholder="e.g. Pikachu (Shiny)"
+                    placeholder={
+                      deck === 'pokemon'
+                        ? 'e.g. Pikachu (Shiny)'
+                        : 'e.g. Monkey D. Luffy (Gear 5)'
+                    }
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                   />
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label size="small" htmlFor="pp-dex">
-                    Dex # (optional)
+                    {deck === 'pokemon'
+                      ? 'Dex # (optional)'
+                      : 'Number (optional)'}
                   </Label>
                   <Input
                     id="pp-dex"
                     inputMode="numeric"
-                    placeholder="1–1025, or blank"
+                    placeholder={
+                      deck === 'pokemon'
+                        ? '1–1025, or blank'
+                        : 'e.g. 1 for OP #001; variants share it'
+                    }
                     value={dex}
                     onChange={(e) => setDex(e.target.value)}
                   />
@@ -263,11 +312,29 @@ const PixelPokedexPage = () => {
           )}
 
           <Input
-            placeholder="Search by name or #dex…"
-            aria-label="Search pixel pokémon by name or dex"
+            placeholder="Search by name or number…"
+            aria-label="Search pixel sprites by name or number"
             value={q}
             onChange={(e) => setFilter(() => setQ(e.target.value))}
           />
+
+          <div
+            role="group"
+            aria-label="Deck"
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            {(['pokemon', 'one-piece', ''] as const).map((f) => (
+              <button
+                key={f || 'all'}
+                type="button"
+                aria-pressed={franchise === f}
+                className={chip(franchise === f)}
+                onClick={() => setFilter(() => setFranchise(f))}
+              >
+                {f ? FRANCHISE_LABEL[f] : 'All decks'}
+              </button>
+            ))}
+          </div>
 
           {data && data.all_types.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -343,7 +410,7 @@ const PixelPokedexPage = () => {
                     {p.name}
                   </Text>
                   <Text size="xsmall" className="text-ui-fg-subtle">
-                    {p.dex !== null ? `#${p.dex}` : 'custom'} · {p.variant}
+                    {entryNumber(p) || 'custom'} · {p.variant}
                   </Text>
                 </div>
                 {p.types.length > 0 && (

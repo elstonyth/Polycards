@@ -13,9 +13,13 @@ import {
   CORE_PREFIX_WRITES,
   CORE_READ_PREFIXES,
   CUSTOM_ADMIN_RESOURCES,
+  SECRET_READS,
   adminRbacRoutes,
 } from '../admin-rbac';
-import { adminSurfacePolicies } from '../../policies/admin-surfaces';
+import {
+  adminSurfacePolicies,
+  secretReadPolicies,
+} from '../../policies/admin-surfaces';
 import {
   API_ROOT,
   collectRouteFiles,
@@ -139,5 +143,46 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('GET', '/admin/referrals/settlements')).toEqual([
       'referral:read',
     ]);
+    // Stock writes (spec 2026-10-28).
+    expect(policyFor('POST', '/admin/goods-receive-notes')).toEqual([
+      'goods_receive_note:update',
+    ]);
+    expect(policyFor('POST', '/admin/goods-receive-notes/*/reverse')).toEqual([
+      'goods_receive_note:update',
+    ]);
+  });
+
+  it('the mailing list needs the Orders read policy on top of procurement', () => {
+    const policyFor = (method: string, url: string) =>
+      entries
+        .filter((e) => e.methods.includes(method) && e.re.test(url))
+        .flatMap((e) => e.policies.map((p) => `${p.resource}:${p.operation}`));
+    // It returns customer names, addresses and emails.
+    expect(policyFor('GET', '/admin/procurement/to-ship').sort()).toEqual([
+      'delivery_order:read',
+      'procurement:read',
+    ]);
+    expect(policyFor('GET', '/admin/procurement/to-buy')).toEqual([
+      'procurement:read',
+    ]);
+  });
+
+  it('secret-bearing GETs ask for their own declared read policy', () => {
+    // Partner passwords and full bank numbers must not ride on a screen's read
+    // policy: the view-only Support viewer holds those but not these.
+    const declared = new Set(
+      secretReadPolicies.policies.map((p) => `${p.resource}:${p.operation}`),
+    );
+    for (const s of SECRET_READS) {
+      const route = routes.find(
+        (r) => r.method === 'GET' && matcherToRegExp(s.matcher).test(r.url),
+      );
+      expect(route).toBeDefined();
+      const asks = entries
+        .filter((e) => e.methods.includes('GET') && e.re.test(route!.url))
+        .flatMap((e) => e.policies.map((p) => `${p.resource}:${p.operation}`));
+      expect(asks).toContain(`${s.resource}:read`);
+      expect(declared.has(`${s.resource}:read`)).toBe(true);
+    }
   });
 });

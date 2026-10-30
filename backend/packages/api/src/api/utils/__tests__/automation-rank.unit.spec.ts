@@ -364,16 +364,21 @@ it('held targets exclude owned accounts from threats and buffers', () => {
   expect(runtime.status.leadMyr).toBe(50);
 });
 
-it('below-target account never draws against an owned account at the target boundary', () => {
+it('below-target account pushes past an owned account at the target boundary; monitor mode only reports it', () => {
+  const owned = options(NOW, {
+    ownedCustomerIds: new Set(['local', 'external']),
+  });
   const runtime = createRankRuntime(target(), NOW);
-  expect(
-    evaluateRank(
-      runtime,
-      observation(),
-      options(NOW, { ownedCustomerIds: new Set(['local', 'external']) }),
-    ),
-  ).toMatchObject({ draw: false, done: false });
-  expect(runtime.status.state).toBe('conflict');
+  expect(evaluateRank(runtime, observation(), owned)).toMatchObject({
+    draw: true,
+    done: false,
+  });
+  expect(runtime.status.state).toBe('pushing');
+  const monitor = createRankRuntime(target({ mode: 'monitor' }), NOW);
+  expect(evaluateRank(monitor, observation(), owned)).toMatchObject({
+    draw: false,
+  });
+  expect(monitor.status.state).toBe('conflict');
 });
 
 it('missing external cutoff is explicitly unknown rather than a fabricated zero-value competitor', () => {

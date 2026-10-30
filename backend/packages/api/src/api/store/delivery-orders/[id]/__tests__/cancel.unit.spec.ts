@@ -51,16 +51,15 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
 
     await cancelOrder(req as any, res);
 
+    // allowed_from re-checks the customer window under the order's lock.
     expect(run).toHaveBeenCalledWith({
-      input: { order_id: 'do_1', status: 'canceled' },
+      input: {
+        order_id: 'do_1',
+        status: 'canceled',
+        allowed_from: ['requested'],
+      },
     });
     expect(out.body.order.id).toBe('do_1');
-  });
-
-  it('also allows cancel while processed', async () => {
-    const { res } = mkRes();
-    await cancelOrder(mkReq([order({ status: 'processed' })]) as any, res);
-    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it('404s an unknown order id without invoking the workflow', async () => {
@@ -87,15 +86,12 @@ describe('POST /store/delivery-orders/:id/cancel', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('cancels a legacy expand-window packing order', async () => {
-    const { res } = mkRes();
-    await cancelOrder(mkReq([order({ status: 'packing' })]) as any, res);
-    expect(run).toHaveBeenCalledTimes(1);
-  });
-
   it.each([
-    // The customer window closes at `processed`: from ready_to_ship on only the
-    // operator may cancel (the admin's ALLOWED map still permits it).
+    // The customer window closes at the 12am cutoff: from `processed` on only
+    // the operator may cancel (the admin's ALLOWED map still permits it).
+    ['processed', /already processed .*contact support/i],
+    // Legacy token for `processed`, worded the same.
+    ['packing', /already processed .*contact support/i],
     ['ready_to_ship', /already ready to ship .*contact support/i],
     ['shipped', /already shipped .*contact support/i],
     // CUSTOMER_STATUS_WORD.completed === 'delivered' — the customer is told

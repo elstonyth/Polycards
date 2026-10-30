@@ -21,7 +21,7 @@ import { rm, timeAgo } from '../../lib/format';
 import {
   attentionWithdrawals,
   doublePayAcross,
-  staleDeposits,
+  stuckDeposits,
 } from '../../lib/dashboard';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { isForbidden } from './helpers';
@@ -74,9 +74,10 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const processed = useDeliveryOrderCount('processed');
   const ready = useDeliveryOrderCount('ready_to_ship');
   const runs = useReferralSettlements();
-  // Both rails: a refunded payout either gateway still holds or paid.
+  // Every rail: a refunded payout any gateway still holds or paid.
   const auditRm = useGatewayAudit('MYR');
   const auditSgd = useGatewayAudit('SGD');
+  const auditUsdt = useGatewayAudit('USDT');
   const pricing = usePricingHealth();
   const queries = [
     held,
@@ -87,6 +88,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     runs,
     auditRm,
     auditSgd,
+    auditUsdt,
     pricing,
   ];
   const shipping = [requested, processed, ready];
@@ -95,13 +97,13 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     ? attentionWithdrawals(held.data.withdrawals, held.data.total)
     : undefined;
   const s = pending.data
-    ? staleDeposits(pending.data.deposits, pending.data.total)
+    ? stuckDeposits(pending.data.deposits, pending.data.total)
     : undefined;
   const toShip = shipping.every((q) => q.data !== undefined)
     ? shipping.reduce((n, q) => n + (q.data ?? 0), 0)
     : undefined;
   const drafts = runs.data?.filter((r) => r.status === 'draft');
-  const twice = doublePayAcross([auditRm.data, auditSgd.data]);
+  const twice = doublePayAcross([auditRm.data, auditSgd.data, auditUsdt.data]);
 
   // Only queues that loaded are counted, so a failed read is never "zero".
   const counts: Record<string, number> = {};
@@ -174,18 +176,21 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
       urgent: true,
     });
   }
+  // Stuck only (2026-10-25): a customer who opened the cashier and walked away
+  // is not shown — operators read that as a gateway fault. What is left is
+  // rare and real: the gateway never confirmed a top-up the customer may have
+  // paid. Calm (no ping), and the link opens the pending view, oldest first.
   if (s && s.count > 0) {
     const shown = s.capped ? `${s.count}+` : String(s.count);
     items.push({
       id: 'deposits',
       icon: <Clock />,
-      title: t('dashboard.staleTopups', { count: s.count, shown }),
-      detail: t('dashboard.staleDetail', {
+      title: t('dashboard.stuckTopups', { count: s.count, shown }),
+      detail: t('dashboard.stuckDetail', {
         age: s.oldest ? timeAgo(s.oldest) : '—',
       }),
-      to: '/deposits',
+      to: '/deposits?view=pending',
       action: t('dashboard.check'),
-      urgent: true,
     });
   }
   if (toShip) {

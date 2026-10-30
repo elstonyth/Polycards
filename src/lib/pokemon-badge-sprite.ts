@@ -5,6 +5,7 @@ import { spriteGif, spritePng } from '@/lib/mock/pokedex';
 
 export type BadgeCard = {
   name: string;
+  set?: string | null;
   pokemonDex?: number | null;
   spriteImage?: string | null;
 };
@@ -31,15 +32,25 @@ export type BadgeSprite = {
  * reduced-motion visitor. A gif cannot be paused by CSS, so this is the only
  * lever; the png is the same sprite, so the card↔reel mapping survives it.
  */
-export function badgeSprite(card: BadgeCard, still = false): BadgeSprite {
+export function badgeSprite(
+  card: BadgeCard,
+  still = false,
+  /** isPokemonPack of the pack this renders in; undefined = no pack context
+   *  (see resolveCardPokemon for what each value does). */
+  pokemon?: boolean,
+): BadgeSprite {
   // resolveCardPokemon takes snake_case; PackCard carries camelCase. Both
   // fields are optional there, so an unmapped call compiles clean and silently
   // drops the admin's configured pixel-Pokémon — the case test 1 pins.
-  const { dex, name } = resolveCardPokemon({
-    name: card.name,
-    pokemon_dex: card.pokemonDex,
-    sprite_image: card.spriteImage,
-  });
+  const { dex, name } = resolveCardPokemon(
+    {
+      name: card.name,
+      set: card.set,
+      pokemon_dex: card.pokemonDex,
+      sprite_image: card.spriteImage,
+    },
+    { pokemon },
+  );
   const custom = card.spriteImage?.trim() ? card.spriteImage : null;
   const dexChain =
     dex === null

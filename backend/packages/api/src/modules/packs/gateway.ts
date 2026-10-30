@@ -67,7 +67,7 @@ export type {
 // testOnly() below, which gates isPaymentGateway (and therefore
 // gatewayConfigFor, resolveActiveGateway and the admin switch), plus the
 // registry entry's own `configured` / `configFromEnv`.
-export type PaymentGateway = 'tgpay' | 'the7pay' | 'a3pay' | 'fake';
+export type PaymentGateway = 'tgpay' | 'the7pay' | 'a3pay' | 'gp365' | 'fake';
 
 export { LEDGER_CURRENCY };
 
@@ -97,12 +97,28 @@ export type GatewayDefinition = {
    * on top of the amount paid out. The float pre-check must cover both.
    */
   payoutFeePercent?: number;
+  /** A flat fee per payout on top of the percent, in the gateway's currency
+   *  (GlobePay365's 1 USDT gas). Also taken from our float. */
+  payoutFlatFee?: number;
   /** Are the credentials for this gateway present in the environment? */
   configured: (env: Partial<NodeJS.ProcessEnv>) => boolean;
   /** Its client config from env; throws when `configured` would be false. */
   configFromEnv: (env: NodeJS.ProcessEnv) => GatewayConfig;
   /** Does create-payment/payout need the customer's name/email/phone? */
   needsCustomerContact: boolean;
+  /**
+   * A regional gateway's pay-in channels, in the rail codes the storefront
+   * sends (startDeposit refuses any other before a row is written).
+   */
+  depositMethods?: readonly string[];
+  /** Must a pay-in name the PAYING account's holder (A3Pay matches it)? */
+  needsPayerName?: boolean;
+  /**
+   * How far (cents of its currency) the gateway may move a payin from what
+   * we asked and still be the same deposit at the same rate (payment-fx.ts
+   * nudgedDeposit / callbackLedgerAmount). Default PAYIN_NUDGE_CENTS.
+   */
+  payinNudgeCents?: number;
   /** Their server-to-server callback targets on OUR backend. */
   hooks: { deposit: string; withdrawal: string; payoutVerify?: string };
   /**
@@ -185,6 +201,8 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     // account's holder, else the verified real name) — the sheet does not
     // ask — so this gateway needs no profile contact.
     needsCustomerContact: false,
+    depositMethods: ['OB', 'BQR'],
+    needsPayerName: true,
     hooks: {
       deposit: '/hooks/a3pay/deposit',
       withdrawal: '/hooks/a3pay/withdrawal',
@@ -215,6 +233,55 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     },
     // WD 1.5% (back office, above): a S$50.79 payout cost S$51.55 live.
     payoutFeePercent: 1.5,
+  },
+
+  // USDT, beside the active RM gateway like A3Pay — and on the same platform
+  // (GlobePay365 publishes A3Pay's handbook under its own name), so it shares
+  // A3Pay's client, adapter and hook handlers with its own GP365_* keys, host
+  // and callback paths. NOT the retired 'globepay' (RETIRED_GATEWAYS): that
+  // id names the old MYR merchant's rows, which must stay history.
+  gp365: {
+    id: 'gp365',
+    label: 'GlobePay365 (USDT)',
+    currency: 'USDT',
+    configured: (env) =>
+      env.GP365_ENABLED === 'true' && a3pay.a3payFamilyConfigured('gp365', env),
+    configFromEnv: (env) => a3pay.a3payFamilyConfigFromEnv('gp365', env),
+    needsCustomerContact: false,
+    // UTRC = USDT on Tron (TRC20). No payer name: the doc requires
+    // FromCustomerAccountHolderName for SGD only. UERC (ERC20) is withdrawn:
+    // production CreatePayin refuses it ("unknown error"; all 3 live attempts
+    // and a test on 2026-10-26), so offering it only strands customers.
+    // Re-add it here and in the storefront rail once GlobePay365 opens it.
+    depositMethods: ['UTRC'],
+    needsPayerName: false,
+    // PROVISIONAL, up to 1 USDT: crypto cashiers make amounts unique with
+    // larger tails than A3Pay's cent. Measure payinActualAmount on staging.
+    payinNudgeCents: 100,
+    hooks: {
+      deposit: '/hooks/gp365/deposit',
+      withdrawal: '/hooks/gp365/withdrawal',
+      payoutVerify: '/hooks/gp365/payout-verify',
+    },
+    // GlobePay365's own payout cost (2026-10-21): 0.2% + 1 USDT gas.
+    payoutFeePercent: 0.2,
+    payoutFlatFee: 1,
+    // RM fences on the converted amount, as for A3Pay. GlobePay365 itself
+    // takes 3 USDT and up with no maximum (2026-10-21); our band is tighter.
+    // Payouts start at 60 USDT so the 2% withdrawal fee covers the 1 USDT gas.
+    limits: {
+      depositMin: 30,
+      depositMax: 10000,
+      // Under USDT 60 (~RM 250) so the USDT floor, not this one, binds.
+      withdrawalMin: 30,
+      withdrawalMax: 30000,
+    },
+    currencyLimits: {
+      depositMin: 10,
+      depositMax: 2000,
+      withdrawalMin: 60,
+      withdrawalMax: 5000,
+    },
   },
 
   // Test-only. Mirrors TGPay's limits and contact requirement field for
@@ -394,7 +461,8 @@ export async function resolveActiveGateway(
 export type GatewayConfig =
   | TgpayConfig<'tgpay'>
   | TgpayConfig<'the7pay'>
-  | A3payConfig
+  | A3payConfig<'a3pay'>
+  | A3payConfig<'gp365'>
   | FakeConfig;
 
 /** Config for a SPECIFIC gateway, from env. Throws when it is not configured. */
@@ -695,35 +763,47 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
 // Total over the kinds by construction: a new member of the GatewayConfig
 // union has no entry here until someone writes its adapter, and the compiler
 // says so.
-/** A3Pay's payin rails: the storefront's rail codes are already theirs. */
-export const A3PAY_METHODS = ['OB', 'BQR'] as const;
-
 /** A definite refusal raised before any call — nothing exists on their side. */
-function a3payRefusal(message: string, code: string): a3pay.A3payError {
-  return new a3pay.A3payError(`A3Pay: ${message}`, [code], 400, true);
+function a3payRefusal(
+  config: A3payConfig,
+  message: string,
+  code: string,
+): a3pay.A3payError {
+  return new a3pay.A3payError(
+    `${a3pay.A3PAY_FAMILY[config.kind].label}: ${message}`,
+    [code],
+    400,
+    true,
+  );
 }
 
+// One adapter for every tenant of the A3Pay platform (A3Pay SGD, GlobePay365
+// USDT): `config.kind` is the gateway id, so its registry entry supplies the
+// channels and the payer-name rule; the wire format is shared.
 const a3payAdapter: GatewayAdapter<A3payConfig> = {
   async submitDeposit(input, config) {
-    if (
-      !(A3PAY_METHODS as readonly string[]).includes(input.paymentMethodCode)
-    ) {
+    const def = GATEWAYS[config.kind];
+    if (!def.depositMethods?.includes(input.paymentMethodCode)) {
       throw a3payRefusal(
+        config,
         `no rail for method ${input.paymentMethodCode}`,
         'A3PAY_UNSUPPORTED_METHOD',
       );
     }
-    // The SGD amount comes from the row's FX lock. Never fall back to
-    // `amount`: that is RM, and sending it as SGD would charge ~3.3x.
+    // The gateway-currency amount comes from the row's FX lock. Never fall
+    // back to `amount`: that is RM, and sending it as SGD would charge ~3.3x.
     if (!(input.gatewayAmount && input.gatewayAmount > 0)) {
       throw a3payRefusal(
-        'no SGD amount on the deposit',
+        config,
+        `no ${config.currencyCode} amount on the deposit`,
         'A3PAY_NO_GATEWAY_AMOUNT',
       );
     }
-    if (!input.payerName?.trim()) {
+    const payerName = input.payerName?.trim() ?? '';
+    if (def.needsPayerName && !payerName) {
       throw a3payRefusal(
-        'SGD payins need the paying account holder name',
+        config,
+        `${config.currencyCode} payins need the paying account holder name`,
         'A3PAY_PAYER_REQUIRED',
       );
     }
@@ -736,7 +816,7 @@ const a3payAdapter: GatewayAdapter<A3payConfig> = {
         callbackUrl: input.notifyUrl,
         returnUrl: input.returnUrl,
         paymentMethodId: input.paymentMethodCode,
-        accountHolderName: input.payerName.trim(),
+        ...(def.needsPayerName ? { accountHolderName: payerName } : {}),
       },
       config,
     );
@@ -772,13 +852,15 @@ const a3payAdapter: GatewayAdapter<A3payConfig> = {
   async submitWithdrawal(input, config) {
     if (!(input.gatewayAmount && input.gatewayAmount > 0)) {
       throw a3payRefusal(
-        'no SGD amount on the payout',
+        config,
+        `no ${config.currencyCode} amount on the payout`,
         'A3PAY_NO_GATEWAY_AMOUNT',
       );
     }
-    const bank = gatewayBankCode(input.destinationBankCode, 'a3pay');
+    const bank = gatewayBankCode(input.destinationBankCode, config.kind);
     if (!bank) {
       throw a3payRefusal(
+        config,
         `cannot pay to bank ${input.destinationBankCode}`,
         'A3PAY_UNKNOWN_BANK',
       );
@@ -791,7 +873,10 @@ const a3payAdapter: GatewayAdapter<A3payConfig> = {
         ipAddress: input.ipAddress,
         bankCode: bank.code,
         accountNumber: input.destinationAccountNumber,
-        accountHolderName: input.destinationAccountHolderName,
+        // A wallet has no holder: GlobePay365 wants MCustId repeated here.
+        accountHolderName: findBank(input.destinationBankCode)?.wallet
+          ? input.merchantClientId
+          : input.destinationAccountHolderName,
         callbackUrl: input.notifyUrl,
         verifyUrl: input.returnUrl,
       },
@@ -817,8 +902,8 @@ const a3payAdapter: GatewayAdapter<A3payConfig> = {
     };
   },
 
-  async getSupportedBanks() {
-    return banksFor('a3pay');
+  async getSupportedBanks(config) {
+    return banksFor(config.kind);
   },
 
   async checkBalance(config) {
@@ -841,6 +926,7 @@ const ADAPTERS: {
   tgpay: tgpayAdapter,
   the7pay: tgpayAdapter,
   a3pay: a3payAdapter,
+  gp365: a3payAdapter,
   fake: fakeGateway,
 };
 
@@ -868,10 +954,7 @@ export function submitDeposit(
  * a later A3PAY_CURRENCY edit must not turn live payouts into refunds. Rows
  * from before the column (currency absent) keep the config's currency.
  */
-export function inRowCurrency(
-  config: GatewayConfig,
-  fx: RowFx,
-): GatewayConfig {
+export function inRowCurrency(config: GatewayConfig, fx: RowFx): GatewayConfig {
   const currency = typeof fx.currency === 'string' ? fx.currency : '';
   return currency &&
     'currencyCode' in config &&

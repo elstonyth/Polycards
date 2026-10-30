@@ -8,7 +8,6 @@ import {
   rowGateway,
   submitDeposit,
   GatewayError,
-  A3PAY_METHODS,
   GATEWAY_IDS,
   isLedgerGateway,
   type PaymentGateway,
@@ -30,11 +29,11 @@ import { alertOps } from './ops-alert';
 import { PAYIN_STATUS } from './a3pay';
 
 /**
- * An A3Pay payin at status 4 (Verify Fail): A3Pay could not match the payment
- * to the payer we named (it compares the account name). Not final, so nothing
- * changes on the row — but the customer may well have paid, so a human must
- * look. Once per deposit per 6 hours (callback retries and the 1-minute sweep
- * both report it).
+ * An A3Pay-platform payin at status 4 (Verify Fail): the gateway could not
+ * match the payment to the payer we named (A3Pay compares the account name).
+ * Not final, so nothing changes on the row — but the customer may well have
+ * paid, so a human must look. Once per deposit per 6 hours (callback retries
+ * and the 1-minute sweep both report it).
  */
 export function alertPayinVerifyFail(
   scope: { resolve: <T>(key: string) => T },
@@ -45,10 +44,17 @@ export function alertPayinVerifyFail(
   },
 ): void {
   const gateway = rowGateway(deposit);
+  const name = gateway ? GATEWAYS[gateway].label : 'The gateway';
+  const head = `${name} reports Verify Fail (status 4) on deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id})`;
   void alertOps(
     scope,
     `payin-verify-fail:${deposit.merchant_transaction_id}`,
-    `${gateway ? GATEWAYS[gateway].label : 'The gateway'} reports Verify Fail (status 4) on deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}) — A3Pay matches a payment ONLY by its exact amount (cents included), so the customer most likely never transferred it or sent a different sum. No action unless they show proof of payment; then ask A3Pay to match it in their back office so the callback credits it. Never credit it by admin adjustment: the sweep could credit it a second time.`,
+    // GlobePay365 (2026-10-20, staging): an order not paid in full in time,
+    // or paid a different amount, is status 4, and its record keeps the
+    // ORDER amount, never what arrived.
+    gateway === 'gp365'
+      ? `${head} — the order was not paid in time, or the USDT that arrived differs from the order (GlobePay365 treats that as unpaid). No action unless the customer shows proof of a transfer; then ask GlobePay365 to resolve it by hand: refund what arrived, or mark the order successful ONLY once the full amount has arrived (their record shows the order amount, so a successful mark credits the full order). Never credit it by admin adjustment: the sweep could credit it a second time.`
+      : `${head} — ${name} matches a payment ONLY by its exact amount (cents included), so the customer most likely never transferred it or sent a different sum. No action unless they show proof of payment; then ask ${name} to match it in their back office so the callback credits it. Never credit it by admin adjustment: the sweep could credit it a second time.`,
     { muteMs: 6 * 60 * 60 * 1000 },
   );
 }
@@ -65,12 +71,15 @@ export function sweepAlertsVerifyFail(
   return deposit.status === 'pending' && isPayinVerifyFail(deposit.gateway, statusId);
 }
 
-/** Payin status 4 from A3Pay (TGPay has no such status). */
+/** Payin status 4 from a tenant of the A3Pay platform (A3Pay, GlobePay365). */
 export function isPayinVerifyFail(
   gateway: string | null | undefined,
   statusId: unknown,
 ): boolean {
-  return gateway === 'a3pay' && Number(statusId) === PAYIN_STATUS.VERIFY_FAIL;
+  return (
+    (gateway === 'a3pay' || gateway === 'gp365') &&
+    Number(statusId) === PAYIN_STATUS.VERIFY_FAIL
+  );
 }
 
 /** The gateway_deposit.status domain, from the model. */
@@ -297,7 +306,12 @@ export async function startDeposit(
     // Today's S$ band: the gateway's own, narrowed so the converted credit
     // also fits the RM band — refused here in S$, not later in RM.
     const band = currencyLimits
-      ? regionalDepositBand(quote, currencyLimits, GATEWAYS[gateway].limits)
+      ? regionalDepositBand(
+          quote,
+          currencyLimits,
+          GATEWAYS[gateway].limits,
+          GATEWAYS[gateway].payinNudgeCents,
+        )
       : null;
     if (band && (paid < band.min || paid > band.max)) {
       throw new MedusaError(
@@ -348,7 +362,7 @@ export async function startDeposit(
   // maps the rail code onto its own channels (or refuses it as definite).
   const paymentMethodCode = input.paymentMethodCode ?? GATEWAY_DEFAULT_METHOD;
   const methods: readonly string[] = regional
-    ? A3PAY_METHODS
+    ? (GATEWAYS[gateway].depositMethods ?? [])
     : GATEWAY_MYR_METHODS;
   if (!methods.includes(paymentMethodCode)) {
     throw new MedusaError(
@@ -362,7 +376,8 @@ export async function startDeposit(
   // refusal after one.
   const payerName =
     typeof input.payerName === 'string' ? input.payerName.trim() : '';
-  if (regional && (payerName.length < 2 || payerName.length > 120)) {
+  const needsPayerName = GATEWAYS[gateway].needsPayerName === true;
+  if (needsPayerName && (payerName.length < 2 || payerName.length > 120)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'Enter the name on the bank account you are paying from (reload the page if you see no name field).',
@@ -424,7 +439,8 @@ export async function startDeposit(
         ipAddress: input.ipAddress,
         paymentMethodCode,
         customer: input.customer,
-        ...(fx ? { gatewayAmount: fx.gatewayAmount, payerName } : {}),
+        ...(fx ? { gatewayAmount: fx.gatewayAmount } : {}),
+        ...(needsPayerName ? { payerName } : {}),
       },
       config,
     );
@@ -530,7 +546,13 @@ export async function startDeposit(
   // holds exactly. Skipped when the new credit would cross the gateway's RM
   // ceiling: the row then keeps its original credit, as before.
   const nudged =
-    fx !== null ? nudgedDeposit(fx, Number(result.depositActualAmount)) : null;
+    fx !== null
+      ? nudgedDeposit(
+          fx,
+          Number(result.depositActualAmount),
+          GATEWAYS[gateway].payinNudgeCents,
+        )
+      : null;
   const relock =
     nudged !== null &&
     nudged.credit <= GATEWAYS[gateway].limits.depositMax &&

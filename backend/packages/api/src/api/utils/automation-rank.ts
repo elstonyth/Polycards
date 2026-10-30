@@ -323,7 +323,13 @@ export function evaluateRank(
   }
   const modeDone = !['test', 'live'].includes(target.mode);
   if (!held) {
-    if (boundary && options.ownedCustomerIds.has(boundary.customerId)) {
+    // Drawing modes push past one of our own accounts at the target rank;
+    // monitor and shadow only report it.
+    if (
+      modeDone &&
+      boundary &&
+      options.ownedCustomerIds.has(boundary.customerId)
+    ) {
       return decision(
         runtime,
         'conflict',

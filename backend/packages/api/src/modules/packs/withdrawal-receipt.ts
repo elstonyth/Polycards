@@ -31,6 +31,8 @@ export type WithdrawalReceiptInput = {
   merchantTransactionId: string;
   outcome: 'paid' | 'refunded';
   occurredAt?: Date;
+  /** A paid USDT payout: what the wallet received. Words the email for a wallet. */
+  usdtAmount?: number;
 };
 
 /**
@@ -68,6 +70,9 @@ export async function sendWithdrawalReceipt(
         outcome: input.outcome,
         occurred_at: (input.occurredAt ?? new Date()).toISOString(),
         site_url: receiptSiteUrl(),
+        ...(input.usdtAmount !== undefined
+          ? { usdt_amount: input.usdtAmount }
+          : {}),
       },
       idempotency_key: withdrawalReceiptKey(
         input.merchantTransactionId,

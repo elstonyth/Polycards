@@ -710,7 +710,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await service.creditBalance('cus_c')).toBe(25);
       });
 
-      it('never ranks or pays an Automation account; the next customer takes its rank', async () => {
+      it('ranks and pays an Automation account like any other account', async () => {
         const { card } = await seedBase();
         await seedStage(1, 100, [
           { rank: 1, credits: 100 },
@@ -731,18 +731,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
           (
             await service.challengeWeekTop({ ...WEEK, weeksBack: 1, limit: 10 })
           ).map((row) => row.customer_id),
-        ).toEqual(['cus_a', 'cus_b']);
-        // Its pulls still fill the community pool: 600 USD × fx 4.
+        ).toEqual(['cus_house', 'cus_a', 'cus_b']);
+        // Its pulls fill the community pool too: 600 USD × fx 4.
         expect(await service.challengeWeekPool({ ...WEEK, weeksBack: 1 })).toBe(
           2400,
         );
         const r = await service.settleChallengeWeek({});
         expect(r.winners.map((w) => [w.customerId, w.rank])).toEqual([
-          ['cus_a', 1],
-          ['cus_b', 2],
+          ['cus_house', 1],
+          ['cus_a', 2],
         ]);
-        expect(await service.creditBalance('cus_house')).toBe(0);
-        expect(await service.creditBalance('cus_a')).toBe(100);
+        expect(await service.creditBalance('cus_house')).toBe(100);
+        expect(await service.creditBalance('cus_a')).toBe(50);
       });
 
       it('an admin anchor change cannot re-pay a week overlapping a paid one', async () => {

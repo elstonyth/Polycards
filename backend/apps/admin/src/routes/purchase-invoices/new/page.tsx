@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Button,
   Container,
+  Drawer,
   Heading,
   Input,
   Label,
@@ -13,95 +15,61 @@ import {
 } from '@medusajs/ui';
 import { ArrowLeft, Trash } from '@medusajs/icons';
 import {
-  useCards,
   useCreatePurchaseInvoice,
-  useEligibleProducts,
-  useFxRate,
+  useGoodsReceiveNote,
+  useOpenGoodsReceiveNotes,
   usePurchaseInvoice,
   usePurchaseInvoices,
 } from '../../../lib/queries';
-import { rm, usdToMyr } from '../../../lib/format';
+import { orderDateTime, rm } from '../../../lib/format';
 import {
   draftError,
+  invoiceFormLines,
   mytMidnightIso,
   mytToday,
   type DraftLine,
 } from '../../../lib/purchase-invoice-form';
+import {
+  StockItemSearch,
+  StockLineItem,
+  type StockSearchItem,
+} from '../../../components/StockItemSearch';
+import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 // ponytail: no config export — a create page belongs behind the list's "New
 // invoice" button, not in the sidebar (mirrors [id]/page.tsx).
 
 const NewPurchaseInvoicePage = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [date, setDate] = useState(() => mytToday());
-  const [supplier, setSupplier] = useState('');
+  // null = not typed since the last GRN pick, so the field shows the picked
+  // GRN's supplier — derived, not copied in by an effect, which is what lets a
+  // ?from_grn= deep link fill it once the GRN loads.
+  const [supplier, setSupplier] = useState<string | null>(null);
   const [reversesId, setReversesId] = useState<string | null>(null);
+  // Transfer from goods receive note (spec 2026-10-28). `?from_grn=` is the GRN
+  // detail page's "Transfer to purchase invoice" button. Unit costs are keyed
+  // by GRN line id, so switching GRNs needs no reset: another GRN's lines have
+  // other ids.
+  const [fromGrnId, setFromGrnId] = useState<string | null>(
+    () => searchParams.get('from_grn') || null,
+  );
+  const [unitCosts, setUnitCosts] = useState<Record<string, string>>({});
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Only the PURCHASE lines are state. A reversal's lines are wholly determined
   // by the invoice being reversed, so they are derived below rather than copied
   // into state by an effect — no sync to get wrong, and switching the picker
   // back to "None" restores whatever purchase lines were already staged.
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
-  const [filter, setFilter] = useState('');
 
-  const { data: cards } = useCards();
-  // `true` is REQUIRED — useEligibleProducts takes the enabled flag positionally
-  // and there is no default; the picker is always on here, unlike the register
-  // modal that gates it on being open.
-  const { data: eligible } = useEligibleProducts(true);
-  const { data: fxData } = useFxRate();
   const { data: invoicesPage } = usePurchaseInvoices(0);
   const { data: reversalSource } = usePurchaseInvoice(reversesId);
+  const { data: grnData, isError: grnError } = useGoodsReceiveNote(fromGrnId);
+  const { data: openGrns, isError: openGrnsError } =
+    useOpenGoodsReceiveNotes(pickerOpen);
   const create = useCreatePurchaseInvoice();
-
-  // Merged item-search source: registered gacha Cards plus catalog products not
-  // yet promoted to a Card. Both lists are already fetched by existing hooks —
-  // no new backend code.
-  //
-  // fmv_snapshot is MYR (purchase-invoice-line.ts), and BOTH sources are USD:
-  // AdminCard.market_value is raw USD, so cards use the already-resolved
-  // priceBreakdown.marketMyr; EligibleProduct.fmv is raw USD too
-  // (admin/gacha/eligible-products emits `num(meta.fmv)` unconverted), so it
-  // needs the same conversion — via usdToMyr, which is the mirror of the
-  // backend displayMarketPrice the card side already went through, so the two
-  // halves of this list are priced identically rather than merely similarly.
-  //
-  // No hardcoded FX fallback: before the rate loads, usdToMyr(x, 0) is 0, and a
-  // silent RM 0.00 prefill on a money record is worse than a row that is not
-  // offered yet. Cards are unaffected — their MYR is already server-resolved.
-  const fx = fxData?.effective ?? 0;
-  const searchable = useMemo(() => {
-    const fromCards = (cards ?? []).map((c) => ({
-      handle: c.handle,
-      name: c.name,
-      fmv: c.priceBreakdown.marketMyr,
-      kind: 'Card' as const,
-    }));
-    const cardHandles = new Set(fromCards.map((c) => c.handle));
-    const fromEligible =
-      fx > 0
-        ? (eligible ?? [])
-            .filter((p) => !cardHandles.has(p.handle))
-            .map((p) => ({
-              handle: p.handle,
-              name: p.title,
-              fmv: usdToMyr(p.fmv ?? 0, fx),
-              kind: 'Product' as const,
-            }))
-        : [];
-    return [...fromCards, ...fromEligible];
-  }, [cards, eligible, fx]);
-
-  const visible = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return searchable.slice(0, 50);
-    return searchable
-      .filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.handle.toLowerCase().includes(q),
-      )
-      .slice(0, 50);
-  }, [searchable, filter]);
 
   // Only NON-reversing invoices are offerable. api/.../validate.ts requires
   // every line of a reversing invoice to be negative-qty, and the service
@@ -138,26 +106,47 @@ const NewPurchaseInvoicePage = () => {
     }));
   }, [reversesId, reversalSource]);
 
-  // Whichever mode is active owns the body that gets submitted, so a staged
-  // purchase line can never ride along on a reversal (which the server rejects
-  // per-invoice anyway) or the other way round.
-  const lines = reversesId ? reversalLines : draftLines;
+  // Same id guard as the reversal: useGoodsReceiveNote serves the PREVIOUS
+  // GRN for a render after a re-pick. Only an OPEN GRN prefills — a
+  // transferred or reversed one would only 400 at save, so a stale deep link
+  // gets a message instead of lines.
+  const grn =
+    grnData?.goods_receive_note.id === fromGrnId
+      ? grnData.goods_receive_note
+      : undefined;
+  const grnLines = fromGrnId ? (grn?.status === 'open' ? grn.lines : []) : null;
+  const supplierValue = supplier ?? grn?.supplier ?? '';
 
-  const addLine = (item: { handle: string; name: string; fmv: number }) => {
-    // Handle/name/FMV come from the MATCHED item, never from the typed text —
-    // card_handle is what the weighted-average cost and the reversal match key
-    // off, so a free-typed handle would silently create a second cost bucket.
+  // Whichever mode is active owns the body that gets submitted, so a staged
+  // purchase line can never ride along on a reversal or a transfer (which the
+  // server rejects per-invoice anyway) or the other way round.
+  const lines = reversesId
+    ? reversalLines
+    : invoiceFormLines(draftLines, grnLines, unitCosts);
+  // Card, FMV and qty come from another record in both modes.
+  const locked = !!reversesId || !!fromGrnId;
+
+  // The server refuses a transfer AND a reversal on one invoice, so picking
+  // either mode clears the other.
+  const pickGrn = (id: string) => {
+    setFromGrnId(id);
+    setReversesId(null);
+    setSupplier(null);
+    setPickerOpen(false);
+  };
+
+  // The picked item's handle/name/FMV, never typed text — see StockItemSearch.
+  const addLine = (item: StockSearchItem) => {
     setDraftLines((prev) => [
       ...prev,
       {
         card_handle: item.handle,
         card_name: item.name,
-        fmv_snapshot: item.fmv.toFixed(2),
+        fmv_snapshot: item.fmv?.toFixed(2) ?? '',
         qty: '1',
-        unit_cost: item.fmv.toFixed(2),
+        unit_cost: item.fmv?.toFixed(2) ?? '',
       },
     ]);
-    setFilter('');
   };
 
   // Both only reachable in purchase mode — a reversal's rows render as text.
@@ -165,6 +154,16 @@ const NewPurchaseInvoicePage = () => {
     setDraftLines((prev) =>
       prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
     );
+  // In transfer mode the unit cost is the only editable field, held per GRN
+  // line id; otherwise it is an ordinary draft edit.
+  const setUnitCost = (i: number, value: string) => {
+    const grnLine = grnLines?.[i];
+    if (grnLine) {
+      setUnitCosts((prev) => ({ ...prev, [grnLine.id]: value }));
+    } else {
+      updateLine(i, { unit_cost: value });
+    }
+  };
   const removeLine = (i: number) =>
     setDraftLines((prev) => prev.filter((_, idx) => idx !== i));
 
@@ -181,13 +180,19 @@ const NewPurchaseInvoicePage = () => {
     (s, l) => s + Number(l.fmv_snapshot) * Number(l.qty),
     0,
   );
+  // Whole numbers only: a half-typed or fractional qty (refused at save) must
+  // not show NaN or float dust in the total.
+  const totalQty = lines.reduce((s, l) => {
+    const n = Number(l.qty);
+    return s + (Number.isInteger(n) ? n : 0);
+  }, 0);
 
   const submit = async () => {
     // Refuse rather than round. Silently snapping an operator's money entry to
     // 2dp is precisely the class of drift Tasks 2 and 3 hardened against, and
     // the server would 400 on it regardless — this only makes the message name
     // the row and the field.
-    const problem = draftError(date, supplier, lines);
+    const problem = draftError(date, supplierValue, lines);
     if (problem) {
       toast.error(problem);
       return;
@@ -196,8 +201,9 @@ const NewPurchaseInvoicePage = () => {
       const res = await create.mutateAsync({
         // MYT calendar day, not UTC midnight — see mytMidnightIso.
         date: mytMidnightIso(date),
-        supplier: supplier.trim(),
+        supplier: supplierValue.trim(),
         reverses_invoice_id: reversesId,
+        from_grn_id: reversesId ? null : fromGrnId,
         lines: lines.map((l) => ({
           card_handle: l.card_handle,
           card_name: l.card_name,
@@ -262,7 +268,7 @@ const NewPurchaseInvoicePage = () => {
               </Label>
               <Input
                 id="pi-supplier"
-                value={supplier}
+                value={supplierValue}
                 maxLength={256}
                 placeholder="Who the cards were bought from"
                 onChange={(e) => setSupplier(e.target.value)}
@@ -274,7 +280,10 @@ const NewPurchaseInvoicePage = () => {
               </Label>
               <Select
                 value={reversesId ?? ''}
-                onValueChange={(v) => setReversesId(v || null)}
+                onValueChange={(v) => {
+                  setReversesId(v || null);
+                  if (v) setFromGrnId(null);
+                }}
               >
                 <Select.Trigger>
                   <Select.Value placeholder="None — this is a purchase" />
@@ -295,49 +304,92 @@ const NewPurchaseInvoicePage = () => {
               ) : null}
             </div>
           </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            {fromGrnId ? (
+              <>
+                <Text size="small" weight="plus">
+                  {t('grn.transfer.from', { no: grn?.display_no ?? '…' })}
+                </Text>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() => setFromGrnId(null)}
+                >
+                  {t('grn.transfer.clear')}
+                </Button>
+                <Text className="text-ui-fg-muted w-full" size="small">
+                  {grnError
+                    ? t('grn.transfer.loadError')
+                    : grn && grn.status !== 'open'
+                      ? t('grn.transfer.notOpen', {
+                          no: grn.display_no,
+                          status: t(`grn.status.${grn.status}`),
+                        })
+                      : t('grn.transfer.hint')}
+                </Text>
+              </>
+            ) : (
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => setPickerOpen(true)}
+              >
+                {t('grn.transfer.button')}
+              </Button>
+            )}
+          </div>
         </div>
 
-        {!reversesId ? (
-          <div className="flex flex-col gap-y-2 border-t px-6 py-4">
-            <Label size="small" weight="plus" htmlFor="pi-item-search">
-              Add item
-            </Label>
-            <Input
-              id="pi-item-search"
-              type="search"
-              className="max-w-md"
-              placeholder="Search registered cards and catalog products"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-            <div className="max-h-64 max-w-md divide-y overflow-y-auto rounded-lg border">
-              {visible.map((s) => (
-                <button
-                  key={`${s.kind}-${s.handle}`}
-                  type="button"
-                  onClick={() => addLine(s)}
-                  className="hover:bg-ui-bg-base-hover flex w-full items-center gap-3 px-4 py-2 text-left"
-                >
-                  <span className="flex-1 truncate text-sm font-medium">
-                    {s.name}
-                  </span>
-                  <span className="text-ui-fg-muted truncate text-xs">
-                    {s.handle}
-                  </span>
-                  <span className="text-ui-fg-subtle whitespace-nowrap text-xs tabular-nums">
-                    {rm(s.fmv)}
-                  </span>
-                </button>
-              ))}
-              {visible.length === 0 ? (
-                <div className="text-ui-fg-subtle px-4 py-3 text-sm">
-                  {searchable.length === 0
-                    ? 'No cards or catalog products to add.'
-                    : 'No item matches that search.'}
+        <Drawer open={pickerOpen} onOpenChange={setPickerOpen}>
+          <Drawer.Content>
+            <Drawer.Header>
+              <Drawer.Title>{t('grn.transfer.pickerTitle')}</Drawer.Title>
+            </Drawer.Header>
+            <Drawer.Body className="overflow-y-auto p-0">
+              {openGrnsError ? (
+                <Text size="small" className="text-ui-fg-error p-6">
+                  {t('grn.loadError')}
+                </Text>
+              ) : !openGrns ? (
+                <div className="p-6">
+                  <LoadingSkeleton rows={4} />
                 </div>
-              ) : null}
-            </div>
-          </div>
+              ) : openGrns.goods_receive_notes.length === 0 ? (
+                <Text size="small" className="text-ui-fg-muted p-6">
+                  {t('grn.transfer.noneOpen')}
+                </Text>
+              ) : (
+                <div className="divide-y">
+                  {openGrns.goods_receive_notes.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => pickGrn(g.id)}
+                      className="hover:bg-ui-bg-base-hover flex w-full items-center gap-3 px-6 py-3 text-left"
+                    >
+                      <span className="whitespace-nowrap text-sm font-medium">
+                        {g.display_no}
+                      </span>
+                      <span className="text-ui-fg-subtle flex-1 truncate text-sm">
+                        {g.supplier}
+                      </span>
+                      <span className="text-ui-fg-muted whitespace-nowrap text-xs">
+                        {orderDateTime(g.date)}
+                      </span>
+                      <span className="text-ui-fg-subtle whitespace-nowrap text-xs tabular-nums">
+                        {t('grn.qtyN', { n: g.total_qty })}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Drawer.Body>
+          </Drawer.Content>
+        </Drawer>
+
+        {!locked ? (
+          <StockItemSearch id="pi-item-search" onPick={addLine} />
         ) : null}
 
         {lines.length === 0 ? (
@@ -345,12 +397,18 @@ const NewPurchaseInvoicePage = () => {
             <Text className="text-ui-fg-subtle" size="small">
               {reversesId
                 ? 'Loading the invoice being reversed...'
-                : 'No lines yet — search above and pick an item.'}
+                : fromGrnId
+                  ? grnError
+                    ? t('grn.transfer.loadError')
+                    : grn
+                      ? t('grn.transfer.noLines')
+                      : t('grn.transfer.loading')
+                  : 'No lines yet — search above and pick an item.'}
             </Text>
           </div>
         ) : (
           <div
-            className="overflow-x-auto border-t"
+            className="overflow-x-auto border-t [&_input]:scroll-mb-24"
             tabIndex={0}
             role="region"
             aria-label="Invoice lines"
@@ -377,14 +435,11 @@ const NewPurchaseInvoicePage = () => {
               <Table.Body>
                 {lines.map((l, i) => (
                   <Table.Row key={`${l.card_handle}-${i}`}>
-                    <Table.Cell className="break-words">
-                      {l.card_name}
-                      <span className="text-ui-fg-muted ml-2 text-xs">
-                        {l.card_handle}
-                      </span>
+                    <Table.Cell>
+                      <StockLineItem handle={l.card_handle} name={l.card_name} />
                     </Table.Cell>
                     <Table.Cell className="text-right">
-                      {reversesId ? (
+                      {locked ? (
                         <span className="tabular-nums">
                           {rm(Number(l.fmv_snapshot))}
                         </span>
@@ -405,7 +460,7 @@ const NewPurchaseInvoicePage = () => {
                       )}
                     </Table.Cell>
                     <Table.Cell className="text-right">
-                      {reversesId ? (
+                      {locked ? (
                         <span className="tabular-nums">{l.qty}</span>
                       ) : (
                         <Input
@@ -433,9 +488,7 @@ const NewPurchaseInvoicePage = () => {
                           className="w-28 text-right"
                           aria-label={`Line ${i + 1} unit cost`}
                           value={l.unit_cost}
-                          onChange={(e) =>
-                            updateLine(i, { unit_cost: e.target.value })
-                          }
+                          onChange={(e) => setUnitCost(i, e.target.value)}
                         />
                       )}
                     </Table.Cell>
@@ -443,7 +496,7 @@ const NewPurchaseInvoicePage = () => {
                       {rm(Number(l.qty) * Number(l.unit_cost))}
                     </Table.Cell>
                     <Table.Cell className="text-right">
-                      {reversesId ? null : (
+                      {locked ? null : (
                         <Button
                           variant="transparent"
                           size="small"
@@ -461,7 +514,15 @@ const NewPurchaseInvoicePage = () => {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-end gap-8 border-t px-6 py-4">
+        {/* Sticky: a long invoice keeps its totals and Save in view. No z-index:
+            one would paint it over Radix portals (drawers, selects). */}
+        <div className="bg-ui-bg-base sticky bottom-0 flex flex-wrap items-center justify-end gap-8 rounded-b-lg border-t px-6 py-4">
+          <div className="text-right">
+            <Text className="text-ui-fg-subtle" size="small">
+              Total qty
+            </Text>
+            <Text className="tabular-nums">{totalQty}</Text>
+          </div>
           <div className="text-right">
             <Text className="text-ui-fg-subtle" size="small">
               Total FMV

@@ -53,6 +53,8 @@ export type SavedBankAccountView = SavedBankAccount & {
   /** The bank's own payout floor (RM) when it has one (Touch 'n Go: 100), so
    *  the form can state and check it; null = the gateway's floor applies. */
   minRm: number | null;
+  /** A USDT wallet's chain (banks.ts), absent for a bank. */
+  wallet?: string;
 };
 
 /**
@@ -186,6 +188,9 @@ export function savedBankAccountViews(
         bankSupportedBy(account.bankCode, g),
       ),
       minRm: bankPayoutMinRm(account.bankCode),
+      ...(findBank(account.bankCode)?.wallet
+        ? { wallet: findBank(account.bankCode)?.wallet }
+        : {}),
     };
   });
 }

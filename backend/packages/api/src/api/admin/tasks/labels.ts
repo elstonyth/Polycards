@@ -1,4 +1,5 @@
 import type PacksModuleService from '../../../modules/packs/service';
+import { ticketsSuffix } from '../../../modules/packs/lucky-draw';
 import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
 import type {
   TaskKind,
@@ -82,6 +83,8 @@ export async function resolveTaskLabels(
     kind?: string;
     requirement: unknown;
     reward: unknown;
+    /** Lucky Draw tickets the claim also pays; > 0 is appended to the reward. */
+    tickets?: number;
   }[],
 ): Promise<Map<string, TaskLabels>> {
   const refs = collect(rows);
@@ -133,7 +136,9 @@ export async function resolveTaskLabels(
         packTitle,
         pixelName,
       ),
-      reward: rewardLabel(row.reward, packTitle, cardName),
+      reward:
+        rewardLabel(row.reward, packTitle, cardName) +
+        ticketsSuffix(row.tickets),
     });
   }
   return out;

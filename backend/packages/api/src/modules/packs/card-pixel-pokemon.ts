@@ -7,15 +7,24 @@ import { asPixelPokemonCrud } from './pixel-pokemon-service';
 // so the storefront resolver stays unchanged (it already prefers sprite_image /
 // pokemon_dex). Backfill apply (Plan 1) and the admin update-card step (Plan 2)
 // both write these fields whenever a card's pixel_pokemon_id is (re)assigned.
-export type PixelPokemonLike = { dex: number | null; image_url: string | null };
+export type PixelPokemonLike = {
+  dex: number | null;
+  image_url: string | null;
+  /** Missing = a pre-franchise row, i.e. Pokémon (the column default). */
+  franchise?: string | null;
+};
 export type MirroredCardFields = {
   pokemon_dex: number | null;
   sprite_image: string | null;
 };
 
 export function mirroredCardFields(pp: PixelPokemonLike): MirroredCardFields {
+  const pokemon = (pp.franchise ?? 'pokemon') === 'pokemon';
   return {
-    pokemon_dex: pp.dex ?? null,
+    // Only a Pokémon's dex lands on the card: the storefront reads
+    // card.pokemon_dex as a Pokémon (sprite fallback, reel identity), so any
+    // other deck's entry stays dex-less there no matter what the row holds.
+    pokemon_dex: pokemon ? (pp.dex ?? null) : null,
     sprite_image: pp.image_url ?? null,
   };
 }

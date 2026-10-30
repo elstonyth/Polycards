@@ -69,4 +69,22 @@ describe('cached', () => {
     await cached(`k-${MAX_ENTRIES + 10}`, 60_000, load);
     expect(load).toHaveBeenCalledTimes(0);
   });
+
+  it('a refreshed hot key moves to the back, so pressure evicts cold keys first', async () => {
+    vi.useFakeTimers();
+    const MAX_ENTRIES = 256;
+    const load = vi.fn(async () => 'v');
+    await cached('hot', 1000, load); // inserted first, refreshed below
+    for (let i = 1; i < MAX_ENTRIES; i++)
+      await cached(`cold-${i}`, 60_000, load);
+    vi.advanceTimersByTime(1001);
+    await cached('hot', 1000, load); // window expired: reloaded
+    // Pressure: one more key pushes the store past the bound.
+    await cached('new', 60_000, load);
+    load.mockClear();
+    await cached('hot', 1000, load);
+    expect(load).toHaveBeenCalledTimes(0); // hot survived
+    await cached('cold-1', 60_000, load);
+    expect(load).toHaveBeenCalledTimes(1); // the oldest cold key went instead
+  });
 });

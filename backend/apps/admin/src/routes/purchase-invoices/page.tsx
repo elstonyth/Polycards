@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Button, Container, Heading, Input, Table, Text } from '@medusajs/ui';
 import { Plus } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
@@ -12,7 +13,7 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'pcNav.purchaseInvoices',
   translationNs: 'translation',
-  rank: 2,
+  rank: 3,
   nested: '/inventory/list',
 };
 
@@ -27,6 +28,7 @@ type SortKey = 'created_at' | 'date' | 'display_no' | 'supplier';
 const MAX_Q = 100;
 
 const PurchaseInvoicesPage = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
@@ -158,6 +160,18 @@ const PurchaseInvoicesPage = () => {
                         <span className="text-ui-fg-muted ml-2 text-xs">
                           reversal
                         </span>
+                      ) : null}
+                      {inv.from_grn_id && inv.from_grn_display_no ? (
+                        <button
+                          type="button"
+                          className="text-ui-fg-interactive ml-2 whitespace-nowrap text-xs hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/goods-receive-notes/${inv.from_grn_id}`);
+                          }}
+                        >
+                          {t('grn.fromBadge', { no: inv.from_grn_display_no })}
+                        </button>
                       ) : null}
                     </Table.Cell>
                     <Table.Cell className="whitespace-nowrap">

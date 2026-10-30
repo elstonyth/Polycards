@@ -3,8 +3,15 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { tickLive } from '../../src/api/utils/automation-live-store';
+import { clearRecentPullsCache } from '../../src/api/store/pulls/recent/route';
 import automationLiveJob from '../../src/jobs/automation-live';
 import { mintSuperAdmin, unwrapResponse } from './utils';
+import type { IEventBusModuleService } from '@medusajs/framework/types';
+
+// Never send to Telegram from an integration run, even if local env has a token.
+jest.mock('../../src/modules/packs/telegram', () => ({
+  postApexPull: jest.fn(async () => null),
+}));
 
 // The app's own scheduled job calls tickLive every 2 s. This suite drives
 // every tick itself (often with a fake clock) and counts which call claimed a
@@ -23,6 +30,18 @@ medusaIntegrationTestRunner({
   testSuite: ({ api, getContainer }) => {
     it('settles every selected draw without a spend cap and publishes each pull to the storefront feed', async () => {
       const container = getContainer();
+      const eventBus = container.resolve<IEventBusModuleService>(Modules.EVENT_BUS);
+      const emit = eventBus.emit.bind(eventBus);
+      const announcements: string[] = [];
+      jest.spyOn(eventBus, 'emit').mockImplementation(async (events, options) => {
+        for (const event of Array.isArray(events) ? events : [events]) {
+          if (event.name !== 'pull.revealed') continue;
+          announcements.push((event.data as { pull_id: string }).pull_id);
+          // A dropped announcement must not interrupt the paid draw or sell.
+          if (announcements.length === 1) throw new Error('Test event bus outage');
+        }
+        await emit(events, options);
+      });
       const token = await mintSuperAdmin(
         container,
         api,
@@ -197,6 +216,9 @@ medusaIntegrationTestRunner({
       expect(pull.id).toBe(view.cycles[0].pullId);
       expect(pull.open_id).toBe(view.cycles[0].id);
       expect(pull.status).toBe('bought_back');
+      expect(pull.source).toBe('bonus');
+      expect(pull.revealed_at).not.toBeNull();
+      expect(announcements).toEqual([pull.id]);
       const transactions = await packs.listCreditTransactions({
         customer_id: customer.id,
       });
@@ -255,6 +277,11 @@ medusaIntegrationTestRunner({
       });
       const settledPulls = await packs.listPulls({ customer_id: customer.id });
       expect(settledPulls).toHaveLength(3);
+      // Later ticks publish only their new pulls, never backfill the missed first post.
+      expect(announcements.slice().sort()).toEqual(
+        settledPulls.map((row) => row.id).sort(),
+      );
+      expect(settledPulls.every((row) => row.revealed_at !== null)).toBe(true);
       expect(settledPulls.map((row) => row.source).sort()).toEqual([
         'bonus',
         'pack',
@@ -294,7 +321,8 @@ medusaIntegrationTestRunner({
           ),
         ).toHaveLength(1);
       }
-      await new Promise((resolve) => setTimeout(resolve, 5100));
+      // The feed serves a stale body while it rebuilds (#835); read it fresh.
+      clearRecentPullsCache();
       for (const path of [
         '/store/pulls/recent',
         '/store/pulls/recent?pack_id=live-pack',
@@ -458,16 +486,20 @@ medusaIntegrationTestRunner({
         (await packs.listPulls({ id: rankedDraw.cycles[0].pullId }))[0].status,
       ).toBe('bought_back');
       let rankClock = rankedDraw.nextRunAt;
-      expect(await tickLive(container, () => rankClock)).toBe(false);
-      const limited = (await api.get('/admin/automation/live', { headers }))
+      // Still below its rank: the goal account keeps drawing past the
+      // per-account cap (1) until the goal is done.
+      expect(await tickLive(container, () => rankClock)).toBe(true);
+      const pushing = (await api.get('/admin/automation/live', { headers }))
         .data;
-      expect(limited.status).toBe('completed');
-      expect(limited.rankGoals[0]).toMatchObject({
-        done: true,
-        status: { state: 'limited', currentRank: 2, mode: 'live' },
+      expect(pushing.status).toBe('running');
+      expect(pushing.rankGoals[0]).toMatchObject({
+        done: false,
+        status: { currentRank: 2, mode: 'live' },
       });
-      expect(limited.cycles).toHaveLength(1);
-      await new Promise((resolve) => setTimeout(resolve, 5100));
+      expect(pushing.cycles).toHaveLength(2);
+      await api.post('/admin/automation/live', { action: 'stop' }, { headers });
+      // The feed serves a stale body while it rebuilds (#835); read it fresh.
+      clearRecentPullsCache();
       const feed = (
         await api.get('/store/pulls/recent?pack_id=live-pack', {
           headers: storeHeaders,
@@ -505,6 +537,44 @@ medusaIntegrationTestRunner({
       expect(secured.rankGoals[0]).toMatchObject({
         done: true,
         status: { state: 'secured', currentRank: 2 },
+      });
+      // Repeat: a finished round starts the next one on its own, archived in
+      // history, at the pack prices of the moment.
+      await api.post(
+        '/admin/automation/live',
+        {
+          action: 'run',
+          config: { ...config, maxCyclesPerAccount: 1, repeat: true },
+        },
+        { headers },
+      );
+      expect(await tickLive(container)).toBe(true);
+      const firstRound = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(firstRound).toMatchObject({ status: 'running' });
+      expect(firstRound.cycles).toHaveLength(1);
+      await packs.updatePacks({
+        selector: { slug: 'live-pack' },
+        data: { price: 10.5 },
+      });
+      expect(await tickLive(container, () => firstRound.nextRunAt)).toBe(false);
+      const nextRound = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(nextRound).toMatchObject({
+        status: 'running',
+        cycles: [],
+        packPricesCents: { 'live-pack': 1050 },
+      });
+      expect(nextRound.runId).not.toBe(firstRound.runId);
+      expect(nextRound.history[0]).toMatchObject({
+        runId: firstRound.runId,
+        draws: 1,
+        settled: 1,
+      });
+      await api.post('/admin/automation/live', { action: 'stop' }, { headers });
+      await packs.updatePacks({
+        selector: { slug: 'live-pack' },
+        data: { price: 10 },
       });
       // Simulate a disable arriving after the next draw, at the separate sell boundary.
       const pullsBeforeDisable = (

@@ -36,6 +36,10 @@ import Pack from '../models/pack';
 import Card from '../models/card';
 import PackOdds from '../models/pack-odds';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
+// lockedPullIds reads a reward pull's task claim (daily-task lock).
+import TaskDefinition from '../models/task-definition';
+import TaskClaim from '../models/task-claim';
 import CreditTransaction from '../models/credit-transaction';
 import DeliveryOrder from '../models/delivery-order';
 import DeliveryOrderItem from '../models/delivery-order-item';
@@ -73,10 +77,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [
+    TaskDefinition,
+    TaskClaim,
     Pack,
     Card,
     PackOdds,
     Pull,
+    TicketSpin,
     CreditTransaction,
     DeliveryOrder,
     DeliveryOrderItem,

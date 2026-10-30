@@ -328,8 +328,10 @@ pack, or a card straight to the vault — the latter two land as
 `source='reward'` pulls, sellable like any pulled card the moment they land
 (completing the task IS the requirement; operator decision 2026-09-03), and
 their sale is plain cash (ADR 0012), withdrawable only under the Withdrawable
-rule (ADR 0013). Only the free welcome pack's `source='free'` pull carries the
-first-paid-open lock.
+rule (ADR 0013). The exception is a **daily** task's card or free-rip card: it
+carries the free welcome pack's first-paid-open lock (owner, 2026-10-23;
+`lockedPullIds`, computed from the claim, so cards already in vaults too).
+Those and the welcome pack's `source='free'` pull are the only locked pulls.
 
 **Check-in**:
 The explicit once-per-MYT-day button on /task (`daily_checkin`), counted by

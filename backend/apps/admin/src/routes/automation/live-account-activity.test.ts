@@ -61,14 +61,16 @@ function snapshot(overrides: Partial<LiveSnapshot> = {}): LiveSnapshot {
 }
 
 describe('Live account activity', () => {
-  it('shows goal results separately from cycle completion and excludes accounts without goals', () => {
+  it('shows goal results separately from cycle completion; accounts without goals draw ordinarily', () => {
     const state = snapshot({ cycles: [cycle], schedules: [] });
     state.config!.rankTargets = [
       { customerId: 'a', period: 'weekly', targetRank: 1 },
     ];
     refreshLiveRankGoals(state, [], now);
+    expect(getLiveAccountActivity(state, 'b', true, now).label).toBe('Pending');
+    state.cycles = [cycle, { ...cycle, id: 'cycle-b', customerId: 'b' }];
     expect(getLiveAccountActivity(state, 'b', true, now).label).toBe(
-      'No rank goal',
+      'Completed',
     );
     expect(getLiveAccountActivity(state, 'a', true, now)).toMatchObject({
       label: 'Rank data unavailable',
@@ -97,7 +99,7 @@ describe('Live account activity', () => {
     expect(getLiveAccountActivity(state, 'a', true, now).label).toBe('Blocked');
   });
 
-  it('skips accounts without a goal when describing the fixed draw queue', () => {
+  it('puts a ready goal account first in the fixed draw queue', () => {
     const state = snapshot({ schedules: [] });
     state.config!.timingMode = 'fixed';
     state.config!.rankTargets = [
@@ -120,6 +122,10 @@ describe('Live account activity', () => {
     expect(getLiveAccountActivity(state, 'b', true, now)).toMatchObject({
       label: 'Waiting',
       reason: 'Waiting for the configured draw interval.',
+    });
+    expect(getLiveAccountActivity(state, 'a', true, now)).toMatchObject({
+      label: 'Pending',
+      reason: 'Waiting for earlier accounts to finish.',
     });
   });
   it.each([

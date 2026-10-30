@@ -37,6 +37,7 @@ import Pack from '../models/pack';
 import Card from '../models/card';
 import PackOdds from '../models/pack-odds';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
 import CreditTransaction from '../models/credit-transaction';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
@@ -71,6 +72,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Card,
     PackOdds,
     Pull,
+    TicketSpin,
     CreditTransaction,
     LedgerEntry,
     LedgerSequence,

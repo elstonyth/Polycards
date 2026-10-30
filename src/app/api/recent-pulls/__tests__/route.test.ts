@@ -164,6 +164,7 @@ describe('polling JSON compatibility aliases', () => {
     const { GET: cardGet } = await import('@/app/api/cards/[handle]/route');
     const oldCard = {
       ...wire,
+      handle: 'charizard-4',
       marketPriceMyr: 1234.5,
       set: 'Base',
       grader: 'PSA',
@@ -173,12 +174,12 @@ describe('polling JSON compatibility aliases', () => {
     };
     seed({ 'GET /store/cards/:handle': { body: { card: oldCard } } });
     const response = await cardGet(
-      new Request('http://localhost/api/cards/charizard'),
-      { params: Promise.resolve({ handle: 'charizard' }) },
+      new Request('http://localhost/api/cards/charizard-4'),
+      { params: Promise.resolve({ handle: 'charizard-4' }) },
     );
     const { card } = await response.json();
     expect(card).toEqual({
-      handle: 'charizard',
+      handle: 'charizard-4',
       name: 'Charizard',
       image: '/card.png',
       slab_image: '/slab.png',
@@ -251,6 +252,24 @@ describe('polling JSON compatibility aliases', () => {
       pokemonDex: 6,
       spriteImage: '/sprite.png',
     });
+  });
+  it('pack detail: a miss answers 404 and is not memoised, so the pack shows on the next poll', async () => {
+    const { GET: packGet } = await import('@/app/api/pack-detail/[slug]/route');
+    const get = () =>
+      packGet(new Request('http://localhost/api/pack-detail/bronze-pack'), {
+        params: Promise.resolve({ slug: 'bronze-pack' }),
+      });
+    seed();
+    expect((await get()).status).toBe(404);
+
+    seed({
+      'GET /store/packs/:slug': {
+        body: { odds: [{ ...wire, marketPriceMyr: 5 }] },
+      },
+    });
+    const ok = await get();
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).detail.pool[0].value).toBe('RM 5.00');
   });
   it('recent rows retain legacy prices and labels without replacing pull ids with card handles', async () => {
     seed({

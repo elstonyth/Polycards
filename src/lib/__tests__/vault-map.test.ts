@@ -65,3 +65,23 @@ describe('mapVaultItem challenge-prize frame', () => {
     expect(mapVaultItem(withPrize()).challengePrize).toBe(false);
   });
 });
+
+describe('mapVaultItem Lucky Draw prize', () => {
+  const base = raw({ percent: 90, amount: 405, firm: true });
+
+  // A Lucky Draw win wears no frame: the backend sends no tier, and the flag
+  // puts "Lucky Draw" where the tile would name one.
+  it('carries lucky_draw_prize through, with no tier on the card', () => {
+    const item = mapVaultItem({
+      ...base,
+      lucky_draw_prize: true,
+      card: { ...base.card, rarity: '' },
+    });
+    expect(item.luckyDrawPrize).toBe(true);
+    expect(item.card.rarity).toBeFalsy();
+  });
+
+  it('defaults a missing flag to false (older backend)', () => {
+    expect(mapVaultItem(base).luckyDrawPrize).toBe(false);
+  });
+});

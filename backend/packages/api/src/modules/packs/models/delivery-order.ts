@@ -29,6 +29,10 @@ export const DeliveryOrder = model
     ship_phone: model.text().nullable(),
     // Operator-entered (manual) — no carrier integration in v1.
     tracking_number: model.text().nullable(),
+    // Last carrier check by the shipment tracker (shipment-tracking.ts
+    // TrackingSnapshot). Written only by the tracker; carries the number it
+    // checked, so a later staff edit of tracking_number makes it stale.
+    tracking_snapshot: model.json().nullable(),
     // Proof-of-delivery photos (operator-uploaded /admin/media URLs). Stored as a
     // string[] — visible to the customer on their orders page. Array (not object)
     // so an update replaces it wholesale (Medusa's assign merges POJOs but
@@ -46,8 +50,9 @@ export const DeliveryOrder = model
     // Column name predates the processed/ready_to_ship/completed rename — it
     // now stamps when status hits 'completed', not a literal "delivered" status.
     delivered_at: model.dateTime().nullable(),
-    // True when this shipment fulfils a reward-economy prize (Pull.source='reward').
-    // Used by recordRewardWithdrawal for the daily withdrawal cap COUNT.
+    // True when this shipment carries a reward-economy prize (Pull.source='reward'):
+    // on its own (recordRewardWithdrawal) or riding in a vault order since
+    // 2026-10-23. The daily prize cap counts the prize pulls, not this flag.
     is_reward: model.boolean().default(false),
   })
   .indexes([

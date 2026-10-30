@@ -76,6 +76,20 @@ describe('topup receipt template', () => {
     expect(r.html).toContain('&lt;script&gt;');
   });
 
+  it('labels the USDT networks instead of the gateway codes', () => {
+    for (const [code, label] of [
+      ['UTRC', 'USDT · TRC20'],
+      ['UERC', 'USDT · ERC20'],
+    ]) {
+      const r = renderTemplate(TOPUP_RECEIPT_TEMPLATE, {
+        ...DATA,
+        payment_method: code,
+      })!;
+      expect(r.text).toContain(`Method:     ${label}`);
+      expect(r.html).toContain(label);
+    }
+  });
+
   it('falls back to the raw code for a method it has no label for', () => {
     const r = renderTemplate(TOPUP_RECEIPT_TEMPLATE, {
       ...DATA,

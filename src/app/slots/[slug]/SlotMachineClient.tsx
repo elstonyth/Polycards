@@ -43,6 +43,10 @@ import {
   type Rarity,
   FREE_WELCOME_CATEGORY,
   ODDS,
+  TICKET_ART,
+  isTicketPack,
+  ticketCount,
+  ticketTotal,
 } from '@/lib/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
 // The spin/open seam. Every route a press can take — the paid batch Open, the
@@ -77,13 +81,15 @@ import {
   blastMs,
   type Phase,
 } from '@/lib/reveal-phase';
-import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
+import { isPokemonPack, resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
 import {
   buildDecoyPool,
   buildIdlePool,
   HREEL_IDLE_POOL_MAX,
+  NEUTRAL_CARD_SPRITE,
+  ticketReelLabel,
   type HReelCell,
 } from '@/lib/hreel';
 import { SlotStatusBar } from './SlotStatusBar';
@@ -92,6 +98,7 @@ import { OddsSheet } from './OddsSheet';
 import { VaultRoom } from './VaultRoom';
 import { Meter } from './Meter';
 import { RevealStage } from './RevealStage';
+import { TicketReveal } from './TicketReveal';
 import { SuccessToast } from '@/components/ui/SuccessToast';
 import { CARD_BACK_SRC } from './SlabCard';
 import type { SellBackOffer } from './useSellWindow';
@@ -116,21 +123,42 @@ function topRarityOf(cards: WonCard[]): Rarity {
 }
 
 /** Cosmetic reel-winner mapping for a won/demo card (decides nothing): rarity
- *  color + the column's Pokémon sprite (custom image ⇢ dex gif ⇢ Poké Ball). */
-function winnerFor(card: WonCard): ColumnWinner {
+ *  color + the column's Pokémon sprite (custom image ⇢ dex gif ⇢ Poké Ball).
+ *  In a non-Pokémon pack: custom image ⇢ neutral card-back — never a Pokémon. */
+function winnerFor(card: WonCard, pokemon: boolean): ColumnWinner {
+  if (card.tickets != null) {
+    return {
+      dex: null,
+      image: TICKET_ART,
+      label: ticketReelLabel(card.tickets),
+      name: card.name,
+      rarity: card.rarity,
+      rarityRgb: rarityRgb(card.rarity),
+    };
+  }
   // resolveCardPokemon takes the wire's snake_case; the view is camelCase.
-  const r = resolveCardPokemon({
-    name: card.name,
-    pokemon_dex: card.pokemonDex,
-    sprite_image: card.spriteImage,
-  });
+  const r = resolveCardPokemon(
+    {
+      name: card.name,
+      set: card.set,
+      pokemon_dex: card.pokemonDex,
+      sprite_image: card.spriteImage,
+    },
+    { pokemon },
+  );
   const custom =
     card.spriteImage && card.spriteImage.trim() !== ''
       ? card.spriteImage
       : null;
   return {
     dex: r.dex,
-    image: custom ?? (r.dex === null ? POKEBALL_PLACEHOLDER : undefined),
+    image:
+      custom ??
+      (r.dex !== null
+        ? undefined
+        : pokemon
+          ? POKEBALL_PLACEHOLDER
+          : NEUTRAL_CARD_SPRITE),
     name: r.name ?? card.name,
     rarity: card.rarity as ColumnWinner['rarity'],
     rarityRgb: rarityRgb(card.rarity),
@@ -194,7 +222,8 @@ export default function SlotMachineClient({
   // A task's free rip. Like the welcome pack it is exactly ONE open at no cost,
   // but it spends an entitlement rather than a one-time eligibility, and the
   // card it yields is a reward pull — sellable on the spot like any pulled
-  // card (completing the task is the requirement; no welcome-pack lock).
+  // card, except a DAILY task's rip before the first paid open, which carries
+  // the welcome-pack lock (the backend's `locked` says which).
   const isFreeRip = freeRipClaimId !== null && freeRipClaimId !== '';
 
   // Which of the four routes a press takes — decided ONCE, here, by the seam
@@ -288,11 +317,16 @@ export default function SlotMachineClient({
   // has stays in the flicker (an all-Pikachu/Charizard pack across six tiers
   // flickers all six colors, not just the first card per species).
   // Empty → ReelStrip falls back to its curated set.
-  // ponytail: decoys render the dex sprite (spriteGif); for seeded entries that
-  // IS the linked sprite. A custom-uploaded (dex-less) sprite would only flicker
-  // via name-derive — threading the custom sprite_image into decoy cells is the
-  // upgrade path if that ever matters.
-  const basePool = useMemo<HReelCell[]>(() => buildDecoyPool(pool), [pool]);
+  // Pokémon cells render their dex sprite (spriteGif; for seeded entries that IS
+  // the linked sprite); a dex-less custom sprite (One Piece) rides on the cell as
+  // `image`, so a One Piece pack flickers its own characters, not the fallback.
+  const ticketPack = isTicketPack(pack);
+  // A ticket pack filed under Pokémon must still never fall back to Pokémon.
+  const pokemonPack = isPokemonPack(pack.categoryId) && !ticketPack;
+  const basePool = useMemo<HReelCell[]>(
+    () => buildDecoyPool(pool, { pokemon: pokemonPack }),
+    [pool, pokemonPack],
+  );
   // Per-reel pools are sliced to HREEL_IDLE_POOL_MAX: the idle drift tiles one
   // full pool period + the visible window onto the strip, so a pool past the
   // cap can't wrap and ReelStrip rests the reel sharp — the "rails frozen" bug
@@ -660,7 +694,12 @@ export default function SlotMachineClient({
     // switched tabs away and back or reloaded. Same identity guard as the
     // balance above — never light the rolled account's dot for whoever is
     // signed in now.
-    if (batch.forId !== null && batch.forId === customerIdRef.current) {
+    // A ticket roll puts nothing in the vault.
+    if (
+      batch.forId !== null &&
+      batch.forId === customerIdRef.current &&
+      ticketTotal(batch.cards) === 0
+    ) {
       refreshVaultDot();
     }
 
@@ -672,7 +711,8 @@ export default function SlotMachineClient({
     const winners: ColumnWinner[] = [];
     let mappingFailed = false;
     try {
-      for (const card of batch.cards) winners.push(winnerFor(card));
+      for (const card of batch.cards)
+        winners.push(winnerFor(card, pokemonPack));
     } catch (err) {
       logger.error('[slots] post-charge mapping failed', err);
       mappingFailed = true;
@@ -735,8 +775,10 @@ export default function SlotMachineClient({
     // Prepend one RecentPull per card won in this batch — real wins only; a
     // demo draw is theater and must never appear in the live pull ticker. Read
     // off the ROLL, not the machine: a login mid-flight flips the live isDemo
-    // and would push theater cards into the live ticker.
-    if (held.mode !== 'demo') {
+    // and would push theater cards into the live ticker. A ticket is no pull, so
+    // it stays out too.
+    const tickets = ticketTotal(held.cards);
+    if (held.mode !== 'demo' && tickets === 0) {
       // handleSettled never runs during render: its callers are the reel's rAF
       // settle (onAllSettled), the watchdog timeout and handleRoll's catch. The
       // compiler can't see that through the onAllSettled prop.
@@ -772,7 +814,9 @@ export default function SlotMachineClient({
     }
     const bigPrefix = held.mode === 'demo' ? 'Demo — ' : big ? 'Big win! ' : '';
     const first = held.cards[0];
-    if (held.cards.length === 1 && first) {
+    if (tickets > 0) {
+      setAnnounce(`${bigPrefix}Won ${ticketCount(tickets)}`);
+    } else if (held.cards.length === 1 && first) {
       const firstValue = first.priceMyr != null ? rm(first.priceMyr) : '—';
       setAnnounce(`${bigPrefix}Won ${first.name}, ${firstValue}`);
     } else {
@@ -1152,32 +1196,48 @@ export default function SlotMachineClient({
               // scrolls only as a last resort (RevealStage m-auto keeps the top
               // edge reachable then).
               <div className="absolute inset-0 flex overflow-y-auto overflow-x-hidden px-fluid py-2 [container-type:size]">
-                <RevealStage
-                  phase={phase}
-                  cards={spin.cards}
-                  offers={offers}
-                  // Each ReelStrip reports its winner rect BEFORE it calls
-                  // onAllSettled, and this overlay only mounts after that
-                  // settle's phase change, so the array is complete here.
-                  // eslint-disable-next-line react-hooks/refs -- filled before the settle re-render reads it
-                  winnerRects={winnerRects.current}
-                  spriteSrcs={spriteSrcs}
-                  reduced={reduced}
-                  demo={demoReveal}
-                  locked={lockedReveal}
-                  onSignUp={demoReveal ? () => openAuth('signup') : undefined}
-                  onSkip={skipToCards}
-                  onConclude={handleConclude}
-                  onCloseInstant={closeInstantWindow}
-                  onSellBack={sellBackPull}
-                  onReveal={revealPull}
-                  onSold={handleSold}
-                  onSellFailed={handleSellFailed}
-                  sfx={sfx}
-                  vibrate={vibrate}
-                  playReveal={playReveal}
-                  play={play}
-                />
+                {/* The ROLL decides, never the pack: this shows the batch that
+                    was won, however the catalog reads now. */}
+                {ticketTotal(spin.cards) > 0 ? (
+                  <TicketReveal
+                    phase={phase}
+                    cards={spin.cards}
+                    reduced={reduced}
+                    demo={demoReveal}
+                    onSignUp={demoReveal ? () => openAuth('signup') : undefined}
+                    onSkip={skipToCards}
+                    onConclude={handleConclude}
+                    vibrate={vibrate}
+                    playReveal={playReveal}
+                  />
+                ) : (
+                  <RevealStage
+                    phase={phase}
+                    cards={spin.cards}
+                    offers={offers}
+                    // Each ReelStrip reports its winner rect BEFORE it calls
+                    // onAllSettled, and this overlay only mounts after that
+                    // settle's phase change, so the array is complete here.
+                    // eslint-disable-next-line react-hooks/refs -- filled before the settle re-render reads it
+                    winnerRects={winnerRects.current}
+                    spriteSrcs={spriteSrcs}
+                    reduced={reduced}
+                    demo={demoReveal}
+                    locked={lockedReveal}
+                    onSignUp={demoReveal ? () => openAuth('signup') : undefined}
+                    onSkip={skipToCards}
+                    onConclude={handleConclude}
+                    onCloseInstant={closeInstantWindow}
+                    onSellBack={sellBackPull}
+                    onReveal={revealPull}
+                    onSold={handleSold}
+                    onSellFailed={handleSellFailed}
+                    sfx={sfx}
+                    vibrate={vibrate}
+                    playReveal={playReveal}
+                    play={play}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -1196,7 +1256,10 @@ export default function SlotMachineClient({
           <SlotControls
             costLine={
               isDemo ? (
-                <span>Free demo — no credits charged, no real cards won</span>
+                <span>
+                  Free demo — no credits charged, no real{' '}
+                  {ticketPack ? 'tickets' : 'cards'} won
+                </span>
               ) : isFreeRip ? (
                 <span>Your free rip from Tasks — nothing charged</span>
               ) : isFreePack ? (

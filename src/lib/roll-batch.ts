@@ -203,9 +203,9 @@ interface NormalizedRoll {
 /**
  * The sell-back offer for one roll — the ONLY place one is built.
  *
- * A null `pullId` (demo card, regressed response) is the only thing that
- * yields no offer. Everything else gets one, falling back to the flat catalog
- * rate when an older backend quoted nothing.
+ * A null `pullId` (demo card, ticket roll, regressed response) is the only thing
+ * that yields no offer. Everything else gets one, falling back to the flat
+ * catalog rate when an older backend quoted nothing.
  */
 function buildOffer(
   roll: NormalizedRoll,
@@ -281,19 +281,11 @@ function demoSpin(req: RollRequest, deps: RollDeps): RollResult {
     // Unreachable past `rollBlocker` — an empty pool is demoDraw's only miss.
     if (!drawn) return { ok: false, kind: 'rejected', error: EMPTY_DEMO_POOL };
     // A pool card IS the reveal's card shape; its pool price is what the demo
-    // slab stamps, and no offer is ever built for it (pullId null).
-    //
-    // The two sprite fields are dropped ON PURPOSE: `winnerFor`
-    // (SlotMachineClient) then derives the demo winner's reel cell from the
-    // card NAME instead of its configured pixel-Pokémon. The decoys around it
-    // keep theirs (`buildDecoyPool`, hreel.ts), so winner and decoys can
-    // disagree for the same card — long-standing demo behaviour, and making
-    // them agree is a product decision for a follow-up, not a refactor.
-    rolls.push({
-      card: { ...drawn, pokemonDex: null, spriteImage: null },
-      pullId: null,
-      buyback: null,
-    });
+    // slab stamps, and no offer is ever built for it (pullId null). It keeps
+    // its configured sprite, like the decoys around it: a demo winner shows
+    // exactly the sprite a real pull of that card would (owner's call,
+    // 2026-10-25 — before, a One Piece demo winner landed on a card-back).
+    rolls.push({ card: drawn, pullId: null, buyback: null });
   }
   return { ok: true, batch: batchOf(req, rolls, spinAt, null, false) };
 }
@@ -334,9 +326,10 @@ async function openRolls(
       // A task reward sells like any pulled card (completing the task IS the
       // requirement), so the backend quotes it and reports `locked: false` —
       // the same `locked` + `buyback` pair a paid open carries, passed through
-      // rather than hardcoded here. `locked: true` is what would make the
-      // reveal show "Keep in vault"; buildOffer's flat-rate fallback still
-      // yields a real offer when the backend quotes none.
+      // rather than hardcoded here. `locked: true` (a DAILY task's rip before
+      // the first paid open) makes the reveal show "Keep in vault";
+      // buildOffer's flat-rate fallback still yields a real offer when the
+      // backend quotes none.
       return {
         ok: true,
         batch: batchOf(

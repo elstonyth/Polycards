@@ -28,15 +28,18 @@ import {
 } from '@medusajs/icons';
 import CreatePlayerModal from './CreatePlayerModal';
 import { PeriodLeaders } from './PeriodLeaders';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useCustomerGroupsAdmin,
   useExportPartnerAccounts,
   usePlayers,
   useSetPlayerDisabled,
 } from '../../lib/queries';
-import type { PlayerRow } from '../../lib/admin-rest';
+import type { PlayerRow, ProfitRange } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
+import { RangePicker } from '../overview/RangePicker';
+import { dayRangeText, todayMyt } from '../overview/helpers';
 import {
   DEFAULT_PLAYER_GROUP_NAME,
   isDefaultPlayerGroup,
@@ -50,26 +53,48 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   icon: Users,
   rank: 30,
+  permissions: ['player:read' as Permission],
 };
+
+// The dashboard (/overview) sends a role without its figures here; a role
+// without the Players page either (the automation operator) goes on to the
+// one page it has.
+export const handle = { permissions: 'player:read', redirectTo: '/automation' };
 
 // The player the confirm modal is about. `disabled` here is the player's
 // CURRENT state; useSetPlayerDisabled takes the TARGET state, so the mutation
 // is handed the negation. The two conventions sit one line apart — don't merge.
 type Target = { id: string; email: string; disabled: boolean };
 
-// EXACTLY the backend's SORTABLE allow-list (api/admin/players/route.ts): the
-// real `customer` columns plus the ledger money totals, which the server
-// orders over every player. Vault, VIP level, group and status are not
-// sortable; those headers stay plain.
+// EXACTLY the backend's SORTABLE allow-list (api/admin/players/route.ts):
+// every column sorts, ordered by the server over every player (2026-10-23).
 type SortKey =
   | 'created_at'
   | 'email'
   | 'name'
+  | 'phone'
+  | 'group'
+  | 'level'
   | 'wallet'
+  | 'vault'
   | 'topup'
   | 'withdrawn'
   | 'contribution'
-  | 'spend';
+  | 'spend'
+  | 'status';
+
+// All time first: it is the default, and what the totals meant before the
+// period picker existed.
+const PERIODS: readonly ProfitRange[] = [
+  'all',
+  'today',
+  'yesterday',
+  '7d',
+  '30d',
+  'month',
+  'last_month',
+  'custom',
+];
 
 // The sort with no column of its own (email) lives in this menu with the
 // common ones; the headers sort too. Each is `key:dir`.
@@ -110,12 +135,26 @@ const joined = (iso: string): string => {
 // else (real name, pulls) is on the player's own page, one click away.
 const PlayersPage = () => {
   const { t } = useTranslation();
+  // A view-only role (Support viewer) reads players but changes nothing, and
+  // has no dashboard figures: hide the leaders board (GET /admin/stats) and
+  // the Generate button (POST /admin/players) rather than show it a 403. The
+  // logins export carries partner passwords, so it asks its own policy.
+  const perms = usePermissions();
+  const canSeeStats = perms.hasPermission('stats:read' as Permission);
+  const canCreate = perms.hasPermission('player:update' as Permission);
+  const canExport = perms.hasPermission(
+    'partner_credential:read' as Permission,
+  );
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
   // '' = every group; 'default' = outside every non-default group; else an id.
   const [group, setGroup] = useState('');
+  // The period the turnover and money in/out columns (and their sorts) cover.
+  const [range, setRange] = useState<ProfitRange>('all');
+  const [from, setFrom] = useState(todayMyt);
+  const [to, setTo] = useState(todayMyt);
   const [target, setTarget] = useState<Target | null>(null);
   const [reason, setReason] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
@@ -150,6 +189,11 @@ const PlayersPage = () => {
     q || undefined,
     sort ? `${sort.key}:${sort.dir}` : 'created_at:desc',
     group || undefined,
+    range === 'all'
+      ? undefined
+      : range === 'custom'
+        ? { range, from, to }
+        : { range },
   );
   const setDisabled = useSetPlayerDisabled();
 
@@ -194,13 +238,17 @@ const PlayersPage = () => {
 
   return (
     <div className="flex flex-col gap-y-3">
-      <PeriodLeaders />
+      {canSeeStats && <PeriodLeaders />}
       <Container className="p-0">
         <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
           <div>
             <Heading level="h2">{t('players.title')}</Heading>
-            <Text className="text-ui-fg-subtle mt-1" size="small">
-              {t('players.subtitle')}
+            <Text className="text-ui-fg-subtle mt-1 max-w-xl" size="small">
+              {data?.window
+                ? t('players.periodNote', {
+                    window: dayRangeText(data.window),
+                  })
+                : t('players.subtitle')}
             </Text>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -257,33 +305,57 @@ const PlayersPage = () => {
                 setPage(0);
               }}
             />
-            <Button
-              size="base"
-              variant="secondary"
-              onClick={() => setCreateOpen(true)}
-            >
-              {t('players.generate')}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenu.Trigger asChild>
-                <IconButton aria-label={t('players.more')}>
-                  <EllipsisHorizontal />
-                </IconButton>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content align="end">
-                {/* The .xlsx of every generated partner login — the same rows
-                    the generator shows once, so a closed modal loses nothing. */}
-                <DropdownMenu.Item
-                  className="gap-x-2"
-                  disabled={exporter.isPending}
-                  onClick={exportLogins}
-                >
-                  <ArrowDownTray className="text-ui-fg-subtle" />
-                  {t('players.exportShort')}
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu>
+            {canCreate && (
+              <Button
+                size="base"
+                variant="secondary"
+                onClick={() => setCreateOpen(true)}
+              >
+                {t('players.generate')}
+              </Button>
+            )}
+            {canExport && (
+              <DropdownMenu>
+                <DropdownMenu.Trigger asChild>
+                  <IconButton aria-label={t('players.more')}>
+                    <EllipsisHorizontal />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end">
+                  {/* The .xlsx of every generated partner login — the same rows
+                      the generator shows once, so a closed modal loses nothing. */}
+                  <DropdownMenu.Item
+                    className="gap-x-2"
+                    disabled={exporter.isPending}
+                    onClick={exportLogins}
+                  >
+                    <ArrowDownTray className="text-ui-fg-subtle" />
+                    {t('players.exportShort')}
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu>
+            )}
           </div>
+        </div>
+        <div className="px-6 pb-4">
+          <RangePicker
+            range={range}
+            onRange={(r) => {
+              setRange(r);
+              setPage(0);
+            }}
+            ranges={PERIODS}
+            from={from}
+            to={to}
+            onFrom={(v) => {
+              setFrom(v);
+              setPage(0);
+            }}
+            onTo={(v) => {
+              setTo(v);
+              setPage(0);
+            }}
+          />
         </div>
 
         {isError ? (
@@ -315,13 +387,11 @@ const PlayersPage = () => {
               <Table.Header>
                 <Table.Row>
                   {sortHeader('name', t('players.player'))}
-                  <Table.HeaderCell>{t('players.phone')}</Table.HeaderCell>
-                  <Table.HeaderCell>{t('players.group')}</Table.HeaderCell>
-                  <Table.HeaderCell>{t('players.level')}</Table.HeaderCell>
+                  {sortHeader('phone', t('players.phone'))}
+                  {sortHeader('group', t('players.group'))}
+                  {sortHeader('level', t('players.level'))}
                   {sortHeader('wallet', t('players.wallet'), true)}
-                  <Table.HeaderCell className="text-right">
-                    {t('players.vault')}
-                  </Table.HeaderCell>
+                  {sortHeader('vault', t('players.vault'), true)}
                   {sortHeader('topup', t('players.topup'), true)}
                   {sortHeader('withdrawn', t('players.withdrawn'), true)}
                   {sortHeader(
@@ -332,7 +402,7 @@ const PlayersPage = () => {
                   )}
                   {sortHeader('spend', t('players.spend'), true)}
                   {sortHeader('created_at', t('players.joined'))}
-                  <Table.HeaderCell>{t('players.status')}</Table.HeaderCell>
+                  {sortHeader('status', t('players.status'))}
                 </Table.Row>
               </Table.Header>
               <Table.Body>

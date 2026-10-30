@@ -1,6 +1,24 @@
 // Small formatting helpers shared across the mock app pages.
 
-// One USD/number formatter. prefix+toLocaleString for the "$"/"US$" family;
+// `n.toLocaleString(locale, options)` builds a fresh Intl.NumberFormat on EVERY
+// call: ~17µs against ~0.4µs for reusing one (Node 24). Every price on every
+// SSR render and poll goes through money(), and on 2026-10-25 that was the
+// storefront's hot path (pods blocked long enough to fail /healthz → 503s).
+// Same locale + options give byte-identical output, so reuse one per shape.
+const formatters = new Map<string, Intl.NumberFormat>();
+const numberFormat = (
+  key: string,
+  options: Intl.NumberFormatOptions,
+): Intl.NumberFormat => {
+  let f = formatters.get(key);
+  if (!f) {
+    f = new Intl.NumberFormat('en-US', options);
+    formatters.set(key, f);
+  }
+  return f;
+};
+
+// One USD/number formatter. prefix+formatted number for the "$"/"US$" family;
 // currency:true uses Intl currency style (kept for `usd`'s exact output).
 export function money(
   amount: number,
@@ -8,19 +26,19 @@ export function money(
 ): string {
   const { decimals = 2, prefix = '$', currency = false } = opts;
   if (currency) {
-    return amount.toLocaleString('en-US', {
+    return numberFormat(`usd:${decimals}`, {
       style: 'currency',
       currency: 'USD',
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
-    });
+    }).format(amount);
   }
   return (
     prefix +
-    amount.toLocaleString('en-US', {
+    numberFormat(`fixed:${decimals}`, {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
-    })
+    }).format(amount)
   );
 }
 
@@ -38,6 +56,9 @@ export const rmNbsp = (n: number) =>
 /** Singapore dollars — what an A3Pay customer pays or receives. */
 export const sgd = (n: number) => money(n, { prefix: 'S$' });
 export const sgd0 = (n: number) => money(n, { prefix: 'S$', decimals: 0 });
+/** Tether — what a GlobePay365 customer pays or receives. */
+export const usdt = (n: number) => money(n, { prefix: 'USDT ' });
+export const usdt0 = (n: number) => money(n, { prefix: 'USDT ', decimals: 0 });
 
 // Affordability compared in integer sen, never raw floats: a fractional pack
 // price times a reel/qty count (e.g. 1.1 * 3 === 3.3000000000000003) can read
@@ -62,9 +83,12 @@ export function voucherLabel(grant: {
 }
 
 export const compact = (n: number) =>
-  n.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+  numberFormat('compact', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n);
 
-export const num = (n: number) => n.toLocaleString('en-US');
+export const num = (n: number) => numberFormat('num', {}).format(n);
 
 // Coarse relative time for the activity / recent-pulls feeds ("3h ago",
 // "2d ago"). Future and unparsable dates read as "just now"; `now` is injectable
@@ -119,13 +143,26 @@ export function pullTime(iso: string): string {
 }
 
 // Calendar date in Malaysian time ("19 Oct 2026") — the referral friend
-// list's joined dates. Fixed UTC+8 and hand-rolled for the same server/client
-// parity as pullTime. Unparsable → "".
+// list's joined dates, /transactions and /orders. Fixed UTC+8 and hand-rolled
+// for the same server/client parity as pullTime. Unparsable → "".
 export function mytDate(iso: string): string {
   const ms = new Date(iso).getTime();
   if (!Number.isFinite(ms)) return '';
   const d = new Date(ms + MYT_OFFSET_MS);
   return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+// Wall-clock time in Malaysian time ("10:27 PM") for the /transactions rows.
+// That page renders on the UTC server, so a plain Intl formatter printed a
+// 10:27 PM withdrawal as "2:27 PM" and customers read an 8-hour wait into it.
+// Unparsable → "".
+export function mytClock(iso: string): string {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms + MYT_OFFSET_MS);
+  const h24 = d.getUTCHours();
+  const minute = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${h24 % 12 || 12}:${minute} ${h24 < 12 ? 'AM' : 'PM'}`;
 }
 
 // The mirror of relativeTime for a FUTURE instant ("in 45m", "in 23h", "in 2d")

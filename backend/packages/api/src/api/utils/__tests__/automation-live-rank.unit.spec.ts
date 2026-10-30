@@ -5,12 +5,14 @@ import {
   validateLiveConfig,
 } from '../automation-live';
 import {
+  LIVE_GOAL_MAX_CYCLES,
   liveRankTargetsToObserve,
   refreshLiveRankGoals,
 } from '../automation-live-rank';
+import { createHumanizedState, planHumanized } from '../automation-humanized';
 import { validateRankTargets } from '../automation-rank';
 import type { RankObservation } from '../automation-rank';
-import type { LiveConfig } from '../automation-live-types';
+import type { LiveConfig, LiveCycle } from '../automation-live-types';
 
 const NOW = Date.parse('2026-10-18T12:00:00Z');
 const config: LiveConfig = {
@@ -20,12 +22,21 @@ const config: LiveConfig = {
   maxCyclesPerAccount: 1,
   rankTargets: [{ customerId: 'cus_a', period: 'weekly', targetRank: 1 }],
 };
-const running = () =>
+// Only the goal account in the run: the goal's own mechanics, with no
+// ordinary draws from other accounts in between.
+const goalOnly: LiveConfig = { ...config, customerIds: ['cus_a'] };
+const running = (runConfig: LiveConfig = goalOnly) =>
   Object.assign(createLiveState(), {
     status: 'running' as const,
-    config,
+    config: runConfig,
     packPriceCents: 4500,
   });
+const settle = (cycle: LiveCycle) => ({
+  ...cycle,
+  costCents: 4500,
+  differenceCents: 0,
+  bonusDifferenceCents: 0,
+});
 const observation = (now = NOW, held = false): RankObservation => ({
   periodKey: 'week-1',
   observedAt: now,
@@ -48,7 +59,7 @@ it('accepts only distinct selected live customers and achievable Top N allocatio
   ).toEqual(alltime);
   const [goal] = alltime;
   for (const rankTargets of [
-    // Automation accounts never rank on the weekly prize board.
+    // Live goals stay on the all-time board only.
     config.rankTargets,
     [{ ...goal, customerId: 'cus_other' }],
     [goal, goal],
@@ -62,7 +73,7 @@ it('accepts only distinct selected live customers and achievable Top N allocatio
   expect(() => validateRankTargets([{ mode: 'live' }])).toThrow();
 });
 
-it('never draws without fresh matching observations and only draws target accounts', () => {
+it('never draws the goal account without fresh matching observations', () => {
   const state = running();
   expect(claimLiveCycle(state, NOW)).toBeNull();
   for (const value of [
@@ -100,23 +111,34 @@ it('confirms final settled draw twice before marking goal reached, surviving res
   expect(state.cycles).toHaveLength(1);
 });
 
-it('reports cycle limit without claiming the rank was reached', () => {
+it('keeps a goal account drawing past the per-account cap, up to its own ceiling', () => {
   const state = running();
   refreshLiveRankGoals(state, [observation()], NOW);
   const cycle = claimLiveCycle(state, NOW)!;
-  completeLiveCycle(
-    state,
-    { ...cycle, costCents: 4500, differenceCents: 0, bonusDifferenceCents: 0 },
-    NOW + 1,
-  );
+  completeLiveCycle(state, settle(cycle), NOW + 1);
   refreshLiveRankGoals(
     state,
-    [{ ...observation(NOW + 3000), ownPulls: 2, ownValueMyr: 20 }],
-    NOW + 3000,
+    [{ ...observation(NOW + 6000), ownPulls: 2, ownValueMyr: 20 }],
+    NOW + 6000,
   );
-  claimLiveCycle(state, NOW + 3000);
-  expect(state.rankGoals![0].status.state).toBe('limited');
-  expect(state.status).toBe('completed');
+  expect(claimLiveCycle(state, NOW + 6000)?.customerId).toBe('cus_a');
+  // At its ceiling the goal stops without claiming the rank was reached.
+  const capped = running();
+  capped.cycles = Array.from({ length: LIVE_GOAL_MAX_CYCLES }, (_, index) => ({
+    id: `c${index}`,
+    customerId: 'cus_a',
+    startedAt: NOW,
+    finishedAt: NOW,
+    error: null,
+  }));
+  refreshLiveRankGoals(
+    capped,
+    [{ ...observation(), ownPulls: LIVE_GOAL_MAX_CYCLES }],
+    NOW,
+  );
+  claimLiveCycle(capped, NOW);
+  expect(capped.rankGoals![0].status.state).toBe('limited');
+  expect(capped.status).toBe('completed');
 });
 
 it('stops on weekly rollover and unconfirmed own-pull updates without another draw', () => {
@@ -152,8 +174,8 @@ it('stops on weekly rollover and unconfirmed own-pull updates without another dr
   }
 });
 
-it('does not let an owned-boundary wait block an eligible account', () => {
-  const state = running();
+it('pushes a goal account past an owned account at its target boundary', () => {
+  const state = running(config);
   state.config = {
     ...config,
     rankTargets: [
@@ -175,14 +197,14 @@ it('does not let an owned-boundary wait block an eligible account', () => {
     ],
     NOW,
   );
-  expect(state.rankGoals![0].status.state).toBe('conflict');
-  expect(claimLiveCycle(state, NOW)?.customerId).toBe('cus_b');
+  expect(state.rankGoals![0].status.state).toBe('pushing');
+  expect(claimLiveCycle(state, NOW)?.customerId).toBe('cus_a');
 });
 
 it('respects real-clock Humanized sleep even when a rank draw is eligible', () => {
   const state = running();
   state.config = {
-    ...config,
+    ...goalOnly,
     timingMode: 'humanized',
     humanizedRegion: 'mysg',
   };
@@ -195,7 +217,7 @@ it('respects real-clock Humanized sleep even when a rank draw is eligible', () =
 
 it('does not shorten the configured draw interval for a post-draw rank check', () => {
   const state = running();
-  state.config = { ...config, intervalSeconds: 60, maxCyclesPerAccount: 2 };
+  state.config = { ...goalOnly, intervalSeconds: 60, maxCyclesPerAccount: 2 };
   refreshLiveRankGoals(state, [observation()], NOW);
   const cycle = claimLiveCycle(state, NOW)!;
   completeLiveCycle(
@@ -220,13 +242,13 @@ it('does not shorten the configured draw interval for a post-draw rank check', (
 
 it('refreshes dispatch-ready evidence across a weekly reset before the periodic check is due', () => {
   const state = running();
-  state.config = { ...config, maxCyclesPerAccount: 2 };
+  state.config = { ...goalOnly, maxCyclesPerAccount: 2 };
   refreshLiveRankGoals(state, [observation()], NOW);
   state.nextDrawAt = NOW + 3000;
   expect(state.rankGoals![0].nextCheckAt).toBe(NOW + 15000);
   expect(liveRankTargetsToObserve(state, NOW + 2000)).toEqual([]);
   expect(liveRankTargetsToObserve(state, NOW + 3000)).toEqual(
-    config.rankTargets,
+    goalOnly.rankTargets,
   );
   refreshLiveRankGoals(
     state,
@@ -246,4 +268,103 @@ it('rejects an observation that expires between its database read and cycle clai
   );
   expect(claimLiveCycle(state, NOW + 1000)).toBeNull();
   expect(state.pending).toBeNull();
+});
+
+describe('accounts without a goal in a goal run', () => {
+  // cus_a has the goal; cus_b (listed first) and cus_c draw ordinarily.
+  const mixed: LiveConfig = {
+    ...config,
+    customerIds: ['cus_b', 'cus_a', 'cus_c'],
+    timingMode: 'fixed',
+  };
+
+  it('keep drawing while the goal account has no fresh rank data', () => {
+    const state = running(mixed);
+    expect(claimLiveCycle(state, NOW)?.customerId).toBe('cus_b');
+  });
+
+  it('draw after an eligible goal account, even when listed before it', () => {
+    const state = running(mixed);
+    refreshLiveRankGoals(state, [observation()], NOW);
+    expect(claimLiveCycle(state, NOW)?.customerId).toBe('cus_a');
+  });
+
+  it('share the run’s draw interval with the goal account', () => {
+    const state = running(mixed);
+    const first = claimLiveCycle(state, NOW)!;
+    completeLiveCycle(state, settle(first), NOW + 1000);
+    // Fixed 5 s interval from the settled draw.
+    expect(claimLiveCycle(state, NOW + 3000)).toBeNull();
+    expect(claimLiveCycle(state, NOW + 6000)?.customerId).toBe('cus_c');
+  });
+
+  it('keep the run going until they finish and every goal is done, then complete', () => {
+    const state = running({ ...mixed, customerIds: ['cus_a', 'cus_b'] });
+    refreshLiveRankGoals(state, [observation()], NOW);
+    const goalDraw = claimLiveCycle(state, NOW)!;
+    expect(goalDraw.customerId).toBe('cus_a');
+    completeLiveCycle(state, settle(goalDraw), NOW + 1);
+    // Two fresh checks confirm the goal; cus_b has not drawn yet.
+    refreshLiveRankGoals(state, [observation(NOW + 3000, true)], NOW + 3000);
+    refreshLiveRankGoals(state, [observation(NOW + 5000, true)], NOW + 5000);
+    expect(state.rankGoals![0].status.state).toBe('secured');
+    const other = claimLiveCycle(state, NOW + 6000)!;
+    expect(other.customerId).toBe('cus_b');
+    expect(state.status).toBe('running');
+    completeLiveCycle(state, settle(other), NOW + 6001);
+    expect(claimLiveCycle(state, NOW + 12000)).toBeNull();
+    expect(state.status).toBe('completed');
+  });
+
+  it('end only the skipped account and keep the others drawing', () => {
+    const state = running(mixed);
+    const first = claimLiveCycle(state, NOW)!;
+    completeLiveCycle(
+      state,
+      { ...first, skipped: 'Balance is below the cheapest pack.' },
+      NOW + 1,
+    );
+    expect(state.status).toBe('running');
+    expect(claimLiveCycle(state, NOW + 6000)?.customerId).toBe('cus_c');
+  });
+
+  it('wait behind a ready Humanized goal account that waited less', () => {
+    const ready = (id: string) => {
+      const humanized = createHumanizedState(id, 'mysg');
+      let now = Date.parse('2026-10-18T04:00:00Z');
+      for (let index = 0; index < 100; index++) {
+        const plan = planHumanized(humanized, now, () => 0.5);
+        if (plan.ready) break;
+        now += plan.delayMs;
+      }
+      return { humanized, now };
+    };
+    const goal = ready('cus_a');
+    const other = ready('cus_b');
+    const now = Math.max(goal.now, other.now) + 60_000;
+    goal.humanized.nextDrawAt = now - 1000;
+    other.humanized.nextDrawAt = now - 50_000;
+    const state = running({
+      ...config,
+      customerIds: ['cus_b', 'cus_a'],
+      timingMode: 'humanized',
+      humanizedRegion: 'mysg',
+    });
+    state.schedules = [
+      {
+        customerId: 'cus_b',
+        humanized: other.humanized,
+        nextRunAt: now - 50_000,
+        waitReason: 'Within active session',
+      },
+      {
+        customerId: 'cus_a',
+        humanized: goal.humanized,
+        nextRunAt: now - 1000,
+        waitReason: 'Within active session',
+      },
+    ];
+    refreshLiveRankGoals(state, [observation(now)], now);
+    expect(claimLiveCycle(state, now, () => 0.5)?.customerId).toBe('cus_a');
+  });
 });

@@ -53,11 +53,13 @@ export function losslessStatus(
 
 export function packEligible(
   w: LosslessWindow,
-  pack: { slug: string; category: string },
+  pack: { slug: string; category: string; prize_type?: string | null },
 ): boolean {
   if (
     pack.category === FREE_WELCOME_CATEGORY ||
-    pack.category === REWARD_BOX_CATEGORY
+    pack.category === REWARD_BOX_CATEGORY ||
+    // A spin is never sold back, so there is no buyback to lift.
+    pack.prize_type === 'tickets'
   ) {
     return false;
   }
@@ -67,7 +69,10 @@ export function packEligible(
 /** True when `pack` sells at the lossless instant rate at `atMs`. */
 export function isLossless(
   windows: LosslessWindow[],
-  pack: { slug: string; category: string } | null | undefined,
+  pack:
+    | { slug: string; category: string; prize_type?: string | null }
+    | null
+    | undefined,
   atMs: number,
   source?: string | null,
 ): boolean {

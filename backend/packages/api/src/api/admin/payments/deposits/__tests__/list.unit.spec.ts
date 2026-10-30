@@ -1,5 +1,8 @@
 import { GET, parseStatusFilter } from '../route';
-import { GATEWAY_STALE_AFTER_MS } from '../../../../../modules/packs/gateway-reconcile';
+import {
+  GATEWAY_FULL_SWEEP_EVERY_MIN,
+  GATEWAY_STALE_AFTER_MS,
+} from '../../../../../modules/packs/gateway-reconcile';
 import type {
   FakeFacet,
   GatewayReports,
@@ -158,6 +161,36 @@ describe('GET /admin/payments/deposits', () => {
     expect(out.body.deposits[1].stale).toBe(false);
   });
 
+  // `stuck` = what the dashboard alarms on: pending two full sweeps past the
+  // stale window WITH a gateway id. An abandoned cashier is expired by then;
+  // a row with no gateway id never reached a cashier, so it cannot be paid.
+  it('flags stuck only past two sweeps beyond the window, with a gateway id', async () => {
+    const sweep = GATEWAY_FULL_SWEEP_EVERY_MIN * 60 * 1000;
+    const ago = (ms: number) => new Date(Date.now() - GATEWAY_STALE_AFTER_MS - ms);
+    const { res, out } = mkRes();
+    const { scope } = mkScope([
+      deposit(1, { created_at: ago(sweep) }),
+      deposit(2, { created_at: ago(3 * sweep) }),
+      deposit(3, { created_at: ago(3 * sweep), gateway_transaction_id: null }),
+      deposit(4, {
+        status: 'settled',
+        amount_settled: '30.00',
+        created_at: ago(30 * sweep),
+      }),
+    ]);
+    await GET({ scope, query: { status: 'all' } } as any, res);
+
+    expect(out.body.deposits.map((d: any) => d.stuck)).toEqual([
+      false,
+      true,
+      false,
+      false,
+    ]);
+    // The broader `stale` still fires on the first one — that is the
+    // abandoned-cashier window the dashboard no longer alarms on.
+    expect(out.body.deposits[0].stale).toBe(true);
+  });
+
   it('never flags a settled row, however old', async () => {
     const { res, out } = mkRes();
     const { scope } = mkScope([
@@ -189,5 +222,29 @@ describe('GET /admin/payments/deposits', () => {
     await expect(
       GET({ scope: mkScope(rows).scope, query: { limit: '500' } } as any, res),
     ).rejects.toThrow(/limit/);
+  });
+});
+
+describe('GET /admin/payments/deposits ?customer_id (player page Payments tab)', () => {
+  const CUS = 'cus_01M3WPN3TEN4H9NQRNS27MT4SQ';
+
+  it('narrows the list to one customer, alongside the status filter', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    await GET({ scope, query: { status: 'all', customer_id: CUS } } as any, res);
+    expect(calls.filter).toEqual({ customer_id: CUS });
+
+    await GET({ scope, query: { status: 'failed', customer_id: CUS } } as any, mkRes().res);
+    expect(calls.filter).toEqual({ status: 'failed', customer_id: CUS });
+  });
+
+  it('refuses a malformed customer_id instead of widening to every customer', async () => {
+    const { res, out } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    for (const bad of ['', 'cus_x', "cus_' or 1=1", ['cus_01M3WPN3TEN4H9NQRNS27MT4SQ']]) {
+      await GET({ scope, query: { customer_id: bad } } as any, res);
+      expect(out.status).toBe(400);
+    }
+    expect(calls.filter).toBeUndefined();
   });
 });

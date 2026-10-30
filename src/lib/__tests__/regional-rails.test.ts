@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WithdrawBank } from '@/lib/actions/vault';
-import { bankCountryGroups } from '../regional-rails';
+import { bankCountryGroups, REGIONAL_RAILS } from '../regional-rails';
 
 describe('bankCountryGroups', () => {
   const MAYBANK = { bankCode: 'MBB', bankName: 'Maybank', currency: 'MYR' };
@@ -26,9 +26,28 @@ describe('bankCountryGroups', () => {
   });
 
   it('keeps a bank in a currency this build has no rail for, with no flag', () => {
-    const USDT = { bankCode: 'TRC20', bankName: 'USDT', currency: 'USDT' };
-    expect(bankCountryGroups([USDT])).toEqual([
-      { country: 'USDT', items: [USDT] },
+    const THB = { bankCode: 'KBANKTH', bankName: 'Kasikorn', currency: 'THB' };
+    expect(bankCountryGroups([THB])).toEqual([
+      { country: 'THB', items: [THB] },
     ]);
+  });
+
+  it('groups USDT wallets under their own toggle with the Tether mark', () => {
+    const TRC = {
+      bankCode: 'USDTTRC20',
+      bankName: 'USDT · TRC20 (Tron)',
+      currency: 'USDT',
+    };
+    expect(bankCountryGroups([TRC])).toEqual([
+      { country: 'USDT', flag: 'USDT', items: [TRC] },
+    ]);
+  });
+});
+
+// GlobePay365 production refuses ERC20 payins (2026-10-26); the backend
+// allow-list (gateway.ts depositMethods) says the same.
+describe('USDT top-up chains', () => {
+  it('offers TRC20 only', () => {
+    expect(REGIONAL_RAILS.USDT?.methods.map((m) => m.code)).toEqual(['UTRC']);
   });
 });

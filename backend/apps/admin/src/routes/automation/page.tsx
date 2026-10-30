@@ -6,10 +6,12 @@ import {
   ChartBar,
   FireSolid,
   PlaySolid,
+  Robot,
   Trophy,
   Users,
 } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   Badge,
   Button,
@@ -36,11 +38,15 @@ declare const __BACKEND_URL__: string;
 // Generated, text-free key art (robot arm lifting a sealed pack).
 const HERO_ART = new URL('./assets/hero.webp', import.meta.url).href;
 
+// Top-level, not nested under Players: the automation operator role
+// (scripts/create-automation-operator.ts) has no player:read, and a nested
+// entry only renders under a visible parent.
 export const config: RouteConfig = {
   label: 'pcNav.automation',
   translationNs: 'translation',
-  rank: 3,
-  nested: '/players',
+  icon: Robot,
+  rank: 35,
+  permissions: ['automation:read' as Permission],
 };
 
 async function readMonitor<T>(path: string, signal: AbortSignal): Promise<T> {
@@ -94,8 +100,8 @@ function AccountListEditor({ current }: { current: string[] }) {
       <Heading level="h2">Edit the account list</Heading>
       <Text size="small" className="text-ui-fg-subtle">
         One email per line, up to 80. These accounts can be used in runs and
-        never rank on the weekly prize board. Saving replaces the whole list; an
-        account you remove counts on this week’s board again with all its pulls.
+        rank on the weekly prize board like any other account. Saving replaces
+        the whole list.
       </Text>
       <Textarea
         aria-label="Bot account emails"
@@ -154,6 +160,9 @@ const SUBTITLE: Record<string, string> = {
 
 export function AutomationPage() {
   const { t } = useTranslation();
+  // Saving the list asks customer:read (api/admin-rbac.ts): the automation
+  // operator runs the accounts staff chose but cannot change them.
+  const canEditAccounts = usePermissions().hasPermission('customer:read');
   const [tab, setTab] = useState('overview');
   const activity = useAutomationActivity(7);
   const recent = new Map(
@@ -368,7 +377,7 @@ export function AutomationPage() {
               </Text>
             )}
           </Container>
-          {accounts.data && (
+          {accounts.data && canEditAccounts && (
             <AccountListEditor
               key={accounts.data.updatedAt}
               current={all.flatMap((account) =>

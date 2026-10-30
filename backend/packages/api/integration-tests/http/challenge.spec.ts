@@ -540,9 +540,8 @@ medusaIntegrationTestRunner({
         expect(body.progress.pooledMyr).toBe(MYR(180));
       });
 
-      // Automation accounts are out of the ranking itself (challengeWeekTop),
-      // so the shown rank is the paid rank; their pulls still fill the pool.
-      it('leaves Automation accounts out of the top and re-ranks the rest', async () => {
+      // Automation accounts rank like any other account (owner, 2026-10-26).
+      it('ranks Automation accounts in the top like everyone else', async () => {
         await packs().createAutomationMonitors([
           {
             id: 'global',
@@ -554,9 +553,10 @@ medusaIntegrationTestRunner({
 
         const body = await getStore();
         expect(body.top.map((t: { seed: number }) => t.seed)).toEqual([
+          seedOf('cus_sc_1'),
           seedOf('cus_sc_2'),
         ]);
-        expect(body.top[0]).toMatchObject({ rank: 1, volumeMyr: MYR(30) });
+        expect(body.top[0]).toMatchObject({ rank: 1, volumeMyr: MYR(150) });
         expect(body.progress.pooledMyr).toBe(MYR(180));
       });
 

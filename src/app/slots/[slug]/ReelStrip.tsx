@@ -45,6 +45,7 @@ const IDLE_DRIFT_PX_PER_MS = 0.02;
 export function ReelStrip({
   winnerDex,
   winnerImage,
+  winnerLabel,
   winnerName,
   winnerRarity,
   winnerRarityRgb,
@@ -61,6 +62,7 @@ export function ReelStrip({
 }: {
   winnerDex: number | null;
   winnerImage?: string;
+  winnerLabel?: string;
   winnerName?: string;
   winnerRarity: Rarity;
   winnerRarityRgb: string;
@@ -224,6 +226,8 @@ export function ReelStrip({
     setView({
       cells: buildPressStrip({
         winnerDex,
+        winnerImage,
+        winnerLabel,
         winnerRarity,
         winIndex: idx,
         keepCells: keep,
@@ -290,6 +294,8 @@ export function ReelStrip({
     colIndex,
     count,
     winnerDex,
+    winnerImage,
+    winnerLabel,
     winnerRarity,
     cellSize,
     poolLen,
@@ -375,7 +381,8 @@ export function ReelStrip({
                     ? true
                     : i <= IDLE_BASE_INDEX + HREEL_VISIBLE_CELLS
                 }
-                imageSrc={isWinnerCell ? winnerImage : undefined}
+                imageSrc={isWinnerCell ? winnerImage : cell.image}
+                label={cell.label}
                 glowRgb={litColor}
                 lit={done ? isWinnerCell : true}
                 landed={done && isWinnerCell}

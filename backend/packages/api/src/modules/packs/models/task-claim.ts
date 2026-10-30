@@ -8,6 +8,8 @@ import { model } from '@medusajs/framework/utils';
 // player's board resets a day earlier, on purpose.
 // reward_snapshot freezes what was actually granted;
 // claim_ref carries the credit transaction / pull id it minted.
+// Never delete a claim that minted a pull: lockedPullIds reads it to keep a
+// daily task's card locked until the first paid open (owner, 2026-10-23).
 export const TaskClaim = model
   .define('task_claim', {
     id: model.id().primaryKey(),

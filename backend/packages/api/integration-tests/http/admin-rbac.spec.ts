@@ -11,6 +11,7 @@ import {
   DESK_BOT_ACTOR,
   deskBotRoleId,
 } from '../../src/api/reports/admin/proxy';
+import { createAutomationOperator } from '../../src/scripts/create-automation-operator';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -147,6 +148,72 @@ medusaIntegrationTestRunner({
         for (const path of READS) {
           const res = await call('get', path, adminToken);
           expect({ path, status: res.status }).toEqual({ path, status: 200 });
+        }
+      });
+
+      it('lets the automation operator run Automation and nothing else', async () => {
+        const email = 'operator@test.dev';
+        const password = 'operator-pw-1';
+        await createAutomationOperator(getContainer(), email, password);
+        const login = await api.post('/auth/user/emailpass', {
+          email,
+          password,
+        });
+        const token = login.data.token as string;
+
+        const permissions = await call(
+          'get',
+          '/admin/rbac/me/permissions',
+          token,
+        );
+        expect(permissions.data.permissions).toEqual([
+          'automation:delete',
+          'automation:read',
+          'automation:update',
+          'store:read',
+        ]);
+
+        // The Automation page's own calls, plus the dashboard shell's.
+        for (const path of [
+          '/admin/automation',
+          '/admin/automation/activity',
+          '/admin/automation/leaderboard',
+          '/admin/automation/live',
+          '/admin/automation/sandbox',
+          '/admin/stores',
+          '/admin/users/me',
+        ]) {
+          const res = await call('get', path, token);
+          expect({ path, status: res.status }).toEqual({ path, status: 200 });
+        }
+        // The account list takes any customer's email and a live run spends
+        // that customer's wallet, so only staff (customer:read) may change it.
+        const save = await call('post', '/admin/automation/accounts', token);
+        expect(save.status).toBe(403);
+        expect(save.data.message).toContain('customer:read');
+
+        for (const path of [
+          '/admin/customers',
+          '/admin/customer-groups',
+          '/admin/players',
+          '/admin/packs',
+          '/admin/stats',
+          '/admin/ledger',
+          '/admin/referrals/settlements',
+          '/admin/users',
+          '/admin/rbac/roles',
+        ]) {
+          const res = await call('get', path, token);
+          expect({ path, status: res.status }).toEqual({ path, status: 403 });
+        }
+        for (const w of WRITES.filter(
+          (w) => !w.path.startsWith('/admin/automation'),
+        )) {
+          const res = await call(w.method, w.path, token);
+          expect({ path: w.path, status: res.status }).toEqual({
+            path: w.path,
+            status: 403,
+          });
         }
       });
     });

@@ -411,3 +411,32 @@ describe('GET /admin/payments/withdrawals/:id/account', () => {
     );
   });
 });
+
+describe('GET /admin/payments/withdrawals ?customer_id (player page Payments tab)', () => {
+  const CUS = 'cus_01M3WPN3TEN4H9NQRNS27MT4SQ';
+
+  it('narrows the list to one customer, alongside the status filter', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([withdrawal(1, { customer_id: CUS })]);
+    await GET({ scope, query: { status: 'all', customer_id: CUS } } as any, res);
+    expect(calls.filter).toEqual({ customer_id: CUS });
+  });
+
+  it('refuses a malformed customer_id', async () => {
+    let status: number | undefined;
+    let body: any;
+    const res = {
+      setHeader: () => {},
+      json: (b: any) => (body = b),
+      status: (s: number) => {
+        status = s;
+        return { json: (b: any) => (body = b) };
+      },
+    } as any;
+    const { scope, calls } = mkScope([withdrawal(1)]);
+    await GET({ scope, query: { customer_id: 'nope' } } as any, res);
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/customer_id/);
+    expect(calls.filter).toBeUndefined();
+  });
+});

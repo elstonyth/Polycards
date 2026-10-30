@@ -8,7 +8,7 @@ import {
   resolveWithdrawalDestination,
   sharedAccountCheckApplies,
 } from './saved-accounts';
-import { findBank } from './banks';
+import { findBank, walletAddressValid } from './banks';
 import {
   channelStatus,
   destinationMinRm,
@@ -187,14 +187,27 @@ export const RATE_CHANGED_MESSAGE =
  * balance read is cheap and read-only; a failed read is NOT short (the submit
  * still decides), so a balance-endpoint outage never blocks payouts.
  */
+/**
+ * What a payout of `gatewayAmount` takes from OUR float: the amount PLUS the
+ * gateway's own fee (percent and flat), rounded up to the cent, since an
+ * amount that passed on its own could still be refused.
+ */
+export function payoutFloatNeeded(
+  gateway: PaymentGateway,
+  gatewayAmount: number,
+): number {
+  const { payoutFeePercent = 0, payoutFlatFee = 0 } = GATEWAYS[gateway] ?? {};
+  return (
+    Math.ceil(gatewayAmount * (100 + payoutFeePercent) - 1e-6) / 100 +
+    payoutFlatFee
+  );
+}
+
 async function regionalFloatShort(
   config: GatewayConfig,
   gatewayAmount: number,
 ): Promise<{ available: number; currency: string } | null> {
-  // The wallet pays the amount PLUS the gateway's own payout fee, rounded up
-  // to the cent: an amount that passed on its own could still be refused.
-  const fee = GATEWAYS[config.kind as PaymentGateway]?.payoutFeePercent ?? 0;
-  const needed = Math.ceil(gatewayAmount * (100 + fee) - 1e-6) / 100;
+  const needed = payoutFloatNeeded(config.kind as PaymentGateway, gatewayAmount);
   try {
     const b = await checkBalance(config);
     const available = Number(b.availableBalance);
@@ -359,7 +372,9 @@ function looksLikeCardNumber(digits: string): boolean {
 }
 
 /** Bank account fields, validated at the boundary. Their API gives no field
- * length errors a customer could act on, so sanity-check here. */
+ * length errors a customer could act on, so sanity-check here. A USDT wallet
+ * (banks.ts `wallet`) is an address in its chain's format and has no holder
+ * name: the gateway is sent the customer id in its place. */
 export function withdrawalDetailsError(input: {
   bankCode?: unknown;
   accountNumber?: unknown;
@@ -376,6 +391,15 @@ export function withdrawalDetailsError(input: {
     return `Withdrawals to ${bank.name} are unavailable. Choose another bank.`;
   }
   const accountNumber = input.accountNumber;
+  const wallet = findBank(bankCode)?.wallet;
+  if (wallet) {
+    return typeof accountNumber === 'string' &&
+      walletAddressValid(wallet, accountNumber)
+      ? null
+      : wallet === 'tron'
+        ? 'That is not a valid TRC20 (Tron) address. Copy it exactly from your wallet: it starts with T and is 34 characters long.'
+        : 'That is not a valid ERC20 (Ethereum) address. Copy it exactly from your wallet: it starts with 0x, and capital letters matter.';
+  }
   if (
     typeof accountNumber !== 'string' ||
     !/^[0-9]{5,34}$/.test(accountNumber)
@@ -762,6 +786,7 @@ export async function startWithdrawal(
       await packs.otherPayoutAccountHolders(
         input.customerId,
         precheckDestination.accountNumber,
+        findBank(precheckDestination.bankCode)?.wallet !== undefined,
       )
     ).some(
       (h) => h.holder_name == null && findBank(h.bank_code)?.id === bankId,
@@ -1198,6 +1223,19 @@ export async function startWithdrawal(
           "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
         );
       }
+      // The same refusal for every bank: from 2026-10-20 17:40 TGPay refused
+      // all bank payouts this way (67 refusals, 8+ customers). Under the
+      // generic copy below customers blamed their bank details and retried 4–6
+      // times. Their routing, so say the details are fine and come back later.
+      // Worded to hit the storefront's existing /withdrawals are temporarily
+      // unavailable/ pass-through (vault-errors.ts), so it reads right whichever
+      // deploy lands first.
+      if (/no payout provider is available/i.test(error.message)) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.',
+        );
+      }
       // Says who refused, and does not instruct the customer to fix something
       // that may well be correct. The old wording ("check the bank details")
       // was a guess dressed as a diagnosis: on 2026-08-11 two customers retried
@@ -1580,7 +1618,19 @@ export type WithdrawalOutcomeRow = {
   merchant_transaction_id: string;
   gateway_transaction_id: string | null;
   amount: unknown;
+  /** The gateway leg (payment-fx.ts). Read only to word the USDT receipt. */
+  currency?: unknown;
+  gateway_amount?: unknown;
 };
+
+/** The USDT the wallet received, for the paid receipt and bell row; undefined
+ *  on every other rail, whose notices stay RM-and-bank worded. */
+function usdtPaidAmount(row: WithdrawalOutcomeRow): number | undefined {
+  const amount = Number(row.gateway_amount);
+  return row.currency === 'USDT' && Number.isFinite(amount) && amount > 0
+    ? amount
+    : undefined;
+}
 
 /**
  * What the caller observed about a payout that reached the bank. Everything
@@ -1639,6 +1689,7 @@ export async function applyWithdrawalOutcome(
 ): Promise<{ replayed: boolean }> {
   const packs = resolvePacks<GatewayWithdrawals>(scope);
   const amount = Number(withdrawal.amount);
+  const usdtAmount = usdtPaidAmount(withdrawal);
   const gatewayTransactionId = outcome.gatewayTransactionId || null;
 
   await sendWithdrawalReceipt(scope, {
@@ -1647,6 +1698,7 @@ export async function applyWithdrawalOutcome(
     reference: outcome.gatewayRef,
     merchantTransactionId: withdrawal.merchant_transaction_id,
     outcome: 'paid',
+    ...(usdtAmount !== undefined ? { usdtAmount } : {}),
   });
 
   const claimed = await packs.claimWithdrawalStatus({
@@ -1683,7 +1735,11 @@ export async function applyWithdrawalOutcome(
       await notifyFeed(scope, {
         receiverId: withdrawal.customer_id,
         template: 'withdrawal_paid',
-        data: { amount_myr: amount, reference: outcome.gatewayRef },
+        data: {
+          amount_myr: amount,
+          reference: outcome.gatewayRef,
+          ...(usdtAmount !== undefined ? { usdt_amount: usdtAmount } : {}),
+        },
         idempotencyKey: withdrawalFeedKey(
           withdrawal.merchant_transaction_id,
           'paid',

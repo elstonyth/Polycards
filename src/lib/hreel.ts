@@ -44,7 +44,37 @@ export function idleDriftFits(poolLen: number): boolean {
  *  reward in this pack, never arbitrary species. */
 export const DECOY_DEXES = [1, 4, 7, 25, 6, 9, 3, 143, 94, 130, 448, 197];
 
-export type HReelCell = { dex: number; rarity: Rarity };
+/** Neutral card-back (vector, so it stays crisp under the reel's pixelated
+ *  scaling): the sprite a non-Pokémon pack shows when a card has none — never
+ *  a Pokémon, never a Poké Ball. */
+export const NEUTRAL_CARD_SPRITE =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='22' y='9' width='56' height='82' rx='7' fill='#262626' stroke='#a3a3a3' stroke-width='3'/><rect x='30' y='17' width='40' height='66' rx='4' fill='none' stroke='#525252' stroke-width='2'/><path d='M50 36 62 50 50 64 38 50Z' fill='#d4d4d4'/></svg>",
+  );
+
+/** A reel cell. `image` is set only for a card with a custom sprite and NO
+ *  Pokémon (One Piece characters): it is what the cell draws, and `dex` is then
+ *  0 (no species). Pokémon cells keep drawing their dex sprite as before.
+ *  `label` is a ticket row's amount, drawn over the art as live text. */
+export type HReelCell = {
+  dex: number;
+  rarity: Rarity;
+  image?: string;
+  label?: string;
+};
+
+/** The amount a ticket tile shows. */
+export const ticketReelLabel = (tickets: number): string => `x${tickets}`;
+
+/** Cell identity for the no-adjacent-repeat checks: the species when there is
+ *  one (a seeded-linked winner carries BOTH its dex and an image URL, and must
+ *  still match the dex-only decoys of the same Pokémon), else the custom image —
+ *  so two different dex-less sprites (both dex 0) never count as a repeat. Every
+ *  ticket tile shares one image, so only its amount tells it apart. */
+const spriteOf = (
+  c: Pick<HReelCell, 'dex' | 'image' | 'label'>,
+): number | string => c.label ?? (c.dex > 0 ? c.dex : (c.image ?? c.dex));
 
 /**
  * Decoy flicker pool from the pack's OWN cards: each entry pairs a card's
@@ -52,27 +82,69 @@ export type HReelCell = { dex: number; rarity: Rarity };
  * PAIR — not by dex alone. A pack of 15 Pikachu/Charizard variants across all
  * six tiers must flicker all six tier colors; dedup-by-dex used to collapse it
  * to the first card per species (2 entries → only 2 glow colors all spin).
- * Dex-less cards (trainer/energy with no resolvable Pokémon) are skipped.
+ * A dex-less card with a custom sprite (One Piece) flickers that sprite, keyed
+ * by its URL; one with neither (trainer/energy) is skipped. Without this a
+ * One Piece pack's pool came out empty and the reel fell back to DECOY_DEXES —
+ * Pokémon in a One Piece pack.
+ *
+ * `pokemon: false` (a One Piece / sports pack — see isPokemonPack) never
+ * resolves a Pokémon, and a pool with nothing to show falls back to the neutral
+ * card-back instead of the Pokémon DECOY_DEXES.
  */
 export function buildDecoyPool(
   cards: readonly Pick<
     PackCard,
-    'name' | 'pokemonDex' | 'spriteImage' | 'rarity'
+    'name' | 'set' | 'pokemonDex' | 'spriteImage' | 'rarity' | 'tickets'
   >[],
+  { pokemon = true }: { pokemon?: boolean } = {},
 ): HReelCell[] {
   const seen = new Set<string>();
   const out: HReelCell[] = [];
   for (const c of cards) {
-    const dex = resolveCardPokemon({
-      name: c.name,
-      pokemon_dex: c.pokemonDex,
-      sprite_image: c.spriteImage,
-    }).dex;
-    if (dex === null) continue;
-    const key = `${dex}:${c.rarity}`;
+    if (c.tickets != null) {
+      // One row per amount (the backend's unique index), so nothing to dedupe,
+      // and no name to read a Pokémon out of.
+      out.push({
+        dex: 0,
+        rarity: c.rarity,
+        image: c.spriteImage ?? undefined,
+        label: ticketReelLabel(c.tickets),
+      });
+      continue;
+    }
+    const { dex, sprite } = resolveCardPokemon(
+      {
+        name: c.name,
+        set: c.set,
+        pokemon_dex: c.pokemonDex,
+        sprite_image: c.spriteImage,
+      },
+      { pokemon },
+    );
+    if (dex === null && sprite === null) continue;
+    // A card's own custom sprite flickers as itself (a variant row, a custom
+    // upload), species or not; a card without one keeps the stock dex cell.
+    const custom = c.spriteImage?.trim() ? c.spriteImage : null;
+    const cell: HReelCell =
+      custom !== null
+        ? { dex: dex ?? 0, rarity: c.rarity, image: custom }
+        : dex !== null
+          ? { dex, rarity: c.rarity }
+          : { dex: 0, rarity: c.rarity, image: sprite! };
+    // Dedup by the exact sprite: two variants of one species in a tier stay
+    // two decoys (the repeat checks still key on the species — spriteOf).
+    const key = `${cell.dex}:${cell.image ?? ''}:${c.rarity}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ dex, rarity: c.rarity });
+    out.push(cell);
+  }
+  if (!pokemon && out.length === 0) {
+    // Six cycled tier colours so the spin still flickers.
+    return RARITY_ORDER.map((_, i) => ({
+      dex: 0,
+      rarity: decoyRarity(i),
+      image: NEUTRAL_CARD_SPRITE,
+    }));
   }
   return out;
 }
@@ -163,6 +235,8 @@ function mulberry32(seed: number): () => number {
  */
 export function buildPressStrip({
   winnerDex,
+  winnerImage,
+  winnerLabel,
   winnerRarity,
   winIndex,
   keepCells,
@@ -171,6 +245,10 @@ export function buildPressStrip({
   decoyCards = [],
 }: {
   winnerDex: number | null;
+  /** The won card's custom sprite, when it has one (ReelStrip draws it). */
+  winnerImage?: string;
+  /** A ticket win's amount, drawn over the art. */
+  winnerLabel?: string;
   winnerRarity: Rarity;
   winIndex: number;
   keepCells: number;
@@ -196,38 +274,50 @@ export function buildPressStrip({
       : DECOY_DEXES.map((dex, i) => ({ dex, rarity: decoyRarity(i) }));
   // Enough tail past the winner to fill the window's right half when it lands.
   const length = winIndex + Math.ceil(HREEL_VISIBLE_CELLS / 2) + 2;
-  const safeWinner =
+  const validDex =
     winnerDex !== null &&
     Number.isInteger(winnerDex) &&
     winnerDex >= 1 &&
     winnerDex <= POKEDEX_MAX
       ? winnerDex
-      : pool[0]!.dex;
+      : null;
+  // A custom-sprite winner shows its own image (dex 0 if it has no species);
+  // garbage with no image falls back to the first POOL cell, sprite and all.
+  const winnerCell: HReelCell = winnerImage
+    ? {
+        dex: validDex ?? 0,
+        rarity: winnerRarity,
+        image: winnerImage,
+        ...(winnerLabel ? { label: winnerLabel } : {}),
+      }
+    : validDex !== null
+      ? { dex: validDex, rarity: winnerRarity }
+      : { ...pool[0]!, rarity: winnerRarity };
   const rand = mulberry32(rngSeed);
   const cells: HReelCell[] = [];
   for (let i = 0; i < length; i++) {
     if (i < keepCells) {
       // Idle tiling, verbatim — what is already on screen at press time.
-      const c = pool[(i + seed * 4) % pool.length]!;
-      cells.push({ dex: c.dex, rarity: c.rarity });
+      cells.push({ ...pool[(i + seed * 4) % pool.length]! });
       continue;
     }
     if (i === winIndex) {
       // Pin the winner INLINE so the neighbor rerolls below can see it — a
       // post-loop overwrite let winIndex±1 double the winner's sprite at the
       // most-watched moment (the landing).
-      cells.push({ dex: safeWinner, rarity: winnerRarity });
+      cells.push(winnerCell);
       continue;
     }
     let c = pool[Math.floor(rand() * pool.length)]!;
     // Reroll immediate sprite repeats — a doubled cell reads as a stutter at
     // speed. cells[i-1] covers the winner's RIGHT neighbor (the winner is
-    // already pushed); the LEFT neighbor must also reject the winner's dex
+    // already pushed); the LEFT neighbor must also reject the winner's sprite
     // ahead of time. Bounded tries so a single-entry pool can't loop forever.
-    const prevDex = cells[i - 1]?.dex;
-    const winnerAhead = i === winIndex - 1 ? safeWinner : undefined;
+    const prev = cells[i - 1];
+    const prevSprite = prev ? spriteOf(prev) : undefined;
+    const winnerAhead = i === winIndex - 1 ? spriteOf(winnerCell) : undefined;
     const blocked = (p: HReelCell) =>
-      p.dex === prevDex || p.dex === winnerAhead;
+      spriteOf(p) === prevSprite || spriteOf(p) === winnerAhead;
     for (let tries = 0; tries < 4 && blocked(c); tries++) {
       c = pool[Math.floor(rand() * pool.length)]!;
     }
@@ -235,12 +325,17 @@ export function buildPressStrip({
       // Small pools can exhaust the tries; pick deterministically rather than
       // give up — doubling the WINNER's sprite at the landing is the artifact
       // that matters most, so prefer avoiding both, then at least the winner.
+      // When only the previous cell's repeat is unavoidable (every cell shares
+      // one sprite — the neutral card-back pool), keep the random pick: the
+      // first pool cell every time would spin a single tier colour.
       c =
         pool.find((p) => !blocked(p)) ??
-        pool.find((p) => p.dex !== winnerAhead) ??
+        (spriteOf(c) !== winnerAhead
+          ? c
+          : pool.find((p) => spriteOf(p) !== winnerAhead)) ??
         c;
     }
-    cells.push({ dex: c.dex, rarity: c.rarity });
+    cells.push({ ...c });
   }
   const tease = teaseRarity(winnerRarity);
   if (tease && winIndex - 1 >= 0) {
@@ -289,10 +384,9 @@ export function buildHReelStrip(
   // DIFFERENT flanking Pokémon + tier colors — three independent-looking reels,
   // not one repeated ×3. seed=0 keeps the original single-strip behavior. Each
   // cell keeps its card's OWN rarity (its box color), not a cycled palette.
-  const cells: HReelCell[] = Array.from({ length }, (_, i) => {
-    const c = pool[(i + seed * 4) % pool.length]!;
-    return { dex: c.dex, rarity: c.rarity };
-  });
+  const cells: HReelCell[] = Array.from({ length }, (_, i) => ({
+    ...pool[(i + seed * 4) % pool.length]!,
+  }));
   // `winnerDex === null` = IDLE (no spin yet): leave the strip a PURE tiling of
   // the pool, so it is exactly periodic with period `pool.length` cells. That
   // periodicity is what makes ReelStrip's idle drift wrap seamlessly — a pinned
@@ -301,12 +395,14 @@ export function buildHReelStrip(
     // Winner: real dex (fall back to a POOL dex — never a hardcoded 1 — if the
     // caller passes garbage), DECOY color from a pool card (the real color is
     // applied on settle by ReelStrip, so the spin never spoils the rarity).
-    const safeWinner =
+    // (The fallback copies the pool cell's whole sprite — a custom-sprite cell
+    // is dex 0 + image, and dex 0 alone would draw nothing.)
+    const winner: Pick<HReelCell, 'dex' | 'image'> =
       Number.isInteger(winnerDex) && winnerDex >= 1 && winnerDex <= POKEDEX_MAX
-        ? winnerDex
-        : pool[0]!.dex;
+        ? { dex: winnerDex }
+        : pool[0]!;
     cells[winIndex] = {
-      dex: safeWinner,
+      ...winner,
       rarity: pool[(winIndex + seed) % pool.length]!.rarity,
     };
     const tease = teaseRarity(winnerRarity);

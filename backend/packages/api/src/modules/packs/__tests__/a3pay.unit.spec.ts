@@ -3,6 +3,7 @@ import {
   aesDecrypt,
   aesEncrypt,
   buildEnvelope,
+  isOwnPublicKey,
   openCallback,
   payinState,
   payoutState,
@@ -55,6 +56,21 @@ describe('a3pay RSA-SHA1', () => {
 
   it('returns false, not a throw, on a malformed signature', () => {
     expect(verifySignature('{}', '@@not-base64@@', ours.publicKey)).toBe(false);
+  });
+});
+
+describe('isOwnPublicKey', () => {
+  it('spots our own public key in the slot for theirs', () => {
+    expect(isOwnPublicKey(ours.publicKey, ours.privateKey)).toBe(true);
+    // PEM-armoured on one side, bare base64 on the other: same key.
+    const pem = `-----BEGIN PUBLIC KEY-----\n${ours.publicKey.match(/.{1,64}/g)!.join('\n')}\n-----END PUBLIC KEY-----`;
+    expect(isOwnPublicKey(pem, ours.privateKey)).toBe(true);
+  });
+
+  it('passes their real key, and answers false on junk', () => {
+    expect(isOwnPublicKey(theirs.publicKey, ours.privateKey)).toBe(false);
+    expect(isOwnPublicKey('not-a-key', ours.privateKey)).toBe(false);
+    expect(isOwnPublicKey(theirs.publicKey, '')).toBe(false);
   });
 });
 

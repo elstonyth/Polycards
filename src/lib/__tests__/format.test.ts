@@ -5,12 +5,57 @@ import {
   rm0,
   rmAuto,
   num,
+  compact,
   relativeTime,
   timeUntil,
   pullTime,
   mytDate,
+  mytClock,
   affordable,
 } from '../format';
+
+describe('cached formatters match toLocaleString byte for byte', () => {
+  const values = [
+    0,
+    -0,
+    1,
+    -1,
+    0.005,
+    0.015,
+    1.005,
+    1234.5,
+    -9876.543,
+    1e9,
+    12.345,
+    NaN,
+    Infinity,
+  ];
+  it.each(values)('%s', (n) => {
+    const fixed = (d: number) =>
+      n.toLocaleString('en-US', {
+        minimumFractionDigits: d,
+        maximumFractionDigits: d,
+      });
+    expect(rm(n)).toBe(`RM ${fixed(2)}`);
+    expect(rm0(n)).toBe(`RM ${fixed(0)}`);
+    expect(money(n, { decimals: 3 })).toBe(`$${fixed(3)}`);
+    expect(money(n, { currency: true })).toBe(
+      n.toLocaleString('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    );
+    expect(num(n)).toBe(n.toLocaleString('en-US'));
+    expect(compact(n)).toBe(
+      n.toLocaleString('en-US', {
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }),
+    );
+  });
+});
 
 describe('rmAuto', () => {
   it('drops .00 on whole ringgit and keeps sen when there are some', () => {
@@ -142,6 +187,22 @@ describe('pullTime — fixed-MYT absolute roll time', () => {
 
   it('is empty for garbage rather than "NaN NaN"', () => {
     expect(pullTime('not-a-date')).toBe('');
+  });
+});
+
+describe('mytClock — fixed-MYT 12h clock', () => {
+  it('prints the Malaysian wall clock, not the UTC server clock', () => {
+    // 14:27 UTC = 10:27 PM MYT: /transactions printed this as "2:27 PM".
+    expect(mytClock('2026-10-23T14:27:59.000Z')).toBe('10:27 PM');
+    // 17:05 UTC = 1:05 AM MYT next day; the hour is not zero-padded.
+    expect(mytClock('2026-12-31T17:05:00.000Z')).toBe('1:05 AM');
+    // Noon and midnight read 12, never 0.
+    expect(mytClock('2026-09-02T04:00:00.000Z')).toBe('12:00 PM');
+    expect(mytClock('2026-09-02T16:00:00.000Z')).toBe('12:00 AM');
+  });
+
+  it('is empty for garbage', () => {
+    expect(mytClock('not-a-date')).toBe('');
   });
 });
 

@@ -27,11 +27,14 @@ import {
   PackDetailPageSchema,
   RecentPullsPageSchema,
   PullGapsSchema,
+  TicketOddsRowSchema,
+  parseList,
   type ZodType,
 } from '@/lib/data/schemas';
 import {
   CATEGORIES as CATEGORY_META,
   CAT_ICON,
+  ticketCard,
   type Pack,
   type PackCategory,
   type PackCard,
@@ -60,6 +63,7 @@ interface BackendPack {
   in_stock?: boolean;
   group?: 'GRADED' | 'RAW' | 'MIX' | null;
   psa10?: boolean;
+  prize_type?: 'cards' | 'tickets';
 }
 
 const toPack = (p: BackendPack): Pack => ({
@@ -68,7 +72,9 @@ const toPack = (p: BackendPack): Pack => ({
   priceMyr: p.price,
   image: p.image,
   displayImage: p.display_image || undefined,
-  boost: p.boost || undefined,
+  // `boost` is only ever a buyback badge, and a ticket has no buyback.
+  boost: (p.prize_type !== 'tickets' && p.boost) || undefined,
+  prizeType: p.prize_type === 'tickets' ? 'tickets' : undefined,
   buybackPercent:
     typeof p.buyback_percent === 'number' ? p.buyback_percent : undefined,
   inStock: p.in_stock === false ? false : undefined,
@@ -86,6 +92,11 @@ const titleCase = (key: string): string =>
     .split(/[-_]/)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
+
+// A Map, not an object lookup: a category named 'constructor' must not read
+// Object's.
+const CAT_ICONS = new Map<string, string>(Object.entries(CAT_ICON));
+const iconOf = (key: string): string => CAT_ICONS.get(key) ?? CAT_ICON.pokemon;
 
 /**
  * Pack catalog grouped by category, in the live-site category order. The packs
@@ -116,7 +127,8 @@ async function loadPackCategories(): Promise<PackCategory[]> {
   // Known categories keep the live-site order + presentational meta (empty
   // ones still render a chip; the client shows empty states). A backend pack
   // in a category the local meta doesn't know still renders — title-cased
-  // label + fallback icon — instead of silently disappearing.
+  // label + its icon (Pokémon's when it has none) — instead of silently
+  // disappearing.
   const known = CATEGORY_META.map((cat) => ({
     ...cat,
     packs: byCategory.get(cat.id) ?? [],
@@ -128,7 +140,7 @@ async function loadPackCategories(): Promise<PackCategory[]> {
       id,
       tab: titleCase(id),
       heading: `${titleCase(id)} Packs`,
-      icon: CAT_ICON.pokemon,
+      icon: iconOf(id),
       packs: list,
     }));
   return [...known, ...extras];
@@ -255,7 +267,7 @@ async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
       ...toPack(pack),
       categoryId: pack.category,
       categoryName: meta?.tab ?? titleCase(pack.category),
-      icon: meta?.icon ?? CAT_ICON.pokemon,
+      icon: meta?.icon ?? iconOf(pack.category),
     },
     siblings: [],
   };
@@ -333,6 +345,19 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
   const row = await packRow(slug, 'pack-detail', PackDetailPageSchema);
   if (!row) return null;
   const { published_odds, demo_odds } = row;
+  if (row.prize_type === 'tickets') {
+    const pool = parseList(TicketOddsRowSchema, row.odds).map((o) =>
+      ticketCard(o.tickets, o.rarity),
+    );
+    return pool.length === 0
+      ? null
+      : {
+          topHits: [],
+          pool,
+          publishedOdds: parsePublishedOdds(published_odds),
+          demoOdds: parsePublishedOdds(demo_odds),
+        };
+  }
   const valid = row.odds as unknown as BackendOddsEntry[];
   if (valid.length === 0) return null;
 

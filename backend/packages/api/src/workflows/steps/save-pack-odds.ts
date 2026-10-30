@@ -88,6 +88,13 @@ export const savePackOddsInvoke = async (
       `Pack '${input.pack_id}' is not available.`,
     );
   }
+  // A ticket pack's table is its own (POST .../ticket-prizes).
+  if (pack.prize_type === 'tickets') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Pack '${input.pack_id}' holds ticket amounts, not cards.`,
+    );
+  }
 
   // PAGED, not take:1000 — the set-equality guard below must see EVERY
   // existing row, or a >1,000-card pool can never be saved again (the GET

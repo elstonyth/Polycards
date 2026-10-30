@@ -192,6 +192,16 @@ describe('body rendering', () => {
     );
   });
 
+  it('a USDT payout says wallet and shows what the wallet got', () => {
+    expect(
+      copyFor('withdrawal_paid').body({ amount_myr: 300, usdt_amount: 71.07 }),
+    ).toBe('USDT 71.07 (RM 300.00) has been sent to your wallet.');
+    // A bad value falls back to the bank wording rather than "USDT NaN".
+    expect(
+      copyFor('withdrawal_paid').body({ amount_myr: 300, usdt_amount: 'x' }),
+    ).toBe('RM 300.00 has been sent to your bank.');
+  });
+
   // Spec 2026-10-07 §1; the bonus line is spec 2026-10-15 §3.
   it('announces a gifted pack and bonus credit', () => {
     expect(
@@ -279,4 +289,20 @@ describe('copyFor', () => {
     expect(c.policy).toBe('never');
     expect(c.href).toBeNull();
   });
+
+  // A USDT wallet address ends in base58 letters; the 4-char cap is what keeps
+  // a full number out of the toast.
+  it.each(['bank_account_added', 'bank_account_removed'])(
+    '%s names a wallet-address tail and refuses anything but 4 chars',
+    (template) => {
+      const body = copyFor(template).body;
+      const render = (last4: string) =>
+        body({ bank_name: 'USDT · TRC20 (Tron)', account_last4: last4 });
+
+      expect(render('xZ9k')).toContain('····xZ9k');
+      for (const bad of ['123', '12345', '1234567890123', 'ab-1']) {
+        expect(render(bad)).toBeNull();
+      }
+    },
+  );
 });

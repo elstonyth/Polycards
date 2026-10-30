@@ -60,6 +60,9 @@ export async function GET(
   });
 
   const serialized = await serializeDeliveryOrders(packs, orders);
+  const snapshotById = new Map(
+    orders.map((o) => [o.id, o.tracking_snapshot ?? null]),
+  );
 
   // Join customer emails for the admin table.
   const customerIds = [...new Set(orders.map((o) => o.customer_id))];
@@ -78,6 +81,9 @@ export async function GET(
     orders: serialized.map((o) => ({
       ...o,
       customer_email: emailById.get(o.customer_id) ?? null,
+      // Admin-only (the storefront shares serializeDeliveryOrders): the
+      // shipment tracker's last carrier check.
+      tracking_snapshot: snapshotById.get(o.id) ?? null,
     })),
   });
 }

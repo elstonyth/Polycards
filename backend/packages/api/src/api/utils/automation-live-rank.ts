@@ -6,6 +6,11 @@ import type {
   LiveState,
 } from './automation-live-types';
 
+/** Draws one goal account may make in a round: it pushes past the run's
+ *  per-account cap until its goal is done, and this bound keeps the run's
+ *  stored state small (Repeat starts another round). */
+export const LIVE_GOAL_MAX_CYCLES = 100;
+
 export function validateLiveRankTargets(
   value: unknown,
   selected: string[],
@@ -24,15 +29,15 @@ export function validateLiveRankTargets(
       ) ||
       !selected.includes(input.customerId) ||
       targets.some((row) => row.customerId === input.customerId) ||
-      // Automation accounts never rank on the weekly prize board
-      // (challengeWeekTop), so a weekly goal could only burn cycles.
+      // All-time only: weekly goals were dropped while automation accounts
+      // could not rank weekly (#827). Bringing them back is its own change.
       input.period !== 'alltime' ||
       !Number.isInteger(input.targetRank) ||
       input.targetRank < 1 ||
       input.targetRank > 10
     ) {
       throw new Error(
-        'Each live goal needs one distinct selected account, the all-time board, and rank 1–10. Automation accounts never rank on the weekly prize board.',
+        'Each live goal needs one distinct selected account, the all-time board, and rank 1–10.',
       );
     }
     targets.push({
@@ -79,7 +84,7 @@ export function refreshLiveRankGoals(
         goal: 'reach',
         secureBufferMyr: 0,
         threatBufferMyr: 0,
-        maxCycles: config.maxCyclesPerAccount,
+        maxCycles: LIVE_GOAL_MAX_CYCLES,
         maxSpendMyr: 0,
         maxDurationMinutes: 0,
       },
@@ -112,7 +117,7 @@ export function refreshLiveRankGoals(
       now,
       completedCycles: cycles.length,
       spentMyr: 0,
-      maxCycles: config.maxCyclesPerAccount,
+      maxCycles: LIVE_GOAL_MAX_CYCLES,
       nextCostMyr: state.packPriceCents / 100,
       ownedCustomerIds: new Set(config.customerIds),
     });
@@ -126,7 +131,13 @@ export function liveRankReady(
   customerId: string,
   now: number,
 ): boolean {
-  if (!state.config?.rankTargets?.length) return true;
+  // An account without a goal draws ordinarily, goal run or not.
+  if (
+    !state.config?.rankTargets?.some(
+      (target) => target.customerId === customerId,
+    )
+  )
+    return true;
   const goal = state.rankGoals?.find(
     (row) => row.target.profileId === customerId,
   );

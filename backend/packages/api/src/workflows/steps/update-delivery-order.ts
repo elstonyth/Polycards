@@ -21,6 +21,17 @@ export type UpdateDeliveryOrderInput = {
     action: 'edit' | 'bulk_status';
     reason: string;
   };
+  /**
+   * Passed straight through to transitionDeliveryOrderStatus's allowedFrom:
+   * the customer cancel route sends CUSTOMER_CANCELABLE so its window is
+   * re-checked under the order's lock.
+   */
+  allowed_from?: string[];
+  /**
+   * ISO time to stamp as delivered_at on a move to completed — the carrier's
+   * own delivery time, from the shipment tracker. Omitted = now.
+   */
+  delivered_at?: string;
 };
 
 export type UpdateDeliveryOrderResult = {
@@ -133,6 +144,8 @@ export const updateDeliveryOrderInvoke = async (
     proofImages: input.proof_images,
     pullIds,
     audit: input.audit,
+    allowedFrom: input.allowed_from,
+    deliveredAt: input.delivered_at,
   });
 
   const prevPullStatus: 'delivering' | null =

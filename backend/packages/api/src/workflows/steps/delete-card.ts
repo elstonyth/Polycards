@@ -92,6 +92,16 @@ export const deleteCardInvoke = async (
     );
   }
 
+  // A winner is still owed it: a one_winner draw refuses to pay part of a pot, so
+  // the card going now would stall that whole event until it came back.
+  const drawEvent = await packs.luckyDrawEventHoldingCard(input.handle);
+  if (drawEvent) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `Cannot delete '${input.handle}' — it is a prize in the Lucky Draw event '${drawEvent}', which has not been drawn yet.`,
+    );
+  }
+
   // PAGED — the compensation snapshot must hold EVERY pack row this card
   // sits in, not the first 1,000.
   const oddsRows = await pageAll((opts) =>

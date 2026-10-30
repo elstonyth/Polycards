@@ -5,12 +5,33 @@ import { GatewayError, type SettlementState } from './gateway-types';
 // JSON, unwrap their { isSuccess, errorList, data } response. The wire format
 // lives in a3pay.ts; this file only knows endpoints, field names and errors.
 //
-// Amounts in and out of this file are in the GATEWAY's currency (SGD). The
-// conversion to and from our RM ledger happens in the orchestration, against
-// the rate locked on each row (fx-quote.ts) — never here.
+// The same client serves every tenant of the platform we hold an account
+// with (A3PAY_FAMILY): A3Pay for SGD and GlobePay365 for USDT publish the
+// same handbook, endpoints and crypto, and differ only in host, keys and
+// currency — exactly as The 7 Pay shares TGPay's client.
+//
+// Amounts in and out of this file are in the GATEWAY's currency (SGD, USDT).
+// The conversion to and from our RM ledger happens in the orchestration,
+// against the rate locked on each row (fx-quote.ts) — never here.
 
-export type A3payConfig = {
-  kind: 'a3pay';
+export type A3payKind = 'a3pay' | 'gp365';
+
+/**
+ * The platform tenants: operator label, env prefix (A3PAY_API_BASE,
+ * GP365_API_BASE, ...) and the currency the merchant account settles in.
+ * GlobePay365's API doc (api.globepay365.com/api/globepay365_api_doc.html,
+ * read 2026-10-12) is A3Pay's handbook with the names changed.
+ */
+export const A3PAY_FAMILY: Record<
+  A3payKind,
+  { label: string; envPrefix: string; currency: string }
+> = {
+  a3pay: { label: 'A3Pay', envPrefix: 'A3PAY', currency: 'SGD' },
+  gp365: { label: 'GlobePay365', envPrefix: 'GP365', currency: 'USDT' },
+};
+
+export type A3payConfig<K extends A3payKind = A3payKind> = {
+  kind: K;
   /** e.g. https://mapi.a3paysg.com — no trailing slash. */
   baseUrl: string;
   /** Their MID / MerchantCode, e.g. SGD00001. */
@@ -23,20 +44,31 @@ export type A3payConfig = {
   currencyCode: string;
 };
 
+const CREDENTIALS = [
+  'API_BASE',
+  'MERCHANT_CODE',
+  'AES_KEY',
+  'MERCHANT_PRIVATE_KEY',
+  'PUBLIC_KEY',
+] as const;
+
 /**
- * Read config from env, failing loudly on a missing value. A half-configured
- * gateway must not start: the failure mode is silently signing with an empty
- * key and getting an opaque rejection hours later.
+ * Read a tenant's config from env, failing loudly on a missing value. A
+ * half-configured gateway must not start: the failure mode is silently
+ * signing with an empty key and getting an opaque rejection hours later.
  */
-export function a3payConfigFromEnv(
+export function a3payFamilyConfigFromEnv<K extends A3payKind>(
+  kind: K,
   env: NodeJS.ProcessEnv = process.env,
-): A3payConfig {
-  const required = (name: string): string => {
+): A3payConfig<K> {
+  const { label, envPrefix, currency } = A3PAY_FAMILY[kind];
+  const required = (suffix: (typeof CREDENTIALS)[number]): string => {
+    const name = `${envPrefix}_${suffix}`;
     const value = env[name];
-    if (!value) throw new Error(`A3Pay: missing required env var ${name}.`);
+    if (!value) throw new Error(`${label}: missing required env var ${name}.`);
     return value;
   };
-  const baseUrl = required('A3PAY_API_BASE').replace(/\/+$/, '');
+  const baseUrl = required('API_BASE').replace(/\/+$/, '');
   // https only — every request carries the signed, encrypted body. Plain http
   // is admitted for a loopback host alone, which is what the local mock
   // (scripts/a3pay-mock.mjs) listens on.
@@ -44,30 +76,54 @@ export function a3payConfigFromEnv(
     !/^https:\/\//i.test(baseUrl) &&
     !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(baseUrl)
   ) {
-    throw new Error('A3Pay: A3PAY_API_BASE must be an https URL.');
+    throw new Error(`${label}: ${envPrefix}_API_BASE must be an https URL.`);
+  }
+  // A staging host in production would open top-ups on a test cashier whose
+  // signed "paid" callbacks credit real RM.
+  if (env.NODE_ENV === 'production' && /stg/i.test(new URL(baseUrl).hostname)) {
+    throw new Error(
+      `${label}: ${envPrefix}_API_BASE points at a staging host in production.`,
+    );
+  }
+  // Rows store the registry currency and are requeried in it (inRowCurrency):
+  // any other CurrCode here would refuse every callback and read live rows as
+  // "Not found", which authorises refunds.
+  const currencyCode = env[`${envPrefix}_CURRENCY`] ?? currency;
+  if (currencyCode !== currency) {
+    throw new Error(
+      `${label}: ${envPrefix}_CURRENCY must be ${currency}, not ${currencyCode}.`,
+    );
   }
   return {
-    kind: 'a3pay',
-    // Required, not defaulted: there is no sandbox, so a default could only
-    // ever be production.
+    kind,
+    // Required, not defaulted: a default could only ever be production.
     baseUrl,
-    merchantCode: required('A3PAY_MERCHANT_CODE'),
-    aesKey: required('A3PAY_AES_KEY'),
-    privateKey: required('A3PAY_MERCHANT_PRIVATE_KEY'),
-    publicKey: required('A3PAY_PUBLIC_KEY'),
-    currencyCode: env.A3PAY_CURRENCY ?? 'SGD',
+    merchantCode: required('MERCHANT_CODE'),
+    aesKey: required('AES_KEY'),
+    privateKey: required('MERCHANT_PRIVATE_KEY'),
+    publicKey: required('PUBLIC_KEY'),
+    currencyCode,
   };
 }
 
-/** Every credential a3payConfigFromEnv requires — the `configured` check. */
+/** Every credential a3payFamilyConfigFromEnv requires — the `configured` check. */
+export function a3payFamilyConfigured(
+  kind: A3payKind,
+  env: Partial<NodeJS.ProcessEnv>,
+): boolean {
+  const { envPrefix } = A3PAY_FAMILY[kind];
+  return CREDENTIALS.every((suffix) => Boolean(env[`${envPrefix}_${suffix}`]));
+}
+
+/** A3Pay (SGD)'s own config — the original single-tenant entry point. */
+export function a3payConfigFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): A3payConfig<'a3pay'> {
+  return a3payFamilyConfigFromEnv('a3pay', env);
+}
+
 export function a3payConfigured(env: Partial<NodeJS.ProcessEnv>): boolean {
-  return [
-    'A3PAY_API_BASE',
-    'A3PAY_MERCHANT_CODE',
-    'A3PAY_AES_KEY',
-    'A3PAY_MERCHANT_PRIVATE_KEY',
-    'A3PAY_PUBLIC_KEY',
-  ].every((name) => Boolean(env[name]));
+  return a3payFamilyConfigured('a3pay', env);
 }
 
 /**
@@ -138,6 +194,7 @@ function failure<T>(
   path: string,
   parsed: A3payResponse<T>,
   httpStatus: number,
+  label: string,
 ): A3payError {
   const list = parsed.errorList ?? [];
   const codes = [
@@ -184,7 +241,7 @@ function failure<T>(
   // is ambiguous even in their envelope: their side may have recorded the
   // payout before failing, and A3Pay posts payouts by hand (TGPay's rule too).
   return new A3payError(
-    `A3Pay ${path} failed: ${detail}`,
+    `${label} ${path} failed: ${detail}`,
     codes,
     httpStatus,
     parsed.isSuccess === false && httpStatus < 500,
@@ -195,13 +252,14 @@ function parse<T>(
   path: string,
   text: string,
   httpStatus: number,
+  label: string,
 ): A3payResponse<T> {
   try {
     return JSON.parse(text) as A3payResponse<T>;
   } catch {
     // An HTML error page or a WAF block (an un-whitelisted IP lands here).
     throw new A3payError(
-      `A3Pay ${path}: non-JSON response (HTTP ${httpStatus}): ${text.slice(0, 200)}`,
+      `${label} ${path}: non-JSON response (HTTP ${httpStatus}): ${text.slice(0, 200)}`,
       [],
       httpStatus,
     );
@@ -224,9 +282,10 @@ async function post<T>(
     body: JSON.stringify(buildEnvelope(payload, config)),
     signal: AbortSignal.timeout(timeoutMs),
   });
-  const parsed = parse<T>(path, await response.text(), response.status);
+  const label = A3PAY_FAMILY[config.kind].label;
+  const parsed = parse<T>(path, await response.text(), response.status, label);
   if (parsed.isSuccess !== true || !parsed.data) {
-    throw failure(path, parsed, response.status);
+    throw failure(path, parsed, response.status, label);
   }
   return parsed.data;
 }
@@ -245,10 +304,10 @@ export type CreatePayinInput = {
   ipAddress: string;
   callbackUrl: string;
   returnUrl: string;
-  /** OB (online banking) | BQR (QR). */
+  /** OB (online banking) | BQR (QR) for SGD; UTRC | UERC for USDT. */
   paymentMethodId: string;
-  /** Required for SGD. */
-  accountHolderName: string;
+  /** The paying account's holder. Required for SGD; omitted for USDT. */
+  accountHolderName?: string;
 };
 
 export type CreatePayinResult = {
@@ -283,7 +342,9 @@ export function createPayin(
       CallbackURL: input.callbackUrl,
       ReturnClientURL: input.returnUrl,
       PaymentMethodId: input.paymentMethodId,
-      FromCustomerAccountHolderName: input.accountHolderName,
+      ...(input.accountHolderName
+        ? { FromCustomerAccountHolderName: input.accountHolderName }
+        : {}),
     },
     config,
   );
@@ -325,9 +386,12 @@ export type SubmitPayoutInput = {
   /** In config.currencyCode (SGD), 2dp. */
   amount: number;
   ipAddress: string;
-  /** A3Pay's own bank code (GetSupportedBankList), not our canonical id. */
+  /** A3Pay's own bank code (GetSupportedBankList), not our canonical id.
+   *  USDT: USDTTRC / USDTERC, the wallet's network. */
   bankCode: string;
+  /** USDT: the wallet address. */
   accountNumber: string;
+  /** USDT: must equal MCustId (customerId), per GlobePay365's doc. */
   accountHolderName: string;
   callbackUrl: string;
   /** Payout Verification URL: they POST here and pay only on "success". */
@@ -428,13 +492,15 @@ export async function getSupportedBankList(
     `${config.baseUrl}${path}?MID=${encodeURIComponent(config.merchantCode)}` +
     `&PaymentMethodId=WD&currCode=${encodeURIComponent(config.currencyCode)}`;
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  const label = A3PAY_FAMILY[config.kind].label;
   const parsed = parse<A3payBank[]>(
     path,
     await response.text(),
     response.status,
+    label,
   );
   if (parsed.isSuccess !== true || !parsed.data) {
-    throw failure(path, parsed, response.status);
+    throw failure(path, parsed, response.status, label);
   }
   return parsed.data;
 }

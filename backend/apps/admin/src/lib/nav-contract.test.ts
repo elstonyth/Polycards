@@ -52,9 +52,11 @@ const readConfig = (file: string): PageConfig | null => {
   };
 };
 
-const configs = pageFiles(ROUTES)
+const allConfigs = pageFiles(ROUTES)
   .map(readConfig)
   .filter((c): c is PageConfig => c !== null);
+// Pages under /settings/ live in the Settings layout's own sidebar, not here.
+const configs = allConfigs.filter((c) => !c.path.startsWith('/settings/'));
 const byRank = (a: PageConfig, b: PageConfig) => (a.rank ?? 0) - (b.rank ?? 0);
 
 type Entry = { path: string; label: string };
@@ -64,6 +66,13 @@ type Group = Entry & { children: Entry[] };
 // merges them.
 const GROUPS: Group[] = [
   { path: '/overview', label: 'pcNav.dashboard', children: [] },
+  // The AI assistant (2026-10-29): every role that may use it sees it; the
+  // conversation review under it is super-admin only.
+  {
+    path: '/assistant',
+    label: 'pcNav.assistant',
+    children: [{ path: '/assistant/review', label: 'pcNav.assistantReview' }],
+  },
   { path: '/deliveries', label: 'pcNav.orders', children: [] },
   {
     path: '/payments',
@@ -83,9 +92,11 @@ const GROUPS: Group[] = [
       { path: '/odds-sets', label: 'pcNav.playerGroups' },
       { path: '/referrals', label: 'pcNav.referrals' },
       { path: '/support', label: 'pcNav.customerSupport' },
-      { path: '/automation', label: 'pcNav.automation' },
     ],
   },
+  // Top-level since 2026-10-23: the automation operator role sees only this
+  // entry, and a nested entry renders only under a visible parent.
+  { path: '/automation', label: 'pcNav.automation', children: [] },
   {
     path: '/packs',
     label: 'pcNav.packs',
@@ -101,7 +112,10 @@ const GROUPS: Group[] = [
     children: [
       { path: '/products/from-pricecharting', label: 'pcNav.addStock' },
       { path: '/products/from-pc-collection', label: 'pcNav.importCollection' },
+      // GRN above Purchase invoices: cards arrive before their invoice.
+      { path: '/goods-receive-notes', label: 'pcNav.goodsReceiveNotes' },
       { path: '/purchase-invoices', label: 'pcNav.purchaseInvoices' },
+      { path: '/procurement', label: 'pcNav.procurement' },
     ],
   },
   {
@@ -111,6 +125,7 @@ const GROUPS: Group[] = [
       { path: '/daily-rewards', label: 'pcNav.vipLevels' },
       { path: '/tasks', label: 'pcNav.tasks' },
       { path: '/challenge', label: 'pcNav.weeklyChallenge' },
+      { path: '/lucky-draw', label: 'pcNav.luckyDraw' },
     ],
   },
   {
@@ -172,11 +187,21 @@ const entry = (c: PageConfig): Entry => ({
 });
 
 describe('sidebar contract (Vault spec §6)', () => {
-  it('shows exactly the 8 top-level entries, in order', () => {
+  it('shows exactly the 10 top-level entries, in order', () => {
     const top = configs.filter((c) => !c.nested).sort(byRank);
     expect(top.map(entry)).toEqual(
       GROUPS.map(({ path, label }) => ({ path, label })),
     );
+  });
+
+  it('gates every top-level entry with permissions', () => {
+    // The sidebar shows an entry without `permissions` to EVERY role, so one
+    // ungated page would appear for the automation operator. Nested entries
+    // hide with their parent.
+    for (const c of allConfigs.filter((x) => !x.nested)) {
+      const body = configBody(join(ROUTES, c.path.slice(1), 'page.tsx'));
+      expect(body, c.path).toMatch(/\bpermissions:\s*\[/);
+    }
   });
 
   it.each(GROUPS)('$path lists its pages in order', (group) => {
@@ -192,7 +217,7 @@ describe('sidebar contract (Vault spec §6)', () => {
   });
 
   it('labels every entry through i18n with an English string', () => {
-    for (const c of configs) {
+    for (const c of allConfigs) {
       expect(c.translationNs, c.path).toBe('translation');
       expect(typeof lookup(c.label ?? ''), `${c.path}: ${c.label}`).toBe(
         'string',

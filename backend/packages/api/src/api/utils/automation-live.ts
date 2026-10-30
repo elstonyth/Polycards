@@ -8,6 +8,7 @@ import {
 } from './automation-humanized';
 import { DEFAULT_LIVE_TIMING } from './automation-live-types';
 import {
+  LIVE_GOAL_MAX_CYCLES,
   liveRankReady,
   nextLiveRankCheck,
   validateLiveRankTargets,
@@ -43,6 +44,23 @@ export function createLiveState(): LiveState {
 const timingRandom = () => randomInt(1_000_000) / 1_000_000;
 const pace = (state: LiveState) =>
   state.config?.humanizedPace ?? DEFAULT_LIVE_TIMING.humanizedPace;
+
+/**
+ * Humanized speed is a clock multiplier: the simulated players live on a
+ * virtual clock that runs `pace` times faster than real time from the run's
+ * start, so sessions, breaks, sleep and days all shrink together (5× = one
+ * player day in about 4.8 real hours). Pace 1 is the real clock.
+ */
+function playerClock(state: LiveState, now: number) {
+  const speed = pace(state);
+  const start = state.clockStartedAt ?? (state.startedAt ??= now);
+  return {
+    now: start + (now - start) * speed,
+    /** A virtual instant or duration converted back to real time. */
+    toRealAt: (virtualAt: number) => start + (virtualAt - start) / speed,
+    toRealMs: (virtualMs: number) => Math.ceil(virtualMs / speed),
+  };
+}
 
 /**
  * One draw's pack from a weighted mix (weights in basis points). Packs the
@@ -101,21 +119,92 @@ export function validateLivePackMix(value: unknown): LivePackWeight[] {
     .map((row) => ({ packSlug: row.packSlug, weightBp: row.weightBp }));
 }
 
+/** Accounts with a leaderboard goal in this run. The rest draw ordinarily. */
+const goalAccount = (state: LiveState, id: string) =>
+  !!state.config?.rankTargets?.some((target) => target.customerId === id);
+
 function remainingCustomers(state: LiveState): string[] {
   const { config } = state;
   if (!config) return [];
   return config.customerIds.filter(
     (id) =>
-      (!config.rankTargets?.length ||
-        config.rankTargets.some((target) => target.customerId === id)) &&
       !state.rankGoals?.some(
         (goal) => goal.target.profileId === id && goal.done,
       ) &&
       // An account that ran out of balance is finished for this run.
       !state.cycles.some((cycle) => cycle.customerId === id && cycle.skipped) &&
       state.cycles.filter((cycle) => cycle.customerId === id).length <
-        config.maxCyclesPerAccount,
+        // A goal account pushes until its goal is done, not the per-account cap.
+        (goalAccount(state, id)
+          ? LIVE_GOAL_MAX_CYCLES
+          : config.maxCyclesPerAccount),
   );
+}
+
+/** A finished round may start the next one by itself (config.repeat) unless
+ *  it failed or was stopped, drew nothing (every account out of balance would
+ *  restart it every tick), or stopped a goal for safety. */
+export function canRepeatLiveRound(state: LiveState): boolean {
+  return (
+    state.status === 'completed' &&
+    !!state.config?.repeat &&
+    !state.pending &&
+    state.cycles.some((cycle) => !cycle.skipped && !cycle.error) &&
+    !state.rankGoals?.some(
+      (goal) =>
+        goal.done && !['secured', 'limited'].includes(goal.status.state),
+    )
+  );
+}
+
+/** Starts a round: the finished one goes to history, cycles, goals and spend
+ *  reset. A repeated round (carryOver) keeps the Humanized schedules and their
+ *  clock, so the accounts carry on their day instead of all waking at once. */
+export function beginLiveRound(
+  state: LiveState,
+  round: Pick<LiveState, 'packPriceCents' | 'packPricesCents'> & {
+    config: LiveConfig;
+  },
+  now: number,
+  carryOver: boolean,
+): void {
+  const finished = summarizeLiveRun(state);
+  if (finished?.draws)
+    state.history = [finished, ...(state.history ?? [])].slice(0, 30);
+  const { config } = round;
+  if (carryOver) state.clockStartedAt ??= state.startedAt;
+  else state.clockStartedAt = undefined;
+  Object.assign(state, {
+    config,
+    packPriceCents: round.packPriceCents,
+    packPricesCents: round.packPricesCents,
+    status: 'running',
+    runId: randomUUID(),
+    startedAt: now,
+    spentCents: 0,
+    cycles: [],
+    schedules:
+      config.timingMode !== 'humanized'
+        ? []
+        : carryOver
+          ? (state.schedules ?? []).filter((row) =>
+              config.customerIds.includes(row.customerId),
+            )
+          : createHumanizedStates(
+              config.customerIds,
+              config.humanizedRegion ?? 'mysg',
+              state.humanizedAssignments,
+            ).map((humanized) => ({
+              customerId: humanized.profileId,
+              humanized,
+              nextRunAt: now,
+              waitReason: 'Planning activity',
+            })),
+    rankGoals: undefined,
+    nextDrawAt: undefined,
+    nextRunAt: now,
+    error: null,
+  });
 }
 
 /** A finished-or-current run in one row, for the run history list. */
@@ -178,7 +267,9 @@ export function claimLiveCycle(
     return null;
   }
   const eligible = remaining.filter((id) => liveRankReady(state, id, now));
-  let customerId = eligible[0];
+  // A goal account draws as soon as its fresh rank check allows; the other
+  // accounts fill the run's draw slots between its draws.
+  let customerId = eligible.find((id) => goalAccount(state, id)) ?? eligible[0];
   if (!customerId) {
     state.nextRunAt = Math.max(now + 2000, nextLiveRankCheck(state, now));
     return null;
@@ -207,6 +298,7 @@ export function claimLiveCycle(
       state.config.humanizedRegion ?? DEFAULT_LIVE_TIMING.humanizedRegion,
       state.humanizedAssignments,
     );
+    const clock = playerClock(state, now);
     state.schedules = state.config.customerIds.map((id) => {
       const previous = state.schedules?.find((row) => row.customerId === id);
       if (previous && (previous.nextRunAt > now || !remaining.includes(id)))
@@ -215,14 +307,14 @@ export function claimLiveCycle(
         ? { ...previous.humanized }
         : assignments.find((row) => row.profileId === id)!;
       if (!humanized.timerKind) humanized.waitReason = previous?.waitReason;
-      const plan = planHumanized(humanized, now, random, pace(state));
+      const plan = planHumanized(humanized, clock.now, random);
       return {
         customerId: id,
         humanized,
         // A due draw keeps its due time, so the longest-waiting account goes first.
         nextRunAt: plan.ready
-          ? Math.min(now, humanized.nextDrawAt ?? now)
-          : now + plan.delayMs,
+          ? Math.min(now, clock.toRealAt(humanized.nextDrawAt ?? clock.now))
+          : now + clock.toRealMs(plan.delayMs),
         waitReason: plan.reason,
       };
     });
@@ -240,18 +332,22 @@ export function claimLiveCycle(
         .map((row) => row.nextRunAt),
     );
     // Draws run one at a time, so serve the longest-waiting account first;
-    // list order would starve the accounts at the end of a busy queue.
-    const ready = state.schedules
-      .filter(
-        (row) =>
-          remaining.includes(row.customerId) &&
-          row.nextRunAt <= now &&
-          eligible.includes(row.customerId),
-      )
-      .reduce<LiveSchedule | undefined>(
+    // list order would starve the accounts at the end of a busy queue. A
+    // ready goal account still goes before the ordinary ones.
+    const due = state.schedules.filter(
+      (row) =>
+        remaining.includes(row.customerId) &&
+        row.nextRunAt <= now &&
+        eligible.includes(row.customerId),
+    );
+    const longestWaiting = (rows: LiveSchedule[]) =>
+      rows.reduce<LiveSchedule | undefined>(
         (best, row) => (best && best.nextRunAt <= row.nextRunAt ? best : row),
         undefined,
       );
+    const ready =
+      longestWaiting(due.filter((row) => goalAccount(state, row.customerId))) ??
+      longestWaiting(due);
     if (ranked)
       state.nextRunAt = Math.min(
         state.nextRunAt,
@@ -301,7 +397,9 @@ export function completeLiveCycle(
   if (
     (state.status === 'running' || state.status === 'paused') &&
     !remainingCustomers(state).length &&
-    !state.config?.rankTargets?.length
+    !state.config?.rankTargets?.length &&
+    // A repeat round finishes at the next claim, where the next one starts.
+    !state.config?.repeat
   )
     state.status = 'completed';
   if (
@@ -314,15 +412,13 @@ export function completeLiveCycle(
       (row) => row.customerId === cycle.customerId,
     );
     if (schedule) {
-      recordHumanizedCycle(
-        schedule.humanized,
-        now,
-        random,
-        { spend: cycle.costCents ?? 0, value: cycle.saleCents ?? 0 },
-        pace(state),
-      );
-      const plan = planHumanized(schedule.humanized, now, random, pace(state));
-      schedule.nextRunAt = now + plan.delayMs;
+      const clock = playerClock(state, now);
+      recordHumanizedCycle(schedule.humanized, clock.now, random, {
+        spend: cycle.costCents ?? 0,
+        value: cycle.saleCents ?? 0,
+      });
+      const plan = planHumanized(schedule.humanized, clock.now, random);
+      schedule.nextRunAt = now + clock.toRealMs(plan.delayMs);
       schedule.waitReason = plan.reason;
     }
   }
@@ -394,8 +490,10 @@ export function validateLiveConfig(
           'humanizedPace',
           'packMix',
           'rankTargets',
+          'repeat',
         ].includes(key),
     ) ||
+    (input.repeat !== undefined && typeof input.repeat !== 'boolean') ||
     typeof input.packSlug !== 'string' ||
     !(
       SLUG.test(input.packSlug) ||
@@ -403,7 +501,7 @@ export function validateLiveConfig(
     ) ||
     !Number.isInteger(input.humanizedPace) ||
     Number(input.humanizedPace) < 1 ||
-    Number(input.humanizedPace) > 10 ||
+    Number(input.humanizedPace) > 24 ||
     !Array.isArray(input.customerIds) ||
     input.customerIds.length < 1 ||
     input.customerIds.length > 80 ||
@@ -433,7 +531,7 @@ export function validateLiveConfig(
     Number(input.randomMinSeconds) > Number(input.randomMaxSeconds)
   )
     throw new Error(
-      'Choose a paid pack, 1–80 monitored customers, Fixed/Random/Humanized timing, 2–86400 second intervals with minimum no greater than maximum, a supported region, Humanized pace 1–10× and 1–10 cycles per account.',
+      'Choose a paid pack, 1–80 monitored customers, Fixed/Random/Humanized timing, 2–86400 second intervals with minimum no greater than maximum, a supported region, Humanized speed 1–24× and 1–10 cycles per account.',
     );
   return {
     packSlug: input.packSlug,
@@ -448,6 +546,7 @@ export function validateLiveConfig(
     randomMaxSeconds: input.randomMaxSeconds,
     humanizedRegion: input.humanizedRegion,
     humanizedPace: input.humanizedPace,
+    ...(input.repeat ? { repeat: true } : {}),
     ...(input.rankTargets === undefined
       ? {}
       : {

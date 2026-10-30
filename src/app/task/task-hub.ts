@@ -61,7 +61,18 @@ export const stubName = (reward: TaskEntry['reward']): string =>
  *  for packs only; a prize card ships for a fee or sells back withdrawable. A
  *  free rip normally hands the player to the slot instead; one that could not
  *  (no claim id) waits in the free-rip list at the top of /task. */
-export function claimNotice(reward: TaskEntry['reward']): string {
+export function claimNotice(
+  reward: TaskEntry['reward'],
+  tickets?: number,
+): string {
+  const extra =
+    typeof tickets === 'number' && Number.isFinite(tickets) && tickets > 0
+      ? ` + ${tickets} Lucky Draw ${tickets === 1 ? 'ticket' : 'tickets'}`
+      : '';
+  return rewardNotice(reward) + extra;
+}
+
+function rewardNotice(reward: TaskEntry['reward']): string {
   if (reward.type === 'credit') {
     const amount = reward.amount_myr;
     const what =

@@ -237,6 +237,66 @@ describe('taskFactsFor reads the VIP high-water mark', () => {
 });
 
 describe('taskFactsFor splits today out of the task week', () => {
+  it('untargeted pixel totals count Pokémon sprites only; One Piece stays per-id', async () => {
+    // "N Pokémon (pixel) cards" must not pay out for One Piece pulls — but a
+    // task that NAMES a One Piece sprite still sees its tally.
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
+    const now = new Date('2026-10-07T04:00:00Z');
+    Object.assign(svc, {
+      listDailyCheckins: jest.fn(async () => []),
+      listVipMemberStates: jest.fn(async () => []),
+    });
+    const execute = jest.fn(async (sql: string) => {
+      if (sql.includes('GROUP BY c.pixel_pokemon_id'))
+        return [
+          {
+            pixel_pokemon_id: 'px_25',
+            franchise: 'pokemon',
+            n: '4',
+            n_week: '2',
+            n_day: '1',
+          },
+          {
+            pixel_pokemon_id: 'op_1',
+            franchise: 'one-piece',
+            n: '7',
+            n_week: '5',
+            n_day: '3',
+          },
+          // library row since deleted → franchise unknown → counted as before
+          {
+            pixel_pokemon_id: 'px_gone',
+            franchise: null,
+            n: '1',
+            n_week: '1',
+            n_day: '0',
+          },
+        ];
+      if (sql.includes('FROM credit_transaction'))
+        return [{ week_sen: '0', day_sen: '0', total_sen: '0' }];
+      return [{ n: '0' }];
+    });
+    const facts: TaskFacts = await (
+      svc as unknown as {
+        taskFactsFor: (input: unknown, ctx: unknown) => Promise<TaskFacts>;
+      }
+    ).taskFactsFor(
+      { customerId: 'cus_1', week: taskWeekFor(now), day: taskDayFor(now) },
+      { manager: { execute } },
+    );
+    expect(facts.vaultPixelCount).toBe(5);
+    expect(facts.week.pixelPulls).toBe(3);
+    expect(facts.day.pixelPulls).toBe(1);
+    expect(facts.vaultPixelCountById.get('op_1')).toBe(7);
+    expect(facts.week.pixelPullsById.get('op_1')).toBe(5);
+    const pixelSql = execute.mock.calls.find(([sql]) =>
+      sql.includes('GROUP BY c.pixel_pokemon_id'),
+    )![0];
+    expect(pixelSql).toContain('LEFT JOIN pixel_pokemon pp');
+  });
+
   it('reads the day from the week rows — check-in dates and FILTERed counts', async () => {
     const svc = Object.create(
       PacksModuleService.prototype,

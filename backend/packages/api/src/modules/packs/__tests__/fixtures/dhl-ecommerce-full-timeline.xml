@@ -1,0 +1,330 @@
+<!-- trimmed from a real ecommerceportal.dhl.com "Show more tracking status" answer, 2026-10-30; recipient names masked -->
+<?xml version='1.0' encoding='UTF-8'?>
+<partial-response id="j_id1"><changes><update id="trackItNowForm:timelinePanel"><![CDATA[<span id="trackItNowForm:timelinePanel">
+
+									<div class="row position-relative d-flex align-items-start tracking-item-start">
+										<div class="col-2 text-uppercase">
+												<div class="text-grey-80">Monday</div>
+												<div class="fw-bold text-grey-80">Oct 19, 2026
+												</div>
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>01:59
+												PM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status-start bg-delivered"></i>
+											</div>
+												<div class="timeline-line timeline-line-start">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 color-delivery"><span class="d-none d-lg-block">Successfully delivered - Signed for by : X</span><span class="d-lg-none">Successfully delivered - Signed for by : X</span>
+											</div>
+											<div class="text-grey-80">
+												Skudai, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>11:59
+												AM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line ">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Out for Delivery</span><span class="d-lg-none">Out for Delivery</span>
+											</div>
+											<div class="text-grey-45">
+												Skudai, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>11:47
+												AM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line ">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Processed at delivery facility</span><span class="d-lg-none">Processed at delivery facility</span>
+											</div>
+											<div class="text-grey-45">
+												Skudai, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>04:26
+												AM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line timeline-line-last">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Departed from facility</span><span class="d-lg-none">Departed from facility</span>
+											</div>
+											<div class="text-grey-45">
+												Kuala Lumpur Hub, Malaysia
+											</div>
+										</div>
+									</div>
+								<hr class="mt-0" />
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+												<div class="text-grey-80">Saturday</div>
+												<div class="fw-bold text-grey-80">Oct 17, 2026
+												</div>
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>08:21
+												PM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line ">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Sorted to delivery facility</span><span class="d-lg-none">Sorted to delivery facility</span>
+											</div>
+											<div class="text-grey-45">
+												Kuala Lumpur Hub, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>08:17
+												PM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line ">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Processed at facility</span><span class="d-lg-none">Processed at facility</span>
+											</div>
+											<div class="text-grey-45">
+												Kuala Lumpur Hub, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>06:22
+												PM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line ">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Arrival at Facility</span><span class="d-lg-none">Arrival at Facility</span>
+											</div>
+											<div class="text-grey-45">
+												Kuala Lumpur Hub, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>02:31
+												PM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line ">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Shipment picked up</span><span class="d-lg-none">Shipment picked up</span>
+											</div>
+											<div class="text-grey-45">
+												Kuchai Lama, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>10:46
+												AM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line ">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Shipment picked up failed [Will Be Re-Attempted]</span><span class="d-lg-none">Shipment picked up failed [Will Be Re-Attempted]</span>
+											</div>
+											<div class="text-grey-45">
+												Kuchai Lama, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>10:41
+												AM LT</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+												<div class="timeline-line ">
+												</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Shipment data received - Awaiting Parcel Handover to DHL</span><span class="d-lg-none">Shipment data received - Awaiting Parcel Handover to DHL</span>
+											</div>
+											<div class="text-grey-45">
+												Kuala Lumpur Hub, Malaysia
+											</div>
+										</div>
+									</div>
+
+									<div class="row position-relative d-flex align-items-start tracking-item text-grey-60">
+										<div class="col-2 text-uppercase">
+										</div>
+
+										
+										<div class="col-2 text-end me-3 text-nowrap">
+											<div>10:41
+												AM Malaysia</div>
+										</div>
+
+										
+										<div class="col-1 position-relative me-3">
+											<div class="d-flex justify-content-center align-items-center">
+												<i class="pi pi-check text-white rounded-circle d-flex justify-content-center align-items-center delivery-icon-status bg-light-green"></i>
+											</div>
+										</div>
+
+										
+										<div class="col-6">
+											<div class="fw-bold text-uppercase fs-18 "><span class="d-none d-lg-block">Data Submitted - Awaiting Parcel Handover to DHL</span><span class="d-lg-none">Data Submitted - Awaiting Parcel Handover to DHL</span>
+											</div>
+											<div class="text-grey-45">
+												KUALA LUMPUR, Malaysia
+											</div>
+										</div>
+									</div>
+							<div class="text-center mt-4 mb-2"><a id="trackItNowForm:j_idt671" href="#" onclick="mojarra.ab(this,event,'action',0,'trackItNowForm:timelinePanel');return false" class="color_dhl_red fs-14 fw-bold text-decoration-underline">Hide tracking status
+									<i class="ms-2 pi pi-chevron-up"></i></a>
+							</div></span>]]></update><update id="j_id1:javax.faces.ViewState:0"><![CDATA[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]]></update></changes></partial-response>

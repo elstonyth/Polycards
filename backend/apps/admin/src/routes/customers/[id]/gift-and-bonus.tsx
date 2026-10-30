@@ -82,6 +82,7 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
     (p) =>
       p.status === 'active' &&
       !UNGIFTABLE.includes(p.category) &&
+      p.prize_type !== 'tickets' &&
       p.group !== null,
   );
   const packTitle =

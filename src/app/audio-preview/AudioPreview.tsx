@@ -37,6 +37,18 @@ export function AudioPreview() {
         <Pill variant="ghost" onClick={() => play('stop')} disabled={muted}>
           Reel stop
         </Pill>
+        {(['drawStart', 'drawTick', 'drawStop', 'drawWin'] as const).map(
+          (cue) => (
+            <Pill
+              key={cue}
+              variant="ghost"
+              onClick={() => sfx(cue)}
+              disabled={muted}
+            >
+              Lucky Draw {cue.slice(4).toLowerCase()}
+            </Pill>
+          ),
+        )}
       </div>
       <div className="divide-y divide-white/10 border-y border-white/10">
         {[...RARITY_ORDER].reverse().map((rarity) => (

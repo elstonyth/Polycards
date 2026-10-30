@@ -4,8 +4,8 @@
  * Ship a vaulted reward-prize Pull as a physical delivery, under the per-customer
  * `credit:` advisory lock (mirrors settleOpen / settleRewardDraw — NOT the
  * lockless requestDeliveryStep). One transaction: validate the Pull is
- * source='reward', owned, status='vaulted' (else 'invalid'); COUNT today's
- * is_reward delivery_order rows; >= withdrawals_per_day → 'capped'; else create a
+ * source='reward', owned, status='vaulted' (else 'invalid'); COUNT the
+ * prize cards in today's shipments; >= withdrawals_per_day → 'capped'; else create a
  * DeliveryOrder(is_reward:true) + DeliveryOrderItem and flip the Pull
  * vaulted → delivering under the lock (that flip — not the per-(order,pull)
  * unique — is the one-active-shipment enforcer).
@@ -33,6 +33,10 @@ import Pack from '../models/pack';
 import Card from '../models/card';
 import PackOdds from '../models/pack-odds';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
+// lockedPullIds reads a reward pull's task claim (daily-task lock).
+import TaskDefinition from '../models/task-definition';
+import TaskClaim from '../models/task-claim';
 import CreditTransaction from '../models/credit-transaction';
 import DeliveryOrder from '../models/delivery-order';
 import DeliveryOrderItem from '../models/delivery-order-item';
@@ -45,6 +49,8 @@ import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
+import { snapshotAddress } from '../delivery';
+import { DEFAULT_MARKET_MULTIPLIER, displayMarketPrice } from '../pricing';
 
 jest.setTimeout(300 * 1000);
 
@@ -72,10 +78,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [
+    TaskDefinition,
+    TaskClaim,
     Pack,
     Card,
     PackOdds,
     Pull,
+    TicketSpin,
     CreditTransaction,
     DeliveryOrder,
     DeliveryOrderItem,
@@ -399,6 +408,138 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(orders).toHaveLength(0);
         const [pull] = await service.listPulls({ id: pullId }, { take: 1 });
         expect(pull.status).toBe('vaulted');
+      });
+    });
+
+    // One parcel, one shipping fee (2026-10-23): prize cards sent with vault
+    // cards ride in the vault order instead of a second RM15 order.
+    describe('createDeliveryOrderWithLedger — prize cards in the vault parcel', () => {
+      const SNAPSHOT = snapshotAddress(ADDRESS)!;
+      const FX = 4;
+      const seedCard = (handle: string, usd: number) =>
+        service.createCards([
+          {
+            handle,
+            name: handle,
+            set: 'Base',
+            grader: 'PSA',
+            grade: '10',
+            market_value: usd,
+            image: 'x.webp',
+          },
+        ]);
+      const seedOwned = async (
+        customerId: string,
+        cardId: string,
+        source: 'pack' | 'reward',
+      ) => {
+        const [pull] = await service.createPulls([
+          {
+            customer_id: customerId,
+            pack_id: 'reward-box-c',
+            card_id: cardId,
+            order_id: null,
+            rolled_at: new Date(),
+            source,
+          },
+        ]);
+        return pull.id;
+      };
+
+      it('ships vault + prize as ONE order with ONE fee; the prize stays out of vault_delta', async () => {
+        const customerId = 'cus_parcel_mixed';
+        await seedCard('parcel-vault', 10);
+        await seedCard('parcel-prize', 20);
+        await service.mutateCreditAtomic({
+          customerId,
+          amount: 50,
+          reason: 'topup',
+          idempotencyReference: `seed-topup:${customerId}`,
+        });
+        const vaultId = await seedOwned(customerId, 'parcel-vault', 'pack');
+        const prizeId = await seedOwned(customerId, 'parcel-prize', 'reward');
+
+        const { orderId } = await service.createDeliveryOrderWithLedger({
+          customerId,
+          snapshot: SNAPSHOT,
+          pullIds: [vaultId, prizeId],
+          fx: FX,
+        });
+
+        const orders = await service.listDeliveryOrders(
+          { customer_id: customerId },
+          { take: 10 },
+        );
+        expect(orders).toHaveLength(1);
+        expect(orders[0].is_reward).toBe(true);
+        expect(Number(orders[0].shipping_fee)).toBe(15);
+        expect(Number(orders[0].insurance_fee)).toBe(0);
+        expect(await service.creditBalance(customerId)).toBe(35);
+        // Prize pulls stay outside value tracking: only the vault card debits.
+        const [od] = await service.listLedgerEntries(
+          { ref_id: orderId, type: 'OD' },
+          { take: 1 },
+        );
+        expect(Number(od.vault_delta)).toBeCloseTo(
+          -displayMarketPrice(10, FX, DEFAULT_MARKET_MULTIPLIER),
+          2,
+        );
+        expect(await service.rewardShippingAllowance(customerId)).toMatchObject(
+          { usedToday: 1, remaining: 0 },
+        );
+
+        // Cancel: the whole fee back, both cards back in the vault, and the
+        // prize allowance freed.
+        await service.transitionDeliveryOrderStatus({
+          orderId,
+          to: 'canceled',
+          trackingNumber: null,
+          pullIds: [vaultId, prizeId],
+        });
+        expect(await service.creditBalance(customerId)).toBe(50);
+        const pulls = await service.listPulls(
+          { id: [vaultId, prizeId] },
+          { take: 2 },
+        );
+        expect(pulls.map((p) => p.status)).toEqual(['vaulted', 'vaulted']);
+        expect(await service.rewardShippingAllowance(customerId)).toMatchObject(
+          { usedToday: 0, remaining: 1 },
+        );
+      });
+
+      it('counts a prize in a vault order against the daily cap, on both paths', async () => {
+        const customerId = 'cus_parcel_cap';
+        const first = await seedPull({ customerId, source: 'reward' });
+        const second = await seedPull({ customerId, source: 'reward' });
+        const third = await seedPull({ customerId, source: 'reward' });
+        const vaultId = await seedPull({ customerId, source: 'pack' });
+
+        // Two prizes in one parcel exceed withdrawals_per_day=1: nothing ships.
+        await expect(
+          service.createDeliveryOrderWithLedger({
+            customerId,
+            snapshot: SNAPSHOT,
+            pullIds: [vaultId, first, second],
+            fx: FX,
+          }),
+        ).rejects.toThrow(/Prize cards ship 1 per day/);
+        expect(
+          await service.listDeliveryOrders({ customer_id: customerId }),
+        ).toHaveLength(0);
+        expect(await service.creditBalance(customerId)).toBe(50);
+
+        // One prize rides along; the reward route is then capped for the day.
+        await service.createDeliveryOrderWithLedger({
+          customerId,
+          snapshot: SNAPSHOT,
+          pullIds: [vaultId, first],
+          fx: FX,
+        });
+        expect(await service.creditBalance(customerId)).toBe(35);
+        expect(
+          (await service.recordRewardWithdrawal(customerId, third, ADDRESS))
+            .status,
+        ).toBe('capped');
       });
     });
   },

@@ -6,3 +6,17 @@
 # Same constant in the first commit's client-side generator (file rewritten
 # since; the alphabet now lives only in partner-accounts.ts).
 445abd670e71053578eca33754ef13645adb7966:backend/apps/admin/src/lib/create-player.ts:generic-api-key:13
+# .do/backend.app.yaml GP365_ENABLED is an env var NAME the generic rule reads as a
+# key value. The tree now carries an inline gitleaks:allow; this covers the commit
+# that predates it.
+df472da06ecca061b3385c3ba4ae666b47be6c66:.do/backend.app.yaml:generic-api-key:576
+# pixel-franchise.spec.ts PASSWORD is the made-up password of the admin the
+# integration runner creates in its throwaway test database, not a credential.
+# The current tree carries an inline gitleaks:allow; this covers the commit
+# that introduced it.
+f586b9d906de8fbd2da64a9ed127c70b055a8f31:backend/packages/api/integration-tests/http/pixel-franchise.spec.ts:generic-api-key:6
+# Admin assistant tests (PR #892): made-up OpenRouter-style keys used to test
+# the key vault and the settings route; the current tree marks them
+# gitleaks:allow, these cover the commits that predate the marker.
+6db79e43dc6d2a360c20a95ab67baac36f3e3f2d:backend/packages/api/src/modules/assistant/__tests__/key-vault.unit.spec.ts:generic-api-key:4
+4b932467f71f15fb59f50af1b5365bc0c28e27f8:backend/packages/api/integration-tests/http/assistant.spec.ts:generic-api-key:20

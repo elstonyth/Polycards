@@ -1,8 +1,5 @@
 import { describe, expect, it, vi, type Mock } from 'vitest';
-import {
-  fetchSeededCandidates,
-  matchSeededEntry,
-} from './pixel-auto-resolve';
+import { fetchSeededCandidates, matchSeededEntry } from './pixel-auto-resolve';
 import { getPixelPokemon, type PixelPokemonRow } from './admin-rest';
 
 vi.mock('./admin-rest', () => ({ getPixelPokemon: vi.fn() }));
@@ -11,6 +8,8 @@ const row = (over: Partial<PixelPokemonRow>): PixelPokemonRow => ({
   id: 'id',
   name: 'Pikachu',
   dex: 25,
+  franchise: 'pokemon',
+  number: null,
   variant: 'normal',
   types: [],
   image_url: null,

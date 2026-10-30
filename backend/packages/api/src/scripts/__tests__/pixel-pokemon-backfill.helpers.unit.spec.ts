@@ -33,6 +33,25 @@ describe('proposeRow', () => {
     expect(row.proposed_dex).toBeNull();
     expect(row.chosen_dex).toBeNull();
   });
+
+  test('a One Piece card never gets a Pokémon (Kuma is not Mew)', () => {
+    for (const card of [
+      { id: 'c5', name: 'Bartholomew Kuma OP07-079', set: null },
+      {
+        id: 'c6',
+        name: 'Bartholomew Kuma',
+        set: 'One Piece Wings of the Captain',
+      },
+    ]) {
+      const row = proposeRow(card);
+      expect(row.all_matches).toEqual([]);
+      expect(row.chosen_dex).toBeNull();
+    }
+    // a Pokémon card with the same Pokémon in its name still proposes it
+    expect(
+      proposeRow({ id: 'c7', name: 'Mew #151', set: 'Pokemon 151' }).chosen_dex,
+    ).toBe(151);
+  });
 });
 
 describe('applyRow (canonical regression — Rockruff card links to Lycanroc)', () => {

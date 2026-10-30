@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { storeShim, backend } from '@/lib/__tests__/store-shim';
-import type { WithdrawAddressInput } from '@/lib/data/schemas';
 
 // The five migrated actions import the port's HTTP adapter; point that import
 // at an in-memory backend per test (src/lib/__tests__/store-shim.ts). The
@@ -43,15 +42,6 @@ const ORDER = {
       card: { handle: 'pikachu', name: 'Pikachu', image: 'i.png' },
     },
   ],
-};
-
-const ADDRESS: WithdrawAddressInput = {
-  firstName: 'Test',
-  lastName: 'User',
-  address1: '123 Jalan Test',
-  city: 'Kuala Lumpur',
-  postalCode: '50000',
-  countryCode: 'MY',
 };
 
 describe('getDeliveryOrders', () => {
@@ -169,6 +159,23 @@ describe('editDeliveryAddress', () => {
     });
   });
 
+  it('after the 12am cutoff, the zone refusal points to support, not to cancel', async () => {
+    backend({
+      'POST /store/delivery-orders/:id/address': {
+        status: 400,
+        body: {
+          message:
+            'That address changes the shipping fee zone, which can no longer change for this order — please contact support.',
+        },
+      },
+    });
+    expect(await editDeliveryAddress('do_1', 'addr_2')).toMatchObject({
+      ok: false,
+      error:
+        'That address is in a different delivery fee zone, which can no longer change for this order — please contact support.',
+    });
+  });
+
   it('surfaces the zone-change refusal rather than a generic one', async () => {
     backend({
       'POST /store/delivery-orders/:id/address': {
@@ -238,135 +245,38 @@ describe('cancelDeliveryOrder', () => {
 });
 
 describe('shipVaultCards', () => {
-  it('ships reward pulls ONE AT A TIME, since the cap is per request', async () => {
-    const mem = backend({
-      'POST /store/rewards/withdraw': { body: { status: 'requested' } },
-    });
-    expect(
-      await shipVaultCards([], ['pull_1', 'pull_2'], 'addr_1', ADDRESS),
-    ).toEqual({ ok: true, shippedIds: ['pull_1', 'pull_2'], skipped: [] });
-    expect(mem.requests.map((r) => [r.path, r.body])).toEqual([
-      ['/store/rewards/withdraw', { pull_id: 'pull_1', address: ADDRESS }],
-      ['/store/rewards/withdraw', { pull_id: 'pull_2', address: ADDRESS }],
-    ]);
-  });
-
-  // The courier needs the phone: these optional lines must survive the schema
-  // parse (zod drops undeclared keys) on their way to the reward route.
-  it('forwards the optional phone, second line and state', async () => {
-    const mem = backend({
-      'POST /store/rewards/withdraw': { body: { status: 'requested' } },
-    });
-    const full = {
-      ...ADDRESS,
-      address2: 'Jalan Awan Besar',
-      province: 'Kuala Lumpur',
-      phone: '+60123456789',
-    };
-    await shipVaultCards([], ['pull_1'], 'addr_1', full);
-    expect(mem.requests[0]?.body).toEqual({ pull_id: 'pull_1', address: full });
-  });
-
-  it('routes ordinary and reward pulls to their own backends', async () => {
+  // One parcel, one shipping fee (2026-10-23): vault and prize cards go to the
+  // delivery route together instead of one reward request per prize.
+  it('sends vault and prize cards as ONE delivery order', async () => {
     const mem = backend({
       'POST /store/delivery-orders': { body: { order_id: 'do_1' } },
-      'POST /store/rewards/withdraw': { body: { status: 'requested' } },
     });
-    const r = await shipVaultCards(['pull_a'], ['pull_r'], 'addr_1', ADDRESS);
-    expect(r).toEqual({
+    expect(await shipVaultCards(['pull_a'], ['pull_r'], 'addr_1')).toEqual({
       ok: true,
       shippedIds: ['pull_a', 'pull_r'],
       skipped: [],
     });
-    expect(mem.requests.map((x) => x.path)).toEqual([
-      '/store/delivery-orders',
-      '/store/rewards/withdraw',
+    expect(mem.requests.map((r) => [r.path, r.body])).toEqual([
+      [
+        '/store/delivery-orders',
+        { pull_ids: ['pull_a', 'pull_r'], address_id: 'addr_1' },
+      ],
     ]);
   });
 
-  // A partial outcome is normal (the cap is reached mid-selection) and is
-  // reported per card — the ordinary cards have already shipped by then.
-  it('reports a per-card cap without failing the submit', async () => {
-    let n = 0;
+  it('ships a prize-only selection through the same single request', async () => {
+    const mem = backend({
+      'POST /store/delivery-orders': { body: { order_id: 'do_1' } },
+    });
+    await shipVaultCards([], ['pull_1', 'pull_2'], 'addr_1');
+    expect(mem.requests.map((r) => r.path)).toEqual(['/store/delivery-orders']);
+  });
+
+  // The backend refuses the whole parcel (cap, balance, phone gate): nothing
+  // ships, so the sheet shows the one reason.
+  it('a refusal fails the whole submit', async () => {
     backend({
-      'POST /store/rewards/withdraw': () => ({
-        body: { status: n++ === 0 ? 'requested' : 'capped' },
-      }),
-    });
-    expect(
-      await shipVaultCards([], ['pull_1', 'pull_2'], 'addr_1', ADDRESS),
-    ).toEqual({
-      ok: true,
-      shippedIds: ['pull_1'],
-      skipped: [
-        {
-          pullId: 'pull_2',
-          reason: "You've hit today's reward shipping limit — try tomorrow.",
-        },
-      ],
-    });
-  });
-
-  // The cap is per customer per day: once it bites, the rest of the
-  // selection is refused the same way without a request each.
-  it('stops asking once the daily cap is reached', async () => {
-    let n = 0;
-    const mem = backend({
-      'POST /store/rewards/withdraw': () => ({
-        body: { status: n++ === 0 ? 'requested' : 'capped' },
-      }),
-    });
-    const capped = "You've hit today's reward shipping limit — try tomorrow.";
-    expect(
-      await shipVaultCards(
-        [],
-        ['pull_1', 'pull_2', 'pull_3'],
-        'addr_1',
-        ADDRESS,
-      ),
-    ).toEqual({
-      ok: true,
-      shippedIds: ['pull_1'],
-      skipped: [
-        { pullId: 'pull_2', reason: capped },
-        { pullId: 'pull_3', reason: capped },
-      ],
-    });
-    expect(mem.requests).toHaveLength(2);
-  });
-
-  it('stops asking once the phone gate refuses', async () => {
-    const mem = backend({
-      'POST /store/rewards/withdraw': {
-        status: 400,
-        body: { message: 'Verify your phone number before continuing.' },
-      },
-    });
-    const r = await shipVaultCards([], ['pull_1', 'pull_2'], 'addr_1', ADDRESS);
-    expect(r).toEqual({
-      ok: true,
-      shippedIds: [],
-      skipped: [
-        {
-          pullId: 'pull_1',
-          reason:
-            'Verify your phone number in Account settings before requesting delivery.',
-        },
-        {
-          pullId: 'pull_2',
-          reason:
-            'Verify your phone number in Account settings before requesting delivery.',
-        },
-      ],
-    });
-    expect(mem.requests).toHaveLength(1);
-  });
-
-  // Prize deliveries pay a fee (2026-10-14): a balance that cannot cover one
-  // prize's fee cannot cover the next, so the rest are skipped unasked.
-  it('stops asking once the balance cannot cover the shipping fee', async () => {
-    const mem = backend({
-      'POST /store/rewards/withdraw': {
+      'POST /store/delivery-orders': {
         status: 400,
         body: {
           message:
@@ -374,19 +284,9 @@ describe('shipVaultCards', () => {
         },
       },
     });
-    const r = await shipVaultCards(
-      [],
-      ['pull_1', 'pull_2', 'pull_3'],
-      'addr_1',
-      ADDRESS,
-    );
-    expect(r.ok && r.skipped.map((s) => s.pullId)).toEqual([
-      'pull_1',
-      'pull_2',
-      'pull_3',
-    ]);
-    expect(r.ok && r.skipped[0]?.reason).toMatch(/Not enough balance/);
-    expect(mem.requests).toHaveLength(1);
+    const r = await shipVaultCards(['pull_a'], ['pull_r'], 'addr_1');
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toMatch(/Not enough balance/);
   });
 
   it('reads today’s prize-shipping allowance, or null when it cannot', async () => {
@@ -405,53 +305,11 @@ describe('shipVaultCards', () => {
     expect(await getPrizeShippingAllowance()).toBeNull();
   });
 
-  it('a per-card refusal becomes that card’s reason, not the whole submit’s', async () => {
-    backend({
-      'POST /store/rewards/withdraw': {
-        status: 404,
-        body: { message: 'Pull not found.' },
-      },
-    });
-    expect(await shipVaultCards([], ['pull_1'], 'addr_1', ADDRESS)).toEqual({
-      ok: true,
-      shippedIds: [],
-      skipped: [
-        { pullId: 'pull_1', reason: 'That card or address was not found.' },
-      ],
-    });
-  });
-
-  // Logged out is the whole selection's problem, not one card's — and it must
-  // land before anything is added to `skipped`.
-  it('logged out fails the whole submit rather than skipping every card', async () => {
-    const mem = backend({}, { token: null });
-    expect(
-      await shipVaultCards([], ['pull_1', 'pull_2'], 'addr_1', ADDRESS),
-    ).toEqual({ ok: false, error: 'Please log in first.', needsAuth: true });
-    expect(mem.requests).toEqual([]);
-  });
-
   it('refuses an empty selection before anything', async () => {
     const mem = backend({});
-    expect(await shipVaultCards([], [], 'addr_1', ADDRESS)).toEqual({
+    expect(await shipVaultCards([], [], 'addr_1')).toEqual({
       ok: false,
       error: 'Select at least one card.',
-    });
-    expect(mem.requests).toEqual([]);
-  });
-
-  it('skips every reward card when the address is not shippable', async () => {
-    const mem = backend({});
-    const bad = { ...ADDRESS, postalCode: '' };
-    expect(await shipVaultCards([], ['pull_1'], 'addr_1', bad)).toEqual({
-      ok: true,
-      shippedIds: [],
-      skipped: [
-        {
-          pullId: 'pull_1',
-          reason: 'That address is missing fields reward shipping requires.',
-        },
-      ],
     });
     expect(mem.requests).toEqual([]);
   });

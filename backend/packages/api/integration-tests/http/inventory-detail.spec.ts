@@ -239,12 +239,12 @@ medusaIntegrationTestRunner({
         expect(badLimit.status).toBe(400);
       });
 
-      it('keeps 0 distinct from null on cost and on_hand', async () => {
+      it('keeps 0 distinct from null on cost and the stock counter', async () => {
         // FREE STOCK. unit_cost 0 is legal (validate.ts rejects only n < 0)
         // and weightedAverageCost guards costScaledSum < 0, not <= 0, so a
         // genuinely free purchase returns 0 rather than null. The product is
         // UNTRACKED, so the invoice's best-effort inventory adjustment is a
-        // no-op and on_hand stays null.
+        // no-op and counter stays null.
         const FREE = 'detail-free';
         await makeProduct(FREE, 'Detail Free');
         expect((await buy(FREE, 'Detail Free', 1, 0)).status).toBe(201);
@@ -297,10 +297,14 @@ medusaIntegrationTestRunner({
         // "?? null" -> "|| null" mutation is caught on either field.
         expect(free.cost).toBe(0);
         expect(trackedRow.cost).toBeNull();
-        // on_hand 0 = "tracked, nothing shippable"; null = untracked, i.e. the
+        // counter 0 = "tracked, nothing shippable"; null = untracked, i.e. the
         // product does not count units at all.
+        expect(trackedRow.counter).toBe(0);
+        expect(free.counter).toBeNull();
+        // The physical on_hand (spec 2026-10-28) is never null: it counts the
+        // invoice's unit whether or not Medusa tracks the product.
+        expect(free.on_hand).toBe(1);
         expect(trackedRow.on_hand).toBe(0);
-        expect(free.on_hand).toBeNull();
       });
 
       it('reads a blank metadata fmv as no FMV rather than as free', async () => {

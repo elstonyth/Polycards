@@ -37,9 +37,9 @@ const pull = (i: number) => ({
 // ?status=/?source= cases assert those land in the filter, not just in a 200.
 const seen: { pulls?: any } = {};
 
-// `hasPaid` is the customer's hasPaidOpen() — the free-welcome lock the pulls
-// route reads so its payable-now quote refuses exactly where the customer's
-// sell button does.
+// `hasPaid` is the customer's hasPaidOpen() — behind lockedPullIds, the
+// free-welcome lock the pulls route reads so its payable-now quote refuses
+// exactly where the customer's sell button does.
 function mkScope(opts: { hasPaid?: boolean; rows?: any[] } = {}) {
   const txs = Array.from({ length: 60 }, (_, i) => tx(i));
   const pulls = opts.rows ?? Array.from({ length: 60 }, (_, i) => pull(i));
@@ -62,7 +62,12 @@ function mkScope(opts: { hasPaid?: boolean; rows?: any[] } = {}) {
       ],
       listPacks: async () => [{ slug: 'pack_1', buyback_percent: 95 }],
       listFxRates: async () => [],
-      hasPaidOpen: async () => opts.hasPaid ?? true,
+      lockedPullIds: async (_id: string, rows: any[]) =>
+        new Set(
+          opts.hasPaid ?? true
+            ? []
+            : rows.filter((r) => r.source === 'free').map((r) => r.id),
+        ),
       // No Lossless window: quotes stay at the pack's own rate.
       losslessWindows: async () => [],
     }),

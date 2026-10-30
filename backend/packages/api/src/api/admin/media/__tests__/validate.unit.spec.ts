@@ -194,9 +194,40 @@ describe('validateImage — sprite profile', () => {
   it('accepts a small near-square sprite', () => {
     expect(validateImage(facts(64, 64), 'sprite')).toEqual({ ok: true });
   });
+  it('accepts an animated idle-loop GIF sprite', () => {
+    expect(
+      validateImage(
+        {
+          ...facts(98, 98),
+          mimeType: 'image/gif',
+          detectedFormat: 'gif',
+          frames: 4,
+        },
+        'sprite',
+      ),
+    ).toEqual({ ok: true });
+  });
   it('rejects a portrait card-shaped image under the sprite profile', () => {
     const r = validateImage(facts(600, 840), 'sprite');
     expect(r.ok).toBe(false);
+  });
+  it('caps a sprite at 1024px and 150 frames (every reel cell decodes it)', () => {
+    expect(validateImage(facts(1024, 1024), 'sprite')).toEqual({ ok: true });
+    expect(validateImage(facts(1025, 1025), 'sprite')).toMatchObject({
+      ok: false,
+      code: 'too_big_dimension',
+    });
+    const gif = (frames: number): ImageFacts => ({
+      ...facts(138, 138),
+      mimeType: 'image/gif',
+      detectedFormat: 'gif',
+      frames,
+    });
+    expect(validateImage(gif(150), 'sprite')).toEqual({ ok: true });
+    expect(validateImage(gif(151), 'sprite')).toMatchObject({
+      ok: false,
+      code: 'animated',
+    });
   });
 });
 

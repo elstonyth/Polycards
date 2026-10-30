@@ -1,24 +1,15 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
-import {
-  Container,
-  Heading,
-  Text,
-  Table,
-  Select,
-  StatusBadge,
-} from '@medusajs/ui';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Container, Heading, Text, Table, Select } from '@medusajs/ui';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useGatewayDeposits } from '../../lib/queries';
-import type {
-  GatewayDeposit,
-  GatewayDepositView,
-} from '../../lib/admin-rest';
+import type { GatewayDepositView } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { depositStatusBadge } from '../../components/PaymentStatusBadge';
 
 export const config: RouteConfig = {
   label: 'pcNav.deposits',
@@ -27,13 +18,20 @@ export const config: RouteConfig = {
   nested: '/payments',
 };
 
+// Settled first and the default (2026-10-25): operators read unpaid and
+// cancelled cashier sessions as a gateway fault, and TGPay files a customer's
+// own cancel/timeout as 'failed'. The rest stay one click away for support
+// ("I paid but got no credit"); the Overview's stuck-top-up row deep-links
+// here with ?view=pending, which sorts oldest — i.e. stuck — first.
 const VIEWS: GatewayDepositView[] = [
-  'pending',
   'settled',
   'failed',
+  'pending',
   'expired',
   'all',
 ];
+const isView = (v: string | null): v is GatewayDepositView =>
+  VIEWS.includes(v as GatewayDepositView);
 
 // EXACTLY the backend's SORTABLE allow-list (api/admin/payments/deposits/
 // route.ts) — real columns only. Customer and status are computed/joined
@@ -43,30 +41,15 @@ const VIEWS: GatewayDepositView[] = [
 // credited, and a header must sort the value its own cells display.
 type SortKey = 'created_at' | 'amount_requested' | 'amount_settled';
 
-// Pending is the default view because this page exists for ONE question: did
-// somebody pay and not get credit? A stale pending row (older than the sweep's
-// stale window, flagged server-side) is that case until proven otherwise.
-const statusBadge = (d: GatewayDeposit, label: string) => {
-  if (d.status === 'settled')
-    return <StatusBadge color="green">{label}</StatusBadge>;
-  if (d.status === 'failed')
-    return <StatusBadge color="red">{label}</StatusBadge>;
-  // 'expired' needs its OWN colour, not the pending fall-through: the sweep
-  // gave up on it while the gateway never ruled, which makes it the likeliest
-  // uncredited payment on the page — exactly the row that must not read as
-  // "still being chased". Purple because the other four are spoken for and
-  // each carries a meaning this state would contradict: green settled, red
-  // refused, orange the stale-PENDING alarm, grey healthy-pending.
-  if (d.status === 'expired')
-    return <StatusBadge color="purple">{label}</StatusBadge>;
-  return <StatusBadge color={d.stale ? 'orange' : 'grey'}>{label}</StatusBadge>;
-};
-
 const DepositsPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
-  const [view, setView] = useState<GatewayDepositView>('pending');
+  const [searchParams] = useSearchParams();
+  const [view, setView] = useState<GatewayDepositView>(() => {
+    const asked = searchParams.get('view');
+    return isView(asked) ? asked : 'settled';
+  });
   // Starts NULL, not seeded: with no explicit sort the route orders pending
   // oldest-first (the work queue) and history views newest-first, and a seeded
   // default would silently flatten that. First header click opts in.
@@ -86,7 +69,7 @@ const DepositsPage = () => {
     setPage(0);
   };
 
-  const staleOnPage = data?.deposits.filter((d) => d.stale).length ?? 0;
+  const stuckOnPage = data?.deposits.filter((d) => d.stuck).length ?? 0;
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -112,12 +95,12 @@ const DepositsPage = () => {
           </Select>
         </div>
 
-        {staleOnPage > 0 && (
+        {stuckOnPage > 0 && (
           <div className="border-t px-6 py-3">
-            <Text size="small" className="text-ui-fg-error">
+            <Text size="small" className="text-ui-fg-subtle">
               {/* `n`, not `count`: i18next treats `count` as a plural selector
                   and resolves suffixed keys before the base one. */}
-              {t('deposits.staleWarning', { n: staleOnPage })}
+              {t('deposits.stuckWarning', { n: stuckOnPage })}
             </Text>
           </div>
         )}
@@ -195,10 +178,10 @@ const DepositsPage = () => {
                       {d.net_amount === null ? '—' : rm(d.net_amount)}
                     </Table.Cell>
                     <Table.Cell>
-                      {statusBadge(
+                      {depositStatusBadge(
                         d,
-                        d.stale
-                          ? t('deposits.statusStale')
+                        d.stuck
+                          ? t('deposits.statusStuck')
                           : t(`deposits.statusLabel.${d.status}`),
                       )}
                     </Table.Cell>

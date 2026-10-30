@@ -2,7 +2,11 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { createElement, act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { useSellWindow, type SellBackOffer } from '../useSellWindow';
+import {
+  SELL_TIMEOUT_MESSAGE,
+  useSellWindow,
+  type SellBackOffer,
+} from '../useSellWindow';
 
 // #514: a sell that FAILS has to reach a surface that outlives this stage, the
 // way a successful one already does through `onSold`. Once the 30s clock is out
@@ -224,6 +228,170 @@ describe('useSellWindow — a failed sell is never silent (#514)', () => {
 
     expect(onSold).toHaveBeenCalledWith(170, 70, 0);
     expect(onSellFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe('useSellWindow — a sell nobody answers never hangs the stage', () => {
+  type SellResult = Awaited<
+    ReturnType<Parameters<typeof useSellWindow>[0]['onSellBack']>
+  >;
+
+  test('times out to an error, then still credits a sale that lands late', async () => {
+    let answer!: (r: SellResult) => void;
+    const onSold = vi.fn();
+    const hook = renderHook(() =>
+      useSellWindow({
+        offers: [offerAt(Date.now() + 30_000)],
+        active: true,
+        onSellBack: vi.fn(() => new Promise<SellResult>((r) => (answer = r))),
+        onSold,
+        sellTimeoutMs: 30,
+      }),
+    );
+    mounted = hook;
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await hook.current.sell(0);
+    });
+    // Not stuck on 'selling': the expiry sweep can now vault it and conclude.
+    expect(result).toBe(false);
+    expect(hook.current.states[0]).toEqual({
+      phase: 'error',
+      message: SELL_TIMEOUT_MESSAGE,
+    });
+
+    await act(async () => {
+      answer({ ok: true, amount: 70, percent: 70, balance: 170 });
+    });
+    expect(hook.current.states[0]).toEqual({ phase: 'sold', amount: 70 });
+    expect(onSold).toHaveBeenCalledWith(170, 70, 0);
+  });
+
+  test("a retry's refusal never paints a late sale back to an error", async () => {
+    const answers: ((r: SellResult) => void)[] = [];
+    const hook = renderHook(() =>
+      useSellWindow({
+        offers: [offerAt(Date.now() + 30_000)],
+        active: true,
+        onSellBack: vi.fn(
+          () => new Promise<SellResult>((r) => answers.push(r)),
+        ),
+        sellTimeoutMs: 30,
+      }),
+    );
+    mounted = hook;
+
+    await act(async () => {
+      await hook.current.sell(0); // first request hangs, times out
+    });
+    let retry!: Promise<boolean>;
+    act(() => {
+      retry = hook.current.sell(0); // player taps Sell again
+    });
+    await act(async () => {
+      answers[0]!({ ok: true, amount: 70, percent: 70, balance: 170 });
+      answers[1]!({ ok: false, error: 'Already sold.' });
+      await retry;
+    });
+    expect(hook.current.states[0]).toEqual({ phase: 'sold', amount: 70 });
+  });
+});
+
+describe('useSellWindow — no error toast over a sale that landed', () => {
+  type SellResult = Awaited<
+    ReturnType<Parameters<typeof useSellWindow>[0]['onSellBack']>
+  >;
+
+  test("a retry's refusal after the deadline does not toast over the late sale", async () => {
+    const answers: ((r: SellResult) => void)[] = [];
+    const onSellFailed = vi.fn();
+    const onSold = vi.fn();
+    const deadline = Date.now() + 80;
+    const hook = renderHook(() =>
+      useSellWindow({
+        offers: [offerAt(deadline)],
+        active: true,
+        onSellBack: vi.fn(
+          () => new Promise<SellResult>((r) => answers.push(r)),
+        ),
+        onSold,
+        onSellFailed,
+        sellTimeoutMs: 30,
+      }),
+    );
+    mounted = hook;
+
+    await act(async () => {
+      await hook.current.sell(0); // hangs, times out inside the window
+    });
+    let retry!: Promise<boolean>;
+    act(() => {
+      retry = hook.current.sell(0);
+    });
+    await act(async () => {
+      answers[0]!({ ok: true, amount: 70, percent: 70, balance: 170 });
+      await new Promise((r) => setTimeout(r, 100)); // cross the deadline
+      answers[1]!({ ok: false, error: 'This card was already sold back.' });
+      await retry;
+    });
+    expect(onSold).toHaveBeenCalledTimes(1);
+    expect(onSellFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe('useSellWindow — a late answer never lands on the next batch', () => {
+  type SellResult = Awaited<
+    ReturnType<Parameters<typeof useSellWindow>[0]['onSellBack']>
+  >;
+
+  test('credits the balance but leaves the new batch card untouched', async () => {
+    let answer!: (r: SellResult) => void;
+    const onSold = vi.fn();
+    const onSellBack = vi.fn(
+      () => new Promise<SellResult>((r) => (answer = r)),
+    );
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const box: { current?: ReturnType<typeof useSellWindow> } = {};
+    function Probe({ offer }: { offer: SellBackOffer }) {
+      const result = useSellWindow({
+        offers: [offer],
+        active: true,
+        onSellBack,
+        onSold,
+        sellTimeoutMs: 30,
+      });
+      useLayoutEffect(() => {
+        box.current = result;
+      });
+      return null;
+    }
+    let root!: Root;
+    const first = offerAt(Date.now() + 30_000);
+    const second = { ...offerAt(Date.now() + 30_000), pullId: 'pull_2' };
+    act(() => {
+      root = createRoot(container);
+      root.render(createElement(Probe, { offer: first }));
+    });
+    mounted = {
+      unmount: () => {
+        act(() => root.unmount());
+        container.remove();
+      },
+    };
+
+    await act(async () => {
+      await box.current!.sell(0); // times out
+    });
+    act(() => root.render(createElement(Probe, { offer: second }))); // next spin
+    expect(box.current!.states[0]).toEqual({ phase: 'idle' });
+
+    await act(async () => {
+      answer({ ok: true, amount: 70, percent: 70, balance: 170 });
+    });
+    expect(box.current!.states[0]).toEqual({ phase: 'idle' });
+    expect(onSold).toHaveBeenCalledWith(170, 70, 0);
   });
 });
 

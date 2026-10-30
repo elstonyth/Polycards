@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type {
   ICustomerModuleService,
   MedusaContainer,
@@ -18,24 +17,23 @@ import { openPackWorkflow } from '../../workflows/open-pack';
 import { buybackPullWorkflow } from '../../workflows/buyback-pull';
 import { monitoredCustomerIds } from './automation-monitor';
 import {
+  beginLiveRound,
+  canRepeatLiveRound,
   claimLiveCycle,
   completeLiveCycle,
   createLiveState,
   executeLiveCycle,
   pickLivePack,
-  summarizeLiveRun,
   validateLiveConfig,
 } from './automation-live';
 import type {
+  LiveConfig,
   LiveCycle,
   LiveSnapshot,
   LiveState,
 } from './automation-live-types';
 import { pageAll } from './page-all';
-import {
-  createHumanizedStates,
-  rememberHumanizedAssignments,
-} from './automation-humanized';
+import { rememberHumanizedAssignments } from './automation-humanized';
 import { observeLiveRanks } from './automation-live-leaderboard';
 import {
   liveRankTargetsToObserve,
@@ -137,6 +135,8 @@ export async function readLive(
       .filter(
         (pack) =>
           !['reward_box', 'free_welcome'].includes(pack.category) &&
+          // A cycle needs a pull and a card to sell. A spin has neither.
+          pack.prize_type !== 'tickets' &&
           Number.isFinite(Number(pack.price)) &&
           Number(pack.price) > 0,
       )
@@ -163,6 +163,60 @@ export async function readLive(
   };
 }
 
+/** Pack prices and accounts for a round, read now. On Run every selected
+ *  account must be active; a repeated round drops the ones that no longer are. */
+async function liveRoundSettings(
+  container: MedusaContainer,
+  config: LiveConfig,
+  dropInactive: boolean,
+): Promise<
+  Pick<LiveState, 'packPriceCents' | 'packPricesCents'> & { config: LiveConfig }
+> {
+  const snapshot = await readLive(container);
+  const catalog = new Map(
+    snapshot.packs.map((pack) => [pack.slug, Math.round(pack.price * 100)]),
+  );
+  const mix = config.packMix ?? [{ packSlug: config.packSlug, weightBp: 1 }];
+  if (mix.some((row) => !catalog.has(row.packSlug)))
+    throw new Error(
+      'Choose available paid card packs: active, in stock, not a ticket pack.',
+    );
+  const packPricesCents = Object.fromEntries(
+    mix.map((row) => [row.packSlug, catalog.get(row.packSlug)!]),
+  );
+  const active = new Set(
+    snapshot.accounts
+      .filter((account) => account.status === 'active')
+      .map((account) => account.id),
+  );
+  if (!dropInactive && config.customerIds.some((id) => !active.has(id)))
+    throw new Error(
+      'Every selected account must exist and be active and unfrozen.',
+    );
+  const customerIds = config.customerIds.filter((id) => active.has(id));
+  if (!customerIds.length)
+    throw new Error('No selected account is active any more.');
+  return {
+    config: {
+      ...config,
+      customerIds,
+      ...(config.rankTargets && {
+        rankTargets: config.rankTargets.filter((target) =>
+          active.has(target.customerId),
+        ),
+      }),
+    },
+    packPricesCents,
+    // A mix's weighted average stands in for "the pack price" in rank estimates.
+    packPriceCents: Math.round(
+      mix.reduce(
+        (sum, row) => sum + packPricesCents[row.packSlug] * row.weightBp,
+        0,
+      ) / mix.reduce((sum, row) => sum + row.weightBp, 0),
+    ),
+  };
+}
+
 export async function changeLive(
   container: MedusaContainer,
   input: unknown,
@@ -179,45 +233,17 @@ export async function changeLive(
   )
     throw invalid('Unsupported live action.');
   const packs = service(container);
-  let config;
-  let priceCents = 0;
-  let pricesCents: Record<string, number> = {};
+  let round: Awaited<ReturnType<typeof liveRoundSettings>> | undefined;
   if (body.action === 'save' || body.action === 'run') {
+    let config;
     try {
       config = validateLiveConfig(body.config, await selectedCustomers(packs));
+      round = await liveRoundSettings(container, config, false);
     } catch (error) {
       throw invalid(
         error instanceof Error ? error.message : 'Invalid live settings.',
       );
     }
-    const snapshot = await readLive(container);
-    const catalog = new Map(
-      snapshot.packs.map((pack) => [pack.slug, Math.round(pack.price * 100)]),
-    );
-    const mix = config.packMix ?? [{ packSlug: config.packSlug, weightBp: 1 }];
-    if (mix.some((row) => !catalog.has(row.packSlug)))
-      throw invalid('Choose available paid packs.');
-    pricesCents = Object.fromEntries(
-      mix.map((row) => [row.packSlug, catalog.get(row.packSlug)!]),
-    );
-    // A mix's weighted average stands in for "the pack price" in rank estimates.
-    priceCents = Math.round(
-      mix.reduce(
-        (sum, row) => sum + pricesCents[row.packSlug] * row.weightBp,
-        0,
-      ) / mix.reduce((sum, row) => sum + row.weightBp, 0),
-    );
-    if (
-      config.customerIds.some(
-        (id) =>
-          !snapshot.accounts.some(
-            (account) => account.id === id && account.status === 'active',
-          ),
-      )
-    )
-      throw invalid(
-        'Every selected account must exist and be active and unfrozen.',
-      );
     if (body.action === 'run') await resolveFxRateStrict(packs);
   }
   await editLive(container, actorId, (state) => {
@@ -245,44 +271,15 @@ export async function changeLive(
     }
     if (state.status === 'running' || state.status === 'paused')
       throw invalid('Stop the current live run before editing settings.');
-    if (!config) throw invalid('Live settings required.');
+    if (!round) throw invalid('Live settings required.');
     for (const row of state.schedules ?? [])
       row.humanized.regionChoice ??= state.config?.humanizedRegion ?? 'mysg';
     state.humanizedAssignments = rememberHumanizedAssignments(
       state.humanizedAssignments ?? [],
       state.schedules?.map((row) => row.humanized) ?? [],
     );
-    const finished = body.action === 'run' ? summarizeLiveRun(state) : null;
-    if (finished?.draws)
-      state.history = [finished, ...(state.history ?? [])].slice(0, 30);
-    state.config = config;
-    state.packPriceCents = priceCents;
-    state.packPricesCents = pricesCents;
-    if (body.action === 'run')
-      Object.assign(state, {
-        status: 'running',
-        runId: randomUUID(),
-        startedAt: Date.now(),
-        spentCents: 0,
-        cycles: [],
-        schedules:
-          config.timingMode === 'humanized'
-            ? createHumanizedStates(
-                config.customerIds,
-                config.humanizedRegion ?? 'mysg',
-                state.humanizedAssignments,
-              ).map((humanized) => ({
-                customerId: humanized.profileId,
-                humanized,
-                nextRunAt: Date.now(),
-                waitReason: 'Planning activity',
-              }))
-            : [],
-        rankGoals: undefined,
-        nextDrawAt: undefined,
-        nextRunAt: Date.now(),
-        error: null,
-      });
+    if (body.action === 'run') beginLiveRound(state, round, Date.now(), false);
+    else Object.assign(state, round);
   });
 }
 
@@ -312,6 +309,18 @@ export async function tickLive(
       refreshLiveRankGoals(state, observations, clock());
     }
     const cycle = claimLiveCycle(state, clock());
+    if (!cycle && canRepeatLiveRound(state)) {
+      // Always-on: the finished round starts the next at today's prices.
+      try {
+        const round = await liveRoundSettings(container, state.config!, true);
+        await resolveFxRateStrict(service(container));
+        beginLiveRound(state, round, clock(), true);
+      } catch (error) {
+        state.error = `Next round not started: ${
+          error instanceof Error ? error.message : 'settings unavailable'
+        }`;
+      }
+    }
     if (!cycle && JSON.stringify(state) === previous) return null;
     await transaction.raw(
       `update automation_live set state = ?::jsonb, updated_at = now() where id = 'global'`,
@@ -378,6 +387,28 @@ export async function tickLive(
                 max_price: maxPrice,
               },
             });
+            // Only this newly committed draw is revealed; never scan past cycles.
+            try {
+              const revealed = await packs.revealPull(result.pull.id, customerId);
+              if (revealed.first_reveal) {
+                await container.resolve(Modules.EVENT_BUS).emit({
+                  name: 'pull.revealed',
+                  data: {
+                    pull_id: result.pull.id,
+                    pack_id: packSlug,
+                    card_id: result.card.handle,
+                    customer_id: customerId,
+                  },
+                });
+              }
+            } catch (error) {
+              // An announcement failure must not interrupt the paid draw's settlement.
+              container.resolve(ContainerRegistrationKeys.LOGGER).warn(
+                `Live automation announcement dropped for pull ${result.pull.id}: ${
+                  error instanceof Error ? error.message : 'reveal unavailable'
+                }`,
+              );
+            }
             return {
               pullId: result.pull.id,
               cardName: result.card.name,

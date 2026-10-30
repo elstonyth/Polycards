@@ -21,6 +21,7 @@ vi.mock('@/lib/logger', () => ({
 import { getPackCategories, getPackBySlug } from '@/lib/data/packs';
 import { clearTtlCache } from '@/lib/ttl-cache';
 import { rm0 } from '@/lib/format';
+import { pickCategory } from '@/lib/packs-data';
 
 const PACKS = 'GET /store/packs';
 const seed = (body: unknown) => backend({ [PACKS]: { body } });
@@ -190,8 +191,7 @@ vi.mock('@/components/home/TheGame', () => ({ default: () => null }));
 vi.mock('@/components/home/FinalCta', () => ({ default: () => null }));
 
 it('rounded-price ties preserve catalog order for the shelf, while money stays exact', async () => {
-  const { isValidElement, Children } = await import('react');
-  const { default: TierShelf } = await import('@/components/home/TierShelf');
+  const { ladderOrder } = await import('@/components/home/TierShelf');
   backend({
     [PACKS]: {
       body: {
@@ -205,26 +205,52 @@ it('rounded-price ties preserve catalog order for the shelf, while money stays e
     'GET /store/packs/:slug': { status: 404 },
   });
   const packs = (await getPackCategories()).flatMap((c) => c.packs);
-  const shelf = TierShelf({ packs, chaseByPack: new Map() });
-  type Props = {
-    children?: import('react').ReactNode;
-    pack?: import('@/lib/packs-data').Pack;
-  };
-  function selectedPacks(
-    node: import('react').ReactNode,
-  ): import('@/lib/packs-data').Pack[] {
-    return Children.toArray(node).flatMap((child) => {
-      if (!isValidElement<Props>(child)) return [];
-      return [
-        ...(child.props.pack ? [child.props.pack] : []),
-        ...selectedPacks(child.props.children),
-      ];
-    });
-  }
-  expect
-    .soft(selectedPacks(shelf).map((p) => p.id))
-    .toEqual(['first', 'second']);
+  expect.soft(ladderOrder(packs).map((p) => p.id)).toEqual(['first', 'second']);
   expect(packs.map((p) => p.priceMyr)).toEqual([1.51, 2.49]);
+});
+
+describe('franchise categories', () => {
+  it('a One Piece pack gets its own category, label and icon', async () => {
+    seed({ packs: [row({ slug: 'op-1', category: 'one-piece' })] });
+    const cats = await getPackCategories();
+    expect(cats.map((c) => [c.id, c.tab, c.icon, c.packs.length])).toEqual([
+      ['pokemon', 'Pokémon', '/pack-index-icons/pokemon.webp', 0],
+      ['one-piece', 'One Piece', '/pack-index-icons/onepiece.webp', 1],
+      ['poly', 'Poly', '/pack-index-icons/poly.webp', 0],
+    ]);
+  });
+
+  it('a category named like an Object property still gets a string icon', async () => {
+    seed({ packs: [row({ slug: 'x', category: 'constructor' })] });
+    const cats = await getPackCategories();
+    expect(cats.find((c) => c.id === 'constructor')?.icon).toBe(
+      '/pack-index-icons/pokemon.webp',
+    );
+  });
+
+  it('pickCategory: the wanted category when it has packs, else the first that does', () => {
+    const cat = (id: string, n: number) => ({
+      id,
+      tab: id,
+      heading: id,
+      icon: '',
+      packs: Array.from({ length: n }, (_, i) => ({
+        id: `${id}-${i}`,
+        name: id,
+        priceMyr: 1,
+        image: '',
+      })),
+    });
+    const both = [cat('pokemon', 2), cat('one-piece', 1)];
+    expect(pickCategory(both, 'one-piece')).toBe('one-piece');
+    expect(pickCategory(both, 'bogus')).toBe('pokemon');
+    expect(pickCategory(both)).toBe('pokemon');
+    // an empty franchise is never opened, even when asked for
+    expect(
+      pickCategory([cat('pokemon', 0), cat('one-piece', 1)], 'pokemon'),
+    ).toBe('one-piece');
+    expect(pickCategory([cat('pokemon', 0)])).toBeUndefined();
+  });
 });
 
 it('features the three distinct highest-value slabs from available packs, not the most expensive pack', async () => {

@@ -246,13 +246,23 @@ export async function POST(
     );
   }
   const bankCode = bank.id;
-  const accountNumber = body.account_number as string;
+  // An EVM address is the same wallet in any letter case (the case is only
+  // its checksum, checked above), so it is stored in one case: otherwise the
+  // checksummed and lowercase copies save as two accounts.
+  const accountNumber =
+    bank.wallet === 'evm'
+      ? (body.account_number as string).toLowerCase()
+      : (body.account_number as string);
   const account: SavedBankAccount = {
     id: savedBankAccountId(bankCode, accountNumber),
     bankCode,
     bankName: bank.name,
     accountNumber,
-    accountHolderName: (body.account_holder_name as string).trim(),
+    // A wallet has no holder (withdrawalDetailsError skips it); its network
+    // name stands in, so the saved list and the admin queue still read.
+    accountHolderName: bank.wallet
+      ? bank.name
+      : (body.account_holder_name as string).trim(),
     savedAt: new Date().toISOString(),
   };
 
@@ -268,19 +278,24 @@ export async function POST(
   // owner out. A number already PAID OUT to blocks under any name, and a
   // different spelling that slips in here is stopped at payout
   // (startWithdrawal refuses a number someone else was paid to first).
+  // A wallet has no holder name to tell owners apart, and its address is
+  // public on-chain: only a wallet already PAID OUT to blocks it here.
   const sameHolder = (name: string | null) =>
     name == null ||
-    name.toLowerCase().replace(/\s+/g, ' ').trim() ===
-      account.accountHolderName.toLowerCase().replace(/\s+/g, ' ');
+    (!bank.wallet &&
+      name.toLowerCase().replace(/\s+/g, ' ').trim() ===
+        account.accountHolderName.toLowerCase().replace(/\s+/g, ' '));
   const heldByAnother =
     !payoutAccountSharingAllowed(customerId) &&
     (
       await resolvePacks<CustomerWallet>(req.scope).otherPayoutAccountHolders(
         customerId,
         accountNumber,
+        bank.wallet !== undefined,
       )
     ).some(
-      (h) => findBank(h.bank_code)?.id === bankCode && sameHolder(h.holder_name),
+      (h) =>
+        findBank(h.bank_code)?.id === bankCode && sameHolder(h.holder_name),
     );
 
   // The cap is checked against the list read INSIDE the lock, not against one

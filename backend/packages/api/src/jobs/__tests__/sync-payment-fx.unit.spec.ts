@@ -145,7 +145,49 @@ describe('sync-payment-fx', () => {
       rate: 3.4,
       source: 'coinbase',
     });
-    expect(alertOps).not.toHaveBeenCalled();
+    // The job prices USDT too, and this mock serves only SGD: no SGD alert.
+    expect(
+      jest
+        .mocked(alertOps)
+        .mock.calls.filter(([, key]) => String(key).includes('SGD')),
+    ).toEqual([]);
+  });
+
+  it('prices USDT from Coinbase USDT, falling back to USD by proxy only', async () => {
+    const usdt = {
+      url: 'https://api.coinbase.com/v2/exchange-rates?currency=USDT',
+      min: 2,
+      max: 8,
+    };
+    feeds({
+      'api.coinbase.com': {
+        status: 200,
+        body: JSON.stringify({
+          data: { currency: 'USDT', rates: { MYR: '4.0793' } },
+        }),
+      },
+    });
+    await expect(fetchPaymentFx('USDT', usdt)).resolves.toMatchObject({
+      rate: 4.0793,
+      source: 'coinbase',
+    });
+    feeds({
+      'api.frankfurter.dev': {
+        status: 200,
+        body: JSON.stringify({ base: 'USD', date: '2026-10-12', rates: { MYR: 4.2 } }),
+      },
+    });
+    const ecb = {
+      url: 'https://api.frankfurter.dev/v1/latest?from=USD&to=MYR',
+      min: 2,
+      max: 8,
+    };
+    // Named as the proxy it is, the USD answer prices USDT...
+    await expect(
+      fetchPaymentFx('USDT', { ...ecb, quotes: 'USD' }),
+    ).resolves.toMatchObject({ rate: 4.2 });
+    // ...and without that, a USD answer for USDT is a wrong pair.
+    await expect(fetchPaymentFx('USDT', ecb)).rejects.toThrow(/answered for USD/);
   });
 
   it('keeps the last rate when every feed fails', async () => {

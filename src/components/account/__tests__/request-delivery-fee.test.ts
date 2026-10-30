@@ -129,32 +129,33 @@ describe('RequestDeliveryModal fee preview', () => {
   test('a prize card pays its zone shipping (RM15 West)', async () => {
     await render([item('pull_r', 'reward', 12)]);
     const text = host.textContent ?? '';
-    expect(text).toContain('Prize card shipping (West Malaysia)');
+    expect(text).toContain('Shipping (West Malaysia)');
     expect(text).toContain('Total — deducted from balance');
     expect(text).toContain('RM 15.00');
   });
 
-  test('vault cards and a prize: one order plus one prize parcel', async () => {
-    // RM 190 of vault cards + a RM 500 prize. Each parcel is insured on its
-    // OWN value: the vault order (RM 190) needs none, the prize (RM 500) RM 25.
+  test('vault cards and a prize: one parcel, one shipping fee', async () => {
+    // RM 190 of vault cards + a RM 500 prize in ONE parcel (2026-10-23).
+    // Shipping once; insurance on each part's own value: none on the vault
+    // cards (RM 190), RM 25 on the prize (RM 500).
     await render([item('pull_a', 'pack', 190), item('pull_r', 'reward', 500)]);
     const text = host.textContent ?? '';
     expect(text).toContain('Shipping (West Malaysia)');
-    expect(text).not.toContain('Insurance (5% of card value)');
-    expect(text).toContain('Prize insurance (5% of card value)');
-    // 15 + 15 + 25.
-    expect(text).toContain('RM 55.00');
+    expect(text).toContain('Insurance (5% of card value)');
+    expect(text).not.toContain('Prize card shipping');
+    // 15 + 25.
+    expect(text).toContain('RM 40.00');
   });
 
-  test('a Singapore address ships at RM50 per parcel', async () => {
+  test('a Singapore parcel ships at RM50, prize cards included', async () => {
     await render(
       [item('pull_a', 'pack', 100), item('pull_r', 'reward', 5)],
       [SG_ADDRESS],
     );
     const text = host.textContent ?? '';
     expect(text).toContain('Shipping (Singapore)');
-    expect(text).toContain('Prize card shipping (Singapore)');
-    expect(text).toContain('RM 100.00');
+    expect(text).toContain('RM 50.00');
+    expect(text).not.toContain('RM 100.00');
   });
 });
 
@@ -172,16 +173,7 @@ describe('RequestDeliveryModal confirm and balance', () => {
       'RM 15.00 will be deducted from your balance',
     );
     await act(async () => button('Confirm & pay RM 15.00')!.click());
-    expect(mocks.shipVaultCards).toHaveBeenCalledWith(
-      [],
-      ['pull_r'],
-      'addr_1',
-      expect.objectContaining({
-        address2: 'Jalan Awan Besar',
-        province: 'Kuala Lumpur',
-        phone: '+60123456789',
-      }),
-    );
+    expect(mocks.shipVaultCards).toHaveBeenCalledWith([], ['pull_r'], 'addr_1');
   });
 
   test('a balance short of the charge is sent to top up, and cannot ship', async () => {
@@ -292,23 +284,22 @@ describe('RequestDeliveryModal review fixes', () => {
       item('pull_r2', 'reward', 10),
     ]);
     const text = host.textContent ?? '';
-    // RM15 vault order + ONE prize parcel, not two.
-    expect(text).toContain('RM 30.00');
+    // One parcel: RM15 shipping once, the held-back prize unpriced.
+    expect(text).toContain('RM 15.00');
     expect(text).toContain('Prize cards ship 1 per day');
     await act(async () => button('Request delivery')!.click());
-    await act(async () => button('Confirm & pay RM 30.00')!.click());
+    await act(async () => button('Confirm & pay RM 15.00')!.click());
     expect(mocks.shipVaultCards).toHaveBeenCalledWith(
       ['pull_a'],
       ['pull_r1'],
       'addr_1',
-      expect.anything(),
     );
   });
 
   test('insures a prize worth over RM200', async () => {
     await render([item('pull_r', 'reward', 400)]);
     const text = host.textContent ?? '';
-    expect(text).toContain('Prize insurance (5% of card value)');
+    expect(text).toContain('Insurance (5% of card value)');
     // RM15 shipping + RM20 insurance.
     expect(text).toContain('RM 35.00');
   });

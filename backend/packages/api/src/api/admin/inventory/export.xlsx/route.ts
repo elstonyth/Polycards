@@ -84,13 +84,12 @@ export const INVENTORY_COLUMNS: Column<InventoryRow>[] = [
   { header: 'Registered Card', width: 16, cell: (r) => r.is_card },
   { header: 'SKU', width: 20, cell: (r) => r.sku },
   { header: 'Title', width: 10, cell: (r) => (r.graded ? 'GRADED' : 'RAW') },
-  // Money and counts go out RAW and NULLABLE, never `?? 0`. null and 0 are
-  // different facts on every one of these -- cost null = no purchase history vs
-  // cost 0 = bought and free; on_hand null = the product tracks no inventory at
-  // all vs on_hand 0 = tracked with nothing shippable; fmv/price null = no FMV
-  // recorded vs 0 = free (0 is the buyback lever). inventory-view.ts builds all
-  // four with `??` and the list page renders null as an em dash, so collapsing
-  // them here would make the export assert something the system does not know.
+  // Money goes out RAW and NULLABLE, never `?? 0`. null and 0 are different
+  // facts on each of these -- cost null = no purchase history vs cost 0 =
+  // bought and free; fmv/price null = no FMV recorded vs 0 = free (0 is the
+  // buyback lever). inventory-view.ts builds all three with `??` and the list
+  // page renders null as an em dash, so collapsing them here would make the
+  // export assert something the system does not know.
   // write-excel-file emits NO <c> element at all for a null cell (asserted
   // against the generated sheet XML in columns.unit.spec) -- that is the blank
   // cell this distinction needs, an empty cell rather than a zero.
@@ -107,9 +106,12 @@ export const INVENTORY_COLUMNS: Column<InventoryRow>[] = [
     width: 26,
     cell: (r) => new Date(r.created_at).toISOString(),
   },
+  // The Stock page's six columns, in its order (spec 2026-10-28).
+  { header: 'Qty To Be Procured', width: 12, cell: (r) => r.to_procure },
   { header: 'On Hand', width: 10, cell: (r) => r.on_hand },
   { header: 'In Vault', width: 10, cell: (r) => r.in_vault },
-  { header: 'Requested', width: 10, cell: (r) => r.requested },
+  { header: 'Requested + Processed', width: 12, cell: (r) => r.requested },
+  { header: 'Ready To Ship', width: 10, cell: (r) => r.ready_to_ship },
   { header: 'Shipped', width: 10, cell: (r) => r.shipped },
   { header: 'Listing Show', width: 12, cell: (r) => r.listing_count },
 ];

@@ -55,11 +55,18 @@ const ALL_PACKS_KEY = 'recent';
 // the cache-set site below.
 const MAX_ENTRIES = 256;
 const recentCache = new Map<string, { expires: number; body: unknown }>();
+// One rebuild per key at a time. Without it every request landing while a
+// rebuild runs starts its own (~8 queries), and at feed volume that herd
+// drained the DB pool and OOM'd the backend (2026-10-20 incident).
+const inflight = new Map<string, Promise<unknown>>();
+// An expired body this young is served while the rebuild runs; older waits.
+const STALE_SERVE_MS = 60_000;
 
 /** Test seam: module state outlives a test's fixtures — one jest process is one
  *  module instance, so a prior test's feed would be served to the next. */
 export function clearRecentPullsCache(): void {
   recentCache.clear();
+  inflight.clear();
 }
 
 const EMPTY_BODY = { pulls: [], drought: {} };
@@ -84,11 +91,33 @@ export async function GET(
   const cacheKey = `${packId ?? ALL_PACKS_KEY}|${rarity ?? ''}`;
 
   const cached = recentCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) {
+  const now = Date.now();
+  if (cached && cached.expires > now) {
     res.json(cached.body);
     return;
   }
 
+  let pending = inflight.get(cacheKey);
+  if (!pending) {
+    pending = buildFeed(req, packId, rarity, cacheKey).finally(() =>
+      inflight.delete(cacheKey),
+    );
+    inflight.set(cacheKey, pending);
+  }
+  if (cached && now - cached.expires < STALE_SERVE_MS) {
+    pending.catch(() => {});
+    res.json(cached.body);
+    return;
+  }
+  res.json(await pending);
+}
+
+async function buildFeed(
+  req: MedusaRequest,
+  packId: string | null,
+  rarity: Rarity | null,
+  cacheKey: string,
+): Promise<unknown> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
   // Gate the slug BEFORE any ledger work: pack_id is caller-supplied and the
@@ -103,8 +132,7 @@ export async function GET(
     );
     if (!pack) {
       remember(cacheKey, EMPTY_BODY);
-      res.json(EMPTY_BODY);
-      return;
+      return EMPTY_BODY;
     }
   }
 
@@ -183,6 +211,11 @@ export async function GET(
         ),
         image: card.image,
         slab_image: card.slab_image ?? null,
+        // The linked sprite, so a feed card never has to guess one by name;
+        // the set tells an unlinked One Piece card from a Pokémon one.
+        set: card.set,
+        pokemon_dex: card.pokemon_dex ?? null,
+        sprite_image: card.sprite_image ?? null,
         // pack the card came from (= Pack.slug) + live catalog label fields.
         pack_id: p.pack_id,
         pack_title: pack?.title ?? null,
@@ -196,7 +229,7 @@ export async function GET(
 
   const body = { pulls: recent, drought };
   remember(cacheKey, body);
-  res.json(body);
+  return body;
 }
 
 // ponytail: pack_id is caller-supplied, so the key space is unbounded (the

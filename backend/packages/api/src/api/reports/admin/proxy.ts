@@ -58,6 +58,8 @@ const BLOCKED: [RegExp, string][] = [
     'PriceCharting lookups (each one costs an API call)',
   ],
   [/\/export(\.[a-z]+)?$/, 'file exports'],
+  // `*:read` passes assistant_review/assistant_setting: every staff chat.
+  [/^\/admin\/assistant/, 'staff assistant chats and settings'],
 ];
 
 /** Why the desk bots may not read `path`, or null when they may. Judged in

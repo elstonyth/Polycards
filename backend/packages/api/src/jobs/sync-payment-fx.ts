@@ -45,7 +45,7 @@ export const PAYMENT_FX_PIN_DRIFT_MIN = 0.005;
  */
 export async function fetchPaymentFx(
   currency: string,
-  feed: { url: string; min: number; max: number },
+  feed: { url: string; min: number; max: number; quotes?: string },
 ): Promise<{ rate: number; asOf: Date; source: string }> {
   const resp = await fetch(feed.url, { signal: AbortSignal.timeout(10_000) });
   if (!resp.ok) throw new Error(`FX feed: HTTP ${resp.status}`);
@@ -59,7 +59,7 @@ export async function fetchPaymentFx(
   // frankfurter base). A missing or different label is a wrong pair, however
   // plausible its number looks.
   const quoted = data?.data ? data.data.currency : data?.base;
-  if (quoted !== currency)
+  if (quoted !== (feed.quotes ?? currency))
     throw new Error(`FX feed: answered for ${String(quoted)}`);
   const raw = data?.data ? data.data.rates?.MYR : data?.rates?.MYR;
   // Only a number or a numeric string is a rate: Number(true) is 1.
@@ -107,7 +107,12 @@ export default async function syncPaymentFxJob(
     for (const url of [feed.url, feed.fallbackUrl]) {
       if (!url) continue;
       try {
-        got = await fetchPaymentFx(currency, { ...feed, url });
+        got = await fetchPaymentFx(currency, {
+          ...feed,
+          url,
+          // A proxy fallback names its own currency (USDT is priced by USD).
+          quotes: url === feed.fallbackUrl ? feed.fallbackQuotes : undefined,
+        });
         break;
       } catch (e) {
         logger.warn(

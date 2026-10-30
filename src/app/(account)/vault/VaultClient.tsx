@@ -5,7 +5,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
-import { rm, rm0 } from '@/lib/format';
+import { TicketArt } from '@/components/TicketArt';
+import { num, rm, rm0 } from '@/lib/format';
 import { sellBackNotice } from '@/lib/buyback-copy';
 import {
   getVault,
@@ -44,11 +45,14 @@ export default function VaultClient({
   initial,
   addresses,
   initialGifts,
+  tickets,
 }: {
   initial: VaultResult;
   addresses: AddressView[];
   /** Packs gifted into this vault, unopened — the Packs row above the cards. */
   initialGifts: PackGift[];
+  /** Lucky Draw tickets held; null when unreadable, which hides the row. */
+  tickets: number | null;
 }) {
   const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
   const [items, setItems] = useState<VaultItem[]>(
@@ -384,6 +388,33 @@ export default function VaultClient({
         ))}
       </div>
 
+      {/* Lucky Draw tickets: always shown when readable, so a player with none
+          is pointed at the tasks that pay them. */}
+      {tickets !== null && (
+        <section aria-label="Lucky Draw tickets" className="mt-4">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3">
+            <TicketArt width={64} className="shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-white">
+                Lucky Draw Tickets ×{num(tickets)}
+              </p>
+              <p className="mt-0.5 text-[12px] text-neutral-400">
+                {tickets > 0
+                  ? 'Put them on the prizes you want'
+                  : 'Earn tickets from tasks'}
+              </p>
+            </div>
+            <Link
+              href={tickets > 0 ? '/lucky-draw?open=1' : '/task'}
+              aria-label={tickets > 0 ? 'Open Lucky Draw' : undefined}
+              className={cn(pillVariants({ size: 'sm' }), 'px-5')}
+            >
+              {tickets > 0 ? 'Open' : 'Tasks'}
+            </Link>
+          </div>
+        </section>
+      )}
+
       {/* Packs gifted into the vault, unopened (spec 2026-10-07 §1). Open
           goes to the pack page, where the gift applies itself as Vault x1. */}
       {gifts.length > 0 && (
@@ -573,9 +604,10 @@ export default function VaultClient({
             // an unknown tier string did before the mapper guarded it.
             const glow = rarityRgb(item.card.rarity ?? '');
             // Locked = the backend refuses BOTH sell and ship — the free
-            // welcome pull before the first PAID open, and only that. NOT
-            // `source`: every reward card (task, achievement, challenge prize)
-            // is source='reward' and sells like any pulled card.
+            // welcome pull and a daily task's card before the first PAID open,
+            // and only those. NOT `source`: every other reward card (weekly
+            // task, achievement, challenge prize) is source='reward' too and
+            // sells like any pulled card.
             const showLock = item.locked && !lockDismissed.has(item.pullId);
             const art = (
               // Pass `rarity` so the slab renders its tier frame + halo, matching
@@ -741,13 +773,21 @@ export default function VaultClient({
                     ~40px and it rendered as "IM…" / "COM…". Rarity is a signal
                     word — it either reads or it shouldn't be there. */}
                 <div className="mt-1 flex flex-col gap-0.5 text-[10px] sm:flex-row sm:items-center sm:justify-between sm:gap-1 sm:text-[11px]">
-                  {!item.challengePrize && (
-                    <span
-                      className="truncate font-bold uppercase tracking-wider"
-                      style={{ color: `rgb(${glow})` }}
-                    >
-                      {item.card.rarity}
+                  {item.luckyDrawPrize ? (
+                    // No tier and no frame: the bare slab and this word are
+                    // how a Lucky Draw win reads (operator 2026-10-25).
+                    <span className="truncate font-bold uppercase tracking-wider text-neutral-300">
+                      Lucky Draw
                     </span>
+                  ) : (
+                    !item.challengePrize && (
+                      <span
+                        className="truncate font-bold uppercase tracking-wider"
+                        style={{ color: `rgb(${glow})` }}
+                      >
+                        {item.card.rarity}
+                      </span>
+                    )
                   )}
                   <span className="font-heading shrink-0 whitespace-nowrap text-[12px] tabular-nums text-white sm:text-[13px]">
                     {/* `?? 0`: the vault has always shown RM 0.00 for an

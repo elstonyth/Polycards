@@ -1033,6 +1033,12 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
         'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.',
       ),
     ).toBeNull();
+    // Same for the payout partner's no-provider refusal.
+    expect(
+      withdrawRemedy(
+        'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.',
+      ),
+    ).toBeNull();
     // The plain cap already says what to do.
     expect(withdrawRemedy('You can withdraw up to RM 12.34 right now.')).toBe(
       null,
@@ -1095,6 +1101,12 @@ describe('regionalBandText', () => {
     expect(regionalBandText({ min: null, max: null }, ui)).toBeNull();
     expect(regionalBandText({ min: 30, max: 9370.5 }, ui)).toBe(
       'Singapore limit S$30–S$9,370.50',
+    );
+  });
+
+  it('does not repeat USDT, whose "country" is its own symbol', () => {
+    expect(regionalBandText({ min: 10, max: 5000 }, REGIONAL_RAILS.USDT!)).toBe(
+      'limit USDT 10–USDT 5,000',
     );
   });
 });

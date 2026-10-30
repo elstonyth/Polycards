@@ -441,6 +441,15 @@ envs:
     scope: RUN_TIME
     value: "50000"
 
+  # The 12am MYT stock run (jobs/stock-allocation.ts): orders whose cards are
+  # all on hand go to ready_to_ship, the other requested ones to processed,
+  # then the to-buy list is frozen for the day. Off unless "true". Turned on
+  # 2026-10-29 at the owner's request. App-level, so the backend service (the
+  # to-buy route) and the worker (the job) both read it.
+  - key: STOCK_AUTO_ALLOCATION
+    scope: RUN_TIME
+    value: "true"
+
   # Touch 'n Go payouts (modules/packs/banks.ts payoutSwitch). Off unless
   # "true": TGPay's TNG route refused 97 of 110 payouts in the week to
   # 2026-10-14. Turned on 2026-10-14 at the operator's request; set "false"
@@ -565,6 +574,43 @@ envs:
   - key: A3PAY_CALLBACK_IPS
     scope: RUN_TIME
     value: 13.192.222.226
+  # GlobePay365 USDT rail (docs/payments/gp365-setup.md). USDT is a channel on
+  # the existing Polycard merchant (2026-10-21), so the keys are that merchant's
+  # old pair under GP365_* names. Never re-add GLOBEPAY_*: gateway-env.ts still
+  # reads those as fallbacks for the global switches. GP365_ENABLED is "true"
+  # since 2026-10-23, after the fee was saved in Settlement -> USDT (with no fee
+  # saved the rail shows as paused). Callbacks come from 13.159.14.239,
+  # the code default, so GP365_CALLBACK_IPS stays unset.
+  - key: GP365_ENABLED # gitleaks:allow (an env var name, not a key)
+    scope: RUN_TIME
+    value: "true"
+  - key: GP365_API_BASE
+    scope: RUN_TIME
+    value: https://mapi.globepay365.com
+  - key: GP365_MERCHANT_CODE
+    scope: RUN_TIME
+    value: Polycard
+  - key: GP365_PUBLIC_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__GP365_PUBLIC_KEY__"
+  - key: GP365_AES_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__GP365_AES_KEY__"
+  - key: GP365_MERCHANT_PRIVATE_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__GP365_MERCHANT_PRIVATE_KEY__"
+  # Lucky Draw seed secret (spec 2026-10-24 §7), added 2026-10-24. App-level
+  # so it reaches BOTH the service (publish hashes each prize seed) and the
+  # worker (the draw job re-derives the seed). Set it before any event is
+  # published and never change it while a published prize is undrawn: every
+  # such draw would refuse.
+  - key: LUCKY_DRAW_SEED_SECRET
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__LUCKY_DRAW_SEED_SECRET__
 
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and
@@ -604,14 +650,15 @@ services:
       branch: master
       deploy_on_push: true
     http_port: 9000
-    # professional-xs, not basic-xs, ONLY because the basic tier is hard-capped
-    # at one instance — `doctl apps propose` rejects instance_count: 2 with
-    # "must not exceed 1 instance for instance_size_slug basic-xs". Same 1 shared
-    # vCPU and 1 GiB for $12/mo instead of $10; the tier buys horizontal scaling
-    # (and unlocks autoscaling), not a faster box.
-    instance_size_slug: professional-xs
+    # Dedicated 2 vCPU / 4 GiB with a 3 GiB heap (NODE_OPTIONS below). On
+    # 2026-10-20 the shared 1 GiB box hit the ~500 MB default V8 heap and
+    # crash-looped once requests queued behind a full DB pool. Scale this box
+    # up, not out: see the connection arithmetic below.
+    instance_size_slug: apps-d-2vcpu-4gb
     # TWO is the ceiling here, and the arithmetic is the reason — this is not a
-    # budget choice. The cluster is db-s-1vcpu-1gb: 25 connections, ~22 usable.
+    # budget choice. The cluster is db-s-1vcpu-2gb since 2026-10-13: 50
+    # connections, 47 usable. The numbers below were written against the old
+    # 25/22 tier, so the margin is now wider than they state.
     # Every backend process opens up to DEFAULT_DB_POOL_MAX (5, see
     # src/utils/db-driver-options.ts), and the PRE_DEPLOY migrate job runs while
     # the old containers are still serving. 2 x 5 + worker 5 + migrate 5 = 20,
@@ -637,6 +684,9 @@ services:
         operator: GREATER_THAN
         window: FIVE_MINUTES
     envs:
+      - key: NODE_OPTIONS
+        scope: RUN_TIME
+        value: --max-old-space-size=3072
       - key: MEDUSA_WORKER_MODE
         scope: RUN_TIME
         value: server

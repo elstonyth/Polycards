@@ -156,6 +156,10 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 
 **The Signal Rule.** Every non-neutral color on screen must mean something a collector can name: a tier, a rarity, money in, or danger. If a color is there "for energy", delete it.
 
+### Lucky Draw only — Holo foil (2026-10-24)
+
+- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on three things: the prize wheel's rim, the prize frame in the win reveal, and the win's dust. Never chrome, never buttons, never text, never another surface. No gold anywhere on the wheel (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` / `.holo-ring` in `globals.css` only turn the light and cut the ring (still under reduced motion).
+
 ## 3. Typography
 
 **Display Font:** Nekst (Black 900, self-hosted) with system sans fallback
@@ -210,10 +214,11 @@ Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ra
 
 ### Navigation
 
-- **Bottom tab bar (mobile, the primary nav):** 5 slots with the shipped labels **Task · Ranks · Home · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: #737373. All five tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
+- **Bottom tab bar (mobile, the primary nav):** 7 slots with the shipped labels **Task · Ranks · Games · Home · Draw · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; Games, added 2026-10-25, does not navigate: it opens the game picker sheet — Coin Flip coming soon — and lights while a game page is open; Draw, moved out of Games 2026-10-30, goes to `/lucky-draw` and sits right of Home so Home stays in the middle; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: #737373. All six tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
 - **Header:** Ink Black, logo left; right side balance chip (Graphite pill: "RM 4.49" + white "＋" disc) opening the top-up sheet, present on every screen.
-- **Desktop (≥1024px):** the tab bar hides and the same five destinations render as pills inside the header row (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
-- **Surfaces without a slot of their own** are owned by a tab through its `match` prefixes, so something always lights up. Me owns the account tree (`/wallet`, `/settings`, `/orders`, `/transactions`, `/bank`, `/bank-withdrawal`, `/notifications`, `/addresses`) plus **`/referral`** — a top-level brand surface reached from the Me quick-access grid, not a sixth tab. Adding a route reachable from Me means adding it to that array in the same change; a route in no `match` array leaves the whole bar dark.
+- **Desktop (≥1024px):** the tab bar hides and the same seven destinations render as pills inside the header row (Games opens the picker as a centred dialog) (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
+- **Surfaces without a slot of their own** are owned by a tab through its `match` prefixes, so something always lights up. Me owns the account tree (`/wallet`, `/settings`, `/orders`, `/transactions`, `/bank`, `/bank-withdrawal`, `/notifications`, `/addresses`) plus **`/referral`** — a top-level brand surface reached from the Me quick-access grid, not a tab of its own. Adding a route reachable from Me means adding it to that array in the same change; a route in no `match` array leaves the whole bar dark.
+- **Page transitions (2026-10-25):** every navigation animates through React `<ViewTransition>` (`src/components/PageTransition.tsx`, mounted by `app/template.tsx` and `app/(account)/template.tsx`): the old page fades out fast, the new one fades in with a 10px rise; entering a game from the Games sheet zooms the game up from 96% while the page behind pushes away, and leaving a game reverses it. The header and tab bar sit in the layout and never move. Reduced motion: pages swap instantly.
 
 ### Signature: Sticky Stat Card
 
@@ -260,6 +265,12 @@ The home page is a six-board editorial scroll story (spec:
   with one tile is dead air. (Note: supersedes the aspirational
   starter/silver/gold/diamond band in §2 — packs use the six-tier axis in
   shipped code.)
+- **Franchise switch** — the home ladder and the `/slots` catalog show ONE
+  pack category (Pokémon, One Piece, …) at a time, behind
+  `PackCategoryTabs.tsx`: the segmented pill sized up (48px, 56px at lg), with
+  the category icon (no pack count). Only categories with packs get a tab; with
+  one, the switch is hidden. A new franchise adds a tab, never a longer list.
+  `/slots` keeps the pick in `?category=`.
 
 ### Signature: Pull History (home board 03 + pack detail)
 
@@ -334,6 +345,33 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
   `.claim-ring`, `.claim-sweep` in globals.css). Chase Gold only, only on
   claimable things, never ambient — it marks a real prize, which is why it is
   not the confetti/coin-shower the Don'ts ban. Reduced motion: still and lit.
+
+### Signature: Lucky Draw (/lucky-draw, 2026-10-24)
+
+Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
+**Draw** tab (2026-10-30; it sat under Games from 2026-10-25, under Task before that).
+
+- **Tabs** — Prizes · Results · My tickets, the leaderboard's segmented pill.
+- **Prize card** — charcoal card: the prize on a 5:7 pedestal, RM value in
+  Chase Gold Nekst, draw time in MYT with a live countdown, tickets in /
+  entrants / my chance, the top 10 (framed avatars) and one white Enter
+  pill.
+- **The wheel** (style "K — Holo Foil") — matte black and graphite wedges
+  sized by tickets, hair-thin silver lines, the holo-foil rim, a pearl hub, a
+  slim silver pointer that flicks on each edge. Pull-back, ~7 s ease-out,
+  settle, landing inside the winner's wedge (never dead centre). Win: holo
+  dust rises from the wedge, the wheel dims, and the prize rises from the hub
+  in a thin holo frame. Decoration only — the result is stored before the
+  wheel turns. Reduced motion: the winner shows directly, no spin, no dust.
+  Sound (2026-10-25, `drawStart/drawTick/drawStop/drawWin` in
+  `src/lib/slot-sfx.ts`, header mute applies): a soft air swoosh on launch, a
+  light pawl click per wedge edge (at most one per 38 ms), a muted wooden
+  knock on the stop, and a glassy E-major shimmer with high sparkles as the
+  prize rises — quiet and premium, never a casino jingle.
+- **Results** — the winner, their tickets, a Watch-the-draw replay and the
+  frozen entry list in draw order with ticket ranges. The seed and its hash
+  stay off the page (operator 2026-10-25); the server still commits and
+  stores them.
 
 ## 6. Do's and Don'ts
 

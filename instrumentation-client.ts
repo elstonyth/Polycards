@@ -16,6 +16,9 @@ Sentry.init({
   beforeBreadcrumb: scrubBreadcrumbUrls,
   beforeSendSpan: scrubSpanUrls,
   dataCollection: sentryDataCollection,
+  // A page transition skipped because the DOM update ran past Chrome's limit:
+  // the page still changes, only the animation drops. React reports it anyway.
+  ignoreErrors: [/Transition was aborted because of timeout in DOM update/],
 });
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

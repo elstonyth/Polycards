@@ -19,7 +19,7 @@ import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
 import { CountrySelect } from '@/components/account/CountrySelect';
 import {
-  computeDeliveryFee,
+  computeParcelFee,
   deliveryZone,
   isShippableCountry,
   isShippablePostcode,
@@ -124,10 +124,10 @@ export default function RequestDeliveryModal({
   // Recomputed per render from the selected address; cheap (two lookups).
   const selectedAddress = addrList.find((a) => a.id === selectedAddr);
   const country = selectedAddress?.countryCode ?? '';
-  // Every delivery pays its zone's fee (2026-10-14): the vault cards go as ONE
-  // order, and each prize card ships through POST /store/rewards/withdraw as
-  // its OWN order. Both pay the zone's shipping plus 5% insurance on card
-  // value above RM200 — the prize on its own value.
+  // One parcel, one shipping fee (2026-10-23): the vault cards and the prize
+  // cards go as ONE order, priced like the backend's computeParcelFee — the
+  // zone's shipping once, plus 5% insurance above RM200 on the vault cards'
+  // combined value and on each prize's own value.
   const paidItems = items.filter((i) => i.source !== 'reward');
   const selectedPrizes = items.filter((i) => i.source === 'reward');
   // Prize cards ship up to a daily limit; only those are priced and sent, and
@@ -145,25 +145,18 @@ export default function RequestDeliveryModal({
     Math.round(
       paidItems.reduce((s, i) => s + (i.card.priceMyr ?? 0), 0) * 100,
     ) / 100;
-  const priced = (value: number) =>
-    selectedAddress
-      ? computeDeliveryFee(
+  const fee =
+    selectedAddress && paidItems.length + prizeItems.length > 0
+      ? computeParcelFee(
           selectedAddress.postalCode,
-          value,
+          orderValue,
+          prizeItems.map((i) => i.card.priceMyr ?? 0),
           selectedAddress.province,
           selectedAddress.city,
           country,
         )
       : null;
-  const fee = paidItems.length > 0 ? priced(orderValue) : null;
-  const prizeFees = prizeItems.map((i) => priced(i.card.priceMyr ?? 0));
-  const prizeShipping = prizeFees.reduce((s, f) => s + (f?.shipping ?? 0), 0);
-  const prizeInsurance = prizeFees.reduce((s, f) => s + (f?.insurance ?? 0), 0);
-  const totalCharge =
-    Math.round(
-      ((fee?.total ?? 0) + prizeFees.reduce((s, f) => s + (f?.total ?? 0), 0)) *
-        100,
-    ) / 100;
+  const totalCharge = fee?.total ?? 0;
   const zone = selectedAddress
     ? deliveryZone(
         selectedAddress.postalCode,
@@ -243,40 +236,13 @@ export default function RequestDeliveryModal({
     setBusy(true);
     setError(null);
     try {
-      // Reward cards take a different backend — POST /store/rewards/withdraw,
-      // which stamps is_reward and enforces a per-day cap — so the selection
-      // is split here rather than sent to a route that would refuse half of it.
       const normalIds = paidItems.map((i) => i.pullId);
       // Only the prizes today's limit lets ship; the rest stay in the vault.
+      // The backend refuses the whole parcel past the cap, so never send more.
       const rewardIds = prizeItems.map((i) => i.pullId);
-      const addr = addrList.find((a) => a.id === selectedAddr);
-      if (!addr) {
-        setError('Choose a shipping address.');
-        return;
-      }
-      const res = await shipVaultCards(normalIds, rewardIds, selectedAddr, {
-        firstName: addr.firstName,
-        lastName: addr.lastName,
-        address1: addr.line1,
-        city: addr.city,
-        postalCode: addr.postalCode,
-        countryCode: addr.countryCode,
-        address2: addr.line2,
-        province: addr.province,
-        phone: addr.phone,
-      });
+      const res = await shipVaultCards(normalIds, rewardIds, selectedAddr);
       if (!res.ok) {
         setError(res.error);
-        return;
-      }
-      // A partial result is normal: the reward cap can bite mid-selection
-      // after the ordinary cards have already shipped. Report it rather than
-      // pretending the whole selection went.
-      if (res.shippedIds.length === 0 && res.skipped.length > 0) {
-        setError(
-          res.skipped[0]?.reason ??
-            'Those cards could not be shipped right now.',
-        );
         return;
       }
       // The fees left the balance server-side; repaint the header chip.
@@ -530,28 +496,6 @@ export default function RequestDeliveryModal({
                   </p>
                 )}
               </>
-            )}
-            {prizeItems.length > 0 && (
-              <div className="mt-1 flex justify-between text-white/70">
-                <span>
-                  Prize card shipping ({ZONE_LABEL[zone]}
-                  {prizeItems.length > 1
-                    ? `, ${prizeItems.length} parcels × ${rm(prizeShipping / prizeItems.length)}`
-                    : ''}
-                  )
-                </span>
-                <span className="shrink-0 whitespace-nowrap pl-3">
-                  {rm(prizeShipping)}
-                </span>
-              </div>
-            )}
-            {prizeInsurance > 0 && (
-              <div className="mt-1 flex justify-between text-white/70">
-                <span>Prize insurance (5% of card value)</span>
-                <span className="shrink-0 whitespace-nowrap pl-3">
-                  {rm(prizeInsurance)}
-                </span>
-              </div>
             )}
             <div className="mt-2 flex justify-between border-t border-white/10 pt-2 font-semibold text-white">
               <span>Total — deducted from balance</span>

@@ -7,9 +7,10 @@ import { cn } from '@/lib/utils';
  * and shows those as the letters "MY" / "SG", and here the flag IS the signal
  * (it tells a customer which country's bank pays in that currency). Both
  * flags fill the same 3:2 box; Malaysia's 2:1 flag is cropped from the right
- * so the canton stays whole.
+ * so the canton stays whole. USDT is no country: it gets Tether's mark (₮ on
+ * teal) in the same box, so the picker rows still line up.
  */
-export type FlagCountry = 'MY' | 'SG';
+export type FlagCountry = 'MY' | 'SG' | 'USDT';
 
 /** Points of an n-pointed star, for an SVG <polygon>. */
 export function starPoints(
@@ -42,6 +43,24 @@ const SG_STARS = Array.from({ length: 5 }, (_, k) => {
 const MY_STAR = starPoints(10.1, 4, 14, 2.35, 1.05);
 
 function Flag({ country }: { country: FlagCountry }) {
+  if (country === 'USDT') {
+    return (
+      <>
+        <rect width="30" height="20" fill="#26A17B" />
+        <rect x="9" y="4" width="12" height="2.6" fill="#fff" />
+        <rect x="13.4" y="4" width="3.2" height="12" fill="#fff" />
+        <ellipse
+          cx="15"
+          cy="9.4"
+          rx="6.6"
+          ry="1.8"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="1.1"
+        />
+      </>
+    );
+  }
   if (country === 'SG') {
     return (
       <>
@@ -79,7 +98,7 @@ export function CountryFlag({
 }) {
   return (
     <svg
-      viewBox={country === 'SG' ? '0 0 30 20' : '0 0 28 14'}
+      viewBox={country === 'MY' ? '0 0 28 14' : '0 0 30 20'}
       preserveAspectRatio="xMinYMid slice"
       aria-hidden
       focusable="false"

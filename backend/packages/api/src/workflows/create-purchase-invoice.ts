@@ -1,5 +1,6 @@
 import {
   createWorkflow,
+  when,
   WorkflowResponse,
 } from '@medusajs/framework/workflows-sdk';
 import createPurchaseInvoiceRecordsStep, {
@@ -27,7 +28,12 @@ export const createPurchaseInvoiceWorkflow = createWorkflow(
   'create-purchase-invoice',
   (input: CreatePurchaseInvoiceRecordsInput) => {
     const invoice = createPurchaseInvoiceRecordsStep(input);
-    adjustInventoryForPurchaseStep({ lines: input.lines });
+    // An invoice transferred from a goods receive note (and any reversal of
+    // one, which inherits from_grn_id) adds cost only: the GRN already raised
+    // the counter for these cards (spec 2026-10-28).
+    when({ input }, ({ input }) => !input.from_grn_id).then(() => {
+      adjustInventoryForPurchaseStep({ lines: input.lines });
+    });
     return new WorkflowResponse(invoice);
   },
 );

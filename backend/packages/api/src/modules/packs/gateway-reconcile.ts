@@ -119,8 +119,9 @@ export type ReconcileInput = {
   amount: number;
   createdAt: Date;
   now: Date;
-  /** The row's FX lock and what the gateway reported in ITS currency. */
-  lock?: { fx: RowFx; reported: number };
+  /** The row's FX lock, what the gateway reported in ITS currency, and that
+   *  gateway's nudge window (GATEWAYS[id].payinNudgeCents; default 10). */
+  lock?: { fx: RowFx; reported: number; windowCents?: number };
   /** The row's gateway's RM deposit ceiling; GATEWAY_MAX_RM when unknown.
    *  A3Pay's is higher (S$5,000 top-ups credit past RM 10,000). */
   ceiling?: number;
@@ -158,7 +159,10 @@ export function reconcileAction(input: ReconcileInput): ReconcileAction {
     // Except on a row locked in another currency: A3Pay matches a payin only
     // by its exact nudged sum, so "the customer paid a different amount" does
     // not happen there. A different S$ sum is a slip at their end.
-    if (input.lock && offLock(input.lock.fx, input.lock.reported)) {
+    if (
+      input.lock &&
+      offLock(input.lock.fx, input.lock.reported, input.lock.windowCents)
+    ) {
       return { kind: 'quarantine', amount: input.amount, reason: 'off-lock' };
     }
     return { kind: 'settle', amount: input.amount };
@@ -251,7 +255,7 @@ export function classifyRequeryError(error: unknown): RequeryRefusal {
  * in a GATEWAY_RECONCILE_BATCH-sized, oldest-first window until the sweep does
  * nothing but requery zombies and never reaches a fresh deposit whose callback
  * was dropped: the exact loss this job exists to prevent. They would also each
- * render an orange "Overdue" on the admin deposits page forever.
+ * stay flagged "Needs gateway check" (`stuck`) on the admin dashboard forever.
  *
  * A WEEK, and the size is the whole point. The failures that produce an
  * ambiguous 400 are credential/whitelist/config breakages resolved by a support

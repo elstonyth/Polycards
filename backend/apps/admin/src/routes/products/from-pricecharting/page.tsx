@@ -14,7 +14,7 @@ import {
   clx,
 } from '@medusajs/ui';
 import { XMark } from '@medusajs/icons';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   searchPriceCharting,
   getPriceChartingProduct,
@@ -48,6 +48,14 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   rank: 0,
   nested: '/inventory/list',
+  // Shown only to a role that can use the page: it opens under core's
+  // /products route (product:read) and calls the PriceCharting API
+  // (pricecharting:read). Hides it from stock-only roles (Stock keeper).
+  permissions: [
+    'pricecharting:read' as Permission,
+    'product:read' as Permission,
+  ],
+  requireAll: true,
 };
 
 // NOTE: usdToMyr is display-only preview math showing the raw FMV in RM; the
@@ -609,6 +617,7 @@ const AddFromPriceChartingPage = () => {
               value={pokemon}
               onChange={(p) => setPokemon((v) => ({ ...v, ...p }))}
               suggestionName={pcProduct?.name ?? ''}
+              setName={pcProduct?.set}
               autoResolveName={pcProduct?.name}
             />
             {pokemon.pixel_pokemon_id === null && (

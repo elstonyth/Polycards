@@ -56,6 +56,15 @@ export type RevealFn = (
   pullId: string,
 ) => Promise<{ ok: true; instantDeadlineMs: number } | { ok: false }>;
 
+// A sell nobody answers must not hold its card in 'selling' forever: the expiry
+// sweep exempts 'selling', so the stage never concludes and the player is stuck
+// on "Selling…" (2026-10-25: a flood starved the storefront and the server
+// action never returned). Past this the card reports the timeout and the sweep
+// can vault it; an answer that still arrives later is applied then.
+export const SELL_TIMEOUT_MS = 15_000;
+export const SELL_TIMEOUT_MESSAGE =
+  'The sale did not confirm in time. Check your balance and vault before selling again.';
+
 export function useSellWindow({
   offers,
   active,
@@ -63,6 +72,7 @@ export function useSellWindow({
   onSellBack,
   onSold,
   onSellFailed,
+  sellTimeoutMs = SELL_TIMEOUT_MS,
 }: {
   offers: (SellBackOffer | null)[];
   active: boolean;
@@ -76,6 +86,8 @@ export function useSellWindow({
    *  renders and the player is told only "Stored in your vault" — true, but
    *  indistinguishable from a card they never tried to sell (#514). */
   onSellFailed?: (message: string) => void;
+  /** Test seam; production always uses SELL_TIMEOUT_MS. */
+  sellTimeoutMs?: number;
 }) {
   const [states, setStates] = useState<SellState[]>(() =>
     offers.map(() => ({ phase: 'idle' })),
@@ -88,7 +100,14 @@ export function useSellWindow({
 
   // Reset per new batch (keyed by the first pullId).
   const batchKey = offers.find((o) => o !== null)?.pullId ?? null;
+  // The batch whose states are live — a late sell answer from an earlier batch
+  // must not land on this batch's card at the same index.
+  const liveBatch = useRef(batchKey);
+  // Pulls whose sale has landed. A retry's refusal ("already sold back") or a
+  // second timeout for one of these must not toast an error over the success.
+  const soldPulls = useRef(new Set<string>());
   useEffect(() => {
+    liveBatch.current = batchKey;
     pinged.current = false;
     // Money path: the whole window (states, deadline, countdown, reveal ping)
     // restarts together when a new batch arrives, keyed on its first pullId.
@@ -227,15 +246,22 @@ export function useSellWindow({
       // the write must compose with anything React has queued since this
       // render, and re-resolving costs nothing.
       setStates((prev) => beginSellAt(resolvedStates(prev, expired), index));
-      try {
-        const res = await onSellBack(offer.pullId);
-        setStates((prev) => {
-          const next = [...prev];
-          next[index] = res.ok
-            ? { phase: 'sold', amount: res.amount }
-            : { phase: 'error', message: res.error };
-          return next;
-        });
+      const report = (res: Awaited<ReturnType<SellBackFn>>): boolean => {
+        if (!res.ok && soldPulls.current.has(offer.pullId)) return false;
+        if (res.ok) soldPulls.current.add(offer.pullId);
+        // A new spin has replaced this batch: its card states are gone, but a
+        // sale that landed still reaches onSold below (balance + confirmation).
+        if (liveBatch.current === batchKey)
+          setStates((prev) => {
+            // A sale that landed late is final: a retry's refusal ("already
+            // sold") must not paint it back to an error.
+            if (!res.ok && prev[index]?.phase === 'sold') return prev;
+            const next = [...prev];
+            next[index] = res.ok
+              ? { phase: 'sold', amount: res.amount }
+              : { phase: 'error', message: res.error };
+            return next;
+          });
         // `amount` is passed alongside the balance so the caller can confirm
         // the sale OUTSIDE this stage. The in-card "+RM x credited" footer is
         // torn down with the reveal (auto-conclude, or expiry mid-flight), and
@@ -262,18 +288,50 @@ export function useSellWindow({
           );
         else if (sweptAway()) onSellFailed?.(res.error);
         return res.ok;
+      };
+      const request = onSellBack(offer.pullId);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), sellTimeoutMs);
+      });
+      try {
+        const res = await Promise.race([request, timedOut]);
+        if (res !== null) return report(res);
+        // Still on the wire: free the card now, and credit the sale if it lands.
+        void request.then(
+          (late) => {
+            if (late.ok) report(late);
+          },
+          () => {},
+        );
+        return report({ ok: false, error: SELL_TIMEOUT_MESSAGE });
       } catch {
+        if (soldPulls.current.has(offer.pullId)) return false;
         const message = 'Something went wrong. Please try again.';
-        setStates((prev) => {
-          const next = [...prev];
-          next[index] = { phase: 'error', message };
-          return next;
-        });
+        if (liveBatch.current === batchKey)
+          setStates((prev) => {
+            if (prev[index]?.phase === 'sold') return prev;
+            const next = [...prev];
+            next[index] = { phase: 'error', message };
+            return next;
+          });
         if (sweptAway()) onSellFailed?.(message);
         return false;
+      } finally {
+        clearTimeout(timer);
       }
     },
-    [offers, onSellBack, onSold, onSellFailed, expired, states, deadlineMs],
+    [
+      offers,
+      onSellBack,
+      onSold,
+      onSellFailed,
+      expired,
+      states,
+      deadlineMs,
+      sellTimeoutMs,
+      batchKey,
+    ],
   );
 
   // Every card is terminal (sold | vaulted) — drives the reveal auto-conclude

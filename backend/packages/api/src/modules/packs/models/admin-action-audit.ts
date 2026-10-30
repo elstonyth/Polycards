@@ -48,6 +48,13 @@ export const ADMIN_AUDIT_ENTITY_TYPES = [
   // Settlement's Acknowledge (2026-10-15) audits against the finding's row;
   // payouts already audit as 'gateway_withdrawal'. See Migration20261015160000.
   'gateway_deposit',
+  // Lucky Draw (spec 2026-10-24): an event's name/window/publish and a prize's
+  // create/edit/cancel — see Migration20261024130000.
+  'lucky_draw_event',
+  'lucky_draw_prize',
+  // Goods receive notes (spec 2026-10-28): create and reversal, both 'create'.
+  // See Migration20261028150000.
+  'goods_receive_note',
 ] as const;
 
 export const ADMIN_AUDIT_ACTIONS = [
@@ -118,6 +125,10 @@ export const ADMIN_AUDIT_ACTIONS = [
   // An operator acknowledging a gateway audit finding on Settlement, entity
   // 'gateway_deposit' or 'gateway_withdrawal' — see Migration20261015160000.
   'acknowledge_finding',
+  // Publishing a Lucky Draw event (entity 'lucky_draw_event') commits each
+  // prize's seed hash — see Migration20261024130000. Cancelling a prize
+  // audits as 'disable', like a lossless-schedule window.
+  'publish',
 ] as const;
 
 // admin_action_audit — append-only record of every admin money mutation

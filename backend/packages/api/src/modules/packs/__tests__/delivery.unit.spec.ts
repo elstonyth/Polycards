@@ -16,22 +16,22 @@ describe("validateDeliveryRequest", () => {
 
   it("returns ok when every requested pull is owned and vaulted", () => {
     const pulls = [vaulted("p1"), vaulted("p2")];
-    expect(validateDeliveryRequest(pulls, ["p1", "p2"], caller, true)).toBe("ok");
+    expect(validateDeliveryRequest(pulls, ["p1", "p2"], caller, new Set())).toBe("ok");
   });
 
   it("rejects an empty selection", () => {
-    expect(validateDeliveryRequest([], [], caller, true)).toBe("empty");
+    expect(validateDeliveryRequest([], [], caller, new Set())).toBe("empty");
   });
 
   it("rejects when a requested id is missing from the fetched pulls", () => {
-    expect(validateDeliveryRequest([vaulted("p1")], ["p1", "p2"], caller, true)).toBe(
+    expect(validateDeliveryRequest([vaulted("p1")], ["p1", "p2"], caller, new Set())).toBe(
       "not_found",
     );
   });
 
   it("rejects a pull owned by someone else (no existence leak)", () => {
     const pulls = [vaulted("p1"), vaulted("p2", "cus_2")];
-    expect(validateDeliveryRequest(pulls, ["p1", "p2"], caller, true)).toBe(
+    expect(validateDeliveryRequest(pulls, ["p1", "p2"], caller, new Set())).toBe(
       "forbidden",
     );
   });
@@ -43,23 +43,23 @@ describe("validateDeliveryRequest", () => {
       vaulted("p1"),
       { id: "p2", customer_id: caller, status },
     ];
-    expect(validateDeliveryRequest(withStatus("delivering"), ["p1", "p2"], caller, true)).toBe(
+    expect(validateDeliveryRequest(withStatus("delivering"), ["p1", "p2"], caller, new Set())).toBe(
       "already_delivering",
     );
-    expect(validateDeliveryRequest(withStatus("delivered"), ["p1", "p2"], caller, true)).toBe(
+    expect(validateDeliveryRequest(withStatus("delivered"), ["p1", "p2"], caller, new Set())).toBe(
       "already_delivered",
     );
-    expect(validateDeliveryRequest(withStatus("bought_back"), ["p1", "p2"], caller, true)).toBe(
+    expect(validateDeliveryRequest(withStatus("bought_back"), ["p1", "p2"], caller, new Set())).toBe(
       "bought_back",
     );
     // Unknown/future statuses keep the generic verdict.
-    expect(validateDeliveryRequest(withStatus("frozen"), ["p1", "p2"], caller, true)).toBe(
+    expect(validateDeliveryRequest(withStatus("frozen"), ["p1", "p2"], caller, new Set())).toBe(
       "not_vaulted",
     );
   });
 
   it("rejects duplicate ids in the selection", () => {
-    expect(validateDeliveryRequest([vaulted("p1")], ["p1", "p1"], caller, true)).toBe(
+    expect(validateDeliveryRequest([vaulted("p1")], ["p1", "p1"], caller, new Set())).toBe(
       "duplicate",
     );
   });
@@ -67,15 +67,15 @@ describe("validateDeliveryRequest", () => {
   describe("reward-source gate", () => {
     it("rejects reward pulls (they ship via the rewards withdrawal path)", () => {
       const pulls = [{ ...vaulted("p1"), source: "reward" }];
-      expect(validateDeliveryRequest(pulls, ["p1"], caller, true)).toBe("reward_source");
+      expect(validateDeliveryRequest(pulls, ["p1"], caller, new Set())).toBe("reward_source");
     });
 
     it("accepts pack pulls (source pack / undefined)", () => {
       const packPull = { ...vaulted("p1"), source: "pack" };
-      expect(validateDeliveryRequest([packPull], ["p1"], caller, true)).toBe("ok");
+      expect(validateDeliveryRequest([packPull], ["p1"], caller, new Set())).toBe("ok");
 
       const noPull = vaulted("p1");
-      expect(validateDeliveryRequest([noPull], ["p1"], caller, true)).toBe("ok");
+      expect(validateDeliveryRequest([noPull], ["p1"], caller, new Set())).toBe("ok");
     });
 
     // Contract pin: recordRewardWithdrawal keys on EXACTLY 'reward_source' for
@@ -84,7 +84,7 @@ describe("validateDeliveryRequest", () => {
     // source gate.
     it("returns exactly 'reward_source' for owned+vaulted+reward (recordRewardWithdrawal keys on it)", () => {
       const rewardPull = { ...vaulted("p1"), source: "reward" };
-      expect(validateDeliveryRequest([rewardPull], ["p1"], caller, true)).toBe(
+      expect(validateDeliveryRequest([rewardPull], ["p1"], caller, new Set())).toBe(
         "reward_source",
       );
 
@@ -95,32 +95,50 @@ describe("validateDeliveryRequest", () => {
         status: "delivering",
         source: "reward",
       };
-      expect(validateDeliveryRequest([delivering], ["p1"], caller, true)).toBe(
+      expect(validateDeliveryRequest([delivering], ["p1"], caller, new Set())).toBe(
         "already_delivering",
       );
 
       // Someone else's reward pull is 'forbidden' (ownership precedes source).
       const foreign = { ...vaulted("p1", "cus_2"), source: "reward" };
-      expect(validateDeliveryRequest([foreign], ["p1"], caller, true)).toBe(
+      expect(validateDeliveryRequest([foreign], ["p1"], caller, new Set())).toBe(
         "forbidden",
       );
+    });
+
+    // The generic delivery path (2026-10-23): prize cards ride in the vault
+    // order, so a mixed selection validates as one parcel.
+    it("passes prize pulls with prizesShipHere, still checking every pull and the lock", () => {
+      const prize = { ...vaulted("p2"), source: "reward" };
+      const opts = { prizesShipHere: true };
+      expect(
+        validateDeliveryRequest([vaulted("p1"), prize], ["p1", "p2"], caller, new Set(), opts),
+      ).toBe("ok");
+      // A pull AFTER the prize is still validated (no early return).
+      expect(
+        validateDeliveryRequest([prize, vaulted("p3", "cus_2")], ["p2", "p3"], caller, new Set(), opts),
+      ).toBe("forbidden");
+      // A daily-task prize card stays locked until the first paid open.
+      expect(
+        validateDeliveryRequest([prize], ["p2"], caller, new Set(["p2"]), opts),
+      ).toBe("free_locked");
     });
   });
 
   // Free welcome pull (spec 2026-08-14): locked out of delivery until the
-  // customer's first PAID open. `freeUnlocked` is hasPaidOpen(), computed once
+  // customer's first PAID open. `lockedIds` is lockedPullIds(), computed once
   // per request by the caller — never stored on the pull.
   describe("free-source lock", () => {
     const freePull = { ...vaulted("p1"), source: "free" };
 
     it("rejects a free pull while the account has no paid open", () => {
-      expect(validateDeliveryRequest([freePull], ["p1"], caller, false)).toBe(
+      expect(validateDeliveryRequest([freePull], ["p1"], caller, new Set(["p1"]))).toBe(
         "free_locked",
       );
     });
 
     it("accepts the same free pull once a paid open exists", () => {
-      expect(validateDeliveryRequest([freePull], ["p1"], caller, true)).toBe(
+      expect(validateDeliveryRequest([freePull], ["p1"], caller, new Set())).toBe(
         "ok",
       );
     });

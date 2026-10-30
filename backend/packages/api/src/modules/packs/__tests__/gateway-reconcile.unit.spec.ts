@@ -239,6 +239,33 @@ describe('reconcileAction', () => {
       ).toEqual({ kind: 'settle', amount: 300 });
     });
 
+    it("uses the row gateway's own nudge window (GlobePay365: 1 USDT)", () => {
+      const usdt = {
+        ledgerAmount: 208.95,
+        gatewayAmount: 50,
+        currency: 'USDT',
+      };
+      const sweep = (reported: number, windowCents?: number) =>
+        reconcileAction({
+          state: 'success',
+          amount: 208.95,
+          createdAt: minutesAgo(5),
+          now,
+          lock: { fx: usdt, reported, windowCents },
+        });
+      // 0.40 USDT off: inside gp365's 100-cent window, outside the default 10.
+      expect(sweep(50.4, 100)).toEqual({ kind: 'settle', amount: 208.95 });
+      expect(sweep(50.4)).toMatchObject({
+        kind: 'quarantine',
+        reason: 'off-lock',
+      });
+      // Past the window is still a slip to quarantine.
+      expect(sweep(51.01, 100)).toMatchObject({
+        kind: 'quarantine',
+        reason: 'off-lock',
+      });
+    });
+
     it('never fences a failed or pending answer', () => {
       expect(
         reconcileAction({

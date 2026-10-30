@@ -33,6 +33,9 @@ export const OPERATION_BY_METHOD = {
  *  them byte-identical to what the middleware entries check. */
 export const CUSTOM_ADMIN_RESOURCES = {
   announcements: 'announcement',
+  assistant: 'assistant',
+  'assistant-review': 'assistant_review',
+  'assistant-settings': 'assistant_setting',
   automation: 'automation',
   'avatar-frames': 'avatar_frame',
   cards: 'card',
@@ -41,9 +44,11 @@ export const CUSTOM_ADMIN_RESOURCES = {
   'delivery-orders': 'delivery_order',
   economy: 'economy',
   gacha: 'gacha',
+  'goods-receive-notes': 'goods_receive_note',
   inventory: 'inventory',
   ledger: 'ledger',
   'lossless-schedules': 'lossless_schedule',
+  'lucky-draw': 'lucky_draw',
   media: 'media',
   'pack-gifts': 'pack_gift',
   packs: 'pack',
@@ -51,6 +56,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   players: 'player',
   pricecharting: 'pricecharting',
   pricing: 'pricing',
+  procurement: 'procurement',
   'profit-report': 'profit_report',
   pulls: 'pull',
   'purchase-invoices': 'purchase_invoice',
@@ -88,6 +94,7 @@ export const CORE_PREFIX_WRITES: {
     'enable',
     'freeze',
     'group',
+    'lucky-draw-tickets',
     'pack-gifts',
     'partner-rate',
     'payout-details',
@@ -128,6 +135,27 @@ export const CORE_PREFIX_WRITES: {
   })),
 ];
 
+/** GETs that hand out secrets a read role must not see even with the screen's
+ *  read policy: partner logins' passwords (the players export) and full bank
+ *  account numbers (a customer's payout details, a withdrawal's account). Each
+ *  asks for its OWN read policy on top of the prefix's — Medusa ANDs
+ *  overlapping entries — so the view-only Support viewer (player / customer /
+ *  payment:read, scripts/create-support-viewer.ts) is refused, while `*:*`
+ *  staff and the `*:read` desk bots pass as before. Declared in
+ *  policies/admin-surfaces.ts. Resources must be NEW names: Mercur already
+ *  owns `payout_account` (its seller payouts, key-unique policy rows). */
+export const SECRET_READS = [
+  { matcher: '/admin/players/export', resource: 'partner_credential' },
+  {
+    matcher: '/admin/customers/*/payout-details',
+    resource: 'customer_bank_account',
+  },
+  {
+    matcher: '/admin/payments/withdrawals/*/account',
+    resource: 'customer_bank_account',
+  },
+] as const;
+
 const METHODS_BY_OPERATION = Object.entries(OPERATION_BY_METHOD).reduce<
   Record<string, ('GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE')[]>
 >((acc, [method, operation]) => {
@@ -138,17 +166,28 @@ const METHODS_BY_OPERATION = Object.entries(OPERATION_BY_METHOD).reduce<
 /** The middleware entries middlewares.ts spreads in. Two matchers per prefix
  *  (`/admin/x` and `/admin/x/*`, a `*` spanning `/` under path-to-regexp
  *  0.1.x), never a bare `/admin/x*`, which would also catch any future
- *  sibling prefix that merely starts with the same letters. */
+ *  sibling prefix that merely starts with the same letters.
+ *
+ *
+ *  Automation reads and runs on `automation:*` alone, so the automation
+ *  operator role (scripts/create-automation-operator.ts) works without
+ *  `customer:read`. Saving the account list also asks `customer:read`: it
+ *  accepts ANY registered customer's email, and a live run then opens packs on
+ *  that customer's wallet. Only staff choose which accounts automation touches. */
 export const adminRbacRoutes: MiddlewareRoute[] = [
-  {
-    matcher: '/admin/automation',
-    methods: ['GET'],
-    policies: [{ resource: 'customer', operation: 'read' }],
-  },
   {
     matcher: '/admin/automation/accounts',
     methods: ['POST'],
     policies: [{ resource: 'customer', operation: 'read' }],
+  },
+  {
+    // The mailing list carries customer names, addresses, phones and emails:
+    // on top of procurement:read (the prefix entry below), ask the same
+    // permission the Orders page does, so a purchasing-only role cannot read
+    // customer details through it.
+    matcher: '/admin/procurement/to-ship',
+    methods: ['GET'],
+    policies: [{ resource: 'delivery_order', operation: 'read' }],
   },
   ...Object.entries(CUSTOM_ADMIN_RESOURCES).flatMap(([prefix, resource]) =>
     [`/admin/${prefix}`, `/admin/${prefix}/*`].flatMap((matcher) =>
@@ -163,5 +202,10 @@ export const adminRbacRoutes: MiddlewareRoute[] = [
     matcher: w.matcher,
     methods: [w.method],
     policies: [{ resource: w.resource, operation: w.operation }],
+  })),
+  ...SECRET_READS.map((s) => ({
+    matcher: s.matcher,
+    methods: ['GET' as const],
+    policies: [{ resource: s.resource, operation: 'read' as const }],
   })),
 ];

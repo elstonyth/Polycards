@@ -9,7 +9,7 @@
  *   GET  /store/delivery-orders            — the caller's orders
  *   POST /store/delivery-orders/:id/address — edit address pre-ship
  *   POST /store/delivery-orders/:id/cancel  — cancel pre-ship (cards → vault)
- *   POST /store/rewards/withdraw            — ship ONE reward pull (capped/day)
+ *   GET  /store/rewards/withdraw            — today's prize-shipping allowance
  *
  * Those five go through the `Store` port (src/lib/store.ts), which owns the
  * cookie read, the bearer, the schema check and the failure log. The ADDRESS
@@ -28,11 +28,8 @@ import {
   CancelDeliverySchema,
   DeliveryOrdersPageSchema,
   UncheckedSchema,
-  WithdrawAddressSchema,
-  WithdrawPrizeSchema,
   PrizeAllowanceSchema,
   type DeliveryOrderStatus,
-  type WithdrawAddressInput,
 } from '@/lib/data/schemas';
 import {
   friendlyError,
@@ -49,7 +46,6 @@ import {
 } from '@/lib/delivery-errors';
 import { normalizePhone } from '@/lib/profile-validation';
 import { isShippableCountry } from '@/lib/delivery-fee';
-import { isPhoneGateError } from '@/lib/phone-gate';
 import { toCardView, type CardView } from '@/lib/card-view';
 
 export type DeliveryOrderItemView = {
@@ -298,8 +294,9 @@ const CANCEL_RULES: ErrorRule[] = [
   [UNAUTHORIZED, DELIVERY_LOGIN],
   [/already canceled/i, 'This delivery is already canceled.'],
   // Backend NOT_ALLOWED once the order is out of the customer window. It fires
-  // from `ready_to_ship` on — not only after the parcel physically ships — so
-  // the copy says "being prepared", which is true for every status it covers.
+  // from `processed` on (the 12am cutoff) — not only after the parcel
+  // physically ships — so the copy says "being prepared", which is true for
+  // every status it covers.
   [
     /no longer be canceled|not allowed|ready to ship|shipped|delivered/i,
     'This order is already being prepared for shipping and can no longer be canceled — please contact support.',
@@ -307,9 +304,9 @@ const CANCEL_RULES: ErrorRule[] = [
   [/not found|404/i, 'That order was not found.'],
 ];
 
-// Cancel an order the customer still owns the decision on (`requested`/
-// `processed`) — the cards return to their vault. From `ready_to_ship` on the
-// backend refuses: the parcel is picked and labelled, so cancelling is an
+// Cancel an order the customer still owns the decision on (`requested`, i.e.
+// before the 12am cutoff) — the cards return to their vault. From `processed`
+// on the backend refuses: purchasing has started on it, so cancelling is an
 // operator/support action. The UI hides the affordance for the same statuses.
 export async function cancelDeliveryOrder(
   orderId: string,
@@ -556,116 +553,24 @@ export async function getPrizeShippingAllowance(): Promise<{
 }
 
 /**
- * Ship a vault selection that may mix ordinary cards with REWARD cards.
+ * Ship a vault selection that may mix ordinary cards with prize (reward) cards
+ * as ONE order through POST /store/delivery-orders, so the parcel pays one
+ * shipping fee (2026-10-23). Prize cards used to go one at a time through
+ * POST /store/rewards/withdraw, each its own order paying the zone fee again.
  *
- * The two take different backends and always have: an ordinary pull goes to
- * POST /store/delivery-orders, a source='reward' pull to
- * POST /store/rewards/withdraw, which stamps is_reward and enforces a
- * withdrawals-per-day cap. The generic path refuses a reward pull outright
- * (delivery.ts returns 'reward_source'), so this split is routing, not a
- * preference — and getting it wrong is a 400, never a wrong shipment.
- *
- * Until now the vault simply had no way to reach the reward path: its only UI
- * lived on the suspended /daily page, so a task-granted card was stuck in the
- * vault with the delivery route telling the customer to use a page that does
- * not exist.
- *
- * Reward pulls ship ONE AT A TIME because the cap is per-request. A partial
- * outcome is normal (cap reached mid-selection) and is reported per card
- * rather than failing the whole submit — the ordinary cards in the same
- * selection have already shipped by then.
+ * The backend checks the daily prize cap under its lock and refuses the whole
+ * request past it, so pass only the prizes today's allowance covers
+ * (getPrizeShippingAllowance).
  */
 export async function shipVaultCards(
   normalPullIds: string[],
   rewardPullIds: string[],
   addressId: string,
-  address: WithdrawAddressInput,
 ): Promise<ShipVaultResult> {
-  if (normalPullIds.length === 0 && rewardPullIds.length === 0) {
+  const pullIds = [...normalPullIds, ...rewardPullIds];
+  if (pullIds.length === 0) {
     return { ok: false, error: 'Select at least one card.' };
   }
-
-  const shippedIds: string[] = [];
-  const skipped: { pullId: string; reason: string }[] = [];
-
-  if (normalPullIds.length > 0) {
-    const res = await requestDelivery(normalPullIds, addressId);
-    if (!res.ok) {
-      // The ordinary batch is all-or-nothing on the backend, and it runs
-      // first — so nothing has shipped yet and the whole submit can fail
-      // cleanly.
-      return res;
-    }
-    shippedIds.push(...normalPullIds);
-  }
-
-  if (rewardPullIds.length > 0) {
-    const parsedAddress = WithdrawAddressSchema.safeParse(address);
-    if (!parsedAddress.success) {
-      for (const pullId of rewardPullIds) {
-        skipped.push({
-          pullId,
-          reason: 'That address is missing fields reward shipping requires.',
-        });
-      }
-      return { ok: true, shippedIds, skipped };
-    }
-    // The daily cap and the phone gate refuse the CUSTOMER, not one card, so
-    // every card after the first such refusal would get the same answer. Say
-    // so for the rest without spending a locked, rate-limited request on each.
-    const skipRest = (from: number, reason: string) => {
-      for (const pullId of rewardPullIds.slice(from)) {
-        skipped.push({ pullId, reason });
-      }
-    };
-    for (const [i, pullId] of rewardPullIds.entries()) {
-      const r = await store.post(
-        '/store/rewards/withdraw',
-        WithdrawPrizeSchema,
-        {
-          pull_id: pullId,
-          address: parsedAddress.data,
-        },
-      );
-      if (!r.ok) {
-        // No cookie at all: this is the whole selection's problem, not this
-        // card's, and it fires before anything is skipped — the same
-        // all-or-nothing answer the pre-loop auth guard used to give.
-        if (r.kind === 'unauthenticated' && r.status === undefined) {
-          return { ok: false, error: LOGIN_FIRST, needsAuth: true };
-        }
-        const reason =
-          r.kind === 'invalid_shape'
-            ? 'This reward card could not be shipped right now.'
-            : friendlyFailure(r, DELIVERY_RULES, DELIVERY_FALLBACK);
-        // Customer-level refusals: every later card would get the same one.
-        // A short balance stops the rest too. shortcut: a later prize with a
-        // smaller fee (no insurance) might still fit, but the sheet checks the
-        // whole total first and the daily cap ships about one prize anyway;
-        // retry per prize if that cap is ever raised.
-        if (
-          isPhoneGateError(reason) ||
-          /top up at least once|not enough balance|bonus credit/i.test(reason)
-        ) {
-          skipRest(i, reason);
-          break;
-        }
-        skipped.push({ pullId, reason });
-        continue;
-      }
-      if (r.data.status === 'requested') {
-        shippedIds.push(pullId);
-      } else if (r.data.status === 'capped') {
-        skipRest(i, "You've hit today's reward shipping limit — try tomorrow.");
-        break;
-      } else {
-        skipped.push({
-          pullId,
-          reason: 'This reward card could not be shipped right now.',
-        });
-      }
-    }
-  }
-
-  return { ok: true, shippedIds, skipped };
+  const res = await requestDelivery(pullIds, addressId);
+  return res.ok ? { ok: true, shippedIds: pullIds, skipped: [] } : res;
 }

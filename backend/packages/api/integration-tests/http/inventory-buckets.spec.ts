@@ -83,6 +83,9 @@ medusaIntegrationTestRunner({
       const bucketsFor = async (handle: string) =>
         (await packs.inventoryLifecycleBuckets([handle])).get(handle);
 
+      const receivedFor = async (handle: string) =>
+        (await packs.receivedQtyByHandle([handle])).get(handle);
+
       const costFor = async (handle: string) =>
         (await packs.weightedAverageCostByHandle([handle])).get(handle);
 
@@ -109,14 +112,18 @@ medusaIntegrationTestRunner({
         expect(await bucketsFor(HANDLE)).toEqual({
           inVault: 0,
           requested: 0,
+          readyToShip: 0,
           shipped: 0,
         });
         expect(await bucketsFor('never-touched-card')).toEqual({
           inVault: 0,
           requested: 0,
+          readyToShip: 0,
           shipped: 0,
         });
         expect(await costFor('never-touched-card')).toBeNull();
+        expect(await receivedFor(HANDLE)).toBe(5);
+        expect(await receivedFor('never-touched-card')).toBe(0);
 
         // 2. PULL — seed a vaulted pull directly via the module service; the
         // roll path itself is out of scope for a bucket-math spec (same
@@ -134,6 +141,7 @@ medusaIntegrationTestRunner({
         expect(await bucketsFor(HANDLE)).toEqual({
           inVault: 1,
           requested: 0,
+          readyToShip: 0,
           shipped: 0,
         });
 
@@ -157,18 +165,34 @@ medusaIntegrationTestRunner({
         expect(await bucketsFor(HANDLE)).toEqual({
           inVault: 0,
           requested: 1,
+          readyToShip: 0,
           shipped: 0,
         });
 
-        // The whole pre-ship pipeline is ONE bucket — not just 'requested'.
-        for (const mid of ['processed', 'ready_to_ship'] as const) {
-          await packs.updateDeliveryOrders([{ id: order.id, status: mid }]);
-          expect(await bucketsFor(HANDLE)).toEqual({
-            inVault: 0,
-            requested: 1,
-            shipped: 0,
-          });
-        }
+        // 'processed' stays in the requested bucket (Stock page column
+        // "requested + processed", spec 2026-10-28)...
+        await packs.updateDeliveryOrders([
+          { id: order.id, status: 'processed' },
+        ]);
+        expect(await bucketsFor(HANDLE)).toEqual({
+          inVault: 0,
+          requested: 1,
+          readyToShip: 0,
+          shipped: 0,
+        });
+        // ...while 'ready_to_ship' is its own column now.
+        await packs.updateDeliveryOrders([
+          { id: order.id, status: 'ready_to_ship' },
+        ]);
+        expect(await bucketsFor(HANDLE)).toEqual({
+          inVault: 0,
+          requested: 0,
+          readyToShip: 1,
+          shipped: 0,
+        });
+        // A pull never moves the physical receipts; only shipping does (On
+        // hand = received − shipped, read off the shipped bucket).
+        expect(await receivedFor(HANDLE)).toBe(5);
 
         // 4. SHIPPED — the REAL (Epic-1-merged) enum. The pull itself stays
         // 'delivering' here; only the ORDER status moves the bucket.
@@ -178,6 +202,7 @@ medusaIntegrationTestRunner({
         expect(await bucketsFor(HANDLE)).toEqual({
           inVault: 0,
           requested: 0,
+          readyToShip: 0,
           shipped: 1,
         });
 
@@ -190,6 +215,7 @@ medusaIntegrationTestRunner({
         expect(await bucketsFor(HANDLE)).toEqual({
           inVault: 0,
           requested: 0,
+          readyToShip: 0,
           shipped: 1,
         });
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Button, Input, Label, Text, clx, toast } from '@medusajs/ui';
-import { spriteGif } from '@acme/pokemon';
+import { pokemonFromCard, spriteGif } from '@acme/pokemon';
 import {
   useUploadImage,
   usePixelPokemon,
@@ -14,6 +14,17 @@ import {
   fetchSeededCandidates,
   matchSeededEntry,
 } from '../../lib/pixel-auto-resolve';
+import {
+  FRANCHISE_LABEL,
+  autoLinkKey,
+  entryNumber,
+  fetchOnePieceRoster,
+  franchiseFor,
+  matchOnePieceEntry,
+  onePieceSearchTerm,
+  pickerDeck,
+  type SpriteFranchise,
+} from '../../lib/sprite-franchise';
 
 // Spec 2 §5 — the card's Pokémon is assigned by LINKING a PixelPokemon library
 // entry by id (id-only). The picker replaces the old dex combobox: search the
@@ -31,6 +42,10 @@ type Props = {
   currentDex?: number | null;
   /** Card/product title — the default name for a custom-uploaded entry. */
   suggestionName: string;
+  /** The card's set ("One Piece Romance Dawn", "Base Set"…) — picks the deck
+   *  (Pokémon / One Piece) the picker searches and auto-links from, so a One
+   *  Piece card is never offered a Pokémon. The operator can switch it. */
+  setName?: string | null;
   /** Namespaces this instance's DOM ids. REQUIRED when more than one picker is
    *  on screen (the bulk collection import renders one per draft): without it
    *  every instance shares `card-pokemon-search`, so clicking any label focuses
@@ -45,6 +60,8 @@ type Props = {
 };
 
 const PICKER_LIMIT = 40;
+
+const FRANCHISES: SpriteFranchise[] = ['pokemon', 'one-piece'];
 
 function entrySprite(e: {
   image_url: string | null;
@@ -62,12 +79,23 @@ const CardPokemonFields = ({
   currentSprite,
   currentDex,
   suggestionName,
+  setName,
   idPrefix = 'card',
   autoResolveName,
 }: Props) => {
   const searchId = `${idPrefix}-pokemon-search`;
   const listboxId = `${idPrefix}-pokemon-listbox`;
   const [search, setSearch] = useState('');
+  // The deck follows the card's set until the operator switches it by hand —
+  // and that switch holds only for the card it was made on.
+  const hint = `${setName ?? ''}|${autoResolveName ?? suggestionName}`;
+  const derived = franchiseFor(setName, autoResolveName ?? suggestionName);
+  const [chosen, setChosen] = useState<{
+    deck: SpriteFranchise;
+    hint: string;
+  } | null>(null);
+  const franchise = pickerDeck(chosen, hint, derived);
+  const manualDeck = chosen?.hint === hint;
   // The entry chosen THIS session — drives the preview once picked. On first
   // load it's null and the preview falls back to the card's mirrored sprite.
   const [picked, setPicked] = useState<PixelPokemonRow | null>(null);
@@ -121,8 +149,18 @@ const CardPokemonFields = ({
   }, []);
 
   const q = search.trim();
-  const { data, isFetching } = usePixelPokemon({ q, limit: PICKER_LIMIT });
-  const matches = q.length >= 1 ? (data?.pixel_pokemon ?? []) : [];
+  const { data, isFetching } = usePixelPokemon({
+    // One Piece searches understand the TCG spellings ("Big Mom", "Law").
+    q: franchise === 'one-piece' ? onePieceSearchTerm(q) : q,
+    franchise,
+    limit: PICKER_LIMIT,
+  });
+  // The query keeps the previous page while the next loads — right after a
+  // deck switch that's the OTHER deck's rows, so filter them out here.
+  const matches =
+    q.length >= 1
+      ? (data?.pixel_pokemon ?? []).filter((m) => m.franchise === franchise)
+      : [];
 
   const linked = value.pixel_pokemon_id !== null;
   // Only let this session's pick drive the preview while it still matches the
@@ -139,13 +177,18 @@ const CardPokemonFields = ({
           dex: currentDex ?? null,
         })
       : null;
+  const pickedNumber = pickedForValue ? entryNumber(pickedForValue) : '';
   const previewLabel = pickedForValue
-    ? `${pickedForValue.name}${pickedForValue.dex != null ? ` · #${pickedForValue.dex}` : ''}${
-        pickedForValue.is_custom ? ' · custom' : ''
+    ? `${pickedForValue.name}${pickedNumber ? ` · ${pickedNumber}` : ''}${
+        pickedForValue.variant !== 'normal'
+          ? ` · ${pickedForValue.variant}`
+          : ''
       }`
     : linked
       ? 'Linked to a library entry'
-      : 'Unassigned — resolves from the card name';
+      : franchise === 'pokemon'
+        ? 'Unassigned — resolves from the card name'
+        : 'Unassigned — no sprite until one is linked';
 
   const select = (e: PixelPokemonRow) => {
     setPicked(e);
@@ -160,22 +203,41 @@ const CardPokemonFields = ({
   // dep on an ever-new identity would cancel the in-flight fetch on every
   // parent render while autoTried blocks the retry.
   const autoTried = useRef<string | null>(null);
+  // The name the operator pressed "Clear link" on — never auto-relinked, even
+  // after a deck switch (the per-deck tryKey alone would re-arm it).
+  const clearedFor = useRef<string | null>(null);
+  // The id auto-link set, so a deck switch can take back ONLY that guess.
+  const autoLinked = useRef<string | null>(null);
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   });
   useEffect(() => {
-    if (!autoResolveName || linked) return;
-    if (autoTried.current === autoResolveName) return;
-    autoTried.current = autoResolveName;
-    const q = autoResolveQuery(autoResolveName);
-    if (!q) return;
+    // Auto-link only ever matches in the card's own deck; once the operator
+    // switches decks by hand, linking is theirs.
+    const tryKey = autoLinkKey({
+      name: autoResolveName,
+      linked,
+      manualDeck,
+      clearedFor: clearedFor.current,
+      deck: derived,
+    });
+    if (!tryKey || !autoResolveName || autoTried.current === tryKey) return;
+    autoTried.current = tryKey;
+    // Each deck matches its own way: Pokémon by the species hidden in the name
+    // (dex-keyed, seeded rows), One Piece by the character's whole name.
+    const pokemonQ =
+      derived === 'pokemon' ? autoResolveQuery(autoResolveName) : null;
+    if (derived === 'pokemon' && !pokemonQ) return;
     let stale = false;
-    fetchSeededCandidates(q)
+    (pokemonQ ? fetchSeededCandidates(pokemonQ) : fetchOnePieceRoster())
       .then((rows) => {
         if (stale) return;
-        const entry = matchSeededEntry(autoResolveName, rows);
+        const entry = pokemonQ
+          ? matchSeededEntry(autoResolveName, rows)
+          : matchOnePieceEntry(autoResolveName, rows);
         if (entry) {
+          autoLinked.current = entry.id;
           setPicked(entry);
           onChangeRef.current({ pixel_pokemon_id: entry.id });
         }
@@ -184,9 +246,25 @@ const CardPokemonFields = ({
     return () => {
       stale = true;
     };
-  }, [autoResolveName, linked]);
+  }, [autoResolveName, linked, derived, manualDeck]);
+
+  const switchDeck = (f: SpriteFranchise) => {
+    if (f === franchise) return;
+    // A guess made in the other deck is not the operator's pick — drop it.
+    if (
+      autoLinked.current !== null &&
+      value.pixel_pokemon_id === autoLinked.current
+    ) {
+      autoLinked.current = null;
+      setPicked(null);
+      onChange({ pixel_pokemon_id: null });
+    }
+    setChosen({ deck: f, hint });
+    setSearch('');
+  };
 
   const clear = () => {
+    clearedFor.current = autoResolveName ?? null;
     setPicked(null);
     onChange({ pixel_pokemon_id: null });
   };
@@ -214,6 +292,11 @@ const CardPokemonFields = ({
         suggestionName.trim() !== '' ? suggestionName.trim() : 'Custom sprite';
       const res = await createEntry.mutateAsync({
         name,
+        franchise,
+        // A Pokémon upload carries its species, so the card keeps a dex
+        // fallback (badge + reel) if the uploaded URL ever breaks.
+        dex:
+          franchise === 'pokemon' ? (pokemonFromCard(name)?.dex ?? null) : null,
         image_url: url,
         variant: 'custom',
       });
@@ -227,9 +310,26 @@ const CardPokemonFields = ({
 
   return (
     <div className="bg-ui-bg-subtle flex flex-col gap-y-3 rounded-lg p-4">
-      <Label size="small" weight="plus" htmlFor={searchId}>
-        Pixel Pokémon
-      </Label>
+      <div className="flex items-center justify-between gap-2">
+        <Label size="small" weight="plus" htmlFor={searchId}>
+          Pixel sprite
+        </Label>
+        {/* Deck switch — Pokémon and One Piece sprites never mix. */}
+        <div role="group" aria-label="Sprite deck" className="flex gap-1">
+          {FRANCHISES.map((f) => (
+            <Button
+              key={f}
+              size="small"
+              type="button"
+              variant={f === franchise ? 'primary' : 'secondary'}
+              aria-pressed={f === franchise}
+              onClick={() => switchDeck(f)}
+            >
+              {FRANCHISE_LABEL[f]}
+            </Button>
+          ))}
+        </div>
+      </div>
 
       <div className="flex items-center gap-4">
         {previewSrc ? (
@@ -261,8 +361,8 @@ const CardPokemonFields = ({
       <Input
         ref={searchRef}
         id={searchId}
-        placeholder="Search the Pokédex library by name…"
-        aria-label="Search the Pokédex library by name"
+        placeholder={`Search the ${FRANCHISE_LABEL[franchise]} sprites by name…`}
+        aria-label={`Search the ${FRANCHISE_LABEL[franchise]} sprites by name`}
         role="combobox"
         aria-expanded={q.length >= 1}
         aria-controls={listboxId}
@@ -309,8 +409,11 @@ const CardPokemonFields = ({
                   )}
                   <span className="flex-1 truncate text-sm font-medium">
                     {m.name}
-                    {m.dex != null && (
-                      <span className="text-ui-fg-subtle"> · #{m.dex}</span>
+                    {entryNumber(m) && (
+                      <span className="text-ui-fg-subtle">
+                        {' '}
+                        · {entryNumber(m)}
+                      </span>
                     )}
                     {m.variant !== 'normal' && (
                       <span className="text-ui-fg-subtle"> · {m.variant}</span>
@@ -331,7 +434,7 @@ const CardPokemonFields = ({
             type="button"
             onClick={clear}
           >
-            Clear link (use name)
+            {franchise === 'pokemon' ? 'Clear link (use name)' : 'Clear link'}
           </Button>
         )}
         <input

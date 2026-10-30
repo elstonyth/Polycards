@@ -67,9 +67,8 @@ export const verdictError = (
         MedusaError.Types.NOT_ALLOWED,
         'One or more cards are no longer available to deliver.',
       );
-    // Only reachable if a caller hand-rolls a request against this path; the
-    // vault routes reward pulls to POST /store/rewards/withdraw itself. The
-    // old copy pointed at a rewards page that no longer exists.
+    // Unreachable from this step since prize cards ride in the vault order
+    // (it passes prizesShipHere); kept so the verdict switch stays total.
     case 'reward_source':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -105,14 +104,17 @@ export const requestDeliveryStep = createStep(
           { take: input.pull_ids.length },
         )
       : [];
-    // One indexed read for the whole batch: a free welcome pull can't ship
+    // One lock read for the whole batch: a free welcome pull can't ship
     // until this customer has opened a PAID pack (spec 2026-08-14).
-    const freeUnlocked = await packs.hasPaidOpen(input.customer_id);
+    const lockedIds = await packs.lockedPullIds(input.customer_id, pulls);
+    // Prize cards ride in the same parcel (one shipping fee); the daily prize
+    // cap is enforced under the credit lock in createDeliveryOrderWithLedger.
     const verdict = validateDeliveryRequest(
       pulls,
       input.pull_ids,
       input.customer_id,
-      freeUnlocked,
+      lockedIds,
+      { prizesShipHere: true },
     );
     if (verdict !== 'ok') throw verdictError(verdict);
 

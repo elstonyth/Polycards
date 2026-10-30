@@ -113,3 +113,23 @@ export function computeDeliveryFee(
       : 0;
   return { shipping, insurance, total: toCents(shipping + insurance) };
 }
+
+// One parcel pays ONE shipping fee (2026-10-23): prize cards ride in the vault
+// order. Mirrors the backend's computeParcelFee — insurance stays what separate
+// orders charged: the vault cards on their combined value, each prize on its own.
+export function computeParcelFee(
+  postalCode: string,
+  vaultValueMyr: number,
+  prizeValuesMyr: number[],
+  province?: string | null,
+  city?: string | null,
+  countryCode?: string | null,
+): DeliveryFee {
+  const fee = (value: number) =>
+    computeDeliveryFee(postalCode, value, province, city, countryCode);
+  const { shipping, insurance: vaultInsurance } = fee(vaultValueMyr);
+  const insurance = toCents(
+    prizeValuesMyr.reduce((sum, v) => sum + fee(v).insurance, vaultInsurance),
+  );
+  return { shipping, insurance, total: toCents(shipping + insurance) };
+}

@@ -21,6 +21,7 @@ import {
 import { checkInToday } from '@/lib/actions/tasks';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { HelpTip } from '@/components/ui/help-tip';
+import { TicketArt } from '@/components/TicketArt';
 import {
   Panel,
   SignInPrompt,
@@ -251,6 +252,23 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
         >
           {stubName(task.reward)}
         </p>
+        {/* The Lucky Draw tickets this task also pays; taps through to the
+            draw so the player sees where they go. */}
+        {task.tickets > 0 && (
+          <Link
+            href="/lucky-draw"
+            className={cn(
+              // Tighter on a phone: "+999 tickets" must fit the 7rem stub.
+              'mt-2 inline-flex items-center gap-0.5 rounded-full border px-1.5 py-1 text-[11px] font-semibold whitespace-nowrap sm:gap-1 sm:px-2.5',
+              claimed
+                ? 'border-white/10 text-neutral-400'
+                : 'border-chase/40 text-chase',
+            )}
+          >
+            <TicketArt width={16} className="shrink-0" />+{task.tickets}{' '}
+            {task.tickets === 1 ? 'ticket' : 'tickets'}
+          </Link>
+        )}
         {/* Only a prize that can be claimed gets a button; one still being
             worked for says so instead of showing a dead Claim. */}
         {claimable ? (
@@ -580,7 +598,9 @@ export function TaskHubClient({
           <p>
             Task rewards (cards, slabs, and cards from reward packs) sell back
             as cash you can withdraw once you’ve topped up and used your money
-            for packs. Credit rewards are bonus credit for packs.{' '}
+            for packs. Cards from daily tasks work like the welcome pack: pay
+            for one pack yourself to unlock selling &amp; delivery. Credit
+            rewards are bonus credit for packs.{' '}
             <Link
               href="/wallet"
               className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"

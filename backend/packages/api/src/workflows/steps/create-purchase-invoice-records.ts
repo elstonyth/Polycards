@@ -15,6 +15,7 @@ export type CreatePurchaseInvoiceRecordsInput = {
   supplier: string;
   agent_user_id: string;
   reverses_invoice_id: string | null;
+  from_grn_id?: string | null; // "transfer from goods receive note"
   lines: InvoiceLineInput[];
 };
 

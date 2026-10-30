@@ -843,6 +843,41 @@
   }
 }
 
+/* Holo foil (Lucky Draw only, 2026-10-24 — DESIGN.md "Holo foil"): the wheel
+   rim and the prize frame. The colour stops live once in src/lib/lucky-draw.ts
+   (HOLO_STOPS -> holoConic, set as the element's background); this file only
+   turns the light (--holo-turn) and cuts the rim's ring. The light never turns
+   with the wheel, so the foil shines like a lamp on a real card. */
+@property --holo-turn {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
+}
+@keyframes holo-turn {
+  to {
+    --holo-turn: 360deg;
+  }
+}
+@layer utilities {
+  .holo-turn {
+    animation: holo-turn var(--holo-period, 9s) linear infinite;
+  }
+  .holo-ring {
+    mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - 9px),
+      #000 calc(100% - 8px),
+      #000 calc(100% - 1px),
+      transparent 100%
+    );
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .holo-turn {
+      animation: none;
+    }
+  }
+}
+
 /* iOS Safari zooms the whole page when a focused field renders under 16px, and
    it never zooms back out. Every form shape in the app is text-sm (14px), so
    pin the floor once here rather than in eight copies of the same input class
@@ -872,6 +907,92 @@ body:has([data-telegram-banner]) [data-testid='free-pack-badge'] {
 @media (min-width: 1024px) {
   body:has([data-telegram-banner]) [data-testid='free-pack-badge'] {
     bottom: calc(1.5rem + env(safe-area-inset-bottom) + 6.823rem + 2.5rem);
+  }
+}
+
+/* Page transitions (src/components/PageTransition.tsx). The old page leaves
+   fast so it never competes with the new one, which arrives a beat later.
+   page: fade and a 10px rise. game-in (Games sheet -> a game): the page
+   behind pushes away as the game zooms up from 96%. game-out: the reverse.
+   The overlay lets taps through so a quick second tap is never lost. */
+::view-transition {
+  pointer-events: none;
+}
+/* The header and tab bar hold still in their own layers, stacked in their
+   normal paint order: above the pages (so a scrolled page fading out never
+   covers them) and below full-screen rooms like the slot machine. */
+::view-transition-group(site-header),
+::view-transition-group(tab-bar),
+::view-transition-new(site-header),
+::view-transition-new(tab-bar) {
+  animation: none;
+}
+/* Not display:none — the old layer must show until the new one paints, and
+   a quick fade keeps the old active tab from ghosting under the new bar. */
+::view-transition-old(site-header),
+::view-transition-old(tab-bar) {
+  animation: 120ms ease-out both vt-out;
+}
+::view-transition-old(.page) {
+  animation: 140ms ease-in both vt-out;
+}
+::view-transition-new(.page) {
+  animation: 260ms cubic-bezier(0.2, 0.8, 0.2, 1) 80ms both vt-rise;
+}
+::view-transition-old(.game-in) {
+  animation: 220ms ease-in both vt-push;
+}
+::view-transition-new(.game-in) {
+  animation: 380ms cubic-bezier(0.2, 0.8, 0.2, 1) 100ms both vt-zoom;
+}
+/* A loading skeleton fades out over the page arriving under it. */
+::view-transition-old(.skeleton) {
+  animation: 240ms ease-out both vt-out;
+}
+::view-transition-old(.game-out) {
+  animation: 200ms ease-in both vt-shrink;
+}
+::view-transition-new(.game-out) {
+  animation: 300ms cubic-bezier(0.2, 0.8, 0.2, 1) 80ms both vt-rise;
+}
+@keyframes vt-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes vt-rise {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+}
+@keyframes vt-push {
+  to {
+    opacity: 0;
+    scale: 1.04;
+    filter: blur(4px);
+  }
+}
+@keyframes vt-zoom {
+  from {
+    opacity: 0;
+    scale: 0.96;
+    filter: blur(4px);
+  }
+}
+@keyframes vt-shrink {
+  to {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+/* The backstop below does not reach view-transition pseudo-elements. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
   }
 }
 

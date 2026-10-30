@@ -9,6 +9,7 @@ import {
   Label,
   Select,
   StatusBadge,
+  Switch,
   Table,
   Text,
 } from '@medusajs/ui';
@@ -473,7 +474,7 @@ export function LivePanel() {
         )}
         <Text size="xsmall" className="text-ui-fg-muted mt-4">
           Runs keep going when you close this page. Opening the page never
-          starts one. These accounts never count on the weekly prize board.
+          starts one. These accounts rank on the weekly prize board too.
         </Text>
       </Container>
 
@@ -625,7 +626,7 @@ export function LivePanel() {
             title="How fast?"
             hint={
               config.timingMode === 'humanized'
-                ? 'Each account sleeps at night, plays in short sessions and pauses between packs. Speed shortens the pauses inside a session; sleep and session times stay real. All accounts share one queue, so about 15 packs a minute is the most it will do.'
+                ? 'Each account lives its own day: short play sessions, breaks, pauses between packs and sleep at night. Speed runs that whole day faster, so the pull, rest, sleep, pull cycle repeats sooner: 5× fits a full day into about 5 hours, 24× into 1 hour. All accounts share one queue, so about 15 packs a minute is the most it will do.'
                 : 'Gap between one pack and the next, across all accounts.'
             }
           >
@@ -706,9 +707,11 @@ export function LivePanel() {
                         <Select.Value />
                       </Select.Trigger>
                       <Select.Content>
-                        {[1, 2, 3, 5, 10].map((pace) => (
+                        {[1, 2, 3, 5, 10, 24].map((pace) => (
                           <Select.Item value={String(pace)} key={pace}>
-                            {pace === 1 ? 'Normal (1×)' : `${pace}× faster`}
+                            {pace === 1
+                              ? 'Real time (1 day = 24 h)'
+                              : `${pace}× (1 day ≈ ${+(24 / pace).toFixed(1)} h)`}
                           </Select.Item>
                         ))}
                       </Select.Content>
@@ -747,20 +750,31 @@ export function LivePanel() {
           <Step
             n={3}
             title="How many packs per account?"
-            hint="The run finishes when every account has opened this many, or runs out of balance."
+            hint="A round finishes when every account has opened this many, or runs out of balance. With Repeat on, the next round starts by itself until you stop it."
           >
-            <div className="max-w-40">
-              <Input
-                id="live-cycles"
-                aria-label="Packs per account"
-                type="number"
-                min={1}
-                max={10}
-                value={config.maxCyclesPerAccount}
-                onChange={(event) =>
-                  update('maxCyclesPerAccount', Number(event.target.value))
-                }
-              />
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="max-w-40">
+                <Input
+                  id="live-cycles"
+                  aria-label="Packs per account"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={config.maxCyclesPerAccount}
+                  onChange={(event) =>
+                    update('maxCyclesPerAccount', Number(event.target.value))
+                  }
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="live-repeat"
+                  checked={!!config.repeat}
+                  disabled={locked}
+                  onCheckedChange={(repeat) => update('repeat', repeat)}
+                />
+                <Label htmlFor="live-repeat">Repeat rounds</Label>
+              </div>
             </div>
           </Step>
 

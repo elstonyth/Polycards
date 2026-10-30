@@ -14,6 +14,7 @@ import {
   resolveFxRate,
 } from './pricing';
 import { toMoney, toOptionalMoney } from './money';
+import { toProcure } from './stock-math';
 import { pageAll } from '../../api/utils/page-all';
 
 export type InventoryRow = {
@@ -28,10 +29,20 @@ export type InventoryRow = {
   price: number | null; // MYR, FMV x multiplier
   cost: number | null; // MYR, D8 weighted average
   created_at: string | Date;
-  on_hand: number | null;
+  // Spec 2026-10-28 — physical cards on the shelf: received (GRN lines +
+  // invoice lines not transferred from a GRN) minus shipped. Pulls never move
+  // it. Negative only when more shipped than was ever received (missing
+  // history), so the admin shows it in the error colour.
+  on_hand: number;
+  // The Medusa stock counter (card-stock.ts): received minus WON, negative =
+  // units owed to winners, null = untracked. Kept for the desk stock report;
+  // the Stock page shows on_hand above.
+  counter: number | null;
   in_vault: number;
-  requested: number;
+  requested: number; // order statuses requested + processed
+  ready_to_ship: number;
   shipped: number;
+  to_procure: number; // max(0, requested + ready_to_ship − on_hand)
   listing_count: number;
 };
 
@@ -67,13 +78,14 @@ async function skuByHandle(
 // to the product's own title + the gacha facts staged on product.metadata by
 // that importer (the same fields admin/gacha/eligible-products/route.ts reads).
 //
-// in_vault / requested / shipped are three INDEPENDENT counts, not a partition:
-// see inventoryLifecycleBuckets' own note — disjointness is convergent, not
-// structural. Never derive a total by summing them; total physical units is
-// on_hand, which comes from the authoritative Medusa counter.
+// in_vault / requested / ready_to_ship / shipped are INDEPENDENT counts, not a
+// partition: see inventoryLifecycleBuckets' own note — disjointness is
+// convergent, not structural. Never derive a total by summing them; physical
+// units on the shelf is on_hand (received − shipped).
 export async function loadInventoryRows(
   container: MedusaContainer,
-  opts: { q?: string; handle?: string; maxRows?: number } = {},
+  // handle: one row (item detail) or several (the procurement to-buy list).
+  opts: { q?: string; handle?: string | string[]; maxRows?: number } = {},
 ): Promise<InventoryRow[]> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const productModule = container.resolve(Modules.PRODUCT);
@@ -138,6 +150,7 @@ export async function loadInventoryRows(
   const stockByHandle = await getCardStockByHandle(container, handles);
   const skus = await skuByHandle(container, handles);
   const buckets = await packs.inventoryLifecycleBuckets(handles);
+  const received = await packs.receivedQtyByHandle(handles);
   const costByHandle = await packs.weightedAverageCostByHandle(handles);
   const listingCounts = await packs.listingCountByHandle(handles);
 
@@ -165,6 +178,10 @@ export async function loadInventoryRows(
     const grader =
       card?.grader ?? (typeof meta.grader === 'string' ? meta.grader : '');
     const b = buckets.get(p.handle);
+    const requested = b?.requested ?? 0;
+    const readyToShip = b?.readyToShip ?? 0;
+    const shipped = b?.shipped ?? 0;
+    const onHand = (received.get(p.handle) ?? 0) - shipped;
     return {
       handle: p.handle,
       product_id: p.id,
@@ -175,18 +192,21 @@ export async function loadInventoryRows(
       graded: isGraded({ grader }),
       fmv: hasFmv ? displayMarketPrice(fmvUsd, fx, 1) : null,
       price: hasFmv ? displayMarketPrice(fmvUsd, fx, mult) : null,
-      // `??`, never `||`, on BOTH of the next two: 0 and null mean different
+      // `??`, never `||`, on cost AND counter: 0 and null mean different
       // things. cost 0 = bought and free (unit_cost 0 is legal and
       // weightedAverageCost guards `< 0`, not `<= 0`); cost null = no purchase
-      // history. on_hand 0 = tracked with nothing shippable; on_hand null =
+      // history. counter 0 = tracked with nothing shippable; counter null =
       // the product tracks no inventory at all (untracked / infinite).
       // Pinned by inventory-detail.spec.
       cost: costByHandle.get(p.handle) ?? null,
       created_at: p.created_at as string | Date,
-      on_hand: stockByHandle.get(p.handle) ?? null,
+      on_hand: onHand,
+      counter: stockByHandle.get(p.handle) ?? null,
       in_vault: b?.inVault ?? 0,
-      requested: b?.requested ?? 0,
-      shipped: b?.shipped ?? 0,
+      requested,
+      ready_to_ship: readyToShip,
+      shipped,
+      to_procure: toProcure(onHand, requested, readyToShip),
       listing_count: listingCounts.get(p.handle) ?? 0,
     };
   });

@@ -129,7 +129,13 @@ medusaIntegrationTestRunner({
         expect(row!.cost).toBe(40); // D8 weighted average, 4 @ 40
         expect(row!.in_vault).toBe(1);
         expect(row!.requested).toBe(0);
+        expect(row!.ready_to_ship).toBe(0);
         expect(row!.shipped).toBe(0);
+        // Spec 2026-10-28: On hand is physical — 4 received, 0 shipped. The
+        // vaulted pull is still on the shelf, so it does NOT lower on_hand,
+        // and with no open order nothing needs buying.
+        expect(row!.on_hand).toBe(4);
+        expect(row!.to_procure).toBe(0);
         expect(row!.listing_count).toBe(0); // in no pack pool, no rank reward
         // The money leg the bucket spec never touched: 100 USD at the pinned
         // 4.5 is RM 450, and `price` must ALSO carry the card's multiplier
