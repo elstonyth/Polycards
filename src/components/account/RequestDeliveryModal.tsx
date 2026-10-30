@@ -28,6 +28,7 @@ import {
   ZONE_LABEL,
 } from '@/lib/delivery-fee';
 import { rm } from '@/lib/format';
+import { normalizePhone } from '@/lib/profile-validation';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -48,6 +49,16 @@ type Props = {
 // ponytail: was a fourth hand-copy of this string, and the only one left
 // without the focus-visible ring (a bare focus:border-white/25 is a 1px
 // 25%-alpha edge, under WCAG 2.4.11's 3:1). Canonical copy lives in ui.tsx.
+
+const EMPTY_FORM: AddAddressInput = {
+  firstName: '',
+  lastName: '',
+  address1: '',
+  city: '',
+  province: '',
+  postalCode: '',
+  countryCode: 'MY',
+};
 
 export default function RequestDeliveryModal({
   open,
@@ -102,15 +113,7 @@ export default function RequestDeliveryModal({
       cancelled = true;
     };
   }, [open, hasPrizes]);
-  const [form, setForm] = useState<AddAddressInput>({
-    firstName: '',
-    lastName: '',
-    address1: '',
-    city: '',
-    province: '',
-    postalCode: '',
-    countryCode: 'MY',
-  });
+  const [form, setForm] = useState<AddAddressInput>(EMPTY_FORM);
   const panelRef = useRef<HTMLDivElement>(null);
   // The sheet stays mounted while closed, so a pending confirmation must not
   // survive a close: the next open (maybe another selection) starts over.
@@ -324,6 +327,10 @@ export default function RequestDeliveryModal({
             <button
               type="button"
               onClick={() => {
+                // Clean slate: a cancelled repair leaves the broken row in
+                // `form`, and saving that here would be the duplicate the
+                // repair exists to avoid.
+                setForm(EMPTY_FORM);
                 setFixingId(null);
                 setAdding(true);
                 setConfirming(false);
@@ -463,6 +470,7 @@ export default function RequestDeliveryModal({
                   onClick={() => {
                     setAdding(false);
                     setFixingId(null);
+                    setError(null);
                   }}
                   className="text-[13px] text-white/60"
                 >
@@ -536,23 +544,36 @@ export default function RequestDeliveryModal({
         {!adding && unshippableCountry && selectedAddress && (
           <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
             <p>
-              This address has “{country}” as its country, so it can’t ship. We
-              ship within Malaysia and Singapore only — fix it and pick the
-              country from the list.
+              {country
+                ? `This address has “${country}” as its country`
+                : 'This address has no country'}
+              , so it can’t ship. We ship within Malaysia and Singapore only —
+              fix it and pick the country from the list.
             </p>
             <Pill
               onClick={() => {
+                const phone = selectedAddress.phone;
                 setForm({
                   firstName: selectedAddress.firstName,
                   lastName: selectedAddress.lastName,
                   address1: selectedAddress.line1,
                   address2: selectedAddress.line2 ?? undefined,
                   city: selectedAddress.city,
-                  province: selectedAddress.province ?? '',
+                  // An old free-text state isn't on the list: blank, so the
+                  // select asks rather than painting its first option.
+                  province: stateAfterCountryChange(
+                    '',
+                    selectedAddress.province,
+                  ),
                   postalCode: selectedAddress.postalCode,
                   countryCode: '',
-                  phone: selectedAddress.phone ?? undefined,
+                  // This form has no phone field, so a number updateAddress
+                  // would refuse is dropped rather than leaving an error the
+                  // customer can't act on. Blank falls back to the verified
+                  // profile phone at request time (request-delivery.ts).
+                  phone: phone && normalizePhone(phone) ? phone : undefined,
                 });
+                setError(null);
                 setFixingId(selectedAddress.id);
                 setAdding(true);
                 setConfirming(false);

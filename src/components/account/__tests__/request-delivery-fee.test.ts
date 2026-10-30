@@ -12,6 +12,7 @@ import type { AddressView } from '@/lib/actions/delivery';
 
 const mocks = vi.hoisted(() => ({
   shipVaultCards: vi.fn(),
+  addAddress: vi.fn(),
   updateAddress: vi.fn(),
   openTopUp: vi.fn(),
   balance: 1000 as number | null,
@@ -21,7 +22,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/actions/delivery', () => ({
   shipVaultCards: mocks.shipVaultCards,
-  addAddress: vi.fn(),
+  addAddress: mocks.addAddress,
   updateAddress: mocks.updateAddress,
   getPrizeShippingAllowance: async () => mocks.allowance,
 }));
@@ -90,6 +91,7 @@ beforeEach(() => {
   mocks.allowance = null;
   mocks.shipVaultCards.mockReset();
   mocks.openTopUp.mockReset();
+  mocks.addAddress.mockReset();
   mocks.updateAddress.mockReset();
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -234,7 +236,11 @@ describe('RequestDeliveryModal confirm and balance', () => {
     await act(async () => button('Save address')!.click());
     expect(mocks.updateAddress).toHaveBeenCalledWith(
       'addr_1',
-      expect.objectContaining({ countryCode: 'MY', address1: ADDRESS.line1 }),
+      expect.objectContaining({
+        countryCode: 'MY',
+        address1: ADDRESS.line1,
+        phone: ADDRESS.phone,
+      }),
     );
     expect(host.querySelectorAll('input[name="addr"]')).toHaveLength(1);
     expect(host.textContent).not.toContain('as its country');
@@ -251,6 +257,73 @@ describe('RequestDeliveryModal confirm and balance', () => {
     );
     expect(host.textContent).not.toContain('as its country');
     expect(button('Request delivery')!.disabled).toBe(false);
+  });
+
+  test('a row with no country at all reads plainly, not as ""', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '' } as AddressView],
+    );
+    expect(host.textContent).toContain('This address has no country');
+  });
+
+  // The sheet has no phone field, so a saved number the action would refuse
+  // has to go, or the customer is stuck on an error they cannot act on here.
+  test('a repair drops a saved phone the action would refuse', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60', phone: '12345' } as AddressView],
+    );
+    await act(async () => button('Fix this address')!.click());
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    await act(async () => {
+      country.value = 'MY';
+      country.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    mocks.updateAddress.mockResolvedValueOnce({ ok: true });
+    await act(async () => button('Save address')!.click());
+    const [, saved] = mocks.updateAddress.mock.calls[0]!;
+    expect(saved.phone).toBeUndefined();
+  });
+
+  // React paints the first option for a value no option has, so a free-text
+  // state would read as "Johor" while the old text is still what saves.
+  test('a repair shows the placeholder for a state not on the list', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60', province: 'KL' } as AddressView],
+    );
+    await act(async () => button('Fix this address')!.click());
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="State"]')!
+        .value,
+    ).toBe('');
+  });
+
+  test('adding after a cancelled repair starts clean and creates a new row', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60' } as AddressView],
+    );
+    await act(async () => button('Fix this address')!.click());
+    await act(async () => button('Cancel')!.click());
+    await act(async () => button('+ Add a new address')!.click());
+
+    const address = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Address"]',
+    )!;
+    expect(address.value).toBe('');
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="Country"]')!
+        .value,
+    ).toBe('MY');
+
+    mocks.addAddress.mockResolvedValueOnce({ ok: true, addressId: 'addr_2' });
+    await act(async () => button('Save address')!.click());
+    expect(mocks.addAddress).toHaveBeenCalled();
+    expect(mocks.updateAddress).not.toHaveBeenCalled();
   });
 });
 
