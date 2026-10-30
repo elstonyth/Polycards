@@ -18,6 +18,7 @@ describe('sentryDataCollection', () => {
       httpHeaders: { response: false },
       graphQL: { variables: false },
       genAI: { inputs: false, outputs: false },
+      mcp: { inputs: false, outputs: false },
     });
   });
 

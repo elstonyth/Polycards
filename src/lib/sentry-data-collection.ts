@@ -34,4 +34,5 @@ export const sentryDataCollection: SentryInitOptions['dataCollection'] = {
   queues: false,
   graphQL: { document: true, variables: false },
   genAI: { inputs: false, outputs: false },
+  mcp: { inputs: false, outputs: false },
 };
