@@ -24,6 +24,10 @@ export const MAX_IMAGES_PER_TURN = 4;
 const ROUND_TIMEOUT_MS = 90_000;
 const TURN_TIMEOUT_MS = 240_000;
 const DRAWS = /(_poster|^generate_image)$/;
+// Barred from tools but not told why, a model that was not done may answer
+// nothing (seen on Sonnet) or write the calls as text (DeepSeek, openrouter.ts).
+const LAST_ROUND =
+  'That was your last tool step: no more tools. Answer the question now in plain text, in the language it was asked in, from what the tools returned. Say plainly what you could not confirm.';
 
 export type TurnEvent =
   | { type: 'text'; delta: string }
@@ -163,6 +167,7 @@ export async function runTurn(opts: {
         return result;
       }
       const last = round === MAX_ROUNDS - 1;
+      if (last) messages.push({ role: 'user', content: LAST_ROUND });
       let roundText = '';
       let calls: { id: string; name: string; arguments: string }[] = [];
       open = true;
@@ -199,11 +204,13 @@ export async function runTurn(opts: {
       // A round that ended without a usage chunk is still billed.
       chargeOpenRound();
       if (!calls.length || last) {
-        if (calls.length) {
+        // Only this round can answer: an earlier one's text is "Let me check...".
+        const silent = !roundText.trim() && !shown;
+        if (calls.length || (last && silent)) {
           // The last round may not call tools; one that still does never answered.
           result.error =
             'The assistant ran out of steps. Ask a narrower question.';
-        } else if (!result.text.trim() && !shown) {
+        } else if (silent) {
           result.error = 'The assistant gave no answer. Ask again.';
         }
         return result;

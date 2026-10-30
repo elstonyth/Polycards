@@ -13,7 +13,12 @@ import { storeImage } from '../images';
 import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
 import { memoryFor } from '../agent-tools';
 import { sealProposal } from '../confirm';
-import { generationCost, MODEL_RE, type ChatMessage } from '../openrouter';
+import {
+  cutToolMarkup,
+  generationCost,
+  MODEL_RE,
+  type ChatMessage,
+} from '../openrouter';
 import { SCHEDULED_PREFIX } from '../schedule';
 import { TOOLS } from '../tools';
 import { MAX_AUDIO_BYTES, transcribe } from '../voice';
@@ -346,7 +351,9 @@ export async function POST(
     );
     const history: ChatMessage[] = earlier
       .reverse()
-      .filter((m) => m.content)
+      // A saved answer with leaked tool calls would teach the model to repeat them.
+      .map((m) => ({ ...m, content: cutToolMarkup(m.content) }))
+      .filter((m) => m.content.trim())
       .map((m) => ({
         role: m.role as 'user' | 'assistant',
         content:
