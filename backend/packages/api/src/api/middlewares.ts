@@ -10,6 +10,7 @@ import {
   type MedusaNextFunction,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import express from 'express';
 import multer from 'multer';
 import {
   rateLimit,
@@ -35,6 +36,7 @@ import {
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
   blockGroupWithdrawals,
+  refusePrivateFields,
   rejectGroupOddsSetUpdate,
   rejectGroupPolicyMetadata,
   stripAdditionalData,
@@ -48,6 +50,7 @@ import {
   noStoreForAuthenticatedStore,
 } from './utils/cache-headers';
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
+import { capAdminSessionAge } from './utils/admin-session-cap';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { requireVouchedVisitor } from './utils/visitor-ip';
@@ -117,6 +120,8 @@ const taskActionRateLimit = rateLimit('task-action');
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
 const adminActionRateLimit = rateLimit('admin-action');
+const assistantChatRateLimit = rateLimit('assistant-chat');
+const assistantSpeakRateLimit = rateLimit('assistant-speak');
 // One instance for every gateway callback route: one abuse ceiling, one
 // budget, one Redis connection (see the gateway-hook spec for sizing).
 const gatewayHookRateLimit = rateLimit('gateway-hook');
@@ -205,7 +210,7 @@ const mediaUploadMiddleware = (
 // dormant here (single house seller, no staff invites) and intentionally
 // closed. When P2P/staff onboarding is built, re-open /register behind the
 // invite-gating rather than removing this block wholesale.
-const blockUnusedVendorSelfRegistration = (
+const blockUnusedSurface = (
   _req: MedusaRequest,
   _res: MedusaResponse,
   next: MedusaNextFunction,
@@ -274,11 +279,11 @@ export default defineMiddlewares({
       middlewares: [redirectRootToDashboard],
     },
     {
-      // See blockUnusedVendorSelfRegistration above — refuse anonymous seller
+      // See blockUnusedSurface above — refuse anonymous seller
       // self-registration (the money-irrelevant but prod-DB-polluting surface).
       matcher: '/vendor/sellers',
       method: 'POST',
-      middlewares: [blockUnusedVendorSelfRegistration],
+      middlewares: [blockUnusedSurface],
     },
     {
       // Defense-in-depth: refuse new `member`-actor self-registration too, so no
@@ -287,7 +292,7 @@ export default defineMiddlewares({
       // seeded house seller needs it for the /seller vendor dashboard.
       matcher: '/auth/member/emailpass/register',
       method: 'POST',
-      middlewares: [blockUnusedVendorSelfRegistration],
+      middlewares: [blockUnusedSurface],
     },
     {
       // Validated admin image upload (POST /admin/media). /admin/* is already
@@ -902,6 +907,13 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
     },
     {
+      // Enter a one_winner event (POST /store/lucky-draw/events/:id/enter) — the
+      // same spend, so the same budget.
+      matcher: '/store/lucky-draw/events/*/enter',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+    },
+    {
       // The customer's in-app notification feed (GET /store/notifications).
       // receiver_id is scoped to the verified bearer token in the route handler —
       // never from query/body — so this entry is the auth + rate-limit gate only.
@@ -1185,12 +1197,70 @@ export default defineMiddlewares({
       matcher: '/admin/*',
       middlewares: [refuseCrossOriginAdminWrite],
     },
+    // One admin login lasts at most 24 h however often it is used: rolling
+    // sessions (medusa-config) would otherwise never expire, and a session
+    // keeps the roles it signed in with (utils/admin-session-cap.ts).
+    {
+      matcher: '/admin/*',
+      middlewares: [capAdminSessionAge],
+    },
     // RBAC for every custom admin route (admin-rbac.ts): a policy per custom
     // prefix and method, plus the write policy for custom writes under a core
     // prefix. Policy-only entries — the framework adds the no-op handler and
     // wraps it in its permission check. Guarded by
     // __tests__/admin-rbac-coverage.unit.spec.ts.
     ...adminRbacRoutes,
+    {
+      // The admin assistant chat (spec 2026-10-29): screenshots travel as data
+      // URLs in the JSON body (up to 4, each shrunk under 1.5 MB), hence the
+      // larger body limit. Medusa parses bodies before its login check, so
+      // the framework parser is off here and the body is read last, after
+      // the login, the role check and the rate limits: nobody signed out can
+      // make the server hold and parse 10 MB.
+      // Each turn spends OpenRouter credit, hence its own per-admin budget.
+      matcher: '/admin/assistant/chat',
+      method: 'POST',
+      bodyParser: false,
+      middlewares: [
+        adminActionRateLimit,
+        assistantChatRateLimit,
+        express.json({ limit: '10mb', inflate: false }),
+      ],
+    },
+    {
+      // Reading an answer aloud (voice.ts) spends OpenRouter credit too; its
+      // own looser budget, so Talk mode never hits "too many questions".
+      matcher: '/admin/assistant/speak',
+      method: 'POST',
+      middlewares: [adminActionRateLimit, assistantSpeakRateLimit],
+    },
+    {
+      // Saving a note or task the person tapped Save on (confirm.ts).
+      matcher: '/admin/assistant/confirm',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/assistant/conversations/*',
+      method: 'DELETE',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/assistant-settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/assistant-settings/test',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // "Hear it" speaks a sample with OpenRouter credit (unsaved cost).
+      matcher: '/admin/assistant-settings/voice-test',
+      method: 'POST',
+      middlewares: [adminActionRateLimit, assistantChatRateLimit],
+    },
     // Admin money-mutation routes — already auth-protected by the framework
     // admin auth, so no explicit authenticate() entry is needed here. All share
     // one limiter instance (one budget + one Redis connection). The limiter keys
@@ -1501,6 +1571,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Withdraw a one_winner event and refund every entrant
+      // (POST /admin/lucky-draw/events/:id/withdraw).
+      matcher: '/admin/lucky-draw/events/*/withdraw',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Lucky Draw prize create / edit (POST /admin/lucky-draw/prizes).
       matcher: '/admin/lucky-draw/prizes',
       method: 'POST',
@@ -1640,9 +1717,28 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Goods receive notes (spec 2026-10-28) — raise the same stock counters
+      // as an invoice, and their reversal lowers them; same admin budget.
+      matcher: '/admin/goods-receive-notes',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/goods-receive-notes/*/reverse',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Delivery-orders bulk status transition — up to 100 order transitions +
       // 100 customer notifications per call; same admin budget.
       matcher: '/admin/delivery-orders/bulk',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // "Check tracking" — one carrier call per shipped order (Ninja Van) or
+      // per 20 (Pos Laju), plus any completions; same admin budget.
+      matcher: '/admin/delivery-orders/track',
       method: ['POST'],
       middlewares: [adminActionRateLimit],
     },
@@ -1667,6 +1763,13 @@ export default defineMiddlewares({
       method: ['POST'],
       middlewares: [adminActionRateLimit],
     },
+    {
+      // Ticket pack table write (POST /admin/packs/:slug/ticket-prizes) — the
+      // same pull table, for a pack that sells tickets; same budget.
+      matcher: '/admin/packs/*/ticket-prizes',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
     // /admin/cards, /admin/cards/*, /admin/products/from-pricecharting,
     // /admin/pixel-pokemon, /admin/packs (bare create) and
     // /admin/packs/*/top-hits are deliberately NOT on adminActionRateLimit —
@@ -1675,6 +1778,20 @@ export default defineMiddlewares({
     // retier), and from-pricecharting matches the recorded convention that
     // only money-mutation routes carry this limiter. See the coverage-guard
     // spec's EXEMPT list for the one-line reason on each.
+    {
+      // Core's cart routes. Nothing here calls them (packs are bought through
+      // /store/packs/*), and even a bare POST /store/carts answers with
+      // customer.groups.id in its default fields, which refusePrivateFields cannot
+      // see. No method pin, and the trailing `*` takes every sub-route.
+      matcher: '/store/carts*',
+      middlewares: [blockUnusedSurface],
+    },
+    {
+      // Mercur's seller routes: nothing here calls them, and they answer with no
+      // login. There is one house seller, so there is nothing to browse.
+      matcher: '/store/sellers*',
+      middlewares: [blockUnusedSurface],
+    },
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a
@@ -1690,10 +1807,15 @@ export default defineMiddlewares({
     // traffic, which the guard passes straight through. That also means this
     // covers the framework-authed routes that have no entry in this array
     // (/store/customers/me and its addresses), which per-matcher wiring would
-    // have missed.
+    // have missed. refusePrivateFields shares the entry for the same reason: core
+    // and Mercur routes with no entry here are where `fields` reached them.
     {
       matcher: '/store/*',
-      middlewares: [noStoreForAuthenticatedStore, blockDisabledCustomerSession],
+      middlewares: [
+        noStoreForAuthenticatedStore,
+        blockDisabledCustomerSession,
+        refusePrivateFields,
+      ],
     },
     // The /admin twin of the entry above — read the two as a pair. Same
     // blanket-matcher rationale: the framework registers

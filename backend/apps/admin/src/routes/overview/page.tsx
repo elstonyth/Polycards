@@ -37,9 +37,10 @@ export const config: RouteConfig = {
   permissions: ['stats:read' as Permission],
 };
 
-// Login lands here (via /orders). A role without the dashboard's figures —
-// the automation operator — goes to the one page it can use instead.
-export const handle = { permissions: 'stats:read', redirectTo: '/automation' };
+// Login lands here (via /orders). A role without the dashboard's figures goes
+// to the Players page instead — the Support viewer's home; the automation
+// operator, without Players either, is passed on from there to Automation.
+export const handle = { permissions: 'stats:read', redirectTo: '/players' };
 
 const OverviewPage = () => {
   const { t } = useTranslation();

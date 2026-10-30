@@ -78,7 +78,7 @@ export const buybackPullStep = createStep(
       // Status-accurate copy: a card that's out for delivery isn't "sold back".
       const reason =
         pull.status === 'delivering' || pull.status === 'delivered'
-          ? 'This card is out for delivery and can no longer be sold back — cancel the delivery first.'
+          ? 'This card is out for delivery and can no longer be sold back — cancel the delivery first if it is still requested, otherwise contact support.'
           : 'This card was already sold back.';
       throw new MedusaError(MedusaError.Types.NOT_ALLOWED, reason);
     }

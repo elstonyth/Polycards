@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'vitest';
 import {
   draftError,
+  grnDraftError,
+  invoiceFormLines,
   moneyError,
   mytMidnightIso,
   mytToday,
   qtyError,
   type DraftLine,
+  type GrnDraftLine,
+  type GrnSourceLine,
 } from './purchase-invoice-form';
 
 // A date every draftError case below can pass in without thinking about it.
@@ -159,6 +163,101 @@ describe('draftError: the invoice date', () => {
       expect(draftError(d, 'Acme', [line()])).not.toBeNull();
       expect(() => mytMidnightIso(d)).toThrow(RangeError);
     }
+  });
+});
+
+describe('invoiceFormLines: transfer from goods receive note', () => {
+  const grnLines: GrnSourceLine[] = [
+    {
+      id: 'grnl_1',
+      card_handle: 'charizard-psa-10',
+      card_name: 'Charizard',
+      // bigNumber columns may arrive as numeric strings.
+      fmv_snapshot: '150.50',
+      qty: 2,
+    },
+    {
+      id: 'grnl_2',
+      card_handle: 'pikachu-raw',
+      card_name: 'Pikachu',
+      fmv_snapshot: 12,
+      qty: 5,
+    },
+  ];
+  const draft = [line({ card_handle: 'mew-raw', qty: '9' })];
+
+  test('copies EVERY GRN line, card and qty from the GRN, unit cost empty', () => {
+    expect(invoiceFormLines(draft, grnLines, {})).toEqual([
+      {
+        card_handle: 'charizard-psa-10',
+        card_name: 'Charizard',
+        fmv_snapshot: '150.5',
+        qty: '2',
+        unit_cost: '',
+      },
+      {
+        card_handle: 'pikachu-raw',
+        card_name: 'Pikachu',
+        fmv_snapshot: '12',
+        qty: '5',
+        unit_cost: '',
+      },
+    ]);
+  });
+
+  test('the operator owns ONLY the unit cost, keyed by GRN line id', () => {
+    const lines = invoiceFormLines(draft, grnLines, {
+      grnl_2: '9.90',
+      // A cost typed against another GRN's line never lands here.
+      grnl_other: '1.00',
+    });
+    expect(lines.map((l) => l.unit_cost)).toEqual(['', '9.90']);
+    // Card and qty stay the GRN's — the server matches them as a multiset.
+    expect(lines.map((l) => [l.card_handle, l.qty])).toEqual([
+      ['charizard-psa-10', '2'],
+      ['pikachu-raw', '5'],
+    ]);
+    // An untouched cost is refused at submit, never saved as RM 0.
+    expect(draftError(VALID_DATE, 'Acme', lines)).toBe(
+      'Line 1 unit cost is required.',
+    );
+  });
+
+  test('clearing the transfer returns the operator their own draft, untouched', () => {
+    expect(invoiceFormLines(draft, null, { grnl_1: '5' })).toBe(draft);
+  });
+});
+
+describe('grnDraftError', () => {
+  const g = (over: Partial<GrnDraftLine> = {}): GrnDraftLine => ({
+    card_handle: 'charizard-psa-10',
+    card_name: 'Charizard',
+    fmv_snapshot: '150',
+    qty: '2',
+    ...over,
+  });
+
+  test('passes a well-formed receipt — no unit cost needed', () => {
+    expect(grnDraftError(VALID_DATE, 'Acme', [g()])).toBeNull();
+  });
+
+  test('names the receive date, not the invoice date', () => {
+    expect(grnDraftError('', 'Acme', [g()])).toBe('Receive date is required.');
+  });
+
+  test('REJECTS a negative qty — a correction is a reversal GRN', () => {
+    expect(grnDraftError(VALID_DATE, 'Acme', [g(), g({ qty: '-1' })])).toBe(
+      'Line 2 qty must be above 0.',
+    );
+    expect(grnDraftError(VALID_DATE, 'Acme', [g({ qty: '0' })])).toBe(
+      'Line 1 qty must be a non-zero whole number.',
+    );
+  });
+
+  test('keeps the FMV 2-decimal rule', () => {
+    expect(
+      grnDraftError(VALID_DATE, 'Acme', [g({ fmv_snapshot: '1.005' })]),
+    ).toBe('Line 1 FMV may carry at most 2 decimals.');
   });
 });
 

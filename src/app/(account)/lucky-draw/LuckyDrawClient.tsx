@@ -8,14 +8,20 @@ import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
 import { mytDate, num } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
-import { getLuckyDraw, getLuckyDrawResult } from '@/lib/actions/lucky-draw';
+import { luckyDrawView, rulesCopy } from '@/lib/lucky-draw';
+import {
+  getLuckyDraw,
+  getLuckyDrawEventResult,
+  getLuckyDrawResult,
+} from '@/lib/actions/lucky-draw';
 import type {
   LuckyDrawPage,
   LuckyDrawPrize,
   LuckyDrawResultDetail,
 } from '@/lib/data/schemas';
-import { EnterSheet, type Entered } from './EnterSheet';
+import { EnterSheet, type Entered, type EnterTarget } from './EnterSheet';
 import { MyTickets } from './MyTickets';
+import { NextEventLine, potTarget, PotView } from './PotView';
 import { PrizeCard } from './PrizeCard';
 import { PrizeWheel } from './PrizeWheel';
 import { ResultDetail } from './ResultDetail';
@@ -41,6 +47,9 @@ const TABS: { key: TabKey; label: string }[] = [
 const POLL_MS = 5000;
 const POLL_JITTER_MS = 2000;
 const POLL_WINDOW_MS = 5 * 60_000;
+// The shared half of the page is cached 10 s on the backend (store view.ts), so
+// a re-read after an entry waits that out: the top 10 then shows the new tickets.
+const TOP_REREAD_MS = 11_000;
 
 /** The /lucky-draw page: Prizes, Results and My tickets. */
 export function LuckyDrawClient({
@@ -56,7 +65,8 @@ export function LuckyDrawClient({
   const [tab, setTab] = useState<TabKey>('prizes');
   const [nowMs, setNowMs] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [entering, setEntering] = useState<LuckyDrawPrize | null>(null);
+  // 'pot': the whole event; its target is derived, so a re-read stays current.
+  const [entering, setEntering] = useState<LuckyDrawPrize | 'pot' | null>(null);
   const [detail, setDetail] = useState<LuckyDrawResultDetail | null>(null);
   const [spins, setSpins] = useState<LuckyDrawResultDetail[]>([]);
   const [playIntro, setPlayIntro] = useState(intro);
@@ -91,6 +101,30 @@ export function LuckyDrawClient({
     const reread = new Set<string>();
     const poll = async () => {
       const now = Date.now();
+      const ev = pageRef.current?.event;
+      // A one-winner event has one result: its own, read from the event route.
+      // Never the prize routes, whose mirror rows hold no entry list.
+      if (ev?.draw_mode === 'one_winner') {
+        const at = Date.parse(ev.ends_at);
+        if (ev.result || now < at) return;
+        if (now >= at + POLL_WINDOW_MS) {
+          if (reread.has(ev.id)) return;
+          reread.add(ev.id);
+          const fresh = await getLuckyDraw();
+          if (live && fresh) setPage(fresh);
+          return;
+        }
+        const found = await getLuckyDrawEventResult(ev.id, ev.name);
+        if (!live || !found) return;
+        setPage((prev) =>
+          prev?.event
+            ? { ...prev, event: { ...prev.event, result: found.result } }
+            : prev,
+        );
+        // No entries: nothing to spin; the panel shows it.
+        if (found.ticket_index != null) setSpins((q) => [...q, found]);
+        return;
+      }
       const undrawn = (pageRef.current?.prizes ?? []).filter((p) => !p.result);
       const lapsed = undrawn.filter(
         (p) =>
@@ -154,15 +188,49 @@ export function LuckyDrawClient({
     else setNotice('Couldn’t load this result right now — try again.');
   };
 
-  const onEntered = (prize: LuckyDrawPrize, tickets: number, res: Entered) => {
+  const openEventResult = async (
+    eventId: string,
+    eventName: string,
+    then: (found: LuckyDrawResultDetail) => void = setDetail,
+  ) => {
+    const found = await getLuckyDrawEventResult(eventId, eventName);
+    if (found) then(found);
+    else setNotice('Couldn’t load this result right now — try again.');
+  };
+
+  const onEntered = (prize: EnterTarget, tickets: number, res: Entered) => {
+    const pot = entering === 'pot';
     setEntering(null);
     setNotice(
-      `You’re in — ${num(tickets)} ${tickets === 1 ? 'ticket' : 'tickets'} on ${prize.title}.`,
+      `You’re in — ${num(tickets)} ${tickets === 1 ? 'ticket' : 'tickets'} ${pot ? 'in' : 'on'} ${prize.title}.`,
     );
     const { balance, myTickets } = res;
     if (balance === undefined || myTickets === undefined) {
       // The entry went through but its numbers did not read: re-read.
       void getLuckyDraw().then((fresh) => fresh && setPage(fresh));
+      return;
+    }
+    if (pot) {
+      setPage((prev) =>
+        prev?.event
+          ? {
+              ...prev,
+              balance,
+              event: {
+                ...prev.event,
+                my_tickets: myTickets,
+                total_tickets: prev.event.total_tickets + tickets,
+                entrant_count:
+                  prev.event.entrant_count +
+                  (prev.event.my_tickets > 0 ? 0 : 1),
+              },
+            }
+          : prev,
+      );
+      // The response cannot place me in the top 10: no ids on the list.
+      window.setTimeout(() => {
+        void getLuckyDraw().then((fresh) => fresh && setPage(fresh));
+      }, TOP_REREAD_MS);
       return;
     }
     // Update locally from the enter response; the page is not re-fetched.
@@ -187,6 +255,13 @@ export function LuckyDrawClient({
 
   const balance = page?.balance ?? 0;
   const event = page?.event ?? null;
+  const view = luckyDrawView(page, nowMs);
+  const enterTarget =
+    entering !== 'pot'
+      ? entering
+      : event && page
+        ? potTarget(event, page.prizes)
+        : null;
 
   return (
     <div>
@@ -242,7 +317,7 @@ export function LuckyDrawClient({
 
       <div className="mt-4">
         {tab === 'results' ? (
-          <ResultsList onOpen={openResult} />
+          <ResultsList onOpen={openResult} onOpenEvent={openEventResult} />
         ) : tab === 'mine' ? (
           <MyTickets />
         ) : !page ? (
@@ -252,6 +327,12 @@ export function LuckyDrawClient({
             <p className="text-sm text-neutral-300">
               The next Lucky Draw is coming soon.
             </p>
+            {page.next_event && (
+              <NextEventLine
+                next={page.next_event}
+                className="mt-1 text-sm text-neutral-400"
+              />
+            )}
             <button
               type="button"
               onClick={() => setTab('results')}
@@ -265,7 +346,7 @@ export function LuckyDrawClient({
           </Panel>
         ) : (
           <>
-            {balance <= 0 && (
+            {balance <= 0 && view !== 'pot_drawn' && (
               <Panel className="mb-4 flex items-center gap-3">
                 <TicketArt width={44} className="shrink-0" />
                 <p className="flex-1 text-sm text-neutral-300">
@@ -283,6 +364,21 @@ export function LuckyDrawClient({
               <p className="text-sm text-neutral-400">
                 Prizes for this Lucky Draw are on their way.
               </p>
+            ) : view !== 'per_prize' ? (
+              <PotView
+                page={page}
+                event={event}
+                nowMs={nowMs}
+                drawing={view === 'pot_drawing'}
+                balance={balance}
+                onEnter={() => setEntering('pot')}
+                onOpenResult={() => void openEventResult(event.id, event.name)}
+                onWatch={() =>
+                  void openEventResult(event.id, event.name, (d) =>
+                    setSpins([d]),
+                  )
+                }
+              />
             ) : (
               <PrizeWheel
                 prizes={page.prizes}
@@ -308,16 +404,14 @@ export function LuckyDrawClient({
       </div>
 
       <p className="mt-6 text-xs leading-relaxed text-neutral-400">
-        Tickets come from tasks and Polycards gifts — they can&rsquo;t be
-        bought. Entering needs at least one top-up, and entries are final. Card
-        prizes go to your vault and sell back like task rewards; credit prizes
-        are bonus credit for packs. Every winner is drawn from a seed fixed
-        before entries open. All times are Malaysia time (MYT).
+        {/* No event to go by: every new event is one-winner. */}
+        {rulesCopy(event ? event.draw_mode : 'one_winner')}
       </p>
 
-      {entering && (
+      {enterTarget && (
         <EnterSheet
-          prize={entering}
+          prize={enterTarget}
+          pot={entering === 'pot'}
           balance={balance}
           onClose={() => setEntering(null)}
           onEntered={onEntered}

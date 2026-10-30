@@ -6,8 +6,16 @@ import {
   ENTER_REFUSALS,
   ENTER_REFUSAL_COPY,
   entriesIntact,
+  eventResultDetail,
+  eventRowId,
+  heroFirst,
+  heroPrize,
   landingAngle,
+  luckyDrawView,
   nextDraw,
+  potTotal,
+  refusalCopy,
+  rulesCopy,
   segmentAt,
   ticketRanges,
   wheelSegments,
@@ -230,5 +238,266 @@ describe('landing and the pointer', () => {
     expect(segmentAt(segs, 90)).toBe(1);
     expect(segmentAt(segs, 360 * 6 + 270)).toBe(0);
     expect(segmentAt(segs, -7)).toBe(0);
+  });
+});
+
+describe('luckyDrawView', () => {
+  const END = '2026-11-30T15:59:00.000Z';
+  const endMs = Date.parse(END);
+  const pot = (over: { result?: unknown } = {}) => ({
+    event: { draw_mode: 'one_winner', ends_at: END, result: null, ...over },
+  });
+
+  it('reads a failed page as unavailable', () => {
+    expect(luckyDrawView(null, endMs)).toBe('unavailable');
+  });
+
+  it('reads no event as coming soon', () => {
+    expect(luckyDrawView({ event: null }, endMs)).toBe('coming_soon');
+  });
+
+  it('gives a per-prize event, or a card-era one with no mode, the old page', () => {
+    expect(
+      luckyDrawView(
+        { event: { draw_mode: 'per_prize', ends_at: END, result: null } },
+        endMs,
+      ),
+    ).toBe('per_prize');
+    expect(luckyDrawView({ event: { ends_at: END } }, endMs)).toBe('per_prize');
+    // A running old event never turns into a pot, even past its end.
+    expect(luckyDrawView({ event: { ends_at: END } }, endMs + 1)).toBe(
+      'per_prize',
+    );
+  });
+
+  it('keeps a pot open until the very end, then waits for the draw', () => {
+    expect(luckyDrawView(pot(), endMs - 1)).toBe('pot_open');
+    expect(luckyDrawView(pot(), endMs)).toBe('pot_drawing');
+    expect(luckyDrawView(pot(), endMs + 60_000)).toBe('pot_drawing');
+  });
+
+  it('shows a stored result whatever the clock says', () => {
+    const result = { winner: { who: 'A' } };
+    expect(luckyDrawView(pot({ result }), endMs - 1)).toBe('pot_drawn');
+    expect(luckyDrawView(pot({ result }), endMs + 1)).toBe('pot_drawn');
+    // No entries: still drawn, the panel says nobody entered.
+    expect(luckyDrawView(pot({ result: { winner: null } }), endMs + 1)).toBe(
+      'pot_drawn',
+    );
+  });
+
+  it('never asks a clock it does not have yet (server render = hydration)', () => {
+    expect(luckyDrawView(pot(), null)).toBe('pot_open');
+    expect(luckyDrawView(pot({ result: { winner: null } }), null)).toBe(
+      'pot_drawn',
+    );
+  });
+});
+
+describe('chance on the pot', () => {
+  it('is 0% with no tickets of mine, or nobody in at all', () => {
+    expect(chancePercent(0, 0)).toBe('0%');
+    expect(chancePercent(0, 900)).toBe('0%');
+  });
+
+  it('rounds to one decimal under 10%, whole numbers above', () => {
+    expect(chancePercent(1, 8)).toBe('13%');
+    expect(chancePercent(1, 16)).toBe('6.3%');
+    expect(chancePercent(1, 1000)).toBe('0.1%');
+    expect(chancePercent(1, 1001)).toBe('<0.1%');
+  });
+
+  it('is 100% only when every ticket in the pot is mine', () => {
+    expect(chancePercent(120, 120)).toBe('100%');
+    expect(chancePercent(1999, 2000)).toBe('99%');
+  });
+});
+
+describe('the pot countdown', () => {
+  const END = '2026-11-30T15:59:00.000Z';
+  const endMs = Date.parse(END);
+
+  it('holds its last second until the end and stops exactly on it', () => {
+    expect(countdownClock(END, endMs - 1)?.s).toBe('01');
+    expect(countdownClock(END, endMs)).toBeNull();
+    expect(drawCountdown(END, endMs - 1)).toBe('0m 01s');
+    expect(drawCountdown(END, endMs)).toBe('Drawing…');
+  });
+
+  it('rolls over on the whole day and hour', () => {
+    expect(countdownClock(END, endMs - 86_400_000)).toEqual({
+      d: '01',
+      h: '00',
+      m: '00',
+      s: '00',
+    });
+    expect(drawCountdown(END, endMs - 3_600_000)).toBe('1h 00m');
+  });
+});
+
+describe('potTotal', () => {
+  it('adds card and credit prizes', () => {
+    const prizes = [
+      { kind: 'card', value_myr: 4200 },
+      { kind: 'credit', value_myr: 500 },
+    ];
+    expect(potTotal(prizes)).toBe(4700);
+  });
+
+  it('adds in sen, so money never prints a float tail', () => {
+    expect(potTotal([{ value_myr: 0.1 }, { value_myr: 0.2 }])).toBe(0.3);
+    expect(potTotal([{ value_myr: 1200.55 }, { value_myr: 300.1 }])).toBe(
+      1500.65,
+    );
+  });
+
+  it('is 0 for an empty pot', () => {
+    expect(potTotal([])).toBe(0);
+  });
+});
+
+describe('heroPrize', () => {
+  it('is the most valuable card, even beside bigger credit (the card is the hero)', () => {
+    const card = { kind: 'card', value_myr: 800 };
+    expect(
+      heroPrize([
+        { kind: 'credit', value_myr: 5000 },
+        { kind: 'card', value_myr: 200 },
+        card,
+      ]),
+    ).toBe(card);
+  });
+
+  it('falls back to the biggest credit prize, and null on an empty pot', () => {
+    const big = { kind: 'credit', value_myr: 500 };
+    expect(heroPrize([{ kind: 'credit', value_myr: 50 }, big])).toBe(big);
+    expect(heroPrize([])).toBeNull();
+  });
+});
+
+describe('heroFirst', () => {
+  it('leads with the hero and keeps the rest in their order', () => {
+    const a = { kind: 'credit', value_myr: 500 };
+    const b = { kind: 'card', value_myr: 200 };
+    const c = { kind: 'card', value_myr: 800 };
+    expect(heroFirst([a, b, c])).toEqual([c, a, b]);
+    expect(heroFirst([])).toEqual([]);
+  });
+});
+
+describe('eventResultDetail', () => {
+  const person = { who: 'Mimo', avatar: null, frame: null };
+  const raw = {
+    result: {
+      winner: person,
+      winner_tickets: 40,
+      total_tickets: 100,
+      entrant_count: 2,
+      seed: 'c'.repeat(64),
+      seed_hash: 'd'.repeat(64),
+      drawn_at: '2026-11-30T16:00:00.000Z',
+    },
+    prizes: [
+      { kind: 'credit', title: 'RM 500', image: null, value_myr: 500 },
+      { kind: 'card', title: 'Umbreon', image: '/u.webp', value_myr: 4200.5 },
+    ],
+    entries: [
+      { person, tickets: 40 },
+      { person: { ...person, who: 'Rin' }, tickets: 60 },
+    ],
+    ticket_index: 12,
+  };
+
+  it('reads as a result the wheel and the sheet already know', () => {
+    const d = eventResultDetail('ldev_1', 'November', raw);
+    expect(d.result).toMatchObject({
+      prize_id: 'ldev_1',
+      title: 'November',
+      image: '/u.webp', // the hero card, not the first prize
+      value_myr: 4700.5, // the whole pot
+      winner: person,
+      winner_tickets: 40,
+      total_tickets: 100,
+      seed: raw.result.seed,
+      seed_hash: raw.result.seed_hash,
+    });
+    expect(d.ticket_index).toBe(12);
+    expect(d.entries).toBe(raw.entries);
+  });
+
+  it('puts the hero first among everything won', () => {
+    const d = eventResultDetail('ldev_1', 'November', raw);
+    expect(d.prizes?.map((p) => p.title)).toEqual(['Umbreon', 'RM 500']);
+  });
+
+  it('holds a no-entries draw: no winner, no ticket', () => {
+    const d = eventResultDetail('ldev_1', 'November', {
+      ...raw,
+      result: { ...raw.result, winner: null, total_tickets: 0 },
+      entries: [],
+      ticket_index: null,
+    });
+    expect(d.result.winner).toBeNull();
+    expect(d.ticket_index).toBeNull();
+  });
+
+  it('holds a detail whose prizes did not read', () => {
+    const d = eventResultDetail('ldev_1', 'November', { ...raw, prizes: [] });
+    expect(d.result.image).toBeNull();
+    expect(d.result.value_myr).toBe(0);
+    expect(d.prizes).toEqual([]);
+  });
+});
+
+describe('eventRowId', () => {
+  it('sends a one-winner row to its event', () => {
+    expect(eventRowId({ draw_mode: 'one_winner', event_id: 'ldev_1' })).toBe(
+      'ldev_1',
+    );
+  });
+
+  it('leaves old rows on their prize, with or without the new fields', () => {
+    expect(eventRowId({})).toBeNull();
+    expect(
+      eventRowId({ draw_mode: 'per_prize', event_id: 'ldev_1' }),
+    ).toBeNull();
+    expect(eventRowId({ draw_mode: 'one_winner' })).toBeNull();
+  });
+});
+
+describe('refusalCopy', () => {
+  it('reads as it always did on a prize', () => {
+    expect(refusalCopy('closed')).toBe('Entries for this prize are closed.');
+    expect(refusalCopy('whatever')).toBe(
+      'Could not enter this prize. Please try again later.',
+    );
+  });
+
+  it('never says "this prize" on a pot', () => {
+    for (const reason of [...ENTER_REFUSALS, 'whatever']) {
+      expect(refusalCopy(reason, true)).toMatch(/\S/);
+      expect(refusalCopy(reason, true)).not.toMatch(/this prize/i);
+    }
+    expect(refusalCopy('no_topup', true)).toBe(ENTER_REFUSAL_COPY.no_topup);
+  });
+});
+
+describe('rulesCopy', () => {
+  it('says one winner takes every prize on a one-winner event', () => {
+    expect(rulesCopy('one_winner')).toMatch(/one winner takes every prize/i);
+  });
+
+  it('keeps the old rule on a per-prize event', () => {
+    expect(rulesCopy('per_prize')).not.toMatch(/one winner/i);
+    expect(rulesCopy('per_prize')).toMatch(/Every winner is drawn/);
+  });
+
+  it('names where tickets come from, and nothing says they can’t be bought', () => {
+    for (const mode of ['one_winner', 'per_prize'] as const) {
+      expect(rulesCopy(mode)).toContain(
+        'Tickets come from tasks, Lucky Packs and Polycards gifts.',
+      );
+      expect(rulesCopy(mode)).not.toMatch(/bought/);
+    }
   });
 });

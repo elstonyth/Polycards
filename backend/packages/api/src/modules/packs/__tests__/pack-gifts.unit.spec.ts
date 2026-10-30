@@ -47,6 +47,20 @@ describe('pack gift rules', () => {
     expect(giftablePackError({ status: 'active', category: 'pokemon' })).toBe(
       null,
     );
+    expect(
+      giftablePackError({
+        status: 'active',
+        category: 'poly',
+        prize_type: 'tickets',
+      }),
+    ).toMatch(/ticket pack/);
+    expect(
+      giftablePackError({
+        status: 'active',
+        category: 'pokemon',
+        prize_type: 'cards',
+      }),
+    ).toBe(null);
   });
 
   it('bounds quantity and requires a note', () => {

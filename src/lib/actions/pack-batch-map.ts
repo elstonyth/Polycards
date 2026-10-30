@@ -7,8 +7,14 @@
  *
  * Nothing in here is server-only — no SDK, no auth, no secrets.
  */
-import { parseOne, WonCardSchema, OpenBuybackSchema } from '@/lib/data/schemas';
+import {
+  parseOne,
+  WonCardSchema,
+  OpenBuybackSchema,
+  TicketSpinRollSchema,
+} from '@/lib/data/schemas';
 import { toCardView } from '@/lib/card-view';
+import { ticketCard } from '@/lib/packs-data';
 import type { WonCard } from './packs';
 
 /** Inline buyback offer shape — shared between openPack and openBatch. */
@@ -61,11 +67,15 @@ export type BatchRoll = {
  * Declares ONLY what is read straight off the raw object — `pull.id`. The card
  * is untyped on purpose: it goes to `parseOne(WonCardSchema, …)`, whose
  * looseObject passthrough carries every display field to `toCardView`.
+ *
+ * A ticket pack's roll has `pull` and `card` null and carries `ticket_spin`
+ * instead, untyped for the same reason.
  */
 export interface RawBatchRollItem {
-  pull?: { id?: unknown };
+  pull?: { id?: unknown } | null;
   card?: unknown;
   buyback?: unknown;
+  ticket_spin?: unknown;
 }
 
 /**
@@ -90,6 +100,16 @@ export const clampCount = (n: number): number =>
  * schema guarantees it and the reveal's card type requires it.
  */
 export function mapBatchRoll(rawRoll: RawBatchRollItem): BatchRoll | null {
+  const spin = parseOne(TicketSpinRollSchema, rawRoll.ticket_spin);
+  if (spin) {
+    // No Pull, so no sell offer: a null pullId is what buildOffer reads.
+    return {
+      card: ticketCard(spin.tickets, spin.rarity),
+      pullId: null,
+      marketValue: 0,
+      buyback: null,
+    };
+  }
   const wonCard = parseOne(WonCardSchema, rawRoll.card);
   if (!wonCard) return null;
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
@@ -7,8 +8,11 @@ import {
   MedusaError,
 } from '@medusajs/framework/utils';
 import { openBatchWorkflow } from '../../../../../workflows/open-batch';
+import { settleVipAfterSpinWorkflow } from '../../../../../workflows/settle-vip-after-spin';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
+import { resolveOddsSetForCustomer } from '../../../../../modules/packs/odds-sets';
+import { rollTicketSpins } from '../../../../../modules/packs/ticket-spin';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
 import {
@@ -88,6 +92,63 @@ export async function POST(
       MedusaError.Types.NOT_ALLOWED,
       'The free welcome pack can only be opened once, singly.',
     );
+  }
+
+  // A ticket pack writes no pull, so it has its own path (spec 2026-10-30 §3): the
+  // server rolls, then one transaction charges and credits. Gifts don't apply.
+  if (pack?.prize_type === 'tickets') {
+    if (gifts > 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A ticket pack cannot be opened with gifted packs.',
+      );
+    }
+    const { unitPrice, rolls } = await rollTicketSpins(
+      packsService,
+      slug,
+      await resolveOddsSetForCustomer(req.scope, customerId),
+      count,
+    );
+    const openId = randomUUID();
+    const settled = await packsService.settleTicketSpins({
+      customerId,
+      packSlug: slug,
+      unitPrice,
+      rolls,
+      openId,
+    });
+    // ⚠ POST-COMMIT, as on a card pack: the customer has paid and holds the
+    // tickets, so nothing below may fail the request.
+    await settleVipAfterSpinWorkflow(req.scope)
+      .run({ input: { customer_id: customerId, open_id: openId } })
+      .catch((err: unknown) => {
+        req.scope
+          .resolve(ContainerRegistrationKeys.LOGGER)
+          .error(
+            `[open-batch] post-commit VIP settle failed for '${slug}' (customer ${customerId}, open ${openId}), the spin stands`,
+            err instanceof Error ? err : new Error(String(err)),
+          );
+      });
+    res.json({
+      prize_type: 'tickets',
+      rolls: settled.spins.map((spin, i) => ({
+        pull: null,
+        card: null,
+        buyback: null,
+        ticket_spin: {
+          id: spin.id,
+          tickets: spin.tickets,
+          rarity: rolls[i].rarity,
+          rolled_at: spin.rolled_at,
+        },
+      })),
+      price: unitPrice,
+      total_charged: settled.totalCharged,
+      balance: settled.balance,
+      ticket_balance: settled.ticketBalance,
+      gifts_used: 0,
+    });
+    return;
   }
 
   // A stale gift count is a 409 the storefront acts on (re-read the gifts).

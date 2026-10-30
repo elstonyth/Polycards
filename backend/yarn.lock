@@ -19,6 +19,7 @@ __metadata:
     "@tanstack/react-query": "npm:5.104.1"
     "@types/node": "npm:^24.19.1"
     autoprefixer: "npm:^10.6.1"
+    framer-motion: "npm:11.18.2"
     i18next: "npm:26.4.2"
     postcss: "npm:^8.5.29"
     react: "npm:^18.3.1"
@@ -12336,7 +12337,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"framer-motion@npm:^11.18.2":
+"framer-motion@npm:11.18.2, framer-motion@npm:^11.18.2":
   version: 11.18.2
   resolution: "framer-motion@npm:11.18.2"
   dependencies:

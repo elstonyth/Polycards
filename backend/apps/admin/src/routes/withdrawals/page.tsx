@@ -12,7 +12,8 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useGatewayWithdrawals,
   useApproveWithdrawal,
@@ -27,6 +28,7 @@ import { rm, timeAgo } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { withdrawalStatusBadge } from '../../components/PaymentStatusBadge';
 import { WithdrawalControlsPanel } from './WithdrawalControlsPanel';
 
 export const config: RouteConfig = {
@@ -58,20 +60,6 @@ type SortKey = 'created_at' | 'amount';
 // the inverse reason: did we debit somebody whose payout never confirmed AND
 // never refunded? A stale pending row (past the sweep window, flagged
 // server-side) is that customer until proven otherwise.
-const statusBadge = (w: GatewayWithdrawal, label: string) => {
-  // held: needs a human, not the gateway — orange reads as "awaiting action"
-  // the same way a stale pending row does, without conflating the two (a
-  // held row's `stale` is always false; the sweep never touches it).
-  if (w.status === 'held')
-    return <StatusBadge color="orange">{label}</StatusBadge>;
-  if (w.status === 'settled')
-    return <StatusBadge color="green">{label}</StatusBadge>;
-  // 'failed' on a withdrawal means the debit was REFUNDED — resolved, not an
-  // error state, so it renders neutral rather than red.
-  if (w.status === 'failed')
-    return <StatusBadge color="blue">{label}</StatusBadge>;
-  return <StatusBadge color={w.stale ? 'orange' : 'grey'}>{label}</StatusBadge>;
-};
 
 const WithdrawalsPage = () => {
   const { t } = useTranslation();
@@ -98,6 +86,11 @@ const WithdrawalsPage = () => {
   // server call, so it must not be re-fetched on a refocus, and it must not
   // outlive this page — navigating away drops them.
   const [revealed, setRevealed] = useState<Record<string, string>>({});
+  // The full number asks its own policy (api/admin-rbac.ts SECRET_READS): a
+  // view-only role sees the masked number with no Reveal.
+  const canReveal = usePermissions().hasPermission(
+    'customer_bank_account:read' as Permission,
+  );
   // A SET, not one id: two reveals can be in flight at once. With a single
   // slot, clicking row A then row B overwrites the id, and A settling clears it
   // while B is still loading — B's button re-enables and can be clicked again.
@@ -344,7 +337,7 @@ const WithdrawalsPage = () => {
                         <span>
                           {w.bank_code} · {revealed[w.id] ?? w.account_number}
                         </span>
-                        {!revealed[w.id] && (
+                        {canReveal && !revealed[w.id] && (
                           <button
                             type="button"
                             className="text-ui-fg-interactive text-xs hover:underline disabled:opacity-50"
@@ -390,7 +383,7 @@ const WithdrawalsPage = () => {
                       )}
                     </Table.Cell>
                     <Table.Cell>
-                      {statusBadge(
+                      {withdrawalStatusBadge(
                         w,
                         w.stale
                           ? t('withdrawals.statusStale')

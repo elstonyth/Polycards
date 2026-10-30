@@ -38,11 +38,14 @@ export async function GET(
     );
   }
   const max = Number(raw);
+  // `counter`, not `on_hand`: this report is about the Medusa counter
+  // (received minus won, negative = owed to winners), which is what its note
+  // tells the desk. The Stock page's physical on_hand is a different number.
   const rows = (await loadInventoryRows(req.scope))
-    .filter((r) => r.is_card && r.on_hand !== null && r.on_hand <= max)
-    .sort((a, b) => a.on_hand! - b.on_hand! || a.name.localeCompare(b.name));
+    .filter((r) => r.is_card && r.counter !== null && r.counter <= max)
+    .sort((a, b) => a.counter! - b.counter! || a.name.localeCompare(b.name));
   const shown = rows.slice(0, Number(rawLimit));
-  const owed = rows.filter((r) => r.on_hand! < 0);
+  const owed = rows.filter((r) => r.counter! < 0);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const active = await packs.listPacks({ status: 'active' }, { take: 1000 });
   const activeSlugs = new Set(active.map((p) => p.slug));
@@ -69,15 +72,17 @@ export async function GET(
     matching_cards: rows.length,
     owed: {
       cards: owed.length,
-      units: owed.reduce((sum, r) => sum - r.on_hand!, 0),
+      units: owed.reduce((sum, r) => sum - r.counter!, 0),
     },
     cards_not_shown: rows.length - shown.length,
     cards: shown.map((r) => ({
       card: r.name,
       handle: r.handle,
-      on_hand: r.on_hand,
+      on_hand: r.counter,
       in_vaults: r.in_vault,
-      delivery_requested: r.requested,
+      // Every open order unit, as before the Stock page split ready_to_ship
+      // out of requested.
+      delivery_requested: r.requested + r.ready_to_ship,
       display_price: r.price,
       in_active_packs: [...(inPacks.get(r.handle) ?? [])].sort(),
     })),

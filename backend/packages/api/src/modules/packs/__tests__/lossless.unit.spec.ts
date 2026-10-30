@@ -60,6 +60,13 @@ describe('lossless', () => {
     );
   });
 
+  it('excludes a ticket pack, which has no buyback to lift', () => {
+    const lucky = { slug: 'lucky', category: 'poly', prize_type: 'tickets' };
+    expect(isLossless([all], lucky, S)).toBe(false);
+    expect(isLossless([{ ...all, pack_slugs: ['lucky'] }], lucky, S)).toBe(false);
+    expect(isLossless([all], { ...lucky, prize_type: 'cards' }, S)).toBe(true);
+  });
+
   it('excludes reward-sourced pulls but not gift or bonus', () => {
     expect(isLossless([all], gold, S + 1, 'reward')).toBe(false);
     expect(isLossless([all], gold, S + 1, 'gift')).toBe(true);

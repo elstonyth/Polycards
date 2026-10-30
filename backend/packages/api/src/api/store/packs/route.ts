@@ -116,6 +116,7 @@ async function computeCatalogBody(req: MedusaRequest) {
       slug: p.slug,
       title: p.title,
       category: p.category,
+      prize_type: p.prize_type,
       price: p.price,
       image: p.image,
       display_image: p.display_image ?? null,

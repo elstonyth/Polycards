@@ -71,6 +71,7 @@ export function draftError(
   date: string,
   supplier: string,
   lines: DraftLine[],
+  dateLabel = 'Invoice date',
 ): string | null {
   // The date belongs HERE rather than in submit(), because mytMidnightIso
   // THROWS on a value it cannot parse and used to do so inside submit()'s try,
@@ -85,9 +86,9 @@ export function draftError(
   //
   // ponytail: '2026-02-30' passes and rolls to 1 March — standard Date
   // behaviour, and <input type="date"> cannot emit it. No calendar check.
-  if (date.trim() === '') return 'Invoice date is required.';
+  if (date.trim() === '') return `${dateLabel} is required.`;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) {
-    return 'Invoice date must be a valid date (YYYY-MM-DD).';
+    return `${dateLabel} must be a valid date (YYYY-MM-DD).`;
   }
   if (supplier.trim() === '') return 'Supplier is required.';
   if (lines.length === 0) return 'Add at least one line.';
@@ -101,6 +102,67 @@ export function draftError(
     if (err) return err;
   }
   return null;
+}
+
+/** A goods receive note line (GET /admin/goods-receive-notes/:id). */
+export type GrnSourceLine = {
+  id: string;
+  card_handle: string;
+  card_name: string;
+  /** bigNumber column — may arrive as a numeric string. */
+  fmv_snapshot: number | string;
+  qty: number;
+};
+
+/**
+ * The New Purchase Invoice form's lines (spec 2026-10-28). With a goods receive
+ * note picked ("Transfer from goods receive note") they are the GRN's own lines:
+ * card, FMV and qty copied as-is and shown read-only — the server requires the
+ * invoice's (card_handle, qty) multiset to equal the GRN's — and only the unit
+ * cost is the operator's. It starts EMPTY, not prefilled from FMV the way a
+ * normal pick is: a GRN records no cost, and an untouched prefill would save FMV
+ * as the cost without anyone typing it. `unitCosts` is keyed by GRN line id, so
+ * a cost typed for one GRN can never land on another GRN's lines.
+ *
+ * `grnLines` null means no transfer: the operator's own draft comes back
+ * untouched, so clearing a transfer returns the normal, editable form.
+ */
+export function invoiceFormLines(
+  draft: DraftLine[],
+  grnLines: GrnSourceLine[] | null,
+  unitCosts: Record<string, string>,
+): DraftLine[] {
+  if (!grnLines) return draft;
+  return grnLines.map((l) => ({
+    card_handle: l.card_handle,
+    card_name: l.card_name,
+    fmv_snapshot: String(Number(l.fmv_snapshot)),
+    qty: String(l.qty),
+    unit_cost: unitCosts[l.id] ?? '',
+  }));
+}
+
+/** A line of the New Goods Receive Note form: an invoice line minus the cost. */
+export type GrnDraftLine = Omit<DraftLine, 'unit_cost'>;
+
+/** draftError for the New Goods Receive Note form: same date, supplier, FMV and
+ *  qty rules, plus qty above 0 — a GRN body takes only positive quantities (a
+ *  correction is a reversal GRN, never a negative line). */
+export function grnDraftError(
+  date: string,
+  supplier: string,
+  lines: GrnDraftLine[],
+): string | null {
+  // '0' only satisfies the shared walk; a GRN records no cost and sends none.
+  const shared = draftError(
+    date,
+    supplier,
+    lines.map((l) => ({ ...l, unit_cost: '0' })),
+    'Receive date',
+  );
+  if (shared) return shared;
+  const i = lines.findIndex((l) => Number(l.qty) < 0);
+  return i === -1 ? null : `Line ${i + 1} qty must be above 0.`;
 }
 
 /**

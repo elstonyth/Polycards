@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { PackCategory } from '@/lib/packs-data';
+import { packTabs, type PackCategory } from '@/lib/packs-data';
 
 // The franchise tab on /slots and the home shelf. /slots keeps it in the URL
 // (?category=), so Back to a cached page and a shared link show the same tab;
@@ -104,7 +104,7 @@ test('/slots hides the switch with a single franchise', () => {
 test('home shelf: the "All packs" link follows the picked franchise', () => {
   render(
     createElement(ShelfTabs, {
-      categories,
+      categories: packTabs(categories),
       panels: { pokemon: 'POKE', 'one-piece': 'OP' },
     }),
   );

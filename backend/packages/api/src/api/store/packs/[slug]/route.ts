@@ -8,6 +8,7 @@ import { withLossless } from '../../../../modules/packs/lossless';
 import { losslessWindowsForDisplay } from '../lossless-display';
 import { pageAll } from '../../../utils/page-all';
 import { demoTierSplit } from '../../../../modules/packs/odds-sets';
+import { ticketOddsRows } from '../../../../modules/packs/ticket-spin';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
@@ -80,6 +81,42 @@ export async function GET(
   // reward_box packs are internal draw pools — excluded from the public catalog (B2).
   if (!pack || pack.category === 'reward_box') {
     res.status(404).json({ message: `Pack '${slug}' not found` });
+    return;
+  }
+
+  // Explicit public shape — `price` is bigNumber now, so a raw `pack` spread
+  // would leak the internal `raw_price` jsonb sidecar into a public payload.
+  const publicPack = {
+    slug: pack.slug,
+    title: pack.title,
+    category: pack.category,
+    prize_type: pack.prize_type,
+    price: toMoney(pack.price),
+    image: pack.image,
+    boost: pack.boost,
+    buyback_percent: pack.buyback_percent,
+    in_stock: pack.in_stock,
+    rank: pack.rank,
+    status: pack.status,
+  };
+
+  // A ticket pack's pool is one row per amount, with no card join and, as below,
+  // no weight. The published odds work as on a card pack. No demo_odds: with one
+  // row per tier, set 3's tier split would be the real rate of each amount, so the
+  // guest demo falls back to the published odds.
+  if (pack.prize_type === 'tickets') {
+    const prizes = await pageAll((opts) =>
+      packsModuleService.listTicketPrizes({ pack_id: slug }, opts),
+    );
+    const body = {
+      prize_type: pack.prize_type,
+      pack: publicPack,
+      odds: ticketOddsRows(prizes),
+      published_odds: normalizePublishedOdds(pack.published_odds),
+      demo_odds: null,
+    };
+    packCache.set(slug, { expires: Date.now() + CACHE_TTL_MS, body });
+    await send(body);
     return;
   }
 
@@ -160,21 +197,9 @@ export async function GET(
   // default players roll — the demo then falls back to the published odds.
   const demoOdds = demoTiers ? { tiers: demoTiers } : null;
 
-  // Explicit public shape — `price` is bigNumber now, so a raw `pack` spread
-  // would leak the internal `raw_price` jsonb sidecar into a public payload.
   const body = {
-    pack: {
-      slug: pack.slug,
-      title: pack.title,
-      category: pack.category,
-      price: toMoney(pack.price),
-      image: pack.image,
-      boost: pack.boost,
-      buyback_percent: pack.buyback_percent,
-      in_stock: pack.in_stock,
-      rank: pack.rank,
-      status: pack.status,
-    },
+    prize_type: pack.prize_type,
+    pack: publicPack,
     odds: entries,
     // The PUBLIC odds display ({ overall, tiers } percentages, admin-authored).
     // This is the ONLY odds data customers ever see — deliberately decoupled

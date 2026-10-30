@@ -17,7 +17,8 @@ const range = (r: { start: number; end: number }) =>
 /**
  * One drawn prize (spec §9): the winner, the replay, and the frozen entry list
  * in draw order with each entrant's ticket numbers. The seed and its hash are
- * not shown (operator 2026-10-25); the API still returns them.
+ * not shown (operator 2026-10-25); the API still returns them. A one-winner
+ * event (`detail.prizes`) also lists everything the winner took.
  */
 export function ResultDetail({
   detail,
@@ -32,7 +33,7 @@ export function ResultDetail({
   useModalA11y(panelRef, true, onClose);
   // The panel's blur: .glass-panel is only the tint (TopUpSheet's pairing).
   useLiquidGlass(panelRef, true, GLASS_SUBTLE);
-  const { result, entries, ticket_index } = detail;
+  const { result, entries, ticket_index, prizes } = detail;
   // A list that does not add up is shown as read, but never walked: no
   // ranges, no winner badge, no replay landing (ticket numbers would shift).
   const intact = entriesIntact(entries, result);
@@ -56,7 +57,7 @@ export function ResultDetail({
         <div className="flex items-start gap-3">
           <span className="relative aspect-[5/7] w-16 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-1">
             <span className="relative block h-full w-full">
-              <PrizeArt src={result.image} />
+              <PrizeArt src={result.image} kind={prizes?.[0]?.kind} />
             </span>
           </span>
           <div className="min-w-0 flex-1">
@@ -121,6 +122,44 @@ export function ResultDetail({
             </p>
           )}
         </div>
+
+        {prizes && prizes.length > 0 && (
+          <section className="mt-5">
+            <h3 className="text-sm font-semibold text-white">
+              {result.winner ? 'Everything they won' : 'The prizes'}
+            </h3>
+            <ul className="mt-2 overflow-hidden rounded-xl border border-white/10">
+              {prizes.map((p, i) => (
+                <li
+                  key={i}
+                  className={cn(
+                    'flex items-center gap-3 px-3 py-2',
+                    i > 0 && 'border-t border-white/5',
+                  )}
+                >
+                  <span className="relative aspect-[5/7] w-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/[0.04] p-0.5">
+                    <span className="relative block h-full w-full">
+                      <PrizeArt src={p.image} kind={p.kind} />
+                    </span>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-neutral-200">
+                      {p.title}
+                    </span>
+                    {p.kind === 'credit' && (
+                      <span className="block text-[11px] text-neutral-400">
+                        Bonus credit
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-heading shrink-0 text-sm text-chase tabular-nums">
+                    {rmAuto(p.value_myr)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className="mt-5">
           <h3 className="text-sm font-semibold text-white">

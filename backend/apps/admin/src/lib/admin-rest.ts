@@ -271,7 +271,10 @@ export interface GroupCreditCustomer {
   last_name: string | null;
 }
 
-export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
+export const listGroupCreditCustomersPage = (
+  groupId: string,
+  offset: number,
+) => {
   const params = new URLSearchParams({
     groups: groupId,
     limit: '100',
@@ -578,13 +581,7 @@ export async function getProfitReport(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  | 'today'
-  | 'yesterday'
-  | '7d'
-  | '30d'
-  | 'month'
-  | 'last_month'
-  | 'custom';
+  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -841,9 +838,7 @@ export const acknowledgeAuditFinding = (body: {
     body,
   );
 
-export async function getGatewayAudit(
-  currency: string,
-): Promise<GatewayAudit> {
+export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
   return getJson<GatewayAudit>(
     `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
   );
@@ -878,8 +873,7 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    | Partial<GatewayPreflightRefusal>
-    | undefined;
+    Partial<GatewayPreflightRefusal> | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1193,6 +1187,24 @@ export interface AdminDeliveryOrder {
   delivered_at: string | null;
   created_at: string;
   items: AdminDeliveryItem[];
+  /** The shipment tracker's last carrier check (list route only). */
+  tracking_snapshot?: DeliveryTrackingSnapshot | null;
+}
+
+/** Mirrors the backend TrackingSnapshot (modules/packs/shipment-tracking.ts). */
+export interface DeliveryTrackingSnapshot {
+  tracking_number: string;
+  carrier: 'ninjavan' | 'poslaju' | 'dhl_ecommerce' | null;
+  state:
+    | 'delivered'
+    | 'in_transit'
+    | 'problem'
+    | 'not_found'
+    | 'unknown_carrier';
+  event: string | null;
+  event_at: string | null;
+  delivered_at: string | null;
+  checked_at: string;
 }
 
 export interface DeliveryOrdersPage {
@@ -1236,6 +1248,16 @@ export const bulkUpdateDeliveryOrders = (
     '/admin/delivery-orders/bulk',
     { ids, status },
   );
+
+// Check every shipped order with its carrier now and complete the delivered
+// ones — the same run as the 2-hourly job.
+export const checkDeliveryTracking = () =>
+  postJson<{
+    checked: number;
+    completed: string[];
+    problems: string[];
+    failed: string[];
+  }>('/admin/delivery-orders/track', {});
 
 export async function getDeliveryOrder(
   id: string,
@@ -1634,6 +1656,8 @@ export function getGatewayDeposits(
   status: GatewayDepositView,
   pageSize = 50,
   sort?: string,
+  /** One customer's attempts only (the player page's Payments tab). */
+  customerId?: string,
 ): Promise<GatewayDepositsResponse> {
   const params = new URLSearchParams({
     status,
@@ -1644,9 +1668,8 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(
-    `/admin/payments/deposits?${params}`,
-  );
+  if (customerId) params.set('customer_id', customerId);
+  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
@@ -1725,6 +1748,8 @@ export function getGatewayWithdrawals(
   status: GatewayWithdrawalView,
   pageSize = 50,
   sort?: string,
+  /** One customer's payouts only (the player page's Payments tab). */
+  customerId?: string,
 ): Promise<GatewayWithdrawalsResponse> {
   const params = new URLSearchParams({
     status,
@@ -1733,6 +1758,7 @@ export function getGatewayWithdrawals(
   });
   // Same contract as getGatewayDeposits: omitted = status-dependent default.
   if (sort) params.set('sort', sort);
+  if (customerId) params.set('customer_id', customerId);
   return getJson<GatewayWithdrawalsResponse>(
     `/admin/payments/withdrawals?${params}`,
   );
@@ -2202,6 +2228,11 @@ export interface AdminPurchaseInvoice {
   /** Joined from the user module; null if the admin account was removed. */
   agent_email: string | null;
   reverses_invoice_id: string | null;
+  /** The goods receive note this invoice was transferred from (spec
+   *  2026-10-28). A reversal of a transferred invoice carries the same id —
+   *  the server copies it — so both read "From GRN-…". */
+  from_grn_id: string | null;
+  from_grn_display_no: string | null;
   created_at: string;
   total_qty: number;
   subtotal: number;
@@ -2255,6 +2286,10 @@ export interface CreatePurchaseInvoiceBody {
   date: string;
   supplier: string;
   reverses_invoice_id?: string | null;
+  /** Transfer from an open GRN. The lines must equal the GRN's as a multiset
+   *  of (card_handle, qty); only unit_cost is the operator's. Never together
+   *  with reverses_invoice_id — the server refuses the pair. */
+  from_grn_id?: string | null;
   lines: CreatePurchaseInvoiceLineBody[];
 }
 
@@ -2271,13 +2306,22 @@ export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
  *  Card row still gets a row — that is exactly what the "List to gacha card"
  *  bulk tool acts on, and `is_card` tells the two apart.
  *
- *  `cost` and `on_hand` are THREE-STATE and the distinction is load-bearing:
+ *  `cost` and `counter` are THREE-STATE and the distinction is load-bearing:
  *  `null` = no purchase history / tracks no inventory at all; `0` = bought and
  *  free / tracked with nothing shippable. The route builds both with `??` and
- *  never `||` (inventory-view.ts says so in as many words, and
- *  inventory-detail.spec pins all four states) — so nothing on this side may
- *  collapse them with a truthiness test either. `fmv`/`price` are null when the
- *  product carries no FMV at all, never NaN and never 0-by-accident.
+ *  never `||` (inventory-view.ts says so in as many words) — so nothing on this
+ *  side may collapse them with a truthiness test either. `fmv`/`price` are null
+ *  when the product carries no FMV at all, never NaN and never 0-by-accident.
+ *
+ *  Stock buckets (spec 2026-10-28), in the Stock page's column order:
+ *  `to_procure` = max(0, requested + ready_to_ship − on_hand); `on_hand` = the
+ *  PHYSICAL cards on the shelf, received (GRN lines + invoice lines not
+ *  transferred from a GRN) minus shipped — never null, and negative only when
+ *  more shipped than was ever received (missing history), which the pages show
+ *  in the error colour; `requested` = orders in requested + processed;
+ *  `ready_to_ship`; `shipped`. `counter` is the OLD Medusa stock counter,
+ *  received minus WON (negative = units owed to winners) — what prize takes
+ *  draw from, so the Lucky Draw picker reads it, not `on_hand`.
  *
  *  All money is MYR and arrives as plain JS numbers (the route folds through
  *  displayMarketPrice / weightedAverageCost, not through a bigNumber getter),
@@ -2296,9 +2340,12 @@ export interface InventoryRow {
   price: number | null;
   cost: number | null;
   created_at: string;
-  on_hand: number | null;
+  to_procure: number;
+  on_hand: number;
+  counter: number | null;
   in_vault: number;
   requested: number;
+  ready_to_ship: number;
   shipped: number;
   listing_count: number;
 }
@@ -2337,7 +2384,7 @@ export interface InventoryStockMovement {
 
 /** GET /admin/inventory/:handle (spec §3.4) — the same row the list renders,
  *  plus where the card is listed and its paged movement history. `item` is a
- *  whole InventoryRow, so the same three-state `cost` / `on_hand` rules apply
+ *  whole InventoryRow, so the same three-state `cost` / `counter` rules apply
  *  here verbatim: null and 0 are different facts, and nothing may collapse
  *  them with a truthiness test. */
 export interface InventoryDetail {
@@ -2398,6 +2445,130 @@ export async function exportInventoryXlsx(q?: string): Promise<void> {
   // first, while still releasing it (a leaked object URL lives until reload).
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+// ── Goods receive notes + procurement (spec 2026-10-28) ──────────────────────
+
+/** open = waiting for its invoice; transferred = an invoice was made from it;
+ *  reversed = undone by a reversal GRN; reversal = this GRN IS that undo. */
+export type GrnStatus = 'open' | 'transferred' | 'reversed' | 'reversal';
+
+export interface GrnRef {
+  id: string;
+  display_no: string;
+}
+
+/** One row of GET /admin/goods-receive-notes. Totals are folded server-side;
+ *  the list carries no lines. A GRN has no cost — only FMV. */
+export interface AdminGoodsReceiveNote {
+  id: string;
+  display_no: string;
+  date: string;
+  supplier: string;
+  agent_user_id: string;
+  agent_email: string | null;
+  created_at: string;
+  status: GrnStatus;
+  invoice: GrnRef | null;
+  reversed_by: GrnRef | null;
+  reverses: GrnRef | null;
+  total_qty: number;
+  total_fmv: number;
+}
+
+/** `fmv_snapshot` is a bigNumber column the route spreads from the ORM row, so
+ *  it may arrive as a numeric string — Number() it before any arithmetic, the
+ *  same rule as AdminPurchaseInvoiceLine. `qty` is signed (negative on a
+ *  reversal GRN). */
+export interface AdminGoodsReceiveNoteLine {
+  id: string;
+  grn_id: string;
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number | string;
+  qty: number;
+}
+
+export interface AdminGoodsReceiveNoteDetail extends AdminGoodsReceiveNote {
+  lines: AdminGoodsReceiveNoteLine[];
+}
+
+export interface GoodsReceiveNotesPage {
+  total: number;
+  offset: number;
+  limit: number;
+  goods_receive_notes: AdminGoodsReceiveNote[];
+}
+
+// Same `sort` / `q` contract as listPurchaseInvoices. `status: 'open'` keeps
+// only GRNs still waiting for their invoice (the invoice form's picker); the
+// route allows no other value.
+export const listGoodsReceiveNotes = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+  status?: 'open',
+) =>
+  getJson<GoodsReceiveNotesPage>(
+    `/admin/goods-receive-notes?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${status ? `&status=${status}` : ''}`,
+  );
+
+export const getGoodsReceiveNote = (id: string) =>
+  getJson<{ goods_receive_note: AdminGoodsReceiveNoteDetail }>(
+    `/admin/goods-receive-notes/${encodeURIComponent(id)}`,
+  );
+
+export interface CreateGoodsReceiveNoteBody {
+  date: string;
+  supplier: string;
+  /** qty is a whole number above 0; fmv_snapshot is MYR, at most 2dp. */
+  lines: Omit<CreatePurchaseInvoiceLineBody, 'unit_cost'>[];
+}
+
+// The workflow returns the bare record, not the list's described row — only
+// the id is read from it.
+export const createGoodsReceiveNote = (body: CreateGoodsReceiveNoteBody) =>
+  postJson<{ goods_receive_note: GrnRef }>('/admin/goods-receive-notes', body);
+
+// Only an OPEN GRN can be reversed; anything else is a 400 with a readable
+// message, which the mutation toasts.
+export const reverseGoodsReceiveNote = (id: string) =>
+  postJson<{ goods_receive_note: GrnRef }>(
+    `/admin/goods-receive-notes/${encodeURIComponent(id)}/reverse`,
+    {},
+  );
+
+/** One card on the purchasing list: to_procure >= 1, oldest waiting order
+ *  first (the route sorts). image: graded = the baked slab, raw = the bare
+ *  card. fmv_usd = the PriceCharting price as is; fmv = that in MYR at the
+ *  live rate, no listing markup. */
+export interface ProcurementToBuyRow {
+  handle: string;
+  name: string;
+  sku: string;
+  photo: string | null;
+  image: string | null;
+  graded: boolean;
+  to_procure: number;
+  on_hand: number;
+  requested: number;
+  ready_to_ship: number;
+  fmv: number | null;
+  fmv_usd: number | null;
+  oldest_order_at: string | null;
+}
+
+// taken_at: when the 12am stock run froze the list; null = live (the run is
+// off, or has not run since the last 12am).
+export const getProcurementToBuy = () =>
+  getJson<{ rows: ProcurementToBuyRow[]; taken_at: string | null }>(
+    '/admin/procurement/to-buy',
+  );
+
+// The mailing list: every ready_to_ship order, oldest first, in the Orders
+// page's own serialized shape (customer_email included).
+export const getProcurementToShip = () =>
+  getJson<{ orders: AdminDeliveryOrder[] }>('/admin/procurement/to-ship');
 
 // ── Referral rebuild (spec 2026-08-24) ───────────────────────────────────────
 
@@ -2688,6 +2859,14 @@ export interface AdminLuckyDrawEvent {
   starts_at: string;
   ends_at: string;
   status: 'draft' | 'published' | 'cancelled';
+  /** one_winner: one customer wins every prize at the end. per_prize: the old
+   *  rules, each prize drawn on its own. A draft becomes one_winner on publish. */
+  draw_mode: 'per_prize' | 'one_winner';
+  /** The event's own commitment. null until published, and on a per_prize
+   *  event, whose hashes are per prize. */
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
   prizes: AdminLuckyDrawPrize[];
 }
 
@@ -2744,6 +2923,14 @@ export const publishLuckyDrawEvent = (id: string, reason: string) =>
     { reason },
   );
 
+/** Cancels a one-winner event and refunds every entrant. Refused once a result
+ *  exists. */
+export const withdrawLuckyDrawEvent = (id: string, reason: string) =>
+  postJson<{ refunded: number }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(id)}/withdraw`,
+    { reason },
+  );
+
 export const saveLuckyDrawPrize = (
   input: AdminLuckyDrawPrizeInput & { reason: string },
 ) => postJson<{ id: string }>('/admin/lucky-draw/prizes', input);
@@ -2767,6 +2954,50 @@ export async function listLuckyDrawEntries(
   );
   return data.entries;
 }
+
+export async function listLuckyDrawEventEntrants(
+  eventId: string,
+): Promise<AdminLuckyDrawEntrant[]> {
+  const data = await getJson<{ entries: AdminLuckyDrawEntrant[] }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(eventId)}/entrants`,
+  );
+  return data.entries;
+}
+
+// ── Ticket pack prizes (spec 2026-10-30 Lucky Pack §2) ──────────────────────
+
+/** A saved row, in the storage units of `pack_odds` (1,000,000 = 100%). */
+export interface AdminTicketPrize {
+  tickets: number;
+  rarity: string;
+  weight: number;
+  /** null = this amount inherits the previous set. */
+  weight_2: number | null;
+  weight_3: number | null;
+  locked: boolean;
+}
+
+/** A row to save, with win % in the units POST /admin/packs/:slug/odds takes.
+ *  The server balances it with the same @acme/odds-math. */
+export interface AdminTicketPrizeEntry {
+  tickets: number;
+  rarity: string;
+  locked: boolean;
+  pct: number;
+  /** null = inherit the previous set. */
+  pct_2: number | null;
+  pct_3: number | null;
+}
+
+const ticketPrizesPath = (slug: string) =>
+  `/admin/packs/${encodeURIComponent(slug)}/ticket-prizes`;
+
+export const getTicketPrizes = (slug: string) =>
+  getJson<{ rows: AdminTicketPrize[] }>(ticketPrizesPath(slug));
+
+/** Replaces the pack's whole table: a row left out is removed. */
+export const saveTicketPrizes = (slug: string, rows: AdminTicketPrizeEntry[]) =>
+  postJson<unknown>(ticketPrizesPath(slug), { rows });
 
 export interface AdminLuckyDrawTicketHistory {
   balance: number;

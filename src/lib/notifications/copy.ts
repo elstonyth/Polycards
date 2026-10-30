@@ -242,11 +242,12 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     body: (data) => {
       const bank = strOf(data, 'bank_name');
       const last4 = strOf(data, 'account_last4');
-      // EXACTLY four digits, matching the email renderer's guard
-      // (backend .../resend/templates.ts). A merely non-empty check would
+      // EXACTLY four characters, matching the email renderer's guard
+      // (backend .../resend/templates.ts) — alphanumeric, because a USDT
+      // wallet address ends in base58 letters. A merely non-empty check would
       // render a FULL account number into a toast if a malformed payload ever
       // reached here.
-      if (!last4 || !/^\d{4}$/.test(last4)) return null;
+      if (!last4 || !/^[A-Za-z0-9]{4}$/.test(last4)) return null;
       return `${bank ? `${bank} ` : ''}····${last4} was added to your withdrawal accounts. If this wasn't you, remove it and change your password.`;
     },
     href: '/bank',
@@ -267,10 +268,10 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     body: (data) => {
       const bank = strOf(data, 'bank_name');
       const last4 = strOf(data, 'account_last4');
-      // EXACTLY four digits, same guard as the added sibling and the email
+      // EXACTLY four characters, same guard as the added sibling and the email
       // renderer: a merely non-empty check would render a FULL account number
       // into a toast if a malformed payload ever reached here.
-      if (!last4 || !/^\d{4}$/.test(last4)) return null;
+      if (!last4 || !/^[A-Za-z0-9]{4}$/.test(last4)) return null;
       return `${bank ? `${bank} ` : ''}····${last4} was removed from your withdrawal accounts. If this wasn't you, change your password now.`;
     },
     href: '/bank',

@@ -216,6 +216,7 @@ describe('franchise categories', () => {
     expect(cats.map((c) => [c.id, c.tab, c.icon, c.packs.length])).toEqual([
       ['pokemon', 'Pokémon', '/pack-index-icons/pokemon.webp', 0],
       ['one-piece', 'One Piece', '/pack-index-icons/onepiece.webp', 1],
+      ['poly', 'Poly', '/pack-index-icons/poly.webp', 0],
     ]);
   });
 

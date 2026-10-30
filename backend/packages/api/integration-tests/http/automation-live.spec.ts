@@ -6,6 +6,12 @@ import { tickLive } from '../../src/api/utils/automation-live-store';
 import { clearRecentPullsCache } from '../../src/api/store/pulls/recent/route';
 import automationLiveJob from '../../src/jobs/automation-live';
 import { mintSuperAdmin, unwrapResponse } from './utils';
+import type { IEventBusModuleService } from '@medusajs/framework/types';
+
+// Never send to Telegram from an integration run, even if local env has a token.
+jest.mock('../../src/modules/packs/telegram', () => ({
+  postApexPull: jest.fn(async () => null),
+}));
 
 // The app's own scheduled job calls tickLive every 2 s. This suite drives
 // every tick itself (often with a fake clock) and counts which call claimed a
@@ -24,6 +30,18 @@ medusaIntegrationTestRunner({
   testSuite: ({ api, getContainer }) => {
     it('settles every selected draw without a spend cap and publishes each pull to the storefront feed', async () => {
       const container = getContainer();
+      const eventBus = container.resolve<IEventBusModuleService>(Modules.EVENT_BUS);
+      const emit = eventBus.emit.bind(eventBus);
+      const announcements: string[] = [];
+      jest.spyOn(eventBus, 'emit').mockImplementation(async (events, options) => {
+        for (const event of Array.isArray(events) ? events : [events]) {
+          if (event.name !== 'pull.revealed') continue;
+          announcements.push((event.data as { pull_id: string }).pull_id);
+          // A dropped announcement must not interrupt the paid draw or sell.
+          if (announcements.length === 1) throw new Error('Test event bus outage');
+        }
+        await emit(events, options);
+      });
       const token = await mintSuperAdmin(
         container,
         api,
@@ -198,6 +216,9 @@ medusaIntegrationTestRunner({
       expect(pull.id).toBe(view.cycles[0].pullId);
       expect(pull.open_id).toBe(view.cycles[0].id);
       expect(pull.status).toBe('bought_back');
+      expect(pull.source).toBe('bonus');
+      expect(pull.revealed_at).not.toBeNull();
+      expect(announcements).toEqual([pull.id]);
       const transactions = await packs.listCreditTransactions({
         customer_id: customer.id,
       });
@@ -256,6 +277,11 @@ medusaIntegrationTestRunner({
       });
       const settledPulls = await packs.listPulls({ customer_id: customer.id });
       expect(settledPulls).toHaveLength(3);
+      // Later ticks publish only their new pulls, never backfill the missed first post.
+      expect(announcements.slice().sort()).toEqual(
+        settledPulls.map((row) => row.id).sort(),
+      );
+      expect(settledPulls.every((row) => row.revealed_at !== null)).toBe(true);
       expect(settledPulls.map((row) => row.source).sort()).toEqual([
         'bonus',
         'pack',

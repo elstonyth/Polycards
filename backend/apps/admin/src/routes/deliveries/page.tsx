@@ -17,8 +17,10 @@ import {
 } from '@medusajs/ui';
 import { TruckFast, XMark } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useBulkUpdateDeliveryOrders,
+  useCheckDeliveryTracking,
   useDeliveryOrders,
   useGatewayDeposits,
   usePulls,
@@ -29,6 +31,7 @@ import type {
   AdminDeliveryItem,
   AdminDeliveryOrder,
   DeliveryStatus,
+  DeliveryTrackingSnapshot,
   GatewayDeposit,
 } from '../../lib/admin-rest';
 import {
@@ -36,6 +39,7 @@ import {
   deliveryStatusLabel,
   orderDateTime,
   rm,
+  timeAgo,
 } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
 import { useTableSort } from '../../lib/use-table-sort';
@@ -88,6 +92,56 @@ const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
   settled: 'Settled',
   failed: 'Cancelled / rejected',
   expired: 'No gateway answer',
+};
+
+const CARRIER_NAME: Record<
+  NonNullable<DeliveryTrackingSnapshot['carrier']>,
+  string
+> = {
+  ninjavan: 'Ninja Van',
+  poslaju: 'Pos Laju',
+  dhl_ecommerce: 'DHL eCommerce',
+};
+
+// What the shipment tracker last heard from the carrier, under a shipped
+// order's status. A snapshot for a different number (staff re-entered it
+// since) is stale and reads as not checked yet.
+const TrackingLine = ({ order }: { order: AdminDeliveryOrder }) => {
+  if (order.status !== 'shipped' || !order.tracking_number) return null;
+  const snap = order.tracking_snapshot;
+  if (!snap || snap.tracking_number !== order.tracking_number) {
+    return (
+      <Text size="xsmall" className="text-ui-fg-muted mt-1">
+        Tracking not checked yet
+      </Text>
+    );
+  }
+  if (snap.state === 'unknown_carrier') {
+    return (
+      <Text size="xsmall" className="text-ui-fg-muted mt-1">
+        Unknown carrier, complete by hand
+      </Text>
+    );
+  }
+  const carrier = snap.carrier ? CARRIER_NAME[snap.carrier] : 'Carrier';
+  const what =
+    snap.state === 'not_found'
+      ? 'no record yet'
+      : (snap.event ?? 'no events yet');
+  return (
+    <Text
+      size="xsmall"
+      className={
+        snap.state === 'problem'
+          ? 'text-ui-fg-error mt-1 line-clamp-2 max-w-64'
+          : 'text-ui-fg-subtle mt-1 line-clamp-2 max-w-64'
+      }
+      title={`${snap.tracking_number}: ${what}`}
+    >
+      {snap.state === 'problem' ? 'Problem: ' : ''}
+      {carrier}: {what} · checked {timeAgo(snap.checked_at)}
+    </Text>
+  );
 };
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
@@ -349,6 +403,16 @@ const DeliveriesPage = () => {
   // Which kind of record the page is showing. 'shipping' is everything the page
   // did before: status tabs, id search, bulk tool, Manage modal.
   const [kind, setKind] = useState<OrderKind>('shipping');
+  // Top-ups are customer money (GET /admin/payments/deposits asks
+  // payment:read). An order handler without it — the Order manager since
+  // 2026-10-28 — gets no tab rather than a tab that 403s.
+  const permissions = usePermissions();
+  const canSeeTopups = permissions.hasPermission('payment:read' as Permission);
+  // "Check tracking" can complete orders (POST /track asks
+  // delivery_order:update); a read-only role gets no button rather than a 403.
+  const canCheckTracking = permissions.hasPermission(
+    'delivery_order:update' as Permission,
+  );
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
@@ -376,6 +440,7 @@ const DeliveriesPage = () => {
   const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
   const bulk = useBulkUpdateDeliveryOrders();
+  const track = useCheckDeliveryTracking();
   const uploadImg = useUploadImage();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
   const [nextStatus, setNextStatus] = useState<DeliveryStatus>('processed');
@@ -433,6 +498,24 @@ const DeliveriesPage = () => {
     setSelected((prev) =>
       applyRangeSelect(prev, pageIds, anchor, id, shiftKey),
     );
+  };
+
+  const checkTracking = async () => {
+    try {
+      const r = await track.mutateAsync();
+      const parts = [
+        `${r.completed.length} completed`,
+        r.problems.length > 0 && `${r.problems.length} need attention`,
+        r.failed.length > 0 && `${r.failed.length} could not be checked`,
+      ].filter(Boolean);
+      const summary = `Checked ${r.checked} shipped orders: ${parts.join(', ')}`;
+      // A carrier that is down reads "0 checked, 14 could not be checked":
+      // not a success.
+      if (r.failed.length > 0 || r.checked === 0) toast.warning(summary);
+      else toast.success(summary);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
   };
 
   // Partial success is the endpoint's contract. Two classes of skip:
@@ -548,18 +631,30 @@ const DeliveriesPage = () => {
             </Text>
           </div>
           {kind === 'shipping' && (
-            <Input
-              type="search"
-              className="w-64"
-              placeholder="Search order id"
-              aria-label="Search orders by id"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
-                clearSelection();
-              }}
-            />
+            <div className="flex items-center gap-2">
+              {canCheckTracking && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={checkTracking}
+                  isLoading={track.isPending}
+                >
+                  Check tracking
+                </Button>
+              )}
+              <Input
+                type="search"
+                className="w-64"
+                placeholder="Search order id"
+                aria-label="Search orders by id"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(0);
+                  clearSelection();
+                }}
+              />
+            </div>
           )}
         </div>
         {/* Two tablists now, so each needs its own name to tell them apart.
@@ -569,7 +664,9 @@ const DeliveriesPage = () => {
           <Tabs.List aria-label="Record kind">
             <Tabs.Trigger value="shipping">Shipping</Tabs.Trigger>
             <Tabs.Trigger value="purchases">Pack purchases</Tabs.Trigger>
-            <Tabs.Trigger value="topups">Topups</Tabs.Trigger>
+            {canSeeTopups && (
+              <Tabs.Trigger value="topups">Topups</Tabs.Trigger>
+            )}
           </Tabs.List>
         </Tabs>
         {kind === 'shipping' && (
@@ -594,7 +691,7 @@ const DeliveriesPage = () => {
       </div>
 
       {kind === 'purchases' && <PackPurchases />}
-      {kind === 'topups' && <Topups />}
+      {kind === 'topups' && canSeeTopups && <Topups />}
 
       {kind === 'shipping' && selected.size > 0 && (
         <div
@@ -709,6 +806,7 @@ const DeliveriesPage = () => {
                       <StatusBadge color={TONE[o.status] ?? 'grey'}>
                         {deliveryStatusLabel(o.status)}
                       </StatusBadge>
+                      <TrackingLine order={o} />
                     </Table.Cell>
                     <Table.Cell className="text-right">
                       <Button

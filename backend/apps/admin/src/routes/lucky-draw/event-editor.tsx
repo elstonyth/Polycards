@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { Button, Drawer, Input, Text, toast } from '@medusajs/ui';
 import { useSaveLuckyDrawEvent } from '../../lib/queries';
 import { Field, Section } from '../../components/form-bits';
-import { toIso } from '../tasks/task-draft';
 import { CreditPrizeRows } from './credit-prize-rows';
 import { InventoryPicker } from './inventory-picker';
 import { eventDraftToPayload, type EventDraft } from './lucky-draw-draft';
+import { windowProblem } from './one-winner';
 import {
   MAX_NEW_EVENT_PRIZES,
   newEventPayload,
@@ -42,13 +42,9 @@ export const EventEditor = ({
     ? newEventPayload(draft, cards, credits)
     : eventDraftToPayload(draft);
   const poolFull = cards.length + credits.length >= MAX_NEW_EVENT_PRIZES;
-  const starts = toIso(draft.startsAt);
-  const ends = toIso(draft.endsAt);
-  const windowBad =
-    starts && ends && new Date(ends).getTime() <= new Date(starts).getTime()
-      ? 'The end must be after the start.'
-      : null;
-  const valid = payload !== null && reason.trim() !== '';
+  // A published window can't change, so a past one must not block a rename.
+  const windowBad = published ? null : windowProblem(draft);
+  const valid = payload !== null && windowBad === null && reason.trim() !== '';
 
   const submit = () => {
     if (!payload || !valid) return;
@@ -121,7 +117,7 @@ export const EventEditor = ({
           <Text size="small" className="text-ui-fg-subtle -mt-3">
             {published
               ? 'A published event can only be renamed — its window is fixed.'
-              : 'Your browser’s time zone. Malaysia time is UTC+8.'}
+              : 'Your browser’s time zone. Malaysia time is UTC+8. Only one event runs at a time; one can start the moment another ends.'}
           </Text>
           {windowBad && (
             <Text size="small" className="text-ui-fg-error -mt-3">
@@ -153,8 +149,7 @@ export const EventEditor = ({
                   {poolSummary(cards, credits)}
                 </Text>
                 <Text size="small" className="text-ui-fg-subtle">
-                  Each prize draws when the event ends. Change a prize’s draw
-                  time after creating it.
+                  One winner takes every prize when the event ends.
                 </Text>
                 {poolFull && (
                   <Text size="small" className="text-ui-fg-subtle">

@@ -46,6 +46,10 @@ const event = (over: Partial<AdminLuckyDrawEvent> = {}): AdminLuckyDrawEvent => 
   starts_at: '2026-11-01T00:00:00.000Z',
   ends_at: '2026-11-30T12:00:00.000Z',
   status: 'draft',
+  draw_mode: 'one_winner',
+  seed_hash: null,
+  total_tickets: 0,
+  entrant_count: 0,
   prizes: [],
   ...over,
 });

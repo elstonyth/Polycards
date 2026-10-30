@@ -9,6 +9,7 @@ import { E164_RE, type PhoneOtpChannel } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
 import { visitorBucket, vouchedVisitorIp } from './visitor-ip';
 import { deskOf } from '../reports/require-report-key';
+import { isAssistantKey } from '../admin/assistant/bridge';
 
 const PHONE_OTP_COOLDOWN_MS = 30_000;
 
@@ -956,6 +957,41 @@ export const RATE_LIMITS = {
   },
 
   /**
+   * The admin assistant chat (POST /admin/assistant/chat, spec 2026-10-29).
+   * Every turn spends OpenRouter credit, so each admin gets their own budget,
+   * keyed on auth_context.actor_id like admin-action. The daily USD cap in
+   * the assistant settings is the spend limit; this only stops hammering.
+   * ASSISTANT_CHAT_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 6/10s)
+   * ASSISTANT_CHAT_RATE_LIMIT / _WINDOW_MS (default 30/60s)
+   */
+  'assistant-chat': {
+    message: 'Too many questions at once. Try again in a minute.',
+    defaults: {
+      burstLimit: 6,
+      burstWindowMs: 10_000,
+      limit: 30,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
+   * Reading an assistant answer aloud (POST /admin/assistant/speak). Looser
+   * than assistant-chat: Talk mode reads every answer and Read aloud replays
+   * are free, while the daily USD cap still bounds the spend.
+   * ASSISTANT_SPEAK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 12/10s)
+   * ASSISTANT_SPEAK_RATE_LIMIT / _WINDOW_MS (default 60/60s)
+   */
+  'assistant-speak': {
+    message: 'Too many read-aloud requests. Try again in a minute.',
+    defaults: {
+      burstLimit: 12,
+      burstWindowMs: 10_000,
+      limit: 60,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
    * The gateway-hook limiter (POST /hooks/tgpay/{deposit,withdrawal}). Those
    * routes are unauthenticated BY DESIGN — a webhook carries no token; their
    * authentication is the gateway's own key headers, checked inside the
@@ -1025,8 +1061,13 @@ export const RATE_LIMITS = {
    */
   'desk-reports': {
     message: 'Too many report requests.',
+    // The admin assistant calls over loopback, so every staff member would
+    // share 127.0.0.1's bucket: with its in-process key it is keyed by the
+    // admin user it reads for (bridge.ts sends x-assistant-user).
     keyOf: (req) =>
-      `${deskOf(req.originalUrl) ?? 'none'}:ip:${callbackSourceIp(req) || 'unknown'}`,
+      isAssistantKey(req.headers['x-report-key'])
+        ? `${deskOf(req.originalUrl) ?? 'none'}:assistant:${String(req.headers['x-assistant-user'] ?? '').slice(0, 80)}`
+        : `${deskOf(req.originalUrl) ?? 'none'}:ip:${callbackSourceIp(req) || 'unknown'}`,
     defaults: {
       burstLimit: 20,
       burstWindowMs: 10_000,

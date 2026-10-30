@@ -28,7 +28,6 @@ export interface PoolCard {
   photo: string | null;
   /** RM — the inventory row's `price`. null = no FMV recorded. */
   value: number | null;
-  onHand: number;
   /** The prize title the players see; starts as the card name. */
   title: string;
 }
@@ -51,17 +50,18 @@ export const blankCredit = (): PoolCredit => ({
   imageUrl: '',
 });
 
-/** Cards with stock to give. Picking one reserves nothing (card prizes work
- *  like a challenge's card prize), so this only keeps the list honest. */
-export const inStockCards = (rows: InventoryRow[]): InventoryRow[] =>
-  rows.filter((r) => r.is_card && (r.on_hand ?? 0) > 0);
+/** Every registered card, whatever its stock. A card prize is minted to the
+ *  winner at the draw like a challenge's card prize, so the operator picks any
+ *  card (spec 2026-10-24). Never gate on stock: the Medusa counter is 0 or
+ *  below for nearly every card (1 of 1,200 above 0 on 2026-10-30). */
+export const prizeCards = (rows: InventoryRow[]): InventoryRow[] =>
+  rows.filter((r) => r.is_card);
 
 export const poolCardFrom = (r: InventoryRow): PoolCard => ({
   handle: r.handle,
   name: r.name,
   photo: r.photo,
   value: r.price,
-  onHand: r.on_hand ?? 0,
   title: r.name,
 });
 

@@ -113,8 +113,25 @@ export async function GET(
         packs.listPulls({ customer_id: customerId, $or: pullLinks }, opts),
       )
     : [];
+  // A ticket pack's open has spins, not pulls: they name its pack instead.
+  const linkedSpins = openIds.length
+    ? await pageAll((opts) =>
+        packs.listTicketSpins(
+          { customer_id: customerId, open_id: openIds },
+          { ...opts, select: ['open_id', 'pack_id'] },
+        ),
+      )
+    : [];
+  const spinPackByOpen = new Map(
+    linkedSpins.map((s) => [s.open_id, s.pack_id]),
+  );
   const linkedHandles = [...new Set(linkedPulls.map((p) => p.card_id))];
-  const linkedSlugs = [...new Set(linkedPulls.map((p) => p.pack_id))];
+  const linkedSlugs = [
+    ...new Set([
+      ...linkedPulls.map((p) => p.pack_id),
+      ...linkedSpins.map((s) => s.pack_id),
+    ]),
+  ];
   const [linkedCards, linkedPacks] = await Promise.all([
     linkedHandles.length
       ? packs.listCards(
@@ -153,12 +170,18 @@ export async function GET(
       // reversal rows carry internal txn ids — neither may reach a customer.
       const reference = isMoneyRow(t.reason) ? t.reference || null : null;
       const rowPulls = pullsFor(t);
+      const spinPack =
+        t.reason === 'pack_open' && t.source_transaction_id
+          ? spinPackByOpen.get(t.source_transaction_id)
+          : undefined;
       return {
         // What the row bought or sold: its pack and card names (empty / null
         // on rows with no pull, or pulls whose card was since deleted).
         pack_title: rowPulls[0]
           ? pullPackTitle(rowPulls[0], packTitle.get(rowPulls[0].pack_id))
-          : null,
+          : spinPack
+            ? (packTitle.get(spinPack) ?? spinPack)
+            : null,
         card_names: rowPulls
           .map((p) => cardName.get(p.card_id))
           .filter((n): n is string => !!n),

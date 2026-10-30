@@ -31,6 +31,7 @@ import LuckyDrawPrize from '../models/lucky-draw-prize';
 import LuckyDrawEntry from '../models/lucky-draw-entry';
 import LuckyDrawTicket from '../models/lucky-draw-ticket';
 import LuckyDrawResult from '../models/lucky-draw-result';
+import LuckyDrawEventResult from '../models/lucky-draw-event-result';
 import CreditTransaction from '../models/credit-transaction';
 import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
@@ -55,6 +56,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     LuckyDrawEntry,
     LuckyDrawTicket,
     LuckyDrawResult,
+    LuckyDrawEventResult,
     CreditTransaction,
     CustomerAccountState,
     AdminActionAudit,
@@ -66,10 +68,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
   ],
   testSuite: ({ service, MikroOrmWrapper }) => {
     // Fixtures use the generated create methods. Each test uses its own
-    // customer ids, so leftovers from another test never touch a balance.
+    // customer ids, so leftovers from another test never touch a balance. A row
+    // made here is per_prize, the column's default: what every event published
+    // before the one-winner change is. The admin writes can no longer make one.
     const makeEvent = async (
       over: Partial<{
+        name: string;
         starts_at: Date;
+        ends_at: Date;
         status: 'draft' | 'published' | 'cancelled';
       }> = {},
     ) => {
@@ -670,7 +676,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
       it('refuses a draw time outside the event window', async () => {
         const startsAt = new Date(Date.now() + HOUR);
         const endsAt = new Date(Date.now() + 5 * HOUR);
-        const { id: eventId } = await saveEvent({ startsAt, endsAt });
+        const { id: eventId } = await makeEvent({
+          starts_at: startsAt,
+          ends_at: endsAt,
+        });
         for (const drawAt of [
           startsAt, // must be strictly after the start
           new Date(startsAt.getTime() - 1),
@@ -691,7 +700,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       it('refuses a draw time that has passed or is under 2 minutes away', async () => {
         // The event opened an hour ago: these draw times are inside its window,
         // so only the past-time rule can refuse them.
-        const { id: eventId } = await saveEvent();
+        const { id: eventId } = await makeEvent();
         for (const drawAt of [
           new Date(Date.now() - 10 * 60 * 1000),
           new Date(Date.now() + 60 * 1000),
@@ -714,7 +723,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await service.listLuckyDrawPrizes({ event_id: eventId }),
         ).toHaveLength(0);
 
-        // A draft edit that MOVES the time is checked too...
+        // An edit that MOVES the time is checked too...
         const { id } = await saveCreditPrize(eventId, { drawAt });
         const later = new Date(drawAt.getTime() + HOUR);
         await rejectsWith(
@@ -735,86 +744,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((await prizeRow(id)).title).toBe('Retitled late');
       });
 
-      it('refuses publishing when a live prize draw time has passed', async () => {
-        const { id: eventId } = await saveEvent();
-        const drawAt = new Date(Date.now() + HOUR);
-        const { id } = await saveCreditPrize(eventId, { drawAt });
-        // A cancelled prize's time does not count.
-        const { id: gone } = await saveCreditPrize(eventId, {
-          drawAt: new Date(Date.now() + 10 * 60 * 1000),
-        });
-        await cancel(gone);
-        for (const now of [
-          new Date(drawAt.getTime() + 1000),
-          new Date(drawAt.getTime() - 60 * 1000),
-        ]) {
-          await rejectsWith(
-            service.publishLuckyDrawEvent({
-              id: eventId,
-              adminId: ADMIN,
-              reason: REASON,
-              now,
-            }),
-            MedusaError.Types.INVALID_DATA,
-          );
-        }
-        expect(
-          (await service.listLuckyDrawEvents({ id: eventId }))[0].status,
-        ).toBe('draft');
-        expect((await prizeRow(id)).seed_hash).toBeNull();
-
-        await service.publishLuckyDrawEvent({
-          id: eventId,
-          adminId: ADMIN,
-          reason: REASON,
-          now: new Date(drawAt.getTime() - 3 * 60 * 1000),
-        });
-        expect(
-          (await service.listLuckyDrawEvents({ id: eventId }))[0].status,
-        ).toBe('published');
-      });
-
-      it('publish gives every prize a seed hash and moves the event to published', async () => {
-        const { id: eventId } = await saveEvent();
-        await makeCard('c-pub');
-        const a = await saveCreditPrize(eventId);
-        const b = await saveCardPrize(eventId, 'c-pub');
-
-        await publish(eventId);
-
-        expect(
-          (await service.listLuckyDrawEvents({ id: eventId }))[0].status,
-        ).toBe('published');
-        const secret = process.env.LUCKY_DRAW_SEED_SECRET!;
-        const nonces = new Set<string>();
-        for (const { id } of [a, b]) {
-          const row = await prizeRow(id);
-          expect(row.seed_nonce).toMatch(/^[0-9a-f]{64}$/);
-          // The commitment verifies against the derived seed...
-          expect(row.seed_hash).toBe(
-            drawSeedHash(deriveDrawSeed(secret, row.seed_nonce!)),
-          );
-          // ...and the row holds no seed, only the nonce and the hash.
-          expect(row).not.toHaveProperty('seed');
-          nonces.add(row.seed_nonce!);
-        }
-        expect(nonces.size).toBe(2);
-
-        const audits = await service.listAdminActionAudits({
-          entity_type: 'lucky_draw_event',
-          entity_id: eventId,
-        });
-        const published = audits.find((x) => x.action === 'publish')!;
-        expect(published).toBeDefined();
-        // The audit trail never carries a seed either.
-        for (const { id } of [a, b]) {
-          const row = await prizeRow(id);
-          expect(JSON.stringify(published)).not.toContain(
-            deriveDrawSeed(secret, row.seed_nonce!),
-          );
-        }
-      });
-
       it('refuses publishing an event with no live prize, or one already published', async () => {
         const { id: empty } = await saveEvent();
         await rejectsWith(publish(empty), MedusaError.Types.NOT_ALLOWED);
@@ -831,23 +760,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await rejectsWith(publish('ldev_missing'), MedusaError.Types.NOT_FOUND);
       });
 
-      it('refuses publishing when a prize draw time fell outside an edited window', async () => {
-        const { id: eventId } = await saveEvent();
-        const { id } = await saveCreditPrize(eventId); // draws at the old end
-        await saveEvent({
-          id: eventId,
-          endsAt: new Date(Date.now() + 2 * HOUR),
-        });
-        await rejectsWith(publish(eventId), MedusaError.Types.INVALID_DATA);
-        expect((await prizeRow(id)).seed_hash).toBeNull();
-      });
-
       it('refuses to publish, or add a prize to a published event, without the seed secret', async () => {
         const { id: eventId } = await saveEvent();
         await saveCreditPrize(eventId);
-        const { id: liveId } = await saveEvent();
-        await saveCreditPrize(liveId);
-        await publish(liveId);
+        const { id: liveId } = await makeEvent();
 
         const saved = process.env.LUCKY_DRAW_SEED_SECRET;
         delete process.env.LUCKY_DRAW_SEED_SECRET;
@@ -869,16 +785,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ).toBe('draft');
         expect(
           await service.listLuckyDrawPrizes({ event_id: liveId }),
-        ).toHaveLength(1);
+        ).toHaveLength(0);
       });
 
       it('a published prize keeps kind, card, credit and draw time; title/image/sort still save', async () => {
-        const { id: eventId } = await saveEvent();
+        const { id: eventId } = await makeEvent();
         await makeCard('c-keep');
         await makeCard('c-other');
         const credit = await saveCreditPrize(eventId);
         const card = await saveCardPrize(eventId, 'c-keep');
-        await publish(eventId);
         const before = await prizeRow(credit.id);
         const cardBefore = await prizeRow(card.id);
 
@@ -945,9 +860,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
 
       it('a prize added to a published event is committed at creation', async () => {
-        const { id: eventId } = await saveEvent();
-        await saveCreditPrize(eventId);
-        await publish(eventId);
+        const { id: eventId } = await makeEvent();
 
         const { id } = await saveCreditPrize(eventId, { sort: 5 });
         const row = await prizeRow(id);
@@ -1105,8 +1018,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
 
       it('writes an audit row per admin action', async () => {
-        const { id: eventId } = await saveEvent();
+        const { id: eventId } = await saveEvent({
+          startsAt: new Date(Date.now() + HOUR),
+        });
         const { id: prizeId } = await saveCreditPrize(eventId);
+        await saveCreditPrize(eventId, { sort: 3 });
         await saveCreditPrize(eventId, { id: prizeId, title: 'Edited' });
         await publish(eventId, 'go live');
         await cancel(prizeId, 'withdrawn');
@@ -1268,15 +1184,30 @@ moduleIntegrationTestRunner<PacksModuleService>({
           ).toBe(true);
         });
 
-        it('honours an explicit draw time inside the window', async () => {
+        it('ignores a draw time: a prize draws at the event end', async () => {
           await makeCard('pool-t');
-          const drawAt = new Date(Date.now() + 24 * HOUR);
+          const endsAt = new Date(Date.now() + 48 * HOUR);
           const { prizeIds } = await create({
-            prizes: [cardPrize('pool-t', { drawAt })],
+            endsAt,
+            prizes: [
+              cardPrize('pool-t', { drawAt: new Date(Date.now() + HOUR) }),
+            ],
           });
           expect(
             new Date((await prizeRow(prizeIds[0])).draw_at).getTime(),
-          ).toBe(drawAt.getTime());
+          ).toBe(endsAt.getTime());
+        });
+
+        it('refuses a pool on an event that ends under 2 minutes from now', async () => {
+          await makeCard('pool-s');
+          await rejectsWith(
+            create({
+              endsAt: new Date(Date.now() + 60 * 1000),
+              prizes: [cardPrize('pool-s')],
+            }),
+            MedusaError.Types.INVALID_DATA,
+          );
+          await nothingExists();
         });
 
         it('with no prizes is a plain draft event', async () => {
@@ -1308,10 +1239,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
             cardPrize('pool-ok', { creditMyr: 10 }),
             cardPrize('pool-ok', { title: '' }),
             cardPrize('pool-ok', { sort: 1.5 }),
-            // outside the window / too soon
-            cardPrize('pool-ok', { drawAt: new Date(Date.now() - 2 * HOUR) }),
-            cardPrize('pool-ok', { drawAt: new Date(Date.now() + 72 * HOUR) }),
-            cardPrize('pool-ok', { drawAt: new Date(Date.now() + 60 * 1000) }),
           ];
           for (const prize of bad) {
             await rejectsWith(
@@ -1499,12 +1426,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           },
         ]);
         const admin = { adminId: 'user_ov', reason: 'x' };
-        const { id: eventId } = await service.saveLuckyDrawEvent({
-          name: 'Overview Draw',
-          startsAt: new Date(Date.now() - HOUR),
-          endsAt: new Date(Date.now() + 48 * HOUR),
-          ...admin,
-        });
+        const { id: eventId } = await makeEvent({ name: 'Overview Draw' });
         const credit = await service.saveLuckyDrawPrize({
           eventId,
           kind: 'credit',
@@ -1522,7 +1444,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
           sort: 1,
           ...admin,
         });
-        await service.publishLuckyDrawEvent({ id: eventId, ...admin });
         await fund('cus_ov1', 100);
         await fund('cus_ov2', 100);
         for (const [customerId, tickets] of [

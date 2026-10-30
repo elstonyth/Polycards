@@ -1,5 +1,12 @@
 # Vault Packs (gifted packs) + Bonus Credit (泥码) — design
 
+> **2026-10-30 operator amendment — Telegram:** new Legendary and Immortal
+> bonus-credit pulls are eligible for the same Telegram board as cash pulls,
+> across all player groups. Live automation reveals each newly committed draw
+> through the existing first-reveal event. No historical backfill or replay of
+> missed announcements. Gifts and private rewards remain excluded; disabled
+> accounts remain hidden. This supersedes the Telegram bonus exclusion below.
+
 > **2026-10-17 operator amendment — leaderboard and challenge only:** pack
 > opens paid with bonus credit now count exactly like normal-credit opens:
 > full card value for both `pack` and `bonus` pulls in the all-time board,

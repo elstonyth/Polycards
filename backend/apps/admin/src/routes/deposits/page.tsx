@@ -1,24 +1,15 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-  Container,
-  Heading,
-  Text,
-  Table,
-  Select,
-  StatusBadge,
-} from '@medusajs/ui';
+import { Container, Heading, Text, Table, Select } from '@medusajs/ui';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useGatewayDeposits } from '../../lib/queries';
-import type {
-  GatewayDeposit,
-  GatewayDepositView,
-} from '../../lib/admin-rest';
+import type { GatewayDepositView } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { depositStatusBadge } from '../../components/PaymentStatusBadge';
 
 export const config: RouteConfig = {
   label: 'pcNav.deposits',
@@ -49,27 +40,6 @@ const isView = (v: string | null): v is GatewayDepositView =>
 // `amount_settled`, NOT `settled_at`: the Credited column renders the AMOUNT
 // credited, and a header must sort the value its own cells display.
 type SortKey = 'created_at' | 'amount_requested' | 'amount_settled';
-
-// The orange alarm is for `stuck` rows only (server-side: pending two sweeps
-// past the stale window, with a gateway id) — the one pending case that may be
-// a customer who paid and was not credited. A merely `stale` row is almost
-// always a customer who walked away, which the next sweep expires; it stays
-// grey so it does not read as a gateway fault.
-const statusBadge = (d: GatewayDeposit, label: string) => {
-  if (d.status === 'settled')
-    return <StatusBadge color="green">{label}</StatusBadge>;
-  if (d.status === 'failed')
-    return <StatusBadge color="red">{label}</StatusBadge>;
-  // 'expired' needs its OWN colour, not the pending fall-through: the sweep
-  // gave up on it while the gateway never ruled, which makes it the likeliest
-  // uncredited payment on the page — exactly the row that must not read as
-  // "still being chased". Purple because the other four are spoken for and
-  // each carries a meaning this state would contradict: green settled, red
-  // refused, orange the stuck-PENDING alarm, grey healthy-pending.
-  if (d.status === 'expired')
-    return <StatusBadge color="purple">{label}</StatusBadge>;
-  return <StatusBadge color={d.stuck ? 'orange' : 'grey'}>{label}</StatusBadge>;
-};
 
 const DepositsPage = () => {
   const { t } = useTranslation();
@@ -208,7 +178,7 @@ const DepositsPage = () => {
                       {d.net_amount === null ? '—' : rm(d.net_amount)}
                     </Table.Cell>
                     <Table.Cell>
-                      {statusBadge(
+                      {depositStatusBadge(
                         d,
                         d.stuck
                           ? t('deposits.statusStuck')

@@ -57,10 +57,37 @@ export function oddsSnapshot(rows: readonly OddsLike[]): {
   };
 }
 
+/** A ticket pack's table as it stood: oddsSnapshot for a pack with no cards. */
+export function ticketPrizeSnapshot(
+  rows: readonly {
+    tickets: number;
+    rarity: string;
+    weight: number;
+    weight_2?: number | null;
+    weight_3?: number | null;
+    locked: boolean;
+  }[],
+) {
+  return {
+    ticket_prizes: rows
+      .map((r) => ({
+        tickets: r.tickets,
+        rarity: r.rarity,
+        weight: r.weight,
+        weight_2: r.weight_2 ?? null,
+        weight_3: r.weight_3 ?? null,
+        locked: r.locked,
+      }))
+      .sort((a, b) => a.tickets - b.tickets),
+  };
+}
+
 export type PackConfig = {
   slug: string;
   title: string;
   category: string;
+  pack_type: string | null;
+  language: string | null;
   status: string;
   in_stock: boolean;
   price: number;
@@ -78,6 +105,8 @@ type PackLike = {
   slug: string;
   title: string;
   category: string;
+  pack_type?: string | null;
+  language?: string | null;
   status: string;
   in_stock?: boolean | null;
   price: unknown;
@@ -98,6 +127,8 @@ export function packConfig(p: PackLike): PackConfig {
     slug: p.slug,
     title: p.title,
     category: p.category,
+    pack_type: p.pack_type ?? null,
+    language: p.language ?? null,
     status: p.status,
     in_stock: p.in_stock ?? true,
     // bigNumber columns can come back as strings.

@@ -20,6 +20,8 @@ import {
   toast,
 } from '@medusajs/ui';
 import { ArrowLeft, EllipsisHorizontal } from '@medusajs/icons';
+import type { Permission } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useAdjustCredits,
   useCustomerAudit,
@@ -66,6 +68,7 @@ import { MoneySummary, PeriodsCard, PlayCard } from './MoneyCards';
 import { LevelTab } from './LevelTab';
 import { VaultTab } from './VaultTab';
 import { WalletTab } from './WalletTab';
+import { PaymentsTab } from './PaymentsTab';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -104,6 +107,7 @@ type ModalKind = 'freeze' | 'unfreeze' | 'credits';
 
 type TabKey =
   | 'wallet'
+  | 'payments'
   | 'vault'
   | 'orders'
   | 'pulls'
@@ -741,10 +745,12 @@ const IdentityActions = ({
   const realName = state?.real_name ?? null;
 
   const editName = () => {
-    const next = window.prompt(
-      'Real name (exactly as on their Touch ’n Go eWallet):',
-      realName ?? '',
-    )?.trim();
+    const next = window
+      .prompt(
+        'Real name (exactly as on their Touch ’n Go eWallet):',
+        realName ?? '',
+      )
+      ?.trim();
     if (!next) return;
     const reason = window.prompt('Reason (audited):')?.trim();
     if (!reason) return;
@@ -758,14 +764,16 @@ const IdentityActions = ({
   };
 
   const changePhone = () => {
-    const next = window.prompt(
-      'New phone number in international format (e.g. +60123456789). The customer is emailed about the change.',
-      phone ?? '',
-    )?.trim();
+    const next = window
+      .prompt(
+        'New phone number in international format (e.g. +60123456789). The customer is emailed about the change.',
+        phone ?? '',
+      )
+      ?.trim();
     if (!next) return;
-    const reason = window.prompt(
-      'Reason (audited) — how was the customer’s identity checked?',
-    )?.trim();
+    const reason = window
+      .prompt('Reason (audited) — how was the customer’s identity checked?')
+      ?.trim();
     if (!reason) return;
     setPhone.mutate(
       { customerId, phone: next, reason },
@@ -809,7 +817,14 @@ const IdentityActions = ({
 const ProfileTab = ({ customerId }: { customerId: string | null }) => {
   const { t } = useTranslation();
   const { data, isError } = useCustomerDetail(customerId);
-  const { data: payout, isError: payoutError } = usePayoutDetails(customerId);
+  // Full bank numbers ask their own policy (api/admin-rbac.ts SECRET_READS):
+  // the view-only Support viewer gets no bank card and no request for it.
+  const canSeeBank = usePermissions().hasPermission(
+    'customer_bank_account:read' as Permission,
+  );
+  const { data: payout, isError: payoutError } = usePayoutDetails(
+    canSeeBank ? customerId : null,
+  );
   const customer = data?.customer;
   // metadata is Record<string, unknown> — the handle is only renderable once
   // it has been narrowed to a non-empty string.
@@ -865,31 +880,33 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
 
       {customerId && <ReferralCard customerId={customerId} />}
 
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('players.bankTitle')}</Heading>
-          <Text className="text-ui-fg-subtle mt-1" size="small">
-            {t('players.bankSubtitle')}
-          </Text>
-        </div>
-        {payoutError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
+      {canSeeBank && (
+        <Container className="p-0">
+          <div className="px-6 py-4">
+            <Heading level="h2">{t('players.bankTitle')}</Heading>
+            <Text className="text-ui-fg-subtle mt-1" size="small">
+              {t('players.bankSubtitle')}
             </Text>
           </div>
-        ) : !payout || !customerId ? (
-          <div className="border-t px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : (
-          // Mounted only once the saved row is in hand, so the three inputs can
-          // seed from useState initialisers. Seeding an already-mounted form
-          // needs an effect, and that effect races the operator's typing on
-          // every background refetch.
-          <BankForm customerId={customerId} seed={payout.details} />
-        )}
-      </Container>
+          {payoutError ? (
+            <div className="border-t px-6 py-6">
+              <Text size="small" className="text-ui-fg-error">
+                Failed to load.
+              </Text>
+            </div>
+          ) : !payout || !customerId ? (
+            <div className="border-t px-6 py-6">
+              <LoadingSkeleton />
+            </div>
+          ) : (
+            // Mounted only once the saved row is in hand, so the three inputs can
+            // seed from useState initialisers. Seeding an already-mounted form
+            // needs an effect, and that effect races the operator's typing on
+            // every background refetch.
+            <BankForm customerId={customerId} seed={payout.details} />
+          )}
+        </Container>
+      )}
     </>
   );
 };
@@ -1625,6 +1642,9 @@ const Customer360Page = () => {
               <Tabs.Trigger value="wallet">
                 {t('players.tabWallet')}
               </Tabs.Trigger>
+              <Tabs.Trigger value="payments">
+                {t('players.tabPayments')}
+              </Tabs.Trigger>
               <Tabs.Trigger value="vault">{t('players.tabVault')}</Tabs.Trigger>
               <Tabs.Trigger value="orders">
                 {t('players.tabOrders')}
@@ -1655,6 +1675,9 @@ const Customer360Page = () => {
       )}
       {tab === 'wallet' && customerId && (
         <WalletTab key={id} customerId={customerId} />
+      )}
+      {tab === 'payments' && customerId && (
+        <PaymentsTab key={id} customerId={customerId} />
       )}
       {tab === 'vault' && customerId && (
         <VaultTab key={id} customerId={customerId} />

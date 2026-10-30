@@ -293,8 +293,9 @@ const CANCEL_RULES: ErrorRule[] = [
   [UNAUTHORIZED, DELIVERY_LOGIN],
   [/already canceled/i, 'This delivery is already canceled.'],
   // Backend NOT_ALLOWED once the order is out of the customer window. It fires
-  // from `ready_to_ship` on — not only after the parcel physically ships — so
-  // the copy says "being prepared", which is true for every status it covers.
+  // from `processed` on (the 12am cutoff) — not only after the parcel
+  // physically ships — so the copy says "being prepared", which is true for
+  // every status it covers.
   [
     /no longer be canceled|not allowed|ready to ship|shipped|delivered/i,
     'This order is already being prepared for shipping and can no longer be canceled — please contact support.',
@@ -302,9 +303,9 @@ const CANCEL_RULES: ErrorRule[] = [
   [/not found|404/i, 'That order was not found.'],
 ];
 
-// Cancel an order the customer still owns the decision on (`requested`/
-// `processed`) — the cards return to their vault. From `ready_to_ship` on the
-// backend refuses: the parcel is picked and labelled, so cancelling is an
+// Cancel an order the customer still owns the decision on (`requested`, i.e.
+// before the 12am cutoff) — the cards return to their vault. From `processed`
+// on the backend refuses: purchasing has started on it, so cancelling is an
 // operator/support action. The UI hides the affordance for the same statuses.
 export async function cancelDeliveryOrder(
   orderId: string,

@@ -18,7 +18,9 @@ import {
 import { coerceCreatePurchaseInvoiceBody } from './validate';
 
 // POST /admin/purchase-invoices — record a receipt (POLYCARD-BACK §3.5).
-// agent_user_id is server-derived (never client-supplied).
+// agent_user_id is server-derived (never client-supplied). Orders do not move
+// on save: the 12am stock run (jobs/stock-allocation.ts) picks the new cards
+// up.
 //
 // Cross-invoice reversal validation deliberately does NOT live here. It is a
 // read-then-write, so running it in this handler and the write in the
@@ -72,6 +74,17 @@ export async function POST(
     );
     for (const l of targetLines) validHandles.add(l.card_handle);
   }
+  // A transfer may name a handle whose product was deleted after the GRN —
+  // the service matches the lines against the GRN itself under its lock.
+  if (body.from_grn_id) {
+    const grnLines = await pageAll((opts) =>
+      packs.listGoodsReceiveNoteLines(
+        { grn_id: [body.from_grn_id as string] },
+        opts,
+      ),
+    );
+    for (const l of grnLines) validHandles.add(l.card_handle);
+  }
   const unknown = body.lines
     .map((l, i) => ({ i, card_handle: l.card_handle }))
     .filter(({ card_handle }) => !validHandles.has(card_handle));
@@ -89,16 +102,28 @@ export async function POST(
   // after the workflow, left a committed invoice with no record of who booked
   // it whenever the audit insert failed. admin_id there is agent_user_id —
   // the same server-derived actor id passed in below.
+  // A reversal of an invoice transferred from a GRN inherits its
+  // from_grn_id, so it skips the counter step and the Stock page's received
+  // count exactly as the original did (spec 2026-10-28).
+  let fromGrnId = body.from_grn_id;
+  if (body.reverses_invoice_id) {
+    const [target] = await packs.listPurchaseInvoices(
+      { id: body.reverses_invoice_id },
+      { take: 1, select: ['id', 'from_grn_id'] },
+    );
+    fromGrnId = target?.from_grn_id ?? null;
+  }
+
   const { result } = await createPurchaseInvoiceWorkflow(req.scope).run({
     input: {
       date: body.date,
       supplier: body.supplier,
       agent_user_id: req.auth_context.actor_id,
       reverses_invoice_id: body.reverses_invoice_id,
+      from_grn_id: fromGrnId,
       lines: body.lines,
     },
   });
-
   res.status(201).json({ invoice: result });
 }
 
@@ -191,6 +216,16 @@ export async function GET(
     ? await users.listUsers({ id: agentIds }, { take: agentIds.length })
     : [];
   const emailByUserId = new Map(agents.map((u) => [u.id, u.email]));
+  const grnIds = [
+    ...new Set(invoices.map((i) => i.from_grn_id).filter(Boolean)),
+  ] as string[];
+  const grns = grnIds.length
+    ? await packs.listGoodsReceiveNotes(
+        { id: grnIds },
+        { take: grnIds.length, select: ['id', 'display_no'] },
+      )
+    : [];
+  const grnNoById = new Map(grns.map((g) => [g.id, g.display_no]));
 
   res.json({
     total,
@@ -206,6 +241,10 @@ export async function GET(
         agent_user_id: inv.agent_user_id,
         agent_email: emailByUserId.get(inv.agent_user_id) ?? null,
         reverses_invoice_id: inv.reverses_invoice_id,
+        from_grn_id: inv.from_grn_id ?? null,
+        from_grn_display_no: inv.from_grn_id
+          ? (grnNoById.get(inv.from_grn_id) ?? null)
+          : null,
         created_at: inv.created_at,
         total_qty: invLines.reduce((s, l) => s + Number(l.qty), 0),
         // Summed in integer sen: reversal lines are negative, and toSen rounds

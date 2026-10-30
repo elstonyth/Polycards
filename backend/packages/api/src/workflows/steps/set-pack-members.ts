@@ -75,6 +75,13 @@ export const setPackMembersInvoke = async (
       `Pack '${input.pack_id}' not found.`,
     );
   }
+  // A ticket pack's table is its own (POST .../ticket-prizes).
+  if (pack.prize_type === 'tickets') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Pack '${input.pack_id}' holds ticket amounts, not cards.`,
+    );
+  }
 
   const desired = Array.from(new Set(input.card_ids));
 

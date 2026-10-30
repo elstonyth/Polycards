@@ -39,6 +39,8 @@ const event = (endsInMs: number) => ({
   name: 'November Lucky Draw',
   starts_at: new Date(Date.now() - 86_400_000).toISOString(),
   ends_at: new Date(Date.now() + endsInMs).toISOString(),
+  top: [],
+  result: null,
 });
 
 const open = { id: 'ldpz_1', top: [], result: null };

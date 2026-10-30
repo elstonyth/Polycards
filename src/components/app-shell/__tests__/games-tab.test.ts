@@ -6,8 +6,8 @@ import { GAMES_EVENT } from '../games';
 import { TABS, isTabActive } from '../tabs';
 
 // The Games tab (operator 2026-10-25) is the one tab that does not navigate:
-// it opens the game picker. These pin that, and that the game pages light
-// Games rather than Task (Task used to own /lucky-draw).
+// it opens the game picker. These pin that, that the game pages light Games
+// rather than Task, and that Lucky Draw left Games for its own tab (2026-10-30).
 
 const nav = { pathname: '/' };
 vi.mock('next/navigation', () => ({ usePathname: () => nav.pathname }));
@@ -42,25 +42,42 @@ afterEach(() => {
 
 const games = TABS.find((t) => t.opens === 'games')!;
 const task = TABS.find((t) => t.label === 'Task')!;
+const draw = TABS.find((t) => t.label === 'Draw')!;
 
 describe('Games tab', () => {
-  test('the bar has six tabs in the operator order', () => {
+  test('the bar has seven tabs in the operator order, Home in the middle', () => {
     expect(TABS.map((t) => t.label)).toEqual([
       'Task',
       'Ranks',
       'Games',
       'Home',
+      'Draw',
       'Vault',
       'Me',
     ]);
   });
 
   test('the game pages light Games, not Task', () => {
-    for (const path of ['/lucky-draw', '/coin-flip', '/coin-flip/x']) {
+    for (const path of ['/coin-flip', '/coin-flip/x']) {
       expect(isTabActive(games, path)).toBe(true);
       expect(isTabActive(task, path)).toBe(false);
     }
     expect(isTabActive(games, '/task')).toBe(false);
+  });
+
+  test('Lucky Draw lights its own tab, not Games or Task', () => {
+    for (const path of ['/lucky-draw', '/lucky-draw/x']) {
+      expect(isTabActive(draw, path)).toBe(true);
+      expect(isTabActive(games, path)).toBe(false);
+      expect(isTabActive(task, path)).toBe(false);
+    }
+  });
+
+  test('Draw goes to the page, and only for a signed-in customer', async () => {
+    expect(draw.gated).toBe(true);
+    await act(async () => root.render(createElement(TabBar)));
+    const link = container.querySelector('a[href="/lucky-draw"]');
+    expect(link?.textContent).toBe('Draw');
   });
 
   test('tapping Games opens the picker instead of navigating', async () => {
@@ -70,7 +87,7 @@ describe('Games tab', () => {
     )!;
     expect(button).toBeTruthy();
     expect(button.getAttribute('aria-haspopup')).toBe('dialog');
-    expect(container.querySelector('a[href="/lucky-draw"]')).toBeNull();
+    expect(container.querySelector('a[href="/coin-flip"]')).toBeNull();
 
     const opened = vi.fn();
     window.addEventListener(GAMES_EVENT, opened);
@@ -80,7 +97,7 @@ describe('Games tab', () => {
   });
 
   test('Games shows as current while a game is open', async () => {
-    nav.pathname = '/lucky-draw';
+    nav.pathname = '/coin-flip';
     await act(async () => root.render(createElement(TabBar)));
     const current = container.querySelectorAll('[aria-current="page"]');
     expect(current).toHaveLength(1);

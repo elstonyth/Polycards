@@ -225,3 +225,51 @@ describe('coercePackBody — in_stock (sold out)', () => {
     ).toBe(true);
   });
 });
+
+describe('coercePackBody — pack_type + language', () => {
+  const type = (extra: Record<string, unknown>) => {
+    const out = coercePackBody({ ...base, ...extra }, 'test-pack');
+    return { pack_type: out.pack_type, language: out.language };
+  };
+
+  it('omitted → both undefined (keep stored — older bundles never clear it)', () => {
+    expect(type({})).toEqual({ pack_type: undefined, language: undefined });
+  });
+
+  it('null / empty → clears both', () => {
+    expect(type({ pack_type: null })).toEqual({ pack_type: null, language: null });
+    expect(type({ pack_type: '' })).toEqual({ pack_type: null, language: null });
+  });
+
+  it('an original pack carries its language (or none yet)', () => {
+    expect(type({ pack_type: 'original', language: 'jp' })).toEqual({
+      pack_type: 'original',
+      language: 'jp',
+    });
+    expect(type({ pack_type: 'original' })).toEqual({
+      pack_type: 'original',
+      language: null,
+    });
+  });
+
+  it('classic and special packs have no language', () => {
+    expect(type({ pack_type: 'classic' })).toEqual({
+      pack_type: 'classic',
+      language: null,
+    });
+    expect(() => type({ pack_type: 'special', language: 'en' })).toThrow(
+      /only an original pack/i,
+    );
+  });
+
+  it('refuses a language sent without its pack_type', () => {
+    expect(() => type({ language: 'en' })).toThrow(/pack_type/);
+  });
+
+  it('refuses values outside the closed sets', () => {
+    expect(() => type({ pack_type: 'premium' })).toThrow(/pack_type/);
+    expect(() => type({ pack_type: 'original', language: 'cn' })).toThrow(
+      /language/,
+    );
+  });
+});

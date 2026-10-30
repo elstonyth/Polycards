@@ -224,3 +224,27 @@ describe('GET /admin/payments/deposits', () => {
     ).rejects.toThrow(/limit/);
   });
 });
+
+describe('GET /admin/payments/deposits ?customer_id (player page Payments tab)', () => {
+  const CUS = 'cus_01M3WPN3TEN4H9NQRNS27MT4SQ';
+
+  it('narrows the list to one customer, alongside the status filter', async () => {
+    const { res } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    await GET({ scope, query: { status: 'all', customer_id: CUS } } as any, res);
+    expect(calls.filter).toEqual({ customer_id: CUS });
+
+    await GET({ scope, query: { status: 'failed', customer_id: CUS } } as any, mkRes().res);
+    expect(calls.filter).toEqual({ status: 'failed', customer_id: CUS });
+  });
+
+  it('refuses a malformed customer_id instead of widening to every customer', async () => {
+    const { res, out } = mkRes();
+    const { scope, calls } = mkScope([deposit(1)]);
+    for (const bad of ['', 'cus_x', "cus_' or 1=1", ['cus_01M3WPN3TEN4H9NQRNS27MT4SQ']]) {
+      await GET({ scope, query: { customer_id: bad } } as any, res);
+      expect(out.status).toBe(400);
+    }
+    expect(calls.filter).toBeUndefined();
+  });
+});

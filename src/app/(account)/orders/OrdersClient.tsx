@@ -52,26 +52,24 @@ const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
   canceled: 'Canceled',
 };
 
-// Both pre-ship windows close at `processed`: from `ready_to_ship` on the
-// parcel is picked and its label printed, so neither the address nor the order
-// itself is the customer's to change any more — cancelling then is a support
-// (or operator) action. `packing` is the legacy expand-window token
-// (~`processed`): the backend's own EDITABLE and CANCELABLE lists accept it, so
-// offering the affordance here is a call it honors, not one it refuses. These
-// sets must keep agreeing with those two backend lists — both drop `packing` in
-// the same release as the CONTRACT migration named in Migration20260727000000.
+// The two pre-ship windows close at different points, matching the backend's
+// EDITABLE and CANCELABLE lists (keep them agreeing):
+// - cancel closes at the 12am cutoff: the nightly stock run moves every
+//   `requested` order to `processed` (purchasing starts buying its cards), and
+//   from then on cancelling is a support (or operator) action (owner,
+//   2026-10-28);
+// - the address stays editable through `processed` and closes at
+//   `ready_to_ship`, when the parcel is picked and its label printed.
+// `packing` is the legacy expand-window token (~`processed`); the backend's
+// EDITABLE list still accepts it until the CONTRACT migration named in
+// Migration20260727000000.
 const ADDRESS_EDITABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
   'packing',
   'processed',
 ]);
-// Same members as ADDRESS_EDITABLE today, spelled out rather than aliased: they
-// are two independent backend lists that happen to agree, and aliasing would
-// make a future change to one silently move the other.
 const CANCELABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
-  'packing',
-  'processed',
 ]);
 
 // Only render http(s) or same-origin root-relative proof URLs — never a
@@ -421,10 +419,12 @@ function CancelOrderModal({
   order,
   onClose,
   onCanceled,
+  onRefused,
 }: {
   order: DeliveryOrderView;
   onClose: () => void;
   onCanceled: (status: DeliveryOrderView['status']) => void;
+  onRefused: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -441,6 +441,9 @@ function CancelOrderModal({
       const res = await cancelDeliveryOrder(order.id);
       if (!res.ok) {
         setError(res.error);
+        // The order may have moved on (e.g. the 12am cutoff passed while the
+        // page was open): refresh the rows so its Cancel button goes.
+        if (!res.needsAuth) onRefused();
         return;
       }
       onCanceled(res.status);
@@ -828,25 +831,25 @@ export default function OrdersClient({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-white/80">
-                  {CANCELABLE.has(o.status) && (
+                  {ADDRESS_EDITABLE.has(o.status) && (
                     <span className="inline-flex items-center gap-2">
-                      {ADDRESS_EDITABLE.has(o.status) && (
-                        <button
-                          type="button"
-                          onClick={() => setEditing(o)}
-                          className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
-                        >
-                          Edit address
-                        </button>
-                      )}
                       <button
                         type="button"
-                        onClick={() => setCanceling(o)}
-                        aria-label={`Cancel order #${o.id.slice(-6)}`}
-                        className="rounded-lg border border-red-500/20 px-3 py-1.5 text-[12px] font-semibold text-red-300/80 transition-colors hover:border-red-500/40 hover:text-red-300"
+                        onClick={() => setEditing(o)}
+                        className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
                       >
-                        Cancel order
+                        Edit address
                       </button>
+                      {CANCELABLE.has(o.status) && (
+                        <button
+                          type="button"
+                          onClick={() => setCanceling(o)}
+                          aria-label={`Cancel order #${o.id.slice(-6)}`}
+                          className="rounded-lg border border-red-500/20 px-3 py-1.5 text-[12px] font-semibold text-red-300/80 transition-colors hover:border-red-500/40 hover:text-red-300"
+                        >
+                          Cancel order
+                        </button>
+                      )}
                     </span>
                   )}
                 </td>
@@ -886,6 +889,13 @@ export default function OrdersClient({
             setCanceledIds((prev) => new Set(prev).add(canceling.id));
             setCanceling(null);
           }}
+          onRefused={() =>
+            void getDeliveryOrders()
+              .then((r) => {
+                if (r.ok) setOrders(r.orders);
+              })
+              .catch(() => {})
+          }
         />
       )}
     </>

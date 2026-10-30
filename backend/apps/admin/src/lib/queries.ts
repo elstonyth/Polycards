@@ -23,6 +23,7 @@ import {
 import {
   adjustCustomerCredits,
   bulkUpdateDeliveryOrders,
+  checkDeliveryTracking,
   createProductFromPriceCharting,
   deleteCard,
   deletePack,
@@ -153,11 +154,16 @@ import {
   listLuckyDraw,
   saveLuckyDrawEvent,
   publishLuckyDrawEvent,
+  withdrawLuckyDrawEvent,
   saveLuckyDrawPrize,
   cancelLuckyDrawPrize,
   listLuckyDrawEntries,
+  listLuckyDrawEventEntrants,
   getLuckyDrawTickets,
   adjustCustomerTickets,
+  getTicketPrizes,
+  saveTicketPrizes,
+  type AdminTicketPrizeEntry,
   type AdminLuckyDrawEvent,
   listAnnouncements,
   saveAnnouncement,
@@ -377,13 +383,14 @@ export const useGatewayAudit = (
 export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
   useQuery({ queryKey: qk.paymentGateway, queryFn: getPaymentGateway });
 
-export const useWithdrawalControls = (): UseQueryResult<WithdrawalControlsView> =>
-  useQuery({
-    queryKey: qk.withdrawalControls,
-    queryFn: getWithdrawalControls,
-    // The status line ("closed until 6:00 AM") follows the clock.
-    refetchInterval: 60_000,
-  });
+export const useWithdrawalControls =
+  (): UseQueryResult<WithdrawalControlsView> =>
+    useQuery({
+      queryKey: qk.withdrawalControls,
+      queryFn: getWithdrawalControls,
+      // The status line ("closed until 6:00 AM") follows the clock.
+      refetchInterval: 60_000,
+    });
 
 export const useSaveWithdrawalControls = () => {
   const qc = useQueryClient();
@@ -649,6 +656,9 @@ export const useUpdatePack = () => {
   return useMutation({
     mutationFn: (vars: { slug: string } & AdminPackWrite) => {
       const { slug, ...payload } = vars;
+      // Fixed at creation. Callers spread a whole AdminPack in here, and the
+      // route refuses to change it, so it never travels.
+      delete payload.prize_type;
       return packsApi.admin.packs.$slug.mutate({ $slug: slug, ...payload });
     },
     // The pack's status also renders on its odds-editor page (activate /
@@ -729,6 +739,25 @@ export const useSaveOdds = () =>
         target_rtp_bps: vars.target_rtp_bps,
       }),
   });
+
+export const useTicketPrizes = (slug: string) =>
+  useQuery({
+    queryKey: qk.ticketPrizes(slug),
+    queryFn: () => getTicketPrizes(slug),
+    enabled: !!slug,
+  });
+
+export const useSaveTicketPrizes = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { slug: string; rows: AdminTicketPrizeEntry[] }) =>
+      saveTicketPrizes(vars.slug, vars.rows),
+    // A save can add or remove rows, so the editor reseeds. Returned so
+    // mutateAsync resolves only after the refetch.
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: qk.ticketPrizes(vars.slug) }),
+  });
+};
 
 export const useSaveMembers = () => {
   const qc = useQueryClient();
@@ -881,7 +910,7 @@ export const useUploadImage = () =>
   });
 
 export const useUpdateDeliveryOrder = () => {
-  const qc = useQueryClient();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (vars: {
       id: string;
@@ -894,19 +923,31 @@ export const useUpdateDeliveryOrder = () => {
         tracking_number: vars.tracking_number,
         proof_images: vars.proof_images,
       }),
-    // Status filters + pages vary, so drop the whole delivery-orders namespace.
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
+    // Status filters + pages vary, so drop the whole delivery-orders
+    // namespace — and the Stock buckets and Procurement lists a status move
+    // changes (useInvalidateStock covers all of them).
+    onSuccess: () => invalidateStock(),
   });
 };
 
 export const useBulkUpdateDeliveryOrders = () => {
-  const qc = useQueryClient();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (vars: { ids: string[]; status: DeliveryStatus }) =>
       bulkUpdateDeliveryOrders(vars.ids, vars.status),
     // Partial success is the contract, so invalidate on SETTLE (not success):
     // a throw here can still leave earlier ids in the batch already moved.
-    onSettled: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
+    onSettled: () => invalidateStock(),
+  });
+};
+
+// Completions flip stock (shipped cards leave the shelf count) the same way a
+// bulk move does, so it invalidates the same keys.
+export const useCheckDeliveryTracking = () => {
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: checkDeliveryTracking,
+    onSettled: () => invalidateStock(),
   });
 };
 
@@ -1168,6 +1209,31 @@ export const useGatewayWithdrawals = (
   useQuery({
     queryKey: qk.gatewayWithdrawals(page, status, sort),
     queryFn: () => getGatewayWithdrawals(page, status, 50, sort),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+  });
+
+// One customer's gateway top-ups / payouts, every status, newest first — the
+// player page's Payments tab ("is it still pending, rejected, paid out?").
+export const useCustomerGatewayDeposits = (
+  customerId: string,
+  page = 0,
+): UseQueryResult<GatewayDepositsResponse> =>
+  useQuery({
+    queryKey: qk.customerDeposits(customerId, page),
+    queryFn: () => getGatewayDeposits(page, 'all', 20, undefined, customerId),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+  });
+
+export const useCustomerGatewayWithdrawals = (
+  customerId: string,
+  page = 0,
+): UseQueryResult<GatewayWithdrawalsResponse> =>
+  useQuery({
+    queryKey: qk.customerWithdrawals(customerId, page),
+    queryFn: () =>
+      getGatewayWithdrawals(page, 'all', 20, undefined, customerId),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -1580,19 +1646,27 @@ export const usePurchaseInvoice = (
 // movement, so on_hand and the weighted-average cost change on the list and the
 // movement history changes on the item detail. Without invalidating them the
 // dashboard's 90 s staleTime (with refetchOnWindowFocus off) shows On Hand 0 and
-// "No purchase history recorded" for stock the operator just bought.
+// "No purchase history recorded" for stock the operator just bought. Since spec
+// 2026-10-28 a save also re-runs the stock allocation (orders move to
+// ready_to_ship) and can close a GRN by transfer — useInvalidateStock covers
+// those caches along with both inventory roots.
 export const useCreatePurchaseInvoice = () => {
   const qc = useQueryClient();
-  const invalidateInventory = useInvalidateInventory();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (body: CreatePurchaseInvoiceBody) =>
       createPurchaseInvoice(body),
     onSuccess: () => {
       toast.success('Purchase invoice created');
       qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey });
-      invalidateInventory();
+      invalidateStock();
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    // A refusal is often "that GRN is no longer open": refresh it so the form
+    // shows its real status instead of failing the same way again.
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+      invalidateStock();
+    },
   });
 };
 
@@ -1889,10 +1963,7 @@ export const useSaveTaskDefinition = () => {
 };
 
 // ── Lucky Draw (spec 2026-10-24) ─────────────────────────────────────────────
-export type {
-  AdminLuckyDrawEvent,
-  AdminLuckyDrawPrize,
-} from './admin-rest';
+export type { AdminLuckyDrawEvent, AdminLuckyDrawPrize } from './admin-rest';
 
 export const useLuckyDraw = (): UseQueryResult<AdminLuckyDrawEvent[]> =>
   useQuery({ queryKey: qk.luckyDraw, queryFn: listLuckyDraw });
@@ -1917,6 +1988,11 @@ export const usePublishLuckyDrawEvent = () =>
     publishLuckyDrawEvent(v.id, v.reason),
   );
 
+export const useWithdrawLuckyDrawEvent = () =>
+  useLuckyDrawWrite((v: { id: string; reason: string }) =>
+    withdrawLuckyDrawEvent(v.id, v.reason),
+  );
+
 export const useSaveLuckyDrawPrize = () =>
   useLuckyDrawWrite((v: Parameters<typeof saveLuckyDrawPrize>[0]) =>
     saveLuckyDrawPrize(v),
@@ -1933,6 +2009,12 @@ export const useLuckyDrawEntries = (prizeId: string | null) =>
     queryKey: qk.luckyDrawEntries(prizeId ?? ''),
     queryFn: () => listLuckyDrawEntries(prizeId as string),
     enabled: prizeId !== null,
+  });
+
+export const useLuckyDrawEventEntrants = (eventId: string) =>
+  useQuery({
+    queryKey: [...qk.luckyDraw, 'event-entrants', eventId],
+    queryFn: () => listLuckyDrawEventEntrants(eventId),
   });
 
 // Support lookup: only runs for a submitted id, and never caches a stale
@@ -1991,6 +2073,139 @@ export const useDeleteAnnouncement = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.announcements }),
   });
 };
+
+// ── Goods receive notes + procurement (spec 2026-10-28) ──────────────────────
+import {
+  createGoodsReceiveNote,
+  getGoodsReceiveNote,
+  getProcurementToBuy,
+  getProcurementToShip,
+  listGoodsReceiveNotes,
+  reverseGoodsReceiveNote,
+  type AdminGoodsReceiveNoteDetail,
+  type CreateGoodsReceiveNoteBody,
+  type GoodsReceiveNotesPage,
+  type ProcurementToBuyRow,
+} from './admin-rest';
+
+export type {
+  AdminGoodsReceiveNote,
+  AdminGoodsReceiveNoteDetail,
+  AdminGoodsReceiveNoteLine,
+  CreateGoodsReceiveNoteBody,
+  GoodsReceiveNotesPage,
+  GrnStatus,
+  ProcurementToBuyRow,
+} from './admin-rest';
+
+// Everything a GRN save, a GRN reversal or an invoice save can move: on hand
+// and the buckets (both inventory roots), the two daily lists, a GRN's status
+// (open -> transferred / reversed), and order statuses — the server re-runs
+// the oldest-first stock allocation after every save, moving orders to
+// processed / ready_to_ship. Returns the folded promise, like
+// useInvalidateInventory, so a caller can await the refetch.
+export const useInvalidateStock = () => {
+  const qc = useQueryClient();
+  return () =>
+    Promise.all(
+      [
+        qk.inventoryKey,
+        qk.inventoryItemKey,
+        qk.procurementKey,
+        qk.deliveryOrdersKey,
+        qk.deliveryOrderKey,
+        qk.goodsReceiveNotesKey,
+        qk.goodsReceiveNoteKey,
+      ].map((queryKey) => qc.invalidateQueries({ queryKey })),
+    );
+};
+
+export const useGoodsReceiveNotes = (
+  page = 0,
+  q?: string,
+  sort = 'created_at:desc',
+): UseQueryResult<GoodsReceiveNotesPage> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNotes(page, q, sort),
+    queryFn: () => listGoodsReceiveNotes(page, q, 50, sort),
+    placeholderData: keepPreviousData,
+  });
+
+// The invoice form's transfer picker: GRNs still waiting for their invoice,
+// newest first, one page of the route's max 100. Gated on `enabled` (the
+// picker drawer being open) — it is modal-only data; a ?from_grn= deep link
+// loads its one GRN through useGoodsReceiveNote instead.
+//
+// shortcut: an open GRN older than the newest 100 cannot be picked here; its
+// detail page's "Transfer to purchase invoice" button still reaches it.
+export const useOpenGoodsReceiveNotes = (
+  enabled: boolean,
+): UseQueryResult<GoodsReceiveNotesPage> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNotes(0, undefined, 'created_at:desc', 'open'),
+    queryFn: () =>
+      listGoodsReceiveNotes(0, undefined, 100, 'created_at:desc', 'open'),
+    enabled,
+  });
+
+export const useGoodsReceiveNote = (
+  id: string | null,
+): UseQueryResult<{ goods_receive_note: AdminGoodsReceiveNoteDetail }> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNote(id ?? ''),
+    queryFn: () => getGoodsReceiveNote(id as string),
+    enabled: !!id,
+  });
+
+export const useCreateGoodsReceiveNote = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: (body: CreateGoodsReceiveNoteBody) =>
+      createGoodsReceiveNote(body),
+    onSuccess: () => {
+      toast.success(t('grn.created'));
+      invalidateStock();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// The reverse route does not re-run the allocation, but on hand drops, so the
+// buckets and the to-buy list still move — same invalidation as a save.
+export const useReverseGoodsReceiveNote = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: (id: string) => reverseGoodsReceiveNote(id),
+    onSuccess: () => {
+      toast.success(t('grn.reversed'));
+      invalidateStock();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useProcurementToBuy = (): UseQueryResult<{
+  rows: ProcurementToBuyRow[];
+  taken_at: string | null;
+}> =>
+  useQuery({
+    queryKey: qk.procurementToBuy,
+    queryFn: getProcurementToBuy,
+    // A page left open past 12am picks up the new list on return, or within
+    // ten minutes while it stays in front.
+    refetchOnWindowFocus: true,
+    refetchInterval: 10 * 60 * 1000,
+  });
+
+export const useProcurementToShip = (): UseQueryResult<{
+  orders: AdminDeliveryOrder[];
+}> =>
+  useQuery({
+    queryKey: qk.procurementToShip,
+    queryFn: getProcurementToShip,
+  });
 
 // ── Dashboard (spec §7) ──────────────────────────────────────────────────────
 // Light reads for the home page: a count per delivery status (limit 1, only

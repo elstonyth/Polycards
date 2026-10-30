@@ -23,6 +23,7 @@ import Pack from '../models/pack';
 import Card from '../models/card';
 import PackOdds from '../models/pack-odds';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
 import CreditTransaction from '../models/credit-transaction';
 import DeliveryOrder from '../models/delivery-order';
 import DeliveryOrderItem from '../models/delivery-order-item';
@@ -44,6 +45,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Card,
     PackOdds,
     Pull,
+    TicketSpin,
     CreditTransaction,
     DeliveryOrder,
     DeliveryOrderItem,

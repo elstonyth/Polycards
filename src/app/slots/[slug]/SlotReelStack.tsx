@@ -10,6 +10,8 @@ import { WinningLine } from './WinningLine';
 export type ColumnWinner = {
   dex: number | null;
   image?: string;
+  /** A ticket win's amount, drawn over the art. */
+  label?: string;
   name?: string;
   rarity: Rarity; // real rarity — drives the gated near-miss tease + settle color
   rarityRgb: string; // real color, applied to the winner cell only after settle
@@ -104,6 +106,7 @@ export function SlotReelStack({
               <ReelStrip
                 winnerDex={w ? w.dex : null}
                 winnerImage={w?.image}
+                winnerLabel={w?.label}
                 winnerName={w?.name}
                 winnerRarity={w ? w.rarity : 'Common'}
                 winnerRarityRgb={w ? w.rarityRgb : '163, 163, 163'}
