@@ -25,7 +25,14 @@ export function isSignedOutResponse(
   }
   const backend = new URL(backendUrl || location.href, location.href);
   const url = new URL(requestUrl, backend);
-  return url.origin === backend.origin && url.pathname.startsWith('/admin/');
+  // /admin/users/me is Mercur's own session probe: on a 401 its route guard
+  // sends the user to login WITH the page they asked for, so they land back on
+  // it. A full reload from here would beat it and lose that page.
+  return (
+    url.origin === backend.origin &&
+    url.pathname.startsWith('/admin/') &&
+    url.pathname !== '/admin/users/me'
+  );
 }
 
 const loginUrl = () =>

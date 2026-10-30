@@ -49,6 +49,12 @@ describe('isSignedOutResponse', () => {
     ).toBe(false);
   });
 
+  test("Mercur's own session probe is left to Mercur, which keeps the page", () => {
+    expect(
+      isSignedOutResponse(`${BACKEND}/admin/users/me`, 401, BACKEND, deliveries),
+    ).toBe(false);
+  });
+
   test('a 401 from anywhere else is not ours to act on', () => {
     expect(
       isSignedOutResponse(
