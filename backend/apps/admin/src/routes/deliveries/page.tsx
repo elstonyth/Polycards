@@ -99,7 +99,11 @@ const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
 const CARRIER_NAME: Record<
   NonNullable<DeliveryTrackingSnapshot['carrier']>,
   string
-> = { ninjavan: 'Ninja Van', poslaju: 'Pos Laju' };
+> = {
+  ninjavan: 'Ninja Van',
+  poslaju: 'Pos Laju',
+  dhl_ecommerce: 'DHL eCommerce',
+};
 
 // What the shipment tracker last heard from the carrier, under a shipped
 // order's status. A snapshot for a different number (staff re-entered it

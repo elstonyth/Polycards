@@ -1194,7 +1194,7 @@ export interface AdminDeliveryOrder {
 /** Mirrors the backend TrackingSnapshot (modules/packs/shipment-tracking.ts). */
 export interface DeliveryTrackingSnapshot {
   tracking_number: string;
-  carrier: 'ninjavan' | 'poslaju' | null;
+  carrier: 'ninjavan' | 'poslaju' | 'dhl_ecommerce' | null;
   state:
     | 'delivered'
     | 'in_transit'

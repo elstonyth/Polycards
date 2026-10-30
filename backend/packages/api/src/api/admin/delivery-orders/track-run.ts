@@ -24,7 +24,11 @@ export type ShipmentTrackerRun = {
 };
 
 const ACTOR = 'system:shipment-tracker';
-const CARRIER_LABEL = { ninjavan: 'Ninja Van', poslaju: 'Pos Laju' } as const;
+const CARRIER_LABEL = {
+  ninjavan: 'Ninja Van',
+  poslaju: 'Pos Laju',
+  dhl_ecommerce: 'DHL eCommerce',
+} as const;
 
 const messageOf = (e: unknown): string => {
   // A workflow refusal arrives as a serialized object carrying `message`.

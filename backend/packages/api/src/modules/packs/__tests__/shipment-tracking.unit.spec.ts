@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+  classifyDhlEcommerce,
   classifyNinjaVan,
   classifyPosLaju,
   detectCarrier,
@@ -62,7 +65,10 @@ describe('detectCarrier', () => {
     ['EHE315326262MY', 'poslaju'],
     ['ENE200026365MY', 'poslaju'],
     ['ER123456789MY', 'poslaju'],
-    ['7125109956829386', null],
+    ['7125109956829386', 'dhl_ecommerce'],
+    ['7128100488960676', 'dhl_ecommerce'],
+    ['7135109956829386', null],
+    ['712510995682938', null],
     ['', null],
   ])('%s -> %s', (n, carrier) => {
     expect(detectCarrier(n)).toBe(carrier);
@@ -170,6 +176,104 @@ describe('classifyPosLaju', () => {
   });
 });
 
+// DHL eCommerce: trimmed real pages (fixtures/, recipient names masked) plus
+// synthetic rows in the same markup for shapes prod had no example of.
+const fixture = (name: string) =>
+  readFileSync(join(__dirname, 'fixtures', name), 'utf8');
+const dhlRow = (text: string, date: string, time: string, place: string) =>
+  `<div class="row position-relative d-flex align-items-start tracking-item">
+  <div class="col-2 text-uppercase"><div class="text-grey-80">Day</div>
+  <div class="fw-bold text-grey-80">${date}</div></div>
+  <div class="col-2 text-end me-3 text-nowrap"><div>${time} LT</div></div>
+  <div class="col-6"><div class="fw-bold"><span class="d-none d-lg-block">${text}</span>
+  <span class="d-lg-none">${text}</span></div><div class="text-grey-80">${place}</div></div>
+  </div>`;
+const dhlPage = (...rows: string[]) =>
+  `<span id="trackItNowForm:timelinePanel">${rows.join('\n')}</span>`;
+const DELIVERED_BADGE =
+  '<span class="badge bg-delivered text-white">Delivered</span>';
+
+describe('classifyDhlEcommerce', () => {
+  it('delivered on the real page, at the delivery scan time, with no recipient name', () => {
+    const r = classifyDhlEcommerce(fixture('dhl-ecommerce-delivered.html'));
+    expect(r).toEqual({
+      carrier: 'dhl_ecommerce',
+      state: 'delivered',
+      event: 'Successfully delivered · Skudai, Malaysia',
+      // Mon 19 Oct 2026, 01:59 PM Malaysia time.
+      event_at: '2026-10-19T05:59:00.000Z',
+      delivered_at: '2026-10-19T05:59:00.000Z',
+    });
+    expect(r.event).not.toMatch(/signed for/i);
+  });
+
+  it('the real "No result found" page is not_found', () => {
+    expect(
+      classifyDhlEcommerce(fixture('dhl-ecommerce-not-found.html')).state,
+    ).toBe('not_found');
+  });
+
+  it('throws on any other page (a bot check, a redesign) rather than guess', () => {
+    expect(() =>
+      classifyDhlEcommerce('<html><body>Verify you are human</body></html>'),
+    ).toThrow(/no tracking timeline/);
+    expect(() => classifyDhlEcommerce(dhlPage())).toThrow(/no events/);
+  });
+
+  it('in transit carries a day header forward to the rows under it', () => {
+    const r = classifyDhlEcommerce(
+      dhlPage(
+        dhlRow(
+          'Out for Delivery',
+          'Oct 19, 2026',
+          '11:59\nAM',
+          'Skudai, Malaysia',
+        ),
+        dhlRow(
+          'Processed at delivery facility',
+          '',
+          '11:47 AM',
+          'Skudai, Malaysia',
+        ),
+      ),
+    );
+    expect(r).toMatchObject({
+      state: 'in_transit',
+      event: 'Out for Delivery · Skudai, Malaysia',
+      event_at: '2026-10-19T03:59:00.000Z',
+    });
+  });
+
+  it('a return is a problem, even when the page later says delivered', () => {
+    expect(
+      classifyDhlEcommerce(
+        dhlPage(
+          dhlRow('Return to shipper', 'Oct 20, 2026', '10:00 AM', 'Ipoh'),
+        ),
+      ).state,
+    ).toBe('problem');
+    expect(
+      classifyDhlEcommerce(
+        DELIVERED_BADGE +
+          dhlPage(
+            dhlRow('Successfully delivered', 'Oct 22, 2026', '10:00 AM', 'KL'),
+            dhlRow('Return to shipper', 'Oct 21, 2026', '10:00 AM', 'Ipoh'),
+          ),
+      ).state,
+    ).toBe('problem');
+  });
+
+  it('"Successfully delivered" without the delivered badge is not delivered', () => {
+    expect(
+      classifyDhlEcommerce(
+        dhlPage(
+          dhlRow('Successfully delivered', 'Oct 22, 2026', '10:00 AM', 'KL'),
+        ),
+      ).state,
+    ).not.toBe('delivered');
+  });
+});
+
 describe('parsePosDate', () => {
   it('reads Malaysia time, 12 AM/PM included', () => {
     expect(parsePosDate('06 Oct 2026, 12:20:00 PM')).toBe(
@@ -189,6 +293,12 @@ describe('trackShipments', () => {
       status,
       json: async () => body,
     }) as Response;
+  const html = (status: number, body: string) =>
+    ({
+      ok: status >= 200 && status < 300,
+      status,
+      text: async () => body,
+    }) as Response;
 
   it('routes each number to its carrier and keeps per-number failures', async () => {
     const fetchFn = jest.fn(async (url: string | URL | Request) => {
@@ -196,6 +306,10 @@ describe('trackShipments', () => {
       if (u.includes('NVMYNINJA000000001')) return json(200, ninjaDelivered);
       if (u.includes('NVMYNINJA000000002')) return json(404, {});
       if (u.includes('NVMYNINJA000000003')) return json(503, {});
+      if (u.includes('ref=7128100488960676')) {
+        return html(200, fixture('dhl-ecommerce-delivered.html'));
+      }
+      if (u.includes('ref=7125109956829386')) return html(503, '');
       // Pos answers only one of the two numbers it was asked about.
       return json(200, { code: 'S0000', data: [posDelivered] });
     }) as unknown as typeof fetch;
@@ -207,7 +321,9 @@ describe('trackShipments', () => {
         'NVMYNINJA000000003',
         'EHE311095909MY',
         'EHE000000000MY',
+        '7128100488960676',
         '7125109956829386',
+        '9125109956829386',
       ],
       fetchFn,
     );
@@ -217,7 +333,12 @@ describe('trackShipments', () => {
     expect(out.get('NVMYNINJA000000003')).toBeInstanceOf(Error);
     expect(out.get('EHE311095909MY')).toMatchObject({ state: 'delivered' });
     expect(out.get('EHE000000000MY')).toBeInstanceOf(Error);
-    expect(out.get('7125109956829386')).toMatchObject({
+    expect(out.get('7128100488960676')).toMatchObject({
+      carrier: 'dhl_ecommerce',
+      state: 'delivered',
+    });
+    expect(out.get('7125109956829386')).toBeInstanceOf(Error);
+    expect(out.get('9125109956829386')).toMatchObject({
       state: 'unknown_carrier',
     });
     const calls = (fetchFn as unknown as jest.Mock).mock.calls.map((c) =>
@@ -239,7 +360,9 @@ describe('trackShipments', () => {
   });
 
   it('stops asking Ninja Van after a 429 and fails the rest of the run', async () => {
-    const fetchFn = jest.fn(async () => json(429, {})) as unknown as typeof fetch;
+    const fetchFn = jest.fn(async () =>
+      json(429, {}),
+    ) as unknown as typeof fetch;
     const numbers = Array.from(
       { length: 10 },
       (_, i) => `NVMYNINJA00000010${i}`,

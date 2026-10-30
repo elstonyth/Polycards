@@ -1,7 +1,8 @@
 // Carrier tracking for shipped delivery orders (2026-10-30). Parcels are
-// dropped at the counter, so there is no shipper account and no API key: both
-// carriers are read through the same public endpoints their own tracking pages
-// call. They are undocumented, so every reader here fails soft — a non-200, a
+// dropped at the counter, so there is no shipper account and no API key:
+// every carrier is read through the same public endpoint its own tracking
+// page uses (for DHL eCommerce that is the page itself, which has no JSON).
+// They are undocumented, so every reader here fails soft — a non-200, a
 // timeout or an unexpected shape throws, and the caller skips that order for
 // this run instead of guessing.
 //
@@ -9,7 +10,7 @@
 // address: SG parcels go out with Ninja Van's NVMY… numbers too, and West
 // Malaysia sometimes goes by Pos Laju when a Ninja Van branch is closed.
 
-export type Carrier = 'ninjavan' | 'poslaju';
+export type Carrier = 'ninjavan' | 'poslaju' | 'dhl_ecommerce';
 
 export type TrackingState =
   | 'delivered'
@@ -19,7 +20,7 @@ export type TrackingState =
   | 'problem'
   // The carrier has no record of the number (a typo, or not scanned yet).
   | 'not_found'
-  // The number matches neither carrier's format.
+  // The number matches no known carrier's format.
   | 'unknown_carrier';
 
 // Stored on delivery_order.tracking_snapshot after each successful check.
@@ -47,11 +48,15 @@ export const normalizeTrackingNumber = (raw: string): string =>
 const NINJA_RE = /^NV[A-Z0-9]{6,}$/;
 // Pos Laju: 2-3 letters, 8-10 digits, MY (prod has EHE315326262MY, ENE…MY).
 const POS_RE = /^[A-Z]{2,3}\d{8,10}MY$/;
+// DHL eCommerce MY: 16 digits starting 712 (DHL's own tracking FAQ and
+// tracking.my's detect rule). Prod had two, shipped 2026-10-17/18.
+const DHL_RE = /^712\d{13}$/;
 
 export function detectCarrier(trackingNumber: string): Carrier | null {
   const n = normalizeTrackingNumber(trackingNumber);
   if (NINJA_RE.test(n)) return 'ninjavan';
   if (POS_RE.test(n)) return 'poslaju';
+  if (DHL_RE.test(n)) return 'dhl_ecommerce';
   return null;
 }
 
@@ -122,24 +127,38 @@ const MONTHS: Record<string, number> = {
   dec: 11,
 };
 
+/** A Malaysia-time (UTC+8) date with a 12-hour clock -> ISO, or null for a
+ *  month name it does not know. */
+function malaysiaIso(
+  year: string,
+  monthName: string,
+  day: string,
+  hour12: string,
+  minute: string,
+  second: string,
+  ampm: string,
+): string | null {
+  const month = MONTHS[monthName.slice(0, 3).toLowerCase()];
+  if (month === undefined) return null;
+  const hour = (Number(hour12) % 12) + (ampm.toUpperCase() === 'PM' ? 12 : 0);
+  const utc = Date.UTC(
+    Number(year),
+    month,
+    Number(day),
+    hour - 8,
+    Number(minute),
+    Number(second),
+  );
+  return new Date(utc).toISOString();
+}
+
 /** "06 Oct 2026, 12:20:00 PM" (Malaysia time, UTC+8) -> ISO, or null. */
 export function parsePosDate(s: string | undefined): string | null {
   const m =
     /^(\d{1,2}) (\w{3}) (\d{4}), (\d{1,2}):(\d{2}):(\d{2}) (AM|PM)$/i.exec(
       (s ?? '').trim(),
     );
-  const month = m ? MONTHS[m[2].toLowerCase()] : undefined;
-  if (!m || month === undefined) return null;
-  const hour = (Number(m[4]) % 12) + (m[7].toUpperCase() === 'PM' ? 12 : 0);
-  const utc = Date.UTC(
-    Number(m[3]),
-    month,
-    Number(m[1]),
-    hour - 8,
-    Number(m[5]),
-    Number(m[6]),
-  );
-  return new Date(utc).toISOString();
+  return m ? malaysiaIso(m[3], m[2], m[1], m[4], m[5], m[6], m[7]) : null;
 }
 
 export function classifyPosLaju(connote: PosConnote): TrackingResult {
@@ -167,6 +186,76 @@ export function classifyPosLaju(connote: PosConnote): TrackingResult {
     return { ...base, state: 'problem' };
   }
   return { ...base, state: 'in_transit' };
+}
+
+// ------------------------------------------------------------ DHL eCommerce
+
+// The public tracking page is server-rendered HTML (JSF). Read from a real
+// page on 2026-10-30: a timeline of rows, newest first. Each row has its event
+// in <span class="d-none d-lg-block">, its place in the next text-grey div,
+// and its time as "01:59 PM LT" (Malaysia time). Only a day's first row
+// carries the date ("Oct 19, 2026"). A delivered parcel also carries the
+// green "badge bg-delivered" header.
+export function classifyDhlEcommerce(html: string): TrackingResult {
+  const base = {
+    carrier: 'dhl_ecommerce' as const,
+    event: null,
+    event_at: null,
+    delivered_at: null,
+  };
+  const panel = html.indexOf('trackItNowForm:timelinePanel');
+  if (panel < 0) {
+    if (/<h4[^>]*>\s*No result found\s*<\/h4>/.test(html)) {
+      return { ...base, state: 'not_found' };
+    }
+    // Anything else (a bot check, a redesign) is not an answer.
+    throw new Error('DHL eCommerce page has no tracking timeline');
+  }
+  const events: { text: string; place: string | null; at: string | null }[] =
+    [];
+  let day: RegExpExecArray | null = null;
+  const rows = html
+    .slice(panel)
+    .split(/class="row position-relative[^"]*tracking-item/)
+    .slice(1);
+  for (const row of rows) {
+    day = /\b([A-Z][a-z]{2}) (\d{1,2}), (\d{4})\b/.exec(row) ?? day;
+    const time = /(\d{1,2}):(\d{2})\s*(AM|PM)\s*LT/.exec(row);
+    const span = /<span class="d-none d-lg-block">([^<]*)<\/span>/.exec(row);
+    if (!span) continue;
+    // After the span: the date header uses the same text-grey class.
+    const place = /<div class="text-grey-\d+">\s*([^<]+?)\s*<\/div>/.exec(
+      row.slice(span.index),
+    );
+    events.push({
+      // "Successfully delivered - Signed for by : <name>": store no name.
+      text: span[1].replace(/\s*-\s*Signed for by.*$/i, '').trim(),
+      place: place?.[1] ?? null,
+      at:
+        day && time
+          ? malaysiaIso(day[3], day[1], day[2], time[1], time[2], '0', time[3])
+          : null,
+    });
+  }
+  const latest = events[0];
+  if (!latest) throw new Error('DHL eCommerce timeline has no events');
+  const result = {
+    ...base,
+    event: latest.place ? `${latest.text} · ${latest.place}` : latest.text,
+    event_at: latest.at,
+  };
+  const returned = events.some((e) => /return/i.test(e.text));
+  if (
+    !returned &&
+    /class="badge bg-delivered/.test(html) &&
+    /successfully delivered/i.test(latest.text)
+  ) {
+    return { ...result, state: 'delivered', delivered_at: latest.at };
+  }
+  if (returned || /unsuccessful|fail|exception/i.test(latest.text)) {
+    return { ...result, state: 'problem' };
+  }
+  return { ...result, state: 'in_transit' };
 }
 
 // ------------------------------------------------------------------ Fetching
@@ -221,6 +310,21 @@ class NinjaRateLimited extends Error {
   }
 }
 
+async function fetchDhlEcommerce(
+  n: string,
+  fetchFn: FetchFn,
+): Promise<TrackingResult> {
+  const res = await fetchFn(
+    `https://ecommerceportal.dhl.com/track/pages/customer/trackItNowPublic.xhtml?ref=${encodeURIComponent(n)}`,
+    {
+      headers: { ...HEADERS, Accept: 'text/html' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    },
+  );
+  if (!res.ok) throw new Error(`DHL eCommerce HTTP ${res.status}`);
+  return classifyDhlEcommerce(await res.text());
+}
+
 async function fetchPosLaju(
   ns: string[],
   fetchFn: FetchFn,
@@ -260,10 +364,12 @@ export async function trackShipments(
   const out = new Map<string, TrackingResult | Error>();
   const ninja: string[] = [];
   const pos: string[] = [];
+  const dhl: string[] = [];
   for (const n of new Set(trackingNumbers.map(normalizeTrackingNumber))) {
     const carrier = detectCarrier(n);
     if (carrier === 'ninjavan') ninja.push(n);
     else if (carrier === 'poslaju') pos.push(n);
+    else if (carrier === 'dhl_ecommerce') dhl.push(n);
     else {
       out.set(n, {
         carrier: null,
@@ -304,6 +410,15 @@ export async function trackShipments(
       }
     } catch (e) {
       for (const n of batch) out.set(n, asError(e));
+    }
+  }
+
+  // One page at a time: it is a web page behind bot protection, not an API.
+  for (const n of dhl) {
+    try {
+      out.set(n, await fetchDhlEcommerce(n, fetchFn));
+    } catch (e) {
+      out.set(n, asError(e));
     }
   }
   return out;
