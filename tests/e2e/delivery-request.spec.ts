@@ -75,6 +75,8 @@ test('customer requests delivery of a vaulted card via the UI', async ({
   });
   await expect(submit).toBeEnabled({ timeout: 15_000 });
   await submit.click();
+  // #790: the first press only prices the delivery; this one places it.
+  await modal.getByRole('button', { name: /^Confirm & pay / }).click();
   // Success fires onSubmitted → the modal closes. Wait for that BEFORE navigating
   // (otherwise the goto aborts the in-flight requestDelivery server action).
   await expect(modal).toBeHidden({ timeout: 15_000 });
