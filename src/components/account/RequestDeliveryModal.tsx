@@ -231,6 +231,37 @@ export default function RequestDeliveryModal({
     }
   }
 
+  // Reopens a saved row that can't ship in the form; saveAddress then updates
+  // that same row.
+  function startFix(a: AddressView) {
+    // A real country stays (the postcode is what's wrong); a junk one starts
+    // on the select's placeholder.
+    const countryCode = isShippableCountry(a.countryCode)
+      ? a.countryCode.trim().toUpperCase()
+      : '';
+    setForm({
+      firstName: a.firstName,
+      lastName: a.lastName,
+      address1: a.line1,
+      address2: a.line2 ?? undefined,
+      city: a.city,
+      // An old free-text state isn't on the list: blank, so the select asks
+      // rather than painting its first option.
+      province: stateAfterCountryChange(countryCode, a.province),
+      postalCode: a.postalCode,
+      countryCode,
+      // This form has no phone field, so a number updateAddress would refuse
+      // is dropped rather than leaving an error the customer can't act on.
+      // Blank falls back to the verified profile phone at request time
+      // (request-delivery.ts).
+      phone: a.phone && normalizePhone(a.phone) ? a.phone : undefined,
+    });
+    setError(null);
+    setFixingId(a.id);
+    setAdding(true);
+    setConfirming(false);
+  }
+
   async function submit() {
     if (!selectedAddr) {
       setError('Choose a shipping address.');
@@ -460,8 +491,13 @@ export default function RequestDeliveryModal({
             </label>
             <div className="col-span-2 flex gap-2">
               {/* Neutral-light primary (Pill): saving an address isn't money-in,
-                  so no buyback green. */}
-              <Pill disabled={busy} onClick={saveAddress} className="px-4">
+                  so no buyback green. Not a real <form>, so the select's
+                  `required` does nothing here. */}
+              <Pill
+                disabled={busy || !isShippableCountry(form.countryCode)}
+                onClick={saveAddress}
+                className="px-4"
+              >
                 Save address
               </Pill>
               {addrList.length > 0 && (
@@ -551,43 +587,26 @@ export default function RequestDeliveryModal({
               fix it and pick the country from the list.
             </p>
             <Pill
-              onClick={() => {
-                const phone = selectedAddress.phone;
-                setForm({
-                  firstName: selectedAddress.firstName,
-                  lastName: selectedAddress.lastName,
-                  address1: selectedAddress.line1,
-                  address2: selectedAddress.line2 ?? undefined,
-                  city: selectedAddress.city,
-                  // An old free-text state isn't on the list: blank, so the
-                  // select asks rather than painting its first option.
-                  province: stateAfterCountryChange(
-                    '',
-                    selectedAddress.province,
-                  ),
-                  postalCode: selectedAddress.postalCode,
-                  countryCode: '',
-                  // This form has no phone field, so a number updateAddress
-                  // would refuse is dropped rather than leaving an error the
-                  // customer can't act on. Blank falls back to the verified
-                  // profile phone at request time (request-delivery.ts).
-                  phone: phone && normalizePhone(phone) ? phone : undefined,
-                });
-                setError(null);
-                setFixingId(selectedAddress.id);
-                setAdding(true);
-                setConfirming(false);
-              }}
+              onClick={() => startFix(selectedAddress)}
               className="mt-2 px-4"
             >
               Fix this address
             </Pill>
           </div>
         )}
-        {!adding && badPostcode && (
-          <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
-            That address needs {postcodeHint(country)} before it can be shipped.
-          </p>
+        {!adding && badPostcode && selectedAddress && (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+            <p>
+              That address needs {postcodeHint(country)} before it can be
+              shipped.
+            </p>
+            <Pill
+              onClick={() => startFix(selectedAddress)}
+              className="mt-2 px-4"
+            >
+              Fix this address
+            </Pill>
+          </div>
         )}
         {/* The charge is confirmed before anything is requested. */}
         {confirming && !adding && priceable && shortBy === 0 && (

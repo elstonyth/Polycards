@@ -8,6 +8,7 @@ import { storeShim } from '@/lib/__tests__/store-shim';
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 const mocks = vi.hoisted(() => ({
   getAuthToken: vi.fn(),
+  getCustomerSession: vi.fn(),
   createAddress: vi.fn(),
   updateAddress: vi.fn(),
   logError: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/data/customer', () => ({
   getAuthToken: mocks.getAuthToken,
   getCustomer: vi.fn(),
+  getCustomerSession: mocks.getCustomerSession,
 }));
 vi.mock('@/lib/logger', () => ({
   logger: {
@@ -61,6 +63,10 @@ beforeEach(() => {
   // branch, which sits AFTER the auth check. Without this every assertion
   // would pass vacuously against `{ ok: false, needsAuth: true }`.
   mocks.getAuthToken.mockResolvedValue('test-token');
+  mocks.getCustomerSession.mockResolvedValue({
+    customer: { addresses: [] },
+    stale: false,
+  });
 });
 
 // Plan 064: the address book is the actual SOURCE of a delivery order's
@@ -184,5 +190,154 @@ describe('addAddress / updateAddress — country must be MY or SG', () => {
     expect(r).toEqual({ ok: true, addressId: 'addr_my' });
     const [body] = mocks.createAddress.mock.calls[0]!;
     expect(body.country_code).toBe('MY');
+  });
+});
+
+// The delivery request refuses these (backend snapshotAddress, isShippablePostcode).
+// Saved anyway, the row looks fine in the book and the customer only meets the
+// refusal at Confirm, so they are refused here, on both write paths.
+describe.each([
+  [
+    'addAddress',
+    (input: AddAddressInput) => addAddress(input),
+    mocks.createAddress,
+  ],
+  [
+    'updateAddress',
+    (input: AddAddressInput) => updateAddress('addr_1', input),
+    mocks.updateAddress,
+  ],
+] as const)('%s — refuses what a delivery would refuse', (_name, save, sdk) => {
+  it.each([
+    ['blank', '', ''],
+    ['whitespace', '  ', ' '],
+  ])(
+    'refuses a %s first and last name',
+    async (_label, firstName, lastName) => {
+      expect(await save({ ...BASE_INPUT, firstName, lastName })).toEqual({
+        ok: false,
+        error: 'Fill in the required address fields.',
+      });
+      expect(sdk).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['MY', '5000', 'a valid 5-digit Malaysian postcode'],
+    ['MY', '018983', 'a valid 5-digit Malaysian postcode'],
+    ['MY', 'ABCDE', 'a valid 5-digit Malaysian postcode'],
+    ['SG', '50000', 'a valid 6-digit Singapore postcode'],
+  ])('refuses %s with postcode %s', async (countryCode, postalCode, hint) => {
+    expect(await save({ ...BASE_INPUT, countryCode, postalCode })).toEqual({
+      ok: false,
+      error: `Enter ${hint} for this address.`,
+    });
+    expect(sdk).not.toHaveBeenCalled();
+  });
+
+  it('keeps a stored MY row with a valid postcode saving unchanged', async () => {
+    sdk.mockResolvedValueOnce({ customer: { addresses: [{ id: 'addr_1' }] } });
+
+    expect((await save(BASE_INPUT)).ok).toBe(true);
+
+    const body = sdk.mock.calls[0]!.find(
+      (arg: unknown) => (arg as { address_1?: string })?.address_1,
+    );
+    expect(body).toEqual({
+      first_name: 'Test',
+      last_name: 'User',
+      address_1: '123 Jalan Test',
+      address_2: null,
+      city: 'Kuala Lumpur',
+      province: 'W.P. Kuala Lumpur',
+      postal_code: '50000',
+      country_code: 'MY',
+      phone: null,
+    });
+  });
+
+  it('accepts a Singapore 6-digit postcode', async () => {
+    sdk.mockResolvedValueOnce({ customer: { addresses: [{ id: 'addr_1' }] } });
+
+    const r = await save({
+      ...BASE_INPUT,
+      city: 'Singapore',
+      province: 'Singapore',
+      postalCode: '018983',
+      countryCode: 'SG',
+    });
+
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts a row with only one of the two names', async () => {
+    sdk.mockResolvedValueOnce({ customer: { addresses: [{ id: 'addr_1' }] } });
+
+    expect((await save({ ...BASE_INPUT, lastName: '' })).ok).toBe(true);
+  });
+});
+
+// Medusa's store route refetches the customer with no order on `addresses`, so
+// the list comes back in whatever order Postgres reads it. The id returned here
+// is what the parcel ships to, so it must be the new row wherever it sits.
+describe('addAddress — which row is new', () => {
+  it('picks the new row by id, not by its place in the list', async () => {
+    mocks.getCustomerSession.mockResolvedValueOnce({
+      customer: { addresses: [{ id: 'addr_a' }, { id: 'addr_b' }] },
+      stale: false,
+    });
+    mocks.createAddress.mockResolvedValueOnce({
+      customer: {
+        addresses: [{ id: 'addr_new' }, { id: 'addr_b' }, { id: 'addr_a' }],
+      },
+    });
+
+    expect(await addAddress(BASE_INPUT)).toEqual({
+      ok: true,
+      addressId: 'addr_new',
+    });
+  });
+
+  it('saves nothing when the book cannot be read first', async () => {
+    mocks.getCustomerSession.mockResolvedValueOnce({
+      customer: null,
+      stale: false,
+    });
+
+    expect(await addAddress(BASE_INPUT)).toEqual({
+      ok: false,
+      error: 'Address was not saved. Please try again.',
+      needsAuth: false,
+    });
+    expect(mocks.createAddress).not.toHaveBeenCalled();
+  });
+
+  it('asks for a login when the session expired', async () => {
+    mocks.getCustomerSession.mockResolvedValueOnce({
+      customer: null,
+      stale: true,
+    });
+
+    expect(await addAddress(BASE_INPUT)).toEqual({
+      ok: false,
+      error: 'Please log in first.',
+      needsAuth: true,
+    });
+    expect(mocks.createAddress).not.toHaveBeenCalled();
+  });
+
+  it('reports not saved when no row in the answer is new', async () => {
+    mocks.getCustomerSession.mockResolvedValueOnce({
+      customer: { addresses: [{ id: 'addr_a' }] },
+      stale: false,
+    });
+    mocks.createAddress.mockResolvedValueOnce({
+      customer: { addresses: [{ id: 'addr_a' }] },
+    });
+
+    expect(await addAddress(BASE_INPUT)).toEqual({
+      ok: false,
+      error: 'Address was not saved. Please try again.',
+    });
   });
 });

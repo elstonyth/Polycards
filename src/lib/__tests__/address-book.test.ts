@@ -9,14 +9,19 @@ import { storeShim } from '@/lib/__tests__/store-shim';
 // that never reaches the wire leaves the stored value untouched while the UI
 // optimistically renders it blank. That is a silent write failure the type
 // checker cannot see, which is exactly why it is pinned here.
-const { createMock, updateMock, deleteMock, getAuthTokenMock } = vi.hoisted(
-  () => ({
-    createMock: vi.fn(),
-    updateMock: vi.fn(),
-    deleteMock: vi.fn(),
-    getAuthTokenMock: vi.fn(),
-  }),
-);
+const {
+  createMock,
+  updateMock,
+  deleteMock,
+  getAuthTokenMock,
+  getCustomerSessionMock,
+} = vi.hoisted(() => ({
+  createMock: vi.fn(),
+  updateMock: vi.fn(),
+  deleteMock: vi.fn(),
+  getAuthTokenMock: vi.fn(),
+  getCustomerSessionMock: vi.fn(),
+}));
 
 // The address-book actions still go through the SDK; the port's HTTP adapter
 // imports 'server-only' and is pulled in by the file's OTHER actions, so it is
@@ -37,6 +42,7 @@ vi.mock('@/lib/medusa', () => ({
 vi.mock('@/lib/data/customer', () => ({
   getAuthToken: getAuthTokenMock,
   getCustomer: vi.fn(),
+  getCustomerSession: getCustomerSessionMock,
 }));
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
@@ -67,6 +73,10 @@ beforeEach(() => {
   deleteMock.mockReset();
   getAuthTokenMock.mockReset();
   getAuthTokenMock.mockResolvedValue('tok');
+  getCustomerSessionMock.mockResolvedValue({
+    customer: { addresses: [] },
+    stale: false,
+  });
   createMock.mockResolvedValue({ customer: { addresses: [{ id: 'addr_1' }] } });
   updateMock.mockResolvedValue({ customer: { addresses: [] } });
   deleteMock.mockResolvedValue({ deleted: true });
@@ -120,6 +130,7 @@ describe('updateAddress', () => {
       // this case could never exercise the null mapping. Off-MY it is still a
       // genuine optional field, which is what this test is about.
       countryCode: 'SG',
+      postalCode: '018983',
       address2: '',
       province: '',
       phone: '',

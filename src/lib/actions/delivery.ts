@@ -23,7 +23,11 @@ import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { getAuthToken, getCustomer } from '@/lib/data/customer';
+import {
+  getAuthToken,
+  getCustomer,
+  getCustomerSession,
+} from '@/lib/data/customer';
 import {
   CancelDeliverySchema,
   DeliveryOrdersPageSchema,
@@ -45,7 +49,11 @@ import {
   DELIVERY_LOGIN,
 } from '@/lib/delivery-errors';
 import { normalizePhone } from '@/lib/profile-validation';
-import { isShippableCountry } from '@/lib/delivery-fee';
+import {
+  isShippableCountry,
+  isShippablePostcode,
+  postcodeHint,
+} from '@/lib/delivery-fee';
 import { toCardView, type CardView } from '@/lib/card-view';
 
 export type DeliveryOrderItemView = {
@@ -387,9 +395,12 @@ const addressBody = (input: AddAddressInput) => ({
   phone: input.phone || null,
 });
 
-// The four fields a parcel cannot ship without. Same gate on add and edit —
+// The fields a parcel cannot ship without. Same gate on add and edit —
 // an edit that blanks the street is as unshippable as an add that omits it.
 const missingRequired = (input: AddAddressInput): boolean =>
+  // Either name will do: the backend's snapshotAddress joins them and only
+  // refuses a row with neither.
+  (!input.firstName?.trim() && !input.lastName?.trim()) ||
   !input.address1?.trim() ||
   !input.city?.trim() ||
   !input.postalCode?.trim() ||
@@ -412,6 +423,18 @@ const missingRequired = (input: AddAddressInput): boolean =>
 // the delivery modal refused every one. Shared by add and edit like the gate
 // above.
 const COUNTRY_ERROR = 'Choose Malaysia or Singapore as the country.';
+
+// What a delivery request would refuse anyway. Saved regardless, the row looks
+// fine in the book and the customer only meets the refusal at Confirm.
+function addressRefusal(input: AddAddressInput): string | null {
+  if (missingRequired(input)) return 'Fill in the required address fields.';
+  if (!isShippableCountry(input.countryCode)) return COUNTRY_ERROR;
+  if (!isShippablePostcode(input.postalCode, input.countryCode)) {
+    // The same sentence as the backend's postcodeMessage.
+    return `Enter ${postcodeHint(input.countryCode)} for this address.`;
+  }
+  return null;
+}
 
 // The address-book phone is the actual SOURCE of a delivery order's
 // ship_phone — the backend's profile-phone fallback (request-delivery.ts)
@@ -443,22 +466,29 @@ export async function addAddress(
   const token = await getAuthToken();
   if (!token)
     return { ok: false, error: 'Please log in first.', needsAuth: true };
-  if (missingRequired(input)) {
-    return { ok: false, error: 'Fill in the required address fields.' };
-  }
-  if (!isShippableCountry(input.countryCode)) {
-    return { ok: false, error: COUNTRY_ERROR };
-  }
+  const refusal = addressRefusal(input);
+  if (refusal) return { ok: false, error: refusal };
   const phoneCheck = validateAddressPhone(input.phone);
   if (!phoneCheck.ok) return phoneCheck;
   try {
+    // The new row is the one that wasn't there before. Its place in the list
+    // means nothing: Medusa's route refetches `addresses` with no ORDER BY, so
+    // an updated row can read last, and that wrong id is where the parcel goes.
+    const { customer: before, stale } = await getCustomerSession();
+    if (!before) {
+      return {
+        ok: false,
+        error: stale ? LOGIN_FIRST : 'Address was not saved. Please try again.',
+        needsAuth: stale,
+      };
+    }
+    const known = new Set((before.addresses ?? []).map((a) => a.id));
     const { customer } = await sdk.store.customer.createAddress(
       addressBody({ ...input, phone: phoneCheck.phone }),
       {},
       { Authorization: `Bearer ${token}` },
     );
-    const list = customer.addresses ?? [];
-    const created = list[list.length - 1];
+    const created = (customer.addresses ?? []).find((a) => !known.has(a.id));
     if (!created?.id) {
       return { ok: false, error: 'Address was not saved. Please try again.' };
     }
@@ -487,12 +517,8 @@ export async function updateAddress(
   const token = await getAuthToken();
   if (!token)
     return { ok: false, error: 'Please log in first.', needsAuth: true };
-  if (missingRequired(input)) {
-    return { ok: false, error: 'Fill in the required address fields.' };
-  }
-  if (!isShippableCountry(input.countryCode)) {
-    return { ok: false, error: COUNTRY_ERROR };
-  }
+  const refusal = addressRefusal(input);
+  if (refusal) return { ok: false, error: refusal };
   const phoneCheck = validateAddressPhone(input.phone);
   if (!phoneCheck.ok) return phoneCheck;
   try {

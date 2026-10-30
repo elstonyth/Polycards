@@ -325,6 +325,107 @@ describe('RequestDeliveryModal confirm and balance', () => {
     expect(mocks.addAddress).toHaveBeenCalled();
     expect(mocks.updateAddress).not.toHaveBeenCalled();
   });
+
+  // This sheet is not a real <form>, so the select's `required` does nothing.
+  test('Save stays disabled on a repair until a country is picked', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60' } as AddressView],
+    );
+    await act(async () => button('Fix this address')!.click());
+    expect(button('Save address')!.disabled).toBe(true);
+
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    await act(async () => {
+      country.value = 'MY';
+      country.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(button('Save address')!.disabled).toBe(false);
+  });
+
+  test('a new address can be saved straight away: it defaults to Malaysia', async () => {
+    await render([item('pull_a', 'pack', 100)], []);
+    expect(button('Save address')!.disabled).toBe(false);
+  });
+
+  // A saved row with a real country and a postcode that cannot be zoned: the
+  // submit is disabled, so without a way in the customer is stuck here.
+  test('offers Fix on a bad postcode, keeping the saved country', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [
+        {
+          ...ADDRESS,
+          province: 'Selangor',
+          postalCode: '5000',
+        } as AddressView,
+      ],
+    );
+    expect(host.textContent).toContain(
+      'That address needs a valid 5-digit Malaysian postcode',
+    );
+    expect(button('Request delivery')!.disabled).toBe(true);
+
+    await act(async () => button('Fix this address')!.click());
+    const select = (label: string) =>
+      host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+    expect(select('Country').value).toBe('MY');
+    expect(select('State').value).toBe('Selangor');
+    expect(button('Save address')!.disabled).toBe(false);
+
+    const postcode = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Postal code"]',
+    )!;
+    expect(postcode.value).toBe('5000');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )!.set!.call(postcode, '50000');
+      postcode.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    mocks.updateAddress.mockResolvedValueOnce({ ok: true });
+    await act(async () => button('Save address')!.click());
+    expect(mocks.updateAddress).toHaveBeenCalledWith(
+      'addr_1',
+      expect.objectContaining({ countryCode: 'MY', postalCode: '50000' }),
+    );
+    expect(host.querySelectorAll('input[name="addr"]')).toHaveLength(1);
+    expect(host.textContent).not.toContain('That address needs');
+    expect(button('Request delivery')!.disabled).toBe(false);
+  });
+
+  test('a Malaysian who misclicked Singapore can switch back from Fix', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [
+        {
+          ...ADDRESS,
+          countryCode: 'SG',
+          province: 'Singapore',
+          postalCode: '50000',
+        } as AddressView,
+      ],
+    );
+    expect(host.textContent).toContain(
+      'That address needs a valid 6-digit Singapore postcode',
+    );
+    await act(async () => button('Fix this address')!.click());
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    expect(country.value).toBe('SG');
+    await act(async () => {
+      country.value = 'MY';
+      country.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="State"]')!
+        .value,
+    ).toBe('');
+  });
 });
 
 describe('RequestDeliveryModal review fixes', () => {

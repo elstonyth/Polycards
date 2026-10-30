@@ -16,6 +16,7 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
+import { isShippableCountry } from '@/lib/delivery-fee';
 import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { mytDate, rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -364,8 +365,13 @@ function EditAddressModal({
             </label>
             <div className="col-span-2 flex gap-2">
               {/* Neutral-light primary (Pill): saving an address isn't money-in,
-                  so no buyback green. */}
-              <Pill disabled={busy} onClick={saveAddress} className="px-4">
+                  so no buyback green. Not a real <form>, so the select's
+                  `required` does nothing here. */}
+              <Pill
+                disabled={busy || !isShippableCountry(form.countryCode)}
+                onClick={saveAddress}
+                className="px-4"
+              >
                 Save address
               </Pill>
               {addresses.length > 0 && (

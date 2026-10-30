@@ -146,6 +146,8 @@ const fillAddress = async (city, postal, country) => {
   await modal.locator('input[aria-label="City"]').fill(city);
   await modal.locator('input[aria-label="Postal code"]').fill(postal);
   await modal.locator('select[aria-label="Country"]').selectOption(country);
+  // Required for MY. The zone checks below rest on the city and postcode.
+  await modal.locator('select[aria-label="State"]').selectOption('Selangor');
   await modal.getByRole('button', { name: /save address/i }).click();
   await page.waitForTimeout(1500);
 };
@@ -195,7 +197,9 @@ check(
 );
 await page.screenshot({ path: 'docs/research/qa-delivery-fee-spoof.png' });
 
-// An unzonable postcode is refused rather than billed the cheap rate.
+// An unzonable postcode is refused at save rather than billed the cheap rate:
+// the form stays open with the reason and no row is added.
+const rowsBefore = await modal.locator('input[name="addr"]').count();
 await modal.getByRole('button', { name: /add a new address/i }).click();
 await fillAddress('Kuala Lumpur', '5000', 'MY');
 text = await modal.innerText();
@@ -204,12 +208,19 @@ const submitBadPostcode = modal.getByRole('button', {
   exact: true,
 });
 check(
-  'malformed postcode is flagged, not billed West',
-  /5-digit Malaysian postcode/i.test(text) && !/Shipping \(West/.test(text),
+  'malformed postcode is refused at save, not billed West',
+  /Enter a valid 5-digit Malaysian postcode/i.test(text) &&
+    !/Shipping \(West/.test(text),
 );
 check(
-  'malformed postcode disables the submit',
-  await submitBadPostcode.isDisabled(),
+  'malformed postcode keeps the form open and the submit disabled',
+  (await modal.locator('input[aria-label="Postal code"]').count()) === 1 &&
+    (await submitBadPostcode.isDisabled()),
+);
+await modal.getByRole('button', { name: 'Cancel' }).first().click();
+check(
+  'malformed postcode adds no row',
+  (await modal.locator('input[name="addr"]').count()) === rowsBefore,
 );
 
 // Non-MY/SG address — blocked, submit disabled. The form only offers MY and
