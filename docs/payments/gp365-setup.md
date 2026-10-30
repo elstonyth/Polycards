@@ -26,13 +26,9 @@ GlobePay365 is our **USDT rail**. It is a second **regional rail**, beside the a
    - The private key goes into `.env` as `GP365_MERCHANT_PRIVATE_KEY` and is never printed.
    - The public key is saved to `docs/payments/gp365-merchant-public-key.txt` (or `--public-file`). **Send that to GlobePay365.**
    - They ask for 1024-bit keys.
-   - Two pairs, both generated 2026-10-12:
+   - Pairs generated 2026-10-12:
      - **Staging:** the private key is in the local backend `.env`; the public key is `gp365-merchant-public-key.staging.txt`.
-     - **Production:** the private key is in the gitignored deploy secrets file that `scripts/do-apply.ps1` reads. It is inert until `GP365_MERCHANT_PRIVATE_KEY` is added to that script's secret list. The public key is `gp365-merchant-public-key.production.txt`. **Back the private key up** (password manager or DO): it exists only on this machine.
-
-     ```bash
-     node scripts/a3pay-keygen.mjs --gateway gp365 --bits 1024 --env-file <deploy secrets file> --public-file docs/payments/gp365-merchant-public-key.production.txt
-     ```
+     - **Production (never used, deleted 2026-10-26):** a second pair made the same day was never registered. Production signs with the Polycard merchant's existing pair (see Production below). Its private key and `gp365-merchant-public-key.production.txt` were removed as dead keys.
 2. **IP whitelist.** Send our egress IPs:
    - For staging probes from the office: the office IP.
    - For production: the backend egress IPs `188.166.181.61` and `188.166.181.204`.
@@ -102,8 +98,8 @@ Run from the office (egress IP 60.48.37.75, whitelisted by GlobePay365 that day;
 
 ## Production (2026-10-21/22)
 
-- **Merchant:** USDT is a channel on the existing **Polycard** merchant (`GP365_MERCHANT_CODE=Polycard`, `GP365_API_BASE=https://mapi.globepay365.com`). Its keys are that merchant's old pair, copied in the deploy secrets file from the `GLOBEPAY_*` entries into `GP365_AES_KEY` / `GP365_PUBLIC_KEY` / `GP365_MERCHANT_PRIVATE_KEY`. The pair generated on 2026-10-12 was never registered and is kept only as `GP365_MERCHANT_PRIVATE_KEY_UNUSED_1012`.
-- **`GP365_PUBLIC_KEY` was our own key (found 2026-10-26).** The copied `GLOBEPAY_PUBLIC_KEY` was the public half of our merchant private key, not GlobePay365's. So every production callback failed its signature check and got HTTP 400 ("signature verification failed"), and deposits were credited only by the requery sweep. The fix is GlobePay365's own platform public key for the Polycard merchant. The preflight now flags our own key in that slot, and so does the signature-mismatch alert.
+- **Merchant:** USDT is a channel on the existing **Polycard** merchant (`GP365_MERCHANT_CODE=Polycard`, `GP365_API_BASE=https://mapi.globepay365.com`). Its keys are that merchant's old pair, copied in the deploy secrets file from the `GLOBEPAY_*` entries into `GP365_AES_KEY` / `GP365_PUBLIC_KEY` / `GP365_MERCHANT_PRIVATE_KEY`. The pair generated on 2026-10-12 was never registered and was deleted on 2026-10-26, together with the stale `GLOBEPAY_*` copies and the old secrets-file backups.
+- **`GP365_PUBLIC_KEY` was our own key (found 2026-10-26).** The copied `GLOBEPAY_PUBLIC_KEY` was the public half of our merchant private key, not GlobePay365's. So every production callback failed its signature check and got HTTP 400 ("signature verification failed"), and deposits were credited only by the requery sweep. The fix is GlobePay365's own platform public key for the Polycard merchant (SPKI fingerprint `deeaad47879c6a98`), live since 2026-10-26 04:17Z (deploy `698bfab5`). The preflight now flags our own key in that slot, and so does the signature-mismatch alert.
 - **Whitelist:** 188.166.181.61, 188.166.181.204 and the office 60.48.37.75.
 - **Their costs:** top-up 1%; payout 0.2% + 1 USDT gas (`payoutFeePercent` / `payoutFlatFee`, which the payout float check reserves). Cashier window 600 s.
 - **Our fee (owner decision 2026-10-22):** top-up **1.5%**, withdrawal **2%**, saved in Admin → Settlement → USDT → Exchange rate. We keep 0.5% of a top-up, and about 1.8% of a payout minus the 1 USDT gas.
