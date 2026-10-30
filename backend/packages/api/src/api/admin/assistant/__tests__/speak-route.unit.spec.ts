@@ -237,6 +237,16 @@ beforeEach(() => {
 // A failed test must not leave fake timers behind for the next one.
 afterEach(() => jest.useRealTimers());
 
+it('never reads aloud tool calls a model wrote as text', async () => {
+  service.listAssistantMessages.mockResolvedValueOnce([
+    { ...answerRow, content: '\n\n<｜DSML｜ calls>SELECT 1' },
+  ]);
+  const p = post();
+  await p.done;
+  expect(p.status()).toBe(400);
+  expect(speakMock).not.toHaveBeenCalled();
+});
+
 it('speaks, stores the speech privately and records which file with the cost', async () => {
   // Same answer in another voice, another model or another answer: no match.
   rows = [

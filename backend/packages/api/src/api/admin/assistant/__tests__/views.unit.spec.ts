@@ -18,7 +18,13 @@ describe('messageView', () => {
         ...row,
         content: 'RM 0 <｜DSML｜ calls>SELECT 1</｜DSML｜ calls>',
       }).content,
-    ).toBe('RM 0 ');
+    ).toBe('RM 0');
+  });
+
+  it('leaves an answer that was only leaked tool calls empty, so the page shows no reply', () => {
+    expect(
+      messageView({ ...row, content: '\n\n<｜DSML｜ calls>SELECT 1' }).content,
+    ).toBe('');
   });
 
   it('leaves a normal answer alone', () => {

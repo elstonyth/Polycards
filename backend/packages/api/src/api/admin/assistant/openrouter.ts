@@ -336,7 +336,7 @@ const TOOL_MARKUP = '<｜';
 
 export const cutToolMarkup = (text: string): string => {
   const at = text.indexOf(TOOL_MARKUP);
-  return at < 0 ? text : text.slice(0, at);
+  return at < 0 ? text : text.slice(0, at).trimEnd();
 };
 
 /** Streams one completion: text as it comes (up to any leaked tool markup),

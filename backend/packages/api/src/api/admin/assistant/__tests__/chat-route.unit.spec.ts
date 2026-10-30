@@ -191,7 +191,7 @@ it('never replays tool calls a model wrote as text into the next question', asyn
   await p.done;
   expect(runTurnMock.mock.calls[0][0].history).toEqual([
     { role: 'user', content: 'why RM 0?' },
-    { role: 'assistant', content: 'RM 0: all bonus ' },
+    { role: 'assistant', content: 'RM 0: all bonus' },
     { role: 'user', content: 'what happened?' },
   ]);
 });
