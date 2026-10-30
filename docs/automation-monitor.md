@@ -15,8 +15,8 @@ without replacing the saved list. Only customer IDs and the importing admin ID
 are saved in `automation_monitor`; account groups and financial records stay
 unchanged. The saved list survives app restarts and deploys.
 
-Reads require `automation:read` and `customer:read`. Loading a list requires
-`automation:update` and `customer:read`. The dashboard has no account mutation
+Reads require `automation:read`. Loading a list requires `automation:update`
+and `customer:update`. The dashboard has no account mutation
 controls. There are no run, pause, resume, stop, pull, sell or credit-grant routes
 under Automation in this release.
 
