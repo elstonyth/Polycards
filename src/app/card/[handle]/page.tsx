@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { getCardResult } from '@/lib/data/cards';
+import { CardCloseButton } from './CardCloseButton';
 import { CardDetailHydrated } from './CardDetailHydrated';
 
 // Price freshness is the whole point — always render on demand (the 60s
@@ -43,8 +44,9 @@ export default async function CardPage({
   const result = await resolveCard(handle);
   // `?prize=weekly` marks an arrival from the Weekly Pulled Value Challenge, so
   // the card keeps the challenge's prism frame here instead of switching to its
-  // pack tier — a prize should still read as a prize when you open it. Any
-  // other value (or none) renders the tier frame as usual.
+  // pack tier — a prize should still read as a prize when you open it. It also
+  // swaps "All packs" for a Close back to where the prize was tapped. Any other
+  // value (or none) renders the tier frame and "All packs" as usual.
   const { prize } = await searchParams;
   const frameVariant = prize === 'weekly' ? ('prism' as const) : undefined;
   // A transient backend failure must NOT 404: this card may well exist (and be
@@ -74,16 +76,20 @@ export default async function CardPage({
   if (result.status === 'notfound') notFound();
   return (
     <div className="mx-auto w-full px-fluid py-6">
-      <Link
-        href="/slots"
-        className="rise-in group mb-6 inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
-      >
-        <ArrowLeft
-          className="h-4 w-4 transition-transform duration-200 ease-out group-hover:-translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
-          aria-hidden
-        />{' '}
-        All packs
-      </Link>
+      {frameVariant ? (
+        <CardCloseButton />
+      ) : (
+        <Link
+          href="/slots"
+          className="rise-in group mb-6 inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
+        >
+          <ArrowLeft
+            className="h-4 w-4 transition-transform duration-200 ease-out group-hover:-translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+            aria-hidden
+          />{' '}
+          All packs
+        </Link>
+      )}
       <CardDetailHydrated initial={result.card} frameVariant={frameVariant} />
     </div>
   );
