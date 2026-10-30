@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Badge, INPUT_CLASS } from '@/components/account/ui';
+import { CountrySelect } from '@/components/account/CountrySelect';
 import { SlabImage } from '@/components/SlabImage';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import {
@@ -15,6 +16,7 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
+import { isShippableCountry } from '@/lib/delivery-fee';
 import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { mytDate, rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -134,7 +136,7 @@ function EditAddressModal({
     city: '',
     province: '',
     postalCode: '',
-    countryCode: '',
+    countryCode: 'MY',
   });
   // Only mounted while open, so `open` is always true here.
   const panelRef = useRef<HTMLDivElement>(null);
@@ -347,30 +349,29 @@ function EditAddressModal({
             </label>
             <label className="col-span-2 block">
               <span className="mb-1.5 block text-[12px] font-medium text-white/55">
-                Country code
+                Country
               </span>
-              <input
-                aria-label="Country code"
-                autoComplete="country"
-                placeholder="MY or SG"
-                maxLength={2}
+              <CountrySelect
                 value={form.countryCode}
-                onChange={(e) => {
-                  const countryCode = e.target.value.toUpperCase();
+                onChange={(countryCode) =>
                   // A state from the other country's list is never valid.
                   setForm((f) => ({
                     ...f,
                     countryCode,
                     province: stateAfterCountryChange(countryCode, f.province),
-                  }));
-                }}
-                className={INPUT_CLASS}
+                  }))
+                }
               />
             </label>
             <div className="col-span-2 flex gap-2">
               {/* Neutral-light primary (Pill): saving an address isn't money-in,
-                  so no buyback green. */}
-              <Pill disabled={busy} onClick={saveAddress} className="px-4">
+                  so no buyback green. Not a real <form>, so the select's
+                  `required` does nothing here. */}
+              <Pill
+                disabled={busy || !isShippableCountry(form.countryCode)}
+                onClick={saveAddress}
+                className="px-4"
+              >
                 Save address
               </Pill>
               {addresses.length > 0 && (
