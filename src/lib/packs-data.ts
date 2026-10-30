@@ -250,6 +250,7 @@ const FACTORY_VIDEO_TIERS = new Set([
   'poncho',
   'chaos',
   'kanto',
+  'lucky',
 ]);
 
 /** Animated factory-hero sources for a pack, or null when its display image is
