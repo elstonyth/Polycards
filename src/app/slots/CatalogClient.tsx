@@ -21,6 +21,7 @@ import PackCategoryTabs from '@/components/PackCategoryTabs';
 import {
   catalogGroupOf,
   packHref,
+  packTabs,
   pickCategory,
   CATALOG_GROUP_HEADING,
   CATALOG_GROUP_ORDER,
@@ -268,7 +269,7 @@ export default function CatalogClient({
   categories,
   freePack = null,
 }: {
-  /** Only categories that have packs. */
+  /** Every franchise, empty ones included (they show as "Coming soon"). */
   categories: PackCategory[];
   /** Visible badge state, or null. `claim` only while this customer's one-time
    *  welcome claim is unspent; `signup` for logged-out visitors while an
@@ -281,6 +282,7 @@ export default function CatalogClient({
   const active =
     pickCategory(categories, useSearchParams().get('category') ?? undefined) ??
     '';
+  const tabs = packTabs(categories);
   const pick = (id: string) => {
     // Next syncs useSearchParams with replaceState; other params survive.
     const params = new URLSearchParams(window.location.search);
@@ -332,18 +334,14 @@ export default function CatalogClient({
 
       {/* Franchise switch — only once there are two to pick from. Not sticky:
           the app header is sticky itself and would cover it. */}
-      {categories.length > 1 && (
+      {tabs.length > 1 && (
         <div className="mb-6">
-          <PackCategoryTabs
-            categories={categories}
-            active={active}
-            onChange={pick}
-          />
+          <PackCategoryTabs categories={tabs} active={active} onChange={pick} />
         </div>
       )}
 
       {/* Empty state — zero packs in the catalog (the backend is the source
-          of truth); only categories with packs are passed in. */}
+          of truth). */}
       {entries.length === 0 && (
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
           No packs available right now — check back soon.

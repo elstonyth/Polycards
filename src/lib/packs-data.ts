@@ -180,6 +180,8 @@ export const pickCategory = (
   categories.find((c) => c.packs.length > 0)?.id;
 
 // Category chrome only — getPackCategories fills `packs` from the backend.
+// Listed order is tab order (operator 2026-10-30): Pokémon, One Piece, Poly on
+// the far right. Each always has a tab; see packTabs.
 export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [
   {
     id: 'pokemon',
@@ -187,7 +189,38 @@ export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [
     heading: 'Pokémon Packs',
     icon: CAT_ICON.pokemon,
   },
+  {
+    id: 'one-piece',
+    tab: 'One Piece',
+    heading: 'One Piece Packs',
+    icon: CAT_ICON['one-piece'],
+  },
+  {
+    id: 'poly',
+    tab: 'Poly',
+    heading: 'Poly Packs',
+    icon: CAT_ICON.poly,
+  },
 ];
+
+export type PackTab = Pick<PackCategory, 'id' | 'tab' | 'icon'> & {
+  /** No active pack yet: shown as "Coming soon", can't be picked. */
+  soon: boolean;
+};
+
+/** The franchise switch's tabs. A category with no active pack stays on the row
+ *  as "Coming soon" and opens by itself once admin activates a pack in it. Empty
+ *  when no category has a pack: a backend outage empties them all, and that must
+ *  not announce every franchise as coming soon. */
+export const packTabs = (categories: PackCategory[]): PackTab[] =>
+  categories.some((c) => c.packs.length > 0)
+    ? categories.map(({ id, tab, icon, packs }) => ({
+        id,
+        tab,
+        icon,
+        soon: packs.length === 0,
+      }))
+    : [];
 
 export type ResolvedPack = Pack & {
   categoryId: string;
