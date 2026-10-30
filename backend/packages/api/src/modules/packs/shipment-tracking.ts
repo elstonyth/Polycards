@@ -73,10 +73,17 @@ export type NinjaOrder = {
   events?: NinjaEvent[];
 };
 
+// Sort key for a carrier timestamp; an unparsable one sorts first instead of
+// turning the comparator into NaN.
+const ms = (s: string | null | undefined) => Date.parse(s ?? '') || 0;
+
 export function classifyNinjaVan(order: NinjaOrder): TrackingResult {
-  const events = [...(order.events ?? [])].sort(
-    (a, b) => Date.parse(a.time ?? '') - Date.parse(b.time ?? ''),
-  );
+  // Anything else (an error body sent with a 200, a new wrapper) is not an
+  // answer — it must not land as "in transit" over the last real one.
+  if (typeof order?.status !== 'string' || !Array.isArray(order.events)) {
+    throw new Error('Ninja Van answer has no status or events');
+  }
+  const events = [...order.events].sort((a, b) => ms(a.time) - ms(b.time));
   const last = events[events.length - 1];
   const place = last?.data?.hub_name ?? last?.data?.dp_name;
   const status = order.granular_status ?? order.status ?? null;
@@ -86,17 +93,20 @@ export function classifyNinjaVan(order: NinjaOrder): TrackingResult {
     event_at: last?.time ?? null,
     delivered_at: null,
   };
-  // Strict: Completed AND a success scan that is NOT a return-to-sender. A
-  // returned parcel also ends in DELIVERY_SUCCESS, with is_rts: true.
-  const success = events
-    .filter((e) => e.type === 'DELIVERY_SUCCESS' && e.data?.is_rts === false)
-    .pop();
-  if (order.status === 'Completed' && success) {
+  // A return is ruled out FIRST: a returned parcel can still read "Completed"
+  // (granular "Returned to Sender") and end in a success scan with is_rts.
+  const returned =
+    /return|cancel/i.test(`${order.status} ${order.granular_status ?? ''}`) ||
+    events.some((e) => e.data?.is_rts === true);
+  // Strict: Completed AND the LAST success scan is not a return-to-sender.
+  const success = events.filter((e) => e.type === 'DELIVERY_SUCCESS').pop();
+  if (
+    !returned &&
+    order.status === 'Completed' &&
+    success?.data?.is_rts === false
+  ) {
     return { ...base, state: 'delivered', delivered_at: success.time ?? null };
   }
-  const returned =
-    /return|cancel/i.test(order.status ?? '') ||
-    events.some((e) => e.data?.is_rts === true);
   if (returned || last?.type === 'DELIVERY_FAILURE') {
     return { ...base, state: 'problem' };
   }
@@ -105,7 +115,13 @@ export function classifyNinjaVan(order: NinjaOrder): TrackingResult {
 
 // ----------------------------------------------------------------- Pos Laju
 
-type PosEvent = { date?: string; process?: string; office?: string };
+type PosEvent = {
+  date?: string;
+  process?: string;
+  office?: string;
+  /** Machine code beside the English text, e.g. 'delivery_success'. */
+  event_type?: string;
+};
 export type PosConnote = {
   connote_id?: string;
   process_status?: string;
@@ -164,7 +180,7 @@ export function parsePosDate(s: string | undefined): string | null {
 export function classifyPosLaju(connote: PosConnote): TrackingResult {
   const events = (connote.tracking_data ?? [])
     .map((e) => ({ ...e, at: parsePosDate(e.date) }))
-    .sort((a, b) => Date.parse(a.at ?? '') - Date.parse(b.at ?? ''));
+    .sort((a, b) => ms(a.at) - ms(b.at));
   const last = events[events.length - 1];
   const base = {
     carrier: 'poslaju' as const,
@@ -177,10 +193,16 @@ export function classifyPosLaju(connote: PosConnote): TrackingResult {
     delivered_at: null,
   };
   if (!events.length) return { ...base, state: 'not_found' };
-  const returned = events.some((e) => /return/i.test(e.process ?? ''));
-  if (connote.process_status === 'DELIVERED' && !returned) {
-    const done = events.filter((e) => /delivered|delivery completed/i.test(e.process ?? '')).pop();
-    return { ...base, state: 'delivered', delivered_at: (done ?? last).at };
+  const returned = events.some((e) =>
+    /return|rts/i.test(`${e.event_type ?? ''} ${e.process ?? ''}`),
+  );
+  // The latest event must itself be the delivery: its machine code when the
+  // answer carries one (live answers do), else Pos's English wording.
+  const lastIsDelivery = last.event_type
+    ? last.event_type === 'delivery_success'
+    : /^delivery completed/i.test(last.process ?? '');
+  if (connote.process_status === 'DELIVERED' && !returned && lastIsDelivery) {
+    return { ...base, state: 'delivered', delivered_at: last.at };
   }
   if (returned || /unsuccessful|fail/i.test(last.process ?? '')) {
     return { ...base, state: 'problem' };
@@ -196,25 +218,36 @@ export function classifyPosLaju(connote: PosConnote): TrackingResult {
 // and its time as "01:59 PM LT" (Malaysia time). Only a day's first row
 // carries the date ("Oct 19, 2026"). A delivered parcel also carries the
 // green "badge bg-delivered" header.
-export function classifyDhlEcommerce(html: string): TrackingResult {
+//
+// The page shows only the newest 5 rows behind a "Show more tracking status"
+// link, and a return-to-shipper leg could hide behind it. `timeline` is the
+// full list that link renders (fetchDhlEcommerce asks for it); a timeline
+// still cut short is refused rather than trusted.
+export function classifyDhlEcommerce(
+  page: string,
+  timeline: string = page,
+): TrackingResult {
   const base = {
     carrier: 'dhl_ecommerce' as const,
     event: null,
     event_at: null,
     delivered_at: null,
   };
-  const panel = html.indexOf('trackItNowForm:timelinePanel');
+  const panel = timeline.indexOf('trackItNowForm:timelinePanel');
   if (panel < 0) {
-    if (/<h4[^>]*>\s*No result found\s*<\/h4>/.test(html)) {
+    if (page.includes('>No result found</h4>')) {
       return { ...base, state: 'not_found' };
     }
     // Anything else (a bot check, a redesign) is not an answer.
     throw new Error('DHL eCommerce page has no tracking timeline');
   }
+  if (SHOW_MORE.test(timeline.slice(panel))) {
+    throw new Error('DHL eCommerce timeline is cut short');
+  }
   const events: { text: string; place: string | null; at: string | null }[] =
     [];
   let day: RegExpExecArray | null = null;
-  const rows = html
+  const rows = timeline
     .slice(panel)
     .split(/class="row position-relative[^"]*tracking-item/)
     .slice(1);
@@ -223,14 +256,18 @@ export function classifyDhlEcommerce(html: string): TrackingResult {
     const time = /(\d{1,2}):(\d{2})\s*(AM|PM)\s*LT/.exec(row);
     const span = /<span class="d-none d-lg-block">([^<]*)<\/span>/.exec(row);
     if (!span) continue;
-    // After the span: the date header uses the same text-grey class.
-    const place = /<div class="text-grey-\d+">\s*([^<]+?)\s*<\/div>/.exec(
-      row.slice(span.index),
-    );
+    // After the span: the date header uses the same text-grey class. One
+    // [^<]* and a trim, not lazy quantifiers around \s*, which backtrack
+    // badly on long whitespace.
+    const place = /<div class="text-grey-\d+">([^<]*)<\/div>/
+      .exec(row.slice(span.index))?.[1]
+      .trim();
     events.push({
       // "Successfully delivered - Signed for by : <name>": store no name.
-      text: span[1].replace(/\s*-\s*Signed for by.*$/i, '').trim(),
-      place: place?.[1] ?? null,
+      text: span[1]
+        .replace(/\s*-\s*(Signed for|Received) by[\s\S]*$/i, '')
+        .trim(),
+      place: place || null,
       at:
         day && time
           ? malaysiaIso(day[3], day[1], day[2], time[1], time[2], '0', time[3])
@@ -247,7 +284,7 @@ export function classifyDhlEcommerce(html: string): TrackingResult {
   const returned = events.some((e) => /return/i.test(e.text));
   if (
     !returned &&
-    /class="badge bg-delivered/.test(html) &&
+    /class="badge bg-delivered/.test(page) &&
     /successfully delivered/i.test(latest.text)
   ) {
     return { ...result, state: 'delivered', delivered_at: latest.at };
@@ -257,6 +294,8 @@ export function classifyDhlEcommerce(html: string): TrackingResult {
   }
   return { ...result, state: 'in_transit' };
 }
+
+const SHOW_MORE = /Show more tracking status/i;
 
 // ------------------------------------------------------------------ Fetching
 
@@ -269,6 +308,9 @@ const HEADERS = {
 const POS_BATCH = 20;
 const NINJA_PARALLEL = 4;
 const NINJA_RETRY_MS = 1_000;
+// A real DHL page is ~200 KB; anything far larger is not one, and the regexes
+// should never see it.
+const MAX_PAGE_CHARS = 2_000_000;
 
 async function fetchNinjaVan(
   n: string,
@@ -282,6 +324,12 @@ async function fetchNinjaVan(
     { headers: HEADERS, signal: AbortSignal.timeout(TIMEOUT_MS) },
   );
   if (res.status === 404) {
+    // Only Ninja Van's own "order not found" (code 150002) means no record;
+    // a 404 without it (a moved endpoint, a proxy page) is not an answer.
+    const body = (await res.json().catch(() => null)) as {
+      error?: { code?: number };
+    } | null;
+    if (body?.error?.code !== 150002) throw new Error('Ninja Van HTTP 404');
     // The 2026-10-30 prod dry run got a 404 for a delivered parcel that the
     // next call found, so ask once more before calling it unknown.
     if (!retried) {
@@ -314,15 +362,57 @@ async function fetchDhlEcommerce(
   n: string,
   fetchFn: FetchFn,
 ): Promise<TrackingResult> {
-  const res = await fetchFn(
-    `https://ecommerceportal.dhl.com/track/pages/customer/trackItNowPublic.xhtml?ref=${encodeURIComponent(n)}`,
-    {
-      headers: { ...HEADERS, Accept: 'text/html' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    },
-  );
+  const url = `https://ecommerceportal.dhl.com/track/pages/customer/trackItNowPublic.xhtml?ref=${encodeURIComponent(n)}`;
+  const res = await fetchFn(url, {
+    headers: { ...HEADERS, Accept: 'text/html' },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`DHL eCommerce HTTP ${res.status}`);
-  return classifyDhlEcommerce(await res.text());
+  const page = (await res.text()).slice(0, MAX_PAGE_CHARS);
+  // "Show more tracking status" is a JSF ajax postback on the same page:
+  // its link id (j_idtNNN) changes between page loads, and the view state
+  // lives in the session cookie, so both come from this response. Proven
+  // live 2026-10-30: 5 rows -> all 11.
+  const more =
+    /id="(trackItNowForm:j_idt\d+)"[^>]*mojarra\.ab\(this,event,'action',0,'trackItNowForm:timelinePanel'\)/.exec(
+      page,
+    );
+  if (!more) return classifyDhlEcommerce(page);
+  const viewState = /name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/.exec(
+    page,
+  )?.[1];
+  if (!viewState) throw new Error('DHL eCommerce page has no view state');
+  const cookie = (res.headers?.getSetCookie?.() ?? [])
+    .map((c) => c.split(';')[0])
+    .join('; ');
+  const full = await fetchFn(url, {
+    method: 'POST',
+    headers: {
+      ...HEADERS,
+      Accept: 'application/xml, text/xml',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'Faces-Request': 'partial/ajax',
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+    body: new URLSearchParams({
+      trackItNowForm: 'trackItNowForm',
+      'javax.faces.ViewState': viewState,
+      'javax.faces.source': more[1],
+      'javax.faces.partial.event': 'click',
+      'javax.faces.partial.execute': `${more[1]} @component`,
+      'javax.faces.partial.render': 'trackItNowForm:timelinePanel',
+      'javax.faces.behavior.event': 'action',
+      'javax.faces.partial.ajax': 'true',
+    }).toString(),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!full.ok) {
+    throw new Error(`DHL eCommerce HTTP ${full.status} (full timeline)`);
+  }
+  return classifyDhlEcommerce(
+    page,
+    (await full.text()).slice(0, MAX_PAGE_CHARS),
+  );
 }
 
 async function fetchPosLaju(
@@ -355,11 +445,14 @@ async function fetchPosLaju(
 /**
  * Checks every number once. The map holds a result or the Error that number
  * hit; a number missing from a Pos answer comes back as an Error too, so the
- * caller never mistakes "no answer" for "not delivered".
+ * caller never mistakes "no answer" for "not delivered". No carrier call
+ * starts after `deadline` (epoch ms): those numbers come back as an Error and
+ * wait for the next run.
  */
 export async function trackShipments(
   trackingNumbers: string[],
   fetchFn: FetchFn = fetch,
+  deadline: number = Infinity,
 ): Promise<Map<string, TrackingResult | Error>> {
   const out = new Map<string, TrackingResult | Error>();
   const ninja: string[] = [];
@@ -382,12 +475,14 @@ export async function trackShipments(
   }
   const asError = (e: unknown) =>
     e instanceof Error ? e : new Error(String(e));
+  const outOfTime = new Error('Out of time this run; checked next run');
+  const late = () => Date.now() > deadline;
 
   let limited: Error | undefined;
   for (let i = 0; i < ninja.length; i += NINJA_PARALLEL) {
     const batch = ninja.slice(i, i + NINJA_PARALLEL);
-    if (limited) {
-      for (const n of batch) out.set(n, limited);
+    if (limited || late()) {
+      for (const n of batch) out.set(n, limited ?? outOfTime);
       continue;
     }
     const settled = await Promise.allSettled(
@@ -403,6 +498,10 @@ export async function trackShipments(
 
   for (let i = 0; i < pos.length; i += POS_BATCH) {
     const batch = pos.slice(i, i + POS_BATCH);
+    if (late()) {
+      for (const n of batch) out.set(n, outOfTime);
+      continue;
+    }
     try {
       const got = await fetchPosLaju(batch, fetchFn);
       for (const n of batch) {
@@ -415,6 +514,10 @@ export async function trackShipments(
 
   // One page at a time: it is a web page behind bot protection, not an API.
   for (const n of dhl) {
+    if (late()) {
+      out.set(n, outOfTime);
+      continue;
+    }
     try {
       out.set(n, await fetchDhlEcommerce(n, fetchFn));
     } catch (e) {

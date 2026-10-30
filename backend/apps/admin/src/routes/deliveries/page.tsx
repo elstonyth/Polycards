@@ -94,8 +94,6 @@ const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
   expired: 'No gateway answer',
 };
 
-// First item's thumbnail + name/handle with a "+N more" tail — the operator
-// scans for "which card", the full manifest lives in the Manage modal.
 const CARRIER_NAME: Record<
   NonNullable<DeliveryTrackingSnapshot['carrier']>,
   string
@@ -135,10 +133,10 @@ const TrackingLine = ({ order }: { order: AdminDeliveryOrder }) => {
       size="xsmall"
       className={
         snap.state === 'problem'
-          ? 'text-ui-fg-error mt-1 max-w-64'
-          : 'text-ui-fg-subtle mt-1 max-w-64'
+          ? 'text-ui-fg-error mt-1 line-clamp-2 max-w-64'
+          : 'text-ui-fg-subtle mt-1 line-clamp-2 max-w-64'
       }
-      title={snap.tracking_number}
+      title={`${snap.tracking_number}: ${what}`}
     >
       {snap.state === 'problem' ? 'Problem: ' : ''}
       {carrier}: {what} · checked {timeAgo(snap.checked_at)}
@@ -146,6 +144,8 @@ const TrackingLine = ({ order }: { order: AdminDeliveryOrder }) => {
   );
 };
 
+// First item's thumbnail + name/handle with a "+N more" tail — the operator
+// scans for "which card", the full manifest lives in the Manage modal.
 const ItemCell = ({ items }: { items: AdminDeliveryItem[] }) => {
   const first = items[0];
   if (!first) {
@@ -406,8 +406,12 @@ const DeliveriesPage = () => {
   // Top-ups are customer money (GET /admin/payments/deposits asks
   // payment:read). An order handler without it — the Order manager since
   // 2026-10-28 — gets no tab rather than a tab that 403s.
-  const canSeeTopups = usePermissions().hasPermission(
-    'payment:read' as Permission,
+  const permissions = usePermissions();
+  const canSeeTopups = permissions.hasPermission('payment:read' as Permission);
+  // "Check tracking" can complete orders (POST /track asks
+  // delivery_order:update); a read-only role gets no button rather than a 403.
+  const canCheckTracking = permissions.hasPermission(
+    'delivery_order:update' as Permission,
   );
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
   const [page, setPage] = useState(0);
@@ -496,11 +500,6 @@ const DeliveriesPage = () => {
     );
   };
 
-  // Partial success is the endpoint's contract. Two classes of skip:
-  // `already <status>` is benign (the backend refuses to audit a no-op) and
-  // belongs in the summary line; everything else is a real refusal — a missing
-  // order or an illegal transition — and gets a red toast, capped at 5 so a
-  // 100-id mistake doesn't bury the screen.
   const checkTracking = async () => {
     try {
       const r = await track.mutateAsync();
@@ -509,14 +508,21 @@ const DeliveriesPage = () => {
         r.problems.length > 0 && `${r.problems.length} need attention`,
         r.failed.length > 0 && `${r.failed.length} could not be checked`,
       ].filter(Boolean);
-      toast.success(
-        `Checked ${r.checked} shipped orders: ${parts.join(', ')}`,
-      );
+      const summary = `Checked ${r.checked} shipped orders: ${parts.join(', ')}`;
+      // A carrier that is down reads "0 checked, 14 could not be checked":
+      // not a success.
+      if (r.failed.length > 0 || r.checked === 0) toast.warning(summary);
+      else toast.success(summary);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
   };
 
+  // Partial success is the endpoint's contract. Two classes of skip:
+  // `already <status>` is benign (the backend refuses to audit a no-op) and
+  // belongs in the summary line; everything else is a real refusal — a missing
+  // order or an illegal transition — and gets a red toast, capped at 5 so a
+  // 100-id mistake doesn't bury the screen.
   const applyBulk = async () => {
     // Clearing the selection on every view change isn't enough on its own:
     // `keepPreviousData` keeps the OLD rows rendered and checkable for the whole
@@ -626,14 +632,16 @@ const DeliveriesPage = () => {
           </div>
           {kind === 'shipping' && (
             <div className="flex items-center gap-2">
-              <Button
-                size="small"
-                variant="secondary"
-                onClick={checkTracking}
-                isLoading={track.isPending}
-              >
-                Check tracking
-              </Button>
+              {canCheckTracking && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={checkTracking}
+                  isLoading={track.isPending}
+                >
+                  Check tracking
+                </Button>
+              )}
               <Input
                 type="search"
                 className="w-64"

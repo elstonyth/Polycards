@@ -12,7 +12,8 @@ const CARD_HANDLE = 'track-card';
 const PACK_PRICE = 5;
 const DELIVERED_NO = 'NVMYNINJA000000001';
 const RETURNED_NO = 'NVMYNINJA000000002';
-const DELIVERED_AT = '2026-10-22T08:14:42Z';
+// Set just before each run: the tracker refuses a delivery dated before the order.
+let DELIVERED_AT = '';
 
 // The carrier side is faked at global fetch (the tracker's default fetchFn).
 // Everything else is real: the migration's tracking_snapshot column, the
@@ -211,6 +212,7 @@ medusaIntegrationTestRunner({
           adminHeaders,
         );
 
+        DELIVERED_AT = new Date().toISOString();
         const run = await post('/admin/delivery-orders/track', adminHeaders);
         expect(run.status).toBe(200);
         expect(run.data).toEqual({

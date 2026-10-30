@@ -194,8 +194,32 @@ const DELIVERED_BADGE =
   '<span class="badge bg-delivered text-white">Delivered</span>';
 
 describe('classifyDhlEcommerce', () => {
+  it('refuses the 5-row page on its own: a return could hide behind "Show more"', () => {
+    expect(() =>
+      classifyDhlEcommerce(fixture('dhl-ecommerce-delivered.html')),
+    ).toThrow(/cut short/);
+  });
+
+  it('strips the signer name even across a line break or as "Received by"', () => {
+    const r = classifyDhlEcommerce(
+      DELIVERED_BADGE +
+        dhlPage(
+          dhlRow(
+            'Successfully delivered - Received by : Ah\nChong',
+            'Oct 22, 2026',
+            '10:00 AM',
+            'KL',
+          ),
+        ),
+    );
+    expect(r.event).toBe('Successfully delivered · KL');
+  });
+
   it('delivered on the real page, at the delivery scan time, with no recipient name', () => {
-    const r = classifyDhlEcommerce(fixture('dhl-ecommerce-delivered.html'));
+    const r = classifyDhlEcommerce(
+      fixture('dhl-ecommerce-delivered.html'),
+      fixture('dhl-ecommerce-full-timeline.xml'),
+    );
     expect(r).toEqual({
       carrier: 'dhl_ecommerce',
       state: 'delivered',
@@ -293,21 +317,31 @@ describe('trackShipments', () => {
       status,
       json: async () => body,
     }) as Response;
-  const html = (status: number, body: string) =>
-    ({
+  const html = (status: number, body: string, cookies: string[] = []) => {
+    const headers = new Headers();
+    for (const c of cookies) headers.append('set-cookie', c);
+    return {
       ok: status >= 200 && status < 300,
       status,
+      headers,
       text: async () => body,
-    }) as Response;
+    } as Response;
+  };
 
   it('routes each number to its carrier and keeps per-number failures', async () => {
-    const fetchFn = jest.fn(async (url: string | URL | Request) => {
+    const fetchFn = jest.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const u = String(url);
       if (u.includes('NVMYNINJA000000001')) return json(200, ninjaDelivered);
-      if (u.includes('NVMYNINJA000000002')) return json(404, {});
+      if (u.includes('NVMYNINJA000000002')) {
+        return json(404, { error: { code: 150002 } });
+      }
       if (u.includes('NVMYNINJA000000003')) return json(503, {});
       if (u.includes('ref=7128100488960676')) {
-        return html(200, fixture('dhl-ecommerce-delivered.html'));
+        return init?.method === 'POST'
+          ? html(200, fixture('dhl-ecommerce-full-timeline.xml'))
+          : html(200, fixture('dhl-ecommerce-delivered.html'), [
+              'JSESSIONID=abc123; Path=/track; Secure',
+            ]);
       }
       if (u.includes('ref=7125109956829386')) return html(503, '');
       // Pos answers only one of the two numbers it was asked about.
@@ -373,5 +407,114 @@ describe('trackShipments', () => {
     for (const n of numbers) {
       expect((out.get(n) as Error).message).toMatch(/rate limit/);
     }
+  });
+
+  it('asks DHL for the full timeline with the page\'s own view state and cookie', async () => {
+    const fetchFn = jest.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? html(200, fixture('dhl-ecommerce-full-timeline.xml'))
+        : html(200, fixture('dhl-ecommerce-delivered.html'), [
+            'JSESSIONID=abc123; Path=/track; Secure',
+          ]),
+    ) as unknown as jest.Mock;
+    const out = await trackShipments(
+      ['7128100488960676'],
+      fetchFn as unknown as typeof fetch,
+    );
+    expect(out.get('7128100488960676')).toMatchObject({
+      state: 'delivered',
+      delivered_at: '2026-10-19T05:59:00.000Z',
+    });
+    const post = fetchFn.mock.calls[1][1] as RequestInit;
+    const form = new URLSearchParams(post.body as string);
+    expect(form.get('javax.faces.ViewState')).toBe('VIEWSTATE-FIXTURE');
+    expect(form.get('javax.faces.source')).toBe('trackItNowForm:j_idt665');
+    expect((post.headers as Record<string, string>).Cookie).toBe(
+      'JSESSIONID=abc123',
+    );
+  });
+
+  it('a Ninja Van 404 without its own not-found code is an error, not "no record"', async () => {
+    const fetchFn = (async () =>
+      json(404, '<html>moved</html>')) as unknown as typeof fetch;
+    const out = await trackShipments(['NVMYNINJA000000002'], fetchFn);
+    expect(out.get('NVMYNINJA000000002')).toBeInstanceOf(Error);
+  });
+
+  it('starts no carrier call after the deadline', async () => {
+    const fetchFn = jest.fn() as unknown as typeof fetch;
+    const out = await trackShipments(
+      ['NVMYNINJA000000001', 'EHE311095909MY', '7128100488960676'],
+      fetchFn,
+      Date.now() - 1,
+    );
+    expect(fetchFn).not.toHaveBeenCalled();
+    for (const v of out.values()) {
+      expect((v as Error).message).toMatch(/Out of time/);
+    }
+  });
+});
+
+describe('carrier review fixes (2026-10-30)', () => {
+  it('Ninja Van: "Returned to Sender" is never delivered, whatever is_rts says', () => {
+    expect(
+      classifyNinjaVan({
+        status: 'Completed',
+        granular_status: 'Returned to Sender',
+        events: [
+          {
+            type: 'DELIVERY_SUCCESS',
+            time: '2026-10-25T08:00:00Z',
+            data: { is_rts: false },
+          },
+        ],
+      }).state,
+    ).toBe('problem');
+  });
+
+  it('Ninja Van: a later return scan beats an earlier delivery scan', () => {
+    expect(
+      classifyNinjaVan({
+        status: 'Completed',
+        events: [
+          { type: 'DELIVERY_SUCCESS', time: '2026-10-20T08:00:00Z', data: { is_rts: false } },
+          { type: 'DELIVERY_SUCCESS', time: '2026-10-25T08:00:00Z', data: { is_rts: true } },
+        ],
+      }).state,
+    ).toBe('problem');
+  });
+
+  it('Ninja Van: an answer with no status or events throws', () => {
+    expect(() => classifyNinjaVan({} as NinjaOrder)).toThrow(/no status/);
+  });
+
+  it('Pos Laju: decides on the machine event codes when present', () => {
+    const at = (h: string) => `06 Oct 2026, ${h}:00:00 AM`;
+    expect(
+      classifyPosLaju({
+        process_status: 'DELIVERED',
+        tracking_data: [
+          { date: at('10'), process: 'Item handed over', event_type: 'delivery_success' },
+          { date: at('09'), process: 'Out for delivery', event_type: 'out_for_delivery' },
+        ],
+      }).state,
+    ).toBe('delivered');
+    expect(
+      classifyPosLaju({
+        process_status: 'DELIVERED',
+        tracking_data: [
+          { date: at('11'), process: 'Delivery completed', event_type: 'delivery_success' },
+          { date: at('10'), process: 'Sent back', event_type: 'rts_initiated' },
+        ],
+      }).state,
+    ).toBe('problem');
+    expect(
+      classifyPosLaju({
+        process_status: 'DELIVERED',
+        tracking_data: [
+          { date: at('09'), process: 'Out for delivery', event_type: 'out_for_delivery' },
+        ],
+      }).state,
+    ).not.toBe('delivered');
   });
 });
