@@ -2037,6 +2037,15 @@
           "nullable": true,
           "mappedType": "text"
         },
+        "tracking_snapshot": {
+          "name": "tracking_snapshot",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
         "proof_images": {
           "name": "proof_images",
           "type": "jsonb",
