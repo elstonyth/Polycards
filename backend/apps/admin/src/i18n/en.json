@@ -1192,6 +1192,8 @@
     "verification": "Phone verification",
     "verificationRequired": "Required",
     "verificationOff": "Off",
+    "seesDrafts": "Sees Draft",
+    "seesDraftsHint": "Sees Draft on: members see Draft packs on the storefront and can spin Draft ticket packs, paying from their real balance. Draft card packs stay view-only. Staff only: this gives no access to anything else, and turning it on is recorded in the audit trail.",
     "reasonPrompt": "Reason (audited):",
     "policyHint": "Partner switch on: members earn the partner rate on their downline turnover, and a per-customer rate cannot be set while they are in the group. Withdrawals \"Blocked\" refuses bank withdrawals for every member. Phone verification \"Off\" lets members top up, withdraw and request delivery without a verified phone. Policy changes are recorded in the audit trail.",
     "players": "Players",

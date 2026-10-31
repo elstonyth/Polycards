@@ -2153,6 +2153,16 @@ export const setGroupPolicy = (
     { ...policy, reason },
   );
 
+export const setGroupDraftAccess = (
+  id: string,
+  seesDrafts: boolean,
+  reason: string,
+) =>
+  postJson<{ customer_group: AdminCustomerGroup }>(
+    `/admin/customer-groups/${encodeURIComponent(id)}/draft-access`,
+    { sees_drafts: seesDrafts, reason },
+  );
+
 /** How many players are in one group. Only `count` is used — limit=1 keeps the
  *  payload one row wide on a group with 50k members (limit=0 is not a
  *  documented "count only" in Medusa, so it isn't relied on here). */
