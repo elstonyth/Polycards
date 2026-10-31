@@ -75,6 +75,10 @@ let mounted: { unmount: () => void } | null = null;
 afterEach(() => {
   mounted?.unmount();
   mounted = null;
+  // After the unmount, so the hook's interval is cleared on the clock it was
+  // set on. The tests that race a short deadline run on a fake clock: under CPU
+  // load a real one can pass the deadline before the step that must precede it.
+  vi.useRealTimers();
 });
 
 describe('useSellWindow — a failed sell is never silent (#514)', () => {
@@ -118,6 +122,7 @@ describe('useSellWindow — a failed sell is never silent (#514)', () => {
     // never renders. This is the failure that needs a surface outliving the
     // stage -- and it is decided by the raw clock, because `expired` captured
     // in the closure is stale exactly here.
+    vi.useFakeTimers();
     const onSellFailed = vi.fn();
     const deadline = Date.now() + 40;
     const onSellBack = vi.fn(async () => {
@@ -135,7 +140,9 @@ describe('useSellWindow — a failed sell is never silent (#514)', () => {
     mounted = hook;
 
     await act(async () => {
-      await hook.current.sell(0);
+      const selling = hook.current.sell(0);
+      await vi.advanceTimersByTimeAsync(80);
+      await selling;
     });
 
     expect(onSellBack).toHaveBeenCalledTimes(1);
@@ -304,6 +311,7 @@ describe('useSellWindow — no error toast over a sale that landed', () => {
   >;
 
   test("a retry's refusal after the deadline does not toast over the late sale", async () => {
+    vi.useFakeTimers();
     const answers: ((r: SellResult) => void)[] = [];
     const onSellFailed = vi.fn();
     const onSold = vi.fn();
@@ -323,7 +331,9 @@ describe('useSellWindow — no error toast over a sale that landed', () => {
     mounted = hook;
 
     await act(async () => {
-      await hook.current.sell(0); // hangs, times out inside the window
+      const first = hook.current.sell(0); // hangs, times out inside the window
+      await vi.advanceTimersByTimeAsync(30);
+      await first;
     });
     let retry!: Promise<boolean>;
     act(() => {
@@ -331,7 +341,11 @@ describe('useSellWindow — no error toast over a sale that landed', () => {
     });
     await act(async () => {
       answers[0]!({ ok: true, amount: 70, percent: 70, balance: 170 });
-      await new Promise((r) => setTimeout(r, 100)); // cross the deadline
+    });
+    // Moves the clock without firing the retry's own timeout, so the refusal
+    // below is what settles the retry.
+    vi.setSystemTime(deadline + 1);
+    await act(async () => {
       answers[1]!({ ok: false, error: 'This card was already sold back.' });
       await retry;
     });

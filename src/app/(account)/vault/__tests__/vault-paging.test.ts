@@ -191,15 +191,16 @@ describe('weekly-challenge prizes', () => {
 });
 
 describe('Lucky Draw tickets row', () => {
-  const mount = (tickets: number | null) =>
+  const mount = (tickets: number | null, spinHref: string | null = null) =>
     act(async () => {
       root.render(
         createElement(VaultClient, {
-          key: `tickets-${tickets}`,
+          key: `tickets-${tickets}-${spinHref}`,
           initial: { ok: true, items: [], balance: 0 },
           addresses: [],
           initialGifts: [],
           tickets,
+          spinHref,
         }),
       );
     });
@@ -207,12 +208,37 @@ describe('Lucky Draw tickets row', () => {
     [...container.querySelectorAll('a')].find(
       (a) => a.textContent?.trim() === text,
     );
+  const button = (text: string) =>
+    [...container.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === text,
+    );
 
-  test('holding tickets: count, hint, and Open into the intro', async () => {
+  test('holding tickets: count, hint, and Use into the intro', async () => {
     await mount(3);
     expect(container.textContent).toContain('Lucky Draw Tickets ×3');
-    expect(container.textContent).toContain('Put them on the prizes you want');
-    expect(link('Open')?.getAttribute('href')).toBe('/lucky-draw?open=1');
+    expect(container.textContent).toContain('Put them in the prize pool');
+    expect(link('Use')?.getAttribute('href')).toBe('/lucky-draw?open=1');
+  });
+
+  test('no ticket pack on sale: Get tickets goes straight to the tasks', async () => {
+    await mount(3);
+    expect(link('Get tickets')?.getAttribute('href')).toBe('/task');
+    expect(button('Get tickets')).toBeUndefined();
+  });
+
+  test('a ticket pack on sale: Get tickets offers tasks or a spin', async () => {
+    await mount(3, '/slots?category=poly');
+    expect(link('Get tickets')).toBeUndefined();
+    expect(link('Spin a Lucky Pack')).toBeUndefined();
+
+    await act(async () => {
+      button('Get tickets')?.click();
+    });
+    expect(button('Get tickets')?.getAttribute('aria-expanded')).toBe('true');
+    expect(link('Go to tasks')?.getAttribute('href')).toBe('/task');
+    expect(link('Spin a Lucky Pack')?.getAttribute('href')).toBe(
+      '/slots?category=poly',
+    );
   });
 
   test('a large balance is grouped like the Lucky Draw page shows it', async () => {
@@ -220,12 +246,13 @@ describe('Lucky Draw tickets row', () => {
     expect(container.textContent).toContain('Lucky Draw Tickets ×1,250');
   });
 
-  test('none yet: points at the tasks that earn them', async () => {
+  test('none yet: points at the tasks, and Use still opens the pool', async () => {
     await mount(0);
     expect(container.textContent).toContain('Lucky Draw Tickets ×0');
     expect(container.textContent).toContain('Earn tickets from tasks');
-    expect(link('Tasks')?.getAttribute('href')).toBe('/task');
-    expect(link('Open')).toBeUndefined();
+    expect(link('Get tickets')?.getAttribute('href')).toBe('/task');
+    // No tickets to open: no intro.
+    expect(link('Use')?.getAttribute('href')).toBe('/lucky-draw');
   });
 
   test('unreadable balance hides the row', async () => {

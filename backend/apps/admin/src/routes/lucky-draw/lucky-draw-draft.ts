@@ -129,8 +129,10 @@ export interface EventDraft {
   endsAt: string;
 }
 
+// Not asked for: pools run too often to name each one (operator 2026-10-31), and
+// players see every one as the Prize Pool. The column stays required.
 export const blankEventDraft = (): EventDraft => ({
-  name: '',
+  name: 'Prize Pool',
   startsAt: '',
   endsAt: '',
 });

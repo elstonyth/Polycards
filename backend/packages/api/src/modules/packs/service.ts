@@ -1041,6 +1041,8 @@ export type LuckyDrawMine = {
     status: 'open' | 'won' | 'lost' | 'cancelled';
     /** Set on a one_winner row, where prize_id is the event id. */
     event_id?: string;
+    /** One_winner rows only: every ticket in the pool, for "my chance". */
+    total_tickets?: number;
   }[];
 };
 
@@ -9071,12 +9073,20 @@ class PacksModuleService extends MedusaService({
       ? await pageAll((opts) =>
           this.listLuckyDrawEventResults(
             { event_id: eventIds },
-            { ...opts, select: ['event_id', 'winner_customer_id'] },
+            {
+              ...opts,
+              select: ['event_id', 'winner_customer_id', 'total_tickets'],
+            },
             sharedContext,
           ),
         )
       : [];
     const eventResultById = new Map(eventResults.map((r) => [r.event_id, r]));
+    const eventSums = await this.luckyDrawEntrySums(
+      eventIds,
+      sharedContext,
+      'event_id',
+    );
     const ticketsByPrize = new Map(
       entered.map((r) => [r.prize_id, Number(r.tickets)]),
     );
@@ -9121,6 +9131,8 @@ class PacksModuleService extends MedusaService({
             .map((p) => ({ kind: p.kind, ...luckyDrawShown(p, cards) })),
         ),
         my_tickets: ticketsByEvent.get(e.id) ?? 0,
+        total_tickets:
+          result?.total_tickets ?? eventSums.get(e.id)?.total_tickets ?? 0,
         draw_at: new Date(e.ends_at).toISOString(),
         status:
           e.status === 'cancelled'

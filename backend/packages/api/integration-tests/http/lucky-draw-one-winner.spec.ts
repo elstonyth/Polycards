@@ -365,7 +365,7 @@ medusaIntegrationTestRunner({
         });
         expect(feed.data.next_before).toBeNull();
 
-        // My tickets: one row per event, an outcome for each viewer.
+        // My entry: one row per event, an outcome for each viewer.
         const adaMe = await get('/store/lucky-draw/me', authed(ada.token));
         expect(adaMe.status).toBe(200);
         expect(adaMe.data.entries).toEqual([
@@ -375,6 +375,7 @@ medusaIntegrationTestRunner({
             title: 'November Pot',
             image: '/cdn/ldow-card.webp',
             my_tickets: 35,
+            total_tickets: 51,
             draw_at: new Date(event.ends_at).toISOString(),
             status: winner === ada.id ? 'won' : 'lost',
           },

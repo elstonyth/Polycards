@@ -480,16 +480,12 @@ const LuckyDrawPage = () => {
                 const totals = showsEventTotals(e);
                 const result = totals ? eventResult(e) : null;
                 const actions = [
-                  ...(e.status !== 'cancelled'
+                  ...(e.status === 'draft'
                     ? [
                         {
                           label: 'Edit',
                           onSelect: () => setEventDraft(eventDraftFrom(e)),
                         },
-                      ]
-                    : []),
-                  ...(e.status === 'draft'
-                    ? [
                         {
                           label: 'Publish…',
                           // The backend refuses an event with no
@@ -671,10 +667,6 @@ const LuckyDrawPage = () => {
       {eventDraft && (
         <EventEditor
           draft={eventDraft}
-          published={
-            eventDraft.id !== undefined &&
-            events.find((e) => e.id === eventDraft.id)?.status === 'published'
-          }
           onChange={setEventDraft}
           onSaved={(id) => {
             setSelectedId(id);

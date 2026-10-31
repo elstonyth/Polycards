@@ -86,6 +86,15 @@ export type Pack = {
 export const isTicketPack = (p: Pick<Pack, 'prizeType'>): boolean =>
   p.prizeType === 'tickets';
 
+/** Where to spin for tickets, or null with no ticket pack on sale (a Draft one
+ *  never reaches the catalog). */
+export const ticketPackHref = (
+  categories: { id: string; packs: Pick<Pack, 'prizeType'>[] }[],
+): string | null => {
+  const category = categories.find((c) => c.packs.some(isTicketPack));
+  return category ? `/slots?category=${category.id}` : null;
+};
+
 /** Membership rule for the catalog's "Graded (Guaranteed PSA 10)" section —
  *  BOTH gates: every pooled card graded AND every one a PSA 10. Everything
  *  else (RAW, MIX, empty, non-PSA-10 graded, older backend) lists under
