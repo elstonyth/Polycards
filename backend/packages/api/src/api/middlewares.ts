@@ -642,6 +642,13 @@ export default defineMiddlewares({
       ],
     },
     {
+      // Draft packs, for a member of a group that can see them. Answers a
+      // non-member as if there were none, so it needs a login but no other gate.
+      matcher: '/store/customers/me/draft-packs*',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       matcher: '/store/packs/*/open',
       method: 'POST',
       middlewares: [
@@ -1381,6 +1388,12 @@ export default defineMiddlewares({
     {
       // Partner policy on a player group (POST /admin/customer-groups/:id/policy).
       matcher: '/admin/customer-groups/*/policy',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Draft access of a player group (POST /admin/customer-groups/:id/draft-access).
+      matcher: '/admin/customer-groups/*/draft-access',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

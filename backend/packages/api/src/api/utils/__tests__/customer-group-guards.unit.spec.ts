@@ -109,6 +109,7 @@ describe('rejectGroupPolicyMetadata', () => {
     ['partner_rate_bp', 10000],
     ['withdrawals_blocked', true],
     ['verification_exempt', false],
+    ['sees_drafts', true],
   ])('refuses metadata carrying %s', async (key, value) => {
     const err = (await run({
       metadata: { odds_set: 2, [key]: value },

@@ -108,7 +108,7 @@ export const CORE_PREFIX_WRITES: {
     resource: CORE_READ_PREFIXES.customers,
     operation: 'update' as const,
   })),
-  ...['odds-set', 'policy'].map((sub) => ({
+  ...['draft-access', 'odds-set', 'policy'].map((sub) => ({
     matcher: `/admin/customer-groups/*/${sub}`,
     method: 'POST' as const,
     resource: CORE_READ_PREFIXES['customer-groups'],
