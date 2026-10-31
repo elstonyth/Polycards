@@ -263,6 +263,13 @@ const FACTORY_VIDEO_TIERS = new Set([
   'chaos',
   'kanto',
   'lucky',
+  // Capsules (ticket packs). Their own names: a capsule shares its metal with a
+  // card tier above, and gold-factory is the card Gold pack's loop.
+  'capsulebronze',
+  'capsulesilver',
+  'capsulegold',
+  'capsuleplatinum',
+  'capsulediamond',
 ]);
 
 /** Animated factory-hero sources for a pack, or null when its display image is
