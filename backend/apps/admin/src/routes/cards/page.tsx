@@ -14,7 +14,6 @@ import {
   StatusBadge,
   Select,
   FocusModal,
-  Prompt,
   toast,
   usePrompt,
 } from '@medusajs/ui';
@@ -41,6 +40,7 @@ import CardPokemonFields from './CardPokemonFields';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { GraderGradeSelect } from '../../components/GraderGradeSelect';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { RowActions } from '../../components/RowActions';
 import { PricingStatus } from './PricingStatus';
 import {
   matchesPricingFilter,
@@ -152,7 +152,6 @@ const GachaCardsPage = () => {
   const uploadImg = useUploadImage();
   const [registerOpen, setRegisterOpen] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<AdminCard | null>(null);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<{
     key: SortKey;
@@ -306,10 +305,7 @@ const GachaCardsPage = () => {
     }
   };
 
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    const handle = deleteTarget.handle;
-    setDeleteTarget(null);
+  const deleteCard = async (handle: string) => {
     try {
       await removeCard.mutateAsync(handle);
       toast.success(t('cards.toast.deleted'));
@@ -677,22 +673,28 @@ const GachaCardsPage = () => {
                     />
                   </Table.Cell>
                   <Table.Cell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        size="small"
-                        variant="secondary"
-                        onClick={() => setForm(formFromCard(c))}
-                      >
-                        {t('cards.list.edit')}
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="transparent"
-                        onClick={() => setDeleteTarget(c)}
-                      >
-                        {t('cards.list.delete')}
-                      </Button>
-                    </div>
+                    <RowActions
+                      subject={c.name}
+                      actions={[
+                        {
+                          label: t('cards.list.edit'),
+                          onSelect: () => setForm(formFromCard(c)),
+                        },
+                        {
+                          label: t('cards.list.delete'),
+                          danger: true,
+                          onSelect: () => void deleteCard(c.handle),
+                          confirm: {
+                            title: t('cards.delete.title'),
+                            description: t('cards.delete.description', {
+                              name: c.name,
+                            }),
+                            confirmText: t('cards.delete.confirm'),
+                            cancelText: t('cards.form.cancel'),
+                          },
+                        },
+                      ]}
+                    />
                   </Table.Cell>
                 </Table.Row>
               ))}
@@ -1042,30 +1044,6 @@ const GachaCardsPage = () => {
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>
-
-      <Prompt
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-      >
-        <Prompt.Content>
-          <Prompt.Header>
-            <Prompt.Title>{t('cards.delete.title')}</Prompt.Title>
-            <Prompt.Description>
-              {t('cards.delete.description', {
-                name: deleteTarget?.name ?? '',
-              })}
-            </Prompt.Description>
-          </Prompt.Header>
-          <Prompt.Footer>
-            <Prompt.Cancel>{t('cards.form.cancel')}</Prompt.Cancel>
-            <Prompt.Action onClick={confirmDelete}>
-              {t('cards.delete.confirm')}
-            </Prompt.Action>
-          </Prompt.Footer>
-        </Prompt.Content>
-      </Prompt>
     </Container>
   );
 };

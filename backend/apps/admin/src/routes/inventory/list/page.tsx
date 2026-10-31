@@ -403,7 +403,9 @@ const InventoryListPage = () => {
           role="region"
           aria-label={t('inventory.title')}
         >
-          <Table>
+          {/* Sixteen columns: half the usual cell gap keeps sideways scrolling
+              short. */}
+          <Table className="[&_td]:pr-3 [&_th]:pr-3">
             <Table.Header>
               <Table.Row>
                 {canListToGacha && (
@@ -473,15 +475,23 @@ const InventoryListPage = () => {
                     />
                   </Table.Cell>
                   <Table.Cell className="break-words">
-                    {r.name}
-                    {!r.is_card && (
-                      <span className="text-ui-fg-subtle ml-1 text-xs">
-                        ({t('inventory.notACard')})
-                      </span>
-                    )}
+                    {/* The width keeps this column from being squeezed by the
+                        fifteen others; a cell's own min-width is unreliable. */}
+                    <div className="min-w-[12rem]">
+                      {r.name}
+                      {!r.is_card && (
+                        <span className="text-ui-fg-subtle ml-1 text-xs">
+                          ({t('inventory.notACard')})
+                        </span>
+                      )}
+                    </div>
                   </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle break-words">
-                    {r.sku}
+                  <Table.Cell className="text-ui-fg-subtle">
+                    {/* One line, full value on hover: a wrapped SKU made rows
+                        four lines tall. */}
+                    <span className="block max-w-[8rem] truncate" title={r.sku}>
+                      {r.sku}
+                    </span>
                   </Table.Cell>
                   <Table.Cell className="whitespace-nowrap">
                     {r.graded ? t('inventory.graded') : t('inventory.raw')}

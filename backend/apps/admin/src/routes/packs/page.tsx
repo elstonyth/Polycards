@@ -16,7 +16,6 @@ import {
   StatusBadge,
   Tabs,
   FocusModal,
-  Prompt,
   toast,
 } from '@medusajs/ui';
 import {
@@ -55,6 +54,7 @@ import { fmtPct, rm, slugKeystroke, toSlug } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { RowActions } from '../../components/RowActions';
 import { LosslessTab } from './LosslessTab';
 
 // Client-side sort — this list is unpaged, the whole catalog is in hand.
@@ -195,7 +195,6 @@ const PacksListPage = () => {
   const [tab, setTab] = useState<'packs' | 'free' | 'lossless'>('packs');
   const [mode, setMode] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [deleteTarget, setDeleteTarget] = useState<AdminPack | null>(null);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | PackStatus>('all');
   // Slugs whose per-set EV/RTP detail row is open (see the chevron in the
@@ -343,10 +342,7 @@ const PacksListPage = () => {
     }
   };
 
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    const slug = deleteTarget.slug;
-    setDeleteTarget(null);
+  const deletePack = async (slug: string) => {
     try {
       await removePack.mutateAsync(slug);
       toast.success(t('packs.toast.deleted'));
@@ -592,39 +588,38 @@ const PacksListPage = () => {
                       <Table.Cell className="tabular-nums">
                         {rm(p.price)}
                       </Table.Cell>
-                      <Table.Cell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="small"
-                            variant="secondary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/packs/${p.slug}`);
-                            }}
-                          >
-                            {t('packs.list.winRates')}
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="secondary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEdit(p);
-                            }}
-                          >
-                            {t('packs.list.edit')}
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="transparent"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTarget(p);
-                            }}
-                          >
-                            {t('packs.list.delete')}
-                          </Button>
-                        </div>
+                      {/* stopPropagation: clicks in the menu bubble through its
+                          portal to the row, which would open the pack. */}
+                      <Table.Cell
+                        className="text-right"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <RowActions
+                          subject={p.title}
+                          actions={[
+                            {
+                              label: t('packs.list.winRates'),
+                              onSelect: () => navigate(`/packs/${p.slug}`),
+                            },
+                            {
+                              label: t('packs.list.edit'),
+                              onSelect: () => openEdit(p),
+                            },
+                            {
+                              label: t('packs.list.delete'),
+                              danger: true,
+                              onSelect: () => void deletePack(p.slug),
+                              confirm: {
+                                title: t('packs.delete.title'),
+                                description: t('packs.delete.description', {
+                                  title: p.title,
+                                }),
+                                confirmText: t('packs.delete.confirm'),
+                                cancelText: t('packs.form.cancel'),
+                              },
+                            },
+                          ]}
+                        />
                       </Table.Cell>
                     </Table.Row>
                     {open && (
@@ -1238,30 +1233,6 @@ const PacksListPage = () => {
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>
-
-      <Prompt
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-      >
-        <Prompt.Content>
-          <Prompt.Header>
-            <Prompt.Title>{t('packs.delete.title')}</Prompt.Title>
-            <Prompt.Description>
-              {t('packs.delete.description', {
-                title: deleteTarget?.title ?? '',
-              })}
-            </Prompt.Description>
-          </Prompt.Header>
-          <Prompt.Footer>
-            <Prompt.Cancel>{t('packs.form.cancel')}</Prompt.Cancel>
-            <Prompt.Action onClick={confirmDelete}>
-              {t('packs.delete.confirm')}
-            </Prompt.Action>
-          </Prompt.Footer>
-        </Prompt.Content>
-      </Prompt>
     </Container>
   );
 };
