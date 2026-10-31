@@ -2,9 +2,9 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
-import { compositionGroup } from '../../../modules/packs/card-view';
 import { withLossless } from '../../../modules/packs/lossless';
 import { losslessWindowsForDisplay } from './lossless-display';
+import { catalogRows } from './pack-bodies';
 
 // GET /store/packs — the gacha pack catalog for /claw and the home "Open Packs"
 // tiles. A plain Medusa store route (publishable-key scoped, but NOT subject to
@@ -90,44 +90,6 @@ async function computeCatalogBody(req: MedusaRequest) {
     { order: { category: 'ASC', rank: 'ASC' }, take: 500 },
   );
 
-  // §2.4.8 composition — ONE grouped scan (packPoolComposition) rather than
-  // paging every odds row and every card in to fold in Node; it applies the
-  // same reward-row + orphan skip-set and the same isGraded/isPsa10 the admin
-  // list's poolComposition does, so the two can never disagree.
-  // `psa10` is the stricter guarantee gate: the storefront's "Guaranteed
-  // PSA 10" section requires EVERY pooled card to be a PSA 10 — an all-graded
-  // pack holding a PSA 9 or a BGS slab is GRADED but NOT psa10, so the
-  // heading can never overclaim.
-  const comp = await packsModuleService.packPoolComposition();
-  const groupOf = (slug: string): 'GRADED' | 'RAW' | 'MIX' | null => {
-    const t = comp.get(slug);
-    return compositionGroup(t?.graded ?? 0, t?.total ?? 0);
-  };
-  const psa10Of = (slug: string): boolean => {
-    const t = comp.get(slug);
-    return t !== undefined && t.total > 0 && t.psa10 === t.total;
-  };
-  // Explicit public shape — `price` is bigNumber now, so a raw spread would
-  // leak the internal `raw_price` jsonb sidecar (and id/timestamps) into a
-  // public payload. `price` serializes as a JSON number (RM — all pack
-  // prices and ledger money are Ringgit).
-  const body = {
-    packs: packs.map((p) => ({
-      slug: p.slug,
-      title: p.title,
-      category: p.category,
-      prize_type: p.prize_type,
-      price: p.price,
-      image: p.image,
-      display_image: p.display_image ?? null,
-      boost: p.boost,
-      buyback_percent: p.buyback_percent,
-      in_stock: p.in_stock,
-      group: groupOf(p.slug),
-      psa10: psa10Of(p.slug),
-      rank: p.rank,
-      status: p.status,
-    })),
-  };
+  const body = { packs: await catalogRows(packsModuleService, packs) };
   return body;
 }

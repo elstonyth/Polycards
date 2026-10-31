@@ -10134,6 +10134,8 @@ class PacksModuleService extends MedusaService({
       unitPrice: number;
       rolls: { tickets: number }[];
       openId: string;
+      /** The caller has checked this customer's group can see Drafts. */
+      allowDraft?: boolean;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
@@ -10148,7 +10150,8 @@ class PacksModuleService extends MedusaService({
     ticketBalance: number;
     totalCharged: number;
   }> {
-    const { customerId, packSlug, unitPrice, rolls, openId } = input;
+    const { customerId, packSlug, unitPrice, rolls, openId, allowDraft } =
+      input;
     if (
       rolls.length < 1 ||
       rolls.length > 3 ||
@@ -10166,7 +10169,7 @@ class PacksModuleService extends MedusaService({
     );
     if (
       pack?.prize_type !== 'tickets' ||
-      pack.status !== 'active' ||
+      (pack.status !== 'active' && !(allowDraft && pack.status === 'draft')) ||
       pack.in_stock === false
     ) {
       throw new MedusaError(

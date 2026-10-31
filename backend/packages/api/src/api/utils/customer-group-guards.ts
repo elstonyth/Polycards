@@ -8,6 +8,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import {
   PARTNER_RATE_KEY,
   resolveGroupPolicyForCustomer,
+  SEES_DRAFTS_KEY,
   VERIFICATION_EXEMPT_KEY,
   WITHDRAWALS_BLOCKED_KEY,
 } from '../../modules/packs/group-policy';
@@ -16,6 +17,7 @@ const GROUP_POLICY_KEYS = [
   PARTNER_RATE_KEY,
   WITHDRAWALS_BLOCKED_KEY,
   VERIFICATION_EXEMPT_KEY,
+  SEES_DRAFTS_KEY,
 ] as const;
 
 /**
@@ -52,7 +54,7 @@ export function stripAdditionalData(
 }
 
 export const GROUP_POLICY_METADATA_MESSAGE =
-  'partner_rate_bp, withdrawals_blocked and verification_exempt are set through POST /admin/customer-groups/:id/policy, which checks the rate against the partner bounds and records the change.';
+  'partner_rate_bp, withdrawals_blocked and verification_exempt are set through POST /admin/customer-groups/:id/policy, which checks the rate against the partner bounds and records the change. sees_drafts is set through POST /admin/customer-groups/:id/draft-access, which records the change.';
 
 /**
  * Same matcher as stripAdditionalData: refuse a body whose `metadata` carries

@@ -42,9 +42,11 @@ export async function rollTicketSpins(
   slug: string,
   set: OddsSet,
   count: number,
+  /** The caller has checked this customer's group can see Drafts. */
+  allowDraft = false,
 ): Promise<{ unitPrice: number; rolls: TicketRoll[] }> {
   const [pack] = await packs.listPacks(
-    { slug, status: 'active' },
+    allowDraft ? { slug } : { slug, status: 'active' },
     { take: 1 },
   );
   if (!pack || pack.category === 'reward_box' || pack.prize_type !== 'tickets') {

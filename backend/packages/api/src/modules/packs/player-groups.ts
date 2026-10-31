@@ -14,7 +14,9 @@ import {
 import { configAuditRow } from './config-audit';
 import {
   groupPolicyOf,
+  groupSeesDrafts,
   PARTNER_RATE_KEY,
+  SEES_DRAFTS_KEY,
   VERIFICATION_EXEMPT_KEY,
   WITHDRAWALS_BLOCKED_KEY,
   type GroupPolicy,
@@ -340,6 +342,55 @@ export async function editGroupPolicy(
       action: 'edit_group_policy',
       before,
       after: next,
+      reason: input.reason,
+    },
+  ]);
+  return updated;
+}
+
+/**
+ * Whether a group's members can see Draft packs. The one writer of that key: the
+ * native metadata routes refuse it (rejectGroupPolicyMetadata), because it also
+ * lets members spend real money on a pack that is not on sale.
+ *
+ * DEFAULT is refused, because it holds every customer without a real group.
+ * Audited under edit_group_policy with only this key in before/after, so no new
+ * action value is needed in admin_action_audit's CHECK.
+ */
+export async function editGroupDraftAccess(
+  container: MedusaContainer,
+  input: {
+    groupId: string;
+    seesDrafts: boolean;
+    adminId: string;
+    reason: string;
+  },
+): Promise<CustomerGroupDTO> {
+  const customers = customerService(container);
+  const group = await customers.retrieveCustomerGroup(input.groupId);
+  if (isDefaultPlayerGroup(group)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'The default player group cannot see Draft packs: it holds every customer without a group. Move the testers into a group of their own first.',
+    );
+  }
+  const before = groupSeesDrafts(group);
+  if (before === input.seesDrafts) return group;
+
+  // Medusa merges metadata per key, so the odds set and the partner policy on
+  // the row survive this write.
+  const updated = await customers.updateCustomerGroups(group.id, {
+    metadata: { [SEES_DRAFTS_KEY]: input.seesDrafts },
+  });
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+  await packs.createAdminActionAudits([
+    {
+      admin_id: input.adminId,
+      entity_type: 'customer_group',
+      entity_id: group.id,
+      action: 'edit_group_policy',
+      before: { [SEES_DRAFTS_KEY]: before },
+      after: { [SEES_DRAFTS_KEY]: input.seesDrafts },
       reason: input.reason,
     },
   ]);
