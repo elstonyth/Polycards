@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import {
   Button,
   Container,
@@ -9,10 +10,9 @@ import {
   Label,
   Table,
   Text,
-  toast,
 } from "@medusajs/ui";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
-import { listPlayers, type PlayersPage } from "../../lib/admin-rest";
+import { listPlayers } from "../../lib/admin-rest";
 import { orderDateTime } from "../../lib/format";
 import { supportSearchQuery } from "./search-query";
 
@@ -30,22 +30,27 @@ const RESULT_LIMIT = 10;
 const SupportPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PlayersPage | null>(null);
-  const [searching, setSearching] = useState(false);
+  // History state, so Back from a player's page brings the results back, and a
+  // phone or email stays out of the address bar.
+  const { state } = useLocation();
+  const applied: string = state?.q ?? "";
+  const [query, setQuery] = useState(applied);
+  const {
+    data: results,
+    error,
+    isFetching,
+    refetch,
+  } = useQuery({
+    queryKey: ["support-search", applied],
+    queryFn: () => listPlayers(0, applied, RESULT_LIMIT),
+    enabled: applied !== "",
+  });
 
-  const search = async () => {
+  const search = () => {
     const q = supportSearchQuery(query);
-    if (!q || searching) return;
-    setSearching(true);
-    try {
-      setResults(await listPlayers(0, q, RESULT_LIMIT));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-      setResults(null);
-    } finally {
-      setSearching(false);
-    }
+    if (!q || isFetching) return;
+    if (q === applied) void refetch();
+    else navigate(".", { replace: true, state: { q } });
   };
 
   const open = (id: string) => navigate(`/customers/${id}`);
@@ -73,11 +78,16 @@ const SupportPage = () => {
             onKeyDown={(e) => e.key === "Enter" && search()}
           />
         </div>
-        <Button onClick={search} isLoading={searching}>
+        <Button onClick={search} isLoading={isFetching}>
           {t("support.search")}
         </Button>
       </div>
-      {results !== null && (
+      {error && (
+        <div className="border-t px-6 py-6" role="alert">
+          <Text className="text-ui-fg-error">{error.message}</Text>
+        </div>
+      )}
+      {results && !error && (
         <div className="border-t">
           {results.players.length === 0 ? (
             <div className="px-6 py-6">
