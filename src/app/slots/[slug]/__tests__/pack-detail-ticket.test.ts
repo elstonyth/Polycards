@@ -12,6 +12,9 @@ import type { PackDetail } from '@/lib/data/packs';
 
 const mocks = vi.hoisted(() => ({
   customer: { id: 'cus_1' } as { id: string } | null,
+  // undefined: the poll answers with its seed, as a live pack's does.
+  poll: undefined as null | undefined,
+  trackPixel: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -38,11 +41,13 @@ vi.mock('@/components/Reveal', () => ({
     createElement('div', null, children),
 }));
 vi.mock('@/lib/use-pack-detail-poll', () => ({
-  usePackDetailPoll: (_id: string, seed: unknown) => seed,
+  usePackDetailPoll: (_id: string, seed: unknown) =>
+    mocks.poll === undefined ? seed : mocks.poll,
 }));
 vi.mock('@/lib/use-recent-pulls', () => ({
   useLiveRecentPulls: (seed: unknown) => seed,
 }));
+vi.mock('@/lib/pixel', () => ({ trackPixel: mocks.trackPixel }));
 vi.mock('@/components/AmbientVideo', () => ({
   AmbientVideo: () => createElement('div'),
 }));
@@ -108,6 +113,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   mocks.customer = { id: 'cus_1' };
+  mocks.poll = undefined;
+  mocks.trackPixel.mockClear();
 });
 
 afterEach(() => {
@@ -260,5 +267,54 @@ describe('PackDetailClient — ticket pack', () => {
     mocks.customer = null;
     const text = await render({ ...BASE, prizeType: 'tickets' }, TICKET_DETAIL);
     expect(text).toContain('Try a free demo spin');
+  });
+});
+
+describe('PackDetailClient — a Draft, for a staff member', () => {
+  const capsule: ResolvedPack = { ...BASE, prizeType: 'tickets', draft: true };
+  const cards: ResolvedPack = { ...BASE, name: 'Draft Cards', draft: true };
+
+  test('a Draft capsule says so and can still be opened', async () => {
+    const text = await render(capsule, TICKET_DETAIL);
+    expect(text).toContain('Draft');
+    expect(text).toContain('Open Capsule');
+    expect(text).not.toContain('Preview only');
+  });
+
+  test('a Draft card pack can be looked at but not opened', async () => {
+    const text = await render(cards, CARD_DETAIL);
+    expect(text).toContain('Draft');
+    expect(text).toContain('Preview only');
+    expect(text).toContain('can be viewed but not opened');
+    expect(text).not.toContain('Open Pack');
+    expect(text).not.toContain('Sold out');
+  });
+
+  // The poll reads the public route, which answers null for a draft, and that
+  // must not blank the page a minute after it loads.
+  test('keeps its details when the public poll finds nothing', async () => {
+    mocks.poll = null;
+    const text = await render(capsule, TICKET_DETAIL);
+    expect(text).toContain('Pull Odds');
+    expect(text).toContain('Top Hits');
+  });
+
+  test('a live pack still takes the poll', async () => {
+    mocks.poll = null;
+    const text = await render({ ...BASE, prizeType: 'tickets' }, TICKET_DETAIL);
+    expect(text).not.toContain('Pull Odds');
+  });
+
+  // A pack nobody can buy yet has no business in the ads funnel.
+  test('is not reported to the ads pixel', async () => {
+    await render(capsule, TICKET_DETAIL);
+    expect(mocks.trackPixel).not.toHaveBeenCalled();
+    await render({ ...BASE, prizeType: 'tickets' }, TICKET_DETAIL);
+    expect(mocks.trackPixel).toHaveBeenCalledTimes(1);
+  });
+
+  test('no Draft label on a live pack', async () => {
+    const text = await render({ ...BASE, prizeType: 'tickets' }, TICKET_DETAIL);
+    expect(text).not.toContain('Draft');
   });
 });

@@ -58,6 +58,10 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
         <span className="absolute left-3 top-3 z-[2] rounded-md bg-neutral-700/90 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white/80 shadow-sm sm:text-[10px]">
           Out of Stock
         </span>
+      ) : pack.draft ? (
+        <span className="absolute left-3 top-3 z-[2] rounded-md bg-white/15 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
+          Draft
+        </span>
       ) : (
         pack.boost && (
           <span className="absolute left-3 top-3 z-[2] rounded-md bg-buyback px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
@@ -182,6 +186,11 @@ function PackRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-0.5 text-sm font-semibold text-white">
           <span className="truncate">{pack.name}</span>
+          {pack.draft && (
+            <span className="ml-1 shrink-0 rounded bg-white/15 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide">
+              Draft
+            </span>
+          )}
           {!oos && (
             <ChevronRight
               className="h-3.5 w-3.5 shrink-0 text-white/60"

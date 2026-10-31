@@ -238,6 +238,8 @@ export default function PackDetailClient({
   // Ads funnel (lib/pixel.ts): a pack page view. Keyed on the pack, not the
   // mount — switching to a sibling pack can reuse this component.
   useEffect(() => {
+    // A pack nobody can buy yet has no business in the ads funnel.
+    if (active.draft) return;
     trackPixel('ViewContent', {
       content_ids: [active.id],
       content_name: active.name,
@@ -245,7 +247,7 @@ export default function PackDetailClient({
       value: active.priceMyr,
       currency: 'MYR',
     });
-  }, [active.id, active.name, active.priceMyr]);
+  }, [active.id, active.name, active.priceMyr, active.draft]);
   // Back can restore a cached server snapshot with an older initialQty, so
   // the live URL owns quantity as well as pack selection.
   const searchParams = useSearchParams();
@@ -267,7 +269,10 @@ export default function PackDetailClient({
   const [needsVerify, setNeedsVerify] = useState(verifyPrompt !== null);
   // One request refreshes every grid price (60s, visibility-gated), seeded
   // with this route's server snapshot.
-  const liveDetail = usePackDetailPoll(active.id, detail);
+  // A Draft keeps its seed: the poll reads the public route, which finds nothing
+  // for a draft and would blank the page a minute after it loads.
+  const polledDetail = usePackDetailPoll(active.id, detail);
+  const liveDetail = active.draft ? detail : polledDetail;
   const [openCard, setOpenCard] = useState<CardSeed | null>(null);
   // A pool card already IS a card seed (one view) — the overlay reads the
   // fields it needs and ignores the rest.
@@ -335,7 +340,11 @@ export default function PackDetailClient({
   const giftsPending = giftKey !== null && heldGifts?.key !== giftKey;
   // Sold out (admin): still listed, but the backend refuses a paid open. Only
   // vault gifts may still open it, so quantity is capped at the gifts held.
-  const soldOutPack = active.inStock === false;
+  // A Draft card pack can be looked at but not opened: a card open writes pulls
+  // into the live feeds, so the backend refuses it. A Draft capsule writes none.
+  const previewOnly = active.draft === true && !ticketPack;
+  const soldOutPack = active.inStock === false || previewOnly;
+  const unavailableLabel = previewOnly ? 'Preview only' : 'Sold out';
   // The reel (openBatch) caps a single open at 3 packs.
   const maxQty = soldOutPack ? Math.min(3, Math.max(1, held)) : 3;
   const qty = Number.isInteger(count)
@@ -556,9 +565,16 @@ export default function PackDetailClient({
           <div className="flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950">
             {/* Title + buyback */}
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
-              <h1 className="font-heading text-xl font-bold tracking-tight text-white sm:text-2xl">
-                {active.name}
-              </h1>
+              <div className="flex min-w-0 items-center gap-2">
+                <h1 className="font-heading text-xl font-bold tracking-tight text-white sm:text-2xl">
+                  {active.name}
+                </h1>
+                {active.draft && (
+                  <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white/70">
+                    Draft
+                  </span>
+                )}
+              </div>
               {isFreePack ? (
                 // A free pull can be neither sold nor delivered until the first
                 // PAID open, so a buyback rate here would advertise money the
@@ -734,7 +750,7 @@ export default function PackDetailClient({
                   primary CTA here is an invitation to a refusal. */}
               {soldOut ? (
                 <Pill variant="secondary" size="lg" disabled className="w-full">
-                  Sold out
+                  {unavailableLabel}
                 </Pill>
               ) : (
                 !freeClaimUnavailable && (
@@ -807,6 +823,8 @@ export default function PackDetailClient({
                     Your one-time welcome pack — nothing charged. The card lands
                     in your vault. {FREE_PULL_LOCKED_MESSAGE}
                   </>
+                ) : previewOnly ? (
+                  <>Draft card packs can be viewed but not opened.</>
                 ) : soldOut ? (
                   <>This {noun} is sold out right now.</>
                 ) : customer && balance !== null ? (
@@ -992,7 +1010,7 @@ export default function PackDetailClient({
           </div>
           {soldOut ? (
             <Pill variant="secondary" size="md" disabled className="px-5">
-              Sold out
+              {unavailableLabel}
             </Pill>
           ) : (
             !freeClaimUnavailable && (
