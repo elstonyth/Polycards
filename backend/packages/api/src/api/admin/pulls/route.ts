@@ -6,6 +6,7 @@ import {
   resolveFxRate,
   displayMarketPrice,
 } from "../../../modules/packs/pricing";
+import { pullPackTitle } from "../../../modules/packs/pull-history";
 import { parsePaginationParams } from "../../../utils/pagination";
 
 // GET /admin/pulls — the gacha Pull ledger for the operator, plus rollups.
@@ -180,7 +181,8 @@ export async function GET(
       customer_id: p.customer_id,
       customer_email: p.customer_id ? emailById.get(p.customer_id) ?? null : null,
       pack_id: p.pack_id,
-      pack_title: packTitleBySlug.get(p.pack_id) ?? null,
+      // A prize card has no pack row: name where it came from, not its sentinel.
+      pack_title: pullPackTitle(p, packTitleBySlug.get(p.pack_id)),
       // Vault lifecycle: vaulted (customer still holds it) vs bought_back
       // (instant sell-back — amount = the MYR (RM) actually credited).
       status: p.status,

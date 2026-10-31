@@ -251,6 +251,15 @@ describe('event drafts', () => {
     });
   });
 
+  test('a new event needs no name typed: it is the Prize Pool', () => {
+    const payload = eventDraftToPayload({
+      ...blankEventDraft(),
+      startsAt: ready.startsAt,
+      endsAt: ready.endsAt,
+    });
+    expect(payload?.name).toBe('Prize Pool');
+  });
+
   test('a new event carries no id', () => {
     const payload = eventDraftToPayload(ready);
     expect(payload).not.toBeNull();

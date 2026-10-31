@@ -1718,6 +1718,8 @@ export const LuckyDrawMineSchema = z.looseObject({
       status: z.string(),
       // Set on a one-winner row, where prize_id is the event id.
       event_id: z.string().optional().catch(undefined),
+      // One-winner rows only: every ticket in the pool.
+      total_tickets: finite.optional().catch(undefined),
     }),
   ).catch([]),
 });
