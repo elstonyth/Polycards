@@ -19,6 +19,7 @@ import {
   useGroupPlayerCount,
   useReferralSettings,
   useSetGroupOddsSet,
+  useSetGroupDraftAccess,
   useSetGroupPolicy,
   type AdminCustomerGroup,
 } from '../../lib/queries';
@@ -27,6 +28,7 @@ import {
   DEFAULT_PLAYER_GROUP_NAME,
   effectiveOddsSet,
   groupPolicyOf,
+  groupSeesDrafts,
   isDefaultPlayerGroup,
   oddsSetOf as coerce,
 } from '../../lib/player-groups';
@@ -82,12 +84,14 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
   const { t } = useTranslation();
   const saveOdds = useSetGroupOddsSet();
   const savePolicy = useSetGroupPolicy();
+  const saveDrafts = useSetGroupDraftAccess();
   const { data: settings } = useReferralSettings();
   // Unsaved edits ONLY. Seeding from the server value would go stale after
   // the post-save invalidation refetch; `undefined` falls back to it every
   // render.
   const [picked, setPicked] = useState<OddsSet | undefined>();
   const [draft, setDraft] = useState<PolicyDraft | undefined>();
+  const [pickedDrafts, setPickedDrafts] = useState<boolean | undefined>();
 
   // The default group's odds set AND policy are LOCKED, not merely hidden: its
   // members and customers with no group at all must behave identically, and
@@ -107,6 +111,11 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
   const edit = (patch: Partial<PolicyDraft>) =>
     setDraft({ ...policy, ...patch });
 
+  // Its own control, not part of the partner policy: any real group can have it.
+  const savedDrafts = groupSeesDrafts(group);
+  const seesDrafts = locked ? savedDrafts : (pickedDrafts ?? savedDrafts);
+  const draftsDirty = !locked && seesDrafts !== savedDrafts;
+
   const boundsHint = settings
     ? `${settings.partner_min_bp / 100}–${settings.partner_max_bp / 100}%`
     : '';
@@ -125,22 +134,35 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
         (rateBp < settings.partner_min_bp ||
           rateBp > settings.partner_max_bp)));
 
-  const saving = saveOdds.isPending || savePolicy.isPending;
+  const saving =
+    saveOdds.isPending || savePolicy.isPending || saveDrafts.isPending;
 
   const save = () => {
-    // Reason FIRST: the policy write is audited and the prompt is its only
-    // input, so a cancelled prompt must abort the whole save — firing the odds
-    // write before asking would leave the row half-saved with Save still lit.
-    const reason = policyDirty
+    // Reason FIRST: the policy and draft writes are audited and the prompt is
+    // their only input, so a cancelled prompt must abort the whole save — firing
+    // the odds write before asking would leave the row half-saved with Save still
+    // lit.
+    const audited = policyDirty || draftsDirty;
+    const reason = audited
       ? window.prompt(t('oddsSets.reasonPrompt'))?.trim()
       : undefined;
-    if (policyDirty && !reason) return;
-    // SEQUENCED, never concurrent: both writes land on the same metadata
+    if (audited && !reason) return;
+    // SEQUENCED, never concurrent: these writes land on the same metadata
     // column through Medusa's read-merge-write, so two in flight can overwrite
     // each other's keys with the stale copy each one read. Odds first (the
-    // native route), policy after it settles.
+    // native route), then policy, then draft access, each after the last settles.
+    const writeDrafts = () => {
+      if (!draftsDirty || !reason) return;
+      saveDrafts.mutate(
+        { id: group.id, seesDrafts, reason },
+        { onSuccess: () => setPickedDrafts(undefined) },
+      );
+    };
     const writePolicy = () => {
-      if (!policyDirty || !reason) return;
+      if (!policyDirty || !reason) {
+        writeDrafts();
+        return;
+      }
       savePolicy.mutate(
         {
           id: group.id,
@@ -151,7 +173,12 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
           },
           reason,
         },
-        { onSuccess: () => setDraft(undefined) },
+        {
+          onSuccess: () => {
+            setDraft(undefined);
+            writeDrafts();
+          },
+        },
       );
     };
     if (oddsDirty) {
@@ -285,6 +312,14 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
           <span className="text-ui-fg-muted">—</span>
         )}
       </Table.Cell>
+      <Table.Cell>
+        <Switch
+          checked={seesDrafts}
+          disabled={locked || saving}
+          onCheckedChange={setPickedDrafts}
+          aria-label={`${t('oddsSets.seesDrafts')} — ${group.name}`}
+        />
+      </Table.Cell>
       <Table.Cell className="text-right">
         <PlayerCount groupId={group.id} />
       </Table.Cell>
@@ -297,7 +332,11 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
           <Button
             size="small"
             variant="secondary"
-            disabled={(!oddsDirty && !policyDirty) || rateInvalid || saving}
+            disabled={
+              (!oddsDirty && !policyDirty && !draftsDirty) ||
+              rateInvalid ||
+              saving
+            }
             onClick={save}
           >
             {t('oddsSets.save')}
@@ -449,6 +488,7 @@ const OddsSetsPage = () => {
                 <Table.HeaderCell>
                   {t('oddsSets.verification')}
                 </Table.HeaderCell>
+                <Table.HeaderCell>{t('oddsSets.seesDrafts')}</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   {t('oddsSets.players')}
                 </Table.HeaderCell>
@@ -466,6 +506,9 @@ const OddsSetsPage = () => {
           <div className="border-t px-6 py-3">
             <Text size="xsmall" className="text-ui-fg-muted">
               {t('oddsSets.policyHint')}
+            </Text>
+            <Text size="xsmall" className="text-ui-fg-muted mt-1">
+              {t('oddsSets.seesDraftsHint')}
             </Text>
           </div>
         </div>

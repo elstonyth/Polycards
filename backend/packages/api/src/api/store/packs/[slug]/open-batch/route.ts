@@ -11,6 +11,7 @@ import { openBatchWorkflow } from '../../../../../workflows/open-batch';
 import { settleVipAfterSpinWorkflow } from '../../../../../workflows/settle-vip-after-spin';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
+import { customerSeesDrafts } from '../../../../../modules/packs/group-policy';
 import { resolveOddsSetForCustomer } from '../../../../../modules/packs/odds-sets';
 import { rollTicketSpins } from '../../../../../modules/packs/ticket-spin';
 import type PacksModuleService from '../../../../../modules/packs/service';
@@ -103,11 +104,19 @@ export async function POST(
         'A ticket pack cannot be opened with gifted packs.',
       );
     }
+    // Staff testing a Draft (group-policy.ts). Only ticket packs: a card open
+    // writes pulls, which reach the live feeds and Telegram, so a card draft stays
+    // refused for everyone by fetchPackData. Read only for a draft, so a normal
+    // spin pays nothing for it.
+    const allowDraft =
+      pack.status === 'draft' &&
+      (await customerSeesDrafts(req.scope, customerId));
     const { unitPrice, rolls } = await rollTicketSpins(
       packsService,
       slug,
       await resolveOddsSetForCustomer(req.scope, customerId),
       count,
+      allowDraft,
     );
     const openId = randomUUID();
     const settled = await packsService.settleTicketSpins({
@@ -116,6 +125,7 @@ export async function POST(
       unitPrice,
       rolls,
       openId,
+      allowDraft,
     });
     // ⚠ POST-COMMIT, as on a card pack: the customer has paid and holds the
     // tickets, so nothing below may fail the request.

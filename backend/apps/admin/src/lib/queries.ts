@@ -135,6 +135,7 @@ import {
   listCustomerGroupsAdmin,
   setGroupOddsSet,
   setGroupPolicy,
+  setGroupDraftAccess,
   createCustomerGroupAdmin,
   countCustomersInGroup,
   setCustomerGroup,
@@ -1508,6 +1509,19 @@ export const useSetGroupPolicy = () => {
       setGroupPolicy(vars.id, vars.policy, vars.reason),
     onSuccess: () => {
       toast.success('Group policy saved');
+      return qc.invalidateQueries({ queryKey: qk.customerGroups });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useSetGroupDraftAccess = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; seesDrafts: boolean; reason: string }) =>
+      setGroupDraftAccess(vars.id, vars.seesDrafts, vars.reason),
+    onSuccess: () => {
+      toast.success('Draft access saved');
       return qc.invalidateQueries({ queryKey: qk.customerGroups });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
