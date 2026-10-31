@@ -147,7 +147,9 @@
       }
     },
     "graded": "评级",
+    "slab": "评级卡",
     "raw": "未评级",
+    "export": "导出 Excel",
     "sku": "SKU"
   },
   "grn": {
@@ -216,6 +218,9 @@
       "loading": "正在加载收货单……",
       "noLines": "没有可转入的明细。"
     }
+  },
+  "cardImage": {
+    "view": "查看 {{name}} 的图片"
   },
   "procurement": {
     "title": "采购清单",

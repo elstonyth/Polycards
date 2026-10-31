@@ -165,6 +165,10 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('GET', '/admin/procurement/to-buy')).toEqual([
       'procurement:read',
     ]);
+    // Nothing beyond procurement:read: the Stock keeper role (Anson) exports.
+    expect(policyFor('GET', '/admin/procurement/to-buy/export')).toEqual([
+      'procurement:read',
+    ]);
   });
 
   it('secret-bearing GETs ask for their own declared read policy', () => {

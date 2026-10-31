@@ -38,6 +38,7 @@ describe('blockedReason', () => {
     ['/admin/pricecharting/search', /PriceCharting/],
     ['/admin/inventory/export.xlsx', /file exports/],
     ['/admin/players/export', /file exports/],
+    ['/admin/procurement/to-buy/export', /file exports/],
     // Medusa matches routes case-insensitively: /admin/USERS runs /admin/users.
     ['/admin/INVITES', /staff invites/],
     ['/admin/Api-Keys', /API keys/],

@@ -6,7 +6,7 @@ import { loadInventoryRows, type InventoryRow } from './inventory-view';
 import { stockAutoAllocationEnabled } from './stock-allocation-run';
 import { displayMarketPrice, resolveFxRate } from './pricing';
 import { toOptionalMoney } from './money';
-import { isGraded } from './card-view';
+import { isGraded, slabGrade, stockImage } from './card-view';
 import { pageAll } from '../../api/utils/page-all';
 
 export type ToBuyRow = Pick<
@@ -27,14 +27,19 @@ export type ToBuyRow = Pick<
 // buyers' group chat, so each row also carries the picture to look for and
 // the PriceCharting price as is. image: graded = the baked slab composite
 // (no tier frame), raw = the bare card. fmv_usd = PriceCharting's own number;
-// fmv = that at the live rate in RM, with no 20% listing markup.
+// fmv = that at the live rate in RM, with no 20% listing markup. set and grade
+// ("PSA 10", null = raw) are what a buyer asks a seller for.
 export type ToBuyListRow = ToBuyRow & {
   image: string | null;
   fmv_usd: number | null;
+  set: string | null;
+  grade: string | null;
 };
 
 type CardLook = {
+  set: string;
   grader: string;
+  grade: string;
   image: string;
   slab_image: string | null;
   market_value: unknown;
@@ -57,9 +62,9 @@ export function addCardDetails(
     return {
       ...r,
       graded,
-      // `||`, not `??`: an empty slab_image / image means "none" too.
-      image:
-        (graded ? card?.slab_image : null) || card?.image || r.photo || null,
+      image: stockImage(graded, card, r.photo),
+      set: card?.set || null,
+      grade: card ? slabGrade(card) : null,
       fmv_usd: usd,
       fmv: usd === null ? r.fmv : displayMarketPrice(usd, fx, 1),
     };

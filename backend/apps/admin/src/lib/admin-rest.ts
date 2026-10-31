@@ -2331,6 +2331,10 @@ export interface InventoryRow {
   handle: string;
   product_id: string;
   photo: string | null;
+  /** The stock screens' picture: graded = the baked slab, raw = the bare card. */
+  image: string | null;
+  /** "PSA 10"; null = raw. */
+  grade: string | null;
   name: string;
   sku: string;
   is_card: boolean;
@@ -2549,6 +2553,8 @@ export interface ProcurementToBuyRow {
   photo: string | null;
   image: string | null;
   graded: boolean;
+  /** "PSA 10"; null = raw. */
+  grade: string | null;
   to_procure: number;
   on_hand: number;
   requested: number;
@@ -2564,6 +2570,30 @@ export const getProcurementToBuy = () =>
   getJson<{ rows: ProcurementToBuyRow[]; taken_at: string | null }>(
     '/admin/procurement/to-buy',
   );
+
+// The list on screen as a .xlsx with each card's picture in its row. Same
+// blob-URL dance as exportInventoryXlsx, for the reasons noted there. The date
+// is Malaysia's: the list turns over at 12am MYT, which is still yesterday in
+// UTC for the first eight hours.
+export async function exportProcurementToBuyXlsx(): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/procurement/to-buy/export`,
+    {
+      credentials: 'include',
+    },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `procurement-to-buy-${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' })}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 // The mailing list: every ready_to_ship order, oldest first, in the Orders
 // page's own serialized shape (customer_email included).
