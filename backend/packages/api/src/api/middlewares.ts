@@ -1336,15 +1336,10 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [rejectAdminBankAccountsMetadata, rejectAdminPhoneWrite],
     },
-    // Reads of the same blob: see redactCustomerSecrets.
+    // Responses carrying the same blob, from any route: see redactCustomerSecrets.
+    // No `method` pin: writes echo the record too.
     {
-      matcher: '/admin/customers',
-      method: 'GET',
-      middlewares: [redactCustomerSecrets],
-    },
-    {
-      matcher: '/admin/customers/*',
-      method: 'GET',
+      matcher: '/admin/*',
       middlewares: [redactCustomerSecrets],
     },
     {

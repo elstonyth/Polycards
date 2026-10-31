@@ -92,12 +92,25 @@ const SECRET_METADATA = [
   { key: PARTNER_CREDENTIAL_KEY, resource: 'partner_credential' },
 ] as const;
 
+/** Removes the keys from every `metadata`, at any depth. */
+const stripSecretMetadata = (node: unknown, hidden: string[]): void => {
+  if (!node || typeof node !== 'object') return;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'metadata' && value && typeof value === 'object') {
+      for (const secret of hidden) delete (value as Record<string, unknown>)[secret];
+    } else {
+      stripSecretMetadata(value, hidden);
+    }
+  }
+};
+
 /**
- * Core's GET /admin/customers and /admin/customers/:id return customer.metadata
- * whole, under customer:read alone, and that blob holds full bank account
- * numbers and partner account passwords. SECRET_READS (api/admin-rbac.ts) fences
- * the routes built to serve them, so without this a view-only role read the same
- * values here, in bulk and with no audit row. Same policies, same answer.
+ * Any admin response can carry customer.metadata whole: `?fields=` walks
+ * relations (an order's customer, a group's customers) and writes echo the
+ * record. That blob holds full bank account numbers and partner account
+ * passwords. SECRET_READS (api/admin-rbac.ts) fences the routes built to serve
+ * them, so without this any role read the same values here, in bulk and with no
+ * audit row. Same policies, same answer.
  */
 export async function redactCustomerSecrets(
   req: MedusaRequest,
@@ -122,19 +135,11 @@ export async function redactCustomerSecrets(
     }
     if (hidden.length > 0) {
       const json = res.json.bind(res);
+      // A copy, so a cached object can never lose its keys for the next caller.
       res.json = (body: unknown) => {
-        const b = body as {
-          customer?: { metadata?: Record<string, unknown> | null };
-          customers?: { metadata?: Record<string, unknown> | null }[];
-        } | null;
-        for (const c of [b?.customer, ...(b?.customers ?? [])]) {
-          if (c?.metadata) {
-            c.metadata = Object.fromEntries(
-              Object.entries(c.metadata).filter(([k]) => !hidden.includes(k)),
-            );
-          }
-        }
-        return json(body);
+        const copy = JSON.parse(JSON.stringify(body ?? null));
+        stripSecretMetadata(copy, hidden);
+        return json(copy);
       };
     }
     next();
