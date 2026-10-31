@@ -722,7 +722,6 @@
   },
   "customer360": {
     "title": "Customer 360",
-    "viewButton": "View 360",
     "back": "Back",
     "memberSince": "Customer since {{date}}",
     "balance": "Credit balance",
