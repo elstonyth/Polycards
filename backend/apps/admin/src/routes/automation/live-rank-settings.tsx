@@ -5,7 +5,7 @@ import type {
   LiveSnapshot,
 } from '../../../../../packages/api/src/api/utils/automation-live-types';
 import { validateLiveRankTargets } from '../../../../../packages/api/src/api/utils/automation-live-rank';
-import { rm } from '../../lib/format';
+import { orderDateTime, rm } from '../../lib/format';
 
 export function LiveRankSettings({
   config,
@@ -153,7 +153,7 @@ export function LiveRankSettings({
                 <Text size="small" className="text-ui-fg-subtle">
                   Last observation:{' '}
                   <time dateTime={goal.status.observedAt}>
-                    {new Date(goal.status.observedAt).toLocaleString()}
+                    {orderDateTime(goal.status.observedAt)}
                   </time>
                 </Text>
               )}

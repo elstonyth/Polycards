@@ -26,6 +26,7 @@ import { resolveImageUrl } from '../../lib/image-url';
 import { scheduleOk, toIso, toLocalInput } from '../tasks/task-draft';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { RowActions } from '../../components/RowActions';
+import { orderDateTime } from '../../lib/format';
 
 // Announcements — the storefront popup (spec 2026-10-06 §5): ads, upcoming
 // drops, news. Every visitor sees the live set once per MYT day as one swipe
@@ -97,7 +98,7 @@ const sortOk = (v: string): boolean => {
 };
 
 const dateLabel = (iso: string | null): string =>
-  iso ? new Date(iso).toLocaleString() : '—';
+  iso ? orderDateTime(iso) : '—';
 
 const windowLabel = (a: AdminAnnouncement): string =>
   a.starts_at || a.ends_at

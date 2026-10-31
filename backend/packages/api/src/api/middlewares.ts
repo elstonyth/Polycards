@@ -20,6 +20,7 @@ import {
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import {
   rejectCustomerMetadata,
+  redactCustomerSecrets,
   rejectAdminBankAccountsMetadata,
 } from './utils/customer-metadata-guard';
 import {
@@ -1334,6 +1335,12 @@ export default defineMiddlewares({
       matcher: '/admin/customers/*',
       method: 'POST',
       middlewares: [rejectAdminBankAccountsMetadata, rejectAdminPhoneWrite],
+    },
+    // Responses carrying the same blob, from any route: see redactCustomerSecrets.
+    // No `method` pin: writes echo the record too.
+    {
+      matcher: '/admin/*',
+      middlewares: [redactCustomerSecrets],
     },
     {
       matcher: '/admin/customers/*/payout-details',

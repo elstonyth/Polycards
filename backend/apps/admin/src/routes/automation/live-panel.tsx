@@ -29,7 +29,7 @@ import {
   PlaySolid,
   StopCircleSolid,
 } from '@medusajs/icons';
-import { rm } from '../../lib/format';
+import { orderDateTime, rm } from '../../lib/format';
 import { getLiveAccountActivity } from './live-account-activity';
 import type { LiveAccountActivity } from './live-account-activity';
 import { LiveRankSettings } from './live-rank-settings';
@@ -877,7 +877,7 @@ export function LivePanel() {
                               activity.nextCheckAt,
                             ).toISOString()}
                           >
-                            {new Date(activity.nextCheckAt).toLocaleString()}
+                            {orderDateTime(activity.nextCheckAt)}
                           </time>
                         </span>
                       )}
@@ -1022,7 +1022,7 @@ export function LivePanel() {
                 <Table.Row key={row.runId}>
                   <Table.Cell className="whitespace-nowrap">
                     {row.startedAt
-                      ? new Date(row.startedAt).toLocaleString()
+                      ? orderDateTime(row.startedAt)
                       : '—'}
                     {row.endedAt && (
                       <Text size="xsmall" className="text-ui-fg-muted">

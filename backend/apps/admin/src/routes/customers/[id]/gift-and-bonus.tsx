@@ -14,6 +14,8 @@ import {
   Textarea,
   toast,
 } from '@medusajs/ui';
+import type { Permission } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useAdjustCredits,
   useCustomerGacha,
@@ -57,6 +59,11 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
   // Same key as the page header's — a cache read, not a second request.
   const { data: view } = useCustomerGacha(customerId);
   const giftsQ = useCustomerPackGifts(customerId);
+  // Sending, revoking and applying all ask customer:update (api/admin-rbac.ts):
+  // a view-only role reads the gifts and balance and gets no form that 403s.
+  const canEdit = usePermissions().hasPermission(
+    'customer:update' as Permission,
+  );
   // The packs list fans out to every odds row (queries.ts usePacks), so it is
   // only fetched once the operator opens the pack select.
   const [packsWanted, setPacksWanted] = useState(false);
@@ -85,8 +92,7 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
       p.prize_type !== 'tickets' &&
       p.group !== null,
   );
-  const packTitle =
-    packs.find((p) => p.slug === packSlug)?.title ?? packSlug;
+  const packTitle = packs.find((p) => p.slug === packSlug)?.title ?? packSlug;
 
   const qty = Number(quantity);
   const giftValid =
@@ -214,89 +220,91 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
           </Text>
         </div>
 
-        <div className="flex flex-wrap items-end gap-3 border-t px-6 py-4">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="gift-pack" size="small">
-              {t('customer360.gift.pack')}
-            </Label>
-            <Select
-              value={packSlug}
-              onValueChange={setPackSlug}
-              onOpenChange={(open) => {
-                if (open) setPacksWanted(true);
-              }}
-            >
-              {/* Hover/focus starts the fetch a beat before the click. */}
-              <Select.Trigger
-                id="gift-pack"
-                className="w-64"
-                onPointerEnter={() => setPacksWanted(true)}
-                onFocus={() => setPacksWanted(true)}
+        {canEdit && (
+          <div className="flex flex-wrap items-end gap-3 border-t px-6 py-4">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="gift-pack" size="small">
+                {t('customer360.gift.pack')}
+              </Label>
+              <Select
+                value={packSlug}
+                onValueChange={setPackSlug}
+                onOpenChange={(open) => {
+                  if (open) setPacksWanted(true);
+                }}
               >
-                <Select.Value
-                  placeholder={t('customer360.gift.packPlaceholder')}
-                />
-              </Select.Trigger>
-              <Select.Content>
-                {/* Without these an empty list reads as "nothing giftable". */}
-                {packsQ.isError ? (
-                  <Text size="small" className="text-ui-fg-error px-2 py-1.5">
-                    {t('customer360.gift.packsError')}
-                  </Text>
-                ) : (
-                  !packsQ.data && (
-                    <Text
-                      size="small"
-                      className="text-ui-fg-subtle px-2 py-1.5"
-                    >
-                      {t('customer360.gift.packsLoading')}
+                {/* Hover/focus starts the fetch a beat before the click. */}
+                <Select.Trigger
+                  id="gift-pack"
+                  className="w-64"
+                  onPointerEnter={() => setPacksWanted(true)}
+                  onFocus={() => setPacksWanted(true)}
+                >
+                  <Select.Value
+                    placeholder={t('customer360.gift.packPlaceholder')}
+                  />
+                </Select.Trigger>
+                <Select.Content>
+                  {/* Without these an empty list reads as "nothing giftable". */}
+                  {packsQ.isError ? (
+                    <Text size="small" className="text-ui-fg-error px-2 py-1.5">
+                      {t('customer360.gift.packsError')}
                     </Text>
-                  )
-                )}
-                {packs.map((p) => (
-                  <Select.Item key={p.slug} value={p.slug}>
-                    {p.title} — {rm(p.price)}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select>
+                  ) : (
+                    !packsQ.data && (
+                      <Text
+                        size="small"
+                        className="text-ui-fg-subtle px-2 py-1.5"
+                      >
+                        {t('customer360.gift.packsLoading')}
+                      </Text>
+                    )
+                  )}
+                  {packs.map((p) => (
+                    <Select.Item key={p.slug} value={p.slug}>
+                      {p.title} — {rm(p.price)}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="gift-qty" size="small">
+                {t('customer360.gift.quantity')}
+              </Label>
+              <Input
+                id="gift-qty"
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                className="w-28"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+            </div>
+            <div className="flex min-w-[16rem] flex-1 flex-col gap-1">
+              <Label htmlFor="gift-note" size="small">
+                {t('customer360.gift.note')}
+              </Label>
+              <Textarea
+                id="gift-note"
+                rows={1}
+                maxLength={512}
+                value={giftNote}
+                onChange={(e) => setGiftNote(e.target.value)}
+              />
+            </div>
+            <Button
+              size="small"
+              onClick={() => setConfirm({ kind: 'gift' })}
+              disabled={!giftValid}
+              isLoading={grant.isPending}
+            >
+              {t('customer360.gift.send')}
+            </Button>
           </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="gift-qty" size="small">
-              {t('customer360.gift.quantity')}
-            </Label>
-            <Input
-              id="gift-qty"
-              type="number"
-              min={1}
-              max={10}
-              step={1}
-              className="w-28"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-            />
-          </div>
-          <div className="flex min-w-[16rem] flex-1 flex-col gap-1">
-            <Label htmlFor="gift-note" size="small">
-              {t('customer360.gift.note')}
-            </Label>
-            <Textarea
-              id="gift-note"
-              rows={1}
-              maxLength={512}
-              value={giftNote}
-              onChange={(e) => setGiftNote(e.target.value)}
-            />
-          </div>
-          <Button
-            size="small"
-            onClick={() => setConfirm({ kind: 'gift' })}
-            disabled={!giftValid}
-            isLoading={grant.isPending}
-          >
-            {t('customer360.gift.send')}
-          </Button>
-        </div>
+        )}
 
         {giftsQ.isError ? (
           <div className="border-t px-6 py-6">
@@ -363,12 +371,14 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
                       {g.opened_at ? orderDateTime(g.opened_at) : '—'}
                     </Table.Cell>
                     <Table.Cell className="text-right">
-                      {g.state === 'unopened' && (
+                      {canEdit && (g.state === 'unopened' || g.state === 'stuck') && (
                         <Button
                           size="small"
                           variant="secondary"
                           aria-label={`Revoke ${g.pack_title} gift`}
-                          onClick={() => setConfirm({ kind: 'revoke', gift: g })}
+                          onClick={() =>
+                            setConfirm({ kind: 'revoke', gift: g })
+                          }
                           disabled={revoke.isPending}
                           isLoading={
                             revoke.isPending &&
@@ -403,45 +413,47 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
             {view ? rm(view.bonus_balance ?? 0) : '—'}
           </Heading>
         </div>
-        <div className="flex flex-col gap-3 border-t px-6 py-4">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="bonus-amount" size="small">
-              {t('customer360.bonus.amount')}
-            </Label>
-            <Input
-              id="bonus-amount"
-              inputMode="decimal"
-              value={bonusAmount}
-              onChange={(e) => setBonusAmount(e.target.value)}
-            />
+        {canEdit && (
+          <div className="flex flex-col gap-3 border-t px-6 py-4">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="bonus-amount" size="small">
+                {t('customer360.bonus.amount')}
+              </Label>
+              <Input
+                id="bonus-amount"
+                inputMode="decimal"
+                value={bonusAmount}
+                onChange={(e) => setBonusAmount(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="bonus-note" size="small">
+                {t('customer360.bonus.note')}
+              </Label>
+              <Textarea
+                id="bonus-note"
+                rows={2}
+                maxLength={512}
+                value={bonusNote}
+                onChange={(e) => setBonusNote(e.target.value)}
+              />
+            </div>
+            {bonusAmount.trim() !== '' && !amountValid && (
+              <Text size="small" className="text-ui-fg-error">
+                {t('customer360.bonus.invalid')}
+              </Text>
+            )}
+            <Button
+              size="small"
+              className="self-end"
+              onClick={() => setConfirm({ kind: 'bonus' })}
+              disabled={!bonusValid}
+              isLoading={adjust.isPending}
+            >
+              {t('customer360.bonus.apply')}
+            </Button>
           </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="bonus-note" size="small">
-              {t('customer360.bonus.note')}
-            </Label>
-            <Textarea
-              id="bonus-note"
-              rows={2}
-              maxLength={512}
-              value={bonusNote}
-              onChange={(e) => setBonusNote(e.target.value)}
-            />
-          </div>
-          {bonusAmount.trim() !== '' && !amountValid && (
-            <Text size="small" className="text-ui-fg-error">
-              {t('customer360.bonus.invalid')}
-            </Text>
-          )}
-          <Button
-            size="small"
-            className="self-end"
-            onClick={() => setConfirm({ kind: 'bonus' })}
-            disabled={!bonusValid}
-            isLoading={adjust.isPending}
-          >
-            {t('customer360.bonus.apply')}
-          </Button>
-        </div>
+        )}
       </Container>
 
       <Prompt
@@ -458,7 +470,9 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
           </Prompt.Header>
           <Prompt.Footer>
             <Prompt.Cancel>{t('support.adjustCancel')}</Prompt.Cancel>
-            <Prompt.Action onClick={handleConfirm}>{promptAction}</Prompt.Action>
+            <Prompt.Action onClick={handleConfirm}>
+              {promptAction}
+            </Prompt.Action>
           </Prompt.Footer>
         </Prompt.Content>
       </Prompt>

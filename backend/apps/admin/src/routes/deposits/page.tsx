@@ -5,7 +5,8 @@ import { Container, Heading, Text, Table, Select } from '@medusajs/ui';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useGatewayDeposits } from '../../lib/queries';
 import type { GatewayDepositView } from '../../lib/admin-rest';
-import { rm, timeAgo } from '../../lib/format';
+import { paymentMethodLabel, rm } from '../../lib/format';
+import { When } from '../customers/[id]/bits';
 import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
@@ -147,7 +148,7 @@ const DepositsPage = () => {
                 {data.deposits.map((d) => (
                   <Table.Row key={d.id}>
                     <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
-                      {timeAgo(d.created_at)}
+                      <When iso={d.created_at} />
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
                       <button
@@ -158,7 +159,7 @@ const DepositsPage = () => {
                         {d.customer_email ?? d.customer_id.slice(0, 8)}
                       </button>
                     </Table.Cell>
-                    <Table.Cell>{d.payment_method_code}</Table.Cell>
+                    <Table.Cell>{paymentMethodLabel(d.payment_method_code)}</Table.Cell>
                     <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                       {rm(d.amount_requested)}
                       {d.gateway_amount !== null && d.currency !== 'MYR' && (
