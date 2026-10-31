@@ -1,7 +1,12 @@
 // src/app/slots/[slug]/page.tsx
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
+import {
+  getDraftPackDetail,
+  getPackBaseForViewer,
+  getPackDetail,
+  getRecentPulls,
+} from '@/lib/data/packs';
 import {
   canClaimFreePack,
   freePackMissing,
@@ -25,7 +30,7 @@ export async function generateMetadata({
   const { slug } = await params;
   // Backend catalog (source of truth) — a backend-created pack gets a real
   // title too, not just the baked 8. Next dedupes the fetch with the page body.
-  const base = await getPackBySlug(slug);
+  const base = await getPackBaseForViewer(slug);
   if (!base) return { title: 'Pack' };
   const { name, categoryName } = base.pack;
   const path = `/slots/${slug}`;
@@ -54,14 +59,17 @@ export default async function SlotsPackDetailPage({
   const { count: countRaw } = await searchParams;
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
-  const [base, detail, recentPulls] = await Promise.all([
-    getPackBySlug(slug),
+  const [base, publicDetail, recentPulls] = await Promise.all([
+    getPackBaseForViewer(slug),
     getPackDetail(slug),
     // This pack's own history — the feed used to be global, so every pack
     // showed identical rows.
     getRecentPulls(slug),
   ]);
   if (!base) notFound();
+  const detail = base.pack.draft
+    ? await getDraftPackDetail(slug)
+    : publicDetail;
 
   // The free welcome pack is hidden from the catalog but NOT from this route, so
   // a shared link / history entry / stale badge lands an ineligible account on a
@@ -86,12 +94,14 @@ export default async function SlotsPackDetailPage({
 
   return (
     <>
-      <ProductJsonLd
-        name={base.pack.name}
-        description={`${base.pack.name} · ${base.pack.categoryName}`}
-        sku={slug}
-        path={`/slots/${slug}`}
-      />
+      {!base.pack.draft && (
+        <ProductJsonLd
+          name={base.pack.name}
+          description={`${base.pack.name} · ${base.pack.categoryName}`}
+          sku={slug}
+          path={`/slots/${slug}`}
+        />
+      )}
       <PackDetailClient
         pack={base.pack}
         siblings={base.siblings}

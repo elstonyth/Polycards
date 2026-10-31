@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getPackCategories } from '@/lib/data/packs';
+import { getPackCategoriesForViewer } from '@/lib/data/packs';
 import { getFreePackState } from '@/lib/data/free-pack';
 import CatalogClient from './CatalogClient';
 
@@ -13,7 +13,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function SlotsPage() {
   const [categories, freePack] = await Promise.all([
-    getPackCategories(),
+    // The live catalog, plus Drafts for a member of a staff group.
+    getPackCategoriesForViewer(),
     // Per-visitor and never cached; degrades to "hidden" on any failure, so it
     // can't take the catalog down with it.
     getFreePackState(),

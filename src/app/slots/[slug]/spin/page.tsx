@@ -1,7 +1,13 @@
 // src/app/slots/[slug]/spin/page.tsx
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
+import {
+  getDraftPackDetail,
+  getPackBaseForViewer,
+  getPackDetail,
+  getRecentPulls,
+} from '@/lib/data/packs';
+import { isTicketPack } from '@/lib/packs-data';
 import SlotMachineClient from '../SlotMachineClient';
 
 // The slot-machine reel — reached from the pack detail (/slots/[slug]) "Open Pack"
@@ -18,7 +24,7 @@ export async function generateMetadata({
   const { slug } = await params;
   // Backend catalog (source of truth), same as the sibling detail page — a
   // backend-created pack gets a real title. Next dedupes the fetch with the body.
-  const base = await getPackBySlug(slug);
+  const base = await getPackBaseForViewer(slug);
   return {
     title: base ? `${base.pack.name} — Slot Machine` : 'Slot Machine',
   };
@@ -37,13 +43,18 @@ export default async function SlotSpinPage({
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
   // Vault packs ("Bet Vault x1") are read by the machine itself, on the
   // client, for whoever is signed in — no server seed to read twice.
-  const [base, detail, recentPulls] = await Promise.all([
-    getPackBySlug(slug),
+  const [base, publicDetail, recentPulls] = await Promise.all([
+    getPackBaseForViewer(slug),
     getPackDetail(slug),
     // Scoped to this pack, same as the detail page above.
     getRecentPulls(slug),
   ]);
-  if (!base) notFound();
+  // A Draft card pack can be looked at but not opened: a card open writes pulls
+  // into the live feeds, so the backend refuses it for everyone.
+  if (!base || (base.pack.draft && !isTicketPack(base.pack))) notFound();
+  const detail = base.pack.draft
+    ? await getDraftPackDetail(slug)
+    : publicDetail;
 
   return (
     <SlotMachineClient

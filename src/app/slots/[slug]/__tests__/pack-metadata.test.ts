@@ -13,7 +13,8 @@ const pack = {
 let base: { pack: typeof pack; siblings: never[] } | null;
 vi.mock('next/navigation', () => ({ notFound: vi.fn() }));
 vi.mock('@/lib/data/packs', () => ({
-  getPackBySlug: async () => base,
+  getPackBaseForViewer: async () => base,
+  getDraftPackDetail: async () => null,
   getPackDetail: async () => null,
   getRecentPulls: async () => [],
 }));

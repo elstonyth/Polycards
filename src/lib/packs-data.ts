@@ -80,6 +80,9 @@ export type Pack = {
   /** Set when the pack pays Lucky Draw tickets instead of cards. Absent on a
    *  card pack and on an older backend. */
   prizeType?: 'tickets';
+  /** A Draft pack, only ever seen by a member of a staff group that can see
+   *  Drafts. Never set on a row from the public catalog. */
+  draft?: boolean;
 };
 
 /** A ticket pack has no card to show, value or sell (spec 2026-10-30). */
