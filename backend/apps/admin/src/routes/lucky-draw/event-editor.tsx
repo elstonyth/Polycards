@@ -14,20 +14,17 @@ import {
   type PoolCredit,
 } from './prize-pool';
 
-/** Create or edit an event: name and window. Once published only the name may
- *  change (the window is what customers saw), so the times lock. A NEW event
- *  also takes its prize pool — cards picked from the inventory plus credit
- *  prizes — and is created with them in one request. An existing event's
- *  prizes are the prize editor's. */
+/** Create or edit a draft event: its window. A NEW event also takes its prize
+ *  pool — cards picked from the inventory plus credit prizes — and is created
+ *  with them in one request. An existing event's prizes are the prize editor's.
+ *  Once published nothing here may change: the window is what customers saw. */
 export const EventEditor = ({
   draft,
-  published,
   onChange,
   onSaved,
   onClose,
 }: {
   draft: EventDraft;
-  published: boolean;
   onChange: (d: EventDraft) => void;
   onSaved: (id: string) => void;
   onClose: () => void;
@@ -42,8 +39,7 @@ export const EventEditor = ({
     ? newEventPayload(draft, cards, credits)
     : eventDraftToPayload(draft);
   const poolFull = cards.length + credits.length >= MAX_NEW_EVENT_PRIZES;
-  // A published window can't change, so a past one must not block a rename.
-  const windowBad = published ? null : windowProblem(draft);
+  const windowBad = windowProblem(draft);
   const valid = payload !== null && windowBad === null && reason.trim() !== '';
 
   const submit = () => {
@@ -78,27 +74,12 @@ export const EventEditor = ({
           <Drawer.Title>{draft.id ? 'Edit event' : 'New event'}</Drawer.Title>
         </Drawer.Header>
         <Drawer.Body className="flex flex-col gap-5 overflow-y-auto">
-          <Field
-            label="Name"
-            htmlFor="ld-event-name"
-            hint="Shown to players as the pool's title. Skip the month: a pool can run for a day or a week."
-          >
-            <Input
-              id="ld-event-name"
-              value={draft.name}
-              maxLength={80}
-              onChange={(e) => onChange({ ...draft, name: e.target.value })}
-              placeholder="e.g. Charizard Pool"
-            />
-          </Field>
-
           <div className="flex flex-wrap gap-4">
             <Field label="Starts" htmlFor="ld-event-starts" className="w-56">
               <Input
                 id="ld-event-starts"
                 type="datetime-local"
                 value={draft.startsAt}
-                disabled={published}
                 onChange={(e) =>
                   onChange({ ...draft, startsAt: e.target.value })
                 }
@@ -109,15 +90,13 @@ export const EventEditor = ({
                 id="ld-event-ends"
                 type="datetime-local"
                 value={draft.endsAt}
-                disabled={published}
                 onChange={(e) => onChange({ ...draft, endsAt: e.target.value })}
               />
             </Field>
           </div>
           <Text size="small" className="text-ui-fg-subtle -mt-3">
-            {published
-              ? 'A published event can only be renamed — its window is fixed.'
-              : 'Your browser’s time zone. Malaysia time is UTC+8. Only one event runs at a time; one can start the moment another ends.'}
+            Your browser’s time zone. Malaysia time is UTC+8. Only one event
+            runs at a time; one can start the moment another ends.
           </Text>
           {windowBad && (
             <Text size="small" className="text-ui-fg-error -mt-3">
