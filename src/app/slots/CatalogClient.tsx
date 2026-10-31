@@ -301,6 +301,8 @@ export default function CatalogClient({
         categoryName: cat.tab,
       })),
     );
+  // A tab of only capsules (Poly): no buyback note, and they aren't called packs.
+  const allCapsules = entries.every((e) => isTicketPack(e.pack));
   const byGroup = {
     graded: entries.filter((e) => catalogGroupOf(e.pack) === 'graded'),
     raw: entries.filter((e) => catalogGroupOf(e.pack) === 'raw'),
@@ -324,7 +326,7 @@ export default function CatalogClient({
     >
       {freePack && <FreePackBadge state={freePack} />}
 
-      {!entries.every((e) => isTicketPack(e.pack)) && (
+      {!allCapsules && (
         <p className="mb-4 text-[12px] leading-relaxed text-neutral-400">
           Instant buyback rates apply during the reveal countdown. Leaving the
           reveal or letting its timer expire changes buyback to{' '}
@@ -357,7 +359,9 @@ export default function CatalogClient({
             <div className="mb-4 flex items-center gap-2.5">
               <g.Icon className="h-6 w-6 shrink-0 text-white/80" aria-hidden />
               <h2 className="font-heading text-lg font-bold tracking-tight text-white sm:text-xl">
-                {CATALOG_GROUP_HEADING[id]}
+                {allCapsules && id === 'more'
+                  ? 'More Capsules'
+                  : CATALOG_GROUP_HEADING[id]}
                 {/* The parenthetical is body voice, not Nekst display. Skipped
                   entirely (not rendered empty) when a section has no note
                   that's honest for every pack in it — see GROUP_CHROME above. */}
@@ -371,8 +375,8 @@ export default function CatalogClient({
                 )}
               </h2>
               <span className="ml-auto text-[13px] text-white/60">
-                {byGroup[id].length}{' '}
-                {byGroup[id].length === 1 ? 'pack' : 'packs'}
+                {byGroup[id].length} {allCapsules ? 'capsule' : 'pack'}
+                {byGroup[id].length === 1 ? '' : 's'}
               </span>
             </div>
 

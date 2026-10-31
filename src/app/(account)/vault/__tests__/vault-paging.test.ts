@@ -229,14 +229,14 @@ describe('Lucky Draw tickets row', () => {
   test('a ticket pack on sale: Get tickets offers tasks or a spin', async () => {
     await mount(3, '/slots?category=poly');
     expect(link('Get tickets')).toBeUndefined();
-    expect(link('Spin a Lucky Pack')).toBeUndefined();
+    expect(link('Spin a capsule')).toBeUndefined();
 
     await act(async () => {
       button('Get tickets')?.click();
     });
     expect(button('Get tickets')?.getAttribute('aria-expanded')).toBe('true');
     expect(link('Go to tasks')?.getAttribute('href')).toBe('/task');
-    expect(link('Spin a Lucky Pack')?.getAttribute('href')).toBe(
+    expect(link('Spin a capsule')?.getAttribute('href')).toBe(
       '/slots?category=poly',
     );
   });

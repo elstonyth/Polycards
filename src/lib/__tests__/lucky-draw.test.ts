@@ -609,7 +609,7 @@ describe('rulesCopy', () => {
   it('names where tickets come from, and nothing says they can’t be bought', () => {
     for (const mode of ['one_winner', 'per_prize'] as const) {
       expect(rulesCopy(mode)).toContain(
-        'Tickets come from tasks, Lucky Packs and Polycards gifts.',
+        'Tickets come from tasks, capsules and Polycards gifts.',
       );
       expect(rulesCopy(mode)).not.toMatch(/bought/);
     }

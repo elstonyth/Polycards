@@ -3,7 +3,7 @@
 
 import { useRef } from 'react';
 import { X } from 'lucide-react';
-import type { Rarity } from '@/lib/packs-data';
+import { ticketCount, type Rarity } from '@/lib/packs-data';
 import type { PoolValueRange } from '@/lib/packs-format';
 import { rarityRgb } from '@/lib/rarity';
 import { rm } from '@/lib/format';
@@ -21,6 +21,16 @@ export const hasPublishedOddsContent = (
 ): odds is { rarity: Rarity; chance: string }[] =>
   odds !== null && (odds.length > 0 || range !== null);
 
+/** "RM 10.00 – RM 50.00", or on a ticket pack "10 – 50 tickets". */
+const rangeLabel = (r: PoolValueRange, tickets: boolean): string => {
+  if (!tickets) {
+    return r.min === r.max ? rm(r.min) : `${rm(r.min)} – ${rm(r.max)}`;
+  }
+  return r.min === r.max
+    ? ticketCount(r.min)
+    : `${r.min.toLocaleString('en-US')} – ${ticketCount(r.max)}`;
+};
+
 /** The published-odds list itself — value-range row + per-rarity rows + caption.
  *  Shared between this sheet and the pack page's odds panel so the two can't
  *  drift (they did during the Epic→Mythical rename). */
@@ -30,6 +40,7 @@ export function PublishedOddsList({
   expectedValue,
   tierRanges,
   rounded = 'xl',
+  tickets = false,
 }: {
   /** Published rows (rarest-first). */
   odds: { rarity: Rarity; chance: string }[];
@@ -46,6 +57,8 @@ export function PublishedOddsList({
    *  the caller did not supply them) simply renders without a range line. */
   tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
   rounded?: 'xl' | '2xl';
+  /** A ticket pack: the same rows, but ticket amounts (ticketOddsPool) not money. */
+  tickets?: boolean;
 }) {
   // Nothing to show: render nothing rather than an empty bordered <ul> + a
   // "Published rates for this pack." caption over zero rates.
@@ -61,12 +74,20 @@ export function PublishedOddsList({
         {range !== null && (
           <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
             <span className="text-[13px] font-semibold text-white">
-              {expectedValue != null ? 'Expected value' : 'Card value range'}
+              {expectedValue != null
+                ? tickets
+                  ? 'Average per pull'
+                  : 'Expected value'
+                : tickets
+                  ? 'Tickets per pull'
+                  : 'Card value range'}
             </span>
             <span className="text-[13px] font-semibold tabular-nums text-white">
-              {expectedValue != null
-                ? rm(expectedValue)
-                : `${rm(range.min)} – ${rm(range.max)}`}
+              {expectedValue == null
+                ? rangeLabel(range, tickets)
+                : tickets
+                  ? ticketCount(Math.round(expectedValue * 10) / 10)
+                  : rm(expectedValue)}
             </span>
           </li>
         )}
@@ -96,15 +117,12 @@ export function PublishedOddsList({
                     // one unbroken string of numbers.
                     <span
                       className="block text-[11px] tabular-nums text-white/45"
-                      aria-label={
-                        tr.min === tr.max
-                          ? `Card value ${rm(tr.min)}`
-                          : `Card value ${rm(tr.min)} to ${rm(tr.max)}`
-                      }
+                      aria-label={`${tickets ? 'Pays' : 'Card value'} ${rangeLabel(
+                        tr,
+                        tickets,
+                      ).replace(' – ', ' to ')}`}
                     >
-                      {tr.min === tr.max
-                        ? rm(tr.min)
-                        : `${rm(tr.min)} – ${rm(tr.max)}`}
+                      {rangeLabel(tr, tickets)}
                     </span>
                   )}
                 </span>
@@ -120,7 +138,7 @@ export function PublishedOddsList({
           UNPUBLISHED set of odds — which invites exactly the question we do not
           want a player asking. These are simply "the rates for this pack". */}
       <p className="mt-2 px-1 text-[11px] text-white/60">
-        Rates for this pack.
+        Rates for this {tickets ? 'capsule' : 'pack'}.
       </p>
     </>
   );
@@ -135,6 +153,7 @@ export function OddsSheet({
   range,
   expectedValue,
   tierRanges,
+  tickets,
 }: {
   open: boolean;
   onClose: () => void;
@@ -143,6 +162,7 @@ export function OddsSheet({
   range: PoolValueRange | null;
   expectedValue?: number | null;
   tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
+  tickets?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
@@ -189,10 +209,12 @@ export function OddsSheet({
             range={range}
             expectedValue={expectedValue}
             tierRanges={tierRanges}
+            tickets={tickets}
           />
         ) : (
           <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-[13px] text-white/60">
-            Odds for this pack aren&apos;t available yet.
+            Odds for this {tickets ? 'capsule' : 'pack'} aren&apos;t available
+            yet.
           </p>
         )}
       </div>

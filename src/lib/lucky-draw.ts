@@ -43,7 +43,7 @@ export const refusalCopy = (reason: string, pot = false): string =>
     ? 'Could not enter this Lucky Draw. Please try again later.'
     : 'Could not enter this prize. Please try again later.');
 
-const RULES_START = 'Tickets come from tasks, Lucky Packs and Polycards gifts.';
+const RULES_START = 'Tickets come from tasks, capsules and Polycards gifts.';
 
 /** The small print under the page, by the event's rule. */
 export const rulesCopy = (mode: 'per_prize' | 'one_winner'): string =>

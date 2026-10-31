@@ -415,7 +415,7 @@ export default function VaultClient({
                   {tickets > 0
                     ? 'Put them in the prize pool'
                     : spinHref
-                      ? 'Earn them from tasks or a Lucky Pack'
+                      ? 'Earn them from tasks or a capsule'
                       : 'Earn tickets from tasks'}
                 </p>
               </div>
@@ -449,7 +449,7 @@ export default function VaultClient({
                   Go to tasks
                 </Link>
                 <Link href={spinHref} className={ticketPill(false)}>
-                  Spin a Lucky Pack
+                  Spin a capsule
                 </Link>
               </div>
             )}
