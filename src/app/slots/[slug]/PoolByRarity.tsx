@@ -3,12 +3,13 @@
 import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, X } from 'lucide-react';
-import type { PackCard, Rarity } from '@/lib/packs-data';
+import { ticketCount, type PackCard, type Rarity } from '@/lib/packs-data';
 import { rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useDragScroll } from '@/lib/use-drag-scroll';
 import { CardTile } from '@/components/cards/CardTile';
+import { TicketArt } from '@/components/TicketArt';
 
 /**
  * The default header (`view.title` below) — the caller pre-filters the RAIL
@@ -33,6 +34,9 @@ import { CardTile } from '@/components/cards/CardTile';
  * the rail strip is skipped and BOTH the header and the dialog fall back to
  * the full pool ("All cards" / "Every card in this pack.") so the pool keeps
  * an entry point on the page.
+ *
+ * On a ticket pack the rows are ticket amounts (ticketTopHits picks the rail), so
+ * a tile is a TicketTile and every string says "prize", not "card".
  */
 export function PoolByRarity({
   rail,
@@ -56,6 +60,7 @@ export function PoolByRarity({
   // Mouse drag-to-scroll on the rail (touch swipes natively).
   const drag = useDragScroll<HTMLDivElement>();
   const hasRail = rail.length > 0;
+  const tickets = full.some((c) => c.tickets != null);
   // One derivation for every rendered string keyed on hasRail (h2, aria-label,
   // blurb, and the dialog's cards/title) -- the QA scripts key on these exact
   // strings (scripts/qa-pool-modal.mjs, qa-mobile-cards.mjs); change together.
@@ -64,14 +69,23 @@ export function PoolByRarity({
   const view = hasRail
     ? {
         title: 'Top Hits',
-        blurb: 'The top-tier cards available in this pack.',
+        blurb: tickets
+          ? 'The biggest ticket prizes in this capsule.'
+          : 'The top-tier cards available in this pack.',
         cards: rail,
       }
     : {
-        title: 'All cards',
-        blurb: 'Every card in this pack.',
+        title: tickets ? 'All prizes' : 'All cards',
+        blurb: tickets
+          ? 'Every ticket prize in this capsule.'
+          : 'Every card in this pack.',
         cards: full,
       };
+  const expandLabel = tickets
+    ? `Show the ${view.cards.length} ${hasRail ? 'top ' : ''}ticket prizes grouped by rarity`
+    : hasRail
+      ? `Show the ${view.cards.length} top-tier cards grouped by rarity`
+      : `Show all ${view.cards.length} cards grouped by rarity`;
 
   return (
     <div className="flex flex-col gap-3">
@@ -84,11 +98,7 @@ export function PoolByRarity({
             type="button"
             onClick={() => setModalOpen(true)}
             aria-haspopup="dialog"
-            aria-label={
-              hasRail
-                ? `Show the ${view.cards.length} top-tier cards grouped by rarity`
-                : `Show all ${view.cards.length} cards grouped by rarity`
-            }
+            aria-label={expandLabel}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
           >
             <Maximize2 className="h-4 w-4" aria-hidden />
@@ -118,12 +128,16 @@ export function PoolByRarity({
         >
           {rail.map((c) => (
             <div key={c.handle} className="w-[38%] shrink-0 sm:w-40">
-              <CardTile
-                card={c}
-                sizes="(max-width: 640px) 38vw, 160px"
-                onOpen={onOpen}
-                pokemon={pokemon}
-              />
+              {tickets ? (
+                <TicketTile card={c} />
+              ) : (
+                <CardTile
+                  card={c}
+                  sizes="(max-width: 640px) 38vw, 160px"
+                  onOpen={onOpen}
+                  pokemon={pokemon}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -136,7 +150,42 @@ export function PoolByRarity({
         tierChances={tierChances}
         onOpen={onOpen}
         pokemon={pokemon}
+        tickets={tickets}
       />
+    </div>
+  );
+}
+
+/** One ticket prize: our ticket, its amount and its tier. The tier's glow plays
+ *  the slab halo's part. Not a button: an amount has no details to open. */
+function TicketTile({ card }: { card: PackCard }) {
+  const rgb = rarityRgb(card.rarity);
+  // Two lines on every tile, so a long amount can't make one taller than the rest.
+  const [amount, unit] = ticketCount(card.tickets ?? 0).split(' ');
+  return (
+    <div
+      className="flex w-full flex-col items-center gap-1.5 rounded-2xl border bg-white/[0.03] p-3 text-center"
+      style={{
+        borderColor: `rgba(${rgb}, 0.45)`,
+        boxShadow: `0 0 28px rgba(${rgb}, 0.28)`,
+      }}
+    >
+      <TicketArt width={160} className="h-auto w-full" />
+      <span className="flex flex-col items-center">
+        <span className="font-heading text-lg font-bold leading-tight tracking-tight tabular-nums text-white">
+          {amount}
+        </span>{' '}
+        <span className="text-[11px] leading-tight text-white/60">{unit}</span>
+      </span>
+      {/* The tier's name stays white: Rare's blue is too dark to read as 11px text. */}
+      <span className="flex items-center gap-1.5 text-[11px] font-medium text-white/80">
+        <span
+          aria-hidden
+          className="h-2 w-2 rounded-full"
+          style={{ background: `rgb(${rgb})` }}
+        />
+        {card.rarity}
+      </span>
     </div>
   );
 }
@@ -152,6 +201,7 @@ function PoolModal({
   tierChances,
   onOpen,
   pokemon,
+  tickets,
 }: {
   open: boolean;
   onClose: () => void;
@@ -161,6 +211,7 @@ function PoolModal({
   tierChances: Partial<Record<Rarity, number>> | null;
   onOpen: (card: PackCard) => void;
   pokemon?: boolean;
+  tickets: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
@@ -175,6 +226,7 @@ function PoolModal({
   // isRarity, and PackDetailPageSchema's droppableArray drops the rows that
   // fail (src/lib/data/schemas.ts), so every card reaching here is already
   // typed to a known tier.
+  const noun = tickets ? 'prize' : 'card';
   const groups = RARITY_ORDER.map((rarity) => ({
     rarity,
     cards: pool.filter((c) => c.rarity === rarity),
@@ -202,13 +254,13 @@ function PoolModal({
           <h2 className="font-heading text-lg font-bold tracking-tight text-white">
             {title}
             <span className="ml-2 text-[13px] font-normal tabular-nums text-white/50">
-              {pool.length} cards
+              {pool.length} {noun}s
             </span>
           </h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close card list"
+            aria-label={`Close ${noun} list`}
             className="flex h-11 w-11 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/10 hover:text-white"
           >
             <X className="h-5 w-5" aria-hidden />
@@ -218,7 +270,7 @@ function PoolModal({
           {groups.map(({ rarity, cards }) => {
             const rgb = rarityRgb(rarity);
             return (
-              <section key={rarity} aria-label={`${rarity} cards`}>
+              <section key={rarity} aria-label={`${rarity} ${noun}s`}>
                 <div className="mb-2 flex items-baseline gap-2">
                   <span
                     aria-hidden
@@ -229,7 +281,7 @@ function PoolModal({
                     {rarity}
                   </h3>
                   <span className="text-[12px] tabular-nums text-white/50">
-                    {cards.length} {cards.length === 1 ? 'card' : 'cards'}
+                    {cards.length} {cards.length === 1 ? noun : `${noun}s`}
                   </span>
                   {typeof tierChances?.[rarity] === 'number' && (
                     <span className="ml-auto text-[12px] tabular-nums text-white/60">
@@ -243,15 +295,19 @@ function PoolModal({
                     edge loss at the panel border is an accepted trade — the
                     rail's padding hack doesn't compose with a wrapping grid. */}
                 <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
-                  {cards.map((c) => (
-                    <CardTile
-                      key={c.handle}
-                      card={c}
-                      sizes="(max-width: 640px) 45vw, 200px"
-                      onOpen={onOpen}
-                      pokemon={pokemon}
-                    />
-                  ))}
+                  {cards.map((c) =>
+                    tickets ? (
+                      <TicketTile key={c.handle} card={c} />
+                    ) : (
+                      <CardTile
+                        key={c.handle}
+                        card={c}
+                        sizes="(max-width: 640px) 45vw, 200px"
+                        onOpen={onOpen}
+                        pokemon={pokemon}
+                      />
+                    ),
+                  )}
                 </div>
               </section>
             );

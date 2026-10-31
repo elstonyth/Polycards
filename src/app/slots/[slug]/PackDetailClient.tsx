@@ -39,6 +39,8 @@ import { PublishedOddsList, hasPublishedOddsContent } from './OddsSheet';
 import { PoolByRarity } from './PoolByRarity';
 import {
   publishedOddsRows,
+  ticketOddsPool,
+  ticketTopHits,
   poolValueRange,
   poolExpectedValue,
   tierValueRanges,
@@ -280,9 +282,11 @@ export default function PackDetailClient({
   // become a different, paid pack.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
   // Pays Lucky Draw tickets: no card to show or sell, so every section below
-  // that assumes one goes. The odds panel's value rows need no check of their
-  // own, because a ticket row has no price (see ticketCard).
+  // that assumes one goes. The odds panel and Top Hits stay, in ticket amounts.
   const ticketPack = isTicketPack(pack);
+  // What this page calls the thing it sells.
+  const noun = ticketPack ? 'capsule' : 'pack';
+  const Noun = ticketPack ? 'Capsule' : 'Pack';
   // One Piece / sports packs: the prize badges never guess a Pokémon.
   const pokemonPack = isPokemonPack(pack.categoryId);
   // The free pack, reached by someone who cannot claim it — a spent claim OR a
@@ -341,7 +345,7 @@ export default function PackDetailClient({
   const vaultGifts = giftsUsed(qty, held);
   const paidCost = priceNum * (qty - vaultGifts);
   const vaultCost = vaultCostLabel(qty, vaultGifts, priceNum);
-  const openLabel = vaultButtonLabel(qty, vaultGifts) ?? 'Open Pack';
+  const openLabel = vaultButtonLabel(qty, vaultGifts) ?? `Open ${Noun}`;
   // Nothing this customer holds covers the open: no buy controls at all.
   const soldOut = soldOutPack && vaultGifts < qty;
   // Baked Polycards tiers animate their factory stage (still poster otherwise).
@@ -382,8 +386,17 @@ export default function PackDetailClient({
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
   // Memoized like `pool` above (stable prop identity for PoolByRarity).
   const topPool = useMemo(
-    () => pool.filter((c) => isTopRarity(c.rarity)),
-    [pool],
+    () =>
+      ticketPack
+        ? ticketTopHits(pool)
+        : pool.filter((c) => isTopRarity(c.rarity)),
+    [ticketPack, pool],
+  );
+
+  // What the odds panel sums: card prices, or on a ticket pack the ticket amounts.
+  const oddsPool = useMemo(
+    () => (ticketPack ? ticketOddsPool(pool) : pool),
+    [ticketPack, pool],
   );
 
   // Sibling selector, sectioned by the SAME backend-derived composition the
@@ -395,12 +408,12 @@ export default function PackDetailClient({
 
   // Card-value range over the FULL pool (not topPool) — one derivation feeding
   // both the odds-panel gate and its range row.
-  const valueRange = useMemo(() => poolValueRange(pool), [pool]);
+  const valueRange = useMemo(() => poolValueRange(oddsPool), [oddsPool]);
 
   // Same derivation per rarity, so each published tier row can state what a
   // card of THAT tier is worth here. The pack-wide range above spans Common to
   // Immortal and so describes no tier in particular.
-  const tierRanges = useMemo(() => tierValueRanges(pool), [pool]);
+  const tierRanges = useMemo(() => tierValueRanges(oddsPool), [oddsPool]);
 
   // Expected value of one pull over the PUBLISHED tiers — what the top row of
   // the odds panel states now (the range only ever described the pool's span).
@@ -409,8 +422,9 @@ export default function PackDetailClient({
   // property than the source) and refuses to preserve the memo.
   const publishedOdds = liveDetail?.publishedOdds ?? null;
   const expectedValue = useMemo(
-    () => (publishedOdds ? poolExpectedValue(pool, publishedOdds.tiers) : null),
-    [pool, publishedOdds],
+    () =>
+      publishedOdds ? poolExpectedValue(oddsPool, publishedOdds.tiers) : null,
+    [oddsPool, publishedOdds],
   );
 
   // Do NOT open/charge here — navigate to the reel, which performs
@@ -456,7 +470,7 @@ export default function PackDetailClient({
         className="-mt-2.5 mb-1.5 inline-flex items-center gap-1.5 py-2.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
-        All packs
+        All {noun}s
       </Link>
 
       {/* ===== MAIN: stage + configurator + card sections =====
@@ -637,7 +651,7 @@ export default function PackDetailClient({
               {siblings.length > 0 && (
                 <div>
                   <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
-                    Pack
+                    {Noun}
                   </p>
                   {/* One rail per composition group, three tiles across. The
                       panel still never scrolls VERTICALLY — the rails scroll
@@ -650,13 +664,15 @@ export default function PackDetailClient({
                       <div key={g.id} data-testid="pack-selector-group">
                         <div className="mb-1 flex items-baseline justify-between gap-2">
                           <p className="text-[11px] font-semibold text-white/70">
-                            {CATALOG_GROUP_HEADING[g.id]}
+                            {ticketPack && g.id === 'more'
+                              ? 'More Capsules'
+                              : CATALOG_GROUP_HEADING[g.id]}
                           </p>
                           <span className="text-[10px] text-white/40">
                             <span className="tabular-nums">
                               {g.packs.length}
                             </span>{' '}
-                            {g.packs.length === 1 ? 'pack' : 'packs'}
+                            {g.packs.length === 1 ? noun : `${noun}s`}
                           </span>
                         </div>
                         <PackRail
@@ -689,7 +705,7 @@ export default function PackDetailClient({
                   <Minus className="h-4 w-4" aria-hidden />
                 </button>
                 <span className="flex h-11 flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-sm font-medium tabular-nums text-white">
-                  {qty} {qty === 1 ? 'Pack' : 'Packs'}
+                  {qty} {qty === 1 ? Noun : `${Noun}s`}
                 </span>
                 <button
                   type="button"
@@ -792,7 +808,7 @@ export default function PackDetailClient({
                     in your vault. {FREE_PULL_LOCKED_MESSAGE}
                   </>
                 ) : soldOut ? (
-                  <>This pack is sold out right now.</>
+                  <>This {noun} is sold out right now.</>
                 ) : customer && balance !== null ? (
                   <>
                     Each open costs {rm(priceNum)} from your balance — you have{' '}
@@ -807,8 +823,8 @@ export default function PackDetailClient({
                   </>
                 ) : (
                   <>
-                    Each open costs the pack price from your balance — one pack
-                    per open, recorded to your account.
+                    Each open costs the {noun} price from your balance — one{' '}
+                    {noun} per open, recorded to your account.
                   </>
                 )}
               </p>
@@ -840,7 +856,7 @@ export default function PackDetailClient({
               back to the full pool under an "All cards" header, so the pool
               keeps an entry point instead of vanishing under an odds panel
               with nothing to point at. */}
-          {pool.length > 0 && !ticketPack && (
+          {pool.length > 0 && (
             <Reveal as="section">
               <PoolByRarity
                 rail={topPool}
@@ -873,6 +889,7 @@ export default function PackDetailClient({
               expectedValue={expectedValue}
               tierRanges={tierRanges}
               rounded="2xl"
+              tickets={ticketPack}
             />
           </Reveal>
         )}

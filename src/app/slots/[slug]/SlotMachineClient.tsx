@@ -64,6 +64,7 @@ import {
   publishedOddsRows,
   poolValueRange,
   poolExpectedValue,
+  ticketOddsPool,
   tierValueRanges,
   type PublishedOdds,
 } from '@/lib/packs-format';
@@ -339,14 +340,20 @@ export default function SlotMachineClient({
     [basePool],
   );
   // Card-value range for the odds sheet — same pool, same memo convention.
-  const valueRange = useMemo(() => poolValueRange(pool), [pool]);
+  // What the odds sheet sums: card prices, or on a ticket pack the ticket amounts.
+  const oddsPool = useMemo(
+    () => (ticketPack ? ticketOddsPool(pool) : pool),
+    [ticketPack, pool],
+  );
+  const valueRange = useMemo(() => poolValueRange(oddsPool), [oddsPool]);
   // Per-tier ranges, so the sheet matches the pack page's odds panel row for row.
-  const tierRanges = useMemo(() => tierValueRanges(pool), [pool]);
+  const tierRanges = useMemo(() => tierValueRanges(oddsPool), [oddsPool]);
   // Expected value over the published tiers — the sheet's top row, same as the
   // pack page's panel.
   const expectedValue = useMemo(
-    () => (publishedOdds ? poolExpectedValue(pool, publishedOdds.tiers) : null),
-    [pool, publishedOdds],
+    () =>
+      publishedOdds ? poolExpectedValue(oddsPool, publishedOdds.tiers) : null,
+    [oddsPool, publishedOdds],
   );
   // Per-reel decoy pools: strip i tiles its OWN shuffled copy of basePool, so
   // stacked reels read independently and the idle sequence is never the same
@@ -1383,6 +1390,7 @@ export default function SlotMachineClient({
         range={valueRange}
         expectedValue={expectedValue}
         tierRanges={tierRanges}
+        tickets={ticketPack}
       />
     </div>
   );
