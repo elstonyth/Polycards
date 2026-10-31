@@ -22,6 +22,8 @@ const row = (over: Partial<InventoryRow> = {}): InventoryRow => ({
   handle: 'charizard-psa10',
   product_id: 'prod_1',
   photo: '/static/charizard.png',
+  image: '/static/charizard.png',
+  grade: 'PSA 10',
   name: 'Charizard PSA 10',
   sku: 'CHZ-10',
   is_card: true,

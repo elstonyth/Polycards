@@ -25,7 +25,7 @@ import {
   type InventoryRow,
 } from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
-import { resolveImageUrl } from '../../../lib/image-url';
+import { CardImage } from '../../../components/CardImage';
 import { applyRangeSelect } from '../../../lib/range-select';
 import { useTableSort } from '../../../lib/use-table-sort';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
@@ -465,17 +465,12 @@ const InventoryListPage = () => {
                     </Table.Cell>
                   )}
                   <Table.Cell>
-                    {/* `r.photo &&`, not just a src: an empty string resolves to
-                        the page URL and gets refetched as an image. */}
-                    {r.photo && (
-                      <img
-                        src={resolveImageUrl(r.photo)}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        className="h-10 w-10 shrink-0 rounded object-cover"
-                      />
-                    )}
+                    <CardImage
+                      src={r.image}
+                      name={r.name}
+                      className="h-14 w-10 shrink-0"
+                      lazy
+                    />
                   </Table.Cell>
                   <Table.Cell className="break-words">
                     {r.name}

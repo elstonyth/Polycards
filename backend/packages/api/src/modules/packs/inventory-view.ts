@@ -7,7 +7,7 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import { getCardStockByHandle } from './card-stock';
-import { isGraded } from './card-view';
+import { isGraded, slabGrade, stockImage } from './card-view';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
@@ -21,10 +21,14 @@ export type InventoryRow = {
   handle: string;
   product_id: string;
   photo: string | null;
+  // What the stock screens show: graded = the baked slab, raw = the bare card.
+  // `photo` stays the product thumbnail for the pickers that read it.
+  image: string | null;
   name: string;
   sku: string;
   is_card: boolean;
   graded: boolean; // title RAW/GRADED
+  grade: string | null; // "PSA 10"; null = raw
   fmv: number | null; // MYR
   price: number | null; // MYR, FMV x multiplier
   cost: number | null; // MYR, D8 weighted average
@@ -177,6 +181,9 @@ export async function loadInventoryRows(
       : DEFAULT_MARKET_MULTIPLIER;
     const grader =
       card?.grader ?? (typeof meta.grader === 'string' ? meta.grader : '');
+    const grade =
+      card?.grade ?? (typeof meta.grade === 'string' ? meta.grade : '');
+    const graded = isGraded({ grader });
     const b = buckets.get(p.handle);
     const requested = b?.requested ?? 0;
     const readyToShip = b?.readyToShip ?? 0;
@@ -186,10 +193,12 @@ export async function loadInventoryRows(
       handle: p.handle,
       product_id: p.id,
       photo: p.thumbnail ?? null,
+      image: stockImage(graded, card, p.thumbnail ?? null),
       name: card?.name ?? p.title,
       sku: skus.get(p.handle) || p.handle,
       is_card: !!card,
-      graded: isGraded({ grader }),
+      graded,
+      grade: slabGrade({ grader, grade }),
       fmv: hasFmv ? displayMarketPrice(fmvUsd, fx, 1) : null,
       price: hasFmv ? displayMarketPrice(fmvUsd, fx, mult) : null,
       // `??`, never `||`, on cost AND counter: 0 and null mean different

@@ -1253,6 +1253,7 @@
     "shipped": "Shipped",
     "listingShow": "Listing Show",
     "graded": "GRADED",
+    "slab": "SLAB",
     "raw": "RAW",
     "notACard": "not a card",
     "noCost": "No purchase history recorded.",
@@ -1369,6 +1370,9 @@
       "loading": "Loading the goods receive note...",
       "noLines": "Nothing to transfer."
     }
+  },
+  "cardImage": {
+    "view": "View picture of {{name}}"
   },
   "procurement": {
     "title": "Procurement",

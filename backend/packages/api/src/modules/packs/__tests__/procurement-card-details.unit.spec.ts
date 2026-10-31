@@ -19,7 +19,9 @@ const row = (over: Partial<ToBuyRow> = {}): ToBuyRow => ({
 });
 const card = (over: Record<string, unknown> = {}) => ({
   handle: 'card-a',
+  set: 'Pokemon Chaos Rising',
   grader: '',
+  grade: '',
   image: 'https://cdn/card.webp',
   slab_image: null as string | null,
   market_value: '10.00',
@@ -122,5 +124,18 @@ describe('addCardDetails', () => {
   it('no card and no photo: image is null, not undefined', () => {
     const [r] = addCardDetails([row({ photo: null })], new Map(), 4.5);
     expect(r.image).toBeNull();
+  });
+
+  it('carries what a buyer asks for: the set, and the grade of a slab', () => {
+    const [slab] = addCardDetails(
+      [row()],
+      byHandle(card({ grader: ' PSA ', grade: ' 10 ' })),
+      4.5,
+    );
+    expect([slab.set, slab.grade]).toEqual(['Pokemon Chaos Rising', 'PSA 10']);
+    const [raw] = addCardDetails([row()], byHandle(card()), 4.5);
+    expect(raw.grade).toBeNull();
+    const [gone] = addCardDetails([row()], new Map(), 4.5);
+    expect([gone.set, gone.grade]).toEqual([null, null]);
   });
 });

@@ -6,7 +6,7 @@ import { ArrowLeft } from '@medusajs/icons';
 import { useInventoryItem } from '../../../../lib/queries';
 import { httpStatus } from '../../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../../lib/format';
-import { resolveImageUrl } from '../../../../lib/image-url';
+import { CardImage } from '../../../../components/CardImage';
 import { Pager } from '../../../../components/Pager';
 import { LoadingSkeleton } from '../../../../components/LoadingSkeleton';
 
@@ -100,17 +100,11 @@ const InventoryItemDetailPage = () => {
           ) : (
             <>
               <div className="flex items-center gap-4">
-                {/* `item.photo &&`, not just a src: an empty string resolves to
-                    the page URL and gets refetched as an image. */}
-                {item.photo && (
-                  <img
-                    src={resolveImageUrl(item.photo)}
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                    className="h-16 w-16 shrink-0 rounded object-cover"
-                  />
-                )}
+                <CardImage
+                  src={item.image}
+                  name={item.name}
+                  className="h-24 w-[68px] shrink-0"
+                />
                 <div>
                   <Heading level="h2" className="break-words">
                     {item.name}
@@ -122,7 +116,9 @@ const InventoryItemDetailPage = () => {
                     {/* Plain text for SKU and RAW/GRADED: they are descriptive
                         values, not statuses — same call the list page makes. */}
                     {item.sku} &middot;{' '}
-                    {item.graded ? t('inventory.graded') : t('inventory.raw')}
+                    {item.graded
+                      ? `${t('inventory.slab')}${item.grade ? ` · ${item.grade}` : ''}`
+                      : t('inventory.raw')}
                     {!item.is_card && (
                       <span className="ml-1">({t('inventory.notACard')})</span>
                     )}
