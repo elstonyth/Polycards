@@ -8,6 +8,7 @@ import {
   getFreePackState,
 } from '@/lib/data/free-pack';
 import { FREE_WELCOME_CATEGORY } from '@/lib/packs-data';
+import { ProductJsonLd, shareImageMeta } from '@/lib/product-share';
 import PackDetailClient from './PackDetailClient';
 
 // The /slots pack detail — configurator/Top-Hits/odds; the "Open Pack" CTA
@@ -25,8 +26,20 @@ export async function generateMetadata({
   // Backend catalog (source of truth) — a backend-created pack gets a real
   // title too, not just the baked 8. Next dedupes the fetch with the page body.
   const base = await getPackBySlug(slug);
+  if (!base) return { title: 'Pack' };
+  const { name, categoryName } = base.pack;
+  const path = `/slots/${slug}`;
   return {
-    title: base ? `${base.pack.name} — ${base.pack.categoryName}` : 'Pack',
+    title: `${name} — ${categoryName}`,
+    // Replaces the layout's openGraph whole, so every field is restated.
+    openGraph: {
+      type: 'website',
+      siteName: 'Polycards',
+      title: name,
+      description: `${name} · ${categoryName}`,
+      url: path,
+      images: [shareImageMeta(path, name)],
+    },
   };
 }
 
@@ -72,14 +85,22 @@ export default async function SlotsPackDetailPage({
   const missing = freeState ? freePackMissing(freeState, slug) : [];
 
   return (
-    <PackDetailClient
-      pack={base.pack}
-      siblings={base.siblings}
-      detail={detail}
-      recentPulls={recentPulls}
-      initialQty={count}
-      freePackEligible={freePackEligible}
-      freePackMissing={missing}
-    />
+    <>
+      <ProductJsonLd
+        name={base.pack.name}
+        description={`${base.pack.name} · ${base.pack.categoryName}`}
+        sku={slug}
+        path={`/slots/${slug}`}
+      />
+      <PackDetailClient
+        pack={base.pack}
+        siblings={base.siblings}
+        detail={detail}
+        recentPulls={recentPulls}
+        initialQty={count}
+        freePackEligible={freePackEligible}
+        freePackMissing={missing}
+      />
+    </>
   );
 }

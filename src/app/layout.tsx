@@ -44,13 +44,15 @@ export const metadata: Metadata = {
   },
   description: SITE_DESCRIPTION,
   applicationName: 'Polycards',
-  alternates: { canonical: '/' },
+  // './' resolves to each route's own path. A bare '/' here was inherited by
+  // every page, telling Meta and Google they were all the home page.
+  alternates: { canonical: './' },
   openGraph: {
     type: 'website',
     siteName: 'Polycards',
     title: 'Polycards — Your Gateway to Physical & Digital Collectibles',
     description: SITE_DESCRIPTION,
-    url: '/',
+    url: './',
     images: [
       { url: '/seo/og.png', width: 2400, height: 1260, alt: 'Polycards' },
     ],
