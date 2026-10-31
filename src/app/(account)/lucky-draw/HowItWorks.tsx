@@ -19,7 +19,7 @@ const STEPS: { stage: PoolStage; title: string; body: string }[] = [
   {
     stage: 'draw',
     title: 'Clock hits zero, one ticket is drawn',
-    body: 'Tickets close the moment the clock ends. Whoever holds the drawn ticket takes every prize.',
+    body: 'Gate closes the moment the clock ends. Whoever holds the drawn ticket takes every prize.',
   },
   {
     stage: 'next',
