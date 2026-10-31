@@ -35,6 +35,7 @@ import type {
 } from '../../lib/admin-rest';
 import {
   DELIVERY_STATUS_LABEL,
+  DELIVERY_TONE,
   deliveryStatusLabel,
   orderDateTime,
   paymentMethodLabel,
@@ -45,10 +46,8 @@ import { useTableSort } from '../../lib/use-table-sort';
 import { applyRangeSelect } from '../../lib/range-select';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
-import {
-  DELIVERY_TONE,
-  TrackingLine,
-} from '../../components/DeliveryTracking';
+import { TrackingLine } from '../../components/DeliveryTracking';
+import { depositStatusBadge } from '../../components/PaymentStatusBadge';
 
 export const config: RouteConfig = {
   label: 'pcNav.orders',
@@ -72,20 +71,6 @@ const STATUSES: DeliveryStatus[] = [
   'completed',
   'canceled',
 ];
-// Exhaustive over GatewayDeposit['status'], so a new gateway status is a type
-// error here rather than a raw token in the badge.
-const DEPOSIT_TONE: Record<
-  GatewayDeposit['status'],
-  'orange' | 'green' | 'red' | 'purple'
-> = {
-  pending: 'orange',
-  settled: 'green',
-  failed: 'red',
-  // Purple, matching routes/deposits/page.tsx: 'expired' is the sweep giving up
-  // while the gateway never ruled, so it is the likeliest UNCREDITED payment on
-  // the page and must not read as either settled, refused, or still-in-flight.
-  expired: 'purple',
-};
 // Same words as routes/deposits (i18n deposits.statusLabel).
 const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
   pending: 'Awaiting payment',
@@ -318,9 +303,12 @@ const Topups = () => {
                     </button>
                   </Table.Cell>
                   <Table.Cell>
-                    <StatusBadge color={DEPOSIT_TONE[d.status]}>
-                      {DEPOSIT_STATUS_LABEL[d.status]}
-                    </StatusBadge>
+                    {depositStatusBadge(
+                        d,
+                        d.stuck
+                          ? 'Needs gateway check'
+                          : DEPOSIT_STATUS_LABEL[d.status],
+                      )}
                   </Table.Cell>
                 </Table.Row>
               ))}

@@ -69,7 +69,9 @@ const CreatePlayerModal = ({ open, onClose }: Props) => {
   const groups = groupList?.customer_groups ?? [];
   const groupId = picked ?? defaultGroupForNewPlayer(groups);
   const batch = parseBatchCount(count);
-  const canSave = batch !== null && !generate.isPending;
+  // The group list loads on open: saving before it arrives would drop the group.
+  const canSave =
+    batch !== null && !generate.isPending && (!!groupList || groupsError);
 
   const save = async () => {
     if (batch === null) return;

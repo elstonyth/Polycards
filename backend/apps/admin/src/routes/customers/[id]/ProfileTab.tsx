@@ -149,7 +149,7 @@ const LastPayout = ({
 }) => {
   const { t } = useTranslation();
   const { data } = useCustomerGatewayWithdrawals(customerId, 0);
-  const last = data?.withdrawals[0];
+  const last = data?.withdrawals.find((w) => w.status === 'settled');
   if (!last) {
     return showEmpty && data ? (
       <TableState empty={t('playerPayments.noWithdrawals')} />
@@ -374,16 +374,17 @@ const ReferralCardBody = ({
   };
 
   const applyRate = (rateBp: number | null, reason: string) => {
-    setDialog(null);
     setRate.mutate(
       { customerId, rateBp, reason },
       {
-        onSuccess: () =>
+        onSuccess: () => {
+          setDialog(null);
           toast.success(
             rateBp === null
               ? t('playerDetail.rateCleared')
               : t('playerDetail.rateSet'),
-          ),
+          );
+        },
         onError: (e) => toast.error(e.message),
       },
     );
@@ -418,7 +419,9 @@ const ReferralCardBody = ({
             <button
               type="button"
               className="text-ui-fg-interactive text-left hover:underline"
-              onClick={() => navigate(`/customers/${data.referred_by}`)}
+              onClick={() =>
+                navigate(`/customers/${data.referred_by}?tab=profile`)
+              }
             >
               {data.referred_by_label ?? data.referred_by}
             </button>
@@ -559,7 +562,9 @@ const ReferralCardBody = ({
                       <button
                         type="button"
                         className="text-ui-fg-interactive text-left hover:underline"
-                        onClick={() => navigate(`/customers/${d.customer_id}`)}
+                        onClick={() =>
+                          navigate(`/customers/${d.customer_id}?tab=profile`)
+                        }
                       >
                         {d.name ?? d.email ?? d.customer_id}
                       </button>
@@ -661,13 +666,20 @@ const ReferralCardBody = ({
             reasonField,
           ]}
           onClose={() => setDialog(null)}
+          busy={setReferrer.isPending}
           onSubmit={({ referrer, reason }) => {
-            setDialog(null);
+            // No change, no audit row saying the account was edited.
+            if ((referrer || null) === data.referred_by) {
+              setDialog(null);
+              return;
+            }
             setReferrer.mutate(
               { customerId, referrerId: referrer || null, reason },
               {
-                onSuccess: () =>
-                  toast.success(t('playerDetail.referrerUpdated')),
+                onSuccess: () => {
+                  setDialog(null);
+                  toast.success(t('playerDetail.referrerUpdated'));
+                },
                 onError: (e) => toast.error(e.message),
               },
             );
@@ -691,18 +703,15 @@ const ReferralCardBody = ({
                   ? ''
                   : String(data.partner_referral_bp / 100),
               placeholder: boundsHint,
+              valid: (value) => Number.isFinite(Number(value)),
             },
             reasonField,
           ]}
           onClose={() => setDialog(null)}
-          onSubmit={({ rate, reason }) => {
-            const pct = Number(rate);
-            if (!Number.isFinite(pct)) {
-              toast.error(t('playerDetail.rateInvalid'));
-              return;
-            }
-            applyRate(Math.round(pct * 100), reason);
-          }}
+          busy={setRate.isPending}
+          onSubmit={({ rate, reason }) =>
+            applyRate(Math.round(Number(rate) * 100), reason)
+          }
         />
       )}
       {dialog === 'clearRate' && (
@@ -710,6 +719,7 @@ const ReferralCardBody = ({
           title={t('playerDetail.rateClearTitle')}
           fields={[reasonField]}
           onClose={() => setDialog(null)}
+          busy={setRate.isPending}
           onSubmit={({ reason }) => applyRate(null, reason)}
         />
       )}
@@ -826,13 +836,15 @@ const PlayerDetailsCard = ({ customerId }: { customerId: string }) => {
             reasonField,
           ]}
           onClose={() => setDialog(null)}
+          busy={setName.isPending}
           onSubmit={({ value, reason }) => {
-            setDialog(null);
             setName.mutate(
               { customerId, realName: value, reason },
               {
-                onSuccess: () =>
-                  toast.success(t('playerDetail.realNameUpdated')),
+                onSuccess: () => {
+                  setDialog(null);
+                  toast.success(t('playerDetail.realNameUpdated'));
+                },
                 onError: (e) => toast.error(e.message),
               },
             );
@@ -856,12 +868,15 @@ const PlayerDetailsCard = ({ customerId }: { customerId: string }) => {
             },
           ]}
           onClose={() => setDialog(null)}
+          busy={setPhone.isPending}
           onSubmit={({ value, reason }) => {
-            setDialog(null);
             setPhone.mutate(
               { customerId, phone: value, reason },
               {
-                onSuccess: () => toast.success(t('playerDetail.phoneUpdated')),
+                onSuccess: () => {
+                  setDialog(null);
+                  toast.success(t('playerDetail.phoneUpdated'));
+                },
                 onError: (e) => toast.error(e.message),
               },
             );

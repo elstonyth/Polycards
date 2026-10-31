@@ -244,7 +244,9 @@ const SupportPage = () => {
                 </Button>
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-px border-t bg-ui-border-base md:grid-cols-3">
+            <div
+              className={`grid grid-cols-1 gap-px border-t bg-ui-border-base ${canAdjust ? "md:grid-cols-3" : "md:grid-cols-2"}`}
+            >
               <div className="bg-ui-bg-subtle px-6 py-4">
                 <Text size="small" className="text-ui-fg-subtle">
                   {t("support.balance")}

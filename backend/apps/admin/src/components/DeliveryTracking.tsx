@@ -1,34 +1,9 @@
 import { Text } from '@medusajs/ui';
-import type {
-  AdminDeliveryOrder,
-  DeliveryStatus,
-  DeliveryTrackingSnapshot,
-} from '../lib/admin-rest';
-import { timeAgo } from '../lib/format';
+import type { AdminDeliveryOrder } from '../lib/admin-rest';
+import { CARRIER_NAME, timeAgo } from '../lib/format';
 
-// A shipment's status colour and carrier line, shared by the All Orders page
-// and the player page's Orders tab, so both say the same thing.
-
-export const DELIVERY_TONE: Record<
-  DeliveryStatus,
-  'orange' | 'blue' | 'green' | 'grey'
-> = {
-  requested: 'orange',
-  processed: 'orange',
-  ready_to_ship: 'orange',
-  shipped: 'blue',
-  completed: 'green',
-  canceled: 'grey',
-};
-
-export const CARRIER_NAME: Record<
-  NonNullable<DeliveryTrackingSnapshot['carrier']>,
-  string
-> = {
-  ninjavan: 'Ninja Van',
-  poslaju: 'Pos Laju',
-  dhl_ecommerce: 'DHL eCommerce',
-};
+// A shipment's carrier line, shared by the All Orders page and the player
+// page's Orders tab, so both say the same thing.
 
 // What the shipment tracker last heard from the carrier, under a shipped
 // order's status. A snapshot for a different number (staff re-entered it

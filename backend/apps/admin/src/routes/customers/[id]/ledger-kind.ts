@@ -53,14 +53,15 @@ export function ledgerKind(reason: string, amount: number): LedgerKind {
 }
 
 /** What a wallet row was about, on one line: 'Gold Pack · Charizard #5 +2' for
- *  a pack open, the card for a sell-back, null when the row names neither. */
+ *  a pack open, the card for a sell-back, the pack alone for a ticket pack (no
+ *  card), null when the row names neither. */
 export function ledgerSubject(tx: {
   reason: string;
   pack_title?: string | null;
   cards?: { name: string }[];
 }): string | null {
   const [first, ...rest] = tx.cards ?? [];
-  if (!first) return null;
+  if (!first) return tx.reason === 'pack_open' ? (tx.pack_title ?? null) : null;
   const card = first.name + (rest.length ? ` +${rest.length}` : '');
   return tx.reason === 'pack_open' && tx.pack_title
     ? `${tx.pack_title} · ${card}`

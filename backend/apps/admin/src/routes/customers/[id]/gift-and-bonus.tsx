@@ -371,7 +371,7 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
                       {g.opened_at ? orderDateTime(g.opened_at) : '—'}
                     </Table.Cell>
                     <Table.Cell className="text-right">
-                      {canEdit && g.state === 'unopened' && (
+                      {canEdit && (g.state === 'unopened' || g.state === 'stuck') && (
                         <Button
                           size="small"
                           variant="secondary"

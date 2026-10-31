@@ -67,17 +67,25 @@ export async function GET(
   const soldPullIds = rows
     .filter((t: any) => t.reason === 'buyback' && t.pull_id)
     .map((t: any) => t.pull_id as string);
-  const [openPulls, soldPulls] = await Promise.all([
+  const [openPulls, soldPulls, spins] = await Promise.all([
     openIds.length
       ? packs.listPulls({ customer_id: id, open_id: openIds })
       : [],
     soldPullIds.length
       ? packs.listPulls({ customer_id: id, id: soldPullIds })
       : [],
+    // A ticket pack's open writes spins, not pulls: no card, but still a pack.
+    openIds.length
+      ? packs.listTicketSpins({ customer_id: id, open_id: openIds })
+      : [],
   ]);
   const seenPulls = [...openPulls, ...soldPulls];
   const handles = [...new Set(seenPulls.map((p: any) => p.card_id as string))];
-  const slugs = [...new Set(seenPulls.map((p: any) => p.pack_id as string))];
+  const slugs = [
+    ...new Set(
+      [...seenPulls, ...spins].map((p: any) => p.pack_id as string),
+    ),
+  ];
   const [cards, packRows, balanceAfter] = await Promise.all([
     handles.length
       ? packs.listCards({ handle: handles }, { take: handles.length })
@@ -125,9 +133,15 @@ export async function GET(
           ) ?? null,
         balance_after: balanceAfter.get(t.id) ?? null,
         // A reward's slug (task-reward) has no pack row and no title to show.
-        pack_title: pulls.length
-          ? (packTitleBySlug.get(pulls[0].pack_id) ?? null)
-          : null,
+        pack_title:
+          packTitleBySlug.get(
+            pulls[0]?.pack_id ??
+              (t.reason === 'pack_open'
+                ? spins.find(
+                    (s: any) => s.open_id === t.source_transaction_id,
+                  )?.pack_id
+                : undefined),
+          ) ?? null,
         cards: pulls.map(subject),
         // A shipping fee's reference is its order id (a refund's is
         // `refund:<order id>`).

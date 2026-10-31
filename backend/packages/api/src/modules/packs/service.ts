@@ -4322,7 +4322,7 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ id: string; cents: string }[]>(
       'SELECT id, cents FROM (' +
-        'SELECT id, ROUND(SUM(amount) OVER (ORDER BY created_at, id) * 100)::bigint AS cents ' +
+        'SELECT id, SUM(ROUND(amount * 100)) OVER (ORDER BY created_at, id)::bigint AS cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL' +
         `) running WHERE id IN (${ids.map(() => '?').join(', ')})`,
       [customerId, ...ids],
@@ -12504,7 +12504,7 @@ class PacksModuleService extends MedusaService({
     return { ids: rows.map((r) => r.id), total: Number(count?.n ?? 0) };
   }
 
-  /** Phase 4 P4.2 — 2-way audit union for a customer.
+  /** Phase 4 P4.2 — audit union for a customer: customer, credit and gift rows.
    *
    *  Covers both entity_type keys used by admin_action_audit:
    *    (a) entity_type='customer' keyed by customerId            (freeze/unfreeze)

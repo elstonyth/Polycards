@@ -15,20 +15,19 @@ import {
   FilterPills,
   TableState,
   When,
-  openableRow,
-  whenText,
 } from './bits';
+import { openableRow, useOrigin, whenText } from './row-helpers';
 
 // Exhaustive over the pull lifecycle, so a shipped card can never read as "in
 // vault" again. Sold back is orange as it always was: the card has left.
 const STATUS_TONE: Record<
   SupportPull['status'],
-  'green' | 'orange' | 'blue' | 'grey'
+  'green' | 'orange' | 'blue'
 > = {
   vaulted: 'green',
   bought_back: 'orange',
   delivering: 'blue',
-  delivered: 'grey',
+  delivered: 'green',
 };
 
 const STATUS_FILTERS = [
@@ -49,15 +48,6 @@ export const PullStatusBadge = ({ pull }: { pull: SupportPull }) => {
         : t(`playerDetail.pullStatus.${pull.status}`, pull.status)}
     </StatusBadge>
   );
-};
-
-/** The pack's title, or how they got the card when no pack row exists (a task
- *  reward has a slug, not a pack). */
-export const useOrigin = () => {
-  const { t } = useTranslation();
-  return (p: SupportPull) =>
-    p.pack_title ??
-    (p.source ? t(`playerDetail.source.${p.source}`, p.source) : p.pack_id);
 };
 
 export const PullDrawer = ({

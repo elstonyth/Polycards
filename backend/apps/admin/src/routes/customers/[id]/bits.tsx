@@ -1,8 +1,9 @@
-import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Copy, Drawer, Input, Label, Prompt, Text } from '@medusajs/ui';
 import { orderDateTime, timeAgo } from '../../../lib/format';
 import { resolveImageUrl } from '../../../lib/image-url';
+import { useRestoreFocus } from './row-helpers';
 
 // The small pieces every tab on the player page shares.
 
@@ -13,27 +14,6 @@ export const When = ({ iso }: { iso: string }) => (
     <div className="text-ui-fg-subtle txt-compact-xsmall">{timeAgo(iso)}</div>
   </>
 );
-
-/** The same date on one line, for a detail panel. */
-export const whenText = (iso: string | null | undefined): string | null =>
-  iso ? `${orderDateTime(iso)} · ${timeAgo(iso)}` : null;
-
-/** Makes a table row open its detail panel, by mouse or keyboard. Dragging
- *  across a row to copy a reference does not open it. */
-export const openableRow = (open: () => void) => ({
-  className: 'cursor-pointer',
-  tabIndex: 0,
-  'aria-haspopup': 'dialog' as const,
-  onClick: () => {
-    if (!window.getSelection()?.toString()) open();
-  },
-  onKeyDown: (e: KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      open();
-    }
-  },
-});
 
 export const FilterPills = <T extends string>({
   label,
@@ -69,18 +49,21 @@ export const DetailDrawer = ({
   title: string;
   onClose: () => void;
   children: ReactNode;
-}) => (
-  <Drawer open onOpenChange={(open) => !open && onClose()}>
-    <Drawer.Content>
-      <Drawer.Header>
-        <Drawer.Title>{title}</Drawer.Title>
-      </Drawer.Header>
-      <Drawer.Body className="divide-y overflow-y-auto p-0">
-        {children}
-      </Drawer.Body>
-    </Drawer.Content>
-  </Drawer>
-);
+}) => {
+  const restoreFocus = useRestoreFocus();
+  return (
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <Drawer.Content onCloseAutoFocus={restoreFocus}>
+        <Drawer.Header>
+          <Drawer.Title>{title}</Drawer.Title>
+        </Drawer.Header>
+        <Drawer.Body className="divide-y overflow-y-auto p-0">
+          {children}
+        </Drawer.Body>
+      </Drawer.Content>
+    </Drawer>
+  );
+};
 
 export const DetailRows = ({ children }: { children: ReactNode }) => (
   <dl className="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-4 gap-y-2.5 break-words px-6 py-4 text-sm">
@@ -156,20 +139,25 @@ export type DialogField = {
   placeholder?: string;
   /** May be left blank (for example "blank = no referrer"). */
   optional?: boolean;
+  /** Keeps Apply off until the trimmed value passes. */
+  valid?: (value: string) => boolean;
 };
 
 /** Asks for the values of an audited action, reason included, then runs it.
- *  Render it only while open, so its fields start from `initial`. */
+ *  Render it only while open, so its fields start from `initial`. It stays open
+ *  until the caller closes it: a refused save keeps what was typed. */
 export const FieldsDialog = ({
   title,
   description,
   fields,
+  busy,
   onSubmit,
   onClose,
 }: {
   title: string;
   description?: string;
   fields: DialogField[];
+  busy?: boolean;
   onSubmit: (values: Record<string, string>) => void;
   onClose: () => void;
 }) => {
@@ -177,10 +165,23 @@ export const FieldsDialog = ({
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(fields.map((f) => [f.key, f.initial ?? ''])),
   );
-  const ready = fields.every((f) => f.optional || values[f.key].trim());
+  const restoreFocus = useRestoreFocus();
+  const ready =
+    !busy &&
+    fields.every((f) => {
+      const value = values[f.key].trim();
+      return (f.optional || !!value) && (f.valid?.(value) ?? true);
+    });
+  const submit = () => {
+    if (ready) {
+      onSubmit(
+        Object.fromEntries(fields.map((f) => [f.key, values[f.key].trim()])),
+      );
+    }
+  };
   return (
     <Prompt open variant="confirmation" onOpenChange={(o) => !o && onClose()}>
-      <Prompt.Content>
+      <Prompt.Content onCloseAutoFocus={restoreFocus}>
         <Prompt.Header>
           <Prompt.Title>{title}</Prompt.Title>
           <Prompt.Description>{description ?? ''}</Prompt.Description>
@@ -199,6 +200,12 @@ export const FieldsDialog = ({
                 onChange={(e) =>
                   setValues((v) => ({ ...v, [f.key]: e.target.value }))
                 }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
               />
             </div>
           ))}
@@ -207,13 +214,11 @@ export const FieldsDialog = ({
           <Prompt.Cancel>{t('support.adjustCancel')}</Prompt.Cancel>
           <Prompt.Action
             disabled={!ready}
-            onClick={() =>
-              onSubmit(
-                Object.fromEntries(
-                  fields.map((f) => [f.key, values[f.key].trim()]),
-                ),
-              )
-            }
+            onClick={(e) => {
+              // Radix closes on click otherwise; see the note above.
+              e.preventDefault();
+              submit();
+            }}
           >
             {t('support.adjustConfirm')}
           </Prompt.Action>

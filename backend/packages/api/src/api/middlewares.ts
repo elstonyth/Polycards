@@ -20,6 +20,7 @@ import {
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import {
   rejectCustomerMetadata,
+  redactCustomerSecrets,
   rejectAdminBankAccountsMetadata,
 } from './utils/customer-metadata-guard';
 import {
@@ -1334,6 +1335,17 @@ export default defineMiddlewares({
       matcher: '/admin/customers/*',
       method: 'POST',
       middlewares: [rejectAdminBankAccountsMetadata, rejectAdminPhoneWrite],
+    },
+    // Reads of the same blob: see redactCustomerSecrets.
+    {
+      matcher: '/admin/customers',
+      method: 'GET',
+      middlewares: [redactCustomerSecrets],
+    },
+    {
+      matcher: '/admin/customers/*',
+      method: 'GET',
+      middlewares: [redactCustomerSecrets],
     },
     {
       matcher: '/admin/customers/*/payout-details',

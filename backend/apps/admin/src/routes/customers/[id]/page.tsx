@@ -251,7 +251,7 @@ const Customer360Page = () => {
       : !reason.trim();
 
   return (
-    <div className="pc-dashboard flex flex-col gap-y-3">
+    <div className="pc-dashboard isolate flex flex-col gap-y-3">
       {/* ── Header: who, their account state, the actions, and the four
           numbers staff check first. ───────────────────────────────── */}
       <Container className="pc-settle p-0">
@@ -371,6 +371,14 @@ const Customer360Page = () => {
         <MoneySummary money={money} view={view} />
       </Container>
 
+      {moneyQ.isError && (
+        <Container>
+          <Text size="small" className="text-ui-fg-error">
+            {t('playerMoney.loadError')}
+          </Text>
+        </Container>
+      )}
+
       {/* ── Prompt modal — single instance, content varies by modal kind ─── */}
       <Prompt
         open={modal !== null}
@@ -440,9 +448,10 @@ const Customer360Page = () => {
 
       {/* ── Tabs: stuck to the top, so the sections stay one click away however
           far down a long ledger the operator has scrolled. ─────────── */}
-      {/* No z-index: Medusa's drawers and prompts have none, and any here would
-          paint this bar over them. */}
-      <Container className="sticky top-0 p-0">
+      {/* z-10 keeps it above buttons and animated cards sliding under it. The
+          root's `isolate` holds that inside this page, so Medusa's drawers and
+          prompts, which have no z-index of their own, still cover it. */}
+      <Container className="sticky top-0 z-10 p-0">
         <div className="overflow-x-auto px-6 py-3">
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
             <Tabs.List
@@ -479,13 +488,8 @@ const Customer360Page = () => {
       </Container>
 
       {tab === 'overview' &&
-        (moneyQ.isError ? (
-          <Container>
-            <Text size="small" className="text-ui-fg-error">
-              {t('playerMoney.loadError')}
-            </Text>
-          </Container>
-        ) : !money ? (
+        !moneyQ.isError &&
+        (!money ? (
           <Container>
             <LoadingSkeleton />
           </Container>

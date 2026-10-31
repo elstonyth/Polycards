@@ -224,16 +224,13 @@ export const usePricingHealth = (): UseQueryResult<PricingHealth> =>
     refetchOnWindowFocus: true,
   });
 
-// `customerId` scopes the ledger to one player (the player-detail tabs). Blank
-// is OMITTED by getPulls, never sent as an empty param — the route 400s on one.
 export const usePulls = (
   page = 0,
   source?: 'pack' | 'reward',
-  customerId?: string,
 ): UseQueryResult<PullsResponse> =>
   useQuery({
-    queryKey: qk.pulls(page, source, customerId),
-    queryFn: () => getPulls(page, 50, source, customerId),
+    queryKey: qk.pulls(page, source),
+    queryFn: () => getPulls(page, 50, source),
     placeholderData: keepPreviousData,
   });
 
@@ -2129,7 +2126,20 @@ export const useInvalidateStock = () => {
         qk.deliveryOrderKey,
         qk.goodsReceiveNotesKey,
         qk.goodsReceiveNoteKey,
-      ].map((queryKey) => qc.invalidateQueries({ queryKey })),
+      ]
+        .map((queryKey) => qc.invalidateQueries({ queryKey }))
+        .concat(
+          // A shipment moves a player's cards and fees: their vault, tiles and
+          // wallet must not wait out the stale time.
+          qc.invalidateQueries({
+            predicate: (q) =>
+              q.queryKey[0] === 'admin' &&
+              q.queryKey[1] === 'customer' &&
+              ['pulls', 'money', 'gacha', 'transactions'].includes(
+                String(q.queryKey[3]),
+              ),
+          }),
+        ),
     );
 };
 

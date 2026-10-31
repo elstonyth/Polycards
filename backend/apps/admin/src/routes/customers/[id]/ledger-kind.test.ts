@@ -22,6 +22,12 @@ describe('ledgerSubject', () => {
     ).toBe('Charizard #5');
   });
 
+  it('names the pack alone for a ticket pack, which pulls no card', () => {
+    expect(
+      ledgerSubject({ reason: 'pack_open', pack_title: 'Lucky Pack', cards: [] }),
+    ).toBe('Lucky Pack');
+  });
+
   it('is null for a row about no card', () => {
     expect(ledgerSubject({ reason: 'topup', cards: [] })).toBeNull();
     expect(ledgerSubject({ reason: 'topup' })).toBeNull();

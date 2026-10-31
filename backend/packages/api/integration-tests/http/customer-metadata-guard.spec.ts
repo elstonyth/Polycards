@@ -1,6 +1,11 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
-import { Modules } from '@medusajs/framework/utils';
-import { postStoreCustomer, unwrapResponse } from './utils';
+import {
+  ContainerRegistrationKeys,
+  generateJwtToken,
+  Modules,
+} from '@medusajs/framework/utils';
+import { supportViewerRoleId } from '../../src/scripts/create-support-viewer';
+import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -132,6 +137,76 @@ medusaIntegrationTestRunner({
         expect(ok.data.customer.metadata ?? {}).not.toHaveProperty(
           'equipped_frame_level',
         );
+      });
+
+      // The read side. Core returns metadata whole under customer:read, and it
+      // holds full bank numbers and partner passwords.
+      it('keeps secret metadata from a role without its own read policy', async () => {
+        const container = getContainer();
+        const customers = container.resolve(Modules.CUSTOMER);
+        const secrets = {
+          bank_accounts: [{ accountNumber: '4012340503' }],
+          partner_credential: { password: 'partner-secret-pw' },
+        };
+        const [player] = await customers.createCustomers([
+          {
+            email: 'guard-secrets@test.dev',
+            has_account: true,
+            metadata: { handle: 'ace', ...secrets },
+          },
+        ]);
+        const { http } = container.resolve(
+          ContainerRegistrationKeys.CONFIG_MODULE,
+        ).projectConfig;
+        const viewer = generateJwtToken(
+          {
+            actor_id: 'guard-viewer',
+            actor_type: 'user',
+            auth_identity_id: '',
+            app_metadata: {
+              user_id: 'guard-viewer',
+              roles: [await supportViewerRoleId(container)],
+            },
+          },
+          {
+            secret: http.jwtSecret,
+            expiresIn: 300,
+            jwtOptions: http.jwtOptions,
+          },
+        );
+        const staff = await mintSuperAdmin(
+          container,
+          api,
+          'guard-admin@test.dev',
+          'guard-admin-password-1',
+        );
+        const get = (path: string, token: string) =>
+          unwrapResponse(
+            api.get(path, { headers: { authorization: `Bearer ${token}` } }),
+          );
+        const detail = `/admin/customers/${player.id}`;
+        const paths = [
+          detail,
+          `${detail}?fields=metadata`,
+          `/admin/customers?q=guard-secrets&fields=%2Bmetadata`,
+        ];
+
+        for (const path of paths) {
+          const res = await get(path, viewer);
+          expect(res.status).toBe(200);
+          const text = JSON.stringify(res.data);
+          expect(text).not.toContain('4012340503');
+          expect(text).not.toContain('partner-secret-pw');
+        }
+        // The rest of the blob survives: the player page reads the handle.
+        expect((await get(detail, viewer)).data.customer.metadata).toEqual({
+          handle: 'ace',
+        });
+        // Staff holding the policies see exactly what they always did.
+        expect((await get(detail, staff)).data.customer.metadata).toEqual({
+          handle: 'ace',
+          ...secrets,
+        });
       });
     });
   },

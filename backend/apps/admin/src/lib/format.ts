@@ -3,7 +3,7 @@
 // one import below is type-only, so it is erased at compile time and the node
 // test never loads admin-rest (which needs the injected __BACKEND_URL__).
 
-import type { DeliveryStatus } from './admin-rest';
+import type { DeliveryStatus, DeliveryTrackingSnapshot } from './admin-rest';
 
 // Display labels only — state/API keep the raw lowercase values. This is the
 // OPERATOR surface: 'completed' reads "Completed" here, while the same status
@@ -16,6 +16,27 @@ export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
   shipped: 'Shipped',
   completed: 'Completed',
   canceled: 'Canceled',
+};
+
+export const DELIVERY_TONE: Record<
+  DeliveryStatus,
+  'orange' | 'blue' | 'green' | 'grey'
+> = {
+  requested: 'orange',
+  processed: 'orange',
+  ready_to_ship: 'orange',
+  shipped: 'blue',
+  completed: 'green',
+  canceled: 'grey',
+};
+
+export const CARRIER_NAME: Record<
+  NonNullable<DeliveryTrackingSnapshot['carrier']>,
+  string
+> = {
+  ninjavan: 'Ninja Van',
+  poslaju: 'Pos Laju',
+  dhl_ecommerce: 'DHL eCommerce',
 };
 
 // Label for a status that came off the wire. Falls back to the raw token

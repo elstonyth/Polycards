@@ -22,9 +22,8 @@ import {
   DetailRows,
   TableState,
   When,
-  openableRow,
-  whenText,
 } from './bits';
+import { openableRow, whenText } from './row-helpers';
 
 const PAGE = 20;
 
@@ -81,12 +80,17 @@ export const PaymentsTab = ({ customerId }: { customerId: string }) => {
   const { t } = useTranslation();
   const [depPage, setDepPage] = useState(0);
   const [wdPage, setWdPage] = useState(0);
-  const [openDep, setOpenDep] = useState<GatewayDeposit | null>(null);
-  const [openWd, setOpenWd] = useState<GatewayWithdrawal | null>(null);
+  const [pickedDep, setOpenDep] = useState<GatewayDeposit | null>(null);
+  const [pickedWd, setOpenWd] = useState<GatewayWithdrawal | null>(null);
   const deposits = useCustomerGatewayDeposits(customerId, depPage);
   const withdrawals = useCustomerGatewayWithdrawals(customerId, wdPage);
   const depRows = deposits.data?.deposits ?? [];
   const wdRows = withdrawals.data?.withdrawals ?? [];
+  // The lists poll every minute, so an open panel reads the row as it is now.
+  const openDep =
+    pickedDep && (depRows.find((d) => d.id === pickedDep.id) ?? pickedDep);
+  const openWd =
+    pickedWd && (wdRows.find((w) => w.id === pickedWd.id) ?? pickedWd);
   const depLabel = (d: GatewayDeposit) =>
     d.stuck ? t('deposits.statusStuck') : t(`deposits.statusLabel.${d.status}`);
   const wdLabel = (w: GatewayWithdrawal) =>

@@ -19,9 +19,8 @@ import {
   FilterPills,
   TableState,
   When,
-  openableRow,
-  whenText,
 } from './bits';
+import { openableRow, whenText } from './row-helpers';
 import {
   WALLET_FILTERS,
   ledgerKind,

@@ -21,7 +21,8 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { StatTile } from './MoneyCards';
 import { PullDrawer } from './PullsTab';
-import { FilterPills, TableState, When, openableRow } from './bits';
+import { FilterPills, TableState, When } from './bits';
+import { openableRow } from './row-helpers';
 
 type Sort = 'newest' | 'value';
 const SORTS: Sort[] = ['newest', 'value'];

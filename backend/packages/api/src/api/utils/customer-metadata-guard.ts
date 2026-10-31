@@ -4,6 +4,8 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import { hasPermission } from '@medusajs/framework';
+import { PARTNER_CREDENTIAL_KEY } from '../../utils/partner-accounts';
 
 // Medusa's stock update-customer route accepts arbitrary `metadata` — read from
 // the installed package, not assumed:
@@ -82,4 +84,62 @@ export function rejectAdminBankAccountsMetadata(
     return;
   }
   next();
+}
+
+// customer.metadata keys only a role with their own read policy may receive.
+const SECRET_METADATA = [
+  { key: 'bank_accounts', resource: 'customer_bank_account' },
+  { key: PARTNER_CREDENTIAL_KEY, resource: 'partner_credential' },
+] as const;
+
+/**
+ * Core's GET /admin/customers and /admin/customers/:id return customer.metadata
+ * whole, under customer:read alone, and that blob holds full bank account
+ * numbers and partner account passwords. SECRET_READS (api/admin-rbac.ts) fences
+ * the routes built to serve them, so without this a view-only role read the same
+ * values here, in bulk and with no audit row. Same policies, same answer.
+ */
+export async function redactCustomerSecrets(
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction,
+): Promise<void> {
+  try {
+    const roles =
+      (req as unknown as { auth_context?: { app_metadata?: { roles?: string[] } } })
+        .auth_context?.app_metadata?.roles ?? [];
+    const hidden: string[] = [];
+    for (const { key, resource } of SECRET_METADATA) {
+      // hasPermission answers true for an empty role list: never here.
+      const allowed =
+        roles.length > 0 &&
+        (await hasPermission({
+          roles,
+          actions: { resource, operation: 'read' },
+          container: req.scope,
+        }));
+      if (!allowed) hidden.push(key);
+    }
+    if (hidden.length > 0) {
+      const json = res.json.bind(res);
+      res.json = (body: unknown) => {
+        const b = body as {
+          customer?: { metadata?: Record<string, unknown> | null };
+          customers?: { metadata?: Record<string, unknown> | null }[];
+        } | null;
+        for (const c of [b?.customer, ...(b?.customers ?? [])]) {
+          if (c?.metadata) {
+            c.metadata = Object.fromEntries(
+              Object.entries(c.metadata).filter(([k]) => !hidden.includes(k)),
+            );
+          }
+        }
+        return json(body);
+      };
+    }
+    next();
+  } catch (e) {
+    // Fail closed: no check, no response.
+    next(e);
+  }
 }
