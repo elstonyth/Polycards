@@ -269,14 +269,6 @@ export interface CustomerGacha {
   } | null;
 }
 
-// Core Medusa admin customer search (?q matches email/name).
-export async function searchCustomers(q: string): Promise<SupportCustomer[]> {
-  const data = await getJson<{ customers: SupportCustomer[] }>(
-    `/admin/customers?q=${encodeURIComponent(q)}&limit=10`,
-  );
-  return data.customers;
-}
-
 export interface GroupCreditCustomer {
   id: string;
   email: string | null;
