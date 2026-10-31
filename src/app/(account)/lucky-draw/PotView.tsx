@@ -479,10 +479,10 @@ export function PotView({
             />
             <StubTime>
               <PoolClock
-                label="Tickets close in"
+                label="Gate closes in"
                 to={event.ends_at}
                 nowMs={nowMs}
-                ended="Tickets are closed"
+                ended="Gate is closed"
               />
               <PassDates
                 startsAt={event.starts_at}
