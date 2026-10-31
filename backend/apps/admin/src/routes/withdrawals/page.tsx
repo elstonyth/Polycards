@@ -201,7 +201,6 @@ const WithdrawalsPage = () => {
 
   return (
     <div className="flex flex-col gap-y-3">
-      <WithdrawalControlsPanel />
       <Container className="p-0">
         <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-4">
           <div>
@@ -497,6 +496,7 @@ const WithdrawalsPage = () => {
           />
         )}
       </Container>
+      <WithdrawalControlsPanel />
     </div>
   );
 };

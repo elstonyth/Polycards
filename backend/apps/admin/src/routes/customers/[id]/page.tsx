@@ -204,7 +204,7 @@ const Customer360Page = () => {
   function applyAdjustCredits() {
     if (!customerId) return;
     const amount = Number(creditAmount.trim());
-    // Reject NaN and a no-op zero adjustment (matches support/page.tsx). Both
+    // Reject NaN and a no-op zero adjustment. Both
     // signs are intended (negative = debit, positive = credit); only exactly 0
     // is meaningless.
     if (!Number.isFinite(amount) || amount === 0) {
