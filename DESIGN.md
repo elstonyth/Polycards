@@ -158,7 +158,7 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 
 ### Lucky Draw only — Holo foil (2026-10-24)
 
-- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on three things: the prize wheel's rim, the prize frame in the win reveal, and the win's dust. Never chrome, never buttons, never text, never another surface. No gold anywhere on the wheel (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` / `.holo-ring` in `globals.css` only turn the light and cut the ring (still under reduced motion).
+- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on five things: the prize wheel's rim, the prize frame (the win reveal, and the pool's front card and zoomed prize), the win's dust, the pool pass's stub (`holoSheet`, under a pearl veil so a whole surface of it stays a card's shimmer and not candy; 2026-10-31, so the page can't be mistaken for the homepage), and the "Now" dot in How it works. Never chrome, never buttons, never text, never another surface. No gold anywhere on the wheel (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` / `.holo-ring` in `globals.css` only turn the light and cut the ring (still under reduced motion).
 
 ## 3. Typography
 
@@ -351,11 +351,45 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
 **Draw** tab (2026-10-30; it sat under Games from 2026-10-25, under Task before that).
 
-- **Tabs** — Prizes · Results · My tickets, the leaderboard's segmented pill.
-- **Prize card** — charcoal card: the prize on a 5:7 pedestal, RM value in
-  Chase Gold Nekst, draw time in MYT with a live countdown, tickets in /
-  entrants / my chance, the top 10 (framed avatars) and one white Enter
-  pill.
+- **Tabs** — Pool · Results · My tickets, the leaderboard's segmented pill.
+- **The pool pass** (`PoolPass`, redesigned 2026-10-31; one winner takes the
+  whole event) — a pool is a pass cut like the ticket art, because the page must
+  not read as the homepage (no fanned slabs, no giant money headline, no 01/02/03
+  strip). The pearl foil stub carries the time in ink: status, the pool's length
+  ("24-hour pool", "3-day pool", "1-week pool"), the clock and its two date
+  fields. It tears, with holes and two notches cut through to the page, into a
+  dark half with the event name, the total in Chase Gold, every prize, and the
+  player's ledger. Stands on its side on a desktop. One white pill, docked over
+  the tab bar like the pack page's buy bar and set into the stub on a desktop:
+  Put tickets in, or Earn tickets at zero. Prizes are never something to pick: a
+  tap only zooms the card, and tickets go on the pool. Once tickets close the
+  stub goes plain grey; after the draw it carries the winner.
+- **Any screen** (`.pool-wide`, measured 2026-10-31 from a 280px folded phone to
+  a 3440px monitor) — the page breaks out of the account column from 640px up:
+  the screen's width less a growing gutter, capped at 96rem, so prizes grow with
+  the screen instead of shrinking. The stub is 30% of the pass on a desktop. A
+  one-row shelf is also held to the window's height (`100dvh - 26rem`), so a
+  1366x650 laptop still has everything on its first screen. Clock digits size
+  from the clock's own width (`cqw`). Two variants handle height: `squat` (short
+  upright phones) keeps only the closing date, `short` (a phone on its side) puts
+  the title and tabs in one row and undocks the action. Set into the stub, the
+  action is sticky, so it is never below the fold. The wide desktop prints the
+  player's ledger on the stub. Results and My tickets keep a 56rem column.
+- **Any length** — a pool can run a day or a week, so the page never assumes a
+  month. Under a day the clock drops its Days column and its digits grow; dates
+  read Today / Tomorrow / Yesterday, then "Sat 7 Nov". Admins are told to leave
+  the month out of the name.
+- **Shelf** (`PoolShelf`) — every prize with its picture and price: two or four
+  sit in pairs on a phone, others in threes; four across as a preview in Next pool.
+- **Next pool** — a smaller plain pass with the name, length, opening time, total
+  and shelf, on every state. With nothing running the pool pass itself shows it,
+  the clock counting to its start.
+- **Enter sheet** — shows the whole pool (every prize, total, closing time)
+  above the stepper, never one card.
+- **How it works** — four steps on a line, the current one marked Now by where
+  the pool is, then the small print under a disclosure.
+- **Old-rule prize card** — kept for any event published before one-winner:
+  charcoal card, the prize on a 5:7 pedestal, draw time, top 10, white Enter pill.
 - **The wheel** (style "K — Holo Foil") — matte black and graphite wedges
   sized by tickets, hair-thin silver lines, the holo-foil rim, a pearl hub, a
   slim silver pointer that flicks on each edge. Pull-back, ~7 s ease-out,

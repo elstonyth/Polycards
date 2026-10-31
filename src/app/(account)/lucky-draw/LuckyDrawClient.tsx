@@ -8,7 +8,7 @@ import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
 import { mytDate, num } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
-import { luckyDrawView, rulesCopy } from '@/lib/lucky-draw';
+import { heroFirst, luckyDrawView, rulesCopy } from '@/lib/lucky-draw';
 import {
   getLuckyDraw,
   getLuckyDrawEventResult,
@@ -21,7 +21,7 @@ import type {
 } from '@/lib/data/schemas';
 import { EnterSheet, type Entered, type EnterTarget } from './EnterSheet';
 import { MyTickets } from './MyTickets';
-import { NextEventLine, potTarget, PotView } from './PotView';
+import { NoPool, potTarget, PotView, UpcomingPool } from './PotView';
 import { PrizeCard } from './PrizeCard';
 import { PrizeWheel } from './PrizeWheel';
 import { ResultDetail } from './ResultDetail';
@@ -32,7 +32,7 @@ import { TicketOpenIntro } from './TicketOpenIntro';
 type TabKey = 'prizes' | 'results' | 'mine';
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'prizes', label: 'Prizes' },
+  { key: 'prizes', label: 'Pool' },
   { key: 'results', label: 'Results' },
   { key: 'mine', label: 'My tickets' },
 ];
@@ -102,6 +102,26 @@ export function LuckyDrawClient({
     const poll = async () => {
       const now = Date.now();
       const ev = pageRef.current?.event;
+      // The next pool's start has passed: bring it in, once the backend's 10 s
+      // page cache has had time to turn over, so an open tab goes straight to it.
+      // Not while this pool's result is still due: back to back, the next one
+      // opens as this one ends, and the page must stay to play this one's spin.
+      const awaitingDraw =
+        ev?.draw_mode === 'one_winner' &&
+        !ev.result &&
+        now < Date.parse(ev.ends_at) + POLL_WINDOW_MS;
+      const next = pageRef.current?.next_event;
+      if (
+        next &&
+        !awaitingDraw &&
+        !reread.has(next.starts_at) &&
+        now >= Date.parse(next.starts_at) + TOP_REREAD_MS
+      ) {
+        reread.add(next.starts_at);
+        const fresh = await getLuckyDraw();
+        if (live && fresh) setPage(fresh);
+        return;
+      }
       // A one-winner event has one result: its own, read from the event route.
       // Never the prize routes, whose mirror rows hold no entry list.
       if (ev?.draw_mode === 'one_winner') {
@@ -264,46 +284,49 @@ export function LuckyDrawClient({
         : null;
 
   return (
-    <div>
-      <div className="flex items-end justify-between gap-3">
+    <div className="pool-wide">
+      {/* Title and balance over the tabs on a phone; one row where there is room
+          across or no room down. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-4 squat:-mt-3 squat:gap-y-2 short:-mt-3 lg:gap-x-6">
         <div className="min-w-0">
-          <h1 className="font-heading text-3xl text-white">LUCKY DRAW</h1>
-          {event && (
+          <h1 className="font-heading text-[clamp(1.35rem,8vw,1.875rem)] whitespace-nowrap text-white short:text-xl">
+            LUCKY DRAW
+          </h1>
+          {view === 'per_prize' && event && (
             <p className="mt-1 text-sm text-neutral-400">
               {event.name} · until {mytDate(event.ends_at)}
             </p>
           )}
         </div>
         {page && (
-          <p className="flex shrink-0 items-center gap-1.5 rounded-full bg-neutral-800 py-2 pr-3.5 pl-3 text-sm font-semibold text-white">
+          <p className="flex shrink-0 items-center gap-1.5 rounded-full bg-neutral-800 py-2 pr-3.5 pl-3 text-sm font-semibold text-white short:order-last lg:order-last">
             <TicketArt width={26} className="-my-1" />
             <span className="tabular-nums">{num(balance)}</span>
             <span className="sr-only">tickets</span>
           </p>
         )}
-      </div>
-
-      <div
-        role="group"
-        aria-label="Lucky Draw sections"
-        className="mt-4 grid grid-cols-3 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1"
-      >
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={tab === key}
-            onClick={() => setTab(key)}
-            className={cn(
-              'flex min-h-11 items-center justify-center rounded-full px-2 text-[13px] font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:text-sm',
-              tab === key
-                ? 'bg-neutral-50 text-neutral-950'
-                : 'text-neutral-400 hover:text-white',
-            )}
-          >
-            {label}
-          </button>
-        ))}
+        <div
+          role="group"
+          aria-label="Lucky Draw sections"
+          className="grid w-full grid-cols-3 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 short:w-[clamp(15rem,40vw,20rem)] lg:w-[26rem]"
+        >
+          {TABS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={tab === key}
+              onClick={() => setTab(key)}
+              className={cn(
+                'flex min-h-11 items-center justify-center rounded-full px-2 text-[13px] font-semibold whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40 squat:min-h-10 short:min-h-9 max-[340px]:px-1 max-[340px]:text-xs sm:text-sm',
+                tab === key
+                  ? 'bg-neutral-50 text-neutral-950'
+                  : 'text-neutral-400 hover:text-white',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Always mounted: a live region added with its text is not announced. */}
@@ -315,38 +338,48 @@ export function LuckyDrawClient({
         )}
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 squat:mt-3 short:mt-3">
         {tab === 'results' ? (
-          <ResultsList onOpen={openResult} onOpenEvent={openEventResult} />
+          // Lists of rows, not a stage: they keep the column they were built for.
+          <div className="mx-auto max-w-4xl">
+            <ResultsList onOpen={openResult} onOpenEvent={openEventResult} />
+          </div>
         ) : tab === 'mine' ? (
-          <MyTickets />
+          <div className="mx-auto max-w-4xl">
+            <MyTickets />
+          </div>
         ) : !page ? (
           <UnavailablePanel />
         ) : !event ? (
-          <Panel className="text-center">
-            <p className="text-sm text-neutral-300">
-              The next Lucky Draw is coming soon.
-            </p>
-            {page.next_event && (
-              <NextEventLine
-                next={page.next_event}
-                className="mt-1 text-sm text-neutral-400"
-              />
-            )}
-            <button
-              type="button"
-              onClick={() => setTab('results')}
-              className={cn(
-                pillVariants({ variant: 'secondary', size: 'sm' }),
-                'mt-3',
-              )}
-            >
-              See past results
-            </button>
-          </Panel>
+          page.next_event ? (
+            <UpcomingPool
+              next={page.next_event}
+              balance={balance}
+              nowMs={nowMs}
+            />
+          ) : (
+            <NoPool onSeeResults={() => setTab('results')} />
+          )
+        ) : page.prizes.length === 0 ? (
+          <p className="text-sm text-neutral-400">
+            Prizes for this Lucky Draw are on their way.
+          </p>
+        ) : view !== 'per_prize' ? (
+          <PotView
+            page={page}
+            event={event}
+            nowMs={nowMs}
+            drawing={view === 'pot_drawing'}
+            balance={balance}
+            onEnter={() => setEntering('pot')}
+            onOpenResult={() => void openEventResult(event.id, event.name)}
+            onWatch={() =>
+              void openEventResult(event.id, event.name, (d) => setSpins([d]))
+            }
+          />
         ) : (
-          <>
-            {balance <= 0 && view !== 'pot_drawn' && (
+          <div className="mx-auto max-w-4xl">
+            {balance <= 0 && (
               <Panel className="mb-4 flex items-center gap-3">
                 <TicketArt width={44} className="shrink-0" />
                 <p className="flex-1 text-sm text-neutral-300">
@@ -360,58 +393,44 @@ export function LuckyDrawClient({
                 </Link>
               </Panel>
             )}
-            {page.prizes.length === 0 ? (
-              <p className="text-sm text-neutral-400">
-                Prizes for this Lucky Draw are on their way.
-              </p>
-            ) : view !== 'per_prize' ? (
-              <PotView
-                page={page}
-                event={event}
-                nowMs={nowMs}
-                drawing={view === 'pot_drawing'}
-                balance={balance}
-                onEnter={() => setEntering('pot')}
-                onOpenResult={() => void openEventResult(event.id, event.name)}
-                onWatch={() =>
-                  void openEventResult(event.id, event.name, (d) =>
-                    setSpins([d]),
-                  )
-                }
-              />
-            ) : (
-              <PrizeWheel
-                prizes={page.prizes}
-                nowMs={nowMs}
-                details={(p) => (
-                  <ul aria-label="Selected prize">
-                    <PrizeCard
-                      key={p.id}
-                      prize={p}
-                      nowMs={nowMs}
-                      opensAt={event.starts_at}
-                      balance={balance}
-                      onEnter={setEntering}
-                      onOpenResult={openResult}
-                      art={false}
-                    />
-                  </ul>
-                )}
-              />
-            )}
-          </>
+            <PrizeWheel
+              prizes={page.prizes}
+              nowMs={nowMs}
+              details={(p) => (
+                <ul aria-label="Selected prize">
+                  <PrizeCard
+                    key={p.id}
+                    prize={p}
+                    nowMs={nowMs}
+                    opensAt={event.starts_at}
+                    balance={balance}
+                    onEnter={setEntering}
+                    onOpenResult={openResult}
+                    art={false}
+                  />
+                </ul>
+              )}
+            />
+          </div>
         )}
       </div>
 
-      <p className="mt-6 text-xs leading-relaxed text-neutral-400">
-        {/* No event to go by: every new event is one-winner. */}
-        {rulesCopy(event ? event.draw_mode : 'one_winner')}
-      </p>
+      {/* The pool tab carries the rules in its own How it works. */}
+      {(tab !== 'prizes' || view === 'per_prize') && (
+        <p className="mx-auto mt-6 max-w-4xl text-xs leading-relaxed text-neutral-400">
+          {/* No event to go by: every new event is one-winner. */}
+          {rulesCopy(event ? event.draw_mode : 'one_winner')}
+        </p>
+      )}
 
       {enterTarget && (
         <EnterSheet
           prize={enterTarget}
           pot={entering === 'pot'}
+          pool={heroFirst(page?.prizes ?? [])}
+          closesAt={event?.ends_at}
+          nowMs={nowMs}
+          closed={view === 'pot_drawing'}
           balance={balance}
           onClose={() => setEntering(null)}
           onEntered={onEntered}

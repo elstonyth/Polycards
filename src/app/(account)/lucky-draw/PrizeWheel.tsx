@@ -112,20 +112,12 @@ export function PrizeWheel({
   prizes,
   nowMs,
   details,
-  pot = false,
-  lead,
 }: {
   prizes: LuckyDrawPrize[];
   /** Null until mounted: the countdowns are client-only (hydration). */
   nowMs: number | null;
   /** The full prize card for the front prize. */
   details: (prize: LuckyDrawPrize) => ReactNode;
-  /** A one-winner event: one draw for every prize, so the hub says so and the
-   *  rows carry what each prize is, not its own countdown. */
-  pot?: boolean;
-  /** Above the list and under the front prize's details: under the wheel on
-   *  mobile, beside it on desktop. */
-  lead?: ReactNode;
 }) {
   const reduced = usePrefersReducedMotion();
   const stageRef = useRef<HTMLDivElement>(null);
@@ -388,14 +380,7 @@ export function PrizeWheel({
       : null;
   const pool = potTotal(prizes);
   const half = metrics.half;
-  const hubLabel =
-    hub?.kind === 'done'
-      ? 'All drawn'
-      : !pot
-        ? 'Next draw'
-        : hub?.kind === 'drawing'
-          ? 'One winner'
-          : 'Draws in';
+  const hubLabel = hub?.kind === 'done' ? 'All drawn' : 'Next draw';
   const front = prizes[clamp(active, 0, last)];
 
   return (
@@ -523,7 +508,7 @@ export function PrizeWheel({
                 role="timer"
                 aria-label={
                   hub?.kind === 'next' && nowMs != null
-                    ? `${pot ? 'Draws' : 'Next draw'} in ${drawCountdown(hub.at, nowMs)}`
+                    ? `Next draw in ${drawCountdown(hub.at, nowMs)}`
                     : undefined
                 }
                 style={{
@@ -645,7 +630,6 @@ export function PrizeWheel({
 
       <div className="mt-4 space-y-4 lg:mt-0">
         {opened && front && details(front)}
-        {lead}
         {!(opened && front) && (
           <ol className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
             {prizes.map((p, i) => (
@@ -664,26 +648,17 @@ export function PrizeWheel({
                     </span>
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span
-                      className={cn(
-                        'text-sm font-semibold text-white',
-                        pot ? 'line-clamp-2' : 'block truncate',
-                      )}
-                    >
+                    <span className="block truncate text-sm font-semibold text-white">
                       {p.title}
                     </span>
                     <span className="block truncate text-xs text-neutral-400 tabular-nums">
-                      {pot
-                        ? p.kind === 'credit'
-                          ? 'Bonus credit'
-                          : 'Card'
-                        : p.result
-                          ? p.result.winner
-                            ? `Won by ${p.result.winner.who}`
-                            : 'No entries'
-                          : nowMs != null
-                            ? drawCountdown(p.draw_at, nowMs)
-                            : ' '}
+                      {p.result
+                        ? p.result.winner
+                          ? `Won by ${p.result.winner.who}`
+                          : 'No entries'
+                        : nowMs != null
+                          ? drawCountdown(p.draw_at, nowMs)
+                          : ' '}
                       {p.my_tickets > 0 && ` · You: ${num(p.my_tickets)}`}
                     </span>
                   </span>

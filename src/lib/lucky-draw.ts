@@ -9,6 +9,7 @@ import type {
   LuckyDrawEventDetail,
   LuckyDrawResultDetail,
 } from '@/lib/data/schemas';
+import { mytClock, mytDay, mytDayNumber } from '@/lib/format';
 
 /** Why the enter route turned an entry away (backend `EnterRefusal`). */
 export const ENTER_REFUSALS = [
@@ -124,6 +125,53 @@ export function eventResultDetail(
     ticket_index: raw.ticket_index,
     prizes,
   };
+}
+
+/** A prize's price on a small tile: whole ringgit from RM 1,000 up, so it stays
+ *  on one line. The pool's total and the zoomed prize keep the sen. */
+export const tilePrice = (value: number): number =>
+  value >= 1000 ? Math.round(value) : value;
+
+/** How long a pool runs, in a player's words: "24-hour", "3-day", "1-week".
+ *  A pool can last a day or a week, and admins often end one a minute short, so
+ *  this rounds to the hour first. Null for a window it can't read. */
+export function poolLength(
+  startsAtIso: string,
+  endsAtIso: string | undefined,
+): string | null {
+  const span = Date.parse(endsAtIso ?? '') - Date.parse(startsAtIso);
+  if (!(span > 0)) return null;
+  const hours = Math.max(1, Math.round(span / 3_600_000));
+  if (hours < 48) return `${hours}-hour`;
+  const days = Math.round(hours / 24);
+  return days % 7 === 0 ? `${days / 7}-week` : `${days}-day`;
+}
+
+const NEAR_DAYS: Record<number, string> = {
+  [-1]: 'Yesterday',
+  0: 'Today',
+  1: 'Tomorrow',
+};
+
+/** The day a pool opens or closes. A short pool lives in today and tomorrow, so
+ *  the near days are words. With no clock yet (the server render) it is the
+ *  plain date, so hydration agrees. */
+export function poolDay(iso: string, nowMs: number | null): string {
+  const at = Date.parse(iso);
+  if (nowMs != null && !Number.isNaN(at)) {
+    const near = NEAR_DAYS[mytDayNumber(at) - mytDayNumber(nowMs)];
+    if (near) return near;
+  }
+  return mytDay(iso);
+}
+
+/** poolDay and the time, to read inside a sentence. */
+export function poolWhen(iso: string, nowMs: number | null): string {
+  const day = poolDay(iso, nowMs);
+  const inSentence = Object.values(NEAR_DAYS).includes(day)
+    ? day.toLowerCase()
+    : day;
+  return `${inSentence}, ${mytClock(iso)} MYT`;
 }
 
 /** The event a results row opens, or null for an old per-prize row. */
@@ -306,3 +354,9 @@ export const HOLO_STOPS = [
 
 /** The foil as a turning conic gradient (globals.css animates --holo-turn). */
 export const holoConic = `conic-gradient(from var(--holo-turn, 0deg), ${[...HOLO_STOPS, HOLO_STOPS[0]].join(', ')})`;
+
+/** The foil as a sheet, for a surface: a conic pinches to a point when you can
+ *  see its middle, so this one slides its light across instead. Under a pearl
+ *  veil, as on the ticket art: at full strength a whole surface of it reads as
+ *  candy, and it is meant to be a premium card's shimmer. */
+export const holoSheet = `linear-gradient(${HOLO_STOPS[3]}a0, ${HOLO_STOPS[3]}a0), linear-gradient(calc(115deg + var(--holo-turn, 0deg)), ${HOLO_STOPS.join(', ')})`;

@@ -3,6 +3,7 @@ import type PacksModuleService from '../../../modules/packs/service';
 import type {
   LuckyDrawEventFacts,
   LuckyDrawEventResultRow,
+  LuckyDrawPage,
   LuckyDrawResultRow,
 } from '../../../modules/packs/service';
 import {
@@ -118,7 +119,7 @@ type SharedPage = {
     result: EventResultView | null;
   } | null;
   prizes: Omit<PrizeView, 'my_tickets'>[];
-  next_event: { name: string; starts_at: string } | null;
+  next_event: LuckyDrawPage['next_event'];
 };
 
 const PAGE_TTL_MS = 10_000;

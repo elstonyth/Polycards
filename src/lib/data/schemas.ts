@@ -1596,10 +1596,13 @@ const LuckyDrawWonPrizeSchema = z.looseObject({
   value_myr: finite,
 });
 
-/** The next published event, for the "coming soon" panel and the drawn pot. */
+/** The next published event: the pool coming up, previewed on every state of
+ *  the page. Both extras are caught, so an older backend still names it. */
 export const NextEventSchema = z.looseObject({
   name: z.string(),
   starts_at: z.string(),
+  ends_at: z.string().optional().catch(undefined),
+  prizes: droppableArray(LuckyDrawWonPrizeSchema).catch([]),
 });
 
 const LuckyDrawPrizeSchema = z

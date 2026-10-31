@@ -22,14 +22,23 @@ export const mytWhen = (iso: string): string =>
  *  for a credit prize without art, else a neutral gift. Fills its parent.
  *  A plain <img> (FramedAvatar's choice): the admin's image_url is free text,
  *  and next/image throws during render for a host outside remotePatterns. */
-export function PrizeArt({ src, kind }: { src: string | null; kind?: string }) {
+export function PrizeArt({
+  src,
+  kind,
+  eager = false,
+}: {
+  src: string | null;
+  kind?: string;
+  /** First-screen art: the empty frame must not be what a player sees first. */
+  eager?: boolean;
+}) {
   const art = src ?? (kind === 'card' ? null : CREDIT_ART);
   return art ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={art}
       alt=""
-      loading="lazy"
+      loading={eager ? 'eager' : 'lazy'}
       decoding="async"
       className="absolute inset-0 h-full w-full object-contain"
     />
@@ -62,9 +71,17 @@ export function PersonChip({
   );
 }
 
-export function Figure({ label, value }: { label: string; value: string }) {
+export function Figure({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
   return (
-    <div className="rounded-xl bg-neutral-950/60 px-3 py-2">
+    <div className={cn('rounded-xl bg-neutral-950/60 px-3 py-2', className)}>
       <p className="text-[10px] font-semibold tracking-wide text-neutral-400 uppercase">
         {label}
       </p>

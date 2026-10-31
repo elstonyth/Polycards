@@ -152,6 +152,22 @@ export function mytDate(iso: string): string {
   return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Weekday and date in Malaysian time ("Sat 7 Nov"), for something happening
+// soon enough that the year adds nothing. Same parity as mytDate. Unparsable → "".
+export function mytDay(iso: string): string {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms + MYT_OFFSET_MS);
+  return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+/** Which calendar day an instant falls on in Malaysian time, as a number: two
+ *  instants on the same day match, and the next day is one more. */
+export const mytDayNumber = (ms: number): number =>
+  Math.floor((ms + MYT_OFFSET_MS) / 86_400_000);
+
 // Wall-clock time in Malaysian time ("10:27 PM") for the /transactions rows.
 // That page renders on the UTC server, so a plain Intl formatter printed a
 // 10:27 PM withdrawal as "2:27 PM" and customers read an 8-hour wait into it.

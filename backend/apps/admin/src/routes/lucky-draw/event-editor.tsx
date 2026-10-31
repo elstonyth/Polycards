@@ -81,14 +81,14 @@ export const EventEditor = ({
           <Field
             label="Name"
             htmlFor="ld-event-name"
-            hint="Shown to players as the draw's title."
+            hint="Shown to players as the pool's title. Skip the month: a pool can run for a day or a week."
           >
             <Input
               id="ld-event-name"
               value={draft.name}
               maxLength={80}
               onChange={(e) => onChange({ ...draft, name: e.target.value })}
-              placeholder="e.g. November Lucky Draw"
+              placeholder="e.g. Charizard Pool"
             />
           </Field>
 
@@ -169,7 +169,7 @@ export const EventEditor = ({
               id="ld-event-reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Set up the November draw"
+              placeholder="e.g. Set up the next pool"
             />
           </Field>
         </Drawer.Body>
