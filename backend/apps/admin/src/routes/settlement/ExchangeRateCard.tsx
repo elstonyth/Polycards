@@ -1,3 +1,5 @@
+import type { Permission } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Badge, Button, Container, Heading, Text } from '@medusajs/ui';
@@ -31,6 +33,10 @@ const Stat = ({
  *  fee and rate form opens in a side panel from "Edit rates". */
 export const ExchangeRateCard = ({ currency }: { currency: string }) => {
   const { t } = useTranslation();
+  // Writes here ask payment:update; a view-only role reads the figures only.
+  const canEdit = usePermissions().hasPermission(
+    'payment:update' as Permission,
+  );
   const { data: fx, isError, isPending } = usePaymentFx(currency);
   const [editing, setEditing] = useState(false);
   const q = fx?.quote;
@@ -62,15 +68,17 @@ export const ExchangeRateCard = ({ currency }: { currency: string }) => {
             </Badge>
           )}
         </div>
-        <FxEditDrawer
-          currency={currency}
-          open={editing}
-          onOpenChange={setEditing}
-        >
-          <Button size="small" variant="secondary" disabled={!fx}>
-            {t('settlement.fxEdit')}
-          </Button>
-        </FxEditDrawer>
+        {canEdit && (
+          <FxEditDrawer
+            currency={currency}
+            open={editing}
+            onOpenChange={setEditing}
+          >
+            <Button size="small" variant="secondary" disabled={!fx}>
+              {t('settlement.fxEdit')}
+            </Button>
+          </FxEditDrawer>
+        )}
       </div>
 
       <div className="bg-ui-border-base grid grid-cols-1 gap-px border-t sm:grid-cols-2 lg:grid-cols-4">

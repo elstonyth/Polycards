@@ -4,6 +4,7 @@ import {
   resolvePacks,
   type GatewayReports,
 } from '../../../../modules/packs/facets';
+import { findBank } from '../../../../modules/packs/banks';
 import { GATEWAY_STALE_AFTER_MS } from '../../../../modules/packs/gateway-reconcile';
 import { WITHDRAWAL_STATUSES } from '../../../../modules/packs/models/gateway-withdrawal';
 import {
@@ -228,6 +229,8 @@ export async function GET(
         ? null
         : Number(r.gateway_amount),
     bank_code: r.bank_code,
+    // The bank's name for staff; a code the registry no longer knows stays null.
+    bank_name: findBank(r.bank_code)?.name ?? null,
     // Masked in bulk, full value via ./[id]/account. The field name is kept so
     // the SPA does not break on a rename.
     account_number: maskAccountNumber(r.account_number),

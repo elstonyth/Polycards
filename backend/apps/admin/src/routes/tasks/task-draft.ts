@@ -5,6 +5,7 @@
 // field, and a component test would not reach it here (the admin vitest runner
 // is node-environment with no plugins, by deliberate choice).
 import type { AdminTaskDefinition } from '../../lib/admin-rest';
+import { orderDateTime } from '../../lib/format';
 
 export type TaskKind = AdminTaskDefinition['kind'];
 
@@ -260,7 +261,7 @@ export const labelsOf = (
   };
 
 const dateLabel = (iso: string | null): string =>
-  iso ? new Date(iso).toLocaleString() : '—';
+  iso ? orderDateTime(iso) : '—';
 
 export const windowLabel = (t: AdminTaskDefinition): string =>
   t.starts_at || t.ends_at

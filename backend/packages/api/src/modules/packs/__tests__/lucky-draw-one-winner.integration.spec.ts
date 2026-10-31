@@ -1803,6 +1803,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
         expect(byId.get(gone.id)).toMatchObject({ status: 'cancelled' });
         expect(byId.has(null as unknown as string)).toBe(false);
+        // The pool's total, for "my chance": the draw's frozen number once drawn,
+        // the entries so far while it runs.
+        expect(byId.get(lost.id)?.total_tickets).toBe(1005);
+        expect(byId.get(open.id)?.total_tickets).toBe(5);
       });
     });
 

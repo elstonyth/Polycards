@@ -1,3 +1,5 @@
+import type { Permission } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -27,6 +29,10 @@ const SHOWN = 10;
  */
 export const AuditFindings = ({ currency }: { currency: string }) => {
   const { t } = useTranslation();
+  // Writes here ask payment:update; a view-only role reads the figures only.
+  const canEdit = usePermissions().hasPermission(
+    'payment:update' as Permission,
+  );
   const audit = useGatewayAudit(currency);
   const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
@@ -161,7 +167,7 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                       ) : null}
                     </Table.Cell>
                     <Table.Cell className="text-right">
-                      {acked ? null : (
+                      {acked || !canEdit ? null : (
                         <Button
                           size="small"
                           variant="secondary"

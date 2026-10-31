@@ -196,6 +196,24 @@ export function chancePercent(mine: number, total: number): string {
   return `${Math.min(mine < total ? 99 : 100, Math.round(p))}%`;
 }
 
+/** What players see every one-winner pool called: pools run too often to name
+ *  each one (operator 2026-10-31). The stored event name is the admin's. */
+export const POOL_TITLE = 'Prize Pool';
+
+/** My chance as a My entry row says it, or null with none to state: a refunded
+ *  pool, an old prize row, a backend still deploying. */
+export function entryChance(entry: {
+  status: string;
+  my_tickets: number;
+  total_tickets?: number;
+}): string | null {
+  if (entry.status === 'cancelled' || !entry.total_tickets) return null;
+  const chance = chancePercent(entry.my_tickets, entry.total_tickets);
+  return entry.status === 'open'
+    ? `${chance} chance`
+    : `had a ${chance} chance`;
+}
+
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /** Time left to a draw: '2d 4h', '3h 05m', '4m 09s', then 'Drawing…'. Seconds

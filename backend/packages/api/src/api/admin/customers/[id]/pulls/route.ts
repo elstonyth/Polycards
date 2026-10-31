@@ -138,6 +138,37 @@ export async function GET(
     id,
     rows as { id: string; source?: string | null }[],
   );
+  // Per-pack rarity, and the live shipment of a card on its way or delivered
+  // (a canceled order's item row stays behind, so its order is checked too).
+  const oddsRows = handles.length
+    ? await packs.listPackOdds(
+        { card_id: handles, pack_id: packIds },
+        { select: ['pack_id', 'card_id', 'rarity'] },
+      )
+    : [];
+  const rarityByPair = new Map(
+    oddsRows.map((o: any) => [`${o.pack_id} ${o.card_id}`, o.rarity]),
+  );
+  const shippedIds = rows
+    .filter((p: any) => p.status === 'delivering' || p.status === 'delivered')
+    .map((p: any) => p.id as string);
+  const items = shippedIds.length
+    ? await packs.listDeliveryOrderItems({ pull_id: shippedIds })
+    : [];
+  const orders = items.length
+    ? await packs.listDeliveryOrders(
+        { id: [...new Set(items.map((i: any) => i.delivery_order_id))] },
+        { select: ['id', 'status'] },
+      )
+    : [];
+  const liveOrderIds = new Set(
+    orders.filter((o: any) => o.status !== 'canceled').map((o: any) => o.id),
+  );
+  const orderByPull = new Map(
+    items
+      .filter((i: any) => liveOrderIds.has(i.delivery_order_id))
+      .map((i: any) => [i.pull_id, i.delivery_order_id]),
+  );
   res.json({
     total,
     fx: { rate: fx, firm: fxFirm },
@@ -193,6 +224,8 @@ export async function GET(
         pack_title: packBySlug.get(p.pack_id)?.title ?? null,
         rolled_at: p.rolled_at,
         status: p.status,
+        source: p.source ?? null,
+        order_id: orderByPull.get(p.id) ?? null,
         buyback_amount:
           p.buyback_amount === null ? null : Number(p.buyback_amount),
         buyback_at: p.buyback_at ?? null,
@@ -201,7 +234,12 @@ export async function GET(
           ? {
               handle: card.handle,
               name: card.name,
-              market_value: displayMarketPrice(toMoney(card.market_value), fx, 1),
+              rarity: rarityByPair.get(`${p.pack_id} ${p.card_id}`) ?? null,
+              market_value: displayMarketPrice(
+                toMoney(card.market_value),
+                fx,
+                1,
+              ),
               image: card.image,
             }
           : null,

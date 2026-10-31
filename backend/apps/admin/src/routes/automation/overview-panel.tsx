@@ -17,7 +17,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { rm } from '../../lib/format';
+import { orderDateTime, rm } from '../../lib/format';
 import { prefersReducedMotion } from '../../lib/use-count-up';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { CountUp } from '../overview/KpiTiles';
@@ -385,7 +385,7 @@ export function OverviewPanel() {
                     <Text size="xsmall" className="text-ui-fg-muted">
                       <time
                         dateTime={hit.rolledAt}
-                        title={new Date(hit.rolledAt).toLocaleString()}
+                        title={orderDateTime(hit.rolledAt)}
                       >
                         {ago(hit.rolledAt)}
                       </time>{' '}

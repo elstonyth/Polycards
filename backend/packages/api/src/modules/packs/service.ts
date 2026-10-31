@@ -1041,6 +1041,8 @@ export type LuckyDrawMine = {
     status: 'open' | 'won' | 'lost' | 'cancelled';
     /** Set on a one_winner row, where prize_id is the event id. */
     event_id?: string;
+    /** One_winner rows only: every ticket in the pool, for "my chance". */
+    total_tickets?: number;
   }[];
 };
 
@@ -4307,6 +4309,27 @@ class PacksModuleService extends MedusaService({
       period: r.period,
       spend: Number(r.spend_cents) / 100,
     }));
+  }
+
+  // The wallet balance right after each of these ledger rows (RM), keyed by
+  // row id: the running sum in ledger order, one pass over this customer's rows.
+  @InjectManager()
+  async balanceAfterRows(
+    customerId: string,
+    ids: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string; cents: string }[]>(
+      'SELECT id, cents FROM (' +
+        'SELECT id, SUM(ROUND(amount * 100)) OVER (ORDER BY created_at, id)::bigint AS cents ' +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL' +
+        `) running WHERE id IN (${ids.map(() => '?').join(', ')})`,
+      [customerId, ...ids],
+    );
+    return new Map(rows.map((r) => [r.id, Number(r.cents) / 100]));
   }
 
   // Rolling-24h GLOBAL sum of MINTED credit (positive `adjustment` rows), in
@@ -9050,12 +9073,20 @@ class PacksModuleService extends MedusaService({
       ? await pageAll((opts) =>
           this.listLuckyDrawEventResults(
             { event_id: eventIds },
-            { ...opts, select: ['event_id', 'winner_customer_id'] },
+            {
+              ...opts,
+              select: ['event_id', 'winner_customer_id', 'total_tickets'],
+            },
             sharedContext,
           ),
         )
       : [];
     const eventResultById = new Map(eventResults.map((r) => [r.event_id, r]));
+    const eventSums = await this.luckyDrawEntrySums(
+      eventIds,
+      sharedContext,
+      'event_id',
+    );
     const ticketsByPrize = new Map(
       entered.map((r) => [r.prize_id, Number(r.tickets)]),
     );
@@ -9100,6 +9131,8 @@ class PacksModuleService extends MedusaService({
             .map((p) => ({ kind: p.kind, ...luckyDrawShown(p, cards) })),
         ),
         my_tickets: ticketsByEvent.get(e.id) ?? 0,
+        total_tickets:
+          result?.total_tickets ?? eventSums.get(e.id)?.total_tickets ?? 0,
         draw_at: new Date(e.ends_at).toISOString(),
         status:
           e.status === 'cancelled'
@@ -12483,7 +12516,7 @@ class PacksModuleService extends MedusaService({
     return { ids: rows.map((r) => r.id), total: Number(count?.n ?? 0) };
   }
 
-  /** Phase 4 P4.2 — 2-way audit union for a customer.
+  /** Phase 4 P4.2 — audit union for a customer: customer, credit and gift rows.
    *
    *  Covers both entity_type keys used by admin_action_audit:
    *    (a) entity_type='customer' keyed by customerId            (freeze/unfreeze)
@@ -12509,11 +12542,13 @@ class PacksModuleService extends MedusaService({
          WHERE deleted_at IS NULL AND (
            (entity_type = 'customer' AND entity_id = ?)
            OR (entity_type = 'credit' AND entity_id IN
-                (SELECT id FROM credit_transaction WHERE customer_id = ? AND reason = 'adjustment' AND deleted_at IS NULL))
+                (SELECT id FROM credit_transaction WHERE customer_id = ? AND reason IN ('adjustment', 'bonus_grant') AND deleted_at IS NULL))
+           OR (entity_type = 'pack_gift' AND entity_id IN
+                (SELECT id FROM pack_gift WHERE customer_id = ? AND deleted_at IS NULL))
          )
          ORDER BY created_at DESC
          LIMIT ? OFFSET ?`,
-      [customerId, customerId, limit, offset],
+      [customerId, customerId, customerId, limit, offset],
     );
     const [state] = await this.listCustomerAccountStates(
       { customer_id: customerId },

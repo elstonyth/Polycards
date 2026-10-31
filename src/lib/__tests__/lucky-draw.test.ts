@@ -6,6 +6,7 @@ import {
   ENTER_REFUSALS,
   ENTER_REFUSAL_COPY,
   entriesIntact,
+  entryChance,
   eventResultDetail,
   eventRowId,
   heroFirst,
@@ -111,6 +112,27 @@ describe('poolWhen', () => {
     expect(poolWhen('2026-11-08T13:00:00.000Z', now)).toBe(
       'Sun 8 Nov, 9:00 PM MYT',
     );
+  });
+});
+
+describe('entryChance', () => {
+  const row = { my_tickets: 30, total_tickets: 100 };
+
+  it('states the chance now while the pool is open', () => {
+    expect(entryChance({ ...row, status: 'open' })).toBe('30% chance');
+  });
+
+  it('states the chance they had once it is drawn', () => {
+    expect(entryChance({ ...row, status: 'won' })).toBe('had a 30% chance');
+    expect(entryChance({ ...row, status: 'lost' })).toBe('had a 30% chance');
+  });
+
+  it('says nothing for a refunded pool, an old prize row or an empty total', () => {
+    expect(entryChance({ ...row, status: 'cancelled' })).toBeNull();
+    expect(entryChance({ my_tickets: 30, status: 'lost' })).toBeNull();
+    expect(
+      entryChance({ my_tickets: 30, total_tickets: 0, status: 'open' }),
+    ).toBeNull();
   });
 });
 

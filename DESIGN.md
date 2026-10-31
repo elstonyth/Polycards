@@ -351,14 +351,18 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
 **Draw** tab (2026-10-30; it sat under Games from 2026-10-25, under Task before that).
 
-- **Tabs** — Pool · Results · My tickets, the leaderboard's segmented pill.
+- **Tabs** — Pool · Results · My entry, the leaderboard's segmented pill. Results
+  is every pool on the platform; My entry is the pools this account joined, each
+  with its tickets, its chance and how it ended (the balance lives in the title
+  row and the Vault).
 - **The pool pass** (`PoolPass`, redesigned 2026-10-31; one winner takes the
   whole event) — a pool is a pass cut like the ticket art, because the page must
   not read as the homepage (no fanned slabs, no giant money headline, no 01/02/03
   strip). The pearl foil stub carries the time in ink: status, the pool's length
   ("24-hour pool", "3-day pool", "1-week pool"), the clock and its two date
   fields. It tears, with holes and two notches cut through to the page, into a
-  dark half with the event name, the total in Chase Gold, every prize, and the
+  dark half with "Prize Pool" (pools have no names of their own, operator
+  2026-10-31), the total in Chase Gold, every prize, and the
   player's ledger. Stands on its side on a desktop. One white pill, docked over
   the tab bar like the pack page's buy bar and set into the stub on a desktop:
   Put tickets in, or Earn tickets at zero. Prizes are never something to pick: a
@@ -374,14 +378,13 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
   upright phones) keeps only the closing date, `short` (a phone on its side) puts
   the title and tabs in one row and undocks the action. Set into the stub, the
   action is sticky, so it is never below the fold. The wide desktop prints the
-  player's ledger on the stub. Results and My tickets keep a 56rem column.
+  player's ledger on the stub. Results and My entry keep a 56rem column.
 - **Any length** — a pool can run a day or a week, so the page never assumes a
   month. Under a day the clock drops its Days column and its digits grow; dates
-  read Today / Tomorrow / Yesterday, then "Sat 7 Nov". Admins are told to leave
-  the month out of the name.
+  read Today / Tomorrow / Yesterday, then "Sat 7 Nov".
 - **Shelf** (`PoolShelf`) — every prize with its picture and price: two or four
   sit in pairs on a phone, others in threes; four across as a preview in Next pool.
-- **Next pool** — a smaller plain pass with the name, length, opening time, total
+- **Next pool** — a smaller plain pass with the length, opening time, total
   and shelf, on every state. With nothing running the pool pass itself shows it,
   the clock counting to its start.
 - **Enter sheet** — shows the whole pool (every prize, total, closing time)

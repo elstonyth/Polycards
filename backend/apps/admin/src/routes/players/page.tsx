@@ -142,6 +142,8 @@ const PlayersPage = () => {
   const perms = usePermissions();
   const canSeeStats = perms.hasPermission('stats:read' as Permission);
   const canCreate = perms.hasPermission('player:update' as Permission);
+  // Enabling and disabling a login asks customer:update.
+  const canToggle = perms.hasPermission('customer:update' as Permission);
   const canExport = perms.hasPermission(
     'partner_credential:read' as Permission,
   );
@@ -161,7 +163,9 @@ const PlayersPage = () => {
   const exporter = useExportPartnerAccounts();
   // Names the default group for players with no stored membership (the
   // constant is the fallback before the list resolves), and fills the filter.
-  const { data: groupList } = useCustomerGroupsAdmin();
+  const { data: groupList } = useCustomerGroupsAdmin({
+    enabled: perms.hasPermission('customer_group:read' as Permission),
+  });
   const groups = groupList?.customer_groups ?? [];
   const defaultGroupName =
     groups.find(isDefaultPlayerGroup)?.name ?? DEFAULT_PLAYER_GROUP_NAME;
@@ -578,7 +582,7 @@ const PlayersPage = () => {
                           <Switch
                             size="small"
                             checked={!p.disabled}
-                            disabled={isPlaceholderData}
+                            disabled={isPlaceholderData || !canToggle}
                             onCheckedChange={() => openModal(p)}
                             aria-label={`${p.disabled ? t('players.disabled') : t('players.active')} — ${p.email}`}
                           />

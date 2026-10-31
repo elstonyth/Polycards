@@ -206,6 +206,13 @@ export interface SupportTransaction {
   created_at: string;
   /** Ledger display id (TP…, SP…) where one exists. /transactions only. */
   ledger_display_id?: string | null;
+  /** The wallet balance right after this row. /transactions only. */
+  balance_after?: number | null;
+  /** What the row was about (/transactions only): the pack and cards behind a
+   *  pack open or sell-back, the shipment behind a shipping fee. */
+  pack_title?: string | null;
+  cards?: { pull_id: string; name: string; image: string | null }[];
+  order_id?: string | null;
 }
 
 export interface SupportPull {
@@ -214,7 +221,11 @@ export interface SupportPull {
   /** The pack's title (/pulls only). */
   pack_title?: string | null;
   rolled_at: string;
-  status: 'vaulted' | 'bought_back';
+  status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered';
+  /** How they got it: pack | reward | free | gift | bonus (/pulls only). */
+  source?: string | null;
+  /** The live shipment of a delivering or delivered card (/pulls only). */
+  order_id?: string | null;
   buyback_amount: number | null;
   /** When the sell-back was paid (bought_back only). Optional: the /gacha
    *  fallback rows don't carry the dispute fields — only /pulls does. */
@@ -232,6 +243,8 @@ export interface SupportPull {
   card: {
     handle: string;
     name: string;
+    /** Per-pack tier of the pull (/pulls only). */
+    rarity?: string | null;
     market_value: number;
     image: string;
   } | null;
@@ -333,6 +346,8 @@ export interface AuditRow {
   reason: string | null;
   created_at: string;
   admin_id: string;
+  /** Null once that staff login no longer exists. */
+  admin_email: string | null;
 }
 
 // frozen (funds) and disabled (login) are orthogonal — one can be set without
@@ -1699,6 +1714,8 @@ export interface GatewayWithdrawal {
   bank_reference_no: string | null;
   unique_reference_no: string | null;
   bank_code: string;
+  /** Null for a code the bank registry no longer knows. */
+  bank_name: string | null;
   /** MASKED (`••••1234`) — the list never serves a full account number. The
    *  full value comes one row at a time from getWithdrawalAccount. */
   account_number: string;
@@ -2049,6 +2066,20 @@ export interface AdminCustomerDetail {
     name: string;
     metadata?: Record<string, unknown> | null;
   }[];
+  /** The player's saved shipping addresses. */
+  addresses?: {
+    id: string;
+    first_name: string | null;
+    last_name: string | null;
+    address_1: string | null;
+    address_2: string | null;
+    city: string | null;
+    province: string | null;
+    postal_code: string | null;
+    country_code: string | null;
+    phone: string | null;
+    is_default_shipping?: boolean;
+  }[];
 }
 
 // `+groups.*` APPENDS to Medusa's default field set rather than replacing it —
@@ -2057,7 +2088,7 @@ export interface AdminCustomerDetail {
 // supported relation, not a query smuggled past the validator.
 export const getCustomerDetail = (id: string) =>
   getJson<{ customer: AdminCustomerDetail }>(
-    `/admin/customers/${encodeURIComponent(id)}?fields=%2Bgroups.id,%2Bgroups.name,%2Bgroups.metadata`,
+    `/admin/customers/${encodeURIComponent(id)}?fields=%2Bgroups.id,%2Bgroups.name,%2Bgroups.metadata,%2Baddresses.*`,
   );
 
 // ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
@@ -2707,6 +2738,8 @@ export async function voidReferralLine(
 
 export interface CustomerReferralCard {
   referred_by: string | null;
+  /** The referrer's name, else email; null if that customer is gone. */
+  referred_by_label?: string | null;
   partner_referral_bp: number | null;
   /** Non-null when the player's group is a partner group: its rate is what
    *  pays them and the manual control below is locked (spec 2026-09-09). */

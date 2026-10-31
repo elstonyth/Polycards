@@ -224,16 +224,13 @@ export const usePricingHealth = (): UseQueryResult<PricingHealth> =>
     refetchOnWindowFocus: true,
   });
 
-// `customerId` scopes the ledger to one player (the player-detail tabs). Blank
-// is OMITTED by getPulls, never sent as an empty param — the route 400s on one.
 export const usePulls = (
   page = 0,
   source?: 'pack' | 'reward',
-  customerId?: string,
 ): UseQueryResult<PullsResponse> =>
   useQuery({
-    queryKey: qk.pulls(page, source, customerId),
-    queryFn: () => getPulls(page, 50, source, customerId),
+    queryKey: qk.pulls(page, source),
+    queryFn: () => getPulls(page, 50, source),
     placeholderData: keepPreviousData,
   });
 
@@ -507,15 +504,19 @@ export const useCustomerTransactions = (
 export const useCustomerPulls = (
   id: string | null,
   page = 0,
-  // status only — getCustomerPulls also accepts `source`, but nothing needs it
-  // here and an un-keyed filter would collide in the cache.
-  opts?: { status?: string; sort?: 'newest' | 'value' },
+  opts?: { status?: string; source?: string; sort?: 'newest' | 'value' },
 ): UseQueryResult<{
   items: SupportPull[];
   total: number;
   fx?: { rate: number; firm: boolean };
 }> => {
-  const queryKey = qk.customerPulls(id ?? '', page, opts?.status, opts?.sort);
+  const queryKey = qk.customerPulls(
+    id ?? '',
+    page,
+    opts?.status,
+    opts?.sort,
+    opts?.source,
+  );
   return useQuery({
     queryKey,
     queryFn: () => getCustomerPulls(id!, page, 25, opts),
@@ -1468,11 +1469,17 @@ export const useCustomerDetail = (
 
 export type { AdminCustomerGroup } from './admin-rest';
 
-export const useCustomerGroupsAdmin = (): UseQueryResult<{
+export const useCustomerGroupsAdmin = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<{
   customer_groups: AdminCustomerGroup[];
   count: number;
 }> =>
-  useQuery({ queryKey: qk.customerGroups, queryFn: listCustomerGroupsAdmin });
+  useQuery({
+    queryKey: qk.customerGroups,
+    queryFn: listCustomerGroupsAdmin,
+    enabled: opts.enabled ?? true,
+  });
 
 // Writes one group's metadata.odds_set. Invalidates the list so the saved value
 // is re-read from the server rather than trusted from local state.
@@ -1796,10 +1803,13 @@ export type {
   ReferralTierWire,
 } from './admin-rest';
 
-export const useReferralSettings = (): UseQueryResult<ReferralSettings> =>
+export const useReferralSettings = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<ReferralSettings> =>
   useQuery({
     queryKey: qk.referralSettings,
     queryFn: getReferralSettings,
+    enabled: opts.enabled ?? true,
   });
 
 export const useUpdateReferralSettings = () => {
@@ -2116,7 +2126,20 @@ export const useInvalidateStock = () => {
         qk.deliveryOrderKey,
         qk.goodsReceiveNotesKey,
         qk.goodsReceiveNoteKey,
-      ].map((queryKey) => qc.invalidateQueries({ queryKey })),
+      ]
+        .map((queryKey) => qc.invalidateQueries({ queryKey }))
+        .concat(
+          // A shipment moves a player's cards and fees: their vault, tiles and
+          // wallet must not wait out the stale time.
+          qc.invalidateQueries({
+            predicate: (q) =>
+              q.queryKey[0] === 'admin' &&
+              q.queryKey[1] === 'customer' &&
+              ['pulls', 'money', 'gacha', 'transactions'].includes(
+                String(q.queryKey[3]),
+              ),
+          }),
+        ),
     );
 };
 
@@ -2199,12 +2222,15 @@ export const useProcurementToBuy = (): UseQueryResult<{
     refetchInterval: 10 * 60 * 1000,
   });
 
-export const useProcurementToShip = (): UseQueryResult<{
+export const useProcurementToShip = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<{
   orders: AdminDeliveryOrder[];
 }> =>
   useQuery({
     queryKey: qk.procurementToShip,
     queryFn: getProcurementToShip,
+    enabled: opts.enabled ?? true,
   });
 
 // ── Dashboard (spec §7) ──────────────────────────────────────────────────────

@@ -124,11 +124,13 @@ describe('qk', () => {
     // The period is part of the key: 7 days and a custom range are
     // different pages, so neither serves the other's cached rows.
     expect(
-      qk.players(0, undefined, undefined, undefined, {
-        range: 'custom',
-        from: '2026-10-01',
-        to: '2026-10-15',
-      }).slice(-3),
+      qk
+        .players(0, undefined, undefined, undefined, {
+          range: 'custom',
+          from: '2026-10-01',
+          to: '2026-10-15',
+        })
+        .slice(-3),
     ).toEqual(['custom', '2026-10-01', '2026-10-15']);
     // playersKey must be a strict prefix of every page key, or a post-disable
     // invalidation would leave the row's status stale on the current page.
@@ -149,6 +151,7 @@ describe('qk', () => {
       0,
       'all',
       'newest',
+      'all',
     ]);
     expect(qk.customerPulls('cus_1', 2, 'vaulted')).toEqual([
       'admin',
@@ -158,7 +161,12 @@ describe('qk', () => {
       2,
       'vaulted',
       'newest',
+      'all',
     ]);
+    // Pack purchases only is its own sibling too.
+    expect(
+      qk.customerPulls('cus_1', 0, undefined, 'newest', 'pack'),
+    ).not.toEqual(qk.customerPulls('cus_1', 0));
     // The Vault tab's "highest value" order is its own sibling entry.
     expect(qk.customerPulls('cus_1', 0, 'vaulted', 'value')).not.toEqual(
       qk.customerPulls('cus_1', 0, 'vaulted'),

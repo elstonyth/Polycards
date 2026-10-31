@@ -41,11 +41,19 @@ import { useConsent } from '@/lib/use-consent';
 // The customer's vault: every pulled card still held, each with a sell-back
 // offer (current FMV × the flat buyback rate — the server quotes the percent).
 // Selling removes the card here and credits the site balance shown at the top.
+/** An action on the tickets row: full width in a pair on a phone. */
+const ticketPill = (lead: boolean) =>
+  cn(
+    pillVariants({ variant: lead ? 'primary' : 'secondary', size: 'sm' }),
+    'flex-1 sm:flex-none',
+  );
+
 export default function VaultClient({
   initial,
   addresses,
   initialGifts,
   tickets,
+  spinHref = null,
 }: {
   initial: VaultResult;
   addresses: AddressView[];
@@ -53,8 +61,11 @@ export default function VaultClient({
   initialGifts: PackGift[];
   /** Lucky Draw tickets held; null when unreadable, which hides the row. */
   tickets: number | null;
+  /** Where to spin a ticket pack; null with none on sale. */
+  spinHref?: string | null;
 }) {
   const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
+  const [gettingTickets, setGettingTickets] = useState(false);
   const [items, setItems] = useState<VaultItem[]>(
     initial.ok ? initial.items : [],
   );
@@ -389,28 +400,59 @@ export default function VaultClient({
       </div>
 
       {/* Lucky Draw tickets: always shown when readable, so a player with none
-          is pointed at the tasks that pay them. */}
+          is pointed at what pays them. Get tickets is the lead action until
+          they hold some, then Use is. */}
       {tickets !== null && (
         <section aria-label="Lucky Draw tickets" className="mt-4">
-          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3">
-            <TicketArt width={64} className="shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white">
-                Lucky Draw Tickets ×{num(tickets)}
-              </p>
-              <p className="mt-0.5 text-[12px] text-neutral-400">
-                {tickets > 0
-                  ? 'Put them on the prizes you want'
-                  : 'Earn tickets from tasks'}
-              </p>
+          <div className="rounded-2xl border border-white/10 bg-neutral-900 p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <TicketArt width={64} className="shrink-0" />
+              <div className="min-w-0 flex-1 basis-40">
+                <p className="truncate text-sm font-semibold text-white">
+                  Lucky Draw Tickets ×{num(tickets)}
+                </p>
+                <p className="mt-0.5 text-[12px] text-neutral-400">
+                  {tickets > 0
+                    ? 'Put them in the prize pool'
+                    : spinHref
+                      ? 'Earn them from tasks or a Lucky Pack'
+                      : 'Earn tickets from tasks'}
+                </p>
+              </div>
+              <div className="flex w-full gap-2 sm:w-auto">
+                {spinHref ? (
+                  <button
+                    type="button"
+                    aria-expanded={gettingTickets}
+                    onClick={() => setGettingTickets((open) => !open)}
+                    className={ticketPill(tickets === 0)}
+                  >
+                    Get tickets
+                  </button>
+                ) : (
+                  <Link href="/task" className={ticketPill(tickets === 0)}>
+                    Get tickets
+                  </Link>
+                )}
+                <Link
+                  href={tickets > 0 ? '/lucky-draw?open=1' : '/lucky-draw'}
+                  aria-label="Use tickets in Lucky Draw"
+                  className={ticketPill(tickets > 0)}
+                >
+                  Use
+                </Link>
+              </div>
             </div>
-            <Link
-              href={tickets > 0 ? '/lucky-draw?open=1' : '/task'}
-              aria-label={tickets > 0 ? 'Open Lucky Draw' : undefined}
-              className={cn(pillVariants({ size: 'sm' }), 'px-5')}
-            >
-              {tickets > 0 ? 'Open' : 'Tasks'}
-            </Link>
+            {gettingTickets && spinHref && (
+              <div className="mt-3 flex flex-wrap gap-2 border-t border-white/10 pt-3">
+                <Link href="/task" className={ticketPill(false)}>
+                  Go to tasks
+                </Link>
+                <Link href={spinHref} className={ticketPill(false)}>
+                  Spin a Lucky Pack
+                </Link>
+              </div>
+            )}
           </div>
         </section>
       )}

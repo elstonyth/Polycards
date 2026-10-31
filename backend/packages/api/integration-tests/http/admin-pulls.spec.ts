@@ -1,6 +1,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
+import { LUCKY_DRAW_PULL_PACK_ID } from '../../src/modules/packs/lucky-draw';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
@@ -265,6 +266,36 @@ medusaIntegrationTestRunner({
         expect(row).toBeDefined();
         // The bug: filtering listPacks by id (not slug) left this null.
         expect(row.pack_title).toBe(PACK_TITLE);
+      });
+
+      it('a Lucky Draw prize card names where it came from', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPulls([
+          {
+            customer_id: 'cus_winner',
+            pack_id: LUCKY_DRAW_PULL_PACK_ID,
+            card_id: CARD_HANDLE,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward' as const,
+          },
+        ]);
+
+        const adminToken = await mintSuperAdmin(
+          getContainer(),
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
+        const ledger = await unwrapResponse(
+          api.get('/admin/pulls', {
+            headers: { authorization: `Bearer ${adminToken}` },
+          }),
+        );
+        const row = ledger.data.pulls.find(
+          (p: { pack_id: string }) => p.pack_id === LUCKY_DRAW_PULL_PACK_ID,
+        );
+        expect(row.pack_title).toBe('Lucky Draw');
       });
     });
   },
