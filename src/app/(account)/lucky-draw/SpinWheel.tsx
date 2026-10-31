@@ -245,8 +245,10 @@ export function SpinWheel({
   const names = entries.map((e) => e.person.who);
 
   return (
-    <div>
-      <div className="relative mx-auto aspect-square w-[min(84vw,26rem)]">
+    // Sized by the window's height too, so the whole wheel and Done fit a laptop;
+    // the result beside it on a phone on its side.
+    <div className="short:grid short:grid-cols-2 short:items-center short:gap-4">
+      <div className="relative mx-auto aspect-square w-[min(84vw,26rem,max(14rem,100dvh-19rem))] short:w-[calc(100dvh-7.5rem)]">
         <div
           className={cn(
             'absolute inset-0 transition-[scale,filter] duration-900 ease-[cubic-bezier(.2,.8,.2,1)] motion-reduce:transition-none',
@@ -449,7 +451,7 @@ export function SpinWheel({
       <div
         aria-live="polite"
         className={cn(
-          'mt-4 min-h-20 text-center transition-[opacity,translate] duration-500 motion-reduce:transition-none',
+          'mt-4 min-h-20 text-center transition-[opacity,translate] duration-500 short:mt-0 motion-reduce:transition-none',
           shown >= 3 ? 'opacity-100' : 'translate-y-1.5 opacity-0',
         )}
       >

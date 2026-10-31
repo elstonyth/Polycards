@@ -13,14 +13,106 @@ import {
   landingAngle,
   luckyDrawView,
   nextDraw,
+  poolDay,
+  poolLength,
+  poolWhen,
   potTotal,
   refusalCopy,
   rulesCopy,
   segmentAt,
   ticketRanges,
+  tilePrice,
   wheelSegments,
   winnerIndex,
 } from '@/lib/lucky-draw';
+
+describe('tilePrice', () => {
+  it('drops the sen from RM 1,000 up, and keeps small prizes exact', () => {
+    expect(tilePrice(175_331.92)).toBe(175_332);
+    expect(tilePrice(1000)).toBe(1000);
+    expect(tilePrice(999.5)).toBe(999.5);
+    expect(tilePrice(10.5)).toBe(10.5);
+  });
+});
+
+describe('poolLength', () => {
+  const start = '2026-11-05T13:00:00.000Z';
+  const after = (hours: number) =>
+    new Date(Date.parse(start) + hours * 3_600_000).toISOString();
+
+  it('says hours under two days', () => {
+    expect(poolLength(start, after(12))).toBe('12-hour');
+    expect(poolLength(start, after(24))).toBe('24-hour');
+    expect(poolLength(start, after(36))).toBe('36-hour');
+  });
+
+  it('says days from two days up', () => {
+    expect(poolLength(start, after(48))).toBe('2-day');
+    expect(poolLength(start, after(72))).toBe('3-day');
+    expect(poolLength(start, after(240))).toBe('10-day');
+  });
+
+  it('says weeks for whole weeks', () => {
+    expect(poolLength(start, after(168))).toBe('1-week');
+    expect(poolLength(start, after(336))).toBe('2-week');
+  });
+
+  it('rounds a window that ends a minute short, as admins set them', () => {
+    expect(
+      poolLength('2026-11-05T16:00:00.000Z', '2026-11-08T15:59:00.000Z'),
+    ).toBe('3-day');
+    expect(
+      poolLength('2026-11-05T16:00:00.000Z', '2026-11-06T15:59:00.000Z'),
+    ).toBe('24-hour');
+  });
+
+  it('has nothing to say about an unreadable or empty window', () => {
+    expect(poolLength('nope', start)).toBeNull();
+    expect(poolLength(start, undefined)).toBeNull();
+    expect(poolLength(start, start)).toBeNull();
+  });
+});
+
+describe('poolDay', () => {
+  // 11:59 PM on Thu 5 Nov in Malaysia, still the 5th in UTC too.
+  const now = Date.parse('2026-11-05T15:59:00.000Z');
+
+  it('names the near days in Malaysia time, not UTC', () => {
+    expect(poolDay('2026-11-05T01:00:00.000Z', now)).toBe('Today');
+    expect(poolDay('2026-11-05T16:00:00.000Z', now)).toBe('Tomorrow');
+    expect(poolDay('2026-11-04T15:59:00.000Z', now)).toBe('Yesterday');
+  });
+
+  it('gives the weekday and date further out', () => {
+    expect(poolDay('2026-11-08T13:00:00.000Z', now)).toBe('Sun 8 Nov');
+    expect(poolDay('2026-11-01T13:00:00.000Z', now)).toBe('Sun 1 Nov');
+  });
+
+  it('gives the plain date with no clock yet, so hydration agrees', () => {
+    expect(poolDay('2026-11-05T01:00:00.000Z', null)).toBe('Thu 5 Nov');
+  });
+
+  it('reads an unreadable date as nothing', () => {
+    expect(poolDay('nope', now)).toBe('');
+    expect(poolDay('nope', null)).toBe('');
+  });
+});
+
+describe('poolWhen', () => {
+  const now = Date.parse('2026-11-05T15:59:00.000Z');
+
+  it('reads inside a sentence', () => {
+    expect(poolWhen('2026-11-05T15:59:30.000Z', now)).toBe(
+      'today, 11:59 PM MYT',
+    );
+    expect(poolWhen('2026-11-06T13:00:00.000Z', now)).toBe(
+      'tomorrow, 9:00 PM MYT',
+    );
+    expect(poolWhen('2026-11-08T13:00:00.000Z', now)).toBe(
+      'Sun 8 Nov, 9:00 PM MYT',
+    );
+  });
+});
 
 describe('chancePercent', () => {
   it('reads the share of tickets the way the prize card shows it', () => {

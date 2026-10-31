@@ -49,7 +49,7 @@ export const ReasonPrompt = ({
             id="ld-reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. November draw is ready"
+            placeholder="e.g. Prizes are ready"
           />
           <Text size="small" className="text-ui-fg-subtle">
             Recorded against your admin account. Required.

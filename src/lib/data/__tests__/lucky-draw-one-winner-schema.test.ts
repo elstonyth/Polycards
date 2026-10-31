@@ -105,10 +105,32 @@ describe('LuckyDrawPageSchema, one-winner fields', () => {
       avatar: '/images/pfps/pfp-8.webp',
       frame: null,
     });
+    // An older backend names the next pool only: nothing to show, nothing lost.
     expect(r.next_event).toEqual({
       name: 'December',
       starts_at: '2026-12-01T00:00:00.000Z',
+      prizes: [],
     });
+  });
+
+  it('reads the next pool with its dates and every prize, dropping a bad row', () => {
+    const r = LuckyDrawPageSchema.parse(
+      page(null, {
+        prizes: [],
+        next_event: {
+          name: 'December',
+          starts_at: '2026-12-01T00:00:00.000Z',
+          ends_at: '2026-12-31T00:00:00.000Z',
+          prizes: [
+            { kind: 'card', title: 'Mew', image: '/a.webp', value_myr: 900 },
+            { kind: 'credit', title: 'RM 50', image: null, value_myr: 50 },
+            { kind: 'card', title: 7 },
+          ],
+        },
+      }),
+    );
+    expect(r.next_event?.ends_at).toBe('2026-12-31T00:00:00.000Z');
+    expect(r.next_event?.prizes.map((p) => p.title)).toEqual(['Mew', 'RM 50']);
   });
 
   it('reads no event with a next one coming', () => {

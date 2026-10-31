@@ -1015,7 +1015,18 @@ export type LuckyDrawPage = {
     result: LuckyDrawEventFacts | null;
   } | null;
   prizes: LuckyDrawPagePrize[];
-  next_event: { name: string; starts_at: string } | null;
+  /** The next pool: when it runs and every prize it will hold. */
+  next_event: {
+    name: string;
+    starts_at: string;
+    ends_at: string;
+    prizes: {
+      kind: string;
+      title: string;
+      image: string | null;
+      value_myr: number;
+    }[];
+  } | null;
 };
 
 export type LuckyDrawMine = {
@@ -8447,6 +8458,40 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // The next pool as the player page previews it: its window and every live
+  // prize with its art and value. Nothing about seeds or entries: it has neither.
+  private async luckyDrawNextEvent(
+    next: { id: string; name: string; starts_at: Date; ends_at: Date },
+    sharedContext: Context,
+  ): Promise<NonNullable<LuckyDrawPage['next_event']>> {
+    const prizes = (
+      await pageAll(
+        (opts) =>
+          this.listLuckyDrawPrizes(
+            { event_id: next.id },
+            { ...opts, select: [...LUCKY_DRAW_PRIZE_FIELDS] },
+            sharedContext,
+          ),
+        { sort: 'ASC', id: 'ASC' },
+      )
+    ).filter((p) => !p.cancelled_at);
+    const cards = await this.luckyDrawCards(prizes, sharedContext);
+    return {
+      name: next.name,
+      starts_at: new Date(next.starts_at).toISOString(),
+      ends_at: new Date(next.ends_at).toISOString(),
+      prizes: prizes.map((p) => {
+        const shown = luckyDrawShown(p, cards);
+        return {
+          kind: p.kind,
+          title: p.title,
+          image: shown.image,
+          value_myr: shown.value_myr,
+        };
+      }),
+    };
+  }
+
   // The player page's shared part: the running event with something left to draw
   // (so a fully drawn event can never hide a live one), else the latest event that
   // was drawn or ended within 7 days (either needs a prize that is not cancelled),
@@ -8506,8 +8551,10 @@ class PacksModuleService extends MedusaService({
       events.find(
         (e) => now < at(e.ends_at) && leftToDraw.get(e.id)?.left_to_draw,
       ) ?? events.sort((a, b) => finishedAt(b) - finishedAt(a))[0];
-    const [next] = await em.execute<{ name: string; starts_at: Date }[]>(
-      'SELECT e.name, e.starts_at FROM lucky_draw_event e ' +
+    const [next] = await em.execute<
+      { id: string; name: string; starts_at: Date; ends_at: Date }[]
+    >(
+      'SELECT e.id, e.name, e.starts_at, e.ends_at FROM lucky_draw_event e ' +
         "WHERE e.status = 'published' AND e.deleted_at IS NULL " +
         'AND e.starts_at > ?::timestamptz AND EXISTS (' +
         'SELECT 1 FROM lucky_draw_prize p WHERE p.event_id = e.id ' +
@@ -8516,10 +8563,7 @@ class PacksModuleService extends MedusaService({
       [new Date(now).toISOString()],
     );
     const next_event = next
-      ? {
-          name: next.name,
-          starts_at: new Date(next.starts_at).toISOString(),
-        }
+      ? await this.luckyDrawNextEvent(next, sharedContext)
       : null;
     if (!event) return { event: null, prizes: [], next_event };
 

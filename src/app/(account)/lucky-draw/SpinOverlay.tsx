@@ -34,11 +34,11 @@ export function SpinOverlay({
         aria-modal="true"
         aria-labelledby="spin-title"
         tabIndex={-1}
-        className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center px-4 py-8 outline-none"
+        className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center px-4 py-8 outline-none short:max-w-3xl short:py-2"
       >
-        <div className="mb-6 flex items-start justify-between gap-3">
+        <div className="mb-6 flex items-start justify-between gap-3 short:mb-1">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold tracking-[0.14em] text-neutral-400 uppercase">
+            <p className="text-[11px] font-semibold tracking-[0.14em] text-neutral-400 uppercase short:hidden">
               Lucky Draw
             </p>
             <h2
@@ -62,7 +62,7 @@ export function SpinOverlay({
           detail={detail}
           reduced={reduced}
         />
-        <div className="mt-4 flex justify-center">
+        <div className="mt-4 flex justify-center short:mt-1">
           {queued > 0 ? (
             <Pill size="lg" onClick={onNext}>
               Next draw ({queued})

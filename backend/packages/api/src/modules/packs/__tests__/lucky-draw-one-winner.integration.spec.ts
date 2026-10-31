@@ -1535,9 +1535,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // Not running yet: the earlier one shows and this one is next.
         const before = await service.luckyDrawPage();
         expect(before.event?.id).toBe(ended.id);
-        expect(before.next_event).toEqual({
+        expect(before.next_event).toMatchObject({
           name: 'Running',
           starts_at: new Date(running.starts_at).toISOString(),
+          ends_at: new Date(running.ends_at).toISOString(),
         });
       });
 
@@ -1627,10 +1628,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const page = await service.luckyDrawPage();
         expect(page.event).toBeNull();
         expect(page.prizes).toEqual([]);
+        // The whole pool it will hold, so a player can see what is coming: no
+        // seed, no ids, and a cancelled prize left out.
         expect(page.next_event).toEqual({
           name: 'Later',
           starts_at: new Date(later.starts_at).toISOString(),
+          ends_at: new Date(later.ends_at).toISOString(),
+          prizes: [
+            {
+              kind: 'credit',
+              title: 'RM 25 credit',
+              image: null,
+              value_myr: 25,
+            },
+          ],
         });
+        expect(JSON.stringify(page.next_event)).not.toContain('seed');
       });
 
       it('lingers 7 days after a draw, then goes', async () => {

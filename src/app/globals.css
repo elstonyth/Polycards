@@ -3,6 +3,10 @@
 @import 'shadcn/tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
+/* A phone on its side: the header and the tab bar leave about 250px. */
+@custom-variant short (@media (max-height: 31.25rem));
+/* A short phone upright (SE-sized): every line of the first screen counts. */
+@custom-variant squat (@media (min-height: 31.26rem) and (max-height: 43.75rem) and (max-width: 39.99rem));
 
 @theme inline {
   --color-background: var(--background);
@@ -858,7 +862,133 @@
     --holo-turn: 360deg;
   }
 }
+/* The Lucky Draw pool: the prizes breathe where they sit. With no animation
+   they simply sit still. */
+@keyframes pool-float {
+  50% {
+    transform: translateY(-1.5%);
+  }
+}
+@keyframes pool-zoom {
+  from {
+    transform: scale(0.82);
+    opacity: 0;
+  }
+}
+@keyframes pool-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
 @layer utilities {
+  /* The account column is sized for forms. The pool is a stage: from a large
+     phone up it takes the screen's width, with a gutter that grows with it, so
+     its prizes grow too. Margins, not a transform: the page's sheets are fixed
+     and a transform would trap them. */
+  @media (min-width: 40rem) {
+    .pool-wide {
+      --pool-width: min(100vw - 2 * clamp(1rem, 4vw, 4.5rem), 96rem);
+      margin-inline: calc((100% - var(--pool-width)) / 2);
+    }
+  }
+  /* The pool pass is drawn from the ticket art: engraved lines over the foil,
+     holes where it tears, and a notch either side of them, all cut through to
+     the page. */
+  .pool-guilloche {
+    background:
+      repeating-radial-gradient(
+        circle at 10% 125%,
+        transparent 0 7px,
+        rgb(255 255 255 / 0.3) 7px 8px
+      ),
+      repeating-radial-gradient(
+        circle at 95% -35%,
+        transparent 0 13px,
+        rgb(255 255 255 / 0.14) 13px 14px
+      );
+  }
+  .pool-perf {
+    position: relative;
+    z-index: 1;
+    height: 0;
+  }
+  .pool-perf::before {
+    content: '';
+    position: absolute;
+    inset-inline: 16px;
+    top: -3px;
+    height: 6px;
+    background: radial-gradient(
+        circle at center,
+        var(--background) 2.5px,
+        transparent 3px
+      )
+      0 0 / 13px 6px round no-repeat;
+  }
+  .pool-perf::after {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    top: -11px;
+    height: 22px;
+    background:
+      radial-gradient(
+        circle at 0 50%,
+        var(--background) 11px,
+        transparent 11.5px
+      ),
+      radial-gradient(
+        circle at 100% 50%,
+        var(--background) 11px,
+        transparent 11.5px
+      );
+  }
+  /* The pass stands on its side on a desktop, so it tears top to bottom. */
+  @media (min-width: 64rem) {
+    .pool-perf-split {
+      width: 0;
+      height: auto;
+    }
+    .pool-perf-split::before {
+      inset: 16px auto 16px -3px;
+      width: 6px;
+      height: auto;
+      background-size: 6px 13px;
+      background-repeat: no-repeat round;
+    }
+    .pool-perf-split::after {
+      inset: 0 auto 0 -11px;
+      width: 22px;
+      height: auto;
+      background:
+        radial-gradient(
+          circle at 50% 0,
+          var(--background) 11px,
+          transparent 11.5px
+        ),
+        radial-gradient(
+          circle at 50% 100%,
+          var(--background) 11px,
+          transparent 11.5px
+        );
+    }
+  }
+  .pool-float {
+    animation: pool-float 5s ease-in-out infinite;
+  }
+  .pool-zoom {
+    animation: pool-zoom 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .pool-pulse {
+    animation: pool-pulse 2s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pool-float,
+    .pool-zoom,
+    .pool-pulse {
+      animation: none;
+    }
+  }
   .holo-turn {
     animation: holo-turn var(--holo-period, 9s) linear infinite;
   }
