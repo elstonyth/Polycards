@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { WALLET_FILTERS, ledgerKind } from './ledger-kind';
+import { WALLET_FILTERS, ledgerKind, ledgerSubject } from './ledger-kind';
+
+describe('ledgerSubject', () => {
+  it('names the pack and card of an open, and how many more a batch held', () => {
+    expect(
+      ledgerSubject({
+        reason: 'pack_open',
+        pack_title: 'Gold Pack',
+        cards: [{ name: 'Charizard #5' }, { name: 'A' }, { name: 'B' }],
+      }),
+    ).toBe('Gold Pack · Charizard #5 +2');
+  });
+
+  it('names only the card of a sell-back', () => {
+    expect(
+      ledgerSubject({
+        reason: 'buyback',
+        pack_title: 'Gold Pack',
+        cards: [{ name: 'Charizard #5' }],
+      }),
+    ).toBe('Charizard #5');
+  });
+
+  it('is null for a row about no card', () => {
+    expect(ledgerSubject({ reason: 'topup', cards: [] })).toBeNull();
+    expect(ledgerSubject({ reason: 'topup' })).toBeNull();
+  });
+});
 
 // Every credit_transaction.reason (backend models/credit-transaction.ts).
 const REASONS = [

@@ -38,7 +38,10 @@ type Props = {
 
 const CreatePlayerModal = ({ open, onClose }: Props) => {
   const { t } = useTranslation();
-  const { data: groupList, isError: groupsError } = useCustomerGroupsAdmin();
+  // Only once opened: the page mounts this closed for roles that cannot open it.
+  const { data: groupList, isError: groupsError } = useCustomerGroupsAdmin({
+    enabled: open,
+  });
   const generate = useCreatePlayers();
   const exporter = useExportPartnerAccounts();
 

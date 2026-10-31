@@ -14,7 +14,8 @@ import {
   Text,
   toast,
 } from "@medusajs/ui";
-import type { RouteConfig } from "@mercurjs/dashboard-sdk";
+import type { Permission, RouteConfig } from "@mercurjs/dashboard-sdk";
+import { usePermissions } from "@mercurjs/admin";
 import { searchCustomers, type SupportCustomer } from "../../lib/admin-rest";
 import {
   useAdjustCredits,
@@ -23,7 +24,8 @@ import {
   useCustomerPulls,
 } from "../../lib/queries";
 import { resolveImageUrl } from "../../lib/image-url";
-import { rm } from "../../lib/format";
+import { orderDateTime, rm } from "../../lib/format";
+import { PullStatusBadge } from "../customers/[id]/PullsTab";
 import { Pager } from "../../components/Pager";
 import { BonusCreditToggle } from "../../components/BonusCreditToggle";
 import { adjustCreditVars, isBonusGrant } from "../../lib/credit-kind";
@@ -57,6 +59,9 @@ const SupportPage = () => {
     setPullPage(0);
   };
   const adjustCredits = useAdjustCredits();
+  const canAdjust = usePermissions().hasPermission(
+    "customer:update" as Permission,
+  );
   // Adjust form state — string inputs, validated server-side (the backend owns
   // the money rules; surfacing its message keeps the two in lockstep).
   const [amount, setAmount] = useState("");
@@ -261,6 +266,7 @@ const SupportPage = () => {
                   })}
                 </Text>
               </div>
+              {canAdjust && (
               <div className="bg-ui-bg-subtle px-6 py-4">
                 <Text size="small" className="text-ui-fg-subtle">
                   {t("support.adjustTitle")}
@@ -293,6 +299,7 @@ const SupportPage = () => {
                   </Button>
                 </div>
               </div>
+              )}
             </div>
           </Container>
 
@@ -362,7 +369,7 @@ const SupportPage = () => {
                           {rm(tx.amount)}
                         </Table.Cell>
                         <Table.Cell className="text-ui-fg-subtle text-right">
-                          {new Date(tx.created_at).toLocaleString("en-US")}
+                          {orderDateTime(tx.created_at)}
                         </Table.Cell>
                       </Table.Row>
                     ))}
@@ -431,7 +438,7 @@ const SupportPage = () => {
                           </div>
                         </Table.Cell>
                         <Table.Cell className="text-ui-fg-subtle">
-                          {p.pack_id}
+                          {p.pack_title ?? p.pack_id}
                         </Table.Cell>
                         <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
                           {rm(p.card?.market_value ?? null)}
@@ -454,9 +461,7 @@ const SupportPage = () => {
                             </div>
                           ) : (
                             <div className="flex flex-col gap-0.5">
-                              <StatusBadge color="green">
-                                {t("pulls.vaulted")}
-                              </StatusBadge>
+                              <PullStatusBadge pull={p} />
                               {/* Payable-now quote — the dispute desk's
                                   quote-vs-paid anchor (sim P1-3). Matches the
                                   customer's sell button exactly. */}
@@ -476,7 +481,7 @@ const SupportPage = () => {
                           )}
                         </Table.Cell>
                         <Table.Cell className="text-ui-fg-subtle text-right">
-                          {new Date(p.rolled_at).toLocaleString("en-US")}
+                          {orderDateTime(p.rolled_at)}
                         </Table.Cell>
                       </Table.Row>
                     ))}

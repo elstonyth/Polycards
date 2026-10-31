@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button, Container, Heading, Table, Text, toast } from '@medusajs/ui';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import { exportProcurementToBuyXlsx } from '../../lib/admin-rest';
 import { useProcurementToBuy, useProcurementToShip } from '../../lib/queries';
 import { inCurrency, mytDateTime, orderDateTime, rm } from '../../lib/format';
@@ -22,7 +23,12 @@ export const config: RouteConfig = {
 const ProcurementPage = () => {
   const { t } = useTranslation();
   const toBuy = useProcurementToBuy();
-  const toShip = useProcurementToShip();
+  // The mailing list carries customer addresses, so it also asks
+  // delivery_order:read: a purchasing-only role gets the To buy list alone.
+  const canSeeToShip = usePermissions().hasPermission(
+    'delivery_order:read' as Permission,
+  );
+  const toShip = useProcurementToShip({ enabled: canSeeToShip });
   // Guarded: every row fetches and re-encodes its picture on the server, and an
   // impatient double-click would pay for that twice.
   const [exporting, setExporting] = useState(false);
@@ -179,6 +185,7 @@ const ProcurementPage = () => {
         )}
       </Container>
 
+      {canSeeToShip && (
       <Container className="p-0">
         <div className="px-6 py-4">
           <Heading level="h2">{t('procurement.toShip')}</Heading>
@@ -254,6 +261,7 @@ const ProcurementPage = () => {
           </div>
         )}
       </Container>
+      )}
     </div>
   );
 };

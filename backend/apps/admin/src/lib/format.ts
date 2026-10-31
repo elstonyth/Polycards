@@ -46,6 +46,19 @@ export const inCurrency = (n: number, currency: string): string =>
 export const rm = (n: number | null): string =>
   n === null ? '—' : inCurrency(n, LEDGER_CURRENCY);
 
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  FPX: 'Online banking',
+  OB: 'Online banking',
+  BQR: 'QR / e-wallet',
+  DN: 'DuitNow',
+  UTRC: 'USDT (TRC-20)',
+  UERC: 'USDT (ERC-20)',
+};
+
+/** A top-up rail's code in staff words; an unknown code shows as itself. */
+export const paymentMethodLabel = (code: string): string =>
+  PAYMENT_METHOD_LABEL[code] ?? code;
+
 // USD → MYR at the given rate (2dp), mirroring the backend displayMarketPrice at
 // multiplier 1. Card FMV is tracked in USD (PriceCharting-native); the admin
 // shows RM at the live rate, no markup (markup lives on the sale price). Bad
@@ -99,7 +112,7 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
 // packing-slip date format. Hand-rolled rather than Intl because no locale
 // gives this exact shape (en-GB → slashes + lowercase am/pm, en-US → MM/dd),
 // and formatToParts costs more than the four lines below.
-export function orderDateTime(iso: string): string {
+export function orderDateTime(iso: string | number): string {
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return '—';
   const p = (n: number) => String(n).padStart(2, '0');

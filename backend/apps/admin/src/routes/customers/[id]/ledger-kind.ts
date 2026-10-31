@@ -52,6 +52,21 @@ export function ledgerKind(reason: string, amount: number): LedgerKind {
   }
 }
 
+/** What a wallet row was about, on one line: 'Gold Pack · Charizard #5 +2' for
+ *  a pack open, the card for a sell-back, null when the row names neither. */
+export function ledgerSubject(tx: {
+  reason: string;
+  pack_title?: string | null;
+  cards?: { name: string }[];
+}): string | null {
+  const [first, ...rest] = tx.cards ?? [];
+  if (!first) return null;
+  const card = first.name + (rest.length ? ` +${rest.length}` : '');
+  return tx.reason === 'pack_open' && tx.pack_title
+    ? `${tx.pack_title} · ${card}`
+    : card;
+}
+
 /** The Wallet tab's filters → the reasons each keeps (GET
  *  /admin/customers/:id/transactions?reasons=). Every reason is in exactly
  *  one, so "All" is the sum of the rest. */

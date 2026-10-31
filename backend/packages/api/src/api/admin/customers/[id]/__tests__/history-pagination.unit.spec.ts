@@ -22,6 +22,7 @@ const tx = (i: number) => ({
   amount: -5,
   reason: 'pack_open',
   reference: null,
+  source_transaction_id: `open_${i}`,
   created_at: new Date(2026, 0, i + 1),
 });
 const pull = (i: number) => ({
@@ -60,11 +61,28 @@ function mkScope(opts: { hasPaid?: boolean; rows?: any[] } = {}) {
       listCards: async () => [
         { handle: 'card-a', name: 'Card A', market_value: 10, image: 'x.png' },
       ],
-      listPacks: async () => [{ slug: 'pack_1', buyback_percent: 95 }],
+      listPacks: async () => [
+        { slug: 'pack_1', title: 'Gold Pack', buyback_percent: 95 },
+      ],
       listFxRates: async () => [],
+      listPulls: async (f: any) =>
+        f.open_id ? [{ ...pull(0), open_id: f.open_id[0] }] : [pull(1)],
+      listLedgerEntries: async () => [],
+      balanceAfterRows: async () => new Map([['ctx_0', 95.5]]),
+      listPackOdds: async () => [
+        { pack_id: 'pack_1', card_id: 'card-a', rarity: 'Rare' },
+      ],
+      listDeliveryOrderItems: async () => [
+        { pull_id: 'pull_0', delivery_order_id: 'canceled' },
+        { pull_id: 'pull_0', delivery_order_id: 'live' },
+      ],
+      listDeliveryOrders: async () => [
+        { id: 'canceled', status: 'canceled' },
+        { id: 'live', status: 'shipped' },
+      ],
       lockedPullIds: async (_id: string, rows: any[]) =>
         new Set(
-          opts.hasPaid ?? true
+          (opts.hasPaid ?? true)
             ? []
             : rows.filter((r) => r.source === 'free').map((r) => r.id),
         ),
@@ -87,6 +105,34 @@ describe('customer history pagination', () => {
     );
     expect(out.body.total).toBe(60);
     expect(out.body.items).toHaveLength(25);
+  });
+
+  it('transactions: says what each row was about', async () => {
+    const { res, out } = mkRes();
+    await getTransactions(
+      { scope: mkScope(), params: { id: 'cus_1' }, query: {} } as any,
+      res,
+    );
+    expect(out.body.items[0]).toMatchObject({
+      balance_after: 95.5,
+      pack_title: 'Gold Pack',
+      cards: [{ pull_id: 'pull_0', name: 'Card A', image: 'x.png' }],
+      order_id: null,
+    });
+  });
+
+  it('pulls: names the live order of a shipped card, never a canceled one', async () => {
+    const { res, out } = mkRes();
+    await getPulls(
+      {
+        scope: mkScope({ rows: [{ ...pull(0), status: 'delivering' }] }),
+        params: { id: 'cus_1' },
+        query: {},
+      } as any,
+      res,
+    );
+    expect(out.body.items[0].order_id).toBe('live');
+    expect(out.body.items[0].card.rarity).toBe('Rare');
   });
 
   it('pulls: pages, reports total, joins card', async () => {
