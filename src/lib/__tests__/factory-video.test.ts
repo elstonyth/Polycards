@@ -17,6 +17,11 @@ describe('factoryVideo', () => {
       'chaos',
       'kanto',
       'lucky',
+      'capsulebronze',
+      'capsulesilver',
+      'capsulegold',
+      'capsuleplatinum',
+      'capsulediamond',
     ]) {
       expect(factoryVideo(`/images/polycards/${tier}-factory.webp`)).toEqual({
         mp4: `/images/polycards/${tier}-factory.mp4`,
@@ -40,6 +45,21 @@ describe('factoryVideo', () => {
     ]) {
       expect(factoryVideo(url)).toBeNull();
     }
+  });
+
+  // A capsule shares its metal with a card pack tier, so its factory has its own
+  // name: an upload called gold-factory would play the card Gold pack's loop.
+  it('plays a capsule factory after uploading its still through admin', () => {
+    vi.stubEnv('NEXT_PUBLIC_MEDIA_HOST', undefined);
+    expect(
+      factoryVideo(
+        'https://polycards-media.sgp1.cdn.digitaloceanspaces.com/capsulegold-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      ),
+    ).toEqual({
+      mp4: '/images/polycards/capsulegold-factory.mp4',
+      webm: '/images/polycards/capsulegold-factory.webm',
+      poster: '/images/polycards/capsulegold-factory-poster.webp',
+    });
   });
 
   it('uses the configured media host for uploaded factory scenes', () => {
