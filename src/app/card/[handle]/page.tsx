@@ -3,7 +3,8 @@ import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
-import { getCardResult } from '@/lib/data/cards';
+import { getCardResult, type CardDetailData } from '@/lib/data/cards';
+import { SITE_URL } from '@/lib/site';
 import { CardCloseButton } from './CardCloseButton';
 import { CardDetailHydrated } from './CardDetailHydrated';
 
@@ -16,6 +17,10 @@ export const dynamic = 'force-dynamic';
 // decode threw URIError (→ 500) on a literal `%` where a 404 was meant.
 const resolveCard = cache((handle: string) => getCardResult(handle));
 
+// A raw card has no grader or grade, so its line is the set alone.
+const cardDescription = (card: CardDetailData): string =>
+  [card.set, `${card.grader} ${card.grade}`.trim()].filter(Boolean).join(' · ');
+
 export async function generateMetadata({
   params,
 }: {
@@ -27,9 +32,29 @@ export async function generateMetadata({
   // body is what distinguishes them).
   if (result.status !== 'ok') return { title: 'Card not found' };
   const { card } = result;
+  const description = cardDescription(card);
+  const path = `/card/${card.handle}`;
   return {
     title: card.name,
-    description: `${card.set} · ${card.grader} ${card.grade}`,
+    description,
+    alternates: { canonical: path },
+    // Replaces the layout's openGraph whole, so every field is restated.
+    openGraph: {
+      type: 'website',
+      siteName: 'Polycards',
+      title: card.name,
+      description,
+      url: path,
+      images: [
+        {
+          url: `${path}/share.jpg`,
+          width: 1080,
+          height: 1080,
+          type: 'image/jpeg',
+          alt: card.name,
+        },
+      ],
+    },
   };
 }
 
@@ -75,8 +100,28 @@ export default async function CardPage({
     );
   }
   if (result.status === 'notfound') notFound();
+  const { card } = result;
+  // Tells Meta's catalog which picture is the product, so it stops guessing
+  // from the page's <img>s. No price: these cards are pulled, not sold, and
+  // Meta would print it on ad tiles.
+  const productJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: card.name,
+    description: cardDescription(card),
+    sku: card.handle,
+    brand: { '@type': 'Brand', name: 'Polycards' },
+    url: `${SITE_URL}/card/${card.handle}`,
+    image: `${SITE_URL}/card/${card.handle}/share.jpg`,
+  };
   return (
     <div className="mx-auto w-full px-fluid py-6">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(productJsonLd).replace(/</g, '\\u003c'),
+        }}
+      />
       {frameVariant ? (
         <CardCloseButton />
       ) : (

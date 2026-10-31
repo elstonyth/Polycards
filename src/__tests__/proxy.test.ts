@@ -99,6 +99,7 @@ describe('unknown routes — a cacheable 404 before rendering', () => {
       '/slots/bronze-pack',
       '/slots/bronze-pack/spin?count=3',
       '/card/pikachu-tg05-psa-10-4080757',
+      '/card/pikachu-tg05-psa-10-4080757/share.jpg',
       '/profile/Collector7530',
       '/r/ZE42A7WA',
       '/vault',
