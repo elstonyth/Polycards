@@ -276,8 +276,12 @@ medusaIntegrationTestRunner({
           ...secrets,
         });
         expect(
-          (await get(`/admin/orders/${order.id}?fields=customer.metadata`, staff))
-            .data.order.customer.metadata,
+          (
+            await get(
+              `/admin/orders/${order.id}?fields=customer.metadata`,
+              staff,
+            )
+          ).data.order.customer.metadata,
         ).toEqual({ handle: 'ace', ...secrets });
       });
     });

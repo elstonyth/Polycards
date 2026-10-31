@@ -97,7 +97,8 @@ const stripSecretMetadata = (node: unknown, hidden: string[]): void => {
   if (!node || typeof node !== 'object') return;
   for (const [key, value] of Object.entries(node)) {
     if (key === 'metadata' && value && typeof value === 'object') {
-      for (const secret of hidden) delete (value as Record<string, unknown>)[secret];
+      for (const secret of hidden)
+        delete (value as Record<string, unknown>)[secret];
     } else {
       stripSecretMetadata(value, hidden);
     }
@@ -119,8 +120,11 @@ export async function redactCustomerSecrets(
 ): Promise<void> {
   try {
     const roles =
-      (req as unknown as { auth_context?: { app_metadata?: { roles?: string[] } } })
-        .auth_context?.app_metadata?.roles ?? [];
+      (
+        req as unknown as {
+          auth_context?: { app_metadata?: { roles?: string[] } };
+        }
+      ).auth_context?.app_metadata?.roles ?? [];
     const hidden: string[] = [];
     for (const { key, resource } of SECRET_METADATA) {
       // hasPermission answers true for an empty role list: never here.
