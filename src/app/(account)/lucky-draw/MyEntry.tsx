@@ -1,13 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { pillVariants } from '@/components/ui/pill';
 import { UnavailablePanel } from '@/components/task-ui';
-import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
 import { mytClock, mytDate, num } from '@/lib/format';
 import { getMyLuckyDraw } from '@/lib/actions/lucky-draw';
+import { entryChance, POOL_TITLE } from '@/lib/lucky-draw';
 import type { LuckyDrawMine } from '@/lib/data/schemas';
 import { mytWhen, PrizeArt } from './PrizeCard';
 
@@ -36,10 +34,11 @@ function Heading({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** My balance, the prizes and one-winner events I entered with their outcome,
- *  and my ticket history (spec §9). Read when the tab opens, so a fresh entry
+/** The pools this account joined, with its chance and how each ended, and its
+ *  ticket history (Results is the same record for the whole platform). The
+ *  balance is on the page's title row. Read when the tab opens, so a fresh entry
  *  shows. */
-export function MyTickets() {
+export function MyEntry() {
   const [mine, setMine] = useState<LuckyDrawMine | null | 'failed'>(null);
 
   useEffect(() => {
@@ -64,36 +63,17 @@ export function MyTickets() {
 
   return (
     <div>
-      <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-neutral-900 p-4">
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/[0.06]">
-          <TicketArt width={44} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
-            My tickets
-          </p>
-          <p className="font-heading text-2xl text-white tabular-nums">
-            {num(mine.balance)}
-          </p>
-        </div>
-        <Link
-          href="/task"
-          className={pillVariants({ variant: 'secondary', size: 'sm' })}
-        >
-          Earn more
-        </Link>
-      </div>
-
-      <Heading>My entries</Heading>
+      <Heading>Pools you joined</Heading>
       {mine.entries.length === 0 ? (
         <p className="text-sm text-neutral-400">
-          You haven&rsquo;t entered a draw yet.
+          You haven&rsquo;t joined a pool yet.
         </p>
       ) : (
         <ul className="space-y-2">
           {mine.entries.map((e) => {
             const status =
               STATUS[e.status as keyof typeof STATUS] ?? STATUS.open;
+            const chance = entryChance(e);
             return (
               <li
                 key={e.prize_id}
@@ -110,11 +90,13 @@ export function MyTickets() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-white">
-                    {e.title}
+                    {e.event_id ? POOL_TITLE : e.title}
                   </p>
                   <p className="mt-0.5 text-[11px] text-neutral-400 tabular-nums">
                     {num(e.my_tickets)}{' '}
-                    {e.my_tickets === 1 ? 'ticket' : 'tickets'} · draws{' '}
+                    {e.my_tickets === 1 ? 'ticket' : 'tickets'}
+                    {chance && ` · ${chance}`} ·{' '}
+                    {e.status === 'open' && 'draws '}
                     {mytWhen(e.draw_at)}
                   </p>
                 </div>

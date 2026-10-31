@@ -8,7 +8,12 @@ import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
 import { mytDate, num } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
-import { heroFirst, luckyDrawView, rulesCopy } from '@/lib/lucky-draw';
+import {
+  heroFirst,
+  luckyDrawView,
+  POOL_TITLE,
+  rulesCopy,
+} from '@/lib/lucky-draw';
 import {
   getLuckyDraw,
   getLuckyDrawEventResult,
@@ -20,7 +25,7 @@ import type {
   LuckyDrawResultDetail,
 } from '@/lib/data/schemas';
 import { EnterSheet, type Entered, type EnterTarget } from './EnterSheet';
-import { MyTickets } from './MyTickets';
+import { MyEntry } from './MyEntry';
 import { NoPool, potTarget, PotView, UpcomingPool } from './PotView';
 import { PrizeCard } from './PrizeCard';
 import { PrizeWheel } from './PrizeWheel';
@@ -34,7 +39,7 @@ type TabKey = 'prizes' | 'results' | 'mine';
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'prizes', label: 'Pool' },
   { key: 'results', label: 'Results' },
-  { key: 'mine', label: 'My tickets' },
+  { key: 'mine', label: 'My entry' },
 ];
 
 // The spin moment (spec §10): from a prize's draw time until its result
@@ -51,7 +56,7 @@ const POLL_WINDOW_MS = 5 * 60_000;
 // a re-read after an entry waits that out: the top 10 then shows the new tickets.
 const TOP_REREAD_MS = 11_000;
 
-/** The /lucky-draw page: Prizes, Results and My tickets. */
+/** The /lucky-draw page: Pool, Results and My entry. */
 export function LuckyDrawClient({
   initial,
   intro,
@@ -134,7 +139,7 @@ export function LuckyDrawClient({
           if (live && fresh) setPage(fresh);
           return;
         }
-        const found = await getLuckyDrawEventResult(ev.id, ev.name);
+        const found = await getLuckyDrawEventResult(ev.id, POOL_TITLE);
         if (!live || !found) return;
         setPage((prev) =>
           prev?.event
@@ -346,7 +351,7 @@ export function LuckyDrawClient({
           </div>
         ) : tab === 'mine' ? (
           <div className="mx-auto max-w-4xl">
-            <MyTickets />
+            <MyEntry />
           </div>
         ) : !page ? (
           <UnavailablePanel />
@@ -372,9 +377,9 @@ export function LuckyDrawClient({
             drawing={view === 'pot_drawing'}
             balance={balance}
             onEnter={() => setEntering('pot')}
-            onOpenResult={() => void openEventResult(event.id, event.name)}
+            onOpenResult={() => void openEventResult(event.id, POOL_TITLE)}
             onWatch={() =>
-              void openEventResult(event.id, event.name, (d) => setSpins([d]))
+              void openEventResult(event.id, POOL_TITLE, (d) => setSpins([d]))
             }
           />
         ) : (

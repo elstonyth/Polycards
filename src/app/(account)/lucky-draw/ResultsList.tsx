@@ -5,7 +5,7 @@ import { Pill } from '@/components/ui/pill';
 import { UnavailablePanel } from '@/components/task-ui';
 import { num } from '@/lib/format';
 import { getLuckyDrawResults } from '@/lib/actions/lucky-draw';
-import { eventRowId } from '@/lib/lucky-draw';
+import { eventRowId, POOL_TITLE } from '@/lib/lucky-draw';
 import type { LuckyDrawResult } from '@/lib/data/schemas';
 import { mytWhen, PersonChip, PrizeArt } from './PrizeCard';
 
@@ -73,7 +73,7 @@ export function ResultsList({
       <ul className="space-y-2">
         {loaded.rows.map((r) => {
           const eventId = eventRowId(r);
-          const title = (eventId && r.event_name) || r.title;
+          const title = eventId ? POOL_TITLE : r.title;
           return (
             <li key={eventId ?? r.prize_id}>
               <button

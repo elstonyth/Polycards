@@ -370,6 +370,16 @@ describe('LuckyDrawMineSchema', () => {
     expect(r.history[0]?.reason).toBe('pack_spin');
   });
 
+  it('reads the pool total, and a row from a backend without it', () => {
+    const r = LuckyDrawMineSchema.parse({
+      balance: 0,
+      history: [],
+      entries: [{ ...row, total_tickets: 100 }, row],
+    });
+    expect(r.entries[0]?.total_tickets).toBe(100);
+    expect(r.entries[1]?.total_tickets).toBeUndefined();
+  });
+
   it('keeps an event row with no image', () => {
     const { image: _none, ...noImage } = row;
     const r = LuckyDrawMineSchema.parse({

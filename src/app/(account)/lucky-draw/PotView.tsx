@@ -12,6 +12,7 @@ import {
   heroFirst,
   heroPrize,
   poolDay,
+  POOL_TITLE,
   poolLength,
   poolWhen,
   potTotal,
@@ -36,8 +37,8 @@ import { PersonChip, TopEntrants } from './PrizeCard';
 type LuckyDrawEvent = NonNullable<LuckyDrawPage['event']>;
 type NextEvent = NonNullable<LuckyDrawPage['next_event']>;
 
-/** The event as the enter sheet reads a prize: the event's id and name, the
- *  hero's art, the pot's value and the event's tickets. */
+/** The event as the enter sheet reads a prize: the event's id, the pool's title,
+ *  the hero's art, the pot's value and the event's tickets. */
 export function potTarget(
   event: LuckyDrawEvent,
   prizes: LuckyDrawPrize[],
@@ -45,7 +46,7 @@ export function potTarget(
   const hero = heroPrize(prizes);
   return {
     id: event.id,
-    title: event.name,
+    title: POOL_TITLE,
     image: hero?.image ?? null,
     kind: hero?.kind ?? 'card',
     value_myr: potTotal(prizes),
@@ -86,13 +87,11 @@ function StubTop({
   );
 }
 
-/** The pool's name and what it is worth, across the top of the dark half. */
+/** The pool's title and what it is worth, across the top of the dark half. */
 function PoolWorth({
-  name,
   prizes,
   caption,
 }: {
-  name: string;
   prizes: PoolPrize[];
   caption?: string;
 }) {
@@ -100,7 +99,7 @@ function PoolWorth({
     <div>
       {/* Off the smallest phones' first screen, so the total fits on it. */}
       <h2 className="text-sm font-semibold text-neutral-300 [@media(max-height:37.5rem)_and_(max-width:39.99rem)]:sr-only">
-        {name}
+        {POOL_TITLE}
       </h2>
       {/* No prizes to add up: a next pool read from a backend still deploying. */}
       {prizes.length > 0 && (
@@ -246,7 +245,7 @@ function UpNext({
   const length = poolLength(next.starts_at, next.ends_at);
   return (
     <section
-      aria-label={`Next pool: ${next.name}`}
+      aria-label="Next pool"
       className="@container rounded-[20px] border border-white/10 bg-neutral-900"
     >
       {/* Its own width decides, not the screen's: it is a column on a desktop. */}
@@ -264,8 +263,7 @@ function UpNext({
               </span>
             )}
           </div>
-          <p className="mt-2 text-base font-semibold text-white">{next.name}</p>
-          <p className="mt-0.5 text-xs text-neutral-300">
+          <p className="mt-2 text-xs text-neutral-300">
             {length && `${length} pool. `}Opens{' '}
             {poolWhen(next.starts_at, nowMs)}.
           </p>
@@ -407,7 +405,6 @@ function DrawnPool({
         }
       >
         <PoolWorth
-          name={event.name}
           prizes={shown}
           caption={
             result.winner
@@ -521,7 +518,7 @@ export function PotView({
           </>
         }
       >
-        <PoolWorth name={event.name} prizes={prizes} />
+        <PoolWorth prizes={prizes} />
         <PoolShelf prizes={prizes} onZoom={setZoom} className="mt-4" />
         <PoolLedger event={event} />
       </PoolPass>
@@ -602,7 +599,7 @@ export function UpcomingPool({
           </>
         }
       >
-        <PoolWorth name={next.name} prizes={prizes} />
+        <PoolWorth prizes={prizes} />
         {prizes.length > 0 && (
           <PoolShelf prizes={prizes} onZoom={setZoom} className="mt-4" />
         )}

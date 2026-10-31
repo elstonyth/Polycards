@@ -3,6 +3,8 @@ import { getVault } from '@/lib/actions/vault';
 import { getAddresses } from '@/lib/actions/delivery';
 import { getPackGifts } from '@/lib/actions/pack-gifts';
 import { getTicketBalance } from '@/lib/actions/lucky-draw';
+import { getPackCategories } from '@/lib/data/packs';
+import { ticketPackHref } from '@/lib/packs-data';
 import { AccountHeader } from '@/components/account/ui';
 import { VaultTabs } from '@/components/account/VaultTabs';
 import VaultClient from './VaultClient';
@@ -14,11 +16,12 @@ export const metadata: Metadata = { title: 'Vault' };
 // then hands off to the client grid for the interactive sell-backs + delivery
 // requests.
 export default async function VaultPage() {
-  const [initial, addresses, gifts, tickets] = await Promise.all([
+  const [initial, addresses, gifts, tickets, categories] = await Promise.all([
     getVault(),
     getAddresses(),
     getPackGifts(),
     getTicketBalance(),
+    getPackCategories(),
   ]);
   return (
     <>
@@ -34,6 +37,7 @@ export default async function VaultPage() {
         initialGifts={gifts ?? []}
         // null (unreadable) hides the Lucky Draw tickets row.
         tickets={tickets}
+        spinHref={ticketPackHref(categories)}
       />
     </>
   );
