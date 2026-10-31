@@ -1,25 +1,20 @@
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import type { UseQueryResult } from '@tanstack/react-query';
 import {
   Badge,
   Button,
   Container,
-  DropdownMenu,
   Heading,
   IconButton,
   Input,
   Label,
   Prompt,
-  Select,
-  StatusBadge,
-  Table,
   Tabs,
   Text,
   toast,
 } from '@medusajs/ui';
-import { ArrowLeft, EllipsisHorizontal } from '@medusajs/icons';
+import { ArrowLeft } from '@medusajs/icons';
 import type { Permission } from '@mercurjs/dashboard-sdk';
 import { usePermissions } from '@mercurjs/admin';
 import {
@@ -28,47 +23,23 @@ import {
   useCustomerDetail,
   useCustomerGacha,
   useCustomerReferral,
-  useCustomerGroupsAdmin,
   useCustomerMoney,
-  useDeliveryOrders,
   useFreezeCustomer,
-  usePayoutDetails,
-  usePulls,
-  useSavePayoutDetails,
-  useReferralSettings,
-  useSetCustomerReferrer,
-  useSetPartnerRate,
-  useSetCustomerRealName,
-  useSetCustomerPhone,
-  useSetPlayerGroup,
   useUnfreezeCustomer,
-  type CustomerReferralCard,
 } from '../../../lib/queries';
-import {
-  deliveryStatusLabel,
-  orderDateTime,
-  rm,
-  timeAgo,
-} from '../../../lib/format';
-import type {
-  CustomerAudit,
-  DeliveryStatus,
-  PayoutDetails,
-} from '../../../lib/admin-rest';
-import {
-  effectiveOddsSet,
-  isDefaultPlayerGroup,
-} from '../../../lib/player-groups';
+import { timeAgo } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
-import { Pager } from '../../../components/Pager';
-import { PullsTable } from '../../../components/PullsTable';
 import { GiftAndBonusPanels } from './gift-and-bonus';
 import { LuckyDrawTicketsPanel } from './lucky-draw-tickets';
 import { MoneySummary, PeriodsCard, PlayCard } from './MoneyCards';
+import { HistoryTab } from './HistoryTab';
 import { LevelTab } from './LevelTab';
+import { OrdersTab } from './OrdersTab';
+import { PaymentsTab } from './PaymentsTab';
+import { ProfileTab } from './ProfileTab';
+import { PullsTab } from './PullsTab';
 import { VaultTab } from './VaultTab';
 import { WalletTab } from './WalletTab';
-import { PaymentsTab } from './PaymentsTab';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -88,33 +59,22 @@ import { PaymentsTab } from './PaymentsTab';
 // button), not a bug fix. Any NEW admin route must be checked against the core
 // route table first — see docs/adr/0002-admin-dashboard-ui-stack.md.
 
-// StatusBadge tone per delivery status, mirroring the All Orders table. A
-// ternary chain rather than a second copy of that page's exhaustive Record: an
-// unknown status from the API lands on 'orange' instead of `undefined`.
-const deliveryTone = (
-  status: DeliveryStatus,
-): 'orange' | 'blue' | 'green' | 'grey' =>
-  status === 'completed'
-    ? 'green'
-    : status === 'canceled'
-      ? 'grey'
-      : status === 'shipped'
-        ? 'blue'
-        : 'orange';
-
 // Which modal is open. null = none.
 type ModalKind = 'freeze' | 'unfreeze' | 'credits';
 
-type TabKey =
-  | 'wallet'
-  | 'payments'
-  | 'vault'
-  | 'orders'
-  | 'pulls'
-  | 'gifts'
-  | 'lvl'
-  | 'profile'
-  | 'history';
+const TABS = [
+  'overview',
+  'wallet',
+  'payments',
+  'vault',
+  'orders',
+  'pulls',
+  'gifts',
+  'lvl',
+  'profile',
+  'history',
+] as const;
+type TabKey = (typeof TABS)[number];
 
 // Two letters for the avatar: initials of the name, else the email's start
 // (the Players list's rule).
@@ -142,1142 +102,16 @@ const joinedDate = (iso: string): string =>
 // The trade is that a tab body's OWN state resets when the tab unmounts (a
 // table offset, an unsaved bank draft — verified, not assumed). State that has
 // to outlive a tab switch is therefore held by the parent instead: the modal,
-// and History's two table offsets. Nothing here is destructive on reset — the
-// bank form only ever writes on an explicit Save.
+// and History's table offset. Nothing here is destructive on reset — the bank
+// form only ever writes on an explicit Save.
 //
 // Each tab body returns its OWN top-level Container(s), not a wrapper <div>:
 // the page root is a `flex flex-col gap-y-3`, so a wrapper would swallow the
-// gap between a tab's sections (Profile has two, History three).
+// gap between a tab's sections (Profile has several).
 //
 // History is the exception that keeps its queries in the PARENT. The header's
 // frozen badge and its Freeze/Unfreeze button read `account_state` off the
-// very same /audit response, so that query cannot move down here. This tab is
-// a JSX move, nothing else.
-
-const BankForm = ({
-  customerId,
-  seed,
-}: {
-  customerId: string;
-  seed: PayoutDetails | null;
-}) => {
-  const { t } = useTranslation();
-  const save = useSavePayoutDetails();
-  const [bankName, setBankName] = useState(seed?.bank_name ?? '');
-  const [account, setAccount] = useState(seed?.bank_account_number ?? '');
-  const [holder, setHolder] = useState(seed?.account_holder_name ?? '');
-
-  // Compared TRIMMED against what the server holds, because submit trims too:
-  // after a save the draft and the refreshed seed agree and Save re-disables
-  // itself instead of offering to write the same row again.
-  const unchanged =
-    bankName.trim() === (seed?.bank_name ?? '') &&
-    account.trim() === (seed?.bank_account_number ?? '') &&
-    holder.trim() === (seed?.account_holder_name ?? '');
-
-  // No toast here — useSavePayoutDetails already fires one on success and
-  // another on error.
-  const submit = () =>
-    save.mutate({
-      id: customerId,
-      details: {
-        bank_name: bankName.trim(),
-        bank_account_number: account.trim(),
-        // The column is nullable; '' would persist as an empty holder name.
-        account_holder_name: holder.trim() || null,
-      },
-    });
-
-  return (
-    <div className="flex flex-col gap-4 border-t px-6 py-4">
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="payout-bank-name" size="small">
-            {t('players.bankName')}
-          </Label>
-          <Input
-            id="payout-bank-name"
-            value={bankName}
-            onChange={(e) => setBankName(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="payout-bank-account" size="small">
-            {t('players.bankAccount')}
-          </Label>
-          <Input
-            id="payout-bank-account"
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="payout-holder" size="small">
-            {t('players.accountHolder')}
-          </Label>
-          <Input
-            id="payout-holder"
-            value={holder}
-            onChange={(e) => setHolder(e.target.value)}
-          />
-        </div>
-      </div>
-      <div>
-        <Button
-          size="small"
-          onClick={submit}
-          isLoading={save.isPending}
-          disabled={unchanged || !bankName.trim() || !account.trim()}
-        >
-          {t('players.saveBank')}
-        </Button>
-      </div>
-    </div>
-  );
-};
-
-/** Move a player between player groups. Exclusive by construction: the Select
- *  holds ONE group and the save posts to the repo-side route that clears the
- *  others, so the operator can never leave a player in two groups whose odds
- *  sets disagree. */
-const GroupCard = ({ customerId }: { customerId: string }) => {
-  const { t } = useTranslation();
-  const { data: detail, isError: detailError } = useCustomerDetail(customerId);
-  const { data: groupList, isError: groupsError } = useCustomerGroupsAdmin();
-  // BOTH error flags: the render below falls back to a skeleton on
-  // `!groupList || !detail`, so a failed customer-detail request with a healthy
-  // group list would sit on that skeleton forever instead of ever reaching the
-  // error message.
-  const isError = detailError || groupsError;
-  const move = useSetPlayerGroup(customerId);
-  // Unsaved pick only — undefined re-reads the server value every render, so
-  // the post-save refetch is what the Select shows (same rule as the Player
-  // Groups page's odds-set column).
-  const [picked, setPicked] = useState<string | undefined>();
-
-  const groups = groupList?.customer_groups ?? [];
-  // Membership is exclusive on every surface we own, so this is normally the
-  // player's only group. The non-DEFAULT preference matches
-  // resolveOddsSetForCustomer EXACTLY: a player put in two groups by the
-  // prebuilt /customer-groups screen rolls their real group's odds, and this
-  // card must name the same one — showing "DEFAULT — Odds set 1" while the spin
-  // rolls set 2 would be a lie the operator acts on. Saving collapses the
-  // duplicates back to one.
-  const memberships = detail?.customer.groups ?? [];
-  const current =
-    (memberships.find((g) => !isDefaultPlayerGroup(g)) ?? memberships[0])?.id ??
-    '';
-  // A player in NO group rolls set 1 — bit-for-bit what the DEFAULT group's
-  // members roll (resolveOddsSetForCustomer returns 1 for both) — so the card
-  // names DEFAULT instead of reading as an unset field the operator has to
-  // interpret. Not cosmetic-only: `current` stays the real membership, so this
-  // shows as an unsaved change and Save persists it in one click. That is the
-  // whole repair path when the fail-soft subscriber missed someone or the row
-  // predates it (see scripts/backfill-default-group.ts).
-  const defaultGroupId = groups.find(isDefaultPlayerGroup)?.id ?? '';
-  const value = (picked ?? current) || defaultGroupId;
-  // `duplicated` keeps Save live when the player holds MORE than one
-  // membership, even with nothing picked. That state is the one this card
-  // exists to repair — the prebuilt /customer-groups screen is what creates it
-  // — and gating purely on `dirty` disabled the button precisely then, so the
-  // only way out was to move the player somewhere else and back. Pressing Save
-  // as-is collapses them onto the group already shown, which is the group the
-  // draw path is already using.
-  const duplicated = memberships.length > 1;
-  const dirty = value !== current;
-
-  return (
-    <Container className="p-0">
-      <div className="px-6 py-4">
-        <Heading level="h2">{t('players.groupTitle')}</Heading>
-        <Text className="text-ui-fg-subtle mt-1" size="small">
-          {t('players.groupSubtitle')}
-        </Text>
-      </div>
-      {isError ? (
-        <div className="border-t px-6 py-6">
-          <Text size="small" className="text-ui-fg-error">
-            {t('players.groupLoadError')}
-          </Text>
-        </div>
-      ) : !groupList || !detail ? (
-        <div className="border-t px-6 py-6">
-          <LoadingSkeleton />
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-end gap-3 border-t px-6 py-4">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="player-group" size="small">
-              {t('players.groupLabel')}
-            </Label>
-            <Select value={value} onValueChange={setPicked}>
-              <Select.Trigger id="player-group" className="w-64">
-                {/* Only reachable when the shop has no DEFAULT row at all —
-                    a group-less player otherwise shows DEFAULT (see
-                    `defaultGroupId` above). A blank trigger reads as a loading
-                    bug rather than a real state. */}
-                <Select.Value placeholder={t('players.groupNone')} />
-              </Select.Trigger>
-              <Select.Content>
-                {groups.map((g) => (
-                  <Select.Item key={g.id} value={g.id}>
-                    {/* effectiveOddsSet, not the raw metadata: the default
-                        group always rolls set 1, whatever its row stores. */}
-                    {g.name} —{' '}
-                    {t('players.groupOddsSet', { n: effectiveOddsSet(g) })}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select>
-          </div>
-          <Button
-            size="small"
-            onClick={() =>
-              move.mutate(value || null, {
-                onSuccess: () => setPicked(undefined),
-              })
-            }
-            isLoading={move.isPending}
-            disabled={!dirty && !duplicated}
-          >
-            {t('players.groupSave')}
-          </Button>
-          {duplicated ? (
-            <Text size="small" className="text-ui-fg-subtle pb-2">
-              {t('players.groupDuplicated', { count: memberships.length })}
-            </Text>
-          ) : (
-            // Says out loud that the DEFAULT on screen is the odds this player
-            // already rolls but is not yet a stored membership — otherwise a
-            // live Save button next to an apparently-correct value looks broken.
-            memberships.length === 0 && (
-              <Text size="small" className="text-ui-fg-subtle pb-2">
-                {t('players.groupUnassigned')}
-              </Text>
-            )
-          )}
-        </div>
-      )}
-    </Container>
-  );
-};
-
-// When this week's line pays: auto-approval holds a whole run with any line
-// over its limit for an admin, and the close voids a line over the ceiling.
-// Never promise Wednesday when one of those applies.
-const payoutNote = (
-  projectedCents: number,
-  limits: CustomerReferralCard['payout_limits'],
-): string =>
-  projectedCents <= 0
-    ? 'Nothing to pay yet.'
-    : projectedCents > limits.line_ceiling_cents
-      ? `Over the ${rm(limits.line_ceiling_cents / 100)} line ceiling — the close voids it for review, so it will not pay as is.`
-      : projectedCents > limits.auto_approve_max_cents
-        ? `Over ${rm(limits.auto_approve_max_cents / 100)} — an admin must approve the week on the Referrals page before it pays.`
-        : 'Usually paid the Wednesday after it closes; a week holding any line over the auto-approve limit waits for an admin.';
-
-// Referral card (rebuild, spec 2026-08-24): who referred them, their direct
-// downline, their weekly payout lines, and the partner-rate control. The rate
-// REPLACES the tier table for this customer; bounds come from the Referrals
-// page settings and are re-enforced server-side.
-const ReferralCard = ({ customerId }: { customerId: string }) => {
-  const { data, isError } = useCustomerReferral(customerId);
-
-  return (
-    <Container className="p-0">
-      <div className="px-6 py-4">
-        <Heading level="h2">Referral</Heading>
-      </div>
-      {isError ? (
-        <div className="border-t px-6 py-6">
-          <Text size="small" className="text-ui-fg-error">
-            Failed to load.
-          </Text>
-        </div>
-      ) : !data ? (
-        <div className="border-t px-6 py-6">
-          <LoadingSkeleton />
-        </div>
-      ) : (
-        // Mounted only once the card is in hand so the rate input seeds from
-        // its useState initialiser (BankForm precedent).
-        <ReferralCardBody customerId={customerId} data={data} />
-      )}
-    </Container>
-  );
-};
-
-const ReferralCardBody = ({
-  customerId,
-  data,
-}: {
-  customerId: string;
-  data: CustomerReferralCard;
-}) => {
-  const { t } = useTranslation();
-  const { data: settings } = useReferralSettings();
-  const setRate = useSetPartnerRate();
-  const setReferrer = useSetCustomerReferrer();
-  const navigate = useNavigate();
-  const [referrerInput, setReferrerInput] = useState(
-    () => data.referred_by ?? '',
-  );
-  const [ratePct, setRatePct] = useState(() =>
-    data.partner_referral_bp === null
-      ? ''
-      : String(data.partner_referral_bp / 100),
-  );
-
-  const apply = (rateBp: number | null) => {
-    const reason = window.prompt('Reason (audited):')?.trim();
-    if (!reason) return;
-    setRate.mutate(
-      { customerId, rateBp, reason },
-      {
-        onSuccess: () =>
-          toast.success(
-            rateBp === null ? 'Partner rate cleared.' : 'Partner rate set.',
-          ),
-        onError: (e) => toast.error(e.message),
-      },
-    );
-  };
-
-  const boundsHint = settings
-    ? `${settings.partner_min_bp / 100}–${settings.partner_max_bp / 100}%`
-    : '';
-  // Conflict rule (spec 2026-09-09): while the player is in a partner group
-  // the group's rate pays them, and the server refuses a manual rate. Lock the
-  // control here with the same message, rather than let the operator type a
-  // value the Set button then rejects.
-  const lockedByGroup = data.partner_group;
-  // Which rule sets this week's rate — the order the close applies it in.
-  const rateSource = lockedByGroup
-    ? `Partner rate · group ${lockedByGroup.name}`
-    : data.partner_referral_bp !== null
-      ? 'Partner rate'
-      : 'Tier rate';
-  // shortcut: sums the last 50 lines the route returns (one per week, so all
-  // history since the 29 Sep launch); move to a server total past 50 weeks.
-  const paidCents = data.lines
-    .filter((l) => l.status === 'paid')
-    .reduce((sum, l) => sum + l.amount_cents, 0);
-
-  return (
-    <div className="border-t px-6 py-4">
-      <dl className="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2 text-sm break-words">
-        <dt className="text-ui-fg-subtle">Referred by</dt>
-        <dd>
-          <div className="flex items-center gap-2">
-            <Input
-              value={referrerInput}
-              onChange={(e) => setReferrerInput(e.target.value)}
-              placeholder="cus_… (blank = none)"
-              className="w-64 font-mono text-xs"
-            />
-            <Button
-              size="small"
-              variant="secondary"
-              disabled={
-                setReferrer.isPending ||
-                (referrerInput.trim() || null) === data.referred_by
-              }
-              onClick={() => {
-                const reason = window.prompt('Reason (audited):')?.trim();
-                if (!reason) return;
-                setReferrer.mutate(
-                  {
-                    customerId,
-                    referrerId: referrerInput.trim() || null,
-                    reason,
-                  },
-                  {
-                    onSuccess: () => toast.success('Attribution updated.'),
-                    onError: (e) => toast.error(e.message),
-                  },
-                );
-              }}
-            >
-              Set
-            </Button>
-          </div>
-        </dd>
-        <dt className="text-ui-fg-subtle">Direct referrals</dt>
-        {/* ?? and the week guard: during a rolling deploy an older API
-            instance can answer without these fields. */}
-        <dd>{data.downline_count ?? data.downline.length}</dd>
-        {data.week && (
-          <>
-            <dt className="text-ui-fg-subtle">This week</dt>
-            <dd>
-              <div className="tabular-nums">
-                {rm(data.week.turnover_cents / 100)} spend ×{' '}
-                {data.week.rate_bp / 100}% ={' '}
-                <span className="font-medium">
-                  {rm(data.week.projected_cents / 100)}
-                </span>
-              </div>
-              <Text size="xsmall" className="text-ui-fg-muted">
-                {rateSource} · week of {data.week.start}, still open.{' '}
-                {payoutNote(data.week.projected_cents, data.payout_limits)}
-              </Text>
-            </dd>
-          </>
-        )}
-        <dt className="text-ui-fg-subtle">Total paid</dt>
-        <dd className="tabular-nums">{rm(paidCents / 100)}</dd>
-        <dt className="text-ui-fg-subtle">Partner rate</dt>
-        <dd>
-          {lockedByGroup ? (
-            <>
-              <div className="flex items-center gap-2">
-                <Badge size="small" color="purple">
-                  {lockedByGroup.rate_bp / 100}% · {lockedByGroup.name}
-                </Badge>
-                {/* Clearing stays allowed while the group applies (the
-                    server refuses only a NEW rate), so an inert per-customer
-                    rate can be removed without a move out and back. */}
-                {data.partner_referral_bp !== null && (
-                  <Button
-                    size="small"
-                    variant="transparent"
-                    disabled={setRate.isPending}
-                    onClick={() => {
-                      setRatePct('');
-                      apply(null);
-                    }}
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
-              <Text size="xsmall" className="text-ui-fg-muted">
-                {t('players.partnerLockedByGroup', {
-                  group: lockedByGroup.name,
-                })}
-                {data.partner_referral_bp !== null &&
-                  ` ${t('players.partnerManualShadowed', {
-                    rate: data.partner_referral_bp / 100,
-                  })}`}
-              </Text>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={ratePct}
-                  onChange={(e) => setRatePct(e.target.value)}
-                  placeholder={boundsHint}
-                  className="w-24"
-                />
-                <Text size="small" className="text-ui-fg-muted">
-                  %
-                </Text>
-                <Button
-                  size="small"
-                  variant="secondary"
-                  disabled={setRate.isPending || ratePct.trim() === ''}
-                  onClick={() => apply(Math.round(Number(ratePct) * 100))}
-                >
-                  Set
-                </Button>
-                {data.partner_referral_bp !== null && (
-                  <Button
-                    size="small"
-                    variant="transparent"
-                    disabled={setRate.isPending}
-                    onClick={() => {
-                      setRatePct('');
-                      apply(null);
-                    }}
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
-              {boundsHint && (
-                <Text size="xsmall" className="text-ui-fg-muted">
-                  Allowed range {boundsHint} — replaces the tier table for this
-                  customer.
-                </Text>
-              )}
-            </>
-          )}
-        </dd>
-      </dl>
-      {data.downline.length > 0 && (
-        <div className="mt-4">
-          <Text size="small" className="text-ui-fg-subtle">
-            Referrals
-          </Text>
-          <div className="mt-1 max-h-96 overflow-y-auto">
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>Player</Table.HeaderCell>
-                  <Table.HeaderCell>Referred since</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    This week
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    Lifetime
-                  </Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {data.downline.map((d) => (
-                  <Table.Row key={d.customer_id}>
-                    <Table.Cell>
-                      <button
-                        type="button"
-                        className="text-ui-fg-interactive text-left hover:underline"
-                        onClick={() => navigate(`/customers/${d.customer_id}`)}
-                      >
-                        {d.name ?? d.email ?? d.customer_id}
-                      </button>
-                      {d.name && d.email && (
-                        <div className="text-ui-fg-muted text-xs">
-                          {d.email}
-                        </div>
-                      )}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
-                      {orderDateTime(d.since)}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(d.week_spend_cents / 100)}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(d.lifetime_spend_cents / 100)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-          <Text size="xsmall" className="text-ui-fg-muted mt-2">
-            Spend counts pack opens paid with real money, net of refunds. Opens
-            paid with bonus credit earn no commission.
-          </Text>
-        </div>
-      )}
-      {data.lines.length > 0 && (
-        <div className="mt-4">
-          <Text size="small" className="text-ui-fg-subtle">
-            Weekly payouts
-          </Text>
-          <div className="mt-1 max-h-96 overflow-y-auto">
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>Week of</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    Referral spend
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    Rate
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    Commission
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>Status</Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {data.lines.map((l) => (
-                  <Table.Row key={l.id}>
-                    <Table.Cell className="whitespace-nowrap tabular-nums">
-                      {l.week_start ?? '—'}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(l.basis_cents / 100)}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {l.rate_bp / 100}%
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(l.amount_cents / 100)}
-                    </Table.Cell>
-                    <Table.Cell>
-                      <StatusBadge
-                        color={
-                          l.status === 'paid'
-                            ? 'green'
-                            : l.status === 'voided'
-                              ? 'red'
-                              : 'orange'
-                        }
-                      >
-                        {l.status}
-                      </StatusBadge>
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-/**
- * Real name + phone, the two identity facts the customer can no longer change
- * themselves (spec 2026-10-06) — staff match the real name against a Touch 'n
- * Go lookup of the phone, and these buttons are customer service's way to
- * correct either. window.prompt for the value and the audited reason, like
- * the partner-rate and referrer controls.
- */
-const IdentityActions = ({
-  customerId,
-  phone,
-}: {
-  customerId: string;
-  phone: string | null;
-}) => {
-  const { data: audit } = useCustomerAudit(customerId, 0);
-  const setName = useSetCustomerRealName();
-  const setPhone = useSetCustomerPhone();
-  const state = audit?.account_state ?? null;
-  const realName = state?.real_name ?? null;
-
-  const editName = () => {
-    const next = window
-      .prompt(
-        'Real name (exactly as on their Touch ’n Go eWallet):',
-        realName ?? '',
-      )
-      ?.trim();
-    if (!next) return;
-    const reason = window.prompt('Reason (audited):')?.trim();
-    if (!reason) return;
-    setName.mutate(
-      { customerId, realName: next, reason },
-      {
-        onSuccess: () => toast.success('Real name updated.'),
-        onError: (e) => toast.error(e.message),
-      },
-    );
-  };
-
-  const changePhone = () => {
-    const next = window
-      .prompt(
-        'New phone number in international format (e.g. +60123456789). The customer is emailed about the change.',
-        phone ?? '',
-      )
-      ?.trim();
-    if (!next) return;
-    const reason = window
-      .prompt('Reason (audited) — how was the customer’s identity checked?')
-      ?.trim();
-    if (!reason) return;
-    setPhone.mutate(
-      { customerId, phone: next, reason },
-      {
-        onSuccess: () => toast.success('Phone updated.'),
-        onError: (e) => toast.error(e.message),
-      },
-    );
-  };
-
-  return (
-    <>
-      <dt className="text-ui-fg-subtle">Real name</dt>
-      <dd className="flex flex-wrap items-center gap-2">
-        <span>{realName ?? '— (not entered yet)'}</span>
-        <Button
-          size="small"
-          variant="secondary"
-          disabled={setName.isPending}
-          onClick={editName}
-        >
-          {realName ? 'Correct' : 'Set'}
-        </Button>
-      </dd>
-      <dt className="text-ui-fg-subtle">Phone verified</dt>
-      <dd className="flex flex-wrap items-center gap-2">
-        <span>{state?.phone_verified_at ? 'Yes (locked)' : 'No'}</span>
-        <Button
-          size="small"
-          variant="secondary"
-          disabled={setPhone.isPending}
-          onClick={changePhone}
-        >
-          Change phone
-        </Button>
-      </dd>
-    </>
-  );
-};
-
-const ProfileTab = ({ customerId }: { customerId: string | null }) => {
-  const { t } = useTranslation();
-  const { data, isError } = useCustomerDetail(customerId);
-  // Full bank numbers ask their own policy (api/admin-rbac.ts SECRET_READS):
-  // the view-only Support viewer gets no bank card and no request for it.
-  const canSeeBank = usePermissions().hasPermission(
-    'customer_bank_account:read' as Permission,
-  );
-  const { data: payout, isError: payoutError } = usePayoutDetails(
-    canSeeBank ? customerId : null,
-  );
-  const customer = data?.customer;
-  // metadata is Record<string, unknown> — the handle is only renderable once
-  // it has been narrowed to a non-empty string.
-  const handle = customer?.metadata?.handle;
-  const handleLabel = typeof handle === 'string' && handle ? handle : '—';
-  const name =
-    [customer?.first_name, customer?.last_name].filter(Boolean).join(' ') ||
-    '—';
-
-  return (
-    <>
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('players.identityTitle')}</Heading>
-        </div>
-        {isError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
-        ) : !customer ? (
-          <div className="border-t px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : (
-          // break-words (inherited by every dd) so a long email or handle wraps
-          // instead of widening the 1fr track past the container.
-          <dl className="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2 break-words border-t px-6 py-4 text-sm">
-            <dt className="text-ui-fg-subtle">{t('players.name')}</dt>
-            <dd>{name}</dd>
-            <dt className="text-ui-fg-subtle">{t('players.email')}</dt>
-            <dd>{customer.email}</dd>
-            <dt className="text-ui-fg-subtle">{t('players.phone')}</dt>
-            <dd>{customer.phone ?? '—'}</dd>
-            {customerId && (
-              <IdentityActions
-                customerId={customerId}
-                phone={customer.phone ?? null}
-              />
-            )}
-            <dt className="text-ui-fg-subtle">{t('players.handle')}</dt>
-            <dd>{handleLabel}</dd>
-            <dt className="text-ui-fg-subtle">{t('players.registered')}</dt>
-            <dd className="tabular-nums">
-              {orderDateTime(customer.created_at)}
-            </dd>
-          </dl>
-        )}
-      </Container>
-
-      {customerId && <GroupCard customerId={customerId} />}
-
-      {customerId && <ReferralCard customerId={customerId} />}
-
-      {canSeeBank && (
-        <Container className="p-0">
-          <div className="px-6 py-4">
-            <Heading level="h2">{t('players.bankTitle')}</Heading>
-            <Text className="text-ui-fg-subtle mt-1" size="small">
-              {t('players.bankSubtitle')}
-            </Text>
-          </div>
-          {payoutError ? (
-            <div className="border-t px-6 py-6">
-              <Text size="small" className="text-ui-fg-error">
-                Failed to load.
-              </Text>
-            </div>
-          ) : !payout || !customerId ? (
-            <div className="border-t px-6 py-6">
-              <LoadingSkeleton />
-            </div>
-          ) : (
-            // Mounted only once the saved row is in hand, so the three inputs can
-            // seed from useState initialisers. Seeding an already-mounted form
-            // needs an effect, and that effect races the operator's typing on
-            // every background refetch.
-            <BankForm customerId={customerId} seed={payout.details} />
-          )}
-        </Container>
-      )}
-    </>
-  );
-};
-
-// Shipping half of the Orders tab: this player's delivery orders, read-only.
-// Managing/bulk-editing a shipment stays on the All Orders page — this is the
-// player's record of what was sent, not a second place to change it.
-const ShippingOrders = ({ customerId }: { customerId: string }) => {
-  const { t } = useTranslation();
-  const [page, setPage] = useState(0);
-  const { data, isError } = useDeliveryOrders(
-    undefined,
-    page,
-    undefined,
-    customerId,
-  );
-  if (isError) {
-    return (
-      <div className="border-t px-6 py-6">
-        <Text size="small" className="text-ui-fg-error">
-          Failed to load.
-        </Text>
-      </div>
-    );
-  }
-  if (!data) {
-    return (
-      <div className="border-t px-6 py-6">
-        <LoadingSkeleton />
-      </div>
-    );
-  }
-  const orders = data.orders;
-  if (orders.length === 0) {
-    return (
-      <div className="border-t px-6 py-6">
-        <Text className="text-ui-fg-subtle">{t('players.ordersEmpty')}</Text>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <div
-        className="overflow-x-auto border-t"
-        tabIndex={0}
-        role="region"
-        aria-label="Shipping orders table"
-      >
-        <Table>
-          <Table.Header>
-            <Table.Row>
-              <Table.HeaderCell>{t('players.order')}</Table.HeaderCell>
-              <Table.HeaderCell>{t('players.date')}</Table.HeaderCell>
-              <Table.HeaderCell>{t('players.items')}</Table.HeaderCell>
-              <Table.HeaderCell className="text-right">
-                {t('players.qty')}
-              </Table.HeaderCell>
-              <Table.HeaderCell>{t('players.status')}</Table.HeaderCell>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {orders.map((o) => (
-              <Table.Row key={o.id}>
-                <Table.Cell className="font-mono text-xs">
-                  #{o.id.slice(-6)}
-                </Table.Cell>
-                <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
-                  {orderDateTime(o.created_at)}
-                </Table.Cell>
-                {/* First card + a "+N more" tail, same summary the All Orders
-                    table shows. The full manifest lives in its Manage modal. */}
-                <Table.Cell>
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate">
-                      {o.items[0]?.card?.name ?? o.items[0]?.pull_id ?? '—'}
-                    </span>
-                    {o.items.length > 1 && (
-                      <span className="text-ui-fg-subtle whitespace-nowrap text-xs">
-                        +{o.items.length - 1} more
-                      </span>
-                    )}
-                  </span>
-                </Table.Cell>
-                <Table.Cell className="text-right tabular-nums">
-                  {o.items.length}
-                </Table.Cell>
-                <Table.Cell>
-                  <StatusBadge color={deliveryTone(o.status)}>
-                    {deliveryStatusLabel(o.status)}
-                  </StatusBadge>
-                </Table.Cell>
-              </Table.Row>
-            ))}
-          </Table.Body>
-        </Table>
-      </div>
-      <Pager
-        page={page}
-        onPage={setPage}
-        pageSize={data.limit}
-        count={orders.length}
-        total={data.total}
-      />
-    </>
-  );
-};
-
-// Pack purchases half: source='pack', so reward-economy pulls (which are not
-// purchases) stay out — same filter the All Orders page applies.
-const PackPurchases = ({ customerId }: { customerId: string }) => {
-  const [page, setPage] = useState(0);
-  const { data, isError } = usePulls(page, 'pack', customerId);
-
-  if (isError) {
-    return (
-      <div className="border-t px-6 py-6">
-        <Text size="small" className="text-ui-fg-error">
-          Failed to load.
-        </Text>
-      </div>
-    );
-  }
-  return (
-    <div className="border-t">
-      <PullsTable
-        pulls={data?.pulls ?? null}
-        page={page}
-        onPage={setPage}
-        limit={data?.limit ?? 50}
-        total={data?.total ?? 0}
-        showCustomer={false}
-      />
-    </div>
-  );
-};
-
-// customerId is a plain string here, not `string | null` like the other tabs:
-// usePulls/useDeliveryOrders have no `enabled` flag, so a null id would fetch
-// the SITE-WIDE ledger under this player's header. The parent renders these two
-// only once the route param is in hand.
-const OrdersTab = ({ customerId }: { customerId: string }) => {
-  const { t } = useTranslation();
-  // Same two-value toggle as the All Orders page. Each half owns its own page
-  // offset, so flipping kinds doesn't carry an offset into the other table.
-  const [kind, setKind] = useState<'shipping' | 'purchases'>('shipping');
-
-  return (
-    <Container className="p-0">
-      <div className="px-6 py-4">
-        <Tabs
-          value={kind}
-          onValueChange={(v) => setKind(v as 'shipping' | 'purchases')}
-        >
-          <Tabs.List aria-label="Order kind">
-            <Tabs.Trigger value="shipping">
-              {t('players.ordersShipping')}
-            </Tabs.Trigger>
-            <Tabs.Trigger value="purchases">
-              {t('players.ordersPurchases')}
-            </Tabs.Trigger>
-          </Tabs.List>
-        </Tabs>
-      </div>
-      {kind === 'shipping' ? (
-        <ShippingOrders customerId={customerId} />
-      ) : (
-        <PackPurchases customerId={customerId} />
-      )}
-    </Container>
-  );
-};
-
-// The relocated Pull Ledger (spec D6): every pull this player has made, all
-// sources, buyback states included.
-const PullsTab = ({ customerId }: { customerId: string }) => {
-  const [page, setPage] = useState(0);
-  const { data, isError } = usePulls(page, undefined, customerId);
-
-  if (isError) {
-    return (
-      <Container className="p-0">
-        <div className="px-6 py-6">
-          <Text size="small" className="text-ui-fg-error">
-            Failed to load.
-          </Text>
-        </div>
-      </Container>
-    );
-  }
-  return (
-    <PullsTable
-      pulls={data?.pulls ?? null}
-      page={page}
-      onPage={setPage}
-      limit={data?.limit ?? 50}
-      total={data?.total ?? 0}
-      showCustomer={false}
-    />
-  );
-};
-
-const HistoryTab = ({
-  auditQ,
-  auditPage,
-  setAuditPage,
-}: {
-  auditQ: UseQueryResult<CustomerAudit>;
-  auditPage: number;
-  setAuditPage: (page: number) => void;
-}) => {
-  const { t } = useTranslation();
-
-  const { data: auditData, isError: auditError } = auditQ;
-  // Ticket grants are audited as a customer `edit`; `after` holds the change.
-  const ticketLabel = (after: unknown) => {
-    const a = after as { delta?: unknown; lucky_draw_tickets?: unknown } | null;
-    return typeof a?.delta === 'number' &&
-      typeof a.lucky_draw_tickets === 'number'
-      ? t('customer360.action.luckyDrawTickets', {
-          delta: `${a.delta > 0 ? '+' : ''}${a.delta.toLocaleString('en-US')}`,
-          balance: a.lucky_draw_tickets.toLocaleString('en-US'),
-        })
-      : null;
-  };
-
-  const auditActions = (auditData?.actions ?? [])
-    // ponytail: belt-and-suspenders — backend already orders DESC; sort client-side to guarantee newest-first regardless of fetch order
-    .slice()
-    .sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-  const accountState = auditData?.account_state ?? null;
-
-  return (
-    <>
-      {/* ── Audit timeline ──────────────────────────────────────── */}
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('customer360.auditTitle')}</Heading>
-          <Text className="text-ui-fg-subtle mt-1" size="small">
-            {t('customer360.auditSubtitle')}
-          </Text>
-        </div>
-
-        {/* Account state panel */}
-        {accountState && (
-          <div className="border-t px-6 py-4">
-            <Text size="small" className="text-ui-fg-subtle mb-2">
-              {t('customer360.accountStateTitle')}
-            </Text>
-            <div className="flex items-center gap-3">
-              {accountState.frozen && (
-                <Badge size="small" color="red">
-                  {t('customer360.accountStateFrozen')}
-                </Badge>
-              )}
-              {accountState.disabled && (
-                <Badge size="small" color="red">
-                  {t('players.disabled')}
-                </Badge>
-              )}
-              {!accountState.frozen && !accountState.disabled && (
-                <Badge size="small" color="green">
-                  {t('customer360.accountStateActive')}
-                </Badge>
-              )}
-              {accountState.freeze_cause && (
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.accountStateCause')}:{' '}
-                  {accountState.freeze_cause}
-                </Text>
-              )}
-              {accountState.frozen_at && (
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.accountStateSince', {
-                    date: new Date(accountState.frozen_at).toLocaleDateString(
-                      'en-US',
-                    ),
-                  })}
-                </Text>
-              )}
-            </div>
-            {accountState.freeze_reason && (
-              <Text size="small" className="text-ui-fg-subtle mt-1">
-                &ldquo;{accountState.freeze_reason}&rdquo;
-              </Text>
-            )}
-            {accountState.disabled && accountState.disabled_at && (
-              <Text size="small" className="text-ui-fg-subtle mt-1">
-                {t('customer360.accountStateSince', {
-                  date: new Date(accountState.disabled_at).toLocaleDateString(
-                    'en-US',
-                  ),
-                })}
-                {accountState.disabled_by &&
-                  ` · ${t('customer360.accountStateBy', { admin: accountState.disabled_by })}`}
-              </Text>
-            )}
-            {accountState.disabled && accountState.disabled_reason && (
-              <Text size="small" className="text-ui-fg-subtle mt-1">
-                &ldquo;{accountState.disabled_reason}&rdquo;
-              </Text>
-            )}
-          </div>
-        )}
-
-        {auditError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
-        ) : !auditData ? (
-          <div className="border-t px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : auditActions.length === 0 ? (
-          <div className="border-t px-6 py-6">
-            <Text className="text-ui-fg-subtle">
-              {t('customer360.auditEmpty')}
-            </Text>
-          </div>
-        ) : (
-          <>
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>
-                    {t('customer360.auditWhen')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('customer360.auditAction')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('customer360.auditReason')}
-                  </Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {auditActions.map((row) => (
-                  <Table.Row key={row.id}>
-                    <Table.Cell className="text-ui-fg-subtle tabular-nums whitespace-nowrap">
-                      {new Date(row.created_at).toLocaleString('en-US')}
-                    </Table.Cell>
-                    <Table.Cell>
-                      {/* ponytail: t() falls back to raw action key if label missing */}
-                      {ticketLabel(row.after) ??
-                        t(`customer360.action.${row.action}`, row.action)}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle">
-                      {row.reason ?? '—'}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-            <Pager
-              page={auditPage}
-              onPage={setAuditPage}
-              pageSize={50}
-              count={auditActions.length}
-              total={null}
-            />
-          </>
-        )}
-      </Container>
-    </>
-  );
-};
+// very same /audit response, so that query cannot move down there.
 
 const Customer360Page = () => {
   const { t } = useTranslation();
@@ -1285,7 +119,14 @@ const Customer360Page = () => {
   const { id = '' } = useParams();
   const customerId = id || null;
 
-  const [tab, setTab] = useState<TabKey>('wallet');
+  // The open tab lives in the URL, so a refresh, a shared link and the browser's
+  // Back from another player all land on the same tab. `replace`: switching tabs
+  // is not a step Back should walk through.
+  const [params, setParams] = useSearchParams();
+  const asked = params.get('tab');
+  const tab: TabKey = TABS.find((k) => k === asked) ?? 'overview';
+  const setTab = (next: TabKey) =>
+    setParams(next === 'overview' ? {} : { tab: next }, { replace: true });
 
   // Offset page for the audit table (the endpoint serves 50/page).
   const [auditPage, setAuditPage] = useState(0);
@@ -1309,6 +150,11 @@ const Customer360Page = () => {
   const freeze = useFreezeCustomer();
   const unfreeze = useUnfreezeCustomer();
   const adjustCredits = useAdjustCredits();
+  // Every write on this page asks customer:update (api/admin-rbac.ts). A
+  // view-only role sees the whole player and no button that would 403.
+  const canEdit = usePermissions().hasPermission(
+    'customer:update' as Permission,
+  );
 
   // The header's badge and its Freeze/Unfreeze button read the account state
   // off the audit response — which is why that query stays here and not in the
@@ -1405,93 +251,91 @@ const Customer360Page = () => {
       : !reason.trim();
 
   return (
-    <div className="pc-dashboard flex flex-col gap-y-3">
+    <div className="pc-dashboard isolate flex flex-col gap-y-3">
       {/* ── Header: who, their account state, the actions, and the four
           numbers staff check first. ───────────────────────────────── */}
       <Container className="pc-settle p-0">
-        <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
-          <div className="min-w-0">
-            <button
-              type="button"
+        <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <IconButton
+              size="small"
+              variant="transparent"
+              aria-label={t('customer360.back')}
               onClick={() => navigate(-1)}
-              className="text-ui-fg-subtle hover:text-ui-fg-base mb-3 flex items-center gap-1 text-sm"
             >
-              <ArrowLeft className="h-4 w-4" />
-              {t('customer360.back')}
-            </button>
-            <div className="flex min-w-0 items-center gap-3">
-              <span
-                aria-hidden
-                className="bg-ui-bg-component text-ui-fg-subtle txt-compact-small-plus flex size-10 shrink-0 items-center justify-center rounded-full uppercase"
-              >
-                {initials(playerName, view?.customer.email ?? id)}
-              </span>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Heading level="h2" className="truncate">
-                    {playerName || view?.customer.email || id}
-                  </Heading>
-                  {view?.vip && (
-                    <Badge size="small" color="purple">
-                      {t('customer360.vipLevel', { level: view.vip.level })}
-                    </Badge>
-                  )}
-                  {isFrozen && (
-                    <Badge size="small" color="red">
-                      {t('customer360.frozen')}
-                    </Badge>
-                  )}
-                  {isDisabled && (
-                    <Badge size="small" color="red">
-                      {t('players.disabled')}
-                    </Badge>
-                  )}
-                  {/* Partner account (spec 2026-09-09) — from the referral card's
-                      query, which the Profile tab also reads; the header shows it
-                      whatever tab is open. Names the group when the group is the
-                      source, since that is where it has to be changed. */}
-                  {referralQ.data?.partner_group ? (
-                    <Badge size="small" color="purple">
-                      {t('players.partnerViaGroup', {
-                        group: referralQ.data.partner_group.name,
-                      })}
-                    </Badge>
-                  ) : referralQ.data?.partner_referral_bp !== null &&
-                    referralQ.data?.partner_referral_bp !== undefined ? (
-                    <Badge size="small" color="purple">
-                      {t('players.partner')}
-                    </Badge>
-                  ) : null}
-                </div>
-                {view && (
-                  <Text
-                    size="small"
-                    className="text-ui-fg-subtle mt-0.5 break-words"
-                  >
-                    {[
-                      playerName ? view.customer.email : null,
-                      t('playerMoney.joined', {
-                        date: joinedDate(view.customer.created_at),
-                      }),
-                      money?.last.open_at
-                        ? t('playerMoney.activeAgo', {
-                            ago: timeAgo(money.last.open_at),
-                          })
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </Text>
+              <ArrowLeft />
+            </IconButton>
+            <span
+              aria-hidden
+              className="bg-ui-bg-component text-ui-fg-subtle txt-compact-small-plus flex size-10 shrink-0 items-center justify-center rounded-full uppercase"
+            >
+              {initials(playerName, view?.customer.email ?? id)}
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Heading level="h2" className="truncate">
+                  {playerName || view?.customer.email || id}
+                </Heading>
+                {view?.vip && (
+                  <Badge size="small" color="purple">
+                    {t('customer360.vipLevel', { level: view.vip.level })}
+                  </Badge>
                 )}
+                {isFrozen && (
+                  <Badge size="small" color="red">
+                    {t('customer360.frozen')}
+                  </Badge>
+                )}
+                {isDisabled && (
+                  <Badge size="small" color="red">
+                    {t('players.disabled')}
+                  </Badge>
+                )}
+                {/* Partner account (spec 2026-09-09) — from the referral card's
+                    query, which the Profile tab also reads; the header shows it
+                    whatever tab is open. Names the group when the group is the
+                    source, since that is where it has to be changed. */}
+                {referralQ.data?.partner_group ? (
+                  <Badge size="small" color="purple">
+                    {t('players.partnerViaGroup', {
+                      group: referralQ.data.partner_group.name,
+                    })}
+                  </Badge>
+                ) : referralQ.data?.partner_referral_bp !== null &&
+                  referralQ.data?.partner_referral_bp !== undefined ? (
+                  <Badge size="small" color="purple">
+                    {t('players.partner')}
+                  </Badge>
+                ) : null}
               </div>
+              {view && (
+                <Text
+                  size="small"
+                  className="text-ui-fg-subtle mt-0.5 break-words"
+                >
+                  {[
+                    playerName ? view.customer.email : null,
+                    t('playerMoney.joined', {
+                      date: joinedDate(view.customer.created_at),
+                    }),
+                    money?.last.open_at
+                      ? t('playerMoney.activeAgo', {
+                          ago: timeAgo(money.last.open_at),
+                        })
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              )}
+              {viewError && (
+                <Text size="small" className="text-ui-fg-error mt-1">
+                  {t('playerDetail.loadError')}
+                </Text>
+              )}
             </div>
-            {viewError && (
-              <Text size="small" className="text-ui-fg-error mt-1">
-                Failed to load.
-              </Text>
-            )}
           </div>
-          {view && (
+          {view && canEdit && (
             <div className="flex items-center gap-2">
               {isFrozen ? (
                 <Button
@@ -1520,26 +364,6 @@ const Customer360Page = () => {
               >
                 {t('customer360.btnAdjustCredits')}
               </Button>
-              {/* Gift packs and Bonus credit live in their own tab now; these
-                  jump straight to it. */}
-              <DropdownMenu>
-                <DropdownMenu.Trigger asChild>
-                  <IconButton size="small" aria-label={t('playerMoney.more')}>
-                    <EllipsisHorizontal />
-                  </IconButton>
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Content align="end">
-                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
-                    {t('playerMoney.giftPacks')}
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
-                    {t('playerMoney.bonusCredit')}
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
-                    {t('playerMoney.luckyDrawTickets')}
-                  </DropdownMenu.Item>
-                </DropdownMenu.Content>
-              </DropdownMenu>
             </div>
           )}
         </div>
@@ -1547,21 +371,12 @@ const Customer360Page = () => {
         <MoneySummary money={money} view={view} />
       </Container>
 
-      {moneyQ.isError ? (
+      {moneyQ.isError && (
         <Container>
           <Text size="small" className="text-ui-fg-error">
             {t('playerMoney.loadError')}
           </Text>
         </Container>
-      ) : !money ? (
-        <Container>
-          <LoadingSkeleton />
-        </Container>
-      ) : (
-        <>
-          <PeriodsCard money={money} />
-          <PlayCard money={money} />
-        </>
       )}
 
       {/* ── Prompt modal — single instance, content varies by modal kind ─── */}
@@ -1631,14 +446,21 @@ const Customer360Page = () => {
         </Prompt.Content>
       </Prompt>
 
-      {/* ── Tabs ───────────────────────────────────────────────── */}
-      <Container className="p-0">
+      {/* ── Tabs: stuck to the top, so the sections stay one click away however
+          far down a long ledger the operator has scrolled. ─────────── */}
+      {/* z-10 keeps it above buttons and animated cards sliding under it. The
+          root's `isolate` holds that inside this page, so Medusa's drawers and
+          prompts, which have no z-index of their own, still cover it. */}
+      <Container className="sticky top-0 z-10 p-0">
         <div className="overflow-x-auto px-6 py-3">
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
             <Tabs.List
               aria-label="Player detail sections"
               className="whitespace-nowrap"
             >
+              <Tabs.Trigger value="overview">
+                {t('playerDetail.tabOverview')}
+              </Tabs.Trigger>
               <Tabs.Trigger value="wallet">
                 {t('players.tabWallet')}
               </Tabs.Trigger>
@@ -1665,11 +487,25 @@ const Customer360Page = () => {
         </div>
       </Container>
 
+      {tab === 'overview' &&
+        !moneyQ.isError &&
+        (!money ? (
+          <Container>
+            <LoadingSkeleton />
+          </Container>
+        ) : (
+          <>
+            <PeriodsCard money={money} />
+            <PlayCard money={money} />
+          </>
+        ))}
       {/* key={id}: the tree's "open subtree" button navigates to another
           /customers/:id WITHOUT remounting this route, so without a key a tab
           body would keep the previous player's table offset and — worse — the
           previous player's bank-form draft. */}
-      {tab === 'profile' && <ProfileTab key={id} customerId={customerId} />}
+      {tab === 'profile' && customerId && (
+        <ProfileTab key={id} customerId={customerId} />
+      )}
       {tab === 'lvl' && customerId && (
         <LevelTab key={id} customerId={customerId} />
       )}
@@ -1682,9 +518,9 @@ const Customer360Page = () => {
       {tab === 'vault' && customerId && (
         <VaultTab key={id} customerId={customerId} />
       )}
-      {/* Both take a non-null id — see the OrdersTab note. key={id} is what
-          makes their keepPreviousData safe: the body remounts on a customer
-          change, so there is no previous player's page to hold over. */}
+      {/* key={id} is what makes their keepPreviousData safe: the body remounts
+          on a customer change, so there is no previous player's page to hold
+          over. */}
       {tab === 'orders' && customerId && (
         <OrdersTab key={id} customerId={customerId} />
       )}

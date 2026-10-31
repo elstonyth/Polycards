@@ -58,7 +58,8 @@ export async function GET(
   }
   const ledgerFilter: Record<string, unknown> = source ? { source } : {};
 
-  // Optional ?customer_id= — the per-player view. Stricter than ?source=:
+  // Optional ?customer_id= — the per-player view, for API callers: the player
+  // page reads /admin/customers/:id/pulls. Stricter than ?source=:
   // absent means unscoped, but an empty/blank value 400s instead of silently
   // falling back to every customer's pulls. A repeated param arrives as an
   // array and 400s too.

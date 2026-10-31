@@ -38,7 +38,10 @@ type Props = {
 
 const CreatePlayerModal = ({ open, onClose }: Props) => {
   const { t } = useTranslation();
-  const { data: groupList, isError: groupsError } = useCustomerGroupsAdmin();
+  // Only once opened: the page mounts this closed for roles that cannot open it.
+  const { data: groupList, isError: groupsError } = useCustomerGroupsAdmin({
+    enabled: open,
+  });
   const generate = useCreatePlayers();
   const exporter = useExportPartnerAccounts();
 
@@ -66,7 +69,9 @@ const CreatePlayerModal = ({ open, onClose }: Props) => {
   const groups = groupList?.customer_groups ?? [];
   const groupId = picked ?? defaultGroupForNewPlayer(groups);
   const batch = parseBatchCount(count);
-  const canSave = batch !== null && !generate.isPending;
+  // The group list loads on open: saving before it arrives would drop the group.
+  const canSave =
+    batch !== null && !generate.isPending && (!!groupList || groupsError);
 
   const save = async () => {
     if (batch === null) return;

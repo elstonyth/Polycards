@@ -11,6 +11,8 @@ import {
   Textarea,
   toast,
 } from '@medusajs/ui';
+import type { Permission } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useAdjustTickets,
   useCustomerGacha,
@@ -33,6 +35,9 @@ export const LuckyDrawTicketsPanel = ({
   const { data: view } = useCustomerGacha(customerId);
   const ticketsQ = useLuckyDrawTickets(customerId);
   const adjust = useAdjustTickets();
+  const canEdit = usePermissions().hasPermission(
+    'customer:update' as Permission,
+  );
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -91,51 +96,55 @@ export const LuckyDrawTicketsPanel = ({
             {ticketsQ.data ? num(ticketsQ.data.balance) : '—'}
           </Text>
         </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="tickets-amount" size="small">
-            {t('customer360.tickets.amount')}
-          </Label>
-          <Input
-            ref={amountRef}
-            id="tickets-amount"
-            type="number"
-            step="1"
-            aria-invalid={amount.trim() !== '' && tickets === null}
-            aria-describedby="tickets-amount-error"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-          {amount.trim() !== '' && tickets === null && (
-            <Text
-              id="tickets-amount-error"
-              role="alert"
+        {canEdit && (
+          <>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="tickets-amount" size="small">
+                {t('customer360.tickets.amount')}
+              </Label>
+              <Input
+                ref={amountRef}
+                id="tickets-amount"
+                type="number"
+                step="1"
+                aria-invalid={amount.trim() !== '' && tickets === null}
+                aria-describedby="tickets-amount-error"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+              {amount.trim() !== '' && tickets === null && (
+                <Text
+                  id="tickets-amount-error"
+                  role="alert"
+                  size="small"
+                  className="text-ui-fg-error"
+                >
+                  {t('customer360.tickets.invalid')}
+                </Text>
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="tickets-note" size="small">
+                {t('customer360.tickets.note')}
+              </Label>
+              <Textarea
+                id="tickets-note"
+                rows={1}
+                maxLength={512}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </div>
+            <Button
               size="small"
-              className="text-ui-fg-error"
+              onClick={() => setConfirming(true)}
+              disabled={!valid}
+              isLoading={adjust.isPending}
             >
-              {t('customer360.tickets.invalid')}
-            </Text>
-          )}
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="tickets-note" size="small">
-            {t('customer360.tickets.note')}
-          </Label>
-          <Textarea
-            id="tickets-note"
-            rows={1}
-            maxLength={512}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </div>
-        <Button
-          size="small"
-          onClick={() => setConfirming(true)}
-          disabled={!valid}
-          isLoading={adjust.isPending}
-        >
-          {t('customer360.tickets.apply')}
-        </Button>
+              {t('customer360.tickets.apply')}
+            </Button>
+          </>
+        )}
       </div>
 
       <Prompt

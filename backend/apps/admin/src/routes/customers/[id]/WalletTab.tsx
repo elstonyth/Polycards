@@ -1,16 +1,32 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Container, Heading, Table, Text } from '@medusajs/ui';
+import { Container, Heading, Table, Text } from '@medusajs/ui';
 import {
   useCustomerMoney,
   useCustomerTransactions,
 } from '../../../lib/queries';
-import { orderDateTime, rm, timeAgo } from '../../../lib/format';
+import type { SupportTransaction } from '../../../lib/admin-rest';
+import { rm } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { delta } from '../../economy/signs';
 import { StatTile } from './MoneyCards';
-import { WALLET_FILTERS, ledgerKind, type WalletFilter } from './ledger-kind';
+import {
+  CardLine,
+  DetailDrawer,
+  DetailRow,
+  DetailRows,
+  FilterPills,
+  TableState,
+  When,
+} from './bits';
+import { openableRow, whenText } from './row-helpers';
+import {
+  WALLET_FILTERS,
+  ledgerKind,
+  ledgerSubject,
+  type WalletFilter,
+} from './ledger-kind';
 import { withdrawableNote } from './wallet-note';
 
 const FILTERS = Object.keys(WALLET_FILTERS) as WalletFilter[];
@@ -23,16 +39,75 @@ const dot = (kind: string, amount: number) =>
       ? 'bg-ui-tag-green-icon'
       : 'bg-ui-tag-red-icon';
 
+/** An admin's note has spaces; a gateway or order reference never does. */
+const isNote = (reference: string | null) =>
+  !!reference && /\s/.test(reference);
+
+const TransactionDrawer = ({
+  tx,
+  title,
+  onClose,
+}: {
+  tx: SupportTransaction;
+  title: string;
+  onClose: () => void;
+}) => {
+  const { t } = useTranslation();
+  const bonus = tx.bonus ?? 0;
+  const note = isNote(tx.reference);
+  return (
+    <DetailDrawer title={title} onClose={onClose}>
+      <DetailRows>
+        <DetailRow label={t('support.amount')} value={delta(tx.amount)} />
+        {bonus !== 0 && (
+          <DetailRow label={t('playerDetail.bonusPart')} value={delta(bonus)} />
+        )}
+        <DetailRow
+          label={t('playerDetail.balanceAfter')}
+          value={tx.balance_after == null ? null : rm(tx.balance_after)}
+        />
+        <DetailRow label={t('support.when')} value={whenText(tx.created_at)} />
+        <DetailRow label={t('pulls.pack')} value={tx.pack_title} />
+        <DetailRow
+          label={t('playerDetail.ledgerId')}
+          code={tx.ledger_display_id}
+        />
+        {tx.order_id ? (
+          <DetailRow label={t('players.order')} code={tx.order_id} />
+        ) : note ? (
+          <DetailRow label={t('playerDetail.note')} value={tx.reference} />
+        ) : (
+          <DetailRow
+            label={t('playerMoney.colReference')}
+            code={tx.reference}
+          />
+        )}
+      </DetailRows>
+      {!!tx.cards?.length && (
+        <div className="flex flex-col gap-3 px-6 py-4">
+          <Text size="small" weight="plus">
+            {t('playerDetail.cards', { count: tx.cards.length })}
+          </Text>
+          {tx.cards.map((c) => (
+            <CardLine key={c.pull_id} name={c.name} image={c.image} />
+          ))}
+        </div>
+      )}
+    </DetailDrawer>
+  );
+};
+
 /**
  * The wallet as support needs it: what the player holds, what can leave
  * right now and why not (the withdraw button's own gate: frozen, never
  * topped up, bonus, money still to use on packs), then the ledger in
- * words, filterable by kind.
+ * words, filterable by kind. A row opens everything known about it.
  */
 export const WalletTab = ({ customerId }: { customerId: string }) => {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<WalletFilter>('all');
   const [page, setPage] = useState(0);
+  const [open, setOpen] = useState<SupportTransaction | null>(null);
   const { data: money } = useCustomerMoney(customerId);
   const { data, isError } = useCustomerTransactions(
     customerId,
@@ -48,6 +123,10 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
     pt && pt.deposited > 0
       ? Math.min(100, Math.max(0, (pt.used / pt.deposited) * 100))
       : 100;
+  const kindLabel = (tx: SupportTransaction) => {
+    const kind = ledgerKind(tx.reason, tx.amount);
+    return kind === 'other' ? tx.reason : t(`playerMoney.kind.${kind}`);
+  };
 
   return (
     <>
@@ -113,42 +192,28 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
       <Container className="p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
           <Heading level="h2">{t('playerMoney.historyTitle')}</Heading>
-          <div
-            className="flex flex-wrap gap-1"
-            role="group"
-            aria-label={t('playerMoney.historyTitle')}
-          >
-            {FILTERS.map((f) => (
-              <Button
-                key={f}
-                size="small"
-                variant={filter === f ? 'primary' : 'secondary'}
-                aria-pressed={filter === f}
-                onClick={() => {
-                  setFilter(f);
-                  setPage(0);
-                }}
-              >
-                {t(`playerMoney.filter.${f}`)}
-              </Button>
-            ))}
-          </div>
+          <FilterPills
+            label={t('playerMoney.historyTitle')}
+            value={filter}
+            options={FILTERS.map((f) => ({
+              value: f,
+              label: t(`playerMoney.filter.${f}`),
+            }))}
+            onChange={(f) => {
+              setFilter(f);
+              setPage(0);
+            }}
+          />
         </div>
 
         {isError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
+          <TableState isError />
         ) : !data ? (
           <div className="border-t px-6 py-6">
             <LoadingSkeleton />
           </div>
         ) : rows.length === 0 ? (
-          <div className="border-t px-6 py-6">
-            <Text className="text-ui-fg-subtle">{t('support.empty')}</Text>
-          </div>
+          <TableState empty={t('support.empty')} />
         ) : (
           <>
             <div
@@ -167,6 +232,9 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
                     <Table.HeaderCell className="text-right">
                       {t('support.amount')}
                     </Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">
+                      {t('playerDetail.balanceAfter')}
+                    </Table.HeaderCell>
                     <Table.HeaderCell>
                       {t('playerMoney.colReference')}
                     </Table.HeaderCell>
@@ -176,26 +244,34 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
                   {rows.map((tx) => {
                     const kind = ledgerKind(tx.reason, tx.amount);
                     const bonus = tx.bonus ?? 0;
+                    const subject = ledgerSubject(tx);
                     return (
-                      <Table.Row key={tx.id}>
+                      <Table.Row
+                        key={tx.id}
+                        {...openableRow(() => setOpen(tx))}
+                      >
                         <Table.Cell className="whitespace-nowrap">
-                          <div className="tabular-nums">
-                            {orderDateTime(tx.created_at)}
-                          </div>
-                          <div className="text-ui-fg-subtle txt-compact-xsmall">
-                            {timeAgo(tx.created_at)}
-                          </div>
+                          <When iso={tx.created_at} />
                         </Table.Cell>
-                        <Table.Cell>
+                        <Table.Cell className="max-w-[22rem]">
                           <span className="inline-flex items-center gap-2 whitespace-nowrap">
                             <span
                               aria-hidden
                               className={`size-2 shrink-0 rounded-full ${dot(kind, tx.amount)}`}
                             />
-                            {kind === 'other'
-                              ? tx.reason
-                              : t(`playerMoney.kind.${kind}`)}
+                            {kindLabel(tx)}
                           </span>
+                          {(subject || tx.order_id) && (
+                            <div
+                              className="text-ui-fg-subtle txt-compact-xsmall truncate"
+                              title={subject ?? undefined}
+                            >
+                              {subject ??
+                                t('playerDetail.orderRef', {
+                                  id: tx.order_id?.slice(-6),
+                                })}
+                            </div>
+                          )}
                         </Table.Cell>
                         <Table.Cell className="whitespace-nowrap text-right">
                           <div
@@ -211,21 +287,30 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
                             </div>
                           )}
                         </Table.Cell>
-                        <Table.Cell className="max-w-[22rem]">
+                        <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-right tabular-nums">
+                          {tx.balance_after == null
+                            ? '—'
+                            : rm(tx.balance_after)}
+                        </Table.Cell>
+                        <Table.Cell className="max-w-[16rem]">
                           {tx.ledger_display_id && (
                             <div className="txt-compact-small-plus font-mono">
                               {tx.ledger_display_id}
                             </div>
                           )}
-                          {/* Gateway refs run to 40 characters: cut, whole
-                              on hover. A code reads in mono; an admin's note
-                              (it has spaces) stays in the text face. */}
-                          <div
-                            className={`text-ui-fg-subtle txt-compact-xsmall truncate ${tx.reference && !/\s/.test(tx.reference) ? 'font-mono' : ''}`}
-                            title={tx.reference ?? undefined}
-                          >
-                            {tx.reference ?? (tx.ledger_display_id ? '' : '—')}
-                          </div>
+                          {/* Gateway refs run to 40 characters: cut here, whole
+                              in the panel. A code reads in mono; an admin's
+                              note stays in the text face. Hidden on a shipping
+                              row, whose order already reads under its type. */}
+                          {!tx.order_id && (
+                            <div
+                              className={`text-ui-fg-subtle txt-compact-xsmall truncate ${isNote(tx.reference) ? '' : 'font-mono'}`}
+                              title={tx.reference ?? undefined}
+                            >
+                              {tx.reference ??
+                                (tx.ledger_display_id ? '' : '—')}
+                            </div>
+                          )}
                         </Table.Cell>
                       </Table.Row>
                     );
@@ -243,6 +328,14 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
           </>
         )}
       </Container>
+
+      {open && (
+        <TransactionDrawer
+          tx={open}
+          title={kindLabel(open)}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </>
   );
 };

@@ -24,12 +24,13 @@ import type {
   GatewayWithdrawal,
   GatewayWithdrawalView,
 } from '../../lib/admin-rest';
-import { rm, timeAgo } from '../../lib/format';
+import { rm } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { withdrawalStatusBadge } from '../../components/PaymentStatusBadge';
 import { WithdrawalControlsPanel } from './WithdrawalControlsPanel';
+import { When } from '../customers/[id]/bits';
 
 export const config: RouteConfig = {
   label: 'pcNav.withdrawals',
@@ -88,9 +89,12 @@ const WithdrawalsPage = () => {
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   // The full number asks its own policy (api/admin-rbac.ts SECRET_READS): a
   // view-only role sees the masked number with no Reveal.
-  const canReveal = usePermissions().hasPermission(
+  const perms = usePermissions();
+  const canReveal = perms.hasPermission(
     'customer_bank_account:read' as Permission,
   );
+  // Approve and deny ask payment:update; a view-only role reads the row only.
+  const canDecide = perms.hasPermission('payment:update' as Permission);
   // A SET, not one id: two reveals can be in flight at once. With a single
   // slot, clicking row A then row B overwrites the id, and A settling clears it
   // while B is still loading — B's button re-enables and can be clicked again.
@@ -303,7 +307,7 @@ const WithdrawalsPage = () => {
                 {data.withdrawals.map((w) => (
                   <Table.Row key={w.id}>
                     <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
-                      {timeAgo(w.created_at)}
+                      <When iso={w.created_at} />
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
                       <div className="flex items-center gap-x-2 whitespace-nowrap">
@@ -335,7 +339,8 @@ const WithdrawalsPage = () => {
                     <Table.Cell className="text-ui-fg-subtle">
                       <div className="flex items-center gap-x-2 whitespace-nowrap">
                         <span>
-                          {w.bank_code} · {revealed[w.id] ?? w.account_number}
+                          {w.bank_name ?? w.bank_code} ·{' '}
+                          {revealed[w.id] ?? w.account_number}
                         </span>
                         {canReveal && !revealed[w.id] && (
                           <button
@@ -443,7 +448,7 @@ const WithdrawalsPage = () => {
                         row that just left 'held' must not keep its buttons
                         until the next poll. */}
                     <Table.Cell>
-                      {w.status === 'held' ? (
+                      {canDecide && w.status === 'held' ? (
                         <div className="flex items-center gap-x-2">
                           {/* Pre-emptively disabled on a frozen account: the
                               backend refuses this one anyway (Task 5), so

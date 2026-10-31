@@ -4311,6 +4311,27 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
+  // The wallet balance right after each of these ledger rows (RM), keyed by
+  // row id: the running sum in ledger order, one pass over this customer's rows.
+  @InjectManager()
+  async balanceAfterRows(
+    customerId: string,
+    ids: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string; cents: string }[]>(
+      'SELECT id, cents FROM (' +
+        'SELECT id, SUM(ROUND(amount * 100)) OVER (ORDER BY created_at, id)::bigint AS cents ' +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL' +
+        `) running WHERE id IN (${ids.map(() => '?').join(', ')})`,
+      [customerId, ...ids],
+    );
+    return new Map(rows.map((r) => [r.id, Number(r.cents) / 100]));
+  }
+
   // Rolling-24h GLOBAL sum of MINTED credit (positive `adjustment` rows), in
   // integer cents. Backs the ADJUST_DAILY_MINT_MAX_RM ceiling enforced in
   // adminAdjustCredit. Callers MUST pass the locked transaction's context and
@@ -12495,7 +12516,7 @@ class PacksModuleService extends MedusaService({
     return { ids: rows.map((r) => r.id), total: Number(count?.n ?? 0) };
   }
 
-  /** Phase 4 P4.2 — 2-way audit union for a customer.
+  /** Phase 4 P4.2 — audit union for a customer: customer, credit and gift rows.
    *
    *  Covers both entity_type keys used by admin_action_audit:
    *    (a) entity_type='customer' keyed by customerId            (freeze/unfreeze)
@@ -12521,11 +12542,13 @@ class PacksModuleService extends MedusaService({
          WHERE deleted_at IS NULL AND (
            (entity_type = 'customer' AND entity_id = ?)
            OR (entity_type = 'credit' AND entity_id IN
-                (SELECT id FROM credit_transaction WHERE customer_id = ? AND reason = 'adjustment' AND deleted_at IS NULL))
+                (SELECT id FROM credit_transaction WHERE customer_id = ? AND reason IN ('adjustment', 'bonus_grant') AND deleted_at IS NULL))
+           OR (entity_type = 'pack_gift' AND entity_id IN
+                (SELECT id FROM pack_gift WHERE customer_id = ? AND deleted_at IS NULL))
          )
          ORDER BY created_at DESC
          LIMIT ? OFFSET ?`,
-      [customerId, customerId, limit, offset],
+      [customerId, customerId, customerId, limit, offset],
     );
     const [state] = await this.listCustomerAccountStates(
       { customer_id: customerId },

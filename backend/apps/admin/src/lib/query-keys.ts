@@ -107,7 +107,18 @@ export const qk = {
     page: number,
     status?: string,
     sort: 'newest' | 'value' = 'newest',
-  ) => ['admin', 'customer', id, 'pulls', page, status ?? 'all', sort] as const,
+    source?: string,
+  ) =>
+    [
+      'admin',
+      'customer',
+      id,
+      'pulls',
+      page,
+      status ?? 'all',
+      sort,
+      source ?? 'all',
+    ] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's audit in one call
   customerAuditKey: (id: string) => ['admin', 'customer', id, 'audit'] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's transaction ledger in one call

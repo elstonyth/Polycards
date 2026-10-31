@@ -12,7 +12,7 @@ import {
   Table,
   Text,
 } from '@medusajs/ui';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useCreateCustomerGroup,
   useCustomerGroupsAdmin,
@@ -36,6 +36,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   rank: 0,
   nested: '/players',
+  permissions: ['customer_group:read' as Permission],
 };
 
 type OddsSet = 1 | 2 | 3;

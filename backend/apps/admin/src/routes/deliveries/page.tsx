@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { useHref, useNavigate } from 'react-router-dom';
+import { useHref, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Checkbox,
   Container,
@@ -31,21 +31,23 @@ import type {
   AdminDeliveryItem,
   AdminDeliveryOrder,
   DeliveryStatus,
-  DeliveryTrackingSnapshot,
   GatewayDeposit,
 } from '../../lib/admin-rest';
 import {
   DELIVERY_STATUS_LABEL,
+  DELIVERY_TONE,
   deliveryStatusLabel,
   orderDateTime,
+  paymentMethodLabel,
   rm,
-  timeAgo,
 } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
 import { useTableSort } from '../../lib/use-table-sort';
 import { applyRangeSelect } from '../../lib/range-select';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { TrackingLine } from '../../components/DeliveryTracking';
+import { depositStatusBadge } from '../../components/PaymentStatusBadge';
 
 export const config: RouteConfig = {
   label: 'pcNav.orders',
@@ -53,6 +55,12 @@ export const config: RouteConfig = {
   icon: TruckFast,
   rank: 10,
   permissions: ['delivery_order:read' as Permission],
+};
+
+// The end of the login chain for a stock-only role (see orders/page.tsx).
+export const handle = {
+  permissions: 'delivery_order:read',
+  redirectTo: '/inventory/list',
 };
 
 const STATUSES: DeliveryStatus[] = [
@@ -63,85 +71,12 @@ const STATUSES: DeliveryStatus[] = [
   'completed',
   'canceled',
 ];
-const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
-  requested: 'orange',
-  processed: 'orange',
-  ready_to_ship: 'orange',
-  shipped: 'blue',
-  completed: 'green',
-  canceled: 'grey',
-};
-
-// Exhaustive over GatewayDeposit['status'], so a new gateway status is a type
-// error here rather than a raw token in the badge.
-const DEPOSIT_TONE: Record<
-  GatewayDeposit['status'],
-  'orange' | 'green' | 'red' | 'purple'
-> = {
-  pending: 'orange',
-  settled: 'green',
-  failed: 'red',
-  // Purple, matching routes/deposits/page.tsx: 'expired' is the sweep giving up
-  // while the gateway never ruled, so it is the likeliest UNCREDITED payment on
-  // the page and must not read as either settled, refused, or still-in-flight.
-  expired: 'purple',
-};
 // Same words as routes/deposits (i18n deposits.statusLabel).
 const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
   pending: 'Awaiting payment',
   settled: 'Settled',
   failed: 'Cancelled / rejected',
   expired: 'No gateway answer',
-};
-
-const CARRIER_NAME: Record<
-  NonNullable<DeliveryTrackingSnapshot['carrier']>,
-  string
-> = {
-  ninjavan: 'Ninja Van',
-  poslaju: 'Pos Laju',
-  dhl_ecommerce: 'DHL eCommerce',
-};
-
-// What the shipment tracker last heard from the carrier, under a shipped
-// order's status. A snapshot for a different number (staff re-entered it
-// since) is stale and reads as not checked yet.
-const TrackingLine = ({ order }: { order: AdminDeliveryOrder }) => {
-  if (order.status !== 'shipped' || !order.tracking_number) return null;
-  const snap = order.tracking_snapshot;
-  if (!snap || snap.tracking_number !== order.tracking_number) {
-    return (
-      <Text size="xsmall" className="text-ui-fg-muted mt-1">
-        Tracking not checked yet
-      </Text>
-    );
-  }
-  if (snap.state === 'unknown_carrier') {
-    return (
-      <Text size="xsmall" className="text-ui-fg-muted mt-1">
-        Unknown carrier, complete by hand
-      </Text>
-    );
-  }
-  const carrier = snap.carrier ? CARRIER_NAME[snap.carrier] : 'Carrier';
-  const what =
-    snap.state === 'not_found'
-      ? 'no record yet'
-      : (snap.event ?? 'no events yet');
-  return (
-    <Text
-      size="xsmall"
-      className={
-        snap.state === 'problem'
-          ? 'text-ui-fg-error mt-1 line-clamp-2 max-w-64'
-          : 'text-ui-fg-subtle mt-1 line-clamp-2 max-w-64'
-      }
-      title={`${snap.tracking_number}: ${what}`}
-    >
-      {snap.state === 'problem' ? 'Problem: ' : ''}
-      {carrier}: {what} · checked {timeAgo(snap.checked_at)}
-    </Text>
-  );
 };
 
 // First item's thumbnail + name/handle with a "+N more" tail — the operator
@@ -351,7 +286,7 @@ const Topups = () => {
                   <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
                     {orderDateTime(d.created_at)}
                   </Table.Cell>
-                  <Table.Cell>{d.payment_method_code}</Table.Cell>
+                  <Table.Cell>{paymentMethodLabel(d.payment_method_code)}</Table.Cell>
                   <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                     {rm(d.amount_requested)}
                   </Table.Cell>
@@ -368,9 +303,12 @@ const Topups = () => {
                     </button>
                   </Table.Cell>
                   <Table.Cell>
-                    <StatusBadge color={DEPOSIT_TONE[d.status]}>
-                      {DEPOSIT_STATUS_LABEL[d.status]}
-                    </StatusBadge>
+                    {depositStatusBadge(
+                        d,
+                        d.stuck
+                          ? 'Needs gateway check'
+                          : DEPOSIT_STATUS_LABEL[d.status],
+                      )}
                   </Table.Cell>
                 </Table.Row>
               ))}
@@ -410,13 +348,17 @@ const DeliveriesPage = () => {
   const canSeeTopups = permissions.hasPermission('payment:read' as Permission);
   // "Check tracking" can complete orders (POST /track asks
   // delivery_order:update); a read-only role gets no button rather than a 403.
-  const canCheckTracking = permissions.hasPermission(
+  const canManage = permissions.hasPermission(
     'delivery_order:update' as Permission,
   );
+  const canSeePlayer = permissions.hasPermission('customer:read');
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
   const [page, setPage] = useState(0);
-  const [search, setSearch] = useState('');
-  const [q, setQ] = useState('');
+  // ?q= opens the page on one order (the player page's "Manage in All Orders").
+  const [params] = useSearchParams();
+  const [search, setSearch] = useState(params.get('q') ?? '');
+  const [q, setQ] = useState(params.get('q') ?? '');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<DeliveryStatus>('processed');
   // Re-sorting changes which rows are on screen, so it follows the same rule
@@ -632,7 +574,7 @@ const DeliveriesPage = () => {
           </div>
           {kind === 'shipping' && (
             <div className="flex items-center gap-2">
-              {canCheckTracking && (
+              {canManage && (
                 <Button
                   size="small"
                   variant="secondary"
@@ -702,24 +644,32 @@ const DeliveriesPage = () => {
           <Text size="small" weight="plus">
             {selected.size} selected
           </Text>
-          <Select
-            value={bulkStatus}
-            onValueChange={(v) => setBulkStatus(v as DeliveryStatus)}
-          >
-            <Select.Trigger className="w-44" aria-label="Mark selected as">
-              <Select.Value />
-            </Select.Trigger>
-            <Select.Content>
-              {STATUSES.map((s) => (
-                <Select.Item key={s} value={s}>
-                  {DELIVERY_STATUS_LABEL[s]}
-                </Select.Item>
-              ))}
-            </Select.Content>
-          </Select>
-          <Button size="small" onClick={applyBulk} isLoading={bulk.isPending}>
-            Apply
-          </Button>
+          {canManage && (
+            <>
+              <Select
+                value={bulkStatus}
+                onValueChange={(v) => setBulkStatus(v as DeliveryStatus)}
+              >
+                <Select.Trigger className="w-44" aria-label="Mark selected as">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {STATUSES.map((s) => (
+                    <Select.Item key={s} value={s}>
+                      {DELIVERY_STATUS_LABEL[s]}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select>
+              <Button
+                size="small"
+                onClick={applyBulk}
+                isLoading={bulk.isPending}
+              >
+                Apply
+              </Button>
+            </>
+          )}
           {/* A real link, not a window.open() button: middle/ctrl-click, "open
               in new window" and screen-reader link semantics all come free. */}
           <Button size="small" variant="secondary" asChild>
@@ -800,10 +750,22 @@ const DeliveriesPage = () => {
                       {o.items.length}
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
-                      {o.customer_email ?? o.customer_id}
+                      {canSeePlayer ? (
+                        <button
+                          type="button"
+                          className="text-ui-fg-interactive hover:underline"
+                          onClick={() =>
+                            navigate(`/customers/${o.customer_id}?tab=orders`)
+                          }
+                        >
+                          {o.customer_email ?? o.customer_id}
+                        </button>
+                      ) : (
+                        (o.customer_email ?? o.customer_id)
+                      )}
                     </Table.Cell>
                     <Table.Cell>
-                      <StatusBadge color={TONE[o.status] ?? 'grey'}>
+                      <StatusBadge color={DELIVERY_TONE[o.status] ?? 'grey'}>
                         {deliveryStatusLabel(o.status)}
                       </StatusBadge>
                       <TrackingLine order={o} />
@@ -814,7 +776,7 @@ const DeliveriesPage = () => {
                         variant="secondary"
                         onClick={() => openDetail(o)}
                       >
-                        Manage
+                        {canManage ? 'Manage' : 'View'}
                       </Button>
                     </Table.Cell>
                   </Table.Row>
@@ -851,16 +813,18 @@ const DeliveriesPage = () => {
                 variant="secondary"
                 onClick={() => setDetail(null)}
               >
-                Cancel
+                {canManage ? 'Cancel' : 'Close'}
               </Button>
-              <Button
-                size="small"
-                onClick={save}
-                isLoading={update.isPending}
-                disabled={trackingRequired || uploading}
-              >
-                Save
-              </Button>
+              {canManage && (
+                <Button
+                  size="small"
+                  onClick={save}
+                  isLoading={update.isPending}
+                  disabled={trackingRequired || uploading}
+                >
+                  Save
+                </Button>
+              )}
             </div>
           </FocusModal.Header>
           <FocusModal.Body className="flex flex-col items-center overflow-auto p-10">
@@ -947,6 +911,7 @@ const DeliveriesPage = () => {
                   </Text>
                   <Select
                     value={nextStatus}
+                    disabled={!canManage}
                     onValueChange={(v) => setNextStatus(v as DeliveryStatus)}
                   >
                     <Select.Trigger aria-labelledby="delivery-status-label">
@@ -968,6 +933,7 @@ const DeliveriesPage = () => {
                   <Input
                     aria-labelledby="delivery-tracking-label"
                     value={tracking}
+                    disabled={!canManage}
                     onChange={(e) => setTracking(e.target.value)}
                     placeholder="Required to mark shipped"
                     aria-invalid={trackingRequired || undefined}
@@ -1000,17 +966,19 @@ const DeliveriesPage = () => {
                     className="hidden"
                     onChange={handleProofFiles}
                   />
-                  <div>
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      type="button"
-                      onClick={() => proofRef.current?.click()}
-                      isLoading={uploading}
-                    >
-                      Upload photos
-                    </Button>
-                  </div>
+                  {canManage && (
+                    <div>
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        type="button"
+                        onClick={() => proofRef.current?.click()}
+                        isLoading={uploading}
+                      >
+                        Upload photos
+                      </Button>
+                    </div>
+                  )}
                   {proofImages.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {proofImages.map((url) => (
@@ -1020,14 +988,16 @@ const DeliveriesPage = () => {
                             alt="Delivery proof"
                             className="border-ui-border-base h-20 w-20 rounded border object-cover"
                           />
-                          <button
-                            type="button"
-                            aria-label="Remove photo"
-                            onClick={() => removeProof(url)}
-                            className="bg-ui-bg-base border-ui-border-base text-ui-fg-subtle hover:text-ui-fg-base absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border shadow"
-                          >
-                            <XMark className="h-3 w-3" />
-                          </button>
+                          {canManage && (
+                            <button
+                              type="button"
+                              aria-label="Remove photo"
+                              onClick={() => removeProof(url)}
+                              className="bg-ui-bg-base border-ui-border-base text-ui-fg-subtle hover:text-ui-fg-base absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border shadow"
+                            >
+                              <XMark className="h-3 w-3" />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>

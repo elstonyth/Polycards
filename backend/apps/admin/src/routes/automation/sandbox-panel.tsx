@@ -14,6 +14,7 @@ import type { AutomationConfig } from '../../../../../packages/api/src/api/utils
 import type { SandboxSnapshot } from '../../../../../packages/api/src/api/utils/automation-sandbox-types';
 import { DEFAULT_CONFIG, RunSettings } from './run-settings';
 import { configForProfiles } from './rank-target-draft';
+import { orderDateTime } from '../../lib/format';
 
 declare const __BACKEND_URL__: string;
 const KEY = ['automation-sandbox'];
@@ -23,7 +24,7 @@ const credits = (cents: number) =>
     maximumFractionDigits: 2,
   });
 const date = (value: number | null) =>
-  value === null ? '—' : new Date(value).toLocaleString();
+  value === null ? '—' : orderDateTime(value);
 
 async function requestSandbox(
   action?: Record<string, unknown>,

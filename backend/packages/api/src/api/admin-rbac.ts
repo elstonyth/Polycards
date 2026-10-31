@@ -143,7 +143,9 @@ export const CORE_PREFIX_WRITES: {
  *  payment:read, scripts/create-support-viewer.ts) is refused, while `*:*`
  *  staff and the `*:read` desk bots pass as before. Declared in
  *  policies/admin-surfaces.ts. Resources must be NEW names: Mercur already
- *  owns `payout_account` (its seller payouts, key-unique policy rows). */
+ *  owns `payout_account` (its seller payouts, key-unique policy rows). Core's
+ *  customer reads carry the same values in metadata: redactCustomerSecrets
+ *  applies these policies there. */
 export const SECRET_READS = [
   { matcher: '/admin/players/export', resource: 'partner_credential' },
   {
