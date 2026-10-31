@@ -280,7 +280,7 @@ export function EnterSheet({
             )}
             <p className="mt-1 text-xs leading-relaxed text-neutral-400">
               {pot
-                ? `${closesAt ? `Tickets close ${poolWhen(closesAt, nowMs)}. ` : ''}Entries are final: tickets you put in can’t be taken back.`
+                ? `${closesAt ? `Gate closes ${poolWhen(closesAt, nowMs)}. ` : ''}Entries are final: tickets you put in can’t be taken back.`
                 : 'Entries are final — tickets on a prize can’t be taken back.'}
             </p>
 
@@ -309,7 +309,7 @@ export function EnterSheet({
               onClick={confirm}
             >
               {closed
-                ? 'Tickets are closed'
+                ? 'Gate is closed'
                 : pending
                   ? 'Entering…'
                   : `${pot ? 'Put in' : 'Enter'} ${num(amount)} ${amount === 1 ? 'ticket' : 'tickets'}`}
