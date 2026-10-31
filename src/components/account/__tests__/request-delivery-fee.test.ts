@@ -12,6 +12,8 @@ import type { AddressView } from '@/lib/actions/delivery';
 
 const mocks = vi.hoisted(() => ({
   shipVaultCards: vi.fn(),
+  addAddress: vi.fn(),
+  updateAddress: vi.fn(),
   openTopUp: vi.fn(),
   balance: 1000 as number | null,
   bonus: 0,
@@ -20,7 +22,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/actions/delivery', () => ({
   shipVaultCards: mocks.shipVaultCards,
-  addAddress: vi.fn(),
+  addAddress: mocks.addAddress,
+  updateAddress: mocks.updateAddress,
   getPrizeShippingAllowance: async () => mocks.allowance,
 }));
 vi.mock('@/lib/actions/wallet', () => ({
@@ -88,6 +91,8 @@ beforeEach(() => {
   mocks.allowance = null;
   mocks.shipVaultCards.mockReset();
   mocks.openTopUp.mockReset();
+  mocks.addAddress.mockReset();
+  mocks.updateAddress.mockReset();
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -190,9 +195,236 @@ describe('RequestDeliveryModal confirm and balance', () => {
       [{ ...ADDRESS, countryCode: 'TH', postalCode: '10110' } as AddressView],
     );
     expect(host.textContent).toContain(
-      'We currently ship within Malaysia and Singapore only',
+      'We ship within Malaysia and Singapore only',
     );
     expect(button('Request delivery')!.disabled).toBe(true);
+  });
+
+  // 2026-10-20: 74 Malaysian addresses were saved with "60" or "MALAYSIA" as
+  // the country back when it was free text. The modal names the bad value and
+  // re-opens the address with everything but the country already filled in.
+  test('offers to re-enter an address saved with a junk country', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60' } as AddressView],
+    );
+    expect(host.textContent).toContain('This address has “60” as its country');
+
+    await act(async () => button('Fix this address')!.click());
+
+    const input = (label: string) =>
+      host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+        .value;
+    expect(input('Address')).toBe(ADDRESS.line1);
+    expect(input('Postal code')).toBe(ADDRESS.postalCode);
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    expect(country.value).toBe('');
+    expect([...country.options].map((o) => o.textContent)).toEqual([
+      'Select country',
+      'Malaysia',
+      'Singapore',
+    ]);
+
+    // Saving repairs the SAME row; a second one would leave the junk behind.
+    mocks.updateAddress.mockResolvedValueOnce({ ok: true });
+    await act(async () => {
+      country.value = 'MY';
+      country.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => button('Save address')!.click());
+    expect(mocks.updateAddress).toHaveBeenCalledWith(
+      'addr_1',
+      expect.objectContaining({
+        countryCode: 'MY',
+        address1: ADDRESS.line1,
+        phone: ADDRESS.phone,
+      }),
+    );
+    expect(host.querySelectorAll('input[name="addr"]')).toHaveLength(1);
+    expect(host.textContent).not.toContain('as its country');
+    expect(host.textContent).toContain('West Malaysia');
+  });
+
+  test('opens on a saved address that can ship, not an old junk one', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [
+        { ...ADDRESS, id: 'addr_junk', countryCode: '60' } as AddressView,
+        ADDRESS,
+      ],
+    );
+    expect(host.textContent).not.toContain('as its country');
+    expect(button('Request delivery')!.disabled).toBe(false);
+  });
+
+  test('a row with no country at all reads plainly, not as ""', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '' } as AddressView],
+    );
+    expect(host.textContent).toContain('This address has no country');
+  });
+
+  // The sheet has no phone field, so a saved number the action would refuse
+  // has to go, or the customer is stuck on an error they cannot act on here.
+  test('a repair drops a saved phone the action would refuse', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60', phone: '12345' } as AddressView],
+    );
+    await act(async () => button('Fix this address')!.click());
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    await act(async () => {
+      country.value = 'MY';
+      country.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    mocks.updateAddress.mockResolvedValueOnce({ ok: true });
+    await act(async () => button('Save address')!.click());
+    const [, saved] = mocks.updateAddress.mock.calls[0]!;
+    expect(saved.phone).toBeUndefined();
+  });
+
+  // React paints the first option for a value no option has, so a free-text
+  // state would read as "Johor" while the old text is still what saves.
+  test('a repair shows the placeholder for a state not on the list', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60', province: 'KL' } as AddressView],
+    );
+    await act(async () => button('Fix this address')!.click());
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="State"]')!
+        .value,
+    ).toBe('');
+  });
+
+  test('adding after a cancelled repair starts clean and creates a new row', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60' } as AddressView],
+    );
+    await act(async () => button('Fix this address')!.click());
+    await act(async () => button('Cancel')!.click());
+    await act(async () => button('+ Add a new address')!.click());
+
+    const address = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Address"]',
+    )!;
+    expect(address.value).toBe('');
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="Country"]')!
+        .value,
+    ).toBe('MY');
+
+    mocks.addAddress.mockResolvedValueOnce({ ok: true, addressId: 'addr_2' });
+    await act(async () => button('Save address')!.click());
+    expect(mocks.addAddress).toHaveBeenCalled();
+    expect(mocks.updateAddress).not.toHaveBeenCalled();
+  });
+
+  // This sheet is not a real <form>, so the select's `required` does nothing.
+  test('Save stays disabled on a repair until a country is picked', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60' } as AddressView],
+    );
+    await act(async () => button('Fix this address')!.click());
+    expect(button('Save address')!.disabled).toBe(true);
+
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    await act(async () => {
+      country.value = 'MY';
+      country.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(button('Save address')!.disabled).toBe(false);
+  });
+
+  test('a new address can be saved straight away: it defaults to Malaysia', async () => {
+    await render([item('pull_a', 'pack', 100)], []);
+    expect(button('Save address')!.disabled).toBe(false);
+  });
+
+  // A saved row with a real country and a postcode that cannot be zoned: the
+  // submit is disabled, so without a way in the customer is stuck here.
+  test('offers Fix on a bad postcode, keeping the saved country', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [
+        {
+          ...ADDRESS,
+          province: 'Selangor',
+          postalCode: '5000',
+        } as AddressView,
+      ],
+    );
+    expect(host.textContent).toContain(
+      'That address needs a valid 5-digit Malaysian postcode',
+    );
+    expect(button('Request delivery')!.disabled).toBe(true);
+
+    await act(async () => button('Fix this address')!.click());
+    const select = (label: string) =>
+      host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+    expect(select('Country').value).toBe('MY');
+    expect(select('State').value).toBe('Selangor');
+    expect(button('Save address')!.disabled).toBe(false);
+
+    const postcode = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Postal code"]',
+    )!;
+    expect(postcode.value).toBe('5000');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )!.set!.call(postcode, '50000');
+      postcode.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    mocks.updateAddress.mockResolvedValueOnce({ ok: true });
+    await act(async () => button('Save address')!.click());
+    expect(mocks.updateAddress).toHaveBeenCalledWith(
+      'addr_1',
+      expect.objectContaining({ countryCode: 'MY', postalCode: '50000' }),
+    );
+    expect(host.querySelectorAll('input[name="addr"]')).toHaveLength(1);
+    expect(host.textContent).not.toContain('That address needs');
+    expect(button('Request delivery')!.disabled).toBe(false);
+  });
+
+  test('a Malaysian who misclicked Singapore can switch back from Fix', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [
+        {
+          ...ADDRESS,
+          countryCode: 'SG',
+          province: 'Singapore',
+          postalCode: '50000',
+        } as AddressView,
+      ],
+    );
+    expect(host.textContent).toContain(
+      'That address needs a valid 6-digit Singapore postcode',
+    );
+    await act(async () => button('Fix this address')!.click());
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    expect(country.value).toBe('SG');
+    await act(async () => {
+      country.value = 'MY';
+      country.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="State"]')!
+        .value,
+    ).toBe('');
   });
 });
 

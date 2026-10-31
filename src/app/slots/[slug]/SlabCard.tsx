@@ -289,7 +289,10 @@ export function SlabCard({
             and the two are tuned together in SlabImage rather than here. */}
         <span
           className={cn(
-            'absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)]',
+            'absolute inset-0 [backface-visibility:hidden]',
+            // Reduced motion never rotates the button, so a rotated front face
+            // would stay turned away, and backface-hidden, for good.
+            !reduced && '[transform:rotateY(180deg)]',
             reduced && !flipped && 'hidden',
           )}
           style={{ filter: slabAmbient('reveal', rarityRgb) } as CSSProperties}
