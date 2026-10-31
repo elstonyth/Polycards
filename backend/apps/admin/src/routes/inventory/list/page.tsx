@@ -473,15 +473,23 @@ const InventoryListPage = () => {
                     />
                   </Table.Cell>
                   <Table.Cell className="break-words">
-                    {r.name}
-                    {!r.is_card && (
-                      <span className="text-ui-fg-subtle ml-1 text-xs">
-                        ({t('inventory.notACard')})
-                      </span>
-                    )}
+                    {/* The width keeps this column from being squeezed by the
+                        fifteen others; a cell's own min-width is unreliable. */}
+                    <div className="min-w-[14rem]">
+                      {r.name}
+                      {!r.is_card && (
+                        <span className="text-ui-fg-subtle ml-1 text-xs">
+                          ({t('inventory.notACard')})
+                        </span>
+                      )}
+                    </div>
                   </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle break-words">
-                    {r.sku}
+                  <Table.Cell className="text-ui-fg-subtle">
+                    {/* One line, full value on hover: a wrapped SKU made rows
+                        four lines tall. */}
+                    <span className="block max-w-[9rem] truncate" title={r.sku}>
+                      {r.sku}
+                    </span>
                   </Table.Cell>
                   <Table.Cell className="whitespace-nowrap">
                     {r.graded ? t('inventory.graded') : t('inventory.raw')}
