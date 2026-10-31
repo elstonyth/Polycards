@@ -66,7 +66,7 @@ const KNOWN_ROUTE = [
   /^\/vault\/history\/?$/,
   /^\/auth\/google\/(callback|failed)\/?$/,
   /^\/(card|profile|r)\/[^/]+\/?$/,
-  /^\/card\/[^/]+\/share\.jpg$/,
+  /^\/(card|slots)\/[^/]+\/share\.jpg$/,
   /^\/slots\/[^/]+(\/spin)?\/?$/,
   /^\/(robots\.txt|sitemap\.xml|manifest\.webmanifest|favicon\.ico|icon\.png|apple-icon\.png)$/,
 ];
