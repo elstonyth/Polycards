@@ -659,6 +659,59 @@ medusaIntegrationTestRunner({
         ).toBe(400);
       });
 
+      it('only the DEFAULT group has to top up before entering', async () => {
+        const event = await publishPot();
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const tickets = (id: string) =>
+          packs.createLuckyDrawTickets([
+            {
+              customer_id: id,
+              delta: 5,
+              reason: 'task_claim',
+              ref: `claim-${id}`,
+            },
+          ]);
+        await tickets(ada.id);
+        await tickets(bo.id);
+        const refused = { entered: false, reason: 'no_topup' };
+
+        // The default group even when renamed: its marker is its identity.
+        const renamed = await customers.createCustomerGroups({
+          name: 'Everyone',
+          metadata: { is_default: true },
+        });
+        await customers.addCustomerToGroup([
+          { customer_id: ada.id, customer_group_id: renamed.id },
+        ]);
+        expect(
+          (await enter(event.id, { tickets: 1 }, authed(ada.token))).data,
+        ).toEqual(refused);
+
+        // Fresh off sign-up: no real group yet.
+        expect(
+          (await enter(event.id, { tickets: 1 }, authed(bo.token))).data,
+        ).toEqual(refused);
+
+        // A real group enters with no top-up.
+        const crew = await customers.createCustomerGroups({ name: 'Crew' });
+        await customers.addCustomerToGroup([
+          { customer_id: bo.id, customer_group_id: crew.id },
+        ]);
+        const entered = await enter(
+          event.id,
+          { tickets: 2 },
+          authed(bo.token),
+        );
+        expect(entered.data).toMatchObject({
+          entered: true,
+          balance: 3,
+          myTickets: 2,
+        });
+
+        // The entry gate only: withdrawals and deliveries still read this.
+        expect(await packs.hasTopUp(bo.id)).toBe(false);
+      });
+
       it('blocks deleting a card in a published, undrawn event', async () => {
         const event = await publishPot();
         const held = await unwrapResponse(

@@ -913,6 +913,30 @@ medusaIntegrationTestRunner({
           expect(await packs.listLuckyDrawEntries({})).toHaveLength(0);
         });
 
+        it('POST enter takes a never-topped-up account in a real player group', async () => {
+          const { prizeId } = await publishLive();
+          await packs.createLuckyDrawTickets([
+            {
+              customer_id: bo.id,
+              delta: 20,
+              reason: 'task_claim',
+              ref: 'claim-bo',
+            },
+          ]);
+          const customers = getContainer().resolve(Modules.CUSTOMER);
+          const crew = await customers.createCustomerGroups({ name: 'Crew' });
+          await customers.addCustomerToGroup([
+            { customer_id: bo.id, customer_group_id: crew.id },
+          ]);
+          const res = await enter(prizeId, { tickets: 5 }, authed(bo.token));
+          expect(res.status).toBe(200);
+          expect(res.data).toMatchObject({
+            entered: true,
+            balance: 15,
+            myTickets: 5,
+          });
+        });
+
         it('POST enter refuses a missing prize with 200 and ignores a client clock', async () => {
           const { prizeId } = await publishLive();
           await fund(ada.id, 10);

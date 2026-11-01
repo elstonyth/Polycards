@@ -50,29 +50,43 @@ export default function FreePackBadge({
   const shellCls =
     'fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-30 block transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white lg:bottom-6';
   const art = (
-    <Image
-      src="/images/polycards/free-pack-badge.webp"
-      alt="Free welcome pack"
-      width={112}
-      height={146}
-      // Decorative-adjacent chrome, but it IS the control's only visible
-      // content, so it keeps a real alt; priority is deliberately off (it must
-      // never compete with the catalog art for bandwidth).
+    <span
       className={cn(
+        'relative block',
+        // Gentle idle bob — reuses globals.css's `slabFloat` (±8px) rather
+        // than minting a second identical keyframe. No fill-mode (repo rule:
+        // never `both`), and `infinite`, so settle-then-read QA must filter it
+        // out. Doubly reduced-motion safe: the `motion-safe:` variant drops it
+        // in CSS and `reduced` drops it in JS. On the wrapper so the NEW tag
+        // rides with the art.
+        !reduced && 'motion-safe:animate-[slabFloat_3s_ease-in-out_infinite]',
+      )}
+    >
+      <Image
+        src="/images/polycards/free-pack-badge.webp"
+        alt="Free welcome pack"
+        width={112}
+        height={146}
+        // Decorative-adjacent chrome, but it IS the control's only visible
+        // content, so it keeps a real alt; priority is deliberately off (it must
+        // never compete with the catalog art for bandwidth).
         // Fluid, capped at the art's natural 112px. A fixed 112px is ~30% of
         // a 375px viewport, which reads as an overlay rather than a badge;
         // 18vw holds it at a constant ~18% of the screen and reaches the
         // 7rem cap at 622px, so tablet/desktop are unchanged. The 4rem floor
         // (64px, still well over a 44px tap target) catches 320px screens.
-        'h-auto w-[clamp(4rem,18vw,7rem)] drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]',
-        // Gentle idle bob — reuses globals.css's `slabFloat` (±8px) rather
-        // than minting a second identical keyframe. No fill-mode (repo rule:
-        // never `both`), and `infinite`, so settle-then-read QA must filter it
-        // out. Doubly reduced-motion safe: the `motion-safe:` variant drops it
-        // in CSS and `reduced` drops it in JS.
-        !reduced && 'motion-safe:animate-[slabFloat_3s_ease-in-out_infinite]',
-      )}
-    />
+        className="h-auto w-[clamp(4rem,18vw,7rem)] drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
+      />
+      {/* shortcut: always on while the badge shows, delete when the pack stops
+          being new, along with "new" in both aria-labels below. Those labels
+          are what screen readers hear, so the tag itself is hidden from them. */}
+      <span
+        aria-hidden="true"
+        className="absolute -left-2 top-1 -rotate-12 rounded-full border-2 border-neutral-950 bg-red-600 px-2 py-0.5 font-heading text-[11px] leading-none tracking-wide text-white lg:text-sm"
+      >
+        NEW
+      </span>
+    </span>
   );
 
   if (state.mode === 'signup') {
@@ -81,7 +95,7 @@ export default function FreePackBadge({
         type="button"
         onClick={() => openAuth('signup')}
         data-testid="free-pack-badge"
-        aria-label="Sign up to claim your free welcome pack"
+        aria-label="Sign up to claim your new free welcome pack"
         className={shellCls}
       >
         {art}
@@ -92,7 +106,7 @@ export default function FreePackBadge({
     <Link
       href={`/slots/${encodeURIComponent(state.slug)}/spin`}
       data-testid="free-pack-badge"
-      aria-label="Claim your free welcome pack"
+      aria-label="Claim your new free welcome pack"
       className={shellCls}
     >
       {art}

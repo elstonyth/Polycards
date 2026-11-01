@@ -6733,6 +6733,25 @@ class PacksModuleService extends MedusaService({
     return rows.length > 0;
   }
 
+  // The Lucky Draw's entry gate. Only the DEFAULT group (no group reads the same)
+  // has to have topped up; anyone in a real player group enters without (operator,
+  // 2026-11-02). EFFECTIVE_GROUP_SQL is the one definition of a real group. This
+  // gate alone: withdrawals and deliveries keep reading hasTopUp.
+  @InjectManager()
+  async mayEnterLuckyDraw(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    if (await this.hasTopUp(customerId, sharedContext)) return true;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ one: number }[]>(
+      `SELECT 1 AS one FROM (${EFFECTIVE_GROUP_SQL}) eff WHERE eff.customer_id = ? LIMIT 1`,
+      [customerId],
+    );
+    return rows.length > 0;
+  }
+
   // A customer's Lucky Draw ticket balance: the sum of their live ledger rows
   // (task claims +, entries -, refunds +, admin grants ±). 0 when none.
   @InjectManager()
@@ -6820,7 +6839,7 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    if (!(await this.hasTopUp(customerId, sharedContext))) {
+    if (!(await this.mayEnterLuckyDraw(customerId, sharedContext))) {
       return refuse('no_topup');
     }
     const before = await this.luckyDrawBalance(customerId, sharedContext);
@@ -6919,7 +6938,7 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    if (!(await this.hasTopUp(customerId, sharedContext))) {
+    if (!(await this.mayEnterLuckyDraw(customerId, sharedContext))) {
       return refuse('no_topup');
     }
     const before = await this.luckyDrawBalance(customerId, sharedContext);
