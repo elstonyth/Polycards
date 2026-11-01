@@ -9,6 +9,7 @@ import {
   checkinCount,
   claimNotice,
   claimableCounts,
+  milestoneWorth,
   orderForDisplay,
   rewardArt,
   rewardLabel,
@@ -150,6 +151,34 @@ describe('reward art and label', () => {
     expect(
       rewardLabel({ type: 'pack', pack_id: 'bronze', pack_price_myr: 30 }),
     ).toEqual({ name: 'Free rip · bronze', value: 30 });
+  });
+});
+
+describe('milestoneWorth', () => {
+  const credit = { type: 'credit', amount_myr: 1 } as TaskEntry['reward'];
+
+  it('names the tickets a check-in slot also pays', () => {
+    expect(milestoneWorth({ reward: credit, tickets: 30 })).toBe(
+      `${rm(1)} bonus credit + 30 Lucky Draw tickets`,
+    );
+    expect(milestoneWorth({ reward: credit, tickets: 1 })).toBe(
+      `${rm(1)} bonus credit + 1 Lucky Draw ticket`,
+    );
+  });
+
+  it('says nothing about tickets when there are none', () => {
+    expect(milestoneWorth({ reward: credit, tickets: 0 })).toBe(
+      `${rm(1)} bonus credit`,
+    );
+  });
+
+  it('keeps the RM value on a card or pack', () => {
+    expect(
+      milestoneWorth({
+        reward: { type: 'pack', pack_id: 'bronze', pack_price_myr: 30 },
+        tickets: 5,
+      }),
+    ).toBe(`Free rip · bronze (${rm(30)}) + 5 Lucky Draw tickets`);
   });
 });
 

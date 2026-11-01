@@ -4,19 +4,11 @@ import { Check } from 'lucide-react';
 import { Pill } from '@/components/ui/pill';
 import { HelpTip } from '@/components/ui/help-tip';
 import { cn } from '@/lib/utils';
-import { rm } from '@/lib/format';
 import type { TaskEntry } from '@/lib/data/schemas';
 import { RewardArt, Sparkles } from './reward-art';
-import { isClaimable, rewardLabel } from './task-hub';
+import { isClaimable, milestoneWorth } from './task-hub';
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7] as const;
-
-const worth = (t: TaskEntry): string => {
-  const { name, value } = rewardLabel(t.reward);
-  return t.reward.type !== 'credit' && value != null && value > 0
-    ? `${name} (${rm(value)})`
-    : name;
-};
 
 /** The sentence under the track: what is ready, or what is next. */
 function nextLine(
@@ -36,7 +28,7 @@ function nextLine(
     if (next) {
       const togo = day - count;
       return {
-        text: `${togo} more ${togo === 1 ? 'check-in' : 'check-ins'} to day ${day}: ${worth(next)}.`,
+        text: `${togo} more ${togo === 1 ? 'check-in' : 'check-ins'} to day ${day}: ${milestoneWorth(next)}.`,
         ready: false,
       };
     }
@@ -183,11 +175,11 @@ export function CheckInTrack({
                       ? onClaim(lead)
                       : onNotice(
                           claimed
-                            ? `Day ${day} reward claimed: ${worth(lead)}.`
-                            : `Day ${day} reward: ${worth(lead)}. Check in ${day} ${day === 1 ? 'day' : 'days'} this week to unlock it.`,
+                            ? `Day ${day} reward claimed: ${milestoneWorth(lead)}.`
+                            : `Day ${day} reward: ${milestoneWorth(lead)}. Check in ${day} ${day === 1 ? 'day' : 'days'} this week to unlock it.`,
                         )
                   }
-                  aria-label={`Day ${day} reward: ${worth(lead)}. ${claimable ? 'Ready — claim it.' : claimed ? 'Claimed.' : `Unlocks at ${day} check-ins.`}`}
+                  aria-label={`Day ${day} reward: ${milestoneWorth(lead)}. ${claimable ? 'Ready — claim it.' : claimed ? 'Claimed.' : `Unlocks at ${day} check-ins.`}`}
                   className={cn(
                     tile,
                     // An OUTLINE focus ring: the claimable glow animates

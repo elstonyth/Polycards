@@ -60,10 +60,13 @@ const TOP_REREAD_MS = 11_000;
 export function LuckyDrawClient({
   initial,
   intro,
+  spinHref,
 }: {
   initial: LuckyDrawPage | null;
   /** ?open=1 from the vault's tickets row: play the ticket intro once. */
   intro: boolean;
+  /** Where to spin a capsule for tickets; null with none on sale. */
+  spinHref: string | null;
 }) {
   const reduced = usePrefersReducedMotion();
   const [page, setPage] = useState(initial);
@@ -361,9 +364,13 @@ export function LuckyDrawClient({
               next={page.next_event}
               balance={balance}
               nowMs={nowMs}
+              spinHref={spinHref}
             />
           ) : (
-            <NoPool onSeeResults={() => setTab('results')} />
+            <NoPool
+              spinHref={spinHref}
+              onSeeResults={() => setTab('results')}
+            />
           )
         ) : page.prizes.length === 0 ? (
           <p className="text-sm text-neutral-400">
@@ -376,6 +383,7 @@ export function LuckyDrawClient({
             nowMs={nowMs}
             drawing={view === 'pot_drawing'}
             balance={balance}
+            spinHref={spinHref}
             onEnter={() => setEntering('pot')}
             onOpenResult={() => void openEventResult(event.id, POOL_TITLE)}
             onWatch={() =>

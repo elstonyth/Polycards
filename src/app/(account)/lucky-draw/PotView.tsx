@@ -164,6 +164,34 @@ const EARN_TICKETS = cn(
   ACTION_PILL,
 );
 
+/** Where tickets come from, in the pool's action: tasks, and capsules while one
+ *  is on sale (`spinHref`, the vault's link). */
+function EarnTickets({ spinHref }: { spinHref: string | null }) {
+  if (!spinHref) {
+    return (
+      <Link href="/task" className={EARN_TICKETS}>
+        Earn tickets
+      </Link>
+    );
+  }
+  const pill = (variant: 'primary' | 'secondary') =>
+    cn(
+      pillVariants({ variant, size: 'md' }),
+      ACTION_PILL,
+      'lg:flex-1 xl:flex-none',
+    );
+  return (
+    <div className="flex shrink-0 gap-2">
+      <Link href="/task" className={pill('primary')}>
+        Tasks
+      </Link>
+      <Link href={spinHref} className={pill('secondary')}>
+        Capsules
+      </Link>
+    </div>
+  );
+}
+
 /** Dark pills, for the pale stub. */
 const INK_PILL = 'bg-neutral-950 text-white hover:bg-neutral-800';
 const INK_PILL_QUIET =
@@ -428,6 +456,7 @@ export function PotView({
   nowMs,
   drawing,
   balance,
+  spinHref,
   onEnter,
   onOpenResult,
   onWatch,
@@ -438,6 +467,7 @@ export function PotView({
   /** The end has passed and no result has come yet. */
   drawing: boolean;
   balance: number;
+  spinHref: string | null;
   onEnter: () => void;
   onOpenResult: () => void;
   onWatch: () => void;
@@ -509,10 +539,13 @@ export function PotView({
                 </Pill>
               </PoolAction>
             ) : (
-              <PoolAction title="You have no tickets" sub="Tasks pay them out">
-                <Link href="/task" className={EARN_TICKETS}>
-                  Earn tickets
-                </Link>
+              <PoolAction
+                title="You have no tickets"
+                sub={
+                  spinHref ? 'From tasks or a capsule' : 'Tasks pay them out'
+                }
+              >
+                <EarnTickets spinHref={spinHref} />
               </PoolAction>
             )}
           </>
@@ -542,10 +575,12 @@ export function UpcomingPool({
   next,
   balance,
   nowMs,
+  spinHref,
 }: {
   next: NextEvent;
   balance: number;
   nowMs: number | null;
+  spinHref: string | null;
 }) {
   const [zoom, setZoom] = useState<PoolPrize | null>(null);
   const prizes = heroFirst(next.prizes);
@@ -592,9 +627,7 @@ export function UpcomingPool({
                   : 'Earn some before it opens'
               }
             >
-              <Link href="/task" className={EARN_TICKETS}>
-                Earn tickets
-              </Link>
+              <EarnTickets spinHref={spinHref} />
             </PoolAction>
           </>
         }
@@ -612,7 +645,13 @@ export function UpcomingPool({
 }
 
 /** Nothing running and nothing scheduled: the pass's outline, waiting. */
-export function NoPool({ onSeeResults }: { onSeeResults: () => void }) {
+export function NoPool({
+  spinHref,
+  onSeeResults,
+}: {
+  spinHref: string | null;
+  onSeeResults: () => void;
+}) {
   return (
     <div className="space-y-6">
       <div className="rounded-[20px] border border-dashed border-white/15 px-4 py-8 text-center">
@@ -629,8 +668,16 @@ export function NoPool({ onSeeResults }: { onSeeResults: () => void }) {
             href="/task"
             className={pillVariants({ variant: 'primary', size: 'sm' })}
           >
-            Earn tickets
+            {spinHref ? 'Tasks' : 'Earn tickets'}
           </Link>
+          {spinHref && (
+            <Link
+              href={spinHref}
+              className={pillVariants({ variant: 'secondary', size: 'sm' })}
+            >
+              Capsules
+            </Link>
+          )}
           <Pill size="sm" variant="secondary" onClick={onSeeResults}>
             See past results
           </Pill>

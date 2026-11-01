@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { getLuckyDraw } from '@/lib/actions/lucky-draw';
+import { getPackCategories } from '@/lib/data/packs';
+import { ticketPackHref } from '@/lib/packs-data';
 import { LuckyDrawClient } from './LuckyDrawClient';
 
 export const metadata: Metadata = {
@@ -16,6 +18,16 @@ export default async function LuckyDrawPage({
 }: {
   searchParams: Promise<{ open?: string }>;
 }) {
-  const [page, { open }] = await Promise.all([getLuckyDraw(), searchParams]);
-  return <LuckyDrawClient initial={page} intro={open === '1'} />;
+  const [page, { open }, categories] = await Promise.all([
+    getLuckyDraw(),
+    searchParams,
+    getPackCategories(),
+  ]);
+  return (
+    <LuckyDrawClient
+      initial={page}
+      intro={open === '1'}
+      spinHref={ticketPackHref(categories)}
+    />
+  );
 }
