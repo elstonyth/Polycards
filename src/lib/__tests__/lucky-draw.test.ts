@@ -11,7 +11,6 @@ import {
   eventRowId,
   heroFirst,
   heroPrize,
-  landingAngle,
   luckyDrawView,
   mergeFreshGates,
   nextDraw,
@@ -22,11 +21,9 @@ import {
   potTotal,
   refusalCopy,
   rulesCopy,
-  segmentAt,
   sortGates,
   ticketRanges,
   tilePrice,
-  wheelSegments,
   winnerIndex,
 } from '@/lib/lucky-draw';
 
@@ -507,59 +504,6 @@ describe('entriesIntact', () => {
     expect(entriesIntact([], { total_tickets: 0, winner: { who: 'A' } })).toBe(
       false,
     );
-  });
-});
-
-describe('wheelSegments', () => {
-  it('sizes each segment by its tickets, in list order', () => {
-    const segs = wheelSegments([{ tickets: 3 }, { tickets: 1 }], 0);
-    expect(segs).toEqual([
-      { a0: 0, a1: 270, index: 0 },
-      { a0: 270, a1: 360, index: 1 },
-    ]);
-  });
-
-  it('merges the smallest into one filler arc above the cap, never the winner', () => {
-    // Six entrants, cap 4: the winner (smallest of all, keeps its own span)
-    // and the two biggest stay; the rest become one filler arc at the end.
-    const entries = [
-      { tickets: 10 },
-      { tickets: 1 }, // winner
-      { tickets: 2 },
-      { tickets: 30 },
-      { tickets: 3 },
-      { tickets: 54 },
-    ];
-    const segs = wheelSegments(entries, 1, 4);
-    expect(segs.map((s) => s.index)).toEqual([1, 3, 5, null]);
-    const total = 100;
-    expect(segs[0]!.a1 - segs[0]!.a0).toBeCloseTo((1 / total) * 360);
-    expect(segs[3]!.a1 - segs[3]!.a0).toBeCloseTo(((10 + 2 + 3) / total) * 360);
-    expect(segs[segs.length - 1]!.a1).toBeCloseTo(360);
-  });
-
-  it('leaves a wheel at or under the cap alone', () => {
-    const entries = Array.from({ length: 300 }, () => ({ tickets: 1 }));
-    expect(wheelSegments(entries, 7)).toHaveLength(300);
-    expect(wheelSegments([...entries, { tickets: 1 }], 7)).toHaveLength(300);
-  });
-});
-
-describe('landing and the pointer', () => {
-  const seg = { a0: 100, a1: 200, index: 0 };
-
-  it('lands inside the middle 56% of the segment', () => {
-    expect(landingAngle(seg, 0)).toBeCloseTo(122);
-    expect(landingAngle(seg, 1)).toBeCloseTo(178);
-  });
-
-  it('reads the segment under the 12 o’clock pointer for a rotation', () => {
-    const segs = wheelSegments([{ tickets: 1 }, { tickets: 1 }], 0);
-    expect(segmentAt(segs, 0)).toBe(0);
-    // Turning the wheel 90° clockwise brings the 270° point under the pointer.
-    expect(segmentAt(segs, 90)).toBe(1);
-    expect(segmentAt(segs, 360 * 6 + 270)).toBe(0);
-    expect(segmentAt(segs, -7)).toBe(0);
   });
 });
 

@@ -158,7 +158,7 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 
 ### Lucky Draw only — Holo foil (2026-10-24)
 
-- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on five things: the prize wheel's rim, the prize frame (the win reveal, and the pool's front card and zoomed prize), the win's dust, the pool pass's stub (`holoSheet`, under a pearl veil so a whole surface of it stays a card's shimmer and not candy; 2026-10-31, so the page can't be mistaken for the homepage), and the "Now" dot in How it works. Never chrome, never buttons, never text, never another surface. No gold anywhere on the wheel (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` / `.holo-ring` in `globals.css` only turn the light and cut the ring (still under reduced motion).
+- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on these: the arena's rim, its booster chips and the winner's crown, the prize frame on anything that isn't a card (a credit prize or the admin's own art, in the reveal and the pool), the lines of the Lucky Draw slab frame, the win's dust, the pool pass's stub (`holoSheet`, under a pearl veil so a whole surface of it stays a card's shimmer and not candy; 2026-10-31, so the page can't be mistaken for the homepage), and the "Now" dot in How it works. Never chrome, never buttons, never text, never another surface. No gold on the table but the winner's ring (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` in `globals.css` only turns the light (still under reduced motion).
 
 ## 3. Typography
 
@@ -390,18 +390,52 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
   the pool is, then the small print under a disclosure.
 - **Old-rule prize card** — kept for any event published before one-winner:
   charcoal card, the prize on a 5:7 pedestal, draw time, top 10, white Enter pill.
-- **The wheel** (style "K — Holo Foil") — matte black and graphite wedges
-  sized by tickets, hair-thin silver lines, the holo-foil rim, a pearl hub, a
-  slim silver pointer that flicks on each edge. Pull-back, ~7 s ease-out,
-  settle, landing inside the winner's wedge (never dead centre). Win: holo
-  dust rises from the wedge, the wheel dims, and the prize rises from the hub
-  in a thin holo frame. Decoration only — the result is stored before the
-  wheel turns. Reduced motion: the winner shows directly, no spin, no dust.
-  Sound (2026-10-25, `drawStart/drawTick/drawStop/drawWin` in
-  `src/lib/slot-sfx.ts`, header mute applies): a soft air swoosh on launch, a
-  light pawl click per wedge edge (at most one per 38 ms), a muted wooden
-  knock on the stop, and a glassy E-major shimmer with high sparkles as the
-  prize rises — quiet and premium, never a casino jingle.
+- **The arena** (2026-11-01, replaces the wheel; boss: the draw is 20 seconds, pops
+  up small for everyone signed in, an X closes it, a tap opens it, and it lives in
+  Results) — one round table under one lamp, ringed in holo foil, with every ticket
+  share a set of discs. Bigger eats smaller, the table closes, the last eight meet
+  one duel at a time, and the last two race for foil chips that can swap the lead
+  before the bigger one takes the other in slow motion. Every disc shows its owner's
+  picture from the first second on a phone-sized table, as a token that gains a soft
+  shadow and a little gloss from the lamp as it grows; only the small corner card
+  starts as silver dust, too small for faces. The viewer's discs ring in Paper White, which is the whole
+  personal story: "12 of 200 your discs alive", "You lead with 31%", "You're in the
+  final". No neon, no glitch type, no grid, no confetti: pacing and stakes carry it.
+  Decoration only, like the wheel it replaces: the winner is drawn and paid on the
+  server first, and the disc that survives is simply seated to them
+  (`src/lib/arena/cast.ts`). The battle runs on the device from the stored seed, so
+  every viewer and every replay plays the same run; the engine takes only a seed and
+  a disc count, so it cannot see a player. A gate is always about 320 discs, however
+  few tickets it holds, shared out by tickets with at least one each, so a two-player
+  gate is still a battle. Twenty seconds on the clock, the winner told at 18.3.
+- **The Lucky Draw frame** ("Smoked", 2026-11-02) — the Rank Reward frame's exact
+  shape in dark smoked glass with one holo line on each edge, like a watch bezel. Art
+  from `scripts/compose-lucky-draw-frame.mjs`, cut to the prism frame's own alpha.
+  It marks a card as a Lucky Draw prize wherever it shows: the draw (`PrizeArt`) and
+  the winner's vault, history, delivery and card page. `SlabImage` draws all of them,
+  and `prizeFrameVariant` is the one rule, so the draw and the vault can't disagree.
+  The backend says how each picture wears it (`frame`: `slab`, `raw` or none). A
+  card here carries no tier, so nothing else competes with it.
+- **The corner card** (`ArenaShow`, mounted by `LiveDrawProvider` in the root layout)
+  — bottom right, above the tab bar and over the free-pack badge and Telegram banner,
+  under sheets. LIVE chip, X (28 to see, 44 to hit), one line under the table. It
+  clears itself 9 s after the winner shows; a win stays until closed. It never covers
+  a way to pay or sell: on a phone it lifts above the pack page's Open bar and the
+  vault and leaderboard action tray (`cornerLift`). Not during a pack rip
+  (`/slots/*/spin`). Draws in the same minute play one after another. Only
+  signed-in tabs watch: a result needs a customer token, and that keeps visitors and
+  bots out of the draw-minute reads. Tabs read the gates still to draw from the shared
+  status and look for each result just after the minute the job runs on, with jitter,
+  only while visible (`src/lib/lucky-draw-watch.ts`).
+- **The full view** — a tap opens the same battle at the same moment, with the prize,
+  the tier, the viewer's line, the top three by share and a line for the big meals.
+  Live has no skip (boss); Results has **Skip to result** and **Watch again**. While a
+  draw plays, Results and My entry hold its outcome back. A draw from Results is
+  rebuilt from stored data, not a video file: player pictures come from other hosts,
+  which a browser won't let a canvas record, and this way old draws replay too. Reduced
+  motion: the winner shows directly, no battle, no dust. Sound (`drawStart/drawTick/
+drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the full
+  view, a tap's gesture having unlocked it, and never from the corner.
 - **Results** — the winner, their tickets, a Watch-the-draw replay and the
   frozen entry list in draw order with ticket ranges. The seed and its hash
   stay off the page (operator 2026-10-25); the server still commits and

@@ -31,6 +31,11 @@ const STATUS = {
   },
 } satisfies Record<string, { label: string; className: string }>;
 
+const DRAWING = {
+  label: 'Drawing',
+  className: 'bg-neutral-800 text-neutral-200',
+};
+
 function Heading({ children }: { children: React.ReactNode }) {
   return (
     <h2 className="mt-6 mb-2 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
@@ -43,7 +48,7 @@ function Heading({ children }: { children: React.ReactNode }) {
  *  ticket history (Results is the same record for the whole platform). The
  *  balance is on the page's title row. Read when the tab opens, so a fresh entry
  *  shows. */
-export function MyEntry() {
+export function MyEntry({ held }: { held: ReadonlySet<string> }) {
   const [mine, setMine] = useState<LuckyDrawMine | null | 'failed'>(null);
 
   useEffect(() => {
@@ -76,8 +81,11 @@ export function MyEntry() {
       ) : (
         <ul className="space-y-2">
           {mine.entries.map((e) => {
-            const status =
-              STATUS[e.status as keyof typeof STATUS] ?? STATUS.open;
+            // A draw still playing here: how it ended isn't told yet.
+            const playing = e.event_id != null && held.has(e.event_id);
+            const status = playing
+              ? DRAWING
+              : (STATUS[e.status as keyof typeof STATUS] ?? STATUS.open);
             const chance = entryChance(e);
             return (
               <li
@@ -90,6 +98,7 @@ export function MyEntry() {
                     <PrizeArt
                       src={e.image}
                       kind={e.event_id ? 'card' : undefined}
+                      frame={e.frame}
                     />
                   </span>
                 </span>

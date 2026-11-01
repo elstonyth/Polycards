@@ -31,7 +31,11 @@ beforeEach(() => {
 
 it('answers live: false when no event is published', async () => {
   luckyDrawPage.mockResolvedValue({ events: [], event: null, prizes: [] });
-  expect(await run()).toEqual({ live: false, latest_gate_at: null });
+  expect(await run()).toEqual({
+    live: false,
+    latest_gate_at: null,
+    upcoming: [],
+  });
 });
 
 const event = (endsInMs: number) => ({
@@ -56,19 +60,39 @@ it('answers live: true, and only that, while a prize is still open', async () =>
     event: event(86_400_000),
     prizes: [drawn, open],
   });
-  expect(await run()).toEqual({ live: true, latest_gate_at: null });
+  expect(await run()).toEqual({
+    live: true,
+    latest_gate_at: null,
+    upcoming: [],
+  });
 });
 
 // The page keeps an ended or fully drawn event's results up; the sheet says
 // "Coming soon" until the next event is set up.
 it('answers live: false once every prize is drawn', async () => {
-  luckyDrawPage.mockResolvedValue({ events: [], event: event(86_400_000), prizes: [drawn] });
-  expect(await run()).toEqual({ live: false, latest_gate_at: null });
+  luckyDrawPage.mockResolvedValue({
+    events: [],
+    event: event(86_400_000),
+    prizes: [drawn],
+  });
+  expect(await run()).toEqual({
+    live: false,
+    latest_gate_at: null,
+    upcoming: [],
+  });
 });
 
 it('answers live: false once the event has ended', async () => {
-  luckyDrawPage.mockResolvedValue({ events: [], event: event(-60_000), prizes: [open] });
-  expect(await run()).toEqual({ live: false, latest_gate_at: null });
+  luckyDrawPage.mockResolvedValue({
+    events: [],
+    event: event(-60_000),
+    prizes: [open],
+  });
+  expect(await run()).toEqual({
+    live: false,
+    latest_gate_at: null,
+    upcoming: [],
+  });
 });
 
 it('names when the newest open gate went live, for the Draw tab dot', async () => {
@@ -88,8 +112,28 @@ it('names when the newest open gate went live, for the Draw tab dot', async () =
     event: null,
     prizes: [],
   });
-  expect(await run()).toEqual({
+  expect(await run()).toMatchObject({
     live: false,
     latest_gate_at: '2026-11-02T00:00:00.000Z',
   });
+});
+
+it('lists every gate still to draw, ended ones too: ids and times, nothing else', async () => {
+  const endsAt = new Date(Date.now() - 60_000).toISOString();
+  luckyDrawPage.mockResolvedValue({
+    events: [
+      {
+        id: 'ldev_9',
+        live_at: endsAt,
+        ends_at: endsAt,
+        total_tickets: 40,
+        entrant_count: 4,
+        top: [{ customer_id: 'cus_1', tickets: 40 }],
+      },
+    ],
+    event: null,
+    prizes: [],
+  });
+  const body = (await run()) as { upcoming: unknown };
+  expect(body.upcoming).toEqual([{ id: 'ldev_9', ends_at: endsAt }]);
 });

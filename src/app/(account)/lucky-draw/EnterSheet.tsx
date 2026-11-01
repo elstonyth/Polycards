@@ -37,6 +37,7 @@ export type EnterTarget = Pick<
   | 'id'
   | 'title'
   | 'image'
+  | 'frame'
   | 'kind'
   | 'value_myr'
   | 'my_tickets'
@@ -136,7 +137,11 @@ export function EnterSheet({
           {!pot && (
             <span className="relative aspect-[5/7] w-14 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-1">
               <span className="relative block h-full w-full">
-                <PrizeArt src={prize.image} kind={prize.kind} />
+                <PrizeArt
+                  src={prize.image}
+                  kind={prize.kind}
+                  frame={prize.frame}
+                />
               </span>
             </span>
           )}

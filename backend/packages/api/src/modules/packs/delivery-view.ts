@@ -1,5 +1,7 @@
 import type PacksModuleService from './service';
 import { pageAll } from '../../api/utils/page-all';
+import { isChallengePrizePack } from './challenge-prize';
+import { isLuckyDrawPrizePack } from './lucky-draw';
 
 type DeliveryOrderRow = {
   id: string;
@@ -86,6 +88,9 @@ export async function serializeDeliveryOrders(
       const card = pull ? cardByHandle.get(pull.card_id) : undefined;
       return {
         pull_id: it.pull_id,
+        // As the vault states them: a won card's page keeps the frame it was won in.
+        challenge_prize: isChallengePrizePack(pull?.pack_id),
+        lucky_draw_prize: isLuckyDrawPrizePack(pull?.pack_id),
         card: card
           ? {
               handle: card.handle,

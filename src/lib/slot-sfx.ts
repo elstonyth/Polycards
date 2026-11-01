@@ -147,7 +147,7 @@ function noise(
   src.stop(end + 0.02);
 }
 
-// The Lucky Draw wheel (operator ask 2026-10-25): premium and quiet, never a
+// The Lucky Draw (operator ask 2026-10-25): premium and quiet, never a
 // casino jingle. A glassy E-major shimmer for the win, matching the holo dust.
 const WIN_NOTES = [1318.5, 1661.2, 1975.5, 2637]; // E6 G#6 B6 E7
 
@@ -197,19 +197,19 @@ const CUES: Record<SfxName, () => void> = {
   uiClick: () => blip(1400, 40, { type: 'triangle', gain: 0.25, slideTo: 900 }),
   // Gains below are ~11x the first cut, which peaked near -26 dBFS and was
   // inaudible on phone speakers and under the music bed (operator 2026-10-25);
-  // the wheel also ducks the music bed while it is on screen.
-  // The wheel launching out of its pull-back: a soft rising air swoosh.
+  // the arena also ducks the music bed while it has the whole screen.
+  // The battle starting: a soft rising air swoosh.
   drawStart: () => {
     noise(650, { from: 380, to: 2600, q: 0.7, gain: 0.8, attackMs: 220 });
     blip(110, 500, { type: 'sine', gain: 0.6, slideTo: 165 });
   },
-  // The pointer flicking over a wedge edge: a crisp, light pawl click (fires
-  // per edge, throttled by the wheel, so it slows into a countable landing).
+  // A disc swallowed: a crisp, light pawl click (fires per eat, throttled by
+  // the arena).
   drawTick: () => {
     blip(3200, 14, { type: 'triangle', gain: 0.9, slideTo: 2500 });
     noise(12, { from: 6000, q: 1.4, gain: 0.5 });
   },
-  // The wheel settling: a muted wooden knock.
+  // The last disc swallowed: a muted wooden knock.
   drawStop: () => {
     blip(150, 240, { type: 'sine', gain: 1.8, slideTo: 78 });
     blip(430, 90, { type: 'triangle', gain: 0.6, slideTo: 300 });

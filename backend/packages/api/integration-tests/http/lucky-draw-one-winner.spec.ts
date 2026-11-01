@@ -315,15 +315,40 @@ medusaIntegrationTestRunner({
           detail.data.result.seed_hash,
         );
         expect(detail.data.ticket_index).toBe(pick.ticketIndex);
+        // Each viewer's own row, for the arena; ids stay on the server.
+        expect(detail.data.my_entry_index).toBe(
+          entries.findIndex((e) => e.customer_id === bo.id),
+        );
+        const adaDetail = await get(
+          `/store/lucky-draw/results/events/${event.id}`,
+          authed(ada.token),
+        );
+        expect(adaDetail.data.my_entry_index).toBe(
+          entries.findIndex((e) => e.customer_id === ada.id),
+        );
         expect(detail.data.prizes).toEqual([
           {
             kind: 'card',
             title: 'The card',
             image: '/cdn/ldow-card.webp',
+            // This card has only a scan, so the raw frame, as in the winner's vault.
+            frame: 'raw',
             value_myr: 240,
           },
-          { kind: 'credit', title: 'RM 25', image: null, value_myr: 25 },
-          { kind: 'credit', title: 'RM 10.50', image: null, value_myr: 10.5 },
+          {
+            kind: 'credit',
+            title: 'RM 25',
+            image: null,
+            frame: null,
+            value_myr: 25,
+          },
+          {
+            kind: 'credit',
+            title: 'RM 10.50',
+            image: null,
+            frame: null,
+            value_myr: 10.5,
+          },
         ]);
         expect(
           detail.data.entries.map((e: { tickets: number }) => e.tickets),
@@ -360,6 +385,7 @@ medusaIntegrationTestRunner({
           prize_id: prizes[0].id,
           title: 'November Pot',
           image: '/cdn/ldow-card.webp',
+          frame: 'raw',
           value_myr: 275.5,
           drawn_at: expect.any(String),
           winner: expect.objectContaining({ who: winnerName }),
@@ -386,6 +412,7 @@ medusaIntegrationTestRunner({
             tier: 'economy',
             title: 'November Pot',
             image: '/cdn/ldow-card.webp',
+            frame: 'raw',
             my_tickets: 35,
             total_tickets: 51,
             draw_at: new Date(event.ends_at).toISOString(),
@@ -423,6 +450,54 @@ medusaIntegrationTestRunner({
         expect(late.status).toBe(400);
       });
 
+      it('says which frame each prize picture wears, as the vault would', async () => {
+        await packs.createCards([
+          {
+            handle: 'ldow-slab',
+            name: 'One Winner Slab Card',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 50,
+            market_multiplier: 1.2,
+            image: '/cdn/ldow-scan.webp',
+            slab_image: '/cdn/ldow-slab.webp',
+          },
+        ]);
+        const event = await publishPot({
+          prizes: [
+            { kind: 'card', card_handle: 'ldow-slab', title: 'Slab', sort: 0 },
+            { kind: 'card', card_handle: CARD_HANDLE, title: 'Scan', sort: 1 },
+            {
+              kind: 'card',
+              card_handle: CARD_HANDLE,
+              title: 'Own art',
+              image_url: '/cdn/ldow-art.webp',
+              sort: 2,
+            },
+            { kind: 'credit', credit_myr: 25, title: 'Credit', sort: 3 },
+          ],
+        });
+
+        clearLuckyDrawCache();
+        const open = await get('/store/lucky-draw', authed(ada.token));
+        expect(open.data.event.id).toBe(event.id);
+        expect(
+          open.data.prizes.map(
+            (p: { title: string; image: string | null; frame: unknown }) => [
+              p.title,
+              p.image,
+              p.frame,
+            ],
+          ),
+        ).toEqual([
+          ['Slab', '/cdn/ldow-slab.webp', 'slab'],
+          ['Scan', '/cdn/ldow-card.webp', 'raw'],
+          ['Own art', '/cdn/ldow-art.webp', null],
+          ['Credit', null, null],
+        ]);
+      });
+
       it('runs two gates at once over the routes', async () => {
         const first = await publishPot({ tier: 'first' });
         const second = await publishPot({
@@ -455,9 +530,14 @@ medusaIntegrationTestRunner({
         expect(allKeys(page.data.events)).not.toContain('seed_nonce');
 
         const status = await get('/store/lucky-draw-status', storeHeaders);
+        // Public: the gates still to draw for the popup, ids and times only.
         expect(status.data).toEqual({
           live: true,
           latest_gate_at: expect.any(String),
+          upcoming: [second, first].map((g) => ({
+            id: g.id,
+            ends_at: new Date(g.ends_at).toISOString(),
+          })),
         });
 
         const bad = await adminPost('/admin/lucky-draw/events', {

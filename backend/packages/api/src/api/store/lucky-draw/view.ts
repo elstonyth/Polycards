@@ -1,6 +1,7 @@
 import type { MedusaRequest } from '@medusajs/framework/http';
 import type PacksModuleService from '../../../modules/packs/service';
 import type {
+  LuckyDrawArtFrame,
   LuckyDrawEventFacts,
   LuckyDrawEventResultRow,
   LuckyDrawPage,
@@ -44,6 +45,8 @@ export type ResultView = {
   prize_id: string;
   title: string;
   image: string | null;
+  /** How the picture wears the Lucky Draw frame. */
+  frame: LuckyDrawArtFrame;
   value_myr: number;
   drawn_at: string;
   winner: Person | null;
@@ -76,10 +79,12 @@ export type EventResultView = {
 
 export type EventDetail = {
   result: EventResultView;
+  tier: LuckyDrawPageGate['tier'];
   prizes: {
     kind: 'card' | 'credit';
     title: string;
     image: string | null;
+    frame: LuckyDrawArtFrame;
     value_myr: number;
   }[];
   entries: EntryView[];
@@ -91,6 +96,7 @@ export type PrizeView = {
   kind: 'card' | 'credit';
   title: string;
   image: string | null;
+  frame: LuckyDrawArtFrame;
   value_myr: number;
   draw_at: string;
   seed_hash: string;
@@ -142,6 +148,9 @@ const detailInFlight = new Map<string, Promise<ResultDetail | null>>();
 const eventRowCache = new Map<string, ResultView>();
 const eventDetailCache = new Map<string, EventDetail>();
 const eventDetailInFlight = new Map<string, Promise<EventDetail | null>>();
+/** Customer ids in entry order, beside each cached detail and never in it: the
+ *  detail is one shared body, and the ids must not leave the server. */
+const eventEntrantIds = new Map<string, string[]>();
 /** Prize or event id → when its "not drawn yet" answer expires. Keyed by a URL
  *  param, so capped like the others. */
 const undrawnUntil = new Map<string, number>();
@@ -157,6 +166,7 @@ export function clearLuckyDrawCache(): void {
   eventRowCache.clear();
   eventDetailCache.clear();
   eventDetailInFlight.clear();
+  eventEntrantIds.clear();
   undrawnUntil.clear();
 }
 
@@ -208,6 +218,7 @@ function resultView(
     prize_id: row.prize_id,
     title: row.title,
     image: row.image,
+    frame: row.frame,
     value_myr: row.value_myr,
     drawn_at: row.drawn_at,
     winner: row.winner_customer_id ? personOf(row.winner_customer_id) : null,
@@ -246,6 +257,7 @@ function eventRowView(
     prize_id: row.prizes[0]?.id ?? row.event_id,
     title: row.event_name,
     image: row.image,
+    frame: row.frame,
     value_myr: row.value_myr,
     event_id: row.event_id,
     draw_mode: 'one_winner',
@@ -291,6 +303,7 @@ async function buildSharedPage(
         kind: p.kind,
         title: p.title,
         image: p.image,
+        frame: p.frame,
         value_myr: p.value_myr,
         draw_at: p.draw_at,
         seed_hash: p.seed_hash,
@@ -351,6 +364,26 @@ export async function luckyDrawLatestGateAt(
     .map((g) => g.live_at)
     .sort();
   return open[open.length - 1] ?? null;
+}
+
+/** The gates still to draw, and when each ends: what a signed-in tab watches so
+ *  the draw can pop up the moment it lands. Ids and times only. */
+export async function luckyDrawUpcoming(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+): Promise<{ id: string; ends_at: string }[]> {
+  const { events } = await sharedPage(req, packs);
+  return events.map((g) => ({ id: g.id, ends_at: g.ends_at }));
+}
+
+/** This viewer's row in a drawn event's entry list, or null with none: it lets the
+ *  arena pick out their discs. Call after eventDetailFor. */
+export function myEventEntryIndex(
+  eventId: string,
+  customerId: string,
+): number | null {
+  const at = eventEntrantIds.get(eventId)?.indexOf(customerId) ?? -1;
+  return at < 0 ? null : at;
 }
 
 /** The Lucky Draw page for one viewer: the cached shared half plus their own
@@ -437,6 +470,7 @@ export async function resultFeedFor(
       )
     ).map((v) => [v.prize_id, v]),
   );
+  const fresh = new Map<string, ResultView>();
   const missing = rows
     .filter((r) => r.kind === 'event' && !eventRowCache.has(r.id))
     .map((r) => r.id);
@@ -448,12 +482,19 @@ export async function resultFeedFor(
       found.map((r) => r.winner_customer_id),
     );
     for (const row of found) {
-      remember(eventRowCache, row.event_id, eventRowView(row, personOf));
+      const view = eventRowView(row, personOf);
+      fresh.set(row.event_id, view);
+      // As in buildEventDetail: a failed customer read must not stick.
+      if (view.winner?.who !== 'Anonymous') {
+        remember(eventRowCache, row.event_id, view);
+      }
     }
   }
   return rows.flatMap((r) => {
     const view =
-      r.kind === 'event' ? eventRowCache.get(r.id) : prizes.get(r.id);
+      r.kind === 'event'
+        ? (fresh.get(r.id) ?? eventRowCache.get(r.id))
+        : prizes.get(r.id);
     return view ? [view] : [];
   });
 }
@@ -474,10 +515,12 @@ async function buildEventDetail(
   ]);
   const detail: EventDetail = {
     result: eventResultView(found.row, personOf),
+    tier: found.row.tier,
     prizes: found.row.prizes.map((p) => ({
       kind: p.kind,
       title: p.title,
       image: p.image,
+      frame: p.frame,
       value_myr: p.value_myr,
     })),
     entries: found.entries.map((e) => ({
@@ -486,7 +529,16 @@ async function buildEventDetail(
     })),
     ticket_index: found.ticket_index,
   };
-  remember(eventDetailCache, eventId, detail);
+  // This cache never expires, and a failed customer read comes back as "Anonymous"
+  // for everyone: a draw must not keep that for good.
+  if (detail.entries.some((e) => e.person.who !== 'Anonymous')) {
+    remember(eventDetailCache, eventId, detail);
+  }
+  remember(
+    eventEntrantIds,
+    eventId,
+    found.entries.map((e) => e.customer_id),
+  );
   return detail;
 }
 

@@ -46,6 +46,7 @@ export function gateTarget(gate: LuckyDrawGate): EnterTarget {
     id: gate.id,
     title: POOL_TITLE,
     image: hero?.image ?? null,
+    frame: hero?.frame ?? null,
     kind: hero?.kind ?? 'card',
     value_myr: potTotal(gate.prizes),
     my_tickets: gate.my_tickets,

@@ -84,7 +84,7 @@ function useSoundPlayer() {
   } | null>(null);
   const celebrations = useRef(0);
   // duck() holds, counted apart: silence() (tab hidden, mute) clears the
-  // reveals but must not drop a hold whose wheel is still on screen.
+  // reveals but must not drop a hold whose arena is still on screen.
   const ducks = useRef(0);
 
   const load = useCallback((name: SoundName, ac: AudioContext) => {
@@ -205,7 +205,7 @@ function useSoundPlayer() {
   );
 
   // Hold the music bed down (as a rarity reveal does) while a cue sequence
-  // needs the room — the Lucky Draw wheel. Every duck(true) gets a duck(false).
+  // needs the room — the Lucky Draw arena. Every duck(true) gets a duck(false).
   const duck = useCallback(
     (on: boolean) => {
       ducks.current = Math.max(0, ducks.current + (on ? 1 : -1));

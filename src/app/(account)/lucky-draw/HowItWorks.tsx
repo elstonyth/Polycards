@@ -19,8 +19,8 @@ const STEPS: { stage: PoolStage; title: string; body: string }[] = [
   },
   {
     stage: 'draw',
-    title: 'Clock hits zero, one ticket is drawn',
-    body: 'Gate closes the moment the clock ends. Whoever holds the drawn ticket takes every prize.',
+    title: 'Clock hits zero, the arena opens',
+    body: 'One ticket is drawn when the gate closes, and everyone watches it play out in about 20 seconds. Your share of the tickets is your share of the discs. Bigger discs eat smaller ones, and whoever holds the last one left takes every prize. Replay it any time in Results.',
   },
   {
     stage: 'next',

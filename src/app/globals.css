@@ -847,11 +847,10 @@
   }
 }
 
-/* Holo foil (Lucky Draw only, 2026-10-24 — DESIGN.md "Holo foil"): the wheel
-   rim and the prize frame. The colour stops live once in src/lib/lucky-draw.ts
-   (HOLO_STOPS -> holoConic, set as the element's background); this file only
-   turns the light (--holo-turn) and cuts the rim's ring. The light never turns
-   with the wheel, so the foil shines like a lamp on a real card. */
+/* Holo foil (Lucky Draw only, 2026-10-24 — DESIGN.md "Holo foil"): the prize
+   frame. The colour stops live once in src/lib/lucky-draw.ts (HOLO_STOPS ->
+   holoConic, set as the element's background); this file only turns the light
+   (--holo-turn), so the foil shines like a lamp on a real card. */
 @property --holo-turn {
   syntax: '<angle>';
   inherits: true;
@@ -989,15 +988,6 @@
   }
   .holo-turn {
     animation: holo-turn var(--holo-period, 9s) linear infinite;
-  }
-  .holo-ring {
-    mask: radial-gradient(
-      farthest-side,
-      transparent calc(100% - 9px),
-      #000 calc(100% - 8px),
-      #000 calc(100% - 1px),
-      transparent 100%
-    );
   }
   @media (prefers-reduced-motion: reduce) {
     .holo-turn {
@@ -1139,5 +1129,45 @@ body:has([data-telegram-banner]) [data-testid='free-pack-badge'] {
     transition-duration: 0.01ms !important;
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* The draw arena (DESIGN.md "The arena"): the corner card slides up; a phase name
+   lands and leaves; the winner's line settles in. Content is there without them. */
+@media (prefers-reduced-motion: no-preference) {
+  .arena-mini-in {
+    animation: arena-mini-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .arena-callout {
+    animation: arena-callout 1500ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .arena-told {
+    animation: arena-told 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+@keyframes arena-mini-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.96);
+  }
+}
+@keyframes arena-callout {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.97);
+  }
+  14%,
+  76% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes arena-told {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
   }
 }

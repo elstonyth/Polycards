@@ -997,6 +997,7 @@ medusaIntegrationTestRunner({
               prize_id: prizeId,
               title: 'RM 25 credit',
               image: '/cdn/ld-credit.webp',
+              frame: null,
               my_tickets: 40,
               draw_at: expect.any(String),
               status: 'open',

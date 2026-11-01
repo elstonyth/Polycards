@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { SlabImage } from '@/components/SlabImage';
+import { prizeFrameVariant } from '@/lib/prize-frame';
 import {
   shipVaultCards,
   addAddress,
@@ -324,6 +325,7 @@ export default function RequestDeliveryModal({
             <SlabImage
               key={i.pullId}
               card={i.card}
+              frameVariant={prizeFrameVariant(i)}
               sizes="60px"
               className="w-15 shrink-0"
               glowScale={0.3}

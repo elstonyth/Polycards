@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { getCardResult, type CardDetailData } from '@/lib/data/cards';
 import { ProductJsonLd, shareImageMeta } from '@/lib/product-share';
+import { frameVariantFromParam, prizeCardUrl } from '@/lib/prize-frame';
 import { CardCloseButton } from './CardCloseButton';
 import { CardDetailHydrated } from './CardDetailHydrated';
 
@@ -59,19 +60,19 @@ export default async function CardPage({
 }) {
   const { handle } = await params;
   const result = await resolveCard(handle);
-  // `?prize=weekly` marks an arrival from the Weekly Pulled Value Challenge, so
-  // the card keeps the challenge's prism frame here instead of switching to its
-  // pack tier — a prize should still read as a prize when you open it. It also
-  // swaps "All packs" for a Close back to where the prize was tapped. Any other
-  // value (or none) renders the tier frame and "All packs" as usual.
+  // `?prize=` marks an arrival from where a prize was won, so the card keeps that
+  // frame here instead of switching to its pack tier — a prize should still read
+  // as a prize when you open it. It also swaps "All packs" for a Close back to
+  // where the prize was tapped. Any other value (or none) renders the tier frame
+  // and "All packs" as usual.
   const { prize } = await searchParams;
-  const frameVariant = prize === 'weekly' ? ('prism' as const) : undefined;
+  const frameVariant = frameVariantFromParam(prize);
   // A transient backend failure must NOT 404: this card may well exist (and be
   // owned by whoever bookmarked it). Only a genuine miss gets notFound().
   if (result.status === 'error') {
     return (
       <div className="mx-auto w-full px-fluid py-16">
-        {frameVariant && <CardCloseButton />}
+        {frameVariant && <CardCloseButton variant={frameVariant} />}
         <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-neutral-900 px-6 py-12 text-center">
           <h1 className="font-heading text-2xl text-white">
             Couldn&apos;t load this card
@@ -82,7 +83,7 @@ export default async function CardPage({
           {/* Plain anchor, not Link: a full request re-runs this dynamic page
               instead of a soft nav that can serve the cached error render. */}
           <a
-            href={`/card/${encodeURIComponent(handle)}${frameVariant ? '?prize=weekly' : ''}`}
+            href={prizeCardUrl(handle, frameVariant)}
             className="mt-5 inline-flex min-h-11 items-center text-sm font-bold text-white underline underline-offset-4"
           >
             Try again
@@ -102,7 +103,7 @@ export default async function CardPage({
         path={`/card/${card.handle}`}
       />
       {frameVariant ? (
-        <CardCloseButton />
+        <CardCloseButton variant={frameVariant} />
       ) : (
         <Link
           href="/slots"

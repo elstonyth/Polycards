@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { pillVariants } from '@/components/ui/pill';
+import { useLiveDraw } from '@/components/app-shell/LiveDrawProvider';
+import { ArenaBoundary } from '@/components/draw-arena/ArenaBoundary';
+import { ArenaShow } from '@/components/draw-arena/lazy';
 import { Panel, UnavailablePanel } from '@/components/task-ui';
 import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
@@ -13,7 +16,6 @@ import {
   luckyDrawView,
   mergeFreshGates,
   pageGates,
-  POOL_TITLE,
   rulesCopy,
 } from '@/lib/lucky-draw';
 import {
@@ -34,7 +36,6 @@ import { PrizeCard } from './PrizeCard';
 import { PrizeWheel } from './PrizeWheel';
 import { ResultDetail } from './ResultDetail';
 import { ResultsList } from './ResultsList';
-import { SpinOverlay } from './SpinOverlay';
 import { TicketOpenIntro } from './TicketOpenIntro';
 
 type TabKey = 'prizes' | 'results' | 'mine';
@@ -45,12 +46,11 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'mine', label: 'My entry' },
 ];
 
-// The spin moment (spec §10): from a gate's end until its result appears (or 5
-// minutes pass), the cheap result read is polled — never the whole page — every
-// 5 s plus 0–2 s of jitter, so open tabs do not hit the draw minute in lockstep.
-// One gate per tick, the one polled least recently, so a gate stuck undrawn
-// cannot starve others ending with it. An old per-prize event polls the same way. When a prize's window closes without a result, the page is re-read
-// once, so a tab left open does not say "Drawing…" forever.
+// A gate's result is watched for by LiveDrawProvider, for the whole site, and the
+// draw plays in its popup. This polls only what the page itself needs: an old
+// per-prize event's result (the cheap read, never the whole page, every 5 s plus
+// 0–2 s of jitter, the prize polled least recently first), and a re-read when a
+// window closes with no result, so a tab left open does not say "Drawing…" forever.
 const POLL_MS = 5000;
 const POLL_JITTER_MS = 2000;
 const POLL_WINDOW_MS = 5 * 60_000;
@@ -84,14 +84,24 @@ export function LuckyDrawClient({
     LuckyDrawPrize | { gateId: string } | null
   >(null);
   const [detail, setDetail] = useState<LuckyDrawResultDetail | null>(null);
+  // Draws to play here, one at a time: a replay from Results, or an old prize.
   const [spins, setSpins] = useState<LuckyDrawResultDetail[]>([]);
+  const liveDraw = useLiveDraw();
+  const { track, drawn } = liveDraw;
   const [playIntro, setPlayIntro] = useState(intro);
   const endIntro = useCallback(() => setPlayIntro(false), []);
   const pageRef = useRef(page);
 
   // The gates this tab has read a result for, and every page re-read goes through
   // them: see mergeFreshGates.
-  const closedRef = useRef(new Set<string>());
+  const closedRef = useRef<ReadonlySet<string>>(drawn);
+  useEffect(() => {
+    closedRef.current = drawn;
+  }, [drawn]);
+  // This page can hold a gate newer than the watcher's last status read.
+  useEffect(() => {
+    track(pageGates(page));
+  }, [page, track]);
   const applyFresh = useCallback((fresh: LuckyDrawPage | null) => {
     if (!fresh) return;
     const closed = closedRef.current;
@@ -144,8 +154,6 @@ export function LuckyDrawClient({
         if (live) applyFresh(fresh);
         return;
       }
-      // A gate has one result: its own, read from the event route. Never the
-      // prize routes, whose mirror rows hold no entry list.
       if (gates.length > 0) {
         const ended = gates.filter((g) => now >= Date.parse(g.ends_at));
         const lapsed = ended.filter(
@@ -157,28 +165,7 @@ export function LuckyDrawClient({
           lapsed.forEach((g) => rereadAt.set(g.id, now));
           const fresh = await getLuckyDraw();
           if (live) applyFresh(fresh);
-          return;
         }
-        const due = ended
-          .filter((g) => now < Date.parse(g.ends_at) + POLL_WINDOW_MS)
-          .sort(
-            (a, b) => (polledAt.get(a.id) ?? 0) - (polledAt.get(b.id) ?? 0),
-          )[0];
-        if (!due) return;
-        polledAt.set(due.id, now);
-        const found = await getLuckyDrawEventResult(due.id, POOL_TITLE);
-        if (!live || !found) return;
-        // Drawn: it leaves the list and lives in Results.
-        closedRef.current.add(due.id);
-        setPage(
-          (prev) =>
-            prev && {
-              ...prev,
-              events: pageGates(prev).filter((g) => g.id !== due.id),
-            },
-        );
-        // No entries: nothing to spin.
-        if (found.ticket_index != null) setSpins((q) => [...q, found]);
         return;
       }
       // The last gate has gone: its prize rows are mirrors, with nothing to read.
@@ -316,7 +303,8 @@ export function LuckyDrawClient({
   const balance = page?.balance ?? 0;
   const event = page?.event ?? null;
   const view = luckyDrawView(page, nowMs);
-  const gates = pageGates(page);
+  // A drawn gate leaves the list and lives in Results.
+  const gates = pageGates(page).filter((g) => !drawn.has(g.id));
   const newIds = useNewGates(gates);
   const enteringGate: LuckyDrawGate | null =
     entering && 'gateId' in entering
@@ -387,11 +375,18 @@ export function LuckyDrawClient({
         {tab === 'results' ? (
           // Lists of rows, not a stage: they keep the column they were built for.
           <div className="mx-auto max-w-4xl">
-            <ResultsList onOpen={openResult} onOpenEvent={openEventResult} />
+            {/* Read again as each live draw ends, so it joins the list. */}
+            <ResultsList
+              key={liveDraw.finished}
+              held={liveDraw.held}
+              onWatchLive={liveDraw.watch}
+              onOpen={openResult}
+              onOpenEvent={openEventResult}
+            />
           </div>
         ) : tab === 'mine' ? (
           <div className="mx-auto max-w-4xl">
-            <MyEntry />
+            <MyEntry key={liveDraw.finished} held={liveDraw.held} />
           </div>
         ) : !page ? (
           <UnavailablePanel />
@@ -484,14 +479,21 @@ export function LuckyDrawClient({
           }}
         />
       )}
-      {/* A live draw waits, queued, while the player is in a sheet. */}
+      {/* A draw waits, queued, while the player is in a sheet. */}
       {spins[0] && !enterTarget && !detail && (
-        <SpinOverlay
-          detail={spins[0]}
-          queued={spins.length - 1}
-          onNext={() => setSpins((q) => q.slice(1))}
-          onClose={() => setSpins([])}
-        />
+        <ArenaBoundary
+          key={spins[0].result.prize_id}
+          onFail={() => setSpins((q) => q.slice(1))}
+        >
+          <ArenaShow
+            detail={spins[0]}
+            live={false}
+            expanded
+            onExpand={() => undefined}
+            onCollapse={() => undefined}
+            onClose={() => setSpins((q) => q.slice(1))}
+          />
+        </ArenaBoundary>
       )}
       {/* After hydration only (nowMs is mount-only): server HTML must never
           ship a full-screen scrim, and reduced motion is known by then. */}
