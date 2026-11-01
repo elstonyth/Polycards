@@ -113,7 +113,12 @@ async function buildGaps(
     return empty;
   }
 
-  const gaps = await packs.pullGaps({ packId, rarity, limit: HITS_LIMIT });
+  const gaps = await packs.pullGaps({
+    packId,
+    rarity,
+    limit: HITS_LIMIT,
+    tickets: pack?.prize_type === 'tickets',
+  });
   const pct = pack
     ? (normalizePublishedOdds(pack.published_odds)?.tiers[rarity] ?? null)
     : null;

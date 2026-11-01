@@ -15,10 +15,11 @@ const mocks = vi.hoisted(() => ({
   // undefined: the poll answers with its seed, as a live pack's does.
   poll: undefined as null | undefined,
   trackPixel: vi.fn(),
+  push: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: mocks.push }),
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('next/link', () => ({
@@ -115,6 +116,7 @@ beforeEach(() => {
   mocks.customer = { id: 'cus_1' };
   mocks.poll = undefined;
   mocks.trackPixel.mockClear();
+  mocks.push.mockClear();
 });
 
 afterEach(() => {
@@ -142,7 +144,6 @@ const packWord = (text: string) => /.{0,30}\bpacks?\b.{0,30}/i.exec(text)?.[0];
 const CARD_ONLY = [
   'Expected value',
   'Card value range',
-  'Recent Pulls',
   'buyback',
   'during reveal',
 ];
@@ -209,6 +210,61 @@ describe('PackDetailClient — ticket pack', () => {
     expect(packWord(text)).toBeUndefined();
   });
 
+  test('shows its own pull history, a win as its ticket amount', async () => {
+    await act(async () => {
+      root.render(
+        createElement(PackDetailClient, {
+          pack: { ...BASE, prizeType: 'tickets' },
+          siblings: [],
+          detail: TICKET_DETAIL,
+          recentPulls: {
+            pulls: [
+              {
+                ...ticketCard(300, 'Immortal'),
+                id: 'tksp_1',
+                packName: 'Gold Capsule',
+                packIcon: '/i.webp',
+                who: 'Ann',
+                profileHandle: null,
+                avatar: null,
+                frame: null,
+                rolledAt: '2026-11-02T00:00:00Z',
+                agoLabel: 'just now',
+              },
+            ],
+            drought: { Immortal: 6 },
+          },
+        }),
+      );
+    });
+    const text = container.textContent ?? '';
+    expect(text).toContain('Recent Pulls');
+    expect(text).toContain('capsules without');
+    expect(text).toContain('Ann');
+    expect(text).toContain('300tickets');
+    expect(packWord(text)).toBeUndefined();
+    // An amount has no card page and no overlay: the row is not a control.
+    expect(container.querySelector('a[href^="/card/"]')).toBeNull();
+    expect(container.querySelector('button[aria-label*="Ann"]')).toBeNull();
+  });
+
+  test('an empty history invites a capsule open', async () => {
+    const text = await render({ ...BASE, prizeType: 'tickets' }, TICKET_DETAIL);
+    expect(text).toContain('be the first to open a capsule');
+  });
+
+  // Its ledger isn't public, and the proxy answers an unlisted slug with the
+  // global feed: card pulls under a pack that never paid them.
+  test('a Draft shows no pull history', async () => {
+    const capsule = await render(
+      { ...BASE, prizeType: 'tickets', draft: true },
+      TICKET_DETAIL,
+    );
+    expect(capsule).not.toContain('Recent Pulls');
+    const cards = await render({ ...BASE, draft: true }, CARD_DETAIL);
+    expect(cards).not.toContain('Recent Pulls');
+  });
+
   test('a sold out capsule says so in the same word', async () => {
     const text = await render(
       { ...BASE, prizeType: 'tickets', inStock: false },
@@ -267,6 +323,70 @@ describe('PackDetailClient — ticket pack', () => {
     mocks.customer = null;
     const text = await render({ ...BASE, prizeType: 'tickets' }, TICKET_DETAIL);
     expect(text).toContain('Try a free demo spin');
+  });
+});
+
+describe('PackDetailClient — category dropdown', () => {
+  const tab = (id: string, tabName: string, firstPackId?: string) => ({
+    id,
+    tab: tabName,
+    icon: `/${id}.webp`,
+    soon: !firstPackId,
+    firstPackId,
+  });
+  const TABS = [
+    tab('pokemon', 'Pokémon', '151'),
+    tab('one-piece', 'One Piece'),
+    tab('poly', 'Poly', 'gold-capsule'),
+  ];
+
+  async function renderTabs(categoryTabs: typeof TABS) {
+    await act(async () => {
+      root.render(
+        createElement(PackDetailClient, {
+          pack: { ...BASE, prizeType: 'tickets' },
+          siblings: [],
+          categoryTabs,
+          detail: TICKET_DETAIL,
+          recentPulls: { pulls: [], drought: {} },
+        }),
+      );
+    });
+  }
+  const dropdown = () =>
+    container.querySelector<HTMLSelectElement>('select[aria-label="Category"]');
+
+  test("picking another franchise opens its first pack, keeping the page's scroll", async () => {
+    await renderTabs(TABS);
+    await act(async () => {
+      const select = dropdown()!;
+      select.value = 'pokemon';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(mocks.push).toHaveBeenCalledWith('/slots/151?count=1', {
+      scroll: false,
+    });
+  });
+
+  test('it opens on the franchise on screen', async () => {
+    await renderTabs(TABS);
+    expect(dropdown()!.value).toBe('poly');
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  test('a franchise with nothing on sale is listed but cannot be picked', async () => {
+    await renderTabs(TABS);
+    const onePiece = dropdown()!.querySelector<HTMLOptionElement>(
+      'option[value="one-piece"]',
+    )!;
+    expect(onePiece.disabled).toBe(true);
+    expect(onePiece.textContent).toBe('One Piece (Coming soon)');
+  });
+
+  test('nothing to switch to: the category stays a plain label', async () => {
+    await renderTabs([]);
+    expect(dropdown()).toBeNull();
+    expect(container.textContent).toContain('Poly');
   });
 });
 

@@ -34,6 +34,9 @@ import { loadPullerProfiles } from '../pullers';
 // The body also carries `drought`: for each chase tier, how many packs have
 // been opened since that tier last hit (in the same scope). Always unfiltered
 // by ?rarity — it is the state of the pack, not of the tab.
+//
+// A ticket pack's own feed reads its spins (buildTicketFeed). The global feed
+// stays cards only.
 const RECENT_LIMIT = 12;
 // Over-fetch, because the disabled filter below runs AFTER the query — same
 // reason (and same 2x bound) as the leaderboard's FETCH_N: a disabled puller
@@ -134,6 +137,9 @@ async function buildFeed(
       remember(cacheKey, EMPTY_BODY);
       return EMPTY_BODY;
     }
+    if (pack.prize_type === 'tickets') {
+      return buildTicketFeed(req, packs, pack, rarity, cacheKey);
+    }
   }
 
   const [fxRate, fetched, droughtCounts] = await Promise.all([
@@ -228,6 +234,58 @@ async function buildFeed(
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
   const body = { pulls: recent, drought };
+  remember(cacheKey, body);
+  return body;
+}
+
+// A ticket pack writes a ticket_spin per spin and no pull, so its history reads
+// those, under the same puller rules as above. A row carries the amount won in
+// place of a card. The tier comes off the pack's own table: an amount since
+// removed from it reads Common, as a pull does when its odds row is gone.
+async function buildTicketFeed(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+  pack: { slug: string; title: string; image: string },
+  rarity: Rarity | null,
+  cacheKey: string,
+): Promise<unknown> {
+  const [fetched, droughtCounts, prizes] = await Promise.all([
+    packs.recentTicketSpinRows({
+      packId: pack.slug,
+      rarity,
+      limit: FETCH_LIMIT,
+    }),
+    Promise.all(
+      DROUGHT_TIERS.map((tier) =>
+        packs.pullDrought({ packId: pack.slug, rarity: tier, tickets: true }),
+      ),
+    ),
+    packs.listTicketPrizes({ pack_id: pack.slug }, { take: 1000 }),
+  ]);
+  const tierOf = new Map(prizes.map((p) => [p.tickets, p.rarity]));
+  const pullers = await loadPullerProfiles(
+    req,
+    packs,
+    fetched.map((s) => s.customer_id),
+  );
+  const body = {
+    pulls: fetched
+      .filter((s) => !pullers.disabled.has(s.customer_id))
+      .slice(0, RECENT_LIMIT)
+      .map((s) => ({
+        id: s.id,
+        tickets: s.tickets,
+        rarity: tierOf.get(s.tickets) ?? 'Common',
+        pack_id: pack.slug,
+        pack_title: pack.title,
+        pack_image: pack.image,
+        ...pullers.profileOf(s.customer_id, s.id),
+        rolled_at: s.rolled_at,
+      })),
+    drought: Object.fromEntries(
+      DROUGHT_TIERS.map((tier, i) => [tier, droughtCounts[i]]),
+    ),
+  };
   remember(cacheKey, body);
   return body;
 }

@@ -6698,6 +6698,15 @@
           "expression": "CREATE INDEX IF NOT EXISTS \"IDX_ticket_spin_open\" ON \"ticket_spin\" (\"open_id\") WHERE deleted_at IS NULL"
         },
         {
+          "keyName": "IDX_ticket_spin_pack_id_rolled_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_ticket_spin_pack_id_rolled_at\" ON \"ticket_spin\" (\"pack_id\", \"rolled_at\") WHERE deleted_at IS NULL"
+        },
+        {
           "keyName": "ticket_spin_pkey",
           "columnNames": [
             "id"

@@ -59,7 +59,9 @@ export default async function SlotSpinPage({
   return (
     <SlotMachineClient
       pack={base.pack}
-      recentPulls={recentPulls.pulls}
+      // The reel's ticker lists cards it can price. A ticket stays out of it, as
+      // the machine's own wins do.
+      recentPulls={isTicketPack(base.pack) ? [] : recentPulls.pulls}
       count={count}
       publishedOdds={detail?.publishedOdds ?? null}
       // The reel flickers ONLY these cards' Pokémon (decoys tied to a reward),

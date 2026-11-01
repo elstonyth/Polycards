@@ -247,12 +247,20 @@ export const RecentPullSchema = z.looseObject({
   frame_url: z.string().nullable().optional(),
 });
 
+/** A ticket pack's row in that feed: the amount won in place of a card. */
+export const RecentTicketSpinSchema = RecentPullSchema.omit({
+  handle: true,
+  name: true,
+  market_value: true,
+  marketPriceMyr: true,
+}).extend({ tickets: z.number().int().positive() });
+
 /** GET /store/pulls/recent — the feed. `drought` stays unvalidated here: the
  *  getter walks it entry by entry against the known tiers, so one bad counter
  *  costs its own counter, not the feed. Rows drop one at a time; a non-array
  *  `pulls` fails, which is the getter's empty-feed answer. */
 export const RecentPullsPageSchema = z.looseObject({
-  pulls: droppableArray(RecentPullSchema),
+  pulls: droppableArray(z.union([RecentPullSchema, RecentTicketSpinSchema])),
   drought: z.unknown().optional(),
 });
 
@@ -1489,6 +1497,7 @@ export const RecentPollResponseSchema = z.object({
   pulls: z.array(
     pollCard.extend({
       rarity,
+      tickets: z.number().optional(),
       id: z.string(),
       packName: z.string(),
       packIcon: z.string(),
