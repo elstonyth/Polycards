@@ -1037,109 +1037,110 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     describe('publishing', () => {
-      const WINDOW_A = {
-        startsAt: new Date(Date.now() + 10 * HOUR),
-        endsAt: new Date(Date.now() + 20 * HOUR),
-      };
-
-      it('refuses an overlap, naming the clashing event; back-to-back is allowed', async () => {
-        await liveEvent({ ...WINDOW_A, name: 'Event A' });
-
-        const inside = await saveEvent({
-          name: 'Inside',
-          startsAt: new Date(WINDOW_A.startsAt.getTime() + HOUR),
-          endsAt: new Date(WINDOW_A.endsAt.getTime() + HOUR),
+      it('two gates run side by side, each with its own tickets and its own winner', async () => {
+        const soon = await liveEvent({
+          tier: 'economy',
+          endsAt: new Date(Date.now() + 2 * HOUR),
         });
-        await saveCredit(inside.id);
-        await expect(publish(inside.id)).rejects.toMatchObject({
-          type: MedusaError.Types.CONFLICT,
-          message: expect.stringContaining('Event A'),
-        });
+        const later = await liveEvent(
+          { tier: 'first', endsAt: new Date(Date.now() + 10 * HOUR) },
+          (id) => saveCredit(id, 40),
+        );
+        await fund('cus_a', 100);
+        await fund('cus_b', 100);
+        await enterOk('cus_a', soon.id, 30);
+        await enterOk('cus_b', later.id, 7);
+        await enterOk('cus_a', later.id, 1);
+
+        const page = await service.luckyDrawPage();
         expect(
-          (await service.listLuckyDrawEvents({ id: inside.id }))[0].status,
-        ).toBe('draft');
-
-        // Half-open windows: one ends the instant the next starts.
-        const after = await saveEvent({
-          name: 'After',
-          startsAt: WINDOW_A.endsAt,
-          endsAt: new Date(WINDOW_A.endsAt.getTime() + HOUR),
-        });
-        await saveCredit(after.id);
-        await publish(after.id);
-        const before = await saveEvent({
-          name: 'Before',
-          startsAt: new Date(WINDOW_A.startsAt.getTime() - HOUR),
-          endsAt: WINDOW_A.startsAt,
-        });
-        await saveCredit(before.id);
-        await publish(before.id);
-      });
-
-      it('an overlapping event with nothing left to draw does not clash', async () => {
-        const window = {
-          starts_at: new Date(Date.now() - HOUR),
-          ends_at: new Date(Date.now() + 48 * HOUR),
-        };
-        // All cancelled, or all drawn, or withdrawn: nothing left to draw.
-        const cancelled = await oldEvent(window);
-        await oldPrize(cancelled.id, { cancelled_at: new Date() });
-        const drawn = await oldEvent(window);
-        const prize = await oldPrize(drawn.id);
-        await service.drawLuckyDrawPrize({
-          prizeId: prize.id,
-          now: new Date(Date.now() + 2 * HOUR),
-        });
-        const withdrawn = await liveEvent({ name: 'Withdrawn' });
-        await withdraw(withdrawn.id);
-
-        await liveEvent({ name: 'Fine' });
-
-        // One with a prize still to draw does clash, old rule or not.
-        const open = await oldEvent({ ...window, name: 'Old Open' });
-        await oldPrize(open.id);
-        const { id } = await saveEvent({ name: 'Clashing' });
-        await saveCredit(id);
-        await expect(publish(id)).rejects.toMatchObject({
-          type: MedusaError.Types.CONFLICT,
-        });
-      });
-
-      it('two publishes at once cannot both go live', async () => {
-        const a = await saveEvent({ ...WINDOW_A, name: 'Race A' });
-        const b = await saveEvent({ ...WINDOW_A, name: 'Race B' });
-        await saveCredit(a.id);
-        await saveCredit(b.id);
-
-        const results = await Promise.allSettled([
-          publish(a.id),
-          publish(b.id),
+          page.events.map((g) => [
+            g.id,
+            g.tier,
+            g.total_tickets,
+            g.entrant_count,
+          ]),
+        ).toEqual([
+          [soon.id, 'economy', 30, 1],
+          [later.id, 'first', 8, 2],
         ]);
-
-        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        expect(page.events[1].top).toEqual([
+          { customer_id: 'cus_b', tickets: 7 },
+          { customer_id: 'cus_a', tickets: 1 },
+        ]);
+        expect(page.events[1].prizes).toEqual([
+          expect.objectContaining({ kind: 'credit', value_myr: 40 }),
+        ]);
         expect(
-          await service.listLuckyDrawEvents({ status: 'published' }),
+          await service.luckyDrawMyGateTickets('cus_a', [soon.id, later.id]),
+        ).toEqual({ [soon.id]: 30, [later.id]: 1 });
+
+        // The first gate ends: it stays listed until drawn, and only it draws.
+        const at = afterEnd(soon);
+        const ids = async (now: Date) =>
+          (await service.luckyDrawPage({ now })).events.map((g) => g.id);
+        expect(await ids(at)).toEqual([soon.id, later.id]);
+        expect(await service.drawDueLuckyDrawEvents({ now: at })).toEqual({
+          drawn: 1,
+          failed: 0,
+        });
+        const first = await eventResultOf(soon.id);
+        expect(first.winner_customer_id).toBe('cus_a');
+        expect(first.total_tickets).toBe(30);
+        expect(await eventResultOf(later.id)).toBeUndefined();
+        expect(await ids(at)).toEqual([later.id]);
+
+        const end = afterEnd(later);
+        expect(await service.drawDueLuckyDrawEvents({ now: end })).toEqual({
+          drawn: 1,
+          failed: 0,
+        });
+        expect((await eventResultOf(later.id)).total_tickets).toBe(8);
+        expect(await ids(end)).toEqual([]);
+      });
+
+      it('a gate goes live at its publish when that comes after its start', async () => {
+        const startedAgo = new Date(Date.now() - HOUR);
+        const gate = await liveEvent({ startsAt: startedAgo });
+        const [listed] = (await service.luckyDrawPage()).events;
+        expect(listed.id).toBe(gate.id);
+        expect(listed.starts_at).toBe(startedAgo.toISOString());
+        expect(Date.parse(listed.live_at)).toBeGreaterThan(startedAgo.getTime());
+      });
+
+      it('a gate that has not started is not listed yet', async () => {
+        const coming = await liveEvent({
+          startsAt: new Date(Date.now() + HOUR),
+          endsAt: new Date(Date.now() + 5 * HOUR),
+        });
+        expect((await service.luckyDrawPage()).events).toEqual([]);
+        expect(
+          (await service.luckyDrawPage({ now: new Date(coming.starts_at) }))
+            .events,
         ).toHaveLength(1);
       });
 
-      it('re-runs the overlap check when a prize is added to a finished old event', async () => {
-        const old = await oldEvent({
-          name: 'Old Finished',
-          starts_at: new Date(Date.now() - HOUR),
-          ends_at: new Date(Date.now() + 48 * HOUR),
+      it('a gate defaults to economy, and a published one keeps its tier', async () => {
+        const { id } = await saveEvent();
+        expect((await service.listLuckyDrawEvents({ id }))[0].tier).toBe(
+          'economy',
+        );
+        await saveEvent({ id, tier: 'first' });
+        await saveCredit(id);
+        await publish(id);
+        const [event] = await service.listLuckyDrawEvents({ id });
+        expect(event.tier).toBe('first');
+        await expect(
+          saveEvent({
+            id,
+            tier: 'economy',
+            startsAt: new Date(event.starts_at),
+            endsAt: new Date(event.ends_at),
+          }),
+        ).rejects.toMatchObject({
+          type: MedusaError.Types.NOT_ALLOWED,
+          message: expect.stringContaining('tier'),
         });
-        const prize = await oldPrize(old.id);
-        await service.drawLuckyDrawPrize({
-          prizeId: prize.id,
-          now: new Date(Date.now() + 2 * HOUR),
-        });
-        await liveEvent({ name: 'New Live' });
-
-        await expect(saveCredit(old.id)).rejects.toMatchObject({
-          type: MedusaError.Types.CONFLICT,
-          message: expect.stringContaining('New Live'),
-        });
-        expect(await prizesOf(old.id)).toHaveLength(1);
       });
 
       it('converts an existing draft: one winner, every prize at the end, seed on the event', async () => {

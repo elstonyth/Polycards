@@ -2918,9 +2918,13 @@ export interface AdminLuckyDrawPrize {
   } | null;
 }
 
+/** A gate's tier: a label and a player filter, no rule reads it. */
+export type AdminLuckyDrawTier = 'economy' | 'business' | 'first';
+
 export interface AdminLuckyDrawEvent {
   id: string;
   name: string;
+  tier: AdminLuckyDrawTier;
   starts_at: string;
   ends_at: string;
   status: 'draft' | 'published' | 'cancelled';
@@ -2940,6 +2944,7 @@ export interface AdminLuckyDrawEventInput {
   name: string;
   starts_at: string;
   ends_at: string;
+  tier: AdminLuckyDrawTier;
   /** A NEW event only (an edit with prizes is refused): its whole prize pool,
    *  created with it in one transaction. */
   prizes?: AdminLuckyDrawNewPrize[];

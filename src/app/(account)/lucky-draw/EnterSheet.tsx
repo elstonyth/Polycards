@@ -18,9 +18,11 @@ import {
   MAX_ENTRY_TICKETS,
   poolWhen,
   refusalCopy,
+  TIER_LABEL,
   tilePrice,
+  type LuckyDrawTier,
 } from '@/lib/lucky-draw';
-import type { LuckyDrawPrize } from '@/lib/data/schemas';
+import type { LuckyDrawGate, LuckyDrawPrize } from '@/lib/data/schemas';
 import { FramedArt } from './PoolParts';
 import { PrizeArt } from './PrizeCard';
 
@@ -53,6 +55,7 @@ const stepBtn =
 export function EnterSheet({
   prize,
   pot = false,
+  tier = null,
   pool = [],
   closesAt,
   nowMs = null,
@@ -64,8 +67,10 @@ export function EnterSheet({
   prize: EnterTarget;
   /** `prize` is a one-winner event: post to the event's route, not a prize's. */
   pot?: boolean;
+  /** The gate's tier, so the sheet says which gate this is. */
+  tier?: string | null;
   /** Every prize the tickets go in for, hero first (a one-winner event). */
-  pool?: LuckyDrawPrize[];
+  pool?: LuckyDrawGate['prizes'];
   /** When tickets close, so the player sees it before committing. */
   closesAt?: string;
   nowMs?: number | null;
@@ -144,7 +149,8 @@ export function EnterSheet({
             </h2>
             {pot ? (
               <p className="mt-0.5 text-xs text-neutral-400">
-                Each ticket can win the whole pool
+                {tier ? `${TIER_LABEL[tier as LuckyDrawTier]} · ` : ''}Each
+                ticket can win the whole pool
               </p>
             ) : (
               <p className="font-heading mt-0.5 text-lg text-chase tabular-nums">
@@ -191,8 +197,8 @@ export function EnterSheet({
                   pool.length <= 3 ? 'grid-cols-3' : 'grid-cols-4',
                 )}
               >
-                {pool.map((p) => (
-                  <li key={p.id} className="min-w-0">
+                {pool.map((p, i) => (
+                  <li key={i} className="min-w-0">
                     <span className="block aspect-[5/7]">
                       <FramedArt prize={p} eager />
                     </span>

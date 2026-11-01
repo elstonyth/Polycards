@@ -156,6 +156,10 @@ export function ticketsSuffix(tickets: number | null | undefined): string {
   return n > 0 ? ` + ${n} Lucky Draw ticket${n === 1 ? '' : 's'}` : '';
 }
 
+/** A gate's tier, the operator's call on each gate. No rule reads it. */
+export const LUCKY_DRAW_TIERS = ['economy', 'business', 'first'] as const;
+export type LuckyDrawTier = (typeof LUCKY_DRAW_TIERS)[number];
+
 /** Why enterLuckyDraw turned an entry away (a refusal, not an error). */
 export type EnterRefusal =
   'not_found' | 'not_open' | 'closed' | 'not_enough_tickets' | 'no_topup';

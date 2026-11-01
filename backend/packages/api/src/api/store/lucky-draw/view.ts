@@ -4,6 +4,7 @@ import type {
   LuckyDrawEventFacts,
   LuckyDrawEventResultRow,
   LuckyDrawPage,
+  LuckyDrawPageGate,
   LuckyDrawResultRow,
 } from '../../../modules/packs/service';
 import {
@@ -58,6 +59,7 @@ export type ResultView = {
   draw_mode?: 'one_winner';
   event_name?: string;
   prize_count?: number;
+  tier?: LuckyDrawPageGate['tier'];
 };
 
 /** A one_winner draw's outcome. */
@@ -105,7 +107,11 @@ export type ResultDetail = {
   ticket_index: number | null;
 };
 
+/** One running gate, its top list with names. */
+type GateView = Omit<LuckyDrawPageGate, 'top'> & { top: EntryView[] };
+
 type SharedPage = {
+  events: GateView[];
   event: {
     id: string;
     name: string;
@@ -245,6 +251,7 @@ function eventRowView(
     draw_mode: 'one_winner',
     event_name: row.event_name,
     prize_count: row.prizes.length,
+    tier: row.tier,
   };
 }
 
@@ -260,12 +267,14 @@ async function buildSharedPage(
     ]),
     ...(page.event?.top.map((t) => t.customer_id) ?? []),
     page.event?.result?.winner_customer_id,
+    ...page.events.flatMap((g) => g.top.map((t) => t.customer_id)),
   ]);
   const toEntry = (t: { customer_id: string; tickets: number }) => ({
     person: personOf(t.customer_id),
     tickets: t.tickets,
   });
   return {
+    events: page.events.map((g) => ({ ...g, top: g.top.map(toEntry) })),
     next_event: page.next_event,
     event: page.event && {
       ...page.event,
@@ -330,6 +339,20 @@ export async function luckyDrawLive(
   );
 }
 
+/** When the newest running gate went live: the Draw tab's dot. Null with none
+ *  open. From the same cached page, so it says nothing about prizes or entrants. */
+export async function luckyDrawLatestGateAt(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+): Promise<string | null> {
+  const { events } = await sharedPage(req, packs);
+  const open = events
+    .filter((g) => Date.parse(g.ends_at) > Date.now())
+    .map((g) => g.live_at)
+    .sort();
+  return open[open.length - 1] ?? null;
+}
+
 /** The Lucky Draw page for one viewer: the cached shared half plus their own
  *  balance and tickets, read live. */
 export async function luckyDrawPageFor(
@@ -338,6 +361,7 @@ export async function luckyDrawPageFor(
   customerId: string,
 ): Promise<{
   balance: number;
+  events: (GateView & { my_tickets: number })[];
   event: (NonNullable<SharedPage['event']> & { my_tickets: number }) | null;
   prizes: PrizeView[];
   next_event: SharedPage['next_event'];
@@ -354,8 +378,16 @@ export async function luckyDrawPageFor(
     event?.draw_mode === 'one_winner'
       ? await packs.luckyDrawMyEventTickets(customerId, event.id)
       : 0;
+  const myGates = await packs.luckyDrawMyGateTickets(
+    customerId,
+    shared.events.map((g) => g.id),
+  );
   return {
     balance,
+    events: shared.events.map((g) => ({
+      ...g,
+      my_tickets: myGates[g.id] ?? 0,
+    })),
     event: event && { ...event, my_tickets: myEventTickets },
     prizes: shared.prizes.map((p) => ({ ...p, my_tickets: mine[p.id] ?? 0 })),
     next_event: shared.next_event,

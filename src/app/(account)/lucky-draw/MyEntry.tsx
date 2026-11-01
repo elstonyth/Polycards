@@ -5,7 +5,12 @@ import { UnavailablePanel } from '@/components/task-ui';
 import { cn } from '@/lib/utils';
 import { mytClock, mytDate, num } from '@/lib/format';
 import { getMyLuckyDraw } from '@/lib/actions/lucky-draw';
-import { entryChance, POOL_TITLE } from '@/lib/lucky-draw';
+import {
+  entryChance,
+  POOL_TITLE,
+  TIER_LABEL,
+  type LuckyDrawTier,
+} from '@/lib/lucky-draw';
 import type { LuckyDrawMine } from '@/lib/data/schemas';
 import { mytWhen, PrizeArt } from './PrizeCard';
 
@@ -93,6 +98,7 @@ export function MyEntry() {
                     {e.event_id ? POOL_TITLE : e.title}
                   </p>
                   <p className="mt-0.5 text-[11px] text-neutral-400 tabular-nums">
+                    {e.tier ? `${TIER_LABEL[e.tier as LuckyDrawTier]} · ` : ''}
                     {num(e.my_tickets)}{' '}
                     {e.my_tickets === 1 ? 'ticket' : 'tickets'}
                     {chance && ` · ${chance}`} ·{' '}

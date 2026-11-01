@@ -7,7 +7,6 @@ import {
   eventResult,
   potPrizeState,
   prizeLock,
-  publishErrorText,
   showsEventTotals,
   usesOneWinnerView,
   windowProblem,
@@ -59,6 +58,7 @@ const prize = (
 const event = (over: Partial<AdminLuckyDrawEvent> = {}): AdminLuckyDrawEvent => ({
   id: 'ldevt_1',
   name: 'November Lucky Draw',
+  tier: 'economy',
   starts_at: new Date(STARTS).toISOString(),
   ends_at: new Date(ENDS).toISOString(),
   status: 'published',
@@ -293,38 +293,5 @@ describe('windowProblem', () => {
     expect(
       windowProblem({ startsAt: at(NOW - 60_000), endsAt: ok.endsAt }, NOW),
     ).toBeNull();
-  });
-});
-
-describe('publishErrorText', () => {
-  const refusal = (message: string, status: number) =>
-    Object.assign(new Error(message), { status });
-
-  test('a 409 from the route shows its own message, clashing event name included', () => {
-    expect(
-      publishErrorText(
-        refusal('This overlaps “December Lucky Draw”.', 409),
-      ),
-    ).toBe('This overlaps “December Lucky Draw”.');
-  });
-
-  test('Medusa’s swapped CONFLICT text becomes a line an operator can read', () => {
-    expect(
-      publishErrorText(
-        refusal(
-          'The request conflicted with another request. You may retry the request with the provided Idempotency-Key.',
-          409,
-        ),
-      ),
-    ).toMatch(/overlaps another published event/);
-  });
-
-  test('any other refusal keeps its message', () => {
-    expect(
-      publishErrorText(refusal('Add at least one prize before publishing.', 400)),
-    ).toBe('Add at least one prize before publishing.');
-    expect(publishErrorText(new Error('Failed to fetch'))).toBe(
-      'Failed to fetch',
-    );
   });
 });

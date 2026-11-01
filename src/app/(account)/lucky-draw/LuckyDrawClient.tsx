@@ -11,6 +11,7 @@ import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import {
   heroFirst,
   luckyDrawView,
+  pageGates,
   POOL_TITLE,
   rulesCopy,
 } from '@/lib/lucky-draw';
@@ -20,13 +21,14 @@ import {
   getLuckyDrawResult,
 } from '@/lib/actions/lucky-draw';
 import type {
+  LuckyDrawGate,
   LuckyDrawPage,
   LuckyDrawPrize,
   LuckyDrawResultDetail,
 } from '@/lib/data/schemas';
 import { EnterSheet, type Entered, type EnterTarget } from './EnterSheet';
 import { MyEntry } from './MyEntry';
-import { NoPool, potTarget, PotView, UpcomingPool } from './PotView';
+import { gateTarget, GateList, NoPool } from './GateList';
 import { PrizeCard } from './PrizeCard';
 import { PrizeWheel } from './PrizeWheel';
 import { ResultDetail } from './ResultDetail';
@@ -42,12 +44,11 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'mine', label: 'My entry' },
 ];
 
-// The spin moment (spec §10): from a prize's draw time until its result
-// appears (or 5 minutes pass), the cheap per-prize result read is polled —
-// never the whole page — every 5 s plus 0–2 s of jitter, so open tabs do not
-// hit the draw minute in lockstep. One prize per tick, the one polled least
-// recently, so a prize stuck undrawn cannot starve others sharing its draw
-// time. When a prize's window closes without a result, the page is re-read
+// The spin moment (spec §10): from a gate's end until its result appears (or 5
+// minutes pass), the cheap result read is polled — never the whole page — every
+// 5 s plus 0–2 s of jitter, so open tabs do not hit the draw minute in lockstep.
+// One gate per tick, the one polled least recently, so a gate stuck undrawn
+// cannot starve others ending with it. An old per-prize event polls the same way. When a prize's window closes without a result, the page is re-read
 // once, so a tab left open does not say "Drawing…" forever.
 const POLL_MS = 5000;
 const POLL_JITTER_MS = 2000;
@@ -73,8 +74,11 @@ export function LuckyDrawClient({
   const [tab, setTab] = useState<TabKey>('prizes');
   const [nowMs, setNowMs] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // 'pot': the whole event; its target is derived, so a re-read stays current.
-  const [entering, setEntering] = useState<LuckyDrawPrize | 'pot' | null>(null);
+  // An old per-prize event's prize, or a gate by id: its target is derived, so a
+  // re-read stays current.
+  const [entering, setEntering] = useState<
+    LuckyDrawPrize | { gateId: string } | null
+  >(null);
   const [detail, setDetail] = useState<LuckyDrawResultDetail | null>(null);
   const [spins, setSpins] = useState<LuckyDrawResultDetail[]>([]);
   const [playIntro, setPlayIntro] = useState(intro);
@@ -109,19 +113,12 @@ export function LuckyDrawClient({
     const reread = new Set<string>();
     const poll = async () => {
       const now = Date.now();
-      const ev = pageRef.current?.event;
-      // The next pool's start has passed: bring it in, once the backend's 10 s
-      // page cache has had time to turn over, so an open tab goes straight to it.
-      // Not while this pool's result is still due: back to back, the next one
-      // opens as this one ends, and the page must stay to play this one's spin.
-      const awaitingDraw =
-        ev?.draw_mode === 'one_winner' &&
-        !ev.result &&
-        now < Date.parse(ev.ends_at) + POLL_WINDOW_MS;
+      const gates = pageGates(pageRef.current);
+      // The next gate's start has passed: bring it in, once the backend's 10 s
+      // page cache has had time to turn over, so an open tab shows it.
       const next = pageRef.current?.next_event;
       if (
         next &&
-        !awaitingDraw &&
         !reread.has(next.starts_at) &&
         now >= Date.parse(next.starts_at) + TOP_REREAD_MS
       ) {
@@ -130,26 +127,38 @@ export function LuckyDrawClient({
         if (live && fresh) setPage(fresh);
         return;
       }
-      // A one-winner event has one result: its own, read from the event route.
-      // Never the prize routes, whose mirror rows hold no entry list.
-      if (ev?.draw_mode === 'one_winner') {
-        const at = Date.parse(ev.ends_at);
-        if (ev.result || now < at) return;
-        if (now >= at + POLL_WINDOW_MS) {
-          if (reread.has(ev.id)) return;
-          reread.add(ev.id);
+      // A gate has one result: its own, read from the event route. Never the
+      // prize routes, whose mirror rows hold no entry list.
+      if (gates.length > 0) {
+        const ended = gates.filter((g) => now >= Date.parse(g.ends_at));
+        const lapsed = ended.filter(
+          (g) =>
+            !reread.has(g.id) && now >= Date.parse(g.ends_at) + POLL_WINDOW_MS,
+        );
+        if (lapsed.length > 0) {
+          lapsed.forEach((g) => reread.add(g.id));
           const fresh = await getLuckyDraw();
           if (live && fresh) setPage(fresh);
           return;
         }
-        const found = await getLuckyDrawEventResult(ev.id, POOL_TITLE);
+        const due = ended
+          .filter((g) => now < Date.parse(g.ends_at) + POLL_WINDOW_MS)
+          .sort(
+            (a, b) => (polledAt.get(a.id) ?? 0) - (polledAt.get(b.id) ?? 0),
+          )[0];
+        if (!due) return;
+        polledAt.set(due.id, now);
+        const found = await getLuckyDrawEventResult(due.id, POOL_TITLE);
         if (!live || !found) return;
-        setPage((prev) =>
-          prev?.event
-            ? { ...prev, event: { ...prev.event, result: found.result } }
-            : prev,
+        // Drawn: it leaves the list and lives in Results.
+        setPage(
+          (prev) =>
+            prev && {
+              ...prev,
+              events: pageGates(prev).filter((g) => g.id !== due.id),
+            },
         );
-        // No entries: nothing to spin; the panel shows it.
+        // No entries: nothing to spin.
         if (found.ticket_index != null) setSpins((q) => [...q, found]);
         return;
       }
@@ -227,7 +236,8 @@ export function LuckyDrawClient({
   };
 
   const onEntered = (prize: EnterTarget, tickets: number, res: Entered) => {
-    const pot = entering === 'pot';
+    const gateId = entering && 'gateId' in entering ? entering.gateId : null;
+    const pot = gateId !== null;
     setEntering(null);
     setNotice(
       `You’re in — ${num(tickets)} ${tickets === 1 ? 'ticket' : 'tickets'} ${pot ? 'in' : 'on'} ${prize.title}.`,
@@ -239,21 +249,22 @@ export function LuckyDrawClient({
       return;
     }
     if (pot) {
-      setPage((prev) =>
-        prev?.event
-          ? {
-              ...prev,
-              balance,
-              event: {
-                ...prev.event,
-                my_tickets: myTickets,
-                total_tickets: prev.event.total_tickets + tickets,
-                entrant_count:
-                  prev.event.entrant_count +
-                  (prev.event.my_tickets > 0 ? 0 : 1),
-              },
-            }
-          : prev,
+      setPage(
+        (prev) =>
+          prev && {
+            ...prev,
+            balance,
+            events: pageGates(prev).map((g) =>
+              g.id === gateId
+                ? {
+                    ...g,
+                    my_tickets: myTickets,
+                    total_tickets: g.total_tickets + tickets,
+                    entrant_count: g.entrant_count + (g.my_tickets > 0 ? 0 : 1),
+                  }
+                : g,
+            ),
+          },
       );
       // The response cannot place me in the top 10: no ids on the list.
       window.setTimeout(() => {
@@ -284,12 +295,16 @@ export function LuckyDrawClient({
   const balance = page?.balance ?? 0;
   const event = page?.event ?? null;
   const view = luckyDrawView(page, nowMs);
-  const enterTarget =
-    entering !== 'pot'
+  const gates = pageGates(page);
+  const enteringGate: LuckyDrawGate | null =
+    entering && 'gateId' in entering
+      ? (gates.find((g) => g.id === entering.gateId) ?? null)
+      : null;
+  const enterTarget = enteringGate
+    ? gateTarget(enteringGate)
+    : entering && !('gateId' in entering)
       ? entering
-      : event && page
-        ? potTarget(event, page.prizes)
-        : null;
+      : null;
 
   return (
     <div className="pool-wide">
@@ -358,38 +373,20 @@ export function LuckyDrawClient({
           </div>
         ) : !page ? (
           <UnavailablePanel />
-        ) : !event ? (
-          page.next_event ? (
-            <UpcomingPool
-              next={page.next_event}
-              balance={balance}
-              nowMs={nowMs}
-              spinHref={spinHref}
-            />
-          ) : (
-            <NoPool
-              spinHref={spinHref}
-              onSeeResults={() => setTab('results')}
-            />
-          )
+        ) : gates.length > 0 ? (
+          <GateList
+            gates={gates}
+            nowMs={nowMs}
+            balance={balance}
+            spinHref={spinHref}
+            onEnter={(g) => setEntering({ gateId: g.id })}
+          />
+        ) : view !== 'per_prize' || !event ? (
+          <NoPool spinHref={spinHref} onSeeResults={() => setTab('results')} />
         ) : page.prizes.length === 0 ? (
           <p className="text-sm text-neutral-400">
             Prizes for this Lucky Draw are on their way.
           </p>
-        ) : view !== 'per_prize' ? (
-          <PotView
-            page={page}
-            event={event}
-            nowMs={nowMs}
-            drawing={view === 'pot_drawing'}
-            balance={balance}
-            spinHref={spinHref}
-            onEnter={() => setEntering('pot')}
-            onOpenResult={() => void openEventResult(event.id, POOL_TITLE)}
-            onWatch={() =>
-              void openEventResult(event.id, POOL_TITLE, (d) => setSpins([d]))
-            }
-          />
         ) : (
           <div className="mx-auto max-w-4xl">
             {balance <= 0 && (
@@ -439,11 +436,16 @@ export function LuckyDrawClient({
       {enterTarget && (
         <EnterSheet
           prize={enterTarget}
-          pot={entering === 'pot'}
-          pool={heroFirst(page?.prizes ?? [])}
-          closesAt={event?.ends_at}
+          pot={enteringGate !== null}
+          tier={enteringGate?.tier}
+          pool={enteringGate ? heroFirst(enteringGate.prizes) : []}
+          closesAt={enteringGate?.ends_at ?? event?.ends_at}
           nowMs={nowMs}
-          closed={view === 'pot_drawing'}
+          closed={
+            enteringGate !== null &&
+            nowMs != null &&
+            nowMs >= Date.parse(enteringGate.ends_at)
+          }
           balance={balance}
           onClose={() => setEntering(null)}
           onEntered={onEntered}

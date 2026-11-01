@@ -116,10 +116,3 @@ export const windowProblem = (
     : null;
 };
 
-/** A refused publish, for the toast. The route answers an overlap with a 409
- *  naming the clashing event. Should that ever reach Medusa's error handler
- *  instead, its generic CONFLICT text would say nothing useful. */
-export const publishErrorText = (err: Error): string =>
-  err.message.includes('Idempotency-Key')
-    ? 'This event overlaps another published event. Move its window first.'
-    : err.message;

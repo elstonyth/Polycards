@@ -7,6 +7,7 @@ import type {
   AdminLuckyDrawEventInput,
   AdminLuckyDrawPrize,
   AdminLuckyDrawPrizeInput,
+  AdminLuckyDrawTier,
 } from '../../lib/admin-rest';
 import { toIso, toLocalInput } from '../tasks/task-draft';
 
@@ -127,7 +128,15 @@ export interface EventDraft {
   /** datetime-local strings, browser wall clock. */
   startsAt: string;
   endsAt: string;
+  tier: AdminLuckyDrawTier;
 }
+
+/** Cheap and short up to dear and long: the operator picks per gate. */
+export const TIER_LABEL: Record<AdminLuckyDrawTier, string> = {
+  economy: 'Economy',
+  business: 'Business',
+  first: 'First',
+};
 
 // Not asked for: pools run too often to name each one (operator 2026-10-31), and
 // players see every one as the Prize Pool. The column stays required.
@@ -135,6 +144,7 @@ export const blankEventDraft = (): EventDraft => ({
   name: 'Prize Pool',
   startsAt: '',
   endsAt: '',
+  tier: 'economy',
 });
 
 export const eventDraftFrom = (e: AdminLuckyDrawEvent): EventDraft => ({
@@ -142,6 +152,7 @@ export const eventDraftFrom = (e: AdminLuckyDrawEvent): EventDraft => ({
   name: e.name,
   startsAt: toLocalInput(new Date(e.starts_at)),
   endsAt: toLocalInput(new Date(e.ends_at)),
+  tier: e.tier,
 });
 
 /** null when the backend would refuse it. A blank or half-typed time is
@@ -160,6 +171,7 @@ export function eventDraftToPayload(
     name,
     starts_at: startsAt,
     ends_at: endsAt,
+    tier: d.tier,
   };
 }
 

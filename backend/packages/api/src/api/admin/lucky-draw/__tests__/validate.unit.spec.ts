@@ -19,6 +19,14 @@ describe('parseLuckyDrawEvent', () => {
     ...over,
   });
 
+  it('takes a known tier, and leaves it out when none is sent', () => {
+    expect(parseLuckyDrawEvent(body({ tier: 'first' })).tier).toBe('first');
+    expect(parseLuckyDrawEvent(body()).tier).toBeUndefined();
+    expect(invalid(() => parseLuckyDrawEvent(body({ tier: 'gold' })))).toMatchObject(
+      INVALID,
+    );
+  });
+
   it('parses a create and an edit', () => {
     const out = parseLuckyDrawEvent(body({ id: 'ldev_1' }));
     expect(out.id).toBe('ldev_1');

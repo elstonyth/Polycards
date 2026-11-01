@@ -7,6 +7,8 @@
  */
 import type {
   LuckyDrawEventDetail,
+  LuckyDrawGate,
+  LuckyDrawPage,
   LuckyDrawResultDetail,
 } from '@/lib/data/schemas';
 import { mytClock, mytDay, mytDayNumber } from '@/lib/format';
@@ -132,19 +134,93 @@ export function eventResultDetail(
 export const tilePrice = (value: number): number =>
   value >= 1000 ? Math.round(value) : value;
 
-/** How long a pool runs, in a player's words: "24-hour", "3-day", "1-week".
- *  A pool can last a day or a week, and admins often end one a minute short, so
- *  this rounds to the hour first. Null for a window it can't read. */
-export function poolLength(
-  startsAtIso: string,
-  endsAtIso: string | undefined,
-): string | null {
-  const span = Date.parse(endsAtIso ?? '') - Date.parse(startsAtIso);
-  if (!(span > 0)) return null;
-  const hours = Math.max(1, Math.round(span / 3_600_000));
-  if (hours < 48) return `${hours}-hour`;
-  const days = Math.round(hours / 24);
-  return days % 7 === 0 ? `${days / 7}-week` : `${days}-day`;
+/** A gate's tier, set by the operator on each gate (boss 2026-11-01): cheap and
+ *  short, up to dear and long. A label and a filter; it changes no rule. */
+export const LUCKY_DRAW_TIERS = ['economy', 'business', 'first'] as const;
+export type LuckyDrawTier = (typeof LUCKY_DRAW_TIERS)[number];
+
+export const TIER_LABEL: Record<LuckyDrawTier, string> = {
+  economy: 'Economy',
+  business: 'Business',
+  first: 'First',
+};
+
+/** How much pearl veils the foil on a gate's stub, as a hex alpha: the higher
+ *  the class, the more foil shows. Material, not a new colour. */
+export const TIER_VEIL: Record<LuckyDrawTier, string> = {
+  economy: 'd6',
+  business: 'a0',
+  first: '4c',
+};
+
+/** The running gates on a page. A backend still deploying has no `events`: its
+ *  one running one-winner event reads as one gate with no class. */
+export function pageGates(page: LuckyDrawPage | null): LuckyDrawGate[] {
+  if (!page) return [];
+  if (page.events) return page.events;
+  const { event } = page;
+  if (event?.draw_mode !== 'one_winner' || event.result) return [];
+  return [
+    {
+      id: event.id,
+      tier: null,
+      starts_at: event.starts_at,
+      ends_at: event.ends_at,
+      total_tickets: event.total_tickets,
+      entrant_count: event.entrant_count,
+      my_tickets: event.my_tickets,
+      top: event.top,
+      prizes: page.prizes,
+    },
+  ];
+}
+
+/** When a gate went live: its publish can come after its start. */
+const liveAt = (g: { starts_at: string; live_at?: string }): string =>
+  g.live_at ?? g.starts_at;
+
+export const GATE_SORTS = {
+  closing: 'Closing soon',
+  value: 'Biggest prize',
+  newest: 'Newest',
+} as const;
+export type GateSort = keyof typeof GATE_SORTS;
+
+const SORT_ORDER: Record<
+  GateSort,
+  (a: LuckyDrawGate, b: LuckyDrawGate) => number
+> = {
+  closing: (a, b) => Date.parse(a.ends_at) - Date.parse(b.ends_at),
+  value: (a, b) => potTotal(b.prizes) - potTotal(a.prizes),
+  newest: (a, b) => Date.parse(liveAt(b)) - Date.parse(liveAt(a)),
+};
+
+/** Gates in showing order: a gate new since the last visit on top, then the
+ *  chosen sort. The soonest draw leads by default (boss 2026-11-01). */
+export function sortGates(
+  gates: LuckyDrawGate[],
+  sort: GateSort,
+  newIds: ReadonlySet<string>,
+): LuckyDrawGate[] {
+  return [...gates].sort(
+    (a, b) =>
+      Number(newIds.has(b.id)) - Number(newIds.has(a.id)) ||
+      SORT_ORDER[sort](a, b) ||
+      (a.id < b.id ? -1 : 1),
+  );
+}
+
+/** The gates that went live after the last visit. A first visit has nothing to
+ *  compare with, so nothing is new: every gate marked NEW would mean nothing. */
+export function newGateIds(
+  gates: { id: string; starts_at: string; live_at?: string }[],
+  seenAt: string | null,
+): Set<string> {
+  const seen = seenAt ? Date.parse(seenAt) : NaN;
+  if (Number.isNaN(seen)) return new Set();
+  return new Set(
+    gates.filter((g) => Date.parse(liveAt(g)) > seen).map((g) => g.id),
+  );
 }
 
 const NEAR_DAYS: Record<number, string> = {
@@ -377,4 +453,5 @@ export const holoConic = `conic-gradient(from var(--holo-turn, 0deg), ${[...HOLO
  *  see its middle, so this one slides its light across instead. Under a pearl
  *  veil, as on the ticket art: at full strength a whole surface of it reads as
  *  candy, and it is meant to be a premium card's shimmer. */
-export const holoSheet = `linear-gradient(${HOLO_STOPS[3]}a0, ${HOLO_STOPS[3]}a0), linear-gradient(calc(115deg + var(--holo-turn, 0deg)), ${HOLO_STOPS.join(', ')})`;
+export const holoSheet = (veil = 'a0') =>
+  `linear-gradient(${HOLO_STOPS[3]}${veil}, ${HOLO_STOPS[3]}${veil}), linear-gradient(calc(115deg + var(--holo-turn, 0deg)), ${HOLO_STOPS.join(', ')})`;

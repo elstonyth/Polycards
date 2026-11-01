@@ -43,6 +43,7 @@ const prize = (
 const event = (over: Partial<AdminLuckyDrawEvent> = {}): AdminLuckyDrawEvent => ({
   id: 'ldevt_1',
   name: 'November Lucky Draw',
+  tier: 'economy',
   starts_at: '2026-11-01T00:00:00.000Z',
   ends_at: '2026-11-30T12:00:00.000Z',
   status: 'draft',
@@ -248,7 +249,14 @@ describe('event drafts', () => {
       name: 'November Lucky Draw',
       starts_at: e.starts_at,
       ends_at: e.ends_at,
+      tier: 'economy',
     });
+  });
+
+  test('the tier makes the trip, and a new event starts at economy', () => {
+    const e = event({ tier: 'first' });
+    expect(eventDraftToPayload(eventDraftFrom(e))?.tier).toBe('first');
+    expect(blankEventDraft().tier).toBe('economy');
   });
 
   test('a new event needs no name typed: it is the Prize Pool', () => {

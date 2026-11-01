@@ -943,35 +943,33 @@
         transparent 11.5px
       );
   }
-  /* The pass stands on its side on a desktop, so it tears top to bottom. */
-  @media (min-width: 64rem) {
-    .pool-perf-split {
-      width: 0;
-      height: auto;
-    }
-    .pool-perf-split::before {
-      inset: 16px auto 16px -3px;
-      width: 6px;
-      height: auto;
-      background-size: 6px 13px;
-      background-repeat: no-repeat round;
-    }
-    .pool-perf-split::after {
-      inset: 0 auto 0 -11px;
-      width: 22px;
-      height: auto;
-      background:
-        radial-gradient(
-          circle at 50% 0,
-          var(--background) 11px,
-          transparent 11.5px
-        ),
-        radial-gradient(
-          circle at 50% 100%,
-          var(--background) 11px,
-          transparent 11.5px
-        );
-    }
+  /* A gate tears top to bottom, on a phone as on a desktop. */
+  .pool-perf-split {
+    width: 0;
+    height: auto;
+  }
+  .pool-perf-split::before {
+    inset: 16px auto 16px -3px;
+    width: 6px;
+    height: auto;
+    background-size: 6px 13px;
+    background-repeat: no-repeat round;
+  }
+  .pool-perf-split::after {
+    inset: 0 auto 0 -11px;
+    width: 22px;
+    height: auto;
+    background:
+      radial-gradient(
+        circle at 50% 0,
+        var(--background) 11px,
+        transparent 11.5px
+      ),
+      radial-gradient(
+        circle at 50% 100%,
+        var(--background) 11px,
+        transparent 11.5px
+      );
   }
   .pool-float {
     animation: pool-float 5s ease-in-out infinite;

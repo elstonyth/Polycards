@@ -390,3 +390,44 @@ describe('LuckyDrawMineSchema', () => {
     expect(r.entries[0]?.image).toBeNull();
   });
 });
+
+describe('LuckyDrawPageSchema events', () => {
+  const page = (events: unknown) =>
+    LuckyDrawPageSchema.parse({
+      balance: 5,
+      event: null,
+      prizes: [],
+      next_event: null,
+      events,
+    });
+  const gate = {
+    id: 'ldev_1',
+    tier: 'first',
+    starts_at: '2026-11-01T00:00:00.000Z',
+    ends_at: '2026-11-02T00:00:00.000Z',
+    total_tickets: 9,
+    entrant_count: 2,
+    my_tickets: 1,
+    top: [],
+    prizes: [{ kind: 'card', title: 'A', image: null, value_myr: 10 }],
+  };
+
+  it('reads every running gate', () => {
+    expect(page([gate]).events?.[0]).toMatchObject({
+      id: 'ldev_1',
+      tier: 'first',
+    });
+  });
+
+  it('never guesses a tier it does not know', () => {
+    expect(page([{ ...gate, tier: 'gold' }]).events?.[0]?.tier).toBeNull();
+  });
+
+  it('drops an unreadable gate alone', () => {
+    expect(page([gate, { id: 'broken' }]).events).toHaveLength(1);
+  });
+
+  it('is undefined on a backend still deploying, for pageGates to fall back', () => {
+    expect(page(undefined).events).toBeUndefined();
+  });
+});

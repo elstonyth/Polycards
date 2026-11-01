@@ -28,7 +28,7 @@ export type UnreadDot = {
 // of chrome fan-out.
 const REFETCH_TTL_MS = 30_000;
 
-function readStamp(scope: DotScope, customerId: string): string | null {
+export function readStamp(scope: DotScope, customerId: string): string | null {
   try {
     return window.localStorage.getItem(seenKey(scope, customerId));
   } catch {

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useDrawDot } from './DrawDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { openGames } from './games';
 import { TABS, isTabActive } from './tabs';
@@ -18,6 +19,7 @@ export default function TabBar() {
   const pathname = usePathname();
   const { customer, isLoading } = useAuth();
   const { show: vaultDot } = useVaultDot();
+  const { show: drawDot } = useDrawDot();
   // Leaving a game plays the game exit (PageTransition); other moves fade.
   const inGame = TABS.some((t) => t.opens && isTabActive(t, pathname));
 
@@ -32,13 +34,17 @@ export default function TabBar() {
         {TABS.map((tab) => {
           const active = isTabActive(tab, pathname);
           const Icon = tab.icon;
-          // The vault's "new CARDS" dot is the only one left: the Me tab's
-          // balance-movement dot (credits) was retired 2026-08-11 along with
-          // its /me History tile — the operator did not want /transactions
+          // The vault's "new CARDS" dot and the Draw tab's "new gate" dot: the
+          // Me tab's balance-movement dot (credits) was retired 2026-08-11 along
+          // with its /me History tile — the operator did not want /transactions
           // announcing itself. Kept in step with AppHeader, which renders the
           // same destinations on lg+.
           const dotLabel =
-            tab.href === '/vault' && vaultDot ? 'new items' : null;
+            tab.href === '/vault' && vaultDot
+              ? 'new items'
+              : tab.href === '/lucky-draw' && drawDot
+                ? 'new gate'
+                : null;
           const className = cn(
             'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 transition-colors',
             active

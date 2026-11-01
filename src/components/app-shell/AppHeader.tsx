@@ -13,6 +13,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import NotificationBell from '@/components/NotificationBell';
 import { Pill } from '@/components/ui/pill';
 import { useTopUp } from './TopUpProvider';
+import { useDrawDot } from './DrawDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { openGames } from './games';
 import { TABS, isTabActive } from './tabs';
@@ -31,6 +32,7 @@ export default function AppHeader() {
   const { muted, toggleMuted } = useSound();
   const { balance, openTopUp } = useTopUp();
   const { show: vaultDot } = useVaultDot();
+  const { show: drawDot } = useDrawDot();
   // A pack open or a sell-back moves this number; counting to the new figure
   // (and tinting money-in green for a beat) is what tells the customer the
   // action landed. Snaps under reduced motion; the tint still fires.
@@ -83,13 +85,17 @@ export default function AppHeader() {
             {TABS.map((tab) => {
               const active = isTabActive(tab, pathname);
               const Icon = tab.icon;
-              // The vault's "new CARDS" dot is the only one left: the Me tab's
-              // balance-movement dot (credits) was retired 2026-08-11 with its
-              // /me History tile — the operator did not want /transactions
-              // announcing itself. Mirrors TabBar, which renders the same
-              // destinations below lg.
+              // The vault's "new CARDS" dot and the Draw tab's "new gate" dot:
+              // the Me tab's balance-movement dot (credits) was retired
+              // 2026-08-11 with its /me History tile — the operator did not want
+              // /transactions announcing itself. Mirrors TabBar, which renders
+              // the same destinations below lg.
               const dotLabel =
-                tab.href === '/vault' && vaultDot ? 'new items' : null;
+                tab.href === '/vault' && vaultDot
+                  ? 'new items'
+                  : tab.href === '/lucky-draw' && drawDot
+                    ? 'new gate'
+                    : null;
               const className = cn(
                 'flex h-10 items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
                 active

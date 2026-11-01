@@ -30,6 +30,7 @@ import { PrizeEditor } from './prize-editor';
 import { ReasonPrompt } from './reason-prompt';
 import { TicketLookup } from './ticket-lookup';
 import {
+  TIER_LABEL,
   blankEventDraft,
   blankPrizeDraft,
   eventDraftFrom,
@@ -49,7 +50,6 @@ import {
   eventResult,
   potPrizeState,
   prizeLock,
-  publishErrorText,
   showsEventTotals,
   usesOneWinnerView,
   type EventPhase,
@@ -462,6 +462,7 @@ const LuckyDrawPage = () => {
             <Table.Header>
               <Table.Row>
                 <Table.HeaderCell>Event</Table.HeaderCell>
+                <Table.HeaderCell>Tier</Table.HeaderCell>
                 <Table.HeaderCell>Runs</Table.HeaderCell>
                 <Table.HeaderCell>Status</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">Prizes</Table.HeaderCell>
@@ -542,6 +543,7 @@ const LuckyDrawPage = () => {
                         {e.name}
                       </button>
                     </Table.Cell>
+                    <Table.Cell>{TIER_LABEL[e.tier]}</Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
                       {whenLabel(e.starts_at)} → {whenLabel(e.ends_at)}
                     </Table.Cell>
@@ -748,7 +750,7 @@ const LuckyDrawPage = () => {
                   toast.success('Event published.');
                   setPublishing(false);
                 },
-                onError: (e) => toast.error(publishErrorText(e)),
+                onError: (e) => toast.error(e.message),
               },
             )
           }

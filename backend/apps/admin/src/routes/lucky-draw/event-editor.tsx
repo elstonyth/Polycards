@@ -1,10 +1,14 @@
 import { useState } from 'react';
-import { Button, Drawer, Input, Text, toast } from '@medusajs/ui';
+import { Button, Drawer, Input, Select, Text, toast } from '@medusajs/ui';
 import { useSaveLuckyDrawEvent } from '../../lib/queries';
 import { Field, Section } from '../../components/form-bits';
 import { CreditPrizeRows } from './credit-prize-rows';
 import { InventoryPicker } from './inventory-picker';
-import { eventDraftToPayload, type EventDraft } from './lucky-draw-draft';
+import {
+  eventDraftToPayload,
+  TIER_LABEL,
+  type EventDraft,
+} from './lucky-draw-draft';
 import { windowProblem } from './one-winner';
 import {
   MAX_NEW_EVENT_PRIZES,
@@ -74,6 +78,29 @@ export const EventEditor = ({
           <Drawer.Title>{draft.id ? 'Edit event' : 'New event'}</Drawer.Title>
         </Drawer.Header>
         <Drawer.Body className="flex flex-col gap-5 overflow-y-auto">
+          <Field
+            label="Tier"
+            hint="Printed on the ticket, and what players filter by."
+            className="w-56"
+          >
+            <Select
+              value={draft.tier}
+              onValueChange={(tier) =>
+                onChange({ ...draft, tier: tier as EventDraft['tier'] })
+              }
+            >
+              <Select.Trigger>
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {Object.entries(TIER_LABEL).map(([value, label]) => (
+                  <Select.Item key={value} value={value}>
+                    {label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
+          </Field>
           <div className="flex flex-wrap gap-4">
             <Field label="Starts" htmlFor="ld-event-starts" className="w-56">
               <Input
@@ -95,8 +122,8 @@ export const EventEditor = ({
             </Field>
           </div>
           <Text size="small" className="text-ui-fg-subtle -mt-3">
-            Your browser’s time zone. Malaysia time is UTC+8. Only one event
-            runs at a time; one can start the moment another ends.
+            Your browser’s time zone. Malaysia time is UTC+8. Any number of
+            events can run at the same time.
           </Text>
           {windowBad && (
             <Text size="small" className="text-ui-fg-error -mt-3">

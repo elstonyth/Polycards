@@ -102,6 +102,17 @@ medusaIntegrationTestRunner({
     };
 
     describe('ticket spin and one-winner schema', () => {
+      it('gives every gate a tier, and only a known one', async () => {
+        expect(await isNullable('lucky_draw_event', 'tier')).toBe('NO');
+        const [event] = await service().createLuckyDrawEvents([eventInput()]);
+        expect(event.tier).toBe('economy');
+        await expect(
+          db().raw("UPDATE lucky_draw_event SET tier = 'gold' WHERE id = ?", [
+            event.id,
+          ]),
+        ).rejects.toThrow(/lucky_draw_event_tier_check/);
+      });
+
       it('both migrations built their tables, indexes and CHECKs', async () => {
         const { rows: indexes } = await db().raw(
           'SELECT indexname, indexdef FROM pg_indexes WHERE indexname = ANY(?)',

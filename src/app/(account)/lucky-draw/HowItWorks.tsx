@@ -38,14 +38,11 @@ export function HowItWorks({
   className?: string;
 }) {
   return (
-    <section aria-labelledby="pool-how" className={className}>
-      <h2
-        id="pool-how"
-        className="font-heading text-[22px] leading-tight text-white"
-      >
+    <details className={cn('group', className)}>
+      <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-neutral-300">
         How it works
-      </h2>
-      <ol className="mt-4 lg:grid lg:grid-cols-4 lg:gap-6">
+      </summary>
+      <ol className="mt-2 lg:grid lg:grid-cols-4 lg:gap-6">
         {STEPS.map((s, i) => {
           const now = s.stage === at;
           return (
@@ -99,12 +96,9 @@ export function HowItWorks({
           );
         })}
       </ol>
-      <details className="group mt-5 text-xs text-neutral-400">
-        <summary className="cursor-pointer py-1 font-semibold text-neutral-300">
-          Full rules
-        </summary>
-        <p className="mt-2 leading-relaxed">{rulesCopy('one_winner')}</p>
-      </details>
-    </section>
+      <p className="mt-5 text-xs leading-relaxed text-neutral-400">
+        {rulesCopy('one_winner')}
+      </p>
+    </details>
   );
 }
