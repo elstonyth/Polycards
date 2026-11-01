@@ -221,6 +221,14 @@ medusaIntegrationTestRunner({
           { person: expect.objectContaining({ who: 'Bo' }), tickets: 15 },
         ]);
         expect(open.data.next_event).toBeNull();
+        expect(open.data.events).toEqual([
+          expect.objectContaining({
+            id: event.id,
+            tier: 'economy',
+            my_tickets: 35,
+            total_tickets: 50,
+          }),
+        ]);
         expect(open.data.prizes.map((p: { title: string }) => p.title)).toEqual(
           ['The card', 'RM 25', 'RM 10.50'],
         );
@@ -331,6 +339,8 @@ medusaIntegrationTestRunner({
           total_tickets: 51,
         });
         expect(drawn.data.event.total_tickets).toBe(51);
+        // Drawn: off the list, in Results.
+        expect(drawn.data.events).toEqual([]);
         const refused = await enter(
           event.id,
           { tickets: 1 },
@@ -362,6 +372,7 @@ medusaIntegrationTestRunner({
           draw_mode: 'one_winner',
           event_name: 'November Pot',
           prize_count: 3,
+          tier: 'economy',
         });
         expect(feed.data.next_before).toBeNull();
 
@@ -372,6 +383,7 @@ medusaIntegrationTestRunner({
           {
             prize_id: event.id,
             event_id: event.id,
+            tier: 'economy',
             title: 'November Pot',
             image: '/cdn/ldow-card.webp',
             my_tickets: 35,
@@ -411,47 +423,51 @@ medusaIntegrationTestRunner({
         expect(late.status).toBe(400);
       });
 
-      it('answers an overlapping publish with a 409 naming the clash', async () => {
-        await publishPot({ name: 'Live Pot' });
-        const clash = await adminPost('/admin/lucky-draw/events', {
-          name: 'Clashing Pot',
+      it('runs two gates at once over the routes', async () => {
+        const first = await publishPot({ tier: 'first' });
+        const second = await publishPot({
+          tier: 'economy',
+          ends_at: new Date(Date.now() + 2 * HOUR).toISOString(),
+        });
+        await fund(ada.id, 100);
+        await enter(first.id, { tickets: 9 }, authed(ada.token));
+
+        clearLuckyDrawCache();
+        const page = await get('/store/lucky-draw', authed(ada.token));
+        expect(page.status).toBe(200);
+        expect(
+          page.data.events.map(
+            (g: {
+              id: string;
+              tier: string;
+              my_tickets: number;
+              total_tickets: number;
+            }) => [g.id, g.tier, g.my_tickets, g.total_tickets],
+          ),
+        ).toEqual([
+          [second.id, 'economy', 0, 0],
+          [first.id, 'first', 9, 9],
+        ]);
+        expect(page.data.events[1].top).toEqual([
+          { person: expect.objectContaining({ who: 'Ada' }), tickets: 9 },
+        ]);
+        expect(allKeys(page.data.events)).not.toContain('customer_id');
+        expect(allKeys(page.data.events)).not.toContain('seed_nonce');
+
+        const status = await get('/store/lucky-draw-status', storeHeaders);
+        expect(status.data).toEqual({
+          live: true,
+          latest_gate_at: expect.any(String),
+        });
+
+        const bad = await adminPost('/admin/lucky-draw/events', {
+          name: 'Bad tier',
           starts_at: new Date(Date.now() - HOUR).toISOString(),
           ends_at: new Date(Date.now() + HOUR).toISOString(),
-          reason: 'ldow test',
-          prizes: [{ kind: 'credit', credit_myr: 5, title: 'RM 5', sort: 0 }],
-        });
-        const res = await adminPost(
-          `/admin/lucky-draw/events/${clash.data.id}/publish`,
-          { reason: 'go live' },
-        );
-        expect(res.status).toBe(409);
-        expect(res.data).toEqual({
-          type: 'conflict',
-          message: expect.stringContaining('Live Pot'),
-        });
-      });
-
-      it('answers a prize added to a finished old event with the same 409', async () => {
-        const [old] = await packs.createLuckyDrawEvents([
-          {
-            name: 'Finished Old',
-            starts_at: new Date(Date.now() - HOUR),
-            ends_at: new Date(Date.now() + 48 * HOUR),
-            status: 'published',
-            created_by: 'user_t',
-          },
-        ]);
-        await publishPot({ name: 'New Pot' });
-        const res = await adminPost('/admin/lucky-draw/prizes', {
-          event_id: old.id,
-          kind: 'credit',
-          credit_myr: 5,
-          title: 'Woken up',
-          sort: 0,
+          tier: 'gold',
           reason: 'ldow test',
         });
-        expect(res.status).toBe(409);
-        expect(res.data.message).toContain('New Pot');
+        expect(bad.status).toBe(400);
       });
 
       it('lists entrants, withdraws with refunds, and the view follows', async () => {

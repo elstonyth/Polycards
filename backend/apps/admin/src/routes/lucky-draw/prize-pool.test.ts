@@ -63,6 +63,7 @@ const draft: EventDraft = {
   name: 'December Lucky Draw',
   startsAt: '2026-12-01T00:00',
   endsAt: '2026-12-31T23:00',
+  tier: 'business',
 };
 
 describe('prizeCards', () => {
@@ -234,6 +235,7 @@ describe('newEventPayload', () => {
     );
     expect(payload).toEqual({
       name: 'December Lucky Draw',
+      tier: 'business',
       starts_at: toIso(draft.startsAt),
       ends_at: toIso(draft.endsAt),
       prizes: [

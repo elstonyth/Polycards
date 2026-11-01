@@ -9,6 +9,7 @@ import TabBar from '@/components/app-shell/TabBar';
 import { GamesSheet } from '@/components/app-shell/GamesSheet';
 import { CreditDotProvider } from '@/components/app-shell/CreditDotProvider';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
+import { DrawDotProvider } from '@/components/app-shell/DrawDotProvider';
 import { VaultDotProvider } from '@/components/app-shell/VaultDotProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import { SoundProvider } from '@/lib/use-sound';
@@ -101,31 +102,33 @@ export default async function RootLayout({
           <AuthProvider>
             <CreditDotProvider>
               <TopUpProvider>
-                <VaultDotProvider>
-                  <SkipLink />
-                  <AppHeader />
-                  <main id="main" className="flex-1 pb-12 lg:pb-8">
-                    {/* Referral-link landing. Client-only by design — reads the
+                <DrawDotProvider>
+                  <VaultDotProvider>
+                    <SkipLink />
+                    <AppHeader />
+                    <main id="main" className="flex-1 pb-12 lg:pb-8">
+                      {/* Referral-link landing. Client-only by design — reads the
                       ?invite param from window.location so the ISR-cached home
                       page stays visitor-agnostic. */}
-                    <InviteWelcome />
-                    {children}
-                  </main>
-                  {/* Footer carries the TabBar clearance (pb-28) on phones. */}
-                  <SiteFooter />
-                  <TabBar />
-                  <GamesSheet />
-                  {/* Site-wide free-pack badge; /slots renders its own copy from
+                      <InviteWelcome />
+                      {children}
+                    </main>
+                    {/* Footer carries the TabBar clearance (pb-28) on phones. */}
+                    <SiteFooter />
+                    <TabBar />
+                    <GamesSheet />
+                    {/* Site-wide free-pack badge; /slots renders its own copy from
                     server state, so the global one skips that route. */}
-                  <GlobalFreePackBadge />
-                  <TelegramBanner />
-                  {/* Admin-uploaded promo popup, once per MYT day. Fetches its
+                    <GlobalFreePackBadge />
+                    <TelegramBanner />
+                    {/* Admin-uploaded promo popup, once per MYT day. Fetches its
                     own data client-side (/api/announcements), so the static
                     pages stay static; waits for the cookie-consent answer like
                     the badge and banner. */}
-                  <AnnouncementPopup />
-                  <CookieConsent />
-                </VaultDotProvider>
+                    <AnnouncementPopup />
+                    <CookieConsent />
+                  </VaultDotProvider>
+                </DrawDotProvider>
               </TopUpProvider>
             </CreditDotProvider>
           </AuthProvider>

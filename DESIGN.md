@@ -352,44 +352,41 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
 **Draw** tab (2026-10-30; it sat under Games from 2026-10-25, under Task before that).
 
 - **Tabs** — Pool · Results · My entry, the leaderboard's segmented pill. Results
-  is every pool on the platform; My entry is the pools this account joined, each
-  with its tickets, its chance and how it ended (the balance lives in the title
+  is every gate on the platform; My entry is the gates this account joined, each
+  with its tier, tickets, chance and how it ended (the balance lives in the title
   row and the Vault).
-- **The pool pass** (`PoolPass`, redesigned 2026-10-31; one winner takes the
-  whole event) — a pool is a pass cut like the ticket art, because the page must
-  not read as the homepage (no fanned slabs, no giant money headline, no 01/02/03
-  strip). The pearl foil stub carries the time in ink: status, the pool's length
-  ("24-hour pool", "3-day pool", "1-week pool"), the clock and its two date
-  fields. It tears, with holes and two notches cut through to the page, into a
-  dark half with "Prize Pool" (pools have no names of their own, operator
-  2026-10-31), the total in Chase Gold, every prize, and the
-  player's ledger. Stands on its side on a desktop. One white pill, docked over
-  the tab bar like the pack page's buy bar and set into the stub on a desktop:
-  Put tickets in, or Earn tickets at zero. Prizes are never something to pick: a
-  tap only zooms the card, and tickets go on the pool. Once tickets close the
-  stub goes plain grey; after the draw it carries the winner.
-- **Any screen** (`.pool-wide`, measured 2026-10-31 from a 280px folded phone to
-  a 3440px monitor) — the page breaks out of the account column from 640px up:
-  the screen's width less a growing gutter, capped at 96rem, so prizes grow with
-  the screen instead of shrinking. The stub is 30% of the pass on a desktop. A
-  one-row shelf is also held to the window's height (`100dvh - 26rem`), so a
-  1366x650 laptop still has everything on its first screen. Clock digits size
-  from the clock's own width (`cqw`). Two variants handle height: `squat` (short
-  upright phones) keeps only the closing date, `short` (a phone on its side) puts
-  the title and tabs in one row and undocks the action. Set into the stub, the
-  action is sticky, so it is never below the fold. The wide desktop prints the
-  player's ledger on the stub. Results and My entry keep a 56rem column.
-- **Any length** — a pool can run a day or a week, so the page never assumes a
-  month. Under a day the clock drops its Days column and its digits grow; dates
-  read Today / Tomorrow / Yesterday, then "Sat 7 Nov".
-- **Shelf** (`PoolShelf`) — every prize with its picture and price: two or four
-  sit in pairs on a phone, others in threes; four across as a preview in Next pool.
-- **Next pool** — a smaller plain pass with the length, opening time, total
-  and shelf, on every state. With nothing running the pool pass itself shows it,
-  the clock counting to its start.
-- **Enter sheet** — shows the whole pool (every prize, total, closing time)
+- **The gate ticket** (`GateTicket`, 2026-11-01, boss's spec: many draws run at
+  once) — each running gate is one pass, cut like the ticket art and torn top to
+  bottom on every screen, so a phone holds the same object a desktop does. The
+  foil stub on the left carries the tier, the clock and the one action in ink;
+  the dark half carries "Prize Pool" (gates have no names of their own), the total
+  in Chase Gold, the prizes, and the player's tickets, chance and Players. One
+  ticket fits whole between the page's controls and the tab bar from 320x568 up,
+  with the next one showing below it (boss: "看得完"). No docked bar: with many
+  gates the action belongs to its ticket.
+- **Tier by foil, not colour** — Economy, Business and First (the operator picks per
+  gate: cheap and short up to dear and long) differ by how much pearl veils the
+  foil, from nearly pearl to full shimmer, and by the word on the stub. No new
+  hue, and grey still means only one thing: tickets have closed.
+- **Filter and sort** — tier chips for the tiers running now and a sort button
+  under the tabs, only with two or more gates. The soonest draw leads by default; the sort is the phone's
+  own picker.
+- **New gate** — a gate that went live since the last visit lights a dot on the
+  Draw tab, sits on top marked NEW for that visit, then falls back to the default
+  sort. A first visit marks nothing: every gate marked new would mean nothing.
+- **Prizes** — one prize stands alone; more swipe sideways, the pack page's Top
+  Hits rail. A tap only zooms the card, and tickets go on the gate.
+- **Players** — the count is a button, opening a sheet with the top 10. The list
+  is not on the page.
+- **After the end** — the stub goes plain grey and says the gate is closed until
+  the draw lands; a drawn gate leaves the list for Results. Gates that have not
+  started are not shown.
+- **Any screen** (`.pool-wide`) — the page breaks out of the account column from
+  640px up. Tickets sit in one column up to `lg`, then as many as fit at 34rem or
+  more, so a lone gate takes the row; clock digits size from the stub's own width (`cqw`).
+- **Enter sheet** — shows the whole gate (tier, every prize, total, closing time)
   above the stepper, never one card.
-- **How it works** — four steps on a line, the current one marked Now by where
+- **How it works** — folded under the list, four steps on a line, the current one marked Now by where
   the pool is, then the small print under a disclosure.
 - **Old-rule prize card** — kept for any event published before one-winner:
   charcoal card, the prize on a 5:7 pedestal, draw time, top 10, white Enter pill.

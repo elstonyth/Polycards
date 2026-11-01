@@ -139,6 +139,7 @@ import {
 } from './odds-sets';
 import {
   LUCKY_DRAW_PULL_PACK_ID,
+  type LuckyDrawTier,
   MAX_PRIZE_CREDIT_MYR,
   aggregateEntries,
   commitDrawSeed,
@@ -913,6 +914,7 @@ export interface LuckyDrawOutcome {
 export type AdminLuckyDrawEvent = {
   id: string;
   name: string;
+  tier: LuckyDrawTier;
   starts_at: string;
   ends_at: string;
   status: 'draft' | 'published' | 'cancelled';
@@ -987,6 +989,7 @@ export type LuckyDrawEventFacts = {
 export type LuckyDrawEventResultRow = LuckyDrawEventFacts & {
   event_id: string;
   event_name: string;
+  tier: LuckyDrawTier;
   /** The pot's picture and its RM total. */
   image: string | null;
   value_myr: number;
@@ -999,7 +1002,35 @@ export type LuckyDrawEventResultRow = LuckyDrawEventFacts & {
   }[];
 };
 
+/** One running gate on the player page: tickets go on it, one winner takes its
+ *  prizes. Raw customer ids: the route resolves names. */
+export type LuckyDrawPageGate = {
+  id: string;
+  tier: LuckyDrawTier;
+  starts_at: string;
+  ends_at: string;
+  /** When players could first see it: its start, or its publish if that came
+   *  later (a gate drafted with a start already past). What "new" goes by. */
+  live_at: string;
+  /** The commitment made at publish: public before any entry, so the revealed
+   *  seed can be checked against it. Never the nonce. */
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
+  /** Most tickets first. */
+  top: { customer_id: string; tickets: number }[];
+  prizes: {
+    kind: string;
+    title: string;
+    image: string | null;
+    value_myr: number;
+  }[];
+};
+
 export type LuckyDrawPage = {
+  /** Every running gate, soonest end first. `event`, `prizes` and `next_event`
+   *  keep the one-pool shape for a storefront still deploying. */
+  events: LuckyDrawPageGate[];
   event: {
     id: string;
     name: string;
@@ -1041,6 +1072,7 @@ export type LuckyDrawMine = {
     status: 'open' | 'won' | 'lost' | 'cancelled';
     /** Set on a one_winner row, where prize_id is the event id. */
     event_id?: string;
+    tier?: LuckyDrawTier;
     /** One_winner rows only: every ticket in the pool, for "my chance". */
     total_tickets?: number;
   }[];
@@ -1229,14 +1261,6 @@ const LUCKY_DRAW_EVENT_RESULT_FIELDS = [
   'seed',
   'drawn_at',
 ];
-/** SQL over an event aliased `e`: it has a live prize with no result. A one_winner
- *  draw writes a result per prize, so this reads the same for both modes. */
-const LUCKY_DRAW_LEFT_TO_DRAW_SQL =
-  'EXISTS (SELECT 1 FROM lucky_draw_prize p WHERE p.event_id = e.id ' +
-  'AND p.cancelled_at IS NULL AND p.deleted_at IS NULL AND NOT EXISTS (' +
-  'SELECT 1 FROM lucky_draw_result r ' +
-  'WHERE r.prize_id = p.id AND r.deleted_at IS NULL))';
-
 /** RM value and picture of a prize for the player routes: a credit prize is its
  *  amount; a card prize is the card's current value (0 if the card is gone).
  *  The picture is the prize's own, else the card's slab, else its scan. */
@@ -6901,6 +6925,7 @@ class PacksModuleService extends MedusaService({
       name: string;
       startsAt: Date;
       endsAt: Date;
+      tier?: LuckyDrawTier;
       adminId: string;
       reason: string;
     },
@@ -6938,11 +6963,12 @@ class PacksModuleService extends MedusaService({
     if (
       existing?.status === 'published' &&
       (new Date(existing.starts_at).getTime() !== startsAt ||
-        new Date(existing.ends_at).getTime() !== endsAt)
+        new Date(existing.ends_at).getTime() !== endsAt ||
+        (input.tier !== undefined && input.tier !== existing.tier))
     ) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        'A published event can only be renamed — its window is fixed.',
+        'A published event can only be renamed — its window and tier are fixed.',
       );
     }
 
@@ -6950,6 +6976,7 @@ class PacksModuleService extends MedusaService({
       name,
       starts_at: input.startsAt,
       ends_at: input.endsAt,
+      ...(input.tier === undefined ? {} : { tier: input.tier }),
     };
     const iso = (d: unknown) => new Date(d as Date).toISOString();
     let id = existing?.id;
@@ -6995,12 +7022,14 @@ class PacksModuleService extends MedusaService({
               name: existing.name,
               starts_at: iso(existing.starts_at),
               ends_at: iso(existing.ends_at),
+              tier: existing.tier,
             }
           : null,
         after: {
           name,
           starts_at: iso(data.starts_at),
           ends_at: iso(data.ends_at),
+          tier: input.tier ?? existing?.tier ?? 'economy',
         },
         reason: input.reason,
       },
@@ -7133,11 +7162,6 @@ class PacksModuleService extends MedusaService({
     // Committed before any write, so a missing secret leaves nothing behind.
     const commit =
       perPrize && !existing ? commitDrawSeed(requireDrawSeedSecret()) : null;
-    // A finished old event with a new prize is live again: it must not end up
-    // beside a one_winner event published in the meantime.
-    if (perPrize && !existing) {
-      await this.assertNoLuckyDrawOverlap(event, sharedContext);
-    }
 
     const fields = { ...shape, draw_at: drawAt };
     let id = existing?.id;
@@ -7185,6 +7209,7 @@ class PacksModuleService extends MedusaService({
       name: string;
       startsAt: Date;
       endsAt: Date;
+      tier?: LuckyDrawTier;
       prizes: LuckyDrawPrizeCreateInput[];
       adminId: string;
       reason: string;
@@ -7221,6 +7246,7 @@ class PacksModuleService extends MedusaService({
         name: input.name,
         startsAt: input.startsAt,
         endsAt: input.endsAt,
+        tier: input.tier,
         adminId: input.adminId,
         reason: input.reason,
       },
@@ -7265,40 +7291,6 @@ class PacksModuleService extends MedusaService({
     const missing = wanted.find((h) => !have.has(h));
     if (missing !== undefined) {
       luckyDrawInvalid(`Card '${missing}' does not exist.`);
-    }
-  }
-
-  // A published event's window must not overlap another event with something
-  // left to draw. Half-open windows, so back-to-back events do not clash. The
-  // global lock is held to commit, so two publishes cannot both pass. CONFLICT
-  // names the clash; the routes answer it, because Medusa swaps a CONFLICT's
-  // message for a generic one. Lock order: luckydrawevent:, luckydraw:<eventId>,
-  // this one, credit:, tickets:.
-  private async assertNoLuckyDrawOverlap(
-    event: { id: string; starts_at: Date | string; ends_at: Date | string },
-    sharedContext: Context,
-  ): Promise<void> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      'luckydraw:publish',
-    ]);
-    const [clash] = await em.execute<{ name: string }[]>(
-      "SELECT e.name FROM lucky_draw_event e WHERE e.status = 'published' " +
-        'AND e.deleted_at IS NULL AND e.id <> ? ' +
-        'AND e.starts_at < ?::timestamptz AND e.ends_at > ?::timestamptz ' +
-        `AND ${LUCKY_DRAW_LEFT_TO_DRAW_SQL} ` +
-        'ORDER BY e.starts_at ASC, e.id ASC LIMIT 1',
-      [
-        event.id,
-        new Date(event.ends_at).toISOString(),
-        new Date(event.starts_at).toISOString(),
-      ],
-    );
-    if (clash) {
-      throw new MedusaError(
-        MedusaError.Types.CONFLICT,
-        `This event overlaps "${clash.name}", which still has a prize to draw. Move its window first.`,
-      );
     }
   }
 
@@ -7357,7 +7349,6 @@ class PacksModuleService extends MedusaService({
       );
     }
     const commit = commitDrawSeed(requireDrawSeedSecret());
-    await this.assertNoLuckyDrawOverlap(event, sharedContext);
     await this.updateLuckyDrawPrizes(
       {
         selector: { event_id: event.id },
@@ -8282,6 +8273,7 @@ class PacksModuleService extends MedusaService({
     return events.map((e) => ({
       id: e.id,
       name: e.name,
+      tier: e.tier,
       starts_at: iso(e.starts_at),
       ends_at: iso(e.ends_at),
       status: e.status,
@@ -8515,6 +8507,96 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // The running gates: published one_winner events that have started and have no
+  // result yet, soonest end first. One that has ended waits here for its draw. One
+  // query per kind of row, however many gates run. The player page's list.
+  // shortcut: LIMIT 100 — far more gates than a customer can read at once; page it
+  // if the operator ever runs anywhere near that many together.
+  private async luckyDrawRunningGates(
+    now: number,
+    sharedContext: Context,
+  ): Promise<LuckyDrawPageGate[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      {
+        id: string;
+        tier: LuckyDrawTier;
+        starts_at: Date;
+        ends_at: Date;
+        live_at: Date;
+        seed_hash: string | null;
+      }[]
+    >(
+      // A published event's row only changes on a rename, so updated_at is its
+      // publish; the draw, prize saves and entries never touch it.
+      'SELECT e.id, e.tier, e.starts_at, e.ends_at, e.seed_hash, ' +
+        'GREATEST(e.starts_at, e.updated_at) AS live_at ' +
+        'FROM lucky_draw_event e ' +
+        "WHERE e.status = 'published' AND e.draw_mode = 'one_winner' " +
+        'AND e.deleted_at IS NULL AND e.starts_at <= ?::timestamptz ' +
+        'AND NOT EXISTS (SELECT 1 FROM lucky_draw_event_result r ' +
+        'WHERE r.event_id = e.id AND r.deleted_at IS NULL) ' +
+        'ORDER BY e.ends_at ASC, e.id ASC LIMIT 100',
+      [new Date(now).toISOString()],
+    );
+    if (rows.length === 0) return [];
+    const ids = rows.map((r) => r.id);
+    const prizes = (
+      await pageAll(
+        (opts) =>
+          this.listLuckyDrawPrizes(
+            { event_id: ids },
+            { ...opts, select: [...LUCKY_DRAW_PRIZE_FIELDS] },
+            sharedContext,
+          ),
+        { sort: 'ASC', id: 'ASC' },
+      )
+    ).filter((p) => !p.cancelled_at);
+    const cards = await this.luckyDrawCards(prizes, sharedContext);
+    const sums = await this.luckyDrawEntrySums(ids, sharedContext, 'event_id');
+    const topRows = await em.execute<
+      { event_id: string; customer_id: string; tickets: string | number }[]
+    >(
+      'SELECT event_id, customer_id, tickets FROM (' +
+        'SELECT event_id, customer_id, SUM(tickets) AS tickets, ' +
+        'ROW_NUMBER() OVER (PARTITION BY event_id ' +
+        'ORDER BY SUM(tickets) DESC, customer_id ASC) AS rn ' +
+        'FROM lucky_draw_entry ' +
+        `WHERE event_id IN (${ids.map(() => '?').join(', ')}) ` +
+        'AND deleted_at IS NULL GROUP BY event_id, customer_id' +
+        ') ranked WHERE rn <= ? ORDER BY event_id, rn',
+      [...ids, LUCKY_DRAW_TOP_ENTRANTS],
+    );
+    return rows.flatMap((r) => {
+      const own = prizes.filter((p) => p.event_id === r.id);
+      if (own.length === 0) return [];
+      return [
+        {
+          id: r.id,
+          tier: r.tier,
+          starts_at: new Date(r.starts_at).toISOString(),
+          ends_at: new Date(r.ends_at).toISOString(),
+          live_at: new Date(r.live_at).toISOString(),
+          seed_hash: r.seed_hash,
+          total_tickets: sums.get(r.id)?.total_tickets ?? 0,
+          entrant_count: sums.get(r.id)?.entrant_count ?? 0,
+          top: topRows
+            .filter((t) => t.event_id === r.id)
+            .map((t) => ({
+              customer_id: t.customer_id,
+              tickets: Number(t.tickets),
+            })),
+          prizes: own.map((p) => ({
+            kind: p.kind,
+            title: p.title,
+            ...luckyDrawShown(p, cards),
+          })),
+        },
+      ];
+    });
+  }
+
   // The player page's shared part: the running event with something left to draw
   // (so a fully drawn event can never hide a live one), else the latest event that
   // was drawn or ended within 7 days (either needs a prize that is not cancelled),
@@ -8534,6 +8616,7 @@ class PacksModuleService extends MedusaService({
     const at = (d: unknown) => new Date(d as Date).getTime();
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    const gates = await this.luckyDrawRunningGates(now, sharedContext);
     const published = await this.listLuckyDrawEvents(
       { status: 'published' },
       { order: { starts_at: 'DESC', id: 'DESC' }, take: 50 },
@@ -8588,7 +8671,7 @@ class PacksModuleService extends MedusaService({
     const next_event = next
       ? await this.luckyDrawNextEvent(next, sharedContext)
       : null;
-    if (!event) return { event: null, prizes: [], next_event };
+    if (!event) return { events: gates, event: null, prizes: [], next_event };
 
     const prizes = (
       await pageAll(
@@ -8686,6 +8769,7 @@ class PacksModuleService extends MedusaService({
     }
 
     return {
+      events: gates,
       next_event,
       event: {
         id: event.id,
@@ -8764,6 +8848,28 @@ class PacksModuleService extends MedusaService({
       [customerId, eventId],
     );
     return Number(rows[0]?.tickets ?? 0);
+  }
+
+  // The viewer's own tickets on each of the given gates (absent = 0).
+  @InjectManager()
+  async luckyDrawMyGateTickets(
+    customerId: string,
+    eventIds: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Record<string, number>> {
+    if (eventIds.length === 0) return {};
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      { event_id: string; tickets: string | number }[]
+    >(
+      'SELECT event_id, COALESCE(SUM(tickets), 0) AS tickets ' +
+        'FROM lucky_draw_entry WHERE customer_id = ? ' +
+        `AND event_id IN (${eventIds.map(() => '?').join(', ')}) ` +
+        'AND deleted_at IS NULL GROUP BY event_id',
+      [customerId, ...eventIds],
+    );
+    return Object.fromEntries(rows.map((r) => [r.event_id, Number(r.tickets)]));
   }
 
   // The event a card still has to be paid from: the name of a published event
@@ -8905,7 +9011,7 @@ class PacksModuleService extends MedusaService({
     const drawn = results.map((r) => r.event_id);
     const events = await this.listLuckyDrawEvents(
       { id: drawn },
-      { select: ['id', 'name', 'seed_hash'], take: drawn.length },
+      { select: ['id', 'name', 'seed_hash', 'tier'], take: drawn.length },
       sharedContext,
     );
     const eventById = new Map(events.map((e) => [e.id, e]));
@@ -8937,6 +9043,7 @@ class PacksModuleService extends MedusaService({
           ...luckyDrawEventFacts(r, event.seed_hash),
           event_id: r.event_id,
           event_name: event.name,
+          tier: event.tier,
           image: luckyDrawPotImage(pot),
           // In sen: 0.1 + 0.2 must not print a float tail.
           value_myr:
@@ -9055,7 +9162,7 @@ class PacksModuleService extends MedusaService({
       ? await pageAll((opts) =>
           this.listLuckyDrawEvents(
             { id: eventIds },
-            { ...opts, select: ['id', 'name', 'ends_at', 'status'] },
+            { ...opts, select: ['id', 'name', 'ends_at', 'status', 'tier'] },
             sharedContext,
           ),
         )
@@ -9119,6 +9226,7 @@ class PacksModuleService extends MedusaService({
       return {
         prize_id: e.id,
         event_id: e.id,
+        tier: e.tier,
         title: e.name,
         // A withdrawn event's prizes are all cancelled: it still has a face.
         image: luckyDrawPotImage(

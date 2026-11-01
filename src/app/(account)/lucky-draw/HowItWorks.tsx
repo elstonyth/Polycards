@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { holoConic, rulesCopy } from '@/lib/lucky-draw';
 
@@ -38,14 +39,15 @@ export function HowItWorks({
   className?: string;
 }) {
   return (
-    <section aria-labelledby="pool-how" className={className}>
-      <h2
-        id="pool-how"
-        className="font-heading text-[22px] leading-tight text-white"
-      >
+    <details className={cn('group', className)}>
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 text-sm font-semibold text-neutral-300 [&::-webkit-details-marker]:hidden">
         How it works
-      </h2>
-      <ol className="mt-4 lg:grid lg:grid-cols-4 lg:gap-6">
+        <ChevronDown
+          className="h-4 w-4 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+          aria-hidden
+        />
+      </summary>
+      <ol className="mt-2 lg:grid lg:grid-cols-4 lg:gap-6">
         {STEPS.map((s, i) => {
           const now = s.stage === at;
           return (
@@ -99,12 +101,9 @@ export function HowItWorks({
           );
         })}
       </ol>
-      <details className="group mt-5 text-xs text-neutral-400">
-        <summary className="cursor-pointer py-1 font-semibold text-neutral-300">
-          Full rules
-        </summary>
-        <p className="mt-2 leading-relaxed">{rulesCopy('one_winner')}</p>
-      </details>
-    </section>
+      <p className="mt-5 text-xs leading-relaxed text-neutral-400">
+        {rulesCopy('one_winner')}
+      </p>
+    </details>
   );
 }

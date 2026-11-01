@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const vaultDot = { show: false };
 const creditDot = { show: false };
+const drawDot = { show: false };
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/' }));
 vi.mock('@/components/auth/AuthProvider', () => ({
@@ -18,6 +19,9 @@ vi.mock('@/components/auth/AuthProvider', () => ({
 vi.mock('@/components/AuthButton', () => ({ openAuth: vi.fn() }));
 vi.mock('../VaultDotProvider', () => ({
   useVaultDot: () => vaultDot,
+}));
+vi.mock('../DrawDotProvider', () => ({
+  useDrawDot: () => drawDot,
 }));
 // TabBar no longer imports this — keep the mock anyway. It is what makes a
 // re-added Me-tab dot fail LEGIBLY (labelFor('/me') becomes non-null) instead
@@ -38,6 +42,7 @@ let root: Root;
 beforeEach(() => {
   vaultDot.show = false;
   creditDot.show = false;
+  drawDot.show = false;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -77,6 +82,15 @@ describe('TabBar dots', () => {
     expect(labelFor('/vault')).toBe('Vault, new items');
     expect(labelFor('/me')).toBeNull();
     expect(labelFor('/')).toBeNull();
+  });
+
+  test('the draw dot lands on /lucky-draw and nowhere else', async () => {
+    drawDot.show = true;
+    await render();
+
+    expect(labelFor('/lucky-draw')).toBe('Draw, new gate');
+    expect(labelFor('/vault')).toBeNull();
+    expect(labelFor('/me')).toBeNull();
   });
 
   // The Me tab's balance-movement dot was retired 2026-08-11 with the /me

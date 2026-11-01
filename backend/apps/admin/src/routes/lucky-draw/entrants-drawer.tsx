@@ -8,6 +8,7 @@ import {
   type AdminLuckyDrawPrize,
 } from '../../lib/queries';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { eventLabel } from './lucky-draw-draft';
 import { eventResult } from './one-winner';
 
 /** Who entered, most tickets first. The API returns customer ids only, so each
@@ -148,7 +149,7 @@ export const EventEntrantsDrawer = ({
       data={data}
       isLoading={isLoading}
       isError={isError}
-      title={event.name}
+      title={eventLabel(event)}
       emptyText="Nobody has entered this event."
       refundNote={
         event.status === 'cancelled'

@@ -13,14 +13,17 @@ import {
   heroPrize,
   landingAngle,
   luckyDrawView,
+  mergeFreshGates,
   nextDraw,
+  newGateIds,
+  pageGates,
   poolDay,
-  poolLength,
   poolWhen,
   potTotal,
   refusalCopy,
   rulesCopy,
   segmentAt,
+  sortGates,
   ticketRanges,
   tilePrice,
   wheelSegments,
@@ -36,41 +39,246 @@ describe('tilePrice', () => {
   });
 });
 
-describe('poolLength', () => {
-  const start = '2026-11-05T13:00:00.000Z';
-  const after = (hours: number) =>
-    new Date(Date.parse(start) + hours * 3_600_000).toISOString();
+describe('pageGates', () => {
+  const gate = { id: 'g1', tier: 'first', starts_at: 'a', ends_at: 'b' };
+  const event = {
+    id: 'ev',
+    name: 'x',
+    starts_at: 's',
+    ends_at: 'e',
+    draw_mode: 'one_winner',
+    seed_hash: null,
+    total_tickets: 9,
+    entrant_count: 2,
+    my_tickets: 1,
+    top: [],
+    result: null,
+  };
+  const page = (over: object) =>
+    ({
+      balance: 0,
+      event: null,
+      prizes: [],
+      next_event: null,
+      ...over,
+    }) as never;
 
-  it('says hours under two days', () => {
-    expect(poolLength(start, after(12))).toBe('12-hour');
-    expect(poolLength(start, after(24))).toBe('24-hour');
-    expect(poolLength(start, after(36))).toBe('36-hour');
+  it('reads the running gates when the backend sends them', () => {
+    expect(pageGates(page({ events: [gate] }))).toEqual([gate]);
+    expect(pageGates(page({ events: [], event }))).toEqual([]);
   });
 
-  it('says days from two days up', () => {
-    expect(poolLength(start, after(48))).toBe('2-day');
-    expect(poolLength(start, after(72))).toBe('3-day');
-    expect(poolLength(start, after(240))).toBe('10-day');
+  it("turns an older backend's one running event into one gate with no class", () => {
+    const prizes = [{ id: 'p', title: 'P', value_myr: 5 }];
+    expect(pageGates(page({ event, prizes }))).toEqual([
+      {
+        id: 'ev',
+        tier: null,
+        starts_at: 's',
+        ends_at: 'e',
+        total_tickets: 9,
+        entrant_count: 2,
+        my_tickets: 1,
+        top: [],
+        prizes,
+      },
+    ]);
   });
 
-  it('says weeks for whole weeks', () => {
-    expect(poolLength(start, after(168))).toBe('1-week');
-    expect(poolLength(start, after(336))).toBe('2-week');
-  });
-
-  it('rounds a window that ends a minute short, as admins set them', () => {
+  it('has no gate for no page, an old per-prize event or a drawn one', () => {
+    expect(pageGates(null)).toEqual([]);
     expect(
-      poolLength('2026-11-05T16:00:00.000Z', '2026-11-08T15:59:00.000Z'),
-    ).toBe('3-day');
-    expect(
-      poolLength('2026-11-05T16:00:00.000Z', '2026-11-06T15:59:00.000Z'),
-    ).toBe('24-hour');
+      pageGates(page({ event: { ...event, draw_mode: 'per_prize' } })),
+    ).toEqual([]);
+    expect(pageGates(page({ event: { ...event, result: {} } }))).toEqual([]);
+  });
+});
+
+describe('sortGates', () => {
+  const gate = (id: string, ends: number, starts: number, value: number) =>
+    ({
+      id,
+      ends_at: new Date(ends).toISOString(),
+      starts_at: new Date(starts).toISOString(),
+      prizes: [{ value_myr: value }],
+    }) as never;
+  const a = gate('a', 3000, 100, 5);
+  const b = gate('b', 1000, 200, 50);
+  const c = gate('c', 2000, 300, 500);
+  const ids = (list: { id: string }[]) => list.map((g) => g.id);
+
+  it('leads with the soonest draw by default', () => {
+    expect(ids(sortGates([a, b, c], 'closing', new Set()))).toEqual([
+      'b',
+      'c',
+      'a',
+    ]);
   });
 
-  it('has nothing to say about an unreadable or empty window', () => {
-    expect(poolLength('nope', start)).toBeNull();
-    expect(poolLength(start, undefined)).toBeNull();
-    expect(poolLength(start, start)).toBeNull();
+  it('sorts by the biggest pot, or the newest', () => {
+    expect(ids(sortGates([a, b, c], 'value', new Set()))).toEqual([
+      'c',
+      'b',
+      'a',
+    ]);
+    expect(ids(sortGates([a, b, c], 'newest', new Set()))).toEqual([
+      'c',
+      'b',
+      'a',
+    ]);
+  });
+
+  it('puts a new gate on top, whatever the sort', () => {
+    expect(ids(sortGates([a, b, c], 'closing', new Set(['a'])))).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(ids(sortGates([a, b, c], 'value', new Set(['a'])))).toEqual([
+      'a',
+      'c',
+      'b',
+    ]);
+  });
+
+  it('does not reorder the list it was given', () => {
+    const list = [a, b, c];
+    sortGates(list, 'closing', new Set());
+    expect(ids(list)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('mergeFreshGates', () => {
+  const END = Date.parse('2026-11-01T12:00:00.000Z');
+  const WINDOW = 5 * 60_000;
+  const gate = (id: string, over: object = {}) => ({
+    id,
+    tier: 'first',
+    starts_at: '2026-11-01T00:00:00.000Z',
+    ends_at: new Date(END).toISOString(),
+    total_tickets: 1,
+    ...over,
+  });
+  const page = (events: object[], over: object = {}) =>
+    ({
+      balance: 0,
+      event: null,
+      prizes: [],
+      next_event: null,
+      events,
+      ...over,
+    }) as never;
+  const ids = (p: { events?: { id: string }[] }) => p.events?.map((g) => g.id);
+
+  it('takes the fresh numbers for a gate both reads list', () => {
+    const merged = mergeFreshGates(
+      page([gate('a')]),
+      page([gate('a', { total_tickets: 9 })], { balance: 5 }),
+      new Set(),
+      END - 1000,
+      WINDOW,
+    );
+    expect(merged.balance).toBe(5);
+    expect(merged.events?.[0]?.total_tickets).toBe(9);
+  });
+
+  it('keeps a gate that ended with its result unread, so its spin still plays', () => {
+    const merged = mergeFreshGates(
+      page([
+        gate('drawn'),
+        gate('live', { ends_at: '2026-11-02T00:00:00.000Z' }),
+      ]),
+      page([gate('live', { ends_at: '2026-11-02T00:00:00.000Z' })]),
+      new Set(),
+      END + 3000,
+      WINDOW,
+    );
+    expect(ids(merged)).toEqual(['live', 'drawn']);
+  });
+
+  it('never brings back a gate this tab closed, even from a stale read', () => {
+    const merged = mergeFreshGates(
+      page([]),
+      page([gate('drawn')]),
+      new Set(['drawn']),
+      END + 6000,
+      WINDOW,
+    );
+    expect(ids(merged)).toEqual([]);
+  });
+
+  it('lets go once the polling window is over, and of a gate still running', () => {
+    expect(
+      ids(
+        mergeFreshGates(
+          page([gate('late')]),
+          page([]),
+          new Set(),
+          END + WINDOW,
+          WINDOW,
+        ),
+      ),
+    ).toEqual([]);
+    // Not ended and gone from the read: withdrawn.
+    expect(
+      ids(
+        mergeFreshGates(
+          page([gate('withdrawn')]),
+          page([]),
+          new Set(),
+          END - 1000,
+          WINDOW,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("reads an older backend's one event as its gate", () => {
+    const event = {
+      id: 'ev',
+      name: 'x',
+      starts_at: 's',
+      ends_at: new Date(END + 1000).toISOString(),
+      draw_mode: 'one_winner',
+      seed_hash: null,
+      total_tickets: 2,
+      entrant_count: 1,
+      my_tickets: 0,
+      top: [],
+      result: null,
+    };
+    const fresh = { balance: 0, event, prizes: [], next_event: null } as never;
+    expect(ids(mergeFreshGates(null, fresh, new Set(), END, WINDOW))).toEqual([
+      'ev',
+    ]);
+  });
+});
+
+describe('newGateIds', () => {
+  const gates = [
+    { id: 'a', starts_at: '2026-11-01T10:00:00.000Z' },
+    { id: 'b', starts_at: '2026-11-02T10:00:00.000Z' },
+  ];
+
+  it('names the gates that went live after the last visit', () => {
+    expect([...newGateIds(gates, '2026-11-01T12:00:00.000Z')]).toEqual(['b']);
+    expect([...newGateIds(gates, '2026-11-03T00:00:00.000Z')]).toEqual([]);
+  });
+
+  it('goes by when it went live, not when it was set to start', () => {
+    const late = [
+      {
+        id: 'c',
+        starts_at: '2026-11-01T10:00:00.000Z',
+        live_at: '2026-11-01T13:00:00.000Z',
+      },
+    ];
+    expect([...newGateIds(late, '2026-11-01T12:00:00.000Z')]).toEqual(['c']);
+  });
+
+  it('marks nothing new on a first visit, or on an unreadable stamp', () => {
+    expect(newGateIds(gates, null).size).toBe(0);
+    expect(newGateIds(gates, 'garbage').size).toBe(0);
   });
 });
 

@@ -18,9 +18,11 @@ import {
   MAX_ENTRY_TICKETS,
   poolWhen,
   refusalCopy,
+  TIER_LABEL,
   tilePrice,
+  type LuckyDrawTier,
 } from '@/lib/lucky-draw';
-import type { LuckyDrawPrize } from '@/lib/data/schemas';
+import type { LuckyDrawGate, LuckyDrawPrize } from '@/lib/data/schemas';
 import { FramedArt } from './PoolParts';
 import { PrizeArt } from './PrizeCard';
 
@@ -53,6 +55,7 @@ const stepBtn =
 export function EnterSheet({
   prize,
   pot = false,
+  tier = null,
   pool = [],
   closesAt,
   nowMs = null,
@@ -64,8 +67,10 @@ export function EnterSheet({
   prize: EnterTarget;
   /** `prize` is a one-winner event: post to the event's route, not a prize's. */
   pot?: boolean;
+  /** The gate's tier, so the sheet says which gate this is. */
+  tier?: string | null;
   /** Every prize the tickets go in for, hero first (a one-winner event). */
-  pool?: LuckyDrawPrize[];
+  pool?: LuckyDrawGate['prizes'];
   /** When tickets close, so the player sees it before committing. */
   closesAt?: string;
   nowMs?: number | null;
@@ -144,7 +149,8 @@ export function EnterSheet({
             </h2>
             {pot ? (
               <p className="mt-0.5 text-xs text-neutral-400">
-                Each ticket can win the whole pool
+                {tier ? `${TIER_LABEL[tier as LuckyDrawTier]} · ` : ''}Each
+                ticket can win the whole pool
               </p>
             ) : (
               <p className="font-heading mt-0.5 text-lg text-chase tabular-nums">
@@ -191,8 +197,8 @@ export function EnterSheet({
                   pool.length <= 3 ? 'grid-cols-3' : 'grid-cols-4',
                 )}
               >
-                {pool.map((p) => (
-                  <li key={p.id} className="min-w-0">
+                {pool.map((p, i) => (
+                  <li key={i} className="min-w-0">
                     <span className="block aspect-[5/7]">
                       <FramedArt prize={p} eager />
                     </span>
@@ -284,36 +290,41 @@ export function EnterSheet({
                 : 'Entries are final — tickets on a prize can’t be taken back.'}
             </p>
 
-            {error && (
-              <div role="alert" className="mt-3 text-sm text-red-400">
-                <p>{error.text}</p>
-                {error.topUp && (
-                  <Link
-                    href="/wallet"
-                    className={cn(
-                      pillVariants({ variant: 'secondary', size: 'sm' }),
-                      'mt-2',
-                    )}
-                  >
-                    Top up
-                  </Link>
-                )}
-              </div>
-            )}
-
-            {/* Stays on screen when a short phone has to scroll the sheet. */}
-            <Pill
-              size="lg"
-              className="sticky bottom-0 mt-4 w-full short:mt-3"
-              disabled={pending || !valid || closed}
-              onClick={confirm}
-            >
-              {closed
-                ? 'Gate is closed'
-                : pending
-                  ? 'Entering…'
-                  : `${pot ? 'Put in' : 'Enter'} ${num(amount)} ${amount === 1 ? 'ticket' : 'tickets'}`}
-            </Pill>
+            {/* Stays on screen when a short phone has to scroll the sheet, and a
+                refusal with it: the way out of no_topup must not sit behind it. */}
+            <div className="sticky bottom-0 mt-4 short:mt-3">
+              {error && (
+                <div
+                  role="alert"
+                  className="mb-2 rounded-xl border border-white/10 bg-neutral-900 p-3 text-sm text-red-400"
+                >
+                  <p>{error.text}</p>
+                  {error.topUp && (
+                    <Link
+                      href="/wallet"
+                      className={cn(
+                        pillVariants({ variant: 'secondary', size: 'sm' }),
+                        'mt-2',
+                      )}
+                    >
+                      Top up
+                    </Link>
+                  )}
+                </div>
+              )}
+              <Pill
+                size="lg"
+                className="w-full"
+                disabled={pending || !valid || closed}
+                onClick={confirm}
+              >
+                {closed
+                  ? 'Gate is closed'
+                  : pending
+                    ? 'Entering…'
+                    : `${pot ? 'Put in' : 'Enter'} ${num(amount)} ${amount === 1 ? 'ticket' : 'tickets'}`}
+              </Pill>
+            </div>
           </div>
         </div>
       </div>

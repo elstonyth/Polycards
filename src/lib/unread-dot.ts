@@ -4,7 +4,7 @@
 // localStorage.
 
 /** Which dot a stamp belongs to. One key namespace per surface. */
-export type DotScope = 'vault' | 'credits';
+export type DotScope = 'vault' | 'credits' | 'draw';
 
 /**
  * localStorage key holding a customer's last-seen stamp for one dot.

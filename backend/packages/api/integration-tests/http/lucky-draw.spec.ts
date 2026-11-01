@@ -849,6 +849,7 @@ medusaIntegrationTestRunner({
           expect(none.status).toBe(200);
           expect(none.data).toEqual({
             balance: 0,
+            events: [],
             event: null,
             prizes: [],
             next_event: null,

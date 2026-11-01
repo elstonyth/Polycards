@@ -5,7 +5,12 @@ import { Pill } from '@/components/ui/pill';
 import { UnavailablePanel } from '@/components/task-ui';
 import { num } from '@/lib/format';
 import { getLuckyDrawResults } from '@/lib/actions/lucky-draw';
-import { eventRowId, POOL_TITLE } from '@/lib/lucky-draw';
+import {
+  eventRowId,
+  POOL_TITLE,
+  TIER_LABEL,
+  type LuckyDrawTier,
+} from '@/lib/lucky-draw';
 import type { LuckyDrawResult } from '@/lib/data/schemas';
 import { mytWhen, PersonChip, PrizeArt } from './PrizeCard';
 
@@ -104,6 +109,7 @@ export function ResultsList({
                     </span>
                   )}
                   <span className="mt-1 block text-[11px] text-neutral-400 tabular-nums">
+                    {r.tier ? `${TIER_LABEL[r.tier as LuckyDrawTier]} · ` : ''}
                     {eventId && r.prize_count != null
                       ? `${num(r.prize_count)} ${r.prize_count === 1 ? 'prize' : 'prizes'} · `
                       : ''}

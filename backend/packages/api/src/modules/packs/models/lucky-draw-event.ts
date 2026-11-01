@@ -22,6 +22,9 @@ export const LuckyDrawEvent = model.define('lucky_draw_event', {
   draw_mode: model.enum(['per_prize', 'one_winner']).default('per_prize'),
   seed_nonce: model.text().nullable(),
   seed_hash: model.text().nullable(),
+  // The gate's tier (boss 2026-11-01): the operator's call on each gate, cheap
+  // and short up to dear and long. A label and a player filter; no rule reads it.
+  tier: model.enum(['economy', 'business', 'first']).default('economy'),
 });
 
 export default LuckyDrawEvent;
