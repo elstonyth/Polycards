@@ -76,6 +76,15 @@ export function milestoneWorth(
   return worth + ticketsExtra(t.tickets);
 }
 
+/** What a check-in day still pays, in words. Several tasks can share a day, and
+ *  any of them may be the one paying tickets. */
+export function dayWorth(
+  tasks: Pick<TaskEntry, 'reward' | 'tickets' | 'claimed'>[],
+): string {
+  const open = tasks.filter((t) => !t.claimed);
+  return (open.length > 0 ? open : tasks).map(milestoneWorth).join(' and ');
+}
+
 /** The line shown once a claim lands (spec 2026-10-15 §3): bonus credit is
  *  for packs only; a prize card ships for a fee or sells back withdrawable. A
  *  free rip normally hands the player to the slot instead; one that could not

@@ -11,6 +11,17 @@ describe('ticketPackHref', () => {
     ).toBe('/slots?category=poly');
   });
 
+  it('skips a sold-out ticket pack', () => {
+    const soldOut = { prizeType: 'tickets', inStock: false } as const;
+    expect(ticketPackHref([{ id: 'poly', packs: [soldOut] }])).toBeNull();
+    expect(
+      ticketPackHref([
+        { id: 'poly', packs: [soldOut] },
+        { id: 'promo', packs: [{ prizeType: 'tickets' }] },
+      ]),
+    ).toBe('/slots?category=promo');
+  });
+
   it('is null with no ticket pack on sale', () => {
     expect(
       ticketPackHref([

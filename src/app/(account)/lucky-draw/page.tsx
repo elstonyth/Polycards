@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { getLuckyDraw } from '@/lib/actions/lucky-draw';
 import { getPackCategories } from '@/lib/data/packs';
-import { ticketPackHref } from '@/lib/packs-data';
+import { ticketPackHref, type PackCategory } from '@/lib/packs-data';
 import { LuckyDrawClient } from './LuckyDrawClient';
 
 export const metadata: Metadata = {
@@ -9,6 +9,17 @@ export const metadata: Metadata = {
   description:
     'Put your tickets in the Lucky Draw and watch the wheel. Every draw is checkable.',
 };
+
+// The capsule link is optional and the catalog is memoised, so its first read
+// after a cold start must not hold the page up: past this, no link.
+const CATALOG_WAIT_MS = 1500;
+const categoriesInTime = () =>
+  Promise.race([
+    getPackCategories(),
+    new Promise<PackCategory[]>((resolve) =>
+      setTimeout(() => resolve([]), CATALOG_WAIT_MS),
+    ),
+  ]);
 
 // The Lucky Draw (spec docs/superpowers/specs/2026-10-24-lucky-draw-design.md).
 // Under the gated account group: the layout bounces logged-out visitors, so a
@@ -21,7 +32,7 @@ export default async function LuckyDrawPage({
   const [page, { open }, categories] = await Promise.all([
     getLuckyDraw(),
     searchParams,
-    getPackCategories(),
+    categoriesInTime(),
   ]);
   return (
     <LuckyDrawClient
