@@ -947,12 +947,15 @@ export default function PackDetailClient({
         data-testid="pack-buy-dock"
         className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t border-white/10 bg-neutral-950 px-fluid py-2.5 lg:hidden"
       >
-        <div className="flex items-center gap-3">
-          <div className="min-w-0 flex-1">
+        {/* A price is never cut short: when it can't fit beside the stepper and
+            the pill, the pill takes its own row. The 999 hands the spare width
+            of a single row to this block, so the pill only grows once alone. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-min flex-[999_1_0%]">
             {/* Free mode states the gift where the total normally sits — the
                 slot must not go empty, or the pill drifts left and the dock
                 reads like a different component. */}
-            <p className="truncate font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
+            <p className="whitespace-nowrap font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
               {freeClaimUnavailable
                 ? 'Unavailable'
                 : isFreePack
@@ -1018,7 +1021,7 @@ export default function PackDetailClient({
                 variant="primary"
                 size="md"
                 onClick={handleGoToReel}
-                className="shrink-0 px-5"
+                className="shrink-0 grow px-4"
               >
                 {customer
                   ? isFreePack
