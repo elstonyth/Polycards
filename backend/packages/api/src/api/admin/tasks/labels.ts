@@ -1,5 +1,5 @@
 import type PacksModuleService from '../../../modules/packs/service';
-import { ticketsSuffix } from '../../../modules/packs/lucky-draw';
+import { ticketsLabel, ticketsSuffix } from '../../../modules/packs/lucky-draw';
 import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
 import type {
   TaskKind,
@@ -136,9 +136,12 @@ export async function resolveTaskLabels(
         packTitle,
         pixelName,
       ),
+      // A tickets reward IS its tickets: no ' + N tickets' on top of itself.
       reward:
-        rewardLabel(row.reward, packTitle, cardName) +
-        ticketsSuffix(row.tickets),
+        (row.reward as { type?: unknown } | null)?.type === 'tickets'
+          ? ticketsLabel(row.tickets ?? 0)
+          : rewardLabel(row.reward, packTitle, cardName) +
+            ticketsSuffix(row.tickets),
     });
   }
   return out;

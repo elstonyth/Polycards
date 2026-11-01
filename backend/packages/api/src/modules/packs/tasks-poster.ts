@@ -16,7 +16,7 @@ import { baseline, body, display, fit, measure, textEl } from './pull-card';
 // Text is SVG rendered by sharp against the bundled fonts, so judge the look
 // from a Linux render (the prod container), never a Windows one.
 
-type Kind = 'credit' | 'pack' | 'card';
+type Kind = 'credit' | 'pack' | 'card' | 'tickets';
 
 export type CheckinTier = {
   days: number;

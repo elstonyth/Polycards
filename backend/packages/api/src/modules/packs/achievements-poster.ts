@@ -16,7 +16,7 @@ export { ladderSlots } from './ladder-poster';
 
 export type AchievementTile = {
   level: number;
-  kind: 'credit' | 'pack' | 'card';
+  kind: 'credit' | 'pack' | 'card' | 'tickets';
   /** As /task words it: 'Free rip · Silver Pack', 'RM 50.00 credit'. */
   prize: string;
   /** What /task says it is worth; a credit's is its own amount, so it gets

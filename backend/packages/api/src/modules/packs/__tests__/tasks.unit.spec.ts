@@ -72,6 +72,14 @@ describe('validateTaskRequirement', () => {
 });
 
 describe('validateTaskReward', () => {
+  it('accepts a tickets reward, which holds no amount of its own', () => {
+    expect(validateTaskReward({ type: 'tickets' })).toEqual({ type: 'tickets' });
+    // The amount is the task's tickets column; a stray one here is dropped.
+    expect(validateTaskReward({ type: 'tickets', tickets: 5 })).toEqual({
+      type: 'tickets',
+    });
+  });
+
   it('accepts the three reward kinds', () => {
     expect(validateTaskReward({ type: 'credit', amount_myr: 5.5 })).toEqual({
       type: 'credit',

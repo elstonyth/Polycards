@@ -44,6 +44,17 @@ beforeEach(() => {
 });
 
 describe('resolveTaskLabels', () => {
+  it('a tickets reward reads as its count, with no " + N tickets" on top', async () => {
+    const goal = { type: 'checkin_days', days: 1 };
+    const reward = { type: 'tickets' };
+    const out = await resolveTaskLabels(stub, [
+      { ...row('a', goal, reward), tickets: 50 },
+      { ...row('b', goal, reward), tickets: 1 },
+    ]);
+    expect(out.get('a')!.reward).toBe('50 Lucky Draw tickets');
+    expect(out.get('b')!.reward).toBe('1 Lucky Draw ticket');
+  });
+
   it('reads every requirement type as a sentence, singular and plural', async () => {
     const out = await resolveTaskLabels(stub, [
       row('a', { type: 'checkin_days', days: 1 }, { type: 'credit', amount_myr: 5 }),

@@ -6,7 +6,7 @@ import {
   ACHIEVEMENTS_MAX_TILES,
   renderAchievementsPoster,
 } from '../../../../modules/packs/achievements-poster';
-import { taskCatalogue } from '../tasks/catalogue';
+import { prizeIsGone, taskCatalogue } from '../tasks/catalogue';
 
 // GET /reports/growth/achievements-poster?min_level&max_level: the live
 // VIP-level achievements (reach_level) as a finished ladder poster, one tile
@@ -54,10 +54,8 @@ export async function GET(
   // A free rip or card whose pack or card is gone (the only way /task shows
   // no value for one) cannot be claimed, so it never goes on a public
   // poster; x-poster-skipped names those levels for staff to fix.
-  const gone = (t: (typeof ladder)[number]) =>
-    t.prize_type !== 'credit' && t.value_myr === null;
-  const skipped = inRange.filter(gone).map((t) => t.level);
-  const shown = inRange.filter((t) => !gone(t));
+  const skipped = inRange.filter(prizeIsGone).map((t) => t.level);
+  const shown = inRange.filter((t) => !prizeIsGone(t));
   if (!shown.length && skipped.length) {
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,

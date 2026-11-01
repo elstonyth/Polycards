@@ -63,12 +63,13 @@ export const COUNT_LABEL: Record<string, string> = {
   topup_myr: 'RM',
 };
 
-export const REWARD_TYPES = ['credit', 'pack', 'card'] as const;
+export const REWARD_TYPES = ['credit', 'pack', 'card', 'tickets'] as const;
 
 export const REWARD_LABEL: Record<string, string> = {
   credit: 'Bonus credit (RM)',
   pack: 'Free rip of a pack',
   card: 'A specific card',
+  tickets: 'Lucky Draw tickets',
 };
 
 /**
@@ -91,7 +92,8 @@ export interface Draft {
   rewardValue: string;
   active: boolean;
   sort: string;
-  /** Lucky Draw tickets a claim also pays (whole number, 0 = none). */
+  /** Lucky Draw tickets a claim also pays (whole number, 0 = none); the whole
+   *  payout of a tickets reward. */
   tickets: string;
   /** datetime-local strings, same idiom as the Weekly Challenge schedule. */
   startsAt: string;
@@ -225,6 +227,10 @@ export function draftToPayload(d: Draft): {
   } else if (d.rewardType === 'pack') {
     if (!d.rewardValue.trim()) return null;
     reward = { type: 'pack', pack_id: d.rewardValue.trim() };
+  } else if (d.rewardType === 'tickets') {
+    // The amount travels in `tickets`; a tickets reward of 0 would pay nothing.
+    if (tickets < 1) return null;
+    reward = { type: 'tickets' };
   } else {
     if (!d.rewardValue.trim()) return null;
     reward = { type: 'card', card_handle: d.rewardValue.trim() };
