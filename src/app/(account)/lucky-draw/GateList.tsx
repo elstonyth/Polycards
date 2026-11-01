@@ -63,7 +63,7 @@ const CLOCK_UNITS = [
 // Prizes grow with the phone, kept small enough that a whole ticket and the top
 // of the next fit between the page's controls and the tab bar (boss 2026-11-01:
 // "看得完"). A wider ticket has the room for more.
-const ART_HEIGHT = 'h-[clamp(6rem,15dvh,8rem)] sm:h-[clamp(8rem,20dvh,11rem)]';
+const ART_HEIGHT = 'h-[clamp(5rem,15dvh,8rem)] sm:h-[clamp(8rem,20dvh,11rem)]';
 
 /** The clock on the stub. Digits size from the stub's own width, so they fill it
  *  on a folded phone and on a monitor alike; a gate under a day drops its Days
@@ -144,7 +144,7 @@ function GatePrizes({
   return (
     <div
       {...drag}
-      className="-mx-3 mt-2.5 flex cursor-grab snap-x gap-2 overflow-x-auto scroll-px-3 px-3 active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] sm:-mx-4 sm:scroll-px-4 sm:px-4 [&::-webkit-scrollbar]:hidden"
+      className="-mx-3 mt-1.5 -mb-1 flex cursor-grab snap-x gap-2 overflow-x-auto scroll-px-3 px-3 py-1 active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] sm:-mx-4 sm:scroll-px-4 sm:px-4 [&::-webkit-scrollbar]:hidden"
     >
       {prizes.map((p, i) => (
         <button
@@ -198,7 +198,7 @@ function Stat({
 }
 
 const STUB_ACTION =
-  'h-10 w-full bg-neutral-950 px-2 text-[13px] text-white hover:bg-neutral-800 sm:h-11 sm:text-sm';
+  'h-11 w-full bg-neutral-950 px-2 text-[13px] text-white hover:bg-neutral-800 sm:text-sm';
 
 /** One gate, a pass torn top to bottom like the desktop page always was: on the
  *  foil its tier, its clock and the one action; on the dark half what it is
@@ -227,8 +227,12 @@ function GateTicket({
   const prizes = heroFirst(gate.prizes);
   const closed = nowMs != null && !countdownClock(gate.ends_at, nowMs);
   const tier = gate.tier as LuckyDrawTier | null;
+  const titleId = `gate-${gate.id}`;
   return (
-    <article className="grid h-full grid-cols-[minmax(7.75rem,39%)_0_minmax(0,1fr)] lg:grid-cols-[clamp(15rem,30%,24rem)_0_minmax(0,1fr)]">
+    <article
+      aria-labelledby={titleId}
+      className="grid h-full grid-cols-[minmax(7.75rem,39%)_0_minmax(0,1fr)] lg:grid-cols-[clamp(15rem,30%,24rem)_0_minmax(0,1fr)]"
+    >
       {/* No filter or mask here: the foil is the surface itself. */}
       <div
         className={cn(
@@ -247,7 +251,10 @@ function GateTicket({
         />
         <div className="relative flex flex-1 flex-col">
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-            <h2 className="font-heading text-[clamp(1.05rem,5.4vw,1.375rem)] leading-none">
+            <h2
+              id={titleId}
+              className="font-heading text-[clamp(1.05rem,5.4vw,1.375rem)] leading-none"
+            >
               {tier ? TIER_LABEL[tier] : POOL_TITLE}
             </h2>
             {isNew && (
@@ -320,7 +327,7 @@ function GateTicket({
             <Stat label="Players">
               {num(gate.entrant_count)}
               <ChevronRight
-                className="ml-0.5 h-3.5 w-3.5 text-neutral-400"
+                className="ml-0.5 h-3.5 w-3.5 shrink-0 text-neutral-400"
                 aria-hidden
               />
             </Stat>
@@ -382,7 +389,7 @@ function GateSheet({
 
 const chipClass = (on: boolean) =>
   cn(
-    'h-9 shrink-0 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+    'relative h-9 shrink-0 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap transition-colors outline-none before:absolute before:inset-x-0 before:-inset-y-1 focus-visible:ring-2 focus-visible:ring-white/40',
     on
       ? 'bg-neutral-50 text-neutral-950'
       : 'bg-neutral-800 text-neutral-300 hover:text-white',
@@ -438,7 +445,7 @@ function GateControls({
           aria-label="Sort gates"
           value={sort}
           onChange={(e) => onSort(e.target.value as GateSort)}
-          className="absolute inset-0 cursor-pointer opacity-0"
+          className="absolute -inset-1 cursor-pointer opacity-0"
         >
           {Object.entries(GATE_SORTS).map(([value, label]) => (
             <option key={value} value={value}>
@@ -452,11 +459,13 @@ function GateControls({
 }
 
 /** The gates new since the last visit, fixed for this visit: the next one falls
- *  back to the default sort. Then the Draw tab's dot is cleared, as the vault's. */
-function useNewGates(gates: LuckyDrawGate[]): Set<string> {
+ *  back to the default sort. Then the Draw tab's dot is cleared, as the vault's.
+ *  The page holds this, not the list: the list unmounts on a tab switch. */
+export function useNewGates(gates: LuckyDrawGate[]): Set<string> {
   const { customer } = useAuth();
   const { latestAt, markSeen, refresh } = useDrawDot();
   const customerId = customer?.id ?? null;
+  const hasGates = gates.length > 0;
   const [seenAt, setSeenAt] = useState<{ at: string | null } | null>(null);
 
   // Read after mount (localStorage has no server), before anything stamps it.
@@ -474,8 +483,8 @@ function useNewGates(gates: LuckyDrawGate[]): Set<string> {
     refresh();
   }, [refresh]);
   useEffect(() => {
-    if (seenAt && latestAt) markSeen();
-  }, [seenAt, latestAt, markSeen]);
+    if (seenAt && latestAt && hasGates) markSeen();
+  }, [seenAt, latestAt, hasGates, markSeen]);
 
   return useMemo(() => newGateIds(gates, seenAt?.at ?? null), [gates, seenAt]);
 }
@@ -483,12 +492,14 @@ function useNewGates(gates: LuckyDrawGate[]): Set<string> {
 /** The Pool tab: every running gate, one ticket each, stacked on a phone. */
 export function GateList({
   gates,
+  newIds,
   nowMs,
   balance,
   spinHref,
   onEnter,
 }: {
   gates: LuckyDrawGate[];
+  newIds: ReadonlySet<string>;
   nowMs: number | null;
   balance: number;
   /** Where to spin a capsule for tickets; null with none on sale. */
@@ -500,7 +511,6 @@ export function GateList({
   const [zoom, setZoom] = useState<PoolPrize | null>(null);
   const [playersOf, setPlayersOf] = useState<LuckyDrawGate | null>(null);
   const [gettingTickets, setGettingTickets] = useState(false);
-  const newIds = useNewGates(gates);
 
   const tiers = LUCKY_DRAW_TIERS.filter((t) => gates.some((g) => g.tier === t));
   // A chosen tier whose last gate has just been drawn falls back to all of them.

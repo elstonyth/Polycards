@@ -80,6 +80,7 @@ export const EventEditor = ({
         <Drawer.Body className="flex flex-col gap-5 overflow-y-auto">
           <Field
             label="Tier"
+            htmlFor="ld-event-tier"
             hint="Printed on the ticket, and what players filter by."
             className="w-56"
           >
@@ -89,7 +90,7 @@ export const EventEditor = ({
                 onChange({ ...draft, tier: tier as EventDraft['tier'] })
               }
             >
-              <Select.Trigger>
+              <Select.Trigger id="ld-event-tier">
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>

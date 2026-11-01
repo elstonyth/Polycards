@@ -168,7 +168,8 @@ describe('prizeLock: what can change before and after the start', () => {
     expect(prizeLock(event(), STARTS)).toMatch(/started/);
     expect(prizeLock(event(), DURING)).toMatch(/started/);
     expect(prizeLock(event(), ENDS + 1)).toMatch(/started/);
-    expect(prizeLock(event(), DURING)).toMatch(/only its name/i);
+    // No screen renames an event, so the line must not promise one.
+    expect(prizeLock(event(), DURING)).not.toMatch(/name/i);
   });
 
   test('a draft stays open whatever the clock says: it never started', () => {

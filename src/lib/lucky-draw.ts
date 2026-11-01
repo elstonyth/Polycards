@@ -175,6 +175,31 @@ export function pageGates(page: LuckyDrawPage | null): LuckyDrawGate[] {
   ];
 }
 
+/** A page re-read laid over the one this tab holds. A read can be 10 s old, and a
+ *  fresh one drops a gate the moment it is drawn. So a gate this tab has closed
+ *  stays gone (its spin must not replay), and one that ended with its result
+ *  still unread here stays until its poll answers (its spin must still play). */
+export function mergeFreshGates(
+  prev: LuckyDrawPage | null,
+  fresh: LuckyDrawPage,
+  closed: ReadonlySet<string>,
+  now: number,
+  pollWindowMs: number,
+): LuckyDrawPage {
+  const gates = pageGates(fresh).filter((g) => !closed.has(g.id));
+  const listed = new Set(gates.map((g) => g.id));
+  const unread = pageGates(prev).filter((g) => {
+    const end = Date.parse(g.ends_at);
+    return (
+      !closed.has(g.id) &&
+      !listed.has(g.id) &&
+      now >= end &&
+      now < end + pollWindowMs
+    );
+  });
+  return { ...fresh, events: [...gates, ...unread] };
+}
+
 /** When a gate went live: its publish can come after its start. */
 const liveAt = (g: { starts_at: string; live_at?: string }): string =>
   g.live_at ?? g.starts_at;

@@ -32,6 +32,7 @@ import { TicketLookup } from './ticket-lookup';
 import {
   TIER_LABEL,
   blankEventDraft,
+  eventLabel,
   blankPrizeDraft,
   eventDraftFrom,
   prizeDraftFrom,
@@ -430,7 +431,7 @@ const LuckyDrawPage = () => {
           <div>
             <Heading level="h2">Lucky Draw</Heading>
             <Text size="small" className="text-ui-fg-subtle mt-1">
-              Players put tickets into the running event. When it ends, one
+              Players put tickets into a running event. When it ends, one
               winner takes every prize, drawn from a seed committed (as a hash)
               when the event is published. Events published under the old rules
               finish prize by prize.
@@ -584,7 +585,7 @@ const LuckyDrawPage = () => {
                     </Table.Cell>
                     <Table.Cell className="text-right">
                       {actions.length > 0 && (
-                        <RowActions subject={e.name} actions={actions} />
+                        <RowActions subject={eventLabel(e)} actions={actions} />
                       )}
                     </Table.Cell>
                   </Table.Row>
@@ -599,7 +600,7 @@ const LuckyDrawPage = () => {
         <Container className="p-0">
           <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-4">
             <div>
-              <Heading level="h2">Prizes — {selected.name}</Heading>
+              <Heading level="h2">Prizes — {eventLabel(selected)}</Heading>
               <Text size="small" className="text-ui-fg-subtle mt-1">
                 {oneWinner
                   ? PHASE_LINE[eventPhase(selected)]
@@ -705,7 +706,7 @@ const LuckyDrawPage = () => {
       {withdrawing && selected && (
         <ReasonPrompt
           danger
-          title={`Withdraw ${selected.name}?`}
+          title={`Withdraw ${eventLabel(selected)}?`}
           description={`Every entrant is refunded at once (${selected.total_tickets.toLocaleString()} tickets from ${selected.entrant_count.toLocaleString()} ${
             selected.entrant_count === 1 ? 'player' : 'players'
           }), every prize is cancelled and no draw runs. This cannot be undone.`}
@@ -733,12 +734,12 @@ const LuckyDrawPage = () => {
 
       {publishing && selected && (
         <ReasonPrompt
-          title={`Publish ${selected.name}?`}
+          title={`Publish ${eventLabel(selected)}?`}
           description={`${
             convertsOnPublish(selected) ? `${OLD_DRAFT_NOTE} ` : ''
           }This commits the event’s seed hash and takes it live with ${livePrizes.length} ${
             livePrizes.length === 1 ? 'prize' : 'prizes'
-          }. The window can no longer change, and the prizes lock at the start. When it ends, one winner takes them all. To stop it after publishing, withdraw it and every entrant is refunded. Publishing cannot be undone.`}
+          }. The tier and window can no longer change, and the prizes lock at the start. When it ends, one winner takes them all. To stop it after publishing, withdraw it and every entrant is refunded. Publishing cannot be undone.`}
           confirmLabel="Publish"
           pending={publish.isPending}
           onClose={() => setPublishing(false)}

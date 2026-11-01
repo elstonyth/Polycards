@@ -5,6 +5,15 @@ import type PacksModuleService from '../../src/modules/packs/service';
 import { tickSandbox } from '../../src/api/utils/automation-sandbox-store';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
+// The app's own scheduled job calls tickSandbox every 2 s. This suite drives
+// every tick itself and counts cycles, so a job tick landing in between made it
+// flaky, as automation-live.spec.ts found. Keep the schedule, drop the work.
+jest.mock('../../src/jobs/automation-sandbox', () => ({
+  __esModule: true,
+  default: jest.fn(async () => undefined),
+  config: { name: 'automation-sandbox', schedule: '*/2 * * * * *' },
+}));
+
 jest.setTimeout(240_000);
 
 medusaIntegrationTestRunner({

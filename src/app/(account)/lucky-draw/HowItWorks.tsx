@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { holoConic, rulesCopy } from '@/lib/lucky-draw';
 
@@ -39,8 +40,12 @@ export function HowItWorks({
 }) {
   return (
     <details className={cn('group', className)}>
-      <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-neutral-300">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 text-sm font-semibold text-neutral-300 [&::-webkit-details-marker]:hidden">
         How it works
+        <ChevronDown
+          className="h-4 w-4 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+          aria-hidden
+        />
       </summary>
       <ol className="mt-2 lg:grid lg:grid-cols-4 lg:gap-6">
         {STEPS.map((s, i) => {

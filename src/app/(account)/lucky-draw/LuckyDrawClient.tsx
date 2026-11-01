@@ -11,6 +11,7 @@ import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import {
   heroFirst,
   luckyDrawView,
+  mergeFreshGates,
   pageGates,
   POOL_TITLE,
   rulesCopy,
@@ -28,7 +29,7 @@ import type {
 } from '@/lib/data/schemas';
 import { EnterSheet, type Entered, type EnterTarget } from './EnterSheet';
 import { MyEntry } from './MyEntry';
-import { gateTarget, GateList, NoPool } from './GateList';
+import { gateTarget, GateList, NoPool, useNewGates } from './GateList';
 import { PrizeCard } from './PrizeCard';
 import { PrizeWheel } from './PrizeWheel';
 import { ResultDetail } from './ResultDetail';
@@ -53,6 +54,9 @@ const TABS: { key: TabKey; label: string }[] = [
 const POLL_MS = 5000;
 const POLL_JITTER_MS = 2000;
 const POLL_WINDOW_MS = 5 * 60_000;
+// A gate past that window with no result: its draw is late or failing. Keep
+// looking, slowly, so it cannot sit on "Drawing the winner…" until a reload.
+const LAPSED_REREAD_MS = 60_000;
 // The shared half of the page is cached 10 s on the backend (store view.ts), so
 // a re-read after an entry waits that out: the top 10 then shows the new tickets.
 const TOP_REREAD_MS = 11_000;
@@ -85,6 +89,18 @@ export function LuckyDrawClient({
   const endIntro = useCallback(() => setPlayIntro(false), []);
   const pageRef = useRef(page);
 
+  // The gates this tab has read a result for, and every page re-read goes through
+  // them: see mergeFreshGates.
+  const closedRef = useRef(new Set<string>());
+  const applyFresh = useCallback((fresh: LuckyDrawPage | null) => {
+    if (!fresh) return;
+    const closed = closedRef.current;
+    const now = Date.now();
+    setPage((prev) =>
+      mergeFreshGates(prev, fresh, closed, now, POLL_WINDOW_MS),
+    );
+  }, []);
+
   useEffect(() => {
     pageRef.current = page;
   }, [page]);
@@ -111,6 +127,7 @@ export function LuckyDrawClient({
     let timer = 0;
     const polledAt = new Map<string, number>();
     const reread = new Set<string>();
+    const rereadAt = new Map<string, number>();
     const poll = async () => {
       const now = Date.now();
       const gates = pageGates(pageRef.current);
@@ -124,7 +141,7 @@ export function LuckyDrawClient({
       ) {
         reread.add(next.starts_at);
         const fresh = await getLuckyDraw();
-        if (live && fresh) setPage(fresh);
+        if (live) applyFresh(fresh);
         return;
       }
       // A gate has one result: its own, read from the event route. Never the
@@ -133,12 +150,13 @@ export function LuckyDrawClient({
         const ended = gates.filter((g) => now >= Date.parse(g.ends_at));
         const lapsed = ended.filter(
           (g) =>
-            !reread.has(g.id) && now >= Date.parse(g.ends_at) + POLL_WINDOW_MS,
+            now >= Date.parse(g.ends_at) + POLL_WINDOW_MS &&
+            now - (rereadAt.get(g.id) ?? 0) >= LAPSED_REREAD_MS,
         );
         if (lapsed.length > 0) {
-          lapsed.forEach((g) => reread.add(g.id));
+          lapsed.forEach((g) => rereadAt.set(g.id, now));
           const fresh = await getLuckyDraw();
-          if (live && fresh) setPage(fresh);
+          if (live) applyFresh(fresh);
           return;
         }
         const due = ended
@@ -151,6 +169,7 @@ export function LuckyDrawClient({
         const found = await getLuckyDrawEventResult(due.id, POOL_TITLE);
         if (!live || !found) return;
         // Drawn: it leaves the list and lives in Results.
+        closedRef.current.add(due.id);
         setPage(
           (prev) =>
             prev && {
@@ -162,6 +181,8 @@ export function LuckyDrawClient({
         if (found.ticket_index != null) setSpins((q) => [...q, found]);
         return;
       }
+      // The last gate has gone: its prize rows are mirrors, with nothing to read.
+      if (pageRef.current?.event?.draw_mode === 'one_winner') return;
       const undrawn = (pageRef.current?.prizes ?? []).filter((p) => !p.result);
       const lapsed = undrawn.filter(
         (p) =>
@@ -170,7 +191,7 @@ export function LuckyDrawClient({
       if (lapsed.length > 0) {
         lapsed.forEach((p) => reread.add(p.id));
         const fresh = await getLuckyDraw();
-        if (live && fresh) setPage(fresh);
+        if (live) applyFresh(fresh);
         return;
       }
       const due = undrawn
@@ -217,7 +238,7 @@ export function LuckyDrawClient({
       live = false;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [applyFresh]);
 
   const openResult = async (prizeId: string) => {
     const found = await getLuckyDrawResult(prizeId);
@@ -245,7 +266,7 @@ export function LuckyDrawClient({
     const { balance, myTickets } = res;
     if (balance === undefined || myTickets === undefined) {
       // The entry went through but its numbers did not read: re-read.
-      void getLuckyDraw().then((fresh) => fresh && setPage(fresh));
+      void getLuckyDraw().then(applyFresh);
       return;
     }
     if (pot) {
@@ -268,7 +289,7 @@ export function LuckyDrawClient({
       );
       // The response cannot place me in the top 10: no ids on the list.
       window.setTimeout(() => {
-        void getLuckyDraw().then((fresh) => fresh && setPage(fresh));
+        void getLuckyDraw().then(applyFresh);
       }, TOP_REREAD_MS);
       return;
     }
@@ -296,6 +317,7 @@ export function LuckyDrawClient({
   const event = page?.event ?? null;
   const view = luckyDrawView(page, nowMs);
   const gates = pageGates(page);
+  const newIds = useNewGates(gates);
   const enteringGate: LuckyDrawGate | null =
     entering && 'gateId' in entering
       ? (gates.find((g) => g.id === entering.gateId) ?? null)
@@ -376,6 +398,7 @@ export function LuckyDrawClient({
         ) : gates.length > 0 ? (
           <GateList
             gates={gates}
+            newIds={newIds}
             nowMs={nowMs}
             balance={balance}
             spinHref={spinHref}
@@ -462,7 +485,7 @@ export function LuckyDrawClient({
         />
       )}
       {/* A live draw waits, queued, while the player is in a sheet. */}
-      {spins[0] && !entering && !detail && (
+      {spins[0] && !enterTarget && !detail && (
         <SpinOverlay
           detail={spins[0]}
           queued={spins.length - 1}

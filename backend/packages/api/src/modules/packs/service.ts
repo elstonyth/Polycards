@@ -1012,6 +1012,9 @@ export type LuckyDrawPageGate = {
   /** When players could first see it: its start, or its publish if that came
    *  later (a gate drafted with a start already past). What "new" goes by. */
   live_at: string;
+  /** The commitment made at publish: public before any entry, so the revealed
+   *  seed can be checked against it. Never the nonce. */
+  seed_hash: string | null;
   total_tickets: number;
   entrant_count: number;
   /** Most tickets first. */
@@ -8522,11 +8525,12 @@ class PacksModuleService extends MedusaService({
         starts_at: Date;
         ends_at: Date;
         live_at: Date;
+        seed_hash: string | null;
       }[]
     >(
       // A published event's row only changes on a rename, so updated_at is its
       // publish; the draw, prize saves and entries never touch it.
-      'SELECT e.id, e.tier, e.starts_at, e.ends_at, ' +
+      'SELECT e.id, e.tier, e.starts_at, e.ends_at, e.seed_hash, ' +
         'GREATEST(e.starts_at, e.updated_at) AS live_at ' +
         'FROM lucky_draw_event e ' +
         "WHERE e.status = 'published' AND e.draw_mode = 'one_winner' " +
@@ -8574,6 +8578,7 @@ class PacksModuleService extends MedusaService({
           starts_at: new Date(r.starts_at).toISOString(),
           ends_at: new Date(r.ends_at).toISOString(),
           live_at: new Date(r.live_at).toISOString(),
+          seed_hash: r.seed_hash,
           total_tickets: sums.get(r.id)?.total_tickets ?? 0,
           entrant_count: sums.get(r.id)?.entrant_count ?? 0,
           top: topRows

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  eventLabel,
   blankEventDraft,
   blankPrizeDraft,
   drawTimeProblem,
@@ -251,6 +252,10 @@ describe('event drafts', () => {
       ends_at: e.ends_at,
       tier: 'economy',
     });
+  });
+
+  test('an event is told apart by its tier and its end', () => {
+    expect(eventLabel(event({ tier: 'first' }))).toMatch(/^First · ends \S/);
   });
 
   test('the tier makes the trip, and a new event starts at economy', () => {

@@ -1071,6 +1071,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(page.events[1].prizes).toEqual([
           expect.objectContaining({ kind: 'credit', value_myr: 40 }),
         ]);
+        // Each gate's commitment is public before its draw; never its nonce.
+        expect(page.events.map((g) => g.seed_hash)).toEqual([
+          soon.seed_hash,
+          later.seed_hash,
+        ]);
+        expect(soon.seed_hash).toEqual(expect.any(String));
+        expect(JSON.stringify(page.events)).not.toContain(soon.seed_nonce);
         expect(
           await service.luckyDrawMyGateTickets('cus_a', [soon.id, later.id]),
         ).toEqual({ [soon.id]: 30, [later.id]: 1 });
@@ -1097,6 +1104,80 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
         expect((await eventResultOf(later.id)).total_tickets).toBe(8);
         expect(await ids(end)).toEqual([]);
+      });
+
+      it('gates due together: a stuck one holds up nothing, and one customer can win two', async () => {
+        const [card] = await makeCard('gone-gate-card');
+        const stuck = await liveEvent({ tier: 'first' }, (id) =>
+          saveCard(id, 'gone-gate-card'),
+        );
+        const one = await liveEvent({ tier: 'economy' }, (id) =>
+          saveCredit(id, 25),
+        );
+        const two = await liveEvent({ tier: 'business' }, (id) =>
+          saveCredit(id, 40),
+        );
+        await fund('cus_both', 30);
+        await enterOk('cus_both', stuck.id, 10);
+        await enterOk('cus_both', one.id, 10);
+        await enterOk('cus_both', two.id, 10);
+        await service.deleteCards([card.id]);
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        expect(
+          await service.drawDueLuckyDrawEvents({
+            now: new Date(Date.now() + 49 * HOUR),
+          }),
+        ).toEqual({ drawn: 2, failed: 1 });
+        warn.mockRestore();
+
+        expect(await eventResultOf(stuck.id)).toBeUndefined();
+        expect((await eventResultOf(one.id)).winner_customer_id).toBe(
+          'cus_both',
+        );
+        expect((await eventResultOf(two.id)).winner_customer_id).toBe(
+          'cus_both',
+        );
+        expect(
+          (await rewardCredits('cus_both')).map((c) => Number(c.amount)).sort(),
+        ).toEqual([25, 40]);
+      });
+
+      it('withdrawing one gate refunds only its own tickets', async () => {
+        const out = await liveEvent({ tier: 'economy' });
+        const stays = await liveEvent({ tier: 'first' });
+        await fund('cus_ab', 50);
+        await enterOk('cus_ab', out.id, 20);
+        await enterOk('cus_ab', stays.id, 10);
+
+        expect(await withdraw(out.id)).toEqual({ refunded: 1 });
+
+        expect(await service.luckyDrawBalance('cus_ab')).toBe(40);
+        const refunds = await service.listLuckyDrawTickets({
+          customer_id: 'cus_ab',
+          reason: 'refund',
+        });
+        expect(refunds.map((r) => r.ref)).toEqual([`${out.id}:cus_ab`]);
+        expect(
+          await service.luckyDrawMyGateTickets('cus_ab', [stays.id]),
+        ).toEqual({ [stays.id]: 10 });
+        expect(
+          (await service.luckyDrawPage()).events.map((g) => g.id),
+        ).toEqual([stays.id]);
+      });
+
+      it('entries into two gates at once never overspend', async () => {
+        const a = await liveEvent({ tier: 'economy' });
+        const b = await liveEvent({ tier: 'first' });
+        await fund('cus_cross', 40);
+
+        const results = await Promise.all([
+          enter('cus_cross', a.id, 40),
+          enter('cus_cross', b.id, 40),
+        ]);
+
+        expect(results.filter((r) => r.entered)).toHaveLength(1);
+        expect(await service.luckyDrawBalance('cus_cross')).toBe(0);
       });
 
       it('a gate goes live at its publish when that comes after its start', async () => {

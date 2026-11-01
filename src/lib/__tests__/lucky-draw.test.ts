@@ -13,6 +13,7 @@ import {
   heroPrize,
   landingAngle,
   luckyDrawView,
+  mergeFreshGates,
   nextDraw,
   newGateIds,
   pageGates,
@@ -144,6 +145,112 @@ describe('sortGates', () => {
     const list = [a, b, c];
     sortGates(list, 'closing', new Set());
     expect(ids(list)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('mergeFreshGates', () => {
+  const END = Date.parse('2026-11-01T12:00:00.000Z');
+  const WINDOW = 5 * 60_000;
+  const gate = (id: string, over: object = {}) => ({
+    id,
+    tier: 'first',
+    starts_at: '2026-11-01T00:00:00.000Z',
+    ends_at: new Date(END).toISOString(),
+    total_tickets: 1,
+    ...over,
+  });
+  const page = (events: object[], over: object = {}) =>
+    ({
+      balance: 0,
+      event: null,
+      prizes: [],
+      next_event: null,
+      events,
+      ...over,
+    }) as never;
+  const ids = (p: { events?: { id: string }[] }) => p.events?.map((g) => g.id);
+
+  it('takes the fresh numbers for a gate both reads list', () => {
+    const merged = mergeFreshGates(
+      page([gate('a')]),
+      page([gate('a', { total_tickets: 9 })], { balance: 5 }),
+      new Set(),
+      END - 1000,
+      WINDOW,
+    );
+    expect(merged.balance).toBe(5);
+    expect(merged.events?.[0]?.total_tickets).toBe(9);
+  });
+
+  it('keeps a gate that ended with its result unread, so its spin still plays', () => {
+    const merged = mergeFreshGates(
+      page([
+        gate('drawn'),
+        gate('live', { ends_at: '2026-11-02T00:00:00.000Z' }),
+      ]),
+      page([gate('live', { ends_at: '2026-11-02T00:00:00.000Z' })]),
+      new Set(),
+      END + 3000,
+      WINDOW,
+    );
+    expect(ids(merged)).toEqual(['live', 'drawn']);
+  });
+
+  it('never brings back a gate this tab closed, even from a stale read', () => {
+    const merged = mergeFreshGates(
+      page([]),
+      page([gate('drawn')]),
+      new Set(['drawn']),
+      END + 6000,
+      WINDOW,
+    );
+    expect(ids(merged)).toEqual([]);
+  });
+
+  it('lets go once the polling window is over, and of a gate still running', () => {
+    expect(
+      ids(
+        mergeFreshGates(
+          page([gate('late')]),
+          page([]),
+          new Set(),
+          END + WINDOW,
+          WINDOW,
+        ),
+      ),
+    ).toEqual([]);
+    // Not ended and gone from the read: withdrawn.
+    expect(
+      ids(
+        mergeFreshGates(
+          page([gate('withdrawn')]),
+          page([]),
+          new Set(),
+          END - 1000,
+          WINDOW,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("reads an older backend's one event as its gate", () => {
+    const event = {
+      id: 'ev',
+      name: 'x',
+      starts_at: 's',
+      ends_at: new Date(END + 1000).toISOString(),
+      draw_mode: 'one_winner',
+      seed_hash: null,
+      total_tickets: 2,
+      entrant_count: 1,
+      my_tickets: 0,
+      top: [],
+      result: null,
+    };
+    const fresh = { balance: 0, event, prizes: [], next_event: null } as never;
+    expect(ids(mergeFreshGates(null, fresh, new Set(), END, WINDOW))).toEqual([
+      'ev',
+    ]);
   });
 });
 

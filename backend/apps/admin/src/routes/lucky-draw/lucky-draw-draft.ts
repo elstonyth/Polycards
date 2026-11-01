@@ -138,6 +138,12 @@ export const TIER_LABEL: Record<AdminLuckyDrawTier, string> = {
   first: 'First',
 };
 
+/** Which event, in a prompt or heading: with no names, several running all read
+ *  "Prize Pool", and withdrawing the wrong one refunds it for good. */
+export const eventLabel = (
+  e: Pick<AdminLuckyDrawEvent, 'tier' | 'ends_at'>,
+): string => `${TIER_LABEL[e.tier]} · ends ${whenLabel(e.ends_at)}`;
+
 // Not asked for: pools run too often to name each one (operator 2026-10-31), and
 // players see every one as the Prize Pool. The column stays required.
 export const blankEventDraft = (): EventDraft => ({

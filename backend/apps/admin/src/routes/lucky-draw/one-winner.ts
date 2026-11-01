@@ -70,11 +70,11 @@ export const prizeLock = (e: EventClock, now: number = Date.now()): string | nul
     case 'upcoming':
       return null;
     case 'drawn':
-      return 'This event has been drawn, so its prizes are final. Only its name can change.';
+      return 'This event has been drawn, so its prizes are final.';
     case 'withdrawn':
       return 'This event was withdrawn, so it is closed.';
     default:
-      return 'The event has started, so its prizes are locked. Only its name can change.';
+      return 'The event has started, so its prizes are locked.';
   }
 };
 
