@@ -15,6 +15,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
 import type { LuckyDrawOutcome } from '../service';
+import { CORE_CUSTOMER_MODELS } from '../test-support/core-customer-models';
 import {
   LUCKY_DRAW_PULL_PACK_ID,
   MAX_PRIZE_CREDIT_MYR,
@@ -51,6 +52,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
   // A modules-type spec builds its schema from THIS array, never from the
   // migrations — every table the service touches has to be listed.
   moduleModels: [
+    ...CORE_CUSTOMER_MODELS,
     LuckyDrawEvent,
     LuckyDrawPrize,
     LuckyDrawEntry,
