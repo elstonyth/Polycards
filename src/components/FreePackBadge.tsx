@@ -78,7 +78,8 @@ export default function FreePackBadge({
         className="h-auto w-[clamp(4rem,18vw,7rem)] drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
       />
       {/* shortcut: always on while the badge shows, delete when the pack stops
-          being new. Hidden from readers: the control's aria-label names it. */}
+          being new, along with "new" in both aria-labels below. Those labels
+          are what screen readers hear, so the tag itself is hidden from them. */}
       <span
         aria-hidden="true"
         className="absolute -left-2 top-1 -rotate-12 rounded-full border-2 border-neutral-950 bg-red-600 px-2 py-0.5 font-heading text-[11px] leading-none tracking-wide text-white lg:text-sm"
@@ -94,7 +95,7 @@ export default function FreePackBadge({
         type="button"
         onClick={() => openAuth('signup')}
         data-testid="free-pack-badge"
-        aria-label="Sign up to claim your free welcome pack"
+        aria-label="Sign up to claim your new free welcome pack"
         className={shellCls}
       >
         {art}
@@ -105,7 +106,7 @@ export default function FreePackBadge({
     <Link
       href={`/slots/${encodeURIComponent(state.slug)}/spin`}
       data-testid="free-pack-badge"
-      aria-label="Claim your free welcome pack"
+      aria-label="Claim your new free welcome pack"
       className={shellCls}
     >
       {art}
