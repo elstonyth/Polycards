@@ -21,7 +21,7 @@ import { logger } from '@/lib/logger';
 import { isRarity, type PublishedOdds } from '@/lib/packs-format';
 import { avatarForSeed } from '@/lib/profile-view';
 import { relativeTime } from '@/lib/format';
-import { toCardView, type CardView } from '@/lib/card-view';
+import { toCardView } from '@/lib/card-view';
 import {
   PacksPageSchema,
   UncatalogedPackSchema,
@@ -35,10 +35,12 @@ import {
 import {
   CATEGORIES as CATEGORY_META,
   CAT_ICON,
+  packTabs,
   ticketCard,
   type Pack,
   type PackCategory,
   type PackCard,
+  type PackTab,
   type Rarity,
   type ResolvedPack,
 } from '@/lib/packs-data';
@@ -185,6 +187,8 @@ export async function getPackCategories(): Promise<PackCategory[]> {
 export interface PackBase {
   pack: ResolvedPack;
   siblings: Pack[];
+  /** The category dropdown's options; empty for an unlisted pack. */
+  tabs: PackTab[];
 }
 
 /**
@@ -213,6 +217,7 @@ function baseIn(categories: PackCategory[], slug: string): PackBase | null {
       icon: category.icon,
     },
     siblings: category.packs,
+    tabs: packTabs(categories),
   };
 }
 
@@ -351,6 +356,7 @@ async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
       icon: meta?.icon ?? iconOf(pack.category),
     },
     siblings: [],
+    tabs: [],
   };
 }
 
@@ -503,8 +509,10 @@ export const getPackHighlights = unstable_cache(
 // by toCardView) + when + the source pack's live catalog label + the puller's
 // display name ("Anonymous" when the account has none).
 interface BackendRecentPull {
-  /** Guaranteed by RecentPullSchema — a row without one drops. */
+  /** Guaranteed by RecentPullSchema — a row without one drops. A ticket row
+   *  (RecentTicketSpinSchema) has `tickets` instead of the card fields. */
   handle: string;
+  tickets?: number;
   /** Guaranteed by RecentPullSchema — a row without a known tier drops. */
   rarity: Rarity;
   pack_id: string;
@@ -526,8 +534,9 @@ interface BackendRecentPull {
 
 /** A feed row: the won card (its `handle` opens the card-detail overlay;
  *  `priceMyr` null = an older backend omitted the MYR price — rows render
- *  '—') plus the pull's own display fields. */
-export type RecentPull = CardView & {
+ *  '—') plus the pull's own display fields. On a ticket pack's feed the "card"
+ *  is ticketCard's, with `tickets` set: nothing to open or price. */
+export type RecentPull = PackCard & {
   id: string;
   /** Always known: the feed schema drops a row without a tier. */
   rarity: Rarity;
@@ -607,7 +616,9 @@ export async function getRecentPulls(
       const n = seen.get(key) ?? 0;
       seen.set(key, n + 1);
       return {
-        ...toCardView(p),
+        ...(p.tickets != null
+          ? ticketCard(p.tickets, p.rarity)
+          : toCardView(p)),
         id: p.id ?? `${key}-${n}`,
         rarity: p.rarity,
         // Pack label straight from the backend catalog (source of truth) — a

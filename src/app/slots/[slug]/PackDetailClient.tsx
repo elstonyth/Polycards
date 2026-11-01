@@ -7,6 +7,7 @@ import Image from 'next/image';
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   Clock,
   Info,
   Minus,
@@ -23,6 +24,7 @@ import Reveal from '@/components/Reveal';
 import type { PackDetail, RecentFeed } from '@/lib/data/packs';
 import {
   type Pack,
+  type PackTab,
   type ResolvedPack,
   type PackCard,
   CATALOG_GROUP_HEADING,
@@ -32,6 +34,7 @@ import {
   factoryVideo,
   groupPacks,
   isTicketPack,
+  packHref,
 } from '@/lib/packs-data';
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
@@ -194,6 +197,7 @@ function PackRail({
 export default function PackDetailClient({
   pack,
   siblings,
+  categoryTabs = [],
   detail,
   recentPulls,
   initialQty = 1,
@@ -202,6 +206,9 @@ export default function PackDetailClient({
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
+  /** The category dropdown's options. Under two (an unlisted pack, one franchise)
+   *  the category is a plain label: nothing to switch to. */
+  categoryTabs?: PackTab[];
   /** Backend gacha pool (Top Hits + Pull Odds); null when the backend is down. */
   detail: PackDetail | null;
   /** Live pull history for this pack; an empty feed when there are no pulls /
@@ -341,7 +348,9 @@ export default function PackDetailClient({
   // Sold out (admin): still listed, but the backend refuses a paid open. Only
   // vault gifts may still open it, so quantity is capped at the gifts held.
   // A Draft card pack can be looked at but not opened: a card open writes pulls
-  // into the live feeds, so the backend refuses it. A Draft capsule writes none.
+  // into the live feeds, so the backend refuses it. A capsule's spins only reach
+  // its own feed, which answers empty while it is a Draft and lists them once it
+  // goes Active: nothing marks a spin as a test.
   const previewOnly = active.draft === true && !ticketPack;
   const soldOutPack = active.inStock === false || previewOnly;
   const unavailableLabel = previewOnly ? 'Preview only' : 'Sold out';
@@ -374,6 +383,25 @@ export default function PackDetailClient({
     url.searchParams.set('count', String(count));
     window.history.replaceState(null, '', url);
   };
+
+  // A franchise's page is a pack of it, so the dropdown lands on its first one.
+  const switchCategory = (id: string) => {
+    const first = categoryTabs.find((t) => t.id === id)?.firstPackId;
+    if (first) router.push(packHref(first, qty), { scroll: false });
+  };
+  const categoryLabel = (
+    <span className="flex items-center gap-2">
+      <Image
+        src={pack.icon}
+        alt=""
+        aria-hidden
+        width={20}
+        height={20}
+        className="h-5 w-5 object-contain"
+      />
+      {pack.categoryName}
+    </span>
+  );
 
   // The admin-PUBLISHED odds — the ONLY rates players see. Null (unset) hides
   // the whole Pull Odds panel.
@@ -646,19 +674,33 @@ export default function PackDetailClient({
                 <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
                   Category
                 </p>
-                <div className="flex h-11 items-center rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white">
-                  <span className="flex items-center gap-2">
-                    <Image
-                      src={pack.icon}
-                      alt=""
+                {categoryTabs.length > 1 ? (
+                  // The native picker, invisible over the box (GateList's sort):
+                  // on a phone it is the OS sheet, with nothing to clip or close.
+                  <label className="relative flex h-11 cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white transition-colors focus-within:ring-2 focus-within:ring-white/40 hover:bg-white/10">
+                    {categoryLabel}
+                    <ChevronDown
+                      className="h-4 w-4 shrink-0 text-white/60"
                       aria-hidden
-                      width={20}
-                      height={20}
-                      className="h-5 w-5 object-contain"
                     />
-                    {pack.categoryName}
-                  </span>
-                </div>
+                    <select
+                      aria-label="Category"
+                      value={pack.categoryId}
+                      onChange={(e) => switchCategory(e.target.value)}
+                      className="absolute inset-0 cursor-pointer bg-neutral-900 text-white opacity-0"
+                    >
+                      {categoryTabs.map((t) => (
+                        <option key={t.id} value={t.id} disabled={t.soon}>
+                          {t.soon ? `${t.tab} (Coming soon)` : t.tab}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="flex h-11 items-center rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white">
+                    {categoryLabel}
+                  </div>
+                )}
               </div>
 
               {/* Pack tiles — an uncataloged pack (the free welcome pack) has
@@ -673,6 +715,9 @@ export default function PackDetailClient({
                       panel still never scrolls VERTICALLY — the rails scroll
                       horizontally, so extra tiers cost a swipe, not height. */}
                   <div
+                    // A switched franchise is a new set of rails: remount so
+                    // they centre on the pack instead of keeping the old scroll.
+                    key={pack.categoryId}
                     data-testid="pack-selector"
                     className="flex flex-col gap-2.5"
                   >
@@ -912,7 +957,10 @@ export default function PackDetailClient({
           </Reveal>
         )}
 
-        {!ticketPack && (
+        {/* Not on a Draft: its ledger isn't public, and the feed proxy answers an
+            unlisted slug with the global feed, card pulls under a pack that
+            never paid them. */}
+        {!active.draft && (
           <Reveal as="section" delay={90} className="h-full min-w-0">
             <div className="mb-3 flex items-center gap-2">
               <Clock className="h-4 w-4 text-white/50" aria-hidden />
@@ -932,6 +980,7 @@ export default function PackDetailClient({
               // name-derivation for a card opened from this feed — visible only
               // on a card whose admin-configured sprite differs from its name.
               onSelect={setOpenCard}
+              noun={noun}
             />
           </Reveal>
         )}

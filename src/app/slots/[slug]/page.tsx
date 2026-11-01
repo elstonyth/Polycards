@@ -105,6 +105,7 @@ export default async function SlotsPackDetailPage({
       <PackDetailClient
         pack={base.pack}
         siblings={base.siblings}
+        categoryTabs={base.tabs}
         detail={detail}
         recentPulls={recentPulls}
         initialQty={count}

@@ -19,6 +19,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { GET } from '@/app/api/recent-pulls/route';
 import { clearTtlCache } from '@/lib/ttl-cache';
+import { parseOne, RecentPollResponseSchema } from '@/lib/data/schemas';
 
 const packRow = (over: Record<string, unknown> = {}) => ({
   slug: 'bronze-pack',
@@ -131,6 +132,41 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     const body = await (await GET(req())).json();
     // Unknown tiers and negative counts are dropped at the trust boundary.
     expect(body).toEqual({ pulls: [], drought: { Immortal: 303 } });
+  });
+
+  // The trap is the second hop: the poll schema is a closed object, so a key it
+  // doesn't name is stripped and the first tick would turn the row back into a card.
+  it('a ticket row lands as its amount and keeps it through the poll schema', async () => {
+    mem = seed({
+      'GET /store/pulls/recent': {
+        body: {
+          pulls: [
+            {
+              id: 'tksp_1',
+              tickets: 300,
+              rarity: 'Immortal',
+              pack_id: 'lucky-pack',
+              pack_title: 'Bronze Capsule',
+              who: 'Ann',
+              rolled_at: '2026-11-02T00:00:00Z',
+            },
+          ],
+        },
+      },
+    });
+
+    const body = await (await GET(req())).json();
+    const polled = parseOne(RecentPollResponseSchema, body);
+
+    expect(polled?.pulls[0]).toMatchObject({
+      id: 'tksp_1',
+      tickets: 300,
+      name: '300 tickets',
+      rarity: 'Immortal',
+      priceMyr: null,
+      packName: 'Bronze Capsule',
+      who: 'Ann',
+    });
   });
 
   it('resolving the catalog costs no extra backend hop (getPackCategories is already cached)', async () => {
