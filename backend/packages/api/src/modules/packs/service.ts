@@ -14997,6 +14997,16 @@ class PacksModuleService extends MedusaService({
     if (!claim || claim.customer_id !== input.customerId) {
       return { redeemed: false, reason: 'not_found' };
     }
+    // reward_snapshot is what was frozen at claim time — NOT the task's current
+    // reward, which an admin may have edited since. Read before claim_ref: a
+    // credit or tickets claim has a ref too, and it is not a pull to hand back.
+    const snapshot = (claim.reward_snapshot ?? {}) as {
+      type?: string;
+      pack_id?: string;
+    };
+    if (snapshot.type !== 'pack' || typeof snapshot.pack_id !== 'string') {
+      return { redeemed: false, reason: 'not_a_pack_reward' };
+    }
     if (claim.claim_ref) {
       // Already spun. Hand back the pull so a lost response can still show the
       // player what they won instead of an error.
@@ -15005,15 +15015,6 @@ class PacksModuleService extends MedusaService({
         reason: 'already_redeemed',
         pullId: claim.claim_ref,
       };
-    }
-    // reward_snapshot is what was frozen at claim time — NOT the task's current
-    // reward, which an admin may have edited since.
-    const snapshot = (claim.reward_snapshot ?? {}) as {
-      type?: string;
-      pack_id?: string;
-    };
-    if (snapshot.type !== 'pack' || typeof snapshot.pack_id !== 'string') {
-      return { redeemed: false, reason: 'not_a_pack_reward' };
     }
 
     const rolled = await input.rollPack(snapshot.pack_id);

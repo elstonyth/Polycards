@@ -1172,6 +1172,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
         expect(claim.claim_ref).toBe(rows[0].id);
         expect(claim.reward_snapshot).toEqual({ type: 'tickets', tickets: 50 });
+        // That ref is a ticket row, not a pull: the spin route must not say
+        // "already spun, the card is in your vault" about it.
+        expect(
+          await service.redeemTaskPackClaim({
+            customerId: 'cus_tr1',
+            claimId: claim.id,
+            rollPack: async () => {
+              throw new Error('a tickets claim must never roll');
+            },
+          }),
+        ).toEqual({ redeemed: false, reason: 'not_a_pack_reward' });
         const after = await service.taskHubFor({ customerId: 'cus_tr1' });
         expect(after.pending_spins).toEqual([]);
         expect(after.tasks[0].claimed).toBe(true);
