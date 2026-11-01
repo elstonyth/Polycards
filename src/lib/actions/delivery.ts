@@ -115,8 +115,7 @@ export type ShipVaultResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type EditAddressResult =
-  | { ok: true }
-  | { ok: false; error: string; needsAuth?: boolean };
+  { ok: true } | { ok: false; error: string; needsAuth?: boolean };
 
 export type AddressView = {
   id: string;
@@ -378,8 +377,7 @@ export type AddAddressResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type EditAddressBookResult =
-  | { ok: true }
-  | { ok: false; error: string; needsAuth?: boolean };
+  { ok: true } | { ok: false; error: string; needsAuth?: boolean };
 
 // ONE snake_case mapping for both create and update.
 //
