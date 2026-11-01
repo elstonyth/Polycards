@@ -106,7 +106,7 @@ export function heroFirst<T extends { kind?: string; value_myr: number }>(
   return hero ? [hero, ...prizes.filter((p) => p !== hero)] : prizes;
 }
 
-/** A one-winner event as the wheel and the result sheet read a result: named
+/** A one-winner event as the arena and the result sheet read a result: named
  *  for the event, worth the pot, wearing the hero's art, its prizes hero first.
  *  The name comes from the caller: the page and the results row both have it. */
 export function eventResultDetail(
@@ -121,10 +121,13 @@ export function eventResultDetail(
       prize_id: eventId,
       title: eventName,
       image: prizes[0]?.image ?? null,
+      frame: prizes[0]?.frame ?? null,
       value_myr: potTotal(prizes),
+      tier: raw.tier,
     },
     entries: raw.entries,
     ticket_index: raw.ticket_index,
+    my_entry_index: raw.my_entry_index,
     prizes,
   };
 }
@@ -379,7 +382,7 @@ export function ticketRanges(
 /** Whether an entry list can be walked: its tickets add up to the result's
  *  total, and a result with a winner has entries. The schema drops a row it
  *  cannot read, and one missing row shifts every later ticket range — the
- *  wheel would land on, and the list would badge, the wrong entrant. */
+ *  arena would end on, and the list would badge, the wrong entrant. */
 export function entriesIntact(
   entries: { tickets: number }[],
   result: { total_tickets: number; winner: unknown },
@@ -403,63 +406,8 @@ export function winnerIndex(
   );
 }
 
-/** One wedge of the wheel, in degrees clockwise from 12 o'clock. `index` is
- *  the entry it stands for; null is the merged filler arc. */
-export type WheelSegment = { a0: number; a1: number; index: number | null };
-
-/** The most wedges the wheel draws before it merges the smallest. */
-export const WHEEL_MAX_SEGMENTS = 300;
-
-/** Wedges sized by tickets, in list order. Above `max` entrants the smallest
- *  (never the winner) merge into one filler arc at the end so the wheel stays
- *  readable; every kept wedge, the winner's included, keeps its true span. */
-export function wheelSegments(
-  entries: { tickets: number }[],
-  winner: number,
-  max = WHEEL_MAX_SEGMENTS,
-): WheelSegment[] {
-  const total = entries.reduce((n, e) => n + e.tickets, 0);
-  if (!(total > 0)) return [];
-  let kept: Set<number> | null = null;
-  if (entries.length > max) {
-    const biggest = entries
-      .map((e, i) => ({ i, t: e.tickets }))
-      .filter(({ i }) => i !== winner)
-      .sort((a, b) => b.t - a.t)
-      .slice(0, max - (winner >= 0 ? 2 : 1))
-      .map(({ i }) => i);
-    kept = new Set(winner >= 0 ? [winner, ...biggest] : biggest);
-  }
-  const segs: WheelSegment[] = [];
-  let a = 0;
-  let filler = 0;
-  entries.forEach((e, i) => {
-    if (kept && !kept.has(i)) {
-      filler += e.tickets;
-      return;
-    }
-    const span = (e.tickets / total) * 360;
-    segs.push({ a0: a, a1: a + span, index: i });
-    a += span;
-  });
-  if (filler > 0) segs.push({ a0: a, a1: 360, index: null });
-  return segs;
-}
-
-/** Where the pointer lands in a wedge: uniformly inside its middle 56%, so
- *  the stop never looks staged on an edge or dead centre. `rand` is 0..1. */
-export const landingAngle = (seg: WheelSegment, rand: number): number =>
-  seg.a0 + (seg.a1 - seg.a0) * (0.22 + rand * 0.56);
-
-/** The wedge under the 12 o'clock pointer when the face is turned `rotation`
- *  degrees clockwise. */
-export function segmentAt(segs: WheelSegment[], rotation: number): number {
-  const a = (((360 - (rotation % 360)) % 360) + 360) % 360;
-  return segs.findIndex((s) => a >= s.a0 && a < s.a1);
-}
-
-/** Holo foil (DESIGN.md "Holo foil", Lucky Draw only): the wheel rim, the
- *  prize frame and the dust — never chrome or buttons. The one copy of the
+/** Holo foil (DESIGN.md "Holo foil", Lucky Draw only): the arena's rim and chips,
+ *  the prize frame and the dust — never chrome or buttons. The one copy of the
  *  stops; CSS reads them through `holoConic`. */
 export const HOLO_STOPS = [
   '#c7f0ff',

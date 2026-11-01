@@ -578,7 +578,7 @@ export function PrizeWheel({
                   )}
                 >
                   <span className="relative block size-full">
-                    <PrizeArt src={p.image} kind={p.kind} />
+                    <PrizeArt src={p.image} kind={p.kind} frame={p.frame} />
                   </span>
                 </span>
               </button>
@@ -644,7 +644,7 @@ export function PrizeWheel({
                 >
                   <span className="relative aspect-[5/7] w-10 shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/[0.04] p-0.5">
                     <span className="relative block h-full w-full">
-                      <PrizeArt src={p.image} kind={p.kind} />
+                      <PrizeArt src={p.image} kind={p.kind} frame={p.frame} />
                     </span>
                   </span>
                   <span className="min-w-0 flex-1">

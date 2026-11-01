@@ -182,8 +182,8 @@ export async function GET(
         // pulled from a pack. Stated by the backend rather than left to the
         // storefront to infer from the synthetic pack id.
         challenge_prize: prize,
-        // A Lucky Draw card wears no tier frame and states no tier: won, not
-        // pulled, and the bare slab is how the vault says so.
+        // A Lucky Draw card wears the Lucky Draw frame, as it did in the draw,
+        // and states no tier: it was won, not pulled.
         lucky_draw_prize: luckyDraw,
         showcased: (p as unknown as { showcased: boolean }).showcased ?? false,
         card: {

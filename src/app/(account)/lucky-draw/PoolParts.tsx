@@ -7,6 +7,7 @@ import { GLASS_SUBTLE, useLiquidGlass } from '@/lib/use-liquid-glass';
 import { cn } from '@/lib/utils';
 import { rmAuto } from '@/lib/format';
 import { HOLO_STOPS, holoConic } from '@/lib/lucky-draw';
+import type { LuckyDrawArtFrame } from '@/lib/data/schemas';
 import { PrizeArt } from './PrizeCard';
 
 /** What a gate's pictures need of a prize. */
@@ -14,6 +15,7 @@ export type PoolPrize = {
   kind?: string;
   title: string;
   image: string | null;
+  frame?: LuckyDrawArtFrame;
   value_myr: number;
 };
 
@@ -21,7 +23,9 @@ export type PoolPrize = {
 const HOLO_FRAME_GLOW = `0 0 40px ${HOLO_STOPS[1]}2e, 0 0 90px ${HOLO_STOPS[0]}1c`;
 const PEDESTAL = 'bg-[radial-gradient(90%_60%_at_50%_30%,#2a2a2e,#121214_70%)]';
 
-/** A prize's art in its frame. Fills its parent, which sets the 5:7 shape. */
+/** A prize's art in its frame. Fills its parent, which sets the 5:7 shape. A card
+ *  wears the Lucky Draw frame and needs nothing else round it; the rest, a credit
+ *  prize or the admin's own art, sit on the pedestal. */
 export function FramedArt({
   prize,
   holo = false,
@@ -31,6 +35,19 @@ export function FramedArt({
   holo?: boolean;
   eager?: boolean;
 }) {
+  if (prize.frame) {
+    return (
+      <span className="relative block h-full w-full">
+        <PrizeArt
+          src={prize.image}
+          kind={prize.kind}
+          eager={eager}
+          frame={prize.frame}
+          glowScale={holo ? 0.4 : 0.15}
+        />
+      </span>
+    );
+  }
   const art = (
     <span
       className={cn(

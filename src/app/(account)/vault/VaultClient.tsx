@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
+import { prizeFrameVariant } from '@/lib/prize-frame';
 import { TicketArt } from '@/components/TicketArt';
 import { num, rm, rm0 } from '@/lib/format';
 import { sellBackNotice } from '@/lib/buyback-copy';
@@ -658,9 +659,9 @@ export default function VaultClient({
               // tier frame never appeared here).
               <SlabImage
                 card={item.card}
-                // Won in the weekly challenge → keeps the challenge's prism
-                // frame here, the same one it wore on the stage grid.
-                frameVariant={item.challengePrize ? 'prism' : undefined}
+                // A prize keeps the frame it was won in: the challenge's prism,
+                // or the Lucky Draw's, the same one it wore in the draw.
+                frameVariant={prizeFrameVariant(item)}
                 sizes="(max-width: 1024px) 33vw, 25vw"
                 className="w-full"
               />
@@ -794,9 +795,7 @@ export default function VaultClient({
                         // the tile and the overlay it opens still agree.
                         priceMyr: item.card.priceMyr ?? 0,
                         // The overlay shows the same frame the tile does.
-                        frameVariant: item.challengePrize
-                          ? ('prism' as const)
-                          : undefined,
+                        frameVariant: prizeFrameVariant(item),
                       })
                     }
                     aria-label={`View details for ${item.card.name}`}
@@ -816,8 +815,8 @@ export default function VaultClient({
                     word — it either reads or it shouldn't be there. */}
                 <div className="mt-1 flex flex-col gap-0.5 text-[10px] sm:flex-row sm:items-center sm:justify-between sm:gap-1 sm:text-[11px]">
                   {item.luckyDrawPrize ? (
-                    // No tier and no frame: the bare slab and this word are
-                    // how a Lucky Draw win reads (operator 2026-10-25).
+                    // No tier: its frame and this word are how a Lucky Draw
+                    // win reads.
                     <span className="truncate font-bold uppercase tracking-wider text-neutral-300">
                       Lucky Draw
                     </span>

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { AccountHeader, Badge, Pager } from '@/components/account/ui';
 import { VaultTabs } from '@/components/account/VaultTabs';
 import { SlabImage } from '@/components/SlabImage';
+import { prizeCardUrl, prizeFrameVariant } from '@/lib/prize-frame';
 import { getPullHistory, type PullHistoryItem } from '@/lib/actions/vault';
 import { pullTime, rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -104,14 +105,14 @@ export default async function PullHistoryPage({
               >
                 {p.card.handle ? (
                   <Link
-                    href={`/card/${encodeURIComponent(p.card.handle)}`}
+                    href={prizeCardUrl(p.card.handle, prizeFrameVariant(p))}
                     aria-label={`View ${p.card.name}`}
                     className="w-14 shrink-0 self-start rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:w-16"
                   >
                     <SlabImage
                       card={p.card}
                       alt=""
-                      frameVariant={p.challengePrize ? 'prism' : undefined}
+                      frameVariant={prizeFrameVariant(p)}
                       sizes="64px"
                       glowScale={0.5}
                       className="w-full"

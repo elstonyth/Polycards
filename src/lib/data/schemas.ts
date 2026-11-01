@@ -1557,11 +1557,21 @@ const LuckyDrawEntrySchema = z.looseObject({
 });
 export type LuckyDrawEntry = z.infer<typeof LuckyDrawEntrySchema>;
 
+/** How a prize's picture wears the Lucky Draw frame. Caught: a backend still
+ *  deploying sends none, and the picture then shows as it always did. */
+const LuckyDrawArtFrameSchema = z
+  .enum(['slab', 'raw'])
+  .nullable()
+  .optional()
+  .catch(null);
+export type LuckyDrawArtFrame = z.infer<typeof LuckyDrawArtFrameSchema>;
+
 /** A drawn prize. `seed` exists only here, after the draw. */
 const LuckyDrawResultSchema = z.looseObject({
   prize_id: z.string(),
   title: z.string(),
   image: z.string().nullable().catch(null),
+  frame: LuckyDrawArtFrameSchema,
   value_myr: finite,
   drawn_at: z.string(),
   winner: LuckyDrawPersonSchema.nullable(),
@@ -1597,6 +1607,7 @@ const LuckyDrawWonPrizeSchema = z.looseObject({
   kind: z.string().catch('card'),
   title: z.string(),
   image: z.string().nullable().catch(null),
+  frame: LuckyDrawArtFrameSchema,
   value_myr: finite,
 });
 
@@ -1632,6 +1643,7 @@ const LuckyDrawPrizeSchema = z
     kind: z.string(),
     title: z.string(),
     image: z.string().nullable().catch(null),
+    frame: LuckyDrawArtFrameSchema,
     value_myr: finite,
     draw_at: z.string(),
     seed_hash: z.string().catch(''),
@@ -1657,6 +1669,21 @@ export const LuckyDrawStatusSchema = z.looseObject({
   // When the newest running gate went live: the Draw tab's dot. Absent on a
   // backend still deploying, which reads as no dot.
   latest_gate_at: z.string().nullable().optional().catch(null),
+  // The gates still to draw: what the popup watches. Absent on a backend still
+  // deploying, which reads as nothing to watch, so no popup.
+  upcoming: droppableArray(
+    z.looseObject({ id: z.string(), ends_at: z.string() }),
+  )
+    .optional()
+    .catch(undefined),
+});
+
+/** GET /api/lucky-draw-status — the same read, as the site chrome takes it. */
+export const LuckyDrawChromeStatusSchema = z.looseObject({
+  latest_gate_at: z.string().nullable().catch(null),
+  upcoming: droppableArray(
+    z.looseObject({ id: z.string(), ends_at: z.string() }),
+  ).catch([]),
 });
 
 /** GET /store/lucky-draw — the live event (null: none running). */
@@ -1711,6 +1738,9 @@ export const LuckyDrawResultDetailSchema = z.looseObject({
   result: LuckyDrawResultSchema,
   entries: droppableArray(LuckyDrawEntrySchema),
   ticket_index: finite.nullable(),
+  /** The viewer's row in `entries`; absent or null with none (the arena then has
+   *  no discs to pick out). */
+  my_entry_index: finite.nullable().optional().catch(null),
   /** One-winner only (eventResultDetail): everything the winner took. */
   prizes: droppableArray(LuckyDrawWonPrizeSchema).optional().catch(undefined),
 });
@@ -1724,6 +1754,8 @@ export const LuckyDrawEventDetailSchema = z.looseObject({
   prizes: droppableArray(LuckyDrawWonPrizeSchema).catch([]),
   entries: droppableArray(LuckyDrawEntrySchema),
   ticket_index: finite.nullable(),
+  my_entry_index: finite.nullable().optional().catch(null),
+  tier: z.enum(LUCKY_DRAW_TIERS).nullable().optional().catch(null),
 });
 export type LuckyDrawEventDetail = z.infer<typeof LuckyDrawEventDetailSchema>;
 
@@ -1742,6 +1774,7 @@ export const LuckyDrawMineSchema = z.looseObject({
       prize_id: z.string(),
       title: z.string(),
       image: z.string().nullable().catch(null),
+      frame: LuckyDrawArtFrameSchema,
       my_tickets: finite,
       draw_at: z.string(),
       status: z.string(),

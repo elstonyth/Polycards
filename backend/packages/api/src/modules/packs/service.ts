@@ -512,12 +512,7 @@ export type PlayerLedgerSort = keyof typeof PLAYER_LEDGER_SUMS | 'contribution';
 /** Every Players list sort ordered in SQL (playerIdsSorted): the ledger sums
  *  plus the columns that live off the customer row, and phone. */
 export type PlayerSort =
-  | PlayerLedgerSort
-  | 'vault'
-  | 'level'
-  | 'group'
-  | 'status'
-  | 'phone';
+  PlayerLedgerSort | 'vault' | 'level' | 'group' | 'status' | 'phone';
 
 export const PLAYER_SORTS: ReadonlySet<string> = new Set<PlayerSort>([
   'wallet',
@@ -948,6 +943,7 @@ export type LuckyDrawResultRow = {
   prize_id: string;
   title: string;
   image: string | null;
+  frame: LuckyDrawArtFrame;
   value_myr: number;
   drawn_at: string;
   winner_customer_id: string | null;
@@ -963,6 +959,7 @@ export type LuckyDrawPagePrize = {
   kind: 'card' | 'credit';
   title: string;
   image: string | null;
+  frame: LuckyDrawArtFrame;
   value_myr: number;
   draw_at: string;
   seed_hash: string;
@@ -985,6 +982,10 @@ export type LuckyDrawEventFacts = {
   drawn_at: string;
 };
 
+/** How a prize's picture wears the Lucky Draw frame: `slab` is a baked slab, `raw`
+ *  a bare card scan, null anything else (credit, or the admin's own art). */
+export type LuckyDrawArtFrame = 'slab' | 'raw' | null;
+
 /** A drawn one_winner event with what its winner took. */
 export type LuckyDrawEventResultRow = LuckyDrawEventFacts & {
   event_id: string;
@@ -992,12 +993,14 @@ export type LuckyDrawEventResultRow = LuckyDrawEventFacts & {
   tier: LuckyDrawTier;
   /** The pot's picture and its RM total. */
   image: string | null;
+  frame: LuckyDrawArtFrame;
   value_myr: number;
   prizes: {
     id: string;
     kind: 'card' | 'credit';
     title: string;
     image: string | null;
+    frame: LuckyDrawArtFrame;
     value_myr: number;
   }[];
 };
@@ -1023,6 +1026,7 @@ export type LuckyDrawPageGate = {
     kind: string;
     title: string;
     image: string | null;
+    frame: LuckyDrawArtFrame;
     value_myr: number;
   }[];
 };
@@ -1067,6 +1071,7 @@ export type LuckyDrawMine = {
     prize_id: string;
     title: string;
     image: string | null;
+    frame: LuckyDrawArtFrame;
     my_tickets: number;
     draw_at: string;
     status: 'open' | 'won' | 'lost' | 'cancelled';
@@ -1191,12 +1196,10 @@ function checkLuckyDrawDrawTime(
   now: Date,
 ): void {
   const at = drawAt.getTime();
-  if (
-    !(
-      at > new Date(window.starts_at).getTime() &&
-      at <= new Date(window.ends_at).getTime()
-    )
-  ) {
+  if (!(
+    at > new Date(window.starts_at).getTime() &&
+    at <= new Date(window.ends_at).getTime()
+  )) {
     luckyDrawInvalid(
       'The draw time must fall after the event starts and by the time it ends.',
     );
@@ -1263,7 +1266,9 @@ const LUCKY_DRAW_EVENT_RESULT_FIELDS = [
 ];
 /** RM value and picture of a prize for the player routes: a credit prize is its
  *  amount; a card prize is the card's current value (0 if the card is gone).
- *  The picture is the prize's own, else the card's slab, else its scan. */
+ *  The picture is the prize's own, else the card's slab, else its scan. `frame` says
+ *  how that picture wears the Lucky Draw frame, the same one the card wears in the
+ *  winner's vault: stated here, not inferred from the picture by the storefront. */
 function luckyDrawShown(
   prize: {
     kind: string;
@@ -1272,7 +1277,7 @@ function luckyDrawShown(
     image_url?: string | null;
   },
   cards: { cardByHandle: Map<string, LuckyDrawCard>; fxRate: number },
-): { value_myr: number; image: string | null } {
+): { value_myr: number; image: string | null; frame: LuckyDrawArtFrame } {
   const card =
     prize.kind === 'card' && prize.card_handle
       ? cards.cardByHandle.get(prize.card_handle)
@@ -1285,21 +1290,33 @@ function luckyDrawShown(
           ? cardValueMyr(card, cards.fxRate)
           : 0,
     image: prize.image_url || card?.slab_image || card?.image || null,
+    // The admin's own art is not a card picture, so it wears no frame.
+    frame:
+      prize.image_url || !card
+        ? null
+        : card.slab_image
+          ? 'slab'
+          : card.image
+            ? 'raw'
+            : null,
   };
 }
 
 /** The picture of a whole pot: its most valuable card, else its biggest credit
  *  (the storefront's heroPrize). */
-function luckyDrawPotImage(
-  prizes: { kind: string; image: string | null; value_myr: number }[],
-): string | null {
+function luckyDrawPotFace(
+  prizes: {
+    kind: string;
+    image: string | null;
+    frame: LuckyDrawArtFrame;
+    value_myr: number;
+  }[],
+): { image: string | null; frame: LuckyDrawArtFrame } {
   const cards = prizes.filter((p) => p.kind === 'card');
-  return (
-    (cards.length ? cards : prizes).reduce<(typeof prizes)[number] | null>(
-      (top, p) => (!top || p.value_myr > top.value_myr ? p : top),
-      null,
-    )?.image ?? null
-  );
+  const face = (cards.length ? cards : prizes).reduce<
+    (typeof prizes)[number] | null
+  >((top, p) => (!top || p.value_myr > top.value_myr ? p : top), null);
+  return { image: face?.image ?? null, frame: face?.frame ?? null };
 }
 
 function luckyDrawEventFacts(
@@ -1335,13 +1352,14 @@ function luckyDrawResultRow(
     seed: string;
     drawn_at: unknown;
   },
-  shown: { value_myr: number; image: string | null },
+  shown: { value_myr: number; image: string | null; frame: LuckyDrawArtFrame },
   eventSeedHash?: string | null,
 ): LuckyDrawResultRow {
   return {
     prize_id: prize.id,
     title: prize.title,
     image: shown.image,
+    frame: shown.frame,
     value_myr: shown.value_myr,
     drawn_at: new Date(result.drawn_at as Date).toISOString(),
     winner_customer_id: result.winner_customer_id ?? null,
@@ -3544,10 +3562,7 @@ class PacksModuleService extends MedusaService({
           kind,
           title: d.title,
           requirement: hubRequirement(requirement),
-          reward: hubReward(
-            d.reward as unknown as TaskReward,
-            d.tickets ?? 0,
-          ),
+          reward: hubReward(d.reward as unknown as TaskReward, d.tickets ?? 0),
           tickets: d.tickets ?? 0,
           progress: taskProgress(kind, requirement, facts),
           claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
@@ -8823,6 +8838,7 @@ class PacksModuleService extends MedusaService({
           kind: p.kind,
           title: p.title,
           image: shown.image,
+          frame: shown.frame,
           value_myr: shown.value_myr,
           draw_at: new Date(p.draw_at).toISOString(),
           seed_hash: p.seed_hash ?? '',
@@ -9071,7 +9087,7 @@ class PacksModuleService extends MedusaService({
           event_id: r.event_id,
           event_name: event.name,
           tier: event.tier,
-          image: luckyDrawPotImage(pot),
+          ...luckyDrawPotFace(pot),
           // In sen: 0.1 + 0.2 must not print a float tail.
           value_myr:
             pot.reduce((sen, p) => sen + Math.round(p.value_myr * 100), 0) /
@@ -9256,7 +9272,7 @@ class PacksModuleService extends MedusaService({
         tier: e.tier,
         title: e.name,
         // A withdrawn event's prizes are all cancelled: it still has a face.
-        image: luckyDrawPotImage(
+        ...luckyDrawPotFace(
           eventPrizes
             .filter(
               (p) =>
@@ -9294,6 +9310,7 @@ class PacksModuleService extends MedusaService({
           prize_id: p.id,
           title: p.title,
           image: luckyDrawShown(p, cards).image,
+          frame: luckyDrawShown(p, cards).frame,
           my_tickets: ticketsByPrize.get(p.id) ?? 0,
           draw_at: new Date(p.draw_at).toISOString(),
           status,
@@ -17208,8 +17225,7 @@ class PacksModuleService extends MedusaService({
       const mismatch = this.grnLineMismatch(
         lines,
         input.lines,
-        (l) =>
-          `${l.card_handle} x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
+        (l) => `${l.card_handle} x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
       );
       if (mismatch) {
         throw new MedusaError(

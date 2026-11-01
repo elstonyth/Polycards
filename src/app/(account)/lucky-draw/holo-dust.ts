@@ -2,10 +2,10 @@ import { HOLO_STOPS } from '@/lib/lucky-draw';
 
 // Holo dust for the Lucky Draw win (spec §10, "Holo dust + prize reveal"),
 // ported from docs/superpowers/specs/assets/lucky-draw-spin-prototype.html.
-// Plain canvas, no React: the wheel starts it once the spin has stopped.
+// Plain canvas, no React: the arena starts it as the winner is told.
 //
 // The canvas sits 120% of the stage wide and starts 20% of its height above
-// it (see SpinWheel), so the motes can rise past the wheel's top.
+// it (see ArenaShow), so the motes can rise past the table's top.
 
 const HUES = [...HOLO_STOPS, '#ffffff'];
 
@@ -42,7 +42,7 @@ const mote = (
 });
 
 export type HoloDust = {
-  /** Glints rising out of the winning wedge (under the pointer) for 1.6 s. */
+  /** Glints rising out of the top of the table for 1.6 s. */
   burst: () => void;
   /** One softer 34-mote wave off the top edge of the rising prize frame. */
   wave: () => void;

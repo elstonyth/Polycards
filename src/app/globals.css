@@ -1141,3 +1141,43 @@ body:has([data-telegram-banner]) [data-testid='free-pack-badge'] {
     scroll-behavior: auto !important;
   }
 }
+
+/* The draw arena (DESIGN.md "The arena"): the corner card slides up; a phase name
+   lands and leaves; the winner's line settles in. Content is there without them. */
+@media (prefers-reduced-motion: no-preference) {
+  .arena-mini-in {
+    animation: arena-mini-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .arena-callout {
+    animation: arena-callout 1500ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .arena-told {
+    animation: arena-told 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+@keyframes arena-mini-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.96);
+  }
+}
+@keyframes arena-callout {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.97);
+  }
+  14%,
+  76% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes arena-told {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+}

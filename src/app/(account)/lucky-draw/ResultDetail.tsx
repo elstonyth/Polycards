@@ -57,7 +57,11 @@ export function ResultDetail({
         <div className="flex items-start gap-3">
           <span className="relative aspect-[5/7] w-16 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-1">
             <span className="relative block h-full w-full">
-              <PrizeArt src={result.image} kind={prizes?.[0]?.kind} />
+              <PrizeArt
+                src={result.image}
+                kind={prizes?.[0]?.kind}
+                frame={result.frame}
+              />
             </span>
           </span>
           <div className="min-w-0 flex-1">
@@ -139,7 +143,7 @@ export function ResultDetail({
                 >
                   <span className="relative aspect-[5/7] w-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/[0.04] p-0.5">
                     <span className="relative block h-full w-full">
-                      <PrizeArt src={p.image} kind={p.kind} />
+                      <PrizeArt src={p.image} kind={p.kind} frame={p.frame} />
                     </span>
                   </span>
                   <span className="min-w-0 flex-1">

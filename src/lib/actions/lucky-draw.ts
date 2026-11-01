@@ -39,15 +39,6 @@ export async function getLuckyDrawLive(): Promise<boolean | null> {
   return r.ok ? r.data.live : null;
 }
 
-/** When the newest running gate went live: the Draw tab's dot. Null with none
- *  running, or when the backend can't say. */
-export async function getLuckyDrawLatest(): Promise<string | null> {
-  const r = await store.get('/store/lucky-draw-status', LuckyDrawStatusSchema, {
-    auth: 'none',
-  });
-  return r.ok ? (r.data.latest_gate_at ?? null) : null;
-}
-
 export async function getLuckyDraw(): Promise<LuckyDrawPage | null> {
   const r = await store.get('/store/lucky-draw', LuckyDrawPageSchema);
   return r.ok ? r.data : null;

@@ -20,9 +20,14 @@ type Loaded = { rows: LuckyDrawResult[]; next: string | null };
  *  through `next_before`: one row per one-winner event, one per old prize. Read
  *  when the tab opens, so a fresh draw shows. */
 export function ResultsList({
+  held,
+  onWatchLive,
   onOpen,
   onOpenEvent,
 }: {
+  /** Draws still playing here: their winner isn't told yet. */
+  held: ReadonlySet<string>;
+  onWatchLive: (eventId: string) => void;
   onOpen: (prizeId: string) => void;
   onOpenEvent: (eventId: string, eventName: string) => void;
 }) {
@@ -79,25 +84,38 @@ export function ResultsList({
         {loaded.rows.map((r) => {
           const eventId = eventRowId(r);
           const title = eventId ? POOL_TITLE : r.title;
+          const playing = eventId != null && held.has(eventId);
           return (
             <li key={eventId ?? r.prize_id}>
               <button
                 type="button"
                 onClick={() =>
-                  eventId ? onOpenEvent(eventId, title) : onOpen(r.prize_id)
+                  playing
+                    ? onWatchLive(eventId)
+                    : eventId
+                      ? onOpenEvent(eventId, title)
+                      : onOpen(r.prize_id)
                 }
                 className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3 text-left transition-colors outline-none hover:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-white/40"
               >
                 <span className="relative aspect-[5/7] w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
                   <span className="relative block h-full w-full">
-                    <PrizeArt src={r.image} />
+                    <PrizeArt src={r.image} frame={r.frame} />
                   </span>
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-white">
                     {title}
                   </span>
-                  {r.winner ? (
+                  {playing ? (
+                    <span className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-white">
+                      <span
+                        className="h-1.5 w-1.5 animate-pulse rounded-full bg-white motion-reduce:animate-none"
+                        aria-hidden
+                      />
+                      Drawing live. Tap to watch.
+                    </span>
+                  ) : r.winner ? (
                     <PersonChip
                       person={r.winner}
                       size={20}
@@ -113,7 +131,7 @@ export function ResultsList({
                     {eventId && r.prize_count != null
                       ? `${num(r.prize_count)} ${r.prize_count === 1 ? 'prize' : 'prizes'} · `
                       : ''}
-                    {r.winner
+                    {r.winner && !playing
                       ? `${num(r.winner_tickets)} of ${num(r.total_tickets)} tickets · `
                       : ''}
                     {num(r.entrant_count)}{' '}

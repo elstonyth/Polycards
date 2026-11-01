@@ -2,11 +2,13 @@
 
 import { Gift } from 'lucide-react';
 import { FramedAvatar } from '@/components/FramedAvatar';
+import { SlabImage } from '@/components/SlabImage';
 import { Pill } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
 import { mytClock, mytDate, num, rmAuto } from '@/lib/format';
 import { chancePercent, drawCountdown } from '@/lib/lucky-draw';
 import type {
+  LuckyDrawArtFrame,
   LuckyDrawEntry,
   LuckyDrawPerson,
   LuckyDrawPrize,
@@ -21,18 +23,54 @@ export const mytWhen = (iso: string): string =>
 /** The prize's picture: the card slab or the admin's art, the credit coins
  *  for a credit prize without art, else a neutral gift. Fills its parent.
  *  A plain <img> (FramedAvatar's choice): the admin's image_url is free text,
- *  and next/image throws during render for a host outside remotePatterns. */
+ *  and next/image throws during render for a host outside remotePatterns.
+ *
+ *  A card picture wears the Lucky Draw frame, through SlabImage: the same component
+ *  and geometry as the card's tile in the winner's vault, so the two can't differ. */
 export function PrizeArt({
   src,
   kind,
   eager = false,
+  frame,
+  glowScale = 0.1,
 }: {
   src: string | null;
   kind?: string;
   /** First-screen art: the empty frame must not be what a player sees first. */
   eager?: boolean;
+  /** How this picture wears the Lucky Draw frame (the backend says). */
+  frame?: LuckyDrawArtFrame;
+  /** The frame's halo: small here, because most of these are thumbnails. */
+  glowScale?: number;
 }) {
   const art = src ?? (kind === 'card' ? null : CREDIT_ART);
+  if (art && frame) {
+    return (
+      <span className="absolute inset-0 flex items-center justify-center [container-type:size]">
+        <SlabImage
+          plain
+          card={{
+            name: '',
+            image: art,
+            slabImage: frame === 'slab' ? art : null,
+            rarity: null,
+          }}
+          frameVariant="lucky-draw"
+          alt=""
+          priority={eager}
+          glowScale={glowScale}
+          // SlabImage sits a raw card low and small in a slab-sized box, so a mixed row
+          // lines up. Alone in a tile there is no row: its band (0.624 of the box's
+          // height, 0.459 of its height wide, centred 8.45% low) fills the tile instead.
+          className={
+            frame === 'raw'
+              ? 'pointer-events-none h-[min(160cqh,217cqw)] shrink-0 -translate-y-[8.45%]'
+              : 'h-full shrink-0'
+          }
+        />
+      </span>
+    );
+  }
   return art ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img
@@ -170,7 +208,11 @@ export function PrizeCard({
         {art && (
           <span className="relative aspect-[5/7] w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] p-1.5 sm:w-28">
             <span className="relative block h-full w-full">
-              <PrizeArt src={prize.image} kind={prize.kind} />
+              <PrizeArt
+                src={prize.image}
+                kind={prize.kind}
+                frame={prize.frame}
+              />
             </span>
           </span>
         )}
