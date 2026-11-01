@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { pillVariants } from '@/components/ui/pill';
 import { useLiveDraw } from '@/components/app-shell/LiveDrawProvider';
+import { ArenaBoundary } from '@/components/draw-arena/ArenaBoundary';
 import { ArenaShow } from '@/components/draw-arena/lazy';
 import { Panel, UnavailablePanel } from '@/components/task-ui';
 import { TicketArt } from '@/components/TicketArt';
@@ -480,15 +481,19 @@ export function LuckyDrawClient({
       )}
       {/* A draw waits, queued, while the player is in a sheet. */}
       {spins[0] && !enterTarget && !detail && (
-        <ArenaShow
+        <ArenaBoundary
           key={spins[0].result.prize_id}
-          detail={spins[0]}
-          live={false}
-          expanded
-          onExpand={() => undefined}
-          onCollapse={() => undefined}
-          onClose={() => setSpins((q) => q.slice(1))}
-        />
+          onFail={() => setSpins((q) => q.slice(1))}
+        >
+          <ArenaShow
+            detail={spins[0]}
+            live={false}
+            expanded
+            onExpand={() => undefined}
+            onCollapse={() => undefined}
+            onClose={() => setSpins((q) => q.slice(1))}
+          />
+        </ArenaBoundary>
       )}
       {/* After hydration only (nowMs is mount-only): server HTML must never
           ship a full-screen scrim, and reduced motion is known by then. */}

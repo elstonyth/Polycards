@@ -7,7 +7,7 @@ import { LuckyDrawClient } from './LuckyDrawClient';
 export const metadata: Metadata = {
   title: 'Lucky Draw',
   description:
-    'Put your tickets in the Lucky Draw and watch the wheel. Every draw is checkable.',
+    'Put your tickets in the Lucky Draw and watch the draw live. Every draw is checkable.',
 };
 
 // The capsule link is optional and the catalog is memoised, so its first read

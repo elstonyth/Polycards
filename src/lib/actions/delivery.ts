@@ -58,6 +58,8 @@ import { toCardView, type CardView } from '@/lib/card-view';
 
 export type DeliveryOrderItemView = {
   pullId: string;
+  challengePrize: boolean;
+  luckyDrawPrize: boolean;
   /** The shipped card, or null when the backend no longer resolves it. The
    *  route sends handle/name/image/slab_image only; the other view fields
    *  read as their null defaults. */
@@ -113,7 +115,8 @@ export type ShipVaultResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type EditAddressResult =
-  { ok: true } | { ok: false; error: string; needsAuth?: boolean };
+  | { ok: true }
+  | { ok: false; error: string; needsAuth?: boolean };
 
 export type AddressView = {
   id: string;
@@ -152,6 +155,8 @@ interface BackendDeliveryOrder {
   };
   items: {
     pull_id: string;
+    challenge_prize?: boolean;
+    lucky_draw_prize?: boolean;
     card: {
       handle: string;
       name: string;
@@ -219,6 +224,8 @@ export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
     proofImages: o.proof_images ?? [],
     items: (o.items ?? []).map((it) => ({
       pullId: it.pull_id,
+      challengePrize: it.challenge_prize === true,
+      luckyDrawPrize: it.lucky_draw_prize === true,
       card: it.card ? toCardView(it.card) : null,
     })),
   }));
@@ -371,7 +378,8 @@ export type AddAddressResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type EditAddressBookResult =
-  { ok: true } | { ok: false; error: string; needsAuth?: boolean };
+  | { ok: true }
+  | { ok: false; error: string; needsAuth?: boolean };
 
 // ONE snake_case mapping for both create and update.
 //

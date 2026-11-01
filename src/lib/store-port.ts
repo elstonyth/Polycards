@@ -76,6 +76,8 @@ export type StoreOptions = {
   headers?: Record<string, string>;
   query?: Record<string, string | number | boolean>;
   idempotencyKey?: string;
+  /** A 404 is an expected answer here (a gate not drawn yet), so it isn't logged. */
+  expectMissing?: boolean;
   /**
    * `no-store` by default: these are per-customer reads.
    *
@@ -206,7 +208,9 @@ export function createStore(transport: Transport, log: Log): Store {
         status: sent.status,
         text: sent.text,
       };
-      log(`[store] ${method} ${path}: ${kind}`, failure, sent.cause);
+      if (!(o.expectMissing && kind === 'not_found')) {
+        log(`[store] ${method} ${path}: ${kind}`, failure, sent.cause);
+      }
       return failure;
     }
 

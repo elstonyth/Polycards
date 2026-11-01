@@ -539,6 +539,8 @@ export function createArenaRenderer(
     const tokens: number[] = [];
     ctx.fillStyle = DOT_COLOR;
     ctx.beginPath();
+    // Capped: at 11 fps or under, a full step would make this spring blow up.
+    const springDt = Math.min(dt, 1 / 30);
     const fed: number[] = [];
     const mine: number[] = [];
     for (let k = from; k < to; k++) {
@@ -556,9 +558,9 @@ export function createArenaRenderer(
             (velR[id] as number) +
             (160 * (real - (shownR[id] as number)) -
               15 * (velR[id] as number)) *
-              dt;
+              springDt;
           velR[id] = v;
-          shownR[id] = (shownR[id] as number) + v * dt;
+          shownR[id] = (shownR[id] as number) + v * springDt;
         }
         r = shownR[id] as number;
       }

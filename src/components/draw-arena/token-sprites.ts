@@ -95,13 +95,20 @@ export function loadTokenSprites(
     }, LOAD_TIMEOUT_MS);
     img.onload = () => {
       window.clearTimeout(give);
-      if (stopped) return;
-      try {
-        const token = pictureToken(img);
-        if (token) sprites.set(entry, token);
-      } catch {
-        // The initial stays.
-      }
+      // Decoded off the main thread first: uploads can be 4096 px, and drawing one
+      // undecoded would stall the battle.
+      void img
+        .decode()
+        .catch(() => undefined)
+        .then(() => {
+          if (stopped) return;
+          try {
+            const token = pictureToken(img);
+            if (token) sprites.set(entry, token);
+          } catch {
+            // The initial stays.
+          }
+        });
     };
     img.onerror = () => window.clearTimeout(give);
     img.src = person.avatar;

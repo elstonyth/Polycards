@@ -51,6 +51,42 @@ it('remembers an undrawn event for 2 s too: every open tab polls it at the end',
   expect(luckyDrawEventResult).toHaveBeenCalledTimes(2);
 });
 
+describe('a failed customer read', () => {
+  // The drawn event's cache never expires, so it must not keep "Anonymous" for good.
+  const listCustomers = jest.fn();
+  const drawnReq = {
+    scope: { resolve: () => ({ listCustomers }) },
+  } as unknown as MedusaRequest;
+  const drawn = {
+    row: {
+      event_id: 'ldev_1',
+      winner_customer_id: 'cus_1',
+      tier: 'economy',
+      prizes: [],
+    },
+    entries: [{ customer_id: 'cus_1', tickets: 3 }],
+    ticket_index: 1,
+  };
+  const drawnPacks = {
+    luckyDrawEventResult: jest.fn().mockResolvedValue(drawn),
+    disabledCustomerIds: jest.fn().mockResolvedValue(new Set()),
+    siteSettings: jest.fn().mockResolvedValue({ avatar_frames: {} }),
+  } as unknown as PacksModuleService;
+
+  it('is read again next time, and a good read is kept', async () => {
+    listCustomers.mockReset().mockRejectedValueOnce(new Error('db down'));
+    const failed = await eventDetailFor(drawnReq, drawnPacks, 'ldev_1');
+    expect(failed?.entries[0]?.person.who).toBe('Anonymous');
+
+    listCustomers.mockResolvedValue([{ id: 'cus_1', first_name: 'Ada' }]);
+    const good = await eventDetailFor(drawnReq, drawnPacks, 'ldev_1');
+    expect(good?.entries[0]?.person.who).toBe('Ada');
+
+    await eventDetailFor(drawnReq, drawnPacks, 'ldev_1');
+    expect(listCustomers).toHaveBeenCalledTimes(2);
+  });
+});
+
 it('clearLuckyDrawCache forgets the miss', async () => {
   await resultDetailFor(req, packs, 'ldpz_1');
   clearLuckyDrawCache();

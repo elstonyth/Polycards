@@ -19,6 +19,7 @@ import { addressViewFromInput } from '@/lib/address-view';
 import { isShippableCountry } from '@/lib/delivery-fee';
 import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { mytDate, rm } from '@/lib/format';
+import { prizeCardUrl, prizeFrameVariant } from '@/lib/prize-frame';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -581,7 +582,7 @@ function OrderDetailModal({
                   the count on screen matches the count being shipped. */}
               {it.card ? (
                 <Link
-                  href={`/card/${it.card.handle}`}
+                  href={prizeCardUrl(it.card.handle, prizeFrameVariant(it))}
                   className="min-w-0 flex-1 truncate hover:text-white"
                 >
                   {it.card.name}

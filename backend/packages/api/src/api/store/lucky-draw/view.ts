@@ -470,6 +470,7 @@ export async function resultFeedFor(
       )
     ).map((v) => [v.prize_id, v]),
   );
+  const fresh = new Map<string, ResultView>();
   const missing = rows
     .filter((r) => r.kind === 'event' && !eventRowCache.has(r.id))
     .map((r) => r.id);
@@ -481,12 +482,19 @@ export async function resultFeedFor(
       found.map((r) => r.winner_customer_id),
     );
     for (const row of found) {
-      remember(eventRowCache, row.event_id, eventRowView(row, personOf));
+      const view = eventRowView(row, personOf);
+      fresh.set(row.event_id, view);
+      // As in buildEventDetail: a failed customer read must not stick.
+      if (view.winner?.who !== 'Anonymous') {
+        remember(eventRowCache, row.event_id, view);
+      }
     }
   }
   return rows.flatMap((r) => {
     const view =
-      r.kind === 'event' ? eventRowCache.get(r.id) : prizes.get(r.id);
+      r.kind === 'event'
+        ? (fresh.get(r.id) ?? eventRowCache.get(r.id))
+        : prizes.get(r.id);
     return view ? [view] : [];
   });
 }
@@ -521,7 +529,11 @@ async function buildEventDetail(
     })),
     ticket_index: found.ticket_index,
   };
-  remember(eventDetailCache, eventId, detail);
+  // This cache never expires, and a failed customer read comes back as "Anonymous"
+  // for everyone: a draw must not keep that for good.
+  if (detail.entries.some((e) => e.person.who !== 'Anonymous')) {
+    remember(eventDetailCache, eventId, detail);
+  }
   remember(
     eventEntrantIds,
     eventId,

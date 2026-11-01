@@ -59,8 +59,9 @@ const NOTABLE_EAT = 0.012;
 
 const LIFT: Record<CornerLift, string> = {
   tabs: 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))]',
-  bar: 'bottom-[calc(12rem+env(safe-area-inset-bottom))]',
-  tray: 'bottom-[calc(15rem+env(safe-area-inset-bottom))]',
+  // A landscape phone has no room for the higher lifts: the X must stay on screen.
+  bar: 'bottom-[calc(12rem+env(safe-area-inset-bottom))] short:bottom-[calc(4.5rem+env(safe-area-inset-bottom))]',
+  tray: 'bottom-[calc(15rem+env(safe-area-inset-bottom))] short:bottom-[calc(4.5rem+env(safe-area-inset-bottom))]',
 };
 
 const short = (name: string, max = 16) =>
@@ -125,6 +126,8 @@ export function ArenaShow({
   };
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const expandRef = useRef<HTMLButtonElement>(null);
+  const wasExpanded = useRef(expanded);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dustRef = useRef<HTMLCanvasElement>(null);
@@ -161,6 +164,15 @@ export function ArenaShow({
   const escape = live ? onCollapse : onClose;
   useModalA11y(rootRef, expanded, escape);
 
+  // Folding back: the button that opened it left the page while it was open, so
+  // focus has to be handed to the new one or it falls to the body.
+  useEffect(() => {
+    if (wasExpanded.current && !expanded) {
+      expandRef.current?.focus({ preventScroll: true });
+    }
+    wasExpanded.current = expanded;
+  }, [expanded]);
+
   // No battle to play: a list that doesn't add up, or reduced motion. The result
   // is told as it stands, straight away.
   const skipShow = reduced || win < 0 || broken;
@@ -175,11 +187,17 @@ export function ArenaShow({
     const dots = arenaDots(entries.length);
     const sim = new ArenaSim(seed, dots);
     let raf = 0;
-    const giveUp = window.setTimeout(() => {
-      cancelAnimationFrame(raf);
-      setBroken(true);
-    }, COMPUTE_GIVE_UP_MS);
-    const slice = () => {
+    // Only time the phone was on it counts: a hidden tab pauses the frames, and a
+    // tab coming back must not find its draw given up on.
+    let spent = 0;
+    let lastSlice = 0;
+    const slice = (now: number) => {
+      if (lastSlice > 0 && now - lastSlice < 1000) spent += now - lastSlice;
+      lastSlice = now;
+      if (spent > COMPUTE_GIVE_UP_MS) {
+        setBroken(true);
+        return;
+      }
       const until = performance.now() + SLICE_MS;
       try {
         while (!sim.done && performance.now() < until) sim.advance();
@@ -187,7 +205,6 @@ export function ArenaShow({
           raf = requestAnimationFrame(slice);
           return;
         }
-        window.clearTimeout(giveUp);
         const run = sim.result();
         const owners = castDiscs({
           tickets: entries.map((e) => e.tickets),
@@ -197,9 +214,9 @@ export function ArenaShow({
           dots,
           seed,
         });
-        // The stored result is the truth: a disc that ended anywhere else means
-        // the arena is wrong, so it is not shown.
-        if (owners[run.survivor] !== win) {
+        // The stored result is the truth: a disc that ended anywhere else, or more
+        // than one left standing, means the arena is wrong, so it is not shown.
+        if (run.eats.length !== dots - 1 || owners[run.survivor] !== win) {
           setBroken(true);
           return;
         }
@@ -210,15 +227,11 @@ export function ArenaShow({
           me: myIndex,
         });
       } catch {
-        window.clearTimeout(giveUp);
         setBroken(true);
       }
     };
     raf = requestAnimationFrame(slice);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearTimeout(giveUp);
-    };
+    return () => cancelAnimationFrame(raf);
   }, [entries, myIndex, reduced, result.prize_id, result.seed, win]);
 
   // The show itself: one clock, one canvas, from the first frame. A hidden tab
@@ -243,9 +256,12 @@ export function ArenaShow({
       }
     };
     const renderer = createArenaRenderer(canvas, cast, sprites, onEvent);
+    let t = 0;
     const fit = () => {
       const box = stage.getBoundingClientRect();
       renderer.resize(box.width, box.height);
+      // A resize clears the canvas, and once the show has ended no frame redraws it.
+      if (t > 0) renderer.draw(t, 0);
     };
     fit();
     const watcher = new ResizeObserver(fit);
@@ -263,7 +279,6 @@ export function ArenaShow({
     const nameOf = (entry: number | undefined, you: string) =>
       entry === cast.me ? you : short(cast.names[entry ?? -1] ?? '', 14);
 
-    let t = 0;
     let last = performance.now();
     let raf = 0;
     let lastHud = -Infinity;
@@ -349,7 +364,13 @@ export function ArenaShow({
   // The corner card clears itself once it has said who won; a win waits.
   useEffect(() => {
     if (!live || expanded || !over || iWon) return;
-    const id = window.setTimeout(() => onCloseRef.current(), MINI_LINGER_MS);
+    let id = 0;
+    const clear = () => {
+      // Not while nobody can see it, or the next draw starts unseen.
+      if (document.hidden) id = window.setTimeout(clear, 1000);
+      else onCloseRef.current();
+    };
+    id = window.setTimeout(clear, MINI_LINGER_MS);
     return () => window.clearTimeout(id);
   }, [live, expanded, over, iWon]);
 
@@ -391,11 +412,19 @@ export function ArenaShow({
         expanded
           ? 'fixed inset-0 z-[60] flex flex-col overflow-x-hidden overflow-y-auto bg-neutral-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]'
           : cn(
-              'arena-mini-in fixed right-3 z-40 w-[clamp(9.5rem,44vw,11rem)] overflow-hidden rounded-2xl border border-white/15 bg-neutral-950 shadow-[0_25px_60px_-15px_rgb(0_0_0/.85)] lg:right-6 lg:bottom-6 lg:w-72',
+              'arena-mini-in fixed right-[max(0.75rem,env(safe-area-inset-right))] z-40 w-[clamp(9.5rem,44vw,11rem)] overflow-hidden rounded-2xl border border-white/15 bg-neutral-950 shadow-[0_25px_60px_-15px_rgb(0_0_0/.85)] lg:right-6 lg:bottom-6 lg:w-72',
               LIFT[lift],
             ),
       )}
     >
+      {/* Always mounted, so the result is announced in the corner and full size. */}
+      <p role="status" className="sr-only">
+        {told
+          ? winner
+            ? `${iWon ? 'You' : winner.who} won ${rmAuto(result.value_myr)}`
+            : 'No entries, so nothing was drawn.'
+          : ''}
+      </p>
       {expanded && (
         <header className="flex shrink-0 items-center gap-3 px-4 py-2.5">
           <span className="relative aspect-[5/7] w-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/[0.04] p-0.5">
@@ -495,6 +524,14 @@ export function ArenaShow({
                 className="absolute inset-0 h-full w-full"
               />
             )}
+            {/* No battle to play: the corner still shows what was drawn. */}
+            {skipShow && !expanded && (
+              <div className="absolute inset-0 grid place-items-center">
+                <div className="relative aspect-[5/7] h-[84%]">
+                  <FramedArt prize={face} eager />
+                </div>
+              </div>
+            )}
           </div>
 
           {expanded && callout && !told && (
@@ -574,6 +611,7 @@ export function ArenaShow({
                 LIVE
               </span>
               <button
+                ref={expandRef}
                 type="button"
                 onClick={onExpand}
                 aria-label="Watch the Lucky Draw"
@@ -705,10 +743,7 @@ export function ArenaShow({
                 )}
               </>
             ) : (
-              <div
-                role="status"
-                className="arena-told text-center lg:text-left"
-              >
+              <div className="arena-told text-center lg:text-left">
                 {winner ? (
                   <>
                     <p

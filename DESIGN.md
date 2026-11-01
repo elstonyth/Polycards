@@ -158,7 +158,7 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 
 ### Lucky Draw only — Holo foil (2026-10-24)
 
-- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on five things: the arena's rim and its booster chips, the prize frame on anything that isn't a card (a credit prize or the admin's own art, in the reveal and the pool), the lines of the Lucky Draw slab frame, the win's dust, the pool pass's stub (`holoSheet`, under a pearl veil so a whole surface of it stays a card's shimmer and not candy; 2026-10-31, so the page can't be mistaken for the homepage), and the "Now" dot in How it works. Never chrome, never buttons, never text, never another surface. No gold on the table but the winner's ring (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` / `.holo-ring` in `globals.css` only turn the light and cut the ring (still under reduced motion).
+- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on these: the arena's rim, its booster chips and the winner's crown, the prize frame on anything that isn't a card (a credit prize or the admin's own art, in the reveal and the pool), the lines of the Lucky Draw slab frame, the win's dust, the pool pass's stub (`holoSheet`, under a pearl veil so a whole surface of it stays a card's shimmer and not candy; 2026-10-31, so the page can't be mistaken for the homepage), and the "Now" dot in How it works. Never chrome, never buttons, never text, never another surface. No gold on the table but the winner's ring (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` in `globals.css` only turns the light (still under reduced motion).
 
 ## 3. Typography
 
@@ -434,7 +434,7 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
   rebuilt from stored data, not a video file: player pictures come from other hosts,
   which a browser won't let a canvas record, and this way old draws replay too. Reduced
   motion: the winner shows directly, no battle, no dust. Sound (`drawStart/drawTick/
-  drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the full
+drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the full
   view, a tap's gesture having unlocked it, and never from the corner.
 - **Results** — the winner, their tickets, a Watch-the-draw replay and the
   frozen entry list in draw order with ticket ranges. The seed and its hash

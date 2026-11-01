@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { getCardResult, type CardDetailData } from '@/lib/data/cards';
 import { ProductJsonLd, shareImageMeta } from '@/lib/product-share';
-import { frameVariantFromParam } from '@/lib/prize-frame';
+import { frameVariantFromParam, prizeCardUrl } from '@/lib/prize-frame';
 import { CardCloseButton } from './CardCloseButton';
 import { CardDetailHydrated } from './CardDetailHydrated';
 
@@ -72,7 +72,7 @@ export default async function CardPage({
   if (result.status === 'error') {
     return (
       <div className="mx-auto w-full px-fluid py-16">
-        {frameVariant && <CardCloseButton />}
+        {frameVariant && <CardCloseButton variant={frameVariant} />}
         <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-neutral-900 px-6 py-12 text-center">
           <h1 className="font-heading text-2xl text-white">
             Couldn&apos;t load this card
@@ -83,7 +83,7 @@ export default async function CardPage({
           {/* Plain anchor, not Link: a full request re-runs this dynamic page
               instead of a soft nav that can serve the cached error render. */}
           <a
-            href={`/card/${encodeURIComponent(handle)}${frameVariant ? '?prize=weekly' : ''}`}
+            href={prizeCardUrl(handle, frameVariant)}
             className="mt-5 inline-flex min-h-11 items-center text-sm font-bold text-white underline underline-offset-4"
           >
             Try again
@@ -103,7 +103,7 @@ export default async function CardPage({
         path={`/card/${card.handle}`}
       />
       {frameVariant ? (
-        <CardCloseButton />
+        <CardCloseButton variant={frameVariant} />
       ) : (
         <Link
           href="/slots"

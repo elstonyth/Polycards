@@ -46,7 +46,7 @@ export function PrizeArt({
   const art = src ?? (kind === 'card' ? null : CREDIT_ART);
   if (art && frame) {
     return (
-      <span className="absolute inset-0 flex items-center justify-center [container-type:size]">
+      <span className="absolute inset-0 flex items-center justify-center [contain:layout] [container-type:size]">
         <SlabImage
           plain
           card={{
@@ -62,9 +62,11 @@ export function PrizeArt({
           // SlabImage sits a raw card low and small in a slab-sized box, so a mixed row
           // lines up. Alone in a tile there is no row: its band (0.624 of the box's
           // height, 0.459 of its height wide, centred 8.45% low) fills the tile instead.
+          // The box itself overhangs the tile, empty: layout containment above keeps
+          // that from scrolling a list sideways.
           className={
             frame === 'raw'
-              ? 'pointer-events-none h-[min(160cqh,217cqw)] shrink-0 -translate-y-[8.45%]'
+              ? 'pointer-events-none h-[160%] shrink-0 -translate-y-[8.45%] supports-[height:1cqh]:h-[min(160cqh,217cqw)]'
               : 'h-full shrink-0'
           }
         />

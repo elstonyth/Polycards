@@ -3,6 +3,7 @@ import {
   cornerLift,
   dueGate,
   firstLookAt,
+  freshShows,
   mergeWatched,
   nextLookAt,
   nextWake,
@@ -14,11 +15,27 @@ const at = (m: number) => m * MIN;
 const iso = (ms: number) => new Date(ms).toISOString();
 const never = new Set<string>();
 
+describe('freshShows', () => {
+  const show = (ageMs: number) => ({
+    detail: { result: { drawn_at: new Date(1_000_000 - ageMs).toISOString() } },
+  });
+
+  test('keeps the young, drops the old, at the limit too', () => {
+    const young = show(999);
+    expect(freshShows([young, show(1000)], 1_000_000, 1000)).toEqual([young]);
+  });
+
+  test('the same list when nothing went, so nobody re-renders', () => {
+    const q = [show(1), show(2)];
+    expect(freshShows(q, 1_000_000, 1000)).toBe(q);
+  });
+});
+
 describe('firstLookAt', () => {
   test('never before the first minute after the end, when the job can have run', () => {
     const end = at(100) + 17_000;
     expect(firstLookAt(end, 0)).toBeGreaterThan(at(101));
-    expect(firstLookAt(end, 1)).toBeLessThan(at(101) + 15_000);
+    expect(firstLookAt(end, 1)).toBeLessThan(at(101) + 45_000);
   });
 
   test('a gate ending on the minute is looked for just after it', () => {

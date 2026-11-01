@@ -16,7 +16,9 @@ export type WatchedGate = {
 
 const MINUTE_MS = 60_000;
 const FIRST_LOOK_MIN_MS = 2_000;
-const FIRST_LOOK_SPREAD_MS = 10_000;
+// Wide on purpose: a read costs about 3 queries before its cache, and three gates can
+// draw in one minute. A popup up to 40 s late is fine; tabs aren't synced anyway.
+const FIRST_LOOK_SPREAD_MS = 40_000;
 const LOOK_AGAIN_MS = 8_000;
 const LOOK_AGAIN_SPREAD_MS = 4_000;
 /** A gate with no result by now has a late or failing draw: stop looking. The
@@ -24,6 +26,19 @@ const LOOK_AGAIN_SPREAD_MS = 4_000;
 export const WATCH_WINDOW_MS = 5 * MINUTE_MS;
 /** A result older than this is no longer a live moment: it waits in Results. */
 export const LIVE_MAX_AGE_MS = 2 * MINUTE_MS;
+/** A draw already taken in, waiting behind others or on a sleeping phone, goes after
+ *  this: long enough to watch three in a row, too short to pop up the next morning. */
+export const QUEUE_MAX_AGE_MS = 10 * MINUTE_MS;
+
+/** The shows still young enough to play: the same list when none has gone. */
+export function freshShows<
+  T extends { detail: { result: { drawn_at: string } } },
+>(queue: readonly T[], now: number, maxAge: number): readonly T[] {
+  const kept = queue.filter(
+    (s) => now - Date.parse(s.detail.result.drawn_at) < maxAge,
+  );
+  return kept.length === queue.length ? queue : kept;
+}
 
 /** First look for a gate ending at `endsAt`. `rand` is 0..1. */
 export const firstLookAt = (endsAt: number, rand: number): number =>

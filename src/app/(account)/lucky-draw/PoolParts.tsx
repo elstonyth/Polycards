@@ -19,7 +19,7 @@ export type PoolPrize = {
   value_myr: number;
 };
 
-// The frame's soft glow, in its own foil (SpinWheel's).
+// The frame's soft glow, in its own foil.
 const HOLO_FRAME_GLOW = `0 0 40px ${HOLO_STOPS[1]}2e, 0 0 90px ${HOLO_STOPS[0]}1c`;
 const PEDESTAL = 'bg-[radial-gradient(90%_60%_at_50%_30%,#2a2a2e,#121214_70%)]';
 

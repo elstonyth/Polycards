@@ -3,12 +3,13 @@
 import { useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
+import type { FrameVariant } from '@/lib/prize-frame';
 
 /**
- * A challenge prize opened as a page: Close returns the visitor to where they
- * tapped it, in the same words as CardDetailOverlay's Close.
+ * A prize opened as a page: Close returns the visitor to where they tapped it,
+ * in the same words as CardDetailOverlay's Close.
  */
-export function CardCloseButton() {
+export function CardCloseButton({ variant }: { variant: FrameVariant }) {
   const router = useRouter();
   const closing = useRef(false);
   return (
@@ -30,7 +31,7 @@ export function CardCloseButton() {
           router.back();
         } else {
           // replace, not push: Back must not reopen the card just closed.
-          router.replace('/leaderboard');
+          router.replace(variant === 'lucky-draw' ? '/vault' : '/leaderboard');
         }
       }}
       className="rise-in mb-6 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-4 text-sm font-medium text-white transition-colors hover:bg-white/10"

@@ -36,9 +36,10 @@ export function arenaSeed(text: string): Seed4 {
 export const arenaDots = (entrants: number): number =>
   Math.min(ARENA_MAX_DOTS, Math.max(ARENA_DOTS, entrants));
 
-/** Discs per entry, in proportion to tickets, at least one each, adding up to
- *  `dots` exactly (largest remainder). More entrants than discs: the biggest
- *  holders, the winner and the viewer keep one, and the rest sit out. */
+/** Discs per entry, in proportion to tickets, adding up to `dots` exactly. One disc
+ *  only where a fair share is under one, so what a big holder sees matches their
+ *  chance; the rest split by largest remainder. More entrants than discs: the
+ *  biggest holders, the winner and the viewer keep one, and the rest sit out. */
 export function discShares(
   tickets: readonly number[],
   dots: number,
@@ -58,19 +59,33 @@ export function discShares(
       .slice(0, dots)
       .sort((a, b) => a - b);
   }
-  const total = seated.reduce((n, i) => n + (tickets[i] as number), 0);
-  const spare = dots - seated.length;
+  let pool = seated;
+  let room = dots;
+  let total = pool.reduce((n, i) => n + (tickets[i] as number), 0);
+  const fair = (i: number) =>
+    total > 0 ? (room * (tickets[i] as number)) / total : room / pool.length;
+  // Pinning some at one leaves the others fewer discs, which can pin more.
+  for (;;) {
+    const small = new Set(pool.filter((i) => fair(i) < 1));
+    if (small.size === 0) break;
+    for (const i of small) {
+      shares[i] = 1;
+      total -= tickets[i] as number;
+    }
+    room -= small.size;
+    pool = pool.filter((i) => !small.has(i));
+  }
   const rest: { i: number; part: number }[] = [];
   let given = 0;
-  for (const i of seated) {
-    const exact = total > 0 ? (spare * (tickets[i] as number)) / total : 0;
+  for (const i of pool) {
+    const exact = fair(i);
     const whole = Math.floor(exact);
-    shares[i] = 1 + whole;
+    shares[i] = whole;
     given += whole;
     rest.push({ i, part: exact - whole });
   }
   rest.sort((a, b) => b.part - a.part || a.i - b.i);
-  for (let k = 0; k < spare - given; k++) {
+  for (let k = 0; k < room - given; k++) {
     const row = rest[k % rest.length];
     if (row) shares[row.i] = (shares[row.i] as number) + 1;
   }

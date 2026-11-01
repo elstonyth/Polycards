@@ -768,6 +768,16 @@ export class ArenaSim {
   }
 
   private moveFinal(R: number): void {
+    // A booster can level a locked pair, and equals only bounce: settle it, or the
+    // hunt never ends and the battle stops with discs still on the table.
+    if (
+      this.prey >= 0 &&
+      this.alive[this.prey] &&
+      this.alive[this.hunter] &&
+      this.mass[this.hunter] === this.mass[this.prey]
+    ) {
+      this.tieBreak(this.hunter, this.prey);
+    }
     const huntOn =
       this.prey >= 0 && this.alive[this.prey] && this.alive[this.hunter];
     let sweepOn = false;

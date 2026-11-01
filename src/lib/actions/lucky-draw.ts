@@ -129,7 +129,7 @@ export async function getLuckyDrawResult(
   return r.ok ? r.data : null;
 }
 
-/** One drawn one-winner event, read as a result the wheel and the sheet know;
+/** One drawn one-winner event, read as a result the arena and the sheet know;
  *  null until it is drawn (a 404). */
 export async function getLuckyDrawEventResult(
   eventId: string,
@@ -138,6 +138,7 @@ export async function getLuckyDrawEventResult(
   const r = await store.get(
     `/store/lucky-draw/results/events/${encodeURIComponent(eventId)}`,
     LuckyDrawEventDetailSchema,
+    { expectMissing: true },
   );
   return r.ok ? eventResultDetail(eventId, eventName, r.data) : null;
 }

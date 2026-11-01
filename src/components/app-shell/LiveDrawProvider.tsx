@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { ArenaBoundary } from '@/components/draw-arena/ArenaBoundary';
 import { ArenaShow } from '@/components/draw-arena/lazy';
 import { getLuckyDrawEventResult } from '@/lib/actions/lucky-draw';
 import { readLuckyDrawStatus } from '@/lib/lucky-draw-status-read';
@@ -19,10 +20,12 @@ import { POOL_TITLE } from '@/lib/lucky-draw';
 import {
   cornerLift,
   dueGate,
+  freshShows,
   LIVE_MAX_AGE_MS,
   mergeWatched,
   nextLookAt,
   nextWake,
+  QUEUE_MAX_AGE_MS,
   readShownDraws,
   recordShownDraw,
   type WatchedGate,
@@ -82,8 +85,12 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
   const consent = useConsent();
   const pathname = usePathname();
   const [queue, setQueue] = useState<
-    { id: string; detail: LuckyDrawResultDetail }[]
+    readonly { id: string; detail: LuckyDrawResultDetail }[]
   >([]);
+  const queueRef = useRef(queue);
+  useEffect(() => {
+    queueRef.current = queue;
+  });
   const [expanded, setExpanded] = useState(false);
   const [drawn, setDrawn] = useState<ReadonlySet<string>>(NOBODY);
   const [finished, setFinished] = useState(0);
@@ -101,6 +108,18 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
       Math.random,
     );
     armRef.current();
+  }, []);
+
+  // A draw past `maxAge` isn't live any more, so it doesn't play as if it were:
+  // Results has it. Age runs from the draw, so waiting never restarts the clock.
+  const dropStale = useCallback((maxAge: number) => {
+    const was = queueRef.current;
+    const kept = freshShows(was, Date.now(), maxAge);
+    if (kept === was) return;
+    queueRef.current = kept;
+    setQueue(kept);
+    if (kept[0] !== was[0]) setExpanded(false);
+    setFinished((n) => n + 1);
   }, []);
 
   useEffect(() => {
@@ -124,6 +143,9 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
     };
 
     const tick = async () => {
+      // Hidden since this was armed: nobody is here to see it, and reading now would
+      // use up the draw for another tab that is. Coming back re-arms.
+      if (document.hidden) return;
       const now = Date.now();
       const due = dueGate(watchedRef.current, now);
       if (due) {
@@ -172,6 +194,7 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
     );
     const onBack = () => {
       if (document.hidden) return;
+      dropStale(QUEUE_MAX_AGE_MS);
       if (Date.now() - refreshedAt >= FOCUS_THROTTLE_MS) void refresh();
       arm();
     };
@@ -191,10 +214,10 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
       setExpanded(false);
       setDrawn(NOBODY);
     };
-  }, [customerId, track]);
+  }, [customerId, track, dropStale]);
 
   const closeShow = useCallback(() => {
-    setQueue((q) => q.slice(1));
+    setQueue((q) => freshShows(q.slice(1), Date.now(), QUEUE_MAX_AGE_MS));
     setExpanded(false);
     setFinished((n) => n + 1);
     // A breath between two draws, so the second reads as its own moment.
@@ -208,6 +231,7 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
   }, [resting]);
 
   const watch = useCallback((id: string) => {
+    if (!queueRef.current.some((s) => s.id === id)) return;
     setQueue((q) => {
       const at = q.findIndex((s) => s.id === id);
       if (at <= 0) return q;
@@ -226,33 +250,37 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
   const onScreen =
     show && !resting && consent !== null && !SPIN_ROUTE.test(pathname);
 
-  // Held back by a pack rip or the cookie banner for too long: it isn't live any
-  // more, so it doesn't pop up calling itself that. Results has it. Draws waiting
-  // their turn behind another show are not held back: they play in order.
-  const heldBack = show && !resting && !onScreen ? show.id : null;
+  // Held back by a pack rip or the cookie banner until it is too old to call live.
+  // Draws waiting their turn behind another show are not held back: they play in
+  // order, with the longer limit.
+  const heldBackAt =
+    show && !resting && !onScreen
+      ? Date.parse(show.detail.result.drawn_at)
+      : null;
   useEffect(() => {
-    if (!heldBack) return;
-    const id = window.setTimeout(() => {
-      setQueue((q) => q.filter((s) => s.id !== heldBack));
-      setFinished((n) => n + 1);
-    }, LIVE_MAX_AGE_MS);
+    if (heldBackAt === null) return;
+    const id = window.setTimeout(
+      () => dropStale(LIVE_MAX_AGE_MS),
+      Math.max(0, heldBackAt + LIVE_MAX_AGE_MS - Date.now()),
+    );
     return () => window.clearTimeout(id);
-  }, [heldBack]);
+  }, [heldBackAt, dropStale]);
 
   return (
     <Ctx.Provider value={value}>
       {children}
       {onScreen && (
-        <ArenaShow
-          key={show.id}
-          detail={show.detail}
-          live
-          expanded={expanded}
-          lift={cornerLift(pathname)}
-          onExpand={() => setExpanded(true)}
-          onCollapse={() => setExpanded(false)}
-          onClose={closeShow}
-        />
+        <ArenaBoundary key={show.id} onFail={closeShow}>
+          <ArenaShow
+            detail={show.detail}
+            live
+            expanded={expanded}
+            lift={cornerLift(pathname)}
+            onExpand={() => setExpanded(true)}
+            onCollapse={() => setExpanded(false)}
+            onClose={closeShow}
+          />
+        </ArenaBoundary>
       )}
     </Ctx.Provider>
   );

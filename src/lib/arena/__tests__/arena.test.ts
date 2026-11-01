@@ -129,6 +129,17 @@ describe('the battle', () => {
     expect(Array.from(sim.result().ys)).toEqual(Array.from(run.ys));
   });
 
+  test('a booster levelling the last hunt still ends on one disc', () => {
+    // A real seed that stopped with discs left, the hunter and prey equal for good.
+    const r = runArena(
+      arenaSeed(
+        '14361e05a4fd28a4bace75d6dc2f20521d09f1e6ad2727456a1a6581aac2acc3:ldev_7266',
+      ),
+      ARENA_DOTS,
+    );
+    expect(r.eats).toHaveLength(ARENA_DOTS - 1);
+  });
+
   test('ends at the far ends of its size', () => {
     for (const dots of [2, 3, ARENA_MAX_DOTS]) {
       const r = runArena(seed(`size-${dots}`), dots);
@@ -148,6 +159,15 @@ describe('who sits where', () => {
     );
     expect(discShares([5], 900)).toEqual([900]);
     expect(discShares([1, 1], 900)).toEqual([450, 450]);
+  });
+
+  test('a big holder gets the discs their chance says, not half of them', () => {
+    // First gate's shape on 2026-11-02: 169 players, one with 770 of 2,919 tickets.
+    const others = Array.from({ length: 168 }, (_, i) => (i < 133 ? 13 : 12));
+    const shares = discShares([770, ...others], ARENA_DOTS);
+    expect(shares.reduce((a, b) => a + b, 0)).toBe(ARENA_DOTS);
+    expect(Math.abs((shares[0] as number) - 84)).toBeLessThanOrEqual(1);
+    expect(Math.min(...shares)).toBeGreaterThanOrEqual(1);
   });
 
   test('a one-ticket player among ten thousand still gets a disc', () => {
