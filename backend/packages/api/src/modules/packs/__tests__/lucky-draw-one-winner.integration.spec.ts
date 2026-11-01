@@ -16,6 +16,7 @@ import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../index';
 import PacksModuleService from '../service';
+import { CORE_CUSTOMER_MODELS } from '../test-support/core-customer-models';
 import {
   LUCKY_DRAW_PULL_PACK_ID,
   commitDrawSeed,
@@ -51,6 +52,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [
+    ...CORE_CUSTOMER_MODELS,
     LuckyDrawEvent,
     LuckyDrawPrize,
     LuckyDrawEntry,
