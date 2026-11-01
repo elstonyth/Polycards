@@ -116,7 +116,8 @@ badge is the only public surface of the free pack.
     out top, white "FREE PACK" type, confetti; transparent WebP at
     `public/images/polycards/free-pack-badge.webp` (393×512). Render at
     ~100–130px wide; subtle float/bob animation, gated on
-    `usePrefersReducedMotion`.
+    `usePrefersReducedMotion`. Historical: the art at this path became the
+    comic burst design on 2026-11-01 (786×1024, #938).
 - **Pack detail** (`/slots/<free-slug>`): existing `PackDetailClient`;
   price and quantity controls hidden; single "Open Free Pack" CTA. Direct
   navigation by an ineligible account shows the pack but the open fails
