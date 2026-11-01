@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { SlabImage } from '@/components/SlabImage';
+import { TicketArt } from '@/components/TicketArt';
 import { TierBadge } from '@/components/TierBadge';
 import { PullGapsChart } from '@/components/PullGapsChart';
 import {
@@ -16,7 +17,7 @@ import {
   TOP_RARITIES,
 } from '@/lib/rarity';
 import { pullTime, rm } from '@/lib/format';
-import type { Rarity } from '@/lib/packs-data';
+import { ticketCount, type Rarity } from '@/lib/packs-data';
 import type { RecentFeed, RecentPull } from '@/lib/data/packs';
 
 /**
@@ -54,6 +55,10 @@ function Row({
 }) {
   const rgb = rarityRgb(pull.rarity);
   const top = isTopRarity(pull.rarity);
+  // A ticket win has no card to open or price, so the row is not a control.
+  // [amount, unit], the two lines it prints.
+  const tickets =
+    pull.tickets != null ? ticketCount(pull.tickets).split(' ') : null;
   // Chase-tier rows wear their own hue — the glow is inherited from the pull.
   const style = top
     ? {
@@ -117,35 +122,54 @@ function Row({
           )}
         </span>
       </span>
-      <SlabImage
-        card={pull}
-        // Decorative: the row prints the card's name in the column beside it.
-        alt=""
-        sizes="40px"
-        className="w-9 shrink-0"
-        // 36px slab: the full-size halo (~44px) would bleed over the row
-        // above/below and the value column beside it. Ladder: scale ~
-        // width/200 (see the /me showcase's 80px -> 0.4).
-        glowScale={0.18}
-      />
-      {/* Card name over the value — the value owns the right edge and never
-          wraps; the card name is what truncates. The column is FIXED-width
-          (not sized to its content) so it, and the slab thumb beside it, sit
-          at the same x on every row instead of each row shifting with its own
-          card name. Each width step holds a six-figure "RM 184,828.54" at
-          that step's font size; seven figures would spill left over the
-          thumb. */}
-      <span className="flex w-[6.5rem] shrink-0 flex-col items-end gap-1 @xs:w-[7.25rem] @sm:w-[7.75rem]">
-        {/* Two lines, not an ellipsis: "Pretend Comedian Pikachu #…" cut to
-            one line hid the very words that name the card. overflow-wrap
-            keeps a single long token inside the column. */}
-        <span className="line-clamp-2 max-w-full text-right text-[11px] leading-tight text-neutral-300 [overflow-wrap:anywhere]">
-          {pull.name}
-        </span>
-        <span className="whitespace-nowrap font-heading text-[13px] leading-none text-white tabular-nums @xs:text-[15px] @sm:text-base">
-          {value}
-        </span>
-      </span>
+      {tickets ? (
+        <>
+          <TicketArt width={48} className="shrink-0" />
+          {/* Amount over unit, like the capsule's Top Hits tiles. Narrower than
+              the card column below: no price to hold, and a phone's name column
+              needs the room. Fixed for the same reason, so the art lines up. */}
+          <span className="flex w-14 shrink-0 flex-col items-end gap-1">
+            <span className="whitespace-nowrap font-heading text-[13px] leading-none text-white tabular-nums @xs:text-[15px] @sm:text-base">
+              {tickets[0]}
+            </span>
+            <span className="text-[11px] leading-tight text-neutral-300">
+              {tickets[1]}
+            </span>
+          </span>
+        </>
+      ) : (
+        <>
+          <SlabImage
+            card={pull}
+            // Decorative: the row prints the card's name in the column beside it.
+            alt=""
+            sizes="40px"
+            className="w-9 shrink-0"
+            // 36px slab: the full-size halo (~44px) would bleed over the row
+            // above/below and the value column beside it. Ladder: scale ~
+            // width/200 (see the /me showcase's 80px -> 0.4).
+            glowScale={0.18}
+          />
+          {/* Card name over the value — the value owns the right edge and never
+              wraps; the card name is what truncates. The column is FIXED-width
+              (not sized to its content) so it, and the slab thumb beside it, sit
+              at the same x on every row instead of each row shifting with its own
+              card name. Each width step holds a six-figure "RM 184,828.54" at
+              that step's font size; seven figures would spill left over the
+              thumb. */}
+          <span className="flex w-[6.5rem] shrink-0 flex-col items-end gap-1 @xs:w-[7.25rem] @sm:w-[7.75rem]">
+            {/* Two lines, not an ellipsis: "Pretend Comedian Pikachu #…" cut to
+                one line hid the very words that name the card. overflow-wrap
+                keeps a single long token inside the column. */}
+            <span className="line-clamp-2 max-w-full text-right text-[11px] leading-tight text-neutral-300 [overflow-wrap:anywhere]">
+              {pull.name}
+            </span>
+            <span className="whitespace-nowrap font-heading text-[13px] leading-none text-white tabular-nums @xs:text-[15px] @sm:text-base">
+              {value}
+            </span>
+          </span>
+        </>
+      )}
     </>
   );
   // The chrome lives on the row CONTAINER, not on the card control: the
@@ -157,8 +181,10 @@ function Row({
       style={style}
       className={cn(
         'flex w-full items-center gap-2 rounded-xl border bg-neutral-900 px-3 py-2.5 @xs:gap-3',
-        'transition-[background-color,transform] hover:bg-neutral-800 active:scale-[0.99]',
-        'motion-reduce:transition-none motion-reduce:active:scale-100',
+        !tickets &&
+          'transition-[background-color,transform] hover:bg-neutral-800 active:scale-[0.99]',
+        !tickets &&
+          'motion-reduce:transition-none motion-reduce:active:scale-100',
         !top && 'border-white/10',
       )}
     >
@@ -179,7 +205,12 @@ function Row({
           {avatar}
         </Link>
       ) : null}
-      {onSelect ? (
+      {tickets ? (
+        <div className={cardClass}>
+          {!pull.profileHandle && avatar}
+          {inner}
+        </div>
+      ) : onSelect ? (
         <button
           type="button"
           onClick={() => onSelect(pull)}
@@ -211,6 +242,7 @@ export function PullHistory({
   initial,
   packSlug,
   onSelect,
+  noun = 'pack',
 }: {
   initial: RecentFeed;
   /** Scope to one pack's history; omit for the global feed (rows then also
@@ -219,6 +251,8 @@ export function PullHistory({
   /** Row tap handler (the pack page opens its card overlay); absent = the row
    *  links to /card/[handle]. */
   onSelect?: (pull: RecentPull) => void;
+  /** What one open is called in the copy; a ticket pack says capsule. */
+  noun?: 'pack' | 'capsule';
 }) {
   const [tab, setTab] = useState<Tab>('All');
   const { pulls, drought, pending, shownScope } = useLiveRecentPulls(
@@ -255,7 +289,7 @@ export function PullHistory({
                   </span>
                 </p>
                 <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-neutral-400">
-                  packs without <TierBadge rarity={r} />
+                  {noun}s without <TierBadge rarity={r} />
                 </p>
               </div>
             );
@@ -325,7 +359,7 @@ export function PullHistory({
           {pulls.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
               {tab === 'All'
-                ? 'No pulls yet — be the first to open a pack.'
+                ? `No pulls yet — be the first to open a ${noun}.`
                 : `No ${tab} pulls yet — the next rip could be the one.`}
             </div>
           ) : (

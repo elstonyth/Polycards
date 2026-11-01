@@ -220,6 +220,8 @@ export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [
 export type PackTab = Pick<PackCategory, 'id' | 'tab' | 'icon'> & {
   /** No active pack yet: shown as "Coming soon", can't be picked. */
   soon: boolean;
+  /** Where a pack page's dropdown lands: the franchise's first pack, by rank. */
+  firstPackId?: string;
 };
 
 /** The franchise switch's tabs. A category with no active pack stays on the row
@@ -233,6 +235,7 @@ export const packTabs = (categories: PackCategory[]): PackTab[] =>
         tab,
         icon,
         soon: packs.length === 0,
+        firstPackId: packs[0]?.id,
       }))
     : [];
 

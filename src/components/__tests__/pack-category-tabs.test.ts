@@ -51,6 +51,14 @@ describe('packTabs', () => {
     expect(tabs.find((t) => t.id === 'one-piece')?.soon).toBe(true);
   });
 
+  test("a tab knows its franchise's first pack; an empty one has none", () => {
+    const tabs = packTabs(withPacks('pokemon'));
+    expect(tabs.find((t) => t.id === 'pokemon')?.firstPackId).toBe(
+      'pokemon-pack',
+    );
+    expect(tabs.find((t) => t.id === 'poly')?.firstPackId).toBeUndefined();
+  });
+
   test('an outage does not announce everything as coming soon', () => {
     expect(packTabs(withPacks())).toEqual([]);
   });

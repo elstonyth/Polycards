@@ -441,6 +441,20 @@ const PULL_TIER_SQL =
   'EXISTS (SELECT 1 FROM pack_odds o WHERE o.pack_id = p.pack_id ' +
   '  AND o.card_id = p.card_id AND o.deleted_at IS NULL AND o.rarity = ?)';
 
+/** The same for a `ticket_spin p` row: it has no card, so the amount it won
+ *  picks the row of the pack's table. */
+const TICKET_TIER_SQL =
+  'EXISTS (SELECT 1 FROM ticket_prize o WHERE o.pack_id = p.pack_id ' +
+  '  AND o.tickets = p.tickets AND o.deleted_at IS NULL AND o.rarity = ?)';
+
+/** The ledger a pull-history read walks. A ticket pack writes a ticket_spin per
+ *  spin and no pull; the two tables name the columns these reads use alike, so
+ *  only the table and the tier test differ. */
+const pullLedger = (tickets?: boolean) =>
+  tickets
+    ? { table: 'ticket_spin', tierSql: TICKET_TIER_SQL }
+    : { table: 'pull', tierSql: PULL_TIER_SQL };
+
 /** The gateway_withdrawal.status domain, derived from the model's
  *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
  *  types). */
@@ -11377,30 +11391,58 @@ class PacksModuleService extends MedusaService({
     );
   }
 
+  // recentPullRows for one ticket pack: the same order and the same public
+  // sources, with the amount won in place of the card.
+  @InjectManager()
+  async recentTicketSpinRows(
+    opts: { packId: string; rarity: Rarity | null; limit: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      id: string;
+      customer_id: string;
+      tickets: number;
+      rolled_at: string | Date;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    return await em.execute(
+      'SELECT p.id, p.customer_id, p.tickets, p.rolled_at FROM ticket_spin p ' +
+        " WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus') " +
+        '   AND p.pack_id = ?' +
+        (opts.rarity ? ' AND ' + TICKET_TIER_SQL : '') +
+        ' ORDER BY p.rolled_at DESC, p.id DESC LIMIT ?',
+      [opts.packId, ...(opts.rarity ? [opts.rarity] : []), opts.limit],
+    );
+  }
+
   // "N packs without <tier>": pulls (one per pack opened) since the last pull
   // of that tier — over the whole ledger, or one pack. A tier never hit counts
   // every pull on record, which is the honest number. "Since" is in
   // (rolled_at, id) order — the same order pullGaps numbers the ledger in —
   // so a hit inside a batch open (siblings share one rolled_at) counts the
-  // same siblings here as on the chart's drought bar.
+  // same siblings here as on the chart's drought bar. `tickets` reads a ticket
+  // pack's spins instead.
   @InjectManager()
   async pullDrought(
-    opts: { packId: string | null; rarity: Rarity },
+    opts: { packId: string | null; rarity: Rarity; tickets?: boolean },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<number> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
+    const { table, tierSql } = pullLedger(opts.tickets);
     const rows = await em.execute<{ n: number | string }[]>(
       'WITH last_hit AS (' +
-        '  SELECT p.rolled_at, p.id FROM pull p ' +
+        `  SELECT p.rolled_at, p.id FROM ${table} p ` +
         "   WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
         packSql +
         '     AND ' +
-        PULL_TIER_SQL +
+        tierSql +
         '   ORDER BY p.rolled_at DESC, p.id DESC LIMIT 1' +
         ') ' +
-        'SELECT COUNT(*)::int AS n FROM pull p ' +
+        `SELECT COUNT(*)::int AS n FROM ${table} p ` +
         " WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
         packSql +
         '   AND (NOT EXISTS (SELECT 1 FROM last_hit) ' +
@@ -11420,10 +11462,16 @@ class PacksModuleService extends MedusaService({
   // One scan of the scope's ledger per call (two only when the tier has never
   // hit — see the fallback below), bounded further by the route's 5s cache and
   // its store-read rate limit. The scan itself is UNBOUNDED: a never-hit tier's
-  // drought is "every pull on record" (CONTEXT.md §Drought).
+  // drought is "every pull on record" (CONTEXT.md §Drought). `tickets` reads a
+  // ticket pack's spins instead.
   @InjectManager()
   async pullGaps(
-    opts: { packId: string | null; rarity: Rarity; limit: number },
+    opts: {
+      packId: string | null;
+      rarity: Rarity;
+      limit: number;
+      tickets?: boolean;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     current: number;
@@ -11442,14 +11490,15 @@ class PacksModuleService extends MedusaService({
     const scopeParams = opts.packId
       ? [opts.rarity, opts.packId]
       : [opts.rarity];
+    const { table, tierSql } = pullLedger(opts.tickets);
     const ctes =
       'WITH seq AS (' +
       '  SELECT p.id, p.customer_id, p.rolled_at, ' +
       '         ROW_NUMBER() OVER (ORDER BY p.rolled_at ASC, p.id ASC) AS n, ' +
       '         ' +
-      PULL_TIER_SQL +
+      tierSql +
       ' AS hit ' +
-      '    FROM pull p ' +
+      `    FROM ${table} p ` +
       "   WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
       packSql +
       '), hits AS (' +

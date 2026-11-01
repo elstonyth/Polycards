@@ -105,7 +105,9 @@ _Avoid_: order (a DeliveryOrder is not a Medusa checkout order)
 For one chase tier in one scope (a pack, or the whole ledger), how many
 pack-source Pulls have been rolled since that tier last hit — "303 packs
 without Immortal". Counted in (rolled*at, id) order; a tier never hit counts
-every pull on record. Public display, unfiltered by the feed's tier tab.
+every pull on record. Public display, unfiltered by the feed's tier tab. A
+ticket pack writes spins rather than Pulls and counts those ("6 capsules
+without Immortal").
 \_Avoid*: streak, dry run (a Drought is the operator-facing number, not luck)
 
 **Gap** (pull history):

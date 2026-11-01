@@ -29,6 +29,11 @@ export const TicketSpin = model
       on: ['open_id'],
       where: 'deleted_at IS NULL',
     },
+    {
+      name: 'IDX_ticket_spin_pack_id_rolled_at',
+      on: ['pack_id', 'rolled_at'],
+      where: 'deleted_at IS NULL',
+    },
   ]);
 
 export default TicketSpin;
