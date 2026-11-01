@@ -7,7 +7,7 @@ import {
   splitWeeklyTasks,
   taskWeekLabel,
 } from '../../../../modules/packs/tasks-poster';
-import { catalogueAt, taskCatalogue } from '../tasks/catalogue';
+import { catalogueAt, prizeIsGone, taskCatalogue } from '../tasks/catalogue';
 
 // GET /reports/growth/tasks-poster?week=current|next: the week's live tasks
 // (or, with week=next, the ones switched on for next week) as a posting
@@ -27,9 +27,7 @@ export async function GET(
   const weekly = tasks.filter((t) => t.kind === 'weekly');
   // A free rip or card whose pack or card is gone cannot be claimed, so it
   // never goes on a public poster.
-  const gone = weekly.filter(
-    (t) => t.prize_type !== 'credit' && t.value_myr === null,
-  );
+  const gone = weekly.filter(prizeIsGone);
   const live = weekly.filter((t) => !gone.includes(t));
   if (!live.length) {
     throw new MedusaError(

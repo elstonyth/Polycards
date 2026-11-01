@@ -40,6 +40,17 @@ const hub = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('TaskHubSchema (task hub v2)', () => {
+  it('keeps the count on a Lucky Draw tickets reward', () => {
+    const r = TaskHubSchema.parse(
+      hub({
+        tasks: [
+          task({ reward: { type: 'tickets', tickets: 50 }, tickets: 50 }),
+        ],
+      }),
+    );
+    expect(r.tasks[0]?.reward).toEqual({ type: 'tickets', tickets: 50 });
+  });
+
   it('carries daily tasks, reward art and the check-in count', () => {
     const r = TaskHubSchema.parse(hub());
     expect(r.tasks[0]?.kind).toBe('daily');

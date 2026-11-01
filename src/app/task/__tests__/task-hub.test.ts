@@ -155,6 +155,46 @@ describe('reward art and label', () => {
   });
 });
 
+describe('a Lucky Draw tickets reward', () => {
+  const reward = { type: 'tickets', tickets: 50 } as TaskEntry['reward'];
+  const one = { type: 'tickets', tickets: 1 } as TaskEntry['reward'];
+
+  it('names the count, with no RM value', () => {
+    expect(rewardLabel(reward)).toEqual({
+      name: '50 Lucky Draw tickets',
+      value: null,
+    });
+    expect(rewardLabel(one).name).toBe('1 Lucky Draw ticket');
+  });
+
+  it('still reads when a count is missing', () => {
+    expect(rewardLabel({ type: 'tickets' }).name).toBe('Lucky Draw tickets');
+  });
+
+  it('the stub says what it is: the pill under it has the count', () => {
+    expect(stubName(reward)).toBe('Lucky Draw tickets');
+  });
+
+  it('shows the ticket art, not a gift box', () => {
+    expect(rewardArt(reward)).toBe('/images/lucky-draw/ticket.webp');
+  });
+
+  it('a check-in slot names the tickets once', () => {
+    expect(milestoneWorth({ reward, tickets: 50 })).toBe(
+      '50 Lucky Draw tickets',
+    );
+  });
+
+  it('the claim line says tickets, never "Card added"', () => {
+    expect(claimNotice(reward, 50)).toBe(
+      '50 Lucky Draw tickets added. Head to the Lucky Draw to enter.',
+    );
+    expect(claimNotice(one, 1)).toBe(
+      '1 Lucky Draw ticket added. Head to the Lucky Draw to enter.',
+    );
+  });
+});
+
 describe('milestoneWorth', () => {
   const credit = { type: 'credit', amount_myr: 1 } as TaskEntry['reward'];
 

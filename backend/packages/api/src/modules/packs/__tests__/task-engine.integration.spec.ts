@@ -1121,6 +1121,77 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ).toHaveLength(1);
       });
 
+      it('tickets as the whole reward: paid once, and nothing else is', async () => {
+        const { id: taskId } = await service.saveTaskDefinition({
+          ...valid,
+          reward: { type: 'tickets' },
+          tickets: 50,
+        });
+        await service.checkInDaily({ customerId: 'cus_tr1' });
+        const hub = await service.taskHubFor({ customerId: 'cus_tr1' });
+        expect(hub.tasks[0].reward).toEqual({ type: 'tickets', tickets: 50 });
+
+        const first = await service.claimTask({
+          customerId: 'cus_tr1',
+          taskId,
+        });
+        expect(first).toMatchObject({
+          claimed: true,
+          reward: { type: 'tickets' },
+          tickets: 50,
+        });
+        expect(await service.luckyDrawBalance('cus_tr1')).toBe(50);
+        const again = await service.claimTask({
+          customerId: 'cus_tr1',
+          taskId,
+        });
+        expect(again).toEqual({ claimed: false, reason: 'already_claimed' });
+        expect(await service.luckyDrawBalance('cus_tr1')).toBe(50);
+
+        // One ledger row, keyed by the claim. No credit, no card.
+        const rows = await service.listLuckyDrawTickets({
+          customer_id: 'cus_tr1',
+        });
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          delta: 50,
+          reason: 'task_claim',
+          ref: (first as { claimId: string }).claimId,
+        });
+        expect(
+          await service.listCreditTransactions({ customer_id: 'cus_tr1' }),
+        ).toHaveLength(0);
+        expect(
+          await service.listPulls({ customer_id: 'cus_tr1' }),
+        ).toHaveLength(0);
+
+        // Stamped, so it never reads as an unspent free rip: that read is
+        // claim_ref null with a cap, and these would crowd real rips out of it.
+        const [claim] = await service.listTaskClaims({
+          customer_id: 'cus_tr1',
+        });
+        expect(claim.claim_ref).toBe(rows[0].id);
+        expect(claim.reward_snapshot).toEqual({ type: 'tickets', tickets: 50 });
+        const after = await service.taskHubFor({ customerId: 'cus_tr1' });
+        expect(after.pending_spins).toEqual([]);
+        expect(after.tasks[0].claimed).toBe(true);
+      });
+
+      it('a reward type this build does not know pays nothing', async () => {
+        const { id: taskId } = await service.saveTaskDefinition(valid);
+        await service.updateTaskDefinitions({
+          selector: { id: taskId },
+          data: { reward: { type: 'mystery' } },
+        });
+        await service.checkInDaily({ customerId: 'cus_tr2' });
+        await expect(
+          service.claimTask({ customerId: 'cus_tr2', taskId }),
+        ).rejects.toThrow(/mystery/);
+        expect(
+          await service.listTaskClaims({ customer_id: 'cus_tr2' }),
+        ).toHaveLength(0);
+      });
+
       it('editing tickets after a claim does not change what the claim paid', async () => {
         const { id: taskId } = await service.saveTaskDefinition({
           ...valid,

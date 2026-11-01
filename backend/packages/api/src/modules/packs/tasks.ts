@@ -24,7 +24,11 @@ export type TaskRequirement =
 export type TaskReward =
   | { type: 'credit'; amount_myr: number }
   | { type: 'pack'; pack_id: string }
-  | { type: 'card'; card_handle: string };
+  | { type: 'card'; card_handle: string }
+  /** Lucky Draw tickets and nothing else. It holds no amount: the task's
+   *  `tickets` column is the one number, the same one any other reward adds
+   *  its tickets from. */
+  | { type: 'tickets' };
 
 /** A requirement as GET /store/tasks sends it: a rip goal narrowed to one
  *  pack also carries that pack's title and art, a pull goal narrowed to one
@@ -63,7 +67,9 @@ export type HubReward =
       card_grade: string | null;
       card_value_myr: number | null;
       card_image: string | null;
-    };
+    }
+  /** Carries the task's tickets column, so the row can name the count. */
+  | { type: 'tickets'; tickets: number };
 
 export const TASK_KINDS = ['daily', 'weekly', 'achievement'] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
@@ -211,6 +217,8 @@ export function validateTaskReward(raw: unknown): TaskReward {
       if (typeof r.card_handle !== 'string' || !r.card_handle)
         bad('card: card_handle is required.');
       return { type: 'card', card_handle: r.card_handle as string };
+    case 'tickets':
+      return { type: 'tickets' };
     default:
       return bad(`Unknown reward type '${String(r.type)}'.`);
   }

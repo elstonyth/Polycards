@@ -494,13 +494,17 @@ function TaskEditor({
                 <Field
                   label="Tickets"
                   htmlFor="task-tickets"
-                  hint="Lucky Draw tickets paid with the reward. 0 = none."
+                  hint={
+                    draft.rewardType === "tickets"
+                      ? "How many a claim pays. At least 1."
+                      : "Lucky Draw tickets paid with the reward. 0 = none."
+                  }
                   className="w-40"
                 >
                   <Input
                     id="task-tickets"
                     type="number"
-                    min={0}
+                    min={draft.rewardType === "tickets" ? 1 : 0}
                     max={10000}
                     value={draft.tickets}
                     onChange={(e) =>
@@ -716,7 +720,7 @@ const TasksPage = () => {
           <Heading level="h2">Tasks</Heading>
           <Text size="small" className="text-ui-fg-subtle mt-1">
             What players can earn on the /task page. Rewards pay as credit, a
-            free rip, or a card straight to the vault.
+            free rip, a card straight to the vault, or Lucky Draw tickets.
           </Text>
         </div>
         <Button size="small" onClick={() => setEditing(blankDraft())}>

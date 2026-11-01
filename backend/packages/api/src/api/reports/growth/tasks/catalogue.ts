@@ -1,7 +1,10 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { posterRm } from '../../../../modules/packs/brand-poster';
-import { ticketsSuffix } from '../../../../modules/packs/lucky-draw';
+import {
+  ticketsLabel,
+  ticketsSuffix,
+} from '../../../../modules/packs/lucky-draw';
 import { taskWeekFor } from '../../../../modules/packs/referral';
 import type {
   HubReward,
@@ -9,6 +12,9 @@ import type {
   TaskRequirement,
 } from '../../../../modules/packs/tasks';
 import { resolveTaskLabels } from '../../../admin/tasks/labels';
+
+// Storefront-relative, which is what fetchBytes resolves itself.
+const TICKET_ART = '/images/lucky-draw/ticket.webp';
 
 export type CatalogueTask = {
   title: string;
@@ -45,11 +51,22 @@ export function prizeLabel(
   prize: string;
   value_myr: number | null;
 } {
+  if (reward.type === 'tickets') {
+    return { prize: ticketsLabel(tickets), value_myr: null };
+  }
   const { prize, value_myr } = rewardPrize(reward);
   return { prize: prize + ticketsSuffix(tickets), value_myr };
 }
 
-function rewardPrize(reward: HubReward): {
+/** A free rip or card whose pack or card is gone: the only way /task shows no
+ *  value for one, and nobody can claim it. A credit or tickets cannot go. */
+export const prizeIsGone = (t: {
+  prize_type: HubReward['type'];
+  value_myr: number | null;
+}): boolean =>
+  (t.prize_type === 'pack' || t.prize_type === 'card') && t.value_myr === null;
+
+function rewardPrize(reward: Exclude<HubReward, { type: 'tickets' }>): {
   prize: string;
   value_myr: number | null;
 } {
@@ -136,7 +153,9 @@ export async function taskCatalogue(
           ? t.reward.pack_image
           : t.reward.type === 'card'
             ? t.reward.card_image
-            : null,
+            : t.reward.type === 'tickets'
+              ? TICKET_ART
+              : null,
       ends_at: ends ? new Date(ends).toISOString() : null,
     };
   });

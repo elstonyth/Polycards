@@ -1395,6 +1395,8 @@ export const TaskEntrySchema = z.looseObject({
     // rule: absent/null falls back to the reward-type art.
     pack_image: z.string().nullable().optional(),
     card_image: z.string().nullable().optional(),
+    // A tickets reward's count. Same skew rule: absent reads as the bare name.
+    tickets: finite.optional(),
   }),
   progress: z.looseObject({
     current: finite,

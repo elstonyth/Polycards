@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest';
 import {
   ANY,
   REQUIREMENT_TYPES,
+  REWARD_LABEL,
+  REWARD_TYPES,
   blankDraft,
   countApplies,
   draftFrom,
@@ -119,6 +121,47 @@ describe('draftToPayload rejects what the backend would reject', () => {
     expect(
       draftToPayload(d({ rewardType: 'card', rewardValue: '' })),
     ).toBeNull();
+  });
+});
+
+describe('a Lucky Draw tickets reward', () => {
+  const d = (over: Partial<Draft>): Draft => ({
+    ...blankDraft(),
+    rewardType: 'tickets',
+    ...over,
+  });
+
+  test('the form offers it', () => {
+    expect(REWARD_TYPES).toContain('tickets');
+    expect(REWARD_LABEL.tickets).toBe('Lucky Draw tickets');
+  });
+
+  test('the amount travels in tickets, the reward holds none', () => {
+    expect(draftToPayload(d({ tickets: '50' }))).toMatchObject({
+      reward: { type: 'tickets' },
+      tickets: 50,
+    });
+  });
+
+  test('a tickets reward paying nothing cannot be saved', () => {
+    expect(draftToPayload(d({ tickets: '0' }))).toBeNull();
+    expect(draftToPayload(d({ tickets: '' }))).toBeNull();
+    expect(draftToPayload(d({ tickets: '1' }))).not.toBeNull();
+  });
+
+  test('a saved task round-trips', () => {
+    const draft = draftFrom(
+      task({ reward: { type: 'tickets' }, tickets: 50 }),
+    );
+    expect(draft).toMatchObject({
+      rewardType: 'tickets',
+      rewardValue: '',
+      tickets: '50',
+    });
+    expect(draftToPayload(draft)).toMatchObject({
+      reward: { type: 'tickets' },
+      tickets: 50,
+    });
   });
 });
 

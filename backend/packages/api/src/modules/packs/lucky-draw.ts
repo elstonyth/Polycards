@@ -148,12 +148,16 @@ export function validateTaskTickets(raw: unknown): number {
   return raw as number;
 }
 
+/** '50 Lucky Draw tickets', '1 Lucky Draw ticket'. */
+export const ticketsLabel = (n: number): string =>
+  `${n} Lucky Draw ticket${n === 1 ? '' : 's'}`;
+
 /** What a task label adds for the tickets it pays: ' + 50 Lucky Draw tickets',
  *  ' + 1 Lucky Draw ticket', or '' for none. One wording for the admin console
  *  and the growth posters. */
 export function ticketsSuffix(tickets: number | null | undefined): string {
   const n = tickets ?? 0;
-  return n > 0 ? ` + ${n} Lucky Draw ticket${n === 1 ? '' : 's'}` : '';
+  return n > 0 ? ` + ${ticketsLabel(n)}` : '';
 }
 
 /** A gate's tier, the operator's call on each gate. No rule reads it. */

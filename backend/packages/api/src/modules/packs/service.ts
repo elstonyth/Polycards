@@ -3480,7 +3480,8 @@ class PacksModuleService extends MedusaService({
     // like every other pack/card image.
     const packArt = (slug: string): string | null =>
       packBySlug.get(slug)?.image || null;
-    const hubReward = (reward: TaskReward): HubReward => {
+    const hubReward = (reward: TaskReward, tickets: number): HubReward => {
+      if (reward.type === 'tickets') return { ...reward, tickets };
       if (reward.type === 'pack') {
         const p = packBySlug.get(reward.pack_id);
         return {
@@ -3543,7 +3544,10 @@ class PacksModuleService extends MedusaService({
           kind,
           title: d.title,
           requirement: hubRequirement(requirement),
-          reward: hubReward(d.reward as unknown as TaskReward),
+          reward: hubReward(
+            d.reward as unknown as TaskReward,
+            d.tickets ?? 0,
+          ),
           tickets: d.tickets ?? 0,
           progress: taskProgress(kind, requirement, facts),
           claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
@@ -3687,8 +3691,9 @@ class PacksModuleService extends MedusaService({
     // Lucky Draw tickets ride the claim, in its transaction. The claim's
     // unique index makes this once-only; (reason, ref) is the backstop.
     // Deliberately BEFORE (and apart from) the reward chain below.
+    let ticketRowId: string | null = null;
     if (tickets > 0) {
-      await this.createLuckyDrawTickets(
+      const [ticketRow] = await this.createLuckyDrawTickets(
         [
           {
             customer_id: input.customerId,
@@ -3699,6 +3704,7 @@ class PacksModuleService extends MedusaService({
         ],
         sharedContext,
       );
+      ticketRowId = ticketRow.id;
     }
 
     let ref: string | null = null;
@@ -3774,7 +3780,12 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
       ref = pull.id;
-    } else {
+    } else if (reward.type === 'tickets') {
+      // The ledger row above is the whole payout. Stamped like a credit's or a
+      // card's ref, because a null claim_ref is what an unspent free rip looks
+      // like, and that read has a cap these would crowd real rips out of.
+      ref = ticketRowId;
+    } else if (reward.type === 'pack') {
       // pack: a free RIP, and a rip is something the player does. Claiming
       // grants the entitlement; redeemTaskPackClaim spends it when they spin
       // the slot. The claim row IS the entitlement — `claim_ref` stays null
@@ -3787,6 +3798,13 @@ class PacksModuleService extends MedusaService({
       // if they close the tab? — in any honest way: either the spin is
       // theatre, or the reward is lost. An unspent entitlement simply waits.
       ref = null;
+    } else {
+      // A type this build cannot pay (a newer row during a rollback, a hand
+      // edit) must not fall through into a free rip. This rolls the claim back.
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Task reward type '${String((reward as { type?: unknown }).type)}' is not known.`,
+      );
     }
     if (ref !== null) {
       await this.updateTaskClaims(
@@ -3861,6 +3879,18 @@ class PacksModuleService extends MedusaService({
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         "A task's kind cannot change after creation — retire this one and create a new task instead.",
+      );
+    }
+    // Omitted keeps the stored count; an explicit value replaces it.
+    const tickets =
+      input.tickets === undefined && existing
+        ? (existing.tickets ?? 0)
+        : newTickets;
+    // A tickets reward is nothing but its tickets: at 0 a claim would pay nothing.
+    if (reward.type === 'tickets' && tickets < 1) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'A Lucky Draw tickets reward needs at least 1 ticket.',
       );
     }
     // Reward and requirement targets must EXIST at save time — a typo'd pack
@@ -3942,10 +3972,7 @@ class PacksModuleService extends MedusaService({
       reward: reward as unknown as Record<string, unknown>,
       active: input.active,
       sort: input.sort,
-      tickets:
-        input.tickets === undefined && existing
-          ? (existing.tickets ?? 0)
-          : newTickets,
+      tickets,
       starts_at: input.startsAt ?? null,
       ends_at: input.endsAt ?? null,
       // Stamped when the task goes OFF, cleared when it comes back on, kept

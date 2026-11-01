@@ -58,6 +58,67 @@ const base = {
   reason: 'retire',
 };
 
+describe('saveTaskDefinition: a Lucky Draw tickets reward', () => {
+  const reward = { type: 'tickets' };
+  const fresh = {
+    kind: 'weekly' as const,
+    title: 'Check in 1 day',
+    requirement: { type: 'checkin_days', days: 1 },
+    reward,
+    active: true,
+    sort: 0,
+    adminId: 'adm_1',
+    reason: 'seed',
+  };
+  const saved = { ...EXISTING, ...fresh, id: 'task_1', tickets: 50 };
+
+  it('refuses a new task that would pay nothing', async () => {
+    for (const tickets of [undefined, 0]) {
+      const f = fakeSave(null);
+      await expect(
+        f.svc.saveTaskDefinition({ ...fresh, tickets }, f.ctx),
+      ).rejects.toThrow(/at least 1 ticket/);
+      expect(f.createTaskDefinitions).not.toHaveBeenCalled();
+    }
+  });
+
+  it('saves with at least one ticket, the amount in the tickets column', async () => {
+    const f = fakeSave(null);
+    await expect(
+      f.svc.saveTaskDefinition({ ...fresh, tickets: 50 }, f.ctx),
+    ).resolves.toEqual({ id: 'task_new' });
+    expect(f.createTaskDefinitions).toHaveBeenCalledWith(
+      [expect.objectContaining({ reward, tickets: 50 })],
+      expect.anything(),
+    );
+  });
+
+  it('an edit that omits tickets keeps them, so Retire still saves', async () => {
+    const f = fakeSave(saved);
+    await expect(
+      f.svc.saveTaskDefinition(
+        { ...fresh, id: 'task_1', active: false },
+        f.ctx,
+      ),
+    ).resolves.toEqual({ id: 'task_1' });
+    expect(f.updateTaskDefinitions).toHaveBeenCalledWith(
+      {
+        selector: { id: 'task_1' },
+        data: expect.objectContaining({ tickets: 50, active: false }),
+      },
+      expect.anything(),
+    );
+  });
+
+  it('an edit cannot clear the tickets out of a tickets reward', async () => {
+    const f = fakeSave(saved);
+    await expect(
+      f.svc.saveTaskDefinition({ ...fresh, id: 'task_1', tickets: 0 }, f.ctx),
+    ).rejects.toThrow(/at least 1 ticket/);
+    expect(f.updateTaskDefinitions).not.toHaveBeenCalled();
+  });
+});
+
 describe('saveTaskDefinition re-validates targets only when they change', () => {
   it('Retire (active toggle) on a task whose reward card was deleted saves', async () => {
     const f = fakeSave();
