@@ -9,6 +9,8 @@ import {
   checkinCount,
   claimNotice,
   claimableCounts,
+  dayWorth,
+  milestoneWorth,
   orderForDisplay,
   rewardArt,
   rewardLabel,
@@ -150,6 +152,59 @@ describe('reward art and label', () => {
     expect(
       rewardLabel({ type: 'pack', pack_id: 'bronze', pack_price_myr: 30 }),
     ).toEqual({ name: 'Free rip · bronze', value: 30 });
+  });
+});
+
+describe('milestoneWorth', () => {
+  const credit = { type: 'credit', amount_myr: 1 } as TaskEntry['reward'];
+
+  it('names the tickets a check-in slot also pays', () => {
+    expect(milestoneWorth({ reward: credit, tickets: 30 })).toBe(
+      `${rm(1)} bonus credit + 30 Lucky Draw tickets`,
+    );
+    expect(milestoneWorth({ reward: credit, tickets: 1 })).toBe(
+      `${rm(1)} bonus credit + 1 Lucky Draw ticket`,
+    );
+  });
+
+  it('says nothing about tickets when there are none', () => {
+    expect(milestoneWorth({ reward: credit, tickets: 0 })).toBe(
+      `${rm(1)} bonus credit`,
+    );
+  });
+
+  it('keeps the RM value on a card or pack', () => {
+    expect(
+      milestoneWorth({
+        reward: { type: 'pack', pack_id: 'bronze', pack_price_myr: 30 },
+        tickets: 5,
+      }),
+    ).toBe(`Free rip · bronze (${rm(30)}) + 5 Lucky Draw tickets`);
+  });
+});
+
+describe('dayWorth', () => {
+  const credit = (amount_myr: number) =>
+    ({ type: 'credit', amount_myr }) as TaskEntry['reward'];
+
+  it('names every task of the day, so tickets on any of them show', () => {
+    expect(
+      dayWorth([
+        { reward: credit(1), tickets: 0, claimed: false },
+        { reward: credit(2), tickets: 30, claimed: false },
+      ]),
+    ).toBe(
+      `${rm(1)} bonus credit and ${rm(2)} bonus credit + 30 Lucky Draw tickets`,
+    );
+  });
+
+  it('leaves out what is already claimed, until all of it is', () => {
+    const one = { reward: credit(1), tickets: 0, claimed: true };
+    const two = { reward: credit(2), tickets: 5, claimed: false };
+    expect(dayWorth([one, two])).toBe(
+      `${rm(2)} bonus credit + 5 Lucky Draw tickets`,
+    );
+    expect(dayWorth([one])).toBe(`${rm(1)} bonus credit`);
   });
 });
 

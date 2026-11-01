@@ -57,6 +57,34 @@ export function rewardLabel(reward: TaskEntry['reward']): {
 export const stubName = (reward: TaskEntry['reward']): string =>
   reward.type === 'credit' ? CREDIT_LABEL : rewardLabel(reward).name;
 
+/** The Lucky Draw tickets a task also pays, as a suffix ('' for none). */
+const ticketsExtra = (tickets?: number): string =>
+  typeof tickets === 'number' && Number.isFinite(tickets) && tickets > 0
+    ? ` + ${tickets} Lucky Draw ${tickets === 1 ? 'ticket' : 'tickets'}`
+    : '';
+
+/** A check-in slot's prize in words: the track's art shows only the reward, so
+ *  this is where the slot says it pays tickets too. */
+export function milestoneWorth(
+  t: Pick<TaskEntry, 'reward' | 'tickets'>,
+): string {
+  const { name, value } = rewardLabel(t.reward);
+  const worth =
+    t.reward.type !== 'credit' && value != null && value > 0
+      ? `${name} (${rm(value)})`
+      : name;
+  return worth + ticketsExtra(t.tickets);
+}
+
+/** What a check-in day still pays, in words. Several tasks can share a day, and
+ *  any of them may be the one paying tickets. */
+export function dayWorth(
+  tasks: Pick<TaskEntry, 'reward' | 'tickets' | 'claimed'>[],
+): string {
+  const open = tasks.filter((t) => !t.claimed);
+  return (open.length > 0 ? open : tasks).map(milestoneWorth).join(' and ');
+}
+
 /** The line shown once a claim lands (spec 2026-10-15 §3): bonus credit is
  *  for packs only; a prize card ships for a fee or sells back withdrawable. A
  *  free rip normally hands the player to the slot instead; one that could not
@@ -65,11 +93,7 @@ export function claimNotice(
   reward: TaskEntry['reward'],
   tickets?: number,
 ): string {
-  const extra =
-    typeof tickets === 'number' && Number.isFinite(tickets) && tickets > 0
-      ? ` + ${tickets} Lucky Draw ${tickets === 1 ? 'ticket' : 'tickets'}`
-      : '';
-  return rewardNotice(reward) + extra;
+  return rewardNotice(reward) + ticketsExtra(tickets);
 }
 
 function rewardNotice(reward: TaskEntry['reward']): string {
