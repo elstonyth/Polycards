@@ -12,9 +12,56 @@ vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock('next/headers', () => ({ cookies: vi.fn() }));
 
-import { setAvatarFrame } from '../profile-appearance';
+import { setAvatarFrame, setPresetAvatar } from '../profile-appearance';
 
 beforeEach(() => vi.clearAllMocks());
+
+describe('setPresetAvatar', () => {
+  it('posts the id and revalidates /me', async () => {
+    const mem = backend({ 'POST /store/profile/avatar/preset': { body: {} } });
+    expect(await setPresetAvatar(12)).toEqual({ ok: true });
+    expect(mem.requests[0]?.path).toBe('/store/profile/avatar/preset');
+    expect(mem.requests[0]?.body).toEqual({ id: 12 });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/me');
+  });
+
+  // A server action is a public endpoint: anything that is not a catalog id is
+  // refused here, before the request.
+  it.each([0, 81, 1.5, Number.NaN])(
+    'refuses %s before any request',
+    async (id) => {
+      const mem = backend({});
+      expect(await setPresetAvatar(id)).toEqual({
+        ok: false,
+        error: 'Invalid avatar.',
+      });
+      expect(mem.requests).toEqual([]);
+    },
+  );
+
+  it('logged out: asks for a login without calling the backend', async () => {
+    const mem = backend({}, { token: null });
+    expect(await setPresetAvatar(1)).toEqual({
+      ok: false,
+      error: 'Please log in first.',
+    });
+    expect(mem.requests).toEqual([]);
+  });
+
+  it('does not revalidate when the backend refuses', async () => {
+    backend({
+      'POST /store/profile/avatar/preset': {
+        status: 500,
+        body: { message: 'boom' },
+      },
+    });
+    expect(await setPresetAvatar(1)).toEqual({
+      ok: false,
+      error: 'Something went wrong. Please try again.',
+    });
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+});
 
 describe('setAvatarFrame', () => {
   it('posts the level and revalidates /me', async () => {

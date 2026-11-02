@@ -1176,6 +1176,16 @@ export default defineMiddlewares({
       ],
     },
     {
+      // Catalog avatar pick (POST /store/profile/avatar/preset) — no file, so
+      // no multipart parse, and the same flip-through-them budget as frames.
+      matcher: '/store/profile/avatar/preset',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        profileAppearanceRateLimit,
+      ],
+    },
+    {
       // Frame equip/unequip (POST /store/profile/frame) — cosmetic metadata
       // write on its own appearance budget (NOT the delivery-write tier: a
       // collector flipping through frames swaps faster than 10/10s).
