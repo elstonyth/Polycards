@@ -174,7 +174,7 @@ it('ticks on control clicks, except opted-out, disabled or muted ones', async ()
       .getElementById(id)!
       .dispatchEvent(new MouseEvent('click', { bubbles: true }));
   click('inner');
-  expect(audio.sfx).toHaveBeenLastCalledWith('uiClick');
+  expect(audio.sfx.mock.lastCall?.[0]).toBe('uiClick');
   audio.sfx.mockClear();
   click('own');
   click('off');

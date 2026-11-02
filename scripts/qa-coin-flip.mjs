@@ -26,7 +26,6 @@ const settings = {
   enabled: true,
   eligible: true,
   reason: null,
-  max_stake_amount: 1000,
   published_win_percent: 50,
 };
 const server = createServer(async (req, res) => {
@@ -69,6 +68,10 @@ const server = createServer(async (req, res) => {
     };
   else if (p === '/store/coin-flips/settings') body = settings;
   else if (p === '/store/coin-flips/quotes') {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const selection = JSON.parse(raw);
+    assert.deepEqual(selection.pull_ids, [card.pull_id]);
     const round = {
       id: `cfr_qa${++sequence}`,
       status: 'quoted',
@@ -78,6 +81,9 @@ const server = createServer(async (req, res) => {
       expires_at: new Date(Date.now() + 60000).toISOString(),
       settled_at: null,
       card,
+      cards: [{ ...card, stake_amount: 100 }],
+      chosen_side: selection.chosen_side,
+      landed_side: null,
     };
     rounds.set(round.id, round);
     body = { round };
@@ -95,6 +101,12 @@ const server = createServer(async (req, res) => {
             status: outcome,
             win_amount: outcome === 'won' ? 100 : 0,
             settled_at: new Date().toISOString(),
+            landed_side:
+              outcome === 'won'
+                ? round.chosen_side
+                : round.chosen_side === 'head'
+                  ? 'tail'
+                  : 'head',
           });
         if (failResponse) {
           failResponse = false;
@@ -110,7 +122,16 @@ const server = createServer(async (req, res) => {
     const values = [...rounds.values()]
       .filter((r) => r.status !== 'quoted')
       .reverse();
-    body = { rounds: values, count: values.length, limit: 10, offset: 0 };
+    body = {
+      rounds: values,
+      count: values.length,
+      limit: 10,
+      offset: 0,
+      totals: {
+        head: values.filter((r) => r.landed_side === 'head').length,
+        tail: values.filter((r) => r.landed_side === 'tail').length,
+      },
+    };
   } else if (p.endsWith('/latest')) body = { latest_event_at: null };
   else if (p.startsWith('/store/credits'))
     body = {
@@ -142,7 +163,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((resolve, reject) => {
   server.once('error', reject);
-  server.listen(9000, resolve);
+  server.listen(9000, '127.0.0.1', resolve);
 });
 for (const [target, location] of [
   ['public', '.next/standalone/public'],
@@ -151,7 +172,13 @@ for (const [target, location] of [
   await cp(path.resolve(target), path.resolve(location), { recursive: true });
 }
 const app = spawn(process.execPath, ['.next/standalone/server.js'], {
-  env: { ...process.env, PORT: '4020', HOSTNAME: '127.0.0.1' },
+  env: {
+    ...process.env,
+    PORT: '4020',
+    HOSTNAME: '127.0.0.1',
+    // The default localhost:9000 can resolve to ::1, where a real local backend may listen.
+    NEXT_PUBLIC_MEDUSA_BACKEND_URL: 'http://127.0.0.1:9000',
+  },
   windowsHide: true,
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -201,7 +228,7 @@ try {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('http://127.0.0.1:4020/vault/coin-flip?pull=pull_qa');
-  await page.getByRole('button', { name: 'Review card & odds' }).waitFor();
+  await page.getByRole('button', { name: 'Review cards' }).waitFor();
   await page.locator('canvas').waitFor();
   await page.waitForTimeout(1800);
   await page.screenshot({ path: `${out}/desktop-ready.png`, fullPage: true });
@@ -220,21 +247,27 @@ try {
         .isVisible())
     ) {
       const change = p.getByRole('button', {
-        name: 'Change card',
+        name: 'Edit selection',
         exact: true,
       });
+      const choose = p.getByRole('button', { name: /Choose from Vault/ });
+      // A fresh page paints neither until it has loaded.
+      await change.or(choose).first().waitFor();
       if (await change.isVisible()) await change.click();
-      else await p.getByRole('button', { name: /Choose from Vault/ }).click();
+      else await choose.click();
     }
-    await p
-      .getByRole('button', {
-        name: 'Select Pikachu · PSA 10, RM 100.00',
-        exact: true,
-      })
-      .click();
-    await p.getByRole('button', { name: 'Review card & odds' }).click();
+    const cardButton = p.getByRole('button', {
+      name: 'Select Pikachu · PSA 10, RM 100.00',
+      exact: true,
+    });
+    if ((await cardButton.getAttribute('aria-pressed')) !== 'true')
+      await cardButton.click();
+    await p.getByRole('button', { name: 'Use 1 card', exact: true }).click();
+    await p.getByRole('button', { name: 'Review cards' }).click();
     await p.getByRole('dialog').waitFor();
-    await p.getByRole('button', { name: 'Confirm card', exact: true }).click();
+    await p
+      .getByRole('button', { name: 'Confirm card · Head', exact: true })
+      .click();
   }
   await arm(page);
   assert.equal(accepts, 0);
@@ -247,7 +280,7 @@ try {
     .waitFor();
   assert.equal(accepts, 1);
   await page.screenshot({ path: `${out}/desktop-win.png`, fullPage: true });
-  await page.getByRole('button', { name: 'Choose a card' }).click();
+  await page.getByRole('button', { name: 'Choose cards' }).click();
   assert.equal(
     await page
       .getByRole('dialog', { name: 'Choose from your Vault' })
@@ -278,7 +311,7 @@ try {
     .waitFor({ timeout: 10000 });
   assert.equal(accepts, 2);
   await page.screenshot({ path: `${out}/desktop-loss.png`, fullPage: true });
-  await page.getByRole('button', { name: 'Choose a card' }).click();
+  await page.getByRole('button', { name: 'Choose cards' }).click();
   outcome = 'won';
   failResponse = true;
   await arm(page);
@@ -363,7 +396,7 @@ try {
     path: `${out}/phone-touch-win.png`,
     fullPage: true,
   });
-  await page.getByRole('button', { name: 'Choose a card' }).click();
+  await page.getByRole('button', { name: 'Choose cards' }).click();
   await arm(page);
   await page.evaluate(() =>
     document

@@ -49,6 +49,26 @@ export function AudioPreview() {
             </Pill>
           ),
         )}
+        {(
+          [
+            'coinFlick',
+            'coinWhoosh',
+            'coinClink',
+            'coinRattle',
+            'coinWin',
+            'coinLoss',
+          ] as const
+        ).map((cue) => (
+          <Pill
+            key={cue}
+            variant="ghost"
+            data-sound="off"
+            onClick={() => sfx(cue)}
+            disabled={muted}
+          >
+            Coin {cue.slice(4).toLowerCase()}
+          </Pill>
+        ))}
       </div>
       <div className="divide-y divide-white/10 border-y border-white/10">
         {[...RARITY_ORDER].reverse().map((rarity) => (

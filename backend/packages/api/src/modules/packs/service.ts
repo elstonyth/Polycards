@@ -1325,6 +1325,17 @@ class PacksModuleService extends MedusaService({
     return readCoinFlipSettings(context);
   }
 
+  // How a customer's settled flips landed. A flip lands on the called side exactly
+  // when it wins; a missing call was Head, as in publicCoinFlipRound.
+  @InjectManager()
+  async coinFlipLandedCounts(customerId: string, @MedusaContext() context: Context = {}): Promise<{ head: number; tail: number }> {
+    const [row] = await coinFlipManager(context).execute<{ head: string; tail: string }[]>(
+      "SELECT count(*) FILTER (WHERE (status = 'won') = (coalesce(snapshot->>'chosen_side', 'head') = 'head')) AS head, " +
+      "count(*) FILTER (WHERE (status = 'won') <> (coalesce(snapshot->>'chosen_side', 'head') = 'head')) AS tail " +
+      "FROM coin_flip_round WHERE customer_id = ? AND status IN ('won', 'lost') AND deleted_at IS NULL", [customerId]);
+    return { head: Number(row.head), tail: Number(row.tail) };
+  }
+
   @InjectManager()
   async coinFlipTotals(input: { status?: 'won' | 'lost'; customerId?: string; source?: string; from?: Date; to?: Date }, @MedusaContext() context: Context = {}): Promise<{ wins: number; losses: number; payouts: number; forfeited_value: number }> {
     const where = ["deleted_at IS NULL AND status IN ('won', 'lost')"];
@@ -1364,7 +1375,7 @@ class PacksModuleService extends MedusaService({
   }
 
   @InjectTransactionManager()
-  async quoteCoinFlip(input: { customerId: string; pullId: string }, @MedusaContext() context: Context = {}): Promise<CoinFlipPublicRound> {
+  async quoteCoinFlip(input: import('./coin-flip').CoinFlipQuoteInput, @MedusaContext() context: Context = {}): Promise<CoinFlipPublicRound> {
     return quoteCoinFlipOperation(this, input, context);
   }
 
@@ -1389,7 +1400,8 @@ class PacksModuleService extends MedusaService({
     const placeholders = ids.map(() => '?').join(',');
     const rows = await em.execute<{ id: string }[]>(`SELECT id FROM pull WHERE id IN (${placeholders}) AND customer_id = ? AND deleted_at IS NULL FOR UPDATE`, [...ids, input.customerId]);
     if (rows.length !== ids.length) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Completed pulls do not match their owner.');
-    await em.execute(`UPDATE pull SET flip_eligible_at = now(), updated_at = now() WHERE id IN (${placeholders}) AND flip_eligible_at IS NULL`, ids);
+    // Leaves updated_at alone: /store/vault/latest reads it on a held card as a new event.
+    await em.execute(`UPDATE pull SET flip_eligible_at = now() WHERE id IN (${placeholders}) AND flip_eligible_at IS NULL`, ids);
   }
 
   @InjectTransactionManager()

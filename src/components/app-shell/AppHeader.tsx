@@ -22,7 +22,7 @@ const MARK_SRC = '/branding/polycards-mark.png';
 
 /**
  * App header: logo left, balance chip + top-up entry right (90scard's
- * profile-corner pattern), present on every screen. On lg+ the six tab
+ * profile-corner pattern), present on every screen. On lg+ the seven tab
  * destinations render inline here because the bottom TabBar is hidden.
  */
 export default function AppHeader() {
@@ -75,7 +75,7 @@ export default function AppHeader() {
             />
           </Link>
 
-          {/* Desktop nav — same six destinations as the mobile tab bar. */}
+          {/* Desktop nav — same seven destinations as the mobile tab bar. */}
           <nav
             aria-label="Primary"
             className="hidden items-center gap-0.5 lg:flex"

@@ -1,6 +1,5 @@
 export type CoinFlipSettings = {
   enabled: boolean;
-  max_stake_amount: number | null;
   win_percent: number | null;
   win_percent_2: number | null;
   win_percent_3: number | null;
@@ -8,7 +7,6 @@ export type CoinFlipSettings = {
   revision: number;
 };
 const numericFields = [
-  'max_stake_amount',
   'win_percent',
   'win_percent_2',
   'win_percent_3',
@@ -21,7 +19,6 @@ export type CoinFlipDraft = { enabled: boolean } & Record<
 export function coinFlipDraft(settings: CoinFlipSettings): CoinFlipDraft {
   return {
     enabled: settings.enabled,
-    max_stake_amount: settings.max_stake_amount?.toString() ?? '',
     win_percent: settings.win_percent?.toString() ?? '',
     win_percent_2: settings.win_percent_2?.toString() ?? '',
     win_percent_3: settings.win_percent_3?.toString() ?? '',
@@ -33,7 +30,6 @@ export function parseCoinFlipDraft(
 ): Omit<CoinFlipSettings, 'revision'> {
   const values = {
     enabled: draft.enabled,
-    max_stake_amount: null,
     win_percent: null,
     win_percent_2: null,
     win_percent_3: null,
@@ -42,30 +38,20 @@ export function parseCoinFlipDraft(
   for (const key of numericFields) {
     const raw = draft[key].trim();
     if (!raw) continue;
-    const amount = key === 'max_stake_amount';
     const value = Number(raw);
     if (
-      !(amount ? /^\d+(\.\d{1,2})?$/ : /^\d+(\.\d{1,4})?$/).test(raw) ||
+      !/^\d+(\.\d{1,4})?$/.test(raw) ||
       !Number.isFinite(value) ||
-      value > (amount ? 21474836.47 : 100) ||
-      (amount && value <= 0)
+      value > 100
     )
-      throw new Error(
-        amount
-          ? 'Maximum card value must be positive MYR with at most 2 decimal places.'
-          : 'Odds must be 0–100% with at most 4 decimal places.',
-      );
+      throw new Error('Odds must be 0–100% with at most 4 decimal places.');
     values[key] = value;
   }
   if (
     draft.enabled &&
-    (values.max_stake_amount == null ||
-      values.win_percent == null ||
-      values.published_win_percent == null)
+    (values.win_percent == null || values.published_win_percent == null)
   ) {
-    throw new Error(
-      'Set maximum card value, actual set 1 and published odds before enabling.',
-    );
+    throw new Error('Set actual set 1 and published odds before enabling.');
   }
   return values;
 }
@@ -82,7 +68,7 @@ export type CoinHistoryFilters = {
   customer: string;
   from: string;
   to: string;
-  source?: '' | 'pack' | 'bonus' | 'gift' | 'reward' | 'free';
+  source?: '' | 'pack' | 'bonus' | 'gift' | 'reward' | 'free' | 'mixed' | 'tickets';
 };
 export function coinHistoryQuery(filters: CoinHistoryFilters) {
   const page = Number.isSafeInteger(filters.page)
@@ -101,7 +87,7 @@ export type AdminCoinRound = {
   id: string;
   status: 'won' | 'lost';
   customer_id: string;
-  pull_id: string;
+  pull_id: string | null;
   stake_amount: number;
   win_amount: number;
   published_win_percent: number;
@@ -109,20 +95,37 @@ export type AdminCoinRound = {
   config_revision: number;
   roll: number;
   credit_transaction_id: string | null;
+  chosen_side: 'head' | 'tail';
+  landed_side: 'head' | 'tail';
+  cards: { pull_id: string; name: string; stake_amount: number }[];
+  /** Null when the flip stakes only `tickets`, which move no money. */
   card: {
     name: string;
     image: string | null;
     grader: string | null;
     grade: string | null;
-  };
+  } | null;
+  tickets: number;
   snapshot: {
+    cards?: {
+      card: { pull_id: string; name: string };
+      stake_cents: number;
+      source: string;
+      bonus_bp: number;
+      valuation: {
+        value_usd: number;
+        multiplier: number;
+        fx: number;
+        quoted_at: string;
+      };
+    }[];
     group_id: string | null;
     odds_set: 1 | 2 | 3;
     actual_win_units: number;
     published_win_units: number;
     source: string;
     bonus_bp: number;
-    valuation: {
+    valuation?: {
       value_usd: number;
       multiplier: number;
       fx: number;

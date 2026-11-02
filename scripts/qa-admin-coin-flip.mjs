@@ -27,7 +27,6 @@ const browser = await chromium.launch();
 let settings = {
   enabled: false,
   revision: 7,
-  max_stake_amount: 1000,
   published_win_percent: 50,
   win_percent: 48,
   win_percent_2: null,
@@ -108,6 +107,11 @@ try {
             config_revision: 7,
             roll: 900000,
             credit_transaction_id: null,
+            chosen_side: 'head',
+            landed_side: 'tail',
+            cards: [
+              { pull_id: 'pull_qa', name: 'Pikachu PSA 10', stake_amount: 100 },
+            ],
             card: {
               name: 'Pikachu PSA 10',
               image: null,
@@ -147,7 +151,11 @@ try {
     });
   });
   await page.goto('http://127.0.0.1:7030/dashboard/coin-flips');
-  await page.getByLabel('Maximum card value (RM)').waitFor();
+  await page.getByLabel('Published win odds (%)').waitFor();
+  assert.equal(
+    await page.getByLabel('Maximum total stake per flip (RM)').count(),
+    0,
+  );
   assert.equal(await page.getByLabel('Enable coin flips').isChecked(), false);
   assert(
     await page.getByText('Published odds differ', { exact: false }).isVisible(),

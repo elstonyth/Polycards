@@ -24,6 +24,9 @@ vi.mock('@/lib/actions/vault', () => ({
   toggleShowcase: vi.fn(),
 }));
 vi.mock('@/lib/actions/delivery', () => ({}));
+vi.mock('@/lib/actions/lucky-draw', () => ({
+  getTicketBalance: vi.fn(async () => null),
+}));
 vi.mock('@/lib/actions/pack-gifts', () => ({
   getPackGifts: vi.fn(() => new Promise(() => {})),
 }));

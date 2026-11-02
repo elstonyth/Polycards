@@ -1,33 +1,38 @@
 import Image from 'next/image';
+import type { CoinSide } from '@/lib/coin-flip';
+import { cn } from '@/lib/utils';
 
 export function StaticCoin({
-  won = true,
+  side = 'head',
   compact = false,
+  className,
 }: {
-  won?: boolean;
+  side?: CoinSide;
   compact?: boolean;
+  // Small sizes for chips and the side picker.
+  className?: string;
 }) {
+  // shortcut: baked CoinScene renders; regenerate when its model or lighting changes.
   return (
-    <div
+    <Image
+      src={`/coin-flip/coin-b-${side}.png`}
+      alt=""
       aria-hidden
-      className={`mx-auto flex items-center justify-center rounded-full border-[3px] border-neutral-500 bg-neutral-900 shadow-[inset_0_0_0_2px_#333,inset_0_0_24px_#0a0a0a] ${compact ? 'size-28' : 'size-40 sm:size-48'}`}
-    >
-      <div
-        className={
-          won
-            ? `relative h-20 w-16 overflow-hidden ${compact ? 'scale-75' : ''}`
-            : 'relative h-10 w-32'
-        }
-      >
-        <Image
-          src="/branding/polycards-logo.png"
-          alt=""
-          width={368}
-          height={100}
-          className={won ? 'h-20 w-auto max-w-none' : 'h-auto w-full'}
-          priority
-        />
-      </div>
-    </div>
+      width={512}
+      height={512}
+      sizes={
+        className
+          ? '48px'
+          : compact
+            ? '(min-width: 640px) 64px, 56px'
+            : '(min-width: 640px) 192px, 160px'
+      }
+      loading="eager"
+      className={cn(
+        'object-contain',
+        className ??
+          cn('mx-auto', compact ? 'size-14 sm:size-16' : 'size-40 sm:size-48'),
+      )}
+    />
   );
 }

@@ -20,7 +20,13 @@ export type SfxName =
   | 'drawStart'
   | 'drawTick'
   | 'drawStop'
-  | 'drawWin';
+  | 'drawWin'
+  | 'coinFlick'
+  | 'coinWhoosh'
+  | 'coinClink'
+  | 'coinRattle'
+  | 'coinWin'
+  | 'coinLoss';
 
 let ctx: AudioContext | null = null;
 let effectsGain: GainNode | null = null;
@@ -150,8 +156,16 @@ function noise(
 // The Lucky Draw wheel (operator ask 2026-10-25): premium and quiet, never a
 // casino jingle. A glassy E-major shimmer for the win, matching the holo dust.
 const WIN_NOTES = [1318.5, 1661.2, 1975.5, 2637]; // E6 G#6 B6 E7
+// Coin flip (operator ask 2026-10-30): a black titanium coin on a dark table.
+// The old `thunk`/`clack` bodies sat at 90-180 Hz, which phone speakers drop,
+// so every coin cue keeps its energy in the 1-6 kHz band. A disc's ring has
+// inharmonic partials (about 1 : 1.73 : 2.33), which is what reads as metal.
+const COIN_RING = [2180, 3770, 5080];
+// Credited money: a glassy A-major rise, a different key from the draw win.
+const COIN_WIN_NOTES = [880, 1108.7, 1318.5, 1760]; // A5 C#6 E6 A6
+const strength = (amount = 1) => Math.min(1, Math.max(0, amount));
 
-const CUES: Record<SfxName, () => void> = {
+const CUES: Record<SfxName, (amount?: number) => void> = {
   tick: () => blip(2400, 28, { type: 'square', gain: 0.03 }),
   // Clicky per-cell reel tick (operator ask 2026-08-04: "more clicky"): short
   // bright transient over a stubby tonal body — reads as a mechanical pawl
@@ -231,11 +245,88 @@ const CUES: Record<SfxName, () => void> = {
       });
     }
   },
+  // The thumb snapping the coin off: a nail click, the coin ringing, and air
+  // rising as it leaves the hand.
+  coinFlick: () => {
+    noise(18, { from: 5200, q: 1.3, gain: 0.8 });
+    COIN_RING.forEach((f, i) =>
+      blip(f * 1.06, [520, 340, 210][i]!, {
+        type: 'sine',
+        gain: [0.6, 0.32, 0.16][i]!,
+      }),
+    );
+    noise(320, {
+      from: 600,
+      to: 2600,
+      q: 0.7,
+      gain: 0.5,
+      attackMs: 120,
+      at: 0.03,
+    });
+  },
+  // The coin passing edge-on in the air: one short grain of wind per edge, so
+  // the flutter follows the spin the player sees and stops with it.
+  coinWhoosh: (amount) =>
+    noise(90, {
+      from: 1900,
+      to: 1100,
+      q: 1.2,
+      gain: 0.7 * strength(amount),
+      attackMs: 35,
+    }),
+  // Rim meeting the table: contact click, a short knock, then the ring. Later
+  // bounces pass a smaller `amount`, so they are quieter and ring for less.
+  coinClink: (amount) => {
+    const s = strength(amount);
+    const detune = 0.97 + Math.random() * 0.06;
+    noise(16, { from: 3400, q: 0.8, gain: 1.2 * s });
+    blip(520 * detune, 90, { type: 'triangle', gain: 0.6 * s, slideTo: 330 });
+    COIN_RING.forEach((f, i) =>
+      blip(f * detune, (420 - i * 110) * (0.5 + 0.5 * s), {
+        type: 'sine',
+        gain: [0.46, 0.26, 0.13][i]! * s,
+      }),
+    );
+  },
+  // A coin rolling on its rim as it settles: one light tick per quarter turn
+  // of the wobble, quieter as it flattens.
+  coinRattle: (amount) => {
+    const s = strength(amount);
+    blip(2900 + Math.random() * 900, 14, {
+      type: 'triangle',
+      gain: 0.4 * s,
+      slideTo: 2300,
+    });
+    noise(10, { from: 5200, q: 1.4, gain: 0.35 * s });
+  },
+  // The win, once the coin is still: the coin's ring blooms into the A-major
+  // rise, a soft body under it, and a few sparkles drifting off with the motes.
+  coinWin: () => {
+    blip(2637, 1300, { type: 'sine', gain: 0.24 });
+    COIN_WIN_NOTES.forEach((f, i) =>
+      blip(f, 1100, { type: 'sine', gain: 0.55, at: 0.06 + i * 0.075 }),
+    );
+    blip(659.3, 1400, { type: 'sine', gain: 0.32, at: 0.04 });
+    blip(1318.5, 1500, { type: 'sine', gain: 0.18, at: 0.3 });
+    for (let i = 0; i < 6; i++) {
+      blip(3200 + Math.random() * 2800, 140, {
+        type: 'sine',
+        gain: 0.17,
+        at: 0.36 + i * 0.1 + Math.random() * 0.04,
+      });
+    }
+  },
+  // The loss: the cards sliding away and a muted knock. Quieter than the win
+  // and neutral, never a descending "wah-wah"; kept above 1 kHz like the rest.
+  coinLoss: () => {
+    noise(420, { from: 2600, to: 900, q: 0.8, gain: 0.5, attackMs: 70 });
+    blip(1100, 240, { type: 'triangle', gain: 0.5, slideTo: 760, at: 0.05 });
+  },
 };
 
-export function playSfx(name: SfxName): void {
+export function playSfx(name: SfxName, amount?: number): void {
   try {
-    CUES[name]();
+    CUES[name](amount);
   } catch {
     /* non-fatal */
   }

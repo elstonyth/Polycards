@@ -53,6 +53,7 @@ const BLOCKED: [RegExp, string][] = [
   [/^\/admin\/workflows-executions(\/|$)/, 'workflow internals'],
   [/^\/admin\/notifications(\/|$)/, 'notification contents (reset links)'],
   [/^\/admin\/uploads(\/|$)/, 'uploads'],
+  [/^\/admin\/coin-flips(\/|$)/, 'coin flip rounds and settings (actual odds)'],
   [
     /^\/admin\/pricecharting(\/|$)/,
     'PriceCharting lookups (each one costs an API call)',
@@ -81,6 +82,19 @@ export function blockedReason(path: string): string | null {
 // themselves (db-query.ts).
 const HIDDEN = /password|secret|token|credential|api_?key|real_?name/i;
 
+// Coin flip's actual odds and each group's odds set (the owner, 2026-10-30): the
+// audit rows and group metadata carrying them stay open, so they are hidden by
+// name; published_win_percent is public and stays. Text that is not whole JSON
+// (a row or array cast to text, or left(before::text, 40)) has no keys to read, so
+// there they go by pattern, whatever quoting those casts stack around the key. The odds are plain numbers, so no value mask can catch one
+// a query renamed.
+// shortcut: a query that builds the key from pieces or walks the JSON (jsonb_each)
+// still reads them from those rows; move them out if staff must not manage that.
+const ODDS_KEY = /^(?:actual_)?win_(?:units|percent)(?:_\d)?$|^odds_?set$/i;
+const ODDS_IN_TEXT =
+  /\b((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set)((?:\\*")*\s*:\s*)[^\s,}]+/gi;
+const maskOdds = (text: string) => text.replace(ODDS_IN_TEXT, '$1$2[hidden]');
+
 export function redact(value: unknown): unknown {
   if (typeof value === 'string') return redactJsonText(value);
   if (Array.isArray(value)) return value.map(redact);
@@ -88,20 +102,20 @@ export function redact(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, v]) => [
       key,
-      HIDDEN.test(key) ? '[hidden]' : redact(v),
+      HIDDEN.test(key) || ODDS_KEY.test(key) ? '[hidden]' : redact(v),
     ]),
   );
 }
 
 function redactJsonText(text: string): string {
-  if (!/^\s*[[{]/.test(text)) return text;
+  if (!/^\s*[[{]/.test(text)) return maskOdds(text);
   try {
     const parsed: unknown = JSON.parse(text);
     return parsed !== null && typeof parsed === 'object'
       ? JSON.stringify(redact(parsed))
       : text;
   } catch {
-    return text;
+    return maskOdds(text);
   }
 }
 

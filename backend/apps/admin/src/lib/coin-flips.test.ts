@@ -7,7 +7,6 @@ import {
 } from './coin-flips';
 const initial = {
   enabled: false,
-  max_stake_amount: null,
   win_percent: null,
   win_percent_2: null,
   win_percent_3: null,
@@ -23,7 +22,6 @@ describe('coin flip operator inputs', () => {
     const parsed = parseCoinFlipDraft({
       ...draft,
       enabled: true,
-      max_stake_amount: '100.01',
       win_percent: '48.125',
       win_percent_2: '0',
       published_win_percent: '50',
@@ -37,10 +35,6 @@ describe('coin flip operator inputs', () => {
     for (const value of ['NaN', 'Infinity', '101', '-1', '0.00001', '1e1'])
       expect(() =>
         parseCoinFlipDraft({ ...draft, win_percent: value }),
-      ).toThrow();
-    for (const value of ['0', '1.001', '21474836.48'])
-      expect(() =>
-        parseCoinFlipDraft({ ...draft, max_stake_amount: value }),
       ).toThrow();
     expect(
       parseCoinFlipDraft({ ...draft, win_percent: '0.0001' }).win_percent,

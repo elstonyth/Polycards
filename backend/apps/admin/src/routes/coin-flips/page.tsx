@@ -47,7 +47,7 @@ export const handle = {
 const settingsKey = ['coin-flip-settings'];
 
 function Settings({
-  saved,
+  saved: latest,
   reload,
   active,
   canEdit,
@@ -57,9 +57,12 @@ function Settings({
   active: boolean;
   canEdit: boolean;
 }) {
+  // Background refreshes must not replace an operator's editing baseline.
+  const [saved, setSaved] = useState(latest);
   const [draft, setDraft] = useState(() => coinFlipDraft(saved));
   const [reason, setReason] = useState('');
-  const [stale, setStale] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const stale = conflict || latest.revision !== saved.revision;
   const cache = useQueryClient();
   const dirty = JSON.stringify(draft) !== JSON.stringify(coinFlipDraft(saved));
   let validation = '';
@@ -78,11 +81,14 @@ function Settings({
   const mutation = useMutation({
     mutationFn: saveCoinFlipSettings,
     onSuccess: (settings) => {
+      setSaved(settings);
+      setDraft(coinFlipDraft(settings));
+      setReason('');
       cache.setQueryData(settingsKey, settings);
       toast.success('Coin flip settings saved');
     },
     onError: (error) => {
-      if (httpStatus(error) === 409) setStale(true);
+      if (httpStatus(error) === 409) setConflict(true);
       toast.error(
         error instanceof Error ? error.message : 'Could not save settings',
       );
@@ -98,14 +104,9 @@ function Settings({
   }
   const fields = [
     [
-      'max_stake_amount',
-      'Maximum card value (RM)',
-      'A positive value is required before enabling. Two decimal places.',
-    ],
-    [
       'published_win_percent',
       'Published win odds (%)',
-      'This is the only rate shown on the storefront.',
+      'Published reference rate saved with each flip.',
     ],
     [
       'win_percent',
@@ -180,16 +181,16 @@ function Settings({
           </Text>
           {mismatch && (
             <Text size="small" className="mt-2 text-ui-fg-error">
-              Published odds differ from one or more effective actual rates.
-              Customers see only the published rate.
+              The published reference differs from one or more effective actual
+              rates. Actual rates determine coin-flip outcomes.
             </Text>
           )}
         </div>
         <Text size="small" className="text-ui-fg-subtle">
-          A win keeps the card and pays 100% of its confirmed MYR value as
-          normal Credit. A loss forfeits the card without restocking it. Bonus
-          and gift cards are included; existing withdrawal eligibility is
-          required.
+          One toss settles all selected cards. A win keeps them and pays 100% of
+          their combined confirmed MYR value as normal Credit. A loss forfeits
+          every selected card without restocking it. Bonus and gift cards are
+          included; existing withdrawal eligibility is required.
         </Text>
         {stale && (
           <div
@@ -310,6 +311,8 @@ function History() {
               <option value="gift">Gift</option>
               <option value="reward">Reward</option>
               <option value="free">Free</option>
+              <option value="mixed">Mixed cards</option>
+              <option value="tickets">Tickets only</option>
             </select>
           </div>
           <div>
@@ -391,7 +394,17 @@ function History() {
                   <Table.Row key={round.id}>
                     <Table.Cell>{orderDateTime(round.settled_at)}</Table.Cell>
                     <Table.Cell>
-                      <Text size="small">{round.card.name}</Text>
+                      <Text size="small">
+                        {[
+                          round.cards.length > 1
+                            ? `${round.cards.length} cards · ${round.card?.name} + ${round.cards.length - 1} more`
+                            : round.card?.name,
+                          round.tickets > 0 &&
+                            `${round.tickets} Lucky Draw tickets`,
+                        ]
+                          .filter(Boolean)
+                          .join(' + ')}
+                      </Text>
                       <Text size="small" className="text-ui-fg-subtle">
                         {round.customer_id}
                       </Text>
@@ -400,15 +413,26 @@ function History() {
                       <StatusBadge
                         color={round.status === 'won' ? 'green' : 'red'}
                       >
-                        {round.status === 'won'
-                          ? 'Won · card kept'
-                          : 'Lost · forfeited'}
+                        {round.cards.length === 0
+                          ? round.status === 'won'
+                            ? 'Won · tickets added'
+                            : 'Lost · tickets removed'
+                          : round.status === 'won'
+                            ? 'Won · cards kept'
+                            : 'Lost · forfeited'}
                       </StatusBadge>
                     </Table.Cell>
                     <Table.Cell>
-                      {rm(round.stake_amount)}
+                      {[
+                        round.cards.length > 0 && rm(round.stake_amount),
+                        round.tickets > 0 && `${round.tickets} tickets`,
+                      ]
+                        .filter(Boolean)
+                        .join(' + ')}
                       <Text size="small" className="text-ui-fg-subtle">
-                        Paid {rm(round.win_amount)}
+                        {round.cards.length > 0
+                          ? `Paid ${rm(round.win_amount)}`
+                          : 'No Credit'}
                       </Text>
                     </Table.Cell>
                     <Table.Cell>
@@ -419,7 +443,10 @@ function History() {
                         <dl className="my-3 min-w-72 space-y-2 text-xs">
                           {[
                             ['Round', round.id],
-                            ['Pull', round.pull_id],
+                            [
+                              'Call / landed',
+                              `${round.chosen_side} / ${round.landed_side}`,
+                            ],
                             ['Group', round.snapshot.group_id ?? 'Default'],
                             ['Odds set', round.snapshot.odds_set],
                             [
@@ -429,18 +456,24 @@ function History() {
                             ['Draw (0–999999)', round.roll],
                             ['Config revision', round.config_revision],
                             ['Funding source', round.snapshot.source],
-                            [
-                              'Bonus share',
-                              `${round.snapshot.bonus_bp / 100}%`,
-                            ],
-                            [
-                              'Valuation',
-                              `USD ${round.snapshot.valuation.value_usd} × ${round.snapshot.valuation.multiplier} × FX ${round.snapshot.valuation.fx}`,
-                            ],
-                            [
-                              'Quoted at',
-                              orderDateTime(round.snapshot.valuation.quoted_at),
-                            ],
+                            ...(round.snapshot.valuation
+                              ? [
+                                  [
+                                    'First card bonus share',
+                                    `${round.snapshot.bonus_bp / 100}%`,
+                                  ],
+                                  [
+                                    'First card valuation',
+                                    `USD ${round.snapshot.valuation.value_usd} × ${round.snapshot.valuation.multiplier} × FX ${round.snapshot.valuation.fx}`,
+                                  ],
+                                  [
+                                    'Quoted at',
+                                    orderDateTime(
+                                      round.snapshot.valuation.quoted_at,
+                                    ),
+                                  ],
+                                ]
+                              : []),
                             [
                               'Credit transaction',
                               round.credit_transaction_id ?? 'None',
@@ -452,6 +485,32 @@ function History() {
                             </div>
                           ))}
                         </dl>
+                        <ul className="mb-3 max-h-64 space-y-2 overflow-y-auto text-xs">
+                          {round.cards.map((card) => {
+                            const stake = round.snapshot.cards?.find(
+                              (s) => s.card.pull_id === card.pull_id,
+                            );
+                            return (
+                              <li key={card.pull_id} className="border-t pt-2">
+                                <p>
+                                  {card.name} · {rm(card.stake_amount)}
+                                </p>
+                                <p className="break-all text-ui-fg-subtle">
+                                  {card.pull_id}
+                                </p>
+                                {stake && (
+                                  <p className="text-ui-fg-subtle">
+                                    {stake.source} · Bonus{' '}
+                                    {stake.bonus_bp / 100}% · USD{' '}
+                                    {stake.valuation.value_usd} ×{' '}
+                                    {stake.valuation.multiplier} × FX{' '}
+                                    {stake.valuation.fx}
+                                  </p>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
                       </details>
                     </Table.Cell>
                   </Table.Row>
@@ -501,7 +560,7 @@ export default function CoinFlipsPage() {
           value="settings"
           className="mt-4 data-[state=inactive]:hidden"
         >
-          {query.isError ? (
+          {query.isError && !query.data ? (
             <Container>
               <Text role="alert">Could not load coin flip settings.</Text>
               <Button variant="secondary" onClick={() => void query.refetch()}>
@@ -512,7 +571,7 @@ export default function CoinFlipsPage() {
             <Settings
               active={tab === 'settings'}
               canEdit={canEdit}
-              key={`${query.data.revision}:${reloadKey}`}
+              key={reloadKey}
               saved={query.data}
               reload={() => {
                 void query.refetch().then((result) => {

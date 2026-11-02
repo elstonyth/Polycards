@@ -10,11 +10,17 @@ const entities = [
   'purchase_invoice', 'tier_settings', 'referral_settings', 'weekly_settlement',
   'task_definition', 'customer_group', 'gateway_withdrawal', 'pack', 'card',
   'announcement', 'pack_gift', 'gateway_deposit', 'lucky_draw_event', 'lucky_draw_prize',
+  'goods_receive_note',
 ];
 const list = (values: string[]) => values.map((v) => `'${v}'`).join(', ');
 
-export class Migration20261028120000 extends Migration {
+export class Migration20261031100000 extends Migration {
   override async up(): Promise<void> {
+    // Runs in the pre-deploy job against live traffic, and these ALTERs queue every
+    // later pull and credit query behind them: fail the deploy fast and retry. Their
+    // checks are NOT VALID so none of them scans a money table under that lock;
+    // Migration20261031100400 validates them afterwards.
+    this.addSql(`set local lock_timeout = '5s';`);
     this.addSql(`create table if not exists "coin_flip_config" (
       "id" text not null primary key,
       "enabled" boolean not null default false,
@@ -64,10 +70,10 @@ export class Migration20261028120000 extends Migration {
     this.replaceCheck('credit_transaction', 'reason', [...reasons, 'coin_flip_win']);
     this.replaceCheck('ledger_entry', 'type', [...ledgerTypes, 'CF']);
     this.replaceCheck('admin_action_audit', 'entity_type', [...entities, 'coin_flip_config']);
-    this.addSql(`create unique index if not exists "IDX_credit_coin_flip_round" on "credit_transaction" ("source_transaction_id") where reason = 'coin_flip_win' and deleted_at is null;`);
+    this.addSql('alter table "credit_transaction" drop constraint if exists "credit_coin_flip_basis_check";');
     this.addSql(`alter table "credit_transaction" add constraint "credit_coin_flip_basis_check" check (reason <> 'coin_flip_win' or
       (amount > 0 and pull_id is null and source_transaction_id is not null and
-       coalesce(bonus_cents, 0) = 0 and coalesce(external_funded_cents, 0) = 0));`);
+       coalesce(bonus_cents, 0) = 0 and coalesce(external_funded_cents, 0) = 0)) not valid;`);
   }
 
   override async down(): Promise<void> {
@@ -75,7 +81,7 @@ export class Migration20261028120000 extends Migration {
       if exists (select 1 from coin_flip_round) or
          exists (select 1 from credit_transaction where reason = 'coin_flip_win') or
          exists (select 1 from ledger_entry where type = 'CF') or
-         exists (select 1 from pull where status = 'forfeited' or flip_version > 0) or
+         exists (select 1 from pull where status = 'forfeited') or
          exists (select 1 from admin_action_audit where entity_type = 'coin_flip_config')
       then raise exception 'Coin flip history exists; pause the feature instead of rolling back its records.';
       end if;
@@ -94,6 +100,6 @@ export class Migration20261028120000 extends Migration {
 
   private replaceCheck(table: string, column: string, values: string[]): void {
     this.addSql(`alter table "${table}" drop constraint if exists "${table}_${column}_check";`);
-    this.addSql(`alter table "${table}" add constraint "${table}_${column}_check" check ("${column}" in (${list(values)}));`);
+    this.addSql(`alter table "${table}" add constraint "${table}_${column}_check" check ("${column}" in (${list(values)})) not valid;`);
   }
 }

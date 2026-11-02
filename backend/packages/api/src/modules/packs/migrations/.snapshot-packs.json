@@ -60,7 +60,8 @@
             "coin_flip_config",
             "gateway_deposit",
             "lucky_draw_event",
-            "lucky_draw_prize"
+            "lucky_draw_prize",
+            "goods_receive_note"
           ],
           "mappedType": "enum"
         },
@@ -7263,7 +7264,7 @@
           "unsigned": false,
           "autoincrement": false,
           "primary": false,
-          "nullable": false,
+          "nullable": true,
           "mappedType": "string"
         },
         "status": {
@@ -7283,11 +7284,30 @@
         },
         "stake_cents": {
           "name": "stake_cents",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "decimal"
+        },
+        "raw_stake_cents": {
+          "name": "raw_stake_cents",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "ticket_stake": {
+          "name": "ticket_stake",
           "type": "integer",
           "unsigned": false,
           "autoincrement": false,
           "primary": false,
           "nullable": false,
+          "default": "0",
           "mappedType": "integer"
         },
         "flip_version": {

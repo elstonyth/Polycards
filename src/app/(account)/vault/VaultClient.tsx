@@ -16,6 +16,7 @@ import {
   type VaultItem,
   type VaultResult,
 } from '@/lib/actions/vault';
+import { getTicketBalance } from '@/lib/actions/lucky-draw';
 import { type AddressView } from '@/lib/actions/delivery';
 import { getPackGifts } from '@/lib/actions/pack-gifts';
 import type { PackGift } from '@/lib/vault-packs';
@@ -46,7 +47,7 @@ export default function VaultClient({
   initial,
   addresses,
   initialGifts,
-  tickets,
+  tickets: initialTickets,
 }: {
   initial: VaultResult;
   addresses: AddressView[];
@@ -57,6 +58,7 @@ export default function VaultClient({
 }) {
   const router = useRouter();
   const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
+  const [tickets, setTickets] = useState(initialTickets);
   const [items, setItems] = useState<VaultItem[]>(
     initial.ok ? initial.items : [],
   );
@@ -230,6 +232,12 @@ export default function VaultClient({
         if (live && g) setGifts(g);
       })
       .catch(() => {});
+    // And for the tickets row: Back can restore a count from before a coin flip.
+    void getTicketBalance()
+      .then((held) => {
+        if (live && held !== null) setTickets(held);
+      })
+      .catch(() => {});
     return () => {
       live = false;
     };
@@ -401,9 +409,19 @@ export default function VaultClient({
                 Lucky Draw Tickets ×{num(tickets)}
               </p>
               <p className="mt-0.5 text-[12px] text-neutral-400">
-                {tickets > 0
-                  ? 'Put them on the prizes you want'
-                  : 'Earn tickets from tasks'}
+                {tickets > 0 ? (
+                  <>
+                    Put them on the prizes you want, or{' '}
+                    <Link
+                      href="/vault/coin-flip?stake=tickets"
+                      className="font-semibold text-white underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                    >
+                      flip them
+                    </Link>
+                  </>
+                ) : (
+                  'Earn tickets from tasks'
+                )}
               </p>
             </div>
             <Link
@@ -861,11 +879,11 @@ export default function VaultClient({
           onSell={() => setConfirmBulkSell(true)}
           onDeliver={() => setDeliverOpen(true)}
           onCoinFlip={() => {
-            const [pullId] = selected;
-            if (selected.size === 1 && pullId)
-              router.push(
-                `/vault/coin-flip?pull=${encodeURIComponent(pullId)}`,
-              );
+            if (selected.size > 0 && selected.size <= 20) {
+              const query = new URLSearchParams();
+              for (const id of selected) query.append('pull', id);
+              router.push(`/vault/coin-flip?${query}`);
+            }
           }}
         />
       )}

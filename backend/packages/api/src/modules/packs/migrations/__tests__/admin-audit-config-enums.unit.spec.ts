@@ -3,11 +3,11 @@ import {
   ADMIN_AUDIT_ENTITY_TYPES,
 } from '../../models/admin-action-audit';
 // Apply the latest action CHECK, then the coin migration's entity CHECK;
-// the latter must retain Lucky Draw and settlement audit entities.
-import * as migrationModule from '../Migration20261024130000';
-import { Migration20261028120000 } from '../Migration20261028120000';
+// the latter must retain Lucky Draw, settlement and GRN audit entities.
+import { Migration20261024130000 } from '../Migration20261024130000';
+import * as migrationModule from '../Migration20261031100000';
 
-const { Migration20261024130000 } = migrationModule;
+const { Migration20261031100000 } = migrationModule;
 
 // The DB CHECKs on admin_action_audit are only rewritten by an explicit
 // migration (Migration20260906090000 learned this the hard way). A value the
@@ -18,18 +18,14 @@ const { Migration20261024130000 } = migrationModule;
 // Read from the SQL the migration actually emits (the lists themselves cannot
 // be exported: the migration loader takes a file's first export as its class).
 
-async function checkLists(): Promise<Record<string, string[]>> {
+async function checkLists(direction: 'up' | 'down' = 'up'): Promise<Record<string, string[]>> {
   const sql: string[] = [];
-  const m = Object.create(Migration20261024130000.prototype) as InstanceType<
-    typeof Migration20261024130000
-  > & {
-    addSql: (s: string) => void;
-  };
-  m.addSql = (s: string) => sql.push(s);
-  await m.up();
-  const coin = Object.create(Migration20261028120000.prototype) as Migration20261028120000;
-  coin.addSql = (s: string) => { sql.push(s); };
-  await coin.up();
+  const actions = Object.create(Migration20261024130000.prototype) as Migration20261024130000;
+  actions.addSql = (s: string) => { sql.push(s); };
+  await actions.up();
+  const m = Object.create(Migration20261031100000.prototype) as InstanceType<typeof Migration20261031100000>;
+  m.addSql = (s: string) => { sql.push(s); };
+  await m[direction]();
   const lists: Record<string, string[]> = {};
   for (const s of sql) {
     const hit = s.match(/check\s*\("(\w+)" in \(([^)]*)\)\)/);
@@ -66,6 +62,7 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'lucky_draw_event',
       'lucky_draw_prize',
       'coin_flip_config',
+      'goods_receive_note',
     ]) {
       expect(entity_type).toContain(t);
     }
@@ -92,7 +89,15 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
     }
   });
 
+  it('keeps GRN and all other audit entities when rolling back coin flip', async () => {
+    const { entity_type } = await checkLists('down');
+    expect([...entity_type].sort()).toEqual(
+      ADMIN_AUDIT_ENTITY_TYPES.filter((t) => t !== 'coin_flip_config').sort(),
+    );
+    expect(entity_type).toContain('goods_receive_note');
+  });
+
   it('exports only the migration class (the loader instantiates the first export)', async () => {
-    expect(Object.keys(migrationModule)).toEqual(['Migration20261024130000']);
+    expect(Object.keys(migrationModule)).toEqual(['Migration20261031100000']);
   });
 });

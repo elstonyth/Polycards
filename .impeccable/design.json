@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-28T06:11:57.592Z",
+  "generatedAt": "2026-10-28T18:19:00.436Z",
   "title": "Design System: Polycards",
   "extensions": {
     "colorMeta": {
@@ -193,7 +193,7 @@
       {
         "name": "coin-throw",
         "value": "five 60fps physical traces per result",
-        "purpose": "Flick velocity selects strength; the server result selects the face. Reduced motion shows a static receipt."
+        "purpose": "Gesture strength selects a physical toss from the chosen starting face; the server result determines the landed face. A closer camera frames settlement before wallet and history reveal. Reduced motion, pending assets and unavailable WebGL keep the correct static face and tap path."
       },
       {
         "name": "coin-card-kept",

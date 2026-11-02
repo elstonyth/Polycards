@@ -11,7 +11,7 @@ import { TABS, isTabActive } from './tabs';
 
 /**
  * Bottom tab bar — the primary nav on phones (hidden lg+, where AppHeader
- * carries the same six destinations). Ink bar, hairline top edge, safe-area
+ * carries the same seven destinations). Ink bar, hairline top edge, safe-area
  * padding; active tab is Paper White per DESIGN.md navigation spec.
  */
 export default function TabBar() {

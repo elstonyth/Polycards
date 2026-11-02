@@ -7,14 +7,16 @@ import type PacksModuleService from '../modules/packs/service';
 export default async function backfillCoinFlipEligibility({ container, args }: ExecArgs): Promise<void> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
-  const apply = args.includes('--apply');
+  // `medusa exec` refuses unknown flags, so this is the positional word `apply`.
+  const apply = args?.includes('apply') ?? false;
   const ingressDrained = process.env.COIN_FLIP_INGRESS_DRAINED === '1';
   if (apply && !ingressDrained) throw new Error('Stop pack ingress, drain/stop workers, resolve failed workflows, then set COIN_FLIP_INGRESS_DRAINED=1.');
   if ((await packs.coinFlipSettings()).enabled) throw new Error('Pause coin flip before maintenance.');
   let cursor: string | undefined;
   let count = 0;
   for (;;) {
-    const rows = await packs.listPulls({ status: 'vaulted', flip_eligible_at: null,
+    // A card in delivery comes back to the Vault if its order is cancelled.
+    const rows = await packs.listPulls({ status: ['vaulted', 'delivering'], flip_eligible_at: null,
       ...(cursor ? { id: { $gt: cursor } } : {}) }, { take: 100, order: { id: 'ASC' } });
     if (!rows.length) break;
     if (apply) {
@@ -25,5 +27,5 @@ export default async function backfillCoinFlipEligibility({ container, args }: E
     count += rows.length;
     cursor = rows[rows.length - 1].id;
   }
-  logger.info(`[coin-flip-eligibility] ${apply ? 'Marked' : 'Dry run: found'} ${count} unfinished/legacy vaulted cards. ${apply ? '' : 'Nothing changed.'}`);
+  logger.info(`[coin-flip-eligibility] ${apply ? 'Marked' : 'Dry run: found'} ${count} unfinished/legacy vaulted or in-delivery cards. ${apply ? '' : 'Nothing changed.'}`);
 }

@@ -15,28 +15,78 @@ it('derives owner from authenticated actor and refuses client economics', async 
   const req = { auth_context: { actor_id: 'owner' }, scope: { resolve: () => service }, body: { pull_id: 'pull' }, params: { id: 'round' } };
   const res = { json: jest.fn() };
   await quote(req as never, res as never);
-  expect(service.quoteCoinFlip).toHaveBeenCalledWith({ customerId: 'owner', pullId: 'pull' });
+  expect(service.quoteCoinFlip).toHaveBeenCalledWith({ customerId: 'owner', pullIds: ['pull'], chosenSide: 'head' });
+  await quote({ ...req, body: { pull_ids: ['b', 'a'], chosen_side: 'tail' } } as never, res as never);
+  expect(service.quoteCoinFlip).toHaveBeenLastCalledWith({ customerId: 'owner', pullIds: ['a', 'b'], chosenSide: 'tail' });
+  for (const body of [{ pull_ids: [], chosen_side: 'head' }, { pull_ids: ['a', 'a'], chosen_side: 'tail' },
+    { pull_ids: ['a'] }, { pull_ids: ['a'], chosen_side: 'edge' }, { pull_id: 'a', pull_ids: ['b'] },
+    { pull_ids: Array.from({ length: 21 }, (_, i) => `p${i}`), chosen_side: 'head' }]) {
+    await expect(quote({ ...req, body } as never, res as never)).rejects.toThrow();
+  }
   await expect(quote({ ...req, body: { pull_id: 'pull', amount: 100000, customer_id: 'victim' } } as never, res as never)).rejects.toThrow();
   await accept({ ...req, body: {} } as never, res as never);
   expect(service.acceptCoinFlip).toHaveBeenCalledWith({ customerId: 'owner', roundId: 'round' });
   await expect(accept({ ...req, body: { outcome: 'won' } } as never, res as never)).rejects.toThrow();
+  await expect(accept({ ...req, body: { chosen_side: 'tail' } } as never, res as never)).rejects.toThrow();
+});
+
+it('takes a ticket stake alone or with cards, and always a stated call', async () => {
+  const service = { quoteCoinFlip: jest.fn().mockResolvedValue({ id: 'round' }) };
+  const send = (body: unknown) => quote({ auth_context: { actor_id: 'owner' }, scope: { resolve: () => service }, body } as never, { json: jest.fn() } as never);
+  await send({ tickets: 5, chosen_side: 'tail' });
+  expect(service.quoteCoinFlip).toHaveBeenLastCalledWith({ customerId: 'owner', tickets: 5, chosenSide: 'tail' });
+  await send({ tickets: 5, pull_ids: ['pull'], chosen_side: 'head' });
+  expect(service.quoteCoinFlip).toHaveBeenLastCalledWith({ customerId: 'owner', pullIds: ['pull'], tickets: 5, chosenSide: 'head' });
+  service.quoteCoinFlip.mockClear();
+  for (const body of [
+    { tickets: 5 },
+    { tickets: 5, pull_ids: ['pull'] },
+    { tickets: '5', chosen_side: 'head' },
+    { tickets: 0, chosen_side: 'head' },
+    { tickets: 0, pull_ids: ['pull'], chosen_side: 'head' },
+    { tickets: 1.5, chosen_side: 'head' },
+    { tickets: 5, pull_id: 'pull', chosen_side: 'head' },
+    { tickets: 5, pull_ids: [], chosen_side: 'head' },
+    { tickets: 5, chosen_side: 'head', outcome: 'won' },
+    { chosen_side: 'head' },
+  ]) await expect(send(body)).rejects.toThrow();
+  expect(service.quoteCoinFlip).not.toHaveBeenCalled();
 });
 
 it('only serializes public history fields and only queries owned terminal rounds', async () => {
-  const service = { listAndCountCoinFlipRounds: jest.fn().mockResolvedValue([[privateRound], 1]) };
+  const service = {
+    listAndCountCoinFlipRounds: jest.fn().mockResolvedValue([[privateRound], 1]),
+    coinFlipLandedCounts: jest.fn().mockResolvedValue({ head: 2, tail: 1 }),
+  };
   const res = { json: jest.fn() };
   await history({ auth_context: { actor_id: 'owner' }, scope: { resolve: () => service }, query: {} } as never, res as never);
   expect(service.listAndCountCoinFlipRounds.mock.calls[0][0]).toEqual({ customer_id: 'owner', status: ['won', 'lost'] });
+  expect(service.coinFlipLandedCounts).toHaveBeenCalledWith('owner');
   expect(res.json.mock.calls[0][0].rounds[0]).toMatchObject({ status: 'lost', win_amount: 0, published_win_percent: 50 });
+  expect(res.json.mock.calls[0][0].totals).toEqual({ head: 2, tail: 1 });
   expect(JSON.stringify(res.json.mock.calls)).not.toMatch(/actual_win|odds_set|group_id|roll|snapshot/);
+});
+
+it.each([
+  ['won', ['won']],
+  ['lost', ['lost']],
+  ['quoted', ['won', 'lost']],
+  [['won', 'quoted'], ['won', 'lost']],
+])('history status %j only ever reads settled rounds', async (status, expected) => {
+  const service = {
+    listAndCountCoinFlipRounds: jest.fn().mockResolvedValue([[], 0]),
+    coinFlipLandedCounts: jest.fn().mockResolvedValue({ head: 0, tail: 0 }),
+  };
+  await history({ auth_context: { actor_id: 'owner' }, scope: { resolve: () => service }, query: { status } } as never, { json: jest.fn() } as never);
+  expect(service.listAndCountCoinFlipRounds.mock.calls[0][0]).toEqual({ customer_id: 'owner', status: expected });
 });
 
 it('shows published settings while keeping admin odds out of the storefront', async () => {
   const service = {
-    coinFlipSettings: jest.fn().mockResolvedValue({ enabled: true, max_stake_amount: 500, published_win_percent: 50, win_percent: 35, win_percent_2: 20, revision: 7 }),
+    coinFlipSettings: jest.fn().mockResolvedValue({ enabled: true, published_win_percent: 50, win_percent: 35, win_percent_2: 20, revision: 7 }),
     walletSummary: jest.fn().mockResolvedValue({ hasTopup: true, isFrozen: false, playthrough: { remaining: 0 } }),
   };
   const res = { json: jest.fn() };
   await settings({ auth_context: { actor_id: 'owner' }, scope: { resolve: (key: string) => key === 'customer' ? { listCustomerGroups: async () => [] } : service } } as never, res as never);
-  expect(res.json).toHaveBeenCalledWith({ enabled: true, max_stake_amount: 500, published_win_percent: 50, eligible: true, reason: null });
+  expect(res.json).toHaveBeenCalledWith({ enabled: true, published_win_percent: 50, eligible: true, reason: null });
 });

@@ -131,6 +131,8 @@ medusaIntegrationTestRunner({
           '/admin/api-keys',
           '/admin/inventory/export.xlsx',
           '/admin/pricecharting/search',
+          '/admin/coin-flips',
+          '/admin/coin-flips/settings',
         ]) {
           const res = await read(path);
           expect(res.status).toBe(403);
@@ -140,6 +142,15 @@ medusaIntegrationTestRunner({
           expect((await read(path)).status).toBe(400);
         }
         expect((await read('/admin/customers', '', null)).status).toBe(401);
+      });
+
+      it('hides a group’s odds set on the screens that stay open', async () => {
+        await getContainer()
+          .resolve(Modules.CUSTOMER)
+          .createCustomerGroups({ name: 'Odds check', metadata: { odds_set: 2 } });
+        const res = await read('/admin/customer-groups', '&fields=name,metadata');
+        expect(res.status).toBe(200);
+        expect(JSON.stringify(res.data)).toContain('"odds_set":"[hidden]"');
       });
 
       // 2026-10-04: an undeclared `*:read` was soft-deleted by the next

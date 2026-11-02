@@ -8,6 +8,32 @@
 .won .cardArt {
   animation: card-kept 850ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+/* Kept cards lift one after another, not as a block. */
+.won li:nth-child(2) .cardArt,
+.won li:nth-child(2) .sweep {
+  animation-delay: 70ms;
+}
+.won li:nth-child(3) .cardArt,
+.won li:nth-child(3) .sweep {
+  animation-delay: 140ms;
+}
+.won li:nth-child(n + 4) .cardArt,
+.won li:nth-child(n + 4) .sweep {
+  animation-delay: 210ms;
+}
+/* The still coin (reduced motion, loading, no WebGL) carries the result too. */
+.staticWin,
+.staticLoss {
+  display: inline-block;
+}
+.staticWin {
+  filter: drop-shadow(0 0 22px #2fbf6e59);
+  animation: static-win 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.staticLoss {
+  filter: brightness(0.7) saturate(0.6);
+  transition: filter 600ms ease-out;
+}
 .lost .cardArt {
   animation: card-forfeited 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -33,6 +59,12 @@
   );
   animation: card-sheen 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+.landedIn {
+  animation: landed-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.nudge {
+  animation: nudge 1600ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
 .winPulse,
 .lossPulse {
   position: absolute;
@@ -54,9 +86,25 @@
   }
   40% {
     transform: translateY(-14px) rotate(-3deg);
+    filter: drop-shadow(0 8px 14px #2fbf6e47);
   }
   100% {
     transform: translateY(0) rotate(0);
+    filter: drop-shadow(0 0 0 #2fbf6e00);
+  }
+}
+@keyframes static-win {
+  0% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 #2fbf6e00);
+  }
+  35% {
+    transform: scale(1.04);
+    filter: drop-shadow(0 0 30px #2fbf6e8c);
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 22px #2fbf6e59);
   }
 }
 @keyframes card-forfeited {
@@ -122,7 +170,31 @@
     opacity: 0.3;
   }
 }
+@keyframes landed-in {
+  0% {
+    transform: translateY(-6px) scale(0.94);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+@keyframes nudge {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-3px);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
+  .landedIn,
+  .nudge {
+    animation: none;
+  }
   .won .cardArt,
   .lost .cardArt,
   .won .receipt,
@@ -137,5 +209,12 @@
   .lost .cardArt {
     opacity: 0.5;
     filter: grayscale(1);
+  }
+  /* Still and lit: the glow stays, the bloom does not play. */
+  .staticWin {
+    animation: none;
+  }
+  .staticLoss {
+    transition: none;
   }
 }

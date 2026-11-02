@@ -21,7 +21,10 @@ import LosslessSchedule from '../models/lossless-schedule';
 import TaskDefinition from '../models/task-definition';
 import TaskClaim from '../models/task-claim';
 import RewardsSettings from '../models/rewards-settings';
-import { Migration20261028120000 } from '../migrations/Migration20261028120000';
+import LuckyDrawTicket from '../models/lucky-draw-ticket';
+import { Migration20261031100000 } from '../migrations/Migration20261031100000';
+import { Migration20261031100100 } from '../migrations/Migration20261031100100';
+import { Migration20261031100200 } from '../migrations/Migration20261031100200';
 import { FREE_PULL_LOCKED_MESSAGE } from '../free-pack';
 
 jest.setTimeout(300_000);
@@ -31,9 +34,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [CoinFlipConfig, CoinFlipRound, Pull, Card, FxRate, CreditTransaction,
     CustomerAccountState, LedgerEntry, LedgerSequence, AdminActionAudit, Pack, DeliveryOrder, DeliveryOrderItem,
-    LosslessSchedule, TaskDefinition, TaskClaim, RewardsSettings],
+    LosslessSchedule, TaskDefinition, TaskClaim, RewardsSettings, LuckyDrawTicket],
   testSuite: ({ service, MikroOrmWrapper }) => {
-    const settings = (win = 100) => ({ enabled: true, max_stake_amount: 1000,
+    const settings = (win = 100) => ({ enabled: true,
       win_percent: win, win_percent_2: null, win_percent_3: null, published_win_percent: 50 });
     const configure = async (win = 100) => service.saveCoinFlipSettings({
       settings: settings(win), revision: (await service.coinFlipSettings()).revision,
@@ -63,6 +66,132 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
     const pullState = async (id: string) => (await service.listPulls({ id }, { take: 1 }))[0];
     const wins = (customerId: string) => service.listCreditTransactions({ customer_id: customerId, reason: 'coin_flip_win' });
+    const addPull = async (customerId: string, source: 'pack' | 'gift' | 'reward' = 'gift') =>
+      (await service.createPulls([{ customer_id: customerId, card_id: customerId, pack_id: 'coin-test',
+        rolled_at: new Date(), source, bonus_bp: source === 'pack' ? 0 : 10000,
+        stock_earmarked: true, flip_eligible_at: new Date() }]))[0];
+
+    it.each(['head', 'tail'] as const)('atomically pays or forfeits a mixed bundle called %s, with one idempotent receipt', async chosenSide => {
+      for (const win of [100, 0]) {
+        await configure(win);
+        const input = await seed();
+        const gift = await addPull(input.customerId);
+        const reward = await addPull(input.customerId, 'reward');
+        const pullIds = [input.pullId, gift.id, reward.id];
+        const q = await service.quoteCoinFlip({ customerId: input.customerId, pullIds, chosenSide });
+        expect(q).toMatchObject({ stake_amount: 300, chosen_side: chosenSide, landed_side: null });
+        expect(q.cards).toHaveLength(3);
+        const accept = { customerId: input.customerId, roundId: q.id };
+        const [result, retry] = await Promise.all([service.acceptCoinFlip(accept), service.acceptCoinFlip(accept)]);
+        expect(retry).toEqual(result);
+        expect(result).toMatchObject({ status: win ? 'won' : 'lost', win_amount: win ? 300 : 0,
+          landed_side: win ? chosenSide : chosenSide === 'head' ? 'tail' : 'head' });
+        for (const id of pullIds) expect(await pullState(id)).toMatchObject({ status: win ? 'vaulted' : 'forfeited', flip_version: 1 });
+        expect(await wins(input.customerId)).toHaveLength(win ? 1 : 0);
+        const entries = await service.listLedgerEntries({ type: 'CF', customer_id: input.customerId });
+        expect(entries).toHaveLength(1);
+        expect(Number(entries[0].vault_delta)).toBe(win ? 0 : -200);
+        expect((entries[0].payload as { cards: unknown[] }).cards).toHaveLength(3);
+        expect(await service.coinFlipTotals({ customerId: input.customerId, source: 'mixed' })).toMatchObject({
+          wins: win ? 1 : 0, losses: win ? 0 : 1, payouts: win ? 300 : 0, forfeited_value: win ? 0 : 300,
+        });
+      }
+    });
+
+    it('ignores an old cap and rejects a stale card without partially committing its bundle', async () => {
+      const input = await seed();
+      const second = await addPull(input.customerId);
+      const selection = { customerId: input.customerId, pullIds: [input.pullId, second.id], chosenSide: 'tail' as const };
+      await MikroOrmWrapper.forkManager().execute('UPDATE coin_flip_config SET max_stake_cents = 15000');
+      const q = await service.quoteCoinFlip(selection);
+      expect(q.stake_amount).toBe(200);
+      await service.updatePulls([{ id: second.id, flip_version: 1 }]);
+      await expect(service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })).rejects.toThrow(/changed/);
+      expect(await pullState(input.pullId)).toMatchObject({ status: 'vaulted', flip_version: 0 });
+      expect(await wins(input.customerId)).toHaveLength(0);
+      expect((await service.getCoinFlipRound({ customerId: input.customerId, roundId: q.id })).status).toBe('quoted');
+    });
+
+    it('refuses a quote once its cards are worth less, and honours it if they rose', async () => {
+      await configure(100);
+      const input = await seed();
+      const [card] = await service.listCards({ handle: input.customerId });
+      const q = await service.quoteCoinFlip(input);
+      await service.updateCards([{ id: card.id, market_value: 10 }]);
+      await expect(service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })).rejects.toThrow(/changed/);
+      expect((await service.getCoinFlipRound({ customerId: input.customerId, roundId: q.id })).status).toBe('quoted');
+      expect((await pullState(input.pullId)).status).toBe('vaulted');
+      expect(await wins(input.customerId)).toHaveLength(0);
+      const lower = await service.quoteCoinFlip(input);
+      expect(lower.stake_amount).toBeLessThan(q.stake_amount);
+      await service.updateCards([{ id: card.id, market_value: 40 }]);
+      const receipt = await service.acceptCoinFlip({ customerId: input.customerId, roundId: lower.id });
+      expect(receipt).toMatchObject({ status: 'won', win_amount: lower.stake_amount });
+    });
+
+    it.each([100, 0])('settles a RM60m bundle with %i%% odds without a value cap or integer overflow', async percent => {
+      await configure(percent);
+      const input = await seed();
+      const [card] = await service.listCards({ handle: input.customerId });
+      await service.updateCards([{ id: card.id, market_value: 6_000_000 }]);
+      const second = await addPull(input.customerId);
+      await MikroOrmWrapper.forkManager().execute('UPDATE coin_flip_config SET max_stake_cents = 100');
+      const q = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId, second.id], chosenSide: 'tail' });
+      expect(q.stake_amount).toBe(60_000_000);
+      const receipt = await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id });
+      expect(receipt).toMatchObject({ status: percent ? 'won' : 'lost', stake_amount: 60_000_000, win_amount: percent ? 60_000_000 : 0 });
+      expect(await service.getCoinFlipRound({ customerId: input.customerId, roundId: q.id })).toEqual(receipt);
+      expect((await service.walletSummary(input.customerId)).withdrawable).toBe(percent ? 60_000_000 : 0);
+      for (const id of [input.pullId, second.id]) expect((await pullState(id)).status).toBe(percent ? 'vaulted' : 'forfeited');
+    });
+
+    it('serializes overlapping bundles so a shared card cannot settle twice', async () => {
+      const input = await seed();
+      const b = await addPull(input.customerId);
+      const c = await addPull(input.customerId);
+      const aQuote = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId, b.id], chosenSide: 'head' });
+      const bQuote = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [b.id, c.id], chosenSide: 'tail' });
+      const results = await Promise.allSettled([aQuote, bQuote].map(q => service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })));
+      expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+      expect(await wins(input.customerId)).toHaveLength(1);
+      expect((await pullState(b.id)).flip_version).toBe(1);
+      expect((await service.walletSummary(input.customerId)).withdrawable).toBe(200);
+    });
+
+    it('keeps legacy single-card quotes recoverable as Head calls', async () => {
+      const input = await seed();
+      const q = await service.quoteCoinFlip(input);
+      await MikroOrmWrapper.forkManager().execute("UPDATE coin_flip_round SET snapshot = snapshot - 'cards' - 'chosen_side' WHERE id = ?", [q.id]);
+      const result = await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id });
+      expect(result).toMatchObject({ status: 'won', chosen_side: 'head', landed_side: 'head', win_amount: 100 });
+      expect(result.cards).toHaveLength(1);
+    });
+
+    it('applies every actual odds setting from 100–0 through 0–100 at its exact settlement boundary', async () => {
+      const input = await seed();
+      // Control only the draw in this test; quotes, saved settings and money writes use the real database.
+      const draw = jest.spyOn(require('node:crypto'), 'randomInt');
+      try {
+        for (let percent = 100; percent >= 0; percent--) {
+          await configure(percent);
+          for (const chosenSide of ['head', 'tail'] as const) {
+            for (const won of [true, false]) {
+              if ((won && percent === 0) || (!won && percent === 100)) continue;
+              const pull = await addPull(input.customerId);
+              draw.mockReturnValue(won ? percent * 10000 - 1 : percent * 10000);
+              const q = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [pull.id], chosenSide });
+              const receipt = await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id });
+              expect({ percent, side: chosenSide, status: receipt.status }).toEqual({ percent, side: chosenSide, status: won ? 'won' : 'lost' });
+              expect(receipt.landed_side).toBe(won ? chosenSide : chosenSide === 'head' ? 'tail' : 'head');
+              expect(receipt.win_amount).toBe(won ? 100 : 0);
+              expect(receipt.published_win_percent).toBe(50);
+            }
+          }
+        }
+        expect(draw).toHaveBeenCalledTimes(400);
+        expect((await service.listAndCountCreditTransactions({ customer_id: input.customerId, reason: 'coin_flip_win' }))[1]).toBe(200);
+      } finally { draw.mockRestore(); }
+    });
 
     it.each(['pack', 'gift', 'bonus'] as const)('pays a %s card as normal credit once, keeps funding tags and supports a new confirmed win', async source => {
       const input = await seed(source);
@@ -138,9 +267,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await service.updatePulls([{ id: input.pullId, flip_eligible_at: null }]);
       await expect(service.quoteCoinFlip(input)).rejects.toThrow(/processing/i);
       await expect(service.finalizePullsForCoinFlip({ customerId: 'other', pullIds: [input.pullId] })).rejects.toThrow();
+      const before = (await pullState(input.pullId)).updated_at;
       await service.finalizePullsForCoinFlip({ customerId: input.customerId, pullIds: [input.pullId] });
       await service.finalizePullsForCoinFlip({ customerId: input.customerId, pullIds: [input.pullId] });
       expect((await service.quoteCoinFlip(input)).status).toBe('quoted');
+      // /store/vault/latest reads updated_at on a held card as a new event.
+      expect((await pullState(input.pullId)).updated_at).toEqual(before);
     });
 
     it('requires paused feature and explicit drained ingress for legacy eligibility repair', async () => {
@@ -274,22 +406,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ]);
       expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
       for (const result of results) if (result.status === 'rejected') expect(String(result.reason)).toMatch(/changed|no longer/i);
-      if (results[0].status === 'fulfilled') {
-        const order = results[0].value;
-        const transition = await service.transitionDeliveryOrderStatus({ orderId: order.orderId,
-          to: 'canceled', trackingNumber: null, pullIds: [input.pullId] });
-        const fresh = await service.quoteCoinFlip(input);
-        await service.acceptCoinFlip({ customerId: input.customerId, roundId: fresh.id });
-        await expect(service.undoDeliveryAtomic({ orderId: order.orderId, expectedStatus: 'canceled',
-          pullVersions: transition.pullVersions, restorePulls: true,
-          previous: { status: 'requested', tracking_number: null, shipped_at: null, delivered_at: null } })).rejects.toThrow(/changed/);
-        expect((await pullState(input.pullId)).status).toBe('forfeited');
-      }
+      // Its own card, so this half runs whichever side won the race above.
+      const later = await seed();
+      await service.createCreditTransactions([{ customer_id: later.customerId, reason: 'adjustment', amount: 100 }]);
+      const order = await service.createDeliveryOrderWithLedger({ customerId: later.customerId, pullIds: [later.pullId], snapshot, fx: 4 });
+      const transition = await service.transitionDeliveryOrderStatus({ orderId: order.orderId,
+        to: 'canceled', trackingNumber: null, pullIds: [later.pullId] });
+      const fresh = await service.quoteCoinFlip(later);
+      await service.acceptCoinFlip({ customerId: later.customerId, roundId: fresh.id });
+      await expect(service.undoDeliveryAtomic({ orderId: order.orderId, expectedStatus: 'canceled',
+        pullVersions: transition.pullVersions, restorePulls: true,
+        previous: { status: 'requested', tracking_number: null, shipped_at: null, delivered_at: null } })).rejects.toThrow(/changed/);
+      expect((await pullState(later.pullId)).status).toBe('forfeited');
     });
 
     it.each(['credit_transaction', 'ledger_entry', 'coin_flip_round'] as const)('rolls back if %s write fails', async table => {
       const input = await seed();
-      const q = await service.quoteCoinFlip(input);
+      const other = await addPull(input.customerId);
+      const q = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId, other.id], chosenSide: 'tail' });
       const em = MikroOrmWrapper.forkManager();
       await em.execute("CREATE OR REPLACE FUNCTION coin_test_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'write failed'; END $$");
       await em.execute(`CREATE TRIGGER coin_test_failure BEFORE INSERT OR UPDATE ON ${table} FOR EACH ROW EXECUTE FUNCTION coin_test_fail()`);
@@ -300,6 +434,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await em.execute('DROP FUNCTION coin_test_fail()');
       }
       expect((await pullState(input.pullId)).flip_version).toBe(0);
+      expect((await pullState(other.id)).flip_version).toBe(0);
       expect(await wins(input.customerId)).toHaveLength(0);
       expect((await service.getCoinFlipRound({ customerId: input.customerId, roundId: q.id })).status).toBe('quoted');
       expect(await service.listLedgerEntries({ type: 'CF', customer_id: input.customerId })).toHaveLength(0);
@@ -319,17 +454,281 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(await wins(input.customerId)).toHaveLength(0);
     });
 
+    it.each([[100, false], [0, true]] as const)('at %i%% odds moves the pull updated_at only on a loss, so a win lights no Vault red dot', async (win, moved) => {
+      await configure(win);
+      const input = await seed();
+      const old = new Date('2026-01-01T00:00:00.000Z');
+      await MikroOrmWrapper.forkManager().execute('UPDATE pull SET updated_at = ? WHERE id = ?', [old, input.pullId]);
+      const quote = await service.quoteCoinFlip(input);
+      await service.acceptCoinFlip({ customerId: input.customerId, roundId: quote.id });
+      const updated = new Date((await pullState(input.pullId)).updated_at).getTime();
+      expect(updated !== old.getTime()).toBe(moved);
+    });
+
+    it('counts how a customer\'s settled flips landed, whichever side they called', async () => {
+      const toss = async (customerId: string, chosenSide: 'head' | 'tail') => {
+        const pull = await addPull(customerId);
+        const quote = await service.quoteCoinFlip({ customerId, pullIds: [pull.id], chosenSide });
+        await service.acceptCoinFlip({ customerId, roundId: quote.id });
+      };
+      const { customerId } = await seed();
+      const other = await seed();
+      await service.quoteCoinFlip({ customerId, pullIds: [(await addPull(customerId)).id], chosenSide: 'head' });
+      expect(await service.coinFlipLandedCounts(customerId)).toEqual({ head: 0, tail: 0 });
+      await configure(100);
+      await toss(customerId, 'head');
+      await toss(customerId, 'head');
+      await toss(customerId, 'tail');
+      await toss(other.customerId, 'tail');
+      await configure(0);
+      await toss(customerId, 'head');
+      await toss(customerId, 'tail');
+      expect(await service.coinFlipLandedCounts(customerId)).toEqual({ head: 3, tail: 2 });
+      expect(await service.coinFlipLandedCounts(other.customerId)).toEqual({ head: 0, tail: 1 });
+    });
+
+    describe('ticket flips', () => {
+      const seedTickets = async (held: number) => {
+        const { customerId } = await seed();
+        await service.createLuckyDrawTickets([{ customer_id: customerId, delta: held, reason: 'admin_grant', ref: `admin:${randomUUID()}` }]);
+        return customerId;
+      };
+      const ticketRows = (customerId: string) => service.listLuckyDrawTickets({ customer_id: customerId, reason: 'coin_flip' });
+
+      it.each([[100, 'won', 25, 5], [0, 'lost', 15, -5]] as const)('at %i%% odds a %s flip moves only the staked tickets, once', async (win, status, after, delta) => {
+        await configure(win);
+        const customerId = await seedTickets(20);
+        const walletBefore = (await service.walletSummary(customerId)).balance;
+        const quote = await service.quoteCoinFlip({ customerId, tickets: 5, chosenSide: 'tail' });
+        expect(quote).toMatchObject({ status: 'quoted', tickets: 5, stake_amount: 0, win_amount: 0, card: null, cards: [], chosen_side: 'tail', landed_side: null });
+        expect(JSON.stringify(quote)).not.toMatch(/actual|odds_set|group_id|roll|bonus_bp/);
+        // A quote holds nothing.
+        expect(await service.luckyDrawBalance(customerId)).toBe(20);
+        const accept = { customerId, roundId: quote.id };
+        const [result, retry] = await Promise.all([service.acceptCoinFlip(accept), service.acceptCoinFlip(accept)]);
+        expect(retry).toEqual(result);
+        expect(result).toMatchObject({ status, tickets: 5, stake_amount: 0, win_amount: 0, landed_side: status === 'won' ? 'tail' : 'head' });
+        expect(await service.luckyDrawBalance(customerId)).toBe(after);
+        const rows = await ticketRows(customerId);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ delta, ref: quote.id });
+        // Tickets never touch money: no Credit, no wallet change, no ledger row.
+        expect(await wins(customerId)).toHaveLength(0);
+        expect((await service.walletSummary(customerId)).balance).toBe(walletBefore);
+        expect(await service.listLedgerEntries({ type: 'CF', customer_id: customerId })).toHaveLength(0);
+        expect(await service.coinFlipTotals({ customerId })).toMatchObject({
+          wins: status === 'won' ? 1 : 0, losses: status === 'won' ? 0 : 1, payouts: 0, forfeited_value: 0,
+        });
+      });
+
+      it('a loss takes all of a full-balance stake and nothing more', async () => {
+        await configure(0);
+        const customerId = await seedTickets(7);
+        const quote = await service.quoteCoinFlip({ customerId, tickets: 7, chosenSide: 'head' });
+        await service.acceptCoinFlip({ customerId, roundId: quote.id });
+        expect(await service.luckyDrawBalance(customerId)).toBe(0);
+        await expect(service.quoteCoinFlip({ customerId, tickets: 1, chosenSide: 'head' })).rejects.toThrow(/enough tickets/);
+      });
+
+      it('refuses a stake above the balance at quote', async () => {
+        const customerId = await seedTickets(3);
+        await expect(service.quoteCoinFlip({ customerId, tickets: 4, chosenSide: 'head' })).rejects.toThrow(/enough tickets/);
+        await expect(service.quoteCoinFlip({ customerId, tickets: 0, chosenSide: 'head' })).rejects.toThrow();
+      });
+
+      it('re-checks the balance at accept, since a quote holds no tickets', async () => {
+        const customerId = await seedTickets(5);
+        const first = await service.quoteCoinFlip({ customerId, tickets: 5, chosenSide: 'head' });
+        const second = await service.quoteCoinFlip({ customerId, tickets: 5, chosenSide: 'head' });
+        await configure(0);
+        const q1 = await service.quoteCoinFlip({ customerId, tickets: 5, chosenSide: 'head' });
+        const q2 = await service.quoteCoinFlip({ customerId, tickets: 5, chosenSide: 'head' });
+        await expect(service.acceptCoinFlip({ customerId, roundId: first.id })).rejects.toThrow(/changed/);
+        expect(second.status).toBe('quoted');
+        await service.acceptCoinFlip({ customerId, roundId: q1.id });
+        await expect(service.acceptCoinFlip({ customerId, roundId: q2.id })).rejects.toThrow(/enough tickets/);
+        expect(await service.luckyDrawBalance(customerId)).toBe(0);
+        expect((await service.getCoinFlipRound({ customerId, roundId: q2.id })).status).toBe('quoted');
+      });
+
+      it('refuses an expired quote and another customer', async () => {
+        const customerId = await seedTickets(5);
+        const quote = await service.quoteCoinFlip({ customerId, tickets: 2, chosenSide: 'head' });
+        await expect(service.acceptCoinFlip({ customerId: 'someone_else', roundId: quote.id })).rejects.toThrow(/not found/i);
+        await MikroOrmWrapper.forkManager().execute("UPDATE coin_flip_round SET expires_at = now() - interval '1 second' WHERE id = ?", [quote.id]);
+        await expect(service.acceptCoinFlip({ customerId, roundId: quote.id })).rejects.toThrow(/expired/i);
+        expect(await service.luckyDrawBalance(customerId)).toBe(5);
+      });
+
+      it('holds the ticket lock while it settles, so a Lucky Draw entry cannot spend the same tickets', async () => {
+        const customerId = await seedTickets(5);
+        const quote = await service.quoteCoinFlip({ customerId, tickets: 5, chosenSide: 'head' });
+        const em = MikroOrmWrapper.forkManager();
+        const observer = MikroOrmWrapper.forkManager();
+        await em.begin();
+        let pending: Promise<unknown> | undefined;
+        try {
+          await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [`tickets:${customerId}`]);
+          pending = service.acceptCoinFlip({ customerId, roundId: quote.id });
+          let waiting = false;
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const [row] = await observer.execute<{ waiting: boolean }[]>(
+              "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event = 'advisory' AND query LIKE ?) AS waiting", [`%tickets:${customerId}%`]);
+            if (row.waiting) { waiting = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+          expect(waiting).toBe(true);
+        } finally {
+          await em.rollback();
+        }
+        await expect(pending).resolves.toMatchObject({ status: 'won' });
+      });
+
+      it('sees a spend committed while it waited for the ticket lock', async () => {
+        const customerId = await seedTickets(5);
+        const quote = await service.quoteCoinFlip({ customerId, tickets: 5, chosenSide: 'head' });
+        const em = MikroOrmWrapper.forkManager();
+        const observer = MikroOrmWrapper.forkManager();
+        await em.begin();
+        let pending: Promise<unknown> | undefined;
+        try {
+          await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [`tickets:${customerId}`]);
+          await em.execute(
+            "INSERT INTO lucky_draw_ticket (id, customer_id, delta, reason, ref, created_at, updated_at) VALUES (?, ?, -5, 'admin_grant', ?, now(), now())",
+            [`ldtk_${randomUUID()}`, customerId, `admin:${randomUUID()}`]);
+          pending = service.acceptCoinFlip({ customerId, roundId: quote.id }).catch((error: Error) => error);
+          let waiting = false;
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const [row] = await observer.execute<{ waiting: boolean }[]>(
+              "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event = 'advisory' AND query LIKE ?) AS waiting", [`%tickets:${customerId}%`]);
+            if (row.waiting) { waiting = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+          expect(waiting).toBe(true);
+          await em.commit();
+        } catch (error) {
+          await em.rollback();
+          throw error;
+        }
+        expect(await pending).toMatchObject({ message: expect.stringMatching(/enough tickets/) });
+        expect(await service.luckyDrawBalance(customerId)).toBe(0);
+        expect(await ticketRows(customerId)).toHaveLength(0);
+        expect((await service.getCoinFlipRound({ customerId, roundId: quote.id })).status).toBe('quoted');
+      });
+
+      describe('with cards in the same flip', () => {
+        const seedBoth = async (held: number) => {
+          const input = await seed();
+          await service.createLuckyDrawTickets([{ customer_id: input.customerId, delta: held, reason: 'admin_grant', ref: `admin:${randomUUID()}` }]);
+          return input;
+        };
+
+        it('a win pays Credit on the cards, keeps them and adds the tickets, once', async () => {
+          const input = await seedBoth(20);
+          const quote = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId], tickets: 5, chosenSide: 'tail' });
+          expect(quote).toMatchObject({ status: 'quoted', stake_amount: 100, tickets: 5, chosen_side: 'tail' });
+          expect(quote.cards).toHaveLength(1);
+          expect(await service.luckyDrawBalance(input.customerId)).toBe(20);
+          const accept = { customerId: input.customerId, roundId: quote.id };
+          const [result, retry] = await Promise.all([service.acceptCoinFlip(accept), service.acceptCoinFlip(accept)]);
+          expect(retry).toEqual(result);
+          expect(result).toMatchObject({ status: 'won', win_amount: 100, tickets: 5 });
+          expect(await pullState(input.pullId)).toMatchObject({ status: 'vaulted', flip_version: 1 });
+          expect(await wins(input.customerId)).toHaveLength(1);
+          expect(await service.luckyDrawBalance(input.customerId)).toBe(25);
+          expect(await ticketRows(input.customerId)).toHaveLength(1);
+          expect(await service.listLedgerEntries({ type: 'CF', customer_id: input.customerId })).toHaveLength(1);
+          expect(await service.coinFlipTotals({ customerId: input.customerId })).toEqual({ wins: 1, losses: 0, payouts: 100, forfeited_value: 0 });
+        });
+
+        it('a loss forfeits the cards and takes every staked ticket, leaving the rest', async () => {
+          await configure(0);
+          const input = await seedBoth(20);
+          const quote = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId], tickets: 5, chosenSide: 'tail' });
+          const result = await service.acceptCoinFlip({ customerId: input.customerId, roundId: quote.id });
+          expect(result).toMatchObject({ status: 'lost', win_amount: 0, tickets: 5, landed_side: 'head' });
+          expect(await pullState(input.pullId)).toMatchObject({ status: 'forfeited' });
+          expect(await wins(input.customerId)).toHaveLength(0);
+          expect(await service.luckyDrawBalance(input.customerId)).toBe(15);
+          expect((await ticketRows(input.customerId))[0]).toMatchObject({ delta: -5, ref: quote.id });
+        });
+
+        it('settles nothing when the tickets are gone by accept, not even the cards', async () => {
+          const input = await seedBoth(5);
+          const quote = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId], tickets: 5, chosenSide: 'head' });
+          await service.createLuckyDrawTickets([{ customer_id: input.customerId, delta: -1, reason: 'admin_grant', ref: `admin:${randomUUID()}` }]);
+          await expect(service.acceptCoinFlip({ customerId: input.customerId, roundId: quote.id })).rejects.toThrow(/enough tickets/);
+          expect(await pullState(input.pullId)).toMatchObject({ status: 'vaulted', flip_version: 0 });
+          expect(await wins(input.customerId)).toHaveLength(0);
+          expect(await ticketRows(input.customerId)).toHaveLength(0);
+          expect((await service.getCoinFlipRound({ customerId: input.customerId, roundId: quote.id })).status).toBe('quoted');
+        });
+
+        it('settles nothing when a card changed by accept, not even the tickets', async () => {
+          const input = await seedBoth(5);
+          const quote = await service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId], tickets: 5, chosenSide: 'head' });
+          await service.updatePulls([{ id: input.pullId, flip_version: 1 }]);
+          await expect(service.acceptCoinFlip({ customerId: input.customerId, roundId: quote.id })).rejects.toThrow(/changed/);
+          expect(await service.luckyDrawBalance(input.customerId)).toBe(5);
+          expect(await ticketRows(input.customerId)).toHaveLength(0);
+        });
+
+        it('refuses a quote above the ticket balance even with cards', async () => {
+          const input = await seedBoth(2);
+          await expect(service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId], tickets: 3, chosenSide: 'head' })).rejects.toThrow(/enough tickets/);
+          await expect(service.quoteCoinFlip({ customerId: input.customerId, pullIds: [input.pullId], tickets: 0, chosenSide: 'head' })).rejects.toThrow();
+        });
+      });
+
+      it('lists in history next to card flips and counts them in the tally, with money totals untouched', async () => {
+        const input = await seed();
+        await service.createLuckyDrawTickets([{ customer_id: input.customerId, delta: 4, reason: 'admin_grant', ref: `admin:${randomUUID()}` }]);
+        const cards = await service.quoteCoinFlip(input);
+        await service.acceptCoinFlip({ customerId: input.customerId, roundId: cards.id });
+        const tickets = await service.quoteCoinFlip({ customerId: input.customerId, tickets: 4, chosenSide: 'head' });
+        await service.acceptCoinFlip({ customerId: input.customerId, roundId: tickets.id });
+        const [rows, count] = await service.listAndCountCoinFlipRounds({ customer_id: input.customerId, status: ['won', 'lost'] });
+        expect(count).toBe(2);
+        expect(rows.map(row => row.ticket_stake).sort()).toEqual([0, 4]);
+        expect(await service.coinFlipTotals({ customerId: input.customerId })).toEqual({ wins: 2, losses: 0, payouts: 100, forfeited_value: 0 });
+        expect(await service.coinFlipTotals({ customerId: input.customerId, source: 'tickets' })).toEqual({ wins: 1, losses: 0, payouts: 0, forfeited_value: 0 });
+      });
+    });
+
     it('applies real migration checks and refuses destructive rollback once a round exists', async () => {
       const em = MikroOrmWrapper.forkManager();
-      const migration = Object.create(Migration20261028120000.prototype) as Migration20261028120000;
+      const migration = Object.create(Migration20261031100000.prototype) as Migration20261031100000;
       const sql: string[] = [];
       migration.addSql = statement => { if (typeof statement !== 'string') throw new Error('Expected SQL text.'); sql.push(statement); };
       await migration.up();
+      for (const statement of sql) await em.execute(statement);
+      const uncapped = Object.create(Migration20261031100100.prototype) as Migration20261031100100;
+      uncapped.addSql = statement => { sql.push(statement as string); };
+      sql.length = 0;
+      await uncapped.up();
+      for (const statement of sql) await em.execute(statement);
+      const tickets = Object.create(Migration20261031100200.prototype) as Migration20261031100200;
+      tickets.addSql = statement => { sql.push(statement as string); };
+      sql.length = 0;
+      await tickets.up();
       for (const statement of sql) await em.execute(statement);
       const input = await seed();
       const q = await service.quoteCoinFlip(input);
       await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id });
       await expect(em.execute("UPDATE credit_transaction SET bonus_cents = 1 WHERE reason = 'coin_flip_win'")).rejects.toThrow(/credit_coin_flip_basis_check/);
+      // A round stakes cards, tickets or both, never neither; only a win on cards carries Credit.
+      await expect(em.execute('UPDATE coin_flip_round SET pull_id = NULL WHERE id = ?', [q.id])).rejects.toThrow(/coin_flip_round_stake_kind_check/);
+      await expect(em.execute('UPDATE coin_flip_round SET credit_transaction_id = NULL WHERE id = ?', [q.id])).rejects.toThrow(/coin_flip_round_settlement_check/);
+      await service.createLuckyDrawTickets([{ customer_id: input.customerId, delta: 3, reason: 'admin_grant', ref: `admin:${randomUUID()}` }]);
+      const ticketRound = await service.quoteCoinFlip({ customerId: input.customerId, tickets: 3, chosenSide: 'head' });
+      await expect(em.execute('UPDATE coin_flip_round SET ticket_stake = 0 WHERE id = ?', [ticketRound.id])).rejects.toThrow(/coin_flip_round_stake_kind_check/);
+      await expect(em.execute('UPDATE coin_flip_round SET ticket_stake = 10001 WHERE id = ?', [ticketRound.id])).rejects.toThrow(/coin_flip_round_stake_kind_check/);
+      await service.acceptCoinFlip({ customerId: input.customerId, roundId: ticketRound.id });
+      expect(await service.luckyDrawBalance(input.customerId)).toBe(6);
+      await expect(em.execute("UPDATE lucky_draw_ticket SET reason = 'made_up' WHERE ref = ?", [ticketRound.id])).rejects.toThrow(/lucky_draw_ticket_reason_check/);
+      sql.length = 0;
+      await tickets.down();
+      await expect(em.execute(sql[0])).rejects.toThrow(/Ticket flips exist/);
       sql.length = 0;
       await migration.down();
       await expect(em.execute(sql[0])).rejects.toThrow(/history exists/);

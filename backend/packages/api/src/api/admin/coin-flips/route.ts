@@ -12,7 +12,7 @@ export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse):
   const status = req.query.status === 'won' || req.query.status === 'lost' ? req.query.status : undefined;
   const customerId = req.query.customer_id || undefined;
   const source = req.query.source || undefined;
-  if (source && (typeof source !== 'string' || !['pack', 'bonus', 'gift', 'reward', 'free'].includes(source))) throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid funding source filter.');
+  if (source && (typeof source !== 'string' || !['pack', 'bonus', 'gift', 'reward', 'free', 'mixed', 'tickets'].includes(source))) throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid funding source filter.');
   if (req.query.status && !status) throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid outcome filter.');
   if (customerId && (typeof customerId !== 'string' || customerId.length > 128)) throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid customer filter.');
   const from = req.query.from ? parseMytBound(req.query.from, 'from') : undefined;

@@ -13,8 +13,10 @@ import { mytWhen, PrizeArt } from './PrizeCard';
 
 const REASON: Record<string, string> = {
   task_claim: 'Task reward',
+  pack_spin: 'Lucky Pack',
   entry: 'Entered a prize',
   refund: 'Refund',
+  coin_flip: 'Coin flip',
 };
 
 const STATUS = {

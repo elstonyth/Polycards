@@ -88,6 +88,12 @@ const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
 // straight past the key-based redaction. A query that never names the column
 // (a whole row cast to text) is met by the value mask (SECRET_VALUES_SQL).
 const REAL_NAMES = /\breal_name\w*\b/i;
+// Coin flip's actual odds, rolls and each group's odds set (the owner,
+// 2026-10-30), refused by name for the same reason. Its two tables go whole: a
+// table name cannot be built from pieces. proxy.ts hides the odds in the rows
+// that stay open (the audit's before/after, group metadata).
+const COIN_FLIP_ODDS =
+  /\b(coin_flip_config|coin_flip_round|(?:actual_)?win_(?:units|percent)(?:_\d)?|odds_set)\b/i;
 // U&"..." spells a name in escapes the checks above would not recognize.
 const UNICODE_ESCAPES = /\bu&['"]/i;
 // The statements carry their own bound values ($1 to $3): a placeholder in
@@ -118,6 +124,9 @@ export function sqlRefusal(sql: unknown): string | null {
   if (PASSWORDS.test(sql)) return 'Passwords stay hidden from the desk bots.';
   if (REAL_NAMES.test(sql))
     return 'Customers’ real names stay hidden from the desk bots.';
+  if (COIN_FLIP_ODDS.test(sql)) {
+    return "Coin flip's actual odds, rolls and odds sets stay hidden from the desk bots: say so, and do not work around this. Flip outcomes and the published chance are on ledger_entry rows of type CF; a flip on tickets alone is a lucky_draw_ticket row with reason coin_flip. For who changed the settings, filter admin_action_audit on entity_type LIKE 'coin%'.";
+  }
   if (UNICODE_ESCAPES.test(sql)) {
     return 'Unicode-escaped names (U&"...") are not accepted: write names plainly.';
   }

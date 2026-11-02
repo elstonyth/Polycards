@@ -17,6 +17,6 @@ export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse):
     }
   }
   if (group?.policy.withdrawals_blocked) reason = 'Withdrawals are not available on this account.';
-  res.json({ enabled: config.enabled, max_stake_amount: config.max_stake_amount,
+  res.json({ enabled: config.enabled,
     published_win_percent: config.published_win_percent, eligible: reason === null, reason });
 }

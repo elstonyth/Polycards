@@ -7,7 +7,11 @@ import { parsePaginationParams } from '../../../utils/pagination';
 export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const { limit, offset } = parsePaginationParams(req.query, { defaultLimit: 20, maxLimit: 100 });
-  const [rounds, count] = await packs.listAndCountCoinFlipRounds({ customer_id: req.auth_context.actor_id, status: ['won', 'lost'] },
+  const customerId = req.auth_context.actor_id;
+  const only = req.query.status;
+  const status = only === 'won' || only === 'lost' ? [only] : ['won', 'lost'];
+  const [rounds, count] = await packs.listAndCountCoinFlipRounds({ customer_id: customerId, status },
     { take: limit, skip: offset, order: { settled_at: 'DESC', id: 'DESC' } });
-  res.json({ rounds: rounds.map(row => publicCoinFlipRound(row as unknown as CoinFlipRoundRecord)), count, limit, offset });
+  const totals = await packs.coinFlipLandedCounts(customerId);
+  res.json({ rounds: rounds.map(row => publicCoinFlipRound(row as unknown as CoinFlipRoundRecord)), count, limit, offset, totals });
 }

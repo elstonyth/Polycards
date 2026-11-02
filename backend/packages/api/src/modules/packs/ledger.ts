@@ -15,7 +15,8 @@
 export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF' | 'CF';
 
 export type LedgerPayload =
-    | { type: 'CF'; round_id: string; pull_id: string; card_handle: string; outcome: 'won' | 'lost'; value: number; published_win_percent: number }
+    | { type: 'CF'; round_id: string; pull_id: string; card_handle: string; outcome: 'won' | 'lost'; value: number; published_win_percent: number;
+        cards?: { pull_id: string; card_handle: string; value: number }[]; chosen_side?: 'head' | 'tail'; landed_side?: 'head' | 'tail' }
   | { type: 'TP'; payment_method: string; gateway_ref: string | null }
   | {
       type: 'SP';

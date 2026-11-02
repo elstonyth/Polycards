@@ -13,7 +13,7 @@ word is canonical.
 ## Opening a pack
 
 **Coin Flip**:
-A separately confirmed, single-card Vault round. A win keeps the Pull and adds normal Credit equal to its confirmed MYR market value; a loss marks the Pull `forfeited`. A round is an immutable settlement receipt after acceptance, identified independently of the Pull so repeated wins remain distinct. It shares effective player groups/odds-set IDs with packs, with coin-specific actual rates and independently configured published odds. See [operator guide](docs/operations/vault-coin-flip.md).
+A separately confirmed Vault round on one toss, staking cards, Lucky Draw tickets or both. A win keeps the Pulls, adds normal Credit equal to their confirmed MYR market value and adds the staked number of tickets again; a loss marks the Pulls `forfeited` and takes the staked tickets. A round is an immutable settlement receipt after acceptance, identified independently of the Pull so repeated wins remain distinct. It shares effective player groups/odds-set IDs with packs, with coin-specific actual rates and independently configured published odds. See [operator guide](docs/operations/vault-coin-flip.md).
 
 **Forfeited Pull**:
 A card lost in a coin flip. It is outside the customer's Vault, cannot be sold/delivered/flipped by that customer, and is not automatically restocked.

@@ -35,7 +35,7 @@ medusaIntegrationTestRunner({
       expect((await unwrapResponse(api.get('/admin/coin-flips/settings', { headers: owner.headers }))).status).not.toBe(200);
       const initial = await api.get('/admin/coin-flips/settings', { headers: adminHeaders });
       expect(initial.data.enabled).toBe(false);
-      const settings = { enabled: true, max_stake_amount: 500, win_percent: 100, win_percent_2: 0, win_percent_3: null,
+      const settings = { enabled: true, win_percent: 100, win_percent_2: 0, win_percent_3: null,
         published_win_percent: 50, expected_revision: initial.data.revision, reason: 'Test rollout' };
       const saved = await api.post('/admin/coin-flips/settings', settings, { headers: adminHeaders });
       expect(saved.data.revision).toBe(initial.data.revision + 1);
@@ -50,27 +50,40 @@ medusaIntegrationTestRunner({
         { customer_id: owner.id, reason: 'pack_open', amount: -10, external_funded_cents: -1000 },
       ]);
       const publicSettings = await api.get('/store/coin-flips/settings', { headers: owner.headers });
-      expect(publicSettings.data).toEqual({ enabled: true, eligible: true, reason: null, max_stake_amount: 500, published_win_percent: 50 });
-      const q = await api.post('/store/coin-flips/quotes', { pull_id: pull.id }, { headers: owner.headers });
+      expect(publicSettings.data).toEqual({ enabled: true, eligible: true, reason: null, published_win_percent: 50 });
+      const q = await api.post('/store/coin-flips/quotes', { pull_ids: [pull.id], chosen_side: 'tail' }, { headers: owner.headers });
       const roundId = q.data.round.id as string;
       expect((await unwrapResponse(api.get(`/store/coin-flips/${roundId}`, { headers: stranger.headers }))).status).toBe(404);
       const won = await api.post(`/store/coin-flips/${roundId}/accept`, {}, { headers: owner.headers });
       const replay = await api.post(`/store/coin-flips/${roundId}/accept`, {}, { headers: owner.headers });
       expect(replay.data).toEqual(won.data);
-      expect(won.data.round).toMatchObject({ status: 'won', win_amount: 100, published_win_percent: 50 });
+      expect(won.data.round).toMatchObject({ status: 'won', win_amount: 100, published_win_percent: 50, chosen_side: 'tail', landed_side: 'tail' });
       expect(JSON.stringify(won.data)).not.toMatch(/actual_win|odds_set|group_id|snapshot|roll/);
       await api.post('/admin/coin-flips/settings', { ...settings, win_percent: 0, expected_revision: saved.data.revision }, { headers: adminHeaders });
-      const lossQuote = await api.post('/store/coin-flips/quotes', { pull_id: pull.id }, { headers: owner.headers });
+      const [extra] = await packs.createPulls([{ customer_id: owner.id, pack_id: 'test', card_id: 'coin-card', rolled_at: new Date(),
+        source: 'pack', bonus_bp: 0, flip_eligible_at: new Date() }]);
+      const lossQuote = await api.post('/store/coin-flips/quotes', { pull_ids: [pull.id, extra.id], chosen_side: 'head' }, { headers: owner.headers });
+      expect(lossQuote.data.round).toMatchObject({ stake_amount: 200, chosen_side: 'head' });
+      expect(lossQuote.data.round.cards).toHaveLength(2);
+      expect((await unwrapResponse(api.post(`/store/coin-flips/${lossQuote.data.round.id}/accept`, { chosen_side: 'tail' }, { headers: owner.headers }))).status).toBe(400);
       const lost = await api.post(`/store/coin-flips/${lossQuote.data.round.id}/accept`, {}, { headers: owner.headers });
       expect(lost.data.round.status).toBe('lost');
+      expect(lost.data.round.landed_side).toBe('tail');
+      expect((await packs.listPulls({ id: [pull.id, extra.id] })).every(p => p.status === 'forfeited')).toBe(true);
       const history = await api.get('/store/coin-flips?limit=1', { headers: owner.headers });
-      expect(history.data).toMatchObject({ count: 2, limit: 1 });
+      expect(history.data).toMatchObject({ count: 2, limit: 1, totals: { head: 0, tail: 2 } });
       expect(history.data.rounds[0].status).toBe('lost');
+      const wonOnly = await api.get('/store/coin-flips?status=won', { headers: owner.headers });
+      expect(wonOnly.data).toMatchObject({ count: 1, totals: { head: 0, tail: 2 } });
+      expect(wonOnly.data.rounds[0].status).toBe('won');
       const report = await api.get('/admin/coin-flips', { headers: adminHeaders });
-      expect(report.data.totals).toEqual({ wins: 1, losses: 1, payouts: 100, forfeited_value: 100 });
+      expect(report.data.totals).toEqual({ wins: 1, losses: 1, payouts: 100, forfeited_value: 200 });
       expect(report.data.rounds[0].snapshot.actual_win_units).toBe(0);
       const funded = await api.get('/admin/coin-flips?source=gift', { headers: adminHeaders });
-      expect(funded.data.count).toBe(2);
+      expect(funded.data.count).toBe(1);
+      const mixed = await api.get('/admin/coin-flips?source=mixed', { headers: adminHeaders });
+      expect(mixed.data).toMatchObject({ count: 1, totals: { wins: 0, losses: 1, payouts: 0, forfeited_value: 200 } });
+      expect(mixed.data.rounds[0].cards).toHaveLength(2);
       const gifts = await api.get('/admin/coin-flips?source=pack', { headers: adminHeaders });
       expect(gifts.data).toMatchObject({ count: 0, rounds: [], totals: { wins: 0, losses: 0, payouts: 0, forfeited_value: 0 } });
       expect((await unwrapResponse(api.get('/admin/coin-flips?source=invalid', { headers: adminHeaders }))).status).toBe(400);
