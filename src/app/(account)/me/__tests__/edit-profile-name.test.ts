@@ -48,6 +48,7 @@ function render() {
         username: 'qqqqqqq',
         handle: 'qqqqqqq',
         avatarUrl: null,
+        onAvatarPicked: vi.fn(),
         frames: {},
         highestLevel: 16,
       }),
