@@ -64,6 +64,8 @@ vi.mock('@/components/draw-arena/lazy', async () => {
 });
 
 const { LiveDrawProvider, useLiveDraw } = await import('../LiveDrawProvider');
+const { BATCH_WAIT_MS, LIVE_MAX_AGE_MS } =
+  await import('@/lib/lucky-draw-watch');
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -375,6 +377,212 @@ describe('the popup', () => {
     expect(
       container.querySelector('[data-show]')?.getAttribute('data-expanded'),
     ).toBe('true');
+  });
+});
+
+describe('gates closing in the same minute (boss 2026-11-02: lowest class first)', () => {
+  const ENDS = START + MIN;
+  // ENDS is 12:01:30, so the draw job's minute is 12:02:00.
+  const DRAW_MINUTE = START + 90_000;
+  const result = (
+    id: string,
+    tier: string | null,
+    value: number,
+    ticket: number | null = 3,
+  ) => ({
+    result: {
+      prize_id: id,
+      drawn_at: new Date(DRAW_MINUTE).toISOString(),
+      tier,
+      value_myr: value,
+    },
+    ticket_index: ticket,
+  });
+  const gate = (id: string, endsAt = ENDS) => ({
+    id,
+    ends_at: new Date(endsAt).toISOString(),
+  });
+  const close = async () => {
+    await act(async () => {
+      container.querySelector<HTMLElement>('[data-close]')?.click();
+    });
+    await pass(1000);
+  };
+  // Every first look lands 2 s past the minute, in the order listed: the highest
+  // class is read first, so only the sort can put the lowest first.
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  const untilDrawMinute = (ms: number) => pass(DRAW_MINUTE + ms - Date.now());
+
+  test('economy, business, then first, whatever order the results come in', async () => {
+    state.upcoming = [gate('first'), gate('business'), gate('economy')];
+    state.results.set('first', result('first', 'first', 9000));
+    state.results.set('business', result('business', 'business', 2000));
+    state.results.set('economy', result('economy', 'economy', 300));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(state.reads).toEqual(['first', 'business', 'economy']);
+    expect(shows()).toEqual(['economy']);
+    await close();
+    expect(shows()).toEqual(['business']);
+    await close();
+    expect(shows()).toEqual(['first']);
+    await close();
+    expect(shows()).toEqual([]);
+  });
+
+  test('the same class plays smallest prize first', async () => {
+    state.upcoming = [gate('lucario'), gate('gengar'), gate('pikachu')];
+    state.results.set('lucario', result('lucario', 'economy', 584.21));
+    state.results.set('gengar', result('gengar', 'economy', 277.06));
+    state.results.set('pikachu', result('pikachu', 'economy', 389.42));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(shows()).toEqual(['gengar']);
+    await close();
+    expect(shows()).toEqual(['pikachu']);
+    await close();
+    expect(shows()).toEqual(['lucario']);
+  });
+
+  test('a gate with no class plays after those with one', async () => {
+    state.upcoming = [gate('none'), gate('first')];
+    state.results.set('none', result('none', null, 1));
+    state.results.set('first', result('first', 'first', 9000));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(shows()).toEqual(['first']);
+    await close();
+    expect(shows()).toEqual(['none']);
+  });
+
+  test('nothing plays until the whole minute is in, and no result is told early', async () => {
+    state.upcoming = [gate('business'), gate('economy')];
+    state.results.set('business', result('business', 'business', 2000));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(shows()).toEqual([]);
+    expect(seen.drawn.has('business')).toBe(true);
+    expect(seen.held.has('business')).toBe(true);
+    state.results.set('economy', result('economy', 'economy', 300));
+    await pass(13_000);
+    expect(shows()).toEqual(['economy']);
+    expect(seen.held.has('business')).toBe(true);
+  });
+
+  test('a gate that never draws holds the rest back only so long, then joins in order', async () => {
+    state.upcoming = [gate('first'), gate('business'), gate('economy')];
+    state.results.set('first', result('first', 'first', 9000));
+    state.results.set('business', result('business', 'business', 2000));
+    await mount();
+    await untilDrawMinute(BATCH_WAIT_MS - 1000);
+    expect(shows()).toEqual([]);
+    await pass(2000);
+    expect(shows()).toEqual(['business']);
+    expect(Date.now() - DRAW_MINUTE).toBeLessThan(LIVE_MAX_AGE_MS);
+    // Late, it never cuts into the show playing, but it still goes before First.
+    state.results.set('economy', result('economy', 'economy', 300));
+    await pass(13_000);
+    expect(shows()).toEqual(['business']);
+    await close();
+    expect(shows()).toEqual(['economy']);
+    await close();
+    expect(shows()).toEqual(['first']);
+  });
+
+  test('a gate with no entries counts as in, and plays nothing', async () => {
+    state.upcoming = [gate('empty'), gate('first')];
+    state.results.set('empty', result('empty', 'economy', 300, null));
+    state.results.set('first', result('first', 'first', 9000));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(shows()).toEqual(['first']);
+    await close();
+    expect(shows()).toEqual([]);
+  });
+
+  test('a draw already shown in this browser counts as in, and plays nothing', async () => {
+    window.localStorage.setItem('polycards.draws-shown', '["economy"]');
+    state.upcoming = [gate('economy'), gate('first')];
+    state.results.set('economy', result('economy', 'economy', 300));
+    state.results.set('first', result('first', 'first', 9000));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(shows()).toEqual(['first']);
+    await close();
+    expect(shows()).toEqual([]);
+  });
+
+  test('a gate in a later minute waits for no one, and plays after', async () => {
+    const later = ENDS + MIN;
+    state.upcoming = [gate('first'), gate('economy', later)];
+    state.results.set('first', result('first', 'first', 9000));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(shows()).toEqual(['first']);
+    state.results.set('economy', {
+      ...result('economy', 'economy', 300),
+      result: {
+        ...result('economy', 'economy', 300).result,
+        drawn_at: new Date(DRAW_MINUTE + MIN).toISOString(),
+      },
+    });
+    await pass(MIN + 15_000);
+    expect(shows()).toEqual(['first']);
+    await close();
+    expect(shows()).toEqual(['economy']);
+  });
+
+  test('watching a waiting draw opens it at once, and the rest arriving leaves it up', async () => {
+    state.upcoming = [gate('first'), gate('economy')];
+    state.results.set('first', result('first', 'first', 9000));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(shows()).toEqual([]);
+    await act(async () => {
+      seen.watch('first');
+    });
+    expect(shows()).toEqual(['first']);
+    state.results.set('economy', result('economy', 'economy', 300));
+    await pass(13_000);
+    expect(shows()).toEqual(['first']);
+    expect(
+      container.querySelector('[data-show]')?.getAttribute('data-expanded'),
+    ).toBe('true');
+    await close();
+    expect(shows()).toEqual(['economy']);
+  });
+
+  test('a tab back after the wait still plays lowest first', async () => {
+    state.upcoming = [gate('first'), gate('economy')];
+    state.results.set('first', result('first', 'first', 9000));
+    state.results.set('economy', result('economy', 'economy', 300));
+    await mount();
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await untilDrawMinute(BATCH_WAIT_MS + 5000);
+    expect(state.reads).toEqual([]);
+    hidden.mockReturnValue(false);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await pass(1000);
+    expect(shows()).toEqual(['economy']);
+    await close();
+    expect(shows()).toEqual(['first']);
+    hidden.mockRestore();
+  });
+
+  test('a gate alone in its minute plays as soon as it is read', async () => {
+    state.upcoming = [gate('first')];
+    state.results.set('first', result('first', 'first', 9000));
+    await mount();
+    await untilDrawMinute(3000);
+    expect(shows()).toEqual(['first']);
   });
 });
 

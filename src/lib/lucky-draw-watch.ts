@@ -7,6 +7,8 @@
  * the first minute after the end; a tab first looks a few jittered seconds past it,
  * which usually finds the result in one or two reads.
  */
+import { LUCKY_DRAW_TIERS } from '@/lib/lucky-draw';
+
 export type WatchedGate = {
   id: string;
   endsAt: number;
@@ -40,14 +42,71 @@ export function freshShows<
   return kept.length === queue.length ? queue : kept;
 }
 
+/** The minute the draw job next runs on for a gate ending at `endsAt`. Gates sharing
+ *  it draw in one run, so they play as one batch. */
+export const drawMinute = (endsAt: number): number =>
+  Math.ceil(endsAt / MINUTE_MS) * MINUTE_MS;
+
 /** First look for a gate ending at `endsAt`. `rand` is 0..1. */
 export const firstLookAt = (endsAt: number, rand: number): number =>
-  Math.ceil(endsAt / MINUTE_MS) * MINUTE_MS +
-  FIRST_LOOK_MIN_MS +
-  rand * FIRST_LOOK_SPREAD_MS;
+  drawMinute(endsAt) + FIRST_LOOK_MIN_MS + rand * FIRST_LOOK_SPREAD_MS;
 
 export const nextLookAt = (now: number, rand: number): number =>
   now + LOOK_AGAIN_MS + rand * LOOK_AGAIN_SPREAD_MS;
+
+/** How long past its minute a batch waits for its slowest gate: the latest first
+ *  look and two more. Well short of LIVE_MAX_AGE_MS, which would drop it unplayed. */
+export const BATCH_WAIT_MS =
+  FIRST_LOOK_MIN_MS +
+  FIRST_LOOK_SPREAD_MS +
+  2 * (LOOK_AGAIN_MS + LOOK_AGAIN_SPREAD_MS);
+// A tab back from hidden past that wait reads the rest one right after another.
+const BATCH_READ_GRACE_MS = 3_000;
+
+/** When a batch stops waiting, or null with no other gate of the minute unread. */
+export function batchWaitUntil(
+  watched: readonly WatchedGate[],
+  minute: number,
+  now: number,
+): number | null {
+  return watched.some((w) => drawMinute(w.endsAt) === minute)
+    ? Math.max(minute + BATCH_WAIT_MS, now + BATCH_READ_GRACE_MS)
+    : null;
+}
+
+type QueuedShow = {
+  id: string;
+  endsAt: number;
+  detail: { result: { tier?: string | null; value_myr: number } };
+};
+
+const tierRank = (tier: string | null | undefined): number => {
+  const at = (
+    LUCKY_DRAW_TIERS as readonly (string | null | undefined)[]
+  ).indexOf(tier);
+  return at < 0 ? LUCKY_DRAW_TIERS.length : at;
+};
+
+/** Earlier minute first. Within a minute the lowest class, then the smallest prize
+ *  (boss 2026-11-02), from result data alone so every player gets one order. */
+const showOrder = (a: QueuedShow, b: QueuedShow): number =>
+  drawMinute(a.endsAt) - drawMinute(b.endsAt) ||
+  tierRank(a.detail.result.tier) - tierRank(b.detail.result.tier) ||
+  a.detail.result.value_myr - b.detail.result.value_myr ||
+  (a.id < b.id ? -1 : 1);
+
+/** The queue with this show in its place. The show already playing stays put. */
+export function placeShow<T extends QueuedShow>(
+  queue: readonly T[],
+  show: T,
+  playingId: string | null,
+): T[] {
+  const playing = queue[0]?.id === playingId ? queue.slice(0, 1) : [];
+  return [
+    ...playing,
+    ...[...queue.slice(playing.length), show].sort(showOrder),
+  ];
+}
 
 /** The list after a fresh read of the gates: new ones join, a moved end moves the
  *  look, one this tab already has a result for never comes back, and one past the
