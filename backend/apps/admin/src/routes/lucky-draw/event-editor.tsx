@@ -6,12 +6,13 @@ import { toIso } from '../tasks/task-draft';
 import { CreditPrizeRows } from './credit-prize-rows';
 import { InventoryPicker } from './inventory-picker';
 import {
-  endAfterHours,
   eventDraftToPayload,
   hoursBetween,
+  hoursProblem,
   RUN_LENGTHS,
   TIER_LABEL,
   whenLabel,
+  withRunLength,
   type EventDraft,
 } from './lucky-draw-draft';
 import { windowProblem } from './one-winner';
@@ -50,13 +51,12 @@ export const EventEditor = ({
 
   const setWindow = (startsAt: string, runHours: string) => {
     setHours(runHours);
-    onChange({
-      ...draft,
-      startsAt,
-      endsAt: endAfterHours(startsAt, runHours),
-    });
+    onChange(withRunLength(draft, startsAt, runHours));
   };
   const endsIso = toIso(draft.endsAt);
+  // A saved end stands until the hours change, so an older, longer draft still
+  // opens and saves as it was.
+  const hoursBad = endsIso ? null : hoursProblem(hours);
 
   const creating = !draft.id;
   const payload = creating
@@ -132,15 +132,13 @@ export const EventEditor = ({
               />
             </Field>
             <Field
-              label="Runs for (hours)"
+              label="Hours from start"
               htmlFor="ld-event-hours"
+              hint="Counted from the start, not from publish."
               className="w-56"
             >
               <Input
                 id="ld-event-hours"
-                type="number"
-                min="0"
-                step="any"
                 inputMode="decimal"
                 value={hours}
                 onChange={(e) => setWindow(draft.startsAt, e.target.value)}
@@ -165,18 +163,18 @@ export const EventEditor = ({
               </Button>
             ))}
           </div>
-          {endsIso && (
-            <Text size="small" weight="plus" aria-live="polite">
-              Ends {whenLabel(endsIso)}
-            </Text>
-          )}
+          <Text size="small" weight="plus" aria-live="polite">
+            {endsIso
+              ? `Ends ${whenLabel(endsIso)}`
+              : 'No end yet: pick a start and hours.'}
+          </Text>
           <Text size="small" className="text-ui-fg-subtle -mt-3">
             Your browser’s time zone. Malaysia time is UTC+8. Any number of
             events can run at the same time.
           </Text>
-          {draft.startsAt !== '' && hours !== '' && !endsIso && (
+          {hoursBad && (
             <Text size="small" className="text-ui-fg-error -mt-3">
-              Enter a number of hours above 0.
+              {hoursBad}
             </Text>
           )}
           {windowBad && (

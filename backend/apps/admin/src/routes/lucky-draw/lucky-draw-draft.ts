@@ -192,18 +192,41 @@ export const RUN_LENGTHS: readonly { hours: number; label: string }[] = [
   { hours: 672, label: '28 days' },
 ];
 
+/** The longest run the form takes, 90 days. A window locks once published, so a
+ *  slipped digit (7200 for 720) is stopped here. */
+export const MAX_RUN_HOURS = 90 * 24;
+
+/** Why typed hours can't give an end, or null if they can. Blank is null: the
+ *  form just can't be sent yet. */
+export function hoursProblem(hours: string): string | null {
+  if (hours.trim() === '') return null;
+  const run = Number(hours);
+  if (!(run > 0)) return 'Enter a number of hours above 0.';
+  return run > MAX_RUN_HOURS
+    ? `A gate runs at most ${MAX_RUN_HOURS} hours (90 days).`
+    : null;
+}
+
 /** The end that a start and a typed run length give, or '' without a start and
- *  hours above 0. A blank end is what keeps the form from being sent. */
+ *  usable hours. A blank end is what keeps the form from being sent. */
 export function endAfterHours(startsAt: string, hours: string): string {
   const start = toIso(startsAt);
-  const run = hours.trim() === '' ? NaN : Number(hours);
-  if (start === null || !(run > 0)) return '';
+  if (start === null || hours.trim() === '' || hoursProblem(hours) !== null) {
+    return '';
+  }
   // To the nearest minute: the form's time inputs hold minutes, and rounding is
   // what lets the 2-place hours from hoursBetween rebuild the same end.
   return toLocalInput(
-    new Date(Date.parse(start) + Math.round(run * 60) * 60_000),
+    new Date(Date.parse(start) + Math.round(Number(hours) * 60) * 60_000),
   );
 }
+
+/** The draft with this start and run length: its end follows them. */
+export const withRunLength = (
+  d: EventDraft,
+  startsAt: string,
+  hours: string,
+): EventDraft => ({ ...d, startsAt, endsAt: endAfterHours(startsAt, hours) });
 
 /** A window's run length as the form shows it, to 2 places; '' with no window. */
 export function hoursBetween(startsAt: string, endsAt: string): string {
@@ -245,8 +268,11 @@ export const shortHash = (hash: string | null): string =>
   hash === null ? '—' : hash.length > 12 ? `${hash.slice(0, 12)}…` : hash;
 
 /** An ISO instant as the browser's wall clock — the same clock the
- *  datetime-local inputs use, so a table cell and the form agree. */
+ *  datetime-local inputs use, so a table cell and the form agree. The month is
+ *  named, because an all-numeric date reads two ways. */
 export const whenLabel = (iso: string): string => {
   const d = new Date(iso);
-  return Number.isFinite(d.getTime()) ? d.toLocaleString() : '—';
+  return Number.isFinite(d.getTime())
+    ? d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
+    : '—';
 };
