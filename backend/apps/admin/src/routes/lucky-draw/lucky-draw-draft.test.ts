@@ -316,6 +316,14 @@ describe('run length in hours', () => {
     expect(hoursBetween(START, '2026-11-02T01:30')).toBe('1.5');
   });
 
+  test('the hours shown rebuild the same end, to the minute', () => {
+    const start = new Date(START);
+    for (let minutes = 1; minutes <= 3 * 24 * 60; minutes++) {
+      const end = toLocalInput(new Date(start.getTime() + minutes * 60_000));
+      expect(endAfterHours(START, hoursBetween(START, end))).toBe(end);
+    }
+  });
+
   test('no hours for a blank or reversed window', () => {
     expect(hoursBetween('', '2026-11-03T00:00')).toBe('');
     expect(hoursBetween(START, '')).toBe('');

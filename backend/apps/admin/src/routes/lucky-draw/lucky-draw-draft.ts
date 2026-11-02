@@ -198,7 +198,11 @@ export function endAfterHours(startsAt: string, hours: string): string {
   const start = toIso(startsAt);
   const run = hours.trim() === '' ? NaN : Number(hours);
   if (start === null || !(run > 0)) return '';
-  return toLocalInput(new Date(Date.parse(start) + run * 3_600_000));
+  // To the nearest minute: the form's time inputs hold minutes, and rounding is
+  // what lets the 2-place hours from hoursBetween rebuild the same end.
+  return toLocalInput(
+    new Date(Date.parse(start) + Math.round(run * 60) * 60_000),
+  );
 }
 
 /** A window's run length as the form shows it, to 2 places; '' with no window. */
