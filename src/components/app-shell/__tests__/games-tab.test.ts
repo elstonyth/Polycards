@@ -15,6 +15,11 @@ vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({ customer: { id: 'cus_1' }, isLoading: false }),
 }));
 vi.mock('@/components/AuthButton', () => ({ openAuth: vi.fn() }));
+vi.mock('@/components/AmbientVideo', () => ({ AmbientVideo: () => null }));
+vi.mock('@/lib/use-liquid-glass', () => ({
+  GLASS_SUBTLE: {},
+  useLiquidGlass: () => {},
+}));
 vi.mock('../VaultDotProvider', () => ({
   useVaultDot: () => ({ show: false }),
 }));
@@ -103,6 +108,15 @@ describe('Games tab', () => {
     await act(async () => button.click());
     window.removeEventListener(GAMES_EVENT, opened);
     expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  test('Coin Flip is coming soon: the tile says so and leads nowhere', async () => {
+    const { GamesSheetBody } = await import('../GamesSheetBody');
+    await act(async () =>
+      root.render(createElement(GamesSheetBody, { openedOn: '/' })),
+    );
+    expect(document.body.textContent).toContain('Coming soon');
+    expect(document.querySelector('a[href^="/vault/coin-flip"]')).toBeNull();
   });
 
   test('Games shows as current while a game is open', async () => {

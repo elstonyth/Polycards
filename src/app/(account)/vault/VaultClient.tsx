@@ -28,6 +28,7 @@ import {
   FREE_PULL_LOCKED_MESSAGE,
 } from '@/lib/packs-data';
 import SellConfirmModal from '@/components/SellConfirmModal';
+import { COIN_FLIP_OPEN } from '@/components/app-shell/games';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
 import { RARITY_ORDER, rarityRgb } from '@/lib/rarity';
@@ -424,15 +425,19 @@ export default function VaultClient({
                 </p>
                 <p className="mt-0.5 text-[12px] text-neutral-400">
                   {tickets > 0 ? (
-                    <>
-                      Put them in the prize pool, or{' '}
-                      <Link
-                        href="/vault/coin-flip?stake=tickets"
-                        className="font-semibold text-white underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                      >
-                        flip them
-                      </Link>
-                    </>
+                    COIN_FLIP_OPEN ? (
+                      <>
+                        Put them in the prize pool, or{' '}
+                        <Link
+                          href="/vault/coin-flip?stake=tickets"
+                          className="font-semibold text-white underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                        >
+                          flip them
+                        </Link>
+                      </>
+                    ) : (
+                      'Put them in the prize pool'
+                    )
                   ) : spinHref ? (
                     'Earn them from tasks or a capsule'
                   ) : (
@@ -919,13 +924,17 @@ export default function VaultClient({
           }
           onSell={() => setConfirmBulkSell(true)}
           onDeliver={() => setDeliverOpen(true)}
-          onCoinFlip={() => {
-            if (selected.size > 0 && selected.size <= 20) {
-              const query = new URLSearchParams();
-              for (const id of selected) query.append('pull', id);
-              router.push(`/vault/coin-flip?${query}`);
-            }
-          }}
+          onCoinFlip={
+            COIN_FLIP_OPEN
+              ? () => {
+                  if (selected.size > 0 && selected.size <= 20) {
+                    const query = new URLSearchParams();
+                    for (const id of selected) query.append('pull', id);
+                    router.push(`/vault/coin-flip?${query}`);
+                  }
+                }
+              : undefined
+          }
         />
       )}
 
