@@ -20,7 +20,9 @@ import type PacksModuleService from './service';
 export type GatewayDeposits = Pick<
   PacksModuleService,
   | 'claimDepositStatus'
+  | 'createAdminActionAudits'
   | 'createDepositCapped'
+  | 'listCreditTransactions'
   | 'listFxRates'
   | 'listGatewayDeposits'
   | 'updateGatewayDeposits'
@@ -30,6 +32,7 @@ export type GatewayDeposits = Pick<
 /** The withdrawal half: hold, claim against the debit, submit, refund. */
 export type GatewayWithdrawals = Pick<
   PacksModuleService,
+  | 'listAdminActionAudits'
   | 'claimWithdrawalStatus'
   | 'claimWithdrawalAgainstDebit'
   | 'createGatewayWithdrawals'
@@ -58,6 +61,8 @@ export type GatewayReports = Pick<
   | 'listGatewayDeposits'
   | 'listGatewayWithdrawals'
   | 'listAdminActionAudits'
+  | 'listCreditTransactions'
+  | 'unfinishedMoneyRows'
 >;
 
 /**

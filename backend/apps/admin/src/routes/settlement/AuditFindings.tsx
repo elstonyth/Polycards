@@ -14,10 +14,14 @@ import {
   Textarea,
 } from '@medusajs/ui';
 import type { GatewayAuditFinding } from '../../lib/admin-rest';
-import { useAcknowledgeFinding, useGatewayAudit } from '../../lib/queries';
+import {
+  useAcknowledgeFinding,
+  useCreditDeposit,
+  useGatewayAudit,
+} from '../../lib/queries';
 import { rm } from '../../lib/format';
 import { paymentStatus } from '../../lib/dashboard';
-import { auditCounts } from './audit-counts';
+import { auditCounts, canCreditDeposit } from './audit-counts';
 
 // The first few are enough to act on; the rest are one click away.
 const SHOWN = 10;
@@ -40,6 +44,12 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
   const [target, setTarget] = useState<GatewayAuditFinding | null>(null);
   const [reason, setReason] = useState('');
   const acknowledge = useAcknowledgeFinding();
+  // The same for the Credit deposit prompt.
+  const [creditTarget, setCreditTarget] = useState<GatewayAuditFinding | null>(
+    null,
+  );
+  const [creditReason, setCreditReason] = useState('');
+  const credit = useCreditDeposit();
   const a = audit.data;
   if (!a) return null;
   const n = auditCounts(a);
@@ -168,16 +178,30 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                     </Table.Cell>
                     <Table.Cell className="text-right">
                       {acked || !canEdit ? null : (
-                        <Button
-                          size="small"
-                          variant="secondary"
-                          onClick={() => {
-                            setReason('');
-                            setTarget(f);
-                          }}
-                        >
-                          {t('settlement.acknowledge')}
-                        </Button>
+                        <div className="flex justify-end gap-2 whitespace-nowrap">
+                          {canCreditDeposit(f) ? (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              onClick={() => {
+                                setCreditReason('');
+                                setCreditTarget(f);
+                              }}
+                            >
+                              {t('settlement.creditDeposit')}
+                            </Button>
+                          ) : null}
+                          <Button
+                            size="small"
+                            variant="secondary"
+                            onClick={() => {
+                              setReason('');
+                              setTarget(f);
+                            }}
+                          >
+                            {t('settlement.acknowledge')}
+                          </Button>
+                        </div>
                       )}
                     </Table.Cell>
                   </Table.Row>
@@ -263,6 +287,55 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
               }}
             >
               {t('settlement.acknowledge')}
+            </Prompt.Action>
+          </Prompt.Footer>
+        </Prompt.Content>
+      </Prompt>
+
+      <Prompt
+        variant="confirmation"
+        open={creditTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) setCreditTarget(null);
+        }}
+      >
+        <Prompt.Content>
+          <Prompt.Header>
+            <Prompt.Title>{t('settlement.creditTitle')}</Prompt.Title>
+            <Prompt.Description>
+              {t('settlement.creditDesc')}
+            </Prompt.Description>
+          </Prompt.Header>
+          <div className="flex flex-col gap-1 px-6 pb-2">
+            <Text size="small" className="text-ui-fg-subtle">
+              {creditTarget?.note}
+            </Text>
+            <Label htmlFor="credit-reason" size="small" className="mt-2">
+              {t('settlement.ackReason')}
+            </Label>
+            <Textarea
+              id="credit-reason"
+              maxLength={500}
+              value={creditReason}
+              placeholder={t('settlement.creditReasonPlaceholder')}
+              onChange={(e) => setCreditReason(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <Prompt.Footer>
+            <Prompt.Cancel>{t('settlement.ackCancel')}</Prompt.Cancel>
+            <Prompt.Action
+              disabled={!creditReason.trim() || credit.isPending}
+              onClick={() => {
+                if (!creditTarget || !creditReason.trim()) return;
+                credit.mutate({
+                  id: creditTarget.id,
+                  reason: creditReason.trim(),
+                });
+                setCreditTarget(null);
+              }}
+            >
+              {t('settlement.creditDeposit')}
             </Prompt.Action>
           </Prompt.Footer>
         </Prompt.Content>

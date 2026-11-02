@@ -6,6 +6,7 @@ import {
 } from '../../../../modules/packs/facets';
 import { findBank } from '../../../../modules/packs/banks';
 import { GATEWAY_STALE_AFTER_MS } from '../../../../modules/packs/gateway-reconcile';
+import { deniedWithoutRefund } from '../../../../modules/packs/gateway-withdrawal';
 import { WITHDRAWAL_STATUSES } from '../../../../modules/packs/models/gateway-withdrawal';
 import {
   parsePaginationParams,
@@ -197,6 +198,20 @@ export async function GET(
     frozenStates.filter((s) => s.frozen).map((s) => s.customer_id),
   );
 
+  // What a Deny that crashed before its refund leaves: closed, and the customer
+  // short. A PREVIEW like `frozen` (deny re-checks at click time), so a failure
+  // degrades to no flags rather than taking this page down.
+  const refundMissing = await deniedWithoutRefund(packs, rows).catch(
+    (error) => {
+      logger.error(
+        `[admin-withdrawals] denied-refund lookup failed — no refund flags on this page: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return new Set<string>();
+    },
+  );
+
   const now = Date.now();
   const withdrawals = rows.map((r) => ({
     id: r.id,
@@ -262,6 +277,7 @@ export async function GET(
     // polls can still make the real approve refuse even though this said
     // false a moment ago.
     frozen: frozenIds.has(r.customer_id),
+    refund_missing: refundMissing.has(r.id),
   }));
 
   // Identity-varying response carrying customer emails (CWE-524): a cached

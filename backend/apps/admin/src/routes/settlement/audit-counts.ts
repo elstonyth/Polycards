@@ -25,6 +25,19 @@ export const auditCounts = (a: {
 };
 
 /**
+ * Offer "Credit deposit" only where the note says the ledger shows nothing. The
+ * backend repeats every check; this only keeps the button off rows it refuses.
+ */
+export const canCreditDeposit = (f: {
+  kind: string;
+  status: string;
+  note: string;
+}) =>
+  f.kind === 'deposit' &&
+  f.status !== 'settled' &&
+  f.note.includes('Use Credit deposit');
+
+/**
  * The "Gateway check" tile: open findings differ; findings an operator only
  * acknowledged are not "all match", because the gateway still disagrees with
  * those rows.

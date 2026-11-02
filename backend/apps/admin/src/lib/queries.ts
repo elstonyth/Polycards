@@ -60,6 +60,8 @@ import {
   getGatewayBalance,
   getGatewayAudit,
   acknowledgeAuditFinding,
+  creditGatewayDeposit,
+  getMoneyIntegrity,
   getPaymentGateway,
   savePaymentGateway,
   getWithdrawalControls,
@@ -70,6 +72,7 @@ import {
   type SettlementReport,
   type GatewayBalance,
   type GatewayAudit,
+  type MoneyIntegrity,
   type PaymentGatewaySetting,
   getFxHistory,
   getFxRate,
@@ -378,6 +381,14 @@ export const useGatewayAudit = (
     refetchOnWindowFocus: false,
   });
 
+export const useMoneyIntegrity = (): UseQueryResult<MoneyIntegrity> =>
+  useQuery({
+    queryKey: qk.moneyIntegrity,
+    queryFn: getMoneyIntegrity,
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
 export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
   useQuery({ queryKey: qk.paymentGateway, queryFn: getPaymentGateway });
 
@@ -412,6 +423,20 @@ export const useAcknowledgeFinding = () => {
     onSuccess: () => toast.success(t('settlement.acknowledgedToast')),
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     // Also after a refusal: a 409 means the note changed, so show the new one.
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] }),
+  });
+};
+
+// Settlement's Credit deposit. Same refetch as Acknowledge, also after a
+// refusal: the refusal usually means the row has changed.
+export const useCreditDeposit = () => {
+  const qc = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: creditGatewayDeposit,
+    onSuccess: () => toast.success(t('settlement.creditedToast')),
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () =>
       qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] }),
   });

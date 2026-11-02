@@ -12,6 +12,7 @@ import {
 import {
   useDeliveryOrderCount,
   useGatewayAudit,
+  useMoneyIntegrity,
   useGatewayDeposits,
   useGatewayWithdrawals,
   useReferralSettlements,
@@ -79,7 +80,9 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const auditSgd = useGatewayAudit('SGD');
   const auditUsdt = useGatewayAudit('USDT');
   const pricing = usePricingHealth();
+  const integrity = useMoneyIntegrity();
   const queries = [
+    integrity,
     held,
     pending,
     requested,
@@ -112,6 +115,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   if (toShip !== undefined) counts.orders = toShip;
   if (drafts) counts.referrals = drafts.length;
   if (twice) counts.doublePay = twice.count;
+  if (integrity.data) counts.integrity = integrity.data.findings.length;
   if (pricing.data && !pricing.isError)
     counts.pricing = pricing.data.cards.issues.length;
   const { soundOn, setSound } = useAttentionAlert(counts);
@@ -137,6 +141,18 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
         twice.paid > 0 ? 'dashboard.doublePayPaid' : 'dashboard.doublePayHeld',
         { amount: rm(twice.amount), count: twice.paid },
       ),
+      to: '/settlement',
+      action: t('dashboard.check'),
+      urgent: true,
+    });
+  }
+  if (integrity.data && integrity.data.findings.length > 0) {
+    const count = integrity.data.findings.length;
+    items.push({
+      id: 'integrity',
+      icon: <ExclamationCircle />,
+      title: t('dashboard.integrity', { count, shown: String(count) }),
+      detail: t('dashboard.integrityDetail'),
       to: '/settlement',
       action: t('dashboard.check'),
       urgent: true,

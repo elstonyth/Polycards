@@ -122,6 +122,7 @@ export const CORE_PREFIX_WRITES: {
   },
   ...[
     'audit/acknowledge',
+    'deposits/*/credit',
     'fx',
     'gateway',
     'withdrawals/*/approve',

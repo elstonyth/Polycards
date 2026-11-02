@@ -1,7 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { auditCounts, gatewayCheck } from './audit-counts';
+import { auditCounts, canCreditDeposit, gatewayCheck } from './audit-counts';
 
 const rows = (n: number) => Array.from({ length: n }, () => ({}));
+
+describe('canCreditDeposit', () => {
+  const owed =
+    'gateway says PAID (50.00) but the row is failed — customer paid and was not credited. Use Credit deposit on Settlement, never a hand adjustment';
+
+  it('offers the credit only on a deposit the ledger shows is owed', () => {
+    expect(
+      canCreditDeposit({ kind: 'deposit', status: 'failed', note: owed }),
+    ).toBe(true);
+    expect(
+      canCreditDeposit({ kind: 'deposit', status: 'expired', note: owed }),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['its credit is already on the ledger', 'failed'],
+    ['a hand adjustment names this deposit', 'expired'],
+    ['credit issued without gateway confirmation', 'settled'],
+  ])('never when the note says %s', (note, status) => {
+    expect(canCreditDeposit({ kind: 'deposit', status, note })).toBe(false);
+  });
+
+  it('never on a payout, or a settled row', () => {
+    expect(
+      canCreditDeposit({ kind: 'withdrawal', status: 'failed', note: owed }),
+    ).toBe(false);
+    expect(
+      canCreditDeposit({ kind: 'deposit', status: 'settled', note: owed }),
+    ).toBe(false);
+  });
+});
 
 describe('auditCounts', () => {
   it('a retired gateway row is listed but does not count as a disagreement', () => {
