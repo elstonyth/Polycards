@@ -60,7 +60,8 @@ const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
 // - cancel closes at the 12am cutoff: the nightly stock run moves every
 //   `requested` order to `processed` (purchasing starts buying its cards), and
 //   from then on cancelling is a support (or operator) action (owner,
-//   2026-10-28);
+//   2026-10-28). A complete order can move earlier, when staff press the Stock
+//   page's Refresh (operator, 2026-11-03);
 // - the address stays editable through `processed` and closes at
 //   `ready_to_ship`, when the parcel is picked and its label printed.
 // `packing` is the legacy expand-window token (~`processed`); the backend's

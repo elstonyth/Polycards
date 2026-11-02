@@ -308,7 +308,7 @@ const CANCEL_RULES: ErrorRule[] = [
   [UNAUTHORIZED, DELIVERY_LOGIN],
   [/already canceled/i, 'This delivery is already canceled.'],
   // Backend NOT_ALLOWED once the order is out of the customer window. It fires
-  // from `processed` on (the 12am cutoff) — not only after the parcel
+  // from `processed` on (a stock run moved it) — not only after the parcel
   // physically ships — so the copy says "being prepared", which is true for
   // every status it covers.
   [
@@ -319,7 +319,7 @@ const CANCEL_RULES: ErrorRule[] = [
 ];
 
 // Cancel an order the customer still owns the decision on (`requested`, i.e.
-// before the 12am cutoff) — the cards return to their vault. From `processed`
+// before a stock run moves it) — the cards return to their vault. From `processed`
 // on the backend refuses: purchasing has started on it, so cancelling is an
 // operator/support action. The UI hides the affordance for the same statuses.
 export async function cancelDeliveryOrder(

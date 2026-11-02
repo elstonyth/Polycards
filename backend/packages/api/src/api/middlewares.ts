@@ -1841,6 +1841,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Stock page Refresh — every open order's stock read, plus a status move
+      // per complete order; same admin budget.
+      matcher: '/admin/delivery-orders/allocate',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Pack list reorder — batch rank write across the packs list; same admin
       // budget.
       matcher: '/admin/packs/reorder',

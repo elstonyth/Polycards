@@ -18,9 +18,10 @@ const ACTOR = 'system:stock-allocation';
 
 // Off until the operator turns it on (decision 2026-10-28): the boss checks the
 // new Stock numbers against the shelf before orders start moving by
-// themselves. STOCK_AUTO_ALLOCATION=true enables the 12am run and freezes the
-// to-buy list it leaves behind (procurement-snapshot.ts); runStockAllocation
-// itself and the live to-buy / to-ship lists work either way.
+// themselves. STOCK_AUTO_ALLOCATION=true enables the 12am run and the Stock
+// page's Refresh move, and freezes the to-buy list the 12am run leaves behind
+// (procurement-snapshot.ts); runStockAllocation itself and the live to-buy /
+// to-ship lists work either way.
 export const stockAutoAllocationEnabled = (
   env: NodeJS.ProcessEnv = process.env,
 ): boolean => env.STOCK_AUTO_ALLOCATION?.trim().toLowerCase() === 'true';
@@ -31,9 +32,11 @@ export const stockAutoAllocationEnabled = (
 //    processed, the only legal path — delivery.ts ALLOWED);
 //  - on the nightly run, every requested order still short of cards becomes
 //    processed: it is on that night's to-buy list.
-// Runs only from the 00:00 MYT job (owner, 2026-10-28: the 12am cutoff — a
-// GRN / invoice save no longer moves anything). Never ships, never moves an
-// order backwards.
+// Runs from the 00:00 MYT job (owner, 2026-10-28: the 12am cutoff — a GRN /
+// invoice save no longer moves anything), and from the Stock page's Refresh
+// with nightly false and the staff member as adminId (operator, 2026-11-03:
+// complete orders need not wait for 12am; short ones still do). Never ships,
+// never moves an order backwards.
 //
 // Every move goes through transitionDeliveryOrderStatus, which re-reads the
 // status under the order's own lock, so a second run racing this one fails
@@ -46,7 +49,7 @@ export const stockAutoAllocationEnabled = (
 // statuses (feed-events.ts), the same as when staff move an order by hand.
 export async function runStockAllocation(
   container: MedusaContainer,
-  opts: { nightly: boolean },
+  opts: { nightly: boolean; adminId?: string },
 ): Promise<StockAllocationRun> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
@@ -64,7 +67,8 @@ export async function runStockAllocation(
   );
   const { ready, short } = allocateStock(onHand, orders);
   const statusOf = new Map(orders.map((o) => [o.id, o.status]));
-  const why = 'stock allocation (nightly)';
+  const why = `stock allocation (${opts.nightly ? 'nightly' : 'refresh'})`;
+  const adminId = opts.adminId ?? ACTOR;
 
   const run: StockAllocationRun = { ready: [], processed: [], failed: [] };
   const move = async (orderId: string, to: DeliveryStatus, reason: string) =>
@@ -74,7 +78,7 @@ export async function runStockAllocation(
       // No trackingNumber: the seam keeps the one it reads under the order's
       // lock, so a number staff entered after this run's read survives.
       pullIds: [],
-      audit: { adminId: ACTOR, action: 'bulk_status', reason },
+      audit: { adminId, action: 'bulk_status', reason },
     });
 
   for (const id of ready) {

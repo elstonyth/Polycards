@@ -23,6 +23,7 @@ import {
 import {
   adjustCustomerCredits,
   bulkUpdateDeliveryOrders,
+  allocateDeliveryOrders,
   checkDeliveryTracking,
   createProductFromPriceCharting,
   deleteCard,
@@ -974,6 +975,27 @@ export const useCheckDeliveryTracking = () => {
   const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: checkDeliveryTracking,
+    onSettled: () => invalidateStock(),
+  });
+};
+
+// The Stock page's Refresh for staff who can move orders. onSettled RETURNS the
+// invalidation, so the mutation stays pending until the screen shows the moves;
+// a refused or failed run still reloads, the numbers may have changed anyway.
+export const useAllocateDeliveryOrders = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: allocateDeliveryOrders,
+    onSuccess: ({ ready, failed }) => {
+      if (ready > 0) {
+        toast.success(t('inventory.refreshMoved', { count: ready }));
+      }
+      if (failed > 0) {
+        toast.warning(t('inventory.refreshFailed', { count: failed }));
+      }
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => invalidateStock(),
   });
 };

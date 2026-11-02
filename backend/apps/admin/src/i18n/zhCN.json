@@ -163,6 +163,8 @@
     "slab": "评级卡",
     "raw": "未评级",
     "refresh": "刷新",
+    "refreshMoved_other": "已有 {{count}} 个订单转为待发货",
+    "refreshFailed_other": "{{count}} 个订单未能转换，状态保持不变",
     "export": "导出 Excel",
     "sku": "SKU"
   },

@@ -37,10 +37,10 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Order not found.');
   }
 
-  // The customer window closes at the 12am cutoff (delivery.ts
+  // The customer window closes when a stock run moves the order (delivery.ts
   // CUSTOMER_CANCELABLE). This early check gives the quick refusal; the same
   // list is re-checked under the order's lock (allowed_from), which is what
-  // stops a cancel racing the 12am run.
+  // stops a cancel racing that run.
   if (!CUSTOMER_CANCELABLE.includes(order.status)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

@@ -15,6 +15,7 @@ import { ArchiveBox } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePermissions } from '@mercurjs/admin';
 import {
+  useAllocateDeliveryOrders,
   useEligibleProducts,
   useInventory,
   useInvalidateInventory,
@@ -117,6 +118,11 @@ const InventoryListPage = () => {
     'gacha:read' as Permission,
     'card:update' as Permission,
   ]);
+  // Refresh also moves complete orders for staff who can move orders. Anyone
+  // else (e.g. Stock keeper) just gets the numbers reloaded, not a 403.
+  const canMoveOrders = usePermissions().hasAllPermissions([
+    'delivery_order:update' as Permission,
+  ]);
   const [exporting, setExporting] = useState(false);
   const { sort, sortHeader } = useTableSort<SortKey>({
     key: 'created_at',
@@ -139,6 +145,8 @@ const InventoryListPage = () => {
   const { data, isError, isFetching } = useInventory(q || undefined);
   const registerCard = useRegisterCard();
   const invalidateInventory = useInvalidateInventory();
+  const allocate = useAllocateDeliveryOrders();
+  const refreshBusy = isFetching || allocate.isPending;
 
   // The register endpoint wants market_value in RAW USD; this list's own `fmv`
   // is already MYR-converted for display, so it must NOT be the source. The
@@ -316,9 +324,11 @@ const InventoryListPage = () => {
   const runRefresh = () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
-    void invalidateInventory().finally(() => {
+    const done = () => {
       refreshingRef.current = false;
-    });
+    };
+    if (canMoveOrders) allocate.mutate(undefined, { onSettled: done });
+    else void invalidateInventory().finally(done);
   };
 
   return (
@@ -357,11 +367,13 @@ const InventoryListPage = () => {
               tab or by someone else stays invisible until this. The whole
               namespace, not this one query: cached searches and item pages
               hold the same old figures. Disabled mid-fetch because this is
-              the same heavy read the export guards against double-clicks. */}
+              the same heavy read the export guards against double-clicks. For
+              staff who can move orders it also moves complete orders to
+              ready_to_ship instead of waiting for 12am (operator, 2026-11-03). */}
           <Button
             variant="secondary"
-            isLoading={isFetching}
-            disabled={isFetching}
+            isLoading={refreshBusy}
+            disabled={refreshBusy}
             onClick={runRefresh}
           >
             {t('inventory.refresh')}
