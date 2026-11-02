@@ -18,8 +18,8 @@ export class Migration20261103100000 extends Migration {
   override async up(): Promise<void> {
     // Runs in the pre-deploy job against live traffic, and these ALTERs queue every
     // later pull and credit query behind them: fail the deploy fast and retry. Their
-    // checks are NOT VALID so none of them scans a money table under that lock;
-    // Migration20261103100400 validates them afterwards.
+    // checks are NOT VALID so each can also be validated later on its own;
+    // Migration20261103100400 validates them.
     this.addSql(`set local lock_timeout = '5s';`);
     this.addSql(`create table if not exists "coin_flip_config" (
       "id" text not null primary key,

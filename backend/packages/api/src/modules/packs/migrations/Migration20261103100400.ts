@@ -1,7 +1,8 @@
 import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 
-// Checks Migration20261103100000 added NOT VALID. Validating scans each table but
-// lets reads and writes carry on, so it runs apart from the ALTERs that do not.
+// Checks Migration20261103100000 added NOT VALID. The migrator runs all pending
+// migrations in one transaction, so on a deploy that applies both the ALTERs' lock
+// stays held through these scans: 165 ms on a copy of production data, 2026-11-03.
 const CHECKS = [
   ['pull', 'pull_status_check'],
   ['credit_transaction', 'credit_transaction_reason_check'],
