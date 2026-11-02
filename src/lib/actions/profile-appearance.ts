@@ -114,7 +114,8 @@ export async function setPresetAvatar(id: number): Promise<AppearanceResult> {
     id,
   });
   if (!r.ok) return { ok: false, error: appearanceError(r) };
-  revalidatePath('/me');
+  // No revalidatePath: flipping through 80 avatars would re-read all of /me per
+  // tap. MeHeader renders the pick from state; the modal refreshes once on close.
   return { ok: true };
 }
 

@@ -11,6 +11,7 @@ import {
   type FormEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Camera, Lock, Pencil, X } from 'lucide-react';
 import { FramedAvatar } from '@/components/FramedAvatar';
@@ -18,7 +19,7 @@ import { AnimatedFrame } from '@/components/AnimatedFrame';
 import { AvatarCropper } from '@/components/account/AvatarCropper';
 import { INPUT_CLASS } from '@/components/account/ui';
 import { Pill } from '@/components/ui/pill';
-import { AVATAR_COUNT, avatarPath } from '@/lib/avatar-seed';
+import { AVATAR_COUNT, avatarPath, isCatalogAvatar } from '@/lib/avatar-seed';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
 import {
   uploadAvatar,
@@ -47,9 +48,11 @@ const TABS = [
  * here because they're one decision: the frame rings the photo.
  *
  * Photo, catalog avatar and frame apply immediately (no Save button): the photo
- * POSTs after the crop, an avatar POSTs on tap and shows at once (the action's
- * revalidatePath brings the real value back), a frame POSTs on tap and updates
- * the header through the shared equipped-frame context. The username (tap the
+ * POSTs after the crop, an avatar POSTs on tap and shows at once (MeHeader holds
+ * the pick, and closing refreshes /me once rather than per tap), a frame POSTs on
+ * tap and updates the header through the shared equipped-frame context. The one
+ * exception: an avatar picked over an uploaded photo asks first, because it
+ * deletes that photo. The username (tap the
  * name, 2026-10-03 — support kept having to point players at /settings) is the
  * one typed field, so it alone gets Save/Cancel; it saves through the same
  * updateProfile action /settings uses.
@@ -65,6 +68,7 @@ export function EditProfileModal({
   username,
   handle,
   avatarUrl,
+  onAvatarPicked,
   frames,
   highestLevel,
 }: {
@@ -77,6 +81,8 @@ export function EditProfileModal({
   handle: string | null;
   /** The avatar they have now: stored, else the one their seed assigns. */
   avatarUrl: string | null;
+  /** A catalog pick landed (url), or the server's value is current again (null). */
+  onAvatarPicked: (url: string | null) => void;
   frames: Record<string, string>;
   /** null = the VIP read failed — show "couldn't load", never "locked". */
   highestLevel: number | null;
@@ -90,6 +96,8 @@ export function EditProfileModal({
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('avatars');
   const [shownAvatar, showAvatar] = useOptimistic(avatarUrl);
   const [picking, startPick] = useTransition();
+  const [confirmPick, setConfirmPick] = useState<number | null>(null);
+  const pickedSinceOpen = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const { equipped, setEquipped } = useEquippedFrame();
   const [nameEditing, setNameEditing] = useState(false);
@@ -112,6 +120,12 @@ export function EditProfileModal({
   // otherwise still be open the next time the panel is.
   function close() {
     setNameEditing(false);
+    setConfirmPick(null);
+    // One refresh for all the picks, so back/forward can't restore the old face.
+    if (pickedSinceOpen.current) {
+      pickedSinceOpen.current = false;
+      router.refresh();
+    }
     onClose();
   }
 
@@ -153,7 +167,12 @@ export function EditProfileModal({
         setError(res.error);
         return;
       }
-      router.refresh();
+      // Together, so the header goes straight to the new photo, not through the
+      // avatar it replaced.
+      startRefresh(() => {
+        onAvatarPicked(null);
+        router.refresh();
+      });
     } catch {
       setError('Upload failed. Please try again.');
     } finally {
@@ -166,12 +185,19 @@ export function EditProfileModal({
   }
 
   function pickAvatar(id: number) {
+    setConfirmPick(null);
     setError(null);
     startPick(async () => {
-      showAvatar(avatarPath(id));
+      const url = avatarPath(id);
+      showAvatar(url);
       try {
         const res = await setPresetAvatar(id);
-        if (!res.ok) setError(res.error);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        pickedSinceOpen.current = true;
+        onAvatarPicked(url);
       } catch {
         setError('Couldn’t change your avatar. Please try again.');
       }
@@ -430,10 +456,45 @@ export function EditProfileModal({
 
             {tab === 'avatars' ? (
               <>
-                <p className="mt-4 text-[12px] text-neutral-400">
-                  Pick one, or tap your photo to upload your own.
-                </p>
-                <ul className="-mx-1 mt-3 grid max-h-[38vh] grid-cols-5 gap-2 overflow-y-auto overscroll-contain p-1">
+                {confirmPick !== null ? (
+                  <div
+                    role="alert"
+                    className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] font-medium text-amber-300"
+                  >
+                    <p>
+                      This replaces your uploaded photo. To get it back,
+                      you&rsquo;d need to upload it again.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <Pill
+                        variant="ghost"
+                        className="flex-1"
+                        onClick={() => setConfirmPick(null)}
+                      >
+                        Keep photo
+                      </Pill>
+                      <Pill
+                        className="flex-1"
+                        onClick={() => pickAvatar(confirmPick)}
+                      >
+                        Use avatar
+                      </Pill>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-4 text-[12px] text-neutral-400">
+                    {picking
+                      ? 'Saving…'
+                      : 'Pick one, or tap your photo to upload your own.'}
+                  </p>
+                )}
+                <ul
+                  aria-busy={picking}
+                  className={cn(
+                    '-mx-1 mt-3 grid max-h-[38vh] grid-cols-5 gap-2 overflow-y-auto overscroll-contain p-1 transition-opacity',
+                    picking && 'opacity-60',
+                  )}
+                >
                   {AVATAR_IDS.map((id) => {
                     const url = avatarPath(id);
                     const isCurrent = shownAvatar === url;
@@ -442,7 +503,11 @@ export function EditProfileModal({
                         <button
                           type="button"
                           disabled={isCurrent || picking || busy}
-                          onClick={() => pickAvatar(id)}
+                          onClick={() =>
+                            shownAvatar && !isCatalogAvatar(shownAvatar)
+                              ? setConfirmPick(id)
+                              : pickAvatar(id)
+                          }
                           aria-label={
                             isCurrent
                               ? `Avatar ${id} (current)`
@@ -450,18 +515,19 @@ export function EditProfileModal({
                           }
                           aria-pressed={isCurrent}
                           className={`block w-full rounded-full border-2 p-0.5 transition-colors ${
-                            isCurrent
+                            isCurrent || confirmPick === id
                               ? 'border-chase'
                               : 'border-transparent hover:border-white/40'
                           }`}
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
+                          {/* next/image: full-size art would cost 1.4 MB per
+                              open, since the short grid is all inside the
+                              browser's lazy-load distance. */}
+                          <Image
                             src={url}
                             alt=""
                             width={64}
                             height={64}
-                            loading="lazy"
                             className="aspect-square h-auto w-full rounded-full object-cover"
                           />
                         </button>

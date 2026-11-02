@@ -5,6 +5,10 @@
 // of this count and path: it builds the URL it stores from a validated id.
 export const AVATAR_COUNT = 80; // public/images/avatars/avatar-1..80.webp
 
+// shortcut: public/images/pfps (the old 81) stays, unreferenced, so a tab open
+// across a deploy and any stored old path still load. Delete it once a prod count
+// finds no stored /images/pfps/ value.
+
 /** Catalog id (1..AVATAR_COUNT) → avatar path. */
 export const avatarPath = (id: number): string =>
   `/images/avatars/avatar-${id}.webp`;
