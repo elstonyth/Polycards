@@ -16,6 +16,7 @@ import {
   rewardLabel,
   splitHub,
   stubName,
+  ticketCountLabel,
 } from '../task-hub';
 
 const task = (
@@ -192,6 +193,24 @@ describe('a Lucky Draw tickets reward', () => {
     expect(claimNotice(one, 1)).toBe(
       '1 Lucky Draw ticket added. Head to the Lucky Draw to enter.',
     );
+  });
+});
+
+describe('ticketCountLabel', () => {
+  it('reads ×N for a tickets reward', () => {
+    expect(ticketCountLabel({ type: 'tickets', tickets: 5 })).toBe('×5');
+    expect(ticketCountLabel({ type: 'tickets', tickets: 15 })).toBe('×15');
+  });
+
+  it('stays quiet when the backend sent no count', () => {
+    expect(ticketCountLabel({ type: 'tickets' })).toBeNull();
+  });
+
+  it('stays quiet on any other reward: ×N on coins or a pack would misread', () => {
+    expect(ticketCountLabel({ type: 'credit', amount_myr: 10 })).toBeNull();
+    expect(
+      ticketCountLabel({ type: 'pack', pack_id: 'cr', pack_price_myr: 15 }),
+    ).toBeNull();
   });
 });
 

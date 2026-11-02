@@ -6,7 +6,7 @@ import { HelpTip } from '@/components/ui/help-tip';
 import { cn } from '@/lib/utils';
 import type { TaskEntry } from '@/lib/data/schemas';
 import { RewardArt, Sparkles } from './reward-art';
-import { dayWorth, isClaimable } from './task-hub';
+import { dayWorth, isClaimable, ticketCountLabel } from './task-hub';
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7] as const;
 
@@ -105,6 +105,7 @@ export function CheckInTrack({
           const claimable = Boolean(lead && isClaimable(lead));
           const claimed = Boolean(lead && tasks.every((t) => t.claimed));
           const extra = tasks.length - 1;
+          const ticketCount = lead ? ticketCountLabel(lead.reward) : null;
 
           const face = (
             <>
@@ -141,11 +142,27 @@ export function CheckInTrack({
                 </span>
               )}
               {done && lead && (
-                <span className="absolute right-1 bottom-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-neutral-950">
+                <span
+                  className={cn(
+                    'absolute right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-neutral-950',
+                    // Clears the ticket count, which hangs off the bottom edge.
+                    ticketCount ? 'bottom-2.5' : 'bottom-1',
+                  )}
+                >
                   <Check className="h-2.5 w-2.5" strokeWidth={3} aria-hidden />
                 </span>
               )}
               {claimable && <Sparkles />}
+              {ticketCount && (
+                <span
+                  className={cn(
+                    'font-heading absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-950 px-1 py-px text-[10px] leading-tight whitespace-nowrap tabular-nums sm:px-1.5 sm:text-xs',
+                    claimed ? 'text-neutral-400' : 'text-chase',
+                  )}
+                >
+                  {ticketCount}
+                </span>
+              )}
               {extra > 0 && (
                 <span className="absolute top-1 right-1 rounded-full bg-white/15 px-1 text-[8px] leading-tight text-white">
                   +{extra}
