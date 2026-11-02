@@ -19,6 +19,7 @@ import {
   scheduleOk,
   taskStatus,
   toIso,
+  toLocalInput,
   windowLabel,
   type Draft,
 } from './task-draft';
@@ -553,18 +554,18 @@ describe('draftChecks', () => {
       {
         ...filled(),
         reqType: 'rip_count',
-        reqN: '10',
+        reqN: '4',
         reqPack: ANY,
         rewardType: 'pack',
-        rewardValue: 'bronze-pack',
-        goal: { name: null, image: null, price: 10 },
-        prize: { name: 'Bronze Pack', image: null, value: 300 },
+        rewardValue: 'silver-pack',
+        goal: { name: null, image: null, price: 20 },
+        prize: { name: 'Silver Pack', image: null, value: 240 },
       },
       [],
     );
     expect(checks[0].tone).toBe('warn');
-    expect(checks[0].text).toContain('RM 100');
-    expect(checks[0].text).toContain('RM 300');
+    expect(checks[0].text).toContain('RM 80');
+    expect(checks[0].text).toContain('RM 240');
     expect(checks[0].text).toContain('300%');
   });
 
@@ -593,107 +594,154 @@ describe('draftChecks', () => {
 });
 
 describe('mismatch fixes', () => {
-  const bronze = {
-    slug: 'bronze-pack',
-    title: 'Bronze Pack',
-    image: '/b.webp',
-    price: 300,
+  const silver = {
+    slug: 'silver-pack',
+    title: 'Silver Pack',
+    image: '/s.webp',
+    price: 600,
     prize_type: 'cards',
+    status: 'active' as const,
+    in_stock: true,
   };
-  const capsule = {
-    slug: 'lucky-pack',
-    title: 'Bronze Capsule',
-    image: '/c.webp',
-    price: 10,
+  const gold = { ...silver, slug: 'gold-pack', title: 'Gold Pack', price: 1200 };
+  const goldCapsule = {
+    ...silver,
+    slug: 'gold-capsule',
+    title: 'Gold Capsule',
+    price: 40,
     prize_type: 'tickets',
   };
-  const rip10 = task({
-    title: 'Rip 10 Bronze Free 1 Bronze',
-    requirement: { type: 'rip_count', count: 10, pack_id: null },
-    reward: { type: 'pack', pack_id: 'bronze-pack' },
-    claims: 48,
+  const goldRush = { ...silver, slug: 'gold-rush', title: 'Gold Rush', status: 'draft' as const };
+  const anyRow = task({
+    title: 'Rip 5 Gold Free 1 Silver',
+    requirement: { type: 'rip_count', count: 5, pack_id: null },
+    reward: { type: 'pack', pack_id: 'silver-pack' },
+    claims: 7,
     view: {
       goal_name: null,
       goal_image: null,
-      goal_price_myr: 10,
-      reward_name: 'Bronze Pack',
+      goal_price_myr: 20,
+      reward_name: 'Silver Pack',
       reward_image: null,
-      reward_value_myr: 300,
+      reward_value_myr: 600,
+    },
+  });
+  const issue = { kind: 'any', says: 'gold' } as const;
+
+  test('any pack: says the cost, and can narrow to the pack the name means', () => {
+    const text = issueText(anyRow, issue);
+    expect(text.headline).toContain('says Gold');
+    expect(text.detail).toContain('5 × RM 20 = RM 100');
+    expect(text.detail).toContain('It pays RM 600');
+    expect(text.detail).toContain('7 claimed');
+
+    const [only, keep] = issueFixes(anyRow, issue, [goldCapsule, gold, silver]);
+    expect(only.label).toBe('Make it Gold only');
+    const fixed = only.patch!(draftFrom(anyRow));
+    expect(draftToPayload(fixed)!.requirement).toEqual({
+      type: 'rip_count',
+      count: 5,
+      pack_id: 'gold-pack',
+    });
+    expect(draftToInput(fixed, 'x')!.title).toBe('Rip 5 Gold, free 1 Silver');
+    expect(keep.label).toBe('Any pack is right');
+    expect(draftToInput(draftFrom(anyRow), 'x')!.title).toBe(
+      'Rip any 5 packs, free 1 Silver',
+    );
+  });
+
+  test('any pack: only a pack on sale, and only one, gets the one-click fix', () => {
+    expect(issueFixes(anyRow, issue, [goldCapsule])[0].action).toBe('open');
+    expect(issueFixes(anyRow, issue, [goldRush])[0].action).toBe('open');
+    expect(
+      issueFixes(anyRow, issue, [{ ...gold, in_stock: false }])[0].action,
+    ).toBe('open');
+    expect(
+      issueFixes(anyRow, issue, [gold, { ...gold, slug: 'gold-2' }])[0].action,
+    ).toBe('open');
+  });
+
+  const mew = task({
+    title: 'Pull 2 Mew (Graded or Ungraded)',
+    requirement: {
+      type: 'vault_pixel_count',
+      count: 1,
+      pixel_pokemon_id: 'mew',
+    },
+    reward: { type: 'tickets' },
+    tickets: 20,
+    view: {
+      goal_name: 'Mew',
+      goal_image: null,
+      goal_price_myr: null,
+      reward_name: null,
+      reward_image: null,
+      reward_value_myr: null,
     },
   });
 
-  test('any pack: says the cost, and can narrow to the pack the name means', () => {
-    const issue = { kind: 'any', says: 'bronze' } as const;
-    const text = issueText(rip10, issue);
-    expect(text.headline).toContain('says Bronze');
-    expect(text.detail).toContain('10 × RM 10 = RM 100');
-    expect(text.detail).toContain('It pays RM 300');
-    expect(text.detail).toContain('48 claimed');
-
-    const [only, keep] = issueFixes(rip10, issue, [capsule, bronze]);
-    expect(only.label).toBe('Make it Bronze only');
-    const fixed = only.patch!(draftFrom(rip10));
-    expect(draftToPayload(fixed)!.requirement).toEqual({
-      type: 'rip_count',
-      count: 10,
-      pack_id: 'bronze-pack',
-    });
-    expect(draftToInput(fixed, 'x')!.title).toBe(
-      'Rip 10 Bronze, free 1 Bronze',
-    );
-    expect(keep.label).toBe('Any pack is right');
-    expect(keep.patch).toBeUndefined();
-    expect(draftToInput(draftFrom(rip10), 'x')!.title).toBe(
-      'Rip any 10 packs, free 1 Bronze',
-    );
-  });
-
-  test('any pack with no matching pack sends you to the form', () => {
-    const [first] = issueFixes(rip10, { kind: 'any', says: 'bronze' }, [capsule]);
-    expect(first.action).toBe('open');
-  });
-
   test('count: either the rule moves or the name does', () => {
-    const mew = task({
-      title: 'Pull 2 Mew (Graded or Ungraded)',
-      requirement: {
-        type: 'vault_pixel_count',
-        count: 1,
-        pixel_pokemon_id: 'mew',
-      },
-      reward: { type: 'tickets' },
-      tickets: 20,
-      view: {
-        goal_name: 'Mew',
-        goal_image: null,
-        goal_price_myr: null,
-        reward_name: null,
-        reward_image: null,
-        reward_value_myr: null,
-      },
-    });
     const [change, rename] = issueFixes(mew, { kind: 'count', says: 2 });
     expect(draftToInput(change.patch!(draftFrom(mew)), 'x')).toMatchObject({
       title: 'Pull 2 Mew (Graded or Ungraded)',
       requirement: { count: 2 },
     });
-    expect(rename.patch).toBeUndefined();
-    expect(draftToInput(draftFrom(mew), 'x')!.title).toBe(
+    expect(draftToInput(rename.patch!(draftFrom(mew)), 'x')!.title).toBe(
       'Pull 1 Mew (Graded or Ungraded)',
     );
   });
 
+  test('"the rule is right" restores the rule, whatever was typed since', () => {
+    const [, rename] = issueFixes(mew, { kind: 'count', says: 2 });
+    const typed = { ...draftFrom(mew), reqN: '7' };
+    expect(draftToPayload(rename.patch!(typed))!.requirement).toMatchObject({
+      count: 1,
+    });
+  });
+
+  test('"Change rule to N" is only offered when the rule can be N', () => {
+    const daily = task({
+      kind: 'daily',
+      title: 'Check in 2 days this week',
+      requirement: { type: 'checkin_days', days: 1 },
+    });
+    expect(
+      issueFixes(daily, { kind: 'count', says: 2 }).map((f) => f.label),
+    ).not.toContain('Change rule to 2');
+    const weekly = task({
+      title: 'Check in 8 days',
+      requirement: { type: 'checkin_days', days: 1 },
+    });
+    expect(
+      issueFixes(weekly, { kind: 'count', says: 8 }).map((f) => f.label),
+    ).not.toContain('Change rule to 8');
+  });
+
   test('wrong goal type: open it, or retire it', () => {
-    const sylveon = task({
+    const wrongGoal = task({
       title: 'Pull 2 Eevee',
       requirement: { type: 'checkin_days', days: 1 },
     });
     expect(
-      issueFixes(sylveon, { kind: 'goal', says: 'Pull' }).map((f) => f.action),
+      issueFixes(wrongGoal, { kind: 'goal', says: 'Pull' }).map((f) => f.action),
     ).toEqual(['open', 'retire']);
-    expect(issueText(sylveon, { kind: 'goal', says: 'Pull' }).headline).toContain(
+    expect(issueText(wrongGoal, { kind: 'goal', says: 'Pull' }).headline).toContain(
       'says Pull',
     );
+  });
+
+  test('wrong reward in the name: open it, or rename', () => {
+    const fixes = issueFixes(mew, { kind: 'reward', says: 'RM 100' });
+    expect(fixes.map((f) => f.action)).toEqual(['open', 'patch']);
+    expect(issueText(mew, { kind: 'reward', says: 'RM 100' }).headline).toContain(
+      'says RM 100',
+    );
+  });
+
+  test('with no claims field, it says nothing about claims', () => {
+    const stale = { ...mew };
+    delete stale.claims;
+    expect(issueText(stale, { kind: 'count', says: 2 }).detail).toBe('');
   });
 });
 
@@ -766,5 +814,158 @@ describe('a name is never written for something the form cannot name', () => {
     expect(draftMissing(d).map((m) => m.step)).toEqual(['target']);
     // Retire and the round trip don't need a name, so they still work.
     expect(draftToPayload(d)).not.toBeNull();
+  });
+});
+
+describe('what the backend refuses is refused here first', () => {
+  const rule = (over: Partial<Draft>): Draft => ({ ...filled(), ...over });
+
+  test.each<[string, Partial<Draft>]>([
+    ['level over 100', { kind: 'achievement', reqType: 'reach_level', reqN: '101' }],
+    ['a top-up over RM 100,000', { reqType: 'topup_myr', reqN: '100001' }],
+    ['credit over RM 10,000', { rewardValue: '10001' }],
+    ['credit finer than a sen', { rewardValue: '5.555' }],
+    ['credit of a thousandth', { rewardValue: '0.001' }],
+    ['a fractional top-up', { reqType: 'topup_myr', reqN: '1.5' }],
+  ])('%s', (_name, over) => {
+    expect(draftToPayload(rule(over))).toBeNull();
+    expect(draftMissing(rule(over)).length).toBeGreaterThan(0);
+  });
+
+  test.each<[string, Partial<Draft>]>([
+    ['level 100', { kind: 'achievement', reqType: 'reach_level', reqN: '100' }],
+    ['a top-up of RM 100,000', { reqType: 'topup_myr', reqN: '100000' }],
+    ['credit of RM 10,000', { rewardValue: '10000' }],
+    ['credit in whole sen', { rewardValue: '5.55' }],
+  ])('%s is fine', (_name, over) => {
+    expect(draftToPayload(rule(over))).not.toBeNull();
+    expect(draftMissing(rule(over))).toEqual([]);
+  });
+
+  test('a reward type this form does not know is not sent as a card', () => {
+    expect(
+      draftToPayload({
+        ...filled(),
+        rewardType: 'mystery' as Draft['rewardType'],
+        rewardValue: 'x',
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('a save that would fail always says why', () => {
+  const says = (over: Partial<Draft>) =>
+    draftMissing({ ...filled(), ...over }).map((m) => m.label);
+
+  test.each<[Partial<Draft>]>([
+    [{ rewardValue: '0.00' }],
+    [{ rewardValue: '00' }],
+    [{ rewardValue: '-5' }],
+    [{ tickets: '' }],
+    [{ tickets: '-1' }],
+    [{ tickets: '1.5' }],
+    [{ tickets: '10001' }],
+    [{ rewardType: 'tickets', rewardValue: '', tickets: '1.5' }],
+    [{ rewardType: 'tickets', rewardValue: '', tickets: '10001' }],
+    [{ reqN: '8' }],
+  ])('%j', (over) => {
+    expect(says(over).length).toBeGreaterThan(0);
+    expect(draftToInput({ ...filled(), ...over }, 'x')).toBeNull();
+  });
+
+  test('tickets on top point at where they live', () => {
+    expect(says({ tickets: '1.5' })[0]).toContain('More options');
+  });
+
+  test('a name past what the backend allows asks for something shorter', () => {
+    const long: Draft = {
+      ...filled(),
+      reqType: 'rip_count',
+      reqN: '2',
+      reqPack: 'long',
+      goal: { name: 'x'.repeat(130), image: null, price: 5 },
+    };
+    expect(draftMissing(long).at(-1)!.label).toContain('shorter');
+    expect(draftToInput(long, 'x')).toBeNull();
+  });
+});
+
+describe('a saved window survives a save to the second', () => {
+  const windowed = task({
+    starts_at: '2026-11-01T16:00:30.000Z',
+    ends_at: '2026-11-08T15:59:59.000Z',
+  });
+
+  test('untouched, it goes back exactly', () => {
+    expect(draftToInput(draftFrom(windowed), 'x')).toMatchObject({
+      starts_at: '2026-11-01T16:00:30.000Z',
+      ends_at: '2026-11-08T15:59:59.000Z',
+    });
+  });
+
+  test('changed, the new value is used', () => {
+    const d = { ...draftFrom(windowed), endsAt: '' };
+    expect(draftToInput(d, 'x')).toMatchObject({
+      starts_at: '2026-11-01T16:00:30.000Z',
+      ends_at: null,
+    });
+  });
+
+  test('toLocalInput and toIso round-trip to the minute', () => {
+    const at = '2026-11-01T16:00:00.000Z';
+    expect(toIso(toLocalInput(new Date(at)))).toBe(at);
+    expect(toLocalInput(new Date('garbage'))).toBe('');
+  });
+});
+
+describe('the same goal twice in a week', () => {
+  const week = [
+    task({
+      id: 'any',
+      requirement: { type: 'rip_count', count: 10, pack_id: null },
+      labels: { requirement: 'Rip 10 packs', reward: 'Free rip' },
+    }),
+    task({
+      id: 'top',
+      requirement: { type: 'topup_myr', amount_myr: 100 },
+      labels: { requirement: 'Top up RM 100', reward: 'RM 10' },
+    }),
+  ];
+
+  test('catches two any-pack rips and two equal top-ups', () => {
+    expect(
+      draftChecks(
+        { ...filled(), reqType: 'rip_count', reqN: '10', reqPack: ANY },
+        week,
+      )[0].text,
+    ).toContain('already has this goal');
+    expect(
+      draftChecks({ ...filled(), reqType: 'topup_myr', reqN: '100' }, week)[0]
+        .text,
+    ).toContain('already has this goal');
+  });
+
+  test('a daily or achievement task is not the same goal as a weekly one', () => {
+    expect(
+      draftChecks(
+        { ...filled(), kind: 'daily', reqType: 'topup_myr', reqN: '100' },
+        week,
+      ).map((c) => c.text),
+    ).not.toContainEqual(expect.stringContaining('already has this goal'));
+  });
+
+  test('a pack players cannot rip is said out loud', () => {
+    const [check] = draftChecks(
+      {
+        ...filled(),
+        reqType: 'rip_count',
+        reqN: '2',
+        reqPack: 'draft-pack',
+        goal: { name: 'Draft Pack', image: null, price: 5, buyable: false },
+      },
+      [],
+    );
+    expect(check.tone).toBe('warn');
+    expect(check.text).toContain("can't rip");
   });
 });

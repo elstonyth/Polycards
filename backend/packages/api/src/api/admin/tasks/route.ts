@@ -17,16 +17,23 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const rows = await packs.listTaskDefinitions(
+  // Newest first at the database, so a cap drops the oldest rows and never a live
+  // one. limit and offset let a reader with a size cap (the assistant, the desks)
+  // page through.
+  const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit)) || 500, 1), 500);
+  const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);
+  const [newest, count] = await packs.listAndCountTaskDefinitions(
     {},
-    { order: { sort: 'ASC' }, take: 500 },
+    { order: { created_at: 'DESC' }, take: limit, skip: offset },
   );
+  const rows = [...newest].sort((a, b) => a.sort - b.sort);
   const [labels, views, claims] = await Promise.all([
     resolveTaskLabels(packs, rows),
     resolveTaskViews(packs, rows),
     packs.taskClaimCounts(),
   ]);
   res.json({
+    count,
     tasks: rows.map((t) => ({
       id: t.id,
       kind: t.kind,

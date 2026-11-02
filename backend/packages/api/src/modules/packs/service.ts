@@ -3365,7 +3365,9 @@ class PacksModuleService extends MedusaService({
     const period = { weekStartIso: week.weekStartIso, dayIso: day.dayIso };
     const [defs, facts, claims, unspent] = await Promise.all([
       this.listTaskDefinitions(
-        { active: true },
+        // Weekly rows stay active after they end, so leave those out: taskIsLive
+        // would drop them anyway, and past the cap they'd crowd out live tasks.
+        { active: true, $or: [{ ends_at: null }, { ends_at: { $gt: at } }] },
         // 500 matches the admin list cap — past it, definitions would vanish
         // from the hub silently, so keep the two bounds identical.
         { order: { sort: 'ASC' }, take: 500 },
@@ -3929,7 +3931,18 @@ class PacksModuleService extends MedusaService({
     // the active toggle re-POST the whole definition, and a card or pack
     // deleted since the save must not 400 the very action that fixes it
     // (review 2026-09).
-    if (!existing || !isDeepStrictEqual(existing.reward, reward)) {
+    // Compared as validated, so a key left over from an older rule isn't a change.
+    const sameRule = <T>(stored: unknown, validate: () => T, next: T) => {
+      try {
+        return stored != null && isDeepStrictEqual(validate(), next);
+      } catch {
+        return false;
+      }
+    };
+    if (
+      !existing ||
+      !sameRule(existing.reward, () => validateTaskReward(existing.reward), reward)
+    ) {
       if (reward.type === 'card') {
         const [card] = await this.listCards(
           { handle: reward.card_handle },
@@ -3963,7 +3976,14 @@ class PacksModuleService extends MedusaService({
         }
       }
     }
-    if (!existing || !isDeepStrictEqual(existing.requirement, requirement)) {
+    if (
+      !existing ||
+      !sameRule(
+        existing.requirement,
+        () => validateTaskRequirement(input.kind, existing.requirement),
+        requirement,
+      )
+    ) {
       if (requirement.type === 'rip_count' && requirement.pack_id) {
         const [pack] = await this.listPacks(
           { slug: requirement.pack_id },

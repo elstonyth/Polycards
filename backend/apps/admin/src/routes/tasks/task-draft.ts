@@ -9,6 +9,8 @@ import { orderDateTime } from '../../lib/format';
 import {
   goalAmount,
   leastSpend,
+  money,
+  shortPack,
   taskName,
   type NameIssue,
   type NameParts,
@@ -97,11 +99,25 @@ export interface Draft {
   /** datetime-local strings, same idiom as the Weekly Challenge schedule. */
   startsAt: string;
   endsAt: string;
+  /** The window as stored. The form only holds minutes, so an untouched field
+   *  goes back as this, to the second. */
+  saved?: { starts_at: string | null; ends_at: string | null };
   /** What the goal names, for the sentence, the name and the preview. `price`
-   *  is the least one rip can cost. */
-  goal: { name: string | null; image: string | null; price: number | null };
+   *  is the least one rip can cost. `buyable` is false when players can't open
+   *  that pack right now. */
+  goal: {
+    name: string | null;
+    image: string | null;
+    price: number | null;
+    buyable?: boolean | null;
+  };
   /** What the reward names. `value` is its worth in RM, when it has one. */
-  prize: { name: string | null; image: string | null; value: number | null };
+  prize: {
+    name: string | null;
+    image: string | null;
+    value: number | null;
+    grade?: string | null;
+  };
 }
 
 export const NO_GOAL: Draft['goal'] = { name: null, image: null, price: null };
@@ -175,11 +191,13 @@ export const draftFrom = (t: AdminTaskDefinition): Draft => {
     tickets: String(t.tickets ?? 0),
     startsAt: t.starts_at ? toLocalInput(new Date(t.starts_at)) : '',
     endsAt: t.ends_at ? toLocalInput(new Date(t.ends_at)) : '',
+    saved: { starts_at: t.starts_at, ends_at: t.ends_at },
     goal: t.view
       ? {
           name: t.view.goal_name,
           image: t.view.goal_image,
           price: t.view.goal_price_myr,
+          buyable: t.view.goal_buyable ?? null,
         }
       : NO_GOAL,
     prize: t.view
@@ -187,6 +205,7 @@ export const draftFrom = (t: AdminTaskDefinition): Draft => {
           name: t.view.reward_name,
           image: t.view.reward_image,
           value: t.view.reward_value_myr,
+          grade: t.view.reward_grade ?? null,
         }
       : NO_PRIZE,
   };
@@ -194,6 +213,27 @@ export const draftFrom = (t: AdminTaskDefinition): Draft => {
 
 // Mirrors MAX_TASK_TICKETS in the backend's lucky-draw.ts.
 const MAX_TICKETS = 10_000;
+// Mirror the ceilings in the backend's tasks.ts and saveTaskDefinition. A refusal
+// there would stop a week's publish partway, so they are refused here first.
+const MAX_CREDIT_MYR = 10_000;
+const MAX_TOPUP_MYR = 100_000;
+const MAX_LEVEL = 100;
+const MAX_TITLE = 120;
+
+const validCredit = (value: string): boolean => {
+  const amount = Number(value);
+  return (
+    Number.isFinite(amount) &&
+    amount > 0 &&
+    amount <= MAX_CREDIT_MYR &&
+    Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6
+  );
+};
+
+const validTickets = (value: string): boolean => {
+  const n = value.trim() === '' ? NaN : Number(value);
+  return Number.isInteger(n) && n >= 0 && n <= MAX_TICKETS;
+};
 
 export function draftToPayload(d: Draft): {
   requirement: Record<string, unknown>;
@@ -202,10 +242,8 @@ export function draftToPayload(d: Draft): {
 } | null {
   // Always sent: the backend keeps the stored value only when the field is
   // omitted, so a save that left it out would be a silent "keep", not a "0".
-  const tickets = d.tickets.trim() === '' ? NaN : Number(d.tickets);
-  if (!Number.isInteger(tickets) || tickets < 0 || tickets > MAX_TICKETS) {
-    return null;
-  }
+  if (!validTickets(d.tickets)) return null;
+  const tickets = Number(d.tickets);
   // A goal with no count box (the daily check-in) must not be blocked by
   // whatever the hidden box last held — the operator could not fix it.
   const n = countApplies(d) ? Number(d.reqN) : 1;
@@ -233,6 +271,7 @@ export function draftToPayload(d: Draft): {
       };
       break;
     case 'reach_level':
+      if (n > MAX_LEVEL) return null;
       requirement = { type: d.reqType, level: n };
       break;
     case 'vault_pixel_count':
@@ -244,27 +283,33 @@ export function draftToPayload(d: Draft): {
       };
       break;
     case 'topup_myr':
+      if (n > MAX_TOPUP_MYR) return null;
       requirement = { type: d.reqType, amount_myr: n };
       break;
     default:
       requirement = { type: d.reqType, count: n };
   }
   let reward: Record<string, unknown>;
-  if (d.rewardType === '') return null;
-  if (d.rewardType === 'credit') {
-    const amount = Number(d.rewardValue);
-    if (!Number.isFinite(amount) || amount <= 0) return null;
-    reward = { type: 'credit', amount_myr: amount };
-  } else if (d.rewardType === 'pack') {
-    if (!d.rewardValue.trim()) return null;
-    reward = { type: 'pack', pack_id: d.rewardValue.trim() };
-  } else if (d.rewardType === 'tickets') {
-    // The amount travels in `tickets`; a tickets reward of 0 would pay nothing.
-    if (tickets < 1) return null;
-    reward = { type: 'tickets' };
-  } else {
-    if (!d.rewardValue.trim()) return null;
-    reward = { type: 'card', card_handle: d.rewardValue.trim() };
+  switch (d.rewardType) {
+    case 'credit':
+      if (!validCredit(d.rewardValue)) return null;
+      reward = { type: 'credit', amount_myr: Number(d.rewardValue) };
+      break;
+    case 'pack':
+      if (!d.rewardValue.trim()) return null;
+      reward = { type: 'pack', pack_id: d.rewardValue.trim() };
+      break;
+    case 'tickets':
+      // The amount travels in `tickets`; a tickets reward of 0 would pay nothing.
+      if (tickets < 1) return null;
+      reward = { type: 'tickets' };
+      break;
+    case 'card':
+      if (!d.rewardValue.trim()) return null;
+      reward = { type: 'card', card_handle: d.rewardValue.trim() };
+      break;
+    default:
+      return null;
   }
   return { requirement, reward, tickets };
 }
@@ -280,6 +325,10 @@ export const draftParts = (d: Draft): NameParts => ({
   tickets: Number(d.tickets) || 0,
 });
 
+/** The stored instant when the field is untouched, so seconds aren't lost. */
+const windowIso = (local: string, stored?: string | null): string | null =>
+  stored && toLocalInput(new Date(stored)) === local ? stored : toIso(local);
+
 /** The whole save for a draft, its name written from its rule. */
 export const draftToInput = (d: Draft, reason: string) => {
   const payload = draftToPayload(d);
@@ -292,10 +341,11 @@ export const draftToInput = (d: Draft, reason: string) => {
     requirement: payload.requirement,
     reward: payload.reward,
     active: d.active,
-    sort: Number(d.sort) || 0,
+    // The route only takes a whole number, and would read 1.5 as 0.
+    sort: Math.trunc(Number(d.sort)) || 0,
     tickets: payload.tickets,
-    starts_at: toIso(d.startsAt),
-    ends_at: toIso(d.endsAt),
+    starts_at: windowIso(d.startsAt, d.saved?.starts_at),
+    ends_at: windowIso(d.endsAt, d.saved?.ends_at),
     reason,
   };
 };
@@ -320,25 +370,39 @@ export type BuilderStep =
   | 'reward'
   | 'value';
 
-/** What the sentence still needs, in reading order. */
+const countMissing = (d: Draft): string | null => {
+  const n = Number(d.reqN);
+  const blank = d.reqN.trim() === '';
+  if (d.reqType === 'topup_myr') {
+    if (blank) return 'how much';
+    return Number.isInteger(n) && n > 0 && n <= MAX_TOPUP_MYR
+      ? null
+      : 'a whole RM amount up to RM 100,000';
+  }
+  if (d.reqType === 'checkin_days') {
+    if (blank) return 'which day';
+    return Number.isInteger(n) && n >= 1 && n <= 7 ? null : 'a day from 1 to 7';
+  }
+  if (d.reqType === 'reach_level') {
+    if (blank) return 'which level';
+    return Number.isInteger(n) && n >= 1 && n <= MAX_LEVEL
+      ? null
+      : 'a level from 1 to 100';
+  }
+  if (blank) return 'how many';
+  return Number.isInteger(n) && n > 0 ? null : 'a whole number above 0';
+};
+
+/** What the sentence still needs, in reading order. Anything that would stop a
+ *  save is named here, so a greyed-out button always has a reason beside it. */
 export const draftMissing = (
   d: Draft,
 ): { step: BuilderStep; label: string }[] => {
   const out: { step: BuilderStep; label: string }[] = [];
   if (!d.reqType) out.push({ step: 'goal', label: 'the goal' });
-  const n = Number(d.reqN);
-  if (d.reqType && countApplies(d) && !(Number.isInteger(n) && n > 0)) {
-    out.push({
-      step: 'n',
-      label:
-        d.reqType === 'topup_myr'
-          ? 'how much'
-          : d.reqType === 'checkin_days'
-            ? 'which day'
-            : d.reqType === 'reach_level'
-              ? 'which level'
-              : 'how many',
-    });
+  if (d.reqType && countApplies(d)) {
+    const label = countMissing(d);
+    if (label) out.push({ step: 'n', label });
   }
   if (d.reqType === 'rip_count' && d.reqPack === '')
     out.push({ step: 'target', label: 'which pack' });
@@ -346,7 +410,12 @@ export const draftMissing = (
     out.push({ step: 'target', label: 'which Pokémon' });
   // A rule that names a target the form has no name for: a backend mid-deploy, or
   // a pack or Pokémon since deleted. A name written now would call it "any pack".
-  if (d.reqType === 'rip_count' && d.reqPack && d.reqPack !== ANY && !d.goal.name)
+  if (
+    d.reqType === 'rip_count' &&
+    d.reqPack &&
+    d.reqPack !== ANY &&
+    !d.goal.name
+  )
     out.push({ step: 'target', label: 're-pick the pack' });
   if (
     d.reqType === 'vault_pixel_count' &&
@@ -355,29 +424,50 @@ export const draftMissing = (
     !d.goal.name
   )
     out.push({ step: 'target', label: 're-pick the Pokémon' });
+
   if (!d.rewardType) {
     out.push({ step: 'reward', label: 'the reward' });
   } else if (d.rewardType === 'tickets') {
-    if (!(Number(d.tickets) >= 1))
+    const n = Number(d.tickets);
+    if (d.tickets.trim() === '' || n === 0)
       out.push({ step: 'value', label: 'how many tickets' });
-  } else if (!d.rewardValue.trim() || d.rewardValue === '0') {
+    else if (!validTickets(d.tickets))
+      out.push({
+        step: 'value',
+        label: 'a whole number of tickets up to 10,000',
+      });
+  } else if (d.rewardType === 'credit') {
+    if (d.rewardValue.trim() === '')
+      out.push({ step: 'value', label: 'how much credit' });
+    else if (!validCredit(d.rewardValue))
+      out.push({
+        step: 'value',
+        label: 'credit above RM 0, up to RM 10,000, in whole sen',
+      });
+  } else if (!d.rewardValue.trim()) {
     out.push({
       step: 'value',
-      label:
-        d.rewardType === 'credit'
-          ? 'how much credit'
-          : d.rewardType === 'pack'
-            ? 'which pack to give'
-            : 'which card',
+      label: d.rewardType === 'pack' ? 'which pack to give' : 'which card',
     });
-  } else if (
-    (d.rewardType === 'pack' || d.rewardType === 'card') &&
-    !d.prize.name
-  ) {
+  } else if (!d.prize.name) {
     out.push({
       step: 'value',
       label:
-        d.rewardType === 'pack' ? 're-pick the pack to give' : 're-pick the card',
+        d.rewardType === 'pack'
+          ? 're-pick the pack to give'
+          : 're-pick the card',
+    });
+  }
+  if (d.rewardType && d.rewardType !== 'tickets' && !validTickets(d.tickets)) {
+    out.push({
+      step: 'reward',
+      label: 'a whole number for Tickets on top, in More options',
+    });
+  }
+  if (out.length === 0 && taskName(draftParts(d)).length > MAX_TITLE) {
+    out.push({
+      step: 'target',
+      label: `a shorter name: this one is over ${MAX_TITLE} characters`,
     });
   }
   return out;
@@ -392,12 +482,10 @@ export interface BuilderCheck {
   text: string;
 }
 
-const rm = (n: number): string =>
-  `RM ${n.toLocaleString('en-MY', { maximumFractionDigits: 2 })}`;
-
 /**
  * Says out loud what the sentence would do: a check-in day already taken, a task
- * the week already has, and a reward worth more than the goal costs.
+ * the week already has, a pack players can't open, and a reward worth more than
+ * the goal costs.
  */
 export const draftChecks = (
   d: Draft,
@@ -424,19 +512,26 @@ export const draftChecks = (
     );
   }
 
-  const scope =
-    d.reqType === 'rip_count'
-      ? d.reqPack
-      : d.reqType === 'vault_pixel_count'
-        ? d.reqPixel
-        : null;
-  if (scope && scope !== ANY && n > 0) {
-    const twin = others.find(
-      (t) =>
-        t.requirement.type === d.reqType &&
-        goalAmount(t.requirement) === n &&
-        (t.requirement.pack_id ?? t.requirement.pixel_pokemon_id) === scope,
-    );
+  if (d.kind === 'weekly' && d.reqType !== 'checkin_days' && n > 0) {
+    const scope =
+      d.reqType === 'rip_count'
+        ? d.reqPack
+        : d.reqType === 'vault_pixel_count'
+          ? d.reqPixel
+          : null;
+    const twin =
+      scope === ''
+        ? undefined
+        : others.find(
+            (t) =>
+              t.kind === 'weekly' &&
+              t.requirement.type === d.reqType &&
+              goalAmount(t.requirement) === n &&
+              (scope === null ||
+                ((d.reqType === 'rip_count'
+                  ? t.requirement.pack_id
+                  : t.requirement.pixel_pokemon_id) ?? ANY) === scope),
+          );
     if (twin) {
       out.push({
         tone: 'warn',
@@ -445,12 +540,19 @@ export const draftChecks = (
     }
   }
 
+  if (d.reqType === 'rip_count' && d.goal.buyable === false) {
+    out.push({
+      tone: 'warn',
+      text: `Players can't rip ${d.goal.name ?? 'this pack'} right now, so they can't finish this goal.`,
+    });
+  }
+
   const spend = leastSpend(d.reqType, n, d.goal.price);
   const back =
     d.rewardType === 'credit' ? Number(d.rewardValue) : d.prize.value;
   if (spend && back && draftMissing(d).length === 0) {
     const pct = Math.round((back / spend) * 100);
-    const sum = `The least a player spends is ${rm(spend)}. They get ${rm(back)} back (${pct}%).`;
+    const sum = `The least a player spends is ${money(spend)}. They get ${money(back)} back (${pct}%).`;
     out.push(
       pct > 100
         ? {
@@ -477,20 +579,28 @@ export const issueText = (
   t: AdminTaskDefinition,
   issue: NameIssue,
 ): { headline: string; detail: string } => {
-  const claims = t.claims
-    ? `${t.claims.toLocaleString('en-MY')} claimed.`
-    : 'No claims yet.';
+  const claims =
+    t.claims === undefined
+      ? ''
+      : t.claims
+        ? `${t.claims.toLocaleString('en-MY')} claimed.`
+        : 'No claims yet.';
   const name = `“${t.title}”`;
   switch (issue.kind) {
     case 'any': {
-      const what = t.requirement.type === 'rip_count' ? 'pack' : 'Pokémon';
+      const what =
+        t.requirement.type === 'rip_count'
+          ? 'pack'
+          : t.requirement.type === 'vault_count'
+            ? 'card'
+            : 'Pokémon';
       const price = t.view?.goal_price_myr ?? null;
       const value = t.view?.reward_value_myr ?? null;
       const n = goalAmount(t.requirement);
       const cost =
         price !== null
-          ? `Cheapest way to earn it: ${n} × ${rm(price)} = ${rm(n * price)}. ${
-              value !== null ? `It pays ${rm(value)}. ` : ''
+          ? `Cheapest way to earn it: ${n} × ${money(price)} = ${money(n * price)}. ${
+              value !== null ? `It pays ${money(value)}. ` : ''
             }`
           : '';
       return {
@@ -511,6 +621,11 @@ export const issueText = (
     case 'target':
       return {
         headline: `${name} doesn't mention ${issue.wants}, which is what the rule counts.`,
+        detail: claims,
+      };
+    case 'reward':
+      return {
+        headline: `${name} says ${issue.says}. The rule pays ${labelsOf(t).reward}.`,
         detail: claims,
       };
   }
@@ -534,6 +649,8 @@ export const issueFixes = (
     image: string;
     price: number;
     prize_type?: string;
+    status?: string;
+    in_stock?: boolean;
   }[] = [],
 ): IssueFix[] => {
   const stay = t.claims
@@ -547,36 +664,71 @@ export const issueFixes = (
   const n = goalAmount(t.requirement);
   switch (issue.kind) {
     case 'any': {
-      const pack =
+      const candidates =
         t.requirement.type === 'rip_count'
-          ? packs.find(
+          ? packs.filter(
               (p) =>
+                p.status === 'active' &&
+                p.in_stock !== false &&
+                p.price > 0 &&
                 p.prize_type !== 'tickets' &&
-                p.title.toLowerCase().split(/\s+/)[0] === issue.says,
+                shortPack(p.title).toLowerCase() === issue.says,
             )
-          : undefined;
+          : [];
+      const what =
+        t.requirement.type === 'rip_count'
+          ? 'pack'
+          : t.requirement.type === 'vault_count'
+            ? 'card'
+            : 'Pokémon';
       const keep: IssueFix = {
-        label: `Any ${t.requirement.type === 'rip_count' ? 'pack' : 'Pokémon'} is right`,
+        label: `Any ${what} is right`,
         note: 'The rule stays, and the name changes to say so.',
         action: 'patch',
       };
-      if (!pack) return [open, keep];
-      const short = capital(issue.says);
+      // Only when the name can only mean one pack on sale. Otherwise a person picks.
+      if (candidates.length !== 1) return [open, keep];
+      const pack = candidates[0];
+      const short = shortPack(pack.title);
       return [
         {
           label: `Make it ${short} only`,
-          note: `New claims will need ${n} ${short} rips. ${stay}`.trim(),
+          note: `New claims will need ${n} ${pack.title} rips. ${stay}`.trim(),
           action: 'patch',
           patch: (d) => ({
             ...d,
             reqPack: pack.slug,
-            goal: { name: pack.title, image: pack.image, price: pack.price },
+            goal: {
+              name: pack.title,
+              image: pack.image,
+              price: pack.price,
+              buyable: true,
+            },
           }),
         },
         keep,
       ];
     }
-    case 'count':
+    case 'count': {
+      const rename: IssueFix = {
+        label: `${n} is right, rename`,
+        note: `The rule stays at ${n}, and the name changes to match.`,
+        action: 'patch',
+        patch: (d) => ({ ...d, reqN: String(n) }),
+      };
+      // Only offer a rule that can hold that number: a daily check-in is always
+      // one, and a week has seven days.
+      const possible = draftToPayload({
+        ...draftFrom(t),
+        reqN: String(issue.says),
+      });
+      if (
+        !possible ||
+        issue.says <= 0 ||
+        goalAmount(possible.requirement) !== issue.says
+      ) {
+        return [open, rename];
+      }
       return [
         {
           label: `Change rule to ${issue.says}`,
@@ -584,12 +736,9 @@ export const issueFixes = (
           action: 'patch',
           patch: (d) => ({ ...d, reqN: String(issue.says) }),
         },
-        {
-          label: `${n} is right, rename`,
-          note: `The rule stays at ${n}, and the name changes to match.`,
-          action: 'patch',
-        },
+        rename,
       ];
+    }
     case 'goal':
       return [
         open,
@@ -605,6 +754,15 @@ export const issueFixes = (
         {
           label: 'Rule is right, rename',
           note: 'The rule stays, and the name changes to match.',
+          action: 'patch',
+        },
+      ];
+    case 'reward':
+      return [
+        open,
+        {
+          label: 'Reward is right, rename',
+          note: 'The reward stays, and the name changes to match.',
           action: 'patch',
         },
       ];
@@ -630,7 +788,10 @@ export const labelsOf = (
 const dateLabel = (iso: string | null): string =>
   iso ? orderDateTime(iso) : '—';
 
-export const windowLabel = (t: AdminTaskDefinition): string =>
+export const windowLabel = (t: {
+  starts_at: string | null;
+  ends_at: string | null;
+}): string =>
   t.starts_at || t.ends_at
     ? `${dateLabel(t.starts_at)} → ${dateLabel(t.ends_at)}`
     : 'Always on';

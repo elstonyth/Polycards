@@ -138,37 +138,85 @@ describe('resolveTaskLabels', () => {
 });
 
 describe('resolveTaskViews', () => {
+  const pack = (slug: string, title: string, price: string, over = {}) => ({
+    slug,
+    title,
+    image: `/${slug}.webp`,
+    price,
+    status: 'active',
+    in_stock: true,
+    category: 'pokemon',
+    ...over,
+  });
+  const onSaleFilters: unknown[] = [];
   const catalog = {
-    listPacks: async (sel: { slug?: string[]; status?: string }) =>
-      sel.status === 'active'
-        ? [{ price: 0 }, { price: 45 }, { price: 10 }, { price: 300 }]
-        : (sel.slug ?? []).map((slug) => ({
-            slug,
-            title: slug === 'bronze-pack' ? 'Bronze Pack' : 'Gold Pack',
-            image: `/${slug}.webp`,
-            price: slug === 'bronze-pack' ? '300' : '1200',
-          })),
-    listCards: async () => [],
-    listPixelPokemon: async () => [
-      { id: 'px_151', name: 'Mew', image_url: 'https://cdn/mew.gif' },
+    listPacks: async (sel: { slug?: string[]; status?: string }) => {
+      if (sel.status === 'active') {
+        onSaleFilters.push(sel);
+        return [{ price: 0 }, { price: 45 }, { price: 20 }, { price: 300 }];
+      }
+      const all = [
+        pack('silver-pack', 'Silver Pack', '600'),
+        pack('gold-pack', 'Gold Pack', '1200'),
+        pack('draft-pack', 'Draft Pack', '50', { status: 'draft' }),
+        pack('sold-pack', 'Sold Pack', '50', { in_stock: false }),
+        pack('free-pack', 'Free Pack', '0', { category: 'free_welcome' }),
+        pack('box-pack', 'Box Pack', '50', { category: 'reward_box' }),
+      ];
+      return all.filter((p) => (sel.slug ?? []).includes(p.slug));
+    },
+    listCards: async () => [
+      {
+        handle: 'umbreon',
+        name: 'Umbreon',
+        grader: 'PSA',
+        grade: '10',
+        market_value: 10,
+        market_multiplier: 1,
+        image: '/raw.webp',
+        slab_image: '/slab.webp',
+      },
+      {
+        handle: 'raw',
+        name: 'Raw Card',
+        grader: '',
+        grade: '',
+        market_value: 1,
+        market_multiplier: 1,
+        image: '/raw2.webp',
+        slab_image: null,
+      },
     ],
+    listPixelPokemon: async () => [
+      { id: 'px_151', name: 'Mew', image_url: 'https://cdn/mew.gif', variant: 'normal' },
+      { id: 'px_wano', name: 'Luffy', image_url: 'https://cdn/l.gif', variant: 'wano' },
+    ],
+    retrieveFxRate: async () => 4,
   } as unknown as PacksModuleService;
 
-  it('prices an any-pack goal at the cheapest paid pack, so RM 100 for 10 rips shows', async () => {
+  it('prices an any-pack goal at the cheapest pack a player can really open', async () => {
+    onSaleFilters.length = 0;
     const out = await resolveTaskViews(catalog, [
       {
         id: 'any',
         requirement: { type: 'rip_count', count: 10, pack_id: null },
-        reward: { type: 'pack', pack_id: 'bronze-pack' },
+        reward: { type: 'pack', pack_id: 'silver-pack' },
       },
     ]);
     expect(out.get('any')).toEqual({
       goal_name: null,
       goal_image: null,
-      goal_price_myr: 10,
-      reward_name: 'Bronze Pack',
-      reward_image: '/bronze-pack.webp',
-      reward_value_myr: 300,
+      goal_price_myr: 20,
+      goal_buyable: null,
+      reward_name: 'Silver Pack',
+      reward_grade: null,
+      reward_image: '/silver-pack.webp',
+      reward_value_myr: 600,
+    });
+    expect(onSaleFilters[0]).toEqual({
+      status: 'active',
+      in_stock: true,
+      category: { $nin: ['reward_box', 'free_welcome'] },
     });
   });
 
@@ -192,13 +240,84 @@ describe('resolveTaskViews', () => {
     expect(out.get('rip')).toMatchObject({
       goal_name: 'Gold Pack',
       goal_price_myr: 1200,
+      goal_buyable: true,
       reward_value_myr: 50,
     });
     expect(out.get('pull')).toMatchObject({
       goal_name: 'Mew',
       goal_image: 'https://cdn/mew.gif',
       goal_price_myr: null,
+      goal_buyable: null,
       reward_value_myr: null,
+    });
+  });
+
+  it('a variant keeps its name apart from the plain sprite', async () => {
+    const out = await resolveTaskViews(catalog, [
+      {
+        id: 'v',
+        requirement: {
+          type: 'vault_pixel_count',
+          count: 1,
+          pixel_pokemon_id: 'px_wano',
+        },
+        reward: { type: 'tickets' },
+      },
+    ]);
+    expect(out.get('v')!.goal_name).toBe('Luffy (wano)');
+  });
+
+  it.each(['draft-pack', 'sold-pack', 'free-pack', 'box-pack'])(
+    'says a goal on %s cannot be ripped',
+    async (slug) => {
+      const out = await resolveTaskViews(catalog, [
+        {
+          id: 'x',
+          requirement: { type: 'rip_count', count: 2, pack_id: slug },
+          reward: { type: 'credit', amount_myr: 5 },
+        },
+      ]);
+      expect(out.get('x')!.goal_buyable).toBe(false);
+    },
+  );
+
+  it('a card reward carries its slab, grade and shop value', async () => {
+    const out = await resolveTaskViews(catalog, [
+      {
+        id: 'card',
+        requirement: { type: 'checkin_days', days: 3 },
+        reward: { type: 'card', card_handle: 'umbreon' },
+      },
+      {
+        id: 'raw',
+        requirement: { type: 'checkin_days', days: 4 },
+        reward: { type: 'card', card_handle: 'raw' },
+      },
+    ]);
+    expect(out.get('card')).toMatchObject({
+      reward_name: 'Umbreon',
+      reward_grade: 'PSA 10',
+      reward_image: '/slab.webp',
+    });
+    expect(out.get('card')!.reward_value_myr).toBeGreaterThan(0);
+    expect(out.get('raw')).toMatchObject({
+      reward_grade: null,
+      reward_image: '/raw2.webp',
+    });
+  });
+
+  it('a deleted target has no name, and no claim about whether it can be ripped', async () => {
+    const out = await resolveTaskViews(catalog, [
+      {
+        id: 'gone',
+        requirement: { type: 'rip_count', count: 2, pack_id: 'gone-pack' },
+        reward: { type: 'credit', amount_myr: 5 },
+      },
+    ]);
+    expect(out.get('gone')).toMatchObject({
+      goal_name: null,
+      goal_price_myr: null,
+      goal_buyable: null,
     });
   });
 });

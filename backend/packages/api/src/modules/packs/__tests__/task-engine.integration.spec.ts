@@ -649,6 +649,98 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
     });
 
+    it('saving an old row clears the leftover keys it was stored with', async () => {
+      const { id } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Pull 2 Eevee',
+        requirement: { type: 'vault_pixel_count', count: 2, pixel_pokemon_id: null },
+        reward: { type: 'credit', amount_myr: 5 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      // The repository's own update merges, which is how such rows came to be.
+      await service.updateTaskDefinitions({
+        selector: { id },
+        data: { requirement: { days: 1 }, reward: { pack_id: 'old' } },
+      });
+      const [dirty] = await service.listTaskDefinitions({ id });
+      expect(dirty.requirement).toMatchObject({ days: 1 });
+
+      await service.saveTaskDefinition({
+        id,
+        kind: 'weekly',
+        title: 'Pull 2 Eevee',
+        requirement: dirty.requirement,
+        reward: dirty.reward,
+        active: false,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'retire',
+      });
+      const [clean] = await service.listTaskDefinitions({ id });
+      expect(clean.requirement).toEqual({
+        type: 'vault_pixel_count',
+        count: 2,
+        pixel_pokemon_id: null,
+      });
+      expect(clean.reward).toEqual({ type: 'credit', amount_myr: 5 });
+      expect(clean.active).toBe(false);
+    });
+
+    it('taskClaimCounts counts live claims per task', async () => {
+      await service.checkInDaily({ customerId: 'cus_count' });
+      const { id } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Check in once',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      expect((await service.taskClaimCounts()).get(id)).toBeUndefined();
+      const claim = await service.claimTask({
+        customerId: 'cus_count',
+        taskId: id,
+      });
+      if (!claim.claimed) throw new Error('claim refused');
+      expect((await service.taskClaimCounts()).get(id)).toBe(1);
+      await service.softDeleteTaskClaims([claim.claimId]);
+      expect((await service.taskClaimCounts()).get(id)).toBeUndefined();
+    });
+
+    it('ended rows never crowd a live task out of the hub', async () => {
+      // Every planned week adds rows that stay active after they end.
+      const longAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      await service.createTaskDefinitions(
+        Array.from({ length: 500 }, (_, i) => ({
+          kind: 'weekly' as const,
+          title: `Old ${i}`,
+          requirement: { type: 'checkin_days', days: 1 },
+          reward: { type: 'credit', amount_myr: 1 },
+          active: true,
+          sort: 0,
+          tickets: 0,
+          ends_at: longAgo,
+        })),
+      );
+      await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Still live',
+        requirement: { type: 'checkin_days', days: 2 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 1,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      const hub = await service.taskHubFor({ customerId: 'cus_crowd' });
+      expect(hub.tasks.map((t) => t.title)).toEqual(['Still live']);
+    });
+
     it('a closed window declines with its own reason, not "not completed"', async () => {
       // The window can close between the page load and the tap. Answering
       // 'not_completed' over a finished task is the most confusing thing this

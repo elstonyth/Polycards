@@ -12,20 +12,19 @@ import {
 import type { ReactNode } from 'react';
 import type { AdminTaskDefinition } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
-import { goalAmount, shortPack } from './task-board';
-import { labelsOf } from './task-draft';
+import { goalAmount, money, shortPack } from './task-board';
+import { labelsOf, type TaskStatus } from './task-draft';
 import { goalWords, rewardPictureOf, rewardWords } from './task-words';
-
-const money = (n: number): string =>
-  `RM ${n.toLocaleString('en-MY', { maximumFractionDigits: 2 })}`;
 
 /** The silver ticket art vanishes on a white surface. */
 export const RewardArt = ({ t }: { t: AdminTaskDefinition }) => {
   const picture = rewardPictureOf(t);
+  const tall = t.reward.type === 'pack' || t.reward.type === 'card';
   return (
     <span
       className={clx(
-        'relative h-12 w-9 overflow-hidden rounded-lg max-sm:hidden',
+        'relative w-9 overflow-hidden rounded-lg max-sm:hidden',
+        tall ? 'h-12' : 'h-9',
         t.reward.type === 'tickets' && 'bg-[#141416]',
       )}
     >
@@ -67,7 +66,7 @@ export const GoalArt = ({ t }: { t: AdminTaskDefinition }) => {
         <CreditCard />
       ) : type === 'reach_level' ? (
         <Trophy />
-      ) : type === 'vault_count' ? (
+      ) : type === 'vault_count' || type === 'vault_pixel_count' ? (
         <Star />
       ) : (
         <Sparkles />
@@ -96,14 +95,20 @@ export const GoalLine = ({ t }: { t: AdminTaskDefinition }) => {
 export const TaskRow = ({
   t,
   flagged,
+  status,
+  note,
   actions,
   onOpen,
 }: {
   t: AdminTaskDefinition;
   /** The stored name parts from the rule. */
   flagged: boolean;
+  /** Worth saying only where the page doesn't already imply it. */
+  status?: TaskStatus;
+  /** A line about the row's own window. */
+  note?: string | null;
   actions?: ReactNode;
-  /** Absent = a past week, read-only. */
+  /** Absent = a past week, where a row doesn't open on a click. */
   onOpen?: () => void;
 }) => {
   const anyPack = t.requirement.type === 'rip_count' && !t.requirement.pack_id;
@@ -116,6 +121,15 @@ export const TaskRow = ({
           <Text as="span" size="small" leading="compact">
             <GoalLine t={t} />
           </Text>
+          {t.sort !== 0 && (
+            <Text
+              as="span"
+              size="xsmall"
+              className="text-ui-fg-muted tabular-nums"
+            >
+              #{t.sort}
+            </Text>
+          )}
           {flagged ? (
             <Badge size="2xsmall" color="orange">
               Check
@@ -126,6 +140,21 @@ export const TaskRow = ({
                 Any pack
               </Badge>
             )
+          )}
+          {t.view?.goal_buyable === false && (
+            <Badge size="2xsmall" color="orange">
+              Not on sale
+            </Badge>
+          )}
+          {status === 'upcoming' && (
+            <Badge size="2xsmall" color="blue">
+              Upcoming
+            </Badge>
+          )}
+          {status === 'ended' && (
+            <Badge size="2xsmall" color="grey">
+              Ended
+            </Badge>
           )}
           {!t.active && (
             <Badge size="2xsmall" color="grey">
@@ -148,6 +177,15 @@ export const TaskRow = ({
             </Text>
           )
         )}
+        {note && (
+          <Text
+            as="span"
+            size="xsmall"
+            className="text-ui-fg-muted block tabular-nums"
+          >
+            {note}
+          </Text>
+        )}
       </span>
       <Perforation />
       <RewardArt t={t} />
@@ -168,7 +206,7 @@ export const TaskRow = ({
     </>
   );
   const grid =
-    'grid min-h-16 min-w-0 flex-1 grid-cols-[44px_minmax(0,1fr)_1px_minmax(84px,38%)] items-center gap-x-3 py-2 pr-1.5 pl-3 text-left sm:grid-cols-[44px_minmax(0,1fr)_1px_36px_minmax(92px,0.72fr)]';
+    'grid min-h-[72px] min-w-0 flex-1 grid-cols-[44px_minmax(0,1fr)_1px_minmax(84px,38%)] items-center gap-x-3 py-2 pr-1.5 pl-3 text-left sm:grid-cols-[44px_minmax(0,1fr)_1px_36px_minmax(92px,0.72fr)]';
   return (
     <li className="hover:bg-ui-bg-base-hover flex items-center rounded-lg transition-colors">
       {onOpen ? (
@@ -184,33 +222,34 @@ export const TaskRow = ({
 };
 
 const DayValue = ({ rows }: { rows: AdminTaskDefinition[] }) => {
-  const first = rows[0];
+  // Each row says its own reward. Rows are never summed into one figure, because
+  // a figure no row shows is a figure nobody can check.
   if (rows.length > 1) {
-    const tickets = rows.reduce(
-      (sum, r) => sum + (r.reward.type === 'tickets' ? (r.tickets ?? 0) : 0),
-      0,
-    );
     return (
-      <span className="block text-[13px] leading-tight font-semibold">
-        {tickets > 0 ? `${tickets} tickets` : `${rows.length} rewards`}
-        {tickets > 0 && (
-          <span className="block text-xs font-normal text-neutral-300">
-            {rows.length} rewards
+      <span className="block text-xs leading-tight font-semibold">
+        {rows.length} rewards
+        {rows.map((r) => (
+          <span key={r.id} className="block font-normal text-neutral-300">
+            {rewardWords(r).main}
           </span>
-        )}
+        ))}
       </span>
     );
   }
+  const first = rows[0];
   const type = first.reward.type;
+  const tickets = first.tickets ?? 0;
   const main =
     type === 'tickets'
-      ? `×${first.tickets ?? 0}`
+      ? `×${tickets}`
       : type === 'credit'
         ? money(Number(first.reward.amount_myr ?? 0))
         : shortPack(first.view?.reward_name ?? labelsOf(first).reward);
   const sub =
     type === 'tickets'
-      ? 'tickets'
+      ? tickets === 1
+        ? 'ticket'
+        : 'tickets'
       : type === 'credit'
         ? 'credit'
         : type === 'pack'
@@ -222,6 +261,11 @@ const DayValue = ({ rows }: { rows: AdminTaskDefinition[] }) => {
       {sub && (
         <span className="block text-xs font-normal text-neutral-300">
           {sub}
+        </span>
+      )}
+      {type !== 'tickets' && tickets > 0 && (
+        <span className="block text-xs font-normal text-neutral-300">
+          + {tickets} {tickets === 1 ? 'ticket' : 'tickets'}
         </span>
       )}
     </span>
@@ -269,6 +313,7 @@ export const CheckInTrack = ({
             {onAddDay ? (
               <button
                 type="button"
+                aria-label={`Add a reward to day ${day}`}
                 onClick={() => onAddDay(day)}
                 className={clx(
                   empty,

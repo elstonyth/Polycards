@@ -136,6 +136,29 @@ describe('saveTaskDefinition re-validates targets only when they change', () => 
     expect(f.createAdminActionAudits).toHaveBeenCalledTimes(1);
   });
 
+  it('Retire on an old row with a leftover key and a deleted target still saves', async () => {
+    const f = fakeSave({
+      ...EXISTING,
+      requirement: { type: 'rip_count', count: 3, pack_id: 'gone', days: 1 },
+      reward: { type: 'card', card_handle: 'gone-card', pack_id: 'old' },
+      kind: 'weekly',
+    });
+    await expect(
+      f.svc.saveTaskDefinition(
+        {
+          ...base,
+          kind: 'weekly',
+          requirement: { type: 'rip_count', count: 3, pack_id: 'gone', days: 1 },
+          reward: { type: 'card', card_handle: 'gone-card', pack_id: 'old' },
+          active: false,
+        },
+        f.ctx,
+      ),
+    ).resolves.toEqual({ id: 'task_1' });
+    expect(f.listPacks).not.toHaveBeenCalled();
+    expect(f.listCards).not.toHaveBeenCalled();
+  });
+
   it('the comparison is key-order insensitive (jsonb does not keep ours)', async () => {
     const f = fakeSave({
       ...EXISTING,

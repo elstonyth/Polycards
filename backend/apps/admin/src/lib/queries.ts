@@ -2000,7 +2000,13 @@ export const useSetPartnerRate = () => {
 export type { AdminTaskDefinition } from './admin-rest';
 
 export const useTaskDefinitions = (): UseQueryResult<AdminTaskDefinition[]> =>
-  useQuery({ queryKey: qk.taskDefinitions, queryFn: listTaskDefinitions });
+  useQuery({
+    queryKey: qk.taskDefinitions,
+    queryFn: listTaskDefinitions,
+    // The board reads "this week" from the fetch time. A page left open across
+    // the Monday reset must not keep calling last week this week.
+    refetchInterval: 60_000,
+  });
 
 export const useSaveTaskDefinition = () => {
   const qc = useQueryClient();
@@ -2012,7 +2018,9 @@ export const useSaveTaskDefinition = () => {
 };
 
 /** Saves a week's tasks one at a time, each with its own audit row. Stops at the
- *  first refusal: the list refetches either way, so what landed shows as done. */
+ *  first refusal: the list refetches either way, so what landed shows as done.
+ *  Spaced out because these share the admin limit of 30 requests per 10 seconds,
+ *  and a big week would otherwise trip it partway through. */
 export const usePublishTasks = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -2021,6 +2029,7 @@ export const usePublishTasks = () => {
       onProgress: (saved: number) => void;
     }) => {
       for (const [i, task] of input.tasks.entries()) {
+        if (i > 0) await new Promise((done) => setTimeout(done, 400));
         await saveTaskDefinition(task);
         input.onProgress(i + 1);
       }

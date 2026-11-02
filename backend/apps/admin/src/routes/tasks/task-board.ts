@@ -7,6 +7,8 @@ import type { AdminTaskDefinition } from '../../lib/admin-rest';
 const MYT_MS = 8 * 3600_000;
 const WEEK_MS = 7 * 24 * 3600_000;
 const OVERRUN_MS = 2 * 3600_000;
+// Leaves room in the backend's 120-character title for the goal and the tickets.
+const MAX_CARD_IN_NAME = 60;
 
 /** Monday 00:00 Malaysia time of the week holding `at`, as an instant. Same
  *  week as the backend's taskWeekFor. */
@@ -43,25 +45,56 @@ export const weekLabel = (start: number): string => {
   return `${from} – ${myt(lastDay, { day: 'numeric', month: 'short' })}`;
 };
 
-/** Does this task run in the week? Retired tasks are listed apart. A hand-typed
- *  end can run a little past the Monday reset (12:59 AM, say);
- *  that overrun doesn't make it part of the next week. */
-export const runsInWeek = (t: AdminTaskDefinition, start: number): boolean => {
-  if (!t.active) return false;
-  const end = start + WEEK_MS;
-  const from = t.starts_at ? new Date(t.starts_at).getTime() : start;
-  const to = t.ends_at ? new Date(t.ends_at).getTime() : end;
-  const overlap = Math.min(to, end) - Math.max(from, start);
-  return overlap > 0 && !(from < start && overlap < OVERRUN_MS);
+const when = (iso: string | null | undefined, fallback: number): number =>
+  iso ? new Date(iso).getTime() : fallback;
+
+/** A hand-typed window can run a little past the Monday reset (12:59 AM, say) or
+ *  start just before it. That sliver doesn't make it part of the other week. */
+const overlapsWeek = (t: AdminTaskDefinition, start: number): boolean => {
+  const from = when(t.starts_at, -Infinity);
+  const to = when(t.ends_at, Infinity);
+  const overlap = Math.min(to, start + WEEK_MS) - Math.max(from, start);
+  return overlap > 0 && (overlap >= OVERRUN_MS || overlap * 2 >= to - from);
 };
 
-export const retiredInWeek = (
+/** Does this task run in the week? Retired tasks are listed apart. */
+export const runsInWeek = (t: AdminTaskDefinition, start: number): boolean =>
+  t.active && overlapsWeek(t, start);
+
+/** Switched off, but it ran in this week before that. A row retired before
+ *  retired_at existed has no date to place it by, so it stays on the Retired tab. */
+export const retiredInWeek = (t: AdminTaskDefinition, start: number): boolean =>
+  !t.active &&
+  Boolean(t.retired_at) &&
+  new Date(t.retired_at as string).getTime() >= start &&
+  overlapsWeek(t, start);
+
+/** The window as the viewed week would give it, give or take a typed overrun. */
+export const coversWeek = (t: AdminTaskDefinition, start: number): boolean =>
+  Math.abs(when(t.starts_at, start) - start) <= OVERRUN_MS &&
+  Math.abs(when(t.ends_at, start + WEEK_MS) - (start + WEEK_MS)) <= OVERRUN_MS;
+
+/** Where a row copied from `sourceWeek` should run. A whole week becomes the next
+ *  whole week; a shorter window keeps its shape, one week on. */
+export const copiedWindow = (
   t: AdminTaskDefinition,
-  start: number,
-): boolean => {
-  if (t.active || !t.retired_at) return false;
-  const at = new Date(t.retired_at).getTime();
-  return at >= start && at < start + WEEK_MS;
+  sourceWeek: number,
+): { starts_at: string; ends_at: string; short: boolean } => {
+  const target = addWeeks(sourceWeek, 1);
+  if (coversWeek(t, sourceWeek)) {
+    return {
+      starts_at: new Date(target).toISOString(),
+      ends_at: new Date(addWeeks(target, 1)).toISOString(),
+      short: false,
+    };
+  }
+  return {
+    starts_at: new Date(when(t.starts_at, sourceWeek) + WEEK_MS).toISOString(),
+    ends_at: new Date(
+      when(t.ends_at, sourceWeek + WEEK_MS) + WEEK_MS,
+    ).toISOString(),
+    short: true,
+  };
 };
 
 /** The amount the goal's own type uses. Old rows can hold a key from an earlier
@@ -78,8 +111,11 @@ export const goalAmount = (requirement: Record<string, unknown>): number => {
   return Number(field ?? 0);
 };
 
-const money = (n: number): string =>
-  `RM ${n.toLocaleString('en-MY', { maximumFractionDigits: 2 })}`;
+export const money = (n: number): string =>
+  `RM ${n.toLocaleString('en-MY', {
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 /** "Bronze Pack" reads as "Bronze" in a name; "30th Celebration" stays whole. */
 export const shortPack = (title: string): string =>
@@ -102,12 +138,17 @@ export interface NameParts {
 const rewardWords = (p: NameParts): string => {
   const tickets = `${p.tickets} ${p.tickets === 1 ? 'ticket' : 'tickets'}`;
   if (p.rewardType === 'tickets') return tickets;
+  const card = p.rewardName ?? 'card';
   const main =
     p.rewardType === 'credit'
       ? `free ${money(p.rewardAmount)} bonus credit`
       : p.rewardType === 'pack'
         ? `free 1 ${shortPack(p.rewardName ?? 'pack')}`
-        : `free ${p.rewardName ?? 'card'}`;
+        : `free ${
+            card.length > MAX_CARD_IN_NAME
+              ? `${card.slice(0, MAX_CARD_IN_NAME).trimEnd()}…`
+              : card
+          }`;
   return p.tickets > 0 ? `${main} + ${tickets}` : main;
 };
 
@@ -115,6 +156,7 @@ const rewardWords = (p: NameParts): string => {
  *  disagree. Close to how the team has been writing them by hand. */
 export const taskName = (p: NameParts): string => {
   const { n, goalName } = p;
+  const pokemonCards = `${n} Pokémon ${n === 1 ? 'card' : 'cards'}`;
   switch (p.reqType) {
     case 'checkin_days':
       return p.kind === 'daily'
@@ -122,10 +164,10 @@ export const taskName = (p: NameParts): string => {
         : `Check in ${n} ${n === 1 ? 'day' : 'days'} this week`;
     case 'vault_pixel_count':
       if (p.kind === 'achievement')
-        return goalName ? `Vault ${n} ${goalName}` : `Vault ${n} Pokémon cards`;
+        return goalName ? `Vault ${n} ${goalName}` : `Vault ${pokemonCards}`;
       return goalName
         ? `Pull ${n} ${goalName} (Graded or Ungraded)`
-        : `Pull ${n} Pokémon cards`;
+        : `Pull ${pokemonCards}`;
     case 'rip_count':
       return `${
         goalName
@@ -166,74 +208,170 @@ export type NameIssue =
   /** The name names something, the rule counts anything. */
   | { kind: 'any'; says: string }
   /** The name doesn't mention what the rule names. */
-  | { kind: 'target'; wants: string };
+  | { kind: 'target'; wants: string }
+  /** The name promises a different reward. */
+  | { kind: 'reward'; says: string };
 
 const GOAL_WORDS: [RegExp, string[]][] = [
   [/^check[\s-]?in/, ['checkin_days']],
-  [/^(pull|collect)/, ['vault_pixel_count']],
+  [/^(pull|collect)/, ['vault_pixel_count', 'vault_count']],
   [/^vault/, ['vault_pixel_count', 'vault_count']],
-  [/^rip/, ['rip_count']],
+  [/^(daily )?(rip|open)/, ['rip_count']],
   [/^top\s?up/, ['topup_myr']],
   [/^reach/, ['reach_level']],
 ];
 
 const FILLER = new Set(
-  'rip pull collect vault any pack packs of all pokémon pokemon card cards graded or ungraded the this week x'.split(
+  'rip open daily today pull collect vault any pack packs of all a an more rare new each per pokemon card cards graded or ungraded the this week x'.split(
     ' ',
   ),
 );
 
+/** Lower case, no accents, no hyphens or apostrophes: "Ho-Oh" and "Farfetch’d"
+ *  read the same however they were typed. Keeps . and , for numbers. */
+const normal = (s: string): string =>
+  s
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/['’`]/g, '')
+    .replace(/[-–—:;!?()[\]"]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const wordRe = (word: string): RegExp =>
+  new RegExp(
+    `(?<![\\p{L}\\p{N}])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`,
+    'u',
+  );
+
+/** The count in a piece of title: "10", "x10", "10x", "1,000", "1 000", "1.5k". */
+const readCount = (text: string): number | null => {
+  // A space only groups thousands in money: "Rip 3 151" is 3 of the 151 pack.
+  const plain = text
+    .replace(/\brm\s?(\d{1,3}) (?=\d{3}\b)/g, '$1')
+    .replace(/\brm\s?/g, ' ');
+  const thousands = plain.match(
+    /(?<![\p{L}\p{N}.,])(\d+(?:\.\d+)?)\s*k(?![\p{L}\p{N}])/u,
+  );
+  if (thousands) return Math.round(Number(thousands[1]) * 1000);
+  const found = plain.match(
+    /(?<![\p{L}\p{N}.,])x?(\d{1,3}(?:,\d{3})+|\d+)x?(?![\p{L}\p{N}])/u,
+  );
+  return found ? Number(found[1].replace(/,/g, '')) : null;
+};
+
+const readMoney = (text: string): number | null => {
+  const found = text.match(/\d[\d,]*(?:\.\d+)?/);
+  return found ? Number(found[0].replace(/,/g, '')) : null;
+};
+
+const firstWord = (s: string): string => s.split(' ')[0];
+
+const rewardIssue = (
+  t: AdminTaskDefinition,
+  part: string,
+): NameIssue | null => {
+  if (!part) return null;
+  const kind = t.reward.type;
+  if (wordRe('ticket').test(part) || wordRe('tickets').test(part)) {
+    const says = readCount(part);
+    return says !== null && says !== (t.tickets ?? 0)
+      ? { kind: 'reward', says: `${says} tickets` }
+      : null;
+  }
+  if (kind === 'credit') {
+    const says = readMoney(part);
+    return says !== null && says !== Number(t.reward.amount_myr ?? 0)
+      ? { kind: 'reward', says: money(says) }
+      : null;
+  }
+  const name = t.view?.reward_name;
+  if ((kind === 'pack' || kind === 'card') && name) {
+    const word = firstWord(normal(shortPack(name)));
+    return wordRe(word).test(part)
+      ? null
+      : { kind: 'reward', says: part.replace(/\s+pack$/, '') };
+  }
+  return null;
+};
+
 /**
  * Reads a hand-typed title and says where it parts from the rule. New titles
  * come from taskName and always pass; this is for the rows typed before that.
- * Calibrated on titles staff have really typed (see the test).
+ * Calibrated on titles staff have really typed (see the test). A title it can't
+ * read is left alone: a wrong guess here would offer a button that changes a rule.
  */
 export const nameIssue = (t: AdminTaskDefinition): NameIssue | null => {
-  const title = t.title.toLowerCase().trim();
+  const title = normal(t.title);
   const type = String(t.requirement.type ?? '');
   const said = GOAL_WORDS.find(([word]) => word.test(title));
-  if (said && !said[1].includes(type)) {
-    return { kind: 'goal', says: t.title.split(/\s+/)[0] };
+  if (!said) return null;
+  if (!said[1].includes(type)) {
+    return { kind: 'goal', says: t.title.trim().split(/\s+/)[0] };
   }
 
-  // Only the part before "free 1 Bronze" talks about the goal.
-  const goalPart = title.split(/\b(?:free|win)\b|,\s/)[0];
+  const isRip = type === 'rip_count';
+  const isPull = type === 'vault_pixel_count';
   const goalName = t.view?.goal_name ?? null;
-  const namedWord = goalName ? goalName.toLowerCase().split(/\s+/)[0] : null;
+  // A variant is told apart by art and label; staff type the Pokémon's name.
+  const named = goalName
+    ? normal(isRip ? shortPack(goalName) : goalName.replace(/\s*\(.*\)$/, ''))
+    : null;
+  // The target's own name can hold "free", a comma or a number. Hide it first.
+  const hasWholeName = named !== null && wordRe(named).test(title);
+  const masked = hasWholeName
+    ? title.replace(wordRe(named as string), ' § ')
+    : title;
+  const [goalPart, ...rest] = masked.split(/\b(?:free|win)\b|,\s/);
 
-  // A pack can be named "30th" or "151": that number isn't the count.
-  const forCount = (namedWord ? goalPart.replace(namedWord, ' ') : goalPart)
-    .replace(/\brm\s?/g, '')
-    .replace(/\s+/g, ' ');
-  const found = forCount.match(/\b\d[\d,]*\b/);
-  const says = found
-    ? Number(found[0].replace(/,/g, ''))
-    : type === 'rip_count' || type === 'vault_pixel_count'
-      ? 1
-      : null;
+  // A pack named "30th" or "151": that number isn't the count.
+  const packWord = isRip && named ? firstWord(named) : null;
+  const says =
+    readCount(packWord ? goalPart.replace(wordRe(packWord), ' ') : goalPart) ??
+    (isRip || isPull ? 1 : null);
   if (says !== null && says !== goalAmount(t.requirement)) {
     return { kind: 'count', says };
   }
 
-  const canNameTarget = type === 'rip_count' || type === 'vault_pixel_count';
-  if (canNameTarget && !goalName) {
-    const targetId =
-      type === 'rip_count'
-        ? t.requirement.pack_id
-        : t.requirement.pixel_pokemon_id;
+  if ((isRip || isPull || type === 'vault_count') && !named) {
+    const targetId = isRip
+      ? t.requirement.pack_id
+      : t.requirement.pixel_pokemon_id;
     // A target that no longer exists has no name to compare: the row's label
     // already says "(missing)".
     if (targetId) return null;
     const word = goalPart
       .replace(/[^\p{L}\p{N}\s]/gu, ' ')
       .split(/\s+/)
-      .find((w) => w && !FILLER.has(w) && !/^\d/.test(w));
+      .find(
+        (w) =>
+          w &&
+          !FILLER.has(w) &&
+          w.replace(/^x|x$/g, '') !== String(says) &&
+          w !== 'rm',
+      );
     if (word) return { kind: 'any', says: word };
   }
-  if (canNameTarget && namedWord && !goalPart.includes(namedWord)) {
-    return { kind: 'target', wants: goalName as string };
+
+  if (isRip && named) {
+    const capsule = wordRe('capsule');
+    // A capsule spin is a cheap rip, so "Bronze" and "Bronze Capsule" must not pass
+    // as the same pack. A whole name was hidden above, so count what it held.
+    const saysCapsule =
+      capsule.test(goalPart) || (hasWholeName && capsule.test(named));
+    const mismatch =
+      saysCapsule !== capsule.test(named) ||
+      (!hasWholeName && !wordRe(firstWord(named)).test(goalPart));
+    if (mismatch) return { kind: 'target', wants: goalName as string };
   }
-  return null;
+  if (isPull && named) {
+    const last = named.split(' ').at(-1) as string;
+    if (!wordRe(last).test(goalPart) && !hasWholeName) {
+      return { kind: 'target', wants: goalName as string };
+    }
+  }
+  return rewardIssue(t, rest.join(' ').trim());
 };
 
 /** The least a player must spend to finish the goal, in RM. null = free to earn
@@ -249,23 +387,39 @@ export const leastSpend = (
       ? n
       : null;
 
-/** Same goal on the same target, so a week can't get the same task twice. */
-export const sameGoal = (
+const targetOf = (t: AdminTaskDefinition): unknown =>
+  t.requirement.type === 'rip_count'
+    ? (t.requirement.pack_id ?? null)
+    : t.requirement.type === 'vault_pixel_count'
+      ? (t.requirement.pixel_pokemon_id ?? null)
+      : null;
+
+/** The same goal type on the same pack or Pokémon, whatever the count. */
+export const sameTarget = (
   a: AdminTaskDefinition,
   b: AdminTaskDefinition,
 ): boolean =>
   a.kind === b.kind &&
   a.requirement.type === b.requirement.type &&
-  goalAmount(a.requirement) === goalAmount(b.requirement) &&
-  (a.requirement.pack_id ?? null) === (b.requirement.pack_id ?? null) &&
-  (a.requirement.pixel_pokemon_id ?? null) ===
-    (b.requirement.pixel_pokemon_id ?? null) &&
-  JSON.stringify(rewardKey(a)) === JSON.stringify(rewardKey(b));
+  targetOf(a) === targetOf(b);
 
-const rewardKey = (t: AdminTaskDefinition): unknown[] => [
-  t.reward.type,
-  t.reward.pack_id ?? null,
-  t.reward.card_handle ?? null,
-  t.reward.amount_myr ?? null,
-  t.tickets ?? 0,
-];
+const prizeOf = (t: AdminTaskDefinition): unknown =>
+  t.reward.type === 'pack'
+    ? (t.reward.pack_id ?? null)
+    : t.reward.type === 'card'
+      ? (t.reward.card_handle ?? null)
+      : null;
+
+/**
+ * The same task, so a week must not get it twice. An edited ticket or credit
+ * amount is still the same task, while "Pull 2" and "Pull 3" are separate tiers.
+ * Each key is read by type, so a leftover from an older rule changes nothing.
+ */
+export const sameGoal = (
+  a: AdminTaskDefinition,
+  b: AdminTaskDefinition,
+): boolean =>
+  sameTarget(a, b) &&
+  goalAmount(a.requirement) === goalAmount(b.requirement) &&
+  a.reward.type === b.reward.type &&
+  prizeOf(a) === prizeOf(b);

@@ -1,14 +1,11 @@
 // The words and pictures a task is drawn with, shared by the board, the builder
 // and the planner.
 import type { AdminTaskDefinition } from '../../lib/queries';
-import { goalAmount, shortPack } from './task-board';
+import { goalAmount, money, shortPack } from './task-board';
 import { labelsOf, type Draft } from './task-draft';
 
 export const TICKET_ART = '/images/lucky-draw/ticket.webp';
 export const COINS_ART = '/images/task/credits-coins.webp';
-
-const money = (n: number): string =>
-  `RM ${n.toLocaleString('en-MY', { maximumFractionDigits: 2 })}`;
 
 export const rewardPicture = (d: Draft): string | null =>
   d.rewardType === 'tickets'
@@ -64,14 +61,15 @@ export const rewardWords = (
   t: AdminTaskDefinition,
 ): { main: string; sub: string | null } => {
   const tickets = t.tickets ?? 0;
-  const plus = tickets > 0 ? `+ ${tickets} tickets` : null;
+  const count = `${tickets} ${tickets === 1 ? 'ticket' : 'tickets'}`;
+  const plus = tickets > 0 ? `+ ${count}` : null;
   const value = t.view?.reward_value_myr ?? null;
+  const worth =
+    [value !== null ? money(value) : null, plus].filter(Boolean).join(' ') ||
+    null;
   switch (t.reward.type) {
     case 'tickets':
-      return {
-        main: `${tickets} ${tickets === 1 ? 'ticket' : 'tickets'}`,
-        sub: null,
-      };
+      return { main: count, sub: null };
     case 'credit':
       return {
         main: `${money(Number(t.reward.amount_myr ?? 0))} credit`,
@@ -82,18 +80,12 @@ export const rewardWords = (
         main: t.view?.reward_name
           ? `Free rip · ${shortPack(t.view.reward_name)}`
           : labelsOf(t).reward,
-        sub:
-          [value !== null ? money(value) : null, plus]
-            .filter(Boolean)
-            .join(' ') || null,
+        sub: worth,
       };
     case 'card':
       return {
         main: t.view?.reward_name ?? labelsOf(t).reward,
-        sub:
-          [value !== null ? money(value) : null, plus]
-            .filter(Boolean)
-            .join(' ') || null,
+        sub: worth,
       };
     default:
       return { main: labelsOf(t).reward, sub: null };

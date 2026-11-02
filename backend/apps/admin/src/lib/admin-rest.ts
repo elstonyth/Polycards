@@ -2899,7 +2899,12 @@ export interface AdminTaskView {
   /** The least one rip can cost: the pack's price, or for "any pack" the
    *  cheapest pack on sale. null when the goal isn't a rip. */
   goal_price_myr: number | null;
+  /** false = a pack players can't open right now. null = names no pack. Optional:
+   *  a backend mid-deploy may not send it yet. */
+  goal_buyable?: boolean | null;
   reward_name: string | null;
+  /** "PSA 10" for a graded card reward. Optional for the same reason. */
+  reward_grade?: string | null;
   reward_image: string | null;
   /** null for tickets, which have no RM value. */
   reward_value_myr: number | null;

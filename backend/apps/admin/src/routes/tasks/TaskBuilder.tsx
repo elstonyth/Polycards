@@ -2,7 +2,7 @@
 // get 20 tickets." Each part is a button that opens its own small picker, and the
 // name, the player's card and the checks all follow the sentence. Nothing starts
 // filled in, so a part left alone can't quietly become the rule.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -10,9 +10,11 @@ import {
   Input,
   Label,
   Select,
+  Switch,
   Text,
   clx,
   toast,
+  usePrompt,
 } from '@medusajs/ui';
 import {
   Calendar,
@@ -34,7 +36,7 @@ import {
 } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { Field } from '../../components/form-bits';
-import { taskName } from './task-board';
+import { money, taskName } from './task-board';
 import {
   ANY,
   KIND_LABEL,
@@ -56,46 +58,70 @@ import { COINS_ART, TICKET_ART } from './task-words';
 
 type Step = BuilderStep | 'done';
 
-const money = (n: number): string =>
-  `RM ${n.toLocaleString('en-MY', { maximumFractionDigits: 2 })}`;
+// How many search results a picker draws before asking for a narrower search.
+const PIXEL_SHOWN = 40;
+const CARDS_SHOWN = 24;
 
 const firstMissing = (d: Draft): Step => draftMissing(d)[0]?.step ?? 'done';
 
-const GOALS: Record<
-  string,
-  { title: string; hint: string; icon: React.ReactNode }
-> = {
-  vault_pixel_count: {
-    title: 'Pull a Pokémon',
-    hint: 'Paid pulls, graded or not',
-    icon: <Star />,
-  },
-  rip_count: {
-    title: 'Rip packs',
-    hint: 'Paid rips of a pack you pick',
-    icon: <Sparkles />,
-  },
-  checkin_days: {
-    title: 'Check in',
-    hint: 'Days checked in this week',
-    icon: <Calendar />,
-  },
-  topup_myr: {
-    title: 'Top up',
-    hint: 'Real top-ups only',
-    icon: <CreditCard />,
-  },
-  reach_level: {
-    title: 'Reach a VIP level',
-    hint: 'Their highest level ever',
-    icon: <Trophy />,
-  },
-  vault_count: {
-    title: 'Vault cards',
-    hint: 'Cards ever vaulted',
-    icon: <Star />,
-  },
+const goalTile = (
+  type: string,
+  kind: Draft['kind'],
+): { title: string; hint: string; icon: React.ReactNode } => {
+  const lifetime = kind === 'achievement';
+  switch (type) {
+    case 'vault_pixel_count':
+      return lifetime
+        ? {
+            title: 'Vault a Pokémon',
+            hint: 'Cards ever vaulted, from any source',
+            icon: <Star />,
+          }
+        : {
+            title: 'Pull a Pokémon',
+            hint: 'Paid pulls, graded or not',
+            icon: <Star />,
+          };
+    case 'rip_count':
+      return {
+        title: 'Rip packs',
+        hint: 'Paid rips of a pack you pick',
+        icon: <Sparkles />,
+      };
+    case 'checkin_days':
+      return {
+        title: 'Check in',
+        hint:
+          kind === 'daily' ? 'Checking in today' : 'Days checked in this week',
+        icon: <Calendar />,
+      };
+    case 'topup_myr':
+      return {
+        title: 'Top up',
+        hint: lifetime ? 'Real top-ups, all time' : 'Real top-ups only',
+        icon: <CreditCard />,
+      };
+    case 'reach_level':
+      return {
+        title: 'Reach a VIP level',
+        hint: 'Their highest level ever',
+        icon: <Trophy />,
+      };
+    default:
+      return {
+        title: 'Vault cards',
+        hint: 'Cards ever vaulted',
+        icon: <Star />,
+      };
+  }
 };
+
+const defaultReason = (kind: Draft['kind'], weekText: string): string =>
+  kind === 'weekly'
+    ? `Week of ${weekText} tasks`
+    : kind === 'daily'
+      ? 'New daily task'
+      : 'New achievement';
 
 const Chip = ({
   label,
@@ -113,7 +139,7 @@ const Chip = ({
   <button
     type="button"
     onClick={onClick}
-    aria-pressed={current}
+    aria-current={current ? 'step' : undefined}
     className={clx(
       'mx-px inline-block rounded-md px-2.5 py-0.5 align-baseline font-medium transition-colors',
       filled && !warn
@@ -158,20 +184,16 @@ const Tile = ({
   </button>
 );
 
-const ArtGrid = ({
-  items,
-  pixel,
-}: {
-  items: {
-    key: string;
-    label: string;
-    sub?: string;
-    image: string | null;
-    pressed: boolean;
-    onClick: () => void;
-  }[];
-  pixel?: boolean;
-}) => (
+interface ArtItem {
+  key: string;
+  label: string;
+  sub?: string;
+  image: string | null;
+  pressed: boolean;
+  onClick: () => void;
+}
+
+const ArtGrid = ({ items, pixel }: { items: ArtItem[]; pixel?: boolean }) => (
   <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2">
     {items.map((it) => (
       <button
@@ -214,19 +236,22 @@ const AnyRow = ({
   title,
   hint,
   pressed,
+  disabled,
   onClick,
 }: {
   title: string;
   hint: string;
   pressed: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) => (
   <button
     type="button"
     onClick={onClick}
+    disabled={disabled}
     aria-pressed={pressed}
     className={clx(
-      'hover:bg-ui-bg-base-hover mt-2 flex w-full items-center gap-x-3 rounded-lg border border-dashed px-3 py-2.5 text-left transition-colors',
+      'hover:bg-ui-bg-base-hover mt-2 flex w-full items-center gap-x-3 rounded-lg border border-dashed px-3 py-2.5 text-left transition-colors disabled:opacity-50',
       pressed
         ? 'bg-ui-tag-orange-bg border-ui-tag-orange-border'
         : 'border-ui-border-strong',
@@ -244,6 +269,46 @@ const AnyRow = ({
   </button>
 );
 
+/** A picker's loading, failed and nothing-found states, one line each. */
+const PickerNote = ({
+  what,
+  loading,
+  failed,
+  empty,
+  onRetry,
+}: {
+  what: string;
+  loading: boolean;
+  failed: boolean;
+  empty: boolean;
+  onRetry: () => void;
+}) => {
+  if (loading) {
+    return (
+      <Text size="small" className="text-ui-fg-subtle">
+        Loading {what}…
+      </Text>
+    );
+  }
+  if (failed) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <Text size="small" className="text-ui-fg-error">
+          Couldn't load {what}.
+        </Text>
+        <Button size="small" variant="secondary" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+  return empty ? (
+    <Text size="small" className="text-ui-fg-subtle">
+      No {what} found.
+    </Text>
+  ) : null;
+};
+
 const Numbers = ({
   value,
   quick,
@@ -251,6 +316,7 @@ const Numbers = ({
   placeholder,
   onPick,
   onType,
+  onDone,
 }: {
   value: string;
   quick: number[];
@@ -258,6 +324,7 @@ const Numbers = ({
   placeholder: string;
   onPick: (n: number) => void;
   onType: (v: string) => void;
+  onDone: () => void;
 }) => (
   <div className="flex flex-wrap items-center gap-1.5">
     {quick.map((n) => (
@@ -277,9 +344,17 @@ const Numbers = ({
       aria-label={placeholder}
       placeholder={placeholder}
       className="w-28"
-      value={quick.map(String).includes(value) ? '' : value}
+      // The box always shows what's stored. Blanking it when the value matched a
+      // quick button threw away the digits typed so far: 15 became 5.
+      value={value === '0' ? '' : value}
       onChange={(e) => onType(e.target.value)}
+      onKeyDown={(e) => e.key === 'Enter' && onDone()}
     />
+    {value !== '' && value !== '0' && !quick.map(String).includes(value) && (
+      <Button size="small" variant="secondary" onClick={onDone}>
+        Next
+      </Button>
+    )}
   </div>
 );
 
@@ -294,33 +369,56 @@ export const TaskBuilder = ({
   initial: Draft;
   /** Claims already made on the row being edited. */
   claims: number;
-  /** What the week being viewed already holds, for the clash checks. */
+  /** What the week being worked on already holds, for the clash checks. */
   weekRows: AdminTaskDefinition[];
   weekText: string;
-  /** The week being viewed, as form values. A weekly task runs there. */
+  /** That week, as form values. A new weekly task runs there. */
   weekWindow: { startsAt: string; endsAt: string };
   onClose: () => void;
 }) => {
   const save = useSaveTaskDefinition();
+  const prompt = usePrompt();
   const [d, setD] = useState(initial);
   const [step, setStep] = useState<Step>(firstMissing(initial));
   const [reason, setReason] = useState(
-    initial.id ? '' : `Week of ${weekText} tasks`,
+    initial.id ? '' : defaultReason(initial.kind, weekText),
   );
+  const [reasonEdited, setReasonEdited] = useState(false);
   const [anyOk, setAnyOk] = useState(false);
+  // A half-typed date reads as '' from the input, the same as no date, so the
+  // browser's own flag is the only way to tell them apart.
+  const [badDate, setBadDate] = useState({ starts: false, ends: false });
+  const [pixelInput, setPixelInput] = useState('');
   const [pixelQuery, setPixelQuery] = useState('');
   const [cardQuery, setCardQuery] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setPixelQuery(pixelInput.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [pixelInput]);
+
+  // Picking unmounts the button that had focus. Move on to the next picker, so a
+  // keyboard or screen-reader user isn't dropped back at the top of the page.
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const firstStep = useRef(true);
+  useEffect(() => {
+    if (firstStep.current) {
+      firstStep.current = false;
+      return;
+    }
+    pickerRef.current?.focus();
+  }, [step]);
 
   const locked = Boolean(d.id);
   const needsPacks =
     (d.reqType === 'rip_count' && step === 'target') ||
     (d.rewardType === 'pack' && step === 'value');
-  const { data: packs } = usePacks({ enabled: needsPacks });
-  const { data: cards } = useCards({
+  const packsQuery = usePacks({ enabled: needsPacks });
+  const cardsQuery = useCards({
     enabled: d.rewardType === 'card' && step === 'value',
   });
-  const { data: vip } = useVipLevels();
-  const { data: pixel } = usePixelPokemon(
+  const vipQuery = useVipLevels();
+  const pixelsQuery = usePixelPokemon(
     { q: pixelQuery, limit: 200 },
     { enabled: d.reqType === 'vault_pixel_count' && step === 'target' },
   );
@@ -344,13 +442,18 @@ export const TaskBuilder = ({
     });
   };
   const pickKind = (kind: Draft['kind']) => {
+    if (kind === d.kind) return setStep(firstMissing(d));
     const allowed = REQUIREMENT_TYPES[kind].includes(d.reqType);
+    if (!reasonEdited) setReason(defaultReason(kind, weekText));
     set({
       kind,
       startsAt: kind === 'weekly' ? weekWindow.startsAt : '',
       endsAt: kind === 'weekly' ? weekWindow.endsAt : '',
       ...(allowed
-        ? {}
+        ? // A daily check-in's hidden 1 must not become a weekly goal nobody chose.
+          d.reqType === 'checkin_days'
+          ? { reqN: kind === 'daily' ? '1' : '' }
+          : {}
         : { reqType: '', reqN: '', reqPack: '', reqPixel: '', goal: NO_GOAL }),
     });
   };
@@ -359,25 +462,44 @@ export const TaskBuilder = ({
     set({
       rewardType,
       rewardValue: '',
-      tickets: '0',
+      // A tickets reward's count is its whole payout. Anything else keeps the
+      // tickets it pays on top.
+      tickets:
+        d.rewardType === 'tickets' || rewardType === 'tickets'
+          ? '0'
+          : d.tickets,
       prize: NO_PRIZE,
     });
   };
 
-  const activePacks = (packs ?? [])
-    .filter((p) => p.status === 'active' && p.price > 0)
+  const packs = packsQuery.data ?? [];
+  const onSale = packs
+    .filter(
+      (p) =>
+        p.status === 'active' &&
+        p.in_stock !== false &&
+        p.price > 0 &&
+        p.category !== 'reward_box' &&
+        p.category !== 'free_welcome',
+    )
     .sort((a, b) => a.price - b.price);
+  const onSaleSlugs = new Set(onSale.map((p) => p.slug));
+  const notOnSale = packs.filter((p) => !onSaleSlugs.has(p.slug));
+  const cheapest = onSale[0];
 
   const input = draftToInput(d, reason.trim());
   const missing = draftMissing(d);
   const anyWaiting = needsAnyConfirm(d) && !anyOk;
-  const scheduleValid = scheduleOk(d);
+  const scheduleValid = scheduleOk(d) && !badDate.starts && !badDate.ends;
   const ready =
-    Boolean(input) &&
-    missing.length === 0 &&
-    !anyWaiting &&
-    scheduleValid &&
-    reason.trim() !== '';
+    Boolean(input) && !anyWaiting && scheduleValid && reason.trim() !== '';
+  // Everything that keeps Save grey and isn't part of the sentence itself.
+  const blockers = [
+    missing.length === 0 && anyWaiting && 'Tick the any-pack box below.',
+    !scheduleValid &&
+      'The dates in More options need fixing: finish typing them, and the end must be after the start.',
+    reason.trim() === '' && 'A reason is needed.',
+  ].filter(Boolean);
 
   const submit = () => {
     if (!input || !ready) return;
@@ -390,12 +512,37 @@ export const TaskBuilder = ({
     });
   };
 
-  const whenLabel = KIND_LABEL[d.kind];
+  const dirty = JSON.stringify(d) !== JSON.stringify(initial);
+  const requestClose = async () => {
+    if (save.isPending) return;
+    if (dirty) {
+      const discard = await prompt({
+        variant: 'danger',
+        title: 'Discard this task?',
+        description: "What you've filled in won't be saved.",
+        confirmText: 'Discard',
+        cancelText: 'Keep editing',
+      });
+      if (!discard) return;
+    }
+    onClose();
+  };
+
   const n = Number(d.reqN);
   const hasPrize =
     d.rewardType === 'tickets'
       ? Number(d.tickets) >= 1
-      : d.rewardValue.trim() !== '' && d.rewardValue !== '0';
+      : d.rewardType === 'credit'
+        ? Number(d.rewardValue) > 0
+        : d.rewardValue.trim() !== '' && Boolean(d.prize.name);
+  const inViewedWeek =
+    d.startsAt === weekWindow.startsAt && d.endsAt === weekWindow.endsAt;
+  const runsText =
+    d.kind === 'weekly' && inViewedWeek
+      ? `Runs ${weekText}`
+      : d.startsAt || d.endsAt
+        ? `Runs ${d.startsAt.replace('T', ' ') || 'from now'} to ${d.endsAt.replace('T', ' ') || 'until retired'}`
+        : 'Runs until retired';
 
   const chip = (
     s: BuilderStep,
@@ -418,6 +565,7 @@ export const TaskBuilder = ({
       case 'rip_count': {
         const pull = d.reqType === 'vault_pixel_count';
         const scope = pull ? d.reqPixel : d.reqPack;
+        const named = scope === ANY || (scope !== '' && Boolean(d.goal.name));
         const what =
           scope === ''
             ? pull
@@ -427,12 +575,16 @@ export const TaskBuilder = ({
               ? pull
                 ? 'any Pokémon'
                 : 'any pack'
-              : (d.goal.name ?? scope);
+              : (d.goal.name ?? 'pick again');
         return (
           <>
-            {chip('goal', pull ? 'pulls' : 'rips', true)}{' '}
+            {chip(
+              'goal',
+              pull ? (d.kind === 'achievement' ? 'vaults' : 'pulls') : 'rips',
+              true,
+            )}{' '}
             {chip('n', n > 0 ? String(n) : 'how many?', n > 0)} ×{' '}
-            {chip('target', what, scope !== '', !pull && scope === ANY)}
+            {chip('target', what, named, !pull && scope === ANY)}
           </>
         );
       }
@@ -476,6 +628,7 @@ export const TaskBuilder = ({
   };
 
   const rewardChips = () => {
+    const picked = d.prize.name ?? (d.rewardValue ? 'pick again' : null);
     switch (d.rewardType) {
       case 'tickets':
         return (
@@ -499,22 +652,14 @@ export const TaskBuilder = ({
         return (
           <>
             {chip('reward', 'a free rip of', true)}{' '}
-            {chip(
-              'value',
-              hasPrize ? (d.prize.name ?? d.rewardValue) : 'which pack?',
-              hasPrize,
-            )}
+            {chip('value', picked ?? 'which pack?', hasPrize)}
           </>
         );
       case 'card':
         return (
           <>
             {chip('reward', 'the card', true)}{' '}
-            {chip(
-              'value',
-              hasPrize ? (d.prize.name ?? d.rewardValue) : 'which card?',
-              hasPrize,
-            )}
+            {chip('value', picked ?? 'which card?', hasPrize)}
           </>
         );
       default:
@@ -522,14 +667,41 @@ export const TaskBuilder = ({
     }
   };
 
+  const heading = (text: string) => (
+    <Text size="small" weight="plus" className="mb-2.5">
+      {text}
+    </Text>
+  );
+
+  const packItem = (
+    p: (typeof packs)[number],
+    pressed: boolean,
+    onClick: () => void,
+  ): ArtItem => ({
+    key: p.slug,
+    label: p.title,
+    sub: money(p.price),
+    image: p.image,
+    pressed,
+    onClick,
+  });
+
+  const packsNote = (
+    <PickerNote
+      what="packs"
+      loading={packsQuery.isLoading}
+      failed={packsQuery.isError}
+      empty={false}
+      onRetry={() => packsQuery.refetch()}
+    />
+  );
+
   const picker = () => {
     switch (step) {
       case 'repeat':
         return (
           <>
-            <Text size="small" weight="plus" className="mb-2.5">
-              How often can a player earn it?
-            </Text>
+            {heading('How often can a player earn it?')}
             {locked ? (
               <Text size="small" className="text-ui-fg-subtle">
                 Locked once a task exists. Retire this one and make a new task
@@ -565,20 +737,21 @@ export const TaskBuilder = ({
       case 'goal':
         return (
           <>
-            <Text size="small" weight="plus" className="mb-2.5">
-              What does the player have to do?
-            </Text>
+            {heading('What does the player have to do?')}
             <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-2">
-              {REQUIREMENT_TYPES[d.kind].map((type) => (
-                <Tile
-                  key={type}
-                  title={GOALS[type].title}
-                  hint={GOALS[type].hint}
-                  icon={GOALS[type].icon}
-                  pressed={d.reqType === type}
-                  onClick={() => pickGoal(type)}
-                />
-              ))}
+              {REQUIREMENT_TYPES[d.kind].map((type) => {
+                const tile = goalTile(type, d.kind);
+                return (
+                  <Tile
+                    key={type}
+                    title={tile.title}
+                    hint={tile.hint}
+                    icon={tile.icon}
+                    pressed={d.reqType === type}
+                    onClick={() => pickGoal(type)}
+                  />
+                );
+              })}
             </div>
           </>
         );
@@ -586,9 +759,7 @@ export const TaskBuilder = ({
         if (d.reqType === 'checkin_days') {
           return (
             <>
-              <Text size="small" weight="plus" className="mb-2.5">
-                Which day of the check-in week?
-              </Text>
+              {heading('Which day of the check-in week?')}
               <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-7">
                 {[1, 2, 3, 4, 5, 6, 7].map((day) => {
                   const taken = weekRows.filter(
@@ -632,12 +803,19 @@ export const TaskBuilder = ({
         if (d.reqType === 'reach_level') {
           return (
             <Field label="Which VIP level?" className="max-w-xs">
+              <PickerNote
+                what="VIP levels"
+                loading={vipQuery.isLoading}
+                failed={vipQuery.isError}
+                empty={false}
+                onRetry={() => vipQuery.refetch()}
+              />
               <Select value={d.reqN} onValueChange={(reqN) => set({ reqN })}>
-                <Select.Trigger>
+                <Select.Trigger aria-label="VIP level">
                   <Select.Value placeholder="Level" />
                 </Select.Trigger>
                 <Select.Content>
-                  {(vip?.levels ?? []).map((l) => (
+                  {(vipQuery.data?.levels ?? []).map((l) => (
                     <Select.Item key={l.level} value={String(l.level)}>
                       {l.level}
                     </Select.Item>
@@ -650,9 +828,7 @@ export const TaskBuilder = ({
         if (d.reqType === 'topup_myr') {
           return (
             <>
-              <Text size="small" weight="plus" className="mb-2.5">
-                How much do they top up?
-              </Text>
+              {heading('How much do they top up?')}
               <Numbers
                 value={d.reqN}
                 quick={[100, 300, 500, 1000]}
@@ -660,53 +836,86 @@ export const TaskBuilder = ({
                 placeholder="Other RM"
                 onPick={(v) => set({ reqN: String(v) })}
                 onType={(reqN) => setD({ ...d, reqN })}
+                onDone={() => setStep(firstMissing(d))}
               />
             </>
           );
         }
         return (
           <>
-            <Text size="small" weight="plus" className="mb-2.5">
-              How many?
-            </Text>
+            {heading('How many?')}
             <Numbers
               value={d.reqN}
               quick={[1, 2, 5, 10, 50]}
               placeholder="Other"
               onPick={(v) => set({ reqN: String(v) })}
               onType={(reqN) => setD({ ...d, reqN })}
+              onDone={() => setStep(firstMissing(d))}
             />
           </>
         );
       case 'target':
         if (d.reqType === 'vault_pixel_count') {
+          const found = pixelsQuery.data?.pixel_pokemon ?? [];
+          const shown = found.slice(0, PIXEL_SHOWN);
+          const items: ArtItem[] = shown.map((p) => {
+            const name =
+              p.variant && p.variant !== 'normal'
+                ? `${p.name} (${p.variant})`
+                : p.name;
+            return {
+              key: p.id,
+              label: name,
+              sub: p.dex ? `#${p.dex}` : undefined,
+              image: p.image_url,
+              pressed: d.reqPixel === p.id,
+              onClick: () =>
+                set({
+                  reqPixel: p.id,
+                  goal: { name, image: p.image_url, price: null },
+                }),
+            };
+          });
+          // The one already chosen stays visible even when a search hides it.
+          if (
+            d.reqPixel &&
+            d.reqPixel !== ANY &&
+            d.goal.name &&
+            !shown.some((p) => p.id === d.reqPixel)
+          ) {
+            items.unshift({
+              key: d.reqPixel,
+              label: d.goal.name,
+              image: d.goal.image,
+              pressed: true,
+              onClick: () => setStep(firstMissing(d)),
+            });
+          }
           return (
             <>
-              <Text size="small" weight="plus" className="mb-2.5">
-                Which Pokémon?
-              </Text>
+              {heading('Which Pokémon?')}
               <Input
                 aria-label="Search Pokémon"
                 placeholder="Search Pokémon"
                 className="mb-2.5 max-w-xs"
-                value={pixelQuery}
-                onChange={(e) => setPixelQuery(e.target.value)}
+                value={pixelInput}
+                onChange={(e) => setPixelInput(e.target.value)}
               />
-              <ArtGrid
-                pixel
-                items={(pixel?.pixel_pokemon ?? []).slice(0, 40).map((p) => ({
-                  key: p.id,
-                  label: p.name,
-                  sub: p.dex ? `#${p.dex}` : undefined,
-                  image: p.image_url,
-                  pressed: d.reqPixel === p.id,
-                  onClick: () =>
-                    set({
-                      reqPixel: p.id,
-                      goal: { name: p.name, image: p.image_url, price: null },
-                    }),
-                }))}
+              <PickerNote
+                what="Pokémon"
+                loading={pixelsQuery.isLoading}
+                failed={pixelsQuery.isError}
+                empty={!pixelsQuery.isLoading && found.length === 0}
+                onRetry={() => pixelsQuery.refetch()}
               />
+              <ArtGrid pixel items={items} />
+              {found.length > PIXEL_SHOWN && (
+                <Text size="xsmall" className="text-ui-fg-muted mt-2">
+                  Showing {PIXEL_SHOWN} of{' '}
+                  {pixelsQuery.data?.total ?? found.length}. Search to narrow it
+                  down.
+                </Text>
+              )}
               <AnyRow
                 title="Any Pokémon"
                 hint="Every linked Pokémon card counts."
@@ -718,48 +927,82 @@ export const TaskBuilder = ({
         }
         return (
           <>
-            <Text size="small" weight="plus" className="mb-2.5">
-              Which pack?
-            </Text>
+            {heading('Which pack?')}
+            {packsNote}
             <ArtGrid
-              items={activePacks.map((p) => ({
-                key: p.slug,
-                label: p.title,
-                sub: money(p.price),
-                image: p.image,
-                pressed: d.reqPack === p.slug,
-                onClick: () => {
+              items={onSale.map((p) =>
+                packItem(p, d.reqPack === p.slug, () => {
                   setAnyOk(false);
                   set({
                     reqPack: p.slug,
-                    goal: { name: p.title, image: p.image, price: p.price },
+                    goal: {
+                      name: p.title,
+                      image: p.image,
+                      price: p.price,
+                      buyable: true,
+                    },
                   });
-                },
-              }))}
+                }),
+              )}
             />
             <AnyRow
               title="Any pack"
-              hint={`Every paid rip counts${activePacks[0] ? `, even a ${money(activePacks[0].price)} ${activePacks[0].title}` : ''}. Pick this only on purpose.`}
+              hint={`Every paid rip counts${cheapest ? `, even a ${money(cheapest.price)} ${cheapest.title}` : ''}. Pick this only on purpose.`}
               pressed={d.reqPack === ANY}
+              disabled={!packsQuery.data}
               onClick={() =>
                 set({
                   reqPack: ANY,
                   goal: {
                     name: null,
                     image: null,
-                    price: activePacks[0]?.price ?? null,
+                    price: cheapest?.price ?? null,
+                    buyable: null,
                   },
                 })
               }
             />
+            {notOnSale.some(
+              (p) =>
+                p.price > 0 &&
+                p.category !== 'reward_box' &&
+                p.category !== 'free_welcome',
+            ) && (
+              <>
+                <Text size="xsmall" weight="plus" className="mt-4 mb-2">
+                  Not on sale right now
+                </Text>
+                <ArtGrid
+                  items={notOnSale
+                    .filter(
+                      (p) =>
+                        p.price > 0 &&
+                        p.category !== 'reward_box' &&
+                        p.category !== 'free_welcome',
+                    )
+                    .map((p) =>
+                      packItem(p, d.reqPack === p.slug, () => {
+                        setAnyOk(false);
+                        set({
+                          reqPack: p.slug,
+                          goal: {
+                            name: p.title,
+                            image: p.image,
+                            price: p.price,
+                            buyable: false,
+                          },
+                        });
+                      }),
+                    )}
+                />
+              </>
+            )}
           </>
         );
       case 'reward':
         return (
           <>
-            <Text size="small" weight="plus" className="mb-2.5">
-              What do they get?
-            </Text>
+            {heading('What do they get?')}
             <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-2">
               <Tile
                 title="Lucky Draw tickets"
@@ -808,15 +1051,14 @@ export const TaskBuilder = ({
         if (d.rewardType === 'tickets') {
           return (
             <>
-              <Text size="small" weight="plus" className="mb-2.5">
-                How many tickets?
-              </Text>
+              {heading('How many tickets?')}
               <Numbers
                 value={d.tickets}
                 quick={[5, 10, 20, 50]}
                 placeholder="Other"
                 onPick={(v) => set({ tickets: String(v) })}
                 onType={(tickets) => setD({ ...d, tickets })}
+                onDone={() => setStep(firstMissing(d))}
               />
             </>
           );
@@ -824,9 +1066,7 @@ export const TaskBuilder = ({
         if (d.rewardType === 'credit') {
           return (
             <>
-              <Text size="small" weight="plus" className="mb-2.5">
-                How much credit?
-              </Text>
+              {heading('How much credit?')}
               <Numbers
                 value={d.rewardValue}
                 quick={[5, 10, 30, 50, 100]}
@@ -845,79 +1085,109 @@ export const TaskBuilder = ({
                     prize: { ...NO_PRIZE, value: Number(rewardValue) || null },
                   })
                 }
+                onDone={() => setStep(firstMissing(d))}
               />
             </>
           );
         }
         if (d.rewardType === 'pack') {
+          // A free rip rolls a card, so a ticket pack can't be one. A free rip
+          // skips the stock check, so a pack off sale still works as a reward.
+          const giveable = (list: typeof packs) =>
+            list.filter((p) => p.prize_type !== 'tickets');
+          const pick = (p: (typeof packs)[number]) =>
+            set({
+              rewardValue: p.slug,
+              prize: { name: p.title, image: p.image, value: p.price },
+            });
           return (
             <>
-              <Text size="small" weight="plus" className="mb-2.5">
-                Which pack do they get to rip?
-              </Text>
+              {heading('Which pack do they get to rip?')}
+              {packsNote}
               <ArtGrid
-                items={activePacks
-                  // A free rip rolls a card, so a ticket pack can't be one.
-                  .filter((p) => p.prize_type !== 'tickets')
-                  .map((p) => ({
-                    key: p.slug,
-                    label: p.title,
-                    sub: money(p.price),
-                    image: p.image,
-                    pressed: d.rewardValue === p.slug,
-                    onClick: () =>
-                      set({
-                        rewardValue: p.slug,
-                        prize: {
-                          name: p.title,
-                          image: p.image,
-                          value: p.price,
-                        },
-                      }),
-                  }))}
+                items={giveable(onSale).map((p) =>
+                  packItem(p, d.rewardValue === p.slug, () => pick(p)),
+                )}
               />
+              {giveable(notOnSale).length > 0 && (
+                <>
+                  <Text size="xsmall" weight="plus" className="mt-4 mb-2">
+                    Not on sale right now
+                  </Text>
+                  <ArtGrid
+                    items={giveable(notOnSale).map((p) =>
+                      packItem(p, d.rewardValue === p.slug, () => pick(p)),
+                    )}
+                  />
+                </>
+              )}
             </>
           );
         }
-        return (
-          <>
-            <Text size="small" weight="plus" className="mb-2.5">
-              Which card?
-            </Text>
-            <Input
-              aria-label="Search cards"
-              placeholder="Search cards"
-              className="mb-2.5 max-w-xs"
-              value={cardQuery}
-              onChange={(e) => setCardQuery(e.target.value)}
-            />
-            <ArtGrid
-              items={(cards ?? [])
-                .filter((c) =>
-                  `${c.name} ${c.handle}`
-                    .toLowerCase()
-                    .includes(cardQuery.trim().toLowerCase()),
-                )
-                .slice(0, 24)
-                .map((c) => ({
-                  key: c.handle,
-                  label: c.name,
-                  sub: c.grade ? `${c.grader} ${c.grade}` : undefined,
+        {
+          const found = (cardsQuery.data ?? []).filter((c) =>
+            `${c.name} ${c.handle}`
+              .toLowerCase()
+              .includes(cardQuery.trim().toLowerCase()),
+          );
+          const shown = found.slice(0, CARDS_SHOWN);
+          const items: ArtItem[] = shown.map((c) => ({
+            key: c.handle,
+            label: c.name,
+            sub: c.grade ? `${c.grader} ${c.grade}` : undefined,
+            image: c.slab_image || c.image,
+            pressed: d.rewardValue === c.handle,
+            onClick: () =>
+              set({
+                rewardValue: c.handle,
+                prize: {
+                  name: c.name,
                   image: c.slab_image || c.image,
-                  pressed: d.rewardValue === c.handle,
-                  onClick: () =>
-                    set({
-                      rewardValue: c.handle,
-                      prize: {
-                        name: c.name,
-                        image: c.slab_image || c.image,
-                        value: null,
-                      },
-                    }),
-                }))}
-            />
-          </>
-        );
+                  value: c.priceBreakdown?.displayPrice ?? null,
+                  grade: c.grade ? `${c.grader} ${c.grade}` : null,
+                },
+              }),
+          }));
+          if (
+            d.rewardValue &&
+            d.prize.name &&
+            !shown.some((c) => c.handle === d.rewardValue)
+          ) {
+            items.unshift({
+              key: d.rewardValue,
+              label: d.prize.name,
+              image: d.prize.image,
+              pressed: true,
+              onClick: () => setStep(firstMissing(d)),
+            });
+          }
+          return (
+            <>
+              {heading('Which card?')}
+              <Input
+                aria-label="Search cards"
+                placeholder="Search cards"
+                className="mb-2.5 max-w-xs"
+                value={cardQuery}
+                onChange={(e) => setCardQuery(e.target.value)}
+              />
+              <PickerNote
+                what="cards"
+                loading={cardsQuery.isLoading}
+                failed={cardsQuery.isError}
+                empty={Boolean(cardsQuery.data) && found.length === 0}
+                onRetry={() => cardsQuery.refetch()}
+              />
+              <ArtGrid items={items} />
+              {found.length > CARDS_SHOWN && (
+                <Text size="xsmall" className="text-ui-fg-muted mt-2">
+                  Showing {CARDS_SHOWN} of {found.length}. Search to narrow it
+                  down.
+                </Text>
+              )}
+            </>
+          );
+        }
       default:
         return (
           <>
@@ -937,11 +1207,16 @@ export const TaskBuilder = ({
   const finalName = missing.length === 0 ? taskName(draftParts(d)) : null;
 
   return (
-    <FocusModal open onOpenChange={(o) => !o && onClose()}>
+    <FocusModal open onOpenChange={(o) => !o && void requestClose()}>
       <FocusModal.Content>
         <FocusModal.Header>
           <div className="flex items-center gap-x-2">
-            <Button size="small" variant="secondary" onClick={onClose}>
+            <Button
+              size="small"
+              variant="secondary"
+              disabled={save.isPending}
+              onClick={() => void requestClose()}
+            >
               Cancel
             </Button>
             <Button
@@ -952,7 +1227,7 @@ export const TaskBuilder = ({
             >
               {d.id
                 ? 'Save changes'
-                : d.kind === 'weekly'
+                : d.kind === 'weekly' && inViewedWeek
                   ? `Add to ${weekText}`
                   : 'Create task'}
             </Button>
@@ -975,33 +1250,55 @@ export const TaskBuilder = ({
                 follow the sentence.
               </FocusModal.Description>
               <p className="text-[21px] leading-[2.1] tracking-tight">
-                {chip('repeat', whenLabel, true)}, when a player {goalChips()},
-                they get {rewardChips()}.
+                {chip('repeat', KIND_LABEL[d.kind], true)}, when a player{' '}
+                {goalChips()}, they get {rewardChips()}.
               </p>
 
-              <div className="mt-6">{picker()}</div>
+              <div
+                ref={pickerRef}
+                tabIndex={-1}
+                aria-live="polite"
+                className="mt-6 outline-none"
+              >
+                {picker()}
+              </div>
 
               <details className="border-ui-border-base mt-7 border-t pt-3">
                 <summary className="text-ui-fg-subtle cursor-pointer text-sm font-medium">
-                  {d.kind === 'weekly' && d.startsAt && d.endsAt
-                    ? `Runs ${weekText}. More options`
-                    : 'More options'}
+                  {runsText}. More options
                 </summary>
                 <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
-                  <Field label="Starts" htmlFor="task-starts">
+                  <Field
+                    label="Starts, in this computer's time"
+                    htmlFor="task-starts"
+                  >
                     <Input
                       id="task-starts"
                       type="datetime-local"
                       value={d.startsAt}
-                      onChange={(e) => setD({ ...d, startsAt: e.target.value })}
+                      onChange={(e) => {
+                        const { value, validity } = e.target;
+                        setBadDate((b) => ({
+                          ...b,
+                          starts: validity.badInput,
+                        }));
+                        setD((cur) => ({ ...cur, startsAt: value }));
+                      }}
                     />
                   </Field>
-                  <Field label="Ends" htmlFor="task-ends">
+                  <Field
+                    label="Ends, in this computer's time"
+                    htmlFor="task-ends"
+                  >
                     <Input
                       id="task-ends"
                       type="datetime-local"
                       value={d.endsAt}
-                      onChange={(e) => setD({ ...d, endsAt: e.target.value })}
+                      onChange={(e) => {
+                        const { value, validity } = e.target;
+                        setBadDate((b) => ({ ...b, ends: validity.badInput }));
+                        setD((cur) => ({ ...cur, endsAt: value }));
+                      }}
                     />
                   </Field>
                   {d.rewardType !== 'tickets' && (
@@ -1022,9 +1319,26 @@ export const TaskBuilder = ({
                     <Input
                       id="task-sort"
                       type="number"
+                      step={1}
                       value={d.sort}
                       onChange={(e) => setD({ ...d, sort: e.target.value })}
                     />
+                  </Field>
+                  <Field
+                    label="Listed on /task"
+                    hint={
+                      d.active
+                        ? 'Players can see it.'
+                        : 'Hidden. Anyone who already finished it can still claim.'
+                    }
+                  >
+                    <div className="flex h-8 items-center">
+                      <Switch
+                        checked={d.active}
+                        onCheckedChange={(active) => setD({ ...d, active })}
+                        aria-label="Listed on /task"
+                      />
+                    </div>
                   </Field>
                 </div>
                 {d.endsAt !== '' && (
@@ -1037,7 +1351,7 @@ export const TaskBuilder = ({
                 )}
                 {!scheduleValid && (
                   <Text size="small" className="text-ui-fg-error mt-2">
-                    The end must be after the start.
+                    Finish typing both dates, with the end after the start.
                   </Text>
                 )}
               </details>
@@ -1050,7 +1364,10 @@ export const TaskBuilder = ({
                   <Input
                     id="task-reason"
                     value={reason}
-                    onChange={(e) => setReason(e.target.value)}
+                    onChange={(e) => {
+                      setReason(e.target.value);
+                      setReasonEdited(true);
+                    }}
                     placeholder="Why this change?"
                   />
                 </Field>
@@ -1071,6 +1388,14 @@ export const TaskBuilder = ({
                     </Text>
                   </div>
                 )}
+                {blockers.map((text) => (
+                  <div key={String(text)} className="flex gap-x-2">
+                    <InformationCircle className="text-ui-fg-muted mt-0.5 shrink-0" />
+                    <Text size="small" className="text-ui-fg-subtle">
+                      {text}
+                    </Text>
+                  </div>
+                ))}
                 {d.id && finalName && finalName !== d.title && (
                   <div className="flex gap-x-2">
                     <InformationCircle className="text-ui-fg-muted mt-0.5 shrink-0" />

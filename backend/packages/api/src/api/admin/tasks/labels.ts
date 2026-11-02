@@ -3,6 +3,8 @@ import { cardValueMyr } from '../../../modules/packs/service';
 import { ticketsLabel, ticketsSuffix } from '../../../modules/packs/lucky-draw';
 import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
+import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
+import { REWARD_BOX_CATEGORY } from '../../../modules/packs/lossless';
 import type {
   TaskKind,
   TaskRequirement,
@@ -221,7 +223,11 @@ export interface TaskView {
   /** The least one rip of this goal can cost: its pack's price, or for "any
    *  pack" the cheapest pack on sale. null when the goal isn't a rip. */
   goal_price_myr: number | null;
+  /** false = a pack players can't open right now, so the goal can't be finished.
+   *  null when the goal names no pack. */
+  goal_buyable: boolean | null;
   reward_name: string | null;
+  reward_grade: string | null;
   reward_image: string | null;
   /** null for tickets, which have no RM value. */
   reward_value_myr: number | null;
@@ -241,7 +247,7 @@ export async function resolveTaskViews(
       ? packs.listPacks(
           { slug: [...refs.packSlugs] },
           {
-            select: ['slug', 'title', 'price', 'image'],
+            select: ['slug', 'title', 'price', 'image', 'status', 'in_stock', 'category'],
             take: refs.packSlugs.size,
           },
         )
@@ -267,13 +273,24 @@ export async function resolveTaskViews(
     refs.pixelIds.size
       ? asPixelPokemonCrud(packs).listPixelPokemon(
           { id: [...refs.pixelIds] },
-          { select: ['id', 'name', 'image_url'], take: refs.pixelIds.size },
+          {
+            select: ['id', 'name', 'image_url', 'variant'],
+            take: refs.pixelIds.size,
+          },
         )
       : Promise.resolve([]),
     // A capsule spin counts as a rip too, so "any pack" is as cheap as the
-    // cheapest paid pack of any kind. Free packs don't count (source != pack).
+    // cheapest pack a player can really open. Free packs don't count (source !=
+    // pack), and neither does anything sold out or held for rewards.
     anyPackGoal
-      ? packs.listPacks({ status: 'active' }, { select: ['price'], take: 500 })
+      ? packs.listPacks(
+          {
+            status: 'active',
+            in_stock: true,
+            category: { $nin: [REWARD_BOX_CATEGORY, FREE_WELCOME_CATEGORY] },
+          },
+          { select: ['price'], take: 500 },
+        )
       : Promise.resolve([]),
   ]);
   const fxRate = cardRows.length ? await resolveFxRate(packs) : 0;
@@ -302,7 +319,13 @@ export async function resolveTaskViews(
         ? cardByHandle.get(String(w.card_handle ?? ''))
         : undefined;
     out.set(row.id, {
-      goal_name: goalPack?.title ?? goalPixel?.name ?? null,
+      goal_name:
+        goalPack?.title ??
+        (goalPixel
+          ? goalPixel.variant && goalPixel.variant !== 'normal'
+            ? `${goalPixel.name} (${goalPixel.variant})`
+            : goalPixel.name
+          : null),
       goal_image: goalPack?.image || goalPixel?.image_url || null,
       goal_price_myr:
         q.type !== 'rip_count'
@@ -312,7 +335,18 @@ export async function resolveTaskViews(
             : q.pack_id
               ? null
               : cheapest,
+      goal_buyable: goalPack
+        ? goalPack.status === 'active' &&
+          goalPack.in_stock !== false &&
+          Number(goalPack.price) > 0 &&
+          goalPack.category !== FREE_WELCOME_CATEGORY &&
+          goalPack.category !== REWARD_BOX_CATEGORY
+        : null,
       reward_name: rewardPack?.title ?? rewardCard?.name ?? null,
+      reward_grade:
+        rewardCard?.grader && rewardCard.grade
+          ? `${rewardCard.grader} ${rewardCard.grade}`
+          : null,
       reward_image:
         rewardPack?.image ||
         rewardCard?.slab_image ||
