@@ -1,6 +1,7 @@
 import {
   dataQuery,
   fitAnswer,
+  maskedViewSql,
   scrubSecrets,
   sqlErrorMessage,
   sqlForLog,
@@ -153,6 +154,51 @@ describe('sqlRefusal', () => {
     ['SELECT * FROM pull WHERE customer_id = $2', /Placeholders like \$1/],
   ])('refuses %p', (sql, why) => {
     expect(sqlRefusal(sql)).toMatch(why);
+  });
+});
+
+describe('the tables behind the odds mask', () => {
+  it.each([
+    'SELECT * FROM public.customer_group',
+    'SELECT * FROM PUBLIC.Customer_Group',
+    'SELECT * FROM "public"."customer_group"',
+    'SELECT * FROM public . "admin_action_audit"',
+    'SELECT * FROM polycards.public.admin_action_audit',
+    'SELECT * FROM public/* x */.customer_group',
+    'SELECT * FROM public.\ncustomer_group',
+    'SELECT * FROM public./* /* nested */ */customer_group',
+    'SELECT * FROM public.-- x\ncustomer_group',
+    'SELECT NULL::public.customer_group',
+  ])('refuses %p', (sql) => {
+    expect(sqlRefusal(sql)).toMatch(/stay hidden/);
+  });
+
+  it.each([
+    'SELECT * FROM customer_group',
+    'SELECT * FROM admin_action_audit',
+    'SELECT g.name, m.customer_id FROM customer_group g JOIN public.customer_group_customer m ON m.customer_group_id = g.id',
+    'SELECT cg.* /* all */ FROM customer_group cg',
+    "SELECT a.after->>'published_win_percent' FROM admin_action_audit a",
+  ])('leaves %p to the views', (sql) => {
+    expect(sqlRefusal(sql)).toBeNull();
+  });
+});
+
+describe('maskedViewSql', () => {
+  it('masks only the carrying columns and keeps every other', () => {
+    const sql = maskedViewSql('customer_group', ['id', 'name', 'metadata']);
+    expect(sql).toMatch(
+      /^CREATE TEMP VIEW "customer_group" AS SELECT t\."id", t\."name", regexp_replace\(t\."metadata"::text, /,
+    );
+    expect(sql).toMatch(
+      /::jsonb AS "metadata" FROM public\."customer_group" t$/,
+    );
+  });
+
+  it('refuses to build a view that would pass a renamed column unmasked', () => {
+    expect(() => maskedViewSql('admin_action_audit', ['id', 'before'])).toThrow(
+      /admin_action_audit\.after is gone/,
+    );
   });
 });
 

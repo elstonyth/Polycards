@@ -94,8 +94,8 @@ const HIDDEN = /password|secret|token|credential|api_?key|real_?name/i;
 // (a row or array cast to text, or left(before::text, 40)) has no keys to read, so
 // there they go by pattern, whatever quoting those casts stack around the key. The odds are plain numbers, so no value mask can catch one
 // a query renamed.
-// shortcut: a query that builds the key from pieces or walks the JSON (jsonb_each)
-// still reads them from those rows; move them out if staff must not manage that.
+// That is enough for an admin screen, whose JSON a caller cannot reshape. A query
+// can reshape anything, so db-query.ts masks those rows before a query sees them.
 const ODDS_KEY = /^(?:actual_)?win_(?:units|percent)(?:_\d)?$|^odds_?set$/i;
 const ODDS_IN_TEXT =
   /\b((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set)((?:\\*")*\s*:\s*)[^\s,}]+/gi;
