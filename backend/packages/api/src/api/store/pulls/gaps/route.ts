@@ -3,14 +3,18 @@ import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
 import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
+import { categoryParam, liveTicketPacks } from '../category';
 import { ANONYMOUS_PULLER, loadPullerProfiles } from '../pullers';
 
-// GET /store/pulls/gaps?rarity=<tier>[&pack_id=<Pack.slug>] — the pull-history
-// STATS chart: for one tier, the gap (pulls since the previous hit) behind
-// each recent hit of that tier, who hit it, and the header numbers:
+// GET /store/pulls/gaps?rarity=<tier>[&pack_id=<Pack.slug>|&category=<key>] —
+// the pull-history STATS chart: for one tier, the gap (pulls since the previous
+// hit) behind each recent hit of that tier, who hit it, and the header numbers.
+// ?category reads the spins of that category's live ticket packs, as on the
+// recent route; pack_id wins when both are sent.
 //
 //  pct       the pack's PUBLISHED odds for the tier (admin-set display rate,
-//            never the secret weight); null on the global feed / unset odds
+//            never the secret weight); null on the global and category feeds /
+//            unset odds
 //  expected  1 / pct in draws — the "Avg: 91 draws" the chart's reference
 //            line sits on; null when pct is
 //  avg       the OBSERVED mean gap over every hit on record (the line's
@@ -52,6 +56,7 @@ export async function GET(
     typeof req.query.pack_id === 'string' && req.query.pack_id.trim()
       ? req.query.pack_id.trim()
       : null;
+  const category = categoryParam(req.query, packId);
   // The chart always shows SOME tier — an unknown/absent value reads as the
   // apex tier rather than 400ing a public route.
   const rarity: Rarity =
@@ -59,7 +64,8 @@ export async function GET(
     (RARITY_ORDER as readonly string[]).includes(req.query.rarity)
       ? (req.query.rarity as Rarity)
       : RARITY_ORDER[0];
-  const cacheKey = `${packId ?? ''}|${rarity}`;
+  // JSON for the same reason as the recent route's key.
+  const cacheKey = JSON.stringify([packId, category, rarity]);
 
   const cached = gapsCache.get(cacheKey);
   const now = Date.now();
@@ -70,7 +76,7 @@ export async function GET(
 
   let pending = inflight.get(cacheKey);
   if (!pending) {
-    pending = buildGaps(req, packId, rarity, cacheKey).finally(() =>
+    pending = buildGaps(req, packId, category, rarity, cacheKey).finally(() =>
       inflight.delete(cacheKey),
     );
     inflight.set(cacheKey, pending);
@@ -86,6 +92,7 @@ export async function GET(
 async function buildGaps(
   req: MedusaRequest,
   packId: string | null,
+  category: string | null,
   rarity: Rarity,
   cacheKey: string,
 ): Promise<unknown> {
@@ -99,7 +106,10 @@ async function buildGaps(
         await packs.listPacks({ slug: packId, status: 'active' }, { take: 1 })
       )[0]
     : null;
-  if (packId && !pack) {
+  const categorySlugs = category
+    ? (await liveTicketPacks(packs, category)).map((p) => p.slug)
+    : null;
+  if ((packId && !pack) || categorySlugs?.length === 0) {
     const empty = {
       rarity,
       pct: null,
@@ -114,10 +124,10 @@ async function buildGaps(
   }
 
   const gaps = await packs.pullGaps({
-    packId,
+    packId: categorySlugs ?? packId,
     rarity,
     limit: HITS_LIMIT,
-    tickets: pack?.prize_type === 'tickets',
+    tickets: categorySlugs != null || pack?.prize_type === 'tickets',
   });
   const pct = pack
     ? (normalizePublishedOdds(pack.published_odds)?.tiers[rarity] ?? null)

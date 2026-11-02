@@ -111,6 +111,53 @@ describe('useLiveRecentPulls', () => {
     h.unmount();
   });
 
+  it('a category switch refetches at once under its own scope, and back again', async () => {
+    const h = renderHook(
+      (p: { category?: string }) =>
+        useLiveRecentPulls(seed, undefined, null, p.category),
+      { category: undefined as string | undefined },
+    );
+    const globalScope = h.current.shownScope;
+    await flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    respond({ pulls: [pull('spin')], drought: { Immortal: 1 } });
+    h.rerender({ category: 'poly' });
+    expect(h.current.pending).toBe(true);
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['a', 'b']);
+    // The rows on screen are still the global feed's, and so is this.
+    expect(h.current.shownCategory).toBeUndefined();
+    await flush();
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/recent-pulls?category=poly');
+    expect(h.current.pending).toBe(false);
+    expect(h.current.shownCategory).toBe('poly');
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['spin']);
+    expect(h.current.drought).toEqual({ Immortal: 1 });
+    expect(h.current.shownScope).not.toBe(globalScope);
+
+    respond(seed);
+    h.rerender({ category: undefined });
+    await flush();
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/recent-pulls');
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['a', 'b']);
+    expect(h.current.shownScope).toBe(globalScope);
+    h.unmount();
+  });
+
+  it('an empty Poly feed is its honest empty state, not a blip', async () => {
+    const h = renderHook(
+      (p: { category?: string }) =>
+        useLiveRecentPulls(seed, undefined, null, p.category),
+      { category: undefined as string | undefined },
+    );
+    respond({ pulls: [], drought: {} });
+    h.rerender({ category: 'poly' });
+    await flush();
+    expect(h.current.pulls).toEqual([]);
+    expect(h.current.pending).toBe(false);
+    h.unmount();
+  });
+
   it('a tier switch refetches at once, keeps the old rows as pending until the new scope lands, then re-keys', async () => {
     const h = renderHook(
       (p: { rarity: 'Immortal' | 'Legendary' | null }) =>
