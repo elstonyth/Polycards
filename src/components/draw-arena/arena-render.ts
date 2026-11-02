@@ -33,7 +33,7 @@ export type ArenaRenderer = {
   draw: (t: number, dt: number) => void;
 };
 
-const TOKEN_MIN_R = 2.2; // css px: below this a face can't be seen, so a dot
+const TOKEN_MIN_R = 1.9; // css px: below this a face can't be seen, so a dot
 const SHADOW_MIN_R = 7;
 const LABEL_MIN_R = 17;
 const DOT_COLOR = '#9a9ea8';
@@ -89,6 +89,28 @@ function makeShadow(): HTMLCanvasElement {
     g.fillRect(0, 0, 64, 64);
   }
   return c;
+}
+
+const MINI_TOKEN = 48;
+const miniTokens = new WeakMap<object, CanvasImageSource>();
+
+/** A token's small copy, with the ring a small disc wears. One per picture. */
+function miniOf(sprite: CanvasImageSource): CanvasImageSource {
+  const had = miniTokens.get(sprite);
+  if (had) return had;
+  const mini = document.createElement('canvas');
+  mini.width = mini.height = MINI_TOKEN;
+  const g = mini.getContext('2d');
+  if (!g) return sprite;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(sprite, 0, 0, MINI_TOKEN, MINI_TOKEN);
+  g.beginPath();
+  g.arc(MINI_TOKEN / 2, MINI_TOKEN / 2, MINI_TOKEN / 2 - 1.5, 0, Math.PI * 2);
+  g.lineWidth = 3;
+  g.strokeStyle = 'rgba(228,228,231,.72)';
+  g.stroke();
+  miniTokens.set(sprite, mini);
+  return mini;
 }
 
 export function createArenaRenderer(
@@ -415,10 +437,16 @@ export function createArenaRenderer(
       ctx.drawImage(shadow, px - sr, py - sr + r * 0.2, sr * 2, sr * 2);
     }
     const sprite = sprites.get(owner);
+    // Hundreds of small discs a frame: a tiny copy with its ring baked in is far
+    // cheaper than scaling a full token and stroking a path, and scales down cleaner.
+    if (sprite && !mine && crown === 0 && r / dpr < SHADOW_MIN_R) {
+      ctx.drawImage(miniOf(sprite), px - r, py - r, r * 2, r * 2);
+      return;
+    }
     if (sprite) {
       ctx.drawImage(sprite, px - r, py - r, r * 2, r * 2);
     } else {
-      // Past the picture cap: a plain disc, still readable on the table.
+      // No canvas to draw on (out of memory): a plain disc, still readable.
       ctx.fillStyle = DOT_COLOR;
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
@@ -548,7 +576,8 @@ export function createArenaRenderer(
       const m = run.masses[k] as number;
       const real = run.r0 * Math.sqrt(m) * S;
       let r = real;
-      if (real / dpr >= 2.5) {
+      // Every disc that draws as a token needs a shown radius: tokens draw at it.
+      if (real / dpr >= TOKEN_MIN_R) {
         if (dt === 0 || shownR[id] === 0) {
           shownR[id] = real;
           velR[id] = 0;
@@ -800,25 +829,4 @@ export function arenaHud(cast: ArenaCast, step: number): ArenaHud {
             share: (byOwner.get(me) ?? 0) / total,
           },
   };
-}
-
-/** The discs worth a picture: owners whose disc gets big, winner and viewer first.
- *  Everyone else stays a dot, so a big gate never loads hundreds of images. */
-export function entriesWorthAPicture(
-  cast: ArenaCast,
-  winner: number,
-  max: number,
-): number[] {
-  const { run, owners, me } = cast;
-  const best = new Map<number, number>();
-  for (let d = 0; d < owners.length; d++) {
-    const owner = owners[d] as number;
-    const peak = run.peak[d] as number;
-    if (peak > (best.get(owner) ?? 0)) best.set(owner, peak);
-  }
-  const ranked = [...best.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
-    .map(([entry]) => entry);
-  const first = me == null ? [winner] : [winner, me];
-  return [...new Set([...first, ...ranked])].slice(0, max);
 }

@@ -405,9 +405,12 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
   server first, and the disc that survives is simply seated to them
   (`src/lib/arena/cast.ts`). The battle runs on the device from the stored seed, so
   every viewer and every replay plays the same run; the engine takes only a seed and
-  a disc count, so it cannot see a player. A gate is always about 320 discs, however
-  few tickets it holds, shared out by tickets with at least one each, so a two-player
-  gate is still a battle. Twenty seconds on the clock, the winner told at 18.3.
+  a disc count, so it cannot see a player. A gate has at least 320 discs, so a
+  two-player gate is still a battle, and two per player past that, up to 1,000, so
+  tickets still show on a big gate. They are shared out by tickets with at least one
+  each. Every disc wears its owner's own picture, the same `person.avatar` as every
+  other surface, and the table holds still up to 1.5 s for them so it opens on faces.
+  Twenty seconds on the clock, the winner told at 18.3.
 - **The Lucky Draw frame** ("Smoked", 2026-11-02) — the Rank Reward frame's exact
   shape in dark smoked glass with one holo line on each edge, like a watch bezel. Art
   from `scripts/compose-lucky-draw-frame.mjs`, cut to the prism frame's own alpha.

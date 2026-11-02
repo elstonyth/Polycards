@@ -12,7 +12,8 @@ import { useEquippedFrame } from './equipped-frame';
  * — the Show "Me" header adapted to Polycards data.
  *
  * Tapping the avatar OR the name opens the Edit Profile modal, which owns the
- * photo (crop → upload), username and frame controls. Photo and frames used to
+ * photo (crop → upload), catalog avatar, username and frame controls. Photo and
+ * frames used to
  * be a photo-only shortcut here plus a separate frames card lower on the page;
  * the operator asked for the Show layout where both live behind the name
  * (2026-07-19), and the username joined them on 2026-10-03.
@@ -39,6 +40,9 @@ export function MeHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  // A catalog pick made in the modal: picks don't re-read the page per tap.
+  const [pickedAvatar, setPickedAvatar] = useState<string | null>(null);
+  const shownAvatar = pickedAvatar ?? avatarUrl;
   const { equipped } = useEquippedFrame();
   const initial = (displayName[0] ?? '?').toUpperCase();
   const equippedFrameUrl = equipped ? (frames[String(equipped)] ?? null) : null;
@@ -64,7 +68,7 @@ export function MeHeader({
           className="group relative shrink-0 rounded-full outline-offset-4"
         >
           <FramedAvatar
-            src={avatarUrl}
+            src={shownAvatar}
             initial={initial}
             frameSrc={equippedFrameUrl}
             animateLevel={equipped}
@@ -125,7 +129,8 @@ export function MeHeader({
         displayName={displayName}
         username={username}
         handle={handle}
-        avatarUrl={avatarUrl}
+        avatarUrl={shownAvatar}
+        onAvatarPicked={setPickedAvatar}
         frames={frames}
         highestLevel={highestLevel}
       />

@@ -884,12 +884,14 @@ export const RATE_LIMITS = {
   },
 
   /**
-   * The profile-appearance limiter (POST /store/profile/frame). Frame equip/
+   * The profile-appearance limiter (POST /store/profile/frame and
+   * /store/profile/avatar/preset, one shared budget). Frame equip/
    * unequip is a cosmetic, idempotent metadata write — a collector comparing
    * frames flips through them fast, so it must NOT share the tight delivery-
    * write budget (10/10s tripped on the 11th swap, 2026-07-07). Sized to cycle
    * the whole 10-frame workbook twice a minute with margin; still caps a
-   * runaway script at ~1 write/s sustained. Env-tunable:
+   * runaway script at ~1 write/s sustained. The 80-avatar picker sends one tap
+   * at a time, so a fast flip stays near 1 write/s. Env-tunable:
    * PROFILE_APPEARANCE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 15/10s)
    * PROFILE_APPEARANCE_RATE_LIMIT / _WINDOW_MS (default 60/60s)
    */

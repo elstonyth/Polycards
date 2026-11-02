@@ -6,7 +6,6 @@ import type { TokenSprites } from './arena-render';
 // is fine: these are only ever drawn, never read back.
 
 const SIZE = 160;
-const LOAD_TIMEOUT_MS = 2500;
 
 function blank(): {
   canvas: HTMLCanvasElement;
@@ -71,50 +70,65 @@ function pictureToken(img: HTMLImageElement): HTMLCanvasElement | null {
   return canvas;
 }
 
-/** Tokens for these entries. Initials at once, each picture as it arrives: a slow
- *  or missing image never holds the show. */
+/**
+ * Every player's own picture on their discs: their upload or their default face, the
+ * same `person.avatar` every other surface shows. One token per image, since most
+ * players share a default face: a 300-player gate needs about 120, not 300.
+ *
+ * A letter stands in only until the picture arrives, or if it fails. `ready` settles
+ * once every picture has come or failed, for a show that wants to open on faces.
+ */
 export function loadTokenSprites(
   people: readonly { who: string; avatar: string | null }[],
-  entries: readonly number[],
-): TokenSprites & { stop: () => void } {
+): TokenSprites & { ready: Promise<void>; stop: () => void } {
   const font =
     typeof window === 'undefined'
       ? 'system-ui'
       : `${getComputedStyle(document.documentElement).getPropertyValue('--font-nekst').trim() || 'system-ui'}, system-ui`;
-  const sprites = new Map<number, HTMLCanvasElement | null>();
+  const pictures = new Map<string, HTMLCanvasElement>();
+  const letters = new Map<string, HTMLCanvasElement | null>();
   let stopped = false;
-  for (const entry of entries) {
-    const person = people[entry];
-    if (!person) continue;
-    sprites.set(entry, initialToken(person.who, font));
-    if (!person.avatar) continue;
-    const img = new Image();
-    img.decoding = 'async';
-    const give = window.setTimeout(() => {
-      img.src = '';
-    }, LOAD_TIMEOUT_MS);
-    img.onload = () => {
-      window.clearTimeout(give);
-      // Decoded off the main thread first: uploads can be 4096 px, and drawing one
-      // undecoded would stall the battle.
-      void img
-        .decode()
-        .catch(() => undefined)
-        .then(() => {
-          if (stopped) return;
-          try {
-            const token = pictureToken(img);
-            if (token) sprites.set(entry, token);
-          } catch {
-            // The initial stays.
-          }
-        });
-    };
-    img.onerror = () => window.clearTimeout(give);
-    img.src = person.avatar;
-  }
+
+  const load = (src: string) =>
+    new Promise<void>((settled) => {
+      const img = new Image();
+      img.decoding = 'async';
+      img.onload = () => {
+        // Decoded off the main thread first, so drawing it can't stall the battle.
+        void img
+          .decode()
+          .catch(() => undefined)
+          .then(() => {
+            if (stopped) return;
+            try {
+              const token = pictureToken(img);
+              if (token) pictures.set(src, token);
+            } catch {
+              // The letter stays.
+            }
+          })
+          .finally(settled);
+      };
+      img.onerror = () => settled();
+      img.src = src;
+    });
+
+  const sources = new Set(
+    people.flatMap((person) => (person.avatar ? [person.avatar] : [])),
+  );
+  const ready = Promise.all([...sources].map(load)).then(() => undefined);
+
   return {
-    get: (entry) => sprites.get(entry) ?? null,
+    get(entry) {
+      const person = people[entry];
+      if (!person) return null;
+      const picture = person.avatar ? pictures.get(person.avatar) : undefined;
+      if (picture) return picture;
+      const letter = person.who.charAt(0).toUpperCase() || '?';
+      if (!letters.has(letter)) letters.set(letter, initialToken(letter, font));
+      return letters.get(letter) ?? null;
+    },
+    ready,
     stop() {
       stopped = true;
     },
