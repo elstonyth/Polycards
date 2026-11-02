@@ -25,13 +25,15 @@ import {
  */
 export function RealNameEntry({
   onSaved,
+  initialError,
 }: {
   onSaved: (realName: string) => void;
+  initialError?: string;
 }) {
   const [step, setStep] = useState<'entry' | 'confirm'>('entry');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const errorId = useId();
   const hintId = useId();
 

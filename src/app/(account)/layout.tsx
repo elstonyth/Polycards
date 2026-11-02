@@ -1,6 +1,12 @@
 import { type ReactNode } from 'react';
 import { redirect } from 'next/navigation';
-import { getAccountInfo, getCustomer, getRealName } from '@/lib/data/customer';
+import {
+  getAccountInfo,
+  getCustomer,
+  getRealName,
+  realNameWasRefused,
+} from '@/lib/data/customer';
+import { REAL_NAME_TAKEN } from '@/lib/real-name';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 import { shouldGatePhone } from '@/lib/phone-gate';
 import { PhoneOnboardingModal } from '@/components/account/PhoneOnboardingModal';
@@ -60,7 +66,15 @@ export default async function AccountLayout({
     <div className="mx-auto w-full max-w-2xl px-fluid py-6 lg:max-w-4xl">
       {children}
       {gatePhone && <PhoneOnboardingModal />}
-      {gateRealName && <RealNameModal />}
+      {gateRealName && (
+        <RealNameModal
+          initialError={
+            (await realNameWasRefused(customer.id))
+              ? REAL_NAME_TAKEN
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

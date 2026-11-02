@@ -6734,9 +6734,8 @@ class PacksModuleService extends MedusaService({
     if (existing?.real_name) return false;
     // One person, one account (ADR 0015). Names already on file stay: this refuses
     // a new save, and adminSetRealName is the way past it for two real people with
-    // one name. The lock is for two accounts racing for the same name.
-    // shortcut: scans this table (about 20 ms at 9k rows), add an expression index
-    // if that shows up, since this runs once per account.
+    // one name. The lock is for two accounts racing for the same name. The lookup
+    // uses the index in Migration20261103190000.
     await em.execute(
       `SELECT pg_advisory_xact_lock(hashtextextended('real-name:' || ${realNameKeySql('?::text')}, 0))`,
       [realName],

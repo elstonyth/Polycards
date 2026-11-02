@@ -112,6 +112,7 @@ const authIdentifierRateLimit = rateLimit('auth-identifier');
 // label resolves per request so a rewards claim is never told "Too many
 // delivery requests." (sim finding P3-10).
 const deliveryWriteRateLimit = rateLimit('delivery-write');
+const realNameWriteRateLimit = rateLimit('real-name-write');
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
 // (sharing the delivery-write tier 429'd a collector's 11th frame swap).
 const profileAppearanceRateLimit = rateLimit('profile-appearance');
@@ -591,13 +592,13 @@ export default defineMiddlewares({
     },
     {
       // The customer's one-time real-name write (spec 2026-10-06). Same
-      // bearer-only authenticate as the entry above, for the same reason; the
-      // write tier every other authed account mutation shares.
+      // bearer-only authenticate as the entry above, for the same reason; its
+      // own tier, since a refusal says a name is on the platform (ADR 0015).
       matcher: '/store/customers/me/real-name',
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        deliveryWriteRateLimit,
+        realNameWriteRateLimit,
         // The one write every new account makes, Google sign-ups included: the
         // welcome pack refuses until a name is on file.
         recordVisitorSignal,

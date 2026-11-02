@@ -22,7 +22,7 @@ const noop = () => {};
  * UX only: the welcome-pack claim refuses an account without a real name at
  * the backend whatever this modal does.
  */
-export function RealNameModal() {
+export function RealNameModal({ initialError }: { initialError?: string }) {
   const router = useRouter();
   const { setCustomer } = useAuth();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -81,6 +81,7 @@ export function RealNameModal() {
 
         <div className="mt-5">
           <RealNameEntry
+            initialError={initialError}
             onSaved={() => {
               setDone(true);
               router.refresh();

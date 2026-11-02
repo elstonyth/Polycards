@@ -113,6 +113,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
         );
       });
 
+      // Postgres lower() follows the database locale, and a C locale would miss this.
+      it('folds case beyond ASCII', async () => {
+        expect(await service.setRealName('cus_dup_13', 'ÉRIC TAN')).toBe(true);
+        await expect(
+          service.setRealName('cus_dup_14', 'éric tan'),
+        ).rejects.toThrow(REAL_NAME_TAKEN);
+      });
+
       it('lets exactly one of two accounts racing for a name win', async () => {
         const results = await Promise.allSettled([
           service.setRealName('cus_dup_6', 'Lim Siew Hua'),

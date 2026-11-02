@@ -60,5 +60,6 @@ Accepted, with what covers each:
   a name may carry (owner, 2026-11-03, chosen over sending it to staff review). Names
   already on file stay. Real names aren't verified, so one changed letter or a reordered
   name passes, and the refusal tells whoever tries that a name is on the platform,
-  though never whose. Two real people with one name go through support, who can set it
-  from the player page.
+  though never whose, so one account gets 10 tries an hour. Whoever saves a name first
+  holds it, so two real people with one name, or someone whose name a stranger saved,
+  go through support, who can set it from the player page.
