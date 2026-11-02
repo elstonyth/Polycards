@@ -442,7 +442,7 @@ const WithdrawalsPage = () => {
                         </div>
                       )}
                       {w.refund_missing && (
-                        <div className="text-ui-fg-error mt-1 font-sans">
+                        <div className="text-ui-fg-error mt-1 break-normal font-sans">
                           {t('withdrawals.refundMissing')}
                         </div>
                       )}
@@ -499,6 +499,7 @@ const WithdrawalsPage = () => {
                         <Button
                           size="small"
                           variant="secondary"
+                          className="whitespace-nowrap"
                           disabled={acting.has(w.id)}
                           onClick={() => finishRefund(w)}
                         >

@@ -40,6 +40,7 @@ function harness(deposit: Record<string, unknown> | null) {
     // Every status transition on a deposit row is a conditional claim now
     // (applyDepositOutcome). `true` = this caller moved the row.
     claimDepositStatus: jest.fn().mockResolvedValue(true),
+    listCreditTransactions: jest.fn(async () => []),
     topUpCreditsWithLedger: jest.fn().mockResolvedValue({
       id: 'ct_1',
       balance: 50,

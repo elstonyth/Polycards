@@ -36,6 +36,7 @@ function harness() {
   const packs = {
     listGatewayDeposits: jest.fn(),
     claimDepositStatus: jest.fn().mockResolvedValue(true),
+    listCreditTransactions: jest.fn(async () => []),
     topUpCreditsWithLedger: jest.fn().mockResolvedValue({
       id: 'ct_1',
       balance: 50,

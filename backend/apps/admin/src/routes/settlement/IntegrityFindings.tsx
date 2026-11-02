@@ -27,7 +27,9 @@ export const IntegrityFindings = () => {
         <Table>
           <Table.Header>
             <Table.Row>
-              <Table.HeaderCell>{t('settlement.auditNote')}</Table.HeaderCell>
+              <Table.HeaderCell>
+                {t('settlement.integrityWhat')}
+              </Table.HeaderCell>
               <Table.HeaderCell>
                 {t('settlement.auditCustomer')}
               </Table.HeaderCell>

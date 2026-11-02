@@ -178,7 +178,7 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                     </Table.Cell>
                     <Table.Cell className="text-right">
                       {acked || !canEdit ? null : (
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end gap-2 whitespace-nowrap">
                           {canCreditDeposit(f) ? (
                             <Button
                               size="small"

@@ -306,6 +306,73 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ).toHaveLength(0);
       });
 
+      // A hand credit has no anchor, so nothing else stops the sweep or a late
+      // callback paying the same deposit a second time.
+      describe('a deposit a hand adjustment already names', () => {
+        const handCredit = (customerId: string, reference: string) =>
+          service.createCreditTransactions([
+            {
+              customer_id: customerId,
+              amount: 50,
+              reason: 'adjustment',
+              reference,
+            },
+          ]);
+
+        it.each(['callback', 'requery'] as const)(
+          '%s: refuses, moving no money and leaving the row',
+          async (source) => {
+            const row = await seed(`hand-${source}`, 'expired');
+            await handCredit(
+              row.customer_id,
+              `Paid by hand for ${row.merchant_transaction_id}`,
+            );
+
+            await expect(
+              applyDepositOutcome(scope, row, settled({ source })),
+            ).resolves.toEqual({ applied: false, reason: 'hand-credited' });
+
+            expect(await service.creditBalance(row.customer_id)).toBe(50);
+            expect((await reread(row.id)).status).toBe('expired');
+            expect(sent).toEqual([]);
+          },
+        );
+
+        it('also when it names their reference, on a row still pending', async () => {
+          const row = await seed('hand-gateway-id');
+          await handCredit(
+            row.customer_id,
+            `Paid by hand for ${row.gateway_transaction_id}`,
+          );
+          await expect(
+            applyDepositOutcome(scope, row, settled()),
+          ).resolves.toEqual({ applied: false, reason: 'hand-credited' });
+        });
+
+        // The anchor already holds the credit, so replaying moves nothing and
+        // only heals the row. A later correction must not leave it unsettled.
+        it('still heals a row whose credit is on the anchor', async () => {
+          const row = await seed('hand-anchored');
+          await applyDepositOutcome(scope, row, settled());
+          await handCredit(
+            row.customer_id,
+            `Correction for ${row.merchant_transaction_id}`,
+          );
+          await expect(
+            applyDepositOutcome(scope, row, settled()),
+          ).resolves.toEqual({ applied: true, replayed: true });
+          expect(await service.creditBalance(row.customer_id)).toBe(100);
+        });
+
+        it('an adjustment naming something else changes nothing', async () => {
+          const row = await seed('hand-other');
+          await handCredit(row.customer_id, 'Goodwill');
+          await expect(
+            applyDepositOutcome(scope, row, settled()),
+          ).resolves.toEqual({ applied: true, replayed: false });
+        });
+      });
+
       it('settles a written-off row from the status the caller read, not from pending', async () => {
         // The callback route's recovery branch and the sweep's second scan
         // tier both arrive here with an 'expired' row. A hardcoded 'pending'

@@ -1011,10 +1011,11 @@
     "integrityBar_one": "{{count, number}} payment was left half-finished",
     "integrityBar_other": "{{count, number}} payments were left half-finished",
     "integrityHint": "A server stopped between two steps. Nothing is fixed automatically. Each one clears once it is fixed, and leaves this list after 7 days either way.",
+    "integrityWhat": "What happened",
     "integrity": {
       "open_without_prize": "Charged for an open, but no card or spin was recorded. Refund it by hand if the customer lost out.",
       "sold_without_flip": "Sell-back paid, but the card stayed in the vault. It can't ship or sell again. An engineer needs to close it.",
-      "denied_without_refund": "Payout denied, but the refund never landed. Use Finish refund on Withdrawals, in the Failed view."
+      "denied_without_refund": "Payout denied, but the refund never landed. Use Finish refund on Withdrawals, in the Refunded view."
     },
     "creditDeposit": "Credit deposit",
     "creditTitle": "Credit this deposit?",

@@ -331,7 +331,9 @@ export default async function depositReconcileJob(container: MedusaContainer) {
         if (!outcome.applied) {
           quarantined += 1;
           logger.error(
-            `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, which is not a creditable amount (${outcome.reason}) — not credited, not written off; left ${deposit.status} for manual settlement`,
+            outcome.reason === 'hand-credited'
+              ? `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, but a hand adjustment already names this deposit — not credited, not written off; left ${deposit.status}`
+              : `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, which is not a creditable amount (${outcome.reason}) — not credited, not written off; left ${deposit.status} for manual settlement`,
           );
           continue;
         }

@@ -73,7 +73,9 @@ export function sweepAlertsVerifyFail(
   deposit: { gateway?: string | null; status: string },
   statusId: unknown,
 ): boolean {
-  return deposit.status === 'pending' && isPayinVerifyFail(deposit.gateway, statusId);
+  return (
+    deposit.status === 'pending' && isPayinVerifyFail(deposit.gateway, statusId)
+  );
 }
 
 /** Payin status 4 from a tenant of the A3Pay platform (A3Pay, GlobePay365). */
@@ -665,7 +667,10 @@ export type DepositOutcomeResult =
   | { applied: true; replayed: boolean }
   /** A money fence refused. NOTHING was written; the caller decides what to
    *  answer the gateway and how loudly to log. */
-  | { applied: false; reason: 'amount-not-positive' | 'amount-mismatch' };
+  | {
+      applied: false;
+      reason: 'amount-not-positive' | 'amount-mismatch' | 'hand-credited';
+    };
 
 /**
  * Apply ONE observed outcome to ONE deposit row — the whole settle sequence,
@@ -747,6 +752,26 @@ export async function applyDepositOutcome(
     if (amount !== Number(deposit.amount_requested) || amount > ceiling) {
       return { applied: false, reason: 'amount-mismatch' };
     }
+  }
+
+  // A hand credit has no anchor, so naming the row is the only trail it leaves,
+  // and without this the sweep or a late callback would pay the deposit again.
+  // Only while the anchor is empty: a credit already on it replays and moves
+  // nothing, so a later correction must not stop the row healing.
+  const trail = await ledgerTrail(packs, {
+    customerId: deposit.customer_id,
+    anchor: topupIdempotencyReference(
+      deposit.customer_id,
+      deposit.merchant_transaction_id,
+    ),
+    refs: [
+      deposit.merchant_transaction_id,
+      deposit.gateway_transaction_id,
+      gatewayTransactionId,
+    ],
+  });
+  if (trail.hand && !trail.anchored) {
+    return { applied: false, reason: 'hand-credited' };
   }
 
   const mutation = await packs.topUpCreditsWithLedger({
@@ -873,19 +898,6 @@ export async function creditDepositByAdmin(
       'The gateway does not report this deposit as paid. Nothing was credited.',
     );
   }
-  const { hand } = await ledgerTrail(packs, {
-    customerId: row.customer_id,
-    anchor: topupIdempotencyReference(
-      row.customer_id,
-      row.merchant_transaction_id,
-    ),
-    refs: [row.merchant_transaction_id, row.gateway_transaction_id],
-  });
-  if (hand) {
-    throw refused(
-      'A hand adjustment already names this deposit. Crediting it would pay the customer twice. Nothing was credited.',
-    );
-  }
   const outcome = await applyDepositOutcome(scope, row, {
     state: 'settled',
     source: 'admin',
@@ -899,7 +911,9 @@ export async function creditDepositByAdmin(
   });
   if (!outcome.applied) {
     throw refused(
-      `The gateway reports RM ${detail.amount}, which is not what the deposit asked for. Nothing was credited. Ask an engineer to look at it.`,
+      outcome.reason === 'hand-credited'
+        ? 'A hand adjustment already names this deposit. Crediting it would pay the customer twice. Nothing was credited.'
+        : `The gateway reports RM ${detail.amount}, which is not what the deposit asked for. Nothing was credited. Ask an engineer to look at it.`,
     );
   }
   await packs.createAdminActionAudits([

@@ -81,6 +81,7 @@ function harness(deposit: Record<string, unknown> = pendingRow) {
     ),
     claimDepositStatus: jest.fn().mockResolvedValue(true),
     // A fresh credit writes exactly what it was asked for.
+    listCreditTransactions: jest.fn(async () => []),
     topUpCreditsWithLedger: jest.fn(async (input: { amount: number }) => ({
       id: 'ct_1',
       balance: input.amount,
