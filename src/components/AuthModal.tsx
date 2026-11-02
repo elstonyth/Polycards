@@ -19,7 +19,7 @@ type AuthMode = 'login' | 'signup';
  * Tab/Shift+Tab within it, and restores focus to the triggering element on close
  * (WCAG 2.4.3 Focus Order, 2.1.2 No Keyboard Trap). Esc and backdrop click also close.
  */
-export default function AuthModal() {
+export default function AuthModal({ opening }: { opening?: Event | null }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<AuthMode>('login');
   // The landing supplies this immediately; later opens recover its cookie.
@@ -55,11 +55,13 @@ export default function AuthModal() {
       }
     };
     window.addEventListener('polycards:auth', onOpen);
+    // The request that made AuthModalLoader fetch this chunk.
+    if (opening) onOpen(opening);
     return () => {
       request++;
       window.removeEventListener('polycards:auth', onOpen);
     };
-  }, []);
+  }, [opening]);
 
   // Open automatically when redirected here with ?auth=login|signup (e.g. the
   // account gate sends unauthenticated users to /?auth=login), then clean the URL.
@@ -68,13 +70,16 @@ export default function AuthModal() {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get('auth');
     if (requested !== 'login' && requested !== 'signup') return;
-    window.dispatchEvent(
-      new CustomEvent('polycards:auth', { detail: { mode: requested } }),
-    );
+    // A tap that loaded this modal outranks a ?auth= left in the URL.
+    if (!opening) {
+      window.dispatchEvent(
+        new CustomEvent('polycards:auth', { detail: { mode: requested } }),
+      );
+    }
     const url = new URL(window.location.href);
     url.searchParams.delete('auth');
     window.history.replaceState({}, '', url);
-  }, []);
+  }, [opening]);
 
   // Focus into the panel, Tab trap, Escape, body-scroll lock and focus restore.
   // The hook re-runs only when `open` flips, so switching login↔signup no longer

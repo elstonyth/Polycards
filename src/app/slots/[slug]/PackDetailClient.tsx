@@ -39,6 +39,7 @@ import {
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
 import { PublishedOddsList, hasPublishedOddsContent } from './OddsSheet';
+import { IntentLink } from '@/components/IntentLink';
 import { PoolByRarity } from './PoolByRarity';
 import {
   publishedOddsRows,
@@ -143,7 +144,7 @@ function PackRail({
       {packs.map((p) => {
         const selected = p.id === activeId;
         return (
-          <Link
+          <IntentLink
             key={p.id}
             ref={selected ? arrived : undefined}
             href={`/slots/${p.id}?count=${qty}`}
@@ -187,7 +188,7 @@ function PackRail({
             <span className="text-[11px] font-semibold tabular-nums text-white/55">
               {rm0(p.priceMyr)}
             </span>
-          </Link>
+          </IntentLink>
         );
       })}
     </div>
@@ -729,7 +730,7 @@ export default function PackDetailClient({
                               ? 'More Capsules'
                               : CATALOG_GROUP_HEADING[g.id]}
                           </p>
-                          <span className="text-[10px] text-white/40">
+                          <span className="text-[10px] text-white/60">
                             <span className="tabular-nums">
                               {g.packs.length}
                             </span>{' '}

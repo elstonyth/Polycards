@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import {
@@ -12,7 +11,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm0 } from '@/lib/format';
+import { isOptimizableImage } from '@/lib/optimizable-image';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
+import { IntentLink } from '@/components/IntentLink';
 import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
@@ -86,11 +87,12 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
         <Image
           src={pack.image}
           alt={pack.name}
-          width={205}
-          height={360}
+          // Drawn at h-60 at most. Raw art runs to 2.4 MB against this ~137 px box.
+          width={137}
+          height={240}
           // Operator-entered pack art can be on any host — bypass the optimizer
-          // allowlist (matches the detail hero), else the thumbnail 400s.
-          unoptimized
+          // allowlist only there (matches the detail hero), else the thumbnail 400s.
+          unoptimized={!isOptimizableImage(pack.image)}
           className={cn(
             // hover zoom measured on live /claw: art scales to 1.092 over 0.7s on
             // Tailwind's default curve (0.4,0,0.2,1) — live has no lift/translate
@@ -124,7 +126,7 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
           <QtyStepper qty={qty} onChange={setQty} max={3} className="mb-2" />
           {/* Open → the pack's detail page. The free demo spin there is open
               to everyone; only a real open/claim is auth-gated. */}
-          <Link
+          <IntentLink
             href={packHref(pack.id, qty)}
             className={cn(
               pillVariants({ variant: 'primary', size: 'sm' }),
@@ -132,7 +134,7 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
             )}
           >
             Open
-          </Link>
+          </IntentLink>
         </>
       )}
     </div>
@@ -164,9 +166,9 @@ function PackRow({
         <Image
           src={pack.image}
           alt={pack.name}
-          width={205}
-          height={360}
-          unoptimized
+          width={36}
+          height={64}
+          unoptimized={!isOptimizableImage(pack.image)}
           className={cn(
             'h-16 w-auto object-contain drop-shadow-[0_6px_14px_rgba(0,0,0,0.5)]',
             oos && 'grayscale',
@@ -238,12 +240,12 @@ function PackRow({
   }
 
   return (
-    <Link
+    <IntentLink
       href={packHref(pack.id, 1)}
       className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-2.5 transition-colors hover:border-white/20 hover:bg-white/[0.07]"
     >
       {inner}
-    </Link>
+    </IntentLink>
   );
 }
 

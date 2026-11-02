@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { IntentLink } from '@/components/IntentLink';
 import Image from 'next/image';
 import { ArrowRight } from 'lucide-react';
 import Reveal from '@/components/Reveal';
@@ -189,13 +189,13 @@ function LadderRow({
   return (
     // Tailwind v4 emits `translate`/`scale`, not `transform` — naming
     // `transform` here would transition the border and snap the lift.
-    <Link
+    <IntentLink
       // Straight to the pack the row shows, ready to rip one — same helper the
       // /slots catalog links with, so shape and slug encoding can't drift.
       href={packHref(pack.id, 1)}
       className={`${rowClass} transition-[translate,scale,border-color] hover:-translate-y-0.5 hover:border-white/30 active:scale-[0.99] motion-reduce:transition-colors motion-reduce:hover:translate-y-0 motion-reduce:active:scale-100`}
     >
       {body}
-    </Link>
+    </IntentLink>
   );
 }
