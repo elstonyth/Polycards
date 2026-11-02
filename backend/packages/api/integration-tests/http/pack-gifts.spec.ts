@@ -430,7 +430,7 @@ medusaIntegrationTestRunner({
       expect(saleRow.playthrough ?? 0).toBeCloseTo(0, 2);
     });
 
-    it('shows bonus draws in the feed while excluding gifts and retaining achievement and welcome rules', async () => {
+    it('counts bonus draws in the feed, achievements and welcome unlock, and gifts in none', async () => {
       const task = await unwrapResponse(
         api.post(
           '/admin/tasks',
@@ -446,16 +446,19 @@ medusaIntegrationTestRunner({
       );
       expect(task.status).toBe(200);
 
+      const completed = async () =>
+        (await unwrapResponse(api.get('/store/tasks', { headers: authed() })))
+          .data.tasks[0].progress.completed;
+
       await giftPacks(1, 'nothing');
       await openBatch(1, 1);
+      expect(await packs().hasPaidOpen(customerId)).toBe(false);
+      expect(await completed()).toBe(false);
+
       await grantBonus(PRICE, 'bonus-nothing');
       await openBatch(1, 0);
-
-      expect(await packs().hasPaidOpen(customerId)).toBe(false);
-      const hub = await unwrapResponse(
-        api.get('/store/tasks', { headers: authed() }),
-      );
-      expect(hub.data.tasks[0].progress.completed).toBe(false);
+      expect(await packs().hasPaidOpen(customerId)).toBe(true);
+      expect(await completed()).toBe(true);
       clearRecentPullsCache();
       const recent = await unwrapResponse(
         api.get('/store/pulls/recent', { headers: storeHeaders }),
@@ -463,7 +466,7 @@ medusaIntegrationTestRunner({
       const pulls = JSON.stringify(recent.data);
       const mine = await packs().listPulls({ customer_id: customerId });
       for (const p of mine) {
-        if (p.source === 'bonus') expect(pulls).toContain(p.id);
+        if (p.source === 'pack') expect(pulls).toContain(p.id);
         else expect(pulls).not.toContain(p.id);
       }
     });
@@ -586,7 +589,7 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(200);
         const pull = res.data.rolls[0].pull;
         expect(pull).toMatchObject({
-          source: bonus >= PRICE / 2 ? 'bonus' : 'pack',
+          source: 'pack',
           bonus_bp: (bonus / PRICE) * 10000,
         });
 
