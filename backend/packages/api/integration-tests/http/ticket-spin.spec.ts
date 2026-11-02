@@ -290,8 +290,8 @@ medusaIntegrationTestRunner({
           10_000, 5_000, 0,
         ]);
         expect(ids.map((id: string) => byId.get(id)?.source)).toEqual([
-          'bonus',
-          'bonus',
+          'pack',
+          'pack',
           'pack',
         ]);
         const [sp] = await spEntries();
@@ -1014,28 +1014,26 @@ medusaIntegrationTestRunner({
       );
 
     describe('what counts a spin', () => {
-      it('unlocks a free pull on a cash spin, never on a bonus one, as a pull does', async () => {
+      it('unlocks a free pull on any paid spin, bonus credit included, as a pull does', async () => {
         await livePack();
         await deposit(100);
         expect((await grantBonus(10)).status).toBe(200);
         const freePull = [{ id: 'pull_free', source: 'free' }];
-
-        // Bonus goes first, so this spin is all bonus.
-        expect((await openBatch(1)).status).toBe(200);
-        expect((await spins()).map((s) => s.source)).toEqual(['bonus']);
         expect(await packs().hasPaidOpen(customerId)).toBe(false);
         expect(await packs().lockedPullIds(customerId, freePull)).toEqual(
           new Set(['pull_free']),
         );
 
+        // Bonus goes first, so this spin is all bonus.
         expect((await openBatch(1)).status).toBe(200);
+        expect((await spins()).map((s) => s.source)).toEqual(['pack']);
         expect(await packs().hasPaidOpen(customerId)).toBe(true);
         expect(await packs().lockedPullIds(customerId, freePull)).toEqual(
           new Set(),
         );
       });
 
-      it('moves rip tasks once per cash spin, day and week apart', async () => {
+      it('moves rip tasks once per paid spin, bonus credit included, day and week apart', async () => {
         await livePack();
         await seedCardPack();
         await deposit(100);
@@ -1072,16 +1070,16 @@ medusaIntegrationTestRunner({
           return [anyWeek, luckyWeek, anyDay].map((id) => byId.get(id));
         };
 
-        // A bonus spin moves nothing, as a bonus pull doesn't.
+        // A bonus spin counts, as a bonus pull does.
         expect((await openBatch(1)).status).toBe(200);
-        expect(await progress()).toEqual([0, 0, 0]);
+        expect(await progress()).toEqual([1, 1, 1]);
 
         expect((await openBatch(3)).status).toBe(200);
-        expect(await progress()).toEqual([3, 3, 3]);
+        expect(await progress()).toEqual([4, 4, 4]);
 
         // A card pull counts beside the spins, on its own pack.
         expect((await openCardPack(1)).status).toBe(200);
-        expect(await progress()).toEqual([4, 3, 4]);
+        expect(await progress()).toEqual([5, 4, 5]);
 
         // A spin from before today's MYT midnight leaves the day. It stays in
         // the week, unless today is the Monday the week began.
@@ -1098,7 +1096,7 @@ medusaIntegrationTestRunner({
           ]);
         expect(updated.rowCount).toBe(1);
         const isMonday = new Date(now + MYT).getUTCDay() === 1;
-        expect(await progress()).toEqual(isMonday ? [3, 2, 3] : [4, 3, 3]);
+        expect(await progress()).toEqual(isMonday ? [4, 3, 4] : [5, 4, 4]);
       });
 
       it('attributes spins to their pack in pack-sales, adding up to economy revenue', async () => {

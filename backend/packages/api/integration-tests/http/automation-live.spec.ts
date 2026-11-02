@@ -30,18 +30,23 @@ medusaIntegrationTestRunner({
   testSuite: ({ api, getContainer }) => {
     it('settles every selected draw without a spend cap and publishes each pull to the storefront feed', async () => {
       const container = getContainer();
-      const eventBus = container.resolve<IEventBusModuleService>(Modules.EVENT_BUS);
+      const eventBus = container.resolve<IEventBusModuleService>(
+        Modules.EVENT_BUS,
+      );
       const emit = eventBus.emit.bind(eventBus);
       const announcements: string[] = [];
-      jest.spyOn(eventBus, 'emit').mockImplementation(async (events, options) => {
-        for (const event of Array.isArray(events) ? events : [events]) {
-          if (event.name !== 'pull.revealed') continue;
-          announcements.push((event.data as { pull_id: string }).pull_id);
-          // A dropped announcement must not interrupt the paid draw or sell.
-          if (announcements.length === 1) throw new Error('Test event bus outage');
-        }
-        await emit(events, options);
-      });
+      jest
+        .spyOn(eventBus, 'emit')
+        .mockImplementation(async (events, options) => {
+          for (const event of Array.isArray(events) ? events : [events]) {
+            if (event.name !== 'pull.revealed') continue;
+            announcements.push((event.data as { pull_id: string }).pull_id);
+            // A dropped announcement must not interrupt the paid draw or sell.
+            if (announcements.length === 1)
+              throw new Error('Test event bus outage');
+          }
+          await emit(events, options);
+        });
       const token = await mintSuperAdmin(
         container,
         api,
@@ -216,7 +221,7 @@ medusaIntegrationTestRunner({
       expect(pull.id).toBe(view.cycles[0].pullId);
       expect(pull.open_id).toBe(view.cycles[0].id);
       expect(pull.status).toBe('bought_back');
-      expect(pull.source).toBe('bonus');
+      expect(pull.source).toBe('pack');
       expect(pull.revealed_at).not.toBeNull();
       expect(announcements).toEqual([pull.id]);
       const transactions = await packs.listCreditTransactions({
@@ -283,7 +288,7 @@ medusaIntegrationTestRunner({
       );
       expect(settledPulls.every((row) => row.revealed_at !== null)).toBe(true);
       expect(settledPulls.map((row) => row.source).sort()).toEqual([
-        'bonus',
+        'pack',
         'pack',
         'pack',
       ]);

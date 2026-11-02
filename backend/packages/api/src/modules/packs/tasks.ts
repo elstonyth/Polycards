@@ -225,9 +225,9 @@ export function validateTaskReward(raw: unknown): TaskReward {
 }
 
 /** What one customer did inside ONE period window (today MYT, or this task
- *  week). Rips and pixel pulls count PAID pack pulls only (source='pack'):
- *  free rips and reward cards never count, so a task's own prize can never
- *  feed a task. */
+ *  week). Rips and pixel pulls count PAID pack pulls only (source 'pack', or
+ *  'bonus' on older rows): free rips and reward cards never count, so a task's
+ *  own prize can never feed a task. */
 export interface PeriodFacts {
   checkinDays: number;
   rips: number;
