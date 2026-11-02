@@ -191,6 +191,7 @@ function Row({
       {pull.profileHandle ? (
         <Link
           href={`/profile/${pull.profileHandle}?tab=activity`}
+          prefetch={false}
           aria-label={`View ${pull.who}'s activity`}
           // p-0.5/-m-0.5: the 40px face is the smallest control on the row, and
           // a bare 40px box misses the 44px tap target DESIGN.md asks for. The
@@ -227,6 +228,8 @@ function Row({
       ) : (
         <Link
           href={`/card/${pull.handle}`}
+          // A row of these would be one pod render each, per page view.
+          prefetch={false}
           aria-label={label}
           className={cardClass}
         >
@@ -241,6 +244,7 @@ function Row({
 export function PullHistory({
   initial,
   packSlug,
+  category,
   onSelect,
   noun = 'pack',
 }: {
@@ -248,6 +252,8 @@ export function PullHistory({
   /** Scope to one pack's history; omit for the global feed (rows then also
    *  name their pack). */
   packSlug?: string;
+  /** Read this category's capsule spins instead of the global feed. */
+  category?: string;
   /** Row tap handler (the pack page opens its card overlay); absent = the row
    *  links to /card/[handle]. */
   onSelect?: (pull: RecentPull) => void;
@@ -255,11 +261,16 @@ export function PullHistory({
   noun?: 'pack' | 'capsule';
 }) {
   const [tab, setTab] = useState<Tab>('All');
-  const { pulls, drought, pending, shownScope } = useLiveRecentPulls(
-    initial,
-    packSlug,
-    tab === 'All' || tab === 'Stats' ? null : tab,
-  );
+  const { pulls, drought, pending, shownScope, shownCategory } =
+    useLiveRecentPulls(
+      initial,
+      packSlug,
+      tab === 'All' || tab === 'Stats' ? null : tab,
+      category,
+    );
+  // A category feed is capsules. Follows the rows that landed, not the prop: the
+  // counters on screen are the old scope's until the new one arrives.
+  const shownNoun = shownCategory ? 'capsule' : noun;
   const droughts = RARITY_ORDER.flatMap((r) => {
     const n = drought[r];
     return n == null ? [] : [[r, n] as const];
@@ -289,7 +300,7 @@ export function PullHistory({
                   </span>
                 </p>
                 <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-neutral-400">
-                  {noun}s without <TierBadge rarity={r} />
+                  {shownNoun}s without <TierBadge rarity={r} />
                 </p>
               </div>
             );
@@ -346,6 +357,9 @@ export function PullHistory({
         // Re-fetches when a drought counter moves — a new pull landed.
         <PullGapsChart
           packSlug={packSlug}
+          // The landed category: it moves in the same render as the counters
+          // below, so a franchise switch fetches once, not twice.
+          category={shownCategory}
           refreshKey={JSON.stringify(drought)}
         />
       ) : (
@@ -359,7 +373,7 @@ export function PullHistory({
           {pulls.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
               {tab === 'All'
-                ? `No pulls yet — be the first to open a ${noun}.`
+                ? `No pulls yet — be the first to open a ${shownNoun}.`
                 : `No ${tab} pulls yet — the next rip could be the one.`}
             </div>
           ) : (

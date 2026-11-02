@@ -2884,6 +2884,30 @@ export interface AdminTaskDefinition {
    *  mid-deploy state, and typing it as required is what let the console crash
    *  on `undefined.requirement` instead of degrading. */
   labels?: { requirement: string; reward: string };
+  /** When it was switched off. Optional for the same reason as labels. */
+  retired_at?: string | null;
+  /** Claims made so far. Optional for the same reason as labels. */
+  claims?: number;
+  /** Names, pictures and prices for the board. Optional for the same reason. */
+  view?: AdminTaskView | null;
+}
+
+export interface AdminTaskView {
+  /** The Pokémon or pack the goal names; null = any, or nothing to name. */
+  goal_name: string | null;
+  goal_image: string | null;
+  /** The least one rip can cost: the pack's price, or for "any pack" the
+   *  cheapest pack on sale. null when the goal isn't a rip. */
+  goal_price_myr: number | null;
+  /** false = a pack players can't open right now. null = names no pack. Optional:
+   *  a backend mid-deploy may not send it yet. */
+  goal_buyable?: boolean | null;
+  reward_name: string | null;
+  /** "PSA 10" for a graded card reward. Optional for the same reason. */
+  reward_grade?: string | null;
+  reward_image: string | null;
+  /** null for tickets, which have no RM value. */
+  reward_value_myr: number | null;
 }
 
 export async function listTaskDefinitions(): Promise<AdminTaskDefinition[]> {

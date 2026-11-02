@@ -1,8 +1,17 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  beforeAll,
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+} from 'vitest';
 import { act } from 'react';
 import { renderHook, flush } from './render-hook';
 import { useLiveRecentPulls } from '../use-recent-pulls';
+import { loadSchemas } from '@/lib/lazy-schemas';
 import type { RecentFeed, RecentPull } from '@/lib/data/packs';
 
 // The rules under test are the ones useLiveRecentPulls owns on top of
@@ -44,6 +53,14 @@ const fetchMock = vi.fn();
 const respond = (body: unknown, ok = true) =>
   fetchMock.mockResolvedValueOnce({ ok, json: async () => body });
 
+const poll = () =>
+  act(async () => {
+    vi.advanceTimersByTime(10_000);
+  });
+
+beforeAll(async () => {
+  await loadSchemas();
+});
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
@@ -55,6 +72,24 @@ afterEach(() => {
 });
 
 describe('useLiveRecentPulls', () => {
+  it('fetches at once when the server seed is empty', async () => {
+    respond(seed);
+    const h = renderHook(
+      () => useLiveRecentPulls({ pulls: [], drought: {} }, 'bronze-pack'),
+      {},
+    );
+    await flush();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    h.unmount();
+  });
+
+  it('does not download the seed again on mount', async () => {
+    const h = renderHook(() => useLiveRecentPulls(seed, 'bronze-pack'), {});
+    await flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+    h.unmount();
+  });
+
   it('seeds from the server snapshot, then swaps in the live feed', async () => {
     respond({
       pulls: [pull('c'), pull('a'), pull('b')],
@@ -67,7 +102,7 @@ describe('useLiveRecentPulls', () => {
     );
     expect(h.current.pulls.map((p) => p.id)).toEqual(['a', 'b']);
     expect(h.current.pending).toBe(false);
-    await flush();
+    await poll();
     expect(h.current.pulls.map((p) => p.id)).toEqual(['c', 'a', 'b']);
     expect(h.current.drought).toEqual({ Immortal: 0 });
     expect(fetchMock.mock.calls[0]![0]).toBe(
@@ -76,8 +111,54 @@ describe('useLiveRecentPulls', () => {
     h.unmount();
   });
 
-  it('a tier switch refetches at once, keeps the old rows as pending until the new scope lands, then re-keys', async () => {
+  it('a category switch refetches at once under its own scope, and back again', async () => {
+    const h = renderHook(
+      (p: { category?: string }) =>
+        useLiveRecentPulls(seed, undefined, null, p.category),
+      { category: undefined as string | undefined },
+    );
+    const globalScope = h.current.shownScope;
+    await flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    respond({ pulls: [pull('spin')], drought: { Immortal: 1 } });
+    h.rerender({ category: 'poly' });
+    expect(h.current.pending).toBe(true);
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['a', 'b']);
+    // The rows on screen are still the global feed's, and so is this.
+    expect(h.current.shownCategory).toBeUndefined();
+    await flush();
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/recent-pulls?category=poly');
+    expect(h.current.pending).toBe(false);
+    expect(h.current.shownCategory).toBe('poly');
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['spin']);
+    expect(h.current.drought).toEqual({ Immortal: 1 });
+    expect(h.current.shownScope).not.toBe(globalScope);
+
     respond(seed);
+    h.rerender({ category: undefined });
+    await flush();
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/recent-pulls');
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['a', 'b']);
+    expect(h.current.shownScope).toBe(globalScope);
+    h.unmount();
+  });
+
+  it('an empty Poly feed is its honest empty state, not a blip', async () => {
+    const h = renderHook(
+      (p: { category?: string }) =>
+        useLiveRecentPulls(seed, undefined, null, p.category),
+      { category: undefined as string | undefined },
+    );
+    respond({ pulls: [], drought: {} });
+    h.rerender({ category: 'poly' });
+    await flush();
+    expect(h.current.pulls).toEqual([]);
+    expect(h.current.pending).toBe(false);
+    h.unmount();
+  });
+
+  it('a tier switch refetches at once, keeps the old rows as pending until the new scope lands, then re-keys', async () => {
     const h = renderHook(
       (p: { rarity: 'Immortal' | 'Legendary' | null }) =>
         useLiveRecentPulls(seed, 'bronze-pack', p.rarity),
@@ -92,7 +173,7 @@ describe('useLiveRecentPulls', () => {
     expect(h.current.pending).toBe(true);
     expect(h.current.shownScope).toBe(before);
     expect(h.current.pulls.map((p) => p.id)).toEqual(['a', 'b']);
-    expect(fetchMock.mock.calls[1]![0]).toBe(
+    expect(fetchMock.mock.calls[0]![0]).toBe(
       '/api/recent-pulls?pack_id=bronze-pack&rarity=Immortal',
     );
 
@@ -104,7 +185,6 @@ describe('useLiveRecentPulls', () => {
   });
 
   it('ignores an empty response for the scope already on screen (a blip must not blank a live feed)…', async () => {
-    respond(seed);
     const h = renderHook(
       () => useLiveRecentPulls(seed, 'bronze-pack', null),
       {},
@@ -121,7 +201,6 @@ describe('useLiveRecentPulls', () => {
   });
 
   it("…but an empty response for a NEW scope is that scope's honest empty state", async () => {
-    respond(seed);
     const h = renderHook(
       (p: { rarity: 'Immortal' | 'Legendary' | null }) =>
         useLiveRecentPulls(seed, 'bronze-pack', p.rarity),
@@ -137,7 +216,6 @@ describe('useLiveRecentPulls', () => {
   });
 
   it('keeps the current set on a failed poll', async () => {
-    respond(seed);
     const h = renderHook(() => useLiveRecentPulls(seed, undefined, null), {});
     await flush();
     respond(null, false);
@@ -146,7 +224,7 @@ describe('useLiveRecentPulls', () => {
     });
     await flush();
     expect(h.current.pulls.map((p) => p.id)).toEqual(['a', 'b']);
-    expect(fetchMock.mock.calls[1]![0]).toBe('/api/recent-pulls');
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/recent-pulls');
     h.unmount();
   });
 });
@@ -176,7 +254,7 @@ it.each([
   async (row) => {
     respond({ pulls: [row], drought: {} });
     const h = renderHook(() => useLiveRecentPulls(seed), undefined);
-    await flush();
+    await poll();
     expect(h.current.pulls).toEqual(seed.pulls);
     respond({ pulls: [pull('fresh')], drought: { Rare: 2 } });
     await act(async () => {

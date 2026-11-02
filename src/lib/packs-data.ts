@@ -183,6 +183,10 @@ export const CAT_ICON = {
   poly: '/pack-index-icons/poly.webp',
 } as const;
 
+/** The franchise of ticket capsules. Its spins never reach the global pull feed,
+ *  so its home tab reads a feed of its own. */
+export const POLY_CATEGORY = 'poly';
+
 /** The category a pack list opens on: `wanted` when it has packs, else the
  *  first category that does (catalog order, so Pokémon leads). Every surface
  *  shows ONE franchise at a time — mixing them is what buried the list. */
@@ -210,7 +214,7 @@ export const CATEGORIES: Omit<PackCategory, 'packs'>[] = [
     icon: CAT_ICON['one-piece'],
   },
   {
-    id: 'poly',
+    id: POLY_CATEGORY,
     tab: 'Poly',
     heading: 'Poly Packs',
     icon: CAT_ICON.poly,

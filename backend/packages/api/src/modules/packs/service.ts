@@ -455,6 +455,16 @@ const pullLedger = (tickets?: boolean) =>
     ? { table: 'ticket_spin', tierSql: TICKET_TIER_SQL }
     : { table: 'pull', tierSql: PULL_TIER_SQL };
 
+/** The pack filter of a pull-history read: one pack, several (a category's), or
+ *  null for the whole ledger. An empty list is a syntax error, never the whole
+ *  ledger; the routes answer that case before reading. */
+const packScope = (packId: string | string[] | null) => {
+  if (packId === null) return { sql: '', params: [] };
+  const params = [packId].flat();
+  const marks = params.map(() => '?').join(', ');
+  return { sql: ` AND p.pack_id IN (${marks})`, params };
+};
+
 /** The gateway_withdrawal.status domain, derived from the model's
  *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
  *  types). */
@@ -939,7 +949,7 @@ export type AdminLuckyDrawEvent = {
 
 /** A card's RM value as the vault, the task hub and the Lucky Draw admin
  *  overview show it. */
-function cardValueMyr(
+export function cardValueMyr(
   card: { market_value: unknown; market_multiplier?: unknown },
   fxRate: number,
 ): number {
@@ -3365,7 +3375,9 @@ class PacksModuleService extends MedusaService({
     const period = { weekStartIso: week.weekStartIso, dayIso: day.dayIso };
     const [defs, facts, claims, unspent] = await Promise.all([
       this.listTaskDefinitions(
-        { active: true },
+        // Weekly rows stay active after they end, so leave those out: taskIsLive
+        // would drop them anyway, and past the cap they'd crowd out live tasks.
+        { active: true, $or: [{ ends_at: null }, { ends_at: { $gt: at } }] },
         // 500 matches the admin list cap — past it, definitions would vanish
         // from the hub silently, so keep the two bounds identical.
         { order: { sort: 'ASC' }, take: 500 },
@@ -3929,7 +3941,18 @@ class PacksModuleService extends MedusaService({
     // the active toggle re-POST the whole definition, and a card or pack
     // deleted since the save must not 400 the very action that fixes it
     // (review 2026-09).
-    if (!existing || !isDeepStrictEqual(existing.reward, reward)) {
+    // Compared as validated, so a key left over from an older rule isn't a change.
+    const sameRule = <T>(stored: unknown, validate: () => T, next: T) => {
+      try {
+        return stored != null && isDeepStrictEqual(validate(), next);
+      } catch {
+        return false;
+      }
+    };
+    if (
+      !existing ||
+      !sameRule(existing.reward, () => validateTaskReward(existing.reward), reward)
+    ) {
       if (reward.type === 'card') {
         const [card] = await this.listCards(
           { handle: reward.card_handle },
@@ -3963,7 +3986,14 @@ class PacksModuleService extends MedusaService({
         }
       }
     }
-    if (!existing || !isDeepStrictEqual(existing.requirement, requirement)) {
+    if (
+      !existing ||
+      !sameRule(
+        existing.requirement,
+        () => validateTaskRequirement(input.kind, existing.requirement),
+        requirement,
+      )
+    ) {
       if (requirement.type === 'rip_count' && requirement.pack_id) {
         const [pack] = await this.listPacks(
           { slug: requirement.pack_id },
@@ -4027,9 +4057,19 @@ class PacksModuleService extends MedusaService({
         starts_at: existing.starts_at,
         ends_at: existing.ends_at,
       };
+      // Medusa's update merges into a JSON column, so a key the new rule lacks
+      // would survive it, and could outrank the new rule's own amount. The two rule
+      // columns go in whole.
+      const { requirement: wholeRequirement, reward: wholeReward, ...columns } =
+        data;
       await this.updateTaskDefinitions(
-        { selector: { id }, data },
+        { selector: { id }, data: columns },
         sharedContext,
+      );
+      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      await em.execute(
+        'UPDATE task_definition SET requirement = ?::jsonb, reward = ?::jsonb, updated_at = now() WHERE id = ?',
+        [JSON.stringify(wholeRequirement), JSON.stringify(wholeReward), id],
       );
     } else {
       const [row] = await this.createTaskDefinitions([data], sharedContext);
@@ -4048,6 +4088,20 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { id };
+  }
+
+  /** How many claims each task definition has, for the admin console. */
+  @InjectManager()
+  async taskClaimCounts(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ task_id: string; n: string }[]>(
+      'SELECT task_id, COUNT(*)::bigint AS n FROM task_claim WHERE deleted_at IS NULL GROUP BY task_id',
+      [],
+    );
+    return new Map(rows.map((r) => [r.task_id, Number(r.n)]));
   }
 
   // Admin CRUD for the storefront announcement popup (spec 2026-10-06 §5) —
@@ -11392,12 +11446,10 @@ class PacksModuleService extends MedusaService({
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const params: unknown[] = [];
-    let where = "p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')";
-    if (opts.packId) {
-      where += ' AND p.pack_id = ?';
-      params.push(opts.packId);
-    }
+    const scope = packScope(opts.packId);
+    const params: unknown[] = [...scope.params];
+    let where =
+      "p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" + scope.sql;
     if (opts.rarity) {
       where += ' AND ' + PULL_TIER_SQL;
       params.push(opts.rarity);
@@ -11414,47 +11466,54 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // recentPullRows for one ticket pack: the same order and the same public
-  // sources, with the amount won in place of the card.
+  // recentPullRows for ticket packs: the same order and the same public
+  // sources, with the amount won in place of the card. Over several packs the
+  // scan rides IDX_ticket_spin_rolled_at and stops at `limit`.
   @InjectManager()
   async recentTicketSpinRows(
-    opts: { packId: string; rarity: Rarity | null; limit: number },
+    opts: { packIds: string[]; rarity: Rarity | null; limit: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     {
       id: string;
       customer_id: string;
+      pack_id: string;
       tickets: number;
       rolled_at: string | Date;
     }[]
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    const scope = packScope(opts.packIds);
     return await em.execute(
-      'SELECT p.id, p.customer_id, p.tickets, p.rolled_at FROM ticket_spin p ' +
+      'SELECT p.id, p.customer_id, p.pack_id, p.tickets, p.rolled_at FROM ticket_spin p ' +
         " WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus') " +
-        '   AND p.pack_id = ?' +
+        scope.sql +
         (opts.rarity ? ' AND ' + TICKET_TIER_SQL : '') +
         ' ORDER BY p.rolled_at DESC, p.id DESC LIMIT ?',
-      [opts.packId, ...(opts.rarity ? [opts.rarity] : []), opts.limit],
+      [...scope.params, ...(opts.rarity ? [opts.rarity] : []), opts.limit],
     );
   }
 
   // "N packs without <tier>": pulls (one per pack opened) since the last pull
-  // of that tier — over the whole ledger, or one pack. A tier never hit counts
-  // every pull on record, which is the honest number. "Since" is in
+  // of that tier — over the whole ledger, one pack, or several. A tier never hit
+  // counts every pull on record, which is the honest number. "Since" is in
   // (rolled_at, id) order — the same order pullGaps numbers the ledger in —
   // so a hit inside a batch open (siblings share one rolled_at) counts the
   // same siblings here as on the chart's drought bar. `tickets` reads a ticket
   // pack's spins instead.
   @InjectManager()
   async pullDrought(
-    opts: { packId: string | null; rarity: Rarity; tickets?: boolean },
+    opts: {
+      packId: string | string[] | null;
+      rarity: Rarity;
+      tickets?: boolean;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<number> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
+    const { sql: packSql, params: packParams } = packScope(opts.packId);
     const { table, tierSql } = pullLedger(opts.tickets);
     const rows = await em.execute<{ n: number | string }[]>(
       'WITH last_hit AS (' +
@@ -11470,7 +11529,7 @@ class PacksModuleService extends MedusaService({
         packSql +
         '   AND (NOT EXISTS (SELECT 1 FROM last_hit) ' +
         '        OR (p.rolled_at, p.id) > (SELECT rolled_at, id FROM last_hit))',
-      opts.packId ? [opts.packId, opts.rarity, opts.packId] : [opts.rarity],
+      [...packParams, opts.rarity, ...packParams],
     );
     return Number(rows[0]?.n ?? 0);
   }
@@ -11490,7 +11549,7 @@ class PacksModuleService extends MedusaService({
   @InjectManager()
   async pullGaps(
     opts: {
-      packId: string | null;
+      packId: string | string[] | null;
       rarity: Rarity;
       limit: number;
       tickets?: boolean;
@@ -11509,10 +11568,8 @@ class PacksModuleService extends MedusaService({
   }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
-    const scopeParams = opts.packId
-      ? [opts.rarity, opts.packId]
-      : [opts.rarity];
+    const { sql: packSql, params: packParams } = packScope(opts.packId);
+    const scopeParams = [opts.rarity, ...packParams];
     const { table, tierSql } = pullLedger(opts.tickets);
     const ctes =
       'WITH seq AS (' +

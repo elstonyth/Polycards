@@ -5,9 +5,10 @@ import {
 } from '@/lib/data/packs';
 import { getLeaderboard } from '@/lib/data/leaderboard';
 import { cached } from '@/lib/ttl-cache';
-import type { PackCard } from '@/lib/packs-data';
+import { packTabs, type PackCard } from '@/lib/packs-data';
 import HeroBoard from '@/components/home/HeroBoard';
 import PullsMarquee from '@/components/home/PullsMarquee';
+import { ShelfCategoryProvider } from '@/components/home/ShelfCategory';
 import TierShelf from '@/components/home/TierShelf';
 import RecentPullsSection from '@/components/RecentPullsSection';
 import TheGame from '@/components/home/TheGame';
@@ -98,11 +99,13 @@ export default async function HomePage() {
       {/* seam — live pulls marquee (absent when no pulls) */}
       <PullsMarquee pulls={pulls} />
 
-      {/* 02 — tier-racked shelf */}
-      <TierShelf categories={categories} chaseByPack={chaseByPack} />
+      <ShelfCategoryProvider categories={packTabs(categories)}>
+        {/* 02 — tier-racked shelf */}
+        <TierShelf categories={categories} chaseByPack={chaseByPack} />
 
-      {/* 03 — live proof */}
-      <RecentPullsSection initial={feed} />
+        {/* 03 — live proof */}
+        <RecentPullsSection initial={feed} />
+      </ShelfCategoryProvider>
 
       {/* 04 — podium + loop teaser */}
       <TheGame topRippers={topRippers} />

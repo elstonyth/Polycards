@@ -578,7 +578,8 @@ const FALLBACK_PACK_ICON = '/images/polycards/bronze-pack.webp';
  * pack's own history (the /slots/[slug] pages; filtering backend-side, so a
  * quiet pack still shows its real history instead of nothing). `rarity` keeps
  * only that tier's pulls (the panel's tier tabs; the drought counters stay
- * unfiltered).
+ * unfiltered). `category` reads that category's capsule spins instead (the home
+ * Poly tab).
  * Returns an empty feed (not mock) on any backend failure or empty ledger — an
  * empty feed is a meaningful, truthful state for a live ledger (the component
  * renders a "no pulls yet" empty state), unlike the catalog/detail getters that
@@ -587,6 +588,7 @@ const FALLBACK_PACK_ICON = '/images/polycards/bronze-pack.webp';
 export async function getRecentPulls(
   packSlug?: string,
   rarity?: Rarity,
+  category?: string,
 ): Promise<RecentFeed> {
   // Same two params, same order (`?pack_id=…&rarity=…`) — the SDK
   // serializes this object to the querystring the path carried before, and
@@ -594,6 +596,7 @@ export async function getRecentPulls(
   const query = {
     ...(packSlug ? { pack_id: packSlug } : {}),
     ...(rarity ? { rarity } : {}),
+    ...(category ? { category } : {}),
   };
   const r = await store.get('/store/pulls/recent', RecentPullsPageSchema, {
     ...PUBLIC,
@@ -604,6 +607,15 @@ export async function getRecentPulls(
   // pulls yet" either way, and never mock rows.
   if (!r.ok) return EMPTY_FEED;
   const raw = r.data;
+  // A category feed holds spins only. The storefront deploys ~10 minutes before
+  // the backend, and an older backend ignores ?category and answers the global
+  // card feed: those rows must not show under Poly.
+  if (
+    category &&
+    (raw.pulls as unknown as BackendRecentPull[]).some((p) => p.tickets == null)
+  ) {
+    return EMPTY_FEED;
+  }
 
   // Stable ids: the pull row id, else (older backend) a per-(handle,
   // rolled_at) occurrence counter — NOT the array index, which shifts
@@ -709,12 +721,17 @@ export interface PullGaps {
 export async function getPullGaps(
   rarity: Rarity,
   packSlug?: string,
+  category?: string,
 ): Promise<PullGaps | null> {
   // `?rarity=…&pack_id=…`, in that order, as the hand-built querystring had
   // it — the SDK serializes to the same URL.
   const r = await store.get('/store/pulls/gaps', PullGapsSchema, {
     ...PUBLIC,
-    query: { rarity, ...(packSlug ? { pack_id: packSlug } : {}) },
+    query: {
+      rarity,
+      ...(packSlug ? { pack_id: packSlug } : {}),
+      ...(category ? { category } : {}),
+    },
   });
   // Null (never mock) for a backend failure AND for a malformed body: the
   // chart renders its unavailable state, and /api/pull-gaps turns that null

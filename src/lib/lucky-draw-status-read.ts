@@ -1,4 +1,4 @@
-import { LuckyDrawChromeStatusSchema, parseOne } from '@/lib/data/schemas';
+import { loadSchemas } from '@/lib/lazy-schemas';
 
 // The Draw tab's dot and the draw popup both want the status on every page load.
 // One request between them: chrome fan-out like this is what hit the store-read
@@ -20,7 +20,12 @@ export function readLuckyDrawStatus(): Promise<LuckyDrawChromeStatus | null> {
   if (held && now - held.at < FRESH_MS) return held.read;
   const read = fetch('/api/lucky-draw-status')
     .then((r) => (r.ok ? r.json() : null))
-    .then((body: unknown) => parseOne(LuckyDrawChromeStatusSchema, body))
+    // Loaded here, not at the top of the file: zod stays out of the first load.
+    .then(async (body: unknown) => {
+      if (body == null) return null;
+      const { LuckyDrawChromeStatusSchema, parseOne } = await loadSchemas();
+      return parseOne(LuckyDrawChromeStatusSchema, body);
+    })
     .catch(() => null);
   held = { at: now, read };
   return read;

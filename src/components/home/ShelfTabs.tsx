@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import PackCategoryTabs from '@/components/PackCategoryTabs';
+import { useShelfCategory } from '@/components/home/ShelfCategory';
 import type { PackTab } from '@/lib/packs-data';
 
 /** The shelf's title row. `href` carries the picked franchise to /slots. */
@@ -33,8 +34,7 @@ export function ShelfHeader({ href }: { href: string }) {
 }
 
 /** The home shelf's franchise switch: the server renders one ladder per
- *  category with packs (`panels`), this shows the picked one. The first tab with
- *  packs is the default. */
+ *  category with packs (`panels`), this shows the picked one. */
 export default function ShelfTabs({
   categories,
   panels,
@@ -42,12 +42,7 @@ export default function ShelfTabs({
   categories: PackTab[];
   panels: Record<string, ReactNode>;
 }) {
-  const first = categories.find((c) => !c.soon)?.id ?? '';
-  const [picked, setActive] = useState(first);
-  // A refresh can drop the picked franchise; fall back to the first one left.
-  const active = categories.some((c) => c.id === picked && !c.soon)
-    ? picked
-    : first;
+  const { active, pick } = useShelfCategory();
   return (
     <>
       <ShelfHeader href={`/slots?category=${encodeURIComponent(active)}`} />
@@ -56,7 +51,7 @@ export default function ShelfTabs({
           <PackCategoryTabs
             categories={categories}
             active={active}
-            onChange={setActive}
+            onChange={pick}
           />
         </div>
       )}

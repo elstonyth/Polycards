@@ -1,7 +1,7 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
+import { reportClientError } from '@/lib/report-client-error';
 import { reloadForVersionSkew } from '@/lib/version-skew';
 
 export default function GlobalError({
@@ -12,7 +12,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    Sentry.captureException(error);
+    reportClientError(error);
     // A tab stranded on a previous deploy reloads (see lib/version-skew).
     reloadForVersionSkew(error);
   }, [error]);
