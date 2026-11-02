@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AVATAR_COUNT, avatarForSeed, avatarPath } from '../avatar-seed';
@@ -19,6 +19,20 @@ describe('avatarForSeed', () => {
   it('falls back to a real avatar on a non-finite seed', () => {
     expect(avatarForSeed(Number.NaN)).toBe('/images/avatars/avatar-1.webp');
   });
+});
+
+// The backend validates picks against its own copy: a storefront count above it
+// offers tiles that only ever answer 400.
+it('the backend preset route agrees on the catalog size', () => {
+  const route = readFileSync(
+    join(
+      process.cwd(),
+      'backend/packages/api/src/api/store/profile/avatar/preset/route.ts',
+    ),
+    'utf8',
+  );
+  expect(route).toContain(`PRESET_AVATAR_COUNT = ${AVATAR_COUNT};`);
+  expect(route).toContain('`/images/avatars/avatar-${id}.webp`');
 });
 
 // A count that outgrew the files would show customers a broken image, and the

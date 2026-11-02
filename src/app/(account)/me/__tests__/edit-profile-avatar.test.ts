@@ -72,6 +72,8 @@ describe('EditProfileModal avatar grid', () => {
     render(avatarPath(7));
     expect(tile(7)?.getAttribute('aria-pressed')).toBe('true');
     expect(tile(8)?.getAttribute('aria-pressed')).toBe('false');
+    // Re-picking it would only be a pointless write.
+    expect(tile(7)?.disabled).toBe(true);
   });
 
   it('marks nothing for an uploaded photo', () => {

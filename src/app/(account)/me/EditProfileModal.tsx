@@ -441,7 +441,7 @@ export function EditProfileModal({
                       <li key={id}>
                         <button
                           type="button"
-                          disabled={picking || busy}
+                          disabled={isCurrent || picking || busy}
                           onClick={() => pickAvatar(id)}
                           aria-label={
                             isCurrent

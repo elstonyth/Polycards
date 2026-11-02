@@ -51,20 +51,18 @@ medusaIntegrationTestRunner({
       });
 
       it('needs a logged-in customer', async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const res = await api
           .post('/store/profile/avatar/preset', { id: 1 }, { headers: storeHeaders })
-          .catch((e: any) => e.response);
+          .catch((e: { response: { status: number } }) => e.response);
         expect(res.status).toBe(401);
       });
 
       it('takes a catalog id only, never a URL', async () => {
         const token = await registerCustomer('preset-bad@test.dev');
         for (const id of [0, 81, 1.5, '12', 'https://evil.example/x.webp']) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const res = await api
             .post('/store/profile/avatar/preset', { id }, { headers: authed(token) })
-            .catch((e: any) => e.response);
+            .catch((e: { response: { status: number } }) => e.response);
           expect(res.status).toBe(400);
         }
         const me = await unwrapResponse(

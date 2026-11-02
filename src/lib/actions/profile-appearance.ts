@@ -113,7 +113,7 @@ export async function setPresetAvatar(id: number): Promise<AppearanceResult> {
   const r = await store.post('/store/profile/avatar/preset', UncheckedSchema, {
     id,
   });
-  if (!r.ok) return { ok: false, error: frameError(r) };
+  if (!r.ok) return { ok: false, error: appearanceError(r) };
   revalidatePath('/me');
   return { ok: true };
 }
@@ -129,7 +129,7 @@ export async function setAvatarFrame(
   const r = await store.post('/store/profile/frame', UncheckedSchema, {
     level,
   });
-  if (!r.ok) return { ok: false, error: frameError(r) };
+  if (!r.ok) return { ok: false, error: appearanceError(r) };
   revalidatePath('/me');
   return { ok: true };
 }
@@ -137,7 +137,7 @@ export async function setAvatarFrame(
 /** No cookie at all (the call never left — `status` is undefined) keeps the
  *  logged-out sentence; anything the backend actually said goes through
  *  APPEARANCE_RULES, the same table the upload's own refusals use. */
-function frameError(f: Failure): string {
+function appearanceError(f: Failure): string {
   if (f.kind === 'unauthenticated' && f.status === undefined) {
     return LOGIN_FIRST;
   }
