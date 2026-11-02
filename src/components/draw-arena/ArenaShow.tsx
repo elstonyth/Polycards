@@ -38,16 +38,15 @@ import { createHoloDust } from '@/app/(account)/lucky-draw/holo-dust';
 import {
   arenaHud,
   createArenaRenderer,
-  entriesWorthAPicture,
   type ArenaCast,
   type ArenaEvent,
   type ArenaHud,
 } from './arena-render';
 import { loadTokenSprites } from './token-sprites';
 
-/** Most player pictures one show loads, biggest discs first: enough for every
- *  player of a normal gate, and a ceiling for a huge one. The rest are plain discs. */
-const MAX_PICTURES = 160;
+/** How long the table holds still for its pictures, so the show opens on faces. A
+ *  slow picture swaps in when it arrives; it never holds the draw longer than this. */
+const PICTURE_WAIT_MS = 1500;
 const HUD_EVERY_MS = 140;
 /** Past this the battle has stopped being a moment the phone should be working on. */
 const COMPUTE_GIVE_UP_MS = 6000;
@@ -240,10 +239,7 @@ export function ArenaShow({
     const canvas = canvasRef.current;
     const stage = stageRef.current;
     if (!cast || !canvas || !stage || reduced) return;
-    const sprites = loadTokenSprites(
-      people,
-      entriesWorthAPicture(cast, win, MAX_PICTURES),
-    );
+    const sprites = loadTokenSprites(people);
     let lastTick = 0;
     const onEvent = (e: ArenaEvent) => {
       if (!expandedRef.current) return;
@@ -340,13 +336,33 @@ export function ArenaShow({
       // A little past the end, so the last rings settle, then the phone rests.
       if (t < SHOW_MS + 1500) raf = requestAnimationFrame(frame);
     };
-    raf = requestAnimationFrame(frame);
+    // The table, still, until its pictures are in.
+    renderer.draw(0, 0);
+    let gone = false;
+    let hold = 0;
+    const paint = () => {
+      if (gone) return;
+      renderer.draw(0, 0);
+      hold = window.setTimeout(paint, 120);
+    };
+    hold = window.setTimeout(paint, 120);
+    void Promise.race([
+      sprites.ready,
+      new Promise((r) => window.setTimeout(r, PICTURE_WAIT_MS)),
+    ]).then(() => {
+      window.clearTimeout(hold);
+      if (gone) return;
+      last = performance.now();
+      raf = requestAnimationFrame(frame);
+    });
     return () => {
+      gone = true;
+      window.clearTimeout(hold);
       cancelAnimationFrame(raf);
       watcher.disconnect();
       sprites.stop();
     };
-  }, [cast, people, reduced, take, win]);
+  }, [cast, people, reduced, take]);
 
   // The dust, once, as the winner is told.
   useEffect(() => {

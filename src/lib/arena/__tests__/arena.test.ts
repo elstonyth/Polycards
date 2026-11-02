@@ -10,6 +10,7 @@ import {
 import {
   ARENA_DOTS,
   ARENA_MAX_DOTS,
+  ARENA_SCALED_DOTS,
   arenaDots,
   arenaSeed,
   castDiscs,
@@ -141,7 +142,7 @@ describe('the battle', () => {
   });
 
   test('ends at the far ends of its size', () => {
-    for (const dots of [2, 3, ARENA_MAX_DOTS]) {
+    for (const dots of [2, 3, 652, ARENA_SCALED_DOTS, ARENA_MAX_DOTS]) {
       const r = runArena(seed(`size-${dots}`), dots);
       expect(r.eats).toHaveLength(dots - 1);
     }
@@ -168,6 +169,30 @@ describe('who sits where', () => {
     expect(shares.reduce((a, b) => a + b, 0)).toBe(ARENA_DOTS);
     expect(Math.abs((shares[0] as number) - 84)).toBeLessThanOrEqual(1);
     expect(Math.min(...shares)).toBeGreaterThanOrEqual(1);
+  });
+
+  test('the table grows with its players, so tickets still show', () => {
+    expect(arenaDots(100)).toBe(ARENA_DOTS);
+    expect(arenaDots(326)).toBe(652);
+    expect(arenaDots(500)).toBe(ARENA_SCALED_DOTS);
+    expect(arenaDots(700)).toBe(ARENA_SCALED_DOTS);
+    expect(arenaDots(1500)).toBe(1500);
+    // Live on 2026-11-02: at 326 discs for 326 players, 770 tickets and 1 ticket
+    // looked the same.
+    const tickets = [
+      770,
+      635,
+      ...Array.from({ length: 324 }, (_, i) => (i < 180 ? 5 : 22)),
+    ];
+    const total = tickets.reduce((a, b) => a + b, 0);
+    const dots = arenaDots(tickets.length);
+    const shares = discShares(tickets, dots);
+    expect(shares.reduce((a, b) => a + b, 0)).toBe(dots);
+    expect(Math.min(...shares)).toBe(1);
+    expect((shares[0] as number) / dots).toBeGreaterThan(
+      ((tickets[0] as number) / total) * 0.75,
+    );
+    expect(shares[0]).toBeGreaterThan(shares[2] as number);
   });
 
   test('a one-ticket player among ten thousand still gets a disc', () => {
