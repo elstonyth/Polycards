@@ -115,6 +115,47 @@
   font-display: swap;
 }
 
+/* --- What players see, on the Tasks page -------------------------------- */
+/*
+ * The /task ticket and check-in tile, drawn with the storefront's own face and
+ * dark surface in either admin theme, so staff read a task as a player will.
+ */
+@font-face {
+  font-family: 'Nekst';
+  src: url('./assets/fonts/Nekst-Black.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+.pc-nekst {
+  font-family: 'Nekst', 'Geist', sans-serif;
+  font-weight: 900;
+}
+.pc-ticket-cut {
+  --stub: 6.5rem;
+  --notch: radial-gradient(
+    circle 7px at calc(100% - var(--stub)) 0,
+    #0000 97%,
+    #000
+  );
+  --notch-end: radial-gradient(
+    circle 7px at calc(100% - var(--stub)) 100%,
+    #0000 97%,
+    #000
+  );
+  background: linear-gradient(
+    to left,
+    rgb(255 255 255 / 0.055) var(--stub),
+    rgb(255 255 255 / 0.025) var(--stub)
+  );
+  -webkit-mask:
+    var(--notch) top / 100% 51% no-repeat,
+    var(--notch-end) bottom / 100% 51% no-repeat;
+  mask:
+    var(--notch) top / 100% 51% no-repeat,
+    var(--notch-end) bottom / 100% 51% no-repeat;
+}
+
 /* --- Prebuilt Settings sidebar (spec §6.3) ------------------------------ */
 /*
  * Selectors are the prebuilt dashboard's own data-testid hooks — markup we

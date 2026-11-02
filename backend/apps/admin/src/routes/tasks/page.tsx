@@ -1,815 +1,581 @@
-import { useState } from "react";
+import { useState } from 'react';
 import {
-  Badge,
   Button,
   Container,
-  FocusModal,
   Heading,
-  Input,
-  Select,
-  Switch,
-  Table,
+  IconButton,
   Tabs,
   Text,
-  Tooltip,
   toast,
-} from "@medusajs/ui";
-import { InformationCircleSolid } from '@medusajs/icons';
-import type { RouteConfig } from "@mercurjs/dashboard-sdk";
+  usePrompt,
+} from '@medusajs/ui';
 import {
-  useCards,
+  CheckCircleSolid,
+  ChevronLeft,
+  ChevronRight,
+  ExclamationCircle,
+} from '@medusajs/icons';
+import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import {
   usePacks,
-  usePixelPokemon,
   useSaveTaskDefinition,
   useTaskDefinitions,
-  useVipLevels,
   type AdminTaskDefinition,
-} from "../../lib/queries";
+} from '../../lib/queries';
 import {
-  ANY,
-  COUNT_LABEL,
-  KIND_LABEL,
-  REQUIREMENT_TYPES,
-  REWARD_LABEL,
-  REWARD_TYPES,
+  addWeeks,
+  nameIssue,
+  retiredInWeek,
+  runsInWeek,
+  weekLabel,
+  weekStart,
+} from './task-board';
+import {
   blankDraft,
-  countApplies,
   draftFrom,
-  draftToPayload,
-  labelsOf,
-  requirementLabel,
-  scheduleOk,
+  draftToInput,
+  issueFixes,
+  issueText,
   taskStatus,
-  toIso,
-  windowLabel,
+  toLocalInput,
   type Draft,
-  type TaskKind,
-  type TaskStatus,
-} from "./task-draft";
-import { Field, Section, StaleAwareSelect } from "../../components/form-bits";
-import { LoadingSkeleton } from "../../components/LoadingSkeleton";
-import { RowActions } from "../../components/RowActions";
+  type IssueFix,
+} from './task-draft';
+import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { RowActions } from '../../components/RowActions';
+import { CheckInTrack, GoalArt, TaskRow } from './TaskBoard';
+import { PlanWeek } from './PlanWeek';
+import { TaskBuilder } from './TaskBuilder';
 
 // Tasks — the /task hub's daily / weekly task and achievement definitions
 // (spec 2026-08-24 Phase B; daily cadence 2026-10-06). Progress is computed live on read, so a definition edit
 // never corrupts anyone's history; only claims are stored, and they freeze the
 // reward they granted.
 //
-// Rebuilt as a modal form 2026-08-25: the editor was a flat strip of unlabelled
-// controls wedged above the list, and the list printed raw slugs and pixel
-// ULIDs. Now the form is grouped and every field is named, the list is split by
-// cadence, and the rows read as sentences (labels come from the server — see
-// api/admin/tasks/labels.ts).
+// Rebuilt as a week board 2026-11-02. Customers are paid by the rule while staff
+// read the title, so a task now reads as its rule, a new name is written from the
+// rule, a mismatch sits at the top of the page, and next week starts as a copy of
+// this one.
 export const config: RouteConfig = {
-  label: "pcNav.tasks",
-  translationNs: "translation",
+  label: 'pcNav.tasks',
+  translationNs: 'translation',
   rank: 1,
-  nested: "/rewards",
+  nested: '/rewards',
 };
 
-function TaskEditor({
-  draft,
-  onChange,
-  onSaved,
-  onCancel,
+type Tab = 'weekly' | 'daily' | 'achievements' | 'retired';
+
+const sum = (
+  rows: AdminTaskDefinition[],
+  f: (t: AdminTaskDefinition) => number,
+): number => rows.reduce((a, t) => a + f(t), 0);
+
+const money = (n: number): string =>
+  `RM ${n.toLocaleString('en-MY', { maximumFractionDigits: 2 })}`;
+
+const WeekSection = ({
+  title,
+  meta,
+  onAdd,
+  children,
 }: {
-  draft: Draft;
-  onChange: (d: Draft) => void;
-  onSaved: () => void;
-  onCancel: () => void;
-}) {
-  const save = useSaveTaskDefinition();
-  const [reason, setReason] = useState("");
-  const [cardQuery, setCardQuery] = useState("");
-  const [pixelQuery, setPixelQuery] = useState("");
-
-  // Only fetch what the open form can actually offer.
-  const needsPacks =
-    draft.reqType === "rip_count" || draft.rewardType === "pack";
-  const { data: packs } = usePacks({ enabled: needsPacks });
-  const { data: cards } = useCards({ enabled: draft.rewardType === "card" });
-  const { data: vip } = useVipLevels();
-  // The library runs past a thousand rows and the route caps a page at 200, so
-  // the picker is search-then-select rather than one giant list.
-  const { data: pixel } = usePixelPokemon(
-    { q: pixelQuery, limit: 200 },
-    { enabled: draft.reqType === "vault_pixel_count" },
-  );
-
-  const packOptions = (packs ?? []).map((p) => ({
-    value: p.slug,
-    label: p.title,
-  }));
-  // A free rip rolls a card: a ticket pack can be a rip goal, never the reward.
-  const rewardPackOptions = (packs ?? [])
-    .filter((p) => p.prize_type !== "tickets")
-    .map((p) => ({ value: p.slug, label: p.title }));
-  // Cards are unbounded; a raw list of every one is the least usable control on
-  // the screen. Filtered client-side — useCards already holds the whole list.
-  const cardOptions = (cards ?? [])
-    .filter((c) =>
-      cardQuery.trim() === ""
-        ? true
-        : `${c.name} ${c.handle}`
-            .toLowerCase()
-            .includes(cardQuery.trim().toLowerCase()),
-    )
-    .slice(0, 200)
-    .map((c) => ({
-      value: c.handle,
-      label: c.grade ? `${c.name} · ${c.grader} ${c.grade}` : c.name,
-    }));
-  const pixelOptions = (pixel?.pixel_pokemon ?? []).map((p) => ({
-    value: p.id,
-    label: `${p.dex ? `#${p.dex} ` : ""}${p.name}${
-      p.variant !== "normal" ? ` (${p.variant})` : ""
-    }`,
-  }));
-
-  const payload = draftToPayload(draft);
-  const scheduleValid = scheduleOk(draft);
-  const valid = Boolean(
-    payload && draft.title.trim() && reason.trim() && scheduleValid,
-  );
-
-  const submit = () => {
-    if (!payload) return;
-    save.mutate(
-      {
-        id: draft.id,
-        kind: draft.kind,
-        title: draft.title.trim(),
-        requirement: payload.requirement,
-        reward: payload.reward,
-        active: draft.active,
-        sort: Number(draft.sort) || 0,
-        tickets: payload.tickets,
-        starts_at: toIso(draft.startsAt),
-        ends_at: toIso(draft.endsAt),
-        reason: reason.trim(),
-      },
-      {
-        onSuccess: () => {
-          toast.success(draft.id ? "Task updated." : "Task created.");
-          onSaved();
-        },
-        onError: (e) => toast.error(e.message),
-      },
-    );
-  };
-
-  return (
-    <FocusModal open onOpenChange={(o) => !o && onCancel()}>
-      <FocusModal.Content>
-        <FocusModal.Header>
-          <div className="flex items-center gap-x-2">
-            <Button size="small" variant="secondary" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button
-              size="small"
-              onClick={submit}
-              isLoading={save.isPending}
-              disabled={!valid || save.isPending}
-            >
-              {draft.id ? "Save changes" : "Create task"}
-            </Button>
-          </div>
-        </FocusModal.Header>
-        <FocusModal.Body className="pc-admin flex flex-col items-center overflow-auto p-10">
-          <div className="flex w-full max-w-[720px] flex-col gap-y-6">
-            <FocusModal.Title asChild>
-              <Heading level="h2">
-                {draft.id ? "Edit task" : "New task"}
-              </Heading>
-            </FocusModal.Title>
-
-            <Section
-              title="Basics"
-              description="What players see, and whether it is running."
-            >
-              <Field
-                label="Title"
-                htmlFor="task-title"
-                hint="Shown on the /task page exactly as typed."
-              >
-                <Input
-                  id="task-title"
-                  value={draft.title}
-                  onChange={(e) => onChange({ ...draft, title: e.target.value })}
-                  placeholder="e.g. Check in 3 days this week"
-                />
-              </Field>
-
-              <div className="flex flex-wrap gap-4">
-                <Field
-                  label="Cadence"
-                  hint={
-                    draft.id
-                      ? "Locked after creation — retire this task and make a new one instead."
-                      : "Daily resets every day 00:00 MYT, weekly every Monday 00:00 MYT. An achievement pays once per account, ever."
-                  }
-                  className="w-56"
-                >
-                  {/* Changing kind in place would re-open every claim already
-                      made (kind drives period_key, which is the claim's unique
-                      key), so the backend refuses it. Disabled rather than
-                      left to fail on save — and the handler below also resets
-                      reqType, so a stray change would clobber the config too. */}
-                  <Select
-                    value={draft.kind}
-                    disabled={Boolean(draft.id)}
-                    onValueChange={(kind) => {
-                      const k = kind as Draft["kind"];
-                      onChange({
-                        ...draft,
-                        kind: k,
-                        // Keep a goal the new cadence also allows (weekly
-                        // → daily keeps "rip N packs" and its pack).
-                        reqType: REQUIREMENT_TYPES[k].includes(draft.reqType)
-                          ? draft.reqType
-                          : REQUIREMENT_TYPES[k][0],
-                      });
-                    }}
-                  >
-                    <Select.Trigger>
-                      <Select.Value />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {(Object.keys(KIND_LABEL) as TaskKind[]).map((k) => (
-                        <Select.Item key={k} value={k}>
-                          {KIND_LABEL[k]}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                </Field>
-
-                <Field
-                  label="Order"
-                  htmlFor="task-sort"
-                  hint="Low numbers first. One list — daily, weekly and achievements share it."
-                  className="w-40"
-                >
-                  <Input
-                    id="task-sort"
-                    type="number"
-                    value={draft.sort}
-                    onChange={(e) =>
-                      onChange({ ...draft, sort: e.target.value })
-                    }
-                  />
-                </Field>
-
-                <Field
-                  label="Active"
-                  hint={
-                    draft.active
-                      ? "Listed on /task."
-                      : "Hidden. Anyone who already finished it can still claim."
-                  }
-                  className="w-56"
-                >
-                  <div className="flex h-8 items-center">
-                    <Switch
-                      checked={draft.active}
-                      onCheckedChange={(active) =>
-                        onChange({ ...draft, active })
-                      }
-                      aria-label="Active"
-                    />
-                  </div>
-                </Field>
-              </div>
-            </Section>
-
-            <Section title="Goal" description="What the player has to do.">
-              <div className="flex flex-wrap gap-4">
-                <Field label="Type" className="w-72">
-                  <Select
-                    value={draft.reqType}
-                    onValueChange={(reqType) => onChange({ ...draft, reqType })}
-                  >
-                    <Select.Trigger>
-                      <Select.Value />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {REQUIREMENT_TYPES[draft.kind].map((t) => (
-                        <Select.Item key={t} value={t}>
-                          {requirementLabel(draft.kind, t)}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                </Field>
-
-                {countApplies(draft) && (
-                <Field
-                  label={COUNT_LABEL[draft.reqType] ?? "Amount"}
-                  htmlFor="task-count"
-                  hint={
-                    draft.reqType === "checkin_days"
-                      ? "1 to 7."
-                      : draft.reqType === "topup_myr"
-                        ? "Whole RM, real top-ups only."
-                        : undefined
-                  }
-                  className="w-32"
-                >
-                  {draft.reqType === "reach_level" ? (
-                    // The real ladder, not a free number — 140 typed into a
-                    // 100-rung ladder is a task nobody can ever finish.
-                    <Select
-                      value={draft.reqN}
-                      onValueChange={(reqN) => onChange({ ...draft, reqN })}
-                    >
-                      <Select.Trigger>
-                        <Select.Value placeholder="Level" />
-                      </Select.Trigger>
-                      <Select.Content>
-                        {(vip?.levels ?? []).map((l) => (
-                          <Select.Item key={l.level} value={String(l.level)}>
-                            {l.level}
-                          </Select.Item>
-                        ))}
-                      </Select.Content>
-                    </Select>
-                  ) : (
-                    <Input
-                      id="task-count"
-                      type="number"
-                      min={1}
-                      max={draft.reqType === "checkin_days" ? 7 : undefined}
-                      value={draft.reqN}
-                      onChange={(e) =>
-                        onChange({ ...draft, reqN: e.target.value })
-                      }
-                    />
-                  )}
-                </Field>
-                )}
-
-                {draft.reqType === "rip_count" && (
-                  <Field
-                    label="Which pack"
-                    hint="Any pack counts unless you name one."
-                    className="w-72"
-                  >
-                    <StaleAwareSelect
-                      value={draft.reqPack}
-                      onChange={(reqPack) => onChange({ ...draft, reqPack })}
-                      placeholder="Any pack"
-                      head={{ value: ANY, label: "Any pack" }}
-                      options={packOptions}
-                    />
-                  </Field>
-                )}
-
-                {draft.reqType === "vault_pixel_count" && (
-                  <>
-                    <Field
-                      label="Search Pokémon"
-                      htmlFor="task-pixel-q"
-                      className="w-48"
-                    >
-                      <Input
-                        id="task-pixel-q"
-                        value={pixelQuery}
-                        onChange={(e) => setPixelQuery(e.target.value)}
-                        placeholder="Pikachu…"
-                      />
-                    </Field>
-                    <Field
-                      label="Which Pokémon"
-                      hint="Any linked pixel card counts unless you name one."
-                      className="w-72"
-                    >
-                      <StaleAwareSelect
-                        value={draft.reqPixel}
-                        onChange={(reqPixel) => onChange({ ...draft, reqPixel })}
-                        placeholder="Any Pokémon"
-                        head={{ value: ANY, label: "Any Pokémon" }}
-                        options={pixelOptions}
-                      />
-                    </Field>
-                  </>
-                )}
-              </div>
-            </Section>
-
-            <Section
-              title="Reward"
-              description="Paid once, when the player claims."
-            >
-              <div className="flex flex-wrap gap-4">
-                <Field label="Type" className="w-64">
-                  <Select
-                    value={draft.rewardType}
-                    onValueChange={(rewardType) =>
-                      onChange({
-                        ...draft,
-                        rewardType: rewardType as Draft["rewardType"],
-                        rewardValue: "",
-                      })
-                    }
-                  >
-                    <Select.Trigger>
-                      <Select.Value />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {REWARD_TYPES.map((t) => (
-                        <Select.Item key={t} value={t}>
-                          {REWARD_LABEL[t]}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                </Field>
-
-                {draft.rewardType === "credit" && (
-                  <Field
-                    label="Amount (RM)"
-                    htmlFor="task-credit"
-                    className="w-40"
-                  >
-                    <Input
-                      id="task-credit"
-                      value={draft.rewardValue}
-                      onChange={(e) =>
-                        onChange({ ...draft, rewardValue: e.target.value })
-                      }
-                      placeholder="5"
-                    />
-                  </Field>
-                )}
-
-                {draft.rewardType === "pack" && (
-                  <Field
-                    label="Which pack"
-                    hint="Claiming grants a free rip; the player spins it on the slot to roll this pack's live odds."
-                    className="w-72"
-                  >
-                    <StaleAwareSelect
-                      value={draft.rewardValue}
-                      onChange={(rewardValue) =>
-                        onChange({ ...draft, rewardValue })
-                      }
-                      placeholder="Pick a pack"
-                      options={rewardPackOptions}
-                    />
-                  </Field>
-                )}
-
-                {draft.rewardType === "card" && (
-                  <>
-                    <Field
-                      label="Search cards"
-                      htmlFor="task-card-q"
-                      className="w-48"
-                    >
-                      <Input
-                        id="task-card-q"
-                        value={cardQuery}
-                        onChange={(e) => setCardQuery(e.target.value)}
-                        placeholder="Charizard…"
-                      />
-                    </Field>
-                    <Field
-                      label="Which card"
-                      hint="Goes straight to the vault. Sellable like any pulled card."
-                      className="w-72"
-                    >
-                      <StaleAwareSelect
-                        value={draft.rewardValue}
-                        onChange={(rewardValue) =>
-                          onChange({ ...draft, rewardValue })
-                        }
-                        placeholder="Pick a card"
-                        options={cardOptions}
-                      />
-                    </Field>
-                  </>
-                )}
-
-                <Field
-                  label="Tickets"
-                  htmlFor="task-tickets"
-                  hint={
-                    draft.rewardType === "tickets"
-                      ? "How many a claim pays. At least 1."
-                      : "Lucky Draw tickets paid with the reward. 0 = none."
-                  }
-                  className="w-40"
-                >
-                  <Input
-                    id="task-tickets"
-                    type="number"
-                    min={draft.rewardType === "tickets" ? 1 : 0}
-                    max={10000}
-                    value={draft.tickets}
-                    onChange={(e) =>
-                      onChange({ ...draft, tickets: e.target.value })
-                    }
-                  />
-                </Field>
-              </div>
-            </Section>
-
-            <Section
-              title="Schedule"
-              description="Optional. Leave both blank to run from now until you retire it."
-            >
-              <div className="flex flex-wrap items-start gap-4">
-                <Field label="Starts" htmlFor="task-starts" className="w-56">
-                  <Input
-                    id="task-starts"
-                    type="datetime-local"
-                    value={draft.startsAt}
-                    onChange={(e) =>
-                      onChange({ ...draft, startsAt: e.target.value })
-                    }
-                  />
-                </Field>
-                <Field label="Ends" htmlFor="task-ends" className="w-56">
-                  <Input
-                    id="task-ends"
-                    type="datetime-local"
-                    value={draft.endsAt}
-                    onChange={(e) =>
-                      onChange({ ...draft, endsAt: e.target.value })
-                    }
-                  />
-                </Field>
-              </div>
-              {draft.endsAt !== "" && (
-                // The window gates CLAIMING, not just listing. An operator
-                // picking an end date should read that here rather than find
-                // out from a player who lost a finished reward.
-                <Text size="small" className="text-ui-fg-subtle">
-                  ⚠ After the end time this task disappears and can no longer be
-                  claimed — including by players who already finished it but had
-                  not pressed Claim.
-                </Text>
-              )}
-              {!scheduleValid && (
-                <Text size="small" className="text-ui-fg-error">
-                  The end must be after the start.
-                </Text>
-              )}
-            </Section>
-
-            <Section title="Audit">
-              <Field
-                label="Reason"
-                htmlFor="task-reason"
-                hint="Recorded against your admin account. Required."
-              >
-                <Input
-                  id="task-reason"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g. Launch week check-in task"
-                />
-              </Field>
-            </Section>
-          </div>
-        </FocusModal.Body>
-      </FocusModal.Content>
-    </FocusModal>
-  );
-}
-
-const STATUS_COLOR: Record<TaskStatus, "green" | "blue" | "orange" | "grey"> =
-  {
-    live: "green",
-    upcoming: "blue",
-    ended: "orange",
-    retired: "grey",
-  };
-
-// The list filter. "Retired" also takes `ended` — a task still switched on
-// whose window has closed is as gone for players as a retired one.
-type StatusFilter = "all" | "live" | "upcoming" | "retired";
-
-const matchesFilter = (s: TaskStatus, f: StatusFilter): boolean =>
-  f === "all" || s === f || (f === "retired" && s === "ended");
-
-const TaskTable = ({
-  rows,
-  now,
-  onEdit,
-  onToggleActive,
-}: {
-  rows: AdminTaskDefinition[];
-  now: number;
-  onEdit: (t: AdminTaskDefinition) => void;
-  onToggleActive: (t: AdminTaskDefinition) => void;
+  title: string;
+  meta?: string;
+  onAdd?: () => void;
+  children: React.ReactNode;
 }) => (
-  <Table>
-    <Table.Header>
-      <Table.Row>
-        <Table.HeaderCell>Title</Table.HeaderCell>
-        <Table.HeaderCell>Goal</Table.HeaderCell>
-        <Table.HeaderCell>Reward</Table.HeaderCell>
-        <Table.HeaderCell>Runs</Table.HeaderCell>
-        <Table.HeaderCell>Status</Table.HeaderCell>
-        <Table.HeaderCell />
-      </Table.Row>
-    </Table.Header>
-    <Table.Body>
-      {rows.map((t) => (
-        <Table.Row key={t.id}>
-          <Table.Cell>
-            <div className="flex items-center gap-x-2">
-              <Text size="small">{t.title}</Text>
-              <Text size="small" className="text-ui-fg-muted tabular-nums">
-                #{t.sort}
-              </Text>
-            </div>
-          </Table.Cell>
-          <Table.Cell className="text-ui-fg-subtle">
-            {labelsOf(t).requirement}
-          </Table.Cell>
-          <Table.Cell className="text-ui-fg-subtle">
-            {labelsOf(t).reward}
-          </Table.Cell>
-          <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
-            {windowLabel(t)}
-          </Table.Cell>
-          <Table.Cell>
-            <Badge size="2xsmall" color={STATUS_COLOR[taskStatus(t, now)]}>
-              {taskStatus(t, now)}
-            </Badge>
-          </Table.Cell>
-          <Table.Cell className="text-right">
-            <RowActions
-              subject={t.title}
-              actions={[
-                { label: "Edit", onSelect: () => onEdit(t) },
-                {
-                  label: t.active ? "Retire" : "Reactivate",
-                  danger: t.active,
-                  onSelect: () => onToggleActive(t),
-                },
-              ]}
-            />
-          </Table.Cell>
-        </Table.Row>
-      ))}
-    </Table.Body>
-  </Table>
-);
-
-const EmptyRow = ({ what, filter }: { what: string; filter: StatusFilter }) => (
-  <Text size="small" className="text-ui-fg-muted px-6 py-4">
-    {filter === "all" ? `No ${what} yet.` : `No ${filter} ${what}.`}
-  </Text>
+  <Container className="p-0">
+    <div className="flex flex-wrap items-center gap-x-2.5 px-5 pt-3.5 pb-2">
+      <Text size="small" weight="plus">
+        {title}
+      </Text>
+      {meta && (
+        <Text size="small" className="text-ui-fg-muted tabular-nums">
+          {meta}
+        </Text>
+      )}
+      {onAdd && (
+        <Button
+          size="small"
+          variant="transparent"
+          className="ml-auto"
+          onClick={onAdd}
+        >
+          + Add
+        </Button>
+      )}
+    </div>
+    {children}
+  </Container>
 );
 
 const TasksPage = () => {
   // Status is "as of the last fetch" — dataUpdatedAt, not a Date.now() in
   // render (impure; the React compiler lint refuses it). The list refetches
   // after every save, so a task scheduled a minute ago is badged correctly.
-  const { data, isLoading, dataUpdatedAt: now } = useTaskDefinitions();
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    dataUpdatedAt: now,
+  } = useTaskDefinitions();
   const save = useSaveTaskDefinition();
-  const [editing, setEditing] = useState<Draft | null>(null);
-  const [filter, setFilter] = useState<StatusFilter>("all");
+  const prompt = usePrompt();
+  const [tab, setTab] = useState<Tab>('weekly');
+  // null = whichever week it is now.
+  const [picked, setPicked] = useState<number | null>(null);
+  const [editing, setEditing] = useState<{
+    draft: Draft;
+    claims: number;
+  } | null>(null);
+  const [planFrom, setPlanFrom] = useState<number | null>(null);
 
-  // Retire / reactivate is the Active switch, applied straight from the row so
-  // the common case never needs the form. Same audited POST as a save.
-  const toggleActive = (t: AdminTaskDefinition) => {
-    const d = draftFrom(t);
-    const payload = draftToPayload(d);
-    if (!payload) {
-      toast.error("This task's config is invalid — open it to fix it first.");
-      return;
-    }
+  const thisWeek = weekStart(now);
+  const week = picked ?? thisWeek;
+  const past = week < thisWeek;
+  const all = data ?? [];
+  const inWeek = all.filter((t) => t.kind === 'weekly' && runsInWeek(t, week));
+  const flagged = past ? [] : inWeek.filter((t) => nameIssue(t));
+  // Only an any-pack mismatch needs the catalog, to say which pack it means.
+  const { data: packs } = usePacks({
+    enabled: flagged.some((t) => nameIssue(t)?.kind === 'any'),
+  });
+
+  const weekWindow = {
+    startsAt: toLocalInput(new Date(week)),
+    endsAt: toLocalInput(new Date(addWeeks(week, 1))),
+  };
+  const openNew = (over: Partial<Draft> = {}) =>
+    setEditing({
+      draft: { ...blankDraft(), ...weekWindow, ...over },
+      claims: 0,
+    });
+  const openEdit = (t: AdminTaskDefinition) =>
+    setEditing({ draft: draftFrom(t), claims: t.claims ?? 0 });
+
+  // Retire / reactivate changes the switch and nothing else: the row's rule goes
+  // back exactly as it came. It used to round-trip through the form, which could
+  // rewrite the rule.
+  const setActive = (
+    t: AdminTaskDefinition,
+    active: boolean,
+    reason?: string,
+  ) =>
     save.mutate(
       {
         id: t.id,
         kind: t.kind,
         title: t.title,
-        requirement: payload.requirement,
-        reward: payload.reward,
-        active: !t.active,
+        requirement: t.requirement,
+        reward: t.reward,
+        active,
         sort: t.sort,
-        tickets: payload.tickets,
+        tickets: t.tickets,
         starts_at: t.starts_at,
         ends_at: t.ends_at,
-        reason: t.active ? "Retired from the task list" : "Reactivated",
+        reason:
+          reason ?? (active ? 'Reactivated' : 'Retired from the task list'),
       },
       {
         onSuccess: () =>
-          toast.success(t.active ? "Task retired." : "Task reactivated."),
+          toast.success(active ? 'Task reactivated.' : 'Task retired.'),
+        onError: (e) => toast.error(e.message),
+      },
+    );
+
+  const applyFix = async (t: AdminTaskDefinition, fix: IssueFix) => {
+    if (fix.action === 'open') return openEdit(t);
+    const ok = await prompt({
+      variant: fix.action === 'retire' ? 'danger' : 'confirmation',
+      title: fix.label,
+      description: fix.note,
+      confirmText: fix.label,
+      cancelText: 'Back',
+    });
+    if (!ok) return;
+    if (fix.action === 'retire') {
+      return setActive(t, false, 'Name and rule disagreed: retired');
+    }
+    const draft = fix.patch ? fix.patch(draftFrom(t)) : draftFrom(t);
+    const input = draftToInput(draft, `Name and rule disagreed: ${fix.label}`);
+    if (!input) {
+      toast.error("This task's rule is incomplete. Open it to fix it.");
+      return openEdit(t);
+    }
+    save.mutate(
+      // The window is the row's own, to the second, not the form's rounding.
+      {
+        ...input,
+        starts_at: t.starts_at,
+        ends_at: t.ends_at,
+        active: t.active,
+      },
+      {
+        onSuccess: () =>
+          toast.success('Saved. The reason is in the audit log.'),
         onError: (e) => toast.error(e.message),
       },
     );
   };
 
-  const shown = (data ?? []).filter((t) =>
-    matchesFilter(taskStatus(t, now), filter),
+  const rowActions = (t: AdminTaskDefinition) => (
+    <RowActions
+      subject={t.title}
+      actions={[
+        { label: 'Edit', onSelect: () => openEdit(t) },
+        {
+          label: 'Duplicate',
+          onSelect: () =>
+            setEditing({
+              draft: {
+                ...draftFrom(t),
+                ...(t.kind === 'weekly' ? weekWindow : {}),
+                id: undefined,
+                active: true,
+              },
+              claims: 0,
+            }),
+        },
+        t.active
+          ? {
+              label: 'Retire',
+              danger: true,
+              onSelect: () => setActive(t, false),
+              confirm: {
+                title: 'Retire this task?',
+                description:
+                  'It leaves /task now. Only the on/off switch changes, so its rule stays as it is. Players who already finished it can still claim.',
+              },
+            }
+          : { label: 'Reactivate', onSelect: () => setActive(t, true) },
+      ]}
+    />
   );
-  const daily = shown.filter((t) => t.kind === "daily");
-  const weekly = shown.filter((t) => t.kind === "weekly");
-  const achievements = shown.filter((t) => t.kind === "achievement");
+
+  const row = (t: AdminTaskDefinition, readOnly = false) => (
+    <TaskRow
+      key={t.id}
+      t={t}
+      flagged={t.active && Boolean(nameIssue(t))}
+      onOpen={readOnly ? undefined : () => openEdit(t)}
+      actions={readOnly ? undefined : rowActions(t)}
+    />
+  );
+
+  const pulls = inWeek.filter(
+    (t) => t.requirement.type === 'vault_pixel_count',
+  );
+  const rips = inWeek.filter((t) => t.requirement.type === 'rip_count');
+  const topups = inWeek.filter((t) => t.requirement.type === 'topup_myr');
+  const checkins = inWeek.filter((t) => t.requirement.type === 'checkin_days');
+  const rewardValue = (t: AdminTaskDefinition) => t.view?.reward_value_myr ?? 0;
+  const retiredNow = all.filter(
+    (t) => t.kind === 'weekly' && retiredInWeek(t, week),
+  );
+  const listed = (kind: AdminTaskDefinition['kind']) =>
+    all.filter(
+      (t) => t.kind === kind && t.active && taskStatus(t, now) !== 'ended',
+    );
+
+  const rowsClass = 'grid gap-x-2 px-2 pb-2 xl:grid-cols-2';
 
   return (
-    <Container className="p-0">
-      <div className="flex items-start justify-between px-6 py-4">
-        <div>
-          <Heading level="h2">Tasks</Heading>
-          <Text size="small" className="text-ui-fg-subtle mt-1">
-            What players can earn on the /task page. Rewards pay as credit, a
-            free rip, a card straight to the vault, or Lucky Draw tickets.
-          </Text>
+    <div className="flex flex-col gap-y-3">
+      <Container className="p-0">
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-6 pt-4 pb-3">
+          <div>
+            <Heading level="h1">Tasks</Heading>
+            {tab === 'weekly' && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-1">
+                <IconButton
+                  size="small"
+                  variant="transparent"
+                  aria-label="Previous week"
+                  onClick={() => setPicked(addWeeks(week, -1))}
+                >
+                  <ChevronLeft />
+                </IconButton>
+                <Text
+                  weight="plus"
+                  className="min-w-[92px] text-center tabular-nums"
+                >
+                  {weekLabel(week)}
+                </Text>
+                <IconButton
+                  size="small"
+                  variant="transparent"
+                  aria-label="Next week"
+                  onClick={() => setPicked(addWeeks(week, 1))}
+                >
+                  <ChevronRight />
+                </IconButton>
+                <Text size="small" className="text-ui-fg-muted ml-2">
+                  {week === thisWeek
+                    ? 'This week · resets Monday 12 AM'
+                    : past
+                      ? 'A past week, read only'
+                      : 'Upcoming'}
+                </Text>
+                {week !== thisWeek && (
+                  <Button
+                    size="small"
+                    variant="transparent"
+                    onClick={() => setPicked(null)}
+                  >
+                    Back to this week
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {!past && (
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={!data}
+                onClick={() => setPlanFrom(week)}
+              >
+                Plan {weekLabel(addWeeks(week, 1))}
+              </Button>
+            )}
+            <Button size="small" onClick={() => openNew()}>
+              New task
+            </Button>
+          </div>
         </div>
-        <Button size="small" onClick={() => setEditing(blankDraft())}>
-          New task
-        </Button>
-      </div>
+        <div className="px-5 pb-3">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+            <Tabs.List aria-label="Task type">
+              <Tabs.Trigger value="weekly">Weekly</Tabs.Trigger>
+              <Tabs.Trigger value="daily">Daily</Tabs.Trigger>
+              <Tabs.Trigger value="achievements">Achievements</Tabs.Trigger>
+              <Tabs.Trigger value="retired">Retired</Tabs.Trigger>
+            </Tabs.List>
+          </Tabs>
+        </div>
+      </Container>
 
       {editing && (
-        <TaskEditor
-          draft={editing}
-          onChange={setEditing}
-          onSaved={() => setEditing(null)}
-          onCancel={() => setEditing(null)}
+        <TaskBuilder
+          initial={editing.draft}
+          claims={editing.claims}
+          weekRows={inWeek}
+          weekText={weekLabel(week)}
+          weekWindow={weekWindow}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {planFrom !== null && data && (
+        <PlanWeek
+          tasks={data}
+          sourceWeek={planFrom}
+          onClose={() => setPlanFrom(null)}
         />
       )}
 
-      {isLoading || !data ? (
-        <div className="px-6 pb-6">
-          <LoadingSkeleton rows={4} />
-        </div>
+      {isError ? (
+        <Container className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
+          <Text size="small" className="text-ui-fg-error">
+            Tasks didn't load
+            {error instanceof Error ? `: ${error.message}` : ''}.
+          </Text>
+          <Button size="small" variant="secondary" onClick={() => refetch()}>
+            Try again
+          </Button>
+        </Container>
+      ) : isLoading || !data ? (
+        <Container className="px-6 py-4">
+          <LoadingSkeleton rows={6} />
+        </Container>
+      ) : tab === 'daily' ? (
+        <WeekSection
+          title="Daily tasks"
+          meta="Resets at midnight, Malaysia time"
+          onAdd={() => openNew({ kind: 'daily', startsAt: '', endsAt: '' })}
+        >
+          {listed('daily').length === 0 ? (
+            <Text
+              size="small"
+              className="text-ui-fg-subtle max-w-prose px-5 pb-4"
+            >
+              No daily tasks running. Anything finished but not claimed by
+              midnight is lost.
+            </Text>
+          ) : (
+            <ul className={rowsClass}>{listed('daily').map((t) => row(t))}</ul>
+          )}
+        </WeekSection>
+      ) : tab === 'achievements' ? (
+        <WeekSection
+          title="Achievements"
+          meta="Once per account, ever"
+          onAdd={() =>
+            openNew({ kind: 'achievement', startsAt: '', endsAt: '' })
+          }
+        >
+          {listed('achievement').length === 0 ? (
+            <Text size="small" className="text-ui-fg-subtle px-5 pb-4">
+              No achievements yet.
+            </Text>
+          ) : (
+            <ul className={rowsClass}>
+              {listed('achievement').map((t) => row(t))}
+            </ul>
+          )}
+        </WeekSection>
+      ) : tab === 'retired' ? (
+        <WeekSection title="Retired" meta="Switched off, kept for the record">
+          {all.filter((t) => !t.active).length === 0 ? (
+            <Text size="small" className="text-ui-fg-subtle px-5 pb-4">
+              Nothing retired.
+            </Text>
+          ) : (
+            <ul className={rowsClass}>
+              {all.filter((t) => !t.active).map((t) => row(t))}
+            </ul>
+          )}
+        </WeekSection>
+      ) : inWeek.length === 0 ? (
+        <Container className="flex flex-col items-center gap-y-3 px-6 py-10 text-center">
+          <Text className="text-ui-fg-subtle">
+            Nothing {past ? 'ran' : 'planned'} for {weekLabel(week)}.
+          </Text>
+          {!past && (
+            <Button
+              size="small"
+              variant="secondary"
+              onClick={() => setPlanFrom(addWeeks(week, -1))}
+            >
+              Copy from {weekLabel(addWeeks(week, -1))}
+            </Button>
+          )}
+        </Container>
       ) : (
         <>
-          <div className="border-ui-border-base border-t px-6 py-3">
-            <Tabs
-              value={filter}
-              onValueChange={(v) => setFilter(v as StatusFilter)}
+          {flagged.length > 0 ? (
+            <section className="bg-ui-tag-orange-bg rounded-lg p-2 shadow-[0_0_0_1px_var(--tag-orange-border)]">
+              <h2 className="text-ui-tag-orange-text flex items-center gap-x-2 px-3 pt-1.5 pb-2 text-sm font-semibold">
+                <ExclamationCircle />
+                {flagged.length === 1
+                  ? '1 task pays differently from its name'
+                  : `${flagged.length} tasks pay differently from their names`}
+              </h2>
+              <ul className="flex flex-col gap-y-1.5">
+                {flagged.map((t) => {
+                  const issue = nameIssue(t)!;
+                  const words = issueText(t, issue);
+                  return (
+                    <li
+                      key={t.id}
+                      className="bg-ui-bg-base flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-md px-3.5 py-3"
+                    >
+                      <GoalArt t={t} />
+                      <div className="min-w-0 flex-[1_1_320px]">
+                        <Text size="small" leading="compact">
+                          {words.headline}
+                        </Text>
+                        <Text
+                          size="small"
+                          leading="compact"
+                          className="text-ui-fg-subtle mt-1 tabular-nums"
+                        >
+                          {words.detail}
+                        </Text>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {issueFixes(t, issue, packs ?? []).map((fix) => (
+                          <Button
+                            key={fix.label}
+                            size="small"
+                            variant="secondary"
+                            disabled={save.isPending}
+                            onClick={() => void applyFix(t, fix)}
+                          >
+                            {fix.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : (
+            !past && (
+              <Container className="flex items-center gap-x-2 px-5 py-2.5">
+                <CheckCircleSolid className="text-ui-tag-green-icon" />
+                <Text size="small" className="text-ui-fg-subtle">
+                  Every task this week matches its name.
+                </Text>
+              </Container>
+            )
+          )}
+
+          <WeekSection
+            title="Check-in week"
+            meta="Rewards by how many days a player has checked in"
+          >
+            <div className="px-5 pb-4">
+              <CheckInTrack
+                rows={checkins}
+                onOpenDay={past ? undefined : openEdit}
+                onAddDay={
+                  past
+                    ? undefined
+                    : (day) =>
+                        openNew({
+                          reqType: 'checkin_days',
+                          reqN: String(day),
+                        })
+                }
+              />
+            </div>
+          </WeekSection>
+
+          {pulls.length > 0 && (
+            <WeekSection
+              title="Pull a Pokémon"
+              meta={`${pulls.length} tasks · up to ${sum(pulls, (t) => t.tickets ?? 0)} tickets`}
+              onAdd={
+                past
+                  ? undefined
+                  : () => openNew({ reqType: 'vault_pixel_count' })
+              }
             >
-              <Tabs.List aria-label="Task status">
-                <Tabs.Trigger value="all">All</Tabs.Trigger>
-                <Tabs.Trigger value="live">Live</Tabs.Trigger>
-                <Tabs.Trigger value="upcoming">Upcoming</Tabs.Trigger>
-                <Tabs.Trigger value="retired">Retired</Tabs.Trigger>
-              </Tabs.List>
-            </Tabs>
-          </div>
-
-          <div className="border-ui-border-base flex items-center gap-x-2 border-t px-6 py-3">
-            <Text weight="plus">Daily tasks</Text>
-            <Tooltip content="Progress and claims reset every day at 00:00 MYT. Anything finished but unclaimed at midnight is lost.">
-              <InformationCircleSolid className="text-ui-fg-muted" />
-            </Tooltip>
-          </div>
-          {daily.length === 0 ? (
-            <EmptyRow what="daily tasks" filter={filter} />
-          ) : (
-            <TaskTable
-              rows={daily}
-              now={now}
-              onEdit={(t) => setEditing(draftFrom(t))}
-              onToggleActive={toggleActive}
-            />
+              <ul className={rowsClass}>{pulls.map((t) => row(t, past))}</ul>
+            </WeekSection>
           )}
-
-          <div className="border-ui-border-base flex items-center gap-x-2 border-t px-6 py-3">
-            <Text weight="plus">Weekly tasks</Text>
-            <Tooltip content="Progress and claims reset every Monday 00:00 MYT. Anything finished but unclaimed at the reset is lost.">
-              <InformationCircleSolid className="text-ui-fg-muted" />
-            </Tooltip>
-          </div>
-          {weekly.length === 0 ? (
-            <EmptyRow what="weekly tasks" filter={filter} />
-          ) : (
-            <TaskTable
-              rows={weekly}
-              now={now}
-              onEdit={(t) => setEditing(draftFrom(t))}
-              onToggleActive={toggleActive}
-            />
+          {rips.length > 0 && (
+            <WeekSection
+              title="Rip packs"
+              meta={`${rips.length} tasks · up to ${money(sum(rips, rewardValue))} in free rips`}
+              onAdd={past ? undefined : () => openNew({ reqType: 'rip_count' })}
+            >
+              <ul className={rowsClass}>{rips.map((t) => row(t, past))}</ul>
+            </WeekSection>
           )}
-
-          <div className="border-ui-border-base flex items-center gap-x-2 border-t px-6 py-3">
-            <Text weight="plus">Achievements</Text>
-            <Tooltip content="Claimable once per account, ever. Progress is lifetime and never resets.">
-              <InformationCircleSolid className="text-ui-fg-muted" />
-            </Tooltip>
-          </div>
-          {achievements.length === 0 ? (
-            <EmptyRow what="achievements" filter={filter} />
-          ) : (
-            <TaskTable
-              rows={achievements}
-              now={now}
-              onEdit={(t) => setEditing(draftFrom(t))}
-              onToggleActive={toggleActive}
-            />
+          {topups.length > 0 && (
+            <WeekSection
+              title="Top up"
+              meta={`${topups.length} tasks · up to ${money(sum(topups, rewardValue))} credit`}
+              onAdd={past ? undefined : () => openNew({ reqType: 'topup_myr' })}
+            >
+              <ul className={rowsClass}>{topups.map((t) => row(t, past))}</ul>
+            </WeekSection>
+          )}
+          {retiredNow.length > 0 && (
+            <WeekSection title="Retired this week">
+              <ul className={rowsClass}>
+                {retiredNow.map((t) => row(t, past))}
+              </ul>
+            </WeekSection>
           )}
         </>
       )}
-    </Container>
+    </div>
   );
 };
 

@@ -1,4 +1,4 @@
-import { resolveTaskLabels } from '../labels';
+import { resolveTaskLabels, resolveTaskViews } from '../labels';
 import type PacksModuleService from '../../../../modules/packs/service';
 
 // A stub with only the three readers resolveTaskLabels touches. Enough to pin
@@ -134,6 +134,94 @@ describe('resolveTaskLabels', () => {
     ]);
     expect(out.get('a')!.requirement).toMatch(/Unknown requirement/);
     expect(out.get('a')!.reward).toMatch(/Unknown reward/);
+  });
+});
+
+describe('resolveTaskViews', () => {
+  const catalog = {
+    listPacks: async (sel: { slug?: string[]; status?: string }) =>
+      sel.status === 'active'
+        ? [{ price: 0 }, { price: 45 }, { price: 10 }, { price: 300 }]
+        : (sel.slug ?? []).map((slug) => ({
+            slug,
+            title: slug === 'bronze-pack' ? 'Bronze Pack' : 'Gold Pack',
+            image: `/${slug}.webp`,
+            price: slug === 'bronze-pack' ? '300' : '1200',
+          })),
+    listCards: async () => [],
+    listPixelPokemon: async () => [
+      { id: 'px_151', name: 'Mew', image_url: 'https://cdn/mew.gif' },
+    ],
+  } as unknown as PacksModuleService;
+
+  it('prices an any-pack goal at the cheapest paid pack, so RM 100 for 10 rips shows', async () => {
+    const out = await resolveTaskViews(catalog, [
+      {
+        id: 'any',
+        requirement: { type: 'rip_count', count: 10, pack_id: null },
+        reward: { type: 'pack', pack_id: 'bronze-pack' },
+      },
+    ]);
+    expect(out.get('any')).toEqual({
+      goal_name: null,
+      goal_image: null,
+      goal_price_myr: 10,
+      reward_name: 'Bronze Pack',
+      reward_image: '/bronze-pack.webp',
+      reward_value_myr: 300,
+    });
+  });
+
+  it('names the pack and Pokémon a goal names, and credit is worth its amount', async () => {
+    const out = await resolveTaskViews(catalog, [
+      {
+        id: 'rip',
+        requirement: { type: 'rip_count', count: 2, pack_id: 'gold-pack' },
+        reward: { type: 'credit', amount_myr: 50 },
+      },
+      {
+        id: 'pull',
+        requirement: {
+          type: 'vault_pixel_count',
+          count: 2,
+          pixel_pokemon_id: 'px_151',
+        },
+        reward: { type: 'tickets' },
+      },
+    ]);
+    expect(out.get('rip')).toMatchObject({
+      goal_name: 'Gold Pack',
+      goal_price_myr: 1200,
+      reward_value_myr: 50,
+    });
+    expect(out.get('pull')).toMatchObject({
+      goal_name: 'Mew',
+      goal_image: 'https://cdn/mew.gif',
+      goal_price_myr: null,
+      reward_value_myr: null,
+    });
+  });
+});
+
+describe('resolveTaskLabels — a key left behind by an older rule (2026-11-02)', () => {
+  it('reads the amount the goal type uses, not a stale days', async () => {
+    const out = await resolveTaskLabels(stub, [
+      {
+        id: 't',
+        kind: 'weekly',
+        requirement: {
+          type: 'vault_pixel_count',
+          days: 1,
+          count: 2,
+          pixel_pokemon_id: null,
+        },
+        reward: { type: 'tickets' },
+        tickets: 20,
+      },
+    ]);
+    expect(out.get('t')!.requirement).toBe(
+      'Pull 2 Pokémon (pixel) cards this week',
+    );
   });
 });
 

@@ -7,7 +7,7 @@ import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { reqReason } from '../rewards-settings/validate';
 import { TASK_KINDS, type TaskKind } from '../../../modules/packs/tasks';
-import { resolveTaskLabels } from './labels';
+import { resolveTaskLabels, resolveTaskViews } from './labels';
 
 // GET /admin/tasks — every definition (active and retired), sorted. Each row
 // carries plain-English `labels` so the console can render a task without
@@ -21,7 +21,11 @@ export async function GET(
     {},
     { order: { sort: 'ASC' }, take: 500 },
   );
-  const labels = await resolveTaskLabels(packs, rows);
+  const [labels, views, claims] = await Promise.all([
+    resolveTaskLabels(packs, rows),
+    resolveTaskViews(packs, rows),
+    packs.taskClaimCounts(),
+  ]);
   res.json({
     tasks: rows.map((t) => ({
       id: t.id,
@@ -34,7 +38,10 @@ export async function GET(
       tickets: t.tickets ?? 0,
       starts_at: t.starts_at ? new Date(t.starts_at).toISOString() : null,
       ends_at: t.ends_at ? new Date(t.ends_at).toISOString() : null,
+      retired_at: t.retired_at ? new Date(t.retired_at).toISOString() : null,
+      claims: claims.get(t.id) ?? 0,
       labels: labels.get(t.id) ?? { requirement: '', reward: '' },
+      view: views.get(t.id) ?? null,
     })),
   });
 }

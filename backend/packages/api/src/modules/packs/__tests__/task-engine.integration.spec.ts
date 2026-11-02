@@ -603,6 +603,52 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(audits.map((a) => a.action).sort()).toEqual(['create', 'edit']);
     });
 
+    it('changing a goal or reward type leaves nothing of the old one behind', async () => {
+      // Medusa's update merges into a JSON column, so a key the new rule lacks
+      // used to survive it, and a stale days then outranked count everywhere that
+      // read it.
+      const { id } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Check in 1 day',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 5 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      await service.saveTaskDefinition({
+        id,
+        kind: 'weekly',
+        title: 'Rip 2 packs',
+        requirement: { type: 'rip_count', count: 2, pack_id: null },
+        reward: { type: 'tickets' },
+        tickets: 20,
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'wrong goal',
+      });
+      const [row] = await service.listTaskDefinitions({ id });
+      expect(row.requirement).toEqual({
+        type: 'rip_count',
+        count: 2,
+        pack_id: null,
+      });
+      expect(row.reward).toEqual({ type: 'tickets' });
+      expect(row.title).toBe('Rip 2 packs');
+      expect(row.tickets).toBe(20);
+      const audits = await service.listAdminActionAudits({
+        entity_type: 'task_definition',
+        entity_id: id,
+        action: 'edit',
+      });
+      expect(audits[0].after).toMatchObject({
+        requirement: row.requirement,
+        reward: row.reward,
+      });
+    });
+
     it('a closed window declines with its own reason, not "not completed"', async () => {
       // The window can close between the page load and the tap. Answering
       // 'not_completed' over a finished task is the most confusing thing this

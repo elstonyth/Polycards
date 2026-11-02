@@ -2011,6 +2011,24 @@ export const useSaveTaskDefinition = () => {
   });
 };
 
+/** Saves a week's tasks one at a time, each with its own audit row. Stops at the
+ *  first refusal: the list refetches either way, so what landed shows as done. */
+export const usePublishTasks = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      tasks: Parameters<typeof saveTaskDefinition>[0][];
+      onProgress: (saved: number) => void;
+    }) => {
+      for (const [i, task] of input.tasks.entries()) {
+        await saveTaskDefinition(task);
+        input.onProgress(i + 1);
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.taskDefinitions }),
+  });
+};
+
 // ── Lucky Draw (spec 2026-10-24) ─────────────────────────────────────────────
 export type { AdminLuckyDrawEvent, AdminLuckyDrawPrize } from './admin-rest';
 

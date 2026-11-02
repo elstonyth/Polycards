@@ -939,7 +939,7 @@ export type AdminLuckyDrawEvent = {
 
 /** A card's RM value as the vault, the task hub and the Lucky Draw admin
  *  overview show it. */
-function cardValueMyr(
+export function cardValueMyr(
   card: { market_value: unknown; market_multiplier?: unknown },
   fxRate: number,
 ): number {
@@ -4027,9 +4027,19 @@ class PacksModuleService extends MedusaService({
         starts_at: existing.starts_at,
         ends_at: existing.ends_at,
       };
+      // Medusa's update merges into a JSON column, so a key the new rule lacks
+      // would survive it, and could outrank the new rule's own amount. The two rule
+      // columns go in whole.
+      const { requirement: wholeRequirement, reward: wholeReward, ...columns } =
+        data;
       await this.updateTaskDefinitions(
-        { selector: { id }, data },
+        { selector: { id }, data: columns },
         sharedContext,
+      );
+      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      await em.execute(
+        'UPDATE task_definition SET requirement = ?::jsonb, reward = ?::jsonb, updated_at = now() WHERE id = ?',
+        [JSON.stringify(wholeRequirement), JSON.stringify(wholeReward), id],
       );
     } else {
       const [row] = await this.createTaskDefinitions([data], sharedContext);
@@ -4048,6 +4058,20 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { id };
+  }
+
+  /** How many claims each task definition has, for the admin console. */
+  @InjectManager()
+  async taskClaimCounts(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ task_id: string; n: string }[]>(
+      'SELECT task_id, COUNT(*)::bigint AS n FROM task_claim WHERE deleted_at IS NULL GROUP BY task_id',
+      [],
+    );
+    return new Map(rows.map((r) => [r.task_id, Number(r.n)]));
   }
 
   // Admin CRUD for the storefront announcement popup (spec 2026-10-06 §5) —
