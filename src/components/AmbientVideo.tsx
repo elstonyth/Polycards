@@ -20,6 +20,8 @@ import { usePrefersReducedMotion } from '@/lib/use-reveal';
  * by the surrounding text (headings, pack title/price), so exposing it to
  * assistive tech would only add noise.
  */
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
 export function AmbientVideo({
   mp4,
   webm,
@@ -46,7 +48,9 @@ export function AmbientVideo({
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    if (reduced) {
+    // Asked directly as well: `reduced` is false during hydration, and calling
+    // play() there would download the clip for someone who will never see it.
+    if (reduced || window.matchMedia(REDUCED_MOTION).matches) {
       v.pause();
       v.currentTime = 0;
     } else {

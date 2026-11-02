@@ -16,5 +16,7 @@ const sdk = process.env.NEXT_PUBLIC_SENTRY_DSN
 export const onRouterTransitionStart = (
   ...args: Parameters<typeof captureRouterTransitionStart>
 ) => {
-  void sdk?.then((sentry) => sentry.captureRouterTransitionStart(...args));
+  void sdk
+    ?.then((sentry) => sentry.captureRouterTransitionStart(...args))
+    .catch(() => {});
 };

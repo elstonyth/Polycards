@@ -20,7 +20,7 @@ export function readLuckyDrawStatus(): Promise<LuckyDrawChromeStatus | null> {
   if (held && now - held.at < FRESH_MS) return held.read;
   const read = fetch('/api/lucky-draw-status')
     .then((r) => (r.ok ? r.json() : null))
-    // Only when there is a status to read: zod stays off pages with no live draw.
+    // Loaded here, not at the top of the file: zod stays out of the first load.
     .then(async (body: unknown) => {
       if (body == null) return null;
       const { LuckyDrawChromeStatusSchema, parseOne } = await loadSchemas();

@@ -99,19 +99,13 @@ export default async function HomePage() {
       <PullsMarquee pulls={pulls} />
 
       {/* 02 — tier-racked shelf */}
-      <div className="cv-offscreen">
-        <TierShelf categories={categories} chaseByPack={chaseByPack} />
-      </div>
+      <TierShelf categories={categories} chaseByPack={chaseByPack} />
 
       {/* 03 — live proof */}
-      <div className="cv-offscreen">
-        <RecentPullsSection initial={feed} />
-      </div>
+      <RecentPullsSection initial={feed} />
 
       {/* 04 — podium + loop teaser */}
-      <div className="cv-offscreen">
-        <TheGame topRippers={topRippers} />
-      </div>
+      <TheGame topRippers={topRippers} />
 
       {/* 05 — closer */}
       <FinalCta />

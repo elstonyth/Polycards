@@ -178,6 +178,26 @@ it('honors saved mute before loading music and cancels a reveal that finishes lo
   expect(audio.sources).toHaveLength(before);
 });
 
+it('drops a reel tick whose sample arrived late, then plays the next on time', async () => {
+  await render();
+  let now = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  let finish: (value: ArrayBuffer) => void = () => {};
+  vi.mocked(fetch).mockResolvedValueOnce({
+    ok: true,
+    arrayBuffer: () =>
+      new Promise<ArrayBuffer>((resolve) => {
+        finish = resolve;
+      }),
+  } as Response);
+  await act(async () => sound.sfx('reelTick'));
+  now = 1_000;
+  await act(async () => finish(new ArrayBuffer(0)));
+  expect(audio.sources).toHaveLength(0);
+  await act(async () => sound.sfx('reelTick'));
+  expect(audio.sources).toHaveLength(1);
+});
+
 it('ticks on control clicks, except opted-out, disabled or muted ones', async () => {
   await render();
   document.body.innerHTML = `

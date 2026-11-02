@@ -30,10 +30,11 @@ export type LivePollOptions<T> = {
     prev: T,
     pending: boolean,
   ) => T | null | Promise<T | null>;
-  /** `initial` came from the server for this `resetKey` just now: the first
-   *  tick waits an interval rather than downloading it again. A scope change
-   *  still fetches at once. */
-  seeded?: boolean;
+  /** `initial` came from the server for this `resetKey`, so the first tick can
+   *  wait this long instead of downloading it again during page load. A value
+   *  of `intervalMs` or more leaves it to the interval. A scope change still
+   *  fetches at once. */
+  firstTickMs?: number;
   /** Injected by tests; defaults to fetch → json, `null` on a non-2xx. */
   fetchJson?: (url: string) => Promise<unknown>;
 };
@@ -63,7 +64,13 @@ export type LivePoll<T> = {
 export function useLivePoll<T>(
   url: string | null,
   initial: T,
-  { intervalMs, resetKey = '', accept, seeded, fetchJson }: LivePollOptions<T>,
+  {
+    intervalMs,
+    resetKey = '',
+    accept,
+    firstTickMs = 0,
+    fetchJson,
+  }: LivePollOptions<T>,
 ): LivePoll<T> {
   const [data, setData] = useState(initial);
   const [shownKey, setShownKey] = useState(resetKey);
@@ -79,11 +86,11 @@ export function useLivePoll<T>(
   // render) doesn't restart the interval on every render.
   const acceptRef = useRef(accept);
   const fetchRef = useRef(fetchJson);
-  const seededRef = useRef(seeded);
+  const firstTickRef = useRef(firstTickMs);
   useEffect(() => {
     acceptRef.current = accept;
     fetchRef.current = fetchJson;
-    seededRef.current = seeded;
+    firstTickRef.current = firstTickMs;
   });
 
   useEffect(() => {
@@ -112,8 +119,11 @@ export function useLivePoll<T>(
         // keep the last good data on a transient failure
       }
     };
-    // Swap in live data immediately, then keep polling.
-    if (!seededRef.current || shownRef.current !== resetKey) void tick();
+    // Swap in live data, then keep polling.
+    const wait = shownRef.current === resetKey ? firstTickRef.current : 0;
+    if (wait === 0) void tick();
+    const first =
+      wait > 0 && wait < intervalMs ? setTimeout(tick, wait) : undefined;
     const id = setInterval(tick, intervalMs);
     // Refocusing a backgrounded tab refetches right away — ticks skipped while
     // hidden would otherwise leave the data stale until the next interval.
@@ -123,6 +133,7 @@ export function useLivePoll<T>(
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       active = false;
+      clearTimeout(first);
       clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
     };

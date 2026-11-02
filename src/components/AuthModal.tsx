@@ -70,13 +70,16 @@ export default function AuthModal({ opening }: { opening?: Event | null }) {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get('auth');
     if (requested !== 'login' && requested !== 'signup') return;
-    window.dispatchEvent(
-      new CustomEvent('polycards:auth', { detail: { mode: requested } }),
-    );
+    // A tap that loaded this modal outranks a ?auth= left in the URL.
+    if (!opening) {
+      window.dispatchEvent(
+        new CustomEvent('polycards:auth', { detail: { mode: requested } }),
+      );
+    }
     const url = new URL(window.location.href);
     url.searchParams.delete('auth');
     window.history.replaceState({}, '', url);
-  }, []);
+  }, [opening]);
 
   // Focus into the panel, Tab trap, Escape, body-scroll lock and focus restore.
   // The hook re-runs only when `open` flips, so switching login↔signup no longer

@@ -1,12 +1,11 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, X } from 'lucide-react';
 import { ticketCount, type PackCard, type Rarity } from '@/lib/packs-data';
 import { rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import { useInView } from '@/lib/use-reveal';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useDragScroll } from '@/lib/use-drag-scroll';
 import { CardTile } from '@/components/cards/CardTile';
@@ -154,15 +153,21 @@ function Rail({
 }) {
   // Mouse drag-to-scroll on the rail (touch swipes natively).
   const drag = useDragScroll<HTMLDivElement>();
-  // Clipped by the scroller, so it fires on the swipe that brings it in, and at
-  // once on a screen wide enough to show it.
-  const [sentinel, reached] = useInView<HTMLDivElement>();
+  const [grown, setGrown] = useState(false);
+  // Grows on the first swipe, so a fling never stops at a false end. A screen
+  // wide enough to show every tile has nothing to swipe, so it grows at once.
+  const { ref } = drag;
+  useEffect(() => {
+    const el = ref.current;
+    if (el && el.scrollWidth <= el.clientWidth + 1) setGrown(true);
+  }, [ref, rail.length]);
   return (
     <div
       {...drag}
+      onScroll={() => setGrown(true)}
       className="-mx-4 -my-12 flex cursor-grab gap-2 overflow-x-auto px-10 py-12 active:cursor-grabbing sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
-      {(reached ? rail : rail.slice(0, RAIL_FIRST_TILES)).map((c) => (
+      {(grown ? rail : rail.slice(0, RAIL_FIRST_TILES)).map((c) => (
         <div key={c.handle} className="w-[38%] shrink-0 sm:w-40">
           {tickets ? (
             <TicketTile card={c} />
@@ -176,7 +181,6 @@ function Rail({
           )}
         </div>
       ))}
-      {!reached && <div ref={sentinel} aria-hidden className="w-px shrink-0" />}
     </div>
   );
 }

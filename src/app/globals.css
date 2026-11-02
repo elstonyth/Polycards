@@ -151,17 +151,6 @@
   }
 }
 
-/* A section well below the fold: the browser skips its layout, paint and lazy
-   images until it nears the viewport, so they stop competing with the first
-   screen. It clips to its own box (paint containment), so don't put this on a
-   section whose content glows past its edge. */
-@layer utilities {
-  .cv-offscreen {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 800px;
-  }
-}
-
 /* The money beat. The top chase is the one thing on this fold worth shouting,
    so it lands last and carries a single decaying bloom in its own Chase Gold —
    "Glow Is Earned" (DESIGN.md §4): the hue is inherited from the value itself,
@@ -601,7 +590,9 @@
      only (refraction is capped at ~800px per side for GPU cost). The
      -webkit- line keeps Safari ≤17 frosted. */
   .glass-chrome {
-    background-color: rgb(10 10 10 / 0.7);
+    /* 82%: the lightest that keeps neutral-400 tab labels at 4.5:1 over a bright
+       pack passing behind the bar. */
+    background-color: rgb(10 10 10 / 0.82);
     -webkit-backdrop-filter: blur(24px) saturate(1.5);
     backdrop-filter: blur(24px) saturate(1.5);
   }

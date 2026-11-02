@@ -39,6 +39,7 @@ import {
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
 import { PublishedOddsList, hasPublishedOddsContent } from './OddsSheet';
+import { IntentLink } from '@/components/IntentLink';
 import { PoolByRarity } from './PoolByRarity';
 import {
   publishedOddsRows,
@@ -143,11 +144,10 @@ function PackRail({
       {packs.map((p) => {
         const selected = p.id === activeId;
         return (
-          <Link
+          <IntentLink
             key={p.id}
             ref={selected ? arrived : undefined}
             href={`/slots/${p.id}?count=${qty}`}
-            prefetch={false}
             scroll={false}
             aria-current={selected ? 'page' : undefined}
             className={cn(
@@ -188,7 +188,7 @@ function PackRail({
             <span className="text-[11px] font-semibold tabular-nums text-white/55">
               {rm0(p.priceMyr)}
             </span>
-          </Link>
+          </IntentLink>
         );
       })}
     </div>
@@ -939,7 +939,7 @@ export default function PackDetailClient({
           backend; a pack with no published odds shows no panel at all. Nor does
           a pack whose published odds carry no per-tier rows AND nothing priced
           — that would be a bare heading over an empty box. */}
-      <div className="cv-offscreen mb-10 mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="mb-10 mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {hasPublishedOddsContent(publishedRows, valueRange) && (
           <Reveal as="section" className="h-full min-w-0">
             <div className="mb-3 flex items-center gap-2">

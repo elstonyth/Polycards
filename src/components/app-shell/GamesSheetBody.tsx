@@ -15,12 +15,11 @@ import { GAMES_EVENT } from './games';
  * has its own tab since 2026-10-30. Swipe down, tap outside, X or Escape closes
  * it.
  */
-export function GamesSheetBody() {
+export function GamesSheetBody({ openedOn }: { openedOn: string }) {
   // Open on the page it was opened from: any navigation (browser back
-  // included) closes it. Mounted by the first open, so it starts open.
-  const [openOn, setOpenOn] = useState<string | null>(
-    () => window.location.pathname,
-  );
+  // included) closes it. Mounted by the first open, so it starts open there,
+  // and stays closed if the visitor moved on while this chunk loaded.
+  const [openOn, setOpenOn] = useState<string | null>(openedOn);
   const pathname = usePathname();
   // A navigation that bypasses close() (the back gesture, a redirect) must
   // still drop it, or the sheet reopens by itself on the next visit here.

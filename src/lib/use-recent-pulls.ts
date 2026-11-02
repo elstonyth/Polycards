@@ -63,10 +63,10 @@ export function useLiveRecentPulls(
       // A client-side nav between two pack pages (or a tier switch) refetches
       // at once and reports `pending` until the new scope's rows land.
       resetKey: `${packSlug ?? ''}|${rarity ?? ''}`,
-      // The feed is labelled in whole minutes, so one interval on the seed is
-      // never seen, and this is the storefront's highest-volume request. An empty
-      // seed may be a failed server read, so that one still fetches at once.
-      seeded: initial.pulls.length > 0,
+      // Row times are absolute, so a seed that waits one interval still reads
+      // true, and this is the storefront's highest-volume request. An empty seed
+      // may be a failed server read, so that one fetches at once.
+      firstTickMs: initial.pulls.length > 0 ? POLL_MS : 0,
       accept: acceptFeed,
     },
   );

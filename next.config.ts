@@ -121,7 +121,7 @@ const securityHeaders = [
   },
 ];
 
-const PUBLIC_ASSET_MAX_AGE_S = 604_800; // 7 days
+const PUBLIC_ASSET_MAX_AGE_S = 86_400; // 1 day
 
 const nextConfig: NextConfig = {
   // Standalone output: the production Dockerfile (and DO App Platform) run the
@@ -139,21 +139,21 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns,
     dangerouslyAllowLocalIP,
-    // Every optimized image is a sharp encode on a pod until it is cached, and
-    // uploads get a new name when they change, so a week costs no staleness.
+    // Every optimized image is a sharp encode on a pod until it is cached. A day,
+    // not longer: files in public/ do get replaced under the same name.
     minimumCacheTTL: PUBLIC_ASSET_MAX_AGE_S,
   },
   async headers() {
     return [
       { source: '/:path*', headers: securityHeaders },
-      // Unhashed files, so days with revalidation rather than `immutable`. They
-      // shipped max-age=0, so every page view re-asked a pod for every one.
+      // Unhashed and sometimes replaced under the same name, so a day and not
+      // `immutable`. They shipped max-age=0, so every page view asked a pod again.
       {
         source: '/:dir(images|sounds|branding|fonts|seo)/:path*',
         headers: [
           {
             key: 'Cache-Control',
-            value: `public, max-age=${PUBLIC_ASSET_MAX_AGE_S}, stale-while-revalidate=2592000`,
+            value: `public, max-age=${PUBLIC_ASSET_MAX_AGE_S}`,
           },
         ],
       },

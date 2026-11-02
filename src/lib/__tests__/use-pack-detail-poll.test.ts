@@ -33,6 +33,25 @@ beforeAll(async () => {
   await loadSchemas();
 });
 
+it('corrects a seed soon after mount, since Back can restore an old snapshot', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn(() => new Promise(() => {}));
+  vi.stubGlobal('fetch', fetcher);
+  const hook = renderHook(
+    () => usePackDetailPoll('pack-a', detailA),
+    undefined,
+  );
+  await flush();
+  expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => {
+    vi.advanceTimersByTime(5_000);
+  });
+  expect(fetcher).toHaveBeenCalledOnce();
+  hook.unmount();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
 describe('usePackDetailPoll', () => {
   beforeEach(() => {
     // Default: a fetch that never resolves, so the effect's background tick

@@ -5,9 +5,12 @@ import { loadSchemas } from '@/lib/lazy-schemas';
 import { useLivePoll } from '@/lib/use-live-poll';
 
 const POLL_MS = 60_000;
+// Soon, not at the next poll: browser Back can restore an old server snapshot.
+const FIRST_TICK_MS = 5_000;
 
 /** Live pack detail: fetches immediately on every pack switch (and on a mount
- *  with no server data), then refreshes every 60s while the tab is visible. The caller only ever
+ *  with no server data), 5s after a mount that has it so page load stays clear,
+ *  then refreshes every 60s while the tab is visible. The caller only ever
  *  passes `initial` for the matching pack (null on a sibling switch, per
  *  PackDetailClient) -- so a switch renders null (the caller's gated-empty
  *  sections) until the immediate tick lands, never the PREVIOUS pack's pool/
@@ -24,7 +27,7 @@ export function usePackDetailPoll(
     {
       intervalMs: POLL_MS,
       resetKey: slug,
-      seeded: initial !== null,
+      firstTickMs: initial === null ? 0 : FIRST_TICK_MS,
       accept: async (next) => {
         const { PackPollResponseSchema, parseOne } = await loadSchemas();
         return parseOne(PackPollResponseSchema, next)?.detail ?? null;

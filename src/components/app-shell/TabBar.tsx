@@ -49,7 +49,7 @@ export default function TabBar() {
             'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 transition-colors',
             active
               ? 'text-neutral-50'
-              : 'text-neutral-300 hover:text-neutral-200',
+              : 'text-neutral-400 hover:text-neutral-300',
           );
           const content = (
             <>

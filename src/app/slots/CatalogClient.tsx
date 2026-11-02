@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import {
@@ -14,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { rm0 } from '@/lib/format';
 import { isOptimizableImage } from '@/lib/optimizable-image';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
+import { IntentLink } from '@/components/IntentLink';
 import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
@@ -126,16 +126,15 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
           <QtyStepper qty={qty} onChange={setQty} max={3} className="mb-2" />
           {/* Open → the pack's detail page. The free demo spin there is open
               to everyone; only a real open/claim is auth-gated. */}
-          <Link
+          <IntentLink
             href={packHref(pack.id, qty)}
-            prefetch={false}
             className={cn(
               pillVariants({ variant: 'primary', size: 'sm' }),
               'mt-auto w-full',
             )}
           >
             Open
-          </Link>
+          </IntentLink>
         </>
       )}
     </div>
@@ -241,14 +240,12 @@ function PackRow({
   }
 
   return (
-    <Link
+    <IntentLink
       href={packHref(pack.id, 1)}
-      // A row of these would be one pod render each, per page view.
-      prefetch={false}
       className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-2.5 transition-colors hover:border-white/20 hover:bg-white/[0.07]"
     >
       {inner}
-    </Link>
+    </IntentLink>
   );
 }
 

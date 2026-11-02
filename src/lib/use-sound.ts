@@ -27,6 +27,9 @@ const EFFECTS_VOLUME = 0.22;
 // wrap is seamless on every decoder.
 const MUSIC_LOOP_START_S = 0.1;
 const MUSIC_LOOP_END_S = 24.1;
+// A tick that waited on its sample's first download is out of time, and all the
+// ticks that waited would start together as one loud crack.
+const REEL_TICK_LATE_MS = 60;
 const FILES = {
   tap: '/sounds/slot-tap.mp3',
   start: '/sounds/slot-start.mp3',
@@ -180,13 +183,16 @@ function useSoundPlayer() {
       const ac = sharedAudioContext();
       if (!ac) return;
       const ticket = generation.current;
+      const asked = performance.now();
       void load(name, ac)
         .then((buffer) => {
           if (
             !mounted.current ||
             mutedRef.current ||
             document.hidden ||
-            ticket !== generation.current
+            ticket !== generation.current ||
+            (name === 'reelTick' &&
+              performance.now() - asked > REEL_TICK_LATE_MS)
           )
             return;
           const source = ac.createBufferSource();
@@ -278,6 +284,8 @@ function useSoundPlayer() {
     };
     document.addEventListener('pointerup', onGesture);
     document.addEventListener('keydown', onGesture);
+    // Screen readers can activate a control with a click and no pointer events.
+    document.addEventListener('click', onGesture);
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('storage', storage);
     return () => {
@@ -286,6 +294,7 @@ function useSoundPlayer() {
       setSfxMuted(true);
       document.removeEventListener('pointerup', onGesture);
       document.removeEventListener('keydown', onGesture);
+      document.removeEventListener('click', onGesture);
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('storage', storage);
     };

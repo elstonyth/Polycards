@@ -327,3 +327,75 @@ it('card-price switches to the new seed immediately and ignores a late previous-
   h.unmount();
   vi.unstubAllGlobals();
 });
+
+it('waits firstTickMs after a seeded mount, but a scope change fetches at once', async () => {
+  const fetchJson = vi.fn(async (url: string) => url);
+  const h = renderHook(
+    (p: { url: string }) =>
+      useLivePoll<string>(p.url, 'seed', {
+        intervalMs: 60_000,
+        resetKey: p.url,
+        firstTickMs: 5_000,
+        fetchJson,
+      }),
+    { url: '/api/a' },
+  );
+  await flush();
+  expect(fetchJson).not.toHaveBeenCalled();
+  await act(async () => {
+    vi.advanceTimersByTime(5_000);
+  });
+  expect(fetchJson).toHaveBeenCalledTimes(1);
+  expect(h.current.data).toBe('/api/a');
+  h.rerender({ url: '/api/b' });
+  await flush();
+  expect(fetchJson).toHaveBeenLastCalledWith('/api/b');
+  h.unmount();
+});
+
+it('leaves a firstTickMs of a full interval to the interval, with no double fetch', async () => {
+  const fetchJson = vi.fn(async (url: string) => url);
+  const h = renderHook(
+    () =>
+      useLivePoll<string>('/api/a', 'seed', {
+        intervalMs: 10_000,
+        firstTickMs: 10_000,
+        fetchJson,
+      }),
+    undefined,
+  );
+  await flush();
+  expect(fetchJson).not.toHaveBeenCalled();
+  await act(async () => {
+    vi.advanceTimersByTime(10_000);
+  });
+  expect(fetchJson).toHaveBeenCalledTimes(1);
+  h.unmount();
+});
+
+it('drops a response whose async accept finishes after a scope change', async () => {
+  let finish: (value: string | null) => void = () => {};
+  const accept = (next: unknown) =>
+    next === '/api/a'
+      ? new Promise<string | null>((resolve) => {
+          finish = resolve;
+        })
+      : (next as string);
+  const h = renderHook(
+    (p: { url: string }) =>
+      useLivePoll<string>(p.url, 'seed', {
+        intervalMs: 60_000,
+        resetKey: p.url,
+        accept,
+        fetchJson: async (url: string) => url,
+      }),
+    { url: '/api/a' },
+  );
+  await flush();
+  h.rerender({ url: '/api/b' });
+  await flush();
+  expect(h.current.data).toBe('/api/b');
+  await act(async () => finish('late answer for a'));
+  expect(h.current.data).toBe('/api/b');
+  h.unmount();
+});
