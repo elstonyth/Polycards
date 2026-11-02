@@ -1,6 +1,10 @@
 import type PacksModuleService from '../../../modules/packs/service';
+import { cardValueMyr } from '../../../modules/packs/service';
 import { ticketsLabel, ticketsSuffix } from '../../../modules/packs/lucky-draw';
 import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
+import { resolveFxRate } from '../../../modules/packs/pricing';
+import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
+import { REWARD_BOX_CATEGORY } from '../../../modules/packs/lossless';
 import type {
   TaskKind,
   TaskRequirement,
@@ -147,6 +151,20 @@ export async function resolveTaskLabels(
   return out;
 }
 
+/** The amount the goal's own type uses. Rows saved before 2026-11-02 can still
+ *  hold a key from an older goal, so never `days ?? count`. */
+export function requirementAmount(r: Record<string, unknown>): number {
+  const field =
+    r.type === 'checkin_days'
+      ? r.days
+      : r.type === 'reach_level'
+        ? r.level
+        : r.type === 'topup_myr'
+          ? r.amount_myr
+          : r.count;
+  return Number(field ?? 0);
+}
+
 function requirementLabel(
   raw: unknown,
   kind: TaskKind | undefined,
@@ -154,7 +172,7 @@ function requirementLabel(
   pixelName: Map<string, string>,
 ): string {
   const r = (raw ?? {}) as Record<string, unknown>;
-  const n = Number(r.days ?? r.count ?? r.level ?? r.amount_myr ?? 0);
+  const n = requirementAmount(r);
   // Daily/weekly goals count one period's activity; an achievement counts a
   // lifetime. Without a kind, check-ins and rips were weekly-only.
   const when =
@@ -195,6 +213,156 @@ function requirementLabel(
       // rendering an empty cell.
       return `Unknown requirement '${String(r.type)}'`;
   }
+}
+
+/** The names, pictures and prices the console's board and name check need. */
+export interface TaskView {
+  /** The Pokémon or pack the goal names; null = any, or no target to name. */
+  goal_name: string | null;
+  goal_image: string | null;
+  /** The least one rip of this goal can cost: its pack's price, or for "any
+   *  pack" the cheapest pack on sale. null when the goal isn't a rip. */
+  goal_price_myr: number | null;
+  /** false = a pack players can't open right now, so the goal can't be finished.
+   *  null when the goal names no pack. */
+  goal_buyable: boolean | null;
+  reward_name: string | null;
+  reward_grade: string | null;
+  reward_image: string | null;
+  /** null for tickets, which have no RM value. */
+  reward_value_myr: number | null;
+}
+
+export async function resolveTaskViews(
+  packs: PacksModuleService,
+  rows: { id: string; requirement: unknown; reward: unknown }[],
+): Promise<Map<string, TaskView>> {
+  const refs = collect(rows);
+  const anyPackGoal = rows.some((row) => {
+    const r = row.requirement as { type?: unknown; pack_id?: unknown };
+    return r?.type === 'rip_count' && !r.pack_id;
+  });
+  const [packRows, cardRows, pixelRows, onSale] = await Promise.all([
+    refs.packSlugs.size
+      ? packs.listPacks(
+          { slug: [...refs.packSlugs] },
+          {
+            select: ['slug', 'title', 'price', 'image', 'status', 'in_stock', 'category'],
+            take: refs.packSlugs.size,
+          },
+        )
+      : Promise.resolve([]),
+    refs.cardHandles.size
+      ? packs.listCards(
+          { handle: [...refs.cardHandles] },
+          {
+            select: [
+              'handle',
+              'name',
+              'grader',
+              'grade',
+              'market_value',
+              'market_multiplier',
+              'image',
+              'slab_image',
+            ],
+            take: refs.cardHandles.size,
+          },
+        )
+      : Promise.resolve([]),
+    refs.pixelIds.size
+      ? asPixelPokemonCrud(packs).listPixelPokemon(
+          { id: [...refs.pixelIds] },
+          {
+            select: ['id', 'name', 'image_url', 'variant'],
+            take: refs.pixelIds.size,
+          },
+        )
+      : Promise.resolve([]),
+    // A capsule spin counts as a rip too, so "any pack" is as cheap as the
+    // cheapest pack a player can really open. Free packs don't count (source !=
+    // pack), and neither does anything sold out or held for rewards.
+    anyPackGoal
+      ? packs.listPacks(
+          {
+            status: 'active',
+            in_stock: true,
+            category: { $nin: [REWARD_BOX_CATEGORY, FREE_WELCOME_CATEGORY] },
+          },
+          { select: ['price'], take: 500 },
+        )
+      : Promise.resolve([]),
+  ]);
+  const fxRate = cardRows.length ? await resolveFxRate(packs) : 0;
+  const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
+  const cardByHandle = new Map(cardRows.map((c) => [c.handle, c]));
+  const pixelById = new Map(pixelRows.map((p) => [p.id, p]));
+  const prices = onSale.map((p) => Number(p.price)).filter((p) => p > 0);
+  const cheapest = prices.length ? Math.min(...prices) : null;
+
+  const out = new Map<string, TaskView>();
+  for (const row of rows) {
+    const q = (row.requirement ?? {}) as Record<string, unknown>;
+    const w = (row.reward ?? {}) as Record<string, unknown>;
+    const goalPack =
+      q.type === 'rip_count' && typeof q.pack_id === 'string'
+        ? packBySlug.get(q.pack_id)
+        : undefined;
+    const goalPixel =
+      q.type === 'vault_pixel_count' && typeof q.pixel_pokemon_id === 'string'
+        ? pixelById.get(q.pixel_pokemon_id)
+        : undefined;
+    const rewardPack =
+      w.type === 'pack' ? packBySlug.get(String(w.pack_id ?? '')) : undefined;
+    const rewardCard =
+      w.type === 'card'
+        ? cardByHandle.get(String(w.card_handle ?? ''))
+        : undefined;
+    out.set(row.id, {
+      goal_name:
+        goalPack?.title ??
+        (goalPixel
+          ? goalPixel.variant && goalPixel.variant !== 'normal'
+            ? `${goalPixel.name} (${goalPixel.variant})`
+            : goalPixel.name
+          : null),
+      goal_image: goalPack?.image || goalPixel?.image_url || null,
+      goal_price_myr:
+        q.type !== 'rip_count'
+          ? null
+          : goalPack
+            ? Number(goalPack.price)
+            : q.pack_id
+              ? null
+              : cheapest,
+      goal_buyable: goalPack
+        ? goalPack.status === 'active' &&
+          goalPack.in_stock !== false &&
+          Number(goalPack.price) > 0 &&
+          goalPack.category !== FREE_WELCOME_CATEGORY &&
+          goalPack.category !== REWARD_BOX_CATEGORY
+        : null,
+      reward_name: rewardPack?.title ?? rewardCard?.name ?? null,
+      reward_grade:
+        rewardCard?.grader && rewardCard.grade
+          ? `${rewardCard.grader} ${rewardCard.grade}`
+          : null,
+      reward_image:
+        rewardPack?.image ||
+        rewardCard?.slab_image ||
+        rewardCard?.image ||
+        null,
+      reward_value_myr:
+        w.type === 'credit'
+          ? Number(w.amount_myr ?? 0)
+          : rewardPack
+            ? Number(rewardPack.price)
+            : rewardCard
+              ? cardValueMyr(rewardCard, fxRate)
+              : null,
+    });
+  }
+  return out;
 }
 
 function rewardLabel(
