@@ -1,24 +1,20 @@
-import * as Sentry from '@sentry/nextjs';
-import {
-  scrubBreadcrumbUrls,
-  scrubSpanUrls,
-} from './src/lib/sentry-breadcrumbs';
-import { sentryDataCollection } from './src/lib/sentry-data-collection';
+import type { captureRouterTransitionStart } from '@sentry/nextjs';
 import { installTranslateDomGuard } from './src/lib/translate-dom-guard';
 
 // Synchronous and top-level, so it is in place before hydration.
 installTranslateDomGuard();
 
-Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
-  tracesSampleRate: 0.1,
-  enabled: Boolean(process.env.NEXT_PUBLIC_SENTRY_DSN),
-  beforeBreadcrumb: scrubBreadcrumbUrls,
-  beforeSendSpan: scrubSpanUrls,
-  dataCollection: sentryDataCollection,
-  // A page transition skipped because the DOM update ran past Chrome's limit:
-  // the page still changes, only the animation drops. React reports it anyway.
-  ignoreErrors: [/Transition was aborted because of timeout in DOM update/],
-});
+// No DSN, no SDK: the browser SDK is ~125 KB of parsed JS on every route, and it
+// would only run with `enabled: false` (same rule as src/instrumentation.ts).
+// shortcut: with a DSN the SDK initialises when its chunk arrives, so an error
+// thrown before that is not reported. Move the init back to the top level if
+// Sentry goes live and those early errors matter.
+const sdk = process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? import('./src/lib/sentry-client')
+  : null;
 
-export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
+export const onRouterTransitionStart = (
+  ...args: Parameters<typeof captureRouterTransitionStart>
+) => {
+  void sdk?.then((sentry) => sentry.captureRouterTransitionStart(...args));
+};

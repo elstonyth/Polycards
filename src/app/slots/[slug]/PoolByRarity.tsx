@@ -6,6 +6,7 @@ import { Maximize2, X } from 'lucide-react';
 import { ticketCount, type PackCard, type Rarity } from '@/lib/packs-data';
 import { rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { useInView } from '@/lib/use-reveal';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useDragScroll } from '@/lib/use-drag-scroll';
 import { CardTile } from '@/components/cards/CardTile';
@@ -57,8 +58,6 @@ export function PoolByRarity({
   pokemon?: boolean;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
-  // Mouse drag-to-scroll on the rail (touch swipes natively).
-  const drag = useDragScroll<HTMLDivElement>();
   const hasRail = rail.length > 0;
   const tickets = full.some((c) => c.tickets != null);
   // One derivation for every rendered string keyed on hasRail (h2, aria-label,
@@ -122,25 +121,7 @@ export function PoolByRarity({
           Skipped entirely when the pack has no top-tier cards — an empty
           strip would still eat the halo padding for nothing to tease. */}
       {hasRail && (
-        <div
-          {...drag}
-          className="-mx-4 -my-12 flex cursor-grab gap-2 overflow-x-auto px-10 py-12 active:cursor-grabbing sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-          {rail.map((c) => (
-            <div key={c.handle} className="w-[38%] shrink-0 sm:w-40">
-              {tickets ? (
-                <TicketTile card={c} />
-              ) : (
-                <CardTile
-                  card={c}
-                  sizes="(max-width: 640px) 38vw, 160px"
-                  onOpen={onOpen}
-                  pokemon={pokemon}
-                />
-              )}
-            </div>
-          ))}
-        </div>
+        <Rail rail={rail} tickets={tickets} onOpen={onOpen} pokemon={pokemon} />
       )}
       <PoolModal
         open={modalOpen}
@@ -152,6 +133,50 @@ export function PoolByRarity({
         pokemon={pokemon}
         tickets={tickets}
       />
+    </div>
+  );
+}
+
+/** Tiles rendered before the rail is reached: past a phone's first screen, and
+ *  the rest are ~30 tiles of HTML and hydration on every pack page view. */
+const RAIL_FIRST_TILES = 8;
+
+function Rail({
+  rail,
+  tickets,
+  onOpen,
+  pokemon,
+}: {
+  rail: PackCard[];
+  tickets: boolean;
+  onOpen: (card: PackCard) => void;
+  pokemon?: boolean;
+}) {
+  // Mouse drag-to-scroll on the rail (touch swipes natively).
+  const drag = useDragScroll<HTMLDivElement>();
+  // Clipped by the scroller, so it fires on the swipe that brings it in, and at
+  // once on a screen wide enough to show it.
+  const [sentinel, reached] = useInView<HTMLDivElement>();
+  return (
+    <div
+      {...drag}
+      className="-mx-4 -my-12 flex cursor-grab gap-2 overflow-x-auto px-10 py-12 active:cursor-grabbing sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
+      {(reached ? rail : rail.slice(0, RAIL_FIRST_TILES)).map((c) => (
+        <div key={c.handle} className="w-[38%] shrink-0 sm:w-40">
+          {tickets ? (
+            <TicketTile card={c} />
+          ) : (
+            <CardTile
+              card={c}
+              sizes="(max-width: 640px) 38vw, 160px"
+              onOpen={onOpen}
+              pokemon={pokemon}
+            />
+          )}
+        </div>
+      ))}
+      {!reached && <div ref={sentinel} aria-hidden className="w-px shrink-0" />}
     </div>
   );
 }

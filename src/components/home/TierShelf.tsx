@@ -193,6 +193,8 @@ function LadderRow({
       // Straight to the pack the row shows, ready to rip one — same helper the
       // /slots catalog links with, so shape and slug encoding can't drift.
       href={packHref(pack.id, 1)}
+      // A row of these would be one pod render each, per page view.
+      prefetch={false}
       className={`${rowClass} transition-[translate,scale,border-color] hover:-translate-y-0.5 hover:border-white/30 active:scale-[0.99] motion-reduce:transition-colors motion-reduce:hover:translate-y-0 motion-reduce:active:scale-100`}
     >
       {body}

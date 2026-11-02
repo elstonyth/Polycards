@@ -36,6 +36,7 @@ export async function generateMetadata({
   const path = `/slots/${slug}`;
   return {
     title: `${name} — ${categoryName}`,
+    description: `Open the ${name} from ${categoryName}: see the top hits and odds, then rip it and pull real graded cards.`,
     // Replaces the layout's openGraph whole, so every field is restated.
     openGraph: {
       type: 'website',

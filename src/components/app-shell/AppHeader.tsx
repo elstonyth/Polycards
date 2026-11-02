@@ -7,7 +7,7 @@ import { useSound } from '@/lib/use-sound';
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
 import { useCountedValue } from '@/lib/use-counted-value';
-import AuthModal from '@/components/AuthModal';
+import AuthModalLoader from '@/components/AuthModalLoader';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import NotificationBell from '@/components/NotificationBell';
@@ -241,7 +241,7 @@ export default function AppHeader() {
       </div>
 
       {/* Global login/signup modal (no standalone /login page). */}
-      <AuthModal />
+      <AuthModalLoader />
     </header>
   );
 }

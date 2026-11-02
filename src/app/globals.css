@@ -151,6 +151,17 @@
   }
 }
 
+/* A section well below the fold: the browser skips its layout, paint and lazy
+   images until it nears the viewport, so they stop competing with the first
+   screen. It clips to its own box (paint containment), so don't put this on a
+   section whose content glows past its edge. */
+@layer utilities {
+  .cv-offscreen {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 800px;
+  }
+}
+
 /* The money beat. The top chase is the one thing on this fold worth shouting,
    so it lands last and carries a single decaying bloom in its own Chase Gold —
    "Glow Is Earned" (DESIGN.md §4): the hue is inherited from the value itself,

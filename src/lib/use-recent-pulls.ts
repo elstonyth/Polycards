@@ -2,7 +2,7 @@
 
 import type { RecentFeed } from '@/lib/data/packs';
 import type { Rarity } from '@/lib/packs-data';
-import { RecentPollResponseSchema, parseOne } from '@/lib/data/schemas';
+import { loadSchemas } from '@/lib/lazy-schemas';
 import { useLivePoll } from '@/lib/use-live-poll';
 
 // "Live" = polling of the same-origin proxy (a direct :9000 call is
@@ -19,11 +19,12 @@ const POLL_MS = 10_000;
 /** An empty response only replaces the rows on screen when the scope changed
  *  (`pending`) — otherwise a pack with no pulls would keep showing the
  *  previous pack's rows, while a backend blip would blank a healthy feed. */
-function acceptFeed(
+async function acceptFeed(
   next: unknown,
   _prev: RecentFeed,
   pending: boolean,
-): RecentFeed | null {
+): Promise<RecentFeed | null> {
+  const { RecentPollResponseSchema, parseOne } = await loadSchemas();
   const body = parseOne(RecentPollResponseSchema, next);
   if (!body) return null;
   if (body.pulls.length === 0 && !pending) return null;
@@ -62,6 +63,10 @@ export function useLiveRecentPulls(
       // A client-side nav between two pack pages (or a tier switch) refetches
       // at once and reports `pending` until the new scope's rows land.
       resetKey: `${packSlug ?? ''}|${rarity ?? ''}`,
+      // The feed is labelled in whole minutes, so one interval on the seed is
+      // never seen, and this is the storefront's highest-volume request. An empty
+      // seed may be a failed server read, so that one still fetches at once.
+      seeded: initial.pulls.length > 0,
       accept: acceptFeed,
     },
   );

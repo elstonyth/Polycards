@@ -49,7 +49,7 @@ export default function TabBar() {
             'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 transition-colors',
             active
               ? 'text-neutral-50'
-              : 'text-neutral-400 hover:text-neutral-300',
+              : 'text-neutral-300 hover:text-neutral-200',
           );
           const content = (
             <>
@@ -97,6 +97,8 @@ export default function TabBar() {
               key={tab.href}
               href={tab.href}
               transitionTypes={inGame ? ['game-out'] : undefined}
+              // A visitor's tap on a gated tab opens signup, never this route.
+              prefetch={tab.gated && !customer ? false : undefined}
               // Gated tabs prompt signup in place for visitors instead of
               // navigating into the server redirect. While auth is still
               // loading, let navigation proceed (server gate covers it).

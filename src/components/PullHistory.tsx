@@ -191,6 +191,7 @@ function Row({
       {pull.profileHandle ? (
         <Link
           href={`/profile/${pull.profileHandle}?tab=activity`}
+          prefetch={false}
           aria-label={`View ${pull.who}'s activity`}
           // p-0.5/-m-0.5: the 40px face is the smallest control on the row, and
           // a bare 40px box misses the 44px tap target DESIGN.md asks for. The
@@ -227,6 +228,8 @@ function Row({
       ) : (
         <Link
           href={`/card/${pull.handle}`}
+          // A row of these would be one pod render each, per page view.
+          prefetch={false}
           aria-label={label}
           className={cardClass}
         >

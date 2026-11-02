@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  beforeAll,
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+} from 'vitest';
 import { act } from 'react';
 import {
   renderHook,
@@ -10,6 +18,7 @@ import {
 import { useCardPrice } from '../use-card-price';
 import type { CardDetailData } from '../data/cards';
 import { useLivePoll } from '../use-live-poll';
+import { loadSchemas } from '@/lib/lazy-schemas';
 
 beforeEach(() => {
   presetVisibility('visible');
@@ -217,6 +226,10 @@ describe('useLivePoll', () => {
     expect(h.current.data).toBe('good');
     h.unmount();
   });
+});
+
+beforeAll(async () => {
+  await loadSchemas();
 });
 
 const cardSeed: CardDetailData = {

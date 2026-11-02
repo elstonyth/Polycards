@@ -82,6 +82,11 @@ async function render(show = true) {
   );
 }
 
+const gesture = () =>
+  act(async () => {
+    document.dispatchEvent(new Event('pointerup'));
+  });
+
 beforeEach(() => {
   vi.clearAllMocks();
   audio.sources.length = 0;
@@ -104,8 +109,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('downloads no audio until the first gesture', async () => {
+  await render();
+  expect(fetch).not.toHaveBeenCalled();
+  await gesture();
+  const urls = vi.mocked(fetch).mock.calls.map(([url]) => url);
+  expect(urls).toContain('/sounds/adventure-loop.mp3');
+  expect(urls).toContain('/sounds/reel-tick.wav');
+});
+
 it('shares balanced public music, preserves complete reveal cues across navigation, and mutes immediately', async () => {
   await render();
+  await gesture();
   const music = audio.sources.filter((source) => source.loop);
   expect(music).toHaveLength(1); // StrictMode cannot create duplicate loops.
   expect(audio.gains[0]?.gain.value).toBe(0.25);
@@ -139,11 +154,12 @@ it('shares balanced public music, preserves complete reveal cues across navigati
 it('honors saved mute before loading music and cancels a reveal that finishes loading after mute', async () => {
   localStorage.setItem('polycards.slot.muted', '1');
   await render();
+  await gesture();
   expect(audio.sources).toHaveLength(0);
   expect(
     vi
       .mocked(fetch)
-      .mock.calls.some(([url]) => url === '/sounds/adventure-loop.wav'),
+      .mock.calls.some(([url]) => url === '/sounds/adventure-loop.mp3'),
   ).toBe(false);
   await act(async () => sound.toggleMuted());
   expect(audio.sources.filter((source) => source.loop)).toHaveLength(1);

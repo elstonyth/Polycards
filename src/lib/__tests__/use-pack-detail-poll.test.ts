@@ -1,8 +1,17 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  beforeAll,
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+} from 'vitest';
 import { act } from 'react';
 import { renderHook, flush } from './render-hook';
 import { usePackDetailPoll } from '../use-pack-detail-poll';
+import { loadSchemas } from '@/lib/lazy-schemas';
 import type { PackDetail } from '@/lib/data/packs';
 
 // The rule under test is the one usePackDetailPoll owns on top of useLivePoll:
@@ -19,6 +28,10 @@ const detailA: PackDetail = {
   publishedOdds: null,
   demoOdds: null,
 };
+
+beforeAll(async () => {
+  await loadSchemas();
+});
 
 describe('usePackDetailPoll', () => {
   beforeEach(() => {
@@ -145,6 +158,10 @@ it.each([
       undefined,
     );
     await flush();
+    expect(fetcher).not.toHaveBeenCalled(); // The seed is not downloaded again.
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
     expect(hook.current).toEqual(detailA);
     await act(async () => {
       document.dispatchEvent(new Event('visibilitychange'));

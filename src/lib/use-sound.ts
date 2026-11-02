@@ -22,6 +22,11 @@ import type { Rarity } from '@/lib/packs-data';
 const MUTED_KEY = 'polycards.slot.muted';
 const MUSIC_VOLUME = 0.25;
 const EFFECTS_VOLUME = 0.22;
+// 24 s of loop, wrapped in 0.1 s of itself on each side: MP3 start padding (under
+// 0.1 s, and browsers trim it differently) stays outside the loop points, so the
+// wrap is seamless on every decoder.
+const MUSIC_LOOP_START_S = 0.1;
+const MUSIC_LOOP_END_S = 24.1;
 const FILES = {
   tap: '/sounds/slot-tap.mp3',
   start: '/sounds/slot-start.mp3',
@@ -29,7 +34,7 @@ const FILES = {
   riser: '/sounds/slot-riser.mp3',
   count: '/sounds/slot-count.mp3',
   reelTick: '/sounds/reel-tick.wav',
-  ambient: '/sounds/adventure-loop.wav',
+  ambient: '/sounds/adventure-loop.mp3',
   Common: '/sounds/reveal-common.mp3',
   Uncommon: '/sounds/reveal-uncommon.mp3',
   Rare: '/sounds/reveal-rare.mp3',
@@ -76,6 +81,9 @@ function useSoundPlayer() {
   const mutedRef = useRef(true);
   const mounted = useRef(false);
   const generation = useRef(0);
+  // Audio is blocked until a gesture anyway, so nothing downloads before one:
+  // this provider wraps every page, and a page view must not pay for the music.
+  const gestured = useRef(false);
   const buffers = useRef(new Map<SoundName, Promise<AudioBuffer>>());
   const sources = useRef(new Set<AudioBufferSourceNode>());
   const music = useRef<{
@@ -130,7 +138,13 @@ function useSoundPlayer() {
   }, []);
 
   const startMusic = useCallback(() => {
-    if (!mounted.current || mutedRef.current || document.hidden) return;
+    if (
+      !gestured.current ||
+      !mounted.current ||
+      mutedRef.current ||
+      document.hidden
+    )
+      return;
     const ac = sharedAudioContext(); // Resume synchronously inside the gesture.
     if (!ac || music.current) return;
     const ticket = generation.current;
@@ -151,6 +165,8 @@ function useSoundPlayer() {
           (celebrations.current > 0 || ducks.current > 0 ? 0.35 : 1);
         source.buffer = buffer;
         source.loop = true;
+        source.loopStart = MUSIC_LOOP_START_S;
+        source.loopEnd = MUSIC_LOOP_END_S;
         source.connect(gain).connect(ac.destination);
         music.current = { source, gain };
         source.start();
@@ -232,6 +248,14 @@ function useSoundPlayer() {
     [silence, startMusic],
   );
 
+  const onGesture = useCallback(() => {
+    gestured.current = true;
+    startMusic();
+    if (mutedRef.current) return;
+    const ac = sharedAudioContext();
+    if (ac) void load('reelTick', ac).catch(() => {});
+  }, [load, startMusic]);
+
   const toggleMuted = useCallback(() => {
     const next = !mutedRef.current;
     writeMuted(next);
@@ -252,22 +276,20 @@ function useSoundPlayer() {
       if (event.key === MUTED_KEY || event.key === null)
         applyMuted(readMuted());
     };
-    document.addEventListener('pointerup', startMusic);
-    document.addEventListener('keydown', startMusic);
+    document.addEventListener('pointerup', onGesture);
+    document.addEventListener('keydown', onGesture);
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('storage', storage);
-    const ac = sharedAudioContext();
-    if (ac) void load('reelTick', ac).catch(() => {});
     return () => {
       mounted.current = false;
       silence();
       setSfxMuted(true);
-      document.removeEventListener('pointerup', startMusic);
-      document.removeEventListener('keydown', startMusic);
+      document.removeEventListener('pointerup', onGesture);
+      document.removeEventListener('keydown', onGesture);
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('storage', storage);
     };
-  }, [applyMuted, load, silence, startMusic]);
+  }, [applyMuted, onGesture, silence, startMusic]);
 
   const vibrate = useCallback((pattern: number | number[]) => {
     if (mutedRef.current || !('vibrate' in navigator)) return;

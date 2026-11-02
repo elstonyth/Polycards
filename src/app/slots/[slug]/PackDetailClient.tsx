@@ -147,6 +147,7 @@ function PackRail({
             key={p.id}
             ref={selected ? arrived : undefined}
             href={`/slots/${p.id}?count=${qty}`}
+            prefetch={false}
             scroll={false}
             aria-current={selected ? 'page' : undefined}
             className={cn(
@@ -729,7 +730,7 @@ export default function PackDetailClient({
                               ? 'More Capsules'
                               : CATALOG_GROUP_HEADING[g.id]}
                           </p>
-                          <span className="text-[10px] text-white/40">
+                          <span className="text-[10px] text-white/60">
                             <span className="tabular-nums">
                               {g.packs.length}
                             </span>{' '}
@@ -938,7 +939,7 @@ export default function PackDetailClient({
           backend; a pack with no published odds shows no panel at all. Nor does
           a pack whose published odds carry no per-tier rows AND nothing priced
           — that would be a bare heading over an empty box. */}
-      <div className="mb-10 mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="cv-offscreen mb-10 mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {hasPublishedOddsContent(publishedRows, valueRange) && (
           <Reveal as="section" className="h-full min-w-0">
             <div className="mb-3 flex items-center gap-2">
