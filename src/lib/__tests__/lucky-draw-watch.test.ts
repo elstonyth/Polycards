@@ -44,7 +44,9 @@ describe('gates in one draw minute', () => {
   test('the wait outlasts every look a tab can make, and ends before a draw goes stale', () => {
     const lastFirstLook = firstLookAt(at(10), 1) - at(10);
     const oneRetry = nextLookAt(0, 1);
-    expect(BATCH_WAIT_MS).toBeGreaterThan(lastFirstLook + oneRetry);
+    expect(BATCH_WAIT_MS).toBeGreaterThan(lastFirstLook + 2 * oneRetry);
+    // A draw that fails retries on the next job run, a minute on.
+    expect(BATCH_WAIT_MS).toBeGreaterThan(MIN + oneRetry);
     expect(BATCH_WAIT_MS).toBeLessThan(LIVE_MAX_AGE_MS);
   });
 
@@ -60,8 +62,29 @@ describe('gates in one draw minute', () => {
   test('a tab past the wait still gets a moment to read the rest', () => {
     const late = at(10) + BATCH_WAIT_MS + 5000;
     const until = batchWaitUntil([watched('b', at(10))], at(10), late);
-    expect(until).toBeGreaterThan(late);
-    expect((until ?? 0) - late).toBeLessThan(5000);
+    // Long enough for the other gate's next look, and no longer than one more.
+    expect((until ?? 0) - late).toBeGreaterThan(nextLookAt(0, 1));
+    expect((until ?? 0) - late).toBeLessThan(2 * nextLookAt(0, 1));
+  });
+
+  test('ends differing inside a minute share it, and class decides', () => {
+    expect(
+      ids(
+        placeShow(
+          [show('f', 'first', 1, at(10) - 20_000)],
+          show('e', 'economy', 1),
+          null,
+        ),
+      ),
+    ).toEqual(['e', 'f']);
+  });
+
+  test('a tie falls to the id, whichever came in first', () => {
+    expect(
+      ids(
+        placeShow([show('b', 'economy', 200)], show('a', 'economy', 200), null),
+      ),
+    ).toEqual(['a', 'b']);
   });
 
   test('sorts by minute, then class, then smallest prize, then id', () => {

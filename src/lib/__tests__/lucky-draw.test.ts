@@ -9,6 +9,7 @@ import {
   entryChance,
   eventResultDetail,
   eventRowId,
+  gatesGone,
   heroFirst,
   heroPrize,
   luckyDrawView,
@@ -33,6 +34,54 @@ describe('tilePrice', () => {
     expect(tilePrice(1000)).toBe(1000);
     expect(tilePrice(999.5)).toBe(999.5);
     expect(tilePrice(10.5)).toBe(10.5);
+  });
+});
+
+describe('the show order reads a result as', () => {
+  it('its class and pot, on the same row the arena gets', () => {
+    const { result } = eventResultDetail('ldev_1', 'Prize Pool', {
+      result: {
+        winner: null,
+        winner_tickets: 0,
+        total_tickets: 0,
+        entrant_count: 0,
+        seed: 's',
+        seed_hash: 'h',
+        drawn_at: '2026-11-02T16:00:00.000Z',
+      },
+      prizes: [
+        {
+          kind: 'card',
+          title: 'a',
+          image: null,
+          frame: null,
+          value_myr: 100.1,
+        },
+        {
+          kind: 'card',
+          title: 'b',
+          image: null,
+          frame: null,
+          value_myr: 200.2,
+        },
+      ],
+      entries: [],
+      ticket_index: null,
+      tier: 'business',
+    });
+    expect(result.tier).toBe('business');
+    expect(result.value_myr).toBe(300.3);
+  });
+});
+
+describe('gatesGone', () => {
+  it('keeps a drawn gate up until its show is over', () => {
+    const drawn = new Set(['waiting', 'over']);
+    expect([...gatesGone(drawn, new Set(['waiting']))]).toEqual(['over']);
+    expect([...gatesGone(drawn, new Set())].sort()).toEqual([
+      'over',
+      'waiting',
+    ]);
   });
 });
 

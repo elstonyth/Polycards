@@ -203,6 +203,14 @@ export function mergeFreshGates(
   return { ...fresh, events: [...gates, ...unread] };
 }
 
+/** The gates gone from the page: drawn, with their show over. Until then a ticket
+ *  stays up, closed, so it doesn't vanish with nothing on screen while a tab waits
+ *  to read the rest of its minute. */
+export const gatesGone = (
+  drawn: ReadonlySet<string>,
+  held: ReadonlySet<string>,
+): ReadonlySet<string> => new Set([...drawn].filter((id) => !held.has(id)));
+
 /** When a gate went live: its publish can come after its start. */
 const liveAt = (g: { starts_at: string; live_at?: string }): string =>
   g.live_at ?? g.starts_at;

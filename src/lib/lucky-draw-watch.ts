@@ -54,23 +54,23 @@ export const firstLookAt = (endsAt: number, rand: number): number =>
 export const nextLookAt = (now: number, rand: number): number =>
   now + LOOK_AGAIN_MS + rand * LOOK_AGAIN_SPREAD_MS;
 
-/** How long past its minute a batch waits for its slowest gate: the latest first
- *  look and two more. Well short of LIVE_MAX_AGE_MS, which would drop it unplayed. */
-export const BATCH_WAIT_MS =
-  FIRST_LOOK_MIN_MS +
-  FIRST_LOOK_SPREAD_MS +
-  2 * (LOOK_AGAIN_MS + LOOK_AGAIN_SPREAD_MS);
-// A tab back from hidden past that wait reads the rest one right after another.
-const BATCH_READ_GRACE_MS = 3_000;
+// The slowest gap between two looks at one gate, and the read that follows it.
+const ONE_MORE_LOOK_MS = LOOK_AGAIN_MS + LOOK_AGAIN_SPREAD_MS + 3_000;
+/** How long past its minute a batch waits for its slowest gate: a draw that fails
+ *  retries on the job's next minute, and a tab then needs one more look to see it.
+ *  Well short of LIVE_MAX_AGE_MS, past which a tab no longer plays a draw it reads. */
+export const BATCH_WAIT_MS = MINUTE_MS + ONE_MORE_LOOK_MS;
 
-/** When a batch stops waiting, or null with no other gate of the minute unread. */
+/** When a batch stops waiting, or null with no other gate of the minute unread. A
+ *  late job, or a tab back from hidden, finds gates past the wait: each still gets
+ *  one more look, or the first found would play ahead of its class. */
 export function batchWaitUntil(
   watched: readonly WatchedGate[],
   minute: number,
   now: number,
 ): number | null {
   return watched.some((w) => drawMinute(w.endsAt) === minute)
-    ? Math.max(minute + BATCH_WAIT_MS, now + BATCH_READ_GRACE_MS)
+    ? Math.max(minute + BATCH_WAIT_MS, now + ONE_MORE_LOOK_MS)
     : null;
 }
 
@@ -88,7 +88,7 @@ const tierRank = (tier: string | null | undefined): number => {
 };
 
 /** Earlier minute first. Within a minute the lowest class, then the smallest prize
- *  (boss 2026-11-02), from result data alone so every player gets one order. */
+ *  (boss 2026-11-02), from result data alone so players get one order. */
 const showOrder = (a: QueuedShow, b: QueuedShow): number =>
   drawMinute(a.endsAt) - drawMinute(b.endsAt) ||
   tierRank(a.detail.result.tier) - tierRank(b.detail.result.tier) ||

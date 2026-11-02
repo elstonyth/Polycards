@@ -64,6 +64,21 @@ export type LiveDraw = {
 };
 
 const NOBODY: ReadonlySet<string> = new Set();
+const NO_WAITS: ReadonlyMap<number, number> = new Map();
+
+/** The waits with this minute's set, or gone with no end. The same map when that
+ *  changes nothing, so nobody re-renders. */
+function withWait(
+  waits: ReadonlyMap<number, number>,
+  minute: number,
+  until: number | null,
+): ReadonlyMap<number, number> {
+  if (until === null && !waits.has(minute)) return waits;
+  const next = new Map(waits);
+  if (until === null) next.delete(minute);
+  else next.set(minute, until);
+  return next;
+}
 
 const Ctx = createContext<LiveDraw>({
   track: () => undefined,
@@ -95,11 +110,10 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
     queueRef.current = queue;
   });
   // Gates closing in one minute play lowest class first, so a tab can't start any of
-  // them until it has them all, or has waited as long as it will.
-  const [batchWait, setBatchWait] = useState<{
-    minute: number;
-    until: number;
-  } | null>(null);
+  // them until it has them all, or has waited as long as it will: draw minute to when.
+  const [batchWaits, setBatchWaits] =
+    useState<ReadonlyMap<number, number>>(NO_WAITS);
+  // The show someone can see. It keeps its place; anything else can still be re-sorted.
   const playingRef = useRef<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [drawn, setDrawn] = useState<ReadonlySet<string>>(NOBODY);
@@ -165,13 +179,7 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
       const until = started
         ? null
         : batchWaitUntil(watchedRef.current, minute, Date.now());
-      setBatchWait((was) =>
-        until !== null
-          ? { minute, until }
-          : was?.minute === minute
-            ? null
-            : was,
-      );
+      setBatchWaits((was) => withWait(was, minute, until));
     };
 
     const tick = async () => {
@@ -232,6 +240,12 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
     const onBack = () => {
       if (document.hidden) return;
       dropStale(QUEUE_MAX_AGE_MS);
+      // A wait can run out while hidden, with the reads stopped and no show seen. Wait
+      // again while the rest of the minute is read.
+      const head = queueRef.current[0];
+      if (head && head.id !== playingRef.current) {
+        settleBatch(drawMinute(head.endsAt));
+      }
       if (Date.now() - refreshedAt >= FOCUS_THROTTLE_MS) void refresh();
       arm();
     };
@@ -249,20 +263,23 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
       doneRef.current = new Set();
       playingRef.current = null;
       setQueue([]);
-      setBatchWait(null);
+      setBatchWaits(NO_WAITS);
       setExpanded(false);
       setDrawn(NOBODY);
     };
   }, [customerId, track, dropStale]);
 
   useEffect(() => {
-    if (!batchWait) return;
+    if (batchWaits.size === 0) return;
     const id = window.setTimeout(
-      () => setBatchWait(null),
-      Math.max(0, batchWait.until - Date.now()),
+      () =>
+        setBatchWaits(
+          (was) => new Map([...was].filter(([, until]) => until > Date.now())),
+        ),
+      Math.max(0, Math.min(...batchWaits.values()) - Date.now()),
     );
     return () => window.clearTimeout(id);
-  }, [batchWait]);
+  }, [batchWaits]);
 
   const closeShow = useCallback(() => {
     setQueue((q) => freshShows(q.slice(1), Date.now(), QUEUE_MAX_AGE_MS));
@@ -279,7 +296,8 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
   }, [resting]);
 
   const watch = useCallback((id: string) => {
-    if (!queueRef.current.some((s) => s.id === id)) return;
+    const chosen = queueRef.current.find((s) => s.id === id);
+    if (!chosen) return;
     setQueue((q) => {
       const at = q.findIndex((s) => s.id === id);
       if (at <= 0) return q;
@@ -287,7 +305,7 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
       return show ? [show, ...q.filter((_, i) => i !== at)] : q;
     });
     // Asked for by name: it doesn't wait for the rest of its minute.
-    setBatchWait(null);
+    setBatchWaits((was) => withWait(was, drawMinute(chosen.endsAt), null));
     setExpanded(true);
   }, []);
 
@@ -297,22 +315,24 @@ export function LiveDrawProvider({ children }: { children: ReactNode }) {
     [track, drawn, held, finished, watch],
   );
   const show = queue[0];
+  const waiting = show ? batchWaits.has(drawMinute(show.endsAt)) : false;
   const onScreen =
     show &&
     !resting &&
-    batchWait?.minute !== drawMinute(show.endsAt) &&
+    !waiting &&
     consent !== null &&
     !SPIN_ROUTE.test(pathname);
   const playingId = onScreen ? show.id : null;
   useEffect(() => {
-    if (playingId !== null) playingRef.current = playingId;
-  }, [playingId]);
+    // Mounted in a hidden tab, nobody has seen it yet: see onBack.
+    if (!document.hidden) playingRef.current = playingId;
+  });
 
   // Held back by a pack rip or the cookie banner until it is too old to call live.
   // Draws waiting their turn behind another show are not held back: they play in
-  // order, with the longer limit.
+  // order, with the longer limit. Nor is a batch waiting: that wait has its own end.
   const heldBackAt =
-    show && !resting && !onScreen
+    show && !resting && !waiting && !onScreen
       ? Date.parse(show.detail.result.drawn_at)
       : null;
   useEffect(() => {

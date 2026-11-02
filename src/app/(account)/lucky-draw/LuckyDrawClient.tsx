@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { pillVariants } from '@/components/ui/pill';
 import { useLiveDraw } from '@/components/app-shell/LiveDrawProvider';
@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { mytDate, num } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import {
+  gatesGone,
   heroFirst,
   luckyDrawView,
   mergeFreshGates,
@@ -87,17 +88,18 @@ export function LuckyDrawClient({
   // Draws to play here, one at a time: a replay from Results, or an old prize.
   const [spins, setSpins] = useState<LuckyDrawResultDetail[]>([]);
   const liveDraw = useLiveDraw();
-  const { track, drawn } = liveDraw;
+  const { track, drawn, held } = liveDraw;
+  const gone = useMemo(() => gatesGone(drawn, held), [drawn, held]);
   const [playIntro, setPlayIntro] = useState(intro);
   const endIntro = useCallback(() => setPlayIntro(false), []);
   const pageRef = useRef(page);
 
-  // The gates this tab has read a result for, and every page re-read goes through
-  // them: see mergeFreshGates.
-  const closedRef = useRef<ReadonlySet<string>>(drawn);
+  // The gates this tab is done with, and every page re-read goes through them: see
+  // mergeFreshGates.
+  const closedRef = useRef<ReadonlySet<string>>(gone);
   useEffect(() => {
-    closedRef.current = drawn;
-  }, [drawn]);
+    closedRef.current = gone;
+  }, [gone]);
   // This page can hold a gate newer than the watcher's last status read.
   useEffect(() => {
     track(pageGates(page));
@@ -303,8 +305,8 @@ export function LuckyDrawClient({
   const balance = page?.balance ?? 0;
   const event = page?.event ?? null;
   const view = luckyDrawView(page, nowMs);
-  // A drawn gate leaves the list and lives in Results.
-  const gates = pageGates(page).filter((g) => !drawn.has(g.id));
+  // A drawn gate leaves the list once its show is over, and lives in Results.
+  const gates = pageGates(page).filter((g) => !gone.has(g.id));
   const newIds = useNewGates(gates);
   const enteringGate: LuckyDrawGate | null =
     entering && 'gateId' in entering
