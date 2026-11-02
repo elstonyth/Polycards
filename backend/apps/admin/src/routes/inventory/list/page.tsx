@@ -136,7 +136,7 @@ const InventoryListPage = () => {
   // Blank filter passed as undefined, never '' — qk.inventory() and
   // qk.inventory('') are the same key by construction, but keeping the call
   // site honest matches the sibling pages.
-  const { data, isError } = useInventory(q || undefined);
+  const { data, isError, isFetching } = useInventory(q || undefined);
   const registerCard = useRegisterCard();
   const invalidateInventory = useInvalidateInventory();
 
@@ -343,6 +343,19 @@ const InventoryListPage = () => {
               anchorRef.current = null;
             }}
           />
+          {/* An open page never refetches by itself, so a GRN saved in another
+              tab or by someone else stays invisible until this. The whole
+              namespace, not this one query: cached searches and item pages
+              hold the same old figures. Disabled mid-fetch because this is
+              the same heavy read the export guards against double-clicks. */}
+          <Button
+            variant="secondary"
+            isLoading={isFetching}
+            disabled={isFetching}
+            onClick={() => void invalidateInventory()}
+          >
+            {t('inventory.refresh')}
+          </Button>
           <Button
             variant="secondary"
             isLoading={exporting}
