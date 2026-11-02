@@ -17,12 +17,12 @@ import { setAvatarFrame, setPresetAvatar } from '../profile-appearance';
 beforeEach(() => vi.clearAllMocks());
 
 describe('setPresetAvatar', () => {
-  it('posts the id and revalidates /me', async () => {
+  it('posts the id without re-reading /me', async () => {
     const mem = backend({ 'POST /store/profile/avatar/preset': { body: {} } });
     expect(await setPresetAvatar(12)).toEqual({ ok: true });
     expect(mem.requests[0]?.path).toBe('/store/profile/avatar/preset');
     expect(mem.requests[0]?.body).toEqual({ id: 12 });
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/me');
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
   // A server action is a public endpoint: anything that is not a catalog id is
@@ -48,7 +48,7 @@ describe('setPresetAvatar', () => {
     expect(mem.requests).toEqual([]);
   });
 
-  it('does not revalidate when the backend refuses', async () => {
+  it('falls back cleanly when the backend refuses', async () => {
     backend({
       'POST /store/profile/avatar/preset': {
         status: 500,
@@ -59,7 +59,6 @@ describe('setPresetAvatar', () => {
       ok: false,
       error: 'Something went wrong. Please try again.',
     });
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 });
 

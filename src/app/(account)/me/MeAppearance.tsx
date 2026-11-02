@@ -40,6 +40,9 @@ export function MeHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  // A catalog pick made in the modal: picks don't re-read the page per tap.
+  const [pickedAvatar, setPickedAvatar] = useState<string | null>(null);
+  const shownAvatar = pickedAvatar ?? avatarUrl;
   const { equipped } = useEquippedFrame();
   const initial = (displayName[0] ?? '?').toUpperCase();
   const equippedFrameUrl = equipped ? (frames[String(equipped)] ?? null) : null;
@@ -65,7 +68,7 @@ export function MeHeader({
           className="group relative shrink-0 rounded-full outline-offset-4"
         >
           <FramedAvatar
-            src={avatarUrl}
+            src={shownAvatar}
             initial={initial}
             frameSrc={equippedFrameUrl}
             animateLevel={equipped}
@@ -126,7 +129,8 @@ export function MeHeader({
         displayName={displayName}
         username={username}
         handle={handle}
-        avatarUrl={avatarUrl}
+        avatarUrl={shownAvatar}
+        onAvatarPicked={setPickedAvatar}
         frames={frames}
         highestLevel={highestLevel}
       />
