@@ -4,13 +4,19 @@ import {
   blankEventDraft,
   blankPrizeDraft,
   drawTimeProblem,
+  endAfterHours,
   eventDraftFrom,
   eventDraftToPayload,
+  hoursBetween,
+  hoursProblem,
+  MAX_RUN_HOURS,
   prizeDraftFrom,
   prizeDraftToPayload,
   prizeState,
+  RUN_LENGTHS,
   shortHash,
   whenLabel,
+  withRunLength,
   type PrizeDraft,
 } from './lucky-draw-draft';
 import type {
@@ -293,6 +299,97 @@ describe('event drafts', () => {
   });
 });
 
+describe('run length in hours', () => {
+  const START = '2026-11-02T00:00';
+
+  test('the end is the start plus the hours', () => {
+    expect(endAfterHours(START, '24')).toBe('2026-11-03T00:00');
+    expect(endAfterHours(START, '96')).toBe('2026-11-06T00:00');
+    expect(endAfterHours(START, '1.5')).toBe('2026-11-02T01:30');
+  });
+
+  test('no end without a start and hours above 0', () => {
+    expect(endAfterHours('', '24')).toBe('');
+    for (const hours of ['', '  ', '0', '-3', 'abc', 'e']) {
+      expect(endAfterHours(START, hours)).toBe('');
+    }
+  });
+
+  test('hours stop at the ceiling, and every one-tap length fits under it', () => {
+    expect(endAfterHours(START, String(MAX_RUN_HOURS))).not.toBe('');
+    expect(endAfterHours(START, String(MAX_RUN_HOURS + 1))).toBe('');
+    expect(endAfterHours(START, '70000000')).toBe('');
+    for (const { hours } of RUN_LENGTHS) {
+      expect(hours).toBeLessThanOrEqual(MAX_RUN_HOURS);
+    }
+  });
+
+  test('typed hours are told apart: blank, unusable, too long, fine', () => {
+    expect(hoursProblem('')).toBeNull();
+    expect(hoursProblem('  ')).toBeNull();
+    expect(hoursProblem('24')).toBeNull();
+    expect(hoursProblem('1.5')).toBeNull();
+    expect(hoursProblem(String(MAX_RUN_HOURS))).toBeNull();
+    for (const bad of ['0', '-3', 'abc', 'e']) {
+      expect(hoursProblem(bad)).toMatch(/above 0/);
+    }
+    for (const long of [String(MAX_RUN_HOURS + 1), '7200', '70000000']) {
+      expect(hoursProblem(long)).toMatch(/at most/);
+    }
+  });
+
+  test('moving the start or hours moves the end and keeps the rest', () => {
+    const draft = {
+      ...blankEventDraft(),
+      id: 'ldevt_1',
+      tier: 'first' as const,
+      startsAt: START,
+      endsAt: '2026-11-03T00:00',
+    };
+    expect(withRunLength(draft, '2026-11-05T00:00', '24')).toEqual({
+      ...draft,
+      startsAt: '2026-11-05T00:00',
+      endsAt: '2026-11-06T00:00',
+    });
+    expect(withRunLength(draft, START, '48').endsAt).toBe('2026-11-04T00:00');
+    expect(withRunLength(draft, START, '0').endsAt).toBe('');
+  });
+
+  test('a saved window reads back as its hours', () => {
+    expect(hoursBetween(START, '2026-11-03T00:00')).toBe('24');
+    expect(hoursBetween(START, '2026-11-02T01:30')).toBe('1.5');
+  });
+
+  test('the hours shown rebuild the same end, to the minute', () => {
+    const start = new Date(START);
+    for (let minutes = 1; minutes <= 3 * 24 * 60; minutes++) {
+      const end = toLocalInput(new Date(start.getTime() + minutes * 60_000));
+      expect(endAfterHours(START, hoursBetween(START, end))).toBe(end);
+    }
+  });
+
+  test('no hours for a blank or reversed window', () => {
+    expect(hoursBetween('', '2026-11-03T00:00')).toBe('');
+    expect(hoursBetween(START, '')).toBe('');
+    expect(hoursBetween(START, START)).toBe('');
+    expect(hoursBetween('2026-11-03T00:00', START)).toBe('');
+  });
+
+  test('the form sends the same window the hours describe', () => {
+    const endsAt = endAfterHours(START, '48');
+    const payload = eventDraftToPayload({
+      ...blankEventDraft(),
+      startsAt: START,
+      endsAt,
+    });
+    expect(payload).toMatchObject({
+      starts_at: toIso(START),
+      ends_at: toIso('2026-11-04T00:00'),
+    });
+    expect(hoursBetween(START, endsAt)).toBe('48');
+  });
+});
+
 describe('display helpers', () => {
   const BEFORE = Date.parse(DRAW_AT) - 60_000;
   const result = (
@@ -349,6 +446,13 @@ describe('display helpers', () => {
 
   test('whenLabel reads an unparseable instant as a dash, not "Invalid Date"', () => {
     expect(whenLabel('garbage')).toBe('—');
-    expect(whenLabel(DRAW_AT)).toBe(new Date(DRAW_AT).toLocaleString());
+    expect(whenLabel(DRAW_AT)).toBe(
+      new Date(DRAW_AT).toLocaleString(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'medium',
+      }),
+    );
+    // Names the month: an all-numeric date reads two ways.
+    expect(whenLabel(DRAW_AT)).not.toMatch(/^\d+\/\d+\/\d+/);
   });
 });

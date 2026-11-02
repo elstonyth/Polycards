@@ -181,6 +181,62 @@ export function eventDraftToPayload(
   };
 }
 
+/** The run lengths the event form offers in one tap. */
+export const RUN_LENGTHS: readonly { hours: number; label: string }[] = [
+  { hours: 6, label: '6h' },
+  { hours: 12, label: '12h' },
+  { hours: 24, label: '24h' },
+  { hours: 48, label: '48h' },
+  { hours: 72, label: '72h' },
+  { hours: 168, label: '7 days' },
+  { hours: 672, label: '28 days' },
+];
+
+/** The longest run the form takes, 90 days. A window locks once published, so a
+ *  slipped digit (7200 for 720) is stopped here. */
+export const MAX_RUN_HOURS = 90 * 24;
+
+/** Why typed hours can't give an end, or null if they can. Blank is null: the
+ *  form just can't be sent yet. */
+export function hoursProblem(hours: string): string | null {
+  if (hours.trim() === '') return null;
+  const run = Number(hours);
+  if (!(run > 0)) return 'Enter a number of hours above 0.';
+  return run > MAX_RUN_HOURS
+    ? `A gate runs at most ${MAX_RUN_HOURS} hours (90 days).`
+    : null;
+}
+
+/** The end that a start and a typed run length give, or '' without a start and
+ *  usable hours. A blank end is what keeps the form from being sent. */
+export function endAfterHours(startsAt: string, hours: string): string {
+  const start = toIso(startsAt);
+  if (start === null || hours.trim() === '' || hoursProblem(hours) !== null) {
+    return '';
+  }
+  // To the nearest minute: the form's time inputs hold minutes, and rounding is
+  // what lets the 2-place hours from hoursBetween rebuild the same end.
+  return toLocalInput(
+    new Date(Date.parse(start) + Math.round(Number(hours) * 60) * 60_000),
+  );
+}
+
+/** The draft with this start and run length: its end follows them. */
+export const withRunLength = (
+  d: EventDraft,
+  startsAt: string,
+  hours: string,
+): EventDraft => ({ ...d, startsAt, endsAt: endAfterHours(startsAt, hours) });
+
+/** A window's run length as the form shows it, to 2 places; '' with no window. */
+export function hoursBetween(startsAt: string, endsAt: string): string {
+  const start = toIso(startsAt);
+  const end = toIso(endsAt);
+  if (start === null || end === null) return '';
+  const run = (Date.parse(end) - Date.parse(start)) / 3_600_000;
+  return run > 0 ? String(Math.round(run * 100) / 100) : '';
+}
+
 export type PrizeState =
   | 'cancelled'
   | 'drawn'
@@ -212,8 +268,11 @@ export const shortHash = (hash: string | null): string =>
   hash === null ? '—' : hash.length > 12 ? `${hash.slice(0, 12)}…` : hash;
 
 /** An ISO instant as the browser's wall clock — the same clock the
- *  datetime-local inputs use, so a table cell and the form agree. */
+ *  datetime-local inputs use, so a table cell and the form agree. The month is
+ *  named, because an all-numeric date reads two ways. */
 export const whenLabel = (iso: string): string => {
   const d = new Date(iso);
-  return Number.isFinite(d.getTime()) ? d.toLocaleString() : '—';
+  return Number.isFinite(d.getTime())
+    ? d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
+    : '—';
 };
