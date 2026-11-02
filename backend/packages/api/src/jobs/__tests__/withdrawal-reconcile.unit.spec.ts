@@ -131,6 +131,61 @@ const ambiguous400 = () =>
     400,
   );
 
+// A row with no gateway id may be refunded on a later "not found", so once the
+// gateway has shown it holds the payout, that id is what stops the refund.
+describe('withdrawal sweep — a payout the gateway shows it holds', () => {
+  it('keeps the id it learns on the pending row', async () => {
+    const h = harness();
+    fakeGateway.script({
+      getWithdrawalDetail: {
+        state: 'pending',
+        statusId: null,
+        transactionId: 'T-9',
+      },
+    });
+
+    await withdrawalReconcileJob(h.container);
+
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledTimes(1);
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+      selector: { id: 'gpw_1', status: 'pending' },
+      data: { gateway_transaction_id: 'T-9' },
+    });
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+  });
+
+  it('then never refunds it on a later "not found"', async () => {
+    const h = harness({ ...pendingRow, gateway_transaction_id: 'T-9' });
+    fakeGateway.script({
+      getWithdrawalDetail: new GatewayError(
+        'Transaction not found',
+        ['PMT10016'],
+        404,
+        true,
+      ),
+    });
+
+    await withdrawalReconcileJob(h.container);
+
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing when the row already has the id', async () => {
+    const h = harness({ ...pendingRow, gateway_transaction_id: 'T-9' });
+    fakeGateway.script({
+      getWithdrawalDetail: {
+        state: 'pending',
+        statusId: null,
+        transactionId: 'T-9',
+      },
+    });
+
+    await withdrawalReconcileJob(h.container);
+
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+  });
+});
+
 describe('withdrawal sweep — an unattributable 400 never refunds', () => {
   it('does not refund, does not close the row, and says so loudly', async () => {
     const h = harness();
