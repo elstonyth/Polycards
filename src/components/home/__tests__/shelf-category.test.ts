@@ -39,20 +39,17 @@ const tabsWith = (...ids: string[]) =>
 
 const home = (ids: string[]) => {
   const categories = tabsWith(...ids);
-  return createElement(ShelfCategoryProvider, {
-    categories,
-    children: [
-      createElement(ShelfTabs, {
-        key: 'shelf',
-        categories,
-        panels: { pokemon: 'POKE LADDER', poly: 'POLY LADDER' },
-      }),
-      createElement(RecentPullsSection, {
-        key: 'feed',
-        initial: { pulls: [], drought: {} },
-      }),
-    ],
-  });
+  return createElement(
+    ShelfCategoryProvider,
+    { categories },
+    createElement(ShelfTabs, {
+      categories,
+      panels: { pokemon: 'POKE LADDER', poly: 'POLY LADDER' },
+    }),
+    createElement(RecentPullsSection, {
+      initial: { pulls: [], drought: {} },
+    }),
+  );
 };
 
 let root: Root;

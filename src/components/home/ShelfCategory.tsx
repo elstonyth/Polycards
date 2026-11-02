@@ -15,7 +15,7 @@ export function ShelfCategoryProvider({
   children,
 }: {
   categories: PackTab[];
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const first = categories.find((c) => !c.soon)?.id ?? '';
   const [picked, pick] = useState(first);

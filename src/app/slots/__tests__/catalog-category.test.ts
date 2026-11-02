@@ -105,13 +105,14 @@ test('/slots hides the switch with a single franchise', () => {
 
 test('home shelf: the "All packs" link follows the picked franchise', () => {
   render(
-    createElement(ShelfCategoryProvider, {
-      categories: packTabs(categories),
-      children: createElement(ShelfTabs, {
+    createElement(
+      ShelfCategoryProvider,
+      { categories: packTabs(categories) },
+      createElement(ShelfTabs, {
         categories: packTabs(categories),
         panels: { pokemon: 'POKE', 'one-piece': 'OP' },
       }),
-    }),
+    ),
   );
   const link = () =>
     [...host.querySelectorAll('a')].find((a) => a.textContent === 'All packs');
