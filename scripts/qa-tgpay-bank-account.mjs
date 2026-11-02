@@ -30,6 +30,7 @@ try {
   await email.waitFor({ state: 'detached', timeout: 15000 });
 
   await page.goto(`${STORE}/bank`, { waitUntil: 'domcontentloaded' });
+  // The button only shows with no saved account (ADR 0015): use a fresh customer.
   await page.getByRole('button', { name: /add bank account/i }).click();
   await page.getByRole('button', { name: 'Malaysia', exact: true }).click();
   const bank = page.getByLabel('Bank');

@@ -68,7 +68,7 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     // Other customers on the same number. None by default.
     otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
     // Support's verification of a shared number. Not verified by default.
-    bankShareVerifiedFor: jest.fn().mockResolvedValue(false),
+    bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
     createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
     // Idempotency-Key replay lookup. Empty by default — no prior intent.
     listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
@@ -530,7 +530,9 @@ describe('startWithdrawal — money ordering', () => {
     it('pays once support verified this customer', async () => {
       const h = harness();
       h.packs.otherPayoutAccountHolders.mockResolvedValue([paid]);
-      h.packs.bankShareVerifiedFor.mockResolvedValue(true);
+      h.packs.bankShareVerifiedFor.mockResolvedValue({
+        [SAVED_ACCOUNT.id]: '2026-11-03T00:00:00.000Z',
+      });
       await expect(
         start(h, { gateway: 'tgpay', amount: 56 }),
       ).resolves.toBeTruthy();
@@ -1751,6 +1753,8 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       const packs = {
         listGatewayWithdrawals: jest.fn().mockResolvedValue([heldRow]),
         listCustomerAccountStates: jest.fn().mockResolvedValue([]),
+        otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
+        bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
         claimWithdrawalAgainstDebit: jest
           .fn()
           .mockResolvedValue({ debited: true, claimed: true }),
@@ -1782,6 +1786,65 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         });
       return { packs, approve };
     }
+
+    // One bank account, one Polycards account, on the row's own number: a row
+    // held before the rule shipped, or a number since removed, stays held.
+    describe('a shared bank account', () => {
+      const elsewhere = {
+        customer_id: 'cus_2',
+        bank_code: 'MBBEMYKL',
+        holder_name: null,
+      };
+
+      it('refuses, and the row stays held', async () => {
+        const h = approveHarness();
+        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        await expect(h.approve()).rejects.toThrow(
+          /linked to another Polycards account/,
+        );
+        expect(h.packs.otherPayoutAccountHolders).toHaveBeenCalledWith(
+          heldRow.customer_id,
+          heldRow.account_number,
+          false,
+        );
+        expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
+        expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+      });
+
+      it('refuses a stamp on another number', async () => {
+        const h = approveHarness();
+        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        h.packs.bankShareVerifiedFor.mockResolvedValue({
+          other_account: '2026-11-03T00:00:00.000Z',
+        });
+        await expect(h.approve()).rejects.toThrow(
+          /linked to another Polycards account/,
+        );
+      });
+
+      it('lets a verified number through', async () => {
+        const h = approveHarness();
+        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        h.packs.bankShareVerifiedFor.mockResolvedValue({
+          [savedBankAccountId('MBBEMYKL', heldRow.account_number)]:
+            '2026-11-03T00:00:00.000Z',
+        });
+        // Past the hold: this describe's fake gateway then refuses for its own reason.
+        const out = await h.approve().catch((e: Error) => e);
+        expect(String((out as Error).message)).not.toMatch(/linked to another/);
+        expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalled();
+      });
+
+      it('does not count the same digits at another bank', async () => {
+        const h = approveHarness();
+        h.packs.otherPayoutAccountHolders.mockResolvedValue([
+          { ...elsewhere, bank_code: 'PBBEMYKL' },
+        ]);
+        const out = await h.approve().catch((e: Error) => e);
+        expect(String((out as Error).message)).not.toMatch(/linked to another/);
+        expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalled();
+      });
+    });
 
     beforeEach(() => {
       // Cached, so resolveActiveGateway never needs a site_settings table.

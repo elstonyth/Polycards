@@ -77,6 +77,16 @@ export function rejectAdminBankAccountsMetadata(
 ): void {
   const body = req.body as Record<string, unknown> | null | undefined;
   const metadata = body?.metadata as Record<string, unknown> | null | undefined;
+  // A null blanks the whole blob, which wipes a tied bank account just the same.
+  if (body && 'metadata' in body && metadata === null) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'metadata cannot be cleared through this route. It holds payout destinations, which are audited.',
+      ),
+    );
+    return;
+  }
   if (metadata && typeof metadata === 'object' && 'bank_accounts' in metadata) {
     next(
       new MedusaError(

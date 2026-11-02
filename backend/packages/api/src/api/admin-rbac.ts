@@ -90,6 +90,7 @@ export const CORE_PREFIX_WRITES: {
   operation: Operation;
 }[] = [
   ...[
+    'bank-accounts/add',
     'bank-accounts/remove',
     'bank-accounts/verify',
     'credits',

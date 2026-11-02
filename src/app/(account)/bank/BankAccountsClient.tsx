@@ -366,7 +366,11 @@ export function BankAccountsClient() {
             Each Polycards account has one{' '}
             {walletGroup ? 'wallet' : 'bank account'}, and it can&apos;t be
             linked to another Polycards account. Check the details: to change it
-            later, you&apos;ll need to contact support.
+            later, you&apos;ll need to{' '}
+            <Link href="/contact" className="underline underline-offset-2">
+              contact support
+            </Link>
+            .
           </p>
 
           <div className="mt-4 flex gap-2">

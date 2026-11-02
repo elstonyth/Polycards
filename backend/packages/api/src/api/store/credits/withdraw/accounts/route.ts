@@ -19,12 +19,14 @@ import {
   MAX_SAVED_BANK_ACCOUNTS,
   ONE_BANK_ACCOUNT_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
+  SHARED_SAVE_MESSAGE,
   anySavedAccountShared,
-  bankShareVerified,
-  heldByAnother,
+  blocksNewSave,
+  newSavedBankAccount,
   parseSavedBankAccounts,
   savedBankAccountId,
   savedBankAccountViews,
+  verifiedBankAccounts,
   type SavedBankAccount,
 } from '../../../../../modules/packs/saved-accounts';
 import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-account-notice';
@@ -90,6 +92,7 @@ import {
 export {
   MAX_SAVED_BANK_ACCOUNTS,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
+  SHARED_SAVE_MESSAGE,
   parseSavedBankAccounts,
   savedBankAccountId,
   type SavedBankAccount,
@@ -163,9 +166,12 @@ async function accountViews(
 ) {
   const accounts = parseSavedBankAccounts(metadata.bank_accounts);
   const packs = resolvePacks<CustomerWallet>(req.scope);
-  const onHold =
-    !bankShareVerified(metadata) &&
-    (await anySavedAccountShared(packs, customerId, accounts));
+  const onHold = await anySavedAccountShared(
+    packs,
+    customerId,
+    accounts,
+    verifiedBankAccounts(metadata),
+  );
   const active = await resolveActiveGateway(req.scope);
   // The admin's Touch 'n Go switch and floor (withdrawal-controls.ts), so the
   // form shows a paused TNG account as such and states the right minimum.
@@ -197,7 +203,7 @@ async function accountViews(
             supported: false,
             unavailableReason: findBank(view.bankCode)?.accountLengths?.length
               ? `${invalid} Contact support to change it to the correct bank country and account number.`
-              : invalid,
+              : `${invalid} Contact support to change it.`,
           }
         : {}),
       ...(onHold
@@ -252,26 +258,12 @@ export async function POST(
       'Pick a bank from the list.',
     );
   }
-  const bankCode = bank.id;
-  // An EVM address is the same wallet in any letter case (the case is only
-  // its checksum, checked above), so it is stored in one case: otherwise the
-  // checksummed and lowercase copies save as two accounts.
-  const accountNumber =
-    bank.wallet === 'evm'
-      ? (body.account_number as string).toLowerCase()
-      : (body.account_number as string);
-  const account: SavedBankAccount = {
-    id: savedBankAccountId(bankCode, accountNumber),
-    bankCode,
-    bankName: bank.name,
-    accountNumber,
-    // A wallet has no holder (withdrawalDetailsError skips it); its network
-    // name stands in, so the saved list and the admin queue still read.
-    accountHolderName: bank.wallet
-      ? bank.name
-      : (body.account_holder_name as string).trim(),
-    savedAt: new Date().toISOString(),
-  };
+  const account = newSavedBankAccount(
+    bank,
+    body.account_number as string,
+    (body.account_holder_name as string | undefined) ?? '',
+  );
+  const { accountNumber, bankCode } = account;
 
   // Looked up before the lock (it reads OTHER customers, which this
   // customer's metadata lock does not cover) but applied inside it, where
@@ -281,10 +273,10 @@ export async function POST(
   //
   // Any holder blocks, under any name: one ring typed ten holder names onto one
   // number, which the old same-name rule let straight through. A stranger who
-  // saves someone's number first locks the owner out until support removes it;
-  // support is the answer to that (ADR 0015). Support's verification lifts a
-  // payout hold on a number already saved; it never lets a new one in.
-  const shared = heldByAnother(
+  // saves someone's number first locks the owner out until support acts; support
+  // is the answer to that (ADR 0015). Support's verification lifts a payout hold
+  // on a number already saved; it never lets a new one in.
+  const shared = blocksNewSave(
     await resolvePacks<CustomerWallet>(req.scope).otherPayoutAccountHolders(
       customerId,
       accountNumber,
@@ -298,21 +290,10 @@ export async function POST(
   // MAX-1 accounts and both be allowed through.
   let added = false;
   const saved = await mutateAccounts(req, customerId, (accounts) => {
-    const existing = accounts.findIndex((a) => a.id === account.id);
-    if (existing >= 0) {
-      // Idempotent re-add: refresh the label/holder in place (a customer fixing
-      // a typo'd holder name must not need a delete + re-add dance), but KEEP
-      // the original savedAt so the cooling-off window is not restarted. Safe
-      // because savedBankAccountId is derived from (bankCode, accountNumber):
-      // a re-add cannot repoint an id at a different bank account, only relabel
-      // the one it already names. A row that predates savedAt keeps having
-      // none — re-saving a stale account must not silently arm it, only a
-      // delete-then-add (a new entry, stamped now) does.
-      const prior = accounts[existing] as SavedBankAccount;
-      return accounts.map((a, i) =>
-        i === existing ? { ...account, savedAt: prior.savedAt } : a,
-      );
-    }
+    // Already theirs: nothing to do. A tied account changes through support, its
+    // holder name included, and keeps its original savedAt, so a re-save restarts
+    // no cooling-off window and arms no old row.
+    if (accounts.some((a) => a.id === account.id)) return null;
     if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -327,10 +308,7 @@ export async function POST(
         .warn(
           `[saved-accounts] refused a shared payout account for ${customerId} (${bankCode} …${accountNumber.slice(-4)})`,
         );
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        SHARED_PAYOUT_ACCOUNT_MESSAGE,
-      );
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, SHARED_SAVE_MESSAGE);
     }
     added = true;
     return [...accounts, account];
@@ -341,7 +319,7 @@ export async function POST(
   // cash out". Fired after the write has committed and never allowed to fail
   // the save (the helper swallows its own errors) — a dropped notice must not
   // cost the customer their saved account. Re-saving an account they already
-  // had is not news, so it stays silent.
+  // had changes nothing, so it stays silent.
   if (added) {
     await sendSavedAccountAddedNotice(req.scope, {
       customerId,
