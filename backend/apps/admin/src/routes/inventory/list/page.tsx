@@ -311,6 +311,16 @@ const InventoryListPage = () => {
       .finally(() => setExporting(false));
   };
 
+  // A ref, because a second click can land before the disabled render.
+  const refreshingRef = useRef(false);
+  const runRefresh = () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    void invalidateInventory().finally(() => {
+      refreshingRef.current = false;
+    });
+  };
+
   return (
     <Container className="divide-y p-0">
       <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
@@ -352,7 +362,7 @@ const InventoryListPage = () => {
             variant="secondary"
             isLoading={isFetching}
             disabled={isFetching}
-            onClick={() => void invalidateInventory()}
+            onClick={runRefresh}
           >
             {t('inventory.refresh')}
           </Button>
