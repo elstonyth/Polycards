@@ -4,8 +4,10 @@ import {
   blankEventDraft,
   blankPrizeDraft,
   drawTimeProblem,
+  endAfterHours,
   eventDraftFrom,
   eventDraftToPayload,
+  hoursBetween,
   prizeDraftFrom,
   prizeDraftToPayload,
   prizeState,
@@ -290,6 +292,49 @@ describe('event drafts', () => {
     expect(
       eventDraftToPayload({ ...ready, endsAt: '2026-11-30T00:00' }),
     ).toBeNull();
+  });
+});
+
+describe('run length in hours', () => {
+  const START = '2026-11-02T00:00';
+
+  test('the end is the start plus the hours', () => {
+    expect(endAfterHours(START, '24')).toBe('2026-11-03T00:00');
+    expect(endAfterHours(START, '96')).toBe('2026-11-06T00:00');
+    expect(endAfterHours(START, '1.5')).toBe('2026-11-02T01:30');
+  });
+
+  test('no end without a start and hours above 0', () => {
+    expect(endAfterHours('', '24')).toBe('');
+    for (const hours of ['', '  ', '0', '-3', 'abc']) {
+      expect(endAfterHours(START, hours)).toBe('');
+    }
+  });
+
+  test('a saved window reads back as its hours', () => {
+    expect(hoursBetween(START, '2026-11-03T00:00')).toBe('24');
+    expect(hoursBetween(START, '2026-11-02T01:30')).toBe('1.5');
+  });
+
+  test('no hours for a blank or reversed window', () => {
+    expect(hoursBetween('', '2026-11-03T00:00')).toBe('');
+    expect(hoursBetween(START, '')).toBe('');
+    expect(hoursBetween(START, START)).toBe('');
+    expect(hoursBetween('2026-11-03T00:00', START)).toBe('');
+  });
+
+  test('the form sends the same window the hours describe', () => {
+    const endsAt = endAfterHours(START, '48');
+    const payload = eventDraftToPayload({
+      ...blankEventDraft(),
+      startsAt: START,
+      endsAt,
+    });
+    expect(payload).toMatchObject({
+      starts_at: toIso(START),
+      ends_at: toIso('2026-11-04T00:00'),
+    });
+    expect(hoursBetween(START, endsAt)).toBe('48');
   });
 });
 

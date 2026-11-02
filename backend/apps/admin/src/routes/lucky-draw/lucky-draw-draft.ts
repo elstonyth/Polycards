@@ -181,6 +181,35 @@ export function eventDraftToPayload(
   };
 }
 
+/** The run lengths the event form offers in one tap. */
+export const RUN_LENGTHS: readonly { hours: number; label: string }[] = [
+  { hours: 6, label: '6h' },
+  { hours: 12, label: '12h' },
+  { hours: 24, label: '24h' },
+  { hours: 48, label: '48h' },
+  { hours: 72, label: '72h' },
+  { hours: 168, label: '7 days' },
+  { hours: 672, label: '28 days' },
+];
+
+/** The end that a start and a typed run length give, or '' without a start and
+ *  hours above 0. A blank end is what keeps the form from being sent. */
+export function endAfterHours(startsAt: string, hours: string): string {
+  const start = toIso(startsAt);
+  const run = hours.trim() === '' ? NaN : Number(hours);
+  if (start === null || !(run > 0)) return '';
+  return toLocalInput(new Date(Date.parse(start) + run * 3_600_000));
+}
+
+/** A window's run length as the form shows it, to 2 places; '' with no window. */
+export function hoursBetween(startsAt: string, endsAt: string): string {
+  const start = toIso(startsAt);
+  const end = toIso(endsAt);
+  if (start === null || end === null) return '';
+  const run = (Date.parse(end) - Date.parse(start)) / 3_600_000;
+  return run > 0 ? String(Math.round(run * 100) / 100) : '';
+}
+
 export type PrizeState =
   | 'cancelled'
   | 'drawn'

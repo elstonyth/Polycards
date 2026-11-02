@@ -2,11 +2,16 @@ import { useState } from 'react';
 import { Button, Drawer, Input, Select, Text, toast } from '@medusajs/ui';
 import { useSaveLuckyDrawEvent } from '../../lib/queries';
 import { Field, Section } from '../../components/form-bits';
+import { toIso } from '../tasks/task-draft';
 import { CreditPrizeRows } from './credit-prize-rows';
 import { InventoryPicker } from './inventory-picker';
 import {
+  endAfterHours,
   eventDraftToPayload,
+  hoursBetween,
+  RUN_LENGTHS,
   TIER_LABEL,
+  whenLabel,
   type EventDraft,
 } from './lucky-draw-draft';
 import { windowProblem } from './one-winner';
@@ -37,6 +42,21 @@ export const EventEditor = ({
   const [reason, setReason] = useState('');
   const [cards, setCards] = useState<PoolCard[]>([]);
   const [credits, setCredits] = useState<PoolCredit[]>([]);
+  // As typed, so "1." survives. The end follows it only on a change: opening a
+  // draft and saving it leaves a window that isn't whole hours exactly as it was.
+  const [hours, setHours] = useState(() =>
+    hoursBetween(draft.startsAt, draft.endsAt),
+  );
+
+  const setWindow = (startsAt: string, runHours: string) => {
+    setHours(runHours);
+    onChange({
+      ...draft,
+      startsAt,
+      endsAt: endAfterHours(startsAt, runHours),
+    });
+  };
+  const endsIso = toIso(draft.endsAt);
 
   const creating = !draft.id;
   const payload = creating
@@ -108,24 +128,57 @@ export const EventEditor = ({
                 id="ld-event-starts"
                 type="datetime-local"
                 value={draft.startsAt}
-                onChange={(e) =>
-                  onChange({ ...draft, startsAt: e.target.value })
-                }
+                onChange={(e) => setWindow(e.target.value, hours)}
               />
             </Field>
-            <Field label="Ends" htmlFor="ld-event-ends" className="w-56">
+            <Field
+              label="Runs for (hours)"
+              htmlFor="ld-event-hours"
+              className="w-56"
+            >
               <Input
-                id="ld-event-ends"
-                type="datetime-local"
-                value={draft.endsAt}
-                onChange={(e) => onChange({ ...draft, endsAt: e.target.value })}
+                id="ld-event-hours"
+                type="number"
+                min="0"
+                step="any"
+                inputMode="decimal"
+                value={hours}
+                onChange={(e) => setWindow(draft.startsAt, e.target.value)}
               />
             </Field>
           </div>
+          <div
+            className="-mt-3 flex flex-wrap gap-1"
+            role="group"
+            aria-label="Run length"
+          >
+            {RUN_LENGTHS.map((r) => (
+              <Button
+                key={r.hours}
+                size="small"
+                type="button"
+                variant={hours === String(r.hours) ? 'primary' : 'secondary'}
+                aria-pressed={hours === String(r.hours)}
+                onClick={() => setWindow(draft.startsAt, String(r.hours))}
+              >
+                {r.label}
+              </Button>
+            ))}
+          </div>
+          {endsIso && (
+            <Text size="small" weight="plus" aria-live="polite">
+              Ends {whenLabel(endsIso)}
+            </Text>
+          )}
           <Text size="small" className="text-ui-fg-subtle -mt-3">
             Your browser’s time zone. Malaysia time is UTC+8. Any number of
             events can run at the same time.
           </Text>
+          {draft.startsAt !== '' && hours !== '' && !endsIso && (
+            <Text size="small" className="text-ui-fg-error -mt-3">
+              Enter a number of hours above 0.
+            </Text>
+          )}
           {windowBad && (
             <Text size="small" className="text-ui-fg-error -mt-3">
               {windowBad}
