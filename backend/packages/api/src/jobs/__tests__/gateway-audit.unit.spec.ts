@@ -89,7 +89,7 @@ describe('gateway audit job', () => {
     expect(h.logger.error).toHaveBeenCalledTimes(1);
   });
 
-  // The real row, PC-4081a243…: A3Pay settled it on 10-18, the transfer bounced,
+  // From a real row: A3Pay settled it on 10-18, the transfer bounced,
   // staff refunded it by hand that day and the customer was paid through TGPay.
   it('a settled payout refunded by hand never reads "not refunded"', async () => {
     fakeGateway.script({ getWithdrawalDetail: { state: 'failed', amount: 0 } });
@@ -100,8 +100,8 @@ describe('gateway audit job', () => {
           id: 'gpw_9',
           gateway: 'fake',
           customer_id: 'cus_9',
-          merchant_transaction_id: 'PC-4081',
-          gateway_transaction_id: 'W2026101700000029',
+          merchant_transaction_id: 'PC-BOUNCED',
+          gateway_transaction_id: 'W2026000000000001',
           status: 'settled',
           amount: '100',
           net_amount: null,
@@ -116,7 +116,7 @@ describe('gateway audit job', () => {
           : [
               {
                 reference:
-                  'Refund RM100 for returned payout W2026101700000029; merchant PC-4081',
+                  'Refund RM100 for returned payout W2026000000000001; merchant PC-BOUNCED',
               },
             ],
     );

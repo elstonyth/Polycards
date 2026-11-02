@@ -103,7 +103,7 @@ describe('withdrawalAuditNote', () => {
 
 // The note tells an operator what to do with money, so it must say what the
 // ledger holds. Written from the row alone it told staff to refund a payout
-// already refunded by hand (PC-4081a243…, 2026-10-18).
+// already refunded by hand (2026-10-18).
 describe('a note that knows what the ledger holds', () => {
   const nothing = { anchored: false, hand: false };
   const settledPayout = { status: 'settled', amount: 100 };
@@ -188,7 +188,7 @@ describe('ledgerTrail', () => {
   const lookup = {
     customerId: 'cus_1',
     anchor: 'wd-refund:abc',
-    refs: ['PC-4081', 'W2026101700000029', null],
+    refs: ['PC-BOUNCED', 'W2026000000000001', null],
   };
 
   it('finds the anchor', async () => {
@@ -201,7 +201,7 @@ describe('ledgerTrail', () => {
     // The reference on the real 10-18 refund, shortened.
     const refund = {
       reference:
-        'Refund RM100 for returned A3Pay payout W2026101700000029; merchant PC-4081',
+        'Refund RM100 for returned A3Pay payout W2026000000000001; merchant PC-BOUNCED',
     };
     await expect(
       ledgerTrail(packs([], [{ reference: 'wy' }, refund]), lookup),
