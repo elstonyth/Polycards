@@ -1,9 +1,10 @@
 'use server';
 
 /**
- * Profile appearance server actions — photo upload + frame equip/unequip.
+ * Profile appearance server actions — photo upload, catalog avatar + frame
+ * equip/unequip.
  *
- * The frame POST goes through the `Store` port (src/lib/store.ts) like every
+ * The avatar and frame POSTs go through the `Store` port (src/lib/store.ts) like every
  * other backend call. The photo POST cannot: it is MULTIPART, and the port's
  * transport is `sdk.client.fetch`, which JSON-stringifies a body whenever the
  * content type is JSON and cannot be handed a `FormData` with its boundary
@@ -29,6 +30,7 @@ import {
 } from '@/lib/errors';
 import { UncheckedSchema } from '@/lib/data/schemas';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
+import { AVATAR_COUNT } from '@/lib/avatar-seed';
 
 const APPEARANCE_RULES: ErrorRule[] = [
   [/capped at 5 mb/i, 'Photo is too large — keep it under 5 MB.'],
@@ -100,6 +102,20 @@ export async function uploadAvatar(
       error: friendlyError(error, APPEARANCE_RULES, FALLBACK),
     };
   }
+}
+
+/** Switch to one of the catalog avatars (id 1..AVATAR_COUNT). */
+export async function setPresetAvatar(id: number): Promise<AppearanceResult> {
+  if (!Number.isInteger(id) || id < 1 || id > AVATAR_COUNT) {
+    return { ok: false, error: 'Invalid avatar.' };
+  }
+  // The response is not read — a 2xx IS the answer.
+  const r = await store.post('/store/profile/avatar/preset', UncheckedSchema, {
+    id,
+  });
+  if (!r.ok) return { ok: false, error: frameError(r) };
+  revalidatePath('/me');
+  return { ok: true };
 }
 
 /** Equip (milestone level) or unequip (null) an avatar frame. */

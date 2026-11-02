@@ -91,7 +91,7 @@ describe('GET /api/pull-gaps', () => {
         gap: 42,
         rolledAt: '2026-09-02T13:38:44.000Z',
         who: 'Anonymous',
-        avatar: '/images/pfps/pfp-8.webp',
+        avatar: '/images/avatars/avatar-8.webp',
         frame: null,
       },
     ]);

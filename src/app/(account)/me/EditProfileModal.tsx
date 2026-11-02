@@ -3,6 +3,7 @@
 import {
   useEffect,
   useId,
+  useOptimistic,
   useRef,
   useState,
   useTransition,
@@ -17,8 +18,13 @@ import { AnimatedFrame } from '@/components/AnimatedFrame';
 import { AvatarCropper } from '@/components/account/AvatarCropper';
 import { INPUT_CLASS } from '@/components/account/ui';
 import { Pill } from '@/components/ui/pill';
+import { AVATAR_COUNT, avatarPath } from '@/lib/avatar-seed';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
-import { uploadAvatar, setAvatarFrame } from '@/lib/actions/profile-appearance';
+import {
+  uploadAvatar,
+  setAvatarFrame,
+  setPresetAvatar,
+} from '@/lib/actions/profile-appearance';
 import { updateProfile } from '@/lib/actions/customer';
 import {
   NAME_MAX,
@@ -29,20 +35,28 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
 import { cn } from '@/lib/utils';
 import { useEquippedFrame } from './equipped-frame';
 
+const AVATAR_IDS = Array.from({ length: AVATAR_COUNT }, (_, i) => i + 1);
+const TABS = [
+  { key: 'avatars', label: 'Avatars' },
+  { key: 'frames', label: 'Frames' },
+] as const;
+
 /**
  * Edit Profile — opened by tapping the avatar or the name on /me (the Show
  * pattern the operator asked for, 2026-07-19). Photo and frames live together
  * here because they're one decision: the frame rings the photo.
  *
- * Photo and frame apply immediately (no Save button): the photo POSTs after the
- * crop, a frame POSTs on tap and updates the header through the shared
- * equipped-frame context. The username (tap the name, 2026-10-03 — support kept
- * having to point players at /settings) is the one typed field, so it alone
- * gets Save/Cancel; it saves through the same updateProfile action /settings
- * uses.
+ * Photo, catalog avatar and frame apply immediately (no Save button): the photo
+ * POSTs after the crop, an avatar POSTs on tap and shows at once (the action's
+ * revalidatePath brings the real value back), a frame POSTs on tap and updates
+ * the header through the shared equipped-frame context. The username (tap the
+ * name, 2026-10-03 — support kept having to point players at /settings) is the
+ * one typed field, so it alone gets Save/Cancel; it saves through the same
+ * updateProfile action /settings uses.
  *
- * ponytail: no "Choose Avatar" tab — Polycards has no preset-avatar catalog to
- * put in one. Add tabs when preset avatars exist.
+ * Avatars and frames are tabs because the catalog is long: 80 avatars would bury
+ * the frames below them. The grid scrolls on its own so the big preview stays in
+ * sight while browsing.
  */
 export function EditProfileModal({
   open,
@@ -61,6 +75,7 @@ export function EditProfileModal({
    *  to the handle or email, which must never prefill (and then save as) it. */
   username: string;
   handle: string | null;
+  /** The avatar they have now: stored, else the one their seed assigns. */
   avatarUrl: string | null;
   frames: Record<string, string>;
   /** null = the VIP read failed — show "couldn't load", never "locked". */
@@ -72,6 +87,9 @@ export function EditProfileModal({
   const [picked, setPicked] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [frameBusy, setFrameBusy] = useState<number | 'unequip' | null>(null);
+  const [tab, setTab] = useState<(typeof TABS)[number]['key']>('avatars');
+  const [shownAvatar, showAvatar] = useOptimistic(avatarUrl);
+  const [picking, startPick] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const { equipped, setEquipped } = useEquippedFrame();
   const [nameEditing, setNameEditing] = useState(false);
@@ -145,6 +163,19 @@ export function EditProfileModal({
       setPicked(null);
       setBusy(false);
     }
+  }
+
+  function pickAvatar(id: number) {
+    setError(null);
+    startPick(async () => {
+      showAvatar(avatarPath(id));
+      try {
+        const res = await setPresetAvatar(id);
+        if (!res.ok) setError(res.error);
+      } catch {
+        setError('Couldn’t change your avatar. Please try again.');
+      }
+    });
   }
 
   function startNameEdit() {
@@ -256,7 +287,7 @@ export function EditProfileModal({
                 className="group relative rounded-full outline-offset-4 disabled:opacity-60"
               >
                 <FramedAvatar
-                  src={avatarUrl}
+                  src={shownAvatar}
                   initial={initial}
                   frameSrc={equippedFrameUrl}
                   animateLevel={equipped}
@@ -374,114 +405,185 @@ export function EditProfileModal({
               </p>
             )}
 
-            <div className="mt-6 flex items-baseline justify-between">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-                Frames
-              </p>
-              {equipped && (
+            <div
+              role="group"
+              aria-label="Avatars and frames"
+              className="mt-6 grid grid-cols-2 gap-1 rounded-full border border-white/10 bg-white/5 p-1"
+            >
+              {TABS.map(({ key, label }) => (
                 <button
+                  key={key}
                   type="button"
-                  onClick={() => void handleFrame(null)}
-                  disabled={frameBusy !== null}
-                  className="text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline disabled:opacity-60"
+                  aria-pressed={tab === key}
+                  onClick={() => setTab(key)}
+                  className={cn(
+                    'flex min-h-11 items-center justify-center rounded-full px-2 text-[13px] font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+                    tab === key
+                      ? 'bg-neutral-50 text-neutral-950'
+                      : 'text-neutral-400 hover:text-white',
+                  )}
                 >
-                  {frameBusy === 'unequip' ? 'Removing…' : 'Unequip'}
+                  {label}
                 </button>
-              )}
+              ))}
             </div>
-            <p className="mt-1 text-[12px] text-neutral-400">
-              Unlock a new frame every 10 VIP levels.
-            </p>
 
-            {levelUnknown && (
-              <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] font-medium text-amber-300">
-                Couldn&rsquo;t load your VIP level, so frames can&rsquo;t be
-                changed right now — your unlocks are safe. Retrying
-                automatically&hellip;{' '}
-                <button
-                  type="button"
-                  onClick={() => router.refresh()}
-                  className="font-semibold underline underline-offset-2 hover:text-amber-100"
-                >
-                  Try again now
-                </button>
-              </p>
-            )}
-
-            <ul className="mt-4 grid grid-cols-4 gap-3">
-              {FRAME_LEVELS.map((level) => {
-                const url = frames[String(level)] ?? null;
-                // Unknown level (failed read) is NOT "locked": no padlock, just
-                // temporarily not equippable.
-                const unlocked = highestLevel !== null && highestLevel >= level;
-                const locked = highestLevel !== null && highestLevel < level;
-                const isEquipped = equipped === level;
-                const equippable = unlocked && url !== null && !isEquipped;
-                return (
-                  <li key={level} className="flex flex-col items-center gap-1">
-                    <button
-                      type="button"
-                      disabled={!equippable || frameBusy !== null}
-                      onClick={() => void handleFrame(level)}
-                      aria-label={
-                        isEquipped
-                          ? `LV ${level} frame (equipped)`
-                          : unlocked
-                            ? `Equip LV ${level} frame`
-                            : locked
-                              ? `LV ${level} frame (unlocks at level ${level})`
-                              : `LV ${level} frame (level unavailable right now)`
-                      }
-                      className={`relative flex h-14 w-14 items-center justify-center rounded-full border p-1 transition-colors ${
-                        isEquipped
-                          ? 'border-chase bg-chase/10'
-                          : equippable
-                            ? 'border-white/15 bg-neutral-800 hover:border-white/40'
-                            : 'border-white/5 bg-neutral-900'
-                      } disabled:cursor-not-allowed`}
-                    >
-                      {url ? (
-                        unlocked || isEquipped ? (
-                          // Unlocked art is alive in the workbook too (static
-                          // fallback lives inside AnimatedFrame).
-                          <AnimatedFrame
-                            frameSrc={url}
-                            level={level}
-                            size={46}
-                            plain
-                          />
-                        ) : (
-                          // eslint-disable-next-line @next/next/no-img-element
+            {tab === 'avatars' ? (
+              <>
+                <p className="mt-4 text-[12px] text-neutral-400">
+                  Pick one, or tap your photo to upload your own.
+                </p>
+                <ul className="-mx-1 mt-3 grid max-h-[38vh] grid-cols-5 gap-2 overflow-y-auto overscroll-contain p-1">
+                  {AVATAR_IDS.map((id) => {
+                    const url = avatarPath(id);
+                    const isCurrent = shownAvatar === url;
+                    return (
+                      <li key={id}>
+                        <button
+                          type="button"
+                          disabled={picking || busy}
+                          onClick={() => pickAvatar(id)}
+                          aria-label={
+                            isCurrent
+                              ? `Avatar ${id} (current)`
+                              : `Use avatar ${id}`
+                          }
+                          aria-pressed={isCurrent}
+                          className={`block w-full rounded-full border-2 p-0.5 transition-colors ${
+                            isCurrent
+                              ? 'border-chase'
+                              : 'border-transparent hover:border-white/40'
+                          }`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={url}
                             alt=""
-                            aria-hidden
-                            className={`max-h-full max-w-full object-contain ${
-                              locked ? 'opacity-30 grayscale' : 'opacity-50'
-                            }`}
+                            width={64}
+                            height={64}
+                            loading="lazy"
+                            className="aspect-square h-auto w-full rounded-full object-cover"
                           />
-                        )
-                      ) : (
-                        <span className="text-[10px] text-neutral-500">
-                          soon
-                        </span>
-                      )}
-                      {locked && (
-                        <Lock
-                          className="absolute h-4 w-4 text-neutral-400"
-                          aria-hidden
-                        />
-                      )}
-                    </button>
-                    <span
-                      className={`text-[10px] font-semibold ${isEquipped ? 'text-chase' : 'text-neutral-500'}`}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : (
+              <>
+                <div className="mt-4 flex items-baseline justify-between">
+                  <p className="text-[12px] text-neutral-400">
+                    Unlock a new frame every 10 VIP levels.
+                  </p>
+                  {equipped && (
+                    <button
+                      type="button"
+                      onClick={() => void handleFrame(null)}
+                      disabled={frameBusy !== null}
+                      className="text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline disabled:opacity-60"
                     >
-                      {isEquipped ? 'Equipped' : `LV ${level}`}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+                      {frameBusy === 'unequip' ? 'Removing…' : 'Unequip'}
+                    </button>
+                  )}
+                </div>
+
+                {levelUnknown && (
+                  <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] font-medium text-amber-300">
+                    Couldn&rsquo;t load your VIP level, so frames can&rsquo;t be
+                    changed right now — your unlocks are safe. Retrying
+                    automatically&hellip;{' '}
+                    <button
+                      type="button"
+                      onClick={() => router.refresh()}
+                      className="font-semibold underline underline-offset-2 hover:text-amber-100"
+                    >
+                      Try again now
+                    </button>
+                  </p>
+                )}
+
+                <ul className="mt-4 grid grid-cols-4 gap-3">
+                  {FRAME_LEVELS.map((level) => {
+                    const url = frames[String(level)] ?? null;
+                    // Unknown level (failed read) is NOT "locked": no padlock, just
+                    // temporarily not equippable.
+                    const unlocked =
+                      highestLevel !== null && highestLevel >= level;
+                    const locked =
+                      highestLevel !== null && highestLevel < level;
+                    const isEquipped = equipped === level;
+                    const equippable = unlocked && url !== null && !isEquipped;
+                    return (
+                      <li
+                        key={level}
+                        className="flex flex-col items-center gap-1"
+                      >
+                        <button
+                          type="button"
+                          disabled={!equippable || frameBusy !== null}
+                          onClick={() => void handleFrame(level)}
+                          aria-label={
+                            isEquipped
+                              ? `LV ${level} frame (equipped)`
+                              : unlocked
+                                ? `Equip LV ${level} frame`
+                                : locked
+                                  ? `LV ${level} frame (unlocks at level ${level})`
+                                  : `LV ${level} frame (level unavailable right now)`
+                          }
+                          className={`relative flex h-14 w-14 items-center justify-center rounded-full border p-1 transition-colors ${
+                            isEquipped
+                              ? 'border-chase bg-chase/10'
+                              : equippable
+                                ? 'border-white/15 bg-neutral-800 hover:border-white/40'
+                                : 'border-white/5 bg-neutral-900'
+                          } disabled:cursor-not-allowed`}
+                        >
+                          {url ? (
+                            unlocked || isEquipped ? (
+                              // Unlocked art is alive in the workbook too (static
+                              // fallback lives inside AnimatedFrame).
+                              <AnimatedFrame
+                                frameSrc={url}
+                                level={level}
+                                size={46}
+                                plain
+                              />
+                            ) : (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={url}
+                                alt=""
+                                aria-hidden
+                                className={`max-h-full max-w-full object-contain ${
+                                  locked ? 'opacity-30 grayscale' : 'opacity-50'
+                                }`}
+                              />
+                            )
+                          ) : (
+                            <span className="text-[10px] text-neutral-500">
+                              soon
+                            </span>
+                          )}
+                          {locked && (
+                            <Lock
+                              className="absolute h-4 w-4 text-neutral-400"
+                              aria-hidden
+                            />
+                          )}
+                        </button>
+                        <span
+                          className={`text-[10px] font-semibold ${isEquipped ? 'text-chase' : 'text-neutral-500'}`}
+                        >
+                          {isEquipped ? 'Equipped' : `LV ${level}`}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
           </div>
         </div>,
         document.body,
