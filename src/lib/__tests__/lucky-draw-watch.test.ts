@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'vitest';
 import {
+  BATCH_WAIT_MS,
+  batchWaitUntil,
   cornerLift,
+  drawMinute,
   dueGate,
   firstLookAt,
   freshShows,
+  LIVE_MAX_AGE_MS,
   mergeWatched,
   nextLookAt,
   nextWake,
+  placeShow,
   WATCH_WINDOW_MS,
 } from '../lucky-draw-watch';
 
@@ -14,6 +19,107 @@ const MIN = 60_000;
 const at = (m: number) => m * MIN;
 const iso = (ms: number) => new Date(ms).toISOString();
 const never = new Set<string>();
+
+describe('gates in one draw minute', () => {
+  const watched = (id: string, endsAt: number) => ({
+    id,
+    endsAt,
+    lookAt: endsAt,
+  });
+  const show = (
+    id: string,
+    tier: string | null,
+    value: number,
+    endsAt = at(10),
+  ) => ({ id, endsAt, detail: { result: { tier, value_myr: value } } });
+  const ids = (q: readonly { id: string }[]) => q.map((s) => s.id);
+
+  test('a gate belongs to the minute the draw job next runs on', () => {
+    expect(drawMinute(at(10))).toBe(at(10));
+    expect(drawMinute(at(10) + 1)).toBe(at(11));
+    expect(drawMinute(at(10) + 59_999)).toBe(at(11));
+    expect(firstLookAt(at(10) + 1, 0)).toBe(at(11) + 2000);
+  });
+
+  test('the wait outlasts every look a tab can make, and ends before a draw goes stale', () => {
+    const lastFirstLook = firstLookAt(at(10), 1) - at(10);
+    const oneRetry = nextLookAt(0, 1);
+    expect(BATCH_WAIT_MS).toBeGreaterThan(lastFirstLook + 2 * oneRetry);
+    // A draw that fails retries on the next job run, a minute on.
+    expect(BATCH_WAIT_MS).toBeGreaterThan(MIN + oneRetry);
+    expect(BATCH_WAIT_MS).toBeLessThan(LIVE_MAX_AGE_MS);
+  });
+
+  test('waits while another gate of the minute is unread, and only then', () => {
+    const soon = at(10) + 3000;
+    expect(batchWaitUntil([watched('b', at(10))], at(10), soon)).toBe(
+      at(10) + BATCH_WAIT_MS,
+    );
+    expect(batchWaitUntil([], at(10), soon)).toBeNull();
+    expect(batchWaitUntil([watched('b', at(11))], at(10), soon)).toBeNull();
+  });
+
+  test('a tab past the wait still gets a moment to read the rest', () => {
+    const late = at(10) + BATCH_WAIT_MS + 5000;
+    const until = batchWaitUntil([watched('b', at(10))], at(10), late);
+    // Long enough for the other gate's next look, and no longer than one more.
+    expect((until ?? 0) - late).toBeGreaterThan(nextLookAt(0, 1));
+    expect((until ?? 0) - late).toBeLessThan(2 * nextLookAt(0, 1));
+  });
+
+  test('ends differing inside a minute share it, and class decides', () => {
+    expect(
+      ids(
+        placeShow(
+          [show('f', 'first', 1, at(10) - 20_000)],
+          show('e', 'economy', 1),
+          null,
+        ),
+      ),
+    ).toEqual(['e', 'f']);
+  });
+
+  test('a tie falls to the id, whichever came in first', () => {
+    expect(
+      ids(
+        placeShow([show('b', 'economy', 200)], show('a', 'economy', 200), null),
+      ),
+    ).toEqual(['a', 'b']);
+  });
+
+  test('sorts by minute, then class, then smallest prize, then id', () => {
+    let q = placeShow([], show('first', 'first', 1), null);
+    q = placeShow(q, show('bigger', 'economy', 500), null);
+    q = placeShow(q, show('smaller', 'economy', 200), null);
+    q = placeShow(q, show('business', 'business', 1), null);
+    q = placeShow(q, show('none', null, 1), null);
+    q = placeShow(q, show('tie-b', 'economy', 200), null);
+    q = placeShow(q, show('earlier', 'first', 9, at(9)), null);
+    expect(ids(q)).toEqual([
+      'earlier',
+      'smaller',
+      'tie-b',
+      'bigger',
+      'business',
+      'first',
+      'none',
+    ]);
+  });
+
+  test('never moves the show already playing', () => {
+    const q = [show('first', 'first', 1), show('z', 'first', 9)];
+    expect(ids(placeShow(q, show('economy', 'economy', 1), 'first'))).toEqual([
+      'first',
+      'economy',
+      'z',
+    ]);
+    expect(ids(placeShow(q, show('economy', 'economy', 1), 'gone'))).toEqual([
+      'economy',
+      'first',
+      'z',
+    ]);
+  });
+});
 
 describe('freshShows', () => {
   const show = (ageMs: number) => ({
