@@ -357,5 +357,184 @@ medusaIntegrationTestRunner({
         expect((await query('SELECT 1', null)).status).toBe(401);
       });
     });
+
+    // Owner, 2026-10-30: the bots never read coin flip's actual odds or a
+    // group's odds set. The rows carrying them stay open, so this is run against
+    // queries that reshape those rows, where hiding by name cannot help.
+    describe('coin flip odds and odds sets', () => {
+      const packs = () =>
+        getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+      // Odd figures, so a match in an answer can only be one of these.
+      const ODDS = /12\.34|43\.21|56\.78|21\.43|34\.12|87\.65/;
+      const SET = 7;
+      // LIKE: naming coin_flip_config is itself refused, and this is the filter
+      // the refusal tells a bot to use.
+      const AUDIT = "admin_action_audit a WHERE a.entity_type LIKE 'coin%'";
+
+      const seed = async () => {
+        // Twice, so the second row's `before` holds real odds as well.
+        for (const [win_percent, win_percent_2, win_percent_3, reason] of [
+          [12.34, 43.21, 56.78, 'first odds'],
+          [21.43, 34.12, 87.65, 'set the odds'],
+        ] as const) {
+          await packs().saveCoinFlipSettings({
+            settings: {
+              enabled: false,
+              win_percent,
+              win_percent_2,
+              win_percent_3,
+              published_win_percent: 50,
+            },
+            revision: (await packs().coinFlipSettings()).revision,
+            adminId: 'desk-sql-test',
+            reason,
+          });
+        }
+        await customers().createCustomerGroups({
+          name: 'Set seven',
+          metadata: { odds_set: SET, note: 'kept' },
+        });
+        await packs().createAdminActionAudits([
+          {
+            admin_id: 'desk-sql-test',
+            entity_type: 'customer',
+            entity_id: 'cus_1',
+            action: 'set_player_group',
+            reason: 'moved',
+            after: { group: { id: 'g1', name: 'Set seven', odds_set: SET } },
+          },
+        ]);
+      };
+
+      it.each([
+        // The key comes back as a value, so hiding by key cannot see it.
+        [
+          'key and value',
+          `SELECT e.key, e.value FROM ${AUDIT.replace(' WHERE', ', jsonb_each(a.after) e WHERE')}`,
+        ],
+        [
+          'the old values',
+          `SELECT e.key, e.value FROM ${AUDIT.replace(' WHERE', ', jsonb_each(a.before) e WHERE')}`,
+        ],
+        [
+          'a key built from pieces',
+          `SELECT a.after->>('win_'||'percent') AS p FROM ${AUDIT}`,
+        ],
+        [
+          'a JSON path',
+          `SELECT jsonb_path_query(a.after, '$.*') AS v FROM ${AUDIT}`,
+        ],
+        [
+          'text reshaped past the mask',
+          `SELECT replace(a.after::text, 'win', 'w1n') AS m FROM ${AUDIT}`,
+        ],
+        [
+          'a whole row walked',
+          `SELECT e.key, e.value FROM ${AUDIT.replace(' WHERE', ", jsonb_each(to_jsonb(a)->'after') e WHERE")}`,
+        ],
+      ])('keeps the actual odds out of the audit: %s', async (_how, sql) => {
+        await seed();
+        const res = await query(sql);
+        expect(res.status).toBe(200);
+        expect(res.data.row_count).toBeGreaterThan(0);
+        expect(JSON.stringify(res.data.rows)).not.toMatch(ODDS);
+      });
+
+      it.each([
+        [
+          'key and value',
+          "SELECT e.key, e.value FROM customer_group g, jsonb_each(g.metadata) e WHERE g.name = 'Set seven'",
+        ],
+        [
+          'a key built from pieces',
+          "SELECT g.metadata->>('odds'||'_set') AS s FROM customer_group g WHERE g.name = 'Set seven'",
+        ],
+        [
+          'a JSON path',
+          "SELECT jsonb_path_query(g.metadata, '$.*') AS v FROM customer_group g WHERE g.name = 'Set seven'",
+        ],
+        [
+          'text reshaped past the mask',
+          "SELECT replace(g.metadata::text, 'odds', 'o-d-d-s') AS m FROM customer_group g WHERE g.name = 'Set seven'",
+        ],
+        [
+          'a nested audit copy',
+          "SELECT e.key, e.value FROM admin_action_audit a, jsonb_each(a.after->'group') e WHERE a.action = 'set_player_group'",
+        ],
+      ])("keeps a group's odds set hidden: %s", async (_how, sql) => {
+        await seed();
+        const res = await query(sql);
+        expect(res.status).toBe(200);
+        expect(res.data.row_count).toBeGreaterThan(0);
+        // A set number on its own, or beside its key in reshaped text.
+        expect(JSON.stringify(res.data.rows)).not.toMatch(
+          /(?<![\d.])7(?![\d.])/,
+        );
+      });
+
+      it('answers nothing to a question about a hidden value', async () => {
+        await seed();
+        const set = await query(
+          `SELECT count(*)::int AS n FROM customer_group g WHERE g.metadata->>('odds'||'_set') = '${SET}'`,
+        );
+        expect(set.data.rows).toEqual([{ n: 0 }]);
+        const odds = await query(
+          `SELECT count(*)::int AS n FROM ${AUDIT} AND a.after->>('win_'||'percent') = '12.34'`,
+        );
+        expect(odds.data.rows).toEqual([{ n: 0 }]);
+      });
+
+      it.each([
+        'SELECT * FROM public.customer_group',
+        'SELECT * FROM "public"."admin_action_audit"',
+        'SELECT * FROM public./* x */customer_group',
+      ])('refuses the table behind the mask: %s', async (sql) => {
+        await seed();
+        const res = await query(sql);
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/odds sets stay hidden/);
+      });
+
+      it('masks both tables for every query, even one naming neither', async () => {
+        const views = await query(
+          'SELECT count(*)::int AS n FROM pg_class WHERE relnamespace = pg_my_temp_schema()',
+        );
+        expect(views.data.rows).toEqual([{ n: 2 }]);
+        // It is the view a named table resolves to, however it is spelled.
+        const res = await query(
+          `SELECT c.relkind FROM pg_class c WHERE c.oid = 'CUSTOMER_GROUP'::regclass`,
+        );
+        expect(res.data.rows).toEqual([{ relkind: 'v' }]);
+      });
+
+      it('keeps everything else in those rows open, and stays read-only', async () => {
+        await seed();
+        const audit = await query(
+          `SELECT a.admin_id, a.action, a.reason, a.after->>'published_win_percent' AS published, a.after->'enabled' AS enabled FROM ${AUDIT} ORDER BY a.after->'revision' DESC LIMIT 1`,
+        );
+        expect(audit.status).toBe(200);
+        expect(audit.data.rows).toEqual([
+          {
+            admin_id: 'desk-sql-test',
+            action: 'edit',
+            reason: 'set the odds',
+            published: '50',
+            enabled: false,
+          },
+        ]);
+        const group = await query(
+          "SELECT g.id IS NOT NULL AS has_id, g.name, g.metadata->>'note' AS note FROM customer_group g WHERE g.name = 'Set seven'",
+        );
+        expect(group.data.rows).toEqual([
+          { has_id: true, name: 'Set seven', note: 'kept' },
+        ]);
+        const write = await query('SELECT 1 FROM customer_group FOR UPDATE');
+        expect(write.status).toBe(400);
+        const readOnly = await query(
+          "SELECT current_setting('transaction_read_only') AS ro",
+        );
+        expect(readOnly.data.rows).toEqual([{ ro: 'on' }]);
+      });
+    });
   },
 });

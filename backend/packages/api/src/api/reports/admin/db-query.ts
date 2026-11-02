@@ -10,6 +10,8 @@ import { redact } from './proxy';
 //   - Postgres refuses every write: the query runs in a READ ONLY transaction
 //     on a connection of its own, closed afterwards. That also refuses row
 //     locks (FOR UPDATE) and nextval/setval.
+//   - Coin flip's odds and each group's odds set never reach the query: the
+//     tables carrying them answer through masked views (MASKED_COLUMNS).
 //   - One statement only: every statement carrying the query also carries a
 //     bound parameter, so Postgres parses it as a prepared statement, which
 //     refuses a second command after a semicolon.
@@ -91,10 +93,15 @@ const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
 const REAL_NAMES = /\breal_name\w*\b/i;
 // Coin flip's actual odds, rolls and each group's odds set (the owner,
 // 2026-10-30), refused by name for the same reason. Its two tables go whole: a
-// table name cannot be built from pieces. proxy.ts hides the odds in the rows
-// that stay open (the audit's before/after, group metadata).
+// table name cannot be built from pieces. The rows that stay open (the audit's
+// before/after, group metadata) answer through MASKED_COLUMNS.
 const COIN_FLIP_ODDS =
   /\b(coin_flip_config|coin_flip_round|(?:actual_)?win_(?:units|percent)(?:_\d)?|odds_set)\b/i;
+// The real tables behind those masked views. A schema name is the only way past
+// a temp view, so these two are refused after a dot. So is a comment after any
+// dot: comments nest, and a regex cannot follow one through to the name.
+const BEHIND_THE_MASK =
+  /\.\s*(?:\/\*|--|"?(?:admin_action_audit|customer_group)\b)/i;
 // U&"..." spells a name in escapes the checks above would not recognize.
 const UNICODE_ESCAPES = /\bu&['"]/i;
 // The statements carry their own bound values ($1 to $3): a placeholder in
@@ -127,6 +134,9 @@ export function sqlRefusal(sql: unknown): string | null {
     return 'Customers’ real names stay hidden from the desk bots.';
   if (COIN_FLIP_ODDS.test(sql)) {
     return "Coin flip's actual odds, rolls and odds sets stay hidden from the desk bots: say so, and do not work around this. Flip outcomes and the published chance are on ledger_entry rows of type CF; a flip on tickets alone is a lucky_draw_ticket row with reason coin_flip. For who changed the settings, filter admin_action_audit on entity_type LIKE 'coin%'.";
+  }
+  if (BEHIND_THE_MASK.test(sql)) {
+    return "Coin flip's actual odds and odds sets stay hidden from the desk bots: read admin_action_audit and customer_group by their bare names, with no schema and no comment after a dot.";
   }
   if (UNICODE_ESCAPES.test(sql)) {
     return 'Unicode-escaped names (U&"...") are not accepted: write names plainly.';
@@ -164,6 +174,43 @@ export const dataQuery = (sql: string): string =>
 const SECRET_VALUES_SQL =
   "SELECT metadata->'partner_credential'->>'password' AS s FROM customer WHERE metadata ? 'partner_credential' " +
   'UNION SELECT real_name FROM customer_account_state WHERE real_name IS NOT NULL';
+
+// Coin flip's actual odds and each group's odds set sit in JSON columns of two
+// tables the bots keep reading. No check on a query's text can guard them: a
+// walk (jsonb_each) hands a key back as a value, a key can be built from pieces,
+// and a WHERE can ask about a value without showing it. So the query never sees
+// them: in its own transaction it finds temp views of the same names, which
+// Postgres looks up before any other schema, with these columns masked.
+const MASKED_COLUMNS: Record<string, readonly string[]> = {
+  admin_action_audit: ['before', 'after'],
+  customer_group: ['metadata'],
+};
+// jsonb::text always writes a key whole and in double quotes, so this finds it
+// at any depth. A value of another shape breaks the cast, which fails closed.
+const ODDS_IN_JSON = String.raw`"((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|[^,}\]\s]+)`;
+const MASKED_TABLE_COLUMNS_SQL =
+  "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' " +
+  'AND table_name = ANY($1) ORDER BY ordinal_position';
+
+/** The temp view standing in for `table`, built from its current columns (names
+ *  from the catalog), so a later migration needs no change here. */
+export function maskedViewSql(
+  table: string,
+  columns: readonly string[],
+): string {
+  const masked = MASKED_COLUMNS[table] ?? [];
+  const missing = masked.find((c) => !columns.includes(c));
+  // A renamed column would otherwise come through unmasked.
+  if (missing) {
+    throw new Error(`${table}.${missing} is gone: fix MASKED_COLUMNS.`);
+  }
+  const list = columns.map((c) =>
+    masked.includes(c)
+      ? `regexp_replace(t."${c}"::text, '${ODDS_IN_JSON}', '"\\1": "[hidden]"', 'gi')::jsonb AS "${c}"`
+      : `t."${c}"`,
+  );
+  return `CREATE TEMP VIEW "${table}" AS SELECT ${list.join(', ')} FROM public."${table}" t`;
+}
 
 /** `text` with every secret value replaced by [hidden], as written and as
  *  JSON escapes it (a value inside JSON text). */
@@ -305,13 +352,33 @@ async function runNow(
       // One round trip, no caller text, so the simple protocol is fine here.
       await step(
         // One snapshot for the secrets and the answer (see SECRET_VALUES_SQL).
-        'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY; ' +
+        'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ; ' +
           `SET LOCAL statement_timeout = ${Math.trunc(timeoutMs)}; ` +
           'SET LOCAL lock_timeout = 2000; ' +
           // Ends the transaction if this server vanishes mid-query.
           'SET LOCAL idle_in_transaction_session_timeout = 30000; ' +
+          // The mask's backslashes must reach the regex as written.
+          'SET LOCAL standard_conforming_strings = on; ' +
           "SET LOCAL application_name = 'desk-bots-sql'",
       );
+      // Writable for these views alone: no caller text has run yet, and closing
+      // the connection drops them. Read-only from here on, which cannot be undone.
+      // Made for every query, whatever it names: skipping one on the query's text
+      // would hang the mask on that text again. The cost is a read lock on both
+      // tables for the query's life, which a migration on them may have to wait
+      // out or retry; a retried deploy beats a silent leak.
+      const catalog = (
+        await step(MASKED_TABLE_COLUMNS_SQL, [Object.keys(MASKED_COLUMNS)])
+      ).rows as { table_name: string; column_name: string }[];
+      const views = Object.keys(MASKED_COLUMNS).map((table) =>
+        maskedViewSql(
+          table,
+          catalog
+            .filter((c) => c.table_name === table)
+            .map((c) => c.column_name),
+        ),
+      );
+      await step(`${views.join('; ')}; SET TRANSACTION READ ONLY`);
       secrets = (await step(SECRET_VALUES_SQL)).rows
         .map((r) => r.s)
         .filter((s): s is string => typeof s === 'string');

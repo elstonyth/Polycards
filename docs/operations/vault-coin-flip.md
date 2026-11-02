@@ -10,7 +10,7 @@ The account must have topped up, completed deposit/external-funded playthrough, 
 
 The effective player group and pack odds-set selector are shared with packs. Coin-specific actual rates inherit 3 → 2 → 1 only when null; explicit zero stays zero. Published odds are configured independently and are the only odds sent to customer pages. Admin history retains the actual rate, published rate, group, valuation, config revision, draw, funding and credit reference.
 
-Desk bots never read the actual rates, draws or a group's odds set (owner decision, 2026-10-30). `/reports/admin/read` blocks `/admin/coin-flips`, and `/reports/admin/sql` refuses `coin_flip_config`, `coin_flip_round` and those field names. Both hide the same fields in the rows that stay open (audit before/after, group metadata). Flip outcomes and the published chance stay readable on CF ledger rows. The admin assistant's screen and SQL tools share these checks.
+Desk bots never read the actual rates, draws or a group's odds set (owner decision, 2026-10-30). `/reports/admin/read` blocks `/admin/coin-flips` and hides the same fields by key in the rows that stay open (audit before/after, group metadata). `/reports/admin/sql` refuses `coin_flip_config`, `coin_flip_round` and those field names. A query can reshape a row past any key check (`jsonb_each`, a key built from pieces, a `WHERE` that only asks about a value), so each query also finds temp views named `admin_action_audit` and `customer_group` with those values already masked, and a schema-qualified name for either table is refused. Flip outcomes and the published chance stay readable on CF ledger rows. The admin assistant's screen and SQL tools share these checks.
 
 ## Deployment and eligibility maintenance
 
