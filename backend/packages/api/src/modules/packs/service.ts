@@ -67,6 +67,7 @@ import {
   generatedUsername,
   suffixedUsername,
 } from '../../utils/profile-handle';
+import { REAL_NAME_TAKEN, realNameKeySql } from '../../utils/real-name';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -6731,6 +6732,22 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (existing?.real_name) return false;
+    // One person, one account (ADR 0015). Names already on file stay: this refuses
+    // a new save, and adminSetRealName is the way past it for two real people with
+    // one name. The lock is for two accounts racing for the same name.
+    // shortcut: scans this table (about 20 ms at 9k rows), add an expression index
+    // if that shows up, since this runs once per account.
+    await em.execute(
+      `SELECT pg_advisory_xact_lock(hashtextextended('real-name:' || ${realNameKeySql('?::text')}, 0))`,
+      [realName],
+    );
+    const [taken] = await em.execute<unknown[]>(
+      `SELECT 1 FROM customer_account_state WHERE customer_id <> ? AND real_name IS NOT NULL AND deleted_at IS NULL AND ${realNameKeySql('real_name')} = ${realNameKeySql('?::text')} LIMIT 1`,
+      [customerId, realName],
+    );
+    if (taken) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, REAL_NAME_TAKEN);
+    }
     const data = { real_name: realName, real_name_set_at: new Date() };
     if (existing) {
       await this.updateCustomerAccountStates(

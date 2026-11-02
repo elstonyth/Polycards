@@ -19,6 +19,15 @@ const REAL_NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'@/,-]*$/u;
 export const REAL_NAME_INVALID =
   'Enter your full name exactly as it appears on your IC (letters only, 3–100 characters).';
 
+export const REAL_NAME_TAKEN =
+  'This name is already linked to another Polycards account. Enter your full name as on your IC, or contact support if this is your full name.';
+
+/** Two names are one name when they differ only by case or the separators
+ *  REAL_NAME_RE allows. Strips rather than keeps, so no script collapses to
+ *  empty. In SQL, so setRealName's lock and lookup can't disagree. */
+export const realNameKeySql = (expr: string): string =>
+  `lower(regexp_replace(${expr}, '[ .''@/,-]', '', 'g'))`;
+
 /**
  * Trim, collapse inner whitespace, and validate. Returns the stored form, or
  * null when the input is not an acceptable real name.

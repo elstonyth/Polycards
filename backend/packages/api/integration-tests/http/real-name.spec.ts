@@ -3,6 +3,7 @@ import { Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
+import { REAL_NAME_TAKEN } from '../../src/utils/real-name';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -120,6 +121,28 @@ medusaIntegrationTestRunner({
           realName: 'Tan Ah Kow',
           phoneVerified: false,
         });
+      });
+
+      it('refuses a name another account holds, and says what to do', async () => {
+        const first = await createCustomer('rn-dup-1@test.dev');
+        const second = await createCustomer('rn-dup-2@test.dev');
+        expect(
+          (await setRealName({ real_name: 'Tan Ah Kow' }, first.headers)).status,
+        ).toBe(200);
+
+        const refused = await setRealName(
+          { real_name: 'TAN  AH-KOW' },
+          second.headers,
+        );
+        expect(refused.status).toBe(400);
+        expect(refused.data.message).toBe(REAL_NAME_TAKEN);
+        expect(refused.data.message).not.toMatch(/touch|tng/i);
+
+        const ok = await setRealName(
+          { real_name: 'Tan Ah Kow bin Ali' },
+          second.headers,
+        );
+        expect(ok.status).toBe(200);
       });
 
       it('401s an unauthenticated real-name write', async () => {
