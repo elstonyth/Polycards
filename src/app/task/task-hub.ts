@@ -74,6 +74,13 @@ export const stubName = (reward: TaskEntry['reward']): string =>
       ? TICKETS_LABEL
       : rewardLabel(reward).name;
 
+/** A ticket slot's count on the check-in track. Only a tickets reward gets one:
+ *  ×N on a slot's coins or pack would read as that many of them. */
+export const ticketCountLabel = (reward: TaskEntry['reward']): string | null =>
+  reward.type === 'tickets' && hasTickets(reward.tickets)
+    ? `×${reward.tickets}`
+    : null;
+
 /** The Lucky Draw tickets a task also pays, as a suffix ('' for none). */
 const ticketsExtra = (tickets?: number): string =>
   hasTickets(tickets) ? ` + ${ticketsName(tickets)}` : '';

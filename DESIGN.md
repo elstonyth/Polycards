@@ -105,7 +105,7 @@ components:
   glass-panel: # compact overlays: modals, sheets, toast (refraction-capable)
     backgroundColor: '#0a0a0a8c' # ink-black / 55%
   glass-chrome: # wide chrome: header, tab bar, banners, sticky bars (frosted only)
-    backgroundColor: '#0a0a0ab3' # ink-black / 70%
+    backgroundColor: '#0a0a0ad1' # ink-black / 82%
   glass-scrim: # full-screen overlay backdrops
     backgroundColor: '#0a0a0acc' # ink-black / 80%
 ---
@@ -214,7 +214,7 @@ Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ra
 
 ### Navigation
 
-- **Bottom tab bar (mobile, the primary nav):** 7 slots with the shipped labels **Task · Ranks · Games · Home · Draw · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; Games, added 2026-10-25, does not navigate: it opens the game picker sheet — Coin Flip coming soon — and lights while a game page is open; Draw, moved out of Games 2026-10-30, goes to `/lucky-draw` and sits right of Home so Home stays in the middle; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: #737373. All six tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
+- **Bottom tab bar (mobile, the primary nav):** 7 slots with the shipped labels **Task · Ranks · Games · Home · Draw · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; Games, added 2026-10-25, does not navigate: it opens the game picker sheet — Coin Flip coming soon — and lights while a game page is open; Draw, moved out of Games 2026-10-30, goes to `/lucky-draw` and sits right of Home so Home stays in the middle; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: neutral-400 (#a3a3a3). All six tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
 - **Header:** Ink Black, logo left; right side balance chip (Graphite pill: "RM 4.49" + white "＋" disc) opening the top-up sheet, present on every screen.
 - **Desktop (≥1024px):** the tab bar hides and the same seven destinations render as pills inside the header row (Games opens the picker as a centred dialog) (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
 - **Surfaces without a slot of their own** are owned by a tab through its `match` prefixes, so something always lights up. Me owns the account tree (`/wallet`, `/settings`, `/orders`, `/transactions`, `/bank`, `/bank-withdrawal`, `/notifications`, `/addresses`) plus **`/referral`** — a top-level brand surface reached from the Me quick-access grid, not a tab of its own. Adding a route reachable from Me means adding it to that array in the same change; a route in no `match` array leaves the whole bar dark.
@@ -472,6 +472,6 @@ drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the fu
 The operator dashboard (`backend/apps/admin`) is a product-register surface built on Medusa UI. Source of truth: `docs/superpowers/specs/2026-10-14-admin-redesign-design.md`.
 
 - **Colours:** Medusa UI's own light and dark themes, chosen per operator in the user menu. The darker "Vault" palette was tried on 2026-10-14 and set aside by the operator in favour of the original colours.
-- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too.
+- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too. The Tasks page's preview of the player's card uses Nekst and the storefront's dark surface, because it shows what players see.
 - **Navigation:** the 8-entry sidebar, with unused core Medusa tabs hidden through `src/_navigation.ts`.
 - **Signal colours** on custom pages follow the storefront's meanings: green for money in, red for alerts, gold for "needs action".

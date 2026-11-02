@@ -97,6 +97,8 @@ export default function TabBar() {
               key={tab.href}
               href={tab.href}
               transitionTypes={inGame ? ['game-out'] : undefined}
+              // A visitor's tap on a gated tab opens signup, never this route.
+              prefetch={tab.gated && !customer ? false : undefined}
               // Gated tabs prompt signup in place for visitors instead of
               // navigating into the server redirect. While auth is still
               // loading, let navigation proceed (server gate covers it).

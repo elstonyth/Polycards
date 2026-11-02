@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { getPullGaps, resolveFeedPackSlug } from '@/lib/data/packs';
 import { cachedJson } from '@/lib/ttl-cache';
 import { isRarity } from '@/lib/packs-format';
+import { POLY_CATEGORY } from '@/lib/packs-data';
 import { RARITY_ORDER } from '@/lib/rarity';
 
 // Same-origin proxy for GET /store/pulls/gaps — the pull-history STATS chart.
@@ -21,6 +22,11 @@ export async function GET(request: NextRequest) {
   );
   const rarityRaw = request.nextUrl.searchParams.get('rarity') ?? '';
   const rarity = isRarity(rarityRaw) ? rarityRaw : RARITY_ORDER[0]!;
+  // Same gate as /api/recent-pulls: the home Poly tab, one key, pack_id wins.
+  const category =
+    !pack && request.nextUrl.searchParams.get('category') === POLY_CATEGORY
+      ? POLY_CATEGORY
+      : undefined;
   try {
     // The loader THROWS on a null read (ttl-cache contract): getPullGaps
     // swallows backend failures into null, and memoising that null would
@@ -28,10 +34,10 @@ export async function GET(request: NextRequest) {
     // `return await`, not `return`: a bare return would settle the promise
     // outside this try and the catch below would never see the throw.
     return await cachedJson(
-      `pull-gaps:${pack}:${rarity}`,
+      `pull-gaps:${pack}:${rarity}:${category ?? ''}`,
       CACHE_TTL_MS,
       async () => {
-        const gaps = await getPullGaps(rarity, pack || undefined);
+        const gaps = await getPullGaps(rarity, pack || undefined, category);
         if (!gaps) throw new Error('pull gaps unavailable');
         return gaps;
       },

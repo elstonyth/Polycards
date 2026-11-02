@@ -75,6 +75,19 @@ describe('GET /api/pull-gaps', () => {
     ]);
   });
 
+  it('the Poly category keeps its own key; any other value collapses to the global memo', async () => {
+    await GET(req('?rarity=Immortal&category=poly'));
+    await GET(req('?rarity=Immortal&category=garbage'));
+    await GET(req('?rarity=Immortal'));
+    await GET(req('?rarity=Immortal&category=poly&pack_id=bronze-pack'));
+
+    expect(gapsCallsOf().map((r) => r.query)).toEqual([
+      { rarity: 'Immortal', category: 'poly' },
+      { rarity: 'Immortal' },
+      { rarity: 'Immortal', pack_id: 'bronze-pack' },
+    ]);
+  });
+
   it('maps the body into the chart shape (seed → avatar, nullable header numbers)', async () => {
     const body = await (await GET(req('?rarity=Immortal'))).json();
     expect(body).toMatchObject({

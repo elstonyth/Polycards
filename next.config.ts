@@ -121,6 +121,8 @@ const securityHeaders = [
   },
 ];
 
+const PUBLIC_ASSET_MAX_AGE_S = 86_400; // 1 day
+
 const nextConfig: NextConfig = {
   // Standalone output: the production Dockerfile (and DO App Platform) run the
   // server from `.next/standalone/server.js`. Without this, that dir is never
@@ -134,9 +136,28 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/*': ['./node_modules/geoip-country/data/*.dat'],
   },
-  images: { remotePatterns, dangerouslyAllowLocalIP },
+  images: {
+    remotePatterns,
+    dangerouslyAllowLocalIP,
+    // Every optimized image is a sharp encode on a pod until it is cached. A day,
+    // not longer: files in public/ do get replaced under the same name.
+    minimumCacheTTL: PUBLIC_ASSET_MAX_AGE_S,
+  },
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      // Unhashed and sometimes replaced under the same name, so a day and not
+      // `immutable`. They shipped max-age=0, so every page view asked a pod again.
+      {
+        source: '/:dir(images|sounds|branding|fonts|seo)/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: `public, max-age=${PUBLIC_ASSET_MAX_AGE_S}`,
+          },
+        ],
+      },
+    ];
   },
   // No redirects for retired sections — the claw experience (removed in the
   // mobile redesign) and the routes deleted 2026-07-20 all 404 by operator

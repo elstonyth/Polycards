@@ -25,6 +25,7 @@
  * deliberately do not.
  */
 import { z } from 'zod';
+import { hasUnsafeUrlChar } from '@/lib/unsafe-url-char';
 import { isRarity } from '@/lib/packs-format';
 import type { Rarity } from '@/lib/packs-data';
 import { avatarForSeed } from '@/lib/avatar-seed';
@@ -423,9 +424,7 @@ export const AvatarFramesSchema = z.looseObject({
 
 /** Whitespace, `\` or a control character: a browser strips or reinterprets
  *  them (`\` reads as `/`), so a URL carrying one is not the URL a check saw. */
-export const hasUnsafeUrlChar = (s: string): boolean =>
-  /[\s\\]/.test(s) ||
-  [...s].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+export { hasUnsafeUrlChar };
 
 /** One slide of the storefront announcement popup (spec 2026-10-06 §5). */
 export const AnnouncementSchema = z.looseObject({

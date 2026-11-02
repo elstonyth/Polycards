@@ -81,7 +81,8 @@ export function HeroSlabs({
               card={hit.card}
               alt=""
               sizes="(min-width: 1024px) 246px, 41vw"
-              priority={index === 0}
+              // All on screen, and a side slab's rotated box can be the LCP.
+              priority
               glowScale={0.4}
             />
           </button>

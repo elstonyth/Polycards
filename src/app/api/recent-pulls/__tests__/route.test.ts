@@ -122,6 +122,63 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     expect(pullsCallsOf()[1]!.query).toEqual({ pack_id: 'bronze-pack' });
   });
 
+  it('the Poly category keeps its own key; any other value collapses to the global memo', async () => {
+    await GET(req('?category=poly'));
+    await GET(req('?category=pokemon'));
+    await GET(req('?category=garbage'));
+    await GET(req());
+
+    expect(pullsCallsOf()).toHaveLength(2);
+    expect(pullsCallsOf()[0]!.query).toEqual({ category: 'poly' });
+    expect(pullsCallsOf()[1]!.query).toBeUndefined();
+  });
+
+  it('the Poly category answers from the Store route, not the catalog', async () => {
+    await GET(req('?category=poly'));
+
+    expect(packsCallsOf()).toHaveLength(0);
+  });
+
+  it('a real pack wins over the category; a tier rides along with it', async () => {
+    await GET(req('?category=poly&pack_id=bronze-pack'));
+    await GET(req('?category=poly&rarity=Immortal'));
+
+    expect(pullsCallsOf()[0]!.query).toEqual({ pack_id: 'bronze-pack' });
+    expect(pullsCallsOf()[1]!.query).toEqual({
+      rarity: 'Immortal',
+      category: 'poly',
+    });
+  });
+
+  // The storefront deploys first, and an older backend ignores ?category.
+  it('card rows answering the Poly category read as an empty feed', async () => {
+    mem = seed({
+      'GET /store/pulls/recent': {
+        body: {
+          pulls: [
+            {
+              id: 'pull_1',
+              handle: 'pikachu',
+              name: 'Pikachu',
+              rarity: 'Common',
+              market_value: 1,
+              marketPriceMyr: 5,
+              image: '/c.png',
+              pack_id: 'bronze-pack',
+              rolled_at: '2026-11-02T00:00:00Z',
+            },
+          ],
+          drought: { Immortal: 74 },
+        },
+      },
+    });
+
+    const poly = await (await GET(req('?category=poly'))).json();
+    expect(poly).toEqual({ pulls: [], drought: {} });
+    const global = await (await GET(req())).json();
+    expect(global.pulls).toHaveLength(1);
+  });
+
   it('the body carries the drought counters alongside the rows', async () => {
     mem = seed({
       'GET /store/pulls/recent': {

@@ -10,6 +10,10 @@ describe('isOptimizableImage', () => {
     ).toBe(true);
   });
 
+  it('leaves a local path with a query string unoptimized', () => {
+    expect(isOptimizableImage('/images/x.webp?v=2')).toBe(false);
+  });
+
   it('leaves any other host (and protocol-relative URLs) unoptimized', () => {
     expect(isOptimizableImage('https://example.com/pack.webp')).toBe(false);
     expect(isOptimizableImage(`//${mediaHost()}/x.webp`)).toBe(false);

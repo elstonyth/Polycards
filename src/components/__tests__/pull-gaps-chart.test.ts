@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { loadSchemas } from '@/lib/lazy-schemas';
 
 // Plan 134: the chart is the one same-origin poller that used to cast its
 // response instead of parsing it. A rolling deploy answering 200 with the
@@ -45,6 +54,10 @@ const BODY = {
 
 let container: HTMLDivElement;
 let root: Root;
+
+beforeAll(async () => {
+  await loadSchemas();
+});
 
 beforeEach(() => {
   fetchMock.mockReset();

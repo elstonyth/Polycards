@@ -12,6 +12,7 @@ jest.setTimeout(240 * 1000);
 // `pull` showed nothing for it, and "0 capsules without Immortal" besides. Its
 // own feed and stats chart read the spins; the global feed stays cards only.
 const CAPSULE = 'tickets-feed-capsule';
+const SECOND_CAPSULE = 'tickets-feed-capsule-2';
 const DRAFT = 'tickets-feed-draft';
 const CARD_PACK = 'tickets-feed-cards';
 const CARD = 'tickets-feed-card';
@@ -49,6 +50,14 @@ medusaIntegrationTestRunner({
             published_odds: { tiers: { Immortal: 25 } },
           },
           {
+            slug: SECOND_CAPSULE,
+            title: 'Second Capsule',
+            category: 'poly',
+            price: 20,
+            image: '/cdn/capsule-2.webp',
+            prize_type: 'tickets',
+          },
+          {
             slug: DRAFT,
             title: 'Draft Capsule',
             category: 'poly',
@@ -74,6 +83,14 @@ medusaIntegrationTestRunner({
             { ...p, pack_id: CAPSULE, weight: 1 },
             { ...p, pack_id: DRAFT, weight: 1 },
           ]),
+        );
+        // The same amounts on another tier: each capsule's table is scaled by
+        // its price, so 75 is Legendary on one and Common on the next.
+        await packs.createTicketPrizes(
+          [
+            { tickets: 75, rarity: 'Common' as const },
+            { tickets: 600, rarity: 'Immortal' as const },
+          ].map((p) => ({ ...p, pack_id: SECOND_CAPSULE, weight: 1 })),
         );
 
         // Oldest first, one a minute: 4, 300, 4, 75, 4, then what must not show
@@ -102,6 +119,9 @@ medusaIntegrationTestRunner({
           spin(5, 300, { source: 'gift' }),
           spin(6, 4, { customer_id: 'cus_tickets_disabled' }),
           { ...spin(7, 300), pack_id: DRAFT },
+          // Between the first capsule's spins 4 and 6, then its newest.
+          { ...spin(5, 75), open_id: 'open_second_0', pack_id: SECOND_CAPSULE },
+          { ...spin(8, 75), open_id: 'open_second_1', pack_id: SECOND_CAPSULE },
         ]);
         await packs.createCustomerAccountStates([
           { customer_id: 'cus_tickets_disabled', disabled: true },
@@ -219,6 +239,117 @@ medusaIntegrationTestRunner({
         expect(data.pulls.map((p: { handle: string }) => p.handle)).toEqual([
           CARD,
         ]);
+      });
+
+      describe('?category — the home Poly tab', () => {
+        it('merges its live capsules newest first, each row on its own table', async () => {
+          const { status, data } = await get(
+            '/store/pulls/recent?category=poly',
+          );
+          expect(status).toBe(200);
+          expect(
+            data.pulls.map(
+              (p: { tickets: number; rarity: string; pack_id: string }) => [
+                p.pack_id,
+                p.tickets,
+                p.rarity,
+              ],
+            ),
+          ).toEqual([
+            [SECOND_CAPSULE, 75, 'Common'],
+            [SECOND_CAPSULE, 75, 'Common'],
+            [CAPSULE, 4, 'Common'],
+            [CAPSULE, 75, 'Legendary'],
+            [CAPSULE, 4, 'Common'],
+            [CAPSULE, 300, 'Immortal'],
+            [CAPSULE, 4, 'Common'],
+          ]);
+          expect(data.pulls[0]).toMatchObject({
+            pack_title: 'Second Capsule',
+            pack_image: '/cdn/capsule-2.webp',
+          });
+          expect(data.pulls[3]).toMatchObject({
+            pack_title: 'Feed Capsule',
+            pack_image: '/cdn/capsule.webp',
+          });
+        });
+
+        it('counts the drought across the capsules', async () => {
+          const { data } = await get('/store/pulls/recent?category=poly');
+          // After the 300: 4, 75, 4, the second capsule's two 75s (Common on
+          // its table) and the disabled player's 4.
+          expect(data.drought).toEqual({ Immortal: 6, Legendary: 4 });
+        });
+
+        it('filters by tier off each capsule’s own table', async () => {
+          const { data } = await get(
+            '/store/pulls/recent?category=poly&rarity=Legendary',
+          );
+          expect(
+            data.pulls.map((p: { pack_id: string; tickets: number }) => [
+              p.pack_id,
+              p.tickets,
+            ]),
+          ).toEqual([[CAPSULE, 75]]);
+        });
+
+        it('a key with no feed of its own reads as the global feed', async () => {
+          for (const category of ['pokemon', 'no-such-category']) {
+            const { data } = await get(
+              `/store/pulls/recent?category=${category}`,
+            );
+            expect(
+              data.pulls.map((p: { handle: string }) => p.handle),
+            ).toEqual([CARD]);
+          }
+        });
+
+        it('with no live capsule, both reads answer empty', async () => {
+          const packs =
+            getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+          await packs.updatePacks({
+            selector: { slug: [CAPSULE, SECOND_CAPSULE] },
+            data: { status: 'draft' },
+          });
+
+          const feed = await get('/store/pulls/recent?category=poly');
+          expect(feed.data).toEqual({ pulls: [], drought: {} });
+          const gaps = await get(
+            '/store/pulls/gaps?rarity=Immortal&category=poly',
+          );
+          expect(gaps.data).toMatchObject({ current: 0, hits: [] });
+        });
+
+        it('pack_id wins over category', async () => {
+          const { data } = await get(
+            `/store/pulls/recent?category=poly&pack_id=${SECOND_CAPSULE}`,
+          );
+          expect(
+            new Set(data.pulls.map((p: { pack_id: string }) => p.pack_id)),
+          ).toEqual(new Set([SECOND_CAPSULE]));
+        });
+
+        it('leaves the global feed under its own cache key', async () => {
+          await get('/store/pulls/recent?category=poly');
+          const { data } = await get('/store/pulls/recent');
+          expect(data.pulls.map((p: { handle: string }) => p.handle)).toEqual([
+            CARD,
+          ]);
+        });
+
+        it('the stats chart reads the same spins, with no one published rate', async () => {
+          const { status, data } = await get(
+            '/store/pulls/gaps?rarity=Immortal&category=poly',
+          );
+          expect(status).toBe(200);
+          expect(data).toMatchObject({
+            pct: null,
+            expected: null,
+            avg: 2,
+            current: 6,
+          });
+          expect(data.hits.map((h: { gap: number }) => h.gap)).toEqual([2]);
+        });
       });
     });
   },

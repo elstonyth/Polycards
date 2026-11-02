@@ -2,7 +2,7 @@
 
 import type { RecentFeed } from '@/lib/data/packs';
 import type { Rarity } from '@/lib/packs-data';
-import { RecentPollResponseSchema, parseOne } from '@/lib/data/schemas';
+import { loadSchemas } from '@/lib/lazy-schemas';
 import { useLivePoll } from '@/lib/use-live-poll';
 
 // "Live" = polling of the same-origin proxy (a direct :9000 call is
@@ -19,11 +19,12 @@ const POLL_MS = 10_000;
 /** An empty response only replaces the rows on screen when the scope changed
  *  (`pending`) — otherwise a pack with no pulls would keep showing the
  *  previous pack's rows, while a backend blip would blank a healthy feed. */
-function acceptFeed(
+async function acceptFeed(
   next: unknown,
   _prev: RecentFeed,
   pending: boolean,
-): RecentFeed | null {
+): Promise<RecentFeed | null> {
+  const { RecentPollResponseSchema, parseOne } = await loadSchemas();
   const body = parseOne(RecentPollResponseSchema, next);
   if (!body) return null;
   if (body.pulls.length === 0 && !pending) return null;
@@ -36,20 +37,27 @@ function acceptFeed(
  *  panel's tabs) — switching it refetches at once, and `pending` is true
  *  until rows for the new scope have landed (the previous scope's rows stay
  *  on screen meanwhile, so a tab switch never flashes an empty list).
+ *  `category` reads that category's capsule spins instead of the global feed
+ *  (the home Poly tab), and switches the same way.
  *  Keeps the last good set on transient failures so the feed never blanks. */
 export function useLiveRecentPulls(
   initial: RecentFeed,
   packSlug?: string,
   rarity?: Rarity | null,
+  category?: string,
 ): RecentFeed & {
   pending: boolean;
-  /** The (pack, tier) scope the rows on screen belong to — changes exactly
-   *  when a new scope's rows land, so a list keyed on it re-enters once. */
+  /** The (pack, tier, category) scope the rows on screen belong to — changes
+   *  exactly when a new scope's rows land, so a list keyed on it re-enters once. */
   shownScope: string;
+  /** The category those rows belong to, if any — the previous one until the new
+   *  scope's rows land. */
+  shownCategory?: string;
 } {
   const q = new URLSearchParams();
   if (packSlug) q.set('pack_id', packSlug);
   if (rarity) q.set('rarity', rarity);
+  if (category) q.set('category', category);
   const qs = q.toString();
   // The seed came from the server for the mount-time pack, unfiltered — so the
   // scope it belongs to is the mount-time scope, which is what useLivePoll
@@ -61,10 +69,19 @@ export function useLiveRecentPulls(
       intervalMs: POLL_MS,
       // A client-side nav between two pack pages (or a tier switch) refetches
       // at once and reports `pending` until the new scope's rows land.
-      resetKey: `${packSlug ?? ''}|${rarity ?? ''}`,
+      resetKey: `${packSlug ?? ''}|${rarity ?? ''}|${category ?? ''}`,
+      // Row times are absolute, so a seed that waits one interval still reads
+      // true, and this is the storefront's highest-volume request. An empty seed
+      // may be a failed server read, so that one fetches at once.
+      firstTickMs: initial.pulls.length > 0 ? POLL_MS : 0,
       accept: acceptFeed,
     },
   );
 
-  return { ...data, pending, shownScope: shownKey };
+  return {
+    ...data,
+    pending,
+    shownScope: shownKey,
+    shownCategory: shownKey.split('|')[2] || undefined,
+  };
 }

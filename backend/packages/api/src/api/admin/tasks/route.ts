@@ -7,7 +7,7 @@ import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { reqReason } from '../rewards-settings/validate';
 import { TASK_KINDS, type TaskKind } from '../../../modules/packs/tasks';
-import { resolveTaskLabels } from './labels';
+import { resolveTaskLabels, resolveTaskViews } from './labels';
 
 // GET /admin/tasks — every definition (active and retired), sorted. Each row
 // carries plain-English `labels` so the console can render a task without
@@ -17,12 +17,23 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const rows = await packs.listTaskDefinitions(
+  // Newest first at the database, so a cap drops the oldest rows and never a live
+  // one. limit and offset let a reader with a size cap (the assistant, the desks)
+  // page through.
+  const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit)) || 500, 1), 500);
+  const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);
+  const [newest, count] = await packs.listAndCountTaskDefinitions(
     {},
-    { order: { sort: 'ASC' }, take: 500 },
+    { order: { created_at: 'DESC' }, take: limit, skip: offset },
   );
-  const labels = await resolveTaskLabels(packs, rows);
+  const rows = [...newest].sort((a, b) => a.sort - b.sort);
+  const [labels, views, claims] = await Promise.all([
+    resolveTaskLabels(packs, rows),
+    resolveTaskViews(packs, rows),
+    packs.taskClaimCounts(),
+  ]);
   res.json({
+    count,
     tasks: rows.map((t) => ({
       id: t.id,
       kind: t.kind,
@@ -34,7 +45,10 @@ export async function GET(
       tickets: t.tickets ?? 0,
       starts_at: t.starts_at ? new Date(t.starts_at).toISOString() : null,
       ends_at: t.ends_at ? new Date(t.ends_at).toISOString() : null,
+      retired_at: t.retired_at ? new Date(t.retired_at).toISOString() : null,
+      claims: claims.get(t.id) ?? 0,
       labels: labels.get(t.id) ?? { requirement: '', reward: '' },
+      view: views.get(t.id) ?? null,
     })),
   });
 }
