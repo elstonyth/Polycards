@@ -1221,6 +1221,7 @@
     "typeWp": "Challenge",
     "typeWd": "Withdrawal",
     "typeRf": "Referral",
+    "typeCf": "Coin flip",
     "colType": "Type",
     "colPlayer": "Player",
     "from": "From",
@@ -1419,6 +1420,7 @@
     "packs": "Packs",
     "cards": "Cards",
     "pricing": "Pricing",
+    "coinFlip": "Coin flip",
     "sprites": "Pixel sprites",
     "stock": "Stock",
     "addStock": "Add stock",
@@ -1556,6 +1558,7 @@
       "pack_sales": "Pack sales",
       "delivery_fees": "Delivery fees",
       "sellbacks": "Sell-backs paid",
+      "coin_flip_payouts": "Coin flip payouts",
       "promo_given": "Promo given",
       "referral_commission": "Referral commission paid",
       "adjustments": "Admin adjustments"
@@ -1578,6 +1581,7 @@
     "cardsNoTopupNote_one": "Not counted: {{count, number}} card ({{value}}) of players who never topped up",
     "cardsNoTopupNote_other": "Not counted: {{count, number}} cards ({{value}}) of players who never topped up",
     "movedHint": {
+      "coin_flip_payouts": "Credit paid on wins. Forfeited card value is recorded in coin flip history, not cash income.",
       "sellbacks": "Includes free welcome pulls and prize cards sold back: those have no matching sale or promo line.",
       "promo_given": "Credit promos only: bonus grants, rewards, vouchers and daily rewards. Free pulls and prize cards are not here."
     }
@@ -1620,6 +1624,7 @@
     "returnValue": "{{pct}}% back",
     "returnHint": "Cards won ÷ pack spend. Under 100% means their packs cost more than the cards were worth.",
     "soldBack": "Sold back",
+    "coinFlipPayouts": "Coin flip payouts",
     "promoGiven": "Promo given",
     "referral": "Referral earned",
     "loadError": "Couldn't load this player's money.",
@@ -1648,6 +1653,7 @@
       "money": "Top-ups & withdrawals",
       "packs": "Packs",
       "sellbacks": "Sell-backs",
+      "coinFlips": "Coin flips",
       "rewards": "Bonus & rewards",
       "other": "Adjustments & fees"
     },
@@ -1662,6 +1668,7 @@
       "packOpen": "Pack opened",
       "packRefund": "Pack refunded",
       "sellback": "Sold back",
+      "coinFlip": "Coin flip win",
       "bonusGiven": "Bonus given",
       "bonusTaken": "Bonus taken back",
       "adjustmentIn": "Adjustment (added)",
@@ -1882,13 +1889,15 @@
     "pullStatus": {
       "vaulted": "In vault",
       "delivering": "In delivery",
-      "delivered": "Delivered"
+      "delivered": "Delivered",
+      "forfeited": "Lost in a coin flip"
     },
     "pullFilter": {
       "vaulted": "In vault",
       "bought_back": "Sold back",
       "delivering": "In delivery",
-      "delivered": "Delivered"
+      "delivered": "Delivered",
+      "forfeited": "Lost in a coin flip"
     },
     "source": {
       "pack": "Pack",

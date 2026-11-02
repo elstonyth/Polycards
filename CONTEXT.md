@@ -12,6 +12,15 @@ word is canonical.
 
 ## Opening a pack
 
+**Coin Flip**:
+A separately confirmed Vault round on one toss, staking cards, Lucky Draw tickets or both. A win keeps the Pulls, adds normal Credit equal to their confirmed MYR market value and adds the staked number of tickets again; a loss marks the Pulls `forfeited` and takes the staked tickets. A round is an immutable settlement receipt after acceptance, identified independently of the Pull so repeated wins remain distinct. It shares effective player groups/odds-set IDs with packs, with coin-specific actual rates and independently configured published odds. See [operator guide](docs/operations/vault-coin-flip.md).
+
+**Forfeited Pull**:
+A card lost in a coin flip. It is outside the customer's Vault, cannot be sold/delivered/flipped by that customer, and is not automatically restocked.
+
+**Flip eligibility stamp / version**:
+`flip_eligible_at` proves creation completed outside compensatable pack workflows; legacy repair requires paused flips and drained ingress/workers. `flip_version` invalidates quotes when the Pull changes state or settles another flip, including delivery cancellation and buyback compensation.
+
 **Pack**:
 A gacha pack listing a customer can open (slug, MYR price, category, buyback
 rate, stock). The thing you open.

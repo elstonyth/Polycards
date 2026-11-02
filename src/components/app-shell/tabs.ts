@@ -32,8 +32,8 @@ export const TABS: Tab[] = [
     href: '/coin-flip',
     icon: Gamepad2,
     opens: 'games',
-    // Lit on every game; Coin Flip joins when it ships.
-    match: ['/coin-flip'],
+    // Lit on every game.
+    match: ['/coin-flip', '/vault/coin-flip'],
   },
   { label: 'Home', href: '/', icon: Home },
   // The page is behind login, and says when no draw is on.
@@ -62,6 +62,12 @@ export const TABS: Tab[] = [
 ];
 
 export function isTabActive(tab: Tab, pathname: string): boolean {
+  if (
+    tab.href === '/vault' &&
+    (pathname === '/vault/coin-flip' ||
+      pathname.startsWith('/vault/coin-flip/'))
+  )
+    return false;
   if (tab.href === '/') return pathname === '/';
   if (pathname === tab.href || pathname.startsWith(`${tab.href}/`)) return true;
   return (tab.match ?? []).some(

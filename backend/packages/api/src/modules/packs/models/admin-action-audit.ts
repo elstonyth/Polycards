@@ -45,6 +45,7 @@ export const ADMIN_AUDIT_ENTITY_TYPES = [
   // Pack gifts (spec 2026-10-07): grants and revokes audit against the gift
   // row — see Migration20261007120000. Bonus credit grants audit as 'credit'.
   'pack_gift',
+  'coin_flip_config',
   // Settlement's Acknowledge (2026-10-15) audits against the finding's row;
   // payouts already audit as 'gateway_withdrawal'. See Migration20261015160000.
   'gateway_deposit',

@@ -5,6 +5,23 @@
 
 import type { PullsResponse } from './packs-api';
 import type { GroupPolicy } from './player-groups';
+import {
+  coinHistoryQuery,
+  type AdminCoinHistory,
+  type CoinFlipSettings,
+  type CoinHistoryFilters,
+} from './coin-flips';
+
+export const getCoinFlipSettings = () =>
+  getJson<CoinFlipSettings>('/admin/coin-flips/settings');
+export const saveCoinFlipSettings = (
+  settings: Omit<CoinFlipSettings, 'revision'> & {
+    expected_revision: number;
+    reason: string;
+  },
+) => postJson<CoinFlipSettings>('/admin/coin-flips/settings', settings);
+export const listCoinFlips = (filters: CoinHistoryFilters) =>
+  getJson<AdminCoinHistory>(`/admin/coin-flips?${coinHistoryQuery(filters)}`);
 
 declare const __BACKEND_URL__: string;
 
@@ -221,7 +238,7 @@ export interface SupportPull {
   /** The pack's title (/pulls only). */
   pack_title?: string | null;
   rolled_at: string;
-  status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered';
+  status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered' | 'forfeited';
   /** How they got it: pack | reward | free | gift | bonus (/pulls only). */
   source?: string | null;
   /** The live shipment of a delivering or delivered card (/pulls only). */
@@ -485,6 +502,7 @@ export interface EconomyReport {
   totals: {
     revenue: number;
     payouts: number;
+    coinFlipPayouts: number;
     topups: number;
     adjustments: number;
     /** Shipping + insurance fees collected from customer wallets (fee line, not pack revenue). */
@@ -560,6 +578,7 @@ export interface ProfitReport {
   activity: {
     pack_sales: number;
     sellbacks: number;
+    coin_flip_payouts: number;
     promo_given: number;
     delivery_fees: number;
     referral_commission: number;
@@ -2197,7 +2216,8 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 // ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────
 
 /** The ledger event types (POLYCARD-BACK §5.1). */
-export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF';
+export type LedgerType =
+  'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF' | 'CF';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw

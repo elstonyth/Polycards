@@ -64,7 +64,7 @@ function implausibleCardPath(pathname: string): boolean {
 const KNOWN_ROUTE = [
   /^\/$/,
   /^\/(about|addresses|audio-preview|bank|bank-withdrawal|contact|download|fairness|healthz|how-it-works|leaderboard|lucky-draw|me|notifications|orders|privacy|referral|reset-password|settings|slots|task|transactions|vault|wallet)\/?$/,
-  /^\/vault\/history\/?$/,
+  /^\/vault\/(history|coin-flip)\/?$/,
   /^\/auth\/google\/(callback|failed)\/?$/,
   /^\/(card|profile|r)\/[^/]+\/?$/,
   /^\/(card|slots)\/[^/]+\/share\.jpg$/,
@@ -139,7 +139,7 @@ export function proxy(request: NextRequest) {
 // polled public JSON routes.
 export const config = {
   matcher: [
-    '/((?!_next/|api/|3dicons/|branding/|cdn/|fonts/|images/|pack-index-icons/|seo/|social/|sounds/|videos/).*)',
+    '/((?!_next/|api/|3dicons/|branding/|cdn/|coin-flip/|fonts/|images/|pack-index-icons/|seo/|social/|sounds/|videos/).*)',
     '/api/pack-detail/:path*',
     '/api/cards/:path*',
     '/api/recent-pulls',

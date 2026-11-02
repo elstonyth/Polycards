@@ -143,6 +143,8 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('GET', '/admin/referrals/settlements')).toEqual([
       'referral:read',
     ]);
+    expect(policyFor('GET', '/admin/coin-flips/settings')).toEqual(['coin_flip:read']);
+    expect(policyFor('POST', '/admin/coin-flips/settings')).toEqual(['coin_flip:update']);
     // Stock writes (spec 2026-10-28).
     expect(policyFor('POST', '/admin/goods-receive-notes')).toEqual([
       'goods_receive_note:update',

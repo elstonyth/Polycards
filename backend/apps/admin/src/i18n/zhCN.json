@@ -1,4 +1,16 @@
 {
+  "profit": {
+    "moved": { "coin_flip_payouts": "抛硬币派彩" },
+    "movedHint": {
+      "coin_flip_payouts": "获胜后发放的信用余额。失去卡牌的价值记于抛硬币记录，不计为现金收入。"
+    }
+  },
+  "playerMoney": {
+    "coinFlipPayouts": "抛硬币派彩",
+    "filter": { "coinFlips": "抛硬币" },
+    "kind": { "coinFlip": "抛硬币获胜" }
+  },
+  "ledger": { "typeCf": "抛硬币" },
   "cards": {
     "pricing": {
       "filter": "价格同步",
@@ -56,6 +68,7 @@
     "previous": "上一段 {{value}}"
   },
   "pcNav": {
+    "coinFlip": "抛硬币",
     "luckyDraw": "幸运抽奖",
     "goodsReceiveNotes": "收货单",
     "procurement": "采购清单",

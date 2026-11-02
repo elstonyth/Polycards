@@ -1798,6 +1798,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           source: 'reward',
           bonus_bp: BONUS_BP_FULL,
           stock_earmarked: true,
+          flip_eligible_at: expect.any(Date),
         });
         expect(res).toMatchObject({
           winner_customer_id: 'cus_k',

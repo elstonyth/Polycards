@@ -20,6 +20,7 @@ const STATUS: Record<
   bought_back: { label: 'Sold', tone: 'green' },
   delivering: { label: 'Shipping', tone: 'sky', href: '/orders' },
   delivered: { label: 'Delivered', tone: 'neutral', href: '/orders' },
+  forfeited: { label: 'Lost in coin flip', tone: 'neutral' },
 };
 
 // The "Paid" figure: what the card cost out of its open's charge, or how it

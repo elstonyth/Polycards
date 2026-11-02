@@ -37,6 +37,7 @@ describe('ledgerSubject', () => {
 // Every credit_transaction.reason (backend models/credit-transaction.ts).
 const REASONS = [
   'buyback',
+  'coin_flip_win',
   'topup',
   'pack_open',
   'adjustment',
@@ -58,6 +59,7 @@ describe('ledgerKind', () => {
     expect(ledgerKind('pack_open', -10)).toBe('packOpen');
     expect(ledgerKind('pack_open', 10)).toBe('packRefund');
     expect(ledgerKind('buyback', 9)).toBe('sellback');
+    expect(ledgerKind('coin_flip_win', 10)).toBe('coinFlip');
     expect(ledgerKind('bonus_grant', 50)).toBe('bonusGiven');
     expect(ledgerKind('bonus_grant', -50)).toBe('bonusTaken');
     expect(ledgerKind('adjustment', 5)).toBe('adjustmentIn');

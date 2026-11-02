@@ -14,6 +14,7 @@ const LINES: {
   { key: 'pack_sales' },
   { key: 'delivery_fees' },
   { key: 'sellbacks', out: true, hint: true },
+  { key: 'coin_flip_payouts', out: true, hint: true },
   { key: 'promo_given', out: true, hint: true },
   { key: 'referral_commission', out: true },
   { key: 'adjustments', out: true },

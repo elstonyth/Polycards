@@ -283,6 +283,7 @@ medusaIntegrationTestRunner({
         expect(realOnly.data.activity).toEqual({
           pack_sales: 80,
           sellbacks: 30,
+          coin_flip_payouts: 0,
           promo_given: 0,
           delivery_fees: 0,
           referral_commission: 0,

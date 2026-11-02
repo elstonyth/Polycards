@@ -22,12 +22,13 @@ import { openableRow, useOrigin, whenText } from './row-helpers';
 // vault" again. Sold back is orange as it always was: the card has left.
 const STATUS_TONE: Record<
   SupportPull['status'],
-  'green' | 'orange' | 'blue'
+  'green' | 'orange' | 'blue' | 'red'
 > = {
   vaulted: 'green',
   bought_back: 'orange',
   delivering: 'blue',
   delivered: 'green',
+  forfeited: 'red',
 };
 
 const STATUS_FILTERS = [
@@ -36,6 +37,7 @@ const STATUS_FILTERS = [
   'bought_back',
   'delivering',
   'delivered',
+  'forfeited',
 ] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 

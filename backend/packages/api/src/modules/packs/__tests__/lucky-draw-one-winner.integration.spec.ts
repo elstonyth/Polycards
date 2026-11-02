@@ -523,6 +523,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
           bonus_bp: BONUS_BP_FULL,
           stock_earmarked: true,
         });
+        // Or the coin flip reads the prize as still processing, forever.
+        expect(pulls[0].flip_eligible_at).toBeTruthy();
         expect(stock).toHaveBeenCalledTimes(1);
         expect(stock).toHaveBeenCalledWith('pot-card', 1);
 

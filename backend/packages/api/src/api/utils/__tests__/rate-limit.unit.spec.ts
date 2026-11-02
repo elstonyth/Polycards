@@ -1024,6 +1024,8 @@ describe('RATE_LIMITS', () => {
 
     expect(configs).toEqual([
       'pack-open|5|10000|20|60000|||',
+      'coin-flip-quote|5|10000|20|60000|Too many coin flip quotes. Please wait a moment.||',
+      'coin-flip-accept|5|10000|20|60000|Please wait, then check your original coin flip result.||',
       'pack-open-batch|5|10000|20|60000|||',
       'vault-buyback|10|10000|30|60000|Too many buyback requests.||',
       'pull-reveal|20|10000|60|60000|Too many requests.||',

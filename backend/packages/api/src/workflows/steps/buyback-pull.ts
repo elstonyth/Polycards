@@ -7,28 +7,12 @@ import {
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { findCardInventoryTarget } from '../../modules/packs/card-stock';
-import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
-import { sellbackHoldBp } from '../../modules/packs/bonus-credit';
-import {
-  buybackAmount,
-  resolveBuybackRate,
-  type BuybackRateType,
-} from '../../modules/packs/buyback-rate';
-import { withLossless } from '../../modules/packs/lossless';
-import {
-  DEFAULT_MARKET_MULTIPLIER,
-  displayMarketPrice,
-  resolveFxRateStrict,
-} from '../../modules/packs/pricing';
+import type { BuybackRateType } from '../../modules/packs/buyback-rate';
 import { insertOrMapDuplicate } from './duplicate-race';
 
 export type BuybackPullInput = {
   pull_id: string;
   customer_id: string; // from the authenticated token — NEVER the request body
-  /** Set ONLY by buyback-batch, which resolved lockedPullIds for its whole
-   *  selection server-side and never runs a locked pull: skips the per-pull
-   *  lock read. Never taken from a request body. */
-  lock_checked?: boolean;
 };
 
 export type BuybackResult = {
@@ -55,182 +39,20 @@ type CompensateData =
 // flips to bought_back, the credit ledger gains current-FMV × pack-% , and the
 // physical unit returns to stock (best-effort, mirror of the pull's earmark).
 //
-// Order matters: the credit row is written FIRST because its UNIQUE pull_id is
-// the race guard — a concurrent duplicate buyback dies on the constraint before
-// anything else mutates. The later mutations are manually undone on failure so
-// the step stays atomic; compensation covers later-step failures.
+// Money and ownership settle in one customer-locked transaction.
 export const buybackPullStep = createStep(
   'buyback-pull',
   async (input: BuybackPullInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
 
-    const [pull] = await packs.listPulls({ id: input.pull_id }, { take: 1 });
-    // Unknown id and someone else's pull are the SAME 404 — don't leak which
-    // pull ids exist to other customers.
-    if (!pull || pull.customer_id !== input.customer_id) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Pull '${input.pull_id}' not found.`,
-      );
-    }
-    if (pull.status !== 'vaulted') {
-      // Status-accurate copy: a card that's out for delivery isn't "sold back".
-      const reason =
-        pull.status === 'delivering' || pull.status === 'delivered'
-          ? 'This card is out for delivery and can no longer be sold back — cancel the delivery first if it is still requested, otherwise contact support.'
-          : 'This card was already sold back.';
-      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, reason);
-    }
-    // There is deliberately NO source='reward' refusal here any more. The old
-    // C1 guard existed for daily-box prizes, whose card_id was a product-handle
-    // sentinel with no Card row behind it; the daily box went 2026-08-25 and
-    // every surviving reward pull — weekly-challenge prize, task free rip, task
-    // card reward — carries a real card handle. Task and achievement rewards
-    // sell like any pulled card: completing the task IS the requirement
-    // (operator decision 2026-09-03; the old guard left them quoting RM 0.00
-    // forever). A stale sentinel row, should one exist, still fails safely at
-    // the listCards check below — it is refused, never credited.
-    //
-    // The one exception to the above: a DAILY task's card (owner, 2026-10-23).
-    // Like the free welcome pull it is fully locked (no buyback, no delivery)
-    // until the customer's first PAID open — computed, never stored, so the
-    // first source='pack' pull unlocks it with zero writes (spec 2026-08-14,
-    // lockedPullIds). buyback-batch runs this same step per id, so the batch
-    // inherits the gate.
-    if (
-      !input.lock_checked &&
-      (await packs.lockedPullIds(input.customer_id, [pull])).size
-    ) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        FREE_PULL_LOCKED_MESSAGE,
-      );
-    }
-
-    // Frozen accounts cannot draw value out (Batch A item 5): a fraud/AMLA hold
-    // must block selling a card back for credit. Fresh read (no surrounding lock
-    // here — the buyback writes its credit directly, not via mutateCreditAtomic).
-    await packs.assertNotFrozen(input.customer_id);
-
-    const [card] = await packs.listCards({ handle: pull.card_id }, { take: 1 });
-    if (!card) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This card is no longer in the catalog and cannot be valued.',
-      );
-    }
-
-    // Instant rate inside the post-pull window (the reveal's "sell on the
-    // spot"), the flat rate after — decided HERE from rolled_at, never by the
-    // caller, so the better rate can't be claimed late via the raw API.
-    const [pack] = await packs.listPacks({ slug: pull.pack_id }, { take: 1 });
-    // Lossless Mode is decided at the immutable rolled_at — the instant the
-    // vault and reveal quotes use too — so a window cancelled after the roll
-    // cannot cut a sell the reveal already offered at 100%.
-    const rolledMs = new Date(pull.rolled_at).getTime();
-    const windows = await packs.losslessWindows(rolledMs);
-    // Re-read the closure stamp right before pricing. `pull` was read several
-    // awaits ago (frozen check + card + pack lookups); the reveal's async
-    // close-instant POST could have landed in that gap, and pricing the instant
-    // premium off the stale pre-close read would let a quick vault sell beat the
-    // close and claim 99% (CodeRabbit). The fresh read collapses that window to
-    // the sub-ms between here and the conditional status flip below. Both
-    // pricing inputs below come from the same fresh read — `revealed_at` too,
-    // since a reveal ping landing in that same gap must not collapse the
-    // instant deadline back to the stale `rolled_at + 30s` default and
-    // under-credit a sell the reveal UI already quoted at the instant rate.
-    // `rolled_at` stays from the first read: it's immutable after insert.
-    const [fresh] = await packs.listPulls({ id: pull.id }, { take: 1 });
-    const priced = withLossless(pack, windows, rolledMs, pull.source);
-    const { percent, rate_type } = resolveBuybackRate(priced, {
-      rolled_at: pull.rolled_at,
-      revealed_at: fresh?.revealed_at ?? pull.revealed_at,
-      // Once the reveal has closed the window (left it / concluded), the credit
-      // is the flat vault rate even inside the 30s — the credit must match what
-      // the vault quoted.
-      instant_closed_at: fresh?.instant_closed_at ?? pull.instant_closed_at,
-    });
-
-    // A money amount must never be computed from a corrupt FMV — refuse rather
-    // than credit NaN/garbage (the column is NOT NULL numeric, so this only
-    // fires on real data corruption).
-    const rawUsd = Number(card.market_value);
-    if (!Number.isFinite(rawUsd) || rawUsd < 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This card has no valid market value and cannot be sold back.',
-      );
-    }
-    // Buyback pays MYR credits, so it must be a percentage of the SAME MYR value
-    // the customer sees — market_value is raw USD; the shown Value multiplies it
-    // by FX and the per-card markup (displayMarketPrice). Crediting raw USD ×
-    // percent underpaid every sell-back by the FX rate. Resolve FX + multiplier
-    // at credit time, exactly as the reveal/vault quote does, so quote == credit.
-    const fx = await resolveFxRateStrict(packs);
-    const valueMyr = displayMarketPrice(
-      rawUsd,
-      fx,
-      Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
-    );
-    const amount = buybackAmount(valueMyr, percent);
-
-    // 1. Credit row first — the unique pull_id kills concurrent duplicates here.
-    const [txn] = await insertOrMapDuplicate({
-      insert: () =>
-        packs.recordBuybackCreditTransaction({
-          customerId: input.customer_id,
-          amount,
-          valueMyr,
-          pullId: pull.id,
-          cardHandle: pull.card_id,
-          rate: percent / 100,
-          openId: pull.open_id ?? null,
-          // Bonus and welcome pulls: that share of the sale must be played
-          // through. A reward's or gift's sale is not held (ADR 0012).
-          bonusBp: sellbackHoldBp(pull),
-        }),
-      probeDuplicate: async () => {
-        const [existing] = await packs.listCreditTransactions(
-          { pull_id: pull.id },
-          { take: 1 },
-        );
-        return existing !== undefined;
-      },
-      duplicateError: () =>
-        new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          'This card was already sold back.',
-        ),
+    const { pull, amount, percent, rate_type, creditTransactionId } = await insertOrMapDuplicate({
+      insert: () => packs.buybackPullAtomic({ customerId: input.customer_id, pullId: input.pull_id }),
+      probeDuplicate: async () => (await packs.listCreditTransactions({ pull_id: input.pull_id }, { take: 1 })).length > 0,
+      duplicateError: () => new MedusaError(MedusaError.Types.NOT_ALLOWED, 'This card was already sold back.'),
       logger,
       label: 'buyback-pull',
     });
-    const creditTransactionId = txn.id;
-
-    // 2. Flip the pull. If this fails, remove the credit row so nothing is
-    //    half-applied (compensation only covers later-step failures).
-    try {
-      await packs.transitionPullStatus({
-        ids: [pull.id],
-        from: 'vaulted',
-        to: 'bought_back',
-        set: { buyback_amount: amount, buyback_at: new Date() },
-      });
-    } catch (error) {
-      // The undo itself failing leaves credit-without-flip — loud trail so the
-      // inconsistent pair (pull, txn) can be repaired by hand.
-      try {
-        await packs.deleteCreditTransactionsGuarded([creditTransactionId]);
-        await packs.deleteLedgerEntryByRef('SE', creditTransactionId);
-      } catch (undoError) {
-        logger.error(
-          `buyback-pull: UNDO FAILED — credit txn '${creditTransactionId}' exists but pull '${pull.id}' was not flipped; repair manually. ${
-            undoError instanceof Error ? undoError.message : String(undoError)
-          }`,
-        );
-      }
-      throw error;
-    }
 
     // 3. Return the physical unit to stock — ONLY if this pull actually took
     //    one (stock_earmarked): a pull made at 0 stock / on an untracked
@@ -298,19 +120,8 @@ export const buybackPullStep = createStep(
   async (data: CompensateData, { container }) => {
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
-    await packs.deleteLedgerEntryByRef('SE', data.creditTransactionId);
-    await packs.updatePulls([
-      {
-        id: data.pullId,
-        status: 'vaulted' as const,
-        buyback_amount: null,
-        buyback_at: null,
-        // A restored unit goes back out and the earmark returns with it, so a
-        // later (re-)buyback of the re-vaulted pull restores correctly.
-        ...(data.stockTarget ? { stock_earmarked: true } : {}),
-      },
-    ]);
+    const undone = await packs.undoBuybackAtomic({ pullId: data.pullId, creditTransactionId: data.creditTransactionId, restoreEarmark: Boolean(data.stockTarget) });
+    if (!undone) return;
     if (data.stockTarget) {
       const inventoryModule = container.resolve(Modules.INVENTORY);
       await inventoryModule.adjustInventory(

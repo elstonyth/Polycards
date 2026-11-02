@@ -269,6 +269,10 @@ export const PlayCard = ({ money }: { money: CustomerMoney }) => {
           : t('playerMoney.returnValue', { pct: play.return_pct }),
     },
     { label: t('playerMoney.soldBack'), value: rm(activity.sellbacks) },
+    {
+      label: t('playerMoney.coinFlipPayouts'),
+      value: rm(activity.coin_flip_payouts),
+    },
     { label: t('playerMoney.promoGiven'), value: rm(activity.promo_given) },
   ];
   if (activity.referral_commission !== 0)

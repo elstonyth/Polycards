@@ -16,6 +16,7 @@ describe('reasonLabel', () => {
     expect(reasonLabel('pack_open')).toBe('Pack open');
     expect(reasonLabel('buyback')).toBe('Sell-back');
     expect(reasonLabel('adjustment')).toBe('Adjustment');
+    expect(reasonLabel('coin_flip_win')).toBe('Coin flip win');
   });
   it('labels the cashout reason as the Withdrawn card does', () => {
     expect(reasonLabel('cashout')).toBe('Withdrawal');
