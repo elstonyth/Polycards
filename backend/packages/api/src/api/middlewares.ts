@@ -1730,6 +1730,12 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Settlement's Credit deposit: a ledger write driven by an admin token.
+      matcher: '/admin/payments/deposits/*/credit',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Purchase-invoice writer (POLYCARD-BACK §3.5) — raises real inventory
       // counters, up to 200 lines x 1,000,000 qty per call; same admin budget.
       matcher: '/admin/purchase-invoices',

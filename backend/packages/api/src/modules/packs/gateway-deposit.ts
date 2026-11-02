@@ -4,19 +4,24 @@ import { resolvePacks, type GatewayDeposits } from './facets';
 import {
   GATEWAYS,
   gatewayConfigFor,
+  getDepositDetail,
   paymentGateway,
   rowGateway,
+  rowGatewayConfigs,
   submitDeposit,
   GatewayError,
   GATEWAY_IDS,
   isLedgerGateway,
   type PaymentGateway,
 } from './gateway';
+import { ledgerTrail, stampNote } from './gateway-audit';
+import { toOptionalMoney } from './money';
 import {
   creditForDeposit,
   loadPaymentFxQuote,
   nudgedDeposit,
   regionalDepositBand,
+  rowFx,
 } from './payment-fx';
 import type { TgpayCustomer } from './tgpay-client';
 import { topUpAmountError, topupIdempotencyReference } from './topup';
@@ -620,8 +625,10 @@ export type DepositOutcome =
        *   payment with no automatic remedy at all. Its ceiling guard lives
        *   upstream in `reconcileAction`, which quarantines before the sweep
        *   ever gets here.
+       * - `'admin'` — an operator's Credit deposit (creditDepositByAdmin). A
+       *   person chose this row, so it takes the callback's fence.
        */
-      source: 'callback' | 'requery';
+      source: 'callback' | 'requery' | 'admin';
       /** What the gateway says was paid. Credited verbatim (a `'callback'`
        *  is fenced against the row first). */
       amount: number;
@@ -810,4 +817,105 @@ export async function applyDepositOutcome(
   }
 
   return { applied: true, replayed: mutation.replayed };
+}
+
+/**
+ * Settlement's Credit deposit: a customer paid and the row says otherwise. A
+ * hand adjustment has no link to the deposit, so the sweep or a callback could
+ * credit the same payment again. This credit runs through applyDepositOutcome,
+ * on the anchor they use too, so only one can ever land, and it writes the row.
+ *
+ * Only on the gateway's own word, read now, and only for exactly what the row
+ * asked for (`source: 'admin'` takes the callback's fence). A short or over
+ * payment stays an engineer's call: 2026-10-26's short USDT is the example.
+ *
+ * Audited after the credit, so the log never claims one that was refused. A
+ * crash in between leaves the credit and its ledger row as the record, and the
+ * retry replays on the anchor and writes the log.
+ */
+export async function creditDepositByAdmin(
+  scope: { resolve: <T>(key: string) => T },
+  input: { depositId: string; adminId: string; reason: string },
+): Promise<{ credited: true; replayed: boolean }> {
+  const refused = (message: string) =>
+    new MedusaError(MedusaError.Types.NOT_ALLOWED, message);
+  const packs = resolvePacks<GatewayDeposits>(scope);
+  const [row] = await packs.listGatewayDeposits(
+    { id: input.depositId },
+    { take: 1 },
+  );
+  if (!row) {
+    throw new MedusaError(MedusaError.Types.NOT_FOUND, 'No such deposit.');
+  }
+  if (row.status === 'settled') {
+    throw refused('This deposit is already settled. Nothing was credited.');
+  }
+  const config = rowGatewayConfigs()(row.gateway);
+  if (!config) {
+    throw refused(
+      `Gateway "${row.gateway}" is not configured here, so it cannot confirm this payment. Nothing was credited.`,
+    );
+  }
+  let detail: Awaited<ReturnType<typeof getDepositDetail>>;
+  try {
+    detail = await getDepositDetail(
+      row.merchant_transaction_id,
+      config,
+      rowFx(row),
+    );
+  } catch {
+    throw refused(
+      'The gateway could not be asked about this payment. Nothing was credited. Try again in a moment.',
+    );
+  }
+  if (detail.state !== 'success') {
+    throw refused(
+      'The gateway does not report this deposit as paid. Nothing was credited.',
+    );
+  }
+  const { hand } = await ledgerTrail(packs, {
+    customerId: row.customer_id,
+    anchor: topupIdempotencyReference(
+      row.customer_id,
+      row.merchant_transaction_id,
+    ),
+    refs: [row.merchant_transaction_id, row.gateway_transaction_id],
+  });
+  if (hand) {
+    throw refused(
+      'A hand adjustment already names this deposit. Crediting it would pay the customer twice. Nothing was credited.',
+    );
+  }
+  const outcome = await applyDepositOutcome(scope, row, {
+    state: 'settled',
+    source: 'admin',
+    amount: Number(detail.amount),
+    gatewayRef: row.gateway_transaction_id || row.merchant_transaction_id,
+    netAmount: toOptionalMoney(detail.netAmount),
+    bankReferenceNo: detail.bankReferenceNo || null,
+    uniqueReferenceNo: detail.uniqueReferenceNo || null,
+    gatewayStatus: detail.statusId ?? null,
+    settledAt: new Date(),
+  });
+  if (!outcome.applied) {
+    throw refused(
+      `The gateway reports RM ${detail.amount}, which is not what the deposit asked for. Nothing was credited. Ask an engineer to look at it.`,
+    );
+  }
+  await packs.createAdminActionAudits([
+    {
+      admin_id: input.adminId,
+      entity_type: 'gateway_deposit',
+      entity_id: row.id,
+      action: 'edit',
+      before: { status: row.status },
+      after: { status: 'settled', amount: Number(detail.amount) },
+      reason: input.reason,
+    },
+  ]);
+  // Gone at once, not at the next hourly check: "was not credited" beside a
+  // settled row reads as money still owed. The fence above means the gateway
+  // and the row now agree.
+  await packs.updateGatewayDeposits({ id: row.id, ...stampNote(row, null) });
+  return { credited: true, replayed: outcome.replayed };
 }

@@ -20,7 +20,9 @@ import type PacksModuleService from './service';
 export type GatewayDeposits = Pick<
   PacksModuleService,
   | 'claimDepositStatus'
+  | 'createAdminActionAudits'
   | 'createDepositCapped'
+  | 'listCreditTransactions'
   | 'listFxRates'
   | 'listGatewayDeposits'
   | 'updateGatewayDeposits'

@@ -1004,6 +1004,11 @@
     "acknowledgedFindings_one": "{{count}} acknowledged",
     "acknowledgedFindings_other": "{{count}} acknowledged",
     "acknowledgedToast": "Finding acknowledged",
+    "creditDeposit": "Credit deposit",
+    "creditTitle": "Credit this deposit?",
+    "creditDesc": "The gateway is asked again first. The customer is credited once, through the same step a gateway callback uses, so it can't be paid twice. Don't also make a hand adjustment.",
+    "creditReasonPlaceholder": "What did you check? (recorded in the audit log)",
+    "creditedToast": "Deposit credited",
     "checkAcknowledged_one": "{{count, number}} acknowledged, still differs",
     "checkAcknowledged_other": "{{count, number}} acknowledged, still differ"
   },

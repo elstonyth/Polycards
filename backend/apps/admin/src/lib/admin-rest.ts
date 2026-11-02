@@ -845,6 +845,13 @@ export const acknowledgeAuditFinding = (body: {
     body,
   );
 
+/** Settlement's Credit deposit: the backend asks the gateway again first. */
+export const creditGatewayDeposit = (body: { id: string; reason: string }) =>
+  postJson<{ credited: boolean; replayed: boolean }>(
+    `/admin/payments/deposits/${encodeURIComponent(body.id)}/credit`,
+    { reason: body.reason },
+  );
+
 export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
   return getJson<GatewayAudit>(
     `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
