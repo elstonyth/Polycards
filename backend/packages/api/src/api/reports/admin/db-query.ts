@@ -80,10 +80,10 @@ const REFUSED_FUNCTIONS = new RegExp(
   'i',
 );
 // Password hashes, API keys, invite, reset, verification and MFA tokens,
-// notification contents (reset links), and the staff assistant's chats,
-// memories, schedules and sealed key.
+// notification contents (reset links), the staff assistant's chats, memories,
+// schedules and sealed key, and every customer's IP addresses and browser ids.
 const REFUSED_TABLES =
-  /\b(provider_identity|api_key|(?:member_)?invite|notification|workflow_execution|auth_(?:verification|mfa|password_reset)\w*|assistant_\w+)\b/i;
+  /\b(provider_identity|api_key|(?:member_)?invite|notification|workflow_execution|auth_(?:verification|mfa|password_reset)\w*|assistant_\w+|visitor_signal)\b/i;
 // Partner logins keep their generated password in customer.metadata.
 const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
 // Real names (spec 2026-10-06): refused by NAME in the query, not only

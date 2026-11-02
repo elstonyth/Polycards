@@ -178,6 +178,7 @@ describe('admin RBAC coverage', () => {
       expect.arrayContaining([
         '/admin/customers/*/payout-details',
         '/admin/customers/*/bank-accounts',
+        '/admin/customers/*/visitor-signals',
         '/admin/payments/withdrawals/*/account',
       ]),
     );

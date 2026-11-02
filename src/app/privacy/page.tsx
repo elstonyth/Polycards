@@ -31,6 +31,11 @@ export const metadata: Metadata = {
 //
 // Updated 2026-10-20: Singapore visitors may request codes too.
 //
+// Updated 2026-11-03: IP address and a browser cookie recorded at signup, check-in,
+// claims and withdrawals, kept 180 days, to spot one person running several accounts
+// (ADR 0016). The cookie is security, not analytics, so the banner does not gate
+// it, and the copy says so.
+//
 // Updated 2026-10-06: every account now gives its real name (spec
 // docs/superpowers/specs/2026-10-06-real-name-and-phone-lock-design.md), used
 // only by staff for verification (the copy never names the service). A
@@ -43,7 +48,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'Cookies',
-    body: 'We use cookies to keep you signed in and to remember choices like your referral invite. Analytics cookies (Meta Pixel) are set only if you accept them in the cookie banner — rejecting them keeps the site fully functional. If you accept, the pixel tells Meta which pages and packs you view, when you create an account, when you start a top-up and when it completes (and for how much), and when you open a pack with your balance, so we can see which of our ads work. If you sign up before answering the banner, a small first-party cookie remembers that until you do, so the sign-up can be counted if you accept; nothing reaches Meta unless you accept, and rejecting deletes it. The pixel never receives your password or payment details.',
+    body: 'We use cookies to keep you signed in and to remember choices like your referral invite. One more recognises this browser, to help stop one person running several accounts: it is for account security only, never analytics or advertising, so it is set whichever way you answer the cookie banner. Analytics cookies (Meta Pixel) are set only if you accept them in the cookie banner — rejecting them keeps the site fully functional. If you accept, the pixel tells Meta which pages and packs you view, when you create an account, when you start a top-up and when it completes (and for how much), and when you open a pack with your balance, so we can see which of our ads work. If you sign up before answering the banner, a small first-party cookie remembers that until you do, so the sign-up can be counted if you accept; nothing reaches Meta unless you accept, and rejecting deletes it. The pixel never receives your password or payment details.',
   },
   {
     title: 'Payments',
@@ -59,7 +64,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'Where your data lives',
-    body: 'Data is stored with our hosting provider (DigitalOcean, Singapore region) and retained while your account is active.',
+    body: 'Data is stored with our hosting provider (DigitalOcean, Singapore region) and retained while your account is active. The IP address and browser id we record when you sign up, check in, claim a reward or withdraw are kept for 180 days from the last time we saw them (the cookie itself can stay in your browser for up to 400 days), so our team can check for one person running several accounts, and are deleted sooner if your account is deleted.',
   },
   {
     title: 'Your choices',

@@ -7,6 +7,7 @@ import {
   InjectTransactionManager,
   MedusaContext,
   Modules,
+  generateEntityId,
 } from '@medusajs/framework/utils';
 import type {
   Context,
@@ -90,6 +91,7 @@ import AutomationSandbox from './models/automation-sandbox';
 import AutomationLive from './models/automation-live';
 import CustomerAccountState from './models/customer-account-state';
 import PlayerPayoutDetails from './models/player-payout-details';
+import VisitorSignal from './models/visitor-signal';
 import AdminActionAudit from './models/admin-action-audit';
 import VipMemberState from './models/vip-member-state';
 import VipRewardGrant from './models/vip-reward-grant';
@@ -832,6 +834,9 @@ interface SettleSnapshot {
 // One admin_action_audit row, as every writer supplies it: the model's own
 // columns minus the framework-managed ones. Derived from the model rather than
 // hand-listed so the entity_type/action enums cannot drift from the DB CHECK.
+/** Far more than any real customer's networks and browsers in 180 days. */
+const VISITOR_SIGNAL_ROWS_PER_CUSTOMER = 200;
+
 export type AdminAuditRow = Pick<
   InferTypeOf<typeof AdminActionAudit>,
   | 'admin_id'
@@ -1435,6 +1440,7 @@ class PacksModuleService extends MedusaService({
   AutomationLive,
   CustomerAccountState,
   PlayerPayoutDetails,
+  VisitorSignal,
   AdminActionAudit,
   VipMemberState,
   VipRewardGrant,
@@ -9779,6 +9785,116 @@ class PacksModuleService extends MedusaService({
     return await loadSavedBankAccounts(em, customerId);
   }
 
+  // Which network and browser this account was seen on (ADR 0016). Best effort:
+  // the middleware never awaits it, and nothing refuses a customer because of it.
+  @InjectManager()
+  async recordVisitorSignal(
+    input: { customerId: string; ip: string; deviceId: string | null },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // The cookie's value comes from the browser, so a script could mint endless
+    // rows by rotating it. Past the cap an account just stops adding rows, and an
+    // account that far past normal is a clue in itself.
+    await em.execute(
+      'INSERT INTO visitor_signal (id, customer_id, ip, device_id, first_seen_at, last_seen_at) ' +
+        'SELECT ?, ?, ?, ?, now(), now() ' +
+        'WHERE (SELECT count(*) FROM visitor_signal WHERE customer_id = ?) < ? ' +
+        'ON CONFLICT (customer_id, ip, device_id) DO UPDATE SET ' +
+        'last_seen_at = now(), hits = visitor_signal.hits + 1, updated_at = now()',
+      [
+        generateEntityId('', 'vsig'),
+        input.customerId,
+        input.ip,
+        input.deviceId ?? '',
+        input.customerId,
+        VISITOR_SIGNAL_ROWS_PER_CUSTOMER,
+      ],
+    );
+  }
+
+  // Other accounts seen on this customer's browser or network, for support. A
+  // crowded IP lists only its first 10 accounts: a mobile network can put
+  // thousands of strangers on one address, so the smallest groups come first.
+  @InjectManager()
+  async visitorSignalMatches(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    recorded: boolean;
+    /** Seen on a request the storefront did not sign: a direct API call or script. */
+    unsigned: boolean;
+    device: { customer_id: string; last_seen_at: string }[];
+    /** How many other accounts share a browser, when `device` is cut short. */
+    device_total: number;
+    ip: { ip: string; accounts: number; customer_ids: string[] }[];
+    /** How many networks are shared, when `ip` is cut short. */
+    ip_total: number;
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [seen] = await em.execute<{ n: number; unsigned: number }[]>(
+      "SELECT count(*)::int AS n, count(*) FILTER (WHERE ip = 'unsigned')::int AS unsigned " +
+        'FROM visitor_signal WHERE customer_id = ?',
+      [customerId],
+    );
+    const device = await em.execute<
+      { customer_id: string; last_seen_at: string; total: number }[]
+    >(
+      'SELECT customer_id, max(last_seen_at) AS last_seen_at, (count(*) OVER ())::int AS total FROM visitor_signal ' +
+        "WHERE customer_id <> ? AND device_id <> '' AND device_id IN " +
+        "(SELECT device_id FROM visitor_signal WHERE customer_id = ? AND device_id <> '') " +
+        'GROUP BY customer_id ORDER BY last_seen_at DESC LIMIT 20',
+      [customerId, customerId],
+    );
+    const ip = await em.execute<
+      {
+        ip: string;
+        accounts: number;
+        customer_ids: string[];
+        total: number;
+      }[]
+    >(
+      'SELECT ip, count(DISTINCT customer_id)::int AS accounts, ' +
+        '(array_agg(DISTINCT customer_id))[1:10] AS customer_ids, ' +
+        '(count(*) OVER ())::int AS total ' +
+        'FROM visitor_signal WHERE customer_id <> ? AND ip IN ' +
+        "(SELECT ip FROM visitor_signal WHERE customer_id = ? AND ip <> 'unsigned') " +
+        'GROUP BY ip ORDER BY accounts ASC, ip LIMIT 10',
+      [customerId, customerId],
+    );
+    return {
+      recorded: seen.n > 0,
+      unsigned: seen.unsigned > 0,
+      device: device.map(({ customer_id, last_seen_at }) => ({
+        customer_id,
+        last_seen_at,
+      })),
+      device_total: device[0]?.total ?? 0,
+      ip: ip.map(({ ip: address, accounts, customer_ids }) => ({
+        ip: address,
+        accounts,
+        customer_ids,
+      })),
+      ip_total: ip[0]?.total ?? 0,
+    };
+  }
+
+  // The 180 days the privacy page promises (jobs/purge-visitor-signals.ts), and
+  // any row a request in flight wrote just after its account was deleted.
+  @InjectManager()
+  async purgeVisitorSignals(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute(
+      "DELETE FROM visitor_signal WHERE last_seen_at < now() - interval '180 days' " +
+        'OR customer_id IN (SELECT id FROM customer WHERE deleted_at IS NOT NULL)',
+    );
+  }
+
   // Which of this customer's saved accounts support has verified (ADR 0015). Read
   // by the payout checks, with the same SELECT as savedBankAccountsFor.
   @InjectManager()
@@ -11336,6 +11452,9 @@ class PacksModuleService extends MedusaService({
     );
 
     // Pure personal data, no business value — deleted outright.
+    await em.execute(`delete from "visitor_signal" where "customer_id" = ?`, [
+      customerId,
+    ]);
     await em.execute(
       `delete from "player_payout_details" where "customer_id" = ?`,
       [customerId],

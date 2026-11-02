@@ -35,6 +35,7 @@ import {
   useSetCustomerReferrer,
   useSetPartnerRate,
   useSetPlayerGroup,
+  useVisitorSignals,
   type CustomerReferralCard,
 } from '../../../lib/queries';
 import { orderDateTime, rm } from '../../../lib/format';
@@ -141,6 +142,105 @@ const BankForm = ({
   );
 };
 
+/** Other players, each a link to their page. */
+const PlayerLinks = ({
+  players,
+}: {
+  players: { customer_id: string; handle: string | null }[];
+}) => {
+  const navigate = useNavigate();
+  return (
+    <>
+      {players.map((other, i) => (
+        <span key={other.customer_id}>
+          {i > 0 && ', '}
+          <button
+            type="button"
+            className="text-ui-fg-interactive hover:underline"
+            onClick={() =>
+              navigate(`/customers/${other.customer_id}?tab=profile`)
+            }
+          >
+            {other.handle ?? other.customer_id}
+          </button>
+        </span>
+      ))}
+    </>
+  );
+};
+
+/** At this many other accounts an IP reads as a mobile network, not one person. */
+const CROWDED_IP_ACCOUNTS = 20;
+
+/** Who else was seen on this player's browser or network (ADR 0016). A clue for
+ *  support: nothing here refuses the customer. */
+const VisitorSignalsCard = ({ customerId }: { customerId: string }) => {
+  const { t } = useTranslation();
+  const { data, isError } = useVisitorSignals(customerId);
+  return (
+    <Container className="p-0">
+      <div className="px-6 py-4">
+        <Heading level="h2">{t('players.signalsTitle')}</Heading>
+        <Text className="text-ui-fg-subtle mt-1" size="small">
+          {t('players.signalsSubtitle')}
+        </Text>
+      </div>
+      {isError ? (
+        <TableState isError />
+      ) : !data ? (
+        <div className="border-t px-6 py-6">
+          <LoadingSkeleton />
+        </div>
+      ) : !data.recorded ? (
+        <TableState empty={t('players.signalsNone')} />
+      ) : data.device.length === 0 && data.ip.length === 0 && !data.unsigned ? (
+        <TableState empty={t('players.signalsClear')} />
+      ) : (
+        <div className="flex flex-col gap-2 border-t px-6 py-4">
+          {data.unsigned && (
+            <Text size="small">{t('players.signalsUnsigned')}</Text>
+          )}
+          {data.device.length > 0 && (
+            <Text size="small">
+              <span className="font-medium">{t('players.signalsDevice')}:</span>{' '}
+              <PlayerLinks players={data.device} />
+              {data.device_total > data.device.length &&
+                ` ${t('players.signalsMore', {
+                  count: data.device_total - data.device.length,
+                })}`}
+            </Text>
+          )}
+          {data.ip.map((network) => (
+            <Text key={network.ip} size="small">
+              <span className="font-medium">
+                {t('players.signalsIp', { ip: network.ip })}:
+              </span>{' '}
+              {network.accounts >= CROWDED_IP_ACCOUNTS ? (
+                t('players.signalsCrowded', { count: network.accounts })
+              ) : (
+                <>
+                  <PlayerLinks players={network.customers} />
+                  {network.accounts > network.customers.length &&
+                    ` ${t('players.signalsMore', {
+                      count: network.accounts - network.customers.length,
+                    })}`}
+                </>
+              )}
+            </Text>
+          ))}
+          {data.ip_total > data.ip.length && (
+            <Text size="small" className="text-ui-fg-subtle">
+              {t('players.signalsMoreNetworks', {
+                count: data.ip_total - data.ip.length,
+              })}
+            </Text>
+          )}
+        </div>
+      )}
+    </Container>
+  );
+};
+
 /** The account withdrawals actually go to, and the only way to change it: a
  *  player can neither remove it nor add a second one (ADR 0015). Holds come from
  *  the same check the payout runs: any unverified shared number holds the whole
@@ -153,7 +253,6 @@ const SavedBankAccountsCard = ({
   canEdit: boolean;
 }) => {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const { data, isError } = useSavedBankAccounts(customerId);
   const remove = useRemoveSavedBankAccount(customerId);
   const verify = useSetBankShareVerified(customerId);
@@ -255,20 +354,7 @@ const SavedBankAccountsCard = ({
             {account.linked.length > 0 && (
               <Text size="small" className="text-ui-fg-subtle mt-2">
                 {t('players.savedBankLinked')}:{' '}
-                {account.linked.map((other, i) => (
-                  <span key={other.customer_id}>
-                    {i > 0 && ', '}
-                    <button
-                      type="button"
-                      className="text-ui-fg-interactive hover:underline"
-                      onClick={() =>
-                        navigate(`/customers/${other.customer_id}?tab=profile`)
-                      }
-                    >
-                      {other.handle ?? other.customer_id}
-                    </button>
-                  </span>
-                ))}
+                <PlayerLinks players={account.linked} />
               </Text>
             )}
           </div>
@@ -1170,6 +1256,7 @@ export const ProfileTab = ({ customerId }: { customerId: string }) => {
       {canSeeBank && (
         <SavedBankAccountsCard customerId={customerId} canEdit={canEdit} />
       )}
+      {canSeeBank && <VisitorSignalsCard customerId={customerId} />}
 
       {(canSeeBank || canSeePayments) && (
         <Container className="p-0">

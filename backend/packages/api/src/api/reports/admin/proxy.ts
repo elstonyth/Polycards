@@ -55,6 +55,10 @@ const BLOCKED: [RegExp, string][] = [
   [/^\/admin\/uploads(\/|$)/, 'uploads'],
   [/^\/admin\/coin-flips(\/|$)/, 'coin flip rounds and settings (actual odds)'],
   [
+    /^\/admin\/customers\/[^/]+\/visitor-signals(\/|$)/,
+    "customers' IP addresses and browser ids",
+  ],
+  [
     /^\/admin\/pricecharting(\/|$)/,
     'PriceCharting lookups (each one costs an API call)',
   ],
