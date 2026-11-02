@@ -46,6 +46,9 @@ Accepted, with what covers each:
 - A stranger who saves someone's number first locks the real owner out until support
   acts. Wallets are the exception at save: an address is public on-chain and has no
   holder name, so only one already paid out to blocks a save.
+- A stranger who saves someone's public wallet address holds that owner's payouts until
+  support verifies them. Counting saved wallets at payout is what stops accounts racing
+  past the check on one address, and that matters more.
 - This matches account numbers, so it cannot see one person with several real
   destinations: a fresh USDT wallet per account, or a Singapore bank number on one
   account and the PayNow mobile linked to it on another.

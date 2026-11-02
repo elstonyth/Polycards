@@ -35,6 +35,7 @@ describe('blockedReason', () => {
     ['/admin/workflows-executions', /workflow/],
     ['/admin/notifications', /notification/],
     ['/admin/uploads', /uploads/],
+    ['/admin/customers/cus_1/visitor-signals', /IP addresses/],
     ['/admin/coin-flips', /coin flip/],
     ['/admin/coin-flips/settings', /coin flip/],
     ['/admin/COIN-FLIPS/Settings', /coin flip/],

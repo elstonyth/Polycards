@@ -113,6 +113,8 @@ describe('visitorBucket', () => {
   it('keys an IPv4 address on itself, unwrapping the IPv4-mapped form', () => {
     expect(visitorBucket('175.143.0.1')).toBe('175.143.0.1');
     expect(visitorBucket('::ffff:175.143.0.1')).toBe('175.143.0.1');
+    // The same address in hex must not collapse every such address into one /64.
+    expect(visitorBucket('::ffff:af8f:1')).toBe('175.143.0.1');
   });
 
   // One subscriber is normally handed a whole /64, and the device picks the
@@ -268,13 +270,69 @@ describe('recordVisitorSignal', () => {
     expect(record.mock.calls[0][0].deviceId).toBeNull();
   });
 
-  it('records nothing for an unsigned request, whatever it claims', () => {
+  it('marks an unsigned request as such, believing nothing it claims', () => {
     const { record, next } = run({
       'x-visitor-ip': '175.143.0.1',
       'x-visitor-device': DEVICE,
     });
+    expect(record).toHaveBeenCalledWith({
+      customerId: 'cus_1',
+      ip: 'unsigned',
+      deviceId: null,
+    });
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('records nothing while signing is off', () => {
+    process.env.STOREFRONT_VISITOR_SECRET = SECRET;
+    const record = jest.fn().mockResolvedValue(undefined);
+    const next = jest.fn();
+    delete process.env.STOREFRONT_VISITOR_SECRET;
+    recordVisitorSignal(
+      {
+        headers: {},
+        auth_context: { actor_id: 'cus_1' },
+        scope: { resolve: () => ({ recordVisitorSignal: record }) },
+      } as never,
+      {} as never,
+      next,
+    );
     expect(record).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledWith();
+  });
+
+  it('logs no customer details when a write fails', async () => {
+    const error = Object.assign(
+      new Error('insert values (cus_1, 175.143.0.1) failed'),
+      { code: '53300' },
+    );
+    const { warn } = run(
+      signedHeaders('175.143.0.1'),
+      jest.fn().mockRejectedValue(error),
+    );
+    await new Promise((r) => setImmediate(r));
+    expect(warn.mock.calls[0][0]).toContain('53300');
+    expect(warn.mock.calls[0][0]).not.toContain('175.143.0.1');
+    expect(warn.mock.calls[0][0]).not.toContain('cus_1');
+  });
+
+  it('is wired after authenticate and the limiter on exactly these routes', () => {
+    const entries = extractLimiterEntries(
+      readFileSync(MIDDLEWARES_PATH, 'utf8'),
+    ).filter((e) => /\brecordVisitorSignal\b/.test(e.middlewares));
+    expect(entries.map((e) => e.matcher).sort()).toEqual([
+      '/store/credits/withdraw',
+      '/store/customers/me/real-name',
+      '/store/tasks/*/claim',
+      '/store/tasks/checkin',
+      '/store/tasks/claims/*',
+    ]);
+    for (const e of entries) {
+      expect(e.methods).toEqual(['POST']);
+      expect(e.middlewares.indexOf('authenticate')).toBeLessThan(
+        e.middlewares.indexOf('recordVisitorSignal'),
+      );
+    }
   });
 
   it('records nothing without a customer', () => {

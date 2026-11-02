@@ -23,13 +23,16 @@
  * Beside the pair goes a random id for this browser (x-visitor-device, from the
  * DEVICE_COOKIE first-party cookie), for support's same-device flag (ADR 0016). A
  * security cookie, so it is set whichever way the cookie banner was answered.
- * It is created on a write only: an anonymous page must not carry a Set-Cookie,
- * or the CDN stops caching it.
+ * It is created on a signed-in write only. Every route that records it is signed
+ * in, an anonymous page must not carry a Set-Cookie or the CDN stops caching it,
+ * and setting a cookie makes a server action render the whole page, which a bot
+ * replaying a login or reset form must not be able to trigger.
  */
 import 'server-only';
 import { createHmac, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { cookies, headers } from 'next/headers';
+import { AUTH_COOKIE } from '@/lib/store-port';
 import type { FetchArgs } from '@medusajs/js-sdk';
 
 const DEVICE_COOKIE = '_polycards_device';
@@ -44,7 +47,7 @@ async function deviceId(write: boolean): Promise<string | null> {
     const store = await cookies();
     const current = store.get(DEVICE_COOKIE)?.value;
     if (current && DEVICE_ID.test(current)) return current;
-    if (!write) return null;
+    if (!write || !store.has(AUTH_COOKIE)) return null;
     const fresh = randomUUID();
     store.set(DEVICE_COOKIE, fresh, {
       httpOnly: true,

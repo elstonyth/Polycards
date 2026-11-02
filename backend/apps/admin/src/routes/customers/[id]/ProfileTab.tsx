@@ -193,14 +193,21 @@ const VisitorSignalsCard = ({ customerId }: { customerId: string }) => {
         </div>
       ) : !data.recorded ? (
         <TableState empty={t('players.signalsNone')} />
-      ) : data.device.length === 0 && data.ip.length === 0 ? (
+      ) : data.device.length === 0 && data.ip.length === 0 && !data.unsigned ? (
         <TableState empty={t('players.signalsClear')} />
       ) : (
         <div className="flex flex-col gap-2 border-t px-6 py-4">
+          {data.unsigned && (
+            <Text size="small">{t('players.signalsUnsigned')}</Text>
+          )}
           {data.device.length > 0 && (
             <Text size="small">
               <span className="font-medium">{t('players.signalsDevice')}:</span>{' '}
               <PlayerLinks players={data.device} />
+              {data.device_total > data.device.length &&
+                ` ${t('players.signalsMore', {
+                  count: data.device_total - data.device.length,
+                })}`}
             </Text>
           )}
           {data.ip.map((network) => (
@@ -221,6 +228,13 @@ const VisitorSignalsCard = ({ customerId }: { customerId: string }) => {
               )}
             </Text>
           ))}
+          {data.ip_total > data.ip.length && (
+            <Text size="small" className="text-ui-fg-subtle">
+              {t('players.signalsMoreNetworks', {
+                count: data.ip_total - data.ip.length,
+              })}
+            </Text>
+          )}
         </div>
       )}
     </Container>

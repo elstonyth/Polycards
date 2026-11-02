@@ -27,6 +27,7 @@ const visitor = vi.hoisted(() => ({
   reads: 0,
   device: undefined as string | undefined,
   canSetCookie: true,
+  signedIn: true,
   set: [] as {
     name: string;
     value: string;
@@ -43,6 +44,7 @@ vi.mock('next/headers', () => ({
   },
   cookies: async () => ({
     get: () => (visitor.device ? { value: visitor.device } : undefined),
+    has: () => visitor.signedIn,
     set: (name: string, value: string, options: Record<string, unknown>) => {
       if (!visitor.canSetCookie)
         throw new Error('Cookies can only be modified in a Server Action.');
@@ -64,6 +66,7 @@ beforeEach(() => {
   visitor.reads = 0;
   visitor.device = undefined;
   visitor.canSetCookie = true;
+  visitor.signedIn = true;
   visitor.set = [];
 });
 afterEach(() => {
@@ -103,6 +106,14 @@ describe('withVisitor — the browser id', () => {
     visitor.device = DEVICE;
     expect(deviceOf(await withVisitor(POST))).toBe(DEVICE);
     expect(visitor.set).toEqual([]);
+  });
+
+  it('never creates one for a guest, so a replayed form cannot force a page render', async () => {
+    visitor.signedIn = false;
+    const init = await withVisitor(POST);
+    expect(deviceOf(init)).toBeUndefined();
+    expect(visitor.set).toEqual([]);
+    expect(pairOf(init)).toBeDefined();
   });
 
   it('never creates one on a read', async () => {

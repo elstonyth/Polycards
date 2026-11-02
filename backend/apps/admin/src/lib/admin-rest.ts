@@ -2051,6 +2051,10 @@ export const getSavedBankAccounts = (id: string) =>
 export interface VisitorSignals {
   /** False until this player's first signup, claim or withdrawal since capture. */
   recorded: boolean;
+  /** Seen on a request the storefront did not sign: a direct API call or script. */
+  unsigned: boolean;
+  device_total: number;
+  ip_total: number;
   device: {
     customer_id: string;
     handle: string | null;

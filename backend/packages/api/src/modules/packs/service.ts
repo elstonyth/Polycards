@@ -834,6 +834,9 @@ interface SettleSnapshot {
 // One admin_action_audit row, as every writer supplies it: the model's own
 // columns minus the framework-managed ones. Derived from the model rather than
 // hand-listed so the entity_type/action enums cannot drift from the DB CHECK.
+/** Far more than any real customer's networks and browsers in 180 days. */
+const VISITOR_SIGNAL_ROWS_PER_CUSTOMER = 200;
+
 export type AdminAuditRow = Pick<
   InferTypeOf<typeof AdminActionAudit>,
   | 'admin_id'
@@ -9791,9 +9794,13 @@ class PacksModuleService extends MedusaService({
   ): Promise<void> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    // The cookie's value comes from the browser, so a script could mint endless
+    // rows by rotating it. Past the cap an account just stops adding rows, and an
+    // account that far past normal is a clue in itself.
     await em.execute(
       'INSERT INTO visitor_signal (id, customer_id, ip, device_id, first_seen_at, last_seen_at) ' +
-        'VALUES (?, ?, ?, ?, now(), now()) ' +
+        'SELECT ?, ?, ?, ?, now(), now() ' +
+        'WHERE (SELECT count(*) FROM visitor_signal WHERE customer_id = ?) < ? ' +
         'ON CONFLICT (customer_id, ip, device_id) DO UPDATE SET ' +
         'last_seen_at = now(), hits = visitor_signal.hits + 1, updated_at = now()',
       [
@@ -9801,6 +9808,8 @@ class PacksModuleService extends MedusaService({
         input.customerId,
         input.ip,
         input.deviceId ?? '',
+        input.customerId,
+        VISITOR_SIGNAL_ROWS_PER_CUSTOMER,
       ],
     );
   }
@@ -9814,38 +9823,66 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     recorded: boolean;
+    /** Seen on a request the storefront did not sign: a direct API call or script. */
+    unsigned: boolean;
     device: { customer_id: string; last_seen_at: string }[];
+    /** How many other accounts share a browser, when `device` is cut short. */
+    device_total: number;
     ip: { ip: string; accounts: number; customer_ids: string[] }[];
+    /** How many networks are shared, when `ip` is cut short. */
+    ip_total: number;
   }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const [seen] = await em.execute<{ n: number }[]>(
-      'SELECT count(*)::int AS n FROM visitor_signal WHERE customer_id = ?',
+    const [seen] = await em.execute<{ n: number; unsigned: number }[]>(
+      "SELECT count(*)::int AS n, count(*) FILTER (WHERE ip = 'unsigned')::int AS unsigned " +
+        'FROM visitor_signal WHERE customer_id = ?',
       [customerId],
     );
     const device = await em.execute<
-      { customer_id: string; last_seen_at: string }[]
+      { customer_id: string; last_seen_at: string; total: number }[]
     >(
-      'SELECT customer_id, max(last_seen_at) AS last_seen_at FROM visitor_signal ' +
+      'SELECT customer_id, max(last_seen_at) AS last_seen_at, (count(*) OVER ())::int AS total FROM visitor_signal ' +
         "WHERE customer_id <> ? AND device_id <> '' AND device_id IN " +
         "(SELECT device_id FROM visitor_signal WHERE customer_id = ? AND device_id <> '') " +
         'GROUP BY customer_id ORDER BY last_seen_at DESC LIMIT 20',
       [customerId, customerId],
     );
     const ip = await em.execute<
-      { ip: string; accounts: number; customer_ids: string[] }[]
+      {
+        ip: string;
+        accounts: number;
+        customer_ids: string[];
+        total: number;
+      }[]
     >(
       'SELECT ip, count(DISTINCT customer_id)::int AS accounts, ' +
-        '(array_agg(DISTINCT customer_id))[1:10] AS customer_ids ' +
+        '(array_agg(DISTINCT customer_id))[1:10] AS customer_ids, ' +
+        '(count(*) OVER ())::int AS total ' +
         'FROM visitor_signal WHERE customer_id <> ? AND ip IN ' +
-        '(SELECT ip FROM visitor_signal WHERE customer_id = ?) ' +
+        "(SELECT ip FROM visitor_signal WHERE customer_id = ? AND ip <> 'unsigned') " +
         'GROUP BY ip ORDER BY accounts ASC, ip LIMIT 10',
       [customerId, customerId],
     );
-    return { recorded: seen.n > 0, device, ip };
+    return {
+      recorded: seen.n > 0,
+      unsigned: seen.unsigned > 0,
+      device: device.map(({ customer_id, last_seen_at }) => ({
+        customer_id,
+        last_seen_at,
+      })),
+      device_total: device[0]?.total ?? 0,
+      ip: ip.map(({ ip: address, accounts, customer_ids }) => ({
+        ip: address,
+        accounts,
+        customer_ids,
+      })),
+      ip_total: ip[0]?.total ?? 0,
+    };
   }
 
-  // The 180 days the privacy page promises (jobs/purge-visitor-signals.ts).
+  // The 180 days the privacy page promises (jobs/purge-visitor-signals.ts), and
+  // any row a request in flight wrote just after its account was deleted.
   @InjectManager()
   async purgeVisitorSignals(
     @MedusaContext() sharedContext: Context = {},
@@ -9853,7 +9890,8 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     await em.execute(
-      "DELETE FROM visitor_signal WHERE last_seen_at < now() - interval '180 days'",
+      "DELETE FROM visitor_signal WHERE last_seen_at < now() - interval '180 days' " +
+        'OR customer_id IN (SELECT id FROM customer WHERE deleted_at IS NOT NULL)',
     );
   }
 

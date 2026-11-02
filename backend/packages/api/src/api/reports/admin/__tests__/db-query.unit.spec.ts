@@ -139,6 +139,7 @@ describe('sqlRefusal', () => {
       /real names stay hidden/,
     ],
     // Owner, 2026-10-30: coin flip's actual odds, rolls and odds sets.
+    ['SELECT ip FROM visitor_signal', /./],
     ['SELECT * FROM coin_flip_config', /actual odds/],
     ['TABLE public."COIN_FLIP_ROUND"', /actual odds/],
     ['SELECT roll AS r FROM coin_flip_round', /actual odds/],

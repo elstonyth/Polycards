@@ -93,6 +93,13 @@ export function vouchedVisitorIp(
 export function visitorBucket(ip: string): string {
   const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
   if (mapped) return mapped[1];
+  // The same IPv4-mapped address in hex, or every such address shares one /64.
+  const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(ip);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16);
+    const lo = parseInt(mappedHex[2], 16);
+    return [hi >> 8, hi & 255, lo >> 8, lo & 255].join('.');
+  }
   if (!isIPv6(ip)) return ip;
   const [head, tail] = ip.split('%')[0].split('::');
   const left = head ? head.split(':') : [];
@@ -125,20 +132,25 @@ export function recordVisitorSignal(
   const ip = vouchedVisitorIp(req);
   const customerId = (req as { auth_context?: { actor_id?: string } })
     .auth_context?.actor_id;
-  if (ip && customerId) {
+  // Unsigned once signing is on means it did not come through the storefront: a
+  // direct API call or a script, which is worth support knowing. Its address is
+  // DigitalOcean's ingress, so it is never stored or matched on.
+  if (customerId && (ip || process.env.STOREFRONT_VISITOR_SECRET)) {
     const device = req.headers[VISITOR_DEVICE_HEADER];
+    // The driver's message can carry the customer id, address and browser id,
+    // which must stay inside the 180-day table.
     const warn = (error: unknown) =>
       (req.scope.resolve('logger') as { warn: (msg: string) => void }).warn(
-        `[visitor-signal] not recorded: ${error instanceof Error ? error.message : String(error)}`,
+        `[visitor-signal] not recorded (${(error as { code?: string })?.code ?? 'no code'})`,
       );
     try {
       req.scope
         .resolve<Pick<PacksModuleService, 'recordVisitorSignal'>>('packs')
         .recordVisitorSignal({
           customerId,
-          ip: visitorBucket(ip),
+          ip: ip ? visitorBucket(ip) : 'unsigned',
           deviceId:
-            typeof device === 'string' && DEVICE_ID.test(device)
+            ip && typeof device === 'string' && DEVICE_ID.test(device)
               ? device
               : null,
         })
