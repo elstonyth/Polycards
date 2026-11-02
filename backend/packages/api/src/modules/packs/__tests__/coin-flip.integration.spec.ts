@@ -22,6 +22,7 @@ import TaskDefinition from '../models/task-definition';
 import TaskClaim from '../models/task-claim';
 import RewardsSettings from '../models/rewards-settings';
 import LuckyDrawTicket from '../models/lucky-draw-ticket';
+import TicketSpin from '../models/ticket-spin';
 import { Migration20261103100000 } from '../migrations/Migration20261103100000';
 import { Migration20261103100100 } from '../migrations/Migration20261103100100';
 import { Migration20261103100200 } from '../migrations/Migration20261103100200';
@@ -34,7 +35,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [CoinFlipConfig, CoinFlipRound, Pull, Card, FxRate, CreditTransaction,
     CustomerAccountState, LedgerEntry, LedgerSequence, AdminActionAudit, Pack, DeliveryOrder, DeliveryOrderItem,
-    LosslessSchedule, TaskDefinition, TaskClaim, RewardsSettings, LuckyDrawTicket],
+    LosslessSchedule, TaskDefinition, TaskClaim, RewardsSettings, LuckyDrawTicket, TicketSpin],
   testSuite: ({ service, MikroOrmWrapper }) => {
     const settings = (win = 100) => ({ enabled: true,
       win_percent: win, win_percent_2: null, win_percent_3: null, published_win_percent: 50 });
