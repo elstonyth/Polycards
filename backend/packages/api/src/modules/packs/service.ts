@@ -939,7 +939,7 @@ export type AdminLuckyDrawEvent = {
 
 /** A card's RM value as the vault, the task hub and the Lucky Draw admin
  *  overview show it. */
-function cardValueMyr(
+export function cardValueMyr(
   card: { market_value: unknown; market_multiplier?: unknown },
   fxRate: number,
 ): number {
@@ -3365,7 +3365,9 @@ class PacksModuleService extends MedusaService({
     const period = { weekStartIso: week.weekStartIso, dayIso: day.dayIso };
     const [defs, facts, claims, unspent] = await Promise.all([
       this.listTaskDefinitions(
-        { active: true },
+        // Weekly rows stay active after they end, so leave those out: taskIsLive
+        // would drop them anyway, and past the cap they'd crowd out live tasks.
+        { active: true, $or: [{ ends_at: null }, { ends_at: { $gt: at } }] },
         // 500 matches the admin list cap — past it, definitions would vanish
         // from the hub silently, so keep the two bounds identical.
         { order: { sort: 'ASC' }, take: 500 },
@@ -3929,7 +3931,18 @@ class PacksModuleService extends MedusaService({
     // the active toggle re-POST the whole definition, and a card or pack
     // deleted since the save must not 400 the very action that fixes it
     // (review 2026-09).
-    if (!existing || !isDeepStrictEqual(existing.reward, reward)) {
+    // Compared as validated, so a key left over from an older rule isn't a change.
+    const sameRule = <T>(stored: unknown, validate: () => T, next: T) => {
+      try {
+        return stored != null && isDeepStrictEqual(validate(), next);
+      } catch {
+        return false;
+      }
+    };
+    if (
+      !existing ||
+      !sameRule(existing.reward, () => validateTaskReward(existing.reward), reward)
+    ) {
       if (reward.type === 'card') {
         const [card] = await this.listCards(
           { handle: reward.card_handle },
@@ -3963,7 +3976,14 @@ class PacksModuleService extends MedusaService({
         }
       }
     }
-    if (!existing || !isDeepStrictEqual(existing.requirement, requirement)) {
+    if (
+      !existing ||
+      !sameRule(
+        existing.requirement,
+        () => validateTaskRequirement(input.kind, existing.requirement),
+        requirement,
+      )
+    ) {
       if (requirement.type === 'rip_count' && requirement.pack_id) {
         const [pack] = await this.listPacks(
           { slug: requirement.pack_id },
@@ -4027,9 +4047,19 @@ class PacksModuleService extends MedusaService({
         starts_at: existing.starts_at,
         ends_at: existing.ends_at,
       };
+      // Medusa's update merges into a JSON column, so a key the new rule lacks
+      // would survive it, and could outrank the new rule's own amount. The two rule
+      // columns go in whole.
+      const { requirement: wholeRequirement, reward: wholeReward, ...columns } =
+        data;
       await this.updateTaskDefinitions(
-        { selector: { id }, data },
+        { selector: { id }, data: columns },
         sharedContext,
+      );
+      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      await em.execute(
+        'UPDATE task_definition SET requirement = ?::jsonb, reward = ?::jsonb, updated_at = now() WHERE id = ?',
+        [JSON.stringify(wholeRequirement), JSON.stringify(wholeReward), id],
       );
     } else {
       const [row] = await this.createTaskDefinitions([data], sharedContext);
@@ -4048,6 +4078,20 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { id };
+  }
+
+  /** How many claims each task definition has, for the admin console. */
+  @InjectManager()
+  async taskClaimCounts(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ task_id: string; n: string }[]>(
+      'SELECT task_id, COUNT(*)::bigint AS n FROM task_claim WHERE deleted_at IS NULL GROUP BY task_id',
+      [],
+    );
+    return new Map(rows.map((r) => [r.task_id, Number(r.n)]));
   }
 
   // Admin CRUD for the storefront announcement popup (spec 2026-10-06 §5) —
