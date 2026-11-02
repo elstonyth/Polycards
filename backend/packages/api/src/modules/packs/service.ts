@@ -5908,6 +5908,7 @@ class PacksModuleService extends MedusaService({
         FREE_PULL_LOCKED_MESSAGE,
       );
     }
+    await this.assertNotSoldBack([pullId], sharedContext);
 
     // 2) Snapshot the shipping address (denormalized at request time). A missing
     //    required field is a bad request, surfaced here as 'invalid' (the route
@@ -6058,6 +6059,27 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // A sell-back that dies between its credit and its flip leaves the pull vaulted
+  // and already paid for, and the credit is what says so. Reading it here cannot
+  // strand a sell-back still running: it either flips first, or loses to this
+  // order's flip and deletes its credit.
+  private async assertNotSoldBack(
+    pullIds: string[],
+    sharedContext: Context,
+  ): Promise<void> {
+    const [paid] = await this.listCreditTransactions(
+      { pull_id: pullIds, reason: 'buyback' },
+      { take: 1, select: ['id'] },
+      sharedContext,
+    );
+    if (paid) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'One or more cards were already sold back.',
+      );
+    }
+  }
+
   // Collapses request-delivery's three writes (order, items, pull flip) plus
   // the paired OD ledger row into ONE transaction (POLYCARD-BACK §5.3:
   // "vault - at order CREATE"). Replaces the step's previous three-stage
@@ -6098,6 +6120,7 @@ class PacksModuleService extends MedusaService({
       { take: input.pullIds.length },
       sharedContext,
     );
+    await this.assertNotSoldBack(input.pullIds, sharedContext);
     // Prize pulls ride in this parcel (2026-10-23) but stay outside value
     // tracking, as recordRewardWithdrawal writes them: they add insurance on
     // their own value, never vault_delta.
@@ -12190,6 +12213,64 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return 'acknowledged';
+  }
+
+  /**
+   * What a process dying between two money writes leaves behind: an open charged
+   * with nothing recorded for it, and a sell-back paid with its card not flipped.
+   * Read-only; moneyIntegrityFindings adds denied payouts and is what callers use.
+   */
+  @InjectManager()
+  async unfinishedMoneyRows(
+    since: Date,
+    until: Date,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      kind: 'open_without_prize' | 'sold_without_flip';
+      id: string;
+      customer_id: string;
+      amount: string | number;
+      at: string | Date;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const from = since.toISOString();
+    const to = until.toISOString();
+    // The pull's rolled_at comes a moment before its charge, hence the margin.
+    const rolledFrom = new Date(since.getTime() - 60 * 60 * 1000).toISOString();
+    return em.execute(
+      `SELECT 'open_without_prize' AS kind, ct.id, ct.customer_id, -ct.amount AS amount, ct.created_at AS at
+         FROM credit_transaction ct
+        WHERE ct.deleted_at IS NULL
+          AND ct.reason = 'pack_open'
+          AND ct.amount < 0
+          AND ct.source_transaction_id IS NOT NULL
+          AND ct.created_at >= ? AND ct.created_at < ?
+          AND NOT EXISTS (SELECT 1 FROM pull p
+                           WHERE p.open_id = ct.source_transaction_id
+                             AND p.rolled_at >= ?
+                             AND p.deleted_at IS NULL)
+          AND NOT EXISTS (SELECT 1 FROM ticket_spin s
+                           WHERE s.open_id = ct.source_transaction_id
+                             AND s.deleted_at IS NULL)
+          AND NOT EXISTS (SELECT 1 FROM credit_transaction r
+                           WHERE r.reference = 'reversal:' || ct.id
+                             AND r.deleted_at IS NULL)
+       UNION ALL
+       SELECT 'sold_without_flip' AS kind, p.id, ct.customer_id, ct.amount, ct.created_at AS at
+         FROM credit_transaction ct
+         JOIN pull p ON p.id = ct.pull_id
+        WHERE ct.deleted_at IS NULL
+          AND ct.reason = 'buyback'
+          AND ct.created_at >= ? AND ct.created_at < ?
+          AND p.deleted_at IS NULL
+          AND p.status <> 'bought_back'
+        ORDER BY at DESC
+        LIMIT 100`,
+      [from, to, rolledFrom, from, to],
+    );
   }
 
   @InjectManager()

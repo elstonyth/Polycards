@@ -845,6 +845,20 @@ export const acknowledgeAuditFinding = (body: {
     body,
   );
 
+/** Money a crash left half-moved. Detection only: nothing here moves money. */
+export interface MoneyIntegrity {
+  findings: {
+    kind: 'open_without_prize' | 'sold_without_flip' | 'denied_without_refund';
+    id: string;
+    customer_id: string;
+    amount: number;
+    at: string;
+  }[];
+}
+
+export const getMoneyIntegrity = () =>
+  getJson<MoneyIntegrity>('/admin/payments/integrity');
+
 /** Settlement's Credit deposit: the backend asks the gateway again first. */
 export const creditGatewayDeposit = (body: { id: string; reason: string }) =>
   postJson<{ credited: boolean; replayed: boolean }>(

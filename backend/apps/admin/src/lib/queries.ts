@@ -61,6 +61,7 @@ import {
   getGatewayAudit,
   acknowledgeAuditFinding,
   creditGatewayDeposit,
+  getMoneyIntegrity,
   getPaymentGateway,
   savePaymentGateway,
   getWithdrawalControls,
@@ -71,6 +72,7 @@ import {
   type SettlementReport,
   type GatewayBalance,
   type GatewayAudit,
+  type MoneyIntegrity,
   type PaymentGatewaySetting,
   getFxHistory,
   getFxRate,
@@ -375,6 +377,14 @@ export const useGatewayAudit = (
   useQuery({
     queryKey: qk.gatewayAudit(currency),
     queryFn: () => getGatewayAudit(currency),
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+export const useMoneyIntegrity = (): UseQueryResult<MoneyIntegrity> =>
+  useQuery({
+    queryKey: qk.moneyIntegrity,
+    queryFn: getMoneyIntegrity,
     refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });

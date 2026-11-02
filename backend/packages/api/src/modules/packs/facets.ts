@@ -62,6 +62,7 @@ export type GatewayReports = Pick<
   | 'listGatewayWithdrawals'
   | 'listAdminActionAudits'
   | 'listCreditTransactions'
+  | 'unfinishedMoneyRows'
 >;
 
 /**
