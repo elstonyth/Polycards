@@ -32,6 +32,7 @@ export type GatewayDeposits = Pick<
 /** The withdrawal half: hold, claim against the debit, submit, refund. */
 export type GatewayWithdrawals = Pick<
   PacksModuleService,
+  | 'bankShareVerifiedFor'
   | 'listAdminActionAudits'
   | 'claimWithdrawalStatus'
   | 'claimWithdrawalAgainstDebit'

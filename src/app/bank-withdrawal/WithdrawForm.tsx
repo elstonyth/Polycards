@@ -60,7 +60,7 @@ function unusableReason(account: SavedBankAccount, now: Date): string | null {
     );
   }
   if (typeof account.usableFrom !== 'string') {
-    return 'save it again to use it';
+    return 'contact support to update it';
   }
   const wait = timeUntil(account.usableFrom, now);
   return wait ? `available ${wait}` : null;
@@ -135,7 +135,9 @@ const REMEDIES: [RegExp, string | null, string][] = [
   // packs"), kept for a storefront-first deploy; drop once both are live.
   [/is for opening packs/i, '/slots', 'Open packs'],
   [/more on packs/i, '/slots', 'Open packs'],
-  [/under review/i, '/contact', 'Contact support'],
+  // Above the /bank account/ rule: a shared or locked account changes through
+  // support, the /bank page cannot help (ADR 0015).
+  [/under review|contact support/i, '/contact', 'Contact support'],
   [/add an email address/i, '/settings', 'Add an email address'],
   [
     // NOT "bank details": the paused-payouts refusal says "Your bank details

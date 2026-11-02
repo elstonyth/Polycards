@@ -15,18 +15,19 @@ import {
   type CustomerWallet,
 } from '../../../../../modules/packs/facets';
 import {
+  BANK_ACCOUNT_LOCKED_MESSAGE,
   MAX_SAVED_BANK_ACCOUNTS,
+  ONE_BANK_ACCOUNT_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
+  anySavedAccountShared,
+  bankShareVerified,
+  heldByAnother,
   parseSavedBankAccounts,
-  payoutAccountSharingAllowed,
   savedBankAccountId,
   savedBankAccountViews,
   type SavedBankAccount,
 } from '../../../../../modules/packs/saved-accounts';
-import {
-  sendSavedAccountAddedNotice,
-  sendSavedAccountRemovedNotice,
-} from '../../../../../modules/packs/saved-account-notice';
+import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-account-notice';
 import {
   channelStatus,
   destinationMinRm,
@@ -34,9 +35,11 @@ import {
   tngPausedReason,
 } from '../../../../../modules/packs/withdrawal-controls';
 
-// Saved payout bank accounts — GET (list) / POST (add) / DELETE (remove) on
+// Saved payout bank accounts — GET (list) / POST (add) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
-// merged read-modify-write like the avatar/frame routes.
+// merged read-modify-write like the avatar/frame routes. DELETE only refuses:
+// once tied, an account changes through support (ADR 0015, the admin
+// customers/:id/bank-accounts routes).
 //
 // WHAT KEEPS THIS ROUTE THE ONLY WRITER is our own middleware, NOT the
 // framework. Medusa's stock POST /store/customers/me *accepts* client metadata:
@@ -55,7 +58,7 @@ import {
 // cooling-off window below — then withdraw to it. Do not "simplify" it away on
 // the belief that the framework already rejects metadata.
 //
-// Both writes go through
+// The write goes through
 // PacksModuleService.mutateCustomerMetadata, which holds a `metadata:<customer>`
 // advisory lock across the read and the write — the blob is shared with the
 // avatar and frame routes, and an unlocked merge drops whichever key the loser
@@ -88,7 +91,6 @@ export {
   MAX_SAVED_BANK_ACCOUNTS,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   parseSavedBankAccounts,
-  payoutAccountSharingAllowed,
   savedBankAccountId,
   type SavedBankAccount,
 };
@@ -107,44 +109,47 @@ function requireCustomerId(customerId: string): string {
   return customerId;
 }
 
-/** Read-only list for GET. The write paths do their own read INSIDE the lock. */
-async function loadAccounts(
+/** Read-only blob for GET. The write path does its own read INSIDE the lock. */
+async function loadMetadata(
   req: AuthenticatedMedusaRequest,
   customerId: string,
-): Promise<SavedBankAccount[]> {
+): Promise<Record<string, unknown>> {
   const customers = req.scope.resolve(Modules.CUSTOMER);
   const customer = await customers.retrieveCustomer(
     requireCustomerId(customerId),
   );
-  const metadata = (customer.metadata ?? {}) as Record<string, unknown>;
-  return parseSavedBankAccounts(metadata.bank_accounts);
+  return (customer.metadata ?? {}) as Record<string, unknown>;
 }
 
 /**
  * Run `mutate` against this customer's metadata under the
- * `metadata:<customer>` advisory lock and return the saved list as it was
- * actually written — never as the caller hoped to write it.
+ * `metadata:<customer>` advisory lock and return the blob as it was actually
+ * written — never as the caller hoped to write it.
  */
 async function mutateAccounts(
   req: AuthenticatedMedusaRequest,
   customerId: string,
-  mutate: (accounts: SavedBankAccount[]) => SavedBankAccount[] | null,
-): Promise<SavedBankAccount[]> {
+  mutate: (
+    accounts: SavedBankAccount[],
+    metadata: Record<string, unknown>,
+  ) => SavedBankAccount[] | null,
+): Promise<Record<string, unknown>> {
   const packs = resolvePacks<CustomerWallet>(req.scope);
-  const metadata = await packs.mutateCustomerMetadata({
+  return await packs.mutateCustomerMetadata({
     customerId: requireCustomerId(customerId),
     mutate: (current) => {
-      const next = mutate(parseSavedBankAccounts(current.bank_accounts));
+      const next = mutate(
+        parseSavedBankAccounts(current.bank_accounts),
+        current,
+      );
       return next === null ? null : { ...current, bank_accounts: next };
     },
   });
-  return parseSavedBankAccounts(metadata.bank_accounts);
 }
 
 /**
  * Every response here carries full account numbers, so none of them may land
- * in a shared/browser cache (CWE-525). Applied to all three handlers — POST
- * and DELETE echo the same list GET serves.
+ * in a shared/browser cache (CWE-525). POST echoes the same list GET serves.
  */
 function noStore(res: MedusaResponse): MedusaResponse {
   res.setHeader('Cache-Control', 'no-store');
@@ -154,18 +159,23 @@ function noStore(res: MedusaResponse): MedusaResponse {
 /**
  * The store view of a saved list: payable-or-not against the active gateway
  * AND any open regional one, plus the currency the bank is paid in (SGD for a
- * Singapore bank via A3Pay), so the withdraw form can show what arrives.
+ * Singapore bank via A3Pay), so the withdraw form can show what arrives. A
+ * shared account reads as on hold, with what to do, ahead of the payout refusal.
  */
 async function accountViews(
   req: AuthenticatedMedusaRequest,
-  accounts: Parameters<typeof savedBankAccountViews>[0],
+  customerId: string,
+  metadata: Record<string, unknown>,
 ) {
+  const accounts = parseSavedBankAccounts(metadata.bank_accounts);
+  const packs = resolvePacks<CustomerWallet>(req.scope);
+  const onHold =
+    !bankShareVerified(metadata) &&
+    (await anySavedAccountShared(packs, customerId, accounts));
   const active = await resolveActiveGateway(req.scope);
   // The admin's Touch 'n Go switch and floor (withdrawal-controls.ts), so the
   // form shows a paused TNG account as such and states the right minimum.
-  const controls = await resolvePacks<CustomerWallet>(
-    req.scope,
-  ).withdrawalControls();
+  const controls = await packs.withdrawalControls();
   const tng = channelStatus(controls.tng, Date.now());
   return savedBankAccountViews(
     accounts,
@@ -192,9 +202,12 @@ async function accountViews(
         ? {
             supported: false,
             unavailableReason: findBank(view.bankCode)?.accountLengths?.length
-              ? `${invalid} Remove this account and add it again with the correct bank country and account number.`
+              ? `${invalid} Contact support to change it to the correct bank country and account number.`
               : invalid,
           }
+        : {}),
+      ...(onHold
+        ? { supported: false, unavailableReason: SHARED_PAYOUT_ACCOUNT_MESSAGE }
         : {}),
     };
   });
@@ -204,9 +217,9 @@ export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const accounts = await loadAccounts(req, req.auth_context.actor_id);
+  const metadata = await loadMetadata(req, req.auth_context.actor_id);
   noStore(res).json({
-    accounts: await accountViews(req, accounts),
+    accounts: await accountViews(req, req.auth_context.actor_id, metadata),
   });
 }
 
@@ -268,41 +281,28 @@ export async function POST(
 
   // Looked up before the lock (it reads OTHER customers, which this
   // customer's metadata lock does not cover) but applied inside it, where
-  // "already on my list" is decided from the locked read. Two strangers saving
-  // one number in the same instant can both get through; that race is not the
-  // farming pattern this stops.
+  // "already on my list" and support's verification are decided from the locked
+  // read. Two strangers saving one number in the same instant can both get
+  // through, and are both held at payout, which sees the other's saved entry.
   //
-  // A number another customer has only SAVED blocks under the same holder
-  // name (one person, several accounts: 10 of the 13 clusters). Otherwise
-  // anyone who knew a stranger's number could save it first and lock the real
-  // owner out. A number already PAID OUT to blocks under any name, and a
-  // different spelling that slips in here is stopped at payout
-  // (startWithdrawal refuses a number someone else was paid to first).
-  // A wallet has no holder name to tell owners apart, and its address is
-  // public on-chain: only a wallet already PAID OUT to blocks it here.
-  const sameHolder = (name: string | null) =>
-    name == null ||
-    (!bank.wallet &&
-      name.toLowerCase().replace(/\s+/g, ' ').trim() ===
-        account.accountHolderName.toLowerCase().replace(/\s+/g, ' '));
-  const heldByAnother =
-    !payoutAccountSharingAllowed(customerId) &&
-    (
-      await resolvePacks<CustomerWallet>(req.scope).otherPayoutAccountHolders(
-        customerId,
-        accountNumber,
-        bank.wallet !== undefined,
-      )
-    ).some(
-      (h) =>
-        findBank(h.bank_code)?.id === bankCode && sameHolder(h.holder_name),
-    );
+  // Any holder blocks, under any name: one ring typed ten holder names onto one
+  // number, which the old same-name rule let straight through. A stranger who
+  // saves someone's number first locks the owner out until support removes it;
+  // support is the answer to that (ADR 0015).
+  const shared = heldByAnother(
+    await resolvePacks<CustomerWallet>(req.scope).otherPayoutAccountHolders(
+      customerId,
+      accountNumber,
+      bank.wallet !== undefined,
+    ),
+    bankCode,
+  );
 
   // The cap is checked against the list read INSIDE the lock, not against one
   // this handler read earlier — otherwise two concurrent saves could both see
   // MAX-1 accounts and both be allowed through.
   let added = false;
-  const saved = await mutateAccounts(req, customerId, (accounts) => {
+  const saved = await mutateAccounts(req, customerId, (accounts, metadata) => {
     const existing = accounts.findIndex((a) => a.id === account.id);
     if (existing >= 0) {
       // Idempotent re-add: refresh the label/holder in place (a customer fixing
@@ -318,7 +318,13 @@ export async function POST(
         i === existing ? { ...account, savedAt: prior.savedAt } : a,
       );
     }
-    if (heldByAnother) {
+    if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        ONE_BANK_ACCOUNT_MESSAGE,
+      );
+    }
+    if (shared && !bankShareVerified(metadata)) {
       // The refusal tells the customer the number is linked elsewhere; log
       // it so repeated probing for linked numbers shows up. Last 4 only.
       req.scope
@@ -329,12 +335,6 @@ export async function POST(
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         SHARED_PAYOUT_ACCOUNT_MESSAGE,
-      );
-    }
-    if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        `You can save up to ${MAX_SAVED_BANK_ACCOUNTS} bank accounts — remove one first.`,
       );
     }
     added = true;
@@ -357,48 +357,18 @@ export async function POST(
     });
   }
   noStore(res).json({
-    accounts: await accountViews(req, saved),
+    accounts: await accountViews(req, customerId, saved),
   });
 }
 
+// Kept so a page opened before this rule shipped gets the reason, not a 404.
 export async function DELETE(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
+  _res: MedusaResponse,
 ): Promise<void> {
-  const customerId = requireCustomerId(req.auth_context.actor_id);
-  const id = (req.body as { id?: unknown } | null)?.id;
-  if (typeof id !== 'string' || id.length === 0) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      'Say which saved account to remove.',
-    );
-  }
-
-  let removed: SavedBankAccount | null = null;
-  const saved = await mutateAccounts(req, customerId, (accounts) => {
-    const next = accounts.filter((a) => a.id !== id);
-    // Removing an already-gone account succeeds: the customer's goal (that
-    // account no longer listed) is met, and a refresh-then-retry must not
-    // error. `null` = nothing changed, so no write is issued at all.
-    if (next.length === accounts.length) return null;
-    removed = accounts.find((a) => a.id === id) ?? null;
-    return next;
-  });
-
-  // Removal is as much a security event as addition — see
-  // sendSavedAccountRemovedNotice. Fired after the write commits, never allowed
-  // to fail the delete, and silent on a no-op delete (nothing changed, so there
-  // is nothing to report).
-  if (removed) {
-    await sendSavedAccountRemovedNotice(req.scope, {
-      customerId,
-      accountId: (removed as SavedBankAccount).id,
-      bankName: (removed as SavedBankAccount).bankName,
-      accountNumber: (removed as SavedBankAccount).accountNumber,
-      removedAt: new Date().toISOString(),
-    });
-  }
-  noStore(res).json({
-    accounts: await accountViews(req, saved),
-  });
+  requireCustomerId(req.auth_context.actor_id);
+  throw new MedusaError(
+    MedusaError.Types.NOT_ALLOWED,
+    BANK_ACCOUNT_LOCKED_MESSAGE,
+  );
 }

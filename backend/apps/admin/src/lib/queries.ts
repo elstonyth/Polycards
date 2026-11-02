@@ -1357,6 +1357,9 @@ import {
   exportPartnerAccountsXlsx,
   getCustomerDetail,
   getPayoutDetails,
+  getSavedBankAccounts,
+  removeSavedBankAccount,
+  setBankShareVerified,
   getSpendReport,
   getCustomerMoney,
   type CustomerMoney,
@@ -1455,6 +1458,41 @@ export const useSavePayoutDetails = () => {
       toast.success('Bank details saved');
       qc.invalidateQueries({ queryKey: qk.payoutDetails(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useSavedBankAccounts = (id: string | null) =>
+  useQuery({
+    queryKey: qk.savedBankAccounts(id ?? ''),
+    queryFn: () => getSavedBankAccounts(id!),
+    enabled: !!id,
+  });
+
+export const useRemoveSavedBankAccount = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { accountId: string; reason: string }) =>
+      removeSavedBankAccount(id, vars.accountId, vars.reason),
+    onSuccess: () => {
+      toast.success('Bank account removed');
+      qc.invalidateQueries({ queryKey: qk.savedBankAccounts(id) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useSetBankShareVerified = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { verified: boolean; reason: string }) =>
+      setBankShareVerified(id, vars.verified, vars.reason),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.verified ? 'Bank account verified' : 'Hold put back');
+      qc.invalidateQueries({ queryKey: qk.savedBankAccounts(id) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

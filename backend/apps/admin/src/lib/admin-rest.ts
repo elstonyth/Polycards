@@ -2010,6 +2010,43 @@ export const savePayoutDetails = (id: string, details: PayoutDetails) =>
     details,
   );
 
+export interface SavedBankAccounts {
+  verified_at: string | null;
+  accounts: {
+    id: string;
+    bank_name: string;
+    account_number: string;
+    account_holder_name: string;
+    saved_at: string | null;
+    linked: { customer_id: string; handle: string | null }[];
+  }[];
+}
+
+export const getSavedBankAccounts = (id: string) =>
+  getJson<SavedBankAccounts>(
+    `/admin/customers/${encodeURIComponent(id)}/bank-accounts`,
+  );
+
+export const removeSavedBankAccount = (
+  id: string,
+  accountId: string,
+  reason: string,
+) =>
+  postJson<{ removed: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/bank-accounts/remove`,
+    { account_id: accountId, reason },
+  );
+
+export const setBankShareVerified = (
+  id: string,
+  verified: boolean,
+  reason: string,
+) =>
+  postJson<{ verified: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/bank-accounts/verify`,
+    { verified, reason },
+  );
+
 // Pack spend per calendar month (MYR), newest first, at most 24 months.
 // `period` is a YYYY-MM bucket in Asia/Kuala_Lumpur; empty months are omitted.
 export const getSpendReport = (id: string) =>

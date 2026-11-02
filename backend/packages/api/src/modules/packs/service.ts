@@ -44,7 +44,10 @@ import {
   withdrawalGateError,
 } from './withdrawable';
 import {
+  BANK_SHARE_VERIFIED_KEY,
+  bankShareVerified,
   loadSavedBankAccounts,
+  parseSavedBankAccounts,
   resolveWithdrawalDestination,
   type SavedBankAccount,
 } from './saved-accounts';
@@ -9603,6 +9606,123 @@ class PacksModuleService extends MedusaService({
     return await loadSavedBankAccounts(em, customerId);
   }
 
+  // Has support verified this customer's shared bank account? (ADR 0015.) Read
+  // by the payout check, with the same SELECT as savedBankAccountsFor.
+  @InjectManager()
+  async bankShareVerifiedFor(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      { metadata: Record<string, unknown> | null }[]
+    >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
+      customerId,
+    ]);
+    return bankShareVerified(rows[0]?.metadata ?? {});
+  }
+
+  // Support removes a tied bank account (customers cannot, ADR 0015). Emptying the
+  // list clears the verification, so it never vouches for the next account: with
+  // one account per customer, a new one can only come after that. Taking an extra
+  // off a longer list leaves it. The change and its audit row share one
+  // transaction. Returns what was removed so the route can notify the customer
+  // after commit; null when it is already gone (no write, no audit row).
+  @InjectTransactionManager()
+  async removeSavedBankAccount(
+    input: {
+      customerId: string;
+      adminId: string;
+      accountId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<SavedBankAccount | null> {
+    let removed: SavedBankAccount | null = null;
+    await this.mutateCustomerMetadata(
+      {
+        customerId: input.customerId,
+        mutate: (current) => {
+          const accounts = parseSavedBankAccounts(current.bank_accounts);
+          removed = accounts.find((a) => a.id === input.accountId) ?? null;
+          if (!removed) return null;
+          const next = accounts.filter((a) => a.id !== input.accountId);
+          const { [BANK_SHARE_VERIFIED_KEY]: _cleared, ...rest } = current;
+          return {
+            ...(next.length === 0 ? rest : current),
+            bank_accounts: next,
+          };
+        },
+      },
+      sharedContext,
+    );
+    if (removed) {
+      const { bankName, accountNumber } = removed as SavedBankAccount;
+      await this.audit(
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          // Last 4 only, the rule every bank audit row follows.
+          before: {
+            bank_name: bankName,
+            account_last4: accountNumber.slice(-4),
+          },
+          after: { removed: true },
+          reason: `Removed saved bank account: ${input.reason}`,
+        },
+        sharedContext,
+      );
+    }
+    return removed;
+  }
+
+  // Support's answer to a shared-bank hold: stamp (or clear) the verification
+  // that lifts it for this customer. The change and its audit row share one
+  // transaction; a no-op writes neither.
+  @InjectTransactionManager()
+  async setBankShareVerified(
+    input: {
+      customerId: string;
+      adminId: string;
+      verified: boolean;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    let changed = false;
+    await this.mutateCustomerMetadata(
+      {
+        customerId: input.customerId,
+        mutate: (current) => {
+          if (bankShareVerified(current) === input.verified) return null;
+          changed = true;
+          const { [BANK_SHARE_VERIFIED_KEY]: _cleared, ...rest } = current;
+          return input.verified
+            ? { ...rest, [BANK_SHARE_VERIFIED_KEY]: new Date().toISOString() }
+            : rest;
+        },
+      },
+      sharedContext,
+    );
+    if (changed) {
+      await this.audit(
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { bank_share_verified: !input.verified },
+          after: { bank_share_verified: input.verified },
+          reason: `${input.verified ? 'Verified' : 'Unverified'} shared bank account: ${input.reason}`,
+        },
+        sharedContext,
+      );
+    }
+  }
+
   // Every destination that has actually RECEIVED money, one row per
   // (customer, bank, account), carrying its earliest settlement.
   //
@@ -9653,8 +9773,8 @@ class PacksModuleService extends MedusaService({
   // The bank codes come back raw (saved lists may still hold a retired
   // gateway's alias); the caller compares canonical ids. holder_name is the
   // saved entry's holder (NULL for a payout row, which already proves the
-  // number pays out). Read by the
-  // saved-accounts POST route, which refuses a number someone else holds:
+  // number pays out). Read by the saved-accounts routes and the payout check
+  // (heldByAnother decides), which refuse a number someone else holds:
   // 13 clusters of 2-3 accounts on one bank account farmed welcome packs and
   // tasks by 2026-10-14. Both sides compare digits only, without leading
   // zeros: padding with a 0, or an older saved entry with spaces or dashes,

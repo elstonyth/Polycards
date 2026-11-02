@@ -395,7 +395,7 @@ const bankAccountAdded = (d: {
       `Account:  ${account}`,
       armed,
       '',
-      "If this wasn't you, sign in and remove it now, then change your password —",
+      "If this wasn't you, contact support@polycards.gg now, then change your password —",
       caution,
       '',
       `${d.siteUrl.replace(/\/+$/, '')}/bank`,
@@ -418,7 +418,7 @@ const bankAccountAdded = (d: {
         If you added it, there is nothing to do.
       </p>
       <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
-        <strong>If this wasn't you</strong>, remove it and change your password
+        <strong>If this wasn't you</strong>, contact support and change your password
         now. ${
           armedNow
             ? 'This account can already be withdrawn to.'

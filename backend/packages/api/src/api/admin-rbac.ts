@@ -89,6 +89,8 @@ export const CORE_PREFIX_WRITES: {
   operation: Operation;
 }[] = [
   ...[
+    'bank-accounts/remove',
+    'bank-accounts/verify',
     'credits',
     'disable',
     'enable',
@@ -151,6 +153,10 @@ export const SECRET_READS = [
   { matcher: '/admin/players/export', resource: 'partner_credential' },
   {
     matcher: '/admin/customers/*/payout-details',
+    resource: 'customer_bank_account',
+  },
+  {
+    matcher: '/admin/customers/*/bank-accounts',
     resource: 'customer_bank_account',
   },
   {

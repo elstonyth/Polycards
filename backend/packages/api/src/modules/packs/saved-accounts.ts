@@ -20,8 +20,16 @@ import type { PaymentGateway } from './gateway';
 // .withdrawForCashout), and the one-shot backfill script. A module file also
 // keeps the money path from importing an API route.
 
-/** Hard cap on saved accounts. A picker, not an address book. */
-export const MAX_SAVED_BANK_ACCOUNTS = 5;
+/** One bank account per Polycards account (owner, 2026-11-03, ADR 0015). Lists
+ *  that already hold more were left alone: they refuse a new one, and support
+ *  removes the extras. */
+export const MAX_SAVED_BANK_ACCOUNTS = 1;
+
+export const ONE_BANK_ACCOUNT_MESSAGE =
+  'Your Polycards account already has a bank account. Contact support to change it.';
+
+export const BANK_ACCOUNT_LOCKED_MESSAGE =
+  'A saved bank account cannot be removed here. Contact support to change it.';
 
 export type SavedBankAccount = {
   id: string;
@@ -280,7 +288,7 @@ export function resolveWithdrawalDestination(args: {
   if (!usableAt) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      'This bank account was saved before withdrawal checks were added. Remove it and save it again to use it.',
+      'This bank account was saved before withdrawal checks were added. Contact support to update it.',
     );
   }
   const now = args.now ?? new Date();
@@ -331,40 +339,65 @@ export async function loadSavedBankAccounts(
 }
 
 /**
- * One bank account, one Polycards account: a number another customer already
- * holds is refused (sharing-allowed customers excepted). Existing shared
- * accounts were left alone on purpose (2026-10-14) — only new links are
- * refused, and re-saving an account the customer already has is not a new
- * link. Checked when an account is saved (withdraw/accounts route) and again
- * at payout (startWithdrawal).
+ * One bank account, one Polycards account (ADR 0015). A number another customer
+ * saved or was paid to is refused when saving. At payout, any saved number that
+ * is shared holds the whole account until support acts: verifies this customer
+ * (bankShareVerified) or removes the number. Existing shared accounts are held
+ * too: the clusters left alone on 2026-10-14 were still being farmed.
  */
 export const SHARED_PAYOUT_ACCOUNT_MESSAGE =
-  'This bank account is already linked to another Polycards account. Withdraw to a bank account in your own name, or contact support if this is a mistake.';
+  'Your bank account is linked to another Polycards account. Contact support to verify it.';
 
-/**
- * Support's override for a genuine shared account (a family member's, a joint
- * account): customer ids in PAYOUT_ACCOUNT_SHARING_ALLOWED, comma-separated,
- * read per call. A `*` entry allows everyone, switching the one-bank-account
- * rule off at save and at payout (operator decision, 2026-10-17).
- * shortcut: the override is an env list, so granting one is a spec change and
- * a redeploy; build an admin toggle if overrides become routine.
- */
-export function payoutAccountSharingAllowed(
-  customerId: string,
-  env: Partial<NodeJS.ProcessEnv> = process.env,
+/** Does anyone else hold this destination? The same digits at another bank are
+ *  a different account. A wallet has no holder name to tell owners apart and its
+ *  address is public on-chain, so only a wallet someone was already PAID to
+ *  counts (a payout row has a null holder_name). */
+export function heldByAnother(
+  holders: { bank_code: string; holder_name?: string | null }[],
+  bankCode: string,
 ): boolean {
-  return (env.PAYOUT_ACCOUNT_SHARING_ALLOWED ?? '')
-    .split(',')
-    .some((id) => id.trim() === '*' || id.trim() === customerId);
+  const bank = findBank(bankCode);
+  return holders.some(
+    (h) =>
+      findBank(h.bank_code)?.id === bank?.id &&
+      (!bank?.wallet || h.holder_name == null),
+  );
 }
 
-/** Destinations saved before the shared-account check shipped are exempt at
- *  payout: the existing clusters were left alone by decision (2026-10-14). */
-export const SHARED_ACCOUNT_CHECK_SINCE = Date.parse('2026-10-14T00:00:00+08:00');
-
-export function sharedAccountCheckApplies(account: SavedBankAccount): boolean {
-  return (
-    typeof account.savedAt === 'string' &&
-    Date.parse(account.savedAt) >= SHARED_ACCOUNT_CHECK_SINCE
+/** Is any of this customer's saved accounts held by someone else? The whole list
+ *  counts, not only the one being paid: a second saved number must not be the way
+ *  round a hold. Lists hold a handful of rows, so one lookup each is fine. */
+export async function anySavedAccountShared(
+  packs: {
+    otherPayoutAccountHolders(
+      customerId: string,
+      accountNumber: string,
+      exact?: boolean,
+    ): Promise<{ bank_code: string; holder_name: string | null }[]>;
+  },
+  customerId: string,
+  accounts: SavedBankAccount[],
+): Promise<boolean> {
+  const verdicts = await Promise.all(
+    accounts.map(async (a) =>
+      heldByAnother(
+        await packs.otherPayoutAccountHolders(
+          customerId,
+          a.accountNumber,
+          findBank(a.bankCode)?.wallet !== undefined,
+        ),
+        a.bankCode,
+      ),
+    ),
   );
+  return verdicts.some(Boolean);
+}
+
+/** customer.metadata key, stamped by support after they verify a shared bank
+ *  account. Lifted at save and at payout; removing the account clears it. Only
+ *  admin routes can write it: rejectCustomerMetadata refuses client metadata. */
+export const BANK_SHARE_VERIFIED_KEY = 'bank_share_verified_at';
+
+export function bankShareVerified(metadata: Record<string, unknown>): boolean {
+  return typeof metadata[BANK_SHARE_VERIFIED_KEY] === 'string';
 }

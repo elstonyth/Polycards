@@ -4,9 +4,8 @@ import { resolvePacks, type GatewayWithdrawals } from './facets';
 import {
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   bankSupportedBy,
-  payoutAccountSharingAllowed,
+  anySavedAccountShared,
   resolveWithdrawalDestination,
-  sharedAccountCheckApplies,
 } from './saved-accounts';
 import { findBank, walletAddressValid } from './banks';
 import {
@@ -736,10 +735,11 @@ export async function startWithdrawal(
   // It cannot approve anything the locked resolution would refuse: both read the
   // same list, and savedBankAccountId is derived from (bankCode, accountNumber),
   // so an id resolves to the same destination in both reads or to nothing.
+  const savedAccounts =
+    input.savedAccounts ??
+    (await packs.savedBankAccountsFor(input.customerId));
   const precheckDestination = resolveWithdrawalDestination({
-    accounts:
-      input.savedAccounts ??
-      (await packs.savedBankAccountsFor(input.customerId)),
+    accounts: savedAccounts,
     accountId: input.accountId,
   });
 
@@ -773,31 +773,17 @@ export async function startWithdrawal(
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
     );
   }
-  // One bank account, one Polycards account, at payout too. The save check
-  // trusts a typed holder name for numbers that were only saved, so a second
-  // account can get in under a different spelling before the first is paid.
-  // Here, whoever is paid first keeps the number. Refused before any row or
-  // debit.
+  // One bank account, one Polycards account, at payout too: a shared number holds
+  // every account on it, whoever was paid first, and whichever saved number this
+  // payout goes to, until support acts (ADR 0015). Refused before any row or debit.
   if (
-    sharedAccountCheckApplies(precheckDestination) &&
-    !payoutAccountSharingAllowed(input.customerId)
+    (await anySavedAccountShared(packs, input.customerId, savedAccounts)) &&
+    !(await packs.bankShareVerifiedFor(input.customerId))
   ) {
-    const bankId = findBank(precheckDestination.bankCode)?.id;
-    const paidElsewhere = (
-      await packs.otherPayoutAccountHolders(
-        input.customerId,
-        precheckDestination.accountNumber,
-        findBank(precheckDestination.bankCode)?.wallet !== undefined,
-      )
-    ).some(
-      (h) => h.holder_name == null && findBank(h.bank_code)?.id === bankId,
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      SHARED_PAYOUT_ACCOUNT_MESSAGE,
     );
-    if (paidElsewhere) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        SHARED_PAYOUT_ACCOUNT_MESSAGE,
-      );
-    }
   }
   // A destination with its own payout floor (Touch 'n Go: RM 100, or the
   // admin's higher minimum) is held to it here, before any row or debit — the
