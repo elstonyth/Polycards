@@ -473,22 +473,6 @@ export async function addSavedBankAccount(input: {
   return { ok: true, accounts: r.data.accounts };
 }
 
-/** Remove a saved payout account. Idempotent server-side. */
-export async function removeSavedBankAccount(
-  id: string,
-): Promise<SavedBankAccountsResult> {
-  if (typeof id !== 'string' || id.length === 0) {
-    return { ok: false, error: 'Say which account to remove.' };
-  }
-  const r = await store.del(
-    '/store/credits/withdraw/accounts',
-    SavedBankAccountsSchema,
-    { id },
-  );
-  if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
-  return { ok: true, accounts: r.data.accounts };
-}
-
 export type StartWithdrawalResult =
   | {
       ok: true;

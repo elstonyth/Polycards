@@ -174,6 +174,13 @@ describe('admin RBAC coverage', () => {
   });
 
   it('secret-bearing GETs ask for their own declared read policy', () => {
+    expect(SECRET_READS.map((s) => s.matcher)).toEqual(
+      expect.arrayContaining([
+        '/admin/customers/*/payout-details',
+        '/admin/customers/*/bank-accounts',
+        '/admin/payments/withdrawals/*/account',
+      ]),
+    );
     // Partner passwords and full bank numbers must not ride on a screen's read
     // policy: the view-only Support viewer holds those but not these.
     const declared = new Set(

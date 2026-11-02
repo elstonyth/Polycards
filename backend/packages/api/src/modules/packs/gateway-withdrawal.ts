@@ -4,9 +4,10 @@ import { resolvePacks, type GatewayWithdrawals } from './facets';
 import {
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   bankSupportedBy,
-  payoutAccountSharingAllowed,
+  anySavedAccountShared,
+  heldByAnother,
   resolveWithdrawalDestination,
-  sharedAccountCheckApplies,
+  savedBankAccountId,
 } from './saved-accounts';
 import { findBank, walletAddressValid } from './banks';
 import {
@@ -736,10 +737,11 @@ export async function startWithdrawal(
   // It cannot approve anything the locked resolution would refuse: both read the
   // same list, and savedBankAccountId is derived from (bankCode, accountNumber),
   // so an id resolves to the same destination in both reads or to nothing.
+  const savedAccounts =
+    input.savedAccounts ??
+    (await packs.savedBankAccountsFor(input.customerId));
   const precheckDestination = resolveWithdrawalDestination({
-    accounts:
-      input.savedAccounts ??
-      (await packs.savedBankAccountsFor(input.customerId)),
+    accounts: savedAccounts,
     accountId: input.accountId,
   });
 
@@ -773,31 +775,21 @@ export async function startWithdrawal(
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
     );
   }
-  // One bank account, one Polycards account, at payout too. The save check
-  // trusts a typed holder name for numbers that were only saved, so a second
-  // account can get in under a different spelling before the first is paid.
-  // Here, whoever is paid first keeps the number. Refused before any row or
-  // debit.
+  // One bank account, one Polycards account, at payout too: a shared number holds
+  // every account on it, whoever was paid first, and whichever saved number this
+  // payout goes to, until support acts (ADR 0015). Refused before any row or debit.
   if (
-    sharedAccountCheckApplies(precheckDestination) &&
-    !payoutAccountSharingAllowed(input.customerId)
+    await anySavedAccountShared(
+      packs,
+      input.customerId,
+      savedAccounts,
+      await packs.bankShareVerifiedFor(input.customerId),
+    )
   ) {
-    const bankId = findBank(precheckDestination.bankCode)?.id;
-    const paidElsewhere = (
-      await packs.otherPayoutAccountHolders(
-        input.customerId,
-        precheckDestination.accountNumber,
-        findBank(precheckDestination.bankCode)?.wallet !== undefined,
-      )
-    ).some(
-      (h) => h.holder_name == null && findBank(h.bank_code)?.id === bankId,
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      SHARED_PAYOUT_ACCOUNT_MESSAGE,
     );
-    if (paidElsewhere) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        SHARED_PAYOUT_ACCOUNT_MESSAGE,
-      );
-    }
   }
   // A destination with its own payout floor (Touch 'n Go: RM 100, or the
   // admin's higher minimum) is held to it here, before any row or debit — the
@@ -1992,6 +1984,32 @@ export async function submitHeldWithdrawal(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
+    );
+  }
+
+  // One bank account, one Polycards account, here too (ADR 0015): a row held
+  // before the rule shipped, or on a number since unverified or removed, must not
+  // pay on a click. Judged on the row's own number, not the saved list, which
+  // support may already have changed. The row stays held.
+  const rowBank = findBank(row.bank_code);
+  const rowAccountId = savedBankAccountId(
+    rowBank?.id ?? row.bank_code,
+    row.account_number,
+  );
+  if (
+    !(await packs.bankShareVerifiedFor(row.customer_id))[rowAccountId] &&
+    heldByAnother(
+      await packs.otherPayoutAccountHolders(
+        row.customer_id,
+        row.account_number,
+        rowBank?.wallet !== undefined,
+      ),
+      row.bank_code,
+    )
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This bank account is linked to another Polycards account. Verify it on the player page before approving, or deny the withdrawal.',
     );
   }
 

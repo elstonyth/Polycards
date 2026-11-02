@@ -403,6 +403,7 @@ async function depositLegs(admin, cust) {
 async function payoutLegs(admin, cust) {
   // ---- 9. Withdrawal to a Singapore bank
   await setFx(admin, 0.3125, 'a3pay e2e: back to base');
+  // One saved destination per account since ADR 0015: `cust` needs an empty list.
   const acct = await call('POST', '/store/credits/withdraw/accounts', {
     token: cust,
     body: {

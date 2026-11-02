@@ -141,6 +141,8 @@ export type DialogField = {
   optional?: boolean;
   /** Keeps Apply off until the trimmed value passes. */
   valid?: (value: string) => boolean;
+  /** A pick from this list instead of free text. */
+  options?: { value: string; label: string }[];
 };
 
 /** Asks for the values of an audited action, reason included, then runs it.
@@ -192,21 +194,40 @@ export const FieldsDialog = ({
               <Label htmlFor={`dialog-${f.key}`} size="small">
                 {f.label}
               </Label>
-              <Input
-                id={`dialog-${f.key}`}
-                value={values[f.key]}
-                placeholder={f.placeholder}
-                autoFocus={i === 0}
-                onChange={(e) =>
-                  setValues((v) => ({ ...v, [f.key]: e.target.value }))
-                }
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    submit();
+              {f.options ? (
+                <select
+                  id={`dialog-${f.key}`}
+                  value={values[f.key]}
+                  autoFocus={i === 0}
+                  className="bg-ui-bg-field border-ui-border-base h-8 rounded-md border px-2 text-sm"
+                  onChange={(e) =>
+                    setValues((v) => ({ ...v, [f.key]: e.target.value }))
                   }
-                }}
-              />
+                >
+                  <option value="">{f.placeholder}</option>
+                  {f.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  id={`dialog-${f.key}`}
+                  value={values[f.key]}
+                  placeholder={f.placeholder}
+                  autoFocus={i === 0}
+                  onChange={(e) =>
+                    setValues((v) => ({ ...v, [f.key]: e.target.value }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      submit();
+                    }
+                  }}
+                />
+              )}
             </div>
           ))}
         </div>

@@ -335,6 +335,7 @@ async function payoutLegs(admin, cust) {
     typo.status === 400 && /TRC20/.test(typo.json.message ?? ''),
     `${typo.status} ${typo.json.message}`,
   );
+  // One saved destination per account since ADR 0015: `cust` needs an empty list.
   const acct = await call('POST', '/store/credits/withdraw/accounts', {
     token: cust,
     body: { bank_code: 'USDTTRC20', account_number: TRON },

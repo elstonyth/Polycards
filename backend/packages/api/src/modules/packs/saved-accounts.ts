@@ -5,6 +5,7 @@ import {
   findBank,
   gatewayBankCode,
   sandboxOnlyBank,
+  type Bank,
 } from './banks';
 // Type-only: a value import of gateway.ts from here would cycle through the
 // module index into the service, which imports this file.
@@ -17,11 +18,19 @@ import type { PaymentGateway } from './gateway';
 // Lives in the module layer (not in the API route that owns the CRUD) because
 // three callers need it and they must agree exactly: the saved-accounts route,
 // the payout money path (gateway-withdrawal.ts + PacksModuleService
-// .withdrawForCashout), and the one-shot backfill script. A module file also
+// .withdrawForCashout), and the admin bank-accounts routes. A module file also
 // keeps the money path from importing an API route.
 
-/** Hard cap on saved accounts. A picker, not an address book. */
-export const MAX_SAVED_BANK_ACCOUNTS = 5;
+/** One bank account per Polycards account (owner, 2026-11-03, ADR 0015). Lists
+ *  that already hold more were left alone: they refuse a new one, and support
+ *  removes the extras. */
+export const MAX_SAVED_BANK_ACCOUNTS = 1;
+
+export const ONE_BANK_ACCOUNT_MESSAGE =
+  'Your Polycards account already has a bank account. Contact support to change it.';
+
+export const BANK_ACCOUNT_LOCKED_MESSAGE =
+  'A saved bank account cannot be removed here. Contact support to change it.';
 
 export type SavedBankAccount = {
   id: string;
@@ -33,8 +42,7 @@ export type SavedBankAccount = {
    * ISO timestamp of when this destination was FIRST saved — the anchor of the
    * cooling-off window. Optional in the type because the metadata blob predates
    * this field: rows written before it existed have none, and those resolve as
-   * NOT usable (see destinationUsableAt). Backfilled for destinations that
-   * already received a settled payout — see scripts/backfill-payout-destinations.ts.
+   * NOT usable (see destinationUsableAt).
    */
   savedAt?: string;
 };
@@ -159,7 +167,7 @@ export function payoutDestinationCooldownHours(): number {
  * A missing (or unparseable) `savedAt` resolves to null — NOT to "usable". This
  * is a money path: `undefined` must never read as permission, so the absent case
  * is the refused case and the customer re-saves the account to start a fresh
- * window. The backfill exists so nobody who already withdrew has to.
+ * window. A one-shot backfill (since retired) spared anyone who already withdrew.
  */
 export function destinationUsableAt(
   account: SavedBankAccount,
@@ -262,7 +270,7 @@ export function resolveWithdrawalDestination(args: {
   // accountNumber) at read time, so this comparison is against a value it
   // just derived and cannot fail for that entry. The legacy path is covered
   // instead by every writer computing the id correctly (the save route, the
-  // backfill script) and by client-supplied metadata being refused
+  // admin add route) and by client-supplied metadata being refused
   // (middlewares.ts customer-write guards) — convention, not this enforcement.
   //
   // Same message as the unknown-id branch on purpose: a caller learns "not a
@@ -280,7 +288,7 @@ export function resolveWithdrawalDestination(args: {
   if (!usableAt) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      'This bank account was saved before withdrawal checks were added. Remove it and save it again to use it.',
+      'This bank account was saved before withdrawal checks were added. Contact support to update it.',
     );
   }
   const now = args.now ?? new Date();
@@ -331,40 +339,149 @@ export async function loadSavedBankAccounts(
 }
 
 /**
- * One bank account, one Polycards account: a number another customer already
- * holds is refused (sharing-allowed customers excepted). Existing shared
- * accounts were left alone on purpose (2026-10-14) — only new links are
- * refused, and re-saving an account the customer already has is not a new
- * link. Checked when an account is saved (withdraw/accounts route) and again
- * at payout (startWithdrawal).
+ * One bank account, one Polycards account (ADR 0015). A number another customer
+ * saved or was paid to is refused when saving. At payout, any saved number that
+ * is shared holds the whole account until support acts: verifies that number or
+ * removes it. Existing shared accounts are held too: the clusters left alone on
+ * 2026-10-14 were still being farmed.
  */
 export const SHARED_PAYOUT_ACCOUNT_MESSAGE =
-  'This bank account is already linked to another Polycards account. Withdraw to a bank account in your own name, or contact support if this is a mistake.';
+  'Your bank account is linked to another Polycards account. Contact support to verify it.';
 
-/**
- * Support's override for a genuine shared account (a family member's, a joint
- * account): customer ids in PAYOUT_ACCOUNT_SHARING_ALLOWED, comma-separated,
- * read per call. A `*` entry allows everyone, switching the one-bank-account
- * rule off at save and at payout (operator decision, 2026-10-17).
- * shortcut: the override is an env list, so granting one is a spec change and
- * a redeploy; build an admin toggle if overrides become routine.
- */
-export function payoutAccountSharingAllowed(
-  customerId: string,
-  env: Partial<NodeJS.ProcessEnv> = process.env,
+/** The refusal when saving. Support can add it for its real owner (bank-accounts/add). */
+export const SHARED_SAVE_MESSAGE =
+  'This bank account is linked to another Polycards account. If it is yours, contact support.';
+
+/** Does anyone else hold this destination, saved or paid? The same digits at
+ *  another bank are a different account. */
+export function heldByAnother(
+  holders: { bank_code: string }[],
+  bankCode: string,
 ): boolean {
-  return (env.PAYOUT_ACCOUNT_SHARING_ALLOWED ?? '')
-    .split(',')
-    .some((id) => id.trim() === '*' || id.trim() === customerId);
+  const bank = findBank(bankCode);
+  return holders.some((h) => findBank(h.bank_code)?.id === bank?.id);
 }
 
-/** Destinations saved before the shared-account check shipped are exempt at
- *  payout: the existing clusters were left alone by decision (2026-10-14). */
-export const SHARED_ACCOUNT_CHECK_SINCE = Date.parse('2026-10-14T00:00:00+08:00');
-
-export function sharedAccountCheckApplies(account: SavedBankAccount): boolean {
-  return (
-    typeof account.savedAt === 'string' &&
-    Date.parse(account.savedAt) >= SHARED_ACCOUNT_CHECK_SINCE
+/** Does a new save of this destination get refused? Stricter than a hold on one
+ *  point only: a wallet's address is public on-chain and has no holder name, so
+ *  a stranger who merely saved it must not stop its owner saving it. Only one
+ *  someone was already PAID to blocks (a payout row has a null holder_name). The
+ *  payout check still sees the saved entry, so sharing a wallet earns no money. */
+export function blocksNewSave(
+  holders: { bank_code: string; holder_name?: string | null }[],
+  bankCode: string,
+): boolean {
+  const bank = findBank(bankCode);
+  return holders.some(
+    (h) =>
+      findBank(h.bank_code)?.id === bank?.id &&
+      (!bank?.wallet || h.holder_name == null),
   );
+}
+
+/** Is any saved account that support has not verified held by someone else? The
+ *  whole list counts, not only the one being paid: a second saved number must not
+ *  be the way round a hold. Lists hold a handful of rows, so one lookup each is
+ *  fine. */
+export async function anySavedAccountShared(
+  packs: {
+    otherPayoutAccountHolders(
+      customerId: string,
+      accountNumber: string,
+      exact?: boolean,
+    ): Promise<{ bank_code: string }[]>;
+  },
+  customerId: string,
+  accounts: SavedBankAccount[],
+  verified: Record<string, string>,
+): Promise<boolean> {
+  const verdicts = await Promise.all(
+    accounts
+      .filter((a) => !verified[a.id])
+      .map(async (a) =>
+        heldByAnother(
+          await packs.otherPayoutAccountHolders(
+            customerId,
+            a.accountNumber,
+            findBank(a.bankCode)?.wallet !== undefined,
+          ),
+          a.bankCode,
+        ),
+      ),
+  );
+  return verdicts.some(Boolean);
+}
+
+/** customer.metadata key: saved account id to when support verified it. Per number,
+ *  so it never vouches for another one on the list, and it goes when the account
+ *  does. Lifts the payout hold, never the refusal to save. Only the admin
+ *  bank-accounts routes write it: rejectCustomerMetadata and
+ *  rejectAdminBankAccountsMetadata refuse it everywhere else. */
+export const BANK_SHARE_VERIFIED_KEY = 'bank_share_verified';
+
+export function verifiedBankAccounts(
+  metadata: Record<string, unknown>,
+): Record<string, string> {
+  const stamps = metadata[BANK_SHARE_VERIFIED_KEY];
+  if (typeof stamps !== 'object' || stamps === null) return {};
+  return Object.fromEntries(
+    Object.entries(stamps).filter(([, at]) => typeof at === 'string'),
+  ) as Record<string, string>;
+}
+
+/** The blob with one account's stamp set, or cleared by a null. */
+export function withBankShareStamp(
+  metadata: Record<string, unknown>,
+  accountId: string,
+  stamp: string | null,
+): Record<string, unknown> {
+  const { [accountId]: _old, ...others } = verifiedBankAccounts(metadata);
+  const stamps = stamp === null ? others : { ...others, [accountId]: stamp };
+  const { [BANK_SHARE_VERIFIED_KEY]: _key, ...rest } = metadata;
+  return Object.keys(stamps).length > 0
+    ? { ...rest, [BANK_SHARE_VERIFIED_KEY]: stamps }
+    : rest;
+}
+
+/** Has this other customer got the same destination verified? One person, one
+ *  account: only one account per number can be. Digits only for a bank, as the
+ *  holder lookup compares them; a wallet address is compared whole. */
+export function verifiedElsewhere(
+  metadata: Record<string, unknown>,
+  account: SavedBankAccount,
+): boolean {
+  const key = (a: SavedBankAccount) =>
+    findBank(a.bankCode)?.wallet
+      ? a.accountNumber
+      : a.accountNumber.replace(/\D/g, '').replace(/^0+/, '');
+  const stamps = verifiedBankAccounts(metadata);
+  return parseSavedBankAccounts(metadata.bank_accounts).some(
+    (a) =>
+      Boolean(stamps[a.id]) &&
+      findBank(a.bankCode)?.id === findBank(account.bankCode)?.id &&
+      key(a) === key(account),
+  );
+}
+
+/** A new entry for a saved list, from details withdrawalDetailsError passed. */
+export function newSavedBankAccount(
+  bank: Bank,
+  accountNumber: string,
+  holderName: string,
+): SavedBankAccount {
+  // An EVM address is the same wallet in any letter case (the case is only its
+  // checksum, already checked), so it is stored in one case: otherwise the
+  // checksummed and lowercase copies save as two accounts.
+  const number =
+    bank.wallet === 'evm' ? accountNumber.toLowerCase() : accountNumber;
+  return {
+    id: savedBankAccountId(bank.id, number),
+    bankCode: bank.id,
+    bankName: bank.name,
+    accountNumber: number,
+    // A wallet has no holder (withdrawalDetailsError skips it); its network
+    // name stands in, so the saved list and the admin queue still read.
+    accountHolderName: bank.wallet ? bank.name : holderName.trim(),
+    savedAt: new Date().toISOString(),
+  };
 }

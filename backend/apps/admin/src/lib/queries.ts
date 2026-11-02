@@ -1357,6 +1357,10 @@ import {
   exportPartnerAccountsXlsx,
   getCustomerDetail,
   getPayoutDetails,
+  addSavedBankAccount,
+  getSavedBankAccounts,
+  removeSavedBankAccount,
+  setBankShareVerified,
   getSpendReport,
   getCustomerMoney,
   type CustomerMoney,
@@ -1455,6 +1459,70 @@ export const useSavePayoutDetails = () => {
       toast.success('Bank details saved');
       qc.invalidateQueries({ queryKey: qk.payoutDetails(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useSavedBankAccounts = (id: string | null) =>
+  useQuery({
+    queryKey: qk.savedBankAccounts(id ?? ''),
+    queryFn: () => getSavedBankAccounts(id!),
+    enabled: !!id,
+  });
+
+// Every player's card: a change here can lift or start a hold on the other
+// accounts that share the number, and those pages stay cached for a while.
+const invalidateBankAccountCards = (qc: QueryClient) =>
+  qc.invalidateQueries({
+    predicate: (q) =>
+      q.queryKey[0] === 'admin' && q.queryKey[3] === 'bank-accounts',
+  });
+
+export const useRemoveSavedBankAccount = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { accountId: string; reason: string }) =>
+      removeSavedBankAccount(id, vars.accountId, vars.reason),
+    onSuccess: (data) => {
+      toast.success(
+        data.removed
+          ? 'Bank account removed'
+          : 'That bank account was already gone',
+      );
+      invalidateBankAccountCards(qc);
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useSetBankShareVerified = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      accountId: string;
+      verified: boolean;
+      reason: string;
+    }) => setBankShareVerified(id, vars.accountId, vars.verified, vars.reason),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.verified ? 'Bank account verified' : 'Hold put back');
+      invalidateBankAccountCards(qc);
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useAddSavedBankAccount = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: Parameters<typeof addSavedBankAccount>[1]) =>
+      addSavedBankAccount(id, vars),
+    onSuccess: () => {
+      toast.success('Bank account added');
+      invalidateBankAccountCards(qc);
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
