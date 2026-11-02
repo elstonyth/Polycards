@@ -8,12 +8,9 @@ import { usePathname } from 'next/navigation';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useConsent } from '@/lib/use-consent';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import {
-  AnnouncementsSchema,
-  hasUnsafeUrlChar,
-  parseOne,
-  type Announcement,
-} from '@/lib/data/schemas';
+import type { Announcement } from '@/lib/data/schemas';
+import { loadSchemas } from '@/lib/lazy-schemas';
+import { hasUnsafeUrlChar } from '@/lib/unsafe-url-char';
 import {
   ANNOUNCEMENT_SEEN_KEY,
   mytDay,
@@ -37,10 +34,12 @@ let loading: Promise<Announcement[]> | null = null;
 function loadAnnouncements(): Promise<Announcement[]> {
   loading ??= fetch('/api/announcements')
     .then((r) => (r.ok ? r.json() : null))
-    .then(
-      (body: unknown) =>
-        parseOne(AnnouncementsSchema, body)?.announcements ?? [],
-    )
+    .then(async (body: { announcements?: unknown[] } | null) => {
+      // Nearly every load has no slide, and zod stays off those pages.
+      if (!body?.announcements?.length) return [];
+      const { AnnouncementsSchema, parseOne } = await loadSchemas();
+      return parseOne(AnnouncementsSchema, body)?.announcements ?? [];
+    })
     .catch(() => []);
   return loading;
 }

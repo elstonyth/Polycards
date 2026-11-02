@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { Press_Start_2P } from 'next/font/google';
@@ -115,10 +116,14 @@ export default function NotFound() {
             className="group rounded-xl border border-white/10 bg-neutral-900 p-2 transition-colors hover:border-white/20"
           >
             <div className="flex h-24 items-center justify-center overflow-hidden rounded-lg bg-neutral-800/60 sm:h-28">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              {/* next/image, lazy: the 404 boundary ships in the root layout's
+                  payload, and a plain <img> here preloaded all three packs on
+                  every page of the site. */}
+              <Image
                 src={s.image}
                 alt={s.label}
+                width={64}
+                height={112}
                 className="h-full w-auto object-contain transition-transform duration-300 group-hover:scale-105"
               />
             </div>

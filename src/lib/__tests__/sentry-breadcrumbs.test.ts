@@ -159,7 +159,7 @@ describe('scrubSpanUrls', () => {
 // Each runtime's Sentry.init must carry the scrubbers and the data-collection
 // switches, or one runtime leaks.
 describe.each([
-  ['browser', () => import('../../../instrumentation-client')],
+  ['browser', () => import('../sentry-client')],
   ['server', () => import('../../../sentry.server.config')],
   ['edge', () => import('../../../sentry.edge.config')],
 ])('the %s Sentry config', (_runtime, load) => {
@@ -168,6 +168,7 @@ describe.each([
     const init = vi.fn();
     vi.doMock('@sentry/nextjs', () => ({
       init,
+      captureException: vi.fn(),
       captureRouterTransitionStart: vi.fn(),
     }));
     await load();

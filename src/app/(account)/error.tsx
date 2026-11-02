@@ -1,7 +1,7 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
+import { reportClientError } from '@/lib/report-client-error';
 import { reloadForVersionSkew } from '@/lib/version-skew';
 
 // Segment boundary for the whole account cluster (11 pages). Without it, a
@@ -16,7 +16,7 @@ export default function AccountError({
   reset: () => void;
 }) {
   useEffect(() => {
-    Sentry.captureException(error);
+    reportClientError(error);
     reloadForVersionSkew(error);
   }, [error]);
 
