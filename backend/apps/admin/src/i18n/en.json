@@ -1014,7 +1014,7 @@
     "integrity": {
       "open_without_prize": "Charged for an open, but no card or spin was recorded. Refund it by hand if the customer lost out.",
       "sold_without_flip": "Sell-back paid, but the card stayed in the vault. It can't ship or sell again. An engineer needs to close it.",
-      "denied_without_refund": "Payout denied, but the refund never landed. Use Finish refund on Withdrawals."
+      "denied_without_refund": "Payout denied, but the refund never landed. Use Finish refund on Withdrawals, in the Failed view."
     },
     "creditDeposit": "Credit deposit",
     "creditTitle": "Credit this deposit?",
