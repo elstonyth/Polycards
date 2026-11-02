@@ -73,6 +73,13 @@ import FxRate from './models/fx-rate';
 import PackOdds from './models/pack-odds';
 import Pull from './models/pull';
 import CreditTransaction from './models/credit-transaction';
+import CoinFlipConfig from './models/coin-flip-config';
+import CoinFlipRound from './models/coin-flip-round';
+import { settleBuyback, type BuybackSettlement } from './buyback-settlement';
+import { COIN_FLIP_CONFIG_ID, parseCoinFlipSettings, coinFlipSettingsView, publicCoinFlipRound,
+  type CoinFlipSettings, type CoinFlipPublicRound } from './coin-flip';
+import { coinFlipManager, lockCoinFlipCustomer, readCoinFlipSettings, quoteCoinFlipOperation,
+  acceptCoinFlipOperation, getCoinFlipRoundOperation } from './coin-flip-operations';
 import DeliveryOrder from './models/delivery-order';
 import DeliveryOrderItem from './models/delivery-order-item';
 import VipLevel from './models/vip-level';
@@ -1417,6 +1424,8 @@ class PacksModuleService extends MedusaService({
   PackOdds,
   Pull,
   CreditTransaction,
+  CoinFlipConfig,
+  CoinFlipRound,
   DeliveryOrder,
   DeliveryOrderItem,
   VipLevel,
@@ -1467,6 +1476,160 @@ class PacksModuleService extends MedusaService({
   TicketPrize,
   TicketSpin,
 }) {
+  @InjectTransactionManager()
+  async undoDeliveryAtomic(input: {
+    orderId: string;
+    expectedStatus: DeliveryStatus;
+    pullVersions: Record<string, number>;
+    remove?: { itemIds: string[] };
+    previous?: { status: DeliveryStatus; tracking_number: string | null; shipped_at: Date | null; delivered_at: Date | null };
+    restorePulls: boolean;
+  }, @MedusaContext() context: Context = {}): Promise<void> {
+    const em = coinFlipManager(context);
+    const [owner] = await em.execute<{ customer_id: string }[]>('SELECT customer_id FROM delivery_order WHERE id = ? AND deleted_at IS NULL', [input.orderId]);
+    if (!owner) return;
+    await lockCoinFlipCustomer(owner.customer_id, context);
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [`delivery:${input.orderId}`]);
+    const [order] = await this.listDeliveryOrders({ id: input.orderId }, { take: 1 }, context);
+    if (!order || order.status !== input.expectedStatus) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Delivery changed; refusing to reverse it.');
+    for (const [id, version] of Object.entries(input.pullVersions)) {
+      const [pull] = await em.execute<{ flip_version: number; status: string }[]>('SELECT flip_version, status FROM pull WHERE id = ? AND customer_id = ? AND deleted_at IS NULL FOR UPDATE', [id, owner.customer_id]);
+      const expected = input.expectedStatus === 'canceled' ? 'vaulted' : input.expectedStatus === 'completed' ? 'delivered' : 'delivering';
+      if (!pull || pull.flip_version !== version || pull.status !== expected) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Card changed; refusing to reverse delivery.');
+      if (input.restorePulls) await em.execute('UPDATE pull SET status = ?, flip_version = flip_version + 1, updated_at = now() WHERE id = ?', [input.remove ? 'vaulted' : 'delivering', id]);
+    }
+    const ref = input.remove ? input.orderId : `refund:${input.orderId}`;
+    if (input.remove || input.previous?.status !== 'canceled') {
+      const fees = await this.listCreditTransactions({ reason: 'delivery_fee', reference: ref }, { take: 10 }, context);
+      if (fees.length) await this.deleteCreditTransactionsGuarded(fees.map(row => row.id), context);
+      await this.deleteLedgerEntryByRef('OD', input.remove ? input.orderId : `cancel:${input.orderId}`, context);
+    }
+    if (input.remove) {
+      await this.deleteDeliveryOrderItems(input.remove.itemIds, context);
+      await this.deleteDeliveryOrders([input.orderId], context);
+    } else if (input.previous) {
+      await this.updateDeliveryOrders([{ id: input.orderId, ...input.previous }], context);
+    }
+  }
+
+  @InjectTransactionManager()
+  async buybackPullAtomic(input: { customerId: string; pullId: string }, @MedusaContext() context: Context = {}): Promise<BuybackSettlement> {
+    return settleBuyback(this, input, context);
+  }
+
+  @InjectTransactionManager()
+  async undoBuybackAtomic(input: { pullId: string; creditTransactionId: string; restoreEarmark: boolean }, @MedusaContext() context: Context = {}): Promise<boolean> {
+    const [credit] = await this.listCreditTransactions({ id: input.creditTransactionId, pull_id: input.pullId, reason: 'buyback' }, { take: 1 }, context);
+    if (!credit) return false;
+    await lockCoinFlipCustomer(credit.customer_id, context);
+    const [liveCredit] = await coinFlipManager(context).execute<{ id: string }[]>(
+      "SELECT id FROM credit_transaction WHERE id = ? AND pull_id = ? AND reason = 'buyback' AND deleted_at IS NULL",
+      [input.creditTransactionId, input.pullId]);
+    if (!liveCredit) return false;
+    const changed = await claimRows(coinFlipManager(context), { table: 'pull', ids: [input.pullId],
+      where: { status: 'bought_back', customer_id: credit.customer_id },
+      set: { status: 'vaulted', buyback_amount: null, buyback_at: null, ...(input.restoreEarmark ? { stock_earmarked: true } : {}) } });
+    if (changed.length !== 1) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Cannot reverse a card that changed state.');
+    await coinFlipManager(context).execute('UPDATE pull SET flip_version = flip_version + 1 WHERE id = ?', [input.pullId]);
+    await this.deleteCreditTransactionsGuarded([input.creditTransactionId], context);
+    await this.deleteLedgerEntryByRef('SE', input.creditTransactionId, context);
+    return true;
+  }
+
+  @InjectManager()
+  async coinFlipSettings(@MedusaContext() context: Context = {}): Promise<CoinFlipSettings> {
+    return readCoinFlipSettings(context);
+  }
+
+  // How a customer's settled flips landed. A flip lands on the called side exactly
+  // when it wins; a missing call was Head, as in publicCoinFlipRound.
+  @InjectManager()
+  async coinFlipLandedCounts(customerId: string, @MedusaContext() context: Context = {}): Promise<{ head: number; tail: number }> {
+    const [row] = await coinFlipManager(context).execute<{ head: string; tail: string }[]>(
+      "SELECT count(*) FILTER (WHERE (status = 'won') = (coalesce(snapshot->>'chosen_side', 'head') = 'head')) AS head, " +
+      "count(*) FILTER (WHERE (status = 'won') <> (coalesce(snapshot->>'chosen_side', 'head') = 'head')) AS tail " +
+      "FROM coin_flip_round WHERE customer_id = ? AND status IN ('won', 'lost') AND deleted_at IS NULL", [customerId]);
+    return { head: Number(row.head), tail: Number(row.tail) };
+  }
+
+  @InjectManager()
+  async coinFlipTotals(input: { status?: 'won' | 'lost'; customerId?: string; source?: string; from?: Date; to?: Date }, @MedusaContext() context: Context = {}): Promise<{ wins: number; losses: number; payouts: number; forfeited_value: number }> {
+    const where = ["deleted_at IS NULL AND status IN ('won', 'lost')"];
+    const params: unknown[] = [];
+    if (input.status) { where.push('status = ?'); params.push(input.status); }
+    if (input.customerId) { where.push('customer_id = ?'); params.push(input.customerId); }
+    if (input.source) { where.push("snapshot->>'source' = ?"); params.push(input.source); }
+    if (input.from) { where.push('settled_at >= ?'); params.push(input.from); }
+    if (input.to) { where.push('settled_at < ?'); params.push(input.to); }
+    const [row] = await coinFlipManager(context).execute<{ wins: string; losses: string; paid: string; forfeited: string }[]>(
+      "SELECT count(*) FILTER (WHERE status = 'won') AS wins, count(*) FILTER (WHERE status = 'lost') AS losses, " +
+      "coalesce(sum(stake_cents) FILTER (WHERE status = 'won'), 0) AS paid, coalesce(sum(stake_cents) FILTER (WHERE status = 'lost'), 0) AS forfeited " +
+      'FROM coin_flip_round WHERE ' + where.join(' AND '), params);
+    return { wins: Number(row.wins), losses: Number(row.losses), payouts: Number(row.paid) / 100, forfeited_value: Number(row.forfeited) / 100 };
+  }
+
+  @InjectTransactionManager()
+  async saveCoinFlipSettings(
+    input: { settings: unknown; revision: number; adminId: string; reason: string },
+    @MedusaContext() context: Context = {},
+  ): Promise<CoinFlipSettings> {
+    const values = parseCoinFlipSettings(input.settings);
+    if (!input.adminId || !input.reason.trim() || !Number.isSafeInteger(input.revision) || input.revision < 0) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Admin, revision and reason are required.');
+    }
+    const em = coinFlipManager(context);
+    await em.execute('INSERT INTO coin_flip_config (id) VALUES (?) ON CONFLICT DO NOTHING', [COIN_FLIP_CONFIG_ID]);
+    await em.execute('SELECT id FROM coin_flip_config WHERE id = ? FOR UPDATE', [COIN_FLIP_CONFIG_ID]);
+    const before = await this.coinFlipSettings(context);
+    if (before.revision !== input.revision) throw new MedusaError(MedusaError.Types.CONFLICT, 'Settings changed. Reload before saving.');
+    const revision = before.revision + 1;
+    await this.updateCoinFlipConfigs([{ id: COIN_FLIP_CONFIG_ID, ...values, revision }], context);
+    const after = coinFlipSettingsView({ ...values, revision });
+    await this.audit({ admin_id: input.adminId, entity_type: 'coin_flip_config', entity_id: COIN_FLIP_CONFIG_ID,
+      action: 'edit', reason: input.reason.trim(), before, after }, context);
+    return after;
+  }
+
+  @InjectTransactionManager()
+  async quoteCoinFlip(input: import('./coin-flip').CoinFlipQuoteInput, @MedusaContext() context: Context = {}): Promise<CoinFlipPublicRound> {
+    return quoteCoinFlipOperation(this, input, context);
+  }
+
+  @InjectTransactionManager()
+  async acceptCoinFlip(input: { customerId: string; roundId: string }, @MedusaContext() context: Context = {}): Promise<CoinFlipPublicRound> {
+    return acceptCoinFlipOperation(this, input, context);
+  }
+
+  @InjectManager()
+  async getCoinFlipRound(input: { customerId: string; roundId: string }, @MedusaContext() context: Context = {}): Promise<CoinFlipPublicRound> {
+    return publicCoinFlipRound(await getCoinFlipRoundOperation(input, context));
+  }
+
+  @InjectTransactionManager()
+  async finalizePullsForCoinFlip(input: { customerId: string; pullIds: string[] }, @MedusaContext() context: Context = {}): Promise<void> {
+    const ids = [...new Set(input.pullIds)];
+    if (!input.customerId || ids.length === 0 || ids.length !== input.pullIds.length) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid completed pull list.');
+    }
+    await lockCoinFlipCustomer(input.customerId, context);
+    const em = coinFlipManager(context);
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await em.execute<{ id: string }[]>(`SELECT id FROM pull WHERE id IN (${placeholders}) AND customer_id = ? AND deleted_at IS NULL FOR UPDATE`, [...ids, input.customerId]);
+    if (rows.length !== ids.length) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Completed pulls do not match their owner.');
+    // Leaves updated_at alone: /store/vault/latest reads it on a held card as a new event.
+    await em.execute(`UPDATE pull SET flip_eligible_at = now() WHERE id IN (${placeholders}) AND flip_eligible_at IS NULL`, ids);
+  }
+
+  @InjectTransactionManager()
+  async finalizeLegacyPullsForCoinFlip(input: { customerId: string; pullIds: string[]; ingressDrained: boolean }, @MedusaContext() context: Context = {}): Promise<void> {
+    if (!input.ingressDrained) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Stop and drain pack ingress and workers before maintenance.');
+    await lockCoinFlipCustomer(input.customerId, context);
+    await coinFlipManager(context).execute('INSERT INTO coin_flip_config (id) VALUES (?) ON CONFLICT DO NOTHING', [COIN_FLIP_CONFIG_ID]);
+    await coinFlipManager(context).execute('SELECT id FROM coin_flip_config WHERE id = ? FOR SHARE', [COIN_FLIP_CONFIG_ID]);
+    if ((await this.coinFlipSettings(context)).enabled) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Pause coin flip before maintenance.');
+    await this.finalizePullsForCoinFlip(input, context);
+  }
+
   // Claim only the exact state priced before the HTTP request. The claim's row
   // lock lasts through the ORM money write, preserving its raw_* twin atomically.
   @InjectTransactionManager()
@@ -3811,6 +3974,7 @@ class PacksModuleService extends MedusaService({
       const [pull] = await this.createPulls(
         [
           {
+            flip_eligible_at: new Date(),
             customer_id: input.customerId,
             pack_id: 'task-reward',
             card_id: reward.card_handle,
@@ -6170,7 +6334,11 @@ class PacksModuleService extends MedusaService({
       fx: number;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ orderId: string; itemIds: string[] }> {
+  ): Promise<{ orderId: string; itemIds: string[]; pullVersions: Record<string, number> }> {
+    await lockCoinFlipCustomer(input.customerId, sharedContext);
+    if (await this.isAccountDisabled(input.customerId, sharedContext)) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'This account is unavailable.');
+    await this.assertNotFrozen(input.customerId, sharedContext);
+    if (!await this.hasTopUp(input.customerId, sharedContext)) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
     // ONE listPulls call feeds the value sum, the fee, and the payload tally —
     // vaultValueForPulls takes the rows, not the ids, so this isn't fetched
     // twice. Runs BEFORE the order insert since the fee is stamped at create.
@@ -6179,6 +6347,9 @@ class PacksModuleService extends MedusaService({
       { take: input.pullIds.length },
       sharedContext,
     );
+    const verdict = validateDeliveryRequest(pulls, input.pullIds, input.customerId,
+      await this.lockedPullIds(input.customerId, pulls, sharedContext), { prizesShipHere: true });
+    if (verdict !== 'ok') throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Your cards changed. Refresh your Vault before requesting delivery.');
     await this.assertNotSoldBack(input.pullIds, sharedContext);
     // Prize pulls ride in this parcel (2026-10-23) but stay outside value
     // tracking, as recordRewardWithdrawal writes them: they add insurance on
@@ -6291,7 +6462,7 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
-    return { orderId: order.id, itemIds: items.map((i) => i.id) };
+    return { orderId: order.id, itemIds: items.map((i) => i.id), pullVersions: Object.fromEntries(pulls.map(p => [p.id, p.flip_version + 1])) };
   }
 
   // The OD debit's value: Σ displayMarketPrice(card.market_value, fx,
@@ -8027,6 +8198,7 @@ class PacksModuleService extends MedusaService({
         {
           customer_id: winnerId,
           pack_id: LUCKY_DRAW_PULL_PACK_ID,
+          flip_eligible_at: new Date(),
           card_id: cardHandle,
           order_id: null,
           rolled_at: new Date(),
@@ -10858,7 +11030,7 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Awaited<ReturnType<PacksModuleService['createPulls']>>> {
-    const pulls = await this.createPulls(input.pulls, sharedContext);
+    const pulls = await this.createPulls(input.pulls.map(pull => ({ ...pull, flip_eligible_at: null })), sharedContext);
 
     const vaultDelta =
       input.ledger.vaultValueUsd != null
@@ -13384,6 +13556,7 @@ class PacksModuleService extends MedusaService({
   // use list → id-form to make the guard run.
   async deleteCreditTransactionsGuarded(
     idOrSelector: string | string[] | Record<string, unknown>,
+    sharedContext: Context = {},
   ): Promise<void> {
     const ids =
       typeof idOrSelector === 'string'
@@ -13393,7 +13566,7 @@ class PacksModuleService extends MedusaService({
           : null;
     void ids;
     // Delegate to the MedusaService-generated base (property, not overridable).
-    await this.deleteCreditTransactions(idOrSelector as never);
+    await this.deleteCreditTransactions(idOrSelector as never, sharedContext);
   }
 
   // Stamp the first-seen time for a pull so the 30s instant window counts from
@@ -13555,6 +13728,7 @@ class PacksModuleService extends MedusaService({
         'One or more cards changed state — refresh and try again.',
       );
     }
+    await em.execute('UPDATE pull SET flip_version = flip_version + 1 WHERE id IN (' + input.ids.map(() => '?').join(',') + ')', input.ids);
   }
 
   // Atomic, serialized delivery-order status transition — THE seam every order
@@ -13611,8 +13785,11 @@ class PacksModuleService extends MedusaService({
       deliveredAt?: string;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ status: DeliveryStatus }> {
+  ): Promise<{ status: DeliveryStatus; pullVersions: Record<string, number>; previous: { status: DeliveryStatus; tracking_number: string | null; shipped_at: Date | null; delivered_at: Date | null } }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const [owner] = await em.execute<{ customer_id: string }[]>('SELECT customer_id FROM delivery_order WHERE id = ? AND deleted_at IS NULL', [input.orderId]);
+    if (!owner) throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Delivery order not found.');
+    await lockCoinFlipCustomer(owner.customer_id, sharedContext);
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `delivery:${input.orderId}`,
     ]);
@@ -13629,6 +13806,10 @@ class PacksModuleService extends MedusaService({
       );
     }
 
+    const previous = { status: order.status as DeliveryStatus, tracking_number: order.tracking_number,
+      shipped_at: order.shipped_at, delivered_at: order.delivered_at };
+    const versions = input.pullIds.length ? await em.execute<{ id: string; flip_version: number }[]>(
+      'SELECT id, flip_version FROM pull WHERE customer_id = ? AND id IN (' + input.pullIds.map(() => '?').join(',') + ') AND deleted_at IS NULL', [owner.customer_id, ...input.pullIds]) : [];
     if (input.allowedFrom && !input.allowedFrom.includes(order.status)) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -13828,7 +14009,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    return { status: input.to };
+    return { status: input.to, previous, pullVersions: Object.fromEntries(versions.map(p => [p.id, p.flip_version + (input.to === 'completed' || input.to === 'canceled' ? 1 : 0)])) };
   }
 
   // Atomic credit adjustment + audit: writes the ledger row AND the
@@ -14572,8 +14753,8 @@ class PacksModuleService extends MedusaService({
   // its generated TS signature only declares id/id[]. This is for IN-FLIGHT
   // workflow rollback only (see Global Constraints' two-mechanisms note) —
   // never call it to "fix" a settled row.
-  async deleteLedgerEntryByRef(type: LedgerType, refId: string): Promise<void> {
-    await this.deleteLedgerEntries({ type, ref_id: refId } as never);
+  async deleteLedgerEntryByRef(type: LedgerType, refId: string, sharedContext: Context = {}): Promise<void> {
+    await this.deleteLedgerEntries({ type, ref_id: refId } as never, sharedContext);
   }
 
   // The admin Transactions list (POLYCARD-BACK §5.4). Raw SQL because `q` is an
@@ -15456,6 +15637,7 @@ class PacksModuleService extends MedusaService({
     const [pull] = await this.createPulls(
       [
         {
+            flip_eligible_at: new Date(),
           customer_id: input.customerId,
           pack_id: snapshot.pack_id,
           card_id: rolled.handle,
@@ -16847,6 +17029,7 @@ class PacksModuleService extends MedusaService({
         // this transaction commits — see there for why that is safe.
         const minted = await this.createPulls(
           Array.from({ length: qty }, () => ({
+            flip_eligible_at: new Date(),
             customer_id: customerId,
             pack_id: challengePackId(weekStartIso),
             card_id: handle,
@@ -17131,6 +17314,7 @@ class PacksModuleService extends MedusaService({
 
     const minted = await this.createPulls(
       Array.from({ length: input.qty }, () => ({
+        flip_eligible_at: new Date(),
         customer_id: input.customerId,
         pack_id: challengePackId(input.weekStartIso),
         card_id: input.handle,

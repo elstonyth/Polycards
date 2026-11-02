@@ -52,7 +52,16 @@
             "weekly_settlement",
             "task_definition",
             "customer_group",
-            "gateway_withdrawal"
+            "gateway_withdrawal",
+            "pack",
+            "card",
+            "announcement",
+            "pack_gift",
+            "coin_flip_config",
+            "gateway_deposit",
+            "lucky_draw_event",
+            "lucky_draw_prize",
+            "goods_receive_note"
           ],
           "mappedType": "enum"
         },
@@ -86,6 +95,7 @@
             "edit_voucher_ladder",
             "edit_fx_rate",
             "edit_site_settings",
+            "edit_payment_gateway",
             "edit_avatar_frames",
             "replace",
             "edit",
@@ -101,10 +111,24 @@
             "void_settlement_line",
             "void_settlement",
             "pay_settlement",
-            "edit_payment_gateway",
             "edit_group_policy",
             "approve_withdrawal",
-            "deny_withdrawal"
+            "deny_withdrawal",
+            "delete",
+            "edit_odds",
+            "edit_members",
+            "edit_top_hits",
+            "reorder",
+            "edit_odds_set",
+            "set_player_group",
+            "set_real_name",
+            "set_phone",
+            "grant_pack_gift",
+            "revoke_pack_gift",
+            "grant_bonus_credit",
+            "release_reward_holds",
+            "acknowledge_finding",
+            "publish"
           ],
           "mappedType": "enum"
         },
@@ -1407,7 +1431,8 @@
             "daily_reward",
             "referral_commission",
             "delivery_fee",
-            "bonus_grant"
+            "bonus_grant",
+            "coin_flip_win"
           ],
           "mappedType": "enum"
         },
@@ -1537,6 +1562,15 @@
           "constraint": true,
           "primary": true,
           "unique": true
+        },
+        {
+          "keyName": "IDX_credit_coin_flip_round",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": true,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_credit_coin_flip_round\" ON \"credit_transaction\" (\"source_transaction_id\") WHERE reason = 'coin_flip_win' AND deleted_at IS NULL"
         }
       ],
       "checks": [],
@@ -3293,7 +3327,8 @@
             "AD",
             "WP",
             "WD",
-            "RF"
+            "RF",
+            "CF"
           ],
           "mappedType": "enum"
         },
@@ -5094,7 +5129,8 @@
             "vaulted",
             "bought_back",
             "delivering",
-            "delivered"
+            "delivered",
+            "forfeited"
           ],
           "mappedType": "enum"
         },
@@ -5221,6 +5257,26 @@
           "nullable": false,
           "default": "0",
           "mappedType": "integer"
+        },
+        "flip_version": {
+          "name": "flip_version",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "integer",
+          "default": "0"
+        },
+        "flip_eligible_at": {
+          "name": "flip_eligible_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
         }
       },
       "name": "pull",
@@ -7595,6 +7651,366 @@
           "constraint": true,
           "primary": true,
           "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "boolean",
+          "default": "false"
+        },
+        "max_stake_cents": {
+          "name": "max_stake_cents",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
+        "win_units": {
+          "name": "win_units",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
+        "win_units_2": {
+          "name": "win_units_2",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
+        "win_units_3": {
+          "name": "win_units_3",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
+        "published_win_units": {
+          "name": "published_win_units",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "integer",
+          "default": "0"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "datetime",
+          "default": "now()",
+          "length": 6
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "datetime",
+          "default": "now()",
+          "length": 6
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "datetime",
+          "length": 6
+        }
+      },
+      "name": "coin_flip_config",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "coin_flip_config_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        },
+        {
+          "keyName": "IDX_coin_flip_config_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_coin_flip_config_deleted_at\" ON \"coin_flip_config\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "string"
+        },
+        "pull_id": {
+          "name": "pull_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "string"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "enum",
+          "default": "'quoted'",
+          "enumItems": [
+            "quoted",
+            "won",
+            "lost"
+          ]
+        },
+        "stake_cents": {
+          "name": "stake_cents",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "decimal"
+        },
+        "raw_stake_cents": {
+          "name": "raw_stake_cents",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "ticket_stake": {
+          "name": "ticket_stake",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "0",
+          "mappedType": "integer"
+        },
+        "flip_version": {
+          "name": "flip_version",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "integer"
+        },
+        "config_revision": {
+          "name": "config_revision",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "integer"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "datetime",
+          "length": 6
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "datetime",
+          "length": 6
+        },
+        "snapshot": {
+          "name": "snapshot",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "roll": {
+          "name": "roll",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
+        "credit_transaction_id": {
+          "name": "credit_transaction_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "string"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "datetime",
+          "default": "now()",
+          "length": 6
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "datetime",
+          "default": "now()",
+          "length": 6
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "datetime",
+          "length": 6
+        }
+      },
+      "name": "coin_flip_round",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "coin_flip_round_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        },
+        {
+          "keyName": "IDX_coin_flip_round_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_coin_flip_round_deleted_at\" ON \"coin_flip_round\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_coin_flip_round_customer_created",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_coin_flip_round_customer_created\" ON \"coin_flip_round\" (\"customer_id\", \"created_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_coin_flip_round_pull",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_coin_flip_round_pull\" ON \"coin_flip_round\" (\"pull_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_coin_flip_round_status_created",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_coin_flip_round_status_created\" ON \"coin_flip_round\" (\"status\", \"created_at\") WHERE deleted_at IS NULL"
         }
       ],
       "checks": [],

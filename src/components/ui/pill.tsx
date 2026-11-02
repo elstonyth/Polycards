@@ -41,7 +41,7 @@ function pillVariants({ variant, size }: PillOptions = {}) {
   );
 }
 
-type PillProps = React.ButtonHTMLAttributes<HTMLButtonElement> & PillOptions;
+type PillProps = React.ComponentPropsWithRef<'button'> & PillOptions;
 
 function Pill({
   className,

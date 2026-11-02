@@ -373,6 +373,7 @@ describe('CreditTransactionSchema — keeps every reason the backend emits', () 
 // backend adds a reason, add it HERE and to CREDIT_REASONS in the SAME deploy —
 // these tests fail until you do.
 const BACKEND_CREDIT_REASONS = [
+  'coin_flip_win',
   'buyback',
   'topup',
   'pack_open',

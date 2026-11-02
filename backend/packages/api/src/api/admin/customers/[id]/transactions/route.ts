@@ -4,6 +4,9 @@ import type PacksModuleService from '../../../../../modules/packs/service';
 import { parsePaginationParams } from '../../../../../utils/pagination';
 import { parseReasons } from './reasons';
 
+const ledgerRef = (row: { id: string; reason: string; source_transaction_id?: string | null; reference?: string | null }): string | null | undefined =>
+  row.reason === 'coin_flip_win' ? row.reference : row.reason === 'pack_open' ? row.source_transaction_id : row.id;
+
 // GET /admin/customers/:id/transactions — paginated credit ledger for the
 // support view. Same row shape as the gacha route's `transactions` slice,
 // plus each row's bonus part. Optional ?reasons=topup,cashout keeps only those
@@ -36,9 +39,7 @@ export async function GET(
   // credit_transaction's own id (see each writer's ref_id choice in the
   // ledger epic plan). ONE batched lookup, not per-row.
   const refIds = rows
-    .map((t: any) =>
-      t.reason === 'pack_open' ? t.source_transaction_id : t.id,
-    )
+    .map(ledgerRef)
     .filter((r: unknown): r is string => typeof r === 'string' && r !== '');
   const ledgerRows = refIds.length
     ? await packs.listLedgerEntries(
@@ -128,9 +129,7 @@ export async function GET(
         reference: t.reference ?? null,
         created_at: t.created_at,
         ledger_display_id:
-          displayIdByRefId.get(
-            t.reason === 'pack_open' ? t.source_transaction_id : t.id,
-          ) ?? null,
+          displayIdByRefId.get(ledgerRef(t) ?? '') ?? null,
         balance_after: balanceAfter.get(t.id) ?? null,
         // A reward's slug (task-reward) has no pack row and no title to show.
         pack_title:

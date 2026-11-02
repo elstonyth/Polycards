@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { Migration20261103100000 } from '../Migration20261103100000';
+import { Migration20261103120000 } from '../Migration20261103120000';
 
 // visitor_signal: the table the snapshot (and so the model) declares, and the
 // unique index recordVisitorSignal's ON CONFLICT depends on.
@@ -8,8 +8,8 @@ import { Migration20261103100000 } from '../Migration20261103100000';
 async function emit(dir: 'up' | 'down'): Promise<string> {
   const sql: string[] = [];
   const m = Object.create(
-    Migration20261103100000.prototype,
-  ) as Migration20261103100000 & { addSql: (s: string) => void };
+    Migration20261103120000.prototype,
+  ) as Migration20261103120000 & { addSql: (s: string) => void };
   m.addSql = (s: string) => sql.push(s);
   await m[dir]();
   return sql.join('\n');

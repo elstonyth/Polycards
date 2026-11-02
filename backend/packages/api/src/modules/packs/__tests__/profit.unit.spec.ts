@@ -85,6 +85,7 @@ describe('profit fold', () => {
       profitActivity([
         { reason: 'pack_open', amount: -300 },
         { reason: 'buyback', amount: 120 },
+        { reason: 'coin_flip_win', amount: 100.25 },
         { reason: 'bonus_grant', amount: 50 },
         { reason: 'daily_reward', amount: 5 },
         { reason: 'delivery_fee', amount: -15 },
@@ -95,6 +96,7 @@ describe('profit fold', () => {
     ).toEqual({
       pack_sales: 300,
       sellbacks: 120,
+      coin_flip_payouts: 100.25,
       promo_given: 55,
       delivery_fees: 15,
       referral_commission: 2,
@@ -117,6 +119,7 @@ describe('profit fold', () => {
     expect(profitActivity([])).toEqual({
       pack_sales: 0,
       sellbacks: 0,
+      coin_flip_payouts: 0,
       promo_given: 0,
       delivery_fees: 0,
       referral_commission: 0,

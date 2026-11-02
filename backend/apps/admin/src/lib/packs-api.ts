@@ -265,7 +265,7 @@ export interface PullRow {
   pack_id: string;
   pack_title: string | null;
   /** Vault lifecycle: still held vs instantly sold back. */
-  status: 'vaulted' | 'bought_back';
+  status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered' | 'forfeited';
   /** USD credited at buyback time; null while vaulted. */
   buyback_amount: number | null;
   card: {

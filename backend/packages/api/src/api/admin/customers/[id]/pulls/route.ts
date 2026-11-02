@@ -33,7 +33,7 @@ import { withLossless } from '../../../../../modules/packs/lossless';
 // "pack pulls only"). The customer scope is always kept on the filter.
 // PULL lifecycle enum — NOT the delivery-order enum: a 'shipped' here is as
 // invalid as gibberish.
-const PULL_STATUSES = ['vaulted', 'bought_back', 'delivering', 'delivered'];
+const PULL_STATUSES = ['vaulted', 'bought_back', 'delivering', 'delivered', 'forfeited'];
 const PULL_SOURCES = ['pack', 'reward', 'free', 'gift', 'bonus'];
 
 export async function GET(

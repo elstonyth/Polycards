@@ -23,6 +23,7 @@ export function VaultActionBar({
   onToggleSelectAll,
   onSell,
   onDeliver,
+  onCoinFlip,
 }: {
   selectedCount: number;
   /** How many of the selected cards can actually be SOLD. A reward card ships
@@ -37,6 +38,7 @@ export function VaultActionBar({
   onToggleSelectAll: () => void;
   onSell: () => void;
   onDeliver: () => void;
+  onCoinFlip?: () => void;
 }) {
   const none = selectedCount === 0;
   const withCount = (label: string) =>
@@ -114,6 +116,18 @@ export function VaultActionBar({
           </Pill>
         </div>
       </div>
+      {onCoinFlip && (
+        <Pill
+          variant="secondary"
+          className="mt-3 w-full"
+          disabled={none || selectedCount > 20 || busy}
+          onClick={onCoinFlip}
+        >
+          {selectedCount > 20
+            ? 'Select up to 20 cards to coin flip'
+            : 'Coin flip'}
+        </Pill>
+      )}
     </div>
   );
 }

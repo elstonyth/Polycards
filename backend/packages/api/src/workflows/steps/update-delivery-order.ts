@@ -42,6 +42,8 @@ export type UpdateDeliveryOrderResult = {
 type CompensateData =
   | {
       orderId: string;
+      expectedStatus: DeliveryStatus;
+      pullVersions: Record<string, number>;
       prev: {
         status: DeliveryStatus;
         tracking_number: string | null;
@@ -92,6 +94,8 @@ export const updateDeliveryOrderInvoke = async (
       { order_id: order.id, status: order.status as DeliveryStatus },
       {
         orderId: order.id,
+        expectedStatus: order.status as DeliveryStatus,
+        pullVersions: {},
         prev: {
           status: order.status as DeliveryStatus,
           tracking_number: order.tracking_number ?? null,
@@ -137,7 +141,7 @@ export const updateDeliveryOrderInvoke = async (
   // owns it, so a losing concurrent cancel refuses cleanly instead of
   // reverting the order row after the winner's terminal write (day-3 sim
   // divergence: order stranded at 'requested' with its pulls re-vaulted).
-  await packs.transitionDeliveryOrderStatus({
+  const transition = await packs.transitionDeliveryOrderStatus({
     orderId: order.id,
     to: input.status,
     trackingNumber: nextTracking ?? null,
@@ -155,12 +159,9 @@ export const updateDeliveryOrderInvoke = async (
       : null;
   return new StepResponse({ order_id: order.id, status: input.status }, {
     orderId: order.id,
-    prev: {
-      status: order.status as DeliveryStatus,
-      tracking_number: order.tracking_number ?? null,
-      shipped_at: order.shipped_at ?? null,
-      delivered_at: order.delivered_at ?? null,
-    },
+    expectedStatus: input.status,
+    pullVersions: transition.pullVersions,
+    prev: transition.previous,
     pullIds,
     prevPullStatus,
   } satisfies CompensateData);
@@ -173,36 +174,8 @@ export const updateDeliveryOrderStep = createStep(
   async (data: CompensateData, { container }) => {
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    // A canceled order refunded its shipping fee (transitionDeliveryOrderStatus)
-    // — un-canceling it must take that money back, or the customer keeps both
-    // the refund and the delivery. Mirrors request-delivery's compensation,
-    // which likewise undoes its own fee row. Runs FIRST so a failure here
-    // leaves the order visibly canceled (refund intact, consistent) rather
-    // than live-with-no-charge.
-    if (data.prev.status !== 'canceled') {
-      const refunds = await packs.listCreditTransactions(
-        { reason: 'delivery_fee', reference: `refund:${data.orderId}` },
-        { take: 10 },
-      );
-      if (refunds.length) {
-        await packs.deleteCreditTransactionsGuarded(refunds.map((r) => r.id));
-      }
-      await packs.deleteLedgerEntryByRef('OD', `cancel:${data.orderId}`);
-    }
-    await packs.updateDeliveryOrders([
-      {
-        id: data.orderId,
-        status: data.prev.status,
-        tracking_number: data.prev.tracking_number,
-        shipped_at: data.prev.shipped_at,
-        delivered_at: data.prev.delivered_at,
-      },
-    ]);
-    if (data.prevPullStatus && data.pullIds.length) {
-      await packs.updatePulls(
-        data.pullIds.map((id) => ({ id, status: data.prevPullStatus! })),
-      );
-    }
+    await packs.undoDeliveryAtomic({ orderId: data.orderId, expectedStatus: data.expectedStatus,
+      pullVersions: data.pullVersions, previous: data.prev, restorePulls: Boolean(data.prevPullStatus) });
   },
 );
 

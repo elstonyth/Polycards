@@ -89,6 +89,8 @@ export type LedgerTotals = {
   revenue: number;
   /** Σ buyback — credits paid back out for cards. */
   payouts: number;
+  /** Normal credit awarded by coin flips; forfeited cards are not cash revenue. */
+  coinFlipPayouts: number;
   /** Σ topup — credits purchased (cash in, once payments are real). */
   topups: number;
   /** Σ adjustment — net operator grants/clawbacks. */
@@ -120,6 +122,7 @@ export type LedgerTotals = {
 export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
   let openCents = 0;
   let buybackCents = 0;
+  let coinFlipCents = 0;
   let topupCents = 0;
   let adjustmentCents = 0;
   let cashoutCents = 0;
@@ -133,6 +136,7 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     const cents = Math.round(row.amount * 100);
     if (row.reason === 'pack_open') openCents += cents;
     else if (row.reason === 'buyback') buybackCents += cents;
+    else if (row.reason === 'coin_flip_win') coinFlipCents += cents;
     else if (row.reason === 'topup') topupCents += cents;
     else if (row.reason === 'adjustment') adjustmentCents += cents;
     else if (row.reason === 'cashout') cashoutCents += cents;
@@ -160,6 +164,7 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
   return {
     revenue,
     payouts,
+    coinFlipPayouts: coinFlipCents / 100,
     topups: topupCents / 100,
     adjustments: adjustmentCents / 100,
     cashout: cashoutCents / 100,
@@ -173,6 +178,6 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     // Cashout is a balance move, excluded. rewardPromo / referralCommission are
     // also excluded (operator cost tracked separately); deliveryFees is a
     // courier pass-through, not gacha margin.
-    net: (-openCents - buybackCents) / 100 || 0,
+    net: (-openCents - buybackCents - coinFlipCents) / 100 || 0,
   };
 }

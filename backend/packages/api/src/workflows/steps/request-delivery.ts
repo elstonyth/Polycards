@@ -27,7 +27,7 @@ export type RequestDeliveryResult = {
 };
 
 type CompensateData =
-  | { orderId: string; itemIds: string[]; pullIds: string[] }
+  | { orderId: string; itemIds: string[]; pullIds: string[]; pullVersions: Record<string, number> }
   | undefined;
 
 export const verdictError = (
@@ -187,7 +187,7 @@ export const requestDeliveryStep = createStep(
     // STRICT: the insurance fee is a real wallet debit — never price it on the
     // cached/fallback rate (buyback applies the same rule).
     const fx = await resolveFxRateStrict(packs);
-    const { orderId, itemIds } = await packs.createDeliveryOrderWithLedger({
+    const { orderId, itemIds, pullVersions } = await packs.createDeliveryOrderWithLedger({
       customerId: input.customer_id,
       snapshot,
       pullIds: input.pull_ids,
@@ -202,6 +202,7 @@ export const requestDeliveryStep = createStep(
     return new StepResponse(result, {
       orderId,
       itemIds,
+      pullVersions,
       pullIds: input.pull_ids,
     } satisfies CompensateData);
   },
@@ -209,25 +210,8 @@ export const requestDeliveryStep = createStep(
   async (data: CompensateData, { container }) => {
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    await packs.updatePulls(
-      data.pullIds.map((id) => ({ id, status: 'vaulted' as const })),
-    );
-    await packs.deleteDeliveryOrderItems(data.itemIds);
-    await packs.deleteDeliveryOrders([data.orderId]);
-    // Undo the fee debit BEFORE deleting the OD ledger row: compensation
-    // isn't transactional, and if it dies between the two deletes the
-    // surviving artifact should be the harmless one (a ledger row for a
-    // gone order) — not an unrefundable customer debit. The guarded delete
-    // needs ids, so resolve the row first — its `reference` is the order id,
-    // unique to this request (refund rows carry `refund:<id>`, no false match).
-    const feeRows = await packs.listCreditTransactions(
-      { reason: 'delivery_fee', reference: data.orderId },
-      { take: 10 },
-    );
-    if (feeRows.length) {
-      await packs.deleteCreditTransactionsGuarded(feeRows.map((r) => r.id));
-    }
-    await packs.deleteLedgerEntryByRef('OD', data.orderId);
+    await packs.undoDeliveryAtomic({ orderId: data.orderId, expectedStatus: 'requested',
+      pullVersions: data.pullVersions, remove: { itemIds: data.itemIds }, restorePulls: true });
   },
 );
 

@@ -86,6 +86,13 @@ describe('publishedEv', () => {
 });
 
 describe('ledgerTotals', () => {
+  it('subtracts coin winnings from margin without counting forfeited cards as cash', () => {
+    expect(ledgerTotals([
+      { reason: 'pack_open', amount: -200 },
+      { reason: 'buyback', amount: 50 },
+      { reason: 'coin_flip_win', amount: 100 },
+    ])).toMatchObject({ revenue: 200, payouts: 50, coinFlipPayouts: 100, net: 50 });
+  });
   it('buckets signed amounts by reason with exact cent math', () => {
     const rows = [
       { reason: 'pack_open', amount: -25 },
@@ -101,6 +108,7 @@ describe('ledgerTotals', () => {
     expect(ledgerTotals(rows)).toEqual({
       revenue: 25.3, // |Σ pack_open|
       payouts: 11.61,
+      coinFlipPayouts: 0,
       topups: 100,
       adjustments: 2.5,
       net: 13.69, // revenue - payouts
@@ -116,6 +124,7 @@ describe('ledgerTotals', () => {
     expect(ledgerTotals([])).toEqual({
       revenue: 0,
       payouts: 0,
+      coinFlipPayouts: 0,
       topups: 0,
       adjustments: 0,
       net: 0,

@@ -35,6 +35,9 @@ describe('blockedReason', () => {
     ['/admin/workflows-executions', /workflow/],
     ['/admin/notifications', /notification/],
     ['/admin/uploads', /uploads/],
+    ['/admin/coin-flips', /coin flip/],
+    ['/admin/coin-flips/settings', /coin flip/],
+    ['/admin/COIN-FLIPS/Settings', /coin flip/],
     ['/admin/pricecharting/search', /PriceCharting/],
     ['/admin/inventory/export.xlsx', /file exports/],
     ['/admin/players/export', /file exports/],
@@ -173,6 +176,66 @@ describe('redact', () => {
         { before: { real_name: '[hidden]' }, after: { real_name: '[hidden]' } },
       ],
     });
+  });
+
+  // Owner, 2026-10-30: coin flip's actual odds and each group's odds set stay
+  // off the desks; the audit rows and group metadata carrying them stay open.
+  it('hides coin flip odds and odds sets, and keeps the published chance', () => {
+    expect(
+      redact({
+        before: {
+          win_percent: 40,
+          win_percent_2: 30,
+          win_percent_3: null,
+          published_win_percent: 50,
+        },
+        snapshot: { actual_win_units: 400_000, win_units: 400_000 },
+        groups: [{ name: 'VIP', metadata: { odds_set: 2, is_default: false } }],
+        action: 'edit_odds_set',
+      }),
+    ).toEqual({
+      before: {
+        win_percent: '[hidden]',
+        win_percent_2: '[hidden]',
+        win_percent_3: '[hidden]',
+        published_win_percent: 50,
+      },
+      snapshot: { actual_win_units: '[hidden]', win_units: '[hidden]' },
+      groups: [
+        { name: 'VIP', metadata: { odds_set: '[hidden]', is_default: false } },
+      ],
+      action: 'edit_odds_set',
+    });
+  });
+
+  it.each([
+    // A jsonb column cast to text: still whole JSON.
+    [
+      '{"win_percent": 40, "published_win_percent": 50}',
+      '{"win_percent":"[hidden]","published_win_percent":50}',
+    ],
+    // Cut short, so it no longer parses (left(before::text, 40)).
+    [
+      '{"win_percent": 40, "win_percent_2": 3',
+      '{"win_percent": [hidden], "win_percent_2": [hidden]',
+    ],
+    // A whole row cast to text: Postgres doubles the quotes.
+    [
+      '(g1,VIP,"{""odds_set"": ""2"", ""published_win_percent"": 50}")',
+      '(g1,VIP,"{""odds_set"": [hidden], ""published_win_percent"": 50}")',
+    ],
+    // array_agg(after)::text: the key's quotes are backslash-escaped.
+    [
+      '{"{\\"enabled\\": true, \\"win_percent\\": 41.25, \\"published_win_percent\\": 50}"}',
+      '{"{\\"enabled\\": true, \\"win_percent\\": [hidden], \\"published_win_percent\\": 50}"}',
+    ],
+    // ROW(a)::text: a row inside a row quadruples them.
+    [
+      '("(1,"\"{""""win_percent_2"""": 32.75, """"published_win_percent"""": 50}"\")")',
+      '("(1,"\"{""""win_percent_2"""": [hidden], """"published_win_percent"""": 50}"\")")',
+    ],
+  ])('hides odds in text %p', (text, hidden) => {
+    expect(redact({ text })).toEqual({ text: hidden });
   });
 
   it('shows bank account numbers whole (open since 2026-10-06)', () => {

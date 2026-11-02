@@ -681,6 +681,14 @@ export const RATE_LIMITS = {
    * PACK_OPEN_RATE_LIMIT / PACK_OPEN_RATE_WINDOW_MS (default 20/60s)
    */
   'pack-open': { defaults: DEFAULTS },
+  'coin-flip-quote': {
+    message: 'Too many coin flip quotes. Please wait a moment.',
+    defaults: { burstLimit: 5, burstWindowMs: 10_000, limit: 20, windowMs: 60_000 },
+  },
+  'coin-flip-accept': {
+    message: 'Please wait, then check your original coin flip result.',
+    defaults: { burstLimit: 5, burstWindowMs: 10_000, limit: 20, windowMs: 60_000 },
+  },
 
   /**
    * The pack-open-batch limiter: burst + sustained sliding windows per customer,
