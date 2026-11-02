@@ -60,10 +60,13 @@ describe.each([
       new RegExp(`CREATE (UNIQUE )?INDEX .* ON "${name}"`).test(s),
     );
     const declared = table(name)
-      // Added later, and pinned by ticket-spin-pack-index.unit.spec.ts.
+      // Added later, and pinned by ticket-spin-pack-index.unit.spec.ts and
+      // ticket-spin-rolled-at-index.unit.spec.ts.
       .indexes.filter(
         (i) =>
-          i.expression && i.keyName !== 'IDX_ticket_spin_pack_id_rolled_at',
+          i.expression &&
+          i.keyName !== 'IDX_ticket_spin_pack_id_rolled_at' &&
+          i.keyName !== 'IDX_ticket_spin_rolled_at',
       )
       .map((i) => `${i.expression};`);
     expect(emitted.sort()).toEqual(declared.sort());
