@@ -163,10 +163,13 @@ describe('VAULT_RULES backend-message contract', () => {
       'Withdrawals are not available on this account.',
       // saved-accounts.ts resolveWithdrawalDestination
       'Select a saved bank account.',
-      'This bank account was saved before withdrawal checks were added. Remove it and save it again to use it.',
+      'This bank account was saved before withdrawal checks were added. Contact support to update it.',
       'This bank account is not available for withdrawals yet — try again in about 3 hours.',
       // withdraw/accounts route: one bank account, one Polycards account
-      'This bank account is already linked to another Polycards account. Withdraw to a bank account in your own name, or contact support if this is a mistake.',
+      'Your bank account is linked to another Polycards account. Contact support to verify it.',
+      'This bank account is linked to another Polycards account. If it is yours, contact support.',
+      'Your Polycards account already has a bank account. Contact support to change it.',
+      'A saved bank account cannot be removed here. Contact support to change it.',
       // gateway-withdrawal.ts startWithdrawal / withdrawalDetailsError
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
       'Add an email address to your account before withdrawing.',

@@ -138,7 +138,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
     const ORIGINAL = { ...process.env };
 
-    beforeEach(() => {
+    beforeEach(async () => {
+      // Approve reads saved accounts with raw SQL on the core customer table (ADR
+      // 0015), which a modules-type container does not have. Just the columns it
+      // reads, so that check runs for real.
+      await MikroOrmWrapper.forkManager().execute(
+        'create table if not exists "customer" ("id" text primary key, "metadata" jsonb, "deleted_at" timestamptz null)',
+      );
       sent = [];
       logged = [];
       called = [];
@@ -230,6 +236,36 @@ moduleIntegrationTestRunner<PacksModuleService>({
       );
 
     describe('submitHeldWithdrawal', () => {
+      it('refuses a number another customer holds, and the row stays held', async () => {
+        const row = await seed();
+        await MikroOrmWrapper.forkManager().execute(
+          `insert into "customer" ("id", "metadata") values ('cus_other_holder', ?::jsonb)`,
+          [
+            JSON.stringify({
+              bank_accounts: [
+                {
+                  id: 'other',
+                  bankCode: 'MBBEMYKL',
+                  bankName: 'Maybank',
+                  // Zero padding must not hide it.
+                  accountNumber: `00${ACCOUNT_NUMBER}`,
+                  accountHolderName: 'Someone Else',
+                },
+              ],
+            }),
+          ],
+        );
+        await expect(
+          submitHeldWithdrawal(scope, {
+            withdrawalId: row.id,
+            adminId: 'admin_1',
+            payerIp: '10.0.0.1',
+          }),
+        ).rejects.toThrow(/linked to another Polycards account/);
+        expect(fakeGateway.calls.withdrawals).toEqual([]);
+        expect((await reread(row.id)).status).toBe('held');
+      });
+
       it('submits the row’s OWN stored destination, stamps the gateway id and moves no money', async () => {
         const row = await seed();
         await debit(row);

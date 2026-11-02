@@ -18,6 +18,7 @@ import {
 import type { Permission } from '@mercurjs/dashboard-sdk';
 import { usePermissions } from '@mercurjs/admin';
 import {
+  useAddSavedBankAccount,
   useCustomerAudit,
   useCustomerDetail,
   useCustomerGatewayWithdrawals,
@@ -25,7 +26,10 @@ import {
   useCustomerReferral,
   usePayoutDetails,
   useReferralSettings,
+  useRemoveSavedBankAccount,
   useSavePayoutDetails,
+  useSavedBankAccounts,
+  useSetBankShareVerified,
   useSetCustomerPhone,
   useSetCustomerRealName,
   useSetCustomerReferrer,
@@ -134,6 +138,219 @@ const BankForm = ({
         </div>
       )}
     </div>
+  );
+};
+
+/** The account withdrawals actually go to, and the only way to change it: a
+ *  player can neither remove it nor add a second one (ADR 0015). Holds come from
+ *  the same check the payout runs: any unverified shared number holds the whole
+ *  player, so the warning sits on the card, not on a row. */
+const SavedBankAccountsCard = ({
+  customerId,
+  canEdit,
+}: {
+  customerId: string;
+  canEdit: boolean;
+}) => {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { data, isError } = useSavedBankAccounts(customerId);
+  const remove = useRemoveSavedBankAccount(customerId);
+  const verify = useSetBankShareVerified(customerId);
+  const add = useAddSavedBankAccount(customerId);
+  const [dialog, setDialog] = useState<
+    | { kind: 'remove'; accountId: string }
+    | { kind: 'verify'; accountId: string; to: boolean }
+    | { kind: 'add' }
+    | null
+  >(null);
+  const onHold = data?.accounts.some(
+    (a) => a.linked.length > 0 && !a.verified_at,
+  );
+
+  return (
+    <Container className="p-0">
+      <div className="px-6 py-4">
+        <Heading level="h2">{t('players.savedBankTitle')}</Heading>
+        <Text className="text-ui-fg-subtle mt-1" size="small">
+          {t('players.savedBankSubtitle')}
+        </Text>
+        {onHold && (
+          <div className="mt-2">
+            <StatusBadge color="orange">
+              {t('players.savedBankHold')}
+            </StatusBadge>
+          </div>
+        )}
+      </div>
+      {isError ? (
+        <TableState isError />
+      ) : !data ? (
+        <div className="border-t px-6 py-6">
+          <LoadingSkeleton />
+        </div>
+      ) : data.accounts.length === 0 ? (
+        <>
+          <TableState empty={t('players.savedBankEmpty')} />
+          {canEdit && (
+            <div className="border-t px-6 py-4">
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => setDialog({ kind: 'add' })}
+              >
+                {t('players.savedBankAdd')}
+              </Button>
+            </div>
+          )}
+        </>
+      ) : (
+        data.accounts.map((account) => (
+          <div key={account.id} className="border-t px-6 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Text size="small" weight="plus">
+                {account.bank_name} · {account.account_number} ·{' '}
+                {account.account_holder_name}
+              </Text>
+              {canEdit && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() =>
+                    setDialog({ kind: 'remove', accountId: account.id })
+                  }
+                >
+                  {t('players.savedBankRemove')}
+                </Button>
+              )}
+            </div>
+            {(account.linked.length > 0 || account.verified_at) && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <StatusBadge color={account.verified_at ? 'green' : 'orange'}>
+                  {account.verified_at
+                    ? t('players.savedBankVerified', {
+                        date: orderDateTime(account.verified_at),
+                      })
+                    : t('players.savedBankShared')}
+                </StatusBadge>
+                {canEdit && (
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() =>
+                      setDialog({
+                        kind: 'verify',
+                        accountId: account.id,
+                        to: !account.verified_at,
+                      })
+                    }
+                  >
+                    {account.verified_at
+                      ? t('players.savedBankUnverify')
+                      : t('players.savedBankVerify')}
+                  </Button>
+                )}
+              </div>
+            )}
+            {account.linked.length > 0 && (
+              <Text size="small" className="text-ui-fg-subtle mt-2">
+                {t('players.savedBankLinked')}:{' '}
+                {account.linked.map((other, i) => (
+                  <span key={other.customer_id}>
+                    {i > 0 && ', '}
+                    <button
+                      type="button"
+                      className="text-ui-fg-interactive hover:underline"
+                      onClick={() =>
+                        navigate(`/customers/${other.customer_id}?tab=profile`)
+                      }
+                    >
+                      {other.handle ?? other.customer_id}
+                    </button>
+                  </span>
+                ))}
+              </Text>
+            )}
+          </div>
+        ))
+      )}
+      {dialog?.kind === 'remove' && (
+        <FieldsDialog
+          title={t('players.savedBankRemoveTitle')}
+          description={t('players.savedBankRemoveBody')}
+          fields={[{ key: 'reason', label: t('players.savedBankReason') }]}
+          busy={remove.isPending}
+          onClose={() => setDialog(null)}
+          onSubmit={({ reason }) =>
+            remove.mutate(
+              { accountId: dialog.accountId, reason },
+              { onSuccess: () => setDialog(null) },
+            )
+          }
+        />
+      )}
+      {dialog?.kind === 'verify' && (
+        <FieldsDialog
+          title={t(
+            dialog.to
+              ? 'players.savedBankVerifyTitle'
+              : 'players.savedBankUnverifyTitle',
+          )}
+          description={t(
+            dialog.to
+              ? 'players.savedBankVerifyBody'
+              : 'players.savedBankUnverifyBody',
+          )}
+          fields={[{ key: 'reason', label: t('players.savedBankReason') }]}
+          busy={verify.isPending}
+          onClose={() => setDialog(null)}
+          onSubmit={({ reason }) =>
+            verify.mutate(
+              { accountId: dialog.accountId, verified: dialog.to, reason },
+              { onSuccess: () => setDialog(null) },
+            )
+          }
+        />
+      )}
+      {dialog?.kind === 'add' && (
+        <FieldsDialog
+          title={t('players.savedBankAddTitle')}
+          description={t('players.savedBankAddBody')}
+          fields={[
+            {
+              key: 'bank_code',
+              label: t('players.savedBankChooseBank'),
+              placeholder: t('players.savedBankChoose'),
+              options: (data?.banks ?? []).map((b) => ({
+                value: b.id,
+                label: b.name,
+              })),
+            },
+            { key: 'account_number', label: t('players.savedBankNumber') },
+            { key: 'account_holder_name', label: t('players.savedBankHolder') },
+            { key: 'reason', label: t('players.savedBankReason') },
+          ]}
+          busy={add.isPending}
+          onClose={() => setDialog(null)}
+          onSubmit={({
+            bank_code,
+            account_number,
+            account_holder_name,
+            reason,
+          }) =>
+            add.mutate(
+              {
+                bank_code: bank_code as string,
+                account_number: account_number as string,
+                account_holder_name: account_holder_name as string,
+                reason: reason as string,
+              },
+              { onSuccess: () => setDialog(null) },
+            )
+          }
+        />
+      )}
+    </Container>
   );
 };
 
@@ -950,6 +1167,9 @@ export const ProfileTab = ({ customerId }: { customerId: string }) => {
       <AddressesCard customerId={customerId} />
       <GroupCard customerId={customerId} />
       <ReferralCard customerId={customerId} />
+      {canSeeBank && (
+        <SavedBankAccountsCard customerId={customerId} canEdit={canEdit} />
+      )}
 
       {(canSeeBank || canSeePayments) && (
         <Container className="p-0">

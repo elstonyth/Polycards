@@ -1124,7 +1124,7 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
-      // Add/remove a saved payout account — metadata writes on the delivery
+      // Add a saved payout account (DELETE only refuses) — metadata writes on the delivery
       // write-tier budget (rare, deliberate mutations; NOT the appearance
       // budget, which exists for rapid cosmetic swaps). The actual payout
       // still re-validates on submit; these only shape the picker.
@@ -1354,7 +1354,7 @@ export default defineMiddlewares({
       // "refuse the field" rather than "force has_account and check".
       matcher: '/admin/customers',
       method: 'POST',
-      middlewares: [rejectAdminPhoneWrite],
+      middlewares: [rejectAdminBankAccountsMetadata, rejectAdminPhoneWrite],
     },
     {
       // The framework's own POST /admin/customers/:id writes customer.metadata
@@ -1381,6 +1381,29 @@ export default defineMiddlewares({
     },
     {
       matcher: '/admin/customers/*/payout-details',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    // Saved bank accounts: the list carries full numbers (same reasoning as the
+    // payout-details GET below), and the two writes are support's only way to
+    // change a tied account.
+    {
+      matcher: '/admin/customers/*/bank-accounts',
+      method: 'GET',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/bank-accounts/add',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/bank-accounts/remove',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/bank-accounts/verify',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

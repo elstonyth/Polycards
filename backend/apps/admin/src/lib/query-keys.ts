@@ -201,6 +201,8 @@ export const qk = {
   customerDetail: (id: string) => ['admin', 'customer', id, 'detail'] as const,
   payoutDetails: (id: string) =>
     ['admin', 'customer', id, 'payout-details'] as const,
+  savedBankAccounts: (id: string) =>
+    ['admin', 'customer', id, 'bank-accounts'] as const,
   spendReport: (id: string) =>
     ['admin', 'customer', id, 'spend-report'] as const,
   customerMoney: (id: string) => ['admin', 'customer', id, 'money'] as const,

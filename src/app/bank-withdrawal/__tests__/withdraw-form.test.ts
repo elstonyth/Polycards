@@ -207,13 +207,13 @@ describe('WithdrawForm', () => {
     expect(ready.disabled).toBe(false);
   });
 
-  it('an account with no usableFrom is disabled and says to save it again', async () => {
+  it('an account with no usableFrom is disabled and says to contact support', async () => {
     await render([NEEDS_RESAVE_ACCOUNT]);
     const legacy = [...container.querySelectorAll('option')].find(
       (o) => (o as HTMLOptionElement).value === NEEDS_RESAVE_ACCOUNT.id,
     ) as HTMLOptionElement;
     expect(legacy.disabled).toBe(true);
-    expect(legacy.textContent).toContain('save it again');
+    expect(legacy.textContent).toContain('contact support');
     expect(submitButton().disabled).toBe(true);
   });
 
@@ -798,8 +798,30 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     expectNoUnlockCopy();
   });
 
-  it('locked with no payable account: one quiet nudge to save one now', async () => {
+  it('locked with an account already saved: no nudge, /bank offers no second one', async () => {
     await render([COOLING_ACCOUNT], 0, { available: 350, remaining: 50 });
+    expect(container.querySelector('a[href="/bank"]')).toBeNull();
+  });
+
+  it('a shared account says why and who can help, not to wait', async () => {
+    const reason =
+      'Your bank account is linked to another Polycards account. Contact support to verify it.';
+    await render([
+      { ...READY_ACCOUNT, supported: false, unavailableReason: reason },
+    ]);
+    expect(container.textContent).toContain(reason);
+    expect(container.textContent).not.toContain('short wait');
+    expect(container.querySelector('a[href="/contact"]')).not.toBeNull();
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('a cooling account is told to wait', async () => {
+    await render([COOLING_ACCOUNT]);
+    expect(container.textContent).toContain('short wait');
+  });
+
+  it('locked with no account at all: one quiet nudge to save one now', async () => {
+    await render([], 0, { available: 350, remaining: 50 });
     const links = container.querySelectorAll('a[href="/bank"]');
     expect(links).toHaveLength(1);
     expect(links[0]?.textContent).toBe(`Save your bank account now${NB}→`);
@@ -1016,6 +1038,18 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     expect(
       withdrawRemedy(
         'Withdrawals are unavailable while your account is under review. Contact support.',
+      )?.href,
+    ).toBe('/contact');
+    // A shared or locked account changes through support, not on /bank, though
+    // both say "bank account".
+    expect(
+      withdrawRemedy(
+        'Your bank account is linked to another Polycards account. Contact support to verify it.',
+      )?.href,
+    ).toBe('/contact');
+    expect(
+      withdrawRemedy(
+        'This bank account was saved before withdrawal checks were added. Contact support to update it.',
       )?.href,
     ).toBe('/contact');
     expect(

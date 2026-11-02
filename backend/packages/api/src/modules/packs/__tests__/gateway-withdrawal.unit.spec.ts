@@ -67,6 +67,8 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     savedBankAccountsFor: jest.fn().mockResolvedValue(savedAccounts),
     // Other customers on the same number. None by default.
     otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
+    // Support's verification of a shared number. Not verified by default.
+    bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
     createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
     // Idempotency-Key replay lookup. Empty by default — no prior intent.
     listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
@@ -480,49 +482,71 @@ describe('startWithdrawal — money ordering', () => {
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
 
-  // A number another customer has already been PAID to is refused at payout,
-  // before any row or debit, for destinations saved since the check shipped.
-  it('refuses a payout to a number another customer was already paid to', async () => {
-    // A destination saved since the check shipped is still inside its
-    // 24 h cooling-off today; switch the wait off so the check is reached.
-    const prevCooldown = process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
-    process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = '0';
-    try {
-      const fresh = { ...SAVED_ACCOUNT, savedAt: '2026-10-14T00:00:00+08:00' };
-      const h = harness([fresh]);
-      h.packs.otherPayoutAccountHolders.mockResolvedValue([
-        { customer_id: 'cus_2', bank_code: 'MYMB2U', holder_name: null },
-      ]);
+  // A shared number is held at payout for every account on it, before any row
+  // or debit, until support verifies this customer (ADR 0015).
+  describe('a shared bank account', () => {
+    const paid = { customer_id: 'cus_2', bank_code: 'MYMB2U', holder_name: null };
+    const saved = { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'X' };
+
+    it.each([
+      ['paid out to another customer', paid],
+      ['only saved by another customer, under any name', saved],
+    ])('is refused when %s', async (_label, holder) => {
+      const h = harness();
+      h.packs.otherPayoutAccountHolders.mockResolvedValue([holder]);
       await expect(start(h, { gateway: 'tgpay', amount: 56 })).rejects.toThrow(
-        /already linked to another Polycards account/,
+        /linked to another Polycards account/,
       );
       expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
       expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+    });
 
-      // Only saved elsewhere (not paid): the save check already ruled on it.
-      const h2 = harness([fresh]);
-      h2.packs.otherPayoutAccountHolders.mockResolvedValue([
-        { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'X' },
+    it('is refused to a clean saved number while another saved one is shared', async () => {
+      const shared = {
+        ...SAVED_ACCOUNT,
+        id: savedBankAccountId('MBBEMYKL', '999999999999'),
+        accountNumber: '999999999999',
+      };
+      const h = harness([SAVED_ACCOUNT, shared]);
+      h.packs.otherPayoutAccountHolders.mockImplementation(
+        async (_id: string, number: string) =>
+          number === shared.accountNumber ? [paid] : [],
+      );
+      await expect(
+        start(h, { gateway: 'tgpay', amount: 56, accountId: SAVED_ACCOUNT.id }),
+      ).rejects.toThrow(/linked to another Polycards account/);
+      expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+    });
+
+    it('is refused however long ago it was saved', async () => {
+      const old = { ...SAVED_ACCOUNT, savedAt: '2026-10-01T00:00:00+08:00' };
+      const h = harness([old]);
+      h.packs.otherPayoutAccountHolders.mockResolvedValue([paid]);
+      await expect(start(h, { gateway: 'tgpay', amount: 56 })).rejects.toThrow(
+        /linked to another Polycards account/,
+      );
+    });
+
+    it('pays once support verified this customer', async () => {
+      const h = harness();
+      h.packs.otherPayoutAccountHolders.mockResolvedValue([paid]);
+      h.packs.bankShareVerifiedFor.mockResolvedValue({
+        [SAVED_ACCOUNT.id]: '2026-11-03T00:00:00.000Z',
+      });
+      await expect(
+        start(h, { gateway: 'tgpay', amount: 56 }),
+      ).resolves.toBeTruthy();
+    });
+
+    it('does not count the same digits at another bank', async () => {
+      const h = harness();
+      h.packs.otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'PBBEMYKL', holder_name: null },
       ]);
       await expect(
-        start(h2, { gateway: 'tgpay', amount: 56 }),
+        start(h, { gateway: 'tgpay', amount: 56 }),
       ).resolves.toBeTruthy();
-
-      // Saved before the check shipped: an existing cluster, left alone.
-      const old = { ...SAVED_ACCOUNT, savedAt: '2026-10-13T23:59:59+08:00' };
-      const h3 = harness([old]);
-      h3.packs.otherPayoutAccountHolders.mockResolvedValue([
-        { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: null },
-      ]);
-      await expect(
-        start(h3, { gateway: 'tgpay', amount: 56 }),
-      ).resolves.toBeTruthy();
-      expect(h3.packs.otherPayoutAccountHolders).not.toHaveBeenCalled();
-    } finally {
-      if (prevCooldown === undefined)
-        delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
-      else process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = prevCooldown;
-    }
+    });
   });
 
   it('holds a destination to its own payout floor before any row or debit', async () => {
@@ -816,10 +840,10 @@ describe('startWithdrawal — money ordering', () => {
   // Test-plan case 5: a pre-cooling-off row (no savedAt) is NOT usable, and it
   // says so in its own words — "wait a while" would be a lie, because waiting
   // never arms it.
-  it('refuses an account with no savedAt, telling them to re-save it', async () => {
+  it('refuses an account with no savedAt, sending them to support', async () => {
     const { savedAt: _dropped, ...noTimestamp } = SAVED_ACCOUNT;
     const h = harness([noTimestamp]);
-    await expect(start(h)).rejects.toThrow(/remove it and save it again/i);
+    await expect(start(h)).rejects.toThrow(/contact support to update it/i);
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
@@ -1729,6 +1753,8 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       const packs = {
         listGatewayWithdrawals: jest.fn().mockResolvedValue([heldRow]),
         listCustomerAccountStates: jest.fn().mockResolvedValue([]),
+        otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
+        bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
         claimWithdrawalAgainstDebit: jest
           .fn()
           .mockResolvedValue({ debited: true, claimed: true }),
@@ -1760,6 +1786,65 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         });
       return { packs, approve };
     }
+
+    // One bank account, one Polycards account, on the row's own number: a row
+    // held before the rule shipped, or a number since removed, stays held.
+    describe('a shared bank account', () => {
+      const elsewhere = {
+        customer_id: 'cus_2',
+        bank_code: 'MBBEMYKL',
+        holder_name: null,
+      };
+
+      it('refuses, and the row stays held', async () => {
+        const h = approveHarness();
+        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        await expect(h.approve()).rejects.toThrow(
+          /linked to another Polycards account/,
+        );
+        expect(h.packs.otherPayoutAccountHolders).toHaveBeenCalledWith(
+          heldRow.customer_id,
+          heldRow.account_number,
+          false,
+        );
+        expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
+        expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+      });
+
+      it('refuses a stamp on another number', async () => {
+        const h = approveHarness();
+        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        h.packs.bankShareVerifiedFor.mockResolvedValue({
+          other_account: '2026-11-03T00:00:00.000Z',
+        });
+        await expect(h.approve()).rejects.toThrow(
+          /linked to another Polycards account/,
+        );
+      });
+
+      it('lets a verified number through', async () => {
+        const h = approveHarness();
+        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        h.packs.bankShareVerifiedFor.mockResolvedValue({
+          [savedBankAccountId('MBBEMYKL', heldRow.account_number)]:
+            '2026-11-03T00:00:00.000Z',
+        });
+        // Past the hold: this describe's fake gateway then refuses for its own reason.
+        const out = await h.approve().catch((e: Error) => e);
+        expect(String((out as Error).message)).not.toMatch(/linked to another/);
+        expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalled();
+      });
+
+      it('does not count the same digits at another bank', async () => {
+        const h = approveHarness();
+        h.packs.otherPayoutAccountHolders.mockResolvedValue([
+          { ...elsewhere, bank_code: 'PBBEMYKL' },
+        ]);
+        const out = await h.approve().catch((e: Error) => e);
+        expect(String((out as Error).message)).not.toMatch(/linked to another/);
+        expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalled();
+      });
+    });
 
     beforeEach(() => {
       // Cached, so resolveActiveGateway never needs a site_settings table.
@@ -2175,14 +2260,14 @@ describe('PacksModuleService.withdrawForCashout', () => {
   // Test-plan case 5, asserted at the gate that actually decides: a missing
   // timestamp resolves to REFUSED, with its own message. `undefined` never
   // means "usable".
-  it('refuses an account with no savedAt — no debit, and says to re-save it', async () => {
+  it('refuses an account with no savedAt — no debit, and sends them to support', async () => {
     const { savedAt: _dropped, ...noTimestamp } = SAVED_ACCOUNT;
     const f = fakeService(fakeWallet(), 0, 0, { cus_1: [noTimestamp] });
     await expect(
       f.svc.withdrawForCashout(cashout, f.ctx),
     ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
-      message: expect.stringMatching(/remove it and save it again/i),
+      message: expect.stringMatching(/contact support to update it/i),
     });
     expect(f.withdrawCreditsWithLedger.mock.calls.length).toBe(0);
   });

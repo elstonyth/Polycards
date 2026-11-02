@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Landmark, Trash2, Wallet } from 'lucide-react';
+import Link from 'next/link';
+import { Landmark, Wallet } from 'lucide-react';
 import {
   addSavedBankAccount,
   fetchSavedBankAccounts,
   fetchWithdrawBanks,
-  removeSavedBankAccount,
   type SavedBankAccount,
   type WithdrawBank,
 } from '@/lib/actions/vault';
@@ -17,11 +17,13 @@ import { timeUntil } from '@/lib/format';
 import { bankCountryGroups } from '@/lib/regional-rails';
 import { cn } from '@/lib/utils';
 
-// Saved payout accounts — list, add, remove. This list is where withdrawals
-// GO: the withdraw form submits an account id and the server resolves the bank
-// details from here, so this page is the only place a payout destination is
-// chosen. The backend caps the list at 5 and validates with the payout-submit
-// rules. Existing accounts are rechecked when listed and used.
+// Saved payout accounts — list, add. This list is where withdrawals GO: the
+// withdraw form submits an account id and the server resolves the bank details
+// from here, so this page is the only place a payout destination is chosen. One
+// account per customer, and once saved only support changes it (ADR 0015), so the
+// form says so before the save. Lists that already hold more keep them. The
+// backend validates with the payout-submit rules; existing accounts are rechecked
+// when listed and used.
 //
 // A newly added account may have to wait out a cooling-off window before it can
 // receive money; the server says when via `usableFrom`. That state is rendered
@@ -53,7 +55,7 @@ function payoutStatus(
   }
   if (typeof account.usableFrom !== 'string') {
     // Saved before the cooling-off rule existed: waiting will never arm it.
-    return { label: 'Remove and save again to withdraw to it', ready: false };
+    return { label: 'Contact support to update this account', ready: false };
   }
   const wait = timeUntil(account.usableFrom, now);
   return wait
@@ -73,7 +75,6 @@ export function BankAccountsClient() {
   const [accountNumber, setAccountNumber] = useState('');
   const [holderName, setHolderName] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,24 +157,6 @@ export function BankAccountsClient() {
     }
   }
 
-  async function remove(id: string) {
-    if (removingId) return;
-    setError(null);
-    setRemovingId(id);
-    try {
-      const res = await removeSavedBankAccount(id);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setAccounts(res.accounts);
-    } catch {
-      setError('Something went wrong. Please try again.');
-    } finally {
-      setRemovingId(null);
-    }
-  }
-
   return (
     <div className="mt-4 flex max-w-md flex-col gap-3">
       {accounts === null && !error && (
@@ -224,15 +207,6 @@ export function BankAccountsClient() {
                 {status.label}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => remove(account.id)}
-              disabled={removingId !== null}
-              aria-label={`Remove ${account.bankName} ${maskAccount(account.accountNumber)}`}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-300 disabled:opacity-50"
-            >
-              <Trash2 className="h-4 w-4" aria-hidden />
-            </button>
           </div>
         );
       })}
@@ -388,6 +362,17 @@ export function BankAccountsClient() {
             </>
           )}
 
+          <p className="mt-3 text-[12px] leading-snug text-amber-300/80">
+            Each Polycards account has one{' '}
+            {walletGroup ? 'wallet' : 'bank account'}, and it can&apos;t be
+            linked to another Polycards account. Check the details: to change it
+            later, you&apos;ll need to{' '}
+            <Link href="/contact" className="underline underline-offset-2">
+              contact support
+            </Link>
+            .
+          </p>
+
           <div className="mt-4 flex gap-2">
             <Pill
               onClick={submitAdd}
@@ -408,16 +393,36 @@ export function BankAccountsClient() {
         </div>
       ) : (
         accounts !== null && (
-          <div className="flex gap-2">
-            <Pill onClick={() => setAdding(true)} size="lg" className="flex-1">
-              Add bank account
-            </Pill>
-            <WithdrawLink
-              className={cn(pillVariants({ variant: 'secondary', size: 'lg' }))}
-            >
-              Withdraw
-            </WithdrawLink>
-          </div>
+          <>
+            {accounts.length > 0 && (
+              <p className="text-[13px] text-neutral-400">
+                To change your bank account,{' '}
+                <Link href="/contact" className="text-white underline">
+                  contact support
+                </Link>
+                .
+              </p>
+            )}
+            <div className="flex gap-2">
+              {accounts.length === 0 && (
+                <Pill
+                  onClick={() => setAdding(true)}
+                  size="lg"
+                  className="flex-1"
+                >
+                  Add bank account
+                </Pill>
+              )}
+              <WithdrawLink
+                className={cn(
+                  pillVariants({ variant: 'secondary', size: 'lg' }),
+                  accounts.length > 0 && 'flex-1',
+                )}
+              >
+                Withdraw
+              </WithdrawLink>
+            </div>
+          </>
         )
       )}
     </div>

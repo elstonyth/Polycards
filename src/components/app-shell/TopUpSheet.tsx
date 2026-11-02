@@ -677,9 +677,6 @@ export default function TopUpSheet({
                 <span className="mt-1 block text-[11px] leading-snug text-neutral-500">
                   Exactly as your bank shows it, or the payment can&apos;t be
                   matched.
-                  {payerInfo?.savedName
-                    ? null
-                    : ' Save your bank account under Bank accounts to skip this next time.'}
                 </span>
               </label>
             )}

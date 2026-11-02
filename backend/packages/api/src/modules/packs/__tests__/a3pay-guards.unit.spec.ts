@@ -282,6 +282,7 @@ describe('a regional payout', () => {
       listFxRates: jest.fn().mockResolvedValue([FX_ROW]),
       savedBankAccountsFor: jest.fn().mockResolvedValue([SG_ACCOUNT]),
       otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
+      bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
       updateGatewayWithdrawals: jest.fn(),
@@ -469,6 +470,7 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
       listFxRates: jest.fn().mockResolvedValue([FX_ROW]),
       savedBankAccountsFor: jest.fn().mockResolvedValue([SG_ACCOUNT]),
       otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
+      bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
       updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
@@ -632,6 +634,8 @@ describe('approving a held A3Pay payout', () => {
     return {
       listGatewayWithdrawals: jest.fn().mockResolvedValue([heldRow]),
       listCustomerAccountStates: jest.fn().mockResolvedValue([]),
+      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
+      bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       claimWithdrawalAgainstDebit: jest
         .fn()
         .mockResolvedValue({ debited: true, claimed: true }),

@@ -6,13 +6,13 @@ import { createRoot, type Root } from 'react-dom/client';
 // The add-account form lists one country's payout banks at a time, picked by
 // flag, before accepting bank details. The backend supplies account lengths.
 
+const fetchSavedBankAccounts = vi.fn();
 const fetchWithdrawBanks = vi.fn();
 const addSavedBankAccount = vi.fn();
 vi.mock('@/lib/actions/vault', () => ({
-  fetchSavedBankAccounts: () => Promise.resolve({ ok: true, accounts: [] }),
+  fetchSavedBankAccounts: () => fetchSavedBankAccounts(),
   fetchWithdrawBanks: () => fetchWithdrawBanks(),
   addSavedBankAccount: (...args: unknown[]) => addSavedBankAccount(...args),
-  removeSavedBankAccount: vi.fn(),
   getPaymentLimits: vi.fn(() => new Promise(() => {})),
 }));
 
@@ -54,7 +54,10 @@ const SG = [
 let container: HTMLDivElement;
 let root: Root;
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  fetchSavedBankAccounts.mockResolvedValue({ ok: true, accounts: [] });
+});
 
 afterEach(() => {
   act(() => root.unmount());
@@ -319,5 +322,63 @@ describe('BankAccountsClient — bank country', () => {
     ).toBe(
       'Check your bank country and use the account number shown in your banking app, not a card number.',
     );
+  });
+});
+
+describe('BankAccountsClient — a tied account', () => {
+  const SAVED = {
+    id: 'acc_1',
+    bankCode: 'MBB',
+    bankName: 'Maybank',
+    accountNumber: '123456789012',
+    accountHolderName: 'Tan',
+    usableFrom: '2026-01-01T00:00:00.000Z',
+    supported: true,
+  };
+
+  const mount = async () => {
+    fetchWithdrawBanks.mockResolvedValue({ ok: true, banks: MY });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(BankAccountsClient));
+    });
+  };
+
+  it('offers no remove and no second account, and points at support', async () => {
+    fetchSavedBankAccounts.mockResolvedValue({ ok: true, accounts: [SAVED] });
+    await mount();
+    expect(container.textContent).toContain('Maybank');
+    expect(container.querySelector('button[aria-label^="Remove"]')).toBeNull();
+    expect(container.textContent).not.toContain('Add bank account');
+    expect(
+      container.querySelector('a[href="/contact"]')?.textContent,
+    ).toContain('contact support');
+  });
+
+  it('shows why a shared account is on hold', async () => {
+    fetchSavedBankAccounts.mockResolvedValue({
+      ok: true,
+      accounts: [
+        {
+          ...SAVED,
+          supported: false,
+          unavailableReason:
+            'Your bank account is linked to another Polycards account. Contact support to verify it.',
+        },
+      ],
+    });
+    await mount();
+    expect(container.textContent).toContain('Contact support to verify it');
+  });
+
+  it('warns before the save that only support can change it', async () => {
+    await mount();
+    const add = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Add bank account',
+    ) as HTMLButtonElement;
+    await act(async () => add.click());
+    expect(container.textContent).toContain('contact support');
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
@@ -10,13 +10,13 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { GLASS_SUBTLE, useLiquidGlass } from '@/lib/use-liquid-glass';
-import { GAMES_EVENT } from './games';
+import { COIN_FLIP_OPEN, GAMES_EVENT } from './games';
 
 /**
  * The game picker the Games tab opens (operator 2026-10-25): a bottom sheet
- * on phones, a centred dialog on desktop. Coin Flip opens its guarded Vault
- * flow; Lucky Draw has its own tab since 2026-10-30. Swipe down, tap outside, X
- * or Escape closes it.
+ * on phones, a centred dialog on desktop. Coin Flip is coming soon until
+ * COIN_FLIP_OPEN, then opens its guarded Vault flow; Lucky Draw has its own tab
+ * since 2026-10-30. Swipe down, tap outside, X or Escape closes it.
  */
 export function GamesSheetBody({ openedOn }: { openedOn: string }) {
   // Open on the page it was opened from: any navigation (browser back
@@ -65,6 +65,18 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
   const { customer, isLoading } = useAuth();
   useModalA11y(panelRef, true, onClose);
   useLiquidGlass(panelRef, true, GLASS_SUBTLE);
+  // Rendered from the game's own CoinScene coin, so it matches at every angle:
+  // Head, flip, Tail, flip back (a full turn loops). Its backdrop is the tile's
+  // neutral-900, so no blend mode.
+  const coin = (
+    <AmbientVideo
+      mp4="/images/coin-flip/coin-loop.mp4"
+      webm="/images/coin-flip/coin-loop.webm"
+      poster="/images/coin-flip/coin-loop-poster.webp"
+      fit="contain"
+      className="aspect-[4/3] w-[94%] max-w-[155px] transition-transform duration-300 group-hover:scale-105"
+    />
+  );
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4">
@@ -115,40 +127,56 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
 
         <ul className="mt-4 grid grid-cols-2 gap-3">
           <li>
-            <Link
-              href="/vault/coin-flip"
-              transitionTypes={['game-in']}
-              draggable={false}
-              onClick={(event) => {
-                if (!customer && !isLoading) {
-                  event.preventDefault();
-                  onClose(() => openAuth('signup'));
-                } else onClose();
-              }}
-              className="group relative flex min-h-[14rem] flex-col justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40 sm:aspect-[4/5]"
-            >
-              <span className="absolute inset-x-0 top-6 flex justify-center">
-                {/* Rendered from the game's own CoinScene coin, so it matches at
-                  every angle: Head, flip, Tail, flip back (a full turn loops).
-                  Its backdrop is this tile's neutral-900, so no blend mode. */}
-                <AmbientVideo
-                  mp4="/images/coin-flip/coin-loop.mp4"
-                  webm="/images/coin-flip/coin-loop.webm"
-                  poster="/images/coin-flip/coin-loop-poster.webp"
-                  fit="contain"
-                  className="aspect-[4/3] w-[94%] max-w-[155px] transition-transform duration-300 group-hover:scale-105"
-                />
-              </span>
-              <span className="font-heading text-lg leading-tight text-white">
-                COIN FLIP
-              </span>
-              <span className="mt-0.5 text-xs text-neutral-400">
-                Your cards. One toss.
-              </span>
-            </Link>
+            {COIN_FLIP_OPEN ? (
+              <Link
+                href="/vault/coin-flip"
+                transitionTypes={['game-in']}
+                draggable={false}
+                onClick={(event) => {
+                  if (!customer && !isLoading) {
+                    event.preventDefault();
+                    onClose(() => openAuth('signup'));
+                  } else onClose();
+                }}
+                className="group relative flex min-h-[14rem] flex-col justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40 sm:aspect-[4/5]"
+              >
+                <span className="absolute inset-x-0 top-6 flex justify-center">
+                  {coin}
+                </span>
+                <span className="font-heading text-lg leading-tight text-white">
+                  COIN FLIP
+                </span>
+                <span className="mt-0.5 text-xs text-neutral-400">
+                  Your cards. One toss.
+                </span>
+              </Link>
+            ) : (
+              <SoonTile title="COIN FLIP" art={coin} />
+            )}
           </li>
         </ul>
       </motion.div>
+    </div>
+  );
+}
+
+/** A game that isn't on yet: greyed out and not tappable. */
+function SoonTile({ title, art }: { title: string; art: ReactNode }) {
+  return (
+    <div
+      aria-disabled="true"
+      className="relative flex min-h-[14rem] flex-col sm:aspect-[4/5] justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3"
+    >
+      <span className="absolute top-3 left-3 z-10 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-300 uppercase">
+        Soon
+      </span>
+      <span className="absolute inset-x-0 top-7 flex justify-center opacity-50 grayscale-[0.4]">
+        {art}
+      </span>
+      <span className="font-heading text-lg leading-tight text-neutral-300">
+        {title}
+      </span>
+      <span className="mt-0.5 text-xs text-neutral-500">Coming soon</span>
     </div>
   );
 }
