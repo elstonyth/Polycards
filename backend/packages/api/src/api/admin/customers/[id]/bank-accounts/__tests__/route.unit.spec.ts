@@ -152,6 +152,21 @@ describe('POST bank-accounts/verify', () => {
     expect(packs.setBankShareVerified).not.toHaveBeenCalled();
   });
 
+  it('refuses when nothing on the list is shared, so the stamp cannot sit waiting', async () => {
+    customers.retrieveCustomer.mockResolvedValue({ metadata: {} });
+    await expect(
+      VERIFY(mkReq({ verified: true, reason: 'x' }), mkRes() as never),
+    ).rejects.toThrow(/nothing to verify/);
+    customers.retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [ACCOUNT] },
+    });
+    packs.otherPayoutAccountHolders.mockResolvedValue([]);
+    await expect(
+      VERIFY(mkReq({ verified: true, reason: 'x' }), mkRes() as never),
+    ).rejects.toThrow(/nothing to verify/);
+    expect(packs.setBankShareVerified).not.toHaveBeenCalled();
+  });
+
   it('one person, one account: refuses a second account on the number', async () => {
     packs.otherPayoutAccountHolders.mockResolvedValue([
       { customer_id: 'cus_2', bank_code: 'PBBEMYKL', holder_name: null },
@@ -192,6 +207,9 @@ describe('POST bank-accounts/verify', () => {
   });
 
   it('sets it for this customer, with the admin from the token', async () => {
+    packs.otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'PBBEMYKL', holder_name: null },
+    ]);
     const res = mkRes();
     await VERIFY(mkReq({ verified: true, reason: ' checked ' }), res as never);
     expect(packs.setBankShareVerified).toHaveBeenCalledWith({

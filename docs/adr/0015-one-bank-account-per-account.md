@@ -24,8 +24,9 @@ Three things follow:
   manual freeze would also stop sell-backs and reward claims, so it stays a
   separate, per-customer decision for support. Packs, top-ups and sell-backs keep
   working during a hold, and the money stays in the wallet.
-- **Support lifts a hold per customer** (`metadata.bank_share_verified_at`, set on
-  the player page, audited). Paid-out rows are permanent, so without this no
+- **Support lifts a payout hold per customer** (`metadata.bank_share_verified_at`,
+  set only through the audited verify route). It never lets a new shared number be
+  saved. Paid-out rows are permanent, so without this no
   account on a number that was ever paid could withdraw again. Other accounts on
   the number stay held, and a second account on it cannot be verified while the
   first is. Emptying the list clears the verification, so it never vouches for the
@@ -38,7 +39,9 @@ Three things follow:
   could never free anyone. Support can freeze those by hand.
 
 Accepted: a stranger who saves someone's number first locks the real owner out
-until support removes it. Wallets keep their narrower rule, because an address has
+until support removes it. Someone whose number another account was already paid to
+cannot save it at all, because paid-out rows are permanent, and support has no
+override for that today. Wallets keep their narrower rule, because an address has
 no holder name and is public on-chain: only a wallet already paid out to counts.
 Deleting an account still frees its numbers, because the deletion scrub cuts its
 payout rows to the last 4 digits.

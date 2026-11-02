@@ -6,6 +6,7 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { hasPermission } from '@medusajs/framework';
 import { PARTNER_CREDENTIAL_KEY } from '../../utils/partner-accounts';
+import { BANK_SHARE_VERIFIED_KEY } from '../../modules/packs/saved-accounts';
 
 // Medusa's stock update-customer route accepts arbitrary `metadata` — read from
 // the installed package, not assumed:
@@ -65,7 +66,9 @@ export function rejectCustomerMetadata(
  * — offline-computable, so a well-formed entry passes resolveWithdrawalDestination's
  * integrity re-check. That write would bypass both the metadata:<customer>
  * advisory lock and any audit row, unlike setPayoutDetails which records bank
- * name + last-4 on every change.
+ * name + last-4 on every change. The shared-bank verification stamp gets the
+ * same refusal: written here it would lift a hold with no audit row and no
+ * one-account-per-number check (bank-accounts/verify is its only writer).
  */
 export function rejectAdminBankAccountsMetadata(
   req: MedusaRequest,
@@ -79,6 +82,19 @@ export function rejectAdminBankAccountsMetadata(
       new MedusaError(
         MedusaError.Types.INVALID_DATA,
         'bank_accounts is not writable through this route. Payout destinations are customer-owned and audited.',
+      ),
+    );
+    return;
+  }
+  if (
+    metadata &&
+    typeof metadata === 'object' &&
+    BANK_SHARE_VERIFIED_KEY in metadata
+  ) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${BANK_SHARE_VERIFIED_KEY} is not writable through this route. Use bank-accounts/verify, which is audited.`,
       ),
     );
     return;

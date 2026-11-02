@@ -340,8 +340,8 @@ export async function loadSavedBankAccounts(
 
 /**
  * One bank account, one Polycards account (ADR 0015). A number another customer
- * saved or was paid to is refused when saving. At payout, any saved number that
- * is shared holds the whole account until support acts: verifies this customer
+ * saved or was paid to is refused when saving, always. At payout, any saved number
+ * that is shared holds the whole account until support acts: verifies this customer
  * (bankShareVerified) or removes the number. Existing shared accounts are held
  * too: the clusters left alone on 2026-10-14 were still being farmed.
  */
@@ -394,8 +394,9 @@ export async function anySavedAccountShared(
 }
 
 /** customer.metadata key, stamped by support after they verify a shared bank
- *  account. Lifted at save and at payout; removing the account clears it. Only
- *  admin routes can write it: rejectCustomerMetadata refuses client metadata. */
+ *  account. Lifts the payout hold, never the refusal to save; emptying the list
+ *  clears it. Only bank-accounts/verify writes it: rejectCustomerMetadata and
+ *  rejectAdminBankAccountsMetadata refuse it everywhere else. */
 export const BANK_SHARE_VERIFIED_KEY = 'bank_share_verified_at';
 
 export function bankShareVerified(metadata: Record<string, unknown>): boolean {

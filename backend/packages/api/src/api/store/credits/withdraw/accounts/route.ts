@@ -129,19 +129,13 @@ async function loadMetadata(
 async function mutateAccounts(
   req: AuthenticatedMedusaRequest,
   customerId: string,
-  mutate: (
-    accounts: SavedBankAccount[],
-    metadata: Record<string, unknown>,
-  ) => SavedBankAccount[] | null,
+  mutate: (accounts: SavedBankAccount[]) => SavedBankAccount[] | null,
 ): Promise<Record<string, unknown>> {
   const packs = resolvePacks<CustomerWallet>(req.scope);
   return await packs.mutateCustomerMetadata({
     customerId: requireCustomerId(customerId),
     mutate: (current) => {
-      const next = mutate(
-        parseSavedBankAccounts(current.bank_accounts),
-        current,
-      );
+      const next = mutate(parseSavedBankAccounts(current.bank_accounts));
       return next === null ? null : { ...current, bank_accounts: next };
     },
   });
@@ -281,14 +275,15 @@ export async function POST(
 
   // Looked up before the lock (it reads OTHER customers, which this
   // customer's metadata lock does not cover) but applied inside it, where
-  // "already on my list" and support's verification are decided from the locked
-  // read. Two strangers saving one number in the same instant can both get
-  // through, and are both held at payout, which sees the other's saved entry.
+  // "already on my list" is decided from the locked read. Two strangers saving
+  // one number in the same instant can both get through, and are both held at
+  // payout, which sees the other's saved entry.
   //
   // Any holder blocks, under any name: one ring typed ten holder names onto one
   // number, which the old same-name rule let straight through. A stranger who
   // saves someone's number first locks the owner out until support removes it;
-  // support is the answer to that (ADR 0015).
+  // support is the answer to that (ADR 0015). Support's verification lifts a
+  // payout hold on a number already saved; it never lets a new one in.
   const shared = heldByAnother(
     await resolvePacks<CustomerWallet>(req.scope).otherPayoutAccountHolders(
       customerId,
@@ -302,7 +297,7 @@ export async function POST(
   // this handler read earlier — otherwise two concurrent saves could both see
   // MAX-1 accounts and both be allowed through.
   let added = false;
-  const saved = await mutateAccounts(req, customerId, (accounts, metadata) => {
+  const saved = await mutateAccounts(req, customerId, (accounts) => {
     const existing = accounts.findIndex((a) => a.id === account.id);
     if (existing >= 0) {
       // Idempotent re-add: refresh the label/holder in place (a customer fixing
@@ -324,7 +319,7 @@ export async function POST(
         ONE_BANK_ACCOUNT_MESSAGE,
       );
     }
-    if (shared && !bankShareVerified(metadata)) {
+    if (shared) {
       // The refusal tells the customer the number is linked elsewhere; log
       // it so repeated probing for linked numbers shows up. Last 4 only.
       req.scope

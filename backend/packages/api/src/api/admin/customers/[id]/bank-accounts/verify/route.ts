@@ -15,11 +15,12 @@ import type PacksModuleService from '../../../../../../modules/packs/service';
 type Body = { verified?: unknown; reason?: unknown };
 
 // POST /admin/customers/:id/bank-accounts/verify — support checked this player
-// and lifts the shared-bank hold for them, at save and at payout (ADR 0015).
-// `verified: false` puts it back. One person, one account: other accounts on the
-// number stay held, and a second account on it cannot be verified while the first
-// is. Two supports verifying in the same instant can both pass; that race is not
-// worth a lock on a hand-run action.
+// and lifts the shared-bank hold on their payouts (ADR 0015). `verified: false`
+// puts it back. One person, one account: other accounts on the number stay held,
+// a second account on it cannot be verified while the first is, and there is
+// nothing to verify on a list with no shared number. Two supports verifying in
+// the same instant can both pass; that race is not worth a lock on a hand-run
+// action.
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,
@@ -61,15 +62,18 @@ export async function POST(
       ),
     );
     const others = [...new Set(holders.flat().map((h) => h.customer_id))];
-    const alreadyVerified =
-      others.length === 0
-        ? undefined
-        : (
-            await customers.listCustomers(
-              { id: others },
-              { select: ['id', 'metadata'], take: others.length },
-            )
-          ).find((c) => bankShareVerified(c.metadata ?? {}));
+    if (others.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This player has no saved bank account shared with another account, so there is nothing to verify.',
+      );
+    }
+    const alreadyVerified = (
+      await customers.listCustomers(
+        { id: others },
+        { select: ['id', 'metadata'], take: others.length },
+      )
+    ).find((c) => bankShareVerified(c.metadata ?? {}));
     if (alreadyVerified) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,

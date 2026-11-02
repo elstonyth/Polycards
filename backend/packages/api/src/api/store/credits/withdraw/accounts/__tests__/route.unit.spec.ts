@@ -815,15 +815,17 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     expect(updateCustomers).toHaveBeenCalledTimes(1);
   });
 
-  it('lets a customer support verified save it', async () => {
+  it('verification never lets a new shared number in', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_share_verified_at: '2026-11-03T00:00:00.000Z' },
     });
     otherPayoutAccountHolders.mockResolvedValue([
       { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: null },
     ]);
-    await POST(mkReq(VALID_BODY), mkRes());
-    expect(updateCustomers).toHaveBeenCalledTimes(1);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+    );
+    expect(updateCustomers).not.toHaveBeenCalled();
   });
 
   it('re-saving an account already on the list is not a new link', async () => {
