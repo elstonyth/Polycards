@@ -3,6 +3,7 @@ import { getRecentPulls, resolveFeedPackSlug } from '@/lib/data/packs';
 import { cachedJson } from '@/lib/ttl-cache';
 import { rm } from '@/lib/format';
 import { isRarity } from '@/lib/packs-format';
+import { POLY_CATEGORY } from '@/lib/packs-data';
 
 // Same-origin endpoint the "Recent Pulls" feeds poll for live updates — a
 // direct Store-API call from the browser (:4000 -> :9000) would be CORS-blocked,
@@ -55,11 +56,18 @@ export async function GET(request: NextRequest) {
   // garbage value collapses to the unfiltered feed instead of minting a key.
   const rarityRaw = request.nextUrl.searchParams.get('rarity') ?? '';
   const rarity = isRarity(rarityRaw) ? rarityRaw : undefined;
+  // ?category=poly — the home Poly tab. The one value it may hold, so it mints
+  // one key and needs no catalog read: a catalog blip must not answer the Poly
+  // tab with the global feed's card rows. pack_id wins, as on the Store route.
+  const category =
+    !pack && request.nextUrl.searchParams.get('category') === POLY_CATEGORY
+      ? POLY_CATEGORY
+      : undefined;
   return cachedJson(
-    `recent-pulls:${pack}:${rarity ?? ''}`,
+    `recent-pulls:${pack}:${rarity ?? ''}:${category ?? ''}`,
     CACHE_TTL_MS,
     async () => {
-      const feed = await getRecentPulls(pack || undefined, rarity);
+      const feed = await getRecentPulls(pack || undefined, rarity, category);
       return {
         ...feed,
         // Keep the legacy label for tabs that predate the numeric CardView.

@@ -455,6 +455,16 @@ const pullLedger = (tickets?: boolean) =>
     ? { table: 'ticket_spin', tierSql: TICKET_TIER_SQL }
     : { table: 'pull', tierSql: PULL_TIER_SQL };
 
+/** The pack filter of a pull-history read: one pack, several (a category's), or
+ *  null for the whole ledger. An empty list is a syntax error, never the whole
+ *  ledger; the routes answer that case before reading. */
+const packScope = (packId: string | string[] | null) => {
+  if (packId === null) return { sql: '', params: [] };
+  const params = [packId].flat();
+  const marks = params.map(() => '?').join(', ');
+  return { sql: ` AND p.pack_id IN (${marks})`, params };
+};
+
 /** The gateway_withdrawal.status domain, derived from the model's
  *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
  *  types). */
@@ -11414,47 +11424,53 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // recentPullRows for one ticket pack: the same order and the same public
+  // recentPullRows for ticket packs: the same order and the same public
   // sources, with the amount won in place of the card.
   @InjectManager()
   async recentTicketSpinRows(
-    opts: { packId: string; rarity: Rarity | null; limit: number },
+    opts: { packId: string | string[]; rarity: Rarity | null; limit: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     {
       id: string;
       customer_id: string;
+      pack_id: string;
       tickets: number;
       rolled_at: string | Date;
     }[]
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    const scope = packScope(opts.packId);
     return await em.execute(
-      'SELECT p.id, p.customer_id, p.tickets, p.rolled_at FROM ticket_spin p ' +
+      'SELECT p.id, p.customer_id, p.pack_id, p.tickets, p.rolled_at FROM ticket_spin p ' +
         " WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus') " +
-        '   AND p.pack_id = ?' +
+        scope.sql +
         (opts.rarity ? ' AND ' + TICKET_TIER_SQL : '') +
         ' ORDER BY p.rolled_at DESC, p.id DESC LIMIT ?',
-      [opts.packId, ...(opts.rarity ? [opts.rarity] : []), opts.limit],
+      [...scope.params, ...(opts.rarity ? [opts.rarity] : []), opts.limit],
     );
   }
 
   // "N packs without <tier>": pulls (one per pack opened) since the last pull
-  // of that tier — over the whole ledger, or one pack. A tier never hit counts
-  // every pull on record, which is the honest number. "Since" is in
+  // of that tier — over the whole ledger, one pack, or several. A tier never hit
+  // counts every pull on record, which is the honest number. "Since" is in
   // (rolled_at, id) order — the same order pullGaps numbers the ledger in —
   // so a hit inside a batch open (siblings share one rolled_at) counts the
   // same siblings here as on the chart's drought bar. `tickets` reads a ticket
   // pack's spins instead.
   @InjectManager()
   async pullDrought(
-    opts: { packId: string | null; rarity: Rarity; tickets?: boolean },
+    opts: {
+      packId: string | string[] | null;
+      rarity: Rarity;
+      tickets?: boolean;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<number> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
+    const { sql: packSql, params: packParams } = packScope(opts.packId);
     const { table, tierSql } = pullLedger(opts.tickets);
     const rows = await em.execute<{ n: number | string }[]>(
       'WITH last_hit AS (' +
@@ -11470,7 +11486,7 @@ class PacksModuleService extends MedusaService({
         packSql +
         '   AND (NOT EXISTS (SELECT 1 FROM last_hit) ' +
         '        OR (p.rolled_at, p.id) > (SELECT rolled_at, id FROM last_hit))',
-      opts.packId ? [opts.packId, opts.rarity, opts.packId] : [opts.rarity],
+      [...packParams, opts.rarity, ...packParams],
     );
     return Number(rows[0]?.n ?? 0);
   }
@@ -11490,7 +11506,7 @@ class PacksModuleService extends MedusaService({
   @InjectManager()
   async pullGaps(
     opts: {
-      packId: string | null;
+      packId: string | string[] | null;
       rarity: Rarity;
       limit: number;
       tickets?: boolean;
@@ -11509,10 +11525,8 @@ class PacksModuleService extends MedusaService({
   }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
-    const scopeParams = opts.packId
-      ? [opts.rarity, opts.packId]
-      : [opts.rarity];
+    const { sql: packSql, params: packParams } = packScope(opts.packId);
+    const scopeParams = [opts.rarity, ...packParams];
     const { table, tierSql } = pullLedger(opts.tickets);
     const ctes =
       'WITH seq AS (' +

@@ -244,6 +244,7 @@ function Row({
 export function PullHistory({
   initial,
   packSlug,
+  category,
   onSelect,
   noun = 'pack',
 }: {
@@ -251,6 +252,8 @@ export function PullHistory({
   /** Scope to one pack's history; omit for the global feed (rows then also
    *  name their pack). */
   packSlug?: string;
+  /** Read this category's capsule spins instead of the global feed. */
+  category?: string;
   /** Row tap handler (the pack page opens its card overlay); absent = the row
    *  links to /card/[handle]. */
   onSelect?: (pull: RecentPull) => void;
@@ -262,6 +265,7 @@ export function PullHistory({
     initial,
     packSlug,
     tab === 'All' || tab === 'Stats' ? null : tab,
+    category,
   );
   const droughts = RARITY_ORDER.flatMap((r) => {
     const n = drought[r];
@@ -349,6 +353,7 @@ export function PullHistory({
         // Re-fetches when a drought counter moves — a new pull landed.
         <PullGapsChart
           packSlug={packSlug}
+          category={category}
           refreshKey={JSON.stringify(drought)}
         />
       ) : (

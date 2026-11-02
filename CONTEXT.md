@@ -102,7 +102,7 @@ the two lifecycles.
 _Avoid_: order (a DeliveryOrder is not a Medusa checkout order)
 
 **Drought** (pull history):
-For one chase tier in one scope (a pack, or the whole ledger), how many
+For one chase tier in one scope (a pack, a category's capsules, or the whole ledger), how many
 pack-source Pulls have been rolled since that tier last hit — "303 packs
 without Immortal". Counted in (rolled*at, id) order; a tier never hit counts
 every pull on record. Public display, unfiltered by the feed's tier tab. A

@@ -122,6 +122,34 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     expect(pullsCallsOf()[1]!.query).toEqual({ pack_id: 'bronze-pack' });
   });
 
+  it('the Poly category keeps its own key; any other value collapses to the global memo', async () => {
+    await GET(req('?category=poly'));
+    await GET(req('?category=pokemon'));
+    await GET(req('?category=garbage'));
+    await GET(req());
+
+    expect(pullsCallsOf()).toHaveLength(2);
+    expect(pullsCallsOf()[0]!.query).toEqual({ category: 'poly' });
+    expect(pullsCallsOf()[1]!.query).toBeUndefined();
+  });
+
+  it('the Poly category answers from the Store route, not the catalog', async () => {
+    await GET(req('?category=poly'));
+
+    expect(packsCallsOf()).toHaveLength(0);
+  });
+
+  it('a real pack wins over the category; a tier rides along with it', async () => {
+    await GET(req('?category=poly&pack_id=bronze-pack'));
+    await GET(req('?category=poly&rarity=Immortal'));
+
+    expect(pullsCallsOf()[0]!.query).toEqual({ pack_id: 'bronze-pack' });
+    expect(pullsCallsOf()[1]!.query).toEqual({
+      rarity: 'Immortal',
+      category: 'poly',
+    });
+  });
+
   it('the body carries the drought counters alongside the rows', async () => {
     mem = seed({
       'GET /store/pulls/recent': {

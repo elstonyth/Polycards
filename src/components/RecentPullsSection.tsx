@@ -1,15 +1,23 @@
-import { PullHistory } from '@/components/PullHistory';
-import type { RecentFeed } from '@/lib/data/packs';
+'use client';
 
-/** Home board 03 — live proof: the global pull history (drought counters,
- *  tier tabs, the row feed). The panel itself is PullHistory; this is the
- *  board lockup around it. */
+import { PullHistory } from '@/components/PullHistory';
+import { useShelfCategory } from '@/components/home/ShelfCategory';
+import type { RecentFeed } from '@/lib/data/packs';
+import { POLY_CATEGORY } from '@/lib/packs-data';
+
+/** Home board 03 — live proof: the pull history (drought counters, tier tabs,
+ *  the row feed), global unless the shelf above is on Poly, which reads its
+ *  capsules' spins. The panel itself is PullHistory; this is the board lockup
+ *  around it. */
 export default function RecentPullsSection({
   initial,
 }: {
-  /** Live pull history (server-fetched); an empty feed renders the empty state. */
+  /** Live pull history (server-fetched, global); an empty feed renders the empty
+   *  state. shortcut: a Poly default tab (no Pokémon pack live) shows this seed
+   *  until the first poll, 10s. Fetch the Poly seed if Poly ever leads. */
   initial: RecentFeed;
 }) {
+  const poly = useShelfCategory().active === POLY_CATEGORY;
   return (
     <section
       aria-labelledby="recent-pulls-heading"
@@ -34,7 +42,11 @@ export default function RecentPullsSection({
       </div>
 
       <div className="px-fluid">
-        <PullHistory initial={initial} />
+        <PullHistory
+          initial={initial}
+          category={poly ? POLY_CATEGORY : undefined}
+          noun={poly ? 'capsule' : 'pack'}
+        />
       </div>
     </section>
   );

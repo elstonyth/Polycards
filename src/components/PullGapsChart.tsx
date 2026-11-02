@@ -36,9 +36,12 @@ const SKELETON = ['w-[52%]', 'w-[28%]', 'w-[74%]', 'w-[16%]', 'w-[40%]'];
 
 export function PullGapsChart({
   packSlug,
+  category,
   refreshKey,
 }: {
   packSlug?: string;
+  /** Read this category's capsule spins instead of the global ledger. */
+  category?: string;
   /** Any change refetches — the panel passes its drought counters. */
   refreshKey: string;
 }) {
@@ -49,12 +52,13 @@ export function PullGapsChart({
   // exactly like a tier toggle does, not just when the tier differs.
   const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const scope = `${tier}|${packSlug ?? ''}|${refreshKey}`;
+  const scope = `${tier}|${packSlug ?? ''}|${category ?? ''}|${refreshKey}`;
 
   useEffect(() => {
     let active = true;
     const q = new URLSearchParams({ rarity: tier });
     if (packSlug) q.set('pack_id', packSlug);
+    if (category) q.set('category', category);
     fetch(`/api/pull-gaps?${q.toString()}`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then(async (raw: unknown) => {
@@ -77,7 +81,7 @@ export function PullGapsChart({
     return () => {
       active = false;
     };
-  }, [tier, packSlug, refreshKey, scope]);
+  }, [tier, packSlug, category, refreshKey, scope]);
 
   const rgb = rarityRgb(tier);
   // What is on screen was loaded for another scope until this one lands.
