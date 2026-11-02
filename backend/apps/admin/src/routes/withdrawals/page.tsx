@@ -190,6 +190,22 @@ const WithdrawalsPage = () => {
       await denyMutation.mutateAsync(w.id);
     });
 
+  // The same call as Deny, on a row a Deny closed and never refunded. The
+  // refund's anchor means it can only ever land once.
+  const finishRefund = (w: GatewayWithdrawal) =>
+    withActing(w.id, async () => {
+      const ok = await prompt({
+        title: t('withdrawals.confirmFinishRefundTitle'),
+        description: t('withdrawals.confirmFinishRefundBody', {
+          amount: payoutLabel(w),
+        }),
+        confirmText: t('withdrawals.finishRefund'),
+        variant: 'confirmation',
+      });
+      if (!ok) return;
+      await denyMutation.mutateAsync(w.id);
+    });
+
   // A view change restarts paging — page 3 of "pending" has nothing to do
   // with page 3 of "all".
   const changeView = (next: string) => {
@@ -425,6 +441,11 @@ const WithdrawalsPage = () => {
                           {w.failure_reason}
                         </div>
                       )}
+                      {w.refund_missing && (
+                        <div className="text-ui-fg-error mt-1 font-sans">
+                          {t('withdrawals.refundMissing')}
+                        </div>
+                      )}
                       {/* Their Payout Verification is active, so a failed row
                           with no outcome recorded is worth a look — but it is a
                           POINTER, not a verdict: their call may never have
@@ -474,6 +495,15 @@ const WithdrawalsPage = () => {
                             {t('withdrawals.deny')}
                           </Button>
                         </div>
+                      ) : canDecide && w.refund_missing ? (
+                        <Button
+                          size="small"
+                          variant="secondary"
+                          disabled={acting.has(w.id)}
+                          onClick={() => finishRefund(w)}
+                        >
+                          {t('withdrawals.finishRefund')}
+                        </Button>
                       ) : (
                         <Text size="small" className="text-ui-fg-muted">
                           —

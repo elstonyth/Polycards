@@ -41,6 +41,7 @@ import {
   type RowFx,
 } from './payment-fx';
 import { classifyRequeryError } from './gateway-reconcile';
+import { ledgerTrail } from './gateway-audit';
 import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
 import {
   alertOps,
@@ -2328,6 +2329,42 @@ export async function denyHeldWithdrawal(
     );
   }
 
+  // 'failed' is accepted below for one reason: to finish a Deny of our own that
+  // died between its claim and its refund. That claim wrote this audit row in
+  // its own transaction, so no row means something else closed this one: the
+  // sweep, which refunded it, or a person, who may have refunded it by hand with
+  // no anchor for the refund below to replay on.
+  if (row.status === 'failed') {
+    const [own] = await packs.listAdminActionAudits(
+      {
+        entity_type: 'gateway_withdrawal',
+        entity_id: row.id,
+        action: 'deny_withdrawal',
+      },
+      { take: 1 },
+    );
+    if (!own) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Withdrawal '${row.id}' was not closed by a Deny, so Deny will not refund it. Nothing was credited.`,
+      );
+    }
+    const { hand } = await ledgerTrail(packs, {
+      customerId: row.customer_id,
+      anchor: withdrawalRefundReference(
+        row.customer_id,
+        row.merchant_transaction_id,
+      ),
+      refs: [row.merchant_transaction_id, row.gateway_transaction_id],
+    });
+    if (hand) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A hand adjustment already names this payout. Refunding it would pay the customer twice. Nothing was credited.',
+      );
+    }
+  }
+
   // 1) CLAIM FIRST — the opposite order from the reconcile sweep, which
   // refunds and then closes the row. The inversion is deliberate:
   //
@@ -2341,8 +2378,8 @@ export async function denyHeldWithdrawal(
   //   - That window is closed by making deny RE-RUNNABLE: the claim accepts
   //     'failed' as well as 'held', and the refund is anchored on
   //     withdrawalRefundReference, which guarantees exactly one credit
-  //     however many times it runs. An operator who sees a 'failed' row with
-  //     no refund clicks Deny again and it settles.
+  //     however many times it runs. The withdrawals list flags that row
+  //     (deniedWithoutRefund) and offers Finish refund, which lands here.
   //
   // The DEBIT CHECK RIDES THE SAME CALL, and must. Deny closes the row the
   // moment it claims it, before anything has looked for a debit — so a
@@ -2410,9 +2447,7 @@ export async function denyHeldWithdrawal(
   // 3) The shared four-step ordering (refund -> receipt -> close -> notify).
   // fromStatus 'failed', because the claim above already moved the row there
   // — the helper's default 'pending' selector would silently no-op.
-  // gateway_status is passed back unchanged rather than nulled: a row that
-  // reached 'failed' through the sweep carries the gateway's own status
-  // number, and a mistaken deny on one must not erase it.
+  // gateway_status is passed back unchanged rather than nulled.
   await refundWithdrawal(
     scope,
     row,
@@ -2424,4 +2459,69 @@ export async function denyHeldWithdrawal(
   );
 
   return { id: row.id, status: 'failed', refunded: true };
+}
+
+/**
+ * Which of these rows a Deny closed and never refunded: what its crash leaves
+ * behind, which no sweep revisits. A hand adjustment naming the row counts as
+ * refunded, because Deny would refuse it anyway.
+ */
+export async function deniedWithoutRefund(
+  packs: Pick<
+    GatewayWithdrawals,
+    'listAdminActionAudits' | 'listCreditTransactions'
+  >,
+  rows: readonly {
+    id: string;
+    status: string;
+    customer_id: string;
+    merchant_transaction_id: string;
+    gateway_transaction_id?: string | null;
+  }[],
+): Promise<Set<string>> {
+  const failed = rows.filter((r) => r.status === 'failed');
+  if (failed.length === 0) return new Set();
+  // A re-run writes another row, so this reads more than one per withdrawal.
+  const audits = await packs.listAdminActionAudits(
+    {
+      entity_type: 'gateway_withdrawal',
+      entity_id: failed.map((r) => r.id),
+      action: 'deny_withdrawal',
+    },
+    { select: ['entity_id'], take: failed.length * 20 },
+  );
+  const ids = new Set(audits.map((a) => a.entity_id));
+  const denied = failed
+    .filter((r) => ids.has(r.id))
+    .map((r) => ({
+      row: r,
+      debit: withdrawalIdempotencyReference(
+        r.customer_id,
+        r.merchant_transaction_id,
+      ),
+      refund: withdrawalRefundReference(
+        r.customer_id,
+        r.merchant_transaction_id,
+      ),
+    }));
+  if (denied.length === 0) return new Set();
+  const anchors = denied.flatMap((d) => [d.debit, d.refund]);
+  const ledger = await packs.listCreditTransactions(
+    { source_transaction_id: anchors },
+    { select: ['source_transaction_id'], take: anchors.length },
+  );
+  const seen = new Set(ledger.map((l) => l.source_transaction_id));
+  const stuck = new Set<string>();
+  // One at a time: this reads the customer's adjustments, and these rows are
+  // rare. Every denied row whose refund landed has already dropped out.
+  for (const { row, debit, refund } of denied) {
+    if (!seen.has(debit) || seen.has(refund)) continue;
+    const { hand } = await ledgerTrail(packs, {
+      customerId: row.customer_id,
+      anchor: refund,
+      refs: [row.merchant_transaction_id, row.gateway_transaction_id ?? null],
+    });
+    if (!hand) stuck.add(row.id);
+  }
+  return stuck;
 }

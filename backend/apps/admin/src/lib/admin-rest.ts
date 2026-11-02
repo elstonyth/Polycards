@@ -1749,6 +1749,8 @@ export interface GatewayWithdrawal {
    *  said `false` a moment ago. Surfaced so an approver sees the reason
    *  BEFORE clicking into that refusal, not just after. */
   frozen: boolean;
+  /** A Deny closed this row and its refund never landed. Deny finishes it. */
+  refund_missing: boolean;
 }
 
 export interface GatewayWithdrawalsResponse {

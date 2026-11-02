@@ -651,6 +651,10 @@
     "deny": "Deny",
     "confirmApproveTitle": "Approve this payout?",
     "confirmApproveBody": "Send {{amount}} to {{bank}} {{account}} ({{holder}}) via the active payment gateway. This submits the transfer immediately and cannot be recalled from here.",
+    "refundMissing": "Denied, but the refund never reached the customer's balance.",
+    "finishRefund": "Finish refund",
+    "confirmFinishRefundTitle": "Finish this refund?",
+    "confirmFinishRefundBody": "This withdrawal was denied, but the {{amount}} never came back to the customer's balance. This returns it. It can only land once, so don't also make a hand adjustment.",
     "confirmDenyTitle": "Deny this withdrawal?",
     "confirmDenyBody": "Refuse this {{amount}} withdrawal. Nothing is sent to {{bank}} {{account}} ({{holder}}) — the funds are returned to the customer's in-app balance instead.",
     "paidOutIn": "paid out as {{amount}}"

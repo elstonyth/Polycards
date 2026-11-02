@@ -4,6 +4,10 @@ import { GET, maskAccountNumber, parseStatusFilter } from '../route';
 import { GET as REVEAL } from '../[id]/account/route';
 import { GATEWAY_STALE_AFTER_MS } from '../../../../../modules/packs/gateway-reconcile';
 import { WITHDRAWAL_STATUSES } from '../../../../../modules/packs/models/gateway-withdrawal';
+import {
+  withdrawalIdempotencyReference,
+  withdrawalRefundReference,
+} from '../../../../../modules/packs/gateway-withdrawal';
 import type {
   FakeFacet,
   GatewayReports,
@@ -91,6 +95,9 @@ function mkScope(
   rows: any[],
   frozenIds: string[] = [],
   frozenStateError?: Error,
+  // `denied`: withdrawal ids with a deny_withdrawal audit row. `anchors`: the
+  // source_transaction_id values on the ledger.
+  ledger: { denied?: string[]; anchors?: string[]; error?: Error } = {},
 ) {
   const calls: { filter?: any; opts?: any; frozenFilter?: any } = {};
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -116,6 +123,18 @@ function mkScope(
         .filter((id) => frozenIds.includes(id))
         .map((id) => ({ id: `cas_${id}`, customer_id: id, frozen: true }));
     },
+    listAdminActionAudits: async (filter: any) => {
+      if (ledger.error) throw ledger.error;
+      return (ledger.denied ?? [])
+        .filter((id) => filter.entity_id.includes(id))
+        .map((entity_id) => ({ entity_id }));
+    },
+    listCreditTransactions: async (filter: any) =>
+      Array.isArray(filter.source_transaction_id)
+        ? (ledger.anchors ?? [])
+            .filter((a) => filter.source_transaction_id.includes(a))
+            .map((source_transaction_id) => ({ source_transaction_id }))
+        : [],
   } satisfies FakeFacet<GatewayReports>;
   return {
     calls,
@@ -175,6 +194,51 @@ describe('GET /admin/payments/withdrawals', () => {
     expect(row.account_holder_name).toBe('Tan Ah Kow');
     // Identity-varying (emails) — must never be cacheable (CWE-524).
     expect(out.headers['Cache-Control']).toBe('no-store');
+  });
+
+  // A Deny that crashed before its refund. Nothing else revisits that row, so
+  // this flag is how an operator finds it.
+  describe('refund_missing', () => {
+    const failed = withdrawal(1, { status: 'failed' });
+    const debit = withdrawalIdempotencyReference('cus_1', 'PC-1');
+    const refund = withdrawalRefundReference('cus_1', 'PC-1');
+    const flag = async (ledger: Parameters<typeof mkScope>[3], row = failed) => {
+      const { scope, logger } = mkScope([row], [], undefined, ledger);
+      const { res, out } = mkRes();
+      await GET({ scope, query: { status: 'all' } } as any, res);
+      return { flagged: out.body.withdrawals[0].refund_missing, logger };
+    };
+
+    it('flags a denied row with a debit and no refund', async () => {
+      await expect(
+        flag({ denied: ['gpw_1'], anchors: [debit] }),
+      ).resolves.toMatchObject({ flagged: true });
+    });
+
+    it.each([
+      ['its refund landed', { denied: ['gpw_1'], anchors: [debit, refund] }],
+      ['it never took the money', { denied: ['gpw_1'], anchors: [] }],
+      ['no Deny closed it', { denied: [], anchors: [debit] }],
+    ])('does not flag a row when %s', async (_label, ledger) => {
+      await expect(flag(ledger)).resolves.toMatchObject({ flagged: false });
+    });
+
+    it('never flags a row that is not failed', async () => {
+      await expect(
+        flag(
+          { denied: ['gpw_1'], anchors: [debit] },
+          withdrawal(1, { status: 'held' }),
+        ),
+      ).resolves.toMatchObject({ flagged: false });
+    });
+
+    // A preview, like `frozen`: it must not take the page operators use to
+    // find a stranded debit down with it.
+    it('a failed lookup degrades to no flags and logs', async () => {
+      const { flagged, logger } = await flag({ error: new Error('db down') });
+      expect(flagged).toBe(false);
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    });
   });
 
   // Task 6 (plan 094): approve refuses on a frozen account, so the queue must

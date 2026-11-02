@@ -35,6 +35,7 @@ import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
 import AdminActionAudit from '../models/admin-action-audit';
 import {
+  deniedWithoutRefund,
   denyHeldWithdrawal,
   submitHeldWithdrawal,
   withdrawalIdempotencyReference,
@@ -381,7 +382,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await debit(row);
         fakeGateway.script({
           submitWithdrawal: new GatewayError(
-            'Insufficient payout float',
+            'No payout provider is available',
             ['PMT10013'],
             400,
             true,
@@ -433,7 +434,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(lines).toContain('bankCode=MBB');
         expect(lines).toContain('amount=1500');
         expect(lines).toContain(row.merchant_transaction_id);
-        expect(lines).toContain('Insufficient payout float');
+        expect(lines).toContain('No payout provider is available');
       });
 
       it('an AMBIGUOUS submit error leaves the row claimed for the sweep — never a refund', async () => {
@@ -721,25 +722,149 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await creditRows(row.customer_id)).toHaveLength(1);
       });
 
-      // Deny accepts 'failed' so that recovery works, which also lets an
-      // operator click it on a row the bank already refused. Harmless to the
-      // money (one anchor) but it must not overwrite the bank's diagnostic.
-      it("a mistaken Deny keeps the gateway's failure_reason and gateway_status", async () => {
-        const row = await seed({
-          status: 'failed',
-          gateway_status: 5,
-          failure_reason: 'sweep: requery statusId 5',
-        });
+      // Deny takes 'failed' only to finish its OWN crash. Any other failed row
+      // was closed by something else, and may hold a refund the anchor cannot
+      // see: the RM 59 row of 2026-10 was closed by SQL and refunded by hand, so
+      // a Deny on it would have paid the customer twice.
+      it.each<[string, { gateway_status?: number; failure_reason: string }]>([
+        [
+          'the bank refused',
+          { gateway_status: 5, failure_reason: 'sweep: requery statusId 5' },
+        ],
+        ['someone closed by hand', { failure_reason: 'closed by hand' }],
+      ])('refuses a failed row %s, moving no money', async (_label, over) => {
+        const row = await seed({ status: 'failed', ...over });
         await debit(row);
 
-        await denyHeldWithdrawal(scope, {
-          withdrawalId: row.id,
-          adminId: ADMIN,
-        });
+        await expect(
+          denyHeldWithdrawal(scope, { withdrawalId: row.id, adminId: ADMIN }),
+        ).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
 
         const after = await reread(row.id);
-        expect(after.failure_reason).toBe('sweep: requery statusId 5');
-        expect(after.gateway_status).toBe(5);
+        expect(after.failure_reason).toBe(over.failure_reason);
+        expect(after.gateway_status ?? null).toBe(over.gateway_status ?? null);
+        expect(await creditRows(row.customer_id)).toHaveLength(1);
+        expect(await auditRows(row.id)).toHaveLength(0);
+      });
+
+      describe('a Deny that crashed between its claim and its refund', () => {
+        const crashedDeny = async (row: {
+          id: string;
+          customer_id: string;
+          merchant_transaction_id: string;
+        }) => {
+          const { claimed } = await service.claimWithdrawalAgainstDebit({
+            id: row.id,
+            customerId: row.customer_id,
+            debitReference: withdrawalIdempotencyReference(
+              row.customer_id,
+              row.merchant_transaction_id,
+            ),
+            from: ['held'],
+            to: 'failed',
+            audit: {
+              admin_id: ADMIN,
+              action: 'deny_withdrawal',
+              before: { status: 'held' },
+              after: { status: 'failed', amount: 1500 },
+              reason: 'the process died after this',
+            },
+          });
+          expect(claimed).toBe(true);
+        };
+        const handRefund = (row: {
+          id: string;
+          customer_id: string;
+          merchant_transaction_id: string;
+        }) =>
+          MikroOrmWrapper.getManager().execute(
+            'INSERT INTO credit_transaction ' +
+              '(id, customer_id, amount, raw_amount, reason, reference) ' +
+              "VALUES (?, ?, ?, ?::jsonb, 'adjustment', ?)",
+            [
+              `ct_hand_${row.id}`,
+              row.customer_id,
+              1500,
+              JSON.stringify({ value: '1500', precision: 20 }),
+              `Refund for ${row.merchant_transaction_id}`,
+            ],
+          );
+
+        it('is flagged, and Deny finishes it with one credit', async () => {
+          const row = await seed();
+          await debit(row);
+          await crashedDeny(row);
+
+          expect(
+            await deniedWithoutRefund(service, [await reread(row.id)]),
+          ).toEqual(new Set([row.id]));
+          expect(await service.creditBalance(row.customer_id)).toBe(-1500);
+
+          await expect(
+            denyHeldWithdrawal(scope, { withdrawalId: row.id, adminId: ADMIN }),
+          ).resolves.toEqual({ id: row.id, status: 'failed', refunded: true });
+
+          expect(await service.creditBalance(row.customer_id)).toBe(0);
+          expect(await creditRows(row.customer_id)).toHaveLength(2);
+          expect(
+            await deniedWithoutRefund(service, [await reread(row.id)]),
+          ).toEqual(new Set());
+        });
+
+        it('is neither flagged nor refunded once a hand adjustment names it', async () => {
+          const row = await seed();
+          await debit(row);
+          await crashedDeny(row);
+          await handRefund(row);
+
+          expect(
+            await deniedWithoutRefund(service, [await reread(row.id)]),
+          ).toEqual(new Set());
+          await expect(
+            denyHeldWithdrawal(scope, { withdrawalId: row.id, adminId: ADMIN }),
+          ).rejects.toThrow(/hand adjustment/i);
+          expect(await creditRows(row.customer_id)).toHaveLength(2);
+        });
+
+        it('is not flagged when it never took the money', async () => {
+          const row = await seed();
+          await crashedDeny(row);
+          expect(
+            await deniedWithoutRefund(service, [await reread(row.id)]),
+          ).toEqual(new Set());
+        });
+
+        it('a failed row no Deny closed is not flagged', async () => {
+          const row = await seed({ status: 'failed' });
+          await debit(row);
+          expect(
+            await deniedWithoutRefund(service, [await reread(row.id)]),
+          ).toEqual(new Set());
+        });
+
+        // Past the list's default page: the adjustment naming the row comes last.
+        it('finds the naming adjustment among many others', async () => {
+          const row = await seed();
+          await debit(row);
+          await crashedDeny(row);
+          for (let i = 0; i < 25; i += 1) {
+            await MikroOrmWrapper.getManager().execute(
+              'INSERT INTO credit_transaction ' +
+                '(id, customer_id, amount, raw_amount, reason, reference) ' +
+                "VALUES (?, ?, 1, ?::jsonb, 'adjustment', 'goodwill')",
+              [
+                // Sorts before ct_hand_, so a default page would miss that one.
+                `ct_a_${i}_${row.id}`,
+                row.customer_id,
+                JSON.stringify({ value: '1', precision: 20 }),
+              ],
+            );
+          }
+          await handRefund(row);
+          await expect(
+            denyHeldWithdrawal(scope, { withdrawalId: row.id, adminId: ADMIN }),
+          ).rejects.toThrow(/hand adjustment/i);
+        });
       });
 
       it('refuses a settled row and a pending one — neither is deny’s to touch', async () => {
