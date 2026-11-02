@@ -1,9 +1,10 @@
 'use server';
 
 /**
- * Profile appearance server actions — photo upload + frame equip/unequip.
+ * Profile appearance server actions — photo upload, catalog avatar + frame
+ * equip/unequip.
  *
- * The frame POST goes through the `Store` port (src/lib/store.ts) like every
+ * The avatar and frame POSTs go through the `Store` port (src/lib/store.ts) like every
  * other backend call. The photo POST cannot: it is MULTIPART, and the port's
  * transport is `sdk.client.fetch`, which JSON-stringifies a body whenever the
  * content type is JSON and cannot be handed a `FormData` with its boundary
@@ -29,6 +30,7 @@ import {
 } from '@/lib/errors';
 import { UncheckedSchema } from '@/lib/data/schemas';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
+import { AVATAR_COUNT } from '@/lib/avatar-seed';
 
 const APPEARANCE_RULES: ErrorRule[] = [
   [/capped at 5 mb/i, 'Photo is too large — keep it under 5 MB.'],
@@ -102,6 +104,20 @@ export async function uploadAvatar(
   }
 }
 
+/** Switch to one of the catalog avatars (id 1..AVATAR_COUNT). */
+export async function setPresetAvatar(id: number): Promise<AppearanceResult> {
+  if (!Number.isInteger(id) || id < 1 || id > AVATAR_COUNT) {
+    return { ok: false, error: 'Invalid avatar.' };
+  }
+  // The response is not read — a 2xx IS the answer.
+  const r = await store.post('/store/profile/avatar/preset', UncheckedSchema, {
+    id,
+  });
+  if (!r.ok) return { ok: false, error: appearanceError(r) };
+  revalidatePath('/me');
+  return { ok: true };
+}
+
 /** Equip (milestone level) or unequip (null) an avatar frame. */
 export async function setAvatarFrame(
   level: number | null,
@@ -113,7 +129,7 @@ export async function setAvatarFrame(
   const r = await store.post('/store/profile/frame', UncheckedSchema, {
     level,
   });
-  if (!r.ok) return { ok: false, error: frameError(r) };
+  if (!r.ok) return { ok: false, error: appearanceError(r) };
   revalidatePath('/me');
   return { ok: true };
 }
@@ -121,7 +137,7 @@ export async function setAvatarFrame(
 /** No cookie at all (the call never left — `status` is undefined) keeps the
  *  logged-out sentence; anything the backend actually said goes through
  *  APPEARANCE_RULES, the same table the upload's own refusals use. */
-function frameError(f: Failure): string {
+function appearanceError(f: Failure): string {
   if (f.kind === 'unauthenticated' && f.status === undefined) {
     return LOGIN_FIRST;
   }

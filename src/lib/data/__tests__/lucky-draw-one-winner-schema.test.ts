@@ -102,7 +102,7 @@ describe('LuckyDrawPageSchema, one-winner fields', () => {
     });
     expect(r.event?.top[0]?.person).toEqual({
       who: 'Collector8011',
-      avatar: '/images/pfps/pfp-8.webp',
+      avatar: '/images/avatars/avatar-8.webp',
       frame: null,
     });
     // An older backend names the next pool only: nothing to show, nothing lost.

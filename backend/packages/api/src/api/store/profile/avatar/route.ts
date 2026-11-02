@@ -63,7 +63,8 @@ export function mergeAvatarMetadata(
 // Stores the original via the configured file provider and writes
 // customer.metadata.avatar_url. Metadata is MERGED (read-modify-write) so
 // equipping a frame and changing the photo never clobber each other. These keys
-// are written only here and in /store/profile/frame — but that is enforced by
+// are written only here, in ./preset and in /store/profile/frame — but that is
+// enforced by
 // OUR middleware, not the framework: Medusa's stock POST /store/customers/me
 // accepts client metadata (StoreUpdateCustomer declares it `nullish()` and the
 // route forwards req.validatedBody), and rejectCustomerMetadata

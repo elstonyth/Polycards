@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { AnimatedFrame } from '@/components/AnimatedFrame';
+import { isCatalogAvatar } from '@/lib/avatar-seed';
 import { FRAME_SCALE } from '@/lib/frame-motion';
 
 /**
@@ -51,7 +52,12 @@ export function FramedAvatar({
           height={size}
           loading={priority ? 'eager' : 'lazy'}
           fetchPriority={priority ? 'high' : 'auto'}
-          className="h-full w-full rounded-full object-cover"
+          // A frame's hole is 77% of the avatar and catalog art fills 94%: this
+          // fits the whole head in, where the ring would trim chins and hats.
+          className={cn(
+            'h-full w-full rounded-full object-cover',
+            frameSrc && isCatalogAvatar(src) && 'scale-[0.82]',
+          )}
         />
       ) : (
         <span
