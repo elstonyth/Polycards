@@ -167,6 +167,7 @@ describe('VAULT_RULES backend-message contract', () => {
       'This bank account is not available for withdrawals yet — try again in about 3 hours.',
       // withdraw/accounts route: one bank account, one Polycards account
       'Your bank account is linked to another Polycards account. Contact support to verify it.',
+      'This bank account is linked to another Polycards account. If it is yours, contact support.',
       'Your Polycards account already has a bank account. Contact support to change it.',
       'A saved bank account cannot be removed here. Contact support to change it.',
       // gateway-withdrawal.ts startWithdrawal / withdrawalDetailsError

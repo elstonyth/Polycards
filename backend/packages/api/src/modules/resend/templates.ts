@@ -323,13 +323,11 @@ const bankAccountRemoved = (d: {
   return {
     subject: 'A bank account was removed from your Polycards account',
     text: [
-      'A withdrawal bank account was removed',
+      'Our support team removed a withdrawal bank account',
       '',
       `Account:  ${account}`,
       '',
-      "If this wasn't you, sign in and check your bank accounts now, then",
-      'change your password — someone with access to your account can add a',
-      'new destination and withdraw to it.',
+      "If you didn't ask for this, contact support@polycards.gg now.",
       '',
       `${d.siteUrl.replace(/\/+$/, '')}/bank`,
     ].join('\n'),
@@ -347,12 +345,11 @@ const bankAccountRemoved = (d: {
       </table>
 
       <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
-        If you removed it, there is nothing to do.
+        Our support team removed this account, usually because you asked them to.
+        If you did, there is nothing to do.
       </p>
       <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
-        <strong>If this wasn't you</strong>, review your bank accounts and
-        change your password now. Someone with access to your account can add
-        a new destination and withdraw to it.
+        <strong>If you didn't ask for this</strong>, contact support now.
       </p>
 
       <a href="${site}/bank" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Review your bank accounts</a>

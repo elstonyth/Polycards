@@ -44,11 +44,12 @@ import {
   withdrawalGateError,
 } from './withdrawable';
 import {
-  BANK_SHARE_VERIFIED_KEY,
-  bankShareVerified,
+  MAX_SAVED_BANK_ACCOUNTS,
   loadSavedBankAccounts,
   parseSavedBankAccounts,
   resolveWithdrawalDestination,
+  verifiedBankAccounts,
+  withBankShareStamp,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
@@ -9778,13 +9779,13 @@ class PacksModuleService extends MedusaService({
     return await loadSavedBankAccounts(em, customerId);
   }
 
-  // Has support verified this customer's shared bank account? (ADR 0015.) Read
-  // by the payout check, with the same SELECT as savedBankAccountsFor.
+  // Which of this customer's saved accounts support has verified (ADR 0015). Read
+  // by the payout checks, with the same SELECT as savedBankAccountsFor.
   @InjectManager()
   async bankShareVerifiedFor(
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
+  ): Promise<Record<string, string>> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<
@@ -9792,15 +9793,13 @@ class PacksModuleService extends MedusaService({
     >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
       customerId,
     ]);
-    return bankShareVerified(rows[0]?.metadata ?? {});
+    return verifiedBankAccounts(rows[0]?.metadata ?? {});
   }
 
-  // Support removes a tied bank account (customers cannot, ADR 0015). Emptying the
-  // list clears the verification, so it never vouches for the next account: with
-  // one account per customer, a new one can only come after that. Taking an extra
-  // off a longer list leaves it. The change and its audit row share one
-  // transaction. Returns what was removed so the route can notify the customer
-  // after commit; null when it is already gone (no write, no audit row).
+  // Support removes a tied bank account (customers cannot, ADR 0015), and its
+  // verification with it. The change and its audit row share one transaction.
+  // Returns what was removed so the route can notify the customer after commit;
+  // null when it is already gone (no write, no audit row).
   @InjectTransactionManager()
   async removeSavedBankAccount(
     input: {
@@ -9819,11 +9818,9 @@ class PacksModuleService extends MedusaService({
           const accounts = parseSavedBankAccounts(current.bank_accounts);
           removed = accounts.find((a) => a.id === input.accountId) ?? null;
           if (!removed) return null;
-          const next = accounts.filter((a) => a.id !== input.accountId);
-          const { [BANK_SHARE_VERIFIED_KEY]: _cleared, ...rest } = current;
           return {
-            ...(next.length === 0 ? rest : current),
-            bank_accounts: next,
+            ...withBankShareStamp(current, input.accountId, null),
+            bank_accounts: accounts.filter((a) => a.id !== input.accountId),
           };
         },
       },
@@ -9851,43 +9848,55 @@ class PacksModuleService extends MedusaService({
     return removed;
   }
 
-  // Support's answer to a shared-bank hold: stamp (or clear) the verification
-  // that lifts it for this customer. The change and its audit row share one
-  // transaction; a no-op writes neither.
+  // Support's answer to a shared-bank hold: stamp (or clear) one saved account's
+  // verification. The change and its audit row share one transaction; a no-op
+  // writes neither.
   @InjectTransactionManager()
   async setBankShareVerified(
     input: {
       customerId: string;
       adminId: string;
+      accountId: string;
       verified: boolean;
       reason: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
-    let changed = false;
+    const changed: { last4?: string } = {};
     await this.mutateCustomerMetadata(
       {
         customerId: input.customerId,
         mutate: (current) => {
-          if (bankShareVerified(current) === input.verified) return null;
-          changed = true;
-          const { [BANK_SHARE_VERIFIED_KEY]: _cleared, ...rest } = current;
-          return input.verified
-            ? { ...rest, [BANK_SHARE_VERIFIED_KEY]: new Date().toISOString() }
-            : rest;
+          const account = parseSavedBankAccounts(current.bank_accounts).find(
+            (a) => a.id === input.accountId,
+          );
+          if (!account) {
+            throw new MedusaError(
+              MedusaError.Types.NOT_FOUND,
+              'That bank account is no longer on this player.',
+            );
+          }
+          const stamped = Boolean(verifiedBankAccounts(current)[account.id]);
+          if (stamped === input.verified) return null;
+          changed.last4 = account.accountNumber.slice(-4);
+          return withBankShareStamp(
+            current,
+            account.id,
+            input.verified ? new Date().toISOString() : null,
+          );
         },
       },
       sharedContext,
     );
-    if (changed) {
+    if (changed.last4) {
       await this.audit(
         {
           admin_id: input.adminId,
           entity_type: 'customer',
           entity_id: input.customerId,
           action: 'edit',
-          before: { bank_share_verified: !input.verified },
-          after: { bank_share_verified: input.verified },
+          before: { account_last4: changed.last4, verified: !input.verified },
+          after: { account_last4: changed.last4, verified: input.verified },
           reason: `${input.verified ? 'Verified' : 'Unverified'} shared bank account: ${input.reason}`,
         },
         sharedContext,
@@ -9895,45 +9904,61 @@ class PacksModuleService extends MedusaService({
     }
   }
 
-  // Every destination that has actually RECEIVED money, one row per
-  // (customer, bank, account), carrying its earliest settlement.
-  //
-  // Read by scripts/backfill-payout-destinations.ts only. It exists because
-  // plan 088 made a payout resolve its destination from the customer's saved
-  // list: a customer who was paid to an account BEFORE that list existed has
-  // proven they control it, and should not sit out a cooling-off window to be
-  // paid there again. `settled` is the whole point of the filter — `pending`
-  // has not landed and `failed` came back, so neither is evidence of control.
-  //
-  // MIN(created_at) rather than settled_at: settled_at is nullable on rows that
-  // predate it, and created_at is never null. Both are in the past, which is all
-  // the backfill needs — it stamps a savedAt that is already outside the window.
-  @InjectManager()
-  async listSettledPayoutDestinations(
+  // Support adds a bank account for a player whose list is empty: the one way in
+  // for a real owner whose number another account already holds, which a customer
+  // save refuses for good because paid-out rows are permanent. The account starts
+  // its cooling-off window like any other. `verify` stamps it when it is shared.
+  @InjectTransactionManager()
+  async addSavedBankAccount(
+    input: {
+      customerId: string;
+      adminId: string;
+      account: SavedBankAccount;
+      verify: boolean;
+      reason: string;
+    },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<
-    {
-      customer_id: string;
-      bank_code: string;
-      account_number: string;
-      account_holder_name: string;
-      /** RAW driver value, deliberately widened: whether pg hands back a Date
-       *  or a string is a driver/config detail, and the one caller only ever
-       *  runs against production. Declaring `Date` would be an unverifiable
-       *  claim that turns into a TypeError there; this forces the coercion. */
-      first_settled_at: string | Date;
-    }[]
-  > {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    return await em.execute(
-      'SELECT customer_id, bank_code, account_number, ' +
-        '  MIN(account_holder_name) AS account_holder_name, ' +
-        '  MIN(created_at) AS first_settled_at ' +
-        'FROM gateway_withdrawal ' +
-        "WHERE status = 'settled' AND deleted_at IS NULL " +
-        'GROUP BY customer_id, bank_code, account_number ' +
-        'ORDER BY customer_id, first_settled_at',
+  ): Promise<void> {
+    await this.mutateCustomerMetadata(
+      {
+        customerId: input.customerId,
+        mutate: (current) => {
+          const accounts = parseSavedBankAccounts(current.bank_accounts);
+          if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
+            throw new MedusaError(
+              MedusaError.Types.NOT_ALLOWED,
+              'This player already has a bank account. Remove it first.',
+            );
+          }
+          return {
+            ...(input.verify
+              ? withBankShareStamp(
+                  current,
+                  input.account.id,
+                  new Date().toISOString(),
+                )
+              : current),
+            bank_accounts: [...accounts, input.account],
+          };
+        },
+      },
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'edit',
+        before: null,
+        after: {
+          bank_name: input.account.bankName,
+          account_last4: input.account.accountNumber.slice(-4),
+          verified: input.verify,
+        },
+        reason: `Added saved bank account: ${input.reason}`,
+      },
+      sharedContext,
     );
   }
 
@@ -9941,7 +9966,8 @@ class PacksModuleService extends MedusaService({
   // account, or a payout to it that went out or is on its way (failed rows
   // came back and prove nothing). A deleted account frees its numbers: the
   // deletion scrub cuts its payout rows to the last 4 digits (deleteAccount),
-  // which no 6+ digit number can match, and its saved list is not read.
+  // which the length check below keeps from matching a short zero-padded number,
+  // and its saved list is not read.
   // The bank codes come back raw (saved lists may still hold a retired
   // gateway's alias); the caller compares canonical ids. holder_name is the
   // saved entry's holder (NULL for a payout row, which already proves the
@@ -9987,6 +10013,7 @@ class PacksModuleService extends MedusaService({
         'UNION ' +
         'SELECT customer_id, bank_code, NULL AS holder_name FROM gateway_withdrawal ' +
         "WHERE deleted_at IS NULL AND customer_id <> ? AND ltrim(regexp_replace(account_number, '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
+        "AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4 " +
         "AND status IN ('pending', 'held', 'settled')",
       [customerId, accountNumber, customerId, accountNumber],
     );

@@ -2030,13 +2030,15 @@ export const savePayoutDetails = (id: string, details: PayoutDetails) =>
   );
 
 export interface SavedBankAccounts {
-  verified_at: string | null;
+  /** What support can add for a player with none. */
+  banks: { id: string; name: string }[];
   accounts: {
     id: string;
     bank_name: string;
     account_number: string;
     account_holder_name: string;
     saved_at: string | null;
+    verified_at: string | null;
     linked: { customer_id: string; handle: string | null }[];
   }[];
 }
@@ -2058,12 +2060,27 @@ export const removeSavedBankAccount = (
 
 export const setBankShareVerified = (
   id: string,
+  accountId: string,
   verified: boolean,
   reason: string,
 ) =>
   postJson<{ verified: boolean }>(
     `/admin/customers/${encodeURIComponent(id)}/bank-accounts/verify`,
-    { verified, reason },
+    { account_id: accountId, verified, reason },
+  );
+
+export const addSavedBankAccount = (
+  id: string,
+  details: {
+    bank_code: string;
+    account_number: string;
+    account_holder_name: string;
+    reason: string;
+  },
+) =>
+  postJson<{ added: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/bank-accounts/add`,
+    details,
   );
 
 // Pack spend per calendar month (MYR), newest first, at most 24 months.

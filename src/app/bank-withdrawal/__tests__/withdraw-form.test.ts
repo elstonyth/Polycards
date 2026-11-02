@@ -798,8 +798,30 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     expectNoUnlockCopy();
   });
 
-  it('locked with no payable account: one quiet nudge to save one now', async () => {
+  it('locked with an account already saved: no nudge, /bank offers no second one', async () => {
     await render([COOLING_ACCOUNT], 0, { available: 350, remaining: 50 });
+    expect(container.querySelector('a[href="/bank"]')).toBeNull();
+  });
+
+  it('a shared account says why and who can help, not to wait', async () => {
+    const reason =
+      'Your bank account is linked to another Polycards account. Contact support to verify it.';
+    await render([
+      { ...READY_ACCOUNT, supported: false, unavailableReason: reason },
+    ]);
+    expect(container.textContent).toContain(reason);
+    expect(container.textContent).not.toContain('short wait');
+    expect(container.querySelector('a[href="/contact"]')).not.toBeNull();
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('a cooling account is told to wait', async () => {
+    await render([COOLING_ACCOUNT]);
+    expect(container.textContent).toContain('short wait');
+  });
+
+  it('locked with no account at all: one quiet nudge to save one now', async () => {
+    await render([], 0, { available: 350, remaining: 50 });
     const links = container.querySelectorAll('a[href="/bank"]');
     expect(links).toHaveLength(1);
     expect(links[0]?.textContent).toBe(`Save your bank account now${NB}→`);

@@ -51,6 +51,12 @@ const isUsable = (account: SavedBankAccount, now: Date) =>
   typeof account.usableFrom === 'string' &&
   new Date(account.usableFrom).getTime() <= now.getTime();
 
+/** Only waiting stands between this destination and a payout. */
+const isCooling = (account: SavedBankAccount, now: Date) =>
+  account.supported !== false &&
+  typeof account.usableFrom === 'string' &&
+  new Date(account.usableFrom).getTime() > now.getTime();
+
 /** Why a destination cannot be picked yet, in the customer's terms. */
 function unusableReason(account: SavedBankAccount, now: Date): string | null {
   if (account.supported === false) {
@@ -572,7 +578,7 @@ export default function WithdrawForm({
           />
           {/* Get the cooling-off window out of the way while packs unlock
               withdrawals — only when there is nothing to pay to yet. */}
-          {saved !== null && usableAccounts.length === 0 && (
+          {saved !== null && accounts.length === 0 && (
             <Link
               href="/bank"
               className="mt-2 inline-flex min-h-11 items-center text-[13px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
@@ -671,19 +677,33 @@ export default function WithdrawForm({
             </label>
           )}
 
-          {accounts.length > 0 && !shownUsable && (
-            <p className="mt-2 text-[13px] text-neutral-400">
-              {walletGroup
-                ? 'New wallets need a short wait before first use, to keep your money safe.'
-                : 'New bank accounts need a short wait before first use, to keep your money safe.'}{' '}
-              <Link
-                href="/bank"
-                className="text-white/80 underline underline-offset-2 hover:text-white"
-              >
-                {walletGroup ? 'Manage wallets' : 'Manage bank accounts'}
-              </Link>
-            </p>
-          )}
+          {accounts.length > 0 &&
+            !shownUsable &&
+            (accounts.some((a) => isCooling(a, now)) ? (
+              <p className="mt-2 text-[13px] text-neutral-400">
+                {walletGroup
+                  ? 'New wallets need a short wait before first use, to keep your money safe.'
+                  : 'New bank accounts need a short wait before first use, to keep your money safe.'}{' '}
+                <Link
+                  href="/bank"
+                  className="text-white/80 underline underline-offset-2 hover:text-white"
+                >
+                  {walletGroup ? 'Manage wallets' : 'Manage bank accounts'}
+                </Link>
+              </p>
+            ) : (
+              // Waiting will not help these: say why, and who can.
+              <p className="mt-2 text-[13px] text-amber-300/80">
+                {accounts.find((a) => a.unavailableReason)?.unavailableReason ??
+                  'This account cannot receive withdrawals right now.'}{' '}
+                <Link
+                  href="/contact"
+                  className="text-white/80 underline underline-offset-2 hover:text-white"
+                >
+                  Contact support
+                </Link>
+              </p>
+            ))}
 
           <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
             Amount

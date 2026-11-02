@@ -6,6 +6,7 @@ import {
   savedBankAccountId,
   MAX_SAVED_BANK_ACCOUNTS,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
+  SHARED_SAVE_MESSAGE,
 } from '../route';
 import type {
   FakeFacet,
@@ -376,9 +377,8 @@ describe('POST /store/credits/withdraw/accounts', () => {
       }),
       mkRes(),
     );
-    expect(
-      updateCustomers.mock.calls[1][1].metadata.bank_accounts,
-    ).toHaveLength(1);
+    // The other letter case is the same id, so nothing is added or written.
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a mistyped wallet address with the reason', async () => {
@@ -393,26 +393,23 @@ describe('POST /store/credits/withdraw/accounts', () => {
     ).rejects.toThrow(/not a valid ERC20/);
   });
 
-  it('re-adding the same bank+number updates in place, no duplicate', async () => {
+  it('re-adding the same bank+number changes nothing', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
+    const res = mkRes();
     await POST(
       mkReq({ ...VALID_BODY, account_holder_name: 'Tan A. Kow' }),
-      mkRes(),
+      res,
     );
-    const written = updateCustomers.mock.calls[0][1].metadata.bank_accounts;
-    expect(written).toHaveLength(1);
-    expect(written[0].accountHolderName).toBe('Tan A. Kow');
-    // The cooling-off window is NOT restarted: the id is derived from
-    // (bankCode, accountNumber), so this relabels the destination rather than
-    // changing it, and a customer fixing a typo must not lose a day.
-    expect(written[0].savedAt).toBe(SAVED_AT);
+    expect(updateCustomers).not.toHaveBeenCalled();
+    const [echoed] = (res as { json: jest.Mock }).json.mock.calls[0][0].accounts;
+    expect(echoed.accountHolderName).toBe('Tan Ah Kow');
+    expect(echoed.savedAt).toBe(SAVED_AT);
   });
 
-  // The other direction of the same rule: re-saving a PRE-cooling-off row must
-  // not silently arm it. Only an explicit delete-then-add (a genuinely new
-  // entry) starts a window.
+  // Re-saving a PRE-cooling-off row must not silently arm it. Only support
+  // removing it and a new entry starts a window.
   it('re-adding a row that has no savedAt does NOT stamp one', async () => {
     const { savedAt: _dropped, ...noTimestamp } = savedShape();
     retrieveCustomer.mockResolvedValue({
@@ -420,8 +417,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
     });
     const res = mkRes();
     await POST(mkReq(VALID_BODY), res);
-    const written = updateCustomers.mock.calls[0][1].metadata.bank_accounts;
-    expect(written[0].savedAt).toBeUndefined();
+    expect(updateCustomers).not.toHaveBeenCalled();
     expect(
       (res as { json: jest.Mock }).json.mock.calls[0][0].accounts[0].usableFrom,
     ).toBeNull();
@@ -623,7 +619,7 @@ describe('GET /store/credits/withdraw/accounts', () => {
           currency: 'SGD',
           supported: false,
           unavailableReason:
-            'Withdrawals to Alliance Bank (SG) are unavailable. Choose another bank.',
+            'Withdrawals to Alliance Bank (SG) are unavailable. Choose another bank. Contact support to change it.',
         }),
       ],
     });
@@ -733,7 +729,7 @@ describe('POST accounts — one bank account, one Polycards account', () => {
       { customer_id: 'cus_2', bank_code: 'MBBEMYKL' },
     ]);
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
-      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+      SHARED_SAVE_MESSAGE,
     );
     expect(otherPayoutAccountHolders).toHaveBeenCalledWith(
       'cus_1',
@@ -755,7 +751,7 @@ describe('POST accounts — one bank account, one Polycards account', () => {
       { customer_id: 'cus_2', bank_code: 'MYMB2U' },
     ]);
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
-      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+      SHARED_SAVE_MESSAGE,
     );
   });
 
@@ -765,7 +761,7 @@ describe('POST accounts — one bank account, one Polycards account', () => {
       { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'Someone Else' },
     ]);
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
-      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+      SHARED_SAVE_MESSAGE,
     );
     expect(updateCustomers).not.toHaveBeenCalled();
   });
@@ -802,7 +798,7 @@ describe('POST accounts — one bank account, one Polycards account', () => {
         { customer_id: 'cus_2', bank_code: 'USDTTRC20', holder_name: null },
       ]);
       await expect(POST(mkReq(body), mkRes())).rejects.toThrow(
-        SHARED_PAYOUT_ACCOUNT_MESSAGE,
+        SHARED_SAVE_MESSAGE,
       );
     })();
   });
@@ -817,13 +813,13 @@ describe('POST accounts — one bank account, one Polycards account', () => {
 
   it('verification never lets a new shared number in', async () => {
     retrieveCustomer.mockResolvedValue({
-      metadata: { bank_share_verified_at: '2026-11-03T00:00:00.000Z' },
+      metadata: { bank_share_verified: { [savedShape().id]: '2026-11-03T00:00:00.000Z' } },
     });
     otherPayoutAccountHolders.mockResolvedValue([
       { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: null },
     ]);
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
-      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+      SHARED_SAVE_MESSAGE,
     );
     expect(updateCustomers).not.toHaveBeenCalled();
   });
@@ -835,10 +831,26 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     otherPayoutAccountHolders.mockResolvedValue([
       { customer_id: 'cus_2', bank_code: 'MBBEMYKL' },
     ]);
-    // Decided on the locked read: the account is already theirs, so the
-    // other holder does not block a relabel.
+    // Decided on the locked read: the account is already theirs, so nothing is
+    // refused, and nothing changes either.
     await POST(mkReq(VALID_BODY), mkRes());
-    expect(updateCustomers).toHaveBeenCalledTimes(1);
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST accounts — a saved account changes through support', () => {
+  it('a re-save cannot relabel the holder, even while held', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [savedShape()] },
+    });
+    const res = mkRes();
+    await POST(
+      mkReq({ ...VALID_BODY, account_holder_name: 'Someone Else' }),
+      res,
+    );
+    expect(updateCustomers).not.toHaveBeenCalled();
+    const [echoed] = (res as { json: jest.Mock }).json.mock.calls[0][0].accounts;
+    expect(echoed.accountHolderName).toBe('Tan Ah Kow');
   });
 });
 
@@ -884,7 +896,7 @@ describe('GET accounts — a shared bank account is on hold', () => {
     retrieveCustomer.mockResolvedValue({
       metadata: {
         bank_accounts: [savedShape()],
-        bank_share_verified_at: '2026-11-03T00:00:00.000Z',
+        bank_share_verified: { [savedShape().id]: '2026-11-03T00:00:00.000Z' },
       },
     });
     otherPayoutAccountHolders.mockResolvedValue(held);
@@ -894,6 +906,48 @@ describe('GET accounts — a shared bank account is on hold', () => {
       .accounts;
     expect(account.supported).toBe(true);
     expect(otherPayoutAccountHolders).not.toHaveBeenCalled();
+  });
+
+  it('verifying one number does not lift a hold from another on the list', async () => {
+    const other = savedShape({ id: 'other', accountNumber: '999999999999' });
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [savedShape(), other],
+        bank_share_verified: { [savedShape().id]: '2026-11-03T00:00:00.000Z' },
+      },
+    });
+    otherPayoutAccountHolders.mockResolvedValue(held);
+    const res = mkRes();
+    await GET(mkReq(), res);
+    const { accounts } = (res as { json: jest.Mock }).json.mock.calls[0][0];
+    expect(accounts.map((a: { supported: boolean }) => a.supported)).toEqual([
+      false,
+      false,
+    ]);
+  });
+
+  it('holds a wallet another account only saved', async () => {
+    const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [
+          savedShape({
+            id: savedBankAccountId('USDTTRC20', TRON),
+            bankCode: 'USDTTRC20',
+            bankName: 'USDT · TRC20 (Tron)',
+            accountNumber: TRON,
+            accountHolderName: 'USDT · TRC20 (Tron)',
+          }),
+        ],
+      },
+    });
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'USDTTRC20', holder_name: 'USDT · TRC20 (Tron)' },
+    ]);
+    const res = mkRes();
+    await GET(mkReq(), res);
+    const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0].accounts;
+    expect(account.supported).toBe(false);
   });
 
   it('does not hold the same digits at another bank', async () => {

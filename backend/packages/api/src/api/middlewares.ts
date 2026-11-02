@@ -1354,7 +1354,7 @@ export default defineMiddlewares({
       // "refuse the field" rather than "force has_account and check".
       matcher: '/admin/customers',
       method: 'POST',
-      middlewares: [rejectAdminPhoneWrite],
+      middlewares: [rejectAdminBankAccountsMetadata, rejectAdminPhoneWrite],
     },
     {
       // The framework's own POST /admin/customers/:id writes customer.metadata
@@ -1390,6 +1390,11 @@ export default defineMiddlewares({
     {
       matcher: '/admin/customers/*/bank-accounts',
       method: 'GET',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/bank-accounts/add',
+      method: 'POST',
       middlewares: [adminActionRateLimit],
     },
     {

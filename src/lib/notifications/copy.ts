@@ -272,7 +272,7 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       // renderer: a merely non-empty check would render a FULL account number
       // into a toast if a malformed payload ever reached here.
       if (!last4 || !/^[A-Za-z0-9]{4}$/.test(last4)) return null;
-      return `${bank ? `${bank} ` : ''}····${last4} was removed from your withdrawal accounts. If this wasn't you, change your password now.`;
+      return `${bank ? `${bank} ` : ''}····${last4} was removed from your withdrawal accounts by our support team. If you didn't ask for this, contact support.`;
     },
     href: '/bank',
     action: 'Review accounts',

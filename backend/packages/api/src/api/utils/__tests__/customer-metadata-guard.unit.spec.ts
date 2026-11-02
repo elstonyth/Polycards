@@ -9,10 +9,15 @@ const run = (body: unknown) => {
 };
 
 describe('rejectAdminBankAccountsMetadata', () => {
-  it.each(['bank_accounts', 'bank_share_verified_at'])('refuses %s', (key) => {
+  it.each(['bank_accounts', 'bank_share_verified'])('refuses %s', (key) => {
     const next = run({ metadata: { handle: 'x', [key]: 'anything' } });
     expect(next).toHaveBeenCalledTimes(1);
     expect(next.mock.calls[0][0]?.message).toContain(key);
+  });
+
+  it('refuses clearing the whole blob, which would wipe a tied bank account', () => {
+    const next = run({ metadata: null });
+    expect(next.mock.calls[0][0]?.message).toMatch(/cannot be cleared/);
   });
 
   it('lets any other metadata key through', () => {

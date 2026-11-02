@@ -5,7 +5,9 @@ import {
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   bankSupportedBy,
   anySavedAccountShared,
+  heldByAnother,
   resolveWithdrawalDestination,
+  savedBankAccountId,
 } from './saved-accounts';
 import { findBank, walletAddressValid } from './banks';
 import {
@@ -777,8 +779,12 @@ export async function startWithdrawal(
   // every account on it, whoever was paid first, and whichever saved number this
   // payout goes to, until support acts (ADR 0015). Refused before any row or debit.
   if (
-    (await anySavedAccountShared(packs, input.customerId, savedAccounts)) &&
-    !(await packs.bankShareVerifiedFor(input.customerId))
+    await anySavedAccountShared(
+      packs,
+      input.customerId,
+      savedAccounts,
+      await packs.bankShareVerifiedFor(input.customerId),
+    )
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
@@ -1978,6 +1984,32 @@ export async function submitHeldWithdrawal(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
+    );
+  }
+
+  // One bank account, one Polycards account, here too (ADR 0015): a row held
+  // before the rule shipped, or on a number since unverified or removed, must not
+  // pay on a click. Judged on the row's own number, not the saved list, which
+  // support may already have changed. The row stays held.
+  const rowBank = findBank(row.bank_code);
+  const rowAccountId = savedBankAccountId(
+    rowBank?.id ?? row.bank_code,
+    row.account_number,
+  );
+  if (
+    !(await packs.bankShareVerifiedFor(row.customer_id))[rowAccountId] &&
+    heldByAnother(
+      await packs.otherPayoutAccountHolders(
+        row.customer_id,
+        row.account_number,
+        rowBank?.wallet !== undefined,
+      ),
+      row.bank_code,
+    )
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This bank account is linked to another Polycards account. Verify it on the player page before approving, or deny the withdrawal.',
     );
   }
 

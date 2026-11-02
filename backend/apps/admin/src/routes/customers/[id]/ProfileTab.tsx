@@ -18,6 +18,7 @@ import {
 import type { Permission } from '@mercurjs/dashboard-sdk';
 import { usePermissions } from '@mercurjs/admin';
 import {
+  useAddSavedBankAccount,
   useCustomerAudit,
   useCustomerDetail,
   useCustomerGatewayWithdrawals,
@@ -142,7 +143,8 @@ const BankForm = ({
 
 /** The account withdrawals actually go to, and the only way to change it: a
  *  player can neither remove it nor add a second one (ADR 0015). Holds come from
- *  the same check the payout runs, so what this says is what the player gets. */
+ *  the same check the payout runs: any unverified shared number holds the whole
+ *  player, so the warning sits on the card, not on a row. */
 const SavedBankAccountsCard = ({
   customerId,
   canEdit,
@@ -155,12 +157,16 @@ const SavedBankAccountsCard = ({
   const { data, isError } = useSavedBankAccounts(customerId);
   const remove = useRemoveSavedBankAccount(customerId);
   const verify = useSetBankShareVerified(customerId);
+  const add = useAddSavedBankAccount(customerId);
   const [dialog, setDialog] = useState<
     | { kind: 'remove'; accountId: string }
-    | { kind: 'verify'; to: boolean }
+    | { kind: 'verify'; accountId: string; to: boolean }
+    | { kind: 'add' }
     | null
   >(null);
-  const verified = data?.verified_at != null;
+  const onHold = data?.accounts.some(
+    (a) => a.linked.length > 0 && !a.verified_at,
+  );
 
   return (
     <Container className="p-0">
@@ -169,6 +175,13 @@ const SavedBankAccountsCard = ({
         <Text className="text-ui-fg-subtle mt-1" size="small">
           {t('players.savedBankSubtitle')}
         </Text>
+        {onHold && (
+          <div className="mt-2">
+            <StatusBadge color="orange">
+              {t('players.savedBankHold')}
+            </StatusBadge>
+          </div>
+        )}
       </div>
       {isError ? (
         <TableState isError />
@@ -177,7 +190,20 @@ const SavedBankAccountsCard = ({
           <LoadingSkeleton />
         </div>
       ) : data.accounts.length === 0 ? (
-        <TableState empty={t('players.savedBankEmpty')} />
+        <>
+          <TableState empty={t('players.savedBankEmpty')} />
+          {canEdit && (
+            <div className="border-t px-6 py-4">
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => setDialog({ kind: 'add' })}
+              >
+                {t('players.savedBankAdd')}
+              </Button>
+            </div>
+          )}
+        </>
       ) : (
         data.accounts.map((account) => (
           <div key={account.id} className="border-t px-6 py-4">
@@ -198,22 +224,28 @@ const SavedBankAccountsCard = ({
                 </Button>
               )}
             </div>
-            {account.linked.length > 0 && (
+            {(account.linked.length > 0 || account.verified_at) && (
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <StatusBadge color={verified ? 'green' : 'orange'}>
-                  {verified
+                <StatusBadge color={account.verified_at ? 'green' : 'orange'}>
+                  {account.verified_at
                     ? t('players.savedBankVerified', {
-                        date: orderDateTime(data.verified_at as string),
+                        date: orderDateTime(account.verified_at),
                       })
-                    : t('players.savedBankHold')}
+                    : t('players.savedBankShared')}
                 </StatusBadge>
                 {canEdit && (
                   <Button
                     size="small"
                     variant="secondary"
-                    onClick={() => setDialog({ kind: 'verify', to: !verified })}
+                    onClick={() =>
+                      setDialog({
+                        kind: 'verify',
+                        accountId: account.id,
+                        to: !account.verified_at,
+                      })
+                    }
                   >
-                    {verified
+                    {account.verified_at
                       ? t('players.savedBankUnverify')
                       : t('players.savedBankVerify')}
                   </Button>
@@ -274,7 +306,45 @@ const SavedBankAccountsCard = ({
           onClose={() => setDialog(null)}
           onSubmit={({ reason }) =>
             verify.mutate(
-              { verified: dialog.to, reason },
+              { accountId: dialog.accountId, verified: dialog.to, reason },
+              { onSuccess: () => setDialog(null) },
+            )
+          }
+        />
+      )}
+      {dialog?.kind === 'add' && (
+        <FieldsDialog
+          title={t('players.savedBankAddTitle')}
+          description={t('players.savedBankAddBody')}
+          fields={[
+            {
+              key: 'bank_code',
+              label: t('players.savedBankChooseBank'),
+              placeholder: t('players.savedBankChoose'),
+              options: (data?.banks ?? []).map((b) => ({
+                value: b.id,
+                label: b.name,
+              })),
+            },
+            { key: 'account_number', label: t('players.savedBankNumber') },
+            { key: 'account_holder_name', label: t('players.savedBankHolder') },
+            { key: 'reason', label: t('players.savedBankReason') },
+          ]}
+          busy={add.isPending}
+          onClose={() => setDialog(null)}
+          onSubmit={({
+            bank_code,
+            account_number,
+            account_holder_name,
+            reason,
+          }) =>
+            add.mutate(
+              {
+                bank_code: bank_code as string,
+                account_number: account_number as string,
+                account_holder_name: account_holder_name as string,
+                reason: reason as string,
+              },
               { onSuccess: () => setDialog(null) },
             )
           }
