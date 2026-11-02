@@ -25,6 +25,14 @@ const visitor = vi.hoisted(() => ({
   ip: undefined as string | undefined,
   inScope: true,
   reads: 0,
+  device: undefined as string | undefined,
+  canSetCookie: true,
+  signedIn: true,
+  set: [] as {
+    name: string;
+    value: string;
+    options: Record<string, unknown>;
+  }[],
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('next/headers', () => ({
@@ -34,6 +42,15 @@ vi.mock('next/headers', () => ({
       throw new Error('`headers` was called outside a request scope.');
     return new Headers(visitor.ip ? { 'do-connecting-ip': visitor.ip } : {});
   },
+  cookies: async () => ({
+    get: () => (visitor.device ? { value: visitor.device } : undefined),
+    has: () => visitor.signedIn,
+    set: (name: string, value: string, options: Record<string, unknown>) => {
+      if (!visitor.canSetCookie)
+        throw new Error('Cookies can only be modified in a Server Action.');
+      visitor.set.push({ name, value, options });
+    },
+  }),
 }));
 
 const { withVisitor } = await import('@/lib/visitor-ip');
@@ -47,6 +64,10 @@ beforeEach(() => {
   visitor.ip = '175.143.0.1';
   visitor.inScope = true;
   visitor.reads = 0;
+  visitor.device = undefined;
+  visitor.canSetCookie = true;
+  visitor.signedIn = true;
+  visitor.set = [];
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -65,6 +86,70 @@ const pairOf = (init: FetchArgs | undefined) => {
     ? { ip: h['x-visitor-ip'], sig: h['x-visitor-sig'] }
     : undefined;
 };
+
+describe('withVisitor — the browser id', () => {
+  const DEVICE = '3f2b8c1e-7a4d-4e9a-9c11-5d6e7f8a9b0c';
+  const deviceOf = (init: FetchArgs | undefined) =>
+    (init?.headers as Record<string, string> | undefined)?.['x-visitor-device'];
+
+  it('creates it on a write, and sends what it set', async () => {
+    const init = await withVisitor(POST);
+    expect(visitor.set).toHaveLength(1);
+    expect(visitor.set[0]).toMatchObject({
+      name: '_polycards_device',
+      options: { httpOnly: true, sameSite: 'lax', path: '/' },
+    });
+    expect(deviceOf(init)).toBe(visitor.set[0]?.value);
+  });
+
+  it('reuses the one it has, setting nothing', async () => {
+    visitor.device = DEVICE;
+    expect(deviceOf(await withVisitor(POST))).toBe(DEVICE);
+    expect(visitor.set).toEqual([]);
+  });
+
+  it('never creates one for a guest, so a replayed form cannot force a page render', async () => {
+    visitor.signedIn = false;
+    const init = await withVisitor(POST);
+    expect(deviceOf(init)).toBeUndefined();
+    expect(visitor.set).toEqual([]);
+    expect(pairOf(init)).toBeDefined();
+  });
+
+  it('never creates one on a read', async () => {
+    const init = await withVisitor({ method: 'GET', cache: 'no-store' });
+    expect(deviceOf(init)).toBeUndefined();
+    expect(visitor.set).toEqual([]);
+    expect(pairOf(init)).toBeDefined();
+  });
+
+  it('sends the existing one on a no-store read', async () => {
+    visitor.device = DEVICE;
+    const init = await withVisitor({ method: 'GET', cache: 'no-store' });
+    expect(deviceOf(init)).toBe(DEVICE);
+  });
+
+  it('replaces a value that is not one of ours', async () => {
+    visitor.device = 'not-a-uuid';
+    const init = await withVisitor(POST);
+    expect(deviceOf(init)).toBe(visitor.set[0]?.value);
+    expect(deviceOf(init)).not.toBe('not-a-uuid');
+  });
+
+  it('a cookie store that refuses still signs the request', async () => {
+    visitor.canSetCookie = false;
+    const init = await withVisitor(POST);
+    expect(deviceOf(init)).toBeUndefined();
+    expect(pairOf(init)).toBeDefined();
+  });
+
+  it('adds nothing without a signed address', async () => {
+    visitor.ip = undefined;
+    visitor.device = DEVICE;
+    expect(deviceOf(await withVisitor(POST))).toBeUndefined();
+    expect(visitor.set).toEqual([]);
+  });
+});
 
 describe('withVisitor — the signature', () => {
   it('signs the ingress address with the shared secret and the current second', async () => {

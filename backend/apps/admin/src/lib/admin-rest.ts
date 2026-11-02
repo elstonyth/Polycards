@@ -2048,6 +2048,30 @@ export const getSavedBankAccounts = (id: string) =>
     `/admin/customers/${encodeURIComponent(id)}/bank-accounts`,
   );
 
+export interface VisitorSignals {
+  /** False until this player's first signup, claim or withdrawal since capture. */
+  recorded: boolean;
+  /** Seen on a request the storefront did not sign: a direct API call or script. */
+  unsigned: boolean;
+  device_total: number;
+  ip_total: number;
+  device: {
+    customer_id: string;
+    handle: string | null;
+    last_seen_at: string;
+  }[];
+  ip: {
+    ip: string;
+    accounts: number;
+    customers: { customer_id: string; handle: string | null }[];
+  }[];
+}
+
+export const getVisitorSignals = (id: string) =>
+  getJson<VisitorSignals>(
+    `/admin/customers/${encodeURIComponent(id)}/visitor-signals`,
+  );
+
 export const removeSavedBankAccount = (
   id: string,
   accountId: string,

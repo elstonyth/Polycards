@@ -54,7 +54,7 @@ import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { capAdminSessionAge } from './utils/admin-session-cap';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
-import { requireVouchedVisitor } from './utils/visitor-ip';
+import { recordVisitorSignal, requireVouchedVisitor } from './utils/visitor-ip';
 import { adminRbacRoutes } from './admin-rbac';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
@@ -598,6 +598,9 @@ export default defineMiddlewares({
       middlewares: [
         authenticate('customer', ['bearer']),
         deliveryWriteRateLimit,
+        // The one write every new account makes, Google sign-ups included: the
+        // welcome pack refuses until a name is on file.
+        recordVisitorSignal,
       ],
     },
     {
@@ -874,6 +877,7 @@ export default defineMiddlewares({
       middlewares: [
         authenticate('customer', ['bearer']),
         deliveryWriteRateLimit,
+        recordVisitorSignal,
       ],
     },
     {
@@ -895,14 +899,22 @@ export default defineMiddlewares({
       // Daily check-in (POST /store/tasks/checkin) — idempotent per MYT day.
       matcher: '/store/tasks/checkin',
       method: 'POST',
-      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        taskActionRateLimit,
+        recordVisitorSignal,
+      ],
     },
     {
       // Task reward claim (POST /store/tasks/:id/claim) — idempotent per
       // (task, period) via the task_claim unique index.
       matcher: '/store/tasks/*/claim',
       method: 'POST',
-      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        taskActionRateLimit,
+        recordVisitorSignal,
+      ],
     },
     {
       // Is a Lucky Draw on? (GET /store/lucky-draw-status). Public — no
@@ -1075,6 +1087,7 @@ export default defineMiddlewares({
       middlewares: [
         authenticate('customer', ['bearer']),
         rateLimit('credit-topup'),
+        recordVisitorSignal,
         // Partner groups (spec 2026-09-09): a member of a group whose policy
         // blocks withdrawals is refused here, before any phone check — the
         // block is a property of the account, not of what it has proven.
@@ -1382,6 +1395,12 @@ export default defineMiddlewares({
     {
       matcher: '/admin/customers/*/payout-details',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    // Other accounts on this player's browser or network: carries IP addresses.
+    {
+      matcher: '/admin/customers/*/visitor-signals',
+      method: 'GET',
       middlewares: [adminActionRateLimit],
     },
     // Saved bank accounts: the list carries full numbers (same reasoning as the
