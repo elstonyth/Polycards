@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
+import { COIN_FLIP_OPEN } from '@/components/app-shell/games';
 import { getCustomer } from '@/lib/data/customer';
 import { getVault } from '@/lib/actions/vault';
 import { getCoinFlipSettings } from '@/lib/actions/coin-flip';
@@ -15,6 +16,7 @@ export default async function CoinFlipPage({
     stake?: string;
   }>;
 }) {
+  if (!COIN_FLIP_OPEN) redirect('/vault');
   const [customer, vault, settings, tickets, params] = await Promise.all([
     getCustomer(),
     getVault(),
