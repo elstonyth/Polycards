@@ -91,6 +91,28 @@ function makeShadow(): HTMLCanvasElement {
   return c;
 }
 
+const MINI_TOKEN = 48;
+const miniTokens = new WeakMap<object, CanvasImageSource>();
+
+/** A token's small copy, with the ring a small disc wears. One per picture. */
+function miniOf(sprite: CanvasImageSource): CanvasImageSource {
+  const had = miniTokens.get(sprite);
+  if (had) return had;
+  const mini = document.createElement('canvas');
+  mini.width = mini.height = MINI_TOKEN;
+  const g = mini.getContext('2d');
+  if (!g) return sprite;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(sprite, 0, 0, MINI_TOKEN, MINI_TOKEN);
+  g.beginPath();
+  g.arc(MINI_TOKEN / 2, MINI_TOKEN / 2, MINI_TOKEN / 2 - 1.5, 0, Math.PI * 2);
+  g.lineWidth = 3;
+  g.strokeStyle = 'rgba(228,228,231,.72)';
+  g.stroke();
+  miniTokens.set(sprite, mini);
+  return mini;
+}
+
 export function createArenaRenderer(
   canvas: HTMLCanvasElement,
   cast: ArenaCast,
@@ -415,10 +437,16 @@ export function createArenaRenderer(
       ctx.drawImage(shadow, px - sr, py - sr + r * 0.2, sr * 2, sr * 2);
     }
     const sprite = sprites.get(owner);
+    // Hundreds of small discs a frame: a tiny copy with its ring baked in is far
+    // cheaper than scaling a full token and stroking a path, and scales down cleaner.
+    if (sprite && !mine && crown === 0 && r / dpr < SHADOW_MIN_R) {
+      ctx.drawImage(miniOf(sprite), px - r, py - r, r * 2, r * 2);
+      return;
+    }
     if (sprite) {
       ctx.drawImage(sprite, px - r, py - r, r * 2, r * 2);
     } else {
-      // Past the picture cap: a plain disc, still readable on the table.
+      // No canvas to draw on (out of memory): a plain disc, still readable.
       ctx.fillStyle = DOT_COLOR;
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
@@ -548,7 +576,8 @@ export function createArenaRenderer(
       const m = run.masses[k] as number;
       const real = run.r0 * Math.sqrt(m) * S;
       let r = real;
-      if (real / dpr >= 2.5) {
+      // Every disc that draws as a token needs a shown radius: tokens draw at it.
+      if (real / dpr >= TOKEN_MIN_R) {
         if (dt === 0 || shownR[id] === 0) {
           shownR[id] = real;
           velR[id] = 0;
