@@ -17,7 +17,7 @@ export default function RecentPullsSection({
    *  until the first poll, 10s. Fetch the Poly seed if Poly ever leads. */
   initial: RecentFeed;
 }) {
-  const poly = useShelfCategory().active === POLY_CATEGORY;
+  const { active } = useShelfCategory();
   return (
     <section
       aria-labelledby="recent-pulls-heading"
@@ -44,8 +44,7 @@ export default function RecentPullsSection({
       <div className="px-fluid">
         <PullHistory
           initial={initial}
-          category={poly ? POLY_CATEGORY : undefined}
-          noun={poly ? 'capsule' : 'pack'}
+          category={active === POLY_CATEGORY ? POLY_CATEGORY : undefined}
         />
       </div>
     </section>

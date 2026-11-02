@@ -607,6 +607,15 @@ export async function getRecentPulls(
   // pulls yet" either way, and never mock rows.
   if (!r.ok) return EMPTY_FEED;
   const raw = r.data;
+  // A category feed holds spins only. The storefront deploys ~10 minutes before
+  // the backend, and an older backend ignores ?category and answers the global
+  // card feed: those rows must not show under Poly.
+  if (
+    category &&
+    (raw.pulls as unknown as BackendRecentPull[]).some((p) => p.tickets == null)
+  ) {
+    return EMPTY_FEED;
+  }
 
   // Stable ids: the pull row id, else (older backend) a per-(handle,
   // rolled_at) occurrence counter — NOT the array index, which shifts

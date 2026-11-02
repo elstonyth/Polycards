@@ -125,9 +125,12 @@ describe('useLiveRecentPulls', () => {
     h.rerender({ category: 'poly' });
     expect(h.current.pending).toBe(true);
     expect(h.current.pulls.map((p) => p.id)).toEqual(['a', 'b']);
+    // The rows on screen are still the global feed's, and so is this.
+    expect(h.current.shownCategory).toBeUndefined();
     await flush();
     expect(fetchMock.mock.calls[0]![0]).toBe('/api/recent-pulls?category=poly');
     expect(h.current.pending).toBe(false);
+    expect(h.current.shownCategory).toBe('poly');
     expect(h.current.pulls.map((p) => p.id)).toEqual(['spin']);
     expect(h.current.drought).toEqual({ Immortal: 1 });
     expect(h.current.shownScope).not.toBe(globalScope);

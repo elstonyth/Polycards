@@ -24,6 +24,8 @@ vi.mock('@/components/FreePackBadge', () => ({ default: () => null }));
 
 const CatalogClient = (await import('../CatalogClient')).default;
 const ShelfTabs = (await import('@/components/home/ShelfTabs')).default;
+const { ShelfCategoryProvider } =
+  await import('@/components/home/ShelfCategory');
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -103,9 +105,12 @@ test('/slots hides the switch with a single franchise', () => {
 
 test('home shelf: the "All packs" link follows the picked franchise', () => {
   render(
-    createElement(ShelfTabs, {
+    createElement(ShelfCategoryProvider, {
       categories: packTabs(categories),
-      panels: { pokemon: 'POKE', 'one-piece': 'OP' },
+      children: createElement(ShelfTabs, {
+        categories: packTabs(categories),
+        panels: { pokemon: 'POKE', 'one-piece': 'OP' },
+      }),
     }),
   );
   const link = () =>

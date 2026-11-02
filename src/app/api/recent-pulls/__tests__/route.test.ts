@@ -150,6 +150,35 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     });
   });
 
+  // The storefront deploys first, and an older backend ignores ?category.
+  it('card rows answering the Poly category read as an empty feed', async () => {
+    mem = seed({
+      'GET /store/pulls/recent': {
+        body: {
+          pulls: [
+            {
+              id: 'pull_1',
+              handle: 'pikachu',
+              name: 'Pikachu',
+              rarity: 'Common',
+              market_value: 1,
+              marketPriceMyr: 5,
+              image: '/c.png',
+              pack_id: 'bronze-pack',
+              rolled_at: '2026-11-02T00:00:00Z',
+            },
+          ],
+          drought: { Immortal: 74 },
+        },
+      },
+    });
+
+    const poly = await (await GET(req('?category=poly'))).json();
+    expect(poly).toEqual({ pulls: [], drought: {} });
+    const global = await (await GET(req())).json();
+    expect(global.pulls).toHaveLength(1);
+  });
+
   it('the body carries the drought counters alongside the rows', async () => {
     mem = seed({
       'GET /store/pulls/recent': {

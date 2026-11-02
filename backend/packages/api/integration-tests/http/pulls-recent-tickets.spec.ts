@@ -293,13 +293,31 @@ medusaIntegrationTestRunner({
           ).toEqual([[CAPSULE, 75]]);
         });
 
-        it('a category with no live capsule answers empty', async () => {
+        it('a key with no feed of its own reads as the global feed', async () => {
           for (const category of ['pokemon', 'no-such-category']) {
             const { data } = await get(
               `/store/pulls/recent?category=${category}`,
             );
-            expect(data).toEqual({ pulls: [], drought: {} });
+            expect(
+              data.pulls.map((p: { handle: string }) => p.handle),
+            ).toEqual([CARD]);
           }
+        });
+
+        it('with no live capsule, both reads answer empty', async () => {
+          const packs =
+            getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+          await packs.updatePacks({
+            selector: { slug: [CAPSULE, SECOND_CAPSULE] },
+            data: { status: 'draft' },
+          });
+
+          const feed = await get('/store/pulls/recent?category=poly');
+          expect(feed.data).toEqual({ pulls: [], drought: {} });
+          const gaps = await get(
+            '/store/pulls/gaps?rarity=Immortal&category=poly',
+          );
+          expect(gaps.data).toMatchObject({ current: 0, hits: [] });
         });
 
         it('pack_id wins over category', async () => {
@@ -331,13 +349,6 @@ medusaIntegrationTestRunner({
             current: 6,
           });
           expect(data.hits.map((h: { gap: number }) => h.gap)).toEqual([2]);
-        });
-
-        it('the stats chart is empty for a category with no live capsule', async () => {
-          const { data } = await get(
-            '/store/pulls/gaps?rarity=Immortal&category=pokemon',
-          );
-          expect(data).toMatchObject({ current: 0, hits: [] });
         });
       });
     });

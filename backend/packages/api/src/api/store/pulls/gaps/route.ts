@@ -3,6 +3,7 @@ import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
 import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
+import { categoryParam, liveTicketPacks } from '../category';
 import { ANONYMOUS_PULLER, loadPullerProfiles } from '../pullers';
 
 // GET /store/pulls/gaps?rarity=<tier>[&pack_id=<Pack.slug>|&category=<key>] —
@@ -55,12 +56,7 @@ export async function GET(
     typeof req.query.pack_id === 'string' && req.query.pack_id.trim()
       ? req.query.pack_id.trim()
       : null;
-  const category =
-    !packId &&
-    typeof req.query.category === 'string' &&
-    req.query.category.trim()
-      ? req.query.category.trim()
-      : null;
+  const category = categoryParam(req.query, packId);
   // The chart always shows SOME tier — an unknown/absent value reads as the
   // apex tier rather than 400ing a public route.
   const rarity: Rarity =
@@ -110,14 +106,8 @@ async function buildGaps(
         await packs.listPacks({ slug: packId, status: 'active' }, { take: 1 })
       )[0]
     : null;
-  // A category's live ticket packs, so a Draft capsule's test spins stay out.
   const categorySlugs = category
-    ? (
-        await packs.listPacks(
-          { category, status: 'active', prize_type: 'tickets' },
-          { take: 1000 },
-        )
-      ).map((p) => p.slug)
+    ? (await liveTicketPacks(packs, category)).map((p) => p.slug)
     : null;
   if ((packId && !pack) || categorySlugs?.length === 0) {
     const empty = {

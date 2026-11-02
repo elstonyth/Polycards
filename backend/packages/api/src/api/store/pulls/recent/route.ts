@@ -12,6 +12,7 @@ import {
   resolveFxRate,
 } from '../../../../modules/packs/pricing';
 import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
+import { categoryParam, liveTicketPacks } from '../category';
 import { loadPullerProfiles } from '../pullers';
 
 // GET /store/pulls/recent — the most recent pulls across all packs, for the
@@ -30,7 +31,8 @@ import { loadPullerProfiles } from '../pullers';
 //                        before any ledger query (see the gate below).
 //  ?category=<key>       the spins of that category's live ticket packs — the
 //                        home Poly tab. pack_id wins when both are sent. A
-//                        category with no live ticket pack is an EMPTY feed.
+//                        category with no live ticket pack is an EMPTY feed;
+//                        a key outside FEED_CATEGORIES is the global feed.
 //  ?rarity=<tier>        only pulls of that tier (rarity is per-pack, resolved
 //                        through pack_odds) — the history panel's tier tabs.
 //
@@ -89,12 +91,7 @@ export async function GET(
     typeof req.query.pack_id === 'string' && req.query.pack_id.trim()
       ? req.query.pack_id.trim()
       : null;
-  const category =
-    !packId &&
-    typeof req.query.category === 'string' &&
-    req.query.category.trim()
-      ? req.query.category.trim()
-      : null;
+  const category = categoryParam(req.query, packId);
   // An unknown tier is ignored (the unfiltered feed), not 400'd — the storefront
   // proxy already gates the value, so anything else is a hand-typed URL.
   const rarity =
@@ -137,13 +134,8 @@ async function buildFeed(
 ): Promise<unknown> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
-  // The same gate for a category: one pack lookup before any ledger work, and
-  // active only, so a Draft capsule's test spins stay out.
   if (category) {
-    const scope = await packs.listPacks(
-      { category, status: 'active', prize_type: 'tickets' },
-      { take: 1000 },
-    );
+    const scope = await liveTicketPacks(packs, category);
     if (scope.length === 0) {
       remember(cacheKey, EMPTY_BODY);
       return EMPTY_BODY;
@@ -281,7 +273,7 @@ async function buildTicketFeed(
   const packIds = scope.map((p) => p.slug);
   const [fetched, droughtCounts, prizes] = await Promise.all([
     packs.recentTicketSpinRows({
-      packId: packIds,
+      packIds,
       rarity,
       limit: FETCH_LIMIT,
     }),

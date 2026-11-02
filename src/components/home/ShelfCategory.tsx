@@ -6,7 +6,7 @@ import type { PackTab } from '@/lib/packs-data';
 const ShelfCategoryContext = createContext<{
   active: string;
   pick: (id: string) => void;
-}>({ active: '', pick: () => {} });
+} | null>(null);
 
 /** The franchise picked on the home shelf: the shelf shows its ladder and the
  *  pull history below it follows. The first tab with packs is the default. */
@@ -30,4 +30,10 @@ export function ShelfCategoryProvider({
   );
 }
 
-export const useShelfCategory = () => useContext(ShelfCategoryContext);
+export function useShelfCategory() {
+  const value = useContext(ShelfCategoryContext);
+  if (!value) {
+    throw new Error('useShelfCategory needs a ShelfCategoryProvider');
+  }
+  return value;
+}

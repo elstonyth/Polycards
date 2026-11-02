@@ -11402,12 +11402,10 @@ class PacksModuleService extends MedusaService({
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const params: unknown[] = [];
-    let where = "p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')";
-    if (opts.packId) {
-      where += ' AND p.pack_id = ?';
-      params.push(opts.packId);
-    }
+    const scope = packScope(opts.packId);
+    const params: unknown[] = [...scope.params];
+    let where =
+      "p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" + scope.sql;
     if (opts.rarity) {
       where += ' AND ' + PULL_TIER_SQL;
       params.push(opts.rarity);
@@ -11425,10 +11423,11 @@ class PacksModuleService extends MedusaService({
   }
 
   // recentPullRows for ticket packs: the same order and the same public
-  // sources, with the amount won in place of the card.
+  // sources, with the amount won in place of the card. Over several packs the
+  // scan rides IDX_ticket_spin_rolled_at and stops at `limit`.
   @InjectManager()
   async recentTicketSpinRows(
-    opts: { packId: string | string[]; rarity: Rarity | null; limit: number },
+    opts: { packIds: string[]; rarity: Rarity | null; limit: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     {
@@ -11441,7 +11440,7 @@ class PacksModuleService extends MedusaService({
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const scope = packScope(opts.packId);
+    const scope = packScope(opts.packIds);
     return await em.execute(
       'SELECT p.id, p.customer_id, p.pack_id, p.tickets, p.rolled_at FROM ticket_spin p ' +
         " WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus') " +

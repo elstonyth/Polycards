@@ -50,6 +50,9 @@ export function useLiveRecentPulls(
   /** The (pack, tier, category) scope the rows on screen belong to — changes
    *  exactly when a new scope's rows land, so a list keyed on it re-enters once. */
   shownScope: string;
+  /** The category those rows belong to, if any — the previous one until the new
+   *  scope's rows land. */
+  shownCategory?: string;
 } {
   const q = new URLSearchParams();
   if (packSlug) q.set('pack_id', packSlug);
@@ -75,5 +78,10 @@ export function useLiveRecentPulls(
     },
   );
 
-  return { ...data, pending, shownScope: shownKey };
+  return {
+    ...data,
+    pending,
+    shownScope: shownKey,
+    shownCategory: shownKey.split('|')[2] || undefined,
+  };
 }
