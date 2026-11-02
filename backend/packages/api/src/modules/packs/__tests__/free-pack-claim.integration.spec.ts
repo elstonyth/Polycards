@@ -119,6 +119,19 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await service.hasPaidOpen('cus_4')).toBe(true);
       });
 
+      it('hasPaidOpen: a row labelled bonus before the label was retired still counts', async () => {
+        await service.createPulls([
+          {
+            customer_id: 'cus_5',
+            pack_id: 'bronze-pack',
+            card_id: 'c1',
+            rolled_at: new Date(),
+            source: 'bonus',
+          },
+        ]);
+        expect(await service.hasPaidOpen('cus_5')).toBe(true);
+      });
+
       it('getActiveFreePack: only active free_welcome packs, null otherwise', async () => {
         expect(await service.getActiveFreePack()).toBeNull();
         await service.createPacks([

@@ -10,12 +10,12 @@ export type RecordPullsBatchInput = {
   // in source_transaction_id, stamped on every pull so money↔card links.
   open_id: string;
   // One entry per won card: Card.handle + the draw-time USD value snapshot,
-  // and how its row was paid (spec 2026-10-07): 'gift' / 'bonus' / 'pack'
-  // with the bonus share of a later sell-back.
+  // and how its row was paid (spec 2026-10-07): 'gift' / 'pack' with the bonus
+  // share of a later sell-back.
   cards: {
     card_id: string;
     recorded_value_usd: number;
-    source: 'pack' | 'gift' | 'bonus';
+    source: 'pack' | 'gift';
     bonus_bp: number;
   }[];
   price: number; // the batch's debit (paid rows × price)

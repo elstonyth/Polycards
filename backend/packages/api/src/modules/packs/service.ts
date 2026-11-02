@@ -228,7 +228,6 @@ import {
   bonusShareSen,
   consumeBonusSen,
   normalSenSql,
-  paidPullSource,
   reasonCashSenSql,
   releasableRewardHoldSen,
 } from './bonus-credit';
@@ -3153,10 +3152,10 @@ class PacksModuleService extends MedusaService({
           'SELECT pack_id, COUNT(*)::bigint AS n, ' +
             '  COUNT(*) FILTER (WHERE created_at >= ? AND created_at < ?)::bigint AS n_day ' +
             'FROM (SELECT pack_id, created_at FROM pull ' +
-            "WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL " +
+            "WHERE customer_id = ? AND source IN ('pack', 'bonus') AND deleted_at IS NULL " +
             '  AND created_at >= ? AND created_at < ? ' +
             'UNION ALL SELECT pack_id, created_at FROM ticket_spin ' +
-            "WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL " +
+            "WHERE customer_id = ? AND source IN ('pack', 'bonus') AND deleted_at IS NULL " +
             '  AND created_at >= ? AND created_at < ?) rips GROUP BY pack_id',
           [
             input.day.startUtc,
@@ -3185,11 +3184,11 @@ class PacksModuleService extends MedusaService({
         // shipped a card before claiming (review 2026-08-25 finding 2). This
         // also rides IDX_pull_customer_id_rolled_at instead of scanning for a
         // status that has no index.
-        // Gifted packs and bonus-funded opens do not count toward achievements
-        // (spec 2026-10-07); board eligibility is separate.
+        // Gifted packs do not count toward achievements (spec 2026-10-07);
+        // board eligibility is separate.
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull ' +
-            "WHERE customer_id = ? AND deleted_at IS NULL AND source NOT IN ('gift', 'bonus')",
+            "WHERE customer_id = ? AND deleted_at IS NULL AND source <> 'gift'",
           [input.customerId],
         ),
         // CARDS, not distinct species ("vault how many Pokémon card"): two
@@ -3201,7 +3200,7 @@ class PacksModuleService extends MedusaService({
         // (pixel) cards", so One Piece sprites (franchise) don't advance it
         // unless a task names that sprite. The same scan also FILTERs the period counts
         // daily/weekly pixel tasks read — those count PAID pulls only
-        // (source='pack', like rip counts), so a task's own card prize can
+        // ('pack' or older 'bonus', like rip counts), so a task's own card prize can
         // never feed a task; the lifetime achievement count keeps every
         // source.
         em.execute<
@@ -3213,11 +3212,11 @@ class PacksModuleService extends MedusaService({
             n_day: string;
           }[]
         >(
-          // Lifetime n leaves out gift and bonus pulls (spec 2026-10-07).
-          "SELECT c.pixel_pokemon_id, pp.franchise, COUNT(*) FILTER (WHERE p.source NOT IN ('gift', 'bonus'))::bigint AS n, " +
-            "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
+          // Lifetime n leaves out gift pulls (spec 2026-10-07).
+          "SELECT c.pixel_pokemon_id, pp.franchise, COUNT(*) FILTER (WHERE p.source <> 'gift')::bigint AS n, " +
+            "  COUNT(*) FILTER (WHERE p.source IN ('pack', 'bonus') " +
             '    AND p.created_at >= ? AND p.created_at < ?)::bigint AS n_week, ' +
-            "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
+            "  COUNT(*) FILTER (WHERE p.source IN ('pack', 'bonus') " +
             '    AND p.created_at >= ? AND p.created_at < ?)::bigint AS n_day ' +
             'FROM pull p JOIN card c ON c.handle = p.card_id ' +
             'LEFT JOIN pixel_pokemon pp ON pp.id = c.pixel_pokemon_id ' +
@@ -6740,8 +6739,8 @@ class PacksModuleService extends MedusaService({
 
   // Has this customer ever opened a PAID pack? The free pull's sell/deliver
   // lock reads this (refusal copy: FREE_PULL_LOCKED_MESSAGE) — 'free' and
-  // 'reward' pulls are not purchases, so only source='pack' unlocks. A ticket
-  // pack writes no pull, so its spin counts by the same rule (spec 2026-10-30
+  // 'reward' pulls are not purchases, so only 'pack' (or older 'bonus') unlocks.
+  // A ticket pack writes no pull, so its spin counts by the same rule (spec 2026-10-30
   // §4). One indexed read per table (IDX_pull_customer_id_rolled_at, then
   // ticket_spin's customer_id index), mirroring isPhoneVerified.
   @InjectManager()
@@ -6750,13 +6749,13 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const pulls = await this.listPulls(
-      { customer_id: customerId, source: 'pack' },
+      { customer_id: customerId, source: ['pack', 'bonus'] },
       { take: 1, select: ['id'] },
       sharedContext,
     );
     if (pulls.length > 0) return true;
     const spins = await this.listTicketSpins(
-      { customer_id: customerId, source: 'pack' },
+      { customer_id: customerId, source: ['pack', 'bonus'] },
       { take: 1, select: ['id'] },
       sharedContext,
     );
@@ -10469,7 +10468,7 @@ class PacksModuleService extends MedusaService({
         customer_id: customerId,
         pack_id: packSlug,
         tickets: r.tickets,
-        source: paidPullSource(bonusBp),
+        source: 'pack' as const,
         bonus_bp: bonusBp,
         open_id: openId,
         rolled_at: rolledAt,

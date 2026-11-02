@@ -12,11 +12,7 @@ import { decrementCardStockBatchStep } from "./steps/decrement-card-stock-batch"
 import { settleVipStep } from "./steps/settle-vip";
 import { claimPackGiftsStep } from "./steps/claim-pack-gifts";
 import { stampPackGiftsStep } from "./steps/stamp-pack-gifts";
-import {
-  BONUS_BP_FULL,
-  bonusBpFor,
-  paidPullSource,
-} from "../modules/packs/bonus-credit";
+import { BONUS_BP_FULL, bonusBpFor } from "../modules/packs/bonus-credit";
 
 export type OpenBatchInput = {
   pack_id: string;     // = Pack.slug
@@ -102,7 +98,7 @@ export const openBatchWorkflow = createWorkflow(
         return {
           card_id: c.handle,
           recorded_value_usd: c.recorded_value_usd,
-          source: gift ? ("gift" as const) : paidPullSource(bonusBp),
+          source: gift ? ("gift" as const) : ("pack" as const),
           bonus_bp: bonusBp,
         };
       }),

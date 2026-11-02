@@ -1,4 +1,4 @@
-import { openBonusBp, paidPullSource } from "../modules/packs/bonus-credit";
+import { openBonusBp } from "../modules/packs/bonus-credit";
 import { randomUUID } from "node:crypto";
 import {
   createWorkflow,
@@ -77,9 +77,8 @@ export const openPackWorkflow = createWorkflow(
       open_id: d.charged.open_id,
       source: d.claim.free ? ("free" as const) : ("pack" as const),
     }));
-    // Bonus credit (spec 2026-10-07): an open bonus paid at least half of is a
-    // 'bonus' pull (counts toward boards and public history); its bonus share
-    // of sell-back must be played through before it can be withdrawn.
+    // Bonus credit buys a normal 'pack' pull; its bonus share of sell-back must
+    // be played through before it can be withdrawn.
     const pull = recordPullStep(
       transform({ recordInput, charge }, (d) => {
         const bonusBp = openBonusBp(
@@ -93,7 +92,7 @@ export const openPackWorkflow = createWorkflow(
           source:
             d.recordInput.source === "free"
               ? ("free" as const)
-              : paidPullSource(bonusBp),
+              : ("pack" as const),
           bonus_bp: bonusBp,
           bonus: d.charge.bonus_cents / 100,
         };

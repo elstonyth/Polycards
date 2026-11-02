@@ -609,9 +609,9 @@ export function TaskHubClient({
             </Link>
           </p>
           <p>
-            Daily and weekly tasks count packs you pay for. Packs paid half or
-            more with bonus credit, gift packs, the welcome pack and task reward
-            packs don&rsquo;t count.
+            Daily and weekly tasks count packs you pay for, bonus credit
+            included. Gift packs, the welcome pack and task reward packs
+            don&rsquo;t count.
           </p>
         </div>
       )}

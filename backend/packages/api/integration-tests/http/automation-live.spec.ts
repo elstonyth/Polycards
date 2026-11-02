@@ -216,7 +216,7 @@ medusaIntegrationTestRunner({
       expect(pull.id).toBe(view.cycles[0].pullId);
       expect(pull.open_id).toBe(view.cycles[0].id);
       expect(pull.status).toBe('bought_back');
-      expect(pull.source).toBe('bonus');
+      expect(pull.source).toBe('pack');
       expect(pull.revealed_at).not.toBeNull();
       expect(announcements).toEqual([pull.id]);
       const transactions = await packs.listCreditTransactions({

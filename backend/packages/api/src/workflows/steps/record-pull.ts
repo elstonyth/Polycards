@@ -15,10 +15,9 @@ type RecordPullInput = {
   // card still enters the vault, so the liability the later sell/delivery
   // subtracts has to go IN somewhere (see recordPullsWithLedger).
   vault_value_usd: number | null;
-  // 'free' = the one-time free welcome open; 'bonus' = the open spent bonus
-  // credit (spec 2026-10-07).
-  source: "pack" | "free" | "bonus";
-  /** Basis points of a sell-back paid as bonus (0 unless 'bonus'). */
+  // 'free' = the one-time free welcome open.
+  source: "pack" | "free";
+  /** Basis points of a sell-back paid as bonus (0 unless the open spent bonus). */
   bonus_bp: number;
   /** Bonus credit spent (MYR) — the SP ledger payload. */
   bonus: number;

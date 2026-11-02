@@ -435,12 +435,23 @@ describe('taskFactsFor splits today out of the task week', () => {
     expect(topupSql).toMatch(/reason = 'topup' AND amount > 0/);
     expect(topupSql).toMatch(/deleted_at IS NULL/);
     expect(topupSql).toMatch(/bonus_cents/);
-    // The period pixel counts are paid pulls only; the lifetime one is not.
+    // The period pixel counts are paid pulls only, whatever paid them; the
+    // lifetime one is not.
     const pixelSql = execute.mock.calls.find(([sql]) =>
       sql.includes('GROUP BY c.pixel_pokemon_id'),
     )![0];
-    expect(pixelSql.match(/p\.source = 'pack'/g)).toHaveLength(2);
+    expect(pixelSql.match(/p\.source IN \('pack', 'bonus'\)/g)).toHaveLength(2);
     expect(pixelSql).not.toMatch(/WHERE p\.customer_id = \? AND p\.source/);
+    // Rips and the lifetime counts take older bonus rows too; gifts stay out.
+    const ripSql = execute.mock.calls.find(([sql]) =>
+      sql.includes('GROUP BY pack_id'),
+    )![0];
+    expect(ripSql.match(/source IN \('pack', 'bonus'\)/g)).toHaveLength(2);
+    expect(pixelSql).toMatch(/FILTER \(WHERE p\.source <> 'gift'\)/);
+    const vaultSql = execute.mock.calls.find(
+      ([sql]) => sql.includes("source <> 'gift'") && !sql.includes('GROUP BY'),
+    )![0];
+    expect(vaultSql).toMatch(/SELECT COUNT\(\*\)::bigint AS n FROM pull/);
   });
 });
 

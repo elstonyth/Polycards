@@ -166,8 +166,6 @@ export default async function WalletPage() {
 
         <p className="mt-4 text-[13px] text-neutral-400">
           VIP and the leaderboard count the part of each pack you paid yourself.
-          Packs paid half or more with bonus credit don&rsquo;t count toward
-          tasks.
         </p>
 
         <p className="mt-3 text-[13px] text-neutral-400">

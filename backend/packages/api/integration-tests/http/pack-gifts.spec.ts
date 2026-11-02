@@ -346,7 +346,7 @@ medusaIntegrationTestRunner({
       const res = await openBatch(2, 0);
       expect(res.status).toBe(200);
       const [first, second] = res.data.rolls;
-      expect(first.pull).toMatchObject({ source: 'bonus', bonus_bp: 10000 });
+      expect(first.pull).toMatchObject({ source: 'pack', bonus_bp: 10000 });
       expect(second.pull).toMatchObject({ source: 'pack', bonus_bp: 3334 });
 
       const [debit] = await openRows();
