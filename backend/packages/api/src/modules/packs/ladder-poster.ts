@@ -33,7 +33,7 @@ export type LadderTile = {
   /** Reported back when the picture is missing: the level, the rank. */
   key: number;
   /** A credit has no picture: a wallet tile, never a missing-art placeholder. */
-  kind: 'credit' | 'pack' | 'card';
+  kind: 'credit' | 'pack' | 'card' | 'tickets';
   title: string;
   /** null or 0 = no value to show (a credit's value is in its own name). */
   valueMyr: number | null;

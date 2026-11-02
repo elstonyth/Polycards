@@ -18,6 +18,8 @@ describe('slabGlowRgb', () => {
     expect(slabGlowRgb('Immortal', 'prism')).toBe(VARIANT_RGB.prism);
     // A variant frames the slab on its own — no rarity needed at the call site.
     expect(slabGlowRgb(null, 'prism')).toBe(VARIANT_RGB.prism);
+    // A Lucky Draw card has no tier at all, and still lights up as its frame.
+    expect(slabGlowRgb('', 'lucky-draw')).toBe(VARIANT_RGB['lucky-draw']);
   });
 
   it('falls back to Common for a null/unknown rarity, never to white', () => {

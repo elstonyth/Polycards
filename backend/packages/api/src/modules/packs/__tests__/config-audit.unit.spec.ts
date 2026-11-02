@@ -68,6 +68,8 @@ describe('packConfig', () => {
       slug: 'bronze-pack',
       title: 'Bronze Pack',
       category: 'pokemon',
+      pack_type: 'classic',
+      language: null,
       status: 'active',
       price: '300', // bigNumber can come back as a string
       buyback_percent: 100,
@@ -83,6 +85,8 @@ describe('packConfig', () => {
       slug: 'bronze-pack',
       title: 'Bronze Pack',
       category: 'pokemon',
+      pack_type: 'classic',
+      language: null,
       status: 'active',
       in_stock: true,
       price: 300,

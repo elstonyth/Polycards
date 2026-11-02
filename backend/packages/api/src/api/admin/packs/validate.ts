@@ -2,8 +2,14 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { RARITIES, type TierRangeMap } from '@acme/odds-math';
 import {
   MAX_PUBLISHED_DECIMALS,
+  PACK_LANGUAGES,
+  PACK_TYPES,
+  PRIZE_TYPES,
   PUBLISHED_DECIMALS_DEFAULT,
+  type PackLanguage,
+  type PackType,
   type PackWriteInput,
+  type PrizeType,
   type PublishedOdds,
 } from '../../../workflows/steps/create-pack';
 import { FLAT_PERCENT } from '../../../modules/packs/buyback-rate';
@@ -147,6 +153,36 @@ const coerceTierRanges = (v: unknown): TierRangeMap | null | undefined => {
   return validateTierRangeMap(v);
 };
 
+const oneOf = <T extends string>(set: readonly T[], v: unknown): v is T =>
+  (set as readonly unknown[]).includes(v);
+
+// Pack tags, tri-state as a PAIR (a language only means something next to its
+// type): pack_type omitted → keep both stored values; null/'' → clear both;
+// a type → language checked against it (only an original pack has one).
+const coercePackTags = (
+  b: Record<string, unknown>,
+): { pack_type?: PackType | null; language?: PackLanguage | null } => {
+  const lang = b.language === '' ? null : b.language;
+  if (b.pack_type === undefined) {
+    if (lang != null) bad(`'language' must be sent with its 'pack_type'.`);
+    return {};
+  }
+  const type = b.pack_type === null || b.pack_type === '' ? null : b.pack_type;
+  if (type !== null && !oneOf(PACK_TYPES, type)) {
+    bad(`'pack_type' must be one of: ${PACK_TYPES.join(', ')}.`);
+  }
+  if (lang != null && !oneOf(PACK_LANGUAGES, lang)) {
+    bad(`'language' must be one of: ${PACK_LANGUAGES.join(', ')}.`);
+  }
+  if (lang != null && type !== 'original') {
+    bad('Only an original pack has a language.');
+  }
+  return {
+    pack_type: type as PackType | null,
+    language: (lang ?? null) as PackLanguage | null,
+  };
+};
+
 // Batch rank writes from the packs-list reorder arrows. Rank-only by design:
 // reordering must not travel through the full-payload update (whose activation
 // guard correctly rejects an active empty-pool pack and used to half-apply the
@@ -260,10 +296,24 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     bad('Only the free welcome pack may have a price of 0.');
   }
 
+  // What a spin wins. Neither reserved category is ever bought, and tickets must
+  // be: a spin at price 0 would be free tickets.
+  if (b.prize_type !== undefined && !oneOf(PRIZE_TYPES, b.prize_type)) {
+    bad(`'prize_type' must be one of: ${PRIZE_TYPES.join(', ')}.`);
+  }
+  if (
+    b.prize_type === 'tickets' &&
+    (category === FREE_WELCOME_CATEGORY || category === 'reward_box')
+  ) {
+    bad(`A '${category}' pack cannot be a ticket pack.`);
+  }
+
   return {
     slug,
     title: reqStr(b, 'title'),
     category,
+    ...coercePackTags(b),
+    prize_type: b.prize_type as PrizeType | undefined,
     price,
     image: imageStr(b, 'image'),
     display_image: optImageStr(b, 'display_image'),

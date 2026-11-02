@@ -10,38 +10,76 @@ import { cn } from '@/lib/utils';
 import { num, rmAuto } from '@/lib/format';
 import {
   enterLuckyDraw,
+  enterLuckyDrawEvent,
   type EnterLuckyDrawResult,
 } from '@/lib/actions/lucky-draw';
 import {
   chancePercent,
   MAX_ENTRY_TICKETS,
+  poolWhen,
   refusalCopy,
+  TIER_LABEL,
+  tilePrice,
+  type LuckyDrawTier,
 } from '@/lib/lucky-draw';
-import type { LuckyDrawPrize } from '@/lib/data/schemas';
+import type { LuckyDrawGate, LuckyDrawPrize } from '@/lib/data/schemas';
+import { FramedArt } from './PoolParts';
 import { PrizeArt } from './PrizeCard';
 
 const noop = () => {};
 
 export type Entered = Extract<EnterLuckyDrawResult, { entered: true }>;
 
+/** What tickets go into: a prize, or a one-winner event dressed as its pot
+ *  (the event's id and name, the hero's art, the pot's value and tickets). */
+export type EnterTarget = Pick<
+  LuckyDrawPrize,
+  | 'id'
+  | 'title'
+  | 'image'
+  | 'frame'
+  | 'kind'
+  | 'value_myr'
+  | 'my_tickets'
+  | 'total_tickets'
+>;
+
 const stepBtn =
   'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-neutral-800 text-white transition-colors outline-none hover:bg-neutral-700 focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40';
 
 /**
- * Pick how many tickets go on one prize (spec §5): a stepper with Max, my
- * chance after entering, then one confirm. Entries are final, so the confirm
- * locks while the entry is in flight and a refusal is answered in words.
+ * Pick how many tickets go on one prize (spec §5), or into a one-winner event's
+ * pot: a stepper with Max, my chance after entering, then one confirm. Entries
+ * are final, so the confirm locks while the entry is in flight and a refusal is
+ * answered in words.
  */
 export function EnterSheet({
   prize,
+  pot = false,
+  tier = null,
+  pool = [],
+  closesAt,
+  nowMs = null,
+  closed = false,
   balance,
   onClose,
   onEntered,
 }: {
-  prize: LuckyDrawPrize;
+  prize: EnterTarget;
+  /** `prize` is a one-winner event: post to the event's route, not a prize's. */
+  pot?: boolean;
+  /** The gate's tier, so the sheet says which gate this is. */
+  tier?: string | null;
+  /** Every prize the tickets go in for, hero first (a one-winner event). */
+  pool?: LuckyDrawGate['prizes'];
+  /** When tickets close, so the player sees it before committing. */
+  closesAt?: string;
+  nowMs?: number | null;
+  /** The countdown ran out while the sheet was open. */
+  closed?: boolean;
   balance: number;
   onClose: () => void;
-  onEntered: (prize: LuckyDrawPrize, tickets: number, res: Entered) => void;
+  onEntered: (prize: EnterTarget, tickets: number, res: Entered) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pending, startTransition] = useTransition();
@@ -67,11 +105,14 @@ export function EnterSheet({
   const confirm = () =>
     startTransition(async () => {
       setError(null);
-      const res = await enterLuckyDraw(prize.id, amount);
+      const res = await (pot ? enterLuckyDrawEvent : enterLuckyDraw)(
+        prize.id,
+        amount,
+      );
       if (!res.ok) setError({ text: res.error, topUp: false });
       else if (!res.entered) {
         setError({
-          text: refusalCopy(res.reason),
+          text: refusalCopy(res.reason, pot),
           topUp: res.reason === 'no_topup',
         });
       } else onEntered(prize, amount, res);
@@ -90,24 +131,37 @@ export function EnterSheet({
         aria-busy={pending}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-md sm:rounded-2xl"
+        className="glass-panel max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none short:py-3 sm:max-w-md sm:rounded-2xl short:sm:max-w-3xl"
       >
         <div className="flex items-start gap-3">
-          <span className="relative aspect-[5/7] w-14 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-1">
-            <span className="relative block h-full w-full">
-              <PrizeArt src={prize.image} kind={prize.kind} />
+          {!pot && (
+            <span className="relative aspect-[5/7] w-14 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-1">
+              <span className="relative block h-full w-full">
+                <PrizeArt
+                  src={prize.image}
+                  kind={prize.kind}
+                  frame={prize.frame}
+                />
+              </span>
             </span>
-          </span>
+          )}
           <div className="min-w-0 flex-1">
             <h2
               id="enter-sheet-title"
               className="text-base leading-snug font-semibold text-white"
             >
-              Enter {prize.title}
+              {pot ? 'Put tickets in' : 'Enter'} {prize.title}
             </h2>
-            <p className="font-heading mt-0.5 text-lg text-chase tabular-nums">
-              {rmAuto(prize.value_myr)}
-            </p>
+            {pot ? (
+              <p className="mt-0.5 text-xs text-neutral-400">
+                {tier ? `${TIER_LABEL[tier as LuckyDrawTier]} · ` : ''}Each
+                ticket can win the whole pool
+              </p>
+            ) : (
+              <p className="font-heading mt-0.5 text-lg text-chase tabular-nums">
+                {rmAuto(prize.value_myr)}
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -120,104 +174,164 @@ export function EnterSheet({
           </button>
         </div>
 
-        <p className="mt-4 text-sm text-neutral-400">
-          You have{' '}
-          <span className="font-semibold text-white tabular-nums">
-            {num(balance)}
-          </span>{' '}
-          {balance === 1 ? 'ticket' : 'tickets'}.
-        </p>
-
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            type="button"
-            className={stepBtn}
-            aria-label="One ticket fewer"
-            disabled={pending || amount <= 1}
-            onClick={() => setAmount(amount - 1)}
-          >
-            <Minus className="h-5 w-5" aria-hidden />
-          </button>
-          <label className="sr-only" htmlFor="enter-tickets">
-            Tickets to enter
-          </label>
-          <input
-            id="enter-tickets"
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={max}
-            step={1}
-            value={raw}
-            disabled={pending || max === 0}
-            onChange={(e) => setRaw(e.target.value)}
-            onBlur={() => setAmount(amount)}
-            className="font-heading h-12 min-w-0 flex-1 rounded-xl bg-neutral-800 px-3 text-center text-xl text-white tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-          />
-          <button
-            type="button"
-            className={stepBtn}
-            aria-label="One ticket more"
-            disabled={pending || amount >= max}
-            onClick={() => setAmount(amount + 1)}
-          >
-            <Plus className="h-5 w-5" aria-hidden />
-          </button>
-          <button
-            type="button"
-            disabled={pending || max === 0}
-            onClick={() => setAmount(max)}
-            className={cn(pillVariants({ variant: 'secondary', size: 'lg' }))}
-          >
-            Max
-          </button>
-        </div>
-
-        <p className="mt-3 text-sm text-neutral-400">
-          My chance after entering:{' '}
-          <span className="font-semibold text-white tabular-nums">
-            {chancePercent(
-              prize.my_tickets + (valid ? amount : 0),
-              prize.total_tickets + (valid ? amount : 0),
-            )}
-          </span>
-        </p>
-        {amount > max && (
-          <p className="mt-1 text-xs text-red-400">
-            You have {num(balance)} {balance === 1 ? 'ticket' : 'tickets'}.
-          </p>
-        )}
-        <p className="mt-1 text-xs leading-relaxed text-neutral-400">
-          Entries are final — tickets on a prize can&rsquo;t be taken back.
-        </p>
-
-        {error && (
-          <div role="alert" className="mt-3 text-sm text-red-400">
-            <p>{error.text}</p>
-            {error.topUp && (
-              <Link
-                href="/wallet"
+        {/* A phone on its side has no height to stack these: prizes beside the
+            stepper, so the confirm stays in reach. */}
+        <div
+          className={cn(
+            pot &&
+              pool.length > 0 &&
+              'short:grid short:grid-cols-2 short:items-start short:gap-5',
+          )}
+        >
+          {pot && pool.length > 0 && (
+            <div className="mt-3">
+              <p className="flex items-baseline justify-between gap-3 text-sm font-semibold text-white">
+                <span>
+                  One winner takes{' '}
+                  {pool.length === 1 ? 'it' : `all ${num(pool.length)}`}
+                </span>
+                <span className="font-heading text-lg text-chase tabular-nums">
+                  {rmAuto(prize.value_myr)}
+                </span>
+              </p>
+              {/* Every reward stays in view; a long pool scrolls down, in its own
+                box, so the stepper and the confirm never go off screen. */}
+              <ul
                 className={cn(
-                  pillVariants({ variant: 'secondary', size: 'sm' }),
-                  'mt-2',
+                  'mt-2 grid max-h-[38dvh] gap-2 overflow-y-auto short:max-h-[62dvh]',
+                  pool.length <= 3 ? 'grid-cols-3' : 'grid-cols-4',
                 )}
               >
-                Top up
-              </Link>
-            )}
-          </div>
-        )}
+                {pool.map((p, i) => (
+                  <li key={i} className="min-w-0">
+                    <span className="block aspect-[5/7]">
+                      <FramedArt prize={p} eager />
+                    </span>
+                    <span className="font-heading mt-1 block truncate text-xs text-chase tabular-nums">
+                      {rmAuto(tilePrice(p.value_myr))}
+                    </span>
+                    <span className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-neutral-300">
+                      {p.title}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-        <Pill
-          size="lg"
-          className="mt-4 w-full"
-          disabled={pending || !valid}
-          onClick={confirm}
-        >
-          {pending
-            ? 'Entering…'
-            : `Enter ${num(amount)} ${amount === 1 ? 'ticket' : 'tickets'}`}
-        </Pill>
+          <div>
+            <p className="mt-4 text-sm text-neutral-400 short:mt-3">
+              You have{' '}
+              <span className="font-semibold text-white tabular-nums">
+                {num(balance)}
+              </span>{' '}
+              {balance === 1 ? 'ticket' : 'tickets'}.
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                className={stepBtn}
+                aria-label="One ticket fewer"
+                disabled={pending || amount <= 1}
+                onClick={() => setAmount(amount - 1)}
+              >
+                <Minus className="h-5 w-5" aria-hidden />
+              </button>
+              <label className="sr-only" htmlFor="enter-tickets">
+                Tickets to enter
+              </label>
+              <input
+                id="enter-tickets"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={max}
+                step={1}
+                value={raw}
+                disabled={pending || max === 0}
+                onChange={(e) => setRaw(e.target.value)}
+                onBlur={() => setAmount(amount)}
+                className="font-heading h-12 min-w-0 flex-1 rounded-xl bg-neutral-800 px-3 text-center text-xl text-white tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+              />
+              <button
+                type="button"
+                className={stepBtn}
+                aria-label="One ticket more"
+                disabled={pending || amount >= max}
+                onClick={() => setAmount(amount + 1)}
+              >
+                <Plus className="h-5 w-5" aria-hidden />
+              </button>
+              <button
+                type="button"
+                disabled={pending || max === 0}
+                onClick={() => setAmount(max)}
+                className={cn(
+                  pillVariants({ variant: 'secondary', size: 'lg' }),
+                )}
+              >
+                Max
+              </button>
+            </div>
+
+            <p className="mt-3 text-sm text-neutral-400">
+              Your chance after this:{' '}
+              <span className="font-semibold text-white tabular-nums">
+                {chancePercent(
+                  prize.my_tickets + (valid ? amount : 0),
+                  prize.total_tickets + (valid ? amount : 0),
+                )}
+              </span>
+            </p>
+            {amount > max && (
+              <p className="mt-1 text-xs text-red-400">
+                You have {num(balance)} {balance === 1 ? 'ticket' : 'tickets'}.
+              </p>
+            )}
+            <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+              {pot
+                ? `${closesAt ? `Gate closes ${poolWhen(closesAt, nowMs)}. ` : ''}Entries are final: tickets you put in can’t be taken back.`
+                : 'Entries are final — tickets on a prize can’t be taken back.'}
+            </p>
+
+            {/* Stays on screen when a short phone has to scroll the sheet, and a
+                refusal with it: the way out of no_topup must not sit behind it. */}
+            <div className="sticky bottom-0 mt-4 short:mt-3">
+              {error && (
+                <div
+                  role="alert"
+                  className="mb-2 rounded-xl border border-white/10 bg-neutral-900 p-3 text-sm text-red-400"
+                >
+                  <p>{error.text}</p>
+                  {error.topUp && (
+                    <Link
+                      href="/wallet"
+                      className={cn(
+                        pillVariants({ variant: 'secondary', size: 'sm' }),
+                        'mt-2',
+                      )}
+                    >
+                      Top up
+                    </Link>
+                  )}
+                </div>
+              )}
+              <Pill
+                size="lg"
+                className="w-full"
+                disabled={pending || !valid || closed}
+                onClick={confirm}
+              >
+                {closed
+                  ? 'Gate is closed'
+                  : pending
+                    ? 'Entering…'
+                    : `${pot ? 'Put in' : 'Enter'} ${num(amount)} ${amount === 1 ? 'ticket' : 'tickets'}`}
+              </Pill>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -13,6 +13,7 @@
 // are tuned for a ~110px cell. Don't fold this into the slab framing.
 import type { CSSProperties } from 'react';
 import { CARD_ASPECT } from '@/lib/vault-reel';
+import { TicketArt } from '@/components/TicketArt';
 import { PokemonToken } from './PokemonToken';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +23,7 @@ export function CardTile({
   size,
   eager,
   imageSrc,
+  label,
   glowRgb,
   lit = false,
   landed = false,
@@ -31,6 +33,9 @@ export function CardTile({
   size: number;
   eager: boolean;
   imageSrc?: string;
+  /** A ticket row's amount. Turns the cell into the ticket art with this drawn
+   *  on top as live text, because admin can set any number. */
+  label?: string;
   /** "r,g,b" RARITY color for the cell frame/glow. */
   glowRgb?: string;
   /** Show the rarity glow (spinning decoy flicker, or the settled winner). */
@@ -72,13 +77,31 @@ export function CardTile({
         } as CSSProperties
       }
     >
-      <PokemonToken
-        dex={dex}
-        name={name}
-        size={Math.round(size * 0.72)}
-        eager={eager}
-        imageSrc={imageSrc}
-      />
+      {label ? (
+        // Not PokemonToken: it pixelates and canvas-measures a sprite, and this
+        // art is a smooth render. The type shrinks with the amount's length so
+        // a long number still fits the narrowest tile (three reels on a phone).
+        // 0.63em is Nekst's measured glyph width, 10px the pill's padding + air.
+        <>
+          <TicketArt width={Math.round(cardW * 0.92)} eager={eager} />
+          <span
+            className="absolute bottom-[14%] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-neutral-950/90 px-1 py-0.5 font-heading font-bold leading-none tabular-nums text-white"
+            style={{
+              fontSize: `${Math.min(size * 0.17, (cardW - 10) / (label.length * 0.63))}px`,
+            }}
+          >
+            {label}
+          </span>
+        </>
+      ) : (
+        <PokemonToken
+          dex={dex}
+          name={name}
+          size={Math.round(size * 0.72)}
+          eager={eager}
+          imageSrc={imageSrc}
+        />
+      )}
     </div>
   );
 }

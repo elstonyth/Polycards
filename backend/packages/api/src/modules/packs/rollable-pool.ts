@@ -24,3 +24,14 @@ export async function hasRollablePool(
   );
   return odds.some((o) => o.card_id != null && o.weight > 0);
 }
+
+// The same precondition for a ticket pack: its pool is ticket_prize rows.
+export async function hasRollableTicketTable(
+  packs: PacksModuleService,
+  slug: string,
+): Promise<boolean> {
+  const rows = await pageAll((opts) =>
+    packs.listTicketPrizes({ pack_id: slug }, opts),
+  );
+  return rows.some((r) => r.weight > 0);
+}

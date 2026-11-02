@@ -17,8 +17,9 @@ export type EconomyPackRow = {
 };
 
 // Per-pack theoretical RTP from the CURRENT odds, for GET /admin/economy and
-// GET /admin/profit-report (one copy of the math). Active packs only — drafts
-// aren't sellable, so their RTP is operator-noise. EV uses each card's
+// GET /admin/profit-report (one copy of the math). Active card packs only —
+// drafts aren't sellable, so their RTP is operator-noise, and a ticket pack pays
+// tickets, not card value, so it has none. EV uses each card's
 // DISPLAY value (FMV × market_multiplier, default +20%) in MYR at the live
 // FX rate, because that is the value buyback percents apply to (operator
 // request 2026-07-23; issue #263). RTP stays like-for-like: MYR EV ÷ MYR
@@ -55,6 +56,7 @@ export async function packRtpRows(
     oddsByPack.set(o.pack_id, list);
   }
   return allPacks
+    .filter((p) => p.prize_type !== 'tickets')
     .map((p) => {
       const rtp = packTheoreticalRtp(
         oddsByPack.get(p.slug) ?? [],

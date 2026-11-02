@@ -10,15 +10,17 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 // role is added BESIDE the user's current ones, never in place of them.
 // Covers every tab of the All Orders page (routes/deliveries): delivery
 // orders to read and update (status, tracking, bulk marks), pack purchases
-// (`pull:read`), top-ups (`payment:read`) and the proof photo upload
-// (`media:update`, POST /admin/media). No `customer:read`: the player pages
-// stay closed. No `customer_bank_account` / `partner_credential`.
+// (`pull:read`) and the proof photo upload (`media:update`, POST
+// /admin/media). No `customer:read`: the player pages stay closed. No
+// `payment:read` since 2026-10-28 (owner: "no money side") — it also opened
+// the Payments section (withdrawals, deposits, reconciliation); the Orders
+// page hides its Top-ups tab without it. No `customer_bank_account` /
+// `partner_credential`.
 export const ORDER_MANAGER_ROLE = 'Order manager';
 export const ORDER_MANAGER_POLICIES = [
   { resource: 'delivery_order', operation: 'read' },
   { resource: 'delivery_order', operation: 'update' },
   { resource: 'pull', operation: 'read' },
-  { resource: 'payment', operation: 'read' },
   { resource: 'media', operation: 'update' },
 ] as const;
 
@@ -50,7 +52,7 @@ export async function orderManagerRoleId(
     (await rbac.createRbacRoles({
       name: ORDER_MANAGER_ROLE,
       description:
-        'All Orders: read and update delivery orders, read pack purchases and top-ups, upload proof photos.',
+        'All Orders: read and update delivery orders, read pack purchases, upload proof photos.',
     }));
   for (const policy of policies) {
     const [link] = await rbac.listRbacRolePolicies(

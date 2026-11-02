@@ -24,12 +24,13 @@ import type {
   GatewayWithdrawal,
   GatewayWithdrawalView,
 } from '../../lib/admin-rest';
-import { rm, timeAgo } from '../../lib/format';
+import { rm } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { withdrawalStatusBadge } from '../../components/PaymentStatusBadge';
 import { WithdrawalControlsPanel } from './WithdrawalControlsPanel';
+import { When } from '../customers/[id]/bits';
 
 export const config: RouteConfig = {
   label: 'pcNav.withdrawals',
@@ -88,9 +89,12 @@ const WithdrawalsPage = () => {
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   // The full number asks its own policy (api/admin-rbac.ts SECRET_READS): a
   // view-only role sees the masked number with no Reveal.
-  const canReveal = usePermissions().hasPermission(
+  const perms = usePermissions();
+  const canReveal = perms.hasPermission(
     'customer_bank_account:read' as Permission,
   );
+  // Approve and deny ask payment:update; a view-only role reads the row only.
+  const canDecide = perms.hasPermission('payment:update' as Permission);
   // A SET, not one id: two reveals can be in flight at once. With a single
   // slot, clicking row A then row B overwrites the id, and A settling clears it
   // while B is still loading — B's button re-enables and can be clicked again.
@@ -186,6 +190,22 @@ const WithdrawalsPage = () => {
       await denyMutation.mutateAsync(w.id);
     });
 
+  // The same call as Deny, on a row a Deny closed and never refunded. The
+  // refund's anchor means it can only ever land once.
+  const finishRefund = (w: GatewayWithdrawal) =>
+    withActing(w.id, async () => {
+      const ok = await prompt({
+        title: t('withdrawals.confirmFinishRefundTitle'),
+        description: t('withdrawals.confirmFinishRefundBody', {
+          amount: payoutLabel(w),
+        }),
+        confirmText: t('withdrawals.finishRefund'),
+        variant: 'confirmation',
+      });
+      if (!ok) return;
+      await denyMutation.mutateAsync(w.id);
+    });
+
   // A view change restarts paging — page 3 of "pending" has nothing to do
   // with page 3 of "all".
   const changeView = (next: string) => {
@@ -197,7 +217,6 @@ const WithdrawalsPage = () => {
 
   return (
     <div className="flex flex-col gap-y-3">
-      <WithdrawalControlsPanel />
       <Container className="p-0">
         <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-4">
           <div>
@@ -303,7 +322,7 @@ const WithdrawalsPage = () => {
                 {data.withdrawals.map((w) => (
                   <Table.Row key={w.id}>
                     <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
-                      {timeAgo(w.created_at)}
+                      <When iso={w.created_at} />
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
                       <div className="flex items-center gap-x-2 whitespace-nowrap">
@@ -335,7 +354,8 @@ const WithdrawalsPage = () => {
                     <Table.Cell className="text-ui-fg-subtle">
                       <div className="flex items-center gap-x-2 whitespace-nowrap">
                         <span>
-                          {w.bank_code} · {revealed[w.id] ?? w.account_number}
+                          {w.bank_name ?? w.bank_code} ·{' '}
+                          {revealed[w.id] ?? w.account_number}
                         </span>
                         {canReveal && !revealed[w.id] && (
                           <button
@@ -421,6 +441,11 @@ const WithdrawalsPage = () => {
                           {w.failure_reason}
                         </div>
                       )}
+                      {w.refund_missing && (
+                        <div className="text-ui-fg-error mt-1 break-normal font-sans">
+                          {t('withdrawals.refundMissing')}
+                        </div>
+                      )}
                       {/* Their Payout Verification is active, so a failed row
                           with no outcome recorded is worth a look — but it is a
                           POINTER, not a verdict: their call may never have
@@ -443,7 +468,7 @@ const WithdrawalsPage = () => {
                         row that just left 'held' must not keep its buttons
                         until the next poll. */}
                     <Table.Cell>
-                      {w.status === 'held' ? (
+                      {canDecide && w.status === 'held' ? (
                         <div className="flex items-center gap-x-2">
                           {/* Pre-emptively disabled on a frozen account: the
                               backend refuses this one anyway (Task 5), so
@@ -470,6 +495,16 @@ const WithdrawalsPage = () => {
                             {t('withdrawals.deny')}
                           </Button>
                         </div>
+                      ) : canDecide && w.refund_missing ? (
+                        <Button
+                          size="small"
+                          variant="secondary"
+                          className="whitespace-nowrap"
+                          disabled={acting.has(w.id)}
+                          onClick={() => finishRefund(w)}
+                        >
+                          {t('withdrawals.finishRefund')}
+                        </Button>
                       ) : (
                         <Text size="small" className="text-ui-fg-muted">
                           —
@@ -492,6 +527,7 @@ const WithdrawalsPage = () => {
           />
         )}
       </Container>
+      <WithdrawalControlsPanel />
     </div>
   );
 };

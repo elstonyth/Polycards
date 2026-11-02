@@ -22,6 +22,7 @@ const tx = (i: number) => ({
   amount: -5,
   reason: 'pack_open',
   reference: null,
+  source_transaction_id: `open_${i}`,
   created_at: new Date(2026, 0, i + 1),
 });
 const pull = (i: number) => ({
@@ -35,15 +36,27 @@ const pull = (i: number) => ({
 
 // `seen.pulls` records the filter the pulls route actually queried with — the
 // ?status=/?source= cases assert those land in the filter, not just in a 200.
-const seen: { pulls?: any } = {};
+const seen: { pulls?: any; listPulls: any[]; balanceArgs?: any[] } = {
+  listPulls: [],
+};
 
 // `hasPaid` is the customer's hasPaidOpen() — behind lockedPullIds, the
 // free-welcome lock the pulls route reads so its payable-now quote refuses
 // exactly where the customer's sell button does.
-function mkScope(opts: { hasPaid?: boolean; rows?: any[] } = {}) {
-  const txs = Array.from({ length: 60 }, (_, i) => tx(i));
+function mkScope(
+  opts: {
+    hasPaid?: boolean;
+    rows?: any[];
+    txs?: any[];
+    spins?: any[];
+    noOpenPulls?: boolean;
+  } = {},
+) {
+  const txs = opts.txs ?? Array.from({ length: 60 }, (_, i) => tx(i));
   const pulls = opts.rows ?? Array.from({ length: 60 }, (_, i) => pull(i));
   seen.pulls = undefined;
+  seen.listPulls = [];
+  seen.balanceArgs = undefined;
   return {
     resolve: () => ({
       listAndCountCreditTransactions: async (_f: any, o: any) => [
@@ -60,11 +73,45 @@ function mkScope(opts: { hasPaid?: boolean; rows?: any[] } = {}) {
       listCards: async () => [
         { handle: 'card-a', name: 'Card A', market_value: 10, image: 'x.png' },
       ],
-      listPacks: async () => [{ slug: 'pack_1', buyback_percent: 95 }],
+      listPacks: async () => [
+        { slug: 'pack_1', title: 'Gold Pack', buyback_percent: 95 },
+      ],
       listFxRates: async () => [],
+      // Honours its filter, so a row can only get the pull that is really its.
+      listPulls: async (f: any) => {
+        seen.listPulls.push(f);
+        if (f.open_id) {
+          return opts.noOpenPulls
+            ? []
+            : f.open_id.map((open_id: string, i: number) => ({
+                ...pull(i),
+                open_id,
+              }));
+        }
+        return f.id.map((id: string) => ({ ...pull(0), id }));
+      },
+      listTicketSpins: async () => opts.spins ?? [],
+      listLedgerEntries: async () => [],
+      balanceAfterRows: async (...args: any[]) => {
+        seen.balanceArgs = args;
+        return new Map([['ctx_0', 95.5]]);
+      },
+      listPackOdds: async () => [
+        { pack_id: 'pack_1', card_id: 'card-a', rarity: 'Rare' },
+      ],
+      listDeliveryOrderItems: async () => [
+        // Canceled LAST: a Map keeps the last entry, so with no filter on the
+        // order's status this row would win and the test would fail.
+        { pull_id: 'pull_0', delivery_order_id: 'live' },
+        { pull_id: 'pull_0', delivery_order_id: 'canceled' },
+      ],
+      listDeliveryOrders: async () => [
+        { id: 'canceled', status: 'canceled' },
+        { id: 'live', status: 'shipped' },
+      ],
       lockedPullIds: async (_id: string, rows: any[]) =>
         new Set(
-          opts.hasPaid ?? true
+          (opts.hasPaid ?? true)
             ? []
             : rows.filter((r) => r.source === 'free').map((r) => r.id),
         ),
@@ -87,6 +134,112 @@ describe('customer history pagination', () => {
     );
     expect(out.body.total).toBe(60);
     expect(out.body.items).toHaveLength(25);
+  });
+
+  it('transactions: says what each row was about', async () => {
+    const { res, out } = mkRes();
+    await getTransactions(
+      { scope: mkScope(), params: { id: 'cus_1' }, query: {} } as any,
+      res,
+    );
+    expect(out.body.items[0]).toMatchObject({
+      balance_after: 95.5,
+      pack_title: 'Gold Pack',
+      cards: [{ pull_id: 'pull_0', name: 'Card A', image: 'x.png' }],
+      order_id: null,
+    });
+    // Each row gets its own open's pull, not the first one read.
+    expect(out.body.items[1].cards).toEqual([
+      expect.objectContaining({ pull_id: 'pull_1' }),
+    ]);
+    // Never another customer's pulls, and the balance of this page's rows.
+    expect(seen.listPulls.every((f) => f.customer_id === 'cus_1')).toBe(true);
+    expect(seen.balanceArgs?.[0]).toBe('cus_1');
+    expect(seen.balanceArgs?.[1]).toHaveLength(25);
+  });
+
+  it('transactions: a sell-back names its own card', async () => {
+    const { res, out } = mkRes();
+    await getTransactions(
+      {
+        scope: mkScope({
+          txs: [
+            {
+              id: 'ctx_b',
+              amount: 5,
+              reason: 'buyback',
+              pull_id: 'pull_9',
+              created_at: new Date(2026, 0, 1),
+            },
+          ],
+        }),
+        params: { id: 'cus_1' },
+        query: {},
+      } as any,
+      res,
+    );
+    expect(out.body.items[0].cards).toEqual([
+      expect.objectContaining({ pull_id: 'pull_9' }),
+    ]);
+  });
+
+  it('transactions: a shipping fee and its refund name the order', async () => {
+    const fee = (id: string, amount: number, reference: string) => ({
+      id,
+      amount,
+      reason: 'delivery_fee',
+      reference,
+      created_at: new Date(2026, 0, 1),
+    });
+    const { res, out } = mkRes();
+    await getTransactions(
+      {
+        scope: mkScope({
+          txs: [fee('ctx_f', -15, 'do_9'), fee('ctx_r', 15, 'refund:do_9')],
+        }),
+        params: { id: 'cus_1' },
+        query: {},
+      } as any,
+      res,
+    );
+    expect(out.body.items.map((t: any) => t.order_id)).toEqual([
+      'do_9',
+      'do_9',
+    ]);
+  });
+
+  it('transactions: a ticket pack names its pack with no card', async () => {
+    const { res, out } = mkRes();
+    await getTransactions(
+      {
+        scope: mkScope({
+          noOpenPulls: true,
+          spins: [{ open_id: 'open_0', pack_id: 'pack_1' }],
+        }),
+        params: { id: 'cus_1' },
+        query: {},
+      } as any,
+      res,
+    );
+    expect(out.body.items[0]).toMatchObject({
+      pack_title: 'Gold Pack',
+      cards: [],
+    });
+    expect(out.body.items[1].pack_title).toBeNull();
+  });
+
+  it('pulls: names the live order of a shipped card, never a canceled one', async () => {
+    const { res, out } = mkRes();
+    await getPulls(
+      {
+        scope: mkScope({ rows: [{ ...pull(0), status: 'delivering' }] }),
+        params: { id: 'cus_1' },
+        query: {},
+      } as any,
+      res,
+    );
+    expect(out.body.items[0].order_id).toBe('live');
+    expect(out.body.items[0].card.rarity).toBe('Rare');
   });
 
   it('pulls: pages, reports total, joins card', async () => {

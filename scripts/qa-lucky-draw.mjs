@@ -7,7 +7,7 @@
 // Per viewport (375×812, 1440×900): the vault tickets row, the ?open=1 intro,
 // Prizes, the Enter sheet, the page after entering, the live spin when the
 // timed prize's draw passes (mid-spin, landed, prize reveal, winner told),
-// Results, a result's detail (fair-draw check + entries), My tickets, and
+// Results, a result's detail (fair-draw check + entries), My entry, and
 // /task with "+N tickets" chips. Then a reduced-motion run: the winner shown
 // with no spin. Screenshots go to docs/research/lucky-draw-*.png.
 //
@@ -188,11 +188,11 @@ async function run(width, height) {
     `${tag} vault row shows 1,250 tickets`,
   );
   await noSideScroll(page, `${tag} vault`);
-  await shot(row, `vault-row-${tag}`, 'vault tickets row (balance + Open)');
+  await shot(row, `vault-row-${tag}`, 'vault tickets row (balance + Use)');
   await shot(page, `vault-${tag}`, 'vault viewport with the tickets row');
 
-  // 2. Open → /lucky-draw?open=1 plays the ticket intro once.
-  await row.getByRole('link', { name: 'Open Lucky Draw' }).click();
+  // 2. Use → /lucky-draw?open=1 plays the ticket intro once.
+  await row.getByRole('link', { name: 'Use tickets in Lucky Draw' }).click();
   const intro = page.locator('div.glass-scrim[aria-hidden]');
   await intro.waitFor({ timeout: 10_000 });
   await wait(500);
@@ -373,16 +373,16 @@ async function run(width, height) {
   );
   await detail.getByRole('button', { name: 'Close' }).click();
 
-  // 7. My tickets.
-  await page.getByRole('button', { name: 'My tickets', exact: true }).click();
+  // 7. My entry.
+  await page.getByRole('button', { name: 'My entry', exact: true }).click();
   await page.locator('main').getByText('Ticket history').waitFor();
   await wait(500);
-  await noSideScroll(page, `${tag} my tickets`);
-  await cleanCopy(page, `${tag} my tickets`);
+  await noSideScroll(page, `${tag} my entry`);
+  await cleanCopy(page, `${tag} my entry`);
   await shot(
     page.locator('main'),
-    `my-tickets-${tag}`,
-    'My tickets: balance, entries with outcomes, ticket history',
+    `my-entry-${tag}`,
+    'My entry: pools joined with chance and outcome, ticket history',
     {
       style: CHROME,
     },

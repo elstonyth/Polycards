@@ -35,7 +35,10 @@ async function cardForFlip(service: PacksModuleService, customerId: string, pull
   const [pull] = await service.listPulls({ id: pullId, customer_id: customerId }, { take: 1 }, context);
   if (!pull) return notFound();
   if (pull.status !== 'vaulted') refuse('This card is no longer available in your Vault.');
-  if (!pull.flip_eligible_at) refuse('This card is still processing. Please try again later.');
+  if (!pull.flip_eligible_at) {
+    const [card] = await service.listCards({ handle: pull.card_id }, { take: 1 }, context);
+    refuse(`${card?.name ?? 'This card'} is still processing. Please try again later.`);
+  }
   if ((await service.lockedPullIds(customerId, [pull], context)).size) refuse(FREE_PULL_LOCKED_MESSAGE);
   return pull;
 }

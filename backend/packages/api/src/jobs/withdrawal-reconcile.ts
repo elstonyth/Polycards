@@ -158,7 +158,9 @@ export default async function withdrawalReconcileJob(
           // on the rows that reach the branch below, which is exactly the
           // invariant that function demands. The admin approve route's claim
           // (held -> pending) is the one write that legitimately restarts it,
-          // one HTTP hop before its submit.
+          // one HTTP hop before its submit. The refusal note on an unconfirmed
+          // refusal (heldRefusalFields) is the one write with no id: it lands
+          // in the same request as the submit, never later.
           //
           // Adding a write that leaves a row 'pending' without a gateway id
           // BREAKS this. Give that row a real submit-timestamp column instead
@@ -179,6 +181,16 @@ export default async function withdrawalReconcileJob(
       }
 
       if (action.kind === 'wait') {
+        // The gateway has just shown it holds this payout. With its id on the
+        // row, a later "not found" can never refund it (see above), and its
+        // callback can find the row. A row that gets here with none is the
+        // ambiguous-submit population, which is exactly where that matters.
+        if (detail?.transactionId && !withdrawal.gateway_transaction_id) {
+          await packs.updateGatewayWithdrawals({
+            selector: { id: withdrawal.id, status: 'pending' },
+            data: { gateway_transaction_id: detail.transactionId },
+          });
+        }
         // SUBMIT time, not created_at — the same reasoning as the
         // unknown-requery branch above (unknownWithdrawalAction). "Still
         // unresolved … chase the provider" is a claim about how long the

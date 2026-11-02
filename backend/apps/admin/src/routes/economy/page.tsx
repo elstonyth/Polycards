@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Container, Heading, Text } from '@medusajs/ui';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import type { ProfitRange } from '../../lib/admin-rest';
 import { useProfitReport } from '../../lib/queries';
 import { useScopeParam } from '../../lib/scope-param';
@@ -20,6 +20,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   rank: 4,
   nested: '/payments',
+  permissions: ['profit_report:read' as Permission],
 };
 
 // The Dashboard's presets plus all time, before Custom.

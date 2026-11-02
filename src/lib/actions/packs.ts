@@ -126,6 +126,9 @@ const PACKS_FALLBACK = 'Could not open the pack. Please try again.';
 // rule). Says where the card went instead.
 const CHARGED_BUT_UNSHOWABLE =
   "Your pack opened and the card is in your Vault, but we couldn't show it here.";
+// Same rule on a ticket pack, which has no card and nothing in the Vault.
+const TICKETS_CHARGED_BUT_UNSHOWABLE =
+  "Your spin went through and your tickets are in your Lucky Draw balance, but we couldn't show them here.";
 
 /**
  * A port `Failure` in the open actions' vocabulary.
@@ -294,18 +297,24 @@ export async function openBatch(
   // pre-port projection fallback without changing the Store contract.
   try {
     const {
+      prize_type,
       rolls: rawRolls,
       balance,
       price,
       total_charged,
       gifts_used,
     } = r.data as {
+      prize_type?: unknown;
       rolls: RawBatchRollItem[];
       balance?: unknown;
       price?: unknown;
       total_charged?: unknown;
       gifts_used?: unknown;
     };
+    const unshowable =
+      prize_type === 'tickets'
+        ? TICKETS_CHARGED_BUT_UNSHOWABLE
+        : CHARGED_BUT_UNSHOWABLE;
 
     // The envelope is unchecked (see the header), so `rolls` might not be an
     // array at all. Pre-port this was a TypeError — `for (const rawRoll of
@@ -322,7 +331,7 @@ export async function openBatch(
       logger.error(`[packs] open-batch returned no rolls array for '${slug}'`);
       return {
         ok: false,
-        error: CHARGED_BUT_UNSHOWABLE,
+        error: unshowable,
         needsAuth: false,
         needsTopUp: false,
       };
@@ -342,7 +351,7 @@ export async function openBatch(
     if (rolls.length === 0 && rawRolls.length > 0) {
       return {
         ok: false,
-        error: CHARGED_BUT_UNSHOWABLE,
+        error: unshowable,
       };
     }
 

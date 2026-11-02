@@ -3,7 +3,11 @@ import { MedusaError } from '@medusajs/framework/utils';
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import { hasRollablePool } from '../../modules/packs/rollable-pool';
+import {
+  hasRollablePool,
+  hasRollableTicketTable,
+} from '../../modules/packs/rollable-pool';
+import { FREE_WELCOME_CATEGORY } from '../../modules/packs/free-pack';
 import {
   configAuditRow,
   packConfig,
@@ -16,6 +20,8 @@ import {
 import {
   fillPublishedTiers,
   normalizePublishedOdds,
+  type PackLanguage,
+  type PackType,
   type PackWriteInput,
 } from './create-pack';
 
@@ -27,6 +33,8 @@ type PackSnapshot = {
   id: string;
   title: string;
   category: string;
+  pack_type: PackType | null;
+  language: PackLanguage | null;
   price: number;
   image: string;
   display_image: string | null;
@@ -59,17 +67,42 @@ export const updatePackInvoke = async (
     );
   }
 
+  // Fixed at creation: a pack's sold prizes must not change under its history.
+  // An older admin bundle doesn't send it, and that keeps the stored type.
+  if (input.prize_type !== undefined && input.prize_type !== pack.prize_type) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "A pack's prize type is fixed when it is created.",
+    );
+  }
+  const isTickets = pack.prize_type === 'tickets';
+  if (
+    isTickets &&
+    (input.category === FREE_WELCOME_CATEGORY ||
+      input.category === 'reward_box')
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `A ticket pack cannot move to the '${input.category}' category.`,
+    );
+  }
+
   // Activating (or keeping active) requires a rollable prize pool — an active
   // pack with no positive-weight card odds fails every storefront spin.
   // reward_box packs are internal draw pools (reward rows, card_id null) and
   // are never opened via the pack path, so they are exempt.
   if (input.status === 'active' && input.category !== 'reward_box') {
-    const rollable = await hasRollablePool(packs, input.slug);
+    const rollable = isTickets
+      ? await hasRollableTicketTable(packs, input.slug)
+      : await hasRollablePool(packs, input.slug);
     if (!rollable) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        `Pack '${input.slug}' has no cards in its prize pool. ` +
-          'Add cards and set win rates on the pack page, then activate it.',
+        isTickets
+          ? `Pack '${input.slug}' has no ticket amounts. ` +
+            'Add amounts and set win rates on the pack page, then activate it.'
+          : `Pack '${input.slug}' has no cards in its prize pool. ` +
+            'Add cards and set win rates on the pack page, then activate it.',
       );
     }
   }
@@ -78,6 +111,8 @@ export const updatePackInvoke = async (
     id: pack.id,
     title: pack.title,
     category: pack.category,
+    pack_type: pack.pack_type ?? null,
+    language: pack.language ?? null,
     price: pack.price,
     image: pack.image,
     display_image: pack.display_image ?? null,
@@ -118,6 +153,11 @@ export const updatePackInvoke = async (
     rank: input.rank,
     status: input.status,
     ...(input.in_stock !== undefined ? { in_stock: input.in_stock } : {}),
+    // A pair: written together or not at all, so the DB's original-only
+    // language check never sees half a change.
+    ...(input.pack_type !== undefined
+      ? { pack_type: input.pack_type, language: input.language ?? null }
+      : {}),
     // undefined = the writer didn't send the field — keep the stored value
     // (the list-page edit modal doesn't know about published odds; an older
     // admin bundle doesn't know about display_image).

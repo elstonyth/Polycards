@@ -7,7 +7,6 @@ import {
   consumeBonusSen,
   normalSenSql,
   openBonusBp,
-  paidPullSource,
   reasonCashSenSql,
   releasableRewardHoldSen,
   sellbackHoldBp,
@@ -47,15 +46,6 @@ describe('bonus credit math', () => {
     expect(bonusShareSen(1, 1)).toBe(1);
     expect(bonusShareMyr(270, 9000)).toBe(243);
     expect(bonusShareMyr(0.07, 5000)).toBe(0.04);
-  });
-
-  it('calls a paid row a bonus open only when bonus paid at least half', () => {
-    // RM 5 of leftover bonus on a RM 300 open: still a real-money open.
-    expect(paidPullSource(bonusBpFor(500, 30000))).toBe('pack');
-    expect(paidPullSource(4999)).toBe('pack');
-    expect(paidPullSource(5000)).toBe('bonus');
-    expect(paidPullSource(BONUS_BP_FULL)).toBe('bonus');
-    expect(paidPullSource(0)).toBe('pack');
   });
 
   it('gives the free welcome pull a full bonus share, a paid open its own', () => {

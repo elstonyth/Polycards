@@ -96,3 +96,14 @@ export const isPartnerGroup = (g: {
   name?: string | null;
   metadata?: Record<string, unknown> | null;
 }): boolean => groupPolicyOf(g).partner_rate_bp !== null;
+
+/** Mirrors SEES_DRAFTS_KEY in packs/group-policy.ts. */
+export const SEES_DRAFTS_KEY = 'sees_drafts';
+
+/** Mirrors groupSeesDrafts in packs/group-policy.ts: exactly true, and never the
+ *  DEFAULT group. Not part of groupPolicyOf, which is empty for a non-partner. */
+export const groupSeesDrafts = (g: {
+  name?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): boolean =>
+  !isDefaultPlayerGroup(g) && g.metadata?.[SEES_DRAFTS_KEY] === true;

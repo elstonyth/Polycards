@@ -18,12 +18,15 @@ import {
   GATEWAY_AUDIT_REPEAT_MS,
   GATEWAY_AUDIT_WINDOW_MS,
   depositAuditNote,
+  ledgerTrail,
   stampNote,
   withdrawalAuditNote,
   type GatewayAnswer,
 } from '../modules/packs/gateway-audit';
+import { withdrawalRefundReference } from '../modules/packs/gateway-withdrawal';
 import { toOptionalMoney } from '../modules/packs/money';
 import { rowFx } from '../modules/packs/payment-fx';
+import { topupIdempotencyReference } from '../modules/packs/topup';
 
 /**
  * Gateway audit sweep (plan 130). Re-reads FINAL deposit and withdrawal rows
@@ -163,10 +166,26 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       }
       answer = { kind: 'not-found' };
     }
-    const note = depositAuditNote(
-      { status: row.status, amount: toOptionalMoney(row.amount_settled) },
-      answer,
-    );
+    const audited = {
+      status: row.status,
+      amount: toOptionalMoney(row.amount_settled),
+    };
+    // Rewritten against the ledger only when the gateway disagrees: most rows
+    // agree, and this costs two more reads.
+    const note =
+      depositAuditNote(audited, answer) &&
+      depositAuditNote(
+        audited,
+        answer,
+        await ledgerTrail(packs, {
+          customerId: row.customer_id,
+          anchor: topupIdempotencyReference(
+            row.customer_id,
+            row.merchant_transaction_id,
+          ),
+          refs: [row.merchant_transaction_id, row.gateway_transaction_id],
+        }),
+      );
     await packs.updateGatewayDeposits({
       id: row.id,
       audited_at: now,
@@ -226,10 +245,24 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       }
       answer = { kind: 'not-found' };
     }
-    const note = withdrawalAuditNote(
-      { status: row.status, amount: toOptionalMoney(row.amount) },
-      answer,
-    );
+    const audited = {
+      status: row.status,
+      amount: toOptionalMoney(row.amount),
+    };
+    const note =
+      withdrawalAuditNote(audited, answer) &&
+      withdrawalAuditNote(
+        audited,
+        answer,
+        await ledgerTrail(packs, {
+          customerId: row.customer_id,
+          anchor: withdrawalRefundReference(
+            row.customer_id,
+            row.merchant_transaction_id,
+          ),
+          refs: [row.merchant_transaction_id, row.gateway_transaction_id],
+        }),
+      );
     // Repair (plan 133): rows settled before 2026-09-10 stored net as
     // amount − fee. The gateway's figure is authoritative; overwrite when
     // it disagrees. Deposits never had the inverted convention — do not

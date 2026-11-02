@@ -26,7 +26,7 @@ export async function settleBuyback(
   if (!pull) throw new MedusaError(MedusaError.Types.NOT_FOUND, `Pull '${input.pullId}' not found.`);
   if (pull.status !== 'vaulted') {
     const reason = pull.status === 'delivering' || pull.status === 'delivered'
-      ? 'This card is out for delivery and can no longer be sold back — cancel the delivery first.'
+      ? 'This card is out for delivery and can no longer be sold back — cancel the delivery first if it is still requested, otherwise contact support.'
       : pull.status === 'bought_back' ? 'This card was already sold back.' : 'This card is no longer available to sell.';
     throw new MedusaError(MedusaError.Types.NOT_ALLOWED, reason);
   }

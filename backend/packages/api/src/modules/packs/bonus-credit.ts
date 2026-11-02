@@ -10,6 +10,11 @@
 // through once more before they can be withdrawn (operator rule 2026-10-09;
 // recordBuybackCreditTransaction). A task / challenge reward's or an admin
 // gift pack's sale is cash at once (ADR 0012, sellbackHoldBp).
+//
+// Bonus acts like normal credit except that it can't be withdrawn (owner
+// 2026-11-02): a paid pull is source 'pack' however it was paid. Rows from
+// before then may still say 'bonus' (bonus paid at least half), so counts read
+// both; bonus_bp keeps governing money and playthrough.
 
 /** The refusal when a debit other than a pack open would need bonus credit
  *  (delivery fee, withdrawal, admin deduction): the balance covers it, the
@@ -108,18 +113,6 @@ export function releasableRewardHoldSen(input: {
     left -= releaseSen;
   }
   return out;
-}
-
-/** A paid row is a bonus open when bonus credit paid at least half its price.
- *  Below that it stays 'pack': a few ringgit of leftover bonus must not
- *  disqualify a real-money open from the counts (tasks, achievements, the
- *  welcome unlock, the feed). Leaderboard and challenge value count both
- *  sources in full; bonus_bp still governs money and playthrough. */
-export const BONUS_SOURCE_MIN_BP = 5_000;
-
-/** The source of a PAID (not gifted, not free) pull from its bonus share. */
-export function paidPullSource(bonusBp: number): 'bonus' | 'pack' {
-  return bonusBp >= BONUS_SOURCE_MIN_BP ? 'bonus' : 'pack';
 }
 
 // ── SQL fragments ────────────────────────────────────────────────────────────

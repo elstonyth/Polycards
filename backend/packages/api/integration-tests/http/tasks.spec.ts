@@ -155,6 +155,20 @@ medusaIntegrationTestRunner({
           type: 'credit',
           amount_myr: 3,
         });
+        expect(list.data.tasks[0].claims).toBe(1);
+        expect(list.data.tasks[0].retired_at).toBeNull();
+        expect(list.data.tasks[0].view).toMatchObject({
+          reward_value_myr: 3,
+          goal_buyable: null,
+        });
+        expect(list.data.count).toBe(1);
+
+        // Readers with a size cap (the assistant, the desks) can page through.
+        const page = await unwrapResponse(
+          api.get('/admin/tasks?limit=1&offset=1', { headers: adminHeaders() }),
+        );
+        expect(page.data.tasks).toHaveLength(0);
+        expect(page.data.count).toBe(1);
       });
 
       // A pack reward is a free rip; the card it yields sells on the spot like

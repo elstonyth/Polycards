@@ -68,7 +68,7 @@ export default function ProfileClient({
             alt={user.username}
             size={96}
             priority
-            className="ring-4 ring-white/10"
+            className="rounded-full ring-4 ring-white/10"
           />
           <div className="min-w-0 flex-1 text-center sm:text-left">
             <h1 className="font-heading text-3xl font-bold tracking-tight text-white sm:text-4xl">

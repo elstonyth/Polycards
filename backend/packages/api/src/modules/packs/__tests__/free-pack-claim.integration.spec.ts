@@ -23,6 +23,7 @@ import Pack from '../models/pack';
 import Card from '../models/card';
 import PackOdds from '../models/pack-odds';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
 import CreditTransaction from '../models/credit-transaction';
 import DeliveryOrder from '../models/delivery-order';
 import DeliveryOrderItem from '../models/delivery-order-item';
@@ -44,6 +45,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Card,
     PackOdds,
     Pull,
+    TicketSpin,
     CreditTransaction,
     DeliveryOrder,
     DeliveryOrderItem,
@@ -115,6 +117,19 @@ moduleIntegrationTestRunner<PacksModuleService>({
           },
         ]);
         expect(await service.hasPaidOpen('cus_4')).toBe(true);
+      });
+
+      it('hasPaidOpen: a row labelled bonus before the label was retired still counts', async () => {
+        await service.createPulls([
+          {
+            customer_id: 'cus_5',
+            pack_id: 'bronze-pack',
+            card_id: 'c1',
+            rolled_at: new Date(),
+            source: 'bonus',
+          },
+        ]);
+        expect(await service.hasPaidOpen('cus_5')).toBe(true);
       });
 
       it('getActiveFreePack: only active free_welcome packs, null otherwise', async () => {

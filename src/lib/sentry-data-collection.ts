@@ -18,13 +18,16 @@ type SentryInitOptions = NonNullable<Parameters<typeof Sentry.init>[0]>;
  * proxy headers get masked with them, since the terms match by substring.
  * The query string goes, for the same reason `scrubBreadcrumbUrls` strips it
  * from breadcrumbs: an emailed reset link carries its single-use token there,
- * and the Google return leg its code and state.
+ * and the Google return leg its code and state. Referer is denied for the same
+ * reason: on a same-origin request it is the page's whole URL, query included.
  */
 export const sentryDataCollection: SentryInitOptions['dataCollection'] = {
   userInfo: false,
   cookies: false,
   httpHeaders: {
-    request: { deny: ['forwarded', 'client-ip', 'real-ip', 'connecting-ip'] },
+    request: {
+      deny: ['forwarded', 'client-ip', 'real-ip', 'connecting-ip', 'referer'],
+    },
     response: false,
   },
   httpBodies: [],
@@ -34,4 +37,5 @@ export const sentryDataCollection: SentryInitOptions['dataCollection'] = {
   queues: false,
   graphQL: { document: true, variables: false },
   genAI: { inputs: false, outputs: false },
+  mcp: { inputs: false, outputs: false },
 };

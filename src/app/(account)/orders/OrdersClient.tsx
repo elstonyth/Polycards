@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Badge, INPUT_CLASS } from '@/components/account/ui';
+import { CountrySelect } from '@/components/account/CountrySelect';
 import { SlabImage } from '@/components/SlabImage';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import {
@@ -15,8 +16,10 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
+import { isShippableCountry } from '@/lib/delivery-fee';
 import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { mytDate, rm } from '@/lib/format';
+import { prizeCardUrl, prizeFrameVariant } from '@/lib/prize-frame';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -52,26 +55,24 @@ const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
   canceled: 'Canceled',
 };
 
-// Both pre-ship windows close at `processed`: from `ready_to_ship` on the
-// parcel is picked and its label printed, so neither the address nor the order
-// itself is the customer's to change any more — cancelling then is a support
-// (or operator) action. `packing` is the legacy expand-window token
-// (~`processed`): the backend's own EDITABLE and CANCELABLE lists accept it, so
-// offering the affordance here is a call it honors, not one it refuses. These
-// sets must keep agreeing with those two backend lists — both drop `packing` in
-// the same release as the CONTRACT migration named in Migration20260727000000.
+// The two pre-ship windows close at different points, matching the backend's
+// EDITABLE and CANCELABLE lists (keep them agreeing):
+// - cancel closes at the 12am cutoff: the nightly stock run moves every
+//   `requested` order to `processed` (purchasing starts buying its cards), and
+//   from then on cancelling is a support (or operator) action (owner,
+//   2026-10-28);
+// - the address stays editable through `processed` and closes at
+//   `ready_to_ship`, when the parcel is picked and its label printed.
+// `packing` is the legacy expand-window token (~`processed`); the backend's
+// EDITABLE list still accepts it until the CONTRACT migration named in
+// Migration20260727000000.
 const ADDRESS_EDITABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
   'packing',
   'processed',
 ]);
-// Same members as ADDRESS_EDITABLE today, spelled out rather than aliased: they
-// are two independent backend lists that happen to agree, and aliasing would
-// make a future change to one silently move the other.
 const CANCELABLE: ReadonlySet<DeliveryOrderView['status']> = new Set([
   'requested',
-  'packing',
-  'processed',
 ]);
 
 // Only render http(s) or same-origin root-relative proof URLs — never a
@@ -136,7 +137,7 @@ function EditAddressModal({
     city: '',
     province: '',
     postalCode: '',
-    countryCode: '',
+    countryCode: 'MY',
   });
   // Only mounted while open, so `open` is always true here.
   const panelRef = useRef<HTMLDivElement>(null);
@@ -349,30 +350,29 @@ function EditAddressModal({
             </label>
             <label className="col-span-2 block">
               <span className="mb-1.5 block text-[12px] font-medium text-white/55">
-                Country code
+                Country
               </span>
-              <input
-                aria-label="Country code"
-                autoComplete="country"
-                placeholder="MY or SG"
-                maxLength={2}
+              <CountrySelect
                 value={form.countryCode}
-                onChange={(e) => {
-                  const countryCode = e.target.value.toUpperCase();
+                onChange={(countryCode) =>
                   // A state from the other country's list is never valid.
                   setForm((f) => ({
                     ...f,
                     countryCode,
                     province: stateAfterCountryChange(countryCode, f.province),
-                  }));
-                }}
-                className={INPUT_CLASS}
+                  }))
+                }
               />
             </label>
             <div className="col-span-2 flex gap-2">
               {/* Neutral-light primary (Pill): saving an address isn't money-in,
-                  so no buyback green. */}
-              <Pill disabled={busy} onClick={saveAddress} className="px-4">
+                  so no buyback green. Not a real <form>, so the select's
+                  `required` does nothing here. */}
+              <Pill
+                disabled={busy || !isShippableCountry(form.countryCode)}
+                onClick={saveAddress}
+                className="px-4"
+              >
                 Save address
               </Pill>
               {addresses.length > 0 && (
@@ -421,10 +421,12 @@ function CancelOrderModal({
   order,
   onClose,
   onCanceled,
+  onRefused,
 }: {
   order: DeliveryOrderView;
   onClose: () => void;
   onCanceled: (status: DeliveryOrderView['status']) => void;
+  onRefused: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -441,6 +443,9 @@ function CancelOrderModal({
       const res = await cancelDeliveryOrder(order.id);
       if (!res.ok) {
         setError(res.error);
+        // The order may have moved on (e.g. the 12am cutoff passed while the
+        // page was open): refresh the rows so its Cancel button goes.
+        if (!res.needsAuth) onRefused();
         return;
       }
       onCanceled(res.status);
@@ -577,7 +582,7 @@ function OrderDetailModal({
                   the count on screen matches the count being shipped. */}
               {it.card ? (
                 <Link
-                  href={`/card/${it.card.handle}`}
+                  href={prizeCardUrl(it.card.handle, prizeFrameVariant(it))}
                   className="min-w-0 flex-1 truncate hover:text-white"
                 >
                   {it.card.name}
@@ -828,25 +833,25 @@ export default function OrdersClient({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-white/80">
-                  {CANCELABLE.has(o.status) && (
+                  {ADDRESS_EDITABLE.has(o.status) && (
                     <span className="inline-flex items-center gap-2">
-                      {ADDRESS_EDITABLE.has(o.status) && (
-                        <button
-                          type="button"
-                          onClick={() => setEditing(o)}
-                          className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
-                        >
-                          Edit address
-                        </button>
-                      )}
                       <button
                         type="button"
-                        onClick={() => setCanceling(o)}
-                        aria-label={`Cancel order #${o.id.slice(-6)}`}
-                        className="rounded-lg border border-red-500/20 px-3 py-1.5 text-[12px] font-semibold text-red-300/80 transition-colors hover:border-red-500/40 hover:text-red-300"
+                        onClick={() => setEditing(o)}
+                        className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-white/70 transition-colors hover:text-white"
                       >
-                        Cancel order
+                        Edit address
                       </button>
+                      {CANCELABLE.has(o.status) && (
+                        <button
+                          type="button"
+                          onClick={() => setCanceling(o)}
+                          aria-label={`Cancel order #${o.id.slice(-6)}`}
+                          className="rounded-lg border border-red-500/20 px-3 py-1.5 text-[12px] font-semibold text-red-300/80 transition-colors hover:border-red-500/40 hover:text-red-300"
+                        >
+                          Cancel order
+                        </button>
+                      )}
                     </span>
                   )}
                 </td>
@@ -886,6 +891,13 @@ export default function OrdersClient({
             setCanceledIds((prev) => new Set(prev).add(canceling.id));
             setCanceling(null);
           }}
+          onRefused={() =>
+            void getDeliveryOrders()
+              .then((r) => {
+                if (r.ok) setOrders(r.orders);
+              })
+              .catch(() => {})
+          }
         />
       )}
     </>

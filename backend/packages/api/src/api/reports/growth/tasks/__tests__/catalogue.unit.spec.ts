@@ -1,4 +1,9 @@
-import { catalogueAt, prizeLabel, taskCatalogue } from '../catalogue';
+import {
+  catalogueAt,
+  prizeIsGone,
+  prizeLabel,
+  taskCatalogue,
+} from '../catalogue';
 import type PacksModuleService from '../../../../../modules/packs/service';
 
 describe('catalogueAt', () => {
@@ -119,6 +124,56 @@ describe('prizeLabel — Lucky Draw tickets (2026-10-24)', () => {
   it('leaves the prize alone for 0 tickets or none given', () => {
     expect(prizeLabel(credit, 0).prize).toBe('RM 50.00 bonus credit');
     expect(prizeLabel(credit).prize).toBe('RM 50.00 bonus credit');
+  });
+});
+
+describe('a Lucky Draw tickets reward', () => {
+  const reward = { type: 'tickets', tickets: 50 } as const;
+
+  it('its prize is the count alone, with no RM value', () => {
+    expect(prizeLabel(reward, 50)).toEqual({
+      prize: '50 Lucky Draw tickets',
+      value_myr: null,
+    });
+    expect(prizeLabel({ type: 'tickets', tickets: 1 }, 1).prize).toBe(
+      '1 Lucky Draw ticket',
+    );
+  });
+
+  it('the catalogue draws it with the ticket art', async () => {
+    const { tasks } = await taskCatalogue({
+      taskHubFor: async () => ({
+        week_start: '2026-10-19',
+        tasks: [
+          {
+            id: 't',
+            kind: 'weekly',
+            title: 't',
+            requirement: { type: 'checkin_days', days: 1 },
+            reward,
+            tickets: 50,
+            progress: { current: 0, target: 1, completed: false },
+            claimed: false,
+          },
+        ],
+      }),
+      listTaskDefinitions: async () => [],
+    } as unknown as PacksModuleService);
+    expect(tasks[0]).toMatchObject({
+      prize: '50 Lucky Draw tickets',
+      prize_type: 'tickets',
+      tickets: 50,
+      value_myr: null,
+      image: '/images/lucky-draw/ticket.webp',
+    });
+  });
+
+  it('having no RM value does not make it a gone prize', () => {
+    expect(prizeIsGone({ prize_type: 'tickets', value_myr: null })).toBe(false);
+    expect(prizeIsGone({ prize_type: 'credit', value_myr: 5 })).toBe(false);
+    expect(prizeIsGone({ prize_type: 'pack', value_myr: 30 })).toBe(false);
+    expect(prizeIsGone({ prize_type: 'pack', value_myr: null })).toBe(true);
+    expect(prizeIsGone({ prize_type: 'card', value_myr: null })).toBe(true);
   });
 });
 

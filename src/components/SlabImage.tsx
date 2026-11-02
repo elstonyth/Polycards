@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { rarityRgb } from '@/lib/rarity';
+import type { FrameVariant } from '@/lib/prize-frame';
 import type { CardView } from '@/lib/card-view';
 
 /**
@@ -142,11 +143,14 @@ function rawFrameSrc(rarity: string): string {
  * spectrally tinted (see the prism recipe); it marks Weekly Pulled Value
  * Challenge reward cards on /leaderboard. A variant overrides BOTH the band art
  * and the halo colour, since `rarityRgb` has no entry for it and would fall
- * back to Common gray.
+ * back to Common gray. `lucky-draw` ("Smoked", 2026-11-02) is the same shape in dark
+ * smoked glass with holo lines; it marks a Lucky Draw prize, in the draw and in the
+ * winner's vault (prizeFrameVariant in src/lib/prize-frame.ts is the one rule).
  */
-export type FrameVariant = 'prism';
+export type { FrameVariant };
 export const VARIANT_RGB: Record<FrameVariant, string> = {
   prism: '255, 255, 255', // white — the gradient's own endpoints
+  'lucky-draw': '216, 200, 255', // the holo foil's violet: the band's own light
 };
 
 /**
@@ -293,6 +297,7 @@ export function SlabImage({
   priority = false,
   frameVariant,
   glowScale = 1,
+  plain = false,
 }: {
   /** The card being shown — its art, its name, and its tier. */
   card: Pick<CardView, 'name' | 'image' | 'slabImage' | 'rarity'>;
@@ -307,9 +312,32 @@ export function SlabImage({
   frameVariant?: FrameVariant;
   /** Halo size multiplier — drop below 1 on thumbnail-sized slabs. */
   glowScale?: number;
+  /** Draw the art with a plain <img>: a prize's picture can be free text, and
+   *  next/image throws during render on a host outside remotePatterns. */
+  plain?: boolean;
 }) {
   const { image: src, slabImage: slabSrc, rarity } = card;
   const label = alt ?? card.name;
+  const art = (url: string, fit: 'object-contain' | 'object-cover') =>
+    plain ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt={label}
+        loading={priority ? 'eager' : 'lazy'}
+        decoding="async"
+        className={cn('absolute inset-0 h-full w-full', fit)}
+      />
+    ) : (
+      <Image
+        src={url}
+        alt={label}
+        fill
+        sizes={sizes}
+        priority={priority}
+        className={fit}
+      />
+    );
   // A variant frames the slab on its own — no `rarity` needed at the call site.
   const framed = frameVariant ?? rarity;
   const bandSrc = frameVariant
@@ -351,25 +379,11 @@ export function SlabImage({
               />
             </span>
             <span className="absolute" style={{ inset: `${FRAME_BAND}%` }}>
-              <Image
-                src={slabSrc}
-                alt={label}
-                fill
-                sizes={sizes}
-                priority={priority}
-                className="object-contain"
-              />
+              {art(slabSrc, 'object-contain')}
             </span>
           </>
         ) : (
-          <Image
-            src={slabSrc}
-            alt={label}
-            fill
-            sizes={sizes}
-            priority={priority}
-            className="object-contain"
-          />
+          art(slabSrc, 'object-contain')
         )
       ) : framed ? (
         // RAW + tier/variant frame — card at the measured graded card-art
@@ -402,14 +416,7 @@ export function SlabImage({
             className="absolute overflow-hidden"
             style={{ inset: RAW_CARD_INSET, borderRadius: '4.8% / 3.4%' }}
           >
-            <Image
-              src={src}
-              alt={label}
-              fill
-              sizes={sizes}
-              priority={priority}
-              className="object-cover"
-            />
+            {art(src, 'object-cover')}
           </span>
         </>
       ) : (
@@ -418,14 +425,7 @@ export function SlabImage({
           className="absolute overflow-hidden"
           style={{ inset: RAW_BARE_INSET, borderRadius: '4.8% / 3.4%' }}
         >
-          <Image
-            src={src}
-            alt={label}
-            fill
-            sizes={sizes}
-            priority={priority}
-            className="object-cover"
-          />
+          {art(src, 'object-cover')}
         </span>
       )}
     </span>

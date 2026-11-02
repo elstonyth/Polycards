@@ -16,8 +16,9 @@ export type VaultItem = {
    *  challenge's prism frame here instead of taking the card's pack tier — it
    *  was won there, not pulled from a pack. */
   challengePrize: boolean;
-  /** Won in the Lucky Draw: the backend sends no tier, so the slab wears no
-   *  frame, and the tile says "Lucky Draw" where a tier would sit. */
+  /** Won in the Lucky Draw: it wears the Lucky Draw frame, as it did in the draw
+   *  (prizeFrameVariant). The backend sends no tier, and the tile says "Lucky Draw"
+   *  where a tier would sit. */
   luckyDrawPrize: boolean;
   showcased: boolean;
   /** How the pull was acquired. Display/telemetry only — see `locked`.

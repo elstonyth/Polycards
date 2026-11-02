@@ -105,6 +105,13 @@ export async function fetchPackData(
       MedusaError.Types.NOT_FOUND,
       `Pack '${packId}' is not available.`,
     );
+  // A ticket pack has no cards to draw and spins through open-batch's own path
+  // (ticket-spin.ts). Refused here so every card path says so: /open, free rips.
+  if (pack.prize_type === 'tickets')
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `Pack '${packId}' can't be opened this way.`,
+    );
   const allOdds = await pageAll((opts) =>
     packs.listPackOdds({ pack_id: packId }, opts),
   );

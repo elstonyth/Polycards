@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
     error: null as unknown,
     refetch: vi.fn(),
   },
+  integrity: [] as unknown[],
   alert: vi.fn<
     (counts: Record<string, number>) => {
       soundOn: boolean;
@@ -45,6 +46,7 @@ vi.mock('../../lib/queries', () => {
     useDeliveryOrderCount: () => result(0),
     useReferralSettlements: () => result([]),
     useGatewayAudit: () => result({ findings: [] }),
+    useMoneyIntegrity: () => result({ findings: state.integrity }),
   };
 });
 
@@ -93,7 +95,23 @@ beforeEach(() => {
     error: null,
     refetch: vi.fn(),
   };
+  state.integrity = [];
   state.alert.mockClear();
+});
+
+describe('half-finished payments in dashboard attention', () => {
+  it('raise an alert and link to Settlement, and all clear goes', () => {
+    state.pricing.data = {
+      ...health,
+      cards: { ...health.cards, issues: [], pending_confirmation: 0 },
+    };
+    state.integrity = [{ kind: 'sold_without_flip', id: 'pull_1' }];
+    const html = render();
+    expect(html).toContain('dashboard.integrity');
+    expect(html).toContain('/settlement');
+    expect(html).not.toContain('dashboard.allClear');
+    expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('integrity', 1);
+  });
 });
 
 describe('pricing in dashboard attention', () => {

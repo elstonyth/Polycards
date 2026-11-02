@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
@@ -124,11 +125,15 @@ export default function HowItWorksPage() {
       {/* 1. HERO — wordings and pack each animate in (staggered) */}
       <section className="relative mb-6 overflow-hidden rounded-2xl border border-white/10 bg-neutral-950">
         {/* decorative blurred blob (static, not animated-in) */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        {/* next/image, here and below: a plain <img> in a Server Component is a
+            preload hint in this page's payload, so every prefetch of the page
+            (the home CTA, the footer) downloaded the raw pack art. */}
+        <Image
           src="/images/polycards/gold-pack.webp"
           alt=""
           aria-hidden="true"
+          fill
+          sizes="256px"
           className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-70 blur-[40px] saturate-[1.7] will-change-transform animate-[heroBlob_18s_ease-in-out_infinite] motion-reduce:animate-none motion-reduce:will-change-auto"
         />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-neutral-950/90 via-neutral-950/55 to-neutral-950/20" />
@@ -176,26 +181,29 @@ export default function HowItWorksPage() {
           >
             <div className="relative h-[280px] w-full max-w-[360px] 2xl:h-[340px] 2xl:max-w-[440px]">
               {/* left pack — behind, faded */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <Image
                 src="/images/polycards/platinum-pack.webp"
                 alt=""
                 aria-hidden="true"
+                width={136}
+                height={245}
                 className="absolute bottom-[8%] left-[32%] z-0 h-[72%] w-auto -translate-x-1/2 object-contain opacity-50 drop-shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
               />
               {/* right pack — behind, faded */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <Image
                 src="/images/polycards/diamond-pack.webp"
                 alt=""
                 aria-hidden="true"
+                width={136}
+                height={245}
                 className="absolute bottom-[8%] left-[68%] z-0 h-[72%] w-auto -translate-x-1/2 object-contain opacity-50 drop-shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
               />
               {/* center pack — front */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <Image
                 src="/images/polycards/bronze-pack.webp"
                 alt="Polycards trading card pack"
+                width={174}
+                height={313}
                 className="absolute bottom-0 left-1/2 z-[2] h-[92%] w-auto -translate-x-1/2 object-contain drop-shadow-[0_30px_80px_rgba(0,0,0,0.6)]"
               />
             </div>

@@ -13,6 +13,7 @@ import {
 } from '@medusajs/ui';
 import { ArchiveBox } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useEligibleProducts,
   useInventory,
@@ -24,7 +25,7 @@ import {
   type InventoryRow,
 } from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
-import { resolveImageUrl } from '../../../lib/image-url';
+import { CardImage } from '../../../components/CardImage';
 import { applyRangeSelect } from '../../../lib/range-select';
 import { useTableSort } from '../../../lib/use-table-sort';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
@@ -62,17 +63,19 @@ type SortKey =
   | 'price'
   | 'cost'
   | 'created_at'
+  | 'to_procure'
   | 'on_hand'
   | 'in_vault'
   | 'requested'
+  | 'ready_to_ship'
   | 'shipped';
 
-// Nullable numerics all sort as -Infinity rather than a sentinel like -1:
-// on_hand can legitimately be NEGATIVE (oversold), and -1 would rank a real
-// deficit above "unknown". -Infinity keeps "unknown" strictly last on desc and
+// Nullable numerics (fmv, price, cost) all sort as -Infinity rather than a
+// sentinel like -1: -Infinity keeps "unknown" strictly last on desc and
 // strictly first on asc for every column, and two unknowns compare equal
 // without ever producing NaN (which is why this compares with < / > rather
-// than subtracting).
+// than subtracting). The six stock buckets are never null — on_hand can be
+// NEGATIVE (shipped more than was ever received), which sorts as itself.
 const sortValue = (r: InventoryRow, key: SortKey): number => {
   switch (key) {
     case 'fmv':
@@ -81,14 +84,18 @@ const sortValue = (r: InventoryRow, key: SortKey): number => {
       return r.price ?? Number.NEGATIVE_INFINITY;
     case 'cost':
       return r.cost ?? Number.NEGATIVE_INFINITY;
-    case 'on_hand':
-      return r.on_hand ?? Number.NEGATIVE_INFINITY;
     case 'created_at':
       return Date.parse(r.created_at);
+    case 'to_procure':
+      return r.to_procure;
+    case 'on_hand':
+      return r.on_hand;
     case 'in_vault':
       return r.in_vault;
     case 'requested':
       return r.requested;
+    case 'ready_to_ship':
+      return r.ready_to_ship;
     case 'shipped':
       return r.shipped;
     default:
@@ -102,6 +109,14 @@ const InventoryListPage = () => {
   const [search, setSearch] = useState('');
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Selecting rows only feeds "List to gacha card", which reads
+  // /admin/gacha/eligible-products (gacha:read) and creates cards
+  // (card:update). A role without both (e.g. Stock keeper) gets no checkboxes
+  // instead of a 403 and a button that spins forever.
+  const canListToGacha = usePermissions().hasAllPermissions([
+    'gacha:read' as Permission,
+    'card:update' as Permission,
+  ]);
   const [exporting, setExporting] = useState(false);
   const { sort, sortHeader } = useTableSort<SortKey>({
     key: 'created_at',
@@ -388,30 +403,39 @@ const InventoryListPage = () => {
           role="region"
           aria-label={t('inventory.title')}
         >
-          <Table>
+          {/* Sixteen columns: half the usual cell gap keeps sideways scrolling
+              short. */}
+          <Table className="[&_td]:pr-3 [&_th]:pr-3">
             <Table.Header>
               <Table.Row>
-                <Table.HeaderCell className="w-10">
-                  <Checkbox
-                    aria-label={t('inventory.selectAll')}
-                    checked={
-                      allOnPage ? true : someOnPage ? 'indeterminate' : false
-                    }
-                    onCheckedChange={toggleAll}
-                  />
-                </Table.HeaderCell>
+                {canListToGacha && (
+                  <Table.HeaderCell className="w-10">
+                    <Checkbox
+                      aria-label={t('inventory.selectAll')}
+                      checked={
+                        allOnPage ? true : someOnPage ? 'indeterminate' : false
+                      }
+                      onCheckedChange={toggleAll}
+                    />
+                  </Table.HeaderCell>
+                )}
                 <Table.HeaderCell>{t('inventory.photo')}</Table.HeaderCell>
                 {sortHeader('name', t('inventory.name'))}
                 <Table.HeaderCell>{t('inventory.sku')}</Table.HeaderCell>
                 <Table.HeaderCell>{t('inventory.titleCol')}</Table.HeaderCell>
+                {/* The six stock columns, in the order spec 2026-10-28 fixes
+                    (the Excel export uses the same order), right after Title so
+                    they stay on screen: the table scrolls sideways. */}
+                {sortHeader('to_procure', t('inventory.toProcure'), true)}
+                {sortHeader('on_hand', t('inventory.onHand'), true)}
+                {sortHeader('in_vault', t('inventory.inVault'), true)}
+                {sortHeader('requested', t('inventory.requested'), true)}
+                {sortHeader('ready_to_ship', t('inventory.readyToShip'), true)}
+                {sortHeader('shipped', t('inventory.shipped'), true)}
                 {sortHeader('fmv', t('inventory.fmv'), true)}
                 {sortHeader('price', t('inventory.price'), true)}
                 {sortHeader('cost', t('inventory.cost'), true)}
                 {sortHeader('created_at', t('inventory.created'), true)}
-                {sortHeader('on_hand', t('inventory.onHand'), true)}
-                {sortHeader('in_vault', t('inventory.inVault'), true)}
-                {sortHeader('requested', t('inventory.requested'), true)}
-                {sortHeader('shipped', t('inventory.shipped'), true)}
                 <Table.HeaderCell className="text-right">
                   {t('inventory.listingShow')}
                 </Table.HeaderCell>
@@ -430,42 +454,72 @@ const InventoryListPage = () => {
                       onCheckedChange: only the DOM event carries shiftKey, and
                       Radix checkboxes fire click for keyboard activation too,
                       so no second handler is needed. */}
-                  <Table.Cell
-                    className="select-none"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Checkbox
-                      aria-label={t('inventory.selectOne', { name: r.name })}
-                      checked={selected.has(r.handle)}
-                      onClick={(e) => handleRowCheck(r.handle, e.shiftKey)}
+                  {canListToGacha && (
+                    <Table.Cell
+                      className="select-none"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        aria-label={t('inventory.selectOne', { name: r.name })}
+                        checked={selected.has(r.handle)}
+                        onClick={(e) => handleRowCheck(r.handle, e.shiftKey)}
+                      />
+                    </Table.Cell>
+                  )}
+                  <Table.Cell>
+                    <CardImage
+                      src={r.image}
+                      name={r.name}
+                      className="h-14 w-10 shrink-0"
+                      lazy
                     />
                   </Table.Cell>
-                  <Table.Cell>
-                    {/* `r.photo &&`, not just a src: an empty string resolves to
-                        the page URL and gets refetched as an image. */}
-                    {r.photo && (
-                      <img
-                        src={resolveImageUrl(r.photo)}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        className="h-10 w-10 shrink-0 rounded object-cover"
-                      />
-                    )}
-                  </Table.Cell>
                   <Table.Cell className="break-words">
-                    {r.name}
-                    {!r.is_card && (
-                      <span className="text-ui-fg-subtle ml-1 text-xs">
-                        ({t('inventory.notACard')})
-                      </span>
-                    )}
+                    {/* The width keeps this column from being squeezed by the
+                        fifteen others; a cell's own min-width is unreliable. */}
+                    <div className="min-w-[12rem]">
+                      {r.name}
+                      {!r.is_card && (
+                        <span className="text-ui-fg-subtle ml-1 text-xs">
+                          ({t('inventory.notACard')})
+                        </span>
+                      )}
+                    </div>
                   </Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle break-words">
-                    {r.sku}
+                  <Table.Cell className="text-ui-fg-subtle">
+                    {/* One line, full value on hover: a wrapped SKU made rows
+                        four lines tall. */}
+                    <span className="block max-w-[8rem] truncate" title={r.sku}>
+                      {r.sku}
+                    </span>
                   </Table.Cell>
                   <Table.Cell className="whitespace-nowrap">
                     {r.graded ? t('inventory.graded') : t('inventory.raw')}
+                  </Table.Cell>
+                  {/* Error colour = action needed: cards still to buy, or a
+                      negative on hand (shipped more than was ever received —
+                      missing receipt history). */}
+                  <Table.Cell
+                    className={`text-right tabular-nums ${r.to_procure > 0 ? 'text-ui-fg-error' : ''}`}
+                  >
+                    {r.to_procure}
+                  </Table.Cell>
+                  <Table.Cell
+                    className={`text-right tabular-nums ${r.on_hand < 0 ? 'text-ui-fg-error' : ''}`}
+                  >
+                    {r.on_hand}
+                  </Table.Cell>
+                  <Table.Cell className="text-right tabular-nums">
+                    {r.in_vault}
+                  </Table.Cell>
+                  <Table.Cell className="text-right tabular-nums">
+                    {r.requested}
+                  </Table.Cell>
+                  <Table.Cell className="text-right tabular-nums">
+                    {r.ready_to_ship}
+                  </Table.Cell>
+                  <Table.Cell className="text-right tabular-nums">
+                    {r.shipped}
                   </Table.Cell>
                   {/* rm() already renders null as an em dash and 0 as RM 0.00,
                       so these stay unguarded — do NOT reintroduce a truthiness
@@ -485,27 +539,6 @@ const InventoryListPage = () => {
                   </Table.Cell>
                   <Table.Cell className="text-ui-fg-subtle text-right whitespace-nowrap">
                     {orderDateTime(r.created_at)}
-                  </Table.Cell>
-                  {/* `??`, never `||`: on_hand 0 means "tracked, nothing
-                      shippable" and must render as 0, not as the untracked
-                      em dash. (null ?? 0) < 0 is false, so an untracked row is
-                      never coloured as a deficit. */}
-                  <Table.Cell
-                    className={`text-right tabular-nums ${(r.on_hand ?? 0) < 0 ? 'text-ui-fg-error' : ''}`}
-                    title={
-                      r.on_hand === null ? t('inventory.noStock') : undefined
-                    }
-                  >
-                    {r.on_hand ?? '—'}
-                  </Table.Cell>
-                  <Table.Cell className="text-right tabular-nums">
-                    {r.in_vault}
-                  </Table.Cell>
-                  <Table.Cell className="text-right tabular-nums">
-                    {r.requested}
-                  </Table.Cell>
-                  <Table.Cell className="text-right tabular-nums">
-                    {r.shipped}
                   </Table.Cell>
                   <Table.Cell className="text-right tabular-nums">
                     {r.listing_count}

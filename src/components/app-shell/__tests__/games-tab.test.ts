@@ -18,6 +18,9 @@ vi.mock('@/components/AuthButton', () => ({ openAuth: vi.fn() }));
 vi.mock('../VaultDotProvider', () => ({
   useVaultDot: () => ({ show: false }),
 }));
+vi.mock('../DrawDotProvider', () => ({
+  useDrawDot: () => ({ show: false }),
+}));
 
 const TabBar = (await import('../TabBar')).default;
 

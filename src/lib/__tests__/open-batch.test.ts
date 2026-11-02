@@ -277,3 +277,52 @@ describe('clampCount — real exported function', () => {
     expect(clampCount(2.5)).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Ticket packs: no pull, no card, no buyback — `ticket_spin` is the result.
+// ---------------------------------------------------------------------------
+
+describe('mapBatchRoll — ticket rolls', () => {
+  const ticketRoll = (spin: Record<string, unknown>): RawBatchRollItem => ({
+    pull: null,
+    card: null,
+    buyback: null,
+    ticket_spin: {
+      id: 'tksp_1',
+      rolled_at: '2026-10-30T00:00:00.000Z',
+      ...spin,
+    },
+  });
+
+  it('maps to a ticket reveal card with nothing to sell', () => {
+    const result = mapBatchRoll(ticketRoll({ tickets: 100, rarity: 'Rare' }));
+    expect(result).toMatchObject({
+      card: { tickets: 100, rarity: 'Rare', priceMyr: null, slabImage: null },
+      pullId: null,
+      buyback: null,
+    });
+  });
+
+  // The charge has landed and the tickets are credited: a tile colour must
+  // never turn that into the charged-but-unshowable error.
+  it('keeps the roll when only the tier is bad', () => {
+    const result = mapBatchRoll(ticketRoll({ tickets: 50, rarity: 'Shiny' }));
+    expect(result?.card).toMatchObject({ tickets: 50, rarity: 'Common' });
+  });
+
+  it.each([[0], [-5], [1.5], ['100'], [null]])(
+    'drops a roll whose amount is %s',
+    (tickets) => {
+      expect(mapBatchRoll(ticketRoll({ tickets, rarity: 'Rare' }))).toBeNull();
+    },
+  );
+
+  // A card pack's payload still maps exactly as it did before `pull` and
+  // `card` became nullable on the wire.
+  it('leaves a card roll alone, and refuses one with neither', () => {
+    const card = mapBatchRoll(rawRoll());
+    expect(card?.pullId).toBe('pull-abc-123');
+    expect(card?.card).not.toHaveProperty('tickets');
+    expect(mapBatchRoll({ pull: null, card: null, buyback: null })).toBeNull();
+  });
+});

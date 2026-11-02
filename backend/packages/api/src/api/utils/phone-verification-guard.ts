@@ -71,7 +71,7 @@ export const requireSignupPhoneProof = async (
       : null;
     if (!verified || verified.phone !== phone) {
       // next(err) — repo convention for surfacing middleware errors (see
-      // blockUnusedVendorSelfRegistration in middlewares.ts).
+      // blockUnusedSurface in middlewares.ts).
       return next(signupProofRequired());
     }
     proof = { token, exp: verified.exp };

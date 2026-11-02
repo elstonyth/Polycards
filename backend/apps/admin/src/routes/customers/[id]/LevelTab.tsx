@@ -102,6 +102,9 @@ export const LevelTab = ({ customerId }: { customerId: string }) => {
       <Container className="p-0">
         <div className="px-6 py-4">
           <Heading level="h2">{t('players.spendReport')}</Heading>
+          <Text size="small" className="text-ui-fg-subtle mt-1">
+            {t('playerDetail.spendReportNote')}
+          </Text>
         </div>
         {reportError ? (
           <div className="border-t px-6 py-6">

@@ -1,13 +1,19 @@
 // src/app/slots/[slug]/page.tsx
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
+import {
+  getDraftPackDetail,
+  getPackBaseForViewer,
+  getPackDetail,
+  getRecentPulls,
+} from '@/lib/data/packs';
 import {
   canClaimFreePack,
   freePackMissing,
   getFreePackState,
 } from '@/lib/data/free-pack';
 import { FREE_WELCOME_CATEGORY } from '@/lib/packs-data';
+import { ProductJsonLd, shareImageMeta } from '@/lib/product-share';
 import PackDetailClient from './PackDetailClient';
 
 // The /slots pack detail — configurator/Top-Hits/odds; the "Open Pack" CTA
@@ -24,9 +30,22 @@ export async function generateMetadata({
   const { slug } = await params;
   // Backend catalog (source of truth) — a backend-created pack gets a real
   // title too, not just the baked 8. Next dedupes the fetch with the page body.
-  const base = await getPackBySlug(slug);
+  const base = await getPackBaseForViewer(slug);
+  if (!base) return { title: 'Pack' };
+  const { name, categoryName } = base.pack;
+  const path = `/slots/${slug}`;
   return {
-    title: base ? `${base.pack.name} — ${base.pack.categoryName}` : 'Pack',
+    title: `${name} — ${categoryName}`,
+    description: `Open the ${name} from ${categoryName}: see the top hits and odds before you rip it.`,
+    // Replaces the layout's openGraph whole, so every field is restated.
+    openGraph: {
+      type: 'website',
+      siteName: 'Polycards',
+      title: name,
+      description: `${name} · ${categoryName}`,
+      url: path,
+      images: [shareImageMeta(path, name)],
+    },
   };
 }
 
@@ -41,14 +60,17 @@ export default async function SlotsPackDetailPage({
   const { count: countRaw } = await searchParams;
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
-  const [base, detail, recentPulls] = await Promise.all([
-    getPackBySlug(slug),
+  const [base, publicDetail, recentPulls] = await Promise.all([
+    getPackBaseForViewer(slug),
     getPackDetail(slug),
     // This pack's own history — the feed used to be global, so every pack
     // showed identical rows.
     getRecentPulls(slug),
   ]);
   if (!base) notFound();
+  const detail = base.pack.draft
+    ? await getDraftPackDetail(slug)
+    : publicDetail;
 
   // The free welcome pack is hidden from the catalog but NOT from this route, so
   // a shared link / history entry / stale badge lands an ineligible account on a
@@ -72,14 +94,25 @@ export default async function SlotsPackDetailPage({
   const missing = freeState ? freePackMissing(freeState, slug) : [];
 
   return (
-    <PackDetailClient
-      pack={base.pack}
-      siblings={base.siblings}
-      detail={detail}
-      recentPulls={recentPulls}
-      initialQty={count}
-      freePackEligible={freePackEligible}
-      freePackMissing={missing}
-    />
+    <>
+      {!base.pack.draft && (
+        <ProductJsonLd
+          name={base.pack.name}
+          description={`${base.pack.name} · ${base.pack.categoryName}`}
+          sku={slug}
+          path={`/slots/${slug}`}
+        />
+      )}
+      <PackDetailClient
+        pack={base.pack}
+        siblings={base.siblings}
+        categoryTabs={base.tabs}
+        detail={detail}
+        recentPulls={recentPulls}
+        initialQty={count}
+        freePackEligible={freePackEligible}
+        freePackMissing={missing}
+      />
+    </>
   );
 }

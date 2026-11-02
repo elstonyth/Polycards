@@ -895,6 +895,21 @@ describe('postApexPull', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it.each(['Legendary', 'Immortal'])(
+    'posts a bonus-credit %s pull through the same bot',
+    async (rarity) => {
+      await postApexPull(
+        fakeContainer({ odds: [{ rarity }], pulls: [{ source: 'bonus' }] }),
+        EVENT,
+      );
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({
+        url: 'https://api.telegram.org/bottest-token/sendPhoto',
+        body: { chat_id: '-100123' },
+      });
+    },
+  );
+
   // RARITY_ORDER puts Mythical BELOW Legendary — the counterintuitive one.
   it.each(['Mythical', 'Rare', 'Uncommon', 'Common'])(
     'stays silent for %s',

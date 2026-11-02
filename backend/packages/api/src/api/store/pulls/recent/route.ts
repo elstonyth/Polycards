@@ -12,6 +12,7 @@ import {
   resolveFxRate,
 } from '../../../../modules/packs/pricing';
 import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
+import { categoryParam, liveTicketPacks } from '../category';
 import { loadPullerProfiles } from '../pullers';
 
 // GET /store/pulls/recent — the most recent pulls across all packs, for the
@@ -28,12 +29,22 @@ import { loadPullerProfiles } from '../pullers';
 //                        that pack's own history, not the global one. An
 //                        unknown or draft slug is an EMPTY feed, answered
 //                        before any ledger query (see the gate below).
+//  ?category=<key>       the spins of that category's live ticket packs — the
+//                        home Poly tab. pack_id wins when both are sent. A
+//                        category with no live ticket pack is an EMPTY feed;
+//                        a key outside FEED_CATEGORIES is the global feed.
 //  ?rarity=<tier>        only pulls of that tier (rarity is per-pack, resolved
 //                        through pack_odds) — the history panel's tier tabs.
 //
 // The body also carries `drought`: for each chase tier, how many packs have
 // been opened since that tier last hit (in the same scope). Always unfiltered
 // by ?rarity — it is the state of the pack, not of the tab.
+//
+// A ticket pack's own feed and a category's read their spins (buildTicketFeed).
+// The global feed stays cards only.
+// shortcut: a category feed reads ticket packs only, so a card pack in that
+// category stays on the global feed. Add its pulls when a card franchise gets
+// its own feed.
 const RECENT_LIMIT = 12;
 // Over-fetch, because the disabled filter below runs AFTER the query — same
 // reason (and same 2x bound) as the leaderboard's FETCH_N: a disabled puller
@@ -46,11 +57,10 @@ const DROUGHT_TIERS: readonly Rarity[] = ['Immortal', 'Legendary'];
 // ponytail: per-process 5s cache — mirrors the leaderboard's boardCache. This
 // feed is polled every 10s per open tab (use-recent-pulls); a 5s TTL collapses
 // the queries to one compute per 5s window PER PROCESS, regardless of how many
-// tabs poll. Keyed by (pack_id, rarity) — a single key would serve one pack's
-// rows to every other pack for the window.
+// tabs poll. Keyed by (pack_id, category, rarity) — a single key would serve one
+// pack's rows to every other pack for the window.
 // A new pull surfaces ≤5s later than before — invisible on a "recent" feed.
 const CACHE_TTL_MS = 5_000;
-const ALL_PACKS_KEY = 'recent';
 // ponytail: hard bound on the map's key count — see the eviction check at
 // the cache-set site below.
 const MAX_ENTRIES = 256;
@@ -81,6 +91,7 @@ export async function GET(
     typeof req.query.pack_id === 'string' && req.query.pack_id.trim()
       ? req.query.pack_id.trim()
       : null;
+  const category = categoryParam(req.query, packId);
   // An unknown tier is ignored (the unfiltered feed), not 400'd — the storefront
   // proxy already gates the value, so anything else is a hand-typed URL.
   const rarity =
@@ -88,7 +99,9 @@ export async function GET(
     (RARITY_ORDER as readonly string[]).includes(req.query.rarity)
       ? (req.query.rarity as Rarity)
       : null;
-  const cacheKey = `${packId ?? ALL_PACKS_KEY}|${rarity ?? ''}`;
+  // JSON, not a joined string: pack_id and category are caller-supplied, and no
+  // value of one may land on the key of another feed and overwrite it.
+  const cacheKey = JSON.stringify([packId, category, rarity]);
 
   const cached = recentCache.get(cacheKey);
   const now = Date.now();
@@ -99,7 +112,7 @@ export async function GET(
 
   let pending = inflight.get(cacheKey);
   if (!pending) {
-    pending = buildFeed(req, packId, rarity, cacheKey).finally(() =>
+    pending = buildFeed(req, packId, category, rarity, cacheKey).finally(() =>
       inflight.delete(cacheKey),
     );
     inflight.set(cacheKey, pending);
@@ -115,10 +128,20 @@ export async function GET(
 async function buildFeed(
   req: MedusaRequest,
   packId: string | null,
+  category: string | null,
   rarity: Rarity | null,
   cacheKey: string,
 ): Promise<unknown> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+
+  if (category) {
+    const scope = await liveTicketPacks(packs, category);
+    if (scope.length === 0) {
+      remember(cacheKey, EMPTY_BODY);
+      return EMPTY_BODY;
+    }
+    return buildTicketFeed(req, packs, scope, rarity, cacheKey);
+  }
 
   // Gate the slug BEFORE any ledger work: pack_id is caller-supplied and the
   // publishable key ships in the storefront bundle, so without this a loop of
@@ -133,6 +156,9 @@ async function buildFeed(
     if (!pack) {
       remember(cacheKey, EMPTY_BODY);
       return EMPTY_BODY;
+    }
+    if (pack.prize_type === 'tickets') {
+      return buildTicketFeed(req, packs, [pack], rarity, cacheKey);
     }
   }
 
@@ -228,6 +254,64 @@ async function buildFeed(
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
   const body = { pulls: recent, drought };
+  remember(cacheKey, body);
+  return body;
+}
+
+// A ticket pack writes a ticket_spin per spin and no pull, so its history reads
+// those, under the same puller rules as above. A row carries the amount won in
+// place of a card. The tier comes off the pack's own table: an amount since
+// removed from it reads Common, as a pull does when its odds row is gone. Tables
+// are scaled by price, so one amount sits on different tiers across packs.
+async function buildTicketFeed(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+  scope: { slug: string; title: string; image: string }[],
+  rarity: Rarity | null,
+  cacheKey: string,
+): Promise<unknown> {
+  const packIds = scope.map((p) => p.slug);
+  const [fetched, droughtCounts, prizes] = await Promise.all([
+    packs.recentTicketSpinRows({
+      packIds,
+      rarity,
+      limit: FETCH_LIMIT,
+    }),
+    Promise.all(
+      DROUGHT_TIERS.map((tier) =>
+        packs.pullDrought({ packId: packIds, rarity: tier, tickets: true }),
+      ),
+    ),
+    packs.listTicketPrizes({ pack_id: packIds }, { take: 1000 }),
+  ]);
+  const tierKey = (packId: string, tickets: number) => `${packId}|${tickets}`;
+  const tierOf = new Map(
+    prizes.map((p) => [tierKey(p.pack_id, p.tickets), p.rarity]),
+  );
+  const packBySlug = new Map(scope.map((p) => [p.slug, p]));
+  const pullers = await loadPullerProfiles(
+    req,
+    packs,
+    fetched.map((s) => s.customer_id),
+  );
+  const body = {
+    pulls: fetched
+      .filter((s) => !pullers.disabled.has(s.customer_id))
+      .slice(0, RECENT_LIMIT)
+      .map((s) => ({
+        id: s.id,
+        tickets: s.tickets,
+        rarity: tierOf.get(tierKey(s.pack_id, s.tickets)) ?? 'Common',
+        pack_id: s.pack_id,
+        pack_title: packBySlug.get(s.pack_id)?.title ?? null,
+        pack_image: packBySlug.get(s.pack_id)?.image ?? null,
+        ...pullers.profileOf(s.customer_id, s.id),
+        rolled_at: s.rolled_at,
+      })),
+    drought: Object.fromEntries(
+      DROUGHT_TIERS.map((tier, i) => [tier, droughtCounts[i]]),
+    ),
+  };
   remember(cacheKey, body);
   return body;
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import {
@@ -12,7 +11,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm0 } from '@/lib/format';
+import { isOptimizableImage } from '@/lib/optimizable-image';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
+import { IntentLink } from '@/components/IntentLink';
 import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
@@ -21,9 +22,11 @@ import PackCategoryTabs from '@/components/PackCategoryTabs';
 import {
   catalogGroupOf,
   packHref,
+  packTabs,
   pickCategory,
   CATALOG_GROUP_HEADING,
   CATALOG_GROUP_ORDER,
+  isTicketPack,
   type CatalogGroup,
   type Pack,
   type PackCategory,
@@ -56,6 +59,10 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
         <span className="absolute left-3 top-3 z-[2] rounded-md bg-neutral-700/90 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white/80 shadow-sm sm:text-[10px]">
           Out of Stock
         </span>
+      ) : pack.draft ? (
+        <span className="absolute left-3 top-3 z-[2] rounded-md bg-white/15 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
+          Draft
+        </span>
       ) : (
         pack.boost && (
           <span className="absolute left-3 top-3 z-[2] rounded-md bg-buyback px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
@@ -80,11 +87,12 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
         <Image
           src={pack.image}
           alt={pack.name}
-          width={205}
-          height={360}
+          // Drawn at h-60 at most. Raw art runs to 2.4 MB against this ~137 px box.
+          width={137}
+          height={240}
           // Operator-entered pack art can be on any host — bypass the optimizer
-          // allowlist (matches the detail hero), else the thumbnail 400s.
-          unoptimized
+          // allowlist only there (matches the detail hero), else the thumbnail 400s.
+          unoptimized={!isOptimizableImage(pack.image)}
           className={cn(
             // hover zoom measured on live /claw: art scales to 1.092 over 0.7s on
             // Tailwind's default curve (0.4,0,0.2,1) — live has no lift/translate
@@ -118,7 +126,7 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
           <QtyStepper qty={qty} onChange={setQty} max={3} className="mb-2" />
           {/* Open → the pack's detail page. The free demo spin there is open
               to everyone; only a real open/claim is auth-gated. */}
-          <Link
+          <IntentLink
             href={packHref(pack.id, qty)}
             className={cn(
               pillVariants({ variant: 'primary', size: 'sm' }),
@@ -126,7 +134,7 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
             )}
           >
             Open
-          </Link>
+          </IntentLink>
         </>
       )}
     </div>
@@ -158,9 +166,9 @@ function PackRow({
         <Image
           src={pack.image}
           alt={pack.name}
-          width={205}
-          height={360}
-          unoptimized
+          width={36}
+          height={64}
+          unoptimized={!isOptimizableImage(pack.image)}
           className={cn(
             'h-16 w-auto object-contain drop-shadow-[0_6px_14px_rgba(0,0,0,0.5)]',
             oos && 'grayscale',
@@ -180,6 +188,11 @@ function PackRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-0.5 text-sm font-semibold text-white">
           <span className="truncate">{pack.name}</span>
+          {pack.draft && (
+            <span className="ml-1 shrink-0 rounded bg-white/15 px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide">
+              Draft
+            </span>
+          )}
           {!oos && (
             <ChevronRight
               className="h-3.5 w-3.5 shrink-0 text-white/60"
@@ -197,7 +210,9 @@ function PackRow({
           </span>
         ) : (
           <span className="mt-1 block text-[11px] text-white/60">
-            {categoryName} · {buyback}% instant buyback
+            {isTicketPack(pack)
+              ? categoryName
+              : `${categoryName} · ${buyback}% instant buyback`}
           </span>
         )}
       </div>
@@ -225,12 +240,12 @@ function PackRow({
   }
 
   return (
-    <Link
+    <IntentLink
       href={packHref(pack.id, 1)}
       className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-2.5 transition-colors hover:border-white/20 hover:bg-white/[0.07]"
     >
       {inner}
-    </Link>
+    </IntentLink>
   );
 }
 
@@ -265,7 +280,7 @@ export default function CatalogClient({
   categories,
   freePack = null,
 }: {
-  /** Only categories that have packs. */
+  /** Every franchise, empty ones included (they show as "Coming soon"). */
   categories: PackCategory[];
   /** Visible badge state, or null. `claim` only while this customer's one-time
    *  welcome claim is unspent; `signup` for logged-out visitors while an
@@ -278,6 +293,7 @@ export default function CatalogClient({
   const active =
     pickCategory(categories, useSearchParams().get('category') ?? undefined) ??
     '';
+  const tabs = packTabs(categories);
   const pick = (id: string) => {
     // Next syncs useSearchParams with replaceState; other params survive.
     const params = new URLSearchParams(window.location.search);
@@ -296,6 +312,8 @@ export default function CatalogClient({
         categoryName: cat.tab,
       })),
     );
+  // A tab of only capsules (Poly): no buyback note, and they aren't called packs.
+  const allCapsules = entries.every((e) => isTicketPack(e.pack));
   const byGroup = {
     graded: entries.filter((e) => catalogGroupOf(e.pack) === 'graded'),
     raw: entries.filter((e) => catalogGroupOf(e.pack) === 'raw'),
@@ -319,26 +337,24 @@ export default function CatalogClient({
     >
       {freePack && <FreePackBadge state={freePack} />}
 
-      <p className="mb-4 text-[12px] leading-relaxed text-neutral-400">
-        Instant buyback rates apply during the reveal countdown. Leaving the
-        reveal or letting its timer expire changes buyback to{' '}
-        {BUYBACK_RATE_LABEL} of card value in your vault.
-      </p>
+      {!allCapsules && (
+        <p className="mb-4 text-[12px] leading-relaxed text-neutral-400">
+          Instant buyback rates apply during the reveal countdown. Leaving the
+          reveal or letting its timer expire changes buyback to{' '}
+          {BUYBACK_RATE_LABEL} of card value in your vault.
+        </p>
+      )}
 
       {/* Franchise switch — only once there are two to pick from. Not sticky:
           the app header is sticky itself and would cover it. */}
-      {categories.length > 1 && (
+      {tabs.length > 1 && (
         <div className="mb-6">
-          <PackCategoryTabs
-            categories={categories}
-            active={active}
-            onChange={pick}
-          />
+          <PackCategoryTabs categories={tabs} active={active} onChange={pick} />
         </div>
       )}
 
       {/* Empty state — zero packs in the catalog (the backend is the source
-          of truth); only categories with packs are passed in. */}
+          of truth). */}
       {entries.length === 0 && (
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
           No packs available right now — check back soon.
@@ -354,7 +370,9 @@ export default function CatalogClient({
             <div className="mb-4 flex items-center gap-2.5">
               <g.Icon className="h-6 w-6 shrink-0 text-white/80" aria-hidden />
               <h2 className="font-heading text-lg font-bold tracking-tight text-white sm:text-xl">
-                {CATALOG_GROUP_HEADING[id]}
+                {allCapsules && id === 'more'
+                  ? 'More Capsules'
+                  : CATALOG_GROUP_HEADING[id]}
                 {/* The parenthetical is body voice, not Nekst display. Skipped
                   entirely (not rendered empty) when a section has no note
                   that's honest for every pack in it — see GROUP_CHROME above. */}
@@ -368,8 +386,8 @@ export default function CatalogClient({
                 )}
               </h2>
               <span className="ml-auto text-[13px] text-white/60">
-                {byGroup[id].length}{' '}
-                {byGroup[id].length === 1 ? 'pack' : 'packs'}
+                {byGroup[id].length} {allCapsules ? 'capsule' : 'pack'}
+                {byGroup[id].length === 1 ? '' : 's'}
               </span>
             </div>
 

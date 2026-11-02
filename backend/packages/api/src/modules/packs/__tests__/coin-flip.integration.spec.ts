@@ -22,9 +22,9 @@ import TaskDefinition from '../models/task-definition';
 import TaskClaim from '../models/task-claim';
 import RewardsSettings from '../models/rewards-settings';
 import LuckyDrawTicket from '../models/lucky-draw-ticket';
-import { Migration20261031100000 } from '../migrations/Migration20261031100000';
-import { Migration20261031100100 } from '../migrations/Migration20261031100100';
-import { Migration20261031100200 } from '../migrations/Migration20261031100200';
+import { Migration20261103100000 } from '../migrations/Migration20261103100000';
+import { Migration20261103100100 } from '../migrations/Migration20261103100100';
+import { Migration20261103100200 } from '../migrations/Migration20261103100200';
 import { FREE_PULL_LOCKED_MESSAGE } from '../free-pack';
 
 jest.setTimeout(300_000);
@@ -265,7 +265,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     it('refuses unfinished pack cards and validates finalization ownership', async () => {
       const input = await seed();
       await service.updatePulls([{ id: input.pullId, flip_eligible_at: null }]);
-      await expect(service.quoteCoinFlip(input)).rejects.toThrow(/processing/i);
+      await expect(service.quoteCoinFlip(input)).rejects.toThrow(/^Pikachu is still processing/);
       await expect(service.finalizePullsForCoinFlip({ customerId: 'other', pullIds: [input.pullId] })).rejects.toThrow();
       const before = (await pullState(input.pullId)).updated_at;
       await service.finalizePullsForCoinFlip({ customerId: input.customerId, pullIds: [input.pullId] });
@@ -697,17 +697,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
     it('applies real migration checks and refuses destructive rollback once a round exists', async () => {
       const em = MikroOrmWrapper.forkManager();
-      const migration = Object.create(Migration20261031100000.prototype) as Migration20261031100000;
+      const migration = Object.create(Migration20261103100000.prototype) as Migration20261103100000;
       const sql: string[] = [];
       migration.addSql = statement => { if (typeof statement !== 'string') throw new Error('Expected SQL text.'); sql.push(statement); };
       await migration.up();
       for (const statement of sql) await em.execute(statement);
-      const uncapped = Object.create(Migration20261031100100.prototype) as Migration20261031100100;
+      const uncapped = Object.create(Migration20261103100100.prototype) as Migration20261103100100;
       uncapped.addSql = statement => { sql.push(statement as string); };
       sql.length = 0;
       await uncapped.up();
       for (const statement of sql) await em.execute(statement);
-      const tickets = Object.create(Migration20261031100200.prototype) as Migration20261031100200;
+      const tickets = Object.create(Migration20261103100200.prototype) as Migration20261103100200;
       tickets.addSql = statement => { sql.push(statement as string); };
       sql.length = 0;
       await tickets.up();

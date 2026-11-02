@@ -3,7 +3,7 @@ import { Input, Label, Prompt, Text } from '@medusajs/ui';
 
 /**
  * A confirm dialog that also asks for the audit reason every Lucky Draw write
- * needs (publish, cancel). Mount it only while it is wanted: the reason is
+ * needs (publish, cancel, withdraw). Mount it only while it is wanted: the reason is
  * local state, so a fresh mount is a blank box — no reset effect.
  *
  * The action does not close the dialog itself (`preventDefault` below): on a
@@ -49,7 +49,7 @@ export const ReasonPrompt = ({
             id="ld-reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. November draw is ready"
+            placeholder="e.g. Prizes are ready"
           />
           <Text size="small" className="text-ui-fg-subtle">
             Recorded against your admin account. Required.

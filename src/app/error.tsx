@@ -1,7 +1,7 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
+import { reportClientError } from '@/lib/report-client-error';
 import { reloadForVersionSkew } from '@/lib/version-skew';
 
 export default function Error({
@@ -16,7 +16,7 @@ export default function Error({
   // instrumentation onRequestError hook covers server-side errors.) A tab
   // stranded on a previous deploy reloads instead: reset() can't cure it.
   useEffect(() => {
-    Sentry.captureException(error);
+    reportClientError(error);
     reloadForVersionSkew(error);
   }, [error]);
 

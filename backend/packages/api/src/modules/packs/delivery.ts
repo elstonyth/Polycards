@@ -40,6 +40,24 @@ export const CUSTOMER_STATUS_WORD: Record<string, string> = {
   delivered: 'delivered',
 };
 
+// The customer's own cancel window closes at the 12am cutoff: once the nightly
+// stock run moves an order out of `requested` (to processed, purchasing starts
+// buying its cards) only the operator may cancel it (owner, 2026-10-28).
+// Deliberately NARROWER than ALLOWED below, which still routes processed /
+// ready_to_ship -> canceled for the admin surface. Checked twice: by the
+// store cancel route up front, and under the order's lock in
+// transitionDeliveryOrderStatus (allowedFrom), so a cancel racing the 12am
+// run cannot land on the order the run just moved.
+export const CUSTOMER_CANCELABLE: readonly string[] = ['requested'];
+
+/** The refusal a customer sees when their order is out of that window. */
+export const customerCancelRefusal = (status: string): string =>
+  status === 'canceled'
+    ? 'This delivery is already canceled.'
+    : // Human wording, never the raw enum: "completed" is operator vocabulary
+      // and "ready_to_ship" is snake_case (same rule as the address-edit lock).
+      `This delivery is already ${CUSTOMER_STATUS_WORD[status] ?? status} and can no longer be canceled — please contact support.`;
+
 type PullLike = {
   id: string;
   customer_id: string;

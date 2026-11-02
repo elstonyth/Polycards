@@ -128,6 +128,18 @@ describe('coin flip boundary', () => {
       });
     },
   );
+  it('names the card still processing, even one named like another refusal', async () => {
+    const message =
+      'Paused Expired Mew is still processing. Please try again later.';
+    backend({
+      'POST /store/coin-flips/quotes': { status: 400, body: { message } },
+    });
+    expect(await quoteCoinFlip(['pull_1'], 'head')).toMatchObject({
+      ok: false,
+      uncertain: false,
+      error: message,
+    });
+  });
   it('words ticket refusals as tickets', async () => {
     backend({
       'POST /store/coin-flips/quotes': {

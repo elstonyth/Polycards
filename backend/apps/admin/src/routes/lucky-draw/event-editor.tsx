@@ -1,11 +1,21 @@
 import { useState } from 'react';
-import { Button, Drawer, Input, Text, toast } from '@medusajs/ui';
+import { Button, Drawer, Input, Select, Text, toast } from '@medusajs/ui';
 import { useSaveLuckyDrawEvent } from '../../lib/queries';
 import { Field, Section } from '../../components/form-bits';
 import { toIso } from '../tasks/task-draft';
 import { CreditPrizeRows } from './credit-prize-rows';
 import { InventoryPicker } from './inventory-picker';
-import { eventDraftToPayload, type EventDraft } from './lucky-draw-draft';
+import {
+  eventDraftToPayload,
+  hoursBetween,
+  hoursProblem,
+  RUN_LENGTHS,
+  TIER_LABEL,
+  whenLabel,
+  withRunLength,
+  type EventDraft,
+} from './lucky-draw-draft';
+import { windowProblem } from './one-winner';
 import {
   MAX_NEW_EVENT_PRIZES,
   newEventPayload,
@@ -14,20 +24,17 @@ import {
   type PoolCredit,
 } from './prize-pool';
 
-/** Create or edit an event: name and window. Once published only the name may
- *  change (the window is what customers saw), so the times lock. A NEW event
- *  also takes its prize pool — cards picked from the inventory plus credit
- *  prizes — and is created with them in one request. An existing event's
- *  prizes are the prize editor's. */
+/** Create or edit a draft event: its window. A NEW event also takes its prize
+ *  pool — cards picked from the inventory plus credit prizes — and is created
+ *  with them in one request. An existing event's prizes are the prize editor's.
+ *  Once published nothing here may change: the window is what customers saw. */
 export const EventEditor = ({
   draft,
-  published,
   onChange,
   onSaved,
   onClose,
 }: {
   draft: EventDraft;
-  published: boolean;
   onChange: (d: EventDraft) => void;
   onSaved: (id: string) => void;
   onClose: () => void;
@@ -36,19 +43,28 @@ export const EventEditor = ({
   const [reason, setReason] = useState('');
   const [cards, setCards] = useState<PoolCard[]>([]);
   const [credits, setCredits] = useState<PoolCredit[]>([]);
+  // As typed, so "1." survives. The end follows it only on a change: opening a
+  // draft and saving it leaves a window that isn't whole hours exactly as it was.
+  const [hours, setHours] = useState(() =>
+    hoursBetween(draft.startsAt, draft.endsAt),
+  );
+
+  const setWindow = (startsAt: string, runHours: string) => {
+    setHours(runHours);
+    onChange(withRunLength(draft, startsAt, runHours));
+  };
+  const endsIso = toIso(draft.endsAt);
+  // A saved end stands until the hours change, so an older, longer draft still
+  // opens and saves as it was.
+  const hoursBad = endsIso ? null : hoursProblem(hours);
 
   const creating = !draft.id;
   const payload = creating
     ? newEventPayload(draft, cards, credits)
     : eventDraftToPayload(draft);
   const poolFull = cards.length + credits.length >= MAX_NEW_EVENT_PRIZES;
-  const starts = toIso(draft.startsAt);
-  const ends = toIso(draft.endsAt);
-  const windowBad =
-    starts && ends && new Date(ends).getTime() <= new Date(starts).getTime()
-      ? 'The end must be after the start.'
-      : null;
-  const valid = payload !== null && reason.trim() !== '';
+  const windowBad = windowProblem(draft);
+  const valid = payload !== null && windowBad === null && reason.trim() !== '';
 
   const submit = () => {
     if (!payload || !valid) return;
@@ -83,46 +99,84 @@ export const EventEditor = ({
         </Drawer.Header>
         <Drawer.Body className="flex flex-col gap-5 overflow-y-auto">
           <Field
-            label="Name"
-            htmlFor="ld-event-name"
-            hint="Shown to players as the draw's title."
+            label="Tier"
+            htmlFor="ld-event-tier"
+            hint="Printed on the ticket, and what players filter by."
+            className="w-56"
           >
-            <Input
-              id="ld-event-name"
-              value={draft.name}
-              maxLength={80}
-              onChange={(e) => onChange({ ...draft, name: e.target.value })}
-              placeholder="e.g. November Lucky Draw"
-            />
+            <Select
+              value={draft.tier}
+              onValueChange={(tier) =>
+                onChange({ ...draft, tier: tier as EventDraft['tier'] })
+              }
+            >
+              <Select.Trigger id="ld-event-tier">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {Object.entries(TIER_LABEL).map(([value, label]) => (
+                  <Select.Item key={value} value={value}>
+                    {label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
           </Field>
-
           <div className="flex flex-wrap gap-4">
             <Field label="Starts" htmlFor="ld-event-starts" className="w-56">
               <Input
                 id="ld-event-starts"
                 type="datetime-local"
                 value={draft.startsAt}
-                disabled={published}
-                onChange={(e) =>
-                  onChange({ ...draft, startsAt: e.target.value })
-                }
+                onChange={(e) => setWindow(e.target.value, hours)}
               />
             </Field>
-            <Field label="Ends" htmlFor="ld-event-ends" className="w-56">
+            <Field
+              label="Hours from start"
+              htmlFor="ld-event-hours"
+              hint="Counted from the start, not from publish."
+              className="w-56"
+            >
               <Input
-                id="ld-event-ends"
-                type="datetime-local"
-                value={draft.endsAt}
-                disabled={published}
-                onChange={(e) => onChange({ ...draft, endsAt: e.target.value })}
+                id="ld-event-hours"
+                inputMode="decimal"
+                value={hours}
+                onChange={(e) => setWindow(draft.startsAt, e.target.value)}
               />
             </Field>
           </div>
-          <Text size="small" className="text-ui-fg-subtle -mt-3">
-            {published
-              ? 'A published event can only be renamed — its window is fixed.'
-              : 'Your browser’s time zone. Malaysia time is UTC+8.'}
+          <div
+            className="-mt-3 flex flex-wrap gap-1"
+            role="group"
+            aria-label="Run length"
+          >
+            {RUN_LENGTHS.map((r) => (
+              <Button
+                key={r.hours}
+                size="small"
+                type="button"
+                variant={hours === String(r.hours) ? 'primary' : 'secondary'}
+                aria-pressed={hours === String(r.hours)}
+                onClick={() => setWindow(draft.startsAt, String(r.hours))}
+              >
+                {r.label}
+              </Button>
+            ))}
+          </div>
+          <Text size="small" weight="plus" aria-live="polite">
+            {endsIso
+              ? `Ends ${whenLabel(endsIso)}`
+              : 'No end yet: pick a start and hours.'}
           </Text>
+          <Text size="small" className="text-ui-fg-subtle -mt-3">
+            Your browser’s time zone. Malaysia time is UTC+8. Any number of
+            events can run at the same time.
+          </Text>
+          {hoursBad && (
+            <Text size="small" className="text-ui-fg-error -mt-3">
+              {hoursBad}
+            </Text>
+          )}
           {windowBad && (
             <Text size="small" className="text-ui-fg-error -mt-3">
               {windowBad}
@@ -153,8 +207,7 @@ export const EventEditor = ({
                   {poolSummary(cards, credits)}
                 </Text>
                 <Text size="small" className="text-ui-fg-subtle">
-                  Each prize draws when the event ends. Change a prize’s draw
-                  time after creating it.
+                  One winner takes every prize when the event ends.
                 </Text>
                 {poolFull && (
                   <Text size="small" className="text-ui-fg-subtle">
@@ -174,7 +227,7 @@ export const EventEditor = ({
               id="ld-event-reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Set up the November draw"
+              placeholder="e.g. Set up the next pool"
             />
           </Field>
         </Drawer.Body>

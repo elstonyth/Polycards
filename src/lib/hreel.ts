@@ -55,15 +55,26 @@ export const NEUTRAL_CARD_SPRITE =
 
 /** A reel cell. `image` is set only for a card with a custom sprite and NO
  *  Pokémon (One Piece characters): it is what the cell draws, and `dex` is then
- *  0 (no species). Pokémon cells keep drawing their dex sprite as before. */
-export type HReelCell = { dex: number; rarity: Rarity; image?: string };
+ *  0 (no species). Pokémon cells keep drawing their dex sprite as before.
+ *  `label` is a ticket row's amount, drawn over the art as live text. */
+export type HReelCell = {
+  dex: number;
+  rarity: Rarity;
+  image?: string;
+  label?: string;
+};
+
+/** The amount a ticket tile shows. */
+export const ticketReelLabel = (tickets: number): string => `x${tickets}`;
 
 /** Cell identity for the no-adjacent-repeat checks: the species when there is
  *  one (a seeded-linked winner carries BOTH its dex and an image URL, and must
  *  still match the dex-only decoys of the same Pokémon), else the custom image —
- *  so two different dex-less sprites (both dex 0) never count as a repeat. */
-const spriteOf = (c: Pick<HReelCell, 'dex' | 'image'>): number | string =>
-  c.dex > 0 ? c.dex : (c.image ?? c.dex);
+ *  so two different dex-less sprites (both dex 0) never count as a repeat. Every
+ *  ticket tile shares one image, so only its amount tells it apart. */
+const spriteOf = (
+  c: Pick<HReelCell, 'dex' | 'image' | 'label'>,
+): number | string => c.label ?? (c.dex > 0 ? c.dex : (c.image ?? c.dex));
 
 /**
  * Decoy flicker pool from the pack's OWN cards: each entry pairs a card's
@@ -83,13 +94,24 @@ const spriteOf = (c: Pick<HReelCell, 'dex' | 'image'>): number | string =>
 export function buildDecoyPool(
   cards: readonly Pick<
     PackCard,
-    'name' | 'set' | 'pokemonDex' | 'spriteImage' | 'rarity'
+    'name' | 'set' | 'pokemonDex' | 'spriteImage' | 'rarity' | 'tickets'
   >[],
   { pokemon = true }: { pokemon?: boolean } = {},
 ): HReelCell[] {
   const seen = new Set<string>();
   const out: HReelCell[] = [];
   for (const c of cards) {
+    if (c.tickets != null) {
+      // One row per amount (the backend's unique index), so nothing to dedupe,
+      // and no name to read a Pokémon out of.
+      out.push({
+        dex: 0,
+        rarity: c.rarity,
+        image: c.spriteImage ?? undefined,
+        label: ticketReelLabel(c.tickets),
+      });
+      continue;
+    }
     const { dex, sprite } = resolveCardPokemon(
       {
         name: c.name,
@@ -214,6 +236,7 @@ function mulberry32(seed: number): () => number {
 export function buildPressStrip({
   winnerDex,
   winnerImage,
+  winnerLabel,
   winnerRarity,
   winIndex,
   keepCells,
@@ -224,6 +247,8 @@ export function buildPressStrip({
   winnerDex: number | null;
   /** The won card's custom sprite, when it has one (ReelStrip draws it). */
   winnerImage?: string;
+  /** A ticket win's amount, drawn over the art. */
+  winnerLabel?: string;
   winnerRarity: Rarity;
   winIndex: number;
   keepCells: number;
@@ -259,7 +284,12 @@ export function buildPressStrip({
   // A custom-sprite winner shows its own image (dex 0 if it has no species);
   // garbage with no image falls back to the first POOL cell, sprite and all.
   const winnerCell: HReelCell = winnerImage
-    ? { dex: validDex ?? 0, rarity: winnerRarity, image: winnerImage }
+    ? {
+        dex: validDex ?? 0,
+        rarity: winnerRarity,
+        image: winnerImage,
+        ...(winnerLabel ? { label: winnerLabel } : {}),
+      }
     : validDex !== null
       ? { dex: validDex, rarity: winnerRarity }
       : { ...pool[0]!, rarity: winnerRarity };

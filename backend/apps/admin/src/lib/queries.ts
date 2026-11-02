@@ -23,6 +23,7 @@ import {
 import {
   adjustCustomerCredits,
   bulkUpdateDeliveryOrders,
+  checkDeliveryTracking,
   createProductFromPriceCharting,
   deleteCard,
   deletePack,
@@ -59,6 +60,8 @@ import {
   getGatewayBalance,
   getGatewayAudit,
   acknowledgeAuditFinding,
+  creditGatewayDeposit,
+  getMoneyIntegrity,
   getPaymentGateway,
   savePaymentGateway,
   getWithdrawalControls,
@@ -69,6 +72,7 @@ import {
   type SettlementReport,
   type GatewayBalance,
   type GatewayAudit,
+  type MoneyIntegrity,
   type PaymentGatewaySetting,
   getFxHistory,
   getFxRate,
@@ -134,6 +138,7 @@ import {
   listCustomerGroupsAdmin,
   setGroupOddsSet,
   setGroupPolicy,
+  setGroupDraftAccess,
   createCustomerGroupAdmin,
   countCustomersInGroup,
   setCustomerGroup,
@@ -153,11 +158,16 @@ import {
   listLuckyDraw,
   saveLuckyDrawEvent,
   publishLuckyDrawEvent,
+  withdrawLuckyDrawEvent,
   saveLuckyDrawPrize,
   cancelLuckyDrawPrize,
   listLuckyDrawEntries,
+  listLuckyDrawEventEntrants,
   getLuckyDrawTickets,
   adjustCustomerTickets,
+  getTicketPrizes,
+  saveTicketPrizes,
+  type AdminTicketPrizeEntry,
   type AdminLuckyDrawEvent,
   listAnnouncements,
   saveAnnouncement,
@@ -218,16 +228,13 @@ export const usePricingHealth = (): UseQueryResult<PricingHealth> =>
     refetchOnWindowFocus: true,
   });
 
-// `customerId` scopes the ledger to one player (the player-detail tabs). Blank
-// is OMITTED by getPulls, never sent as an empty param — the route 400s on one.
 export const usePulls = (
   page = 0,
   source?: 'pack' | 'reward',
-  customerId?: string,
 ): UseQueryResult<PullsResponse> =>
   useQuery({
-    queryKey: qk.pulls(page, source, customerId),
-    queryFn: () => getPulls(page, 50, source, customerId),
+    queryKey: qk.pulls(page, source),
+    queryFn: () => getPulls(page, 50, source),
     placeholderData: keepPreviousData,
   });
 
@@ -374,6 +381,14 @@ export const useGatewayAudit = (
     refetchOnWindowFocus: false,
   });
 
+export const useMoneyIntegrity = (): UseQueryResult<MoneyIntegrity> =>
+  useQuery({
+    queryKey: qk.moneyIntegrity,
+    queryFn: getMoneyIntegrity,
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
 export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
   useQuery({ queryKey: qk.paymentGateway, queryFn: getPaymentGateway });
 
@@ -408,6 +423,20 @@ export const useAcknowledgeFinding = () => {
     onSuccess: () => toast.success(t('settlement.acknowledgedToast')),
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     // Also after a refusal: a 409 means the note changed, so show the new one.
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] }),
+  });
+};
+
+// Settlement's Credit deposit. Same refetch as Acknowledge, also after a
+// refusal: the refusal usually means the row has changed.
+export const useCreditDeposit = () => {
+  const qc = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: creditGatewayDeposit,
+    onSuccess: () => toast.success(t('settlement.creditedToast')),
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () =>
       qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] }),
   });
@@ -501,15 +530,19 @@ export const useCustomerTransactions = (
 export const useCustomerPulls = (
   id: string | null,
   page = 0,
-  // status only — getCustomerPulls also accepts `source`, but nothing needs it
-  // here and an un-keyed filter would collide in the cache.
-  opts?: { status?: string; sort?: 'newest' | 'value' },
+  opts?: { status?: string; source?: string; sort?: 'newest' | 'value' },
 ): UseQueryResult<{
   items: SupportPull[];
   total: number;
   fx?: { rate: number; firm: boolean };
 }> => {
-  const queryKey = qk.customerPulls(id ?? '', page, opts?.status, opts?.sort);
+  const queryKey = qk.customerPulls(
+    id ?? '',
+    page,
+    opts?.status,
+    opts?.sort,
+    opts?.source,
+  );
   return useQuery({
     queryKey,
     queryFn: () => getCustomerPulls(id!, page, 25, opts),
@@ -650,6 +683,9 @@ export const useUpdatePack = () => {
   return useMutation({
     mutationFn: (vars: { slug: string } & AdminPackWrite) => {
       const { slug, ...payload } = vars;
+      // Fixed at creation. Callers spread a whole AdminPack in here, and the
+      // route refuses to change it, so it never travels.
+      delete payload.prize_type;
       return packsApi.admin.packs.$slug.mutate({ $slug: slug, ...payload });
     },
     // The pack's status also renders on its odds-editor page (activate /
@@ -730,6 +766,25 @@ export const useSaveOdds = () =>
         target_rtp_bps: vars.target_rtp_bps,
       }),
   });
+
+export const useTicketPrizes = (slug: string) =>
+  useQuery({
+    queryKey: qk.ticketPrizes(slug),
+    queryFn: () => getTicketPrizes(slug),
+    enabled: !!slug,
+  });
+
+export const useSaveTicketPrizes = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { slug: string; rows: AdminTicketPrizeEntry[] }) =>
+      saveTicketPrizes(vars.slug, vars.rows),
+    // A save can add or remove rows, so the editor reseeds. Returned so
+    // mutateAsync resolves only after the refetch.
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: qk.ticketPrizes(vars.slug) }),
+  });
+};
 
 export const useSaveMembers = () => {
   const qc = useQueryClient();
@@ -882,7 +937,7 @@ export const useUploadImage = () =>
   });
 
 export const useUpdateDeliveryOrder = () => {
-  const qc = useQueryClient();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (vars: {
       id: string;
@@ -895,19 +950,31 @@ export const useUpdateDeliveryOrder = () => {
         tracking_number: vars.tracking_number,
         proof_images: vars.proof_images,
       }),
-    // Status filters + pages vary, so drop the whole delivery-orders namespace.
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
+    // Status filters + pages vary, so drop the whole delivery-orders
+    // namespace — and the Stock buckets and Procurement lists a status move
+    // changes (useInvalidateStock covers all of them).
+    onSuccess: () => invalidateStock(),
   });
 };
 
 export const useBulkUpdateDeliveryOrders = () => {
-  const qc = useQueryClient();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (vars: { ids: string[]; status: DeliveryStatus }) =>
       bulkUpdateDeliveryOrders(vars.ids, vars.status),
     // Partial success is the contract, so invalidate on SETTLE (not success):
     // a throw here can still leave earlier ids in the batch already moved.
-    onSettled: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
+    onSettled: () => invalidateStock(),
+  });
+};
+
+// Completions flip stock (shipped cards leave the shelf count) the same way a
+// bulk move does, so it invalidates the same keys.
+export const useCheckDeliveryTracking = () => {
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: checkDeliveryTracking,
+    onSettled: () => invalidateStock(),
   });
 };
 
@@ -1428,11 +1495,17 @@ export const useCustomerDetail = (
 
 export type { AdminCustomerGroup } from './admin-rest';
 
-export const useCustomerGroupsAdmin = (): UseQueryResult<{
+export const useCustomerGroupsAdmin = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<{
   customer_groups: AdminCustomerGroup[];
   count: number;
 }> =>
-  useQuery({ queryKey: qk.customerGroups, queryFn: listCustomerGroupsAdmin });
+  useQuery({
+    queryKey: qk.customerGroups,
+    queryFn: listCustomerGroupsAdmin,
+    enabled: opts.enabled ?? true,
+  });
 
 // Writes one group's metadata.odds_set. Invalidates the list so the saved value
 // is re-read from the server rather than trusted from local state.
@@ -1461,6 +1534,19 @@ export const useSetGroupPolicy = () => {
       setGroupPolicy(vars.id, vars.policy, vars.reason),
     onSuccess: () => {
       toast.success('Group policy saved');
+      return qc.invalidateQueries({ queryKey: qk.customerGroups });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useSetGroupDraftAccess = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; seesDrafts: boolean; reason: string }) =>
+      setGroupDraftAccess(vars.id, vars.seesDrafts, vars.reason),
+    onSuccess: () => {
+      toast.success('Draft access saved');
       return qc.invalidateQueries({ queryKey: qk.customerGroups });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
@@ -1606,19 +1692,27 @@ export const usePurchaseInvoice = (
 // movement, so on_hand and the weighted-average cost change on the list and the
 // movement history changes on the item detail. Without invalidating them the
 // dashboard's 90 s staleTime (with refetchOnWindowFocus off) shows On Hand 0 and
-// "No purchase history recorded" for stock the operator just bought.
+// "No purchase history recorded" for stock the operator just bought. Since spec
+// 2026-10-28 a save also re-runs the stock allocation (orders move to
+// ready_to_ship) and can close a GRN by transfer — useInvalidateStock covers
+// those caches along with both inventory roots.
 export const useCreatePurchaseInvoice = () => {
   const qc = useQueryClient();
-  const invalidateInventory = useInvalidateInventory();
+  const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: (body: CreatePurchaseInvoiceBody) =>
       createPurchaseInvoice(body),
     onSuccess: () => {
       toast.success('Purchase invoice created');
       qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey });
-      invalidateInventory();
+      invalidateStock();
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    // A refusal is often "that GRN is no longer open": refresh it so the form
+    // shows its real status instead of failing the same way again.
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+      invalidateStock();
+    },
   });
 };
 
@@ -1748,10 +1842,13 @@ export type {
   ReferralTierWire,
 } from './admin-rest';
 
-export const useReferralSettings = (): UseQueryResult<ReferralSettings> =>
+export const useReferralSettings = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<ReferralSettings> =>
   useQuery({
     queryKey: qk.referralSettings,
     queryFn: getReferralSettings,
+    enabled: opts.enabled ?? true,
   });
 
 export const useUpdateReferralSettings = () => {
@@ -1903,7 +2000,13 @@ export const useSetPartnerRate = () => {
 export type { AdminTaskDefinition } from './admin-rest';
 
 export const useTaskDefinitions = (): UseQueryResult<AdminTaskDefinition[]> =>
-  useQuery({ queryKey: qk.taskDefinitions, queryFn: listTaskDefinitions });
+  useQuery({
+    queryKey: qk.taskDefinitions,
+    queryFn: listTaskDefinitions,
+    // The board reads "this week" from the fetch time. A page left open across
+    // the Monday reset must not keep calling last week this week.
+    refetchInterval: 60_000,
+  });
 
 export const useSaveTaskDefinition = () => {
   const qc = useQueryClient();
@@ -1911,6 +2014,27 @@ export const useSaveTaskDefinition = () => {
     mutationFn: (input: Parameters<typeof saveTaskDefinition>[0]) =>
       saveTaskDefinition(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.taskDefinitions }),
+  });
+};
+
+/** Saves a week's tasks one at a time, each with its own audit row. Stops at the
+ *  first refusal: the list refetches either way, so what landed shows as done.
+ *  Spaced out because these share the admin limit of 30 requests per 10 seconds,
+ *  and a big week would otherwise trip it partway through. */
+export const usePublishTasks = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      tasks: Parameters<typeof saveTaskDefinition>[0][];
+      onProgress: (saved: number) => void;
+    }) => {
+      for (const [i, task] of input.tasks.entries()) {
+        if (i > 0) await new Promise((done) => setTimeout(done, 400));
+        await saveTaskDefinition(task);
+        input.onProgress(i + 1);
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.taskDefinitions }),
   });
 };
 
@@ -1940,6 +2064,11 @@ export const usePublishLuckyDrawEvent = () =>
     publishLuckyDrawEvent(v.id, v.reason),
   );
 
+export const useWithdrawLuckyDrawEvent = () =>
+  useLuckyDrawWrite((v: { id: string; reason: string }) =>
+    withdrawLuckyDrawEvent(v.id, v.reason),
+  );
+
 export const useSaveLuckyDrawPrize = () =>
   useLuckyDrawWrite((v: Parameters<typeof saveLuckyDrawPrize>[0]) =>
     saveLuckyDrawPrize(v),
@@ -1956,6 +2085,12 @@ export const useLuckyDrawEntries = (prizeId: string | null) =>
     queryKey: qk.luckyDrawEntries(prizeId ?? ''),
     queryFn: () => listLuckyDrawEntries(prizeId as string),
     enabled: prizeId !== null,
+  });
+
+export const useLuckyDrawEventEntrants = (eventId: string) =>
+  useQuery({
+    queryKey: [...qk.luckyDraw, 'event-entrants', eventId],
+    queryFn: () => listLuckyDrawEventEntrants(eventId),
   });
 
 // Support lookup: only runs for a submitted id, and never caches a stale
@@ -2014,6 +2149,155 @@ export const useDeleteAnnouncement = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.announcements }),
   });
 };
+
+// ── Goods receive notes + procurement (spec 2026-10-28) ──────────────────────
+import {
+  createGoodsReceiveNote,
+  getGoodsReceiveNote,
+  getProcurementToBuy,
+  getProcurementToShip,
+  listGoodsReceiveNotes,
+  reverseGoodsReceiveNote,
+  type AdminGoodsReceiveNoteDetail,
+  type CreateGoodsReceiveNoteBody,
+  type GoodsReceiveNotesPage,
+  type ProcurementToBuyRow,
+} from './admin-rest';
+
+export type {
+  AdminGoodsReceiveNote,
+  AdminGoodsReceiveNoteDetail,
+  AdminGoodsReceiveNoteLine,
+  CreateGoodsReceiveNoteBody,
+  GoodsReceiveNotesPage,
+  GrnStatus,
+  ProcurementToBuyRow,
+} from './admin-rest';
+
+// Everything a GRN save, a GRN reversal or an invoice save can move: on hand
+// and the buckets (both inventory roots), the two daily lists, a GRN's status
+// (open -> transferred / reversed), and order statuses — the server re-runs
+// the oldest-first stock allocation after every save, moving orders to
+// processed / ready_to_ship. Returns the folded promise, like
+// useInvalidateInventory, so a caller can await the refetch.
+export const useInvalidateStock = () => {
+  const qc = useQueryClient();
+  return () =>
+    Promise.all(
+      [
+        qk.inventoryKey,
+        qk.inventoryItemKey,
+        qk.procurementKey,
+        qk.deliveryOrdersKey,
+        qk.deliveryOrderKey,
+        qk.goodsReceiveNotesKey,
+        qk.goodsReceiveNoteKey,
+      ]
+        .map((queryKey) => qc.invalidateQueries({ queryKey }))
+        .concat(
+          // A shipment moves a player's cards and fees: their vault, tiles and
+          // wallet must not wait out the stale time.
+          qc.invalidateQueries({
+            predicate: (q) =>
+              q.queryKey[0] === 'admin' &&
+              q.queryKey[1] === 'customer' &&
+              ['pulls', 'money', 'gacha', 'transactions'].includes(
+                String(q.queryKey[3]),
+              ),
+          }),
+        ),
+    );
+};
+
+export const useGoodsReceiveNotes = (
+  page = 0,
+  q?: string,
+  sort = 'created_at:desc',
+): UseQueryResult<GoodsReceiveNotesPage> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNotes(page, q, sort),
+    queryFn: () => listGoodsReceiveNotes(page, q, 50, sort),
+    placeholderData: keepPreviousData,
+  });
+
+// The invoice form's transfer picker: GRNs still waiting for their invoice,
+// newest first, one page of the route's max 100. Gated on `enabled` (the
+// picker drawer being open) — it is modal-only data; a ?from_grn= deep link
+// loads its one GRN through useGoodsReceiveNote instead.
+//
+// shortcut: an open GRN older than the newest 100 cannot be picked here; its
+// detail page's "Transfer to purchase invoice" button still reaches it.
+export const useOpenGoodsReceiveNotes = (
+  enabled: boolean,
+): UseQueryResult<GoodsReceiveNotesPage> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNotes(0, undefined, 'created_at:desc', 'open'),
+    queryFn: () =>
+      listGoodsReceiveNotes(0, undefined, 100, 'created_at:desc', 'open'),
+    enabled,
+  });
+
+export const useGoodsReceiveNote = (
+  id: string | null,
+): UseQueryResult<{ goods_receive_note: AdminGoodsReceiveNoteDetail }> =>
+  useQuery({
+    queryKey: qk.goodsReceiveNote(id ?? ''),
+    queryFn: () => getGoodsReceiveNote(id as string),
+    enabled: !!id,
+  });
+
+export const useCreateGoodsReceiveNote = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: (body: CreateGoodsReceiveNoteBody) =>
+      createGoodsReceiveNote(body),
+    onSuccess: () => {
+      toast.success(t('grn.created'));
+      invalidateStock();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// The reverse route does not re-run the allocation, but on hand drops, so the
+// buckets and the to-buy list still move — same invalidation as a save.
+export const useReverseGoodsReceiveNote = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: (id: string) => reverseGoodsReceiveNote(id),
+    onSuccess: () => {
+      toast.success(t('grn.reversed'));
+      invalidateStock();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useProcurementToBuy = (): UseQueryResult<{
+  rows: ProcurementToBuyRow[];
+  taken_at: string | null;
+}> =>
+  useQuery({
+    queryKey: qk.procurementToBuy,
+    queryFn: getProcurementToBuy,
+    // A page left open past 12am picks up the new list on return, or within
+    // ten minutes while it stays in front.
+    refetchOnWindowFocus: true,
+    refetchInterval: 10 * 60 * 1000,
+  });
+
+export const useProcurementToShip = (
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<{
+  orders: AdminDeliveryOrder[];
+}> =>
+  useQuery({
+    queryKey: qk.procurementToShip,
+    queryFn: getProcurementToShip,
+    enabled: opts.enabled ?? true,
+  });
 
 // ── Dashboard (spec §7) ──────────────────────────────────────────────────────
 // Light reads for the home page: a count per delivery status (limit 1, only

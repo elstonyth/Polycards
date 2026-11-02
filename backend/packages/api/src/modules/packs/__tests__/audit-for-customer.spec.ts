@@ -48,6 +48,48 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(actions).toContain('adjust_credit');      // credit-keyed (the silently-dropped one)
         expect(res.account_state?.frozen).toBe(true);
       });
+
+      it("shows this player's bonus grants and pack gifts, nobody else's", async () => {
+        await service.adminAdjustCredit({
+          customerId: 'au_B',
+          amount: 5,
+          note: 'goodwill',
+          adminId: 'adm_1',
+          bonus: true,
+        });
+        const gift = async (customerId: string) => {
+          const [row] = await service.createPackGifts([
+            {
+              customer_id: customerId,
+              pack_id: 'gift-pack',
+              value_myr: 10,
+              note: 'gift',
+              granted_by: 'adm_1',
+              grant_key: `key-${customerId}`,
+            },
+          ]);
+          await service.createAdminActionAudits([
+            {
+              admin_id: 'adm_1',
+              entity_type: 'pack_gift',
+              entity_id: row.id,
+              action: 'grant_pack_gift',
+              reason: 'gift',
+            },
+          ]);
+        };
+        await gift('au_B');
+        await gift('au_other');
+
+        const res = await service.auditForCustomer('au_B', {
+          limit: 50,
+          offset: 0,
+        });
+        expect(res.actions.map((a) => a.action).sort()).toEqual([
+          'grant_bonus_credit',
+          'grant_pack_gift',
+        ]);
+      });
     });
   },
 });

@@ -58,6 +58,67 @@ const base = {
   reason: 'retire',
 };
 
+describe('saveTaskDefinition: a Lucky Draw tickets reward', () => {
+  const reward = { type: 'tickets' };
+  const fresh = {
+    kind: 'weekly' as const,
+    title: 'Check in 1 day',
+    requirement: { type: 'checkin_days', days: 1 },
+    reward,
+    active: true,
+    sort: 0,
+    adminId: 'adm_1',
+    reason: 'seed',
+  };
+  const saved = { ...EXISTING, ...fresh, id: 'task_1', tickets: 50 };
+
+  it('refuses a new task that would pay nothing', async () => {
+    for (const tickets of [undefined, 0]) {
+      const f = fakeSave(null);
+      await expect(
+        f.svc.saveTaskDefinition({ ...fresh, tickets }, f.ctx),
+      ).rejects.toThrow(/at least 1 ticket/);
+      expect(f.createTaskDefinitions).not.toHaveBeenCalled();
+    }
+  });
+
+  it('saves with at least one ticket, the amount in the tickets column', async () => {
+    const f = fakeSave(null);
+    await expect(
+      f.svc.saveTaskDefinition({ ...fresh, tickets: 50 }, f.ctx),
+    ).resolves.toEqual({ id: 'task_new' });
+    expect(f.createTaskDefinitions).toHaveBeenCalledWith(
+      [expect.objectContaining({ reward, tickets: 50 })],
+      expect.anything(),
+    );
+  });
+
+  it('an edit that omits tickets keeps them, so Retire still saves', async () => {
+    const f = fakeSave(saved);
+    await expect(
+      f.svc.saveTaskDefinition(
+        { ...fresh, id: 'task_1', active: false },
+        f.ctx,
+      ),
+    ).resolves.toEqual({ id: 'task_1' });
+    expect(f.updateTaskDefinitions).toHaveBeenCalledWith(
+      {
+        selector: { id: 'task_1' },
+        data: expect.objectContaining({ tickets: 50, active: false }),
+      },
+      expect.anything(),
+    );
+  });
+
+  it('an edit cannot clear the tickets out of a tickets reward', async () => {
+    const f = fakeSave(saved);
+    await expect(
+      f.svc.saveTaskDefinition({ ...fresh, id: 'task_1', tickets: 0 }, f.ctx),
+    ).rejects.toThrow(/at least 1 ticket/);
+    expect(f.updateTaskDefinitions).not.toHaveBeenCalled();
+  });
+});
+
 describe('saveTaskDefinition re-validates targets only when they change', () => {
   it('Retire (active toggle) on a task whose reward card was deleted saves', async () => {
     const f = fakeSave();
@@ -73,6 +134,29 @@ describe('saveTaskDefinition re-validates targets only when they change', () => 
       expect.anything(),
     );
     expect(f.createAdminActionAudits).toHaveBeenCalledTimes(1);
+  });
+
+  it('Retire on an old row with a leftover key and a deleted target still saves', async () => {
+    const f = fakeSave({
+      ...EXISTING,
+      requirement: { type: 'rip_count', count: 3, pack_id: 'gone', days: 1 },
+      reward: { type: 'card', card_handle: 'gone-card', pack_id: 'old' },
+      kind: 'weekly',
+    });
+    await expect(
+      f.svc.saveTaskDefinition(
+        {
+          ...base,
+          kind: 'weekly',
+          requirement: { type: 'rip_count', count: 3, pack_id: 'gone', days: 1 },
+          reward: { type: 'card', card_handle: 'gone-card', pack_id: 'old' },
+          active: false,
+        },
+        f.ctx,
+      ),
+    ).resolves.toEqual({ id: 'task_1' });
+    expect(f.listPacks).not.toHaveBeenCalled();
+    expect(f.listCards).not.toHaveBeenCalled();
   });
 
   it('the comparison is key-order insensitive (jsonb does not keep ours)', async () => {
@@ -351,12 +435,23 @@ describe('taskFactsFor splits today out of the task week', () => {
     expect(topupSql).toMatch(/reason = 'topup' AND amount > 0/);
     expect(topupSql).toMatch(/deleted_at IS NULL/);
     expect(topupSql).toMatch(/bonus_cents/);
-    // The period pixel counts are paid pulls only; the lifetime one is not.
+    // The period pixel counts are paid pulls only, whatever paid them; the
+    // lifetime one is not.
     const pixelSql = execute.mock.calls.find(([sql]) =>
       sql.includes('GROUP BY c.pixel_pokemon_id'),
     )![0];
-    expect(pixelSql.match(/p\.source = 'pack'/g)).toHaveLength(2);
+    expect(pixelSql.match(/p\.source IN \('pack', 'bonus'\)/g)).toHaveLength(2);
     expect(pixelSql).not.toMatch(/WHERE p\.customer_id = \? AND p\.source/);
+    // Rips and the lifetime counts take older bonus rows too; gifts stay out.
+    const ripSql = execute.mock.calls.find(([sql]) =>
+      sql.includes('GROUP BY pack_id'),
+    )![0];
+    expect(ripSql.match(/source IN \('pack', 'bonus'\)/g)).toHaveLength(2);
+    expect(pixelSql).toMatch(/FILTER \(WHERE p\.source <> 'gift'\)/);
+    const vaultSql = execute.mock.calls.find(
+      ([sql]) => sql.includes("source <> 'gift'") && !sql.includes('GROUP BY'),
+    )![0];
+    expect(vaultSql).toMatch(/SELECT COUNT\(\*\)::bigint AS n FROM pull/);
   });
 });
 

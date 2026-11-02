@@ -16,9 +16,9 @@ export const TaskDefinition = model.define('task_definition', {
   reward: model.json(),
   active: model.boolean().default(true),
   sort: model.number().default(0),
-  // Lucky Draw tickets a claim of this task earns (spec 2026-10-24). A column,
-  // deliberately NOT a TaskReward variant: claimTask's bare `else` would turn
-  // an unknown reward type into a free rip.
+  // Lucky Draw tickets a claim of this task earns (spec 2026-10-24): on top of
+  // `reward`, or the whole of it when reward.type is 'tickets', which holds no
+  // amount of its own. This column is the one number either way.
   tickets: model.number().default(0),
   // Optional run window, the same datetime-local pair the Weekly Challenge
   // schedule uses. null/null = runs from now until retired. Outside the

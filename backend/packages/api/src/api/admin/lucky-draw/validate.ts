@@ -1,4 +1,8 @@
 import { MedusaError } from '@medusajs/framework/utils';
+import {
+  LUCKY_DRAW_TIERS,
+  type LuckyDrawTier,
+} from '../../../modules/packs/lucky-draw';
 
 const invalid = (message: string): never => {
   throw new MedusaError(MedusaError.Types.INVALID_DATA, message);
@@ -68,10 +72,17 @@ export function parseLuckyDrawEvent(body: unknown): {
   name: string;
   startsAt: Date;
   endsAt: Date;
+  tier?: LuckyDrawTier;
   prizes?: ReturnType<typeof parsePrizeFields>[];
 } {
   const raw = (body ?? {}) as Record<string, unknown>;
   const id = optId(raw.id);
+  if (
+    raw.tier !== undefined &&
+    !LUCKY_DRAW_TIERS.includes(raw.tier as LuckyDrawTier)
+  ) {
+    invalid(`tier must be one of: ${LUCKY_DRAW_TIERS.join(', ')}.`);
+  }
   let prizes: ReturnType<typeof parsePrizeFields>[] | undefined;
   if (raw.prizes != null) {
     if (id) invalid('An existing event takes no prizes here.');
@@ -91,6 +102,7 @@ export function parseLuckyDrawEvent(body: unknown): {
     name: text(raw.name, 'name'),
     startsAt: isoDate(raw.starts_at, 'starts_at'),
     endsAt: isoDate(raw.ends_at, 'ends_at'),
+    ...(raw.tier === undefined ? {} : { tier: raw.tier as LuckyDrawTier }),
     ...(prizes ? { prizes } : {}),
   };
 }

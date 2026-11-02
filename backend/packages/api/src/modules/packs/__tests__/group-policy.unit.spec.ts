@@ -2,6 +2,7 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 import {
   EMPTY_GROUP_POLICY,
   groupPolicyOf,
+  groupSeesDrafts,
   isPartnerGroup,
   resolveGroupPolicyForCustomer,
 } from '../group-policy';
@@ -15,6 +16,41 @@ import {
 // defensive the way coerceOddsSet is: a value that is not exactly what the
 // policy expects is the SAFE default (no partner rate, nothing blocked,
 // nothing exempt), never a guess.
+
+describe('groupSeesDrafts', () => {
+  it('is on only for exactly true', () => {
+    expect(
+      groupSeesDrafts({ name: 'staff', metadata: { sees_drafts: true } }),
+    ).toBe(true);
+    for (const v of ['true', 1, null, undefined, false]) {
+      expect(
+        groupSeesDrafts({ name: 'staff', metadata: { sees_drafts: v } }),
+      ).toBe(false);
+    }
+    expect(groupSeesDrafts({ name: 'staff', metadata: null })).toBe(false);
+  });
+
+  it('never for the default group, whatever its row stores', () => {
+    expect(
+      groupSeesDrafts({ name: 'DEFAULT', metadata: { sees_drafts: true } }),
+    ).toBe(false);
+    expect(
+      groupSeesDrafts({
+        name: 'renamed',
+        metadata: { is_default: true, sees_drafts: true },
+      }),
+    ).toBe(false);
+  });
+
+  it('does not depend on the group being a partner group', () => {
+    const g = {
+      name: 'staff',
+      metadata: { sees_drafts: true, partner_rate_bp: null },
+    };
+    expect(groupPolicyOf(g)).toEqual(EMPTY_GROUP_POLICY);
+    expect(groupSeesDrafts(g)).toBe(true);
+  });
+});
 
 describe('groupPolicyOf', () => {
   it('is empty for a group with no metadata', () => {

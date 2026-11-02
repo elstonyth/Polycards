@@ -1,67 +1,117 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { pillVariants } from '@/components/ui/pill';
+import { useLiveDraw } from '@/components/app-shell/LiveDrawProvider';
+import { ArenaBoundary } from '@/components/draw-arena/ArenaBoundary';
+import { ArenaShow } from '@/components/draw-arena/lazy';
 import { Panel, UnavailablePanel } from '@/components/task-ui';
 import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
 import { mytDate, num } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
-import { getLuckyDraw, getLuckyDrawResult } from '@/lib/actions/lucky-draw';
+import {
+  gatesGone,
+  heroFirst,
+  luckyDrawView,
+  mergeFreshGates,
+  pageGates,
+  rulesCopy,
+} from '@/lib/lucky-draw';
+import {
+  getLuckyDraw,
+  getLuckyDrawEventResult,
+  getLuckyDrawResult,
+} from '@/lib/actions/lucky-draw';
 import type {
+  LuckyDrawGate,
   LuckyDrawPage,
   LuckyDrawPrize,
   LuckyDrawResultDetail,
 } from '@/lib/data/schemas';
-import { EnterSheet, type Entered } from './EnterSheet';
-import { MyTickets } from './MyTickets';
+import { EnterSheet, type Entered, type EnterTarget } from './EnterSheet';
+import { MyEntry } from './MyEntry';
+import { gateTarget, GateList, NoPool, useNewGates } from './GateList';
 import { PrizeCard } from './PrizeCard';
 import { PrizeWheel } from './PrizeWheel';
 import { ResultDetail } from './ResultDetail';
 import { ResultsList } from './ResultsList';
-import { SpinOverlay } from './SpinOverlay';
 import { TicketOpenIntro } from './TicketOpenIntro';
 
 type TabKey = 'prizes' | 'results' | 'mine';
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'prizes', label: 'Prizes' },
+  { key: 'prizes', label: 'Pool' },
   { key: 'results', label: 'Results' },
-  { key: 'mine', label: 'My tickets' },
+  { key: 'mine', label: 'My entry' },
 ];
 
-// The spin moment (spec §10): from a prize's draw time until its result
-// appears (or 5 minutes pass), the cheap per-prize result read is polled —
-// never the whole page — every 5 s plus 0–2 s of jitter, so open tabs do not
-// hit the draw minute in lockstep. One prize per tick, the one polled least
-// recently, so a prize stuck undrawn cannot starve others sharing its draw
-// time. When a prize's window closes without a result, the page is re-read
-// once, so a tab left open does not say "Drawing…" forever.
+// A gate's result is watched for by LiveDrawProvider, for the whole site, and the
+// draw plays in its popup. This polls only what the page itself needs: an old
+// per-prize event's result (the cheap read, never the whole page, every 5 s plus
+// 0–2 s of jitter, the prize polled least recently first), and a re-read when a
+// window closes with no result, so a tab left open does not say "Drawing…" forever.
 const POLL_MS = 5000;
 const POLL_JITTER_MS = 2000;
 const POLL_WINDOW_MS = 5 * 60_000;
+// A gate past that window with no result: its draw is late or failing. Keep
+// looking, slowly, so it cannot sit on "Drawing the winner…" until a reload.
+const LAPSED_REREAD_MS = 60_000;
+// The shared half of the page is cached 10 s on the backend (store view.ts), so
+// a re-read after an entry waits that out: the top 10 then shows the new tickets.
+const TOP_REREAD_MS = 11_000;
 
-/** The /lucky-draw page: Prizes, Results and My tickets. */
+/** The /lucky-draw page: Pool, Results and My entry. */
 export function LuckyDrawClient({
   initial,
   intro,
+  spinHref,
 }: {
   initial: LuckyDrawPage | null;
   /** ?open=1 from the vault's tickets row: play the ticket intro once. */
   intro: boolean;
+  /** Where to spin a capsule for tickets; null with none on sale. */
+  spinHref: string | null;
 }) {
   const reduced = usePrefersReducedMotion();
   const [page, setPage] = useState(initial);
   const [tab, setTab] = useState<TabKey>('prizes');
   const [nowMs, setNowMs] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [entering, setEntering] = useState<LuckyDrawPrize | null>(null);
+  // An old per-prize event's prize, or a gate by id: its target is derived, so a
+  // re-read stays current.
+  const [entering, setEntering] = useState<
+    LuckyDrawPrize | { gateId: string } | null
+  >(null);
   const [detail, setDetail] = useState<LuckyDrawResultDetail | null>(null);
+  // Draws to play here, one at a time: a replay from Results, or an old prize.
   const [spins, setSpins] = useState<LuckyDrawResultDetail[]>([]);
+  const liveDraw = useLiveDraw();
+  const { track, drawn, held } = liveDraw;
+  const gone = useMemo(() => gatesGone(drawn, held), [drawn, held]);
   const [playIntro, setPlayIntro] = useState(intro);
   const endIntro = useCallback(() => setPlayIntro(false), []);
   const pageRef = useRef(page);
+
+  // The gates this tab is done with, and every page re-read goes through them: see
+  // mergeFreshGates.
+  const closedRef = useRef<ReadonlySet<string>>(gone);
+  useEffect(() => {
+    closedRef.current = gone;
+  }, [gone]);
+  // This page can hold a gate newer than the watcher's last status read.
+  useEffect(() => {
+    track(pageGates(page));
+  }, [page, track]);
+  const applyFresh = useCallback((fresh: LuckyDrawPage | null) => {
+    if (!fresh) return;
+    const closed = closedRef.current;
+    const now = Date.now();
+    setPage((prev) =>
+      mergeFreshGates(prev, fresh, closed, now, POLL_WINDOW_MS),
+    );
+  }, []);
 
   useEffect(() => {
     pageRef.current = page;
@@ -89,8 +139,39 @@ export function LuckyDrawClient({
     let timer = 0;
     const polledAt = new Map<string, number>();
     const reread = new Set<string>();
+    const rereadAt = new Map<string, number>();
     const poll = async () => {
       const now = Date.now();
+      const gates = pageGates(pageRef.current);
+      // The next gate's start has passed: bring it in, once the backend's 10 s
+      // page cache has had time to turn over, so an open tab shows it.
+      const next = pageRef.current?.next_event;
+      if (
+        next &&
+        !reread.has(next.starts_at) &&
+        now >= Date.parse(next.starts_at) + TOP_REREAD_MS
+      ) {
+        reread.add(next.starts_at);
+        const fresh = await getLuckyDraw();
+        if (live) applyFresh(fresh);
+        return;
+      }
+      if (gates.length > 0) {
+        const ended = gates.filter((g) => now >= Date.parse(g.ends_at));
+        const lapsed = ended.filter(
+          (g) =>
+            now >= Date.parse(g.ends_at) + POLL_WINDOW_MS &&
+            now - (rereadAt.get(g.id) ?? 0) >= LAPSED_REREAD_MS,
+        );
+        if (lapsed.length > 0) {
+          lapsed.forEach((g) => rereadAt.set(g.id, now));
+          const fresh = await getLuckyDraw();
+          if (live) applyFresh(fresh);
+        }
+        return;
+      }
+      // The last gate has gone: its prize rows are mirrors, with nothing to read.
+      if (pageRef.current?.event?.draw_mode === 'one_winner') return;
       const undrawn = (pageRef.current?.prizes ?? []).filter((p) => !p.result);
       const lapsed = undrawn.filter(
         (p) =>
@@ -99,7 +180,7 @@ export function LuckyDrawClient({
       if (lapsed.length > 0) {
         lapsed.forEach((p) => reread.add(p.id));
         const fresh = await getLuckyDraw();
-        if (live && fresh) setPage(fresh);
+        if (live) applyFresh(fresh);
         return;
       }
       const due = undrawn
@@ -146,7 +227,7 @@ export function LuckyDrawClient({
       live = false;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [applyFresh]);
 
   const openResult = async (prizeId: string) => {
     const found = await getLuckyDrawResult(prizeId);
@@ -154,15 +235,51 @@ export function LuckyDrawClient({
     else setNotice('Couldn’t load this result right now — try again.');
   };
 
-  const onEntered = (prize: LuckyDrawPrize, tickets: number, res: Entered) => {
+  const openEventResult = async (
+    eventId: string,
+    eventName: string,
+    then: (found: LuckyDrawResultDetail) => void = setDetail,
+  ) => {
+    const found = await getLuckyDrawEventResult(eventId, eventName);
+    if (found) then(found);
+    else setNotice('Couldn’t load this result right now — try again.');
+  };
+
+  const onEntered = (prize: EnterTarget, tickets: number, res: Entered) => {
+    const gateId = entering && 'gateId' in entering ? entering.gateId : null;
+    const pot = gateId !== null;
     setEntering(null);
     setNotice(
-      `You’re in — ${num(tickets)} ${tickets === 1 ? 'ticket' : 'tickets'} on ${prize.title}.`,
+      `You’re in — ${num(tickets)} ${tickets === 1 ? 'ticket' : 'tickets'} ${pot ? 'in' : 'on'} ${prize.title}.`,
     );
     const { balance, myTickets } = res;
     if (balance === undefined || myTickets === undefined) {
       // The entry went through but its numbers did not read: re-read.
-      void getLuckyDraw().then((fresh) => fresh && setPage(fresh));
+      void getLuckyDraw().then(applyFresh);
+      return;
+    }
+    if (pot) {
+      setPage(
+        (prev) =>
+          prev && {
+            ...prev,
+            balance,
+            events: pageGates(prev).map((g) =>
+              g.id === gateId
+                ? {
+                    ...g,
+                    my_tickets: myTickets,
+                    total_tickets: g.total_tickets + tickets,
+                    entrant_count: g.entrant_count + (g.my_tickets > 0 ? 0 : 1),
+                  }
+                : g,
+            ),
+          },
+      );
+      // The response cannot place me in the top 10: no ids on the list.
+      window.setTimeout(() => {
+        void getLuckyDraw().then(applyFresh);
+      }, TOP_REREAD_MS);
       return;
     }
     // Update locally from the enter response; the page is not re-fetched.
@@ -187,48 +304,64 @@ export function LuckyDrawClient({
 
   const balance = page?.balance ?? 0;
   const event = page?.event ?? null;
+  const view = luckyDrawView(page, nowMs);
+  // A drawn gate leaves the list once its show is over, and lives in Results.
+  const gates = pageGates(page).filter((g) => !gone.has(g.id));
+  const newIds = useNewGates(gates);
+  const enteringGate: LuckyDrawGate | null =
+    entering && 'gateId' in entering
+      ? (gates.find((g) => g.id === entering.gateId) ?? null)
+      : null;
+  const enterTarget = enteringGate
+    ? gateTarget(enteringGate)
+    : entering && !('gateId' in entering)
+      ? entering
+      : null;
 
   return (
-    <div>
-      <div className="flex items-end justify-between gap-3">
+    <div className="pool-wide">
+      {/* Title and balance over the tabs on a phone; one row where there is room
+          across or no room down. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-4 squat:-mt-3 squat:gap-y-2 short:-mt-3 lg:gap-x-6">
         <div className="min-w-0">
-          <h1 className="font-heading text-3xl text-white">LUCKY DRAW</h1>
-          {event && (
+          <h1 className="font-heading text-[clamp(1.35rem,8vw,1.875rem)] whitespace-nowrap text-white short:text-xl">
+            LUCKY DRAW
+          </h1>
+          {view === 'per_prize' && event && (
             <p className="mt-1 text-sm text-neutral-400">
               {event.name} · until {mytDate(event.ends_at)}
             </p>
           )}
         </div>
         {page && (
-          <p className="flex shrink-0 items-center gap-1.5 rounded-full bg-neutral-800 py-2 pr-3.5 pl-3 text-sm font-semibold text-white">
+          <p className="flex shrink-0 items-center gap-1.5 rounded-full bg-neutral-800 py-2 pr-3.5 pl-3 text-sm font-semibold text-white short:order-last lg:order-last">
             <TicketArt width={26} className="-my-1" />
             <span className="tabular-nums">{num(balance)}</span>
             <span className="sr-only">tickets</span>
           </p>
         )}
-      </div>
-
-      <div
-        role="group"
-        aria-label="Lucky Draw sections"
-        className="mt-4 grid grid-cols-3 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1"
-      >
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={tab === key}
-            onClick={() => setTab(key)}
-            className={cn(
-              'flex min-h-11 items-center justify-center rounded-full px-2 text-[13px] font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40 sm:text-sm',
-              tab === key
-                ? 'bg-neutral-50 text-neutral-950'
-                : 'text-neutral-400 hover:text-white',
-            )}
-          >
-            {label}
-          </button>
-        ))}
+        <div
+          role="group"
+          aria-label="Lucky Draw sections"
+          className="grid w-full grid-cols-3 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 short:w-[clamp(15rem,40vw,20rem)] lg:w-[26rem]"
+        >
+          {TABS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={tab === key}
+              onClick={() => setTab(key)}
+              className={cn(
+                'flex min-h-11 items-center justify-center rounded-full px-2 text-[13px] font-semibold whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40 squat:min-h-10 short:min-h-9 max-[340px]:px-1 max-[340px]:text-xs sm:text-sm',
+                tab === key
+                  ? 'bg-neutral-50 text-neutral-950'
+                  : 'text-neutral-400 hover:text-white',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Always mounted: a live region added with its text is not announced. */}
@@ -240,31 +373,42 @@ export function LuckyDrawClient({
         )}
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 squat:mt-3 short:mt-3">
         {tab === 'results' ? (
-          <ResultsList onOpen={openResult} />
+          // Lists of rows, not a stage: they keep the column they were built for.
+          <div className="mx-auto max-w-4xl">
+            {/* Read again as each live draw ends, so it joins the list. */}
+            <ResultsList
+              key={liveDraw.finished}
+              held={liveDraw.held}
+              onWatchLive={liveDraw.watch}
+              onOpen={openResult}
+              onOpenEvent={openEventResult}
+            />
+          </div>
         ) : tab === 'mine' ? (
-          <MyTickets />
+          <div className="mx-auto max-w-4xl">
+            <MyEntry key={liveDraw.finished} held={liveDraw.held} />
+          </div>
         ) : !page ? (
           <UnavailablePanel />
-        ) : !event ? (
-          <Panel className="text-center">
-            <p className="text-sm text-neutral-300">
-              The next Lucky Draw is coming soon.
-            </p>
-            <button
-              type="button"
-              onClick={() => setTab('results')}
-              className={cn(
-                pillVariants({ variant: 'secondary', size: 'sm' }),
-                'mt-3',
-              )}
-            >
-              See past results
-            </button>
-          </Panel>
+        ) : gates.length > 0 ? (
+          <GateList
+            gates={gates}
+            newIds={newIds}
+            nowMs={nowMs}
+            balance={balance}
+            spinHref={spinHref}
+            onEnter={(g) => setEntering({ gateId: g.id })}
+          />
+        ) : view !== 'per_prize' || !event ? (
+          <NoPool spinHref={spinHref} onSeeResults={() => setTab('results')} />
+        ) : page.prizes.length === 0 ? (
+          <p className="text-sm text-neutral-400">
+            Prizes for this Lucky Draw are on their way.
+          </p>
         ) : (
-          <>
+          <div className="mx-auto max-w-4xl">
             {balance <= 0 && (
               <Panel className="mb-4 flex items-center gap-3">
                 <TicketArt width={44} className="shrink-0" />
@@ -279,45 +423,49 @@ export function LuckyDrawClient({
                 </Link>
               </Panel>
             )}
-            {page.prizes.length === 0 ? (
-              <p className="text-sm text-neutral-400">
-                Prizes for this Lucky Draw are on their way.
-              </p>
-            ) : (
-              <PrizeWheel
-                prizes={page.prizes}
-                nowMs={nowMs}
-                details={(p) => (
-                  <ul aria-label="Selected prize">
-                    <PrizeCard
-                      key={p.id}
-                      prize={p}
-                      nowMs={nowMs}
-                      opensAt={event.starts_at}
-                      balance={balance}
-                      onEnter={setEntering}
-                      onOpenResult={openResult}
-                      art={false}
-                    />
-                  </ul>
-                )}
-              />
-            )}
-          </>
+            <PrizeWheel
+              prizes={page.prizes}
+              nowMs={nowMs}
+              details={(p) => (
+                <ul aria-label="Selected prize">
+                  <PrizeCard
+                    key={p.id}
+                    prize={p}
+                    nowMs={nowMs}
+                    opensAt={event.starts_at}
+                    balance={balance}
+                    onEnter={setEntering}
+                    onOpenResult={openResult}
+                    art={false}
+                  />
+                </ul>
+              )}
+            />
+          </div>
         )}
       </div>
 
-      <p className="mt-6 text-xs leading-relaxed text-neutral-400">
-        Tickets come from tasks and Polycards gifts — they can&rsquo;t be
-        bought. Entering needs at least one top-up, and entries are final. Card
-        prizes go to your vault and sell back like task rewards; credit prizes
-        are bonus credit for packs. Every winner is drawn from a seed fixed
-        before entries open. All times are Malaysia time (MYT).
-      </p>
+      {/* The pool tab carries the rules in its own How it works. */}
+      {(tab !== 'prizes' || view === 'per_prize') && (
+        <p className="mx-auto mt-6 max-w-4xl text-xs leading-relaxed text-neutral-400">
+          {/* No event to go by: every new event is one-winner. */}
+          {rulesCopy(event ? event.draw_mode : 'one_winner')}
+        </p>
+      )}
 
-      {entering && (
+      {enterTarget && (
         <EnterSheet
-          prize={entering}
+          prize={enterTarget}
+          pot={enteringGate !== null}
+          tier={enteringGate?.tier}
+          pool={enteringGate ? heroFirst(enteringGate.prizes) : []}
+          closesAt={enteringGate?.ends_at ?? event?.ends_at}
+          nowMs={nowMs}
+          closed={
+            enteringGate !== null &&
+            nowMs != null &&
+            nowMs >= Date.parse(enteringGate.ends_at)
+          }
           balance={balance}
           onClose={() => setEntering(null)}
           onEntered={onEntered}
@@ -333,14 +481,21 @@ export function LuckyDrawClient({
           }}
         />
       )}
-      {/* A live draw waits, queued, while the player is in a sheet. */}
-      {spins[0] && !entering && !detail && (
-        <SpinOverlay
-          detail={spins[0]}
-          queued={spins.length - 1}
-          onNext={() => setSpins((q) => q.slice(1))}
-          onClose={() => setSpins([])}
-        />
+      {/* A draw waits, queued, while the player is in a sheet. */}
+      {spins[0] && !enterTarget && !detail && (
+        <ArenaBoundary
+          key={spins[0].result.prize_id}
+          onFail={() => setSpins((q) => q.slice(1))}
+        >
+          <ArenaShow
+            detail={spins[0]}
+            live={false}
+            expanded
+            onExpand={() => undefined}
+            onCollapse={() => undefined}
+            onClose={() => setSpins((q) => q.slice(1))}
+          />
+        </ArenaBoundary>
       )}
       {/* After hydration only (nowMs is mount-only): server HTML must never
           ship a full-screen scrim, and reduced motion is known by then. */}

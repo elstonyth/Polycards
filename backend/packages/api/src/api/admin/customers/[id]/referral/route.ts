@@ -47,6 +47,13 @@ export async function GET(
       packs.referralLiveWeek({ customerId, now }),
     ]);
 
+  // The referrer's name for the card; a deleted customer has no row.
+  const [referrer] = referredBy
+    ? await customers.listCustomers(
+        { id: referredBy.referrer_id },
+        { take: 1, select: ['email', 'first_name', 'last_name'] },
+      )
+    : [];
   const memberIds = downline.map((d) => d.customer_id);
   const settlementIds = [...new Set(lines.map((l) => l.settlement_id))];
   // ONE batched lookup each for spend, names and line weeks, never per row.
@@ -92,6 +99,10 @@ export async function GET(
 
   res.json({
     referred_by: referredBy?.referrer_id ?? null,
+    referred_by_label: referrer
+      ? [referrer.first_name, referrer.last_name].filter(Boolean).join(' ') ||
+        referrer.email
+      : null,
     partner_referral_bp: state?.partner_referral_bp ?? null,
     partner_group: partnerGroup,
     // Uncapped, unlike the downline list below.

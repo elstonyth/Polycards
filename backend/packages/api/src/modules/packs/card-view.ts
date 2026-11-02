@@ -30,6 +30,22 @@ export function cardByHandle<T extends { handle: string }>(
 export const isGraded = (c: { grader: string }): boolean =>
   c.grader.trim() !== '';
 
+// What a buyer has to ask for: "PSA 10" for a slab, null for a raw card.
+export const slabGrade = (c: {
+  grader: string;
+  grade: string;
+}): string | null =>
+  isGraded(c) ? `${c.grader.trim()} ${c.grade.trim()}`.trim() : null;
+
+// The picture on the stock screens: graded = the baked slab, raw = the bare
+// card. `||`, not `??`: an empty slab_image / image means "none" too.
+export const stockImage = (
+  graded: boolean,
+  card: { image: string; slab_image: string | null } | undefined,
+  fallback: string | null,
+): string | null =>
+  (graded ? card?.slab_image : null) || card?.image || fallback || null;
+
 // Strictly a PSA 10 — what the storefront's "Guaranteed PSA 10" section
 // verifies. GRADED alone is not enough: a PSA 9 or a BGS/CGC slab is graded
 // but would make that heading false advertising, so the guarantee gate checks

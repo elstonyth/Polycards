@@ -441,6 +441,15 @@ envs:
     scope: RUN_TIME
     value: "50000"
 
+  # The 12am MYT stock run (jobs/stock-allocation.ts): orders whose cards are
+  # all on hand go to ready_to_ship, the other requested ones to processed,
+  # then the to-buy list is frozen for the day. Off unless "true". Turned on
+  # 2026-10-29 at the owner's request. App-level, so the backend service (the
+  # to-buy route) and the worker (the job) both read it.
+  - key: STOCK_AUTO_ALLOCATION
+    scope: RUN_TIME
+    value: "true"
+
   # Touch 'n Go payouts (modules/packs/banks.ts payoutSwitch). Off unless
   # "true": TGPay's TNG route refused 97 of 110 payouts in the week to
   # 2026-10-14. Turned on 2026-10-14 at the operator's request; set "false"

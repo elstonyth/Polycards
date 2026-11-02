@@ -6,18 +6,27 @@ import { rm, rmAuto, rmNbsp } from '@/lib/format';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 
 export const CREDIT_ART = '/images/task/credits-coins.webp';
+export const TICKET_ART = '/images/lucky-draw/ticket.webp';
 
 // Built from its code point: a literal U+00A0 (or its escape) in source has
 // already been flattened back into a plain space once, silently.
 const NBSP = String.fromCharCode(0xa0);
 
 const CREDIT_LABEL = 'Bonus credit';
+const TICKETS_LABEL = 'Lucky Draw tickets';
 
 const REWARD_LABEL: Record<string, string> = {
   credit: CREDIT_LABEL,
   pack: 'Free rip',
   card: 'Card',
+  tickets: TICKETS_LABEL,
 };
+
+const hasTickets = (tickets?: number): tickets is number =>
+  typeof tickets === 'number' && Number.isFinite(tickets) && tickets > 0;
+
+const ticketsName = (tickets: number): string =>
+  `${tickets} Lucky Draw ${tickets === 1 ? 'ticket' : 'tickets'}`;
 
 /** Every reward reads "what · worth": the player sees what a task pays before
  *  they claim it. `value` is null when the backend could not price it (a
@@ -49,13 +58,55 @@ export function rewardLabel(reward: TaskEntry['reward']): {
       value: reward.card_value_myr ?? null,
     };
   }
+  if (reward.type === 'tickets' && hasTickets(reward.tickets)) {
+    return { name: ticketsName(reward.tickets), value: null };
+  }
   return { name: REWARD_LABEL[reward.type] ?? 'Reward', value: null };
 }
 
 /** The prize's name on the ticket stub: the art's badge already shows the
- *  worth, so credit just says what it is. */
+ *  worth, so credit just says what it is. So do tickets: the pill under the
+ *  name has their count. */
 export const stubName = (reward: TaskEntry['reward']): string =>
-  reward.type === 'credit' ? CREDIT_LABEL : rewardLabel(reward).name;
+  reward.type === 'credit'
+    ? CREDIT_LABEL
+    : reward.type === 'tickets'
+      ? TICKETS_LABEL
+      : rewardLabel(reward).name;
+
+/** A ticket slot's count on the check-in track. Only a tickets reward gets one:
+ *  ×N on a slot's coins or pack would read as that many of them. */
+export const ticketCountLabel = (reward: TaskEntry['reward']): string | null =>
+  reward.type === 'tickets' && hasTickets(reward.tickets)
+    ? `×${reward.tickets}`
+    : null;
+
+/** The Lucky Draw tickets a task also pays, as a suffix ('' for none). */
+const ticketsExtra = (tickets?: number): string =>
+  hasTickets(tickets) ? ` + ${ticketsName(tickets)}` : '';
+
+/** A check-in slot's prize in words: the track's art shows only the reward, so
+ *  this is where the slot says it pays tickets too. */
+export function milestoneWorth(
+  t: Pick<TaskEntry, 'reward' | 'tickets'>,
+): string {
+  const { name, value } = rewardLabel(t.reward);
+  const worth =
+    t.reward.type !== 'credit' && value != null && value > 0
+      ? `${name} (${rm(value)})`
+      : name;
+  // A tickets reward already named them.
+  return worth + (t.reward.type === 'tickets' ? '' : ticketsExtra(t.tickets));
+}
+
+/** What a check-in day still pays, in words. Several tasks can share a day, and
+ *  any of them may be the one paying tickets. */
+export function dayWorth(
+  tasks: Pick<TaskEntry, 'reward' | 'tickets' | 'claimed'>[],
+): string {
+  const open = tasks.filter((t) => !t.claimed);
+  return (open.length > 0 ? open : tasks).map(milestoneWorth).join(' and ');
+}
 
 /** The line shown once a claim lands (spec 2026-10-15 §3): bonus credit is
  *  for packs only; a prize card ships for a fee or sells back withdrawable. A
@@ -65,11 +116,9 @@ export function claimNotice(
   reward: TaskEntry['reward'],
   tickets?: number,
 ): string {
-  const extra =
-    typeof tickets === 'number' && Number.isFinite(tickets) && tickets > 0
-      ? ` + ${tickets} Lucky Draw ${tickets === 1 ? 'ticket' : 'tickets'}`
-      : '';
-  return rewardNotice(reward) + extra;
+  if (reward.type === 'tickets')
+    return `${rewardLabel(reward).name} added. Head to the Lucky Draw to enter.`;
+  return rewardNotice(reward) + ticketsExtra(tickets);
 }
 
 function rewardNotice(reward: TaskEntry['reward']): string {
@@ -86,11 +135,12 @@ function rewardNotice(reward: TaskEntry['reward']): string {
   return 'Card added to your Vault. Ship it (delivery fee applies) or sell it back.';
 }
 
-/** The picture of the prize: the card's slab, the pack's shot, or the credit
- *  coins. null = nothing to show (a gone pack/card) — the tile falls back to
- *  an icon rather than a broken image. */
+/** The picture of the prize: the card's slab, the pack's shot, the credit
+ *  coins or the Lucky Draw ticket. null = nothing to show (a gone pack/card) —
+ *  the tile falls back to an icon rather than a broken image. */
 export function rewardArt(reward: TaskEntry['reward']): string | null {
   if (reward.type === 'credit') return CREDIT_ART;
+  if (reward.type === 'tickets') return TICKET_ART;
   if (reward.type === 'pack') return reward.pack_image ?? null;
   if (reward.type === 'card') return reward.card_image ?? null;
   return null;

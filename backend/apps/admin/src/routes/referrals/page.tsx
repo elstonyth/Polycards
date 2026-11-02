@@ -11,7 +11,7 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useApproveReferralSettlement,
   usePayReferralSettlement,
@@ -43,6 +43,7 @@ export const config: RouteConfig = {
   translationNs: 'translation',
   rank: 1,
   nested: '/players',
+  permissions: ['referral:read' as Permission],
 };
 
 const fromCents = (cents: number): string => rm(cents / 100);

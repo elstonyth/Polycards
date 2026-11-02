@@ -87,6 +87,7 @@ export function PrizeCard({
 
   return (
     <Link
+      prefetch={false}
       // `prize=weekly` tells the card page this arrival came from the
       // challenge, so the slab keeps the prism frame it wears here instead of
       // switching to the card's pack tier.

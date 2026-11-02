@@ -111,10 +111,12 @@ the two lifecycles.
 _Avoid_: order (a DeliveryOrder is not a Medusa checkout order)
 
 **Drought** (pull history):
-For one chase tier in one scope (a pack, or the whole ledger), how many
+For one chase tier in one scope (a pack, a category's capsules, or the whole ledger), how many
 pack-source Pulls have been rolled since that tier last hit — "303 packs
 without Immortal". Counted in (rolled*at, id) order; a tier never hit counts
-every pull on record. Public display, unfiltered by the feed's tier tab.
+every pull on record. Public display, unfiltered by the feed's tier tab. A
+ticket pack writes spins rather than Pulls and counts those ("6 capsules
+without Immortal").
 \_Avoid*: streak, dry run (a Drought is the operator-facing number, not luck)
 
 **Gap** (pull history):
@@ -332,8 +334,9 @@ paid pack pulls only;
 achievements (reach VIP level, vault N cards, vault N pixel
 Pokémon) are once per account. Progress is computed live from the underlying
 facts; only claims are stored (`task_claim`, one per customer × task ×
-period). Rewards: credit (Bonus Credit since 2026-10-11), a free rip of a
-pack, or a card straight to the vault — the latter two land as
+period). Rewards: Lucky Draw tickets alone (the task's `tickets` count, which
+any other reward can also pay on top), credit (Bonus Credit since 2026-10-11),
+a free rip of a pack, or a card straight to the vault — the latter two land as
 `source='reward'` pulls, sellable like any pulled card the moment they land
 (completing the task IS the requirement; operator decision 2026-09-03), and
 their sale is plain cash (ADR 0012), withdrawable only under the Withdrawable

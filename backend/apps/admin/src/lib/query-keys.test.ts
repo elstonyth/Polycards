@@ -124,11 +124,13 @@ describe('qk', () => {
     // The period is part of the key: 7 days and a custom range are
     // different pages, so neither serves the other's cached rows.
     expect(
-      qk.players(0, undefined, undefined, undefined, {
-        range: 'custom',
-        from: '2026-10-01',
-        to: '2026-10-15',
-      }).slice(-3),
+      qk
+        .players(0, undefined, undefined, undefined, {
+          range: 'custom',
+          from: '2026-10-01',
+          to: '2026-10-15',
+        })
+        .slice(-3),
     ).toEqual(['custom', '2026-10-01', '2026-10-15']);
     // playersKey must be a strict prefix of every page key, or a post-disable
     // invalidation would leave the row's status stale on the current page.
@@ -149,6 +151,7 @@ describe('qk', () => {
       0,
       'all',
       'newest',
+      'all',
     ]);
     expect(qk.customerPulls('cus_1', 2, 'vaulted')).toEqual([
       'admin',
@@ -158,7 +161,12 @@ describe('qk', () => {
       2,
       'vaulted',
       'newest',
+      'all',
     ]);
+    // Pack purchases only is its own sibling too.
+    expect(
+      qk.customerPulls('cus_1', 0, undefined, 'newest', 'pack'),
+    ).not.toEqual(qk.customerPulls('cus_1', 0));
     // The Vault tab's "highest value" order is its own sibling entry.
     expect(qk.customerPulls('cus_1', 0, 'vaulted', 'value')).not.toEqual(
       qk.customerPulls('cus_1', 0, 'vaulted'),
@@ -515,6 +523,46 @@ describe('qk', () => {
     expect(
       qk.inventory('charizard').slice(0, qk.inventoryItemKey.length),
     ).not.toEqual([...qk.inventoryItemKey]);
+  });
+
+  it('keys GRNs, the open-GRN picker and procurement under invalidatable prefixes', () => {
+    expect(qk.goodsReceiveNotes(0)).toEqual([
+      'admin',
+      'goods-receive-notes',
+      0,
+      '',
+      'created_at:desc',
+      'all',
+    ]);
+    // The picker's key sits under the list prefix, so the one invalidation
+    // that refreshes the list also drops a transferred GRN from the picker.
+    for (const key of [
+      qk.goodsReceiveNotes(0),
+      qk.goodsReceiveNotes(0, undefined, 'created_at:desc', 'open'),
+    ]) {
+      expect(key.slice(0, qk.goodsReceiveNotesKey.length)).toEqual([
+        ...qk.goodsReceiveNotesKey,
+      ]);
+    }
+    expect(qk.goodsReceiveNotes(0)).not.toEqual(
+      qk.goodsReceiveNotes(0, undefined, undefined, 'open'),
+    );
+    expect(qk.goodsReceiveNote('grn_1')).toEqual([
+      'admin',
+      'goods-receive-note',
+      'grn_1',
+    ]);
+    expect(
+      qk.goodsReceiveNote('grn_1').slice(0, qk.goodsReceiveNoteKey.length),
+    ).toEqual([...qk.goodsReceiveNoteKey]);
+    for (const key of [qk.procurementToBuy, qk.procurementToShip]) {
+      expect(key.slice(0, qk.procurementKey.length)).toEqual([
+        ...qk.procurementKey,
+      ]);
+    }
+    expect(
+      qk.deliveryOrder('ord_1').slice(0, qk.deliveryOrderKey.length),
+    ).toEqual([...qk.deliveryOrderKey]);
   });
 
   it('keys the dashboard counts and recent payments under the list prefixes', () => {

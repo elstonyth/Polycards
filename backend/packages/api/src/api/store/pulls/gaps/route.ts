@@ -3,14 +3,18 @@ import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
 import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
+import { categoryParam, liveTicketPacks } from '../category';
 import { ANONYMOUS_PULLER, loadPullerProfiles } from '../pullers';
 
-// GET /store/pulls/gaps?rarity=<tier>[&pack_id=<Pack.slug>] — the pull-history
-// STATS chart: for one tier, the gap (pulls since the previous hit) behind
-// each recent hit of that tier, who hit it, and the header numbers:
+// GET /store/pulls/gaps?rarity=<tier>[&pack_id=<Pack.slug>|&category=<key>] —
+// the pull-history STATS chart: for one tier, the gap (pulls since the previous
+// hit) behind each recent hit of that tier, who hit it, and the header numbers.
+// ?category reads the spins of that category's live ticket packs, as on the
+// recent route; pack_id wins when both are sent.
 //
 //  pct       the pack's PUBLISHED odds for the tier (admin-set display rate,
-//            never the secret weight); null on the global feed / unset odds
+//            never the secret weight); null on the global and category feeds /
+//            unset odds
 //  expected  1 / pct in draws — the "Avg: 91 draws" the chart's reference
 //            line sits on; null when pct is
 //  avg       the OBSERVED mean gap over every hit on record (the line's
@@ -26,13 +30,22 @@ import { ANONYMOUS_PULLER, loadPullerProfiles } from '../pullers';
 // the empty chart before any ledger query (a draft pack's odds and ledger are
 // not public until it is active).
 const HITS_LIMIT = 20;
-const CACHE_TTL_MS = 5_000;
+// 30s, not the recent feed's 5s: the global scan reads the whole ledger
+// (~4.4s at 83k pulls on 2026-10-28, growing daily), so a 5s TTL kept each
+// pod rescanning almost back-to-back. A stats chart 30s behind is invisible.
+const CACHE_TTL_MS = 30_000;
 const MAX_ENTRIES = 256;
 const gapsCache = new Map<string, { expires: number; body: unknown }>();
+// One rebuild per key at a time — same herd guard as the recent route: every
+// request landing during a multi-second scan otherwise starts its own scan.
+const inflight = new Map<string, Promise<unknown>>();
+// An expired body this young is served while the rebuild runs; older waits.
+const STALE_SERVE_MS = 120_000;
 
 /** Test seam — see clearRecentPullsCache. */
 export function clearPullGapsCache(): void {
   gapsCache.clear();
+  inflight.clear();
 }
 
 export async function GET(
@@ -43,6 +56,7 @@ export async function GET(
     typeof req.query.pack_id === 'string' && req.query.pack_id.trim()
       ? req.query.pack_id.trim()
       : null;
+  const category = categoryParam(req.query, packId);
   // The chart always shows SOME tier — an unknown/absent value reads as the
   // apex tier rather than 400ing a public route.
   const rarity: Rarity =
@@ -50,14 +64,38 @@ export async function GET(
     (RARITY_ORDER as readonly string[]).includes(req.query.rarity)
       ? (req.query.rarity as Rarity)
       : RARITY_ORDER[0];
-  const cacheKey = `${packId ?? ''}|${rarity}`;
+  // JSON for the same reason as the recent route's key.
+  const cacheKey = JSON.stringify([packId, category, rarity]);
 
   const cached = gapsCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) {
+  const now = Date.now();
+  if (cached && cached.expires > now) {
     res.json(cached.body);
     return;
   }
 
+  let pending = inflight.get(cacheKey);
+  if (!pending) {
+    pending = buildGaps(req, packId, category, rarity, cacheKey).finally(() =>
+      inflight.delete(cacheKey),
+    );
+    inflight.set(cacheKey, pending);
+  }
+  if (cached && now - cached.expires < STALE_SERVE_MS) {
+    pending.catch(() => {});
+    res.json(cached.body);
+    return;
+  }
+  res.json(await pending);
+}
+
+async function buildGaps(
+  req: MedusaRequest,
+  packId: string | null,
+  category: string | null,
+  rarity: Rarity,
+  cacheKey: string,
+): Promise<unknown> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
   // Gate the slug BEFORE the full-ledger scan below — same reason as the
@@ -68,7 +106,10 @@ export async function GET(
         await packs.listPacks({ slug: packId, status: 'active' }, { take: 1 })
       )[0]
     : null;
-  if (packId && !pack) {
+  const categorySlugs = category
+    ? (await liveTicketPacks(packs, category)).map((p) => p.slug)
+    : null;
+  if ((packId && !pack) || categorySlugs?.length === 0) {
     const empty = {
       rarity,
       pct: null,
@@ -79,11 +120,15 @@ export async function GET(
       hits: [],
     };
     remember(cacheKey, empty);
-    res.json(empty);
-    return;
+    return empty;
   }
 
-  const gaps = await packs.pullGaps({ packId, rarity, limit: HITS_LIMIT });
+  const gaps = await packs.pullGaps({
+    packId: categorySlugs ?? packId,
+    rarity,
+    limit: HITS_LIMIT,
+    tickets: categorySlugs != null || pack?.prize_type === 'tickets',
+  });
   const pct = pack
     ? (normalizePublishedOdds(pack.published_odds)?.tiers[rarity] ?? null)
     : null;
@@ -113,7 +158,7 @@ export async function GET(
     hits,
   };
   remember(cacheKey, body);
-  res.json(body);
+  return body;
 }
 
 // ponytail: same bounded map as the recent route — see its `remember`.

@@ -8,7 +8,7 @@ jest.setTimeout(180 * 1000);
 // UI-visibility only and does NOT gate the API, so an anonymous user could
 // POST /auth/member/emailpass/register → POST /vendor/sellers to create a real
 // seller+store+membership in production. A repo middleware
-// (src/api/middlewares.ts → blockUnusedVendorSelfRegistration) hard-404s the two
+// (src/api/middlewares.ts → blockUnusedSurface) hard-404s the two
 // registration entrypoints. These tests assert the surface is closed WITHOUT
 // over-blocking member LOGIN (the seeded house seller's /seller dashboard) or
 // customer registration (the storefront).

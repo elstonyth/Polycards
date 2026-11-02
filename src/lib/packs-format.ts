@@ -8,7 +8,7 @@
  * anywhere.
  */
 import type { Rarity } from '@/lib/packs-data';
-import { RARITY_ORDER } from '@/lib/rarity';
+import { isTopRarity, RARITY_ORDER } from '@/lib/rarity';
 
 /** Rarity tiers, rarest-first (display + iteration order).
  *  Re-exported from `@/lib/rarity` (RARITY_ORDER is the canonical source). */
@@ -150,4 +150,25 @@ export function poolExpectedValue(
     return null;
   }
   return Math.round(ev * 100) / 100;
+}
+
+/** A ticket pool as the odds maths reads it: the amount stands in for the price,
+ *  so a tier's range and the average per pull are the card pack's own sums, over
+ *  the PUBLISHED tiers only. Explicit on purpose: a ticket row has no price of its
+ *  own (see ticketCard), so no other value sum can mistake tickets for money. */
+export const ticketOddsPool = (
+  pool: readonly { rarity: string; tickets?: number }[],
+): { rarity: string; priceMyr: number | null }[] =>
+  pool.map((c) => ({ rarity: c.rarity, priceMyr: c.tickets ?? null }));
+
+/** A ticket pack's Top Hits: the top tiers as on a card pack, biggest first. A pack
+ *  with no top tier shows every amount, because its short list is worth showing
+ *  and a rail-less section would have nothing to look at. */
+export function ticketTopHits<T extends { rarity: string; tickets?: number }>(
+  pool: readonly T[],
+): T[] {
+  const top = pool.filter((c) => isTopRarity(c.rarity));
+  return [...(top.length > 0 ? top : pool)].sort(
+    (a, b) => (b.tickets ?? 0) - (a.tickets ?? 0),
+  );
 }

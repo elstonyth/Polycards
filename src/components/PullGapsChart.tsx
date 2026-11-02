@@ -9,7 +9,7 @@ import { gapScale, gapPercent } from '@/lib/pull-gaps';
 import { pullTime } from '@/lib/format';
 import type { Rarity } from '@/lib/packs-data';
 import type { PullGaps } from '@/lib/data/packs';
-import { parseOne, PullGapsPollResponseSchema } from '@/lib/data/schemas';
+import { loadSchemas } from '@/lib/lazy-schemas';
 
 /**
  * The pull-history STATS tab (showgo's histogram sheet): for one chase tier,
@@ -36,9 +36,12 @@ const SKELETON = ['w-[52%]', 'w-[28%]', 'w-[74%]', 'w-[16%]', 'w-[40%]'];
 
 export function PullGapsChart({
   packSlug,
+  category,
   refreshKey,
 }: {
   packSlug?: string;
+  /** Read this category's capsule spins instead of the global ledger. */
+  category?: string;
   /** Any change refetches — the panel passes its drought counters. */
   refreshKey: string;
 }) {
@@ -49,15 +52,17 @@ export function PullGapsChart({
   // exactly like a tier toggle does, not just when the tier differs.
   const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const scope = `${tier}|${packSlug ?? ''}|${refreshKey}`;
+  const scope = `${tier}|${packSlug ?? ''}|${category ?? ''}|${refreshKey}`;
 
   useEffect(() => {
     let active = true;
     const q = new URLSearchParams({ rarity: tier });
     if (packSlug) q.set('pack_id', packSlug);
+    if (category) q.set('category', category);
     fetch(`/api/pull-gaps?${q.toString()}`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((raw: unknown) => {
+      .then(async (raw: unknown) => {
+        const { parseOne, PullGapsPollResponseSchema } = await loadSchemas();
         if (!active) return;
         // A rolling deploy can answer 200 with the older view shape; a body
         // with no `hits` used to throw inside render (the panel's error
@@ -76,7 +81,7 @@ export function PullGapsChart({
     return () => {
       active = false;
     };
-  }, [tier, packSlug, refreshKey, scope]);
+  }, [tier, packSlug, category, refreshKey, scope]);
 
   const rgb = rarityRgb(tier);
   // What is on screen was loaded for another scope until this one lands.

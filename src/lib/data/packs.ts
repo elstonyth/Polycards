@@ -13,6 +13,7 @@
  * only supplies the presentational per-category labels/icons (local assets).
  */
 
+import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
 import { cached } from '@/lib/ttl-cache';
 import { store } from '@/lib/store';
@@ -20,21 +21,26 @@ import { logger } from '@/lib/logger';
 import { isRarity, type PublishedOdds } from '@/lib/packs-format';
 import { avatarForSeed } from '@/lib/profile-view';
 import { relativeTime } from '@/lib/format';
-import { toCardView, type CardView } from '@/lib/card-view';
+import { toCardView } from '@/lib/card-view';
 import {
   PacksPageSchema,
   UncatalogedPackSchema,
   PackDetailPageSchema,
   RecentPullsPageSchema,
   PullGapsSchema,
+  TicketOddsRowSchema,
+  parseList,
   type ZodType,
 } from '@/lib/data/schemas';
 import {
   CATEGORIES as CATEGORY_META,
   CAT_ICON,
+  packTabs,
+  ticketCard,
   type Pack,
   type PackCategory,
   type PackCard,
+  type PackTab,
   type Rarity,
   type ResolvedPack,
 } from '@/lib/packs-data';
@@ -60,6 +66,8 @@ interface BackendPack {
   in_stock?: boolean;
   group?: 'GRADED' | 'RAW' | 'MIX' | null;
   psa10?: boolean;
+  prize_type?: 'cards' | 'tickets';
+  status?: string;
 }
 
 const toPack = (p: BackendPack): Pack => ({
@@ -68,7 +76,10 @@ const toPack = (p: BackendPack): Pack => ({
   priceMyr: p.price,
   image: p.image,
   displayImage: p.display_image || undefined,
-  boost: p.boost || undefined,
+  // `boost` is only ever a buyback badge, and a ticket has no buyback.
+  boost: (p.prize_type !== 'tickets' && p.boost) || undefined,
+  prizeType: p.prize_type === 'tickets' ? 'tickets' : undefined,
+  draft: p.status === 'draft' || undefined,
   buybackPercent:
     typeof p.buyback_percent === 'number' ? p.buyback_percent : undefined,
   inStock: p.in_stock === false ? false : undefined,
@@ -92,6 +103,24 @@ const titleCase = (key: string): string =>
 const CAT_ICONS = new Map<string, string>(Object.entries(CAT_ICON));
 const iconOf = (key: string): string => CAT_ICONS.get(key) ?? CAT_ICON.pokemon;
 
+const packsByCategory = (rows: BackendPack[]): Map<string, Pack[]> => {
+  const byCategory = new Map<string, Pack[]>();
+  for (const p of rows) {
+    const list = byCategory.get(p.category) ?? [];
+    list.push(toPack(p));
+    byCategory.set(p.category, list);
+  }
+  return byCategory;
+};
+
+const extraCategory = (id: string, packs: Pack[]): PackCategory => ({
+  id,
+  tab: titleCase(id),
+  heading: `${titleCase(id)} Packs`,
+  icon: iconOf(id),
+  packs,
+});
+
 /**
  * Pack catalog grouped by category, in the live-site category order. The packs
  * come entirely from the backend (ordered by rank) — the backend is the single
@@ -111,12 +140,7 @@ async function loadPackCategories(): Promise<PackCategory[]> {
   );
 
   // Group backend packs by category key (response is already rank-ordered).
-  const byCategory = new Map<string, Pack[]>();
-  for (const p of packs as unknown as BackendPack[]) {
-    const list = byCategory.get(p.category) ?? [];
-    list.push(toPack(p));
-    byCategory.set(p.category, list);
-  }
+  const byCategory = packsByCategory(packs as unknown as BackendPack[]);
 
   // Known categories keep the live-site order + presentational meta (empty
   // ones still render a chip; the client shows empty states). A backend pack
@@ -130,13 +154,7 @@ async function loadPackCategories(): Promise<PackCategory[]> {
   const knownIds = new Set(known.map((c) => c.id));
   const extras = [...byCategory.entries()]
     .filter(([id]) => !knownIds.has(id))
-    .map(([id, list]) => ({
-      id,
-      tab: titleCase(id),
-      heading: `${titleCase(id)} Packs`,
-      icon: iconOf(id),
-      packs: list,
-    }));
+    .map(([id, list]) => extraCategory(id, list));
   return [...known, ...extras];
 }
 
@@ -169,6 +187,8 @@ export async function getPackCategories(): Promise<PackCategory[]> {
 export interface PackBase {
   pack: ResolvedPack;
   siblings: Pack[];
+  /** The category dropdown's options; empty for an unlisted pack. */
+  tabs: PackTab[];
 }
 
 /**
@@ -182,10 +202,13 @@ export interface PackBase {
  * backend is down/empty (source of truth) → the page 404s.
  */
 export async function getPackBySlug(slug: string): Promise<PackBase | null> {
-  const categories = await getPackCategories();
+  return baseIn(await getPackCategories(), slug) ?? getUncatalogedPack(slug);
+}
+
+function baseIn(categories: PackCategory[], slug: string): PackBase | null {
   const category = categories.find((c) => c.packs.some((p) => p.id === slug));
   const pack = category?.packs.find((p) => p.id === slug);
-  if (!category || !pack) return getUncatalogedPack(slug);
+  if (!category || !pack) return null;
   return {
     pack: {
       ...pack,
@@ -194,7 +217,76 @@ export async function getPackBySlug(slug: string): Promise<PackBase | null> {
       icon: category.icon,
     },
     siblings: category.packs,
+    tabs: packTabs(categories),
   };
+}
+
+// --- Draft preview: a staff group testing packs customers cannot see ---------
+//
+// Everything above is one answer for every visitor, memoised per process. A draft
+// must never enter it, so these read their own authed routes and go nowhere near
+// `cached` or `packRow`. The backend decides who is a member and answers everyone
+// else as if there were no drafts. The catalog's memo is only ever read here.
+
+const DRAFT_PACKS = '/store/customers/me/draft-packs';
+
+/** This customer's Draft rows. Empty for a non-member and on any failure, and a
+ *  guest sends no request at all (`auth: 'required'`). */
+async function draftRows(): Promise<BackendPack[]> {
+  const r = await store.get(DRAFT_PACKS, PacksPageSchema, { auth: 'required' });
+  return r.ok ? (r.data.packs as unknown as BackendPack[]) : [];
+}
+
+/** The catalog with these drafts added after each category's live packs. Copies,
+ *  because `categories` is the memo every visitor reads. */
+function withDrafts(
+  categories: PackCategory[],
+  drafts: BackendPack[],
+): PackCategory[] {
+  if (drafts.length === 0) return categories;
+  const byCategory = packsByCategory(drafts);
+  const merged = categories.map((c) => ({
+    ...c,
+    packs: [...c.packs, ...(byCategory.get(c.id) ?? [])],
+  }));
+  const seen = new Set(categories.map((c) => c.id));
+  const extras = [...byCategory.entries()]
+    .filter(([id]) => !seen.has(id))
+    .map(([id, list]) => extraCategory(id, list));
+  return [...merged, ...extras];
+}
+
+/** /slots: the catalog as this visitor may see it. */
+export async function getPackCategoriesForViewer(): Promise<PackCategory[]> {
+  const [categories, drafts] = await Promise.all([
+    getPackCategories(),
+    draftRows(),
+  ]);
+  return withDrafts(categories, drafts);
+}
+
+/** A pack page: tries the public catalog first, so only a slug the public can't
+ *  see costs a draft read. Cached per request, shared by the metadata and page. */
+export const getPackBaseForViewer = cache(
+  async (slug: string): Promise<PackBase | null> => {
+    const base = await getPackBySlug(slug);
+    if (base) return base;
+    const drafts = await draftRows();
+    if (!drafts.some((p) => p.slug === slug)) return null;
+    return baseIn(withDrafts(await getPackCategories(), drafts), slug);
+  },
+);
+
+/** A Draft's page data, from the draft route. Null for anyone but a member. */
+export async function getDraftPackDetail(
+  slug: string,
+): Promise<PackDetail | null> {
+  const r = await store.get(
+    `${DRAFT_PACKS}/${encodeURIComponent(slug)}`,
+    PackDetailPageSchema,
+    { auth: 'required' },
+  );
+  return r.ok ? toPackDetail(r.data) : null;
 }
 
 // GET /store/packs/:slug, memoised per process. Every /slots/<slug> SSR, the
@@ -264,6 +356,7 @@ async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
       icon: meta?.icon ?? iconOf(pack.category),
     },
     siblings: [],
+    tabs: [],
   };
 }
 
@@ -337,8 +430,26 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
   // all failed the schema (unknown rarity / non-finite value — dropped so the
   // UI can't render NaN).
   const row = await packRow(slug, 'pack-detail', PackDetailPageSchema);
-  if (!row) return null;
+  return row ? toPackDetail(row) : null;
+}
+
+function toPackDetail(
+  row: ReturnType<typeof PackDetailPageSchema.parse>,
+): PackDetail | null {
   const { published_odds, demo_odds } = row;
+  if (row.prize_type === 'tickets') {
+    const pool = parseList(TicketOddsRowSchema, row.odds).map((o) =>
+      ticketCard(o.tickets, o.rarity),
+    );
+    return pool.length === 0
+      ? null
+      : {
+          topHits: [],
+          pool,
+          publishedOdds: parsePublishedOdds(published_odds),
+          demoOdds: parsePublishedOdds(demo_odds),
+        };
+  }
   const valid = row.odds as unknown as BackendOddsEntry[];
   if (valid.length === 0) return null;
 
@@ -398,8 +509,10 @@ export const getPackHighlights = unstable_cache(
 // by toCardView) + when + the source pack's live catalog label + the puller's
 // display name ("Anonymous" when the account has none).
 interface BackendRecentPull {
-  /** Guaranteed by RecentPullSchema — a row without one drops. */
+  /** Guaranteed by RecentPullSchema — a row without one drops. A ticket row
+   *  (RecentTicketSpinSchema) has `tickets` instead of the card fields. */
   handle: string;
+  tickets?: number;
   /** Guaranteed by RecentPullSchema — a row without a known tier drops. */
   rarity: Rarity;
   pack_id: string;
@@ -421,8 +534,9 @@ interface BackendRecentPull {
 
 /** A feed row: the won card (its `handle` opens the card-detail overlay;
  *  `priceMyr` null = an older backend omitted the MYR price — rows render
- *  '—') plus the pull's own display fields. */
-export type RecentPull = CardView & {
+ *  '—') plus the pull's own display fields. On a ticket pack's feed the "card"
+ *  is ticketCard's, with `tickets` set: nothing to open or price. */
+export type RecentPull = PackCard & {
   id: string;
   /** Always known: the feed schema drops a row without a tier. */
   rarity: Rarity;
@@ -464,7 +578,8 @@ const FALLBACK_PACK_ICON = '/images/polycards/bronze-pack.webp';
  * pack's own history (the /slots/[slug] pages; filtering backend-side, so a
  * quiet pack still shows its real history instead of nothing). `rarity` keeps
  * only that tier's pulls (the panel's tier tabs; the drought counters stay
- * unfiltered).
+ * unfiltered). `category` reads that category's capsule spins instead (the home
+ * Poly tab).
  * Returns an empty feed (not mock) on any backend failure or empty ledger — an
  * empty feed is a meaningful, truthful state for a live ledger (the component
  * renders a "no pulls yet" empty state), unlike the catalog/detail getters that
@@ -473,6 +588,7 @@ const FALLBACK_PACK_ICON = '/images/polycards/bronze-pack.webp';
 export async function getRecentPulls(
   packSlug?: string,
   rarity?: Rarity,
+  category?: string,
 ): Promise<RecentFeed> {
   // Same two params, same order (`?pack_id=…&rarity=…`) — the SDK
   // serializes this object to the querystring the path carried before, and
@@ -480,6 +596,7 @@ export async function getRecentPulls(
   const query = {
     ...(packSlug ? { pack_id: packSlug } : {}),
     ...(rarity ? { rarity } : {}),
+    ...(category ? { category } : {}),
   };
   const r = await store.get('/store/pulls/recent', RecentPullsPageSchema, {
     ...PUBLIC,
@@ -490,6 +607,15 @@ export async function getRecentPulls(
   // pulls yet" either way, and never mock rows.
   if (!r.ok) return EMPTY_FEED;
   const raw = r.data;
+  // A category feed holds spins only. The storefront deploys ~10 minutes before
+  // the backend, and an older backend ignores ?category and answers the global
+  // card feed: those rows must not show under Poly.
+  if (
+    category &&
+    (raw.pulls as unknown as BackendRecentPull[]).some((p) => p.tickets == null)
+  ) {
+    return EMPTY_FEED;
+  }
 
   // Stable ids: the pull row id, else (older backend) a per-(handle,
   // rolled_at) occurrence counter — NOT the array index, which shifts
@@ -502,7 +628,9 @@ export async function getRecentPulls(
       const n = seen.get(key) ?? 0;
       seen.set(key, n + 1);
       return {
-        ...toCardView(p),
+        ...(p.tickets != null
+          ? ticketCard(p.tickets, p.rarity)
+          : toCardView(p)),
         id: p.id ?? `${key}-${n}`,
         rarity: p.rarity,
         // Pack label straight from the backend catalog (source of truth) — a
@@ -593,12 +721,17 @@ export interface PullGaps {
 export async function getPullGaps(
   rarity: Rarity,
   packSlug?: string,
+  category?: string,
 ): Promise<PullGaps | null> {
   // `?rarity=…&pack_id=…`, in that order, as the hand-built querystring had
   // it — the SDK serializes to the same URL.
   const r = await store.get('/store/pulls/gaps', PullGapsSchema, {
     ...PUBLIC,
-    query: { rarity, ...(packSlug ? { pack_id: packSlug } : {}) },
+    query: {
+      rarity,
+      ...(packSlug ? { pack_id: packSlug } : {}),
+      ...(category ? { category } : {}),
+    },
   });
   // Null (never mock) for a backend failure AND for a malformed body: the
   // chart renders its unavailable state, and /api/pull-gaps turns that null

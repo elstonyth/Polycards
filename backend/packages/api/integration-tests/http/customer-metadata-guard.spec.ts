@@ -1,6 +1,11 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
-import { Modules } from '@medusajs/framework/utils';
-import { postStoreCustomer, unwrapResponse } from './utils';
+import {
+  ContainerRegistrationKeys,
+  generateJwtToken,
+  Modules,
+} from '@medusajs/framework/utils';
+import { supportViewerRoleId } from '../../src/scripts/create-support-viewer';
+import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -132,6 +137,152 @@ medusaIntegrationTestRunner({
         expect(ok.data.customer.metadata ?? {}).not.toHaveProperty(
           'equipped_frame_level',
         );
+      });
+
+      // The read side. Core returns metadata whole to anything that can reach
+      // the customer, and it holds full bank numbers and partner passwords.
+      it('keeps secret metadata from a role without its own read policy', async () => {
+        const container = getContainer();
+        const customers = container.resolve(Modules.CUSTOMER);
+        const secrets = {
+          bank_accounts: [{ accountNumber: '4012340503' }],
+          partner_credential: { password: 'partner-secret-pw' },
+        };
+        const [player] = await customers.createCustomers([
+          {
+            email: 'guard-secrets@test.dev',
+            has_account: true,
+            metadata: { handle: 'ace', ...secrets },
+          },
+        ]);
+        const { http } = container.resolve(
+          ContainerRegistrationKeys.CONFIG_MODULE,
+        ).projectConfig;
+        const tokenFor = (name: string, roleId: string) =>
+          generateJwtToken(
+            {
+              actor_id: name,
+              actor_type: 'user',
+              auth_identity_id: '',
+              app_metadata: { user_id: name, roles: [roleId] },
+            },
+            {
+              secret: http.jwtSecret,
+              expiresIn: 300,
+              jwtOptions: http.jwtOptions,
+            },
+          );
+        // A role with exactly these policies, none of the secret reads.
+        const mintRole = async (
+          name: string,
+          resource: string[],
+          operation: string[],
+        ) => {
+          const rbac = container.resolve(Modules.RBAC) as any;
+          const [role] = await rbac.createRbacRoles([{ name }]);
+          const policies = await rbac.listRbacPolicies({ resource, operation });
+          await rbac.createRbacRolePolicies(
+            policies.map((p: { id: string }) => ({
+              role_id: role.id,
+              policy_id: p.id,
+            })),
+          );
+          return tokenFor(name, role.id);
+        };
+        const viewer = tokenFor(
+          'guard-viewer',
+          await supportViewerRoleId(container),
+        );
+        const staff = await mintSuperAdmin(
+          container,
+          api,
+          'guard-admin@test.dev',
+          'guard-admin-password-1',
+        );
+        const get = (path: string, token: string) =>
+          unwrapResponse(
+            api.get(path, { headers: { authorization: `Bearer ${token}` } }),
+          );
+        const detail = `/admin/customers/${player.id}`;
+        // The player sits in a group with themselves as a member, and has an
+        // order: `?fields=` walks both back to the same blob.
+        const [group] = await customers.createCustomerGroups([
+          { name: 'guard-secrets-group' },
+        ]);
+        await customers.addCustomerToGroup({
+          customer_id: player.id,
+          customer_group_id: group.id,
+        });
+        const order = await (
+          container.resolve(Modules.ORDER) as any
+        ).createOrders({
+          email: 'guard-secrets@test.dev',
+          customer_id: player.id,
+          currency_code: 'myr',
+          items: [],
+        });
+        const groupReader = await mintRole(
+          'guard-groups',
+          ['customer_group', 'customer'],
+          ['read'],
+        );
+        const orderReader = await mintRole('guard-orders', ['order'], ['read']);
+        const writer = await mintRole(
+          'guard-writer',
+          ['customer'],
+          ['read', 'update'],
+        );
+        // Each path must reach the blob, or this would pass on an empty answer.
+        const redacted = (res: { status: number; data: unknown }) => {
+          expect(res.status).toBe(200);
+          const text = JSON.stringify(res.data);
+          expect(text).toContain('"handle":"ace"');
+          expect(text).not.toContain('4012340503');
+          expect(text).not.toContain('partner-secret-pw');
+        };
+
+        const reads: [string, string][] = [
+          [detail, viewer],
+          [`${detail}?fields=metadata`, viewer],
+          [`/admin/customers?q=guard-secrets&fields=%2Bmetadata`, viewer],
+          [`${detail}?fields=*groups.customers`, viewer],
+          [
+            `/admin/customer-groups/${group.id}?fields=customers.metadata`,
+            groupReader,
+          ],
+          [`/admin/orders/${order.id}?fields=customer.metadata`, orderReader],
+          [`/admin/orders?fields=*customer`, orderReader],
+        ];
+        for (const [path, token] of reads) {
+          redacted(await get(path, token));
+        }
+        // A write echoes the record.
+        redacted(
+          await unwrapResponse(
+            api.post(
+              `${detail}?fields=metadata`,
+              {},
+              { headers: { authorization: `Bearer ${writer}` } },
+            ),
+          ),
+        );
+        // The rest of the blob survives: the player page reads the handle.
+        expect((await get(detail, viewer)).data.customer.metadata).toEqual({
+          handle: 'ace',
+        });
+        // Staff holding the policies see exactly what they always did.
+        expect((await get(detail, staff)).data.customer.metadata).toEqual({
+          handle: 'ace',
+          ...secrets,
+        });
+        expect(
+          (
+            await get(
+              `/admin/orders/${order.id}?fields=customer.metadata`,
+              staff,
+            )
+          ).data.order.customer.metadata,
+        ).toEqual({ handle: 'ace', ...secrets });
       });
     });
   },

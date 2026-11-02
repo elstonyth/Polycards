@@ -11,6 +11,10 @@ import type PacksModuleService from '../modules/packs/service';
  * so overlapping or repeated runs cannot draw twice. A prize that fails stays
  * due and is retried next minute; the per-prize reason is logged by the
  * service (e.g. "LUCKY_DRAW_SEED_SECRET changed since publish").
+ *
+ * A one_winner event (spec 2026-10-30) draws once at its end, in one transaction
+ * that pays every prize to the one winner or nothing at all, with the event result
+ * unique per event. It stays due and retries the same way.
  */
 export default async function drawLuckyDrawJob(container: MedusaContainer) {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
@@ -22,8 +26,16 @@ export default async function drawLuckyDrawJob(container: MedusaContainer) {
     }
   };
 
+  const decrementStock = takeCardStock(container);
+  const events = await packs.drawDueLuckyDrawEvents({ decrementStock });
+  if (events.failed > 0) {
+    warn(
+      `[draw-lucky-draw] ${events.failed} event(s) FAILED to draw, paid nothing and will be retried next minute — see the "event not drawn" warnings for why (a missing card, or a seed hash mismatch: restore the card or the secret, or withdraw the event)`,
+    );
+  }
+
   const { failed } = await packs.drawDueLuckyDrawPrizes({
-    decrementStock: takeCardStock(container),
+    decrementStock,
     onDrawn: async (o) => {
       // A card prize whose Card row is gone: the winner is recorded but
       // nothing was minted. This line is what puts it in front of an operator.

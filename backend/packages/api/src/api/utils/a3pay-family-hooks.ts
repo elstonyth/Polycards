@@ -232,7 +232,9 @@ export function a3payDepositCallback(kind: A3payKind): Handler {
       });
       if (!outcome.applied) {
         logger.error(
-          `${tag} settled callback for ${merchantTransactionId} claims ${config.currencyCode} ${String(data.Amount)} (RM ${creditedAmount}) but the row asked for ${config.currencyCode} ${String(deposit.gateway_amount)} (RM ${Number(deposit.amount_requested)}) — refusing to credit; the row remains ${deposit.status} for the sweep`,
+          outcome.reason === 'hand-credited'
+            ? `${tag} settled callback for ${merchantTransactionId}, but a hand adjustment already names this deposit — refusing to credit; the row remains ${deposit.status}`
+            : `${tag} settled callback for ${merchantTransactionId} claims ${config.currencyCode} ${String(data.Amount)} (RM ${creditedAmount}) but the row asked for ${config.currencyCode} ${String(deposit.gateway_amount)} (RM ${Number(deposit.amount_requested)}) — refusing to credit; the row remains ${deposit.status} for the sweep`,
         );
         res.status(400).send('rejected');
         return;

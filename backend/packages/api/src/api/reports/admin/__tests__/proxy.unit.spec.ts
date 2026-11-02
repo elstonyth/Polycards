@@ -41,10 +41,17 @@ describe('blockedReason', () => {
     ['/admin/pricecharting/search', /PriceCharting/],
     ['/admin/inventory/export.xlsx', /file exports/],
     ['/admin/players/export', /file exports/],
+    ['/admin/procurement/to-buy/export', /file exports/],
     // Medusa matches routes case-insensitively: /admin/USERS runs /admin/users.
     ['/admin/INVITES', /staff invites/],
     ['/admin/Api-Keys', /API keys/],
     ['/admin/inventory/EXPORT.XLSX', /file exports/],
+    // Every staff member's assistant chats, deleted ones too, and its settings.
+    ['/admin/assistant-review', /assistant chats/],
+    ['/admin/assistant-review/aiconv_1', /assistant chats/],
+    ['/admin/assistant-settings/test', /assistant chats/],
+    ['/admin/assistant/conversations', /assistant chats/],
+    ['/admin/ASSISTANT-Settings', /assistant chats/],
   ])('blocks %s', (path, why) => {
     expect(blockedReason(path)).toMatch(why);
   });

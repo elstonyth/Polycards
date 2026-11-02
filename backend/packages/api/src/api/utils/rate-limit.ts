@@ -9,6 +9,7 @@ import { E164_RE, type PhoneOtpChannel } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
 import { visitorBucket, vouchedVisitorIp } from './visitor-ip';
 import { deskOf } from '../reports/require-report-key';
+import { isAssistantKey } from '../admin/assistant/bridge';
 
 const PHONE_OTP_COOLDOWN_MS = 30_000;
 
@@ -891,12 +892,14 @@ export const RATE_LIMITS = {
   },
 
   /**
-   * The profile-appearance limiter (POST /store/profile/frame). Frame equip/
+   * The profile-appearance limiter (POST /store/profile/frame and
+   * /store/profile/avatar/preset, one shared budget). Frame equip/
    * unequip is a cosmetic, idempotent metadata write — a collector comparing
    * frames flips through them fast, so it must NOT share the tight delivery-
    * write budget (10/10s tripped on the 11th swap, 2026-07-07). Sized to cycle
    * the whole 10-frame workbook twice a minute with margin; still caps a
-   * runaway script at ~1 write/s sustained. Env-tunable:
+   * runaway script at ~1 write/s sustained. The 80-avatar picker sends one tap
+   * at a time, so a fast flip stays near 1 write/s. Env-tunable:
    * PROFILE_APPEARANCE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 15/10s)
    * PROFILE_APPEARANCE_RATE_LIMIT / _WINDOW_MS (default 60/60s)
    */
@@ -959,6 +962,41 @@ export const RATE_LIMITS = {
       burstLimit: 30,
       burstWindowMs: 10_000,
       limit: 200,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
+   * The admin assistant chat (POST /admin/assistant/chat, spec 2026-10-29).
+   * Every turn spends OpenRouter credit, so each admin gets their own budget,
+   * keyed on auth_context.actor_id like admin-action. The daily USD cap in
+   * the assistant settings is the spend limit; this only stops hammering.
+   * ASSISTANT_CHAT_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 6/10s)
+   * ASSISTANT_CHAT_RATE_LIMIT / _WINDOW_MS (default 30/60s)
+   */
+  'assistant-chat': {
+    message: 'Too many questions at once. Try again in a minute.',
+    defaults: {
+      burstLimit: 6,
+      burstWindowMs: 10_000,
+      limit: 30,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
+   * Reading an assistant answer aloud (POST /admin/assistant/speak). Looser
+   * than assistant-chat: Talk mode reads every answer and Read aloud replays
+   * are free, while the daily USD cap still bounds the spend.
+   * ASSISTANT_SPEAK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 12/10s)
+   * ASSISTANT_SPEAK_RATE_LIMIT / _WINDOW_MS (default 60/60s)
+   */
+  'assistant-speak': {
+    message: 'Too many read-aloud requests. Try again in a minute.',
+    defaults: {
+      burstLimit: 12,
+      burstWindowMs: 10_000,
+      limit: 60,
       windowMs: 60_000,
     },
   },
@@ -1033,8 +1071,13 @@ export const RATE_LIMITS = {
    */
   'desk-reports': {
     message: 'Too many report requests.',
+    // The admin assistant calls over loopback, so every staff member would
+    // share 127.0.0.1's bucket: with its in-process key it is keyed by the
+    // admin user it reads for (bridge.ts sends x-assistant-user).
     keyOf: (req) =>
-      `${deskOf(req.originalUrl) ?? 'none'}:ip:${callbackSourceIp(req) || 'unknown'}`,
+      isAssistantKey(req.headers['x-report-key'])
+        ? `${deskOf(req.originalUrl) ?? 'none'}:assistant:${String(req.headers['x-assistant-user'] ?? '').slice(0, 80)}`
+        : `${deskOf(req.originalUrl) ?? 'none'}:ip:${callbackSourceIp(req) || 'unknown'}`,
     defaults: {
       burstLimit: 20,
       burstWindowMs: 10_000,

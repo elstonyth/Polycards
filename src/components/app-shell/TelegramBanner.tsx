@@ -58,7 +58,8 @@ export function TelegramBanner() {
     pathname.startsWith('/slots/') ||
     pathname === '/vault' ||
     pathname.startsWith('/vault/') ||
-    pathname === '/leaderboard'
+    pathname === '/leaderboard' ||
+    pathname === '/lucky-draw'
   ) {
     return null;
   }

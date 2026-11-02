@@ -98,7 +98,9 @@ describe('unknown routes — a cacheable 404 before rendering', () => {
       '/slots',
       '/slots/bronze-pack',
       '/slots/bronze-pack/spin?count=3',
+      '/slots/bronze-pack/share.jpg',
       '/card/pikachu-tg05-psa-10-4080757',
+      '/card/pikachu-tg05-psa-10-4080757/share.jpg',
       '/profile/Collector7530',
       '/r/ZE42A7WA',
       '/vault',
@@ -160,6 +162,7 @@ describe('polled public JSON — same-origin fetches only', () => {
     expect(matches('/api/cards/charizard-4')).toBe(true);
     expect(matches('/api/free-pack')).toBe(true);
     expect(matches('/api/announcements')).toBe(true);
+    expect(matches('/api/lucky-draw-status')).toBe(true);
     expect(matches('/api/me')).toBe(false);
     expect(matches('/api/presence')).toBe(false);
   });
@@ -168,6 +171,10 @@ describe('polled public JSON — same-origin fetches only', () => {
     expect(get('/api/cards/charizard-4')?.status).toBe(403);
     expect(get('/api/free-pack')?.status).toBe(403);
     expect(get('/api/announcements')?.status).toBe(403);
+    expect(get('/api/lucky-draw-status')?.status).toBe(403);
+    expect(
+      get('/api/lucky-draw-status', { 'sec-fetch-site': 'same-origin' }),
+    ).toBeUndefined();
     expect(
       get('/api/cards/charizard-4', { 'sec-fetch-site': 'same-origin' }),
     ).toBeUndefined();

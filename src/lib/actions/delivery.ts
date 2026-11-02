@@ -23,7 +23,11 @@ import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { getAuthToken, getCustomer } from '@/lib/data/customer';
+import {
+  getAuthToken,
+  getCustomer,
+  getCustomerSession,
+} from '@/lib/data/customer';
 import {
   CancelDeliverySchema,
   DeliveryOrdersPageSchema,
@@ -45,10 +49,17 @@ import {
   DELIVERY_LOGIN,
 } from '@/lib/delivery-errors';
 import { normalizePhone } from '@/lib/profile-validation';
+import {
+  isShippableCountry,
+  isShippablePostcode,
+  postcodeHint,
+} from '@/lib/delivery-fee';
 import { toCardView, type CardView } from '@/lib/card-view';
 
 export type DeliveryOrderItemView = {
   pullId: string;
+  challengePrize: boolean;
+  luckyDrawPrize: boolean;
   /** The shipped card, or null when the backend no longer resolves it. The
    *  route sends handle/name/image/slab_image only; the other view fields
    *  read as their null defaults. */
@@ -143,6 +154,8 @@ interface BackendDeliveryOrder {
   };
   items: {
     pull_id: string;
+    challenge_prize?: boolean;
+    lucky_draw_prize?: boolean;
     card: {
       handle: string;
       name: string;
@@ -210,6 +223,8 @@ export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
     proofImages: o.proof_images ?? [],
     items: (o.items ?? []).map((it) => ({
       pullId: it.pull_id,
+      challengePrize: it.challenge_prize === true,
+      luckyDrawPrize: it.lucky_draw_prize === true,
       card: it.card ? toCardView(it.card) : null,
     })),
   }));
@@ -293,8 +308,9 @@ const CANCEL_RULES: ErrorRule[] = [
   [UNAUTHORIZED, DELIVERY_LOGIN],
   [/already canceled/i, 'This delivery is already canceled.'],
   // Backend NOT_ALLOWED once the order is out of the customer window. It fires
-  // from `ready_to_ship` on — not only after the parcel physically ships — so
-  // the copy says "being prepared", which is true for every status it covers.
+  // from `processed` on (the 12am cutoff) — not only after the parcel
+  // physically ships — so the copy says "being prepared", which is true for
+  // every status it covers.
   [
     /no longer be canceled|not allowed|ready to ship|shipped|delivered/i,
     'This order is already being prepared for shipping and can no longer be canceled — please contact support.',
@@ -302,9 +318,9 @@ const CANCEL_RULES: ErrorRule[] = [
   [/not found|404/i, 'That order was not found.'],
 ];
 
-// Cancel an order the customer still owns the decision on (`requested`/
-// `processed`) — the cards return to their vault. From `ready_to_ship` on the
-// backend refuses: the parcel is picked and labelled, so cancelling is an
+// Cancel an order the customer still owns the decision on (`requested`, i.e.
+// before the 12am cutoff) — the cards return to their vault. From `processed`
+// on the backend refuses: purchasing has started on it, so cancelling is an
 // operator/support action. The UI hides the affordance for the same statuses.
 export async function cancelDeliveryOrder(
   orderId: string,
@@ -381,13 +397,16 @@ const addressBody = (input: AddAddressInput) => ({
   city: input.city,
   province: input.province || null,
   postal_code: input.postalCode,
-  country_code: input.countryCode,
+  country_code: input.countryCode.trim().toUpperCase(),
   phone: input.phone || null,
 });
 
-// The four fields a parcel cannot ship without. Same gate on add and edit —
+// The fields a parcel cannot ship without. Same gate on add and edit —
 // an edit that blanks the street is as unshippable as an add that omits it.
 const missingRequired = (input: AddAddressInput): boolean =>
+  // Either name will do: the backend's snapshotAddress joins them and only
+  // refuses a row with neither.
+  (!input.firstName?.trim() && !input.lastName?.trim()) ||
   !input.address1?.trim() ||
   !input.city?.trim() ||
   !input.postalCode?.trim() ||
@@ -403,6 +422,25 @@ const missingRequired = (input: AddAddressInput): boolean =>
   // Singapore has no states (the forms store "Singapore"), and only MY and
   // SG ship at all — workflows/steps/request-delivery.ts refuses the rest.
   (input.countryCode?.trim().toUpperCase() === 'MY' && !input.province?.trim());
+
+// Only MY and SG ship, so an address in any other "country" is dead on arrival.
+// The forms took free text until 2026-10-20 and customers typed the phone code
+// ("60"), "MALAYSIA" or an area code: 74 Malaysian addresses saved that way and
+// the delivery modal refused every one. Shared by add and edit like the gate
+// above.
+const COUNTRY_ERROR = 'Choose Malaysia or Singapore as the country.';
+
+// What a delivery request would refuse anyway. Saved regardless, the row looks
+// fine in the book and the customer only meets the refusal at Confirm.
+function addressRefusal(input: AddAddressInput): string | null {
+  if (missingRequired(input)) return 'Fill in the required address fields.';
+  if (!isShippableCountry(input.countryCode)) return COUNTRY_ERROR;
+  if (!isShippablePostcode(input.postalCode, input.countryCode)) {
+    // The same sentence as the backend's postcodeMessage.
+    return `Enter ${postcodeHint(input.countryCode)} for this address.`;
+  }
+  return null;
+}
 
 // The address-book phone is the actual SOURCE of a delivery order's
 // ship_phone — the backend's profile-phone fallback (request-delivery.ts)
@@ -434,19 +472,29 @@ export async function addAddress(
   const token = await getAuthToken();
   if (!token)
     return { ok: false, error: 'Please log in first.', needsAuth: true };
-  if (missingRequired(input)) {
-    return { ok: false, error: 'Fill in the required address fields.' };
-  }
+  const refusal = addressRefusal(input);
+  if (refusal) return { ok: false, error: refusal };
   const phoneCheck = validateAddressPhone(input.phone);
   if (!phoneCheck.ok) return phoneCheck;
   try {
+    // The new row is the one that wasn't there before. Its place in the list
+    // means nothing: Medusa's route refetches `addresses` with no ORDER BY, so
+    // an updated row can read last, and that wrong id is where the parcel goes.
+    const { customer: before, stale } = await getCustomerSession();
+    if (!before) {
+      return {
+        ok: false,
+        error: stale ? LOGIN_FIRST : 'Address was not saved. Please try again.',
+        needsAuth: stale,
+      };
+    }
+    const known = new Set((before.addresses ?? []).map((a) => a.id));
     const { customer } = await sdk.store.customer.createAddress(
       addressBody({ ...input, phone: phoneCheck.phone }),
       {},
       { Authorization: `Bearer ${token}` },
     );
-    const list = customer.addresses ?? [];
-    const created = list[list.length - 1];
+    const created = (customer.addresses ?? []).find((a) => !known.has(a.id));
     if (!created?.id) {
       return { ok: false, error: 'Address was not saved. Please try again.' };
     }
@@ -475,9 +523,8 @@ export async function updateAddress(
   const token = await getAuthToken();
   if (!token)
     return { ok: false, error: 'Please log in first.', needsAuth: true };
-  if (missingRequired(input)) {
-    return { ok: false, error: 'Fill in the required address fields.' };
-  }
+  const refusal = addressRefusal(input);
+  if (refusal) return { ok: false, error: refusal };
   const phoneCheck = validateAddressPhone(input.phone);
   if (!phoneCheck.ok) return phoneCheck;
   try {

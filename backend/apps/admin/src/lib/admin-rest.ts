@@ -223,6 +223,13 @@ export interface SupportTransaction {
   created_at: string;
   /** Ledger display id (TP…, SP…) where one exists. /transactions only. */
   ledger_display_id?: string | null;
+  /** The wallet balance right after this row. /transactions only. */
+  balance_after?: number | null;
+  /** What the row was about (/transactions only): the pack and cards behind a
+   *  pack open or sell-back, the shipment behind a shipping fee. */
+  pack_title?: string | null;
+  cards?: { pull_id: string; name: string; image: string | null }[];
+  order_id?: string | null;
 }
 
 export interface SupportPull {
@@ -232,6 +239,10 @@ export interface SupportPull {
   pack_title?: string | null;
   rolled_at: string;
   status: 'vaulted' | 'bought_back' | 'delivering' | 'delivered' | 'forfeited';
+  /** How they got it: pack | reward | free | gift | bonus (/pulls only). */
+  source?: string | null;
+  /** The live shipment of a delivering or delivered card (/pulls only). */
+  order_id?: string | null;
   buyback_amount: number | null;
   /** When the sell-back was paid (bought_back only). Optional: the /gacha
    *  fallback rows don't carry the dispute fields — only /pulls does. */
@@ -249,6 +260,8 @@ export interface SupportPull {
   card: {
     handle: string;
     name: string;
+    /** Per-pack tier of the pull (/pulls only). */
+    rarity?: string | null;
     market_value: number;
     image: string;
   } | null;
@@ -271,14 +284,6 @@ export interface CustomerGacha {
     /** null at the top of the ladder. */
     next: { level: number; threshold: number; remaining: number } | null;
   } | null;
-}
-
-// Core Medusa admin customer search (?q matches email/name).
-export async function searchCustomers(q: string): Promise<SupportCustomer[]> {
-  const data = await getJson<{ customers: SupportCustomer[] }>(
-    `/admin/customers?q=${encodeURIComponent(q)}&limit=10`,
-  );
-  return data.customers;
 }
 
 export interface GroupCreditCustomer {
@@ -358,6 +363,8 @@ export interface AuditRow {
   reason: string | null;
   created_at: string;
   admin_id: string;
+  /** Null once that staff login no longer exists. */
+  admin_email: string | null;
 }
 
 // frozen (funds) and disabled (login) are orthogonal — one can be set without
@@ -857,6 +864,27 @@ export const acknowledgeAuditFinding = (body: {
     body,
   );
 
+/** Money a crash left half-moved. Detection only: nothing here moves money. */
+export interface MoneyIntegrity {
+  findings: {
+    kind: 'open_without_prize' | 'sold_without_flip' | 'denied_without_refund';
+    id: string;
+    customer_id: string;
+    amount: number;
+    at: string;
+  }[];
+}
+
+export const getMoneyIntegrity = () =>
+  getJson<MoneyIntegrity>('/admin/payments/integrity');
+
+/** Settlement's Credit deposit: the backend asks the gateway again first. */
+export const creditGatewayDeposit = (body: { id: string; reason: string }) =>
+  postJson<{ credited: boolean; replayed: boolean }>(
+    `/admin/payments/deposits/${encodeURIComponent(body.id)}/credit`,
+    { reason: body.reason },
+  );
+
 export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
   return getJson<GatewayAudit>(
     `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
@@ -1206,6 +1234,24 @@ export interface AdminDeliveryOrder {
   delivered_at: string | null;
   created_at: string;
   items: AdminDeliveryItem[];
+  /** The shipment tracker's last carrier check (list route only). */
+  tracking_snapshot?: DeliveryTrackingSnapshot | null;
+}
+
+/** Mirrors the backend TrackingSnapshot (modules/packs/shipment-tracking.ts). */
+export interface DeliveryTrackingSnapshot {
+  tracking_number: string;
+  carrier: 'ninjavan' | 'poslaju' | 'dhl_ecommerce' | null;
+  state:
+    | 'delivered'
+    | 'in_transit'
+    | 'problem'
+    | 'not_found'
+    | 'unknown_carrier';
+  event: string | null;
+  event_at: string | null;
+  delivered_at: string | null;
+  checked_at: string;
 }
 
 export interface DeliveryOrdersPage {
@@ -1249,6 +1295,16 @@ export const bulkUpdateDeliveryOrders = (
     '/admin/delivery-orders/bulk',
     { ids, status },
   );
+
+// Check every shipped order with its carrier now and complete the delivered
+// ones — the same run as the 2-hourly job.
+export const checkDeliveryTracking = () =>
+  postJson<{
+    checked: number;
+    completed: string[];
+    problems: string[];
+    failed: string[];
+  }>('/admin/delivery-orders/track', {});
 
 export async function getDeliveryOrder(
   id: string,
@@ -1698,6 +1754,8 @@ export interface GatewayWithdrawal {
   bank_reference_no: string | null;
   unique_reference_no: string | null;
   bank_code: string;
+  /** Null for a code the bank registry no longer knows. */
+  bank_name: string | null;
   /** MASKED (`••••1234`) — the list never serves a full account number. The
    *  full value comes one row at a time from getWithdrawalAccount. */
   account_number: string;
@@ -1724,6 +1782,8 @@ export interface GatewayWithdrawal {
    *  said `false` a moment ago. Surfaced so an approver sees the reason
    *  BEFORE clicking into that refusal, not just after. */
   frozen: boolean;
+  /** A Deny closed this row and its refund never landed. Deny finishes it. */
+  refund_missing: boolean;
 }
 
 export interface GatewayWithdrawalsResponse {
@@ -2048,6 +2108,20 @@ export interface AdminCustomerDetail {
     name: string;
     metadata?: Record<string, unknown> | null;
   }[];
+  /** The player's saved shipping addresses. */
+  addresses?: {
+    id: string;
+    first_name: string | null;
+    last_name: string | null;
+    address_1: string | null;
+    address_2: string | null;
+    city: string | null;
+    province: string | null;
+    postal_code: string | null;
+    country_code: string | null;
+    phone: string | null;
+    is_default_shipping?: boolean;
+  }[];
 }
 
 // `+groups.*` APPENDS to Medusa's default field set rather than replacing it —
@@ -2056,7 +2130,7 @@ export interface AdminCustomerDetail {
 // supported relation, not a query smuggled past the validator.
 export const getCustomerDetail = (id: string) =>
   getJson<{ customer: AdminCustomerDetail }>(
-    `/admin/customers/${encodeURIComponent(id)}?fields=%2Bgroups.id,%2Bgroups.name,%2Bgroups.metadata`,
+    `/admin/customers/${encodeURIComponent(id)}?fields=%2Bgroups.id,%2Bgroups.name,%2Bgroups.metadata,%2Baddresses.*`,
   );
 
 // ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
@@ -2111,6 +2185,16 @@ export const setGroupPolicy = (
   postJson<{ customer_group: AdminCustomerGroup }>(
     `/admin/customer-groups/${encodeURIComponent(id)}/policy`,
     { ...policy, reason },
+  );
+
+export const setGroupDraftAccess = (
+  id: string,
+  seesDrafts: boolean,
+  reason: string,
+) =>
+  postJson<{ customer_group: AdminCustomerGroup }>(
+    `/admin/customer-groups/${encodeURIComponent(id)}/draft-access`,
+    { sees_drafts: seesDrafts, reason },
   );
 
 /** How many players are in one group. Only `count` is used — limit=1 keeps the
@@ -2220,6 +2304,11 @@ export interface AdminPurchaseInvoice {
   /** Joined from the user module; null if the admin account was removed. */
   agent_email: string | null;
   reverses_invoice_id: string | null;
+  /** The goods receive note this invoice was transferred from (spec
+   *  2026-10-28). A reversal of a transferred invoice carries the same id —
+   *  the server copies it — so both read "From GRN-…". */
+  from_grn_id: string | null;
+  from_grn_display_no: string | null;
   created_at: string;
   total_qty: number;
   subtotal: number;
@@ -2273,6 +2362,10 @@ export interface CreatePurchaseInvoiceBody {
   date: string;
   supplier: string;
   reverses_invoice_id?: string | null;
+  /** Transfer from an open GRN. The lines must equal the GRN's as a multiset
+   *  of (card_handle, qty); only unit_cost is the operator's. Never together
+   *  with reverses_invoice_id — the server refuses the pair. */
+  from_grn_id?: string | null;
   lines: CreatePurchaseInvoiceLineBody[];
 }
 
@@ -2289,13 +2382,22 @@ export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
  *  Card row still gets a row — that is exactly what the "List to gacha card"
  *  bulk tool acts on, and `is_card` tells the two apart.
  *
- *  `cost` and `on_hand` are THREE-STATE and the distinction is load-bearing:
+ *  `cost` and `counter` are THREE-STATE and the distinction is load-bearing:
  *  `null` = no purchase history / tracks no inventory at all; `0` = bought and
  *  free / tracked with nothing shippable. The route builds both with `??` and
- *  never `||` (inventory-view.ts says so in as many words, and
- *  inventory-detail.spec pins all four states) — so nothing on this side may
- *  collapse them with a truthiness test either. `fmv`/`price` are null when the
- *  product carries no FMV at all, never NaN and never 0-by-accident.
+ *  never `||` (inventory-view.ts says so in as many words) — so nothing on this
+ *  side may collapse them with a truthiness test either. `fmv`/`price` are null
+ *  when the product carries no FMV at all, never NaN and never 0-by-accident.
+ *
+ *  Stock buckets (spec 2026-10-28), in the Stock page's column order:
+ *  `to_procure` = max(0, requested + ready_to_ship − on_hand); `on_hand` = the
+ *  PHYSICAL cards on the shelf, received (GRN lines + invoice lines not
+ *  transferred from a GRN) minus shipped — never null, and negative only when
+ *  more shipped than was ever received (missing history), which the pages show
+ *  in the error colour; `requested` = orders in requested + processed;
+ *  `ready_to_ship`; `shipped`. `counter` is the OLD Medusa stock counter,
+ *  received minus WON (negative = units owed to winners) — what prize takes
+ *  draw from, so the Lucky Draw picker reads it, not `on_hand`.
  *
  *  All money is MYR and arrives as plain JS numbers (the route folds through
  *  displayMarketPrice / weightedAverageCost, not through a bigNumber getter),
@@ -2305,6 +2407,10 @@ export interface InventoryRow {
   handle: string;
   product_id: string;
   photo: string | null;
+  /** The stock screens' picture: graded = the baked slab, raw = the bare card. */
+  image: string | null;
+  /** "PSA 10"; null = raw. */
+  grade: string | null;
   name: string;
   sku: string;
   is_card: boolean;
@@ -2314,9 +2420,12 @@ export interface InventoryRow {
   price: number | null;
   cost: number | null;
   created_at: string;
-  on_hand: number | null;
+  to_procure: number;
+  on_hand: number;
+  counter: number | null;
   in_vault: number;
   requested: number;
+  ready_to_ship: number;
   shipped: number;
   listing_count: number;
 }
@@ -2355,7 +2464,7 @@ export interface InventoryStockMovement {
 
 /** GET /admin/inventory/:handle (spec §3.4) — the same row the list renders,
  *  plus where the card is listed and its paged movement history. `item` is a
- *  whole InventoryRow, so the same three-state `cost` / `on_hand` rules apply
+ *  whole InventoryRow, so the same three-state `cost` / `counter` rules apply
  *  here verbatim: null and 0 are different facts, and nothing may collapse
  *  them with a truthiness test. */
 export interface InventoryDetail {
@@ -2416,6 +2525,156 @@ export async function exportInventoryXlsx(q?: string): Promise<void> {
   // first, while still releasing it (a leaked object URL lives until reload).
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+// ── Goods receive notes + procurement (spec 2026-10-28) ──────────────────────
+
+/** open = waiting for its invoice; transferred = an invoice was made from it;
+ *  reversed = undone by a reversal GRN; reversal = this GRN IS that undo. */
+export type GrnStatus = 'open' | 'transferred' | 'reversed' | 'reversal';
+
+export interface GrnRef {
+  id: string;
+  display_no: string;
+}
+
+/** One row of GET /admin/goods-receive-notes. Totals are folded server-side;
+ *  the list carries no lines. A GRN has no cost — only FMV. */
+export interface AdminGoodsReceiveNote {
+  id: string;
+  display_no: string;
+  date: string;
+  supplier: string;
+  agent_user_id: string;
+  agent_email: string | null;
+  created_at: string;
+  status: GrnStatus;
+  invoice: GrnRef | null;
+  reversed_by: GrnRef | null;
+  reverses: GrnRef | null;
+  total_qty: number;
+  total_fmv: number;
+}
+
+/** `fmv_snapshot` is a bigNumber column the route spreads from the ORM row, so
+ *  it may arrive as a numeric string — Number() it before any arithmetic, the
+ *  same rule as AdminPurchaseInvoiceLine. `qty` is signed (negative on a
+ *  reversal GRN). */
+export interface AdminGoodsReceiveNoteLine {
+  id: string;
+  grn_id: string;
+  card_handle: string;
+  card_name: string;
+  fmv_snapshot: number | string;
+  qty: number;
+}
+
+export interface AdminGoodsReceiveNoteDetail extends AdminGoodsReceiveNote {
+  lines: AdminGoodsReceiveNoteLine[];
+}
+
+export interface GoodsReceiveNotesPage {
+  total: number;
+  offset: number;
+  limit: number;
+  goods_receive_notes: AdminGoodsReceiveNote[];
+}
+
+// Same `sort` / `q` contract as listPurchaseInvoices. `status: 'open'` keeps
+// only GRNs still waiting for their invoice (the invoice form's picker); the
+// route allows no other value.
+export const listGoodsReceiveNotes = (
+  page = 0,
+  q?: string,
+  limit = 50,
+  sort = 'created_at:desc',
+  status?: 'open',
+) =>
+  getJson<GoodsReceiveNotesPage>(
+    `/admin/goods-receive-notes?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${status ? `&status=${status}` : ''}`,
+  );
+
+export const getGoodsReceiveNote = (id: string) =>
+  getJson<{ goods_receive_note: AdminGoodsReceiveNoteDetail }>(
+    `/admin/goods-receive-notes/${encodeURIComponent(id)}`,
+  );
+
+export interface CreateGoodsReceiveNoteBody {
+  date: string;
+  supplier: string;
+  /** qty is a whole number above 0; fmv_snapshot is MYR, at most 2dp. */
+  lines: Omit<CreatePurchaseInvoiceLineBody, 'unit_cost'>[];
+}
+
+// The workflow returns the bare record, not the list's described row — only
+// the id is read from it.
+export const createGoodsReceiveNote = (body: CreateGoodsReceiveNoteBody) =>
+  postJson<{ goods_receive_note: GrnRef }>('/admin/goods-receive-notes', body);
+
+// Only an OPEN GRN can be reversed; anything else is a 400 with a readable
+// message, which the mutation toasts.
+export const reverseGoodsReceiveNote = (id: string) =>
+  postJson<{ goods_receive_note: GrnRef }>(
+    `/admin/goods-receive-notes/${encodeURIComponent(id)}/reverse`,
+    {},
+  );
+
+/** One card on the purchasing list: to_procure >= 1, oldest waiting order
+ *  first (the route sorts). image: graded = the baked slab, raw = the bare
+ *  card. fmv_usd = the PriceCharting price as is; fmv = that in MYR at the
+ *  live rate, no listing markup. */
+export interface ProcurementToBuyRow {
+  handle: string;
+  name: string;
+  sku: string;
+  photo: string | null;
+  image: string | null;
+  graded: boolean;
+  /** "PSA 10"; null = raw. */
+  grade: string | null;
+  to_procure: number;
+  on_hand: number;
+  requested: number;
+  ready_to_ship: number;
+  fmv: number | null;
+  fmv_usd: number | null;
+  oldest_order_at: string | null;
+}
+
+// taken_at: when the 12am stock run froze the list; null = live (the run is
+// off, or has not run since the last 12am).
+export const getProcurementToBuy = () =>
+  getJson<{ rows: ProcurementToBuyRow[]; taken_at: string | null }>(
+    '/admin/procurement/to-buy',
+  );
+
+// The list on screen as a .xlsx with each card's picture in its row. Same
+// blob-URL dance as exportInventoryXlsx, for the reasons noted there. The date
+// is Malaysia's: the list turns over at 12am MYT, which is still yesterday in
+// UTC for the first eight hours.
+export async function exportProcurementToBuyXlsx(): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/procurement/to-buy/export`,
+    {
+      credentials: 'include',
+    },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `procurement-to-buy-${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' })}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// The mailing list: every ready_to_ship order, oldest first, in the Orders
+// page's own serialized shape (customer_email included).
+export const getProcurementToShip = () =>
+  getJson<{ orders: AdminDeliveryOrder[] }>('/admin/procurement/to-ship');
 
 // ── Referral rebuild (spec 2026-08-24) ───────────────────────────────────────
 
@@ -2532,6 +2791,8 @@ export async function voidReferralLine(
 
 export interface CustomerReferralCard {
   referred_by: string | null;
+  /** The referrer's name, else email; null if that customer is gone. */
+  referred_by_label?: string | null;
   partner_referral_bp: number | null;
   /** Non-null when the player's group is a partner group: its rate is what
    *  pays them and the manual control below is locked (spec 2026-09-09). */
@@ -2643,6 +2904,30 @@ export interface AdminTaskDefinition {
    *  mid-deploy state, and typing it as required is what let the console crash
    *  on `undefined.requirement` instead of degrading. */
   labels?: { requirement: string; reward: string };
+  /** When it was switched off. Optional for the same reason as labels. */
+  retired_at?: string | null;
+  /** Claims made so far. Optional for the same reason as labels. */
+  claims?: number;
+  /** Names, pictures and prices for the board. Optional for the same reason. */
+  view?: AdminTaskView | null;
+}
+
+export interface AdminTaskView {
+  /** The Pokémon or pack the goal names; null = any, or nothing to name. */
+  goal_name: string | null;
+  goal_image: string | null;
+  /** The least one rip can cost: the pack's price, or for "any pack" the
+   *  cheapest pack on sale. null when the goal isn't a rip. */
+  goal_price_myr: number | null;
+  /** false = a pack players can't open right now. null = names no pack. Optional:
+   *  a backend mid-deploy may not send it yet. */
+  goal_buyable?: boolean | null;
+  reward_name: string | null;
+  /** "PSA 10" for a graded card reward. Optional for the same reason. */
+  reward_grade?: string | null;
+  reward_image: string | null;
+  /** null for tickets, which have no RM value. */
+  reward_value_myr: number | null;
 }
 
 export async function listTaskDefinitions(): Promise<AdminTaskDefinition[]> {
@@ -2700,12 +2985,24 @@ export interface AdminLuckyDrawPrize {
   } | null;
 }
 
+/** A gate's tier: a label and a player filter, no rule reads it. */
+export type AdminLuckyDrawTier = 'economy' | 'business' | 'first';
+
 export interface AdminLuckyDrawEvent {
   id: string;
   name: string;
+  tier: AdminLuckyDrawTier;
   starts_at: string;
   ends_at: string;
   status: 'draft' | 'published' | 'cancelled';
+  /** one_winner: one customer wins every prize at the end. per_prize: the old
+   *  rules, each prize drawn on its own. A draft becomes one_winner on publish. */
+  draw_mode: 'per_prize' | 'one_winner';
+  /** The event's own commitment. null until published, and on a per_prize
+   *  event, whose hashes are per prize. */
+  seed_hash: string | null;
+  total_tickets: number;
+  entrant_count: number;
   prizes: AdminLuckyDrawPrize[];
 }
 
@@ -2714,6 +3011,7 @@ export interface AdminLuckyDrawEventInput {
   name: string;
   starts_at: string;
   ends_at: string;
+  tier: AdminLuckyDrawTier;
   /** A NEW event only (an edit with prizes is refused): its whole prize pool,
    *  created with it in one transaction. */
   prizes?: AdminLuckyDrawNewPrize[];
@@ -2762,6 +3060,14 @@ export const publishLuckyDrawEvent = (id: string, reason: string) =>
     { reason },
   );
 
+/** Cancels a one-winner event and refunds every entrant. Refused once a result
+ *  exists. */
+export const withdrawLuckyDrawEvent = (id: string, reason: string) =>
+  postJson<{ refunded: number }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(id)}/withdraw`,
+    { reason },
+  );
+
 export const saveLuckyDrawPrize = (
   input: AdminLuckyDrawPrizeInput & { reason: string },
 ) => postJson<{ id: string }>('/admin/lucky-draw/prizes', input);
@@ -2785,6 +3091,50 @@ export async function listLuckyDrawEntries(
   );
   return data.entries;
 }
+
+export async function listLuckyDrawEventEntrants(
+  eventId: string,
+): Promise<AdminLuckyDrawEntrant[]> {
+  const data = await getJson<{ entries: AdminLuckyDrawEntrant[] }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(eventId)}/entrants`,
+  );
+  return data.entries;
+}
+
+// ── Ticket pack prizes (spec 2026-10-30 Lucky Pack §2) ──────────────────────
+
+/** A saved row, in the storage units of `pack_odds` (1,000,000 = 100%). */
+export interface AdminTicketPrize {
+  tickets: number;
+  rarity: string;
+  weight: number;
+  /** null = this amount inherits the previous set. */
+  weight_2: number | null;
+  weight_3: number | null;
+  locked: boolean;
+}
+
+/** A row to save, with win % in the units POST /admin/packs/:slug/odds takes.
+ *  The server balances it with the same @acme/odds-math. */
+export interface AdminTicketPrizeEntry {
+  tickets: number;
+  rarity: string;
+  locked: boolean;
+  pct: number;
+  /** null = inherit the previous set. */
+  pct_2: number | null;
+  pct_3: number | null;
+}
+
+const ticketPrizesPath = (slug: string) =>
+  `/admin/packs/${encodeURIComponent(slug)}/ticket-prizes`;
+
+export const getTicketPrizes = (slug: string) =>
+  getJson<{ rows: AdminTicketPrize[] }>(ticketPrizesPath(slug));
+
+/** Replaces the pack's whole table: a row left out is removed. */
+export const saveTicketPrizes = (slug: string, rows: AdminTicketPrizeEntry[]) =>
+  postJson<unknown>(ticketPrizesPath(slug), { rows });
 
 export interface AdminLuckyDrawTicketHistory {
   balance: number;

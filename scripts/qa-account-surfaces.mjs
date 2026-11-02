@@ -148,7 +148,10 @@ await set('Last name', 'Delete-Me');
 await set('Address', '1 QA Street');
 await set('City', 'Testville');
 await set('Postal code', '12345');
-await set('Country code', 'MY');
+// exact: a bare 'Country' also matches PhoneField's "Country code" select.
+await page
+  .getByRole('combobox', { name: 'Country', exact: true })
+  .selectOption('MY');
 await set('Phone (optional)', '+60100000000');
 await page
   .locator('form')

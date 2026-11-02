@@ -5,7 +5,12 @@ import { storeShim, backend } from '@/lib/__tests__/store-shim';
 // (src/lib/__tests__/store-shim.ts); only the network is fake.
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 
-import { enterLuckyDraw, getLuckyDrawLive } from '../lucky-draw';
+import {
+  enterLuckyDraw,
+  enterLuckyDrawEvent,
+  getLuckyDrawEventResult,
+  getLuckyDrawLive,
+} from '../lucky-draw';
 
 const ENTER = 'POST /store/lucky-draw/prizes/:id/enter';
 // Entries are final, so a failure that may have committed must not invite a
@@ -90,6 +95,115 @@ describe('enterLuckyDraw', () => {
       ok: false,
       error: 'Could not enter. Please try again.',
     });
+  });
+});
+
+describe('enterLuckyDrawEvent', () => {
+  const ENTER_EVENT = 'POST /store/lucky-draw/events/:id/enter';
+
+  it('posts the tickets to the event and hands back the new balance', async () => {
+    const mem = backend({
+      [ENTER_EVENT]: { body: { entered: true, balance: 70, myTickets: 30 } },
+    });
+    expect(await enterLuckyDrawEvent('ldev_1', 30)).toEqual({
+      ok: true,
+      entered: true,
+      balance: 70,
+      myTickets: 30,
+    });
+    expect(mem.requests[0]).toMatchObject({
+      path: '/store/lucky-draw/events/ldev_1/enter',
+      body: { tickets: 30 },
+    });
+  });
+
+  it.each([
+    'not_found',
+    'not_open',
+    'closed',
+    'no_topup',
+    'not_enough_tickets',
+  ])('hands back the %s refusal', async (reason) => {
+    backend({ [ENTER_EVENT]: { body: { entered: false, reason } } });
+    expect(await enterLuckyDrawEvent('ldev_1', 5)).toEqual({
+      ok: true,
+      entered: false,
+      reason,
+    });
+  });
+
+  it('a 5xx may have committed: refresh, never "try again"', async () => {
+    backend({ [ENTER_EVENT]: { status: 502 } });
+    expect(await enterLuckyDrawEvent('ldev_1', 5)).toEqual({
+      ok: false,
+      error: REFRESH,
+    });
+  });
+
+  it('a 4xx was refused before anything was spent: its own sentence', async () => {
+    backend({ [ENTER_EVENT]: { status: 429 } });
+    expect(await enterLuckyDrawEvent('ldev_1', 5)).toEqual({
+      ok: false,
+      error: 'Too many tries — wait a moment and try again.',
+    });
+  });
+
+  it('logged out: asks for a login without calling the backend', async () => {
+    const mem = backend({}, { token: null });
+    expect(await enterLuckyDrawEvent('ldev_1', 5)).toEqual({
+      ok: false,
+      error: 'Please log in first.',
+    });
+    expect(mem.requests).toEqual([]);
+  });
+});
+
+describe('getLuckyDrawEventResult', () => {
+  const DETAIL = 'GET /store/lucky-draw/results/events/:eventId';
+  const person = {
+    who: 'Mimo',
+    face_seed: null,
+    avatar_url: null,
+    frame_url: null,
+  };
+
+  it('reads the event as a result the wheel knows', async () => {
+    const mem = backend({
+      [DETAIL]: {
+        body: {
+          result: {
+            winner: person,
+            winner_tickets: 40,
+            total_tickets: 40,
+            entrant_count: 1,
+            seed: 'c',
+            seed_hash: 'd',
+            drawn_at: '2026-11-30T16:00:00.000Z',
+          },
+          prizes: [
+            { kind: 'card', title: 'Umbreon', image: '/u.webp', value_myr: 42 },
+          ],
+          entries: [{ person, tickets: 40 }],
+          ticket_index: 3,
+        },
+      },
+    });
+    const d = await getLuckyDrawEventResult('ldev_1', 'November');
+    expect(mem.requests[0]?.path).toBe(
+      '/store/lucky-draw/results/events/ldev_1',
+    );
+    expect(d?.result).toMatchObject({
+      prize_id: 'ldev_1',
+      title: 'November',
+      image: '/u.webp',
+      value_myr: 42,
+    });
+    expect(d?.ticket_index).toBe(3);
+  });
+
+  it('is null until the event is drawn (a 404)', async () => {
+    backend({ [DETAIL]: { status: 404 } });
+    expect(await getLuckyDrawEventResult('ldev_1', 'November')).toBeNull();
   });
 });
 

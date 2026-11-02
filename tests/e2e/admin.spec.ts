@@ -173,8 +173,12 @@ test.describe('admin workflow', () => {
     // DOM, so an unscoped getByText(...).first() can latch onto the hidden
     // sidebar anchor instead of the visible stat on this page.
     const main = page.getByRole('main');
-    for (const stat of [/revenue/i, /payouts/i, /vault liability/i]) {
-      await expect(main.getByText(stat).first()).toBeVisible({
+    for (const stat of [
+      'Cash kept',
+      'Still owed to players',
+      'Pack payout rate',
+    ]) {
+      await expect(main.getByText(stat, { exact: true }).first()).toBeVisible({
         timeout: 15_000,
       });
     }

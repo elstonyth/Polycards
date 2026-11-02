@@ -9,8 +9,9 @@ import { luckyDrawPageFor } from './view';
 
 // GET /store/lucky-draw — the live event's prizes with totals, the top 10
 // entrants, the viewer's own tickets and balance, and the result of any prize
-// already drawn. The shared half is cached in view.ts; no prize seed is in
-// this payload until that prize's result exists.
+// already drawn. A one_winner event carries those on `event` too, and
+// `next_event` names what comes next. The shared half is cached in view.ts; no
+// seed is in this payload until its result exists.
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,

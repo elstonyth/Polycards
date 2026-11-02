@@ -6,13 +6,389 @@ import {
   ENTER_REFUSALS,
   ENTER_REFUSAL_COPY,
   entriesIntact,
-  landingAngle,
+  entryChance,
+  eventResultDetail,
+  eventRowId,
+  gatesGone,
+  heroFirst,
+  heroPrize,
+  luckyDrawView,
+  mergeFreshGates,
   nextDraw,
-  segmentAt,
+  newGateIds,
+  pageGates,
+  poolDay,
+  poolWhen,
+  potTotal,
+  refusalCopy,
+  rulesCopy,
+  sortGates,
   ticketRanges,
-  wheelSegments,
+  tilePrice,
   winnerIndex,
 } from '@/lib/lucky-draw';
+
+describe('tilePrice', () => {
+  it('drops the sen from RM 1,000 up, and keeps small prizes exact', () => {
+    expect(tilePrice(175_331.92)).toBe(175_332);
+    expect(tilePrice(1000)).toBe(1000);
+    expect(tilePrice(999.5)).toBe(999.5);
+    expect(tilePrice(10.5)).toBe(10.5);
+  });
+});
+
+describe('the show order reads a result as', () => {
+  it('its class and pot, on the same row the arena gets', () => {
+    const { result } = eventResultDetail('ldev_1', 'Prize Pool', {
+      result: {
+        winner: null,
+        winner_tickets: 0,
+        total_tickets: 0,
+        entrant_count: 0,
+        seed: 's',
+        seed_hash: 'h',
+        drawn_at: '2026-11-02T16:00:00.000Z',
+      },
+      prizes: [
+        {
+          kind: 'card',
+          title: 'a',
+          image: null,
+          frame: null,
+          value_myr: 100.1,
+        },
+        {
+          kind: 'card',
+          title: 'b',
+          image: null,
+          frame: null,
+          value_myr: 200.2,
+        },
+      ],
+      entries: [],
+      ticket_index: null,
+      tier: 'business',
+    });
+    expect(result.tier).toBe('business');
+    expect(result.value_myr).toBe(300.3);
+  });
+});
+
+describe('gatesGone', () => {
+  it('keeps a drawn gate up until its show is over', () => {
+    const drawn = new Set(['waiting', 'over']);
+    expect([...gatesGone(drawn, new Set(['waiting']))]).toEqual(['over']);
+    expect([...gatesGone(drawn, new Set())].sort()).toEqual([
+      'over',
+      'waiting',
+    ]);
+  });
+});
+
+describe('pageGates', () => {
+  const gate = { id: 'g1', tier: 'first', starts_at: 'a', ends_at: 'b' };
+  const event = {
+    id: 'ev',
+    name: 'x',
+    starts_at: 's',
+    ends_at: 'e',
+    draw_mode: 'one_winner',
+    seed_hash: null,
+    total_tickets: 9,
+    entrant_count: 2,
+    my_tickets: 1,
+    top: [],
+    result: null,
+  };
+  const page = (over: object) =>
+    ({
+      balance: 0,
+      event: null,
+      prizes: [],
+      next_event: null,
+      ...over,
+    }) as never;
+
+  it('reads the running gates when the backend sends them', () => {
+    expect(pageGates(page({ events: [gate] }))).toEqual([gate]);
+    expect(pageGates(page({ events: [], event }))).toEqual([]);
+  });
+
+  it("turns an older backend's one running event into one gate with no class", () => {
+    const prizes = [{ id: 'p', title: 'P', value_myr: 5 }];
+    expect(pageGates(page({ event, prizes }))).toEqual([
+      {
+        id: 'ev',
+        tier: null,
+        starts_at: 's',
+        ends_at: 'e',
+        total_tickets: 9,
+        entrant_count: 2,
+        my_tickets: 1,
+        top: [],
+        prizes,
+      },
+    ]);
+  });
+
+  it('has no gate for no page, an old per-prize event or a drawn one', () => {
+    expect(pageGates(null)).toEqual([]);
+    expect(
+      pageGates(page({ event: { ...event, draw_mode: 'per_prize' } })),
+    ).toEqual([]);
+    expect(pageGates(page({ event: { ...event, result: {} } }))).toEqual([]);
+  });
+});
+
+describe('sortGates', () => {
+  const gate = (id: string, ends: number, starts: number, value: number) =>
+    ({
+      id,
+      ends_at: new Date(ends).toISOString(),
+      starts_at: new Date(starts).toISOString(),
+      prizes: [{ value_myr: value }],
+    }) as never;
+  const a = gate('a', 3000, 100, 5);
+  const b = gate('b', 1000, 200, 50);
+  const c = gate('c', 2000, 300, 500);
+  const ids = (list: { id: string }[]) => list.map((g) => g.id);
+
+  it('leads with the soonest draw by default', () => {
+    expect(ids(sortGates([a, b, c], 'closing', new Set()))).toEqual([
+      'b',
+      'c',
+      'a',
+    ]);
+  });
+
+  it('sorts by the biggest pot, or the newest', () => {
+    expect(ids(sortGates([a, b, c], 'value', new Set()))).toEqual([
+      'c',
+      'b',
+      'a',
+    ]);
+    expect(ids(sortGates([a, b, c], 'newest', new Set()))).toEqual([
+      'c',
+      'b',
+      'a',
+    ]);
+  });
+
+  it('puts a new gate on top, whatever the sort', () => {
+    expect(ids(sortGates([a, b, c], 'closing', new Set(['a'])))).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(ids(sortGates([a, b, c], 'value', new Set(['a'])))).toEqual([
+      'a',
+      'c',
+      'b',
+    ]);
+  });
+
+  it('does not reorder the list it was given', () => {
+    const list = [a, b, c];
+    sortGates(list, 'closing', new Set());
+    expect(ids(list)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('mergeFreshGates', () => {
+  const END = Date.parse('2026-11-01T12:00:00.000Z');
+  const WINDOW = 5 * 60_000;
+  const gate = (id: string, over: object = {}) => ({
+    id,
+    tier: 'first',
+    starts_at: '2026-11-01T00:00:00.000Z',
+    ends_at: new Date(END).toISOString(),
+    total_tickets: 1,
+    ...over,
+  });
+  const page = (events: object[], over: object = {}) =>
+    ({
+      balance: 0,
+      event: null,
+      prizes: [],
+      next_event: null,
+      events,
+      ...over,
+    }) as never;
+  const ids = (p: { events?: { id: string }[] }) => p.events?.map((g) => g.id);
+
+  it('takes the fresh numbers for a gate both reads list', () => {
+    const merged = mergeFreshGates(
+      page([gate('a')]),
+      page([gate('a', { total_tickets: 9 })], { balance: 5 }),
+      new Set(),
+      END - 1000,
+      WINDOW,
+    );
+    expect(merged.balance).toBe(5);
+    expect(merged.events?.[0]?.total_tickets).toBe(9);
+  });
+
+  it('keeps a gate that ended with its result unread, so its spin still plays', () => {
+    const merged = mergeFreshGates(
+      page([
+        gate('drawn'),
+        gate('live', { ends_at: '2026-11-02T00:00:00.000Z' }),
+      ]),
+      page([gate('live', { ends_at: '2026-11-02T00:00:00.000Z' })]),
+      new Set(),
+      END + 3000,
+      WINDOW,
+    );
+    expect(ids(merged)).toEqual(['live', 'drawn']);
+  });
+
+  it('never brings back a gate this tab closed, even from a stale read', () => {
+    const merged = mergeFreshGates(
+      page([]),
+      page([gate('drawn')]),
+      new Set(['drawn']),
+      END + 6000,
+      WINDOW,
+    );
+    expect(ids(merged)).toEqual([]);
+  });
+
+  it('lets go once the polling window is over, and of a gate still running', () => {
+    expect(
+      ids(
+        mergeFreshGates(
+          page([gate('late')]),
+          page([]),
+          new Set(),
+          END + WINDOW,
+          WINDOW,
+        ),
+      ),
+    ).toEqual([]);
+    // Not ended and gone from the read: withdrawn.
+    expect(
+      ids(
+        mergeFreshGates(
+          page([gate('withdrawn')]),
+          page([]),
+          new Set(),
+          END - 1000,
+          WINDOW,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("reads an older backend's one event as its gate", () => {
+    const event = {
+      id: 'ev',
+      name: 'x',
+      starts_at: 's',
+      ends_at: new Date(END + 1000).toISOString(),
+      draw_mode: 'one_winner',
+      seed_hash: null,
+      total_tickets: 2,
+      entrant_count: 1,
+      my_tickets: 0,
+      top: [],
+      result: null,
+    };
+    const fresh = { balance: 0, event, prizes: [], next_event: null } as never;
+    expect(ids(mergeFreshGates(null, fresh, new Set(), END, WINDOW))).toEqual([
+      'ev',
+    ]);
+  });
+});
+
+describe('newGateIds', () => {
+  const gates = [
+    { id: 'a', starts_at: '2026-11-01T10:00:00.000Z' },
+    { id: 'b', starts_at: '2026-11-02T10:00:00.000Z' },
+  ];
+
+  it('names the gates that went live after the last visit', () => {
+    expect([...newGateIds(gates, '2026-11-01T12:00:00.000Z')]).toEqual(['b']);
+    expect([...newGateIds(gates, '2026-11-03T00:00:00.000Z')]).toEqual([]);
+  });
+
+  it('goes by when it went live, not when it was set to start', () => {
+    const late = [
+      {
+        id: 'c',
+        starts_at: '2026-11-01T10:00:00.000Z',
+        live_at: '2026-11-01T13:00:00.000Z',
+      },
+    ];
+    expect([...newGateIds(late, '2026-11-01T12:00:00.000Z')]).toEqual(['c']);
+  });
+
+  it('marks nothing new on a first visit, or on an unreadable stamp', () => {
+    expect(newGateIds(gates, null).size).toBe(0);
+    expect(newGateIds(gates, 'garbage').size).toBe(0);
+  });
+});
+
+describe('poolDay', () => {
+  // 11:59 PM on Thu 5 Nov in Malaysia, still the 5th in UTC too.
+  const now = Date.parse('2026-11-05T15:59:00.000Z');
+
+  it('names the near days in Malaysia time, not UTC', () => {
+    expect(poolDay('2026-11-05T01:00:00.000Z', now)).toBe('Today');
+    expect(poolDay('2026-11-05T16:00:00.000Z', now)).toBe('Tomorrow');
+    expect(poolDay('2026-11-04T15:59:00.000Z', now)).toBe('Yesterday');
+  });
+
+  it('gives the weekday and date further out', () => {
+    expect(poolDay('2026-11-08T13:00:00.000Z', now)).toBe('Sun 8 Nov');
+    expect(poolDay('2026-11-01T13:00:00.000Z', now)).toBe('Sun 1 Nov');
+  });
+
+  it('gives the plain date with no clock yet, so hydration agrees', () => {
+    expect(poolDay('2026-11-05T01:00:00.000Z', null)).toBe('Thu 5 Nov');
+  });
+
+  it('reads an unreadable date as nothing', () => {
+    expect(poolDay('nope', now)).toBe('');
+    expect(poolDay('nope', null)).toBe('');
+  });
+});
+
+describe('poolWhen', () => {
+  const now = Date.parse('2026-11-05T15:59:00.000Z');
+
+  it('reads inside a sentence', () => {
+    expect(poolWhen('2026-11-05T15:59:30.000Z', now)).toBe(
+      'today, 11:59 PM MYT',
+    );
+    expect(poolWhen('2026-11-06T13:00:00.000Z', now)).toBe(
+      'tomorrow, 9:00 PM MYT',
+    );
+    expect(poolWhen('2026-11-08T13:00:00.000Z', now)).toBe(
+      'Sun 8 Nov, 9:00 PM MYT',
+    );
+  });
+});
+
+describe('entryChance', () => {
+  const row = { my_tickets: 30, total_tickets: 100 };
+
+  it('states the chance now while the pool is open', () => {
+    expect(entryChance({ ...row, status: 'open' })).toBe('30% chance');
+  });
+
+  it('states the chance they had once it is drawn', () => {
+    expect(entryChance({ ...row, status: 'won' })).toBe('had a 30% chance');
+    expect(entryChance({ ...row, status: 'lost' })).toBe('had a 30% chance');
+  });
+
+  it('says nothing for a refunded pool, an old prize row or an empty total', () => {
+    expect(entryChance({ ...row, status: 'cancelled' })).toBeNull();
+    expect(entryChance({ my_tickets: 30, status: 'lost' })).toBeNull();
+    expect(
+      entryChance({ my_tickets: 30, total_tickets: 0, status: 'open' }),
+    ).toBeNull();
+  });
+});
 
 describe('chancePercent', () => {
   it('reads the share of tickets the way the prize card shows it', () => {
@@ -180,55 +556,263 @@ describe('entriesIntact', () => {
   });
 });
 
-describe('wheelSegments', () => {
-  it('sizes each segment by its tickets, in list order', () => {
-    const segs = wheelSegments([{ tickets: 3 }, { tickets: 1 }], 0);
-    expect(segs).toEqual([
-      { a0: 0, a1: 270, index: 0 },
-      { a0: 270, a1: 360, index: 1 },
-    ]);
+describe('luckyDrawView', () => {
+  const END = '2026-11-30T15:59:00.000Z';
+  const endMs = Date.parse(END);
+  const pot = (over: { result?: unknown } = {}) => ({
+    event: { draw_mode: 'one_winner', ends_at: END, result: null, ...over },
   });
 
-  it('merges the smallest into one filler arc above the cap, never the winner', () => {
-    // Six entrants, cap 4: the winner (smallest of all, keeps its own span)
-    // and the two biggest stay; the rest become one filler arc at the end.
-    const entries = [
-      { tickets: 10 },
-      { tickets: 1 }, // winner
-      { tickets: 2 },
-      { tickets: 30 },
-      { tickets: 3 },
-      { tickets: 54 },
-    ];
-    const segs = wheelSegments(entries, 1, 4);
-    expect(segs.map((s) => s.index)).toEqual([1, 3, 5, null]);
-    const total = 100;
-    expect(segs[0]!.a1 - segs[0]!.a0).toBeCloseTo((1 / total) * 360);
-    expect(segs[3]!.a1 - segs[3]!.a0).toBeCloseTo(((10 + 2 + 3) / total) * 360);
-    expect(segs[segs.length - 1]!.a1).toBeCloseTo(360);
+  it('reads a failed page as unavailable', () => {
+    expect(luckyDrawView(null, endMs)).toBe('unavailable');
   });
 
-  it('leaves a wheel at or under the cap alone', () => {
-    const entries = Array.from({ length: 300 }, () => ({ tickets: 1 }));
-    expect(wheelSegments(entries, 7)).toHaveLength(300);
-    expect(wheelSegments([...entries, { tickets: 1 }], 7)).toHaveLength(300);
+  it('reads no event as coming soon', () => {
+    expect(luckyDrawView({ event: null }, endMs)).toBe('coming_soon');
+  });
+
+  it('gives a per-prize event, or a card-era one with no mode, the old page', () => {
+    expect(
+      luckyDrawView(
+        { event: { draw_mode: 'per_prize', ends_at: END, result: null } },
+        endMs,
+      ),
+    ).toBe('per_prize');
+    expect(luckyDrawView({ event: { ends_at: END } }, endMs)).toBe('per_prize');
+    // A running old event never turns into a pot, even past its end.
+    expect(luckyDrawView({ event: { ends_at: END } }, endMs + 1)).toBe(
+      'per_prize',
+    );
+  });
+
+  it('keeps a pot open until the very end, then waits for the draw', () => {
+    expect(luckyDrawView(pot(), endMs - 1)).toBe('pot_open');
+    expect(luckyDrawView(pot(), endMs)).toBe('pot_drawing');
+    expect(luckyDrawView(pot(), endMs + 60_000)).toBe('pot_drawing');
+  });
+
+  it('shows a stored result whatever the clock says', () => {
+    const result = { winner: { who: 'A' } };
+    expect(luckyDrawView(pot({ result }), endMs - 1)).toBe('pot_drawn');
+    expect(luckyDrawView(pot({ result }), endMs + 1)).toBe('pot_drawn');
+    // No entries: still drawn, the panel says nobody entered.
+    expect(luckyDrawView(pot({ result: { winner: null } }), endMs + 1)).toBe(
+      'pot_drawn',
+    );
+  });
+
+  it('never asks a clock it does not have yet (server render = hydration)', () => {
+    expect(luckyDrawView(pot(), null)).toBe('pot_open');
+    expect(luckyDrawView(pot({ result: { winner: null } }), null)).toBe(
+      'pot_drawn',
+    );
   });
 });
 
-describe('landing and the pointer', () => {
-  const seg = { a0: 100, a1: 200, index: 0 };
-
-  it('lands inside the middle 56% of the segment', () => {
-    expect(landingAngle(seg, 0)).toBeCloseTo(122);
-    expect(landingAngle(seg, 1)).toBeCloseTo(178);
+describe('chance on the pot', () => {
+  it('is 0% with no tickets of mine, or nobody in at all', () => {
+    expect(chancePercent(0, 0)).toBe('0%');
+    expect(chancePercent(0, 900)).toBe('0%');
   });
 
-  it('reads the segment under the 12 o’clock pointer for a rotation', () => {
-    const segs = wheelSegments([{ tickets: 1 }, { tickets: 1 }], 0);
-    expect(segmentAt(segs, 0)).toBe(0);
-    // Turning the wheel 90° clockwise brings the 270° point under the pointer.
-    expect(segmentAt(segs, 90)).toBe(1);
-    expect(segmentAt(segs, 360 * 6 + 270)).toBe(0);
-    expect(segmentAt(segs, -7)).toBe(0);
+  it('rounds to one decimal under 10%, whole numbers above', () => {
+    expect(chancePercent(1, 8)).toBe('13%');
+    expect(chancePercent(1, 16)).toBe('6.3%');
+    expect(chancePercent(1, 1000)).toBe('0.1%');
+    expect(chancePercent(1, 1001)).toBe('<0.1%');
+  });
+
+  it('is 100% only when every ticket in the pot is mine', () => {
+    expect(chancePercent(120, 120)).toBe('100%');
+    expect(chancePercent(1999, 2000)).toBe('99%');
+  });
+});
+
+describe('the pot countdown', () => {
+  const END = '2026-11-30T15:59:00.000Z';
+  const endMs = Date.parse(END);
+
+  it('holds its last second until the end and stops exactly on it', () => {
+    expect(countdownClock(END, endMs - 1)?.s).toBe('01');
+    expect(countdownClock(END, endMs)).toBeNull();
+    expect(drawCountdown(END, endMs - 1)).toBe('0m 01s');
+    expect(drawCountdown(END, endMs)).toBe('Drawing…');
+  });
+
+  it('rolls over on the whole day and hour', () => {
+    expect(countdownClock(END, endMs - 86_400_000)).toEqual({
+      d: '01',
+      h: '00',
+      m: '00',
+      s: '00',
+    });
+    expect(drawCountdown(END, endMs - 3_600_000)).toBe('1h 00m');
+  });
+});
+
+describe('potTotal', () => {
+  it('adds card and credit prizes', () => {
+    const prizes = [
+      { kind: 'card', value_myr: 4200 },
+      { kind: 'credit', value_myr: 500 },
+    ];
+    expect(potTotal(prizes)).toBe(4700);
+  });
+
+  it('adds in sen, so money never prints a float tail', () => {
+    expect(potTotal([{ value_myr: 0.1 }, { value_myr: 0.2 }])).toBe(0.3);
+    expect(potTotal([{ value_myr: 1200.55 }, { value_myr: 300.1 }])).toBe(
+      1500.65,
+    );
+  });
+
+  it('is 0 for an empty pot', () => {
+    expect(potTotal([])).toBe(0);
+  });
+});
+
+describe('heroPrize', () => {
+  it('is the most valuable card, even beside bigger credit (the card is the hero)', () => {
+    const card = { kind: 'card', value_myr: 800 };
+    expect(
+      heroPrize([
+        { kind: 'credit', value_myr: 5000 },
+        { kind: 'card', value_myr: 200 },
+        card,
+      ]),
+    ).toBe(card);
+  });
+
+  it('falls back to the biggest credit prize, and null on an empty pot', () => {
+    const big = { kind: 'credit', value_myr: 500 };
+    expect(heroPrize([{ kind: 'credit', value_myr: 50 }, big])).toBe(big);
+    expect(heroPrize([])).toBeNull();
+  });
+});
+
+describe('heroFirst', () => {
+  it('leads with the hero and keeps the rest in their order', () => {
+    const a = { kind: 'credit', value_myr: 500 };
+    const b = { kind: 'card', value_myr: 200 };
+    const c = { kind: 'card', value_myr: 800 };
+    expect(heroFirst([a, b, c])).toEqual([c, a, b]);
+    expect(heroFirst([])).toEqual([]);
+  });
+});
+
+describe('eventResultDetail', () => {
+  const person = { who: 'Mimo', avatar: null, frame: null };
+  const raw = {
+    result: {
+      winner: person,
+      winner_tickets: 40,
+      total_tickets: 100,
+      entrant_count: 2,
+      seed: 'c'.repeat(64),
+      seed_hash: 'd'.repeat(64),
+      drawn_at: '2026-11-30T16:00:00.000Z',
+    },
+    prizes: [
+      { kind: 'credit', title: 'RM 500', image: null, value_myr: 500 },
+      { kind: 'card', title: 'Umbreon', image: '/u.webp', value_myr: 4200.5 },
+    ],
+    entries: [
+      { person, tickets: 40 },
+      { person: { ...person, who: 'Rin' }, tickets: 60 },
+    ],
+    ticket_index: 12,
+  };
+
+  it('reads as a result the wheel and the sheet already know', () => {
+    const d = eventResultDetail('ldev_1', 'November', raw);
+    expect(d.result).toMatchObject({
+      prize_id: 'ldev_1',
+      title: 'November',
+      image: '/u.webp', // the hero card, not the first prize
+      value_myr: 4700.5, // the whole pot
+      winner: person,
+      winner_tickets: 40,
+      total_tickets: 100,
+      seed: raw.result.seed,
+      seed_hash: raw.result.seed_hash,
+    });
+    expect(d.ticket_index).toBe(12);
+    expect(d.entries).toBe(raw.entries);
+  });
+
+  it('puts the hero first among everything won', () => {
+    const d = eventResultDetail('ldev_1', 'November', raw);
+    expect(d.prizes?.map((p) => p.title)).toEqual(['Umbreon', 'RM 500']);
+  });
+
+  it('holds a no-entries draw: no winner, no ticket', () => {
+    const d = eventResultDetail('ldev_1', 'November', {
+      ...raw,
+      result: { ...raw.result, winner: null, total_tickets: 0 },
+      entries: [],
+      ticket_index: null,
+    });
+    expect(d.result.winner).toBeNull();
+    expect(d.ticket_index).toBeNull();
+  });
+
+  it('holds a detail whose prizes did not read', () => {
+    const d = eventResultDetail('ldev_1', 'November', { ...raw, prizes: [] });
+    expect(d.result.image).toBeNull();
+    expect(d.result.value_myr).toBe(0);
+    expect(d.prizes).toEqual([]);
+  });
+});
+
+describe('eventRowId', () => {
+  it('sends a one-winner row to its event', () => {
+    expect(eventRowId({ draw_mode: 'one_winner', event_id: 'ldev_1' })).toBe(
+      'ldev_1',
+    );
+  });
+
+  it('leaves old rows on their prize, with or without the new fields', () => {
+    expect(eventRowId({})).toBeNull();
+    expect(
+      eventRowId({ draw_mode: 'per_prize', event_id: 'ldev_1' }),
+    ).toBeNull();
+    expect(eventRowId({ draw_mode: 'one_winner' })).toBeNull();
+  });
+});
+
+describe('refusalCopy', () => {
+  it('reads as it always did on a prize', () => {
+    expect(refusalCopy('closed')).toBe('Entries for this prize are closed.');
+    expect(refusalCopy('whatever')).toBe(
+      'Could not enter this prize. Please try again later.',
+    );
+  });
+
+  it('never says "this prize" on a pot', () => {
+    for (const reason of [...ENTER_REFUSALS, 'whatever']) {
+      expect(refusalCopy(reason, true)).toMatch(/\S/);
+      expect(refusalCopy(reason, true)).not.toMatch(/this prize/i);
+    }
+    expect(refusalCopy('no_topup', true)).toBe(ENTER_REFUSAL_COPY.no_topup);
+  });
+});
+
+describe('rulesCopy', () => {
+  it('says one winner takes every prize on a one-winner event', () => {
+    expect(rulesCopy('one_winner')).toMatch(/one winner takes every prize/i);
+  });
+
+  it('keeps the old rule on a per-prize event', () => {
+    expect(rulesCopy('per_prize')).not.toMatch(/one winner/i);
+    expect(rulesCopy('per_prize')).toMatch(/Every winner is drawn/);
+  });
+
+  it('names where tickets come from, and nothing says they can’t be bought', () => {
+    for (const mode of ['one_winner', 'per_prize'] as const) {
+      expect(rulesCopy(mode)).toContain(
+        'Tickets come from tasks, capsules and Polycards gifts.',
+      );
+      expect(rulesCopy(mode)).not.toMatch(/bought/);
+    }
   });
 });

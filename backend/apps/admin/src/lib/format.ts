@@ -3,7 +3,7 @@
 // one import below is type-only, so it is erased at compile time and the node
 // test never loads admin-rest (which needs the injected __BACKEND_URL__).
 
-import type { DeliveryStatus } from './admin-rest';
+import type { DeliveryStatus, DeliveryTrackingSnapshot } from './admin-rest';
 
 // Display labels only — state/API keep the raw lowercase values. This is the
 // OPERATOR surface: 'completed' reads "Completed" here, while the same status
@@ -16,6 +16,27 @@ export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
   shipped: 'Shipped',
   completed: 'Completed',
   canceled: 'Canceled',
+};
+
+export const DELIVERY_TONE: Record<
+  DeliveryStatus,
+  'orange' | 'blue' | 'green' | 'grey'
+> = {
+  requested: 'orange',
+  processed: 'orange',
+  ready_to_ship: 'orange',
+  shipped: 'blue',
+  completed: 'green',
+  canceled: 'grey',
+};
+
+export const CARRIER_NAME: Record<
+  NonNullable<DeliveryTrackingSnapshot['carrier']>,
+  string
+> = {
+  ninjavan: 'Ninja Van',
+  poslaju: 'Pos Laju',
+  dhl_ecommerce: 'DHL eCommerce',
 };
 
 // Label for a status that came off the wire. Falls back to the raw token
@@ -45,6 +66,19 @@ export const inCurrency = (n: number, currency: string): string =>
 
 export const rm = (n: number | null): string =>
   n === null ? '—' : inCurrency(n, LEDGER_CURRENCY);
+
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  FPX: 'Online banking',
+  OB: 'Online banking',
+  BQR: 'QR / e-wallet',
+  DN: 'DuitNow',
+  UTRC: 'USDT (TRC-20)',
+  UERC: 'USDT (ERC-20)',
+};
+
+/** A top-up rail's code in staff words; an unknown code shows as itself. */
+export const paymentMethodLabel = (code: string): string =>
+  PAYMENT_METHOD_LABEL[code] ?? code;
 
 // USD → MYR at the given rate (2dp), mirroring the backend displayMarketPrice at
 // multiplier 1. Card FMV is tracked in USD (PriceCharting-native); the admin
@@ -99,12 +133,23 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
 // packing-slip date format. Hand-rolled rather than Intl because no locale
 // gives this exact shape (en-GB → slashes + lowercase am/pm, en-US → MM/dd),
 // and formatToParts costs more than the four lines below.
-export function orderDateTime(iso: string): string {
+export function orderDateTime(iso: string | number): string {
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return '—';
   const p = (n: number) => String(n).padStart(2, '0');
   const h = d.getHours();
   return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(h % 12 || 12)}:${p(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+// orderDateTime's shape, but always in Malaysia time (UTC+8, no DST) whatever
+// the browser's timezone — for times tied to the 12am MYT cutoff.
+export function mytDateTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '—';
+  const d = new Date(t + 8 * 3600 * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const h = d.getUTCHours();
+  return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()} ${p(h % 12 || 12)}:${p(d.getUTCMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
 // Up to 4 decimals (the odds storage grain, 1 unit = 0.0001%), trailing

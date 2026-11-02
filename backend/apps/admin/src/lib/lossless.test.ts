@@ -34,4 +34,12 @@ describe('losslessEligiblePacks', () => {
     ];
     expect(losslessEligiblePacks(packs).map((p) => p.slug)).toEqual(['a', 'b']);
   });
+
+  it('drops a ticket pack, which has no buyback to lift', () => {
+    const packs = [
+      { slug: 'a', category: 'pokemon', prize_type: 'cards' },
+      { slug: 'lucky', category: 'poly', prize_type: 'tickets' },
+    ];
+    expect(losslessEligiblePacks(packs).map((p) => p.slug)).toEqual(['a']);
+  });
 });

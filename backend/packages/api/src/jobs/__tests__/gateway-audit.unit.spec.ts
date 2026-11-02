@@ -48,6 +48,9 @@ function harness(
     ),
     updateGatewayDeposits: jest.fn(async () => []),
     updateGatewayWithdrawals: jest.fn(async () => []),
+    listCreditTransactions: jest.fn(
+      async (_filter: Record<string, unknown>): Promise<unknown[]> => [],
+    ),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const container = {
@@ -84,6 +87,54 @@ describe('gateway audit job', () => {
     };
     expect(call.audit_note).toMatch(/gateway/i);
     expect(h.logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  // From a real row: A3Pay settled it on 10-18, the transfer bounced,
+  // staff refunded it by hand that day and the customer was paid through TGPay.
+  it('a settled payout refunded by hand never reads "not refunded"', async () => {
+    fakeGateway.script({ getWithdrawalDetail: { state: 'failed', amount: 0 } });
+    const h = harness(
+      [],
+      [
+        {
+          id: 'gpw_9',
+          gateway: 'fake',
+          customer_id: 'cus_9',
+          merchant_transaction_id: 'PC-BOUNCED',
+          gateway_transaction_id: 'W2026000000000001',
+          status: 'settled',
+          amount: '100',
+          net_amount: null,
+          created_at: new Date(),
+        },
+      ],
+    );
+    h.packs.listCreditTransactions.mockImplementation(
+      async (f: Record<string, unknown>) =>
+        f.source_transaction_id
+          ? []
+          : [
+              {
+                reference:
+                  'Refund RM100 for returned payout W2026000000000001; merchant PC-BOUNCED',
+              },
+            ],
+    );
+    await gatewayAuditJob(h.container as never);
+    const [row] = h.packs.updateGatewayWithdrawals.mock.calls[0] as unknown as [
+      { audit_note: string },
+    ];
+    expect(row.audit_note).toMatch(/do not refund again/);
+    expect(row.audit_note).not.toMatch(/not refunded/);
+  });
+
+  it('asks the ledger only about a row that disagrees', async () => {
+    fakeGateway.script({
+      getDepositDetail: { state: 'success', amount: 50, netAmount: 49.4 },
+    });
+    const h = harness([settledDeposit]);
+    await gatewayAuditJob(h.container as never);
+    expect(h.packs.listCreditTransactions).not.toHaveBeenCalled();
   });
 
   it('leaves an ambiguous answer un-stamped so the next run retries it', async () => {

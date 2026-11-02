@@ -25,9 +25,11 @@
  * deliberately do not.
  */
 import { z } from 'zod';
+import { hasUnsafeUrlChar } from '@/lib/unsafe-url-char';
 import { isRarity } from '@/lib/packs-format';
 import type { Rarity } from '@/lib/packs-data';
 import { avatarForSeed } from '@/lib/avatar-seed';
+import { LUCKY_DRAW_TIERS } from '@/lib/lucky-draw';
 
 // Zod 4's JIT compiles schemas with `new Function(...)`; our CSP `script-src`
 // has no 'unsafe-eval' (see src/lib/security/csp.ts), so that probe fires a CSP
@@ -158,10 +160,15 @@ export const UncheckedSchema = z.unknown();
 
 // --- data/packs.ts ----------------------------------------------------------
 
+/** What a pack pays. Absent on an older backend; an unknown value reads as
+ *  cards rather than dropping the pack. */
+const prizeType = z.enum(['cards', 'tickets']).catch('cards').optional();
+
 /** GET /store/packs row — getter checks `category` + finite `price` only. */
 export const PackRowSchema = z.looseObject({
   category: z.string(),
   price: finite,
+  prize_type: prizeType,
   /** §2.4.8 pool composition, backend-derived (GRADED = every card graded,
    *  RAW = none, MIX = both, null = empty pool). Absent on an older backend;
    *  a malformed value degrades to null rather than dropping the pack row. */
@@ -203,6 +210,13 @@ export const OddsEntrySchema = z.looseObject({
   sprite_image: z.string().nullable().catch(null).optional(),
 });
 
+/** GET /store/packs/:slug odds row on a ticket pack: one per amount, with its
+ *  tier and, like a card row, no weight. */
+export const TicketOddsRowSchema = z.looseObject({
+  tickets: z.number().int().positive(),
+  rarity,
+});
+
 /** GET /store/packs/:slug as data/packs.ts#getPackDetail reads it.
  *
  *  `published_odds` / `demo_odds` stay UNVALIDATED here on purpose: they are
@@ -212,7 +226,8 @@ export const OddsEntrySchema = z.looseObject({
  *  droppableArray for the same reason as the catalog: a bad row drops, a
  *  non-array response does not read as "this pack has no pool". */
 export const PackDetailPageSchema = z.looseObject({
-  odds: droppableArray(OddsEntrySchema),
+  odds: droppableArray(z.union([OddsEntrySchema, TicketOddsRowSchema])),
+  prize_type: prizeType,
   published_odds: z.unknown().optional(),
   demo_odds: z.unknown().optional(),
 });
@@ -236,12 +251,20 @@ export const RecentPullSchema = z.looseObject({
   frame_url: z.string().nullable().optional(),
 });
 
+/** A ticket pack's row in that feed: the amount won in place of a card. */
+export const RecentTicketSpinSchema = RecentPullSchema.omit({
+  handle: true,
+  name: true,
+  market_value: true,
+  marketPriceMyr: true,
+}).extend({ tickets: z.number().int().positive() });
+
 /** GET /store/pulls/recent — the feed. `drought` stays unvalidated here: the
  *  getter walks it entry by entry against the known tiers, so one bad counter
  *  costs its own counter, not the feed. Rows drop one at a time; a non-array
  *  `pulls` fails, which is the getter's empty-feed answer. */
 export const RecentPullsPageSchema = z.looseObject({
-  pulls: droppableArray(RecentPullSchema),
+  pulls: droppableArray(z.union([RecentPullSchema, RecentTicketSpinSchema])),
   drought: z.unknown().optional(),
 });
 
@@ -404,9 +427,7 @@ export const AvatarFramesSchema = z.looseObject({
 
 /** Whitespace, `\` or a control character: a browser strips or reinterprets
  *  them (`\` reads as `/`), so a URL carrying one is not the URL a check saw. */
-export const hasUnsafeUrlChar = (s: string): boolean =>
-  /[\s\\]/.test(s) ||
-  [...s].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+export { hasUnsafeUrlChar };
 
 /** One slide of the storefront announcement popup (spec 2026-10-06 §5). */
 export const AnnouncementSchema = z.looseObject({
@@ -916,6 +937,14 @@ export const WonCardSchema = z.looseObject({
   marketPriceMyr: finite.optional(),
 });
 
+/** Open-batch `ticket_spin`: what one reel won on a ticket pack. Only the amount
+ *  can drop the roll. By now the charge has landed and the tickets are credited,
+ *  so a bad tier, which only colours the tile, degrades instead. */
+export const TicketSpinRollSchema = z.looseObject({
+  tickets: z.number().int().positive(),
+  rarity: rarity.catch('Common'),
+});
+
 /** Open-route `buyback` offer — instant percent/amount (required) + the vault
  *  rate/amount and instant deadline (optional; older backends omit them).
  *  `firm:false` = quoted on the FX display fallback; selling would be refused
@@ -1377,6 +1406,8 @@ export const TaskEntrySchema = z.looseObject({
     // rule: absent/null falls back to the reward-type art.
     pack_image: z.string().nullable().optional(),
     card_image: z.string().nullable().optional(),
+    // A tickets reward's count. Same skew rule: absent reads as the bare name.
+    tickets: finite.optional(),
   }),
   progress: z.looseObject({
     current: finite,
@@ -1453,7 +1484,10 @@ export const CardPollResponseSchema = z.object({
     priceHistory: z.array(z.object({ date: z.string(), valueMyr: finite })),
   }),
 });
-const pollPackCard = pollCard.extend({ rarity });
+const pollPackCard = pollCard.extend({
+  rarity,
+  tickets: z.number().optional(),
+});
 export const PackPollResponseSchema = z.object({
   detail: z.object({
     topHits: z.array(pollPackCard),
@@ -1466,6 +1500,7 @@ export const RecentPollResponseSchema = z.object({
   pulls: z.array(
     pollCard.extend({
       rarity,
+      tickets: z.number().optional(),
       id: z.string(),
       packName: z.string(),
       packIcon: z.string(),
@@ -1534,11 +1569,21 @@ const LuckyDrawEntrySchema = z.looseObject({
 });
 export type LuckyDrawEntry = z.infer<typeof LuckyDrawEntrySchema>;
 
+/** How a prize's picture wears the Lucky Draw frame. Caught: a backend still
+ *  deploying sends none, and the picture then shows as it always did. */
+const LuckyDrawArtFrameSchema = z
+  .enum(['slab', 'raw'])
+  .nullable()
+  .optional()
+  .catch(null);
+export type LuckyDrawArtFrame = z.infer<typeof LuckyDrawArtFrameSchema>;
+
 /** A drawn prize. `seed` exists only here, after the draw. */
 const LuckyDrawResultSchema = z.looseObject({
   prize_id: z.string(),
   title: z.string(),
   image: z.string().nullable().catch(null),
+  frame: LuckyDrawArtFrameSchema,
   value_myr: finite,
   drawn_at: z.string(),
   winner: LuckyDrawPersonSchema.nullable(),
@@ -1547,8 +1592,62 @@ const LuckyDrawResultSchema = z.looseObject({
   entrant_count: finite,
   seed: z.string(),
   seed_hash: z.string(),
+  // One-winner rows of the results feed. Caught: a row never drops over them.
+  event_id: z.string().optional().catch(undefined),
+  draw_mode: z.string().optional().catch(undefined),
+  event_name: z.string().optional().catch(undefined),
+  prize_count: finite.optional().catch(undefined),
+  tier: z.enum(LUCKY_DRAW_TIERS).nullable().optional().catch(null),
 });
 export type LuckyDrawResult = z.infer<typeof LuckyDrawResultSchema>;
+
+/** A drawn one-winner event: the proof, once for the whole pot. `seed` exists
+ *  only here, after the draw. */
+export const LuckyDrawEventResultSchema = z.looseObject({
+  winner: LuckyDrawPersonSchema.nullable(),
+  winner_tickets: finite,
+  total_tickets: finite,
+  entrant_count: finite,
+  seed: z.string(),
+  seed_hash: z.string(),
+  drawn_at: z.string(),
+});
+export type LuckyDrawEventResult = z.infer<typeof LuckyDrawEventResultSchema>;
+
+/** What a one-winner event's winner took: one row per prize. */
+const LuckyDrawWonPrizeSchema = z.looseObject({
+  kind: z.string().catch('card'),
+  title: z.string(),
+  image: z.string().nullable().catch(null),
+  frame: LuckyDrawArtFrameSchema,
+  value_myr: finite,
+});
+
+/** One running gate of the page: tickets go on it, and one winner takes its
+ *  prizes. A tier this build does not know reads as none: never guess one. */
+const LuckyDrawGateSchema = z.looseObject({
+  id: z.string(),
+  tier: z.enum(LUCKY_DRAW_TIERS).nullable().catch(null),
+  starts_at: z.string(),
+  ends_at: z.string(),
+  // When players could first see it. Caught: "new" then goes by the start.
+  live_at: z.string().optional().catch(undefined),
+  total_tickets: finite.catch(0),
+  entrant_count: finite.catch(0),
+  my_tickets: finite.catch(0),
+  top: droppableArray(LuckyDrawEntrySchema).catch([]),
+  prizes: droppableArray(LuckyDrawWonPrizeSchema).catch([]),
+});
+export type LuckyDrawGate = z.infer<typeof LuckyDrawGateSchema>;
+
+/** The next published event: the pool coming up, previewed on every state of
+ *  the page. Both extras are caught, so an older backend still names it. */
+export const NextEventSchema = z.looseObject({
+  name: z.string(),
+  starts_at: z.string(),
+  ends_at: z.string().optional().catch(undefined),
+  prizes: droppableArray(LuckyDrawWonPrizeSchema).catch([]),
+});
 
 const LuckyDrawPrizeSchema = z
   .looseObject({
@@ -1556,9 +1655,10 @@ const LuckyDrawPrizeSchema = z
     kind: z.string(),
     title: z.string(),
     image: z.string().nullable().catch(null),
+    frame: LuckyDrawArtFrameSchema,
     value_myr: finite,
     draw_at: z.string(),
-    seed_hash: z.string(),
+    seed_hash: z.string().catch(''),
     total_tickets: finite,
     entrant_count: finite,
     my_tickets: finite.catch(0),
@@ -1576,20 +1676,62 @@ const LuckyDrawPrizeSchema = z
 export type LuckyDrawPrize = z.infer<typeof LuckyDrawPrizeSchema>;
 
 /** GET /store/lucky-draw-status — public: is a Lucky Draw on? */
-export const LuckyDrawStatusSchema = z.looseObject({ live: z.boolean() });
+export const LuckyDrawStatusSchema = z.looseObject({
+  live: z.boolean(),
+  // When the newest running gate went live: the Draw tab's dot. Absent on a
+  // backend still deploying, which reads as no dot.
+  latest_gate_at: z.string().nullable().optional().catch(null),
+  // The gates still to draw: what the popup watches. Absent on a backend still
+  // deploying, which reads as nothing to watch, so no popup.
+  upcoming: droppableArray(
+    z.looseObject({ id: z.string(), ends_at: z.string() }),
+  )
+    .optional()
+    .catch(undefined),
+});
+
+/** GET /api/lucky-draw-status — the same read, as the site chrome takes it. */
+export const LuckyDrawChromeStatusSchema = z.looseObject({
+  latest_gate_at: z.string().nullable().catch(null),
+  upcoming: droppableArray(
+    z.looseObject({ id: z.string(), ends_at: z.string() }),
+  ).catch([]),
+});
 
 /** GET /store/lucky-draw — the live event (null: none running). */
 export const LuckyDrawPageSchema = z.looseObject({
   balance: finite,
+  // Every running gate. Absent on a backend still deploying (pageGates falls
+  // back to `event`, which stays for a storefront still deploying).
+  events: droppableArray(LuckyDrawGateSchema).optional().catch(undefined),
+  // One nested object, not a row that can drop alone: every one-winner field
+  // is caught, so a card-era payload or one drifted field never blanks the
+  // page. A mode this build does not know reads as the old page.
   event: z
     .looseObject({
       id: z.string(),
       name: z.string(),
       starts_at: z.string(),
       ends_at: z.string(),
+      draw_mode: z.enum(['per_prize', 'one_winner']).catch('per_prize'),
+      seed_hash: z.string().nullable().catch(null),
+      total_tickets: finite.catch(0),
+      entrant_count: finite.catch(0),
+      my_tickets: finite.catch(0),
+      top: droppableArray(LuckyDrawEntrySchema).catch([]),
+      result: LuckyDrawEventResultSchema.nullable().catch(null),
+    })
+    // Defence in depth, as the prize: nothing secret rides on into the client
+    // payload (the revealed seed lives on `result`).
+    .transform((e) => {
+      const event = { ...e };
+      delete event.seed;
+      delete event.seed_nonce;
+      return event;
     })
     .nullable(),
   prizes: droppableArray(LuckyDrawPrizeSchema),
+  next_event: NextEventSchema.nullable().catch(null),
 });
 export type LuckyDrawPage = z.infer<typeof LuckyDrawPageSchema>;
 
@@ -1608,8 +1750,26 @@ export const LuckyDrawResultDetailSchema = z.looseObject({
   result: LuckyDrawResultSchema,
   entries: droppableArray(LuckyDrawEntrySchema),
   ticket_index: finite.nullable(),
+  /** The viewer's row in `entries`; absent or null with none (the arena then has
+   *  no discs to pick out). */
+  my_entry_index: finite.nullable().optional().catch(null),
+  /** One-winner only (eventResultDetail): everything the winner took. */
+  prizes: droppableArray(LuckyDrawWonPrizeSchema).optional().catch(undefined),
 });
 export type LuckyDrawResultDetail = z.infer<typeof LuckyDrawResultDetailSchema>;
+
+/** GET /store/lucky-draw/results/events/:eventId — one drawn event: its result,
+ *  every prize, and the frozen entry list in DRAW order. `ticket_index` is not
+ *  caught, for the same reason as above. */
+export const LuckyDrawEventDetailSchema = z.looseObject({
+  result: LuckyDrawEventResultSchema,
+  prizes: droppableArray(LuckyDrawWonPrizeSchema).catch([]),
+  entries: droppableArray(LuckyDrawEntrySchema),
+  ticket_index: finite.nullable(),
+  my_entry_index: finite.nullable().optional().catch(null),
+  tier: z.enum(LUCKY_DRAW_TIERS).nullable().optional().catch(null),
+});
+export type LuckyDrawEventDetail = z.infer<typeof LuckyDrawEventDetailSchema>;
 
 /** GET /store/lucky-draw/me — balance, ticket history, my entries. */
 export const LuckyDrawMineSchema = z.looseObject({
@@ -1626,9 +1786,15 @@ export const LuckyDrawMineSchema = z.looseObject({
       prize_id: z.string(),
       title: z.string(),
       image: z.string().nullable().catch(null),
+      frame: LuckyDrawArtFrameSchema,
       my_tickets: finite,
       draw_at: z.string(),
       status: z.string(),
+      // Set on a one-winner row, where prize_id is the event id.
+      event_id: z.string().optional().catch(undefined),
+      tier: z.enum(LUCKY_DRAW_TIERS).nullable().optional().catch(null),
+      // One-winner rows only: every ticket in the pool.
+      total_tickets: finite.optional().catch(undefined),
     }),
   ).catch([]),
 });

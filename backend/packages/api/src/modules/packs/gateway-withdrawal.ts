@@ -41,6 +41,7 @@ import {
   type RowFx,
 } from './payment-fx';
 import { classifyRequeryError } from './gateway-reconcile';
+import { ledgerTrail } from './gateway-audit';
 import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
 import {
   alertOps,
@@ -1257,24 +1258,22 @@ export async function startWithdrawal(
         ref: merchantTransactionId,
         via: 'customer withdrawal',
       });
-      if (verdict.heldId && error instanceof GatewayError) {
-        // Their id, so their callback finds the row and the sweep never
-        // refunds it on a later "not found"; scoped to 'pending' like the
-        // success write below.
-        await packs.updateGatewayWithdrawals({
-          selector: { id: row.id, status: 'pending' },
-          data: {
-            gateway_transaction_id: verdict.heldId,
-            failure_reason: formatGatewayFailureReason({
-              prefix: 'submit refused, but the gateway holds it',
-              codes: error.codes,
-              httpStatus: error.httpStatus,
+      // Their id, when they hold it, so their callback finds the row and the
+      // sweep never refunds it on a later "not found"; scoped to 'pending' like
+      // the success write below.
+      const held =
+        error instanceof GatewayError
+          ? heldRefusalFields(verdict, error, {
+              prefix: 'submit refused',
               bankCode,
-              message: error.message,
               accountNumber,
               accountHolderName,
-            }),
-          },
+            })
+          : null;
+      if (held) {
+        await packs.updateGatewayWithdrawals({
+          selector: { id: row.id, status: 'pending' },
+          data: held,
         });
       }
     }
@@ -1352,7 +1351,48 @@ type RefusalVerdict = {
   trip: boolean;
   /** The gateway holds the payout after all: its id, for the pending row. */
   heldId: string | null;
+  /** Answered "not found", but not by a refusal known to create nothing: left
+   *  pending for the sweep's hour of grace, with the refusal on the row. */
+  unconfirmed: boolean;
 };
+
+/**
+ * The one refusal text that production has shown creates no payout: 467 refused
+ * payouts by 2026-11-02, none later paid. An empty wallet (`floatEmpty`, read
+ * from the wallet itself) and payouts switched off count too. Any other text is
+ * not proof: a gateway still writing the payout answers "not found" as well.
+ */
+const PROVEN_REFUSAL = /no payout provider is available/i;
+
+/** What keeps a refusal on the row: both callers' write, one rule. The row is
+ *  scoped to 'pending', and a row with no gateway id gets this write only in the
+ *  same breath as its submit, so the sweep's clock barely moves (see
+ *  jobs/withdrawal-reconcile.ts). */
+function heldRefusalFields(
+  verdict: RefusalVerdict,
+  error: GatewayError,
+  input: {
+    /** 'submit refused' | 'approve refused' */
+    prefix: string;
+    bankCode: string;
+    accountNumber: string;
+    accountHolderName: string;
+  },
+): Record<string, string> | null {
+  if (!verdict.heldId && !verdict.unconfirmed) return null;
+  return {
+    ...(verdict.heldId ? { gateway_transaction_id: verdict.heldId } : {}),
+    failure_reason: formatGatewayFailureReason({
+      prefix: `${input.prefix}, ${verdict.heldId ? 'but the gateway holds it' : 'not confirmed: left for the sweep'}`,
+      codes: error.codes,
+      httpStatus: error.httpStatus,
+      bankCode: input.bankCode,
+      message: error.message,
+      accountNumber: input.accountNumber,
+      accountHolderName: input.accountHolderName,
+    }),
+  };
+}
 
 /**
  * Before a refused payout is refunded, ask the gateway whether it holds it
@@ -1364,6 +1404,12 @@ type RefusalVerdict = {
  * fails, leaves the row pending for the sweep: the side that cannot pay
  * twice. Measured on TGPay 2026-10-15: a really refused payout answers 404
  * "Transaction not found", so a genuine refusal still refunds at once.
+ *
+ * That 404 alone is not proof either: it comes back milliseconds after the
+ * submit, while the sweep gives the same answer an hour of grace "for a payout
+ * to become visible". So it refunds at once only behind a refusal known to
+ * create nothing (PROVEN_REFUSAL). Anything else waits for the sweep: an hour
+ * for the customer, where a wrong refund pays them twice.
  *
  * Payouts switched off (TGPAY_PAYOUT_DISABLED) is the one refusal taken at
  * its word: an exact path + 501 + text that means nothing was created
@@ -1393,6 +1439,7 @@ async function judgeRefusal(
     payoutDisabled,
     floatEmpty: floatEmpty !== null,
     trip: payoutDisabled || Boolean(floatEmpty?.trip),
+    unconfirmed: false,
   };
   if (payoutDisabled) return { ...kind, refund: true, heldId: null };
   try {
@@ -1405,10 +1452,13 @@ async function judgeRefusal(
       ? { ...kind, refund: true, heldId: null }
       : { ...kind, refund: false, heldId: detail.transactionId || null };
   } catch (lookupError) {
+    const notFound = classifyRequeryError(lookupError).kind === 'not-found';
+    const proven = kind.floatEmpty || PROVEN_REFUSAL.test(error.message);
     return {
       ...kind,
-      refund: classifyRequeryError(lookupError).kind === 'not-found',
+      refund: notFound && proven,
       heldId: null,
+      unconfirmed: notFound && !proven,
     };
   }
 }
@@ -2169,21 +2219,19 @@ export async function submitHeldWithdrawal(
         ref: row.merchant_transaction_id,
         via: 'admin approve',
       });
-      if (verdict.heldId && error instanceof GatewayError) {
-        await packs.updateGatewayWithdrawals({
-          selector: { id: row.id, status: 'pending' },
-          data: {
-            gateway_transaction_id: verdict.heldId,
-            failure_reason: formatGatewayFailureReason({
-              prefix: 'approve refused, but the gateway holds it',
-              codes: error.codes,
-              httpStatus: error.httpStatus,
+      const held =
+        error instanceof GatewayError
+          ? heldRefusalFields(verdict, error, {
+              prefix: 'approve refused',
               bankCode: row.bank_code,
-              message: error.message,
               accountNumber: row.account_number,
               accountHolderName: row.account_holder_name,
-            }),
-          },
+            })
+          : null;
+      if (held) {
+        await packs.updateGatewayWithdrawals({
+          selector: { id: row.id, status: 'pending' },
+          data: held,
         });
       }
     }
@@ -2281,6 +2329,42 @@ export async function denyHeldWithdrawal(
     );
   }
 
+  // 'failed' is accepted below for one reason: to finish a Deny of our own that
+  // died between its claim and its refund. That claim wrote this audit row in
+  // its own transaction, so no row means something else closed this one: the
+  // sweep, which refunded it, or a person, who may have refunded it by hand with
+  // no anchor for the refund below to replay on.
+  if (row.status === 'failed') {
+    const [own] = await packs.listAdminActionAudits(
+      {
+        entity_type: 'gateway_withdrawal',
+        entity_id: row.id,
+        action: 'deny_withdrawal',
+      },
+      { take: 1 },
+    );
+    if (!own) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Withdrawal '${row.id}' was not closed by a Deny, so Deny will not refund it. Nothing was credited.`,
+      );
+    }
+    const { hand } = await ledgerTrail(packs, {
+      customerId: row.customer_id,
+      anchor: withdrawalRefundReference(
+        row.customer_id,
+        row.merchant_transaction_id,
+      ),
+      refs: [row.merchant_transaction_id, row.gateway_transaction_id],
+    });
+    if (hand) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'A hand adjustment already names this payout. Refunding it would pay the customer twice. Nothing was credited.',
+      );
+    }
+  }
+
   // 1) CLAIM FIRST — the opposite order from the reconcile sweep, which
   // refunds and then closes the row. The inversion is deliberate:
   //
@@ -2294,8 +2378,8 @@ export async function denyHeldWithdrawal(
   //   - That window is closed by making deny RE-RUNNABLE: the claim accepts
   //     'failed' as well as 'held', and the refund is anchored on
   //     withdrawalRefundReference, which guarantees exactly one credit
-  //     however many times it runs. An operator who sees a 'failed' row with
-  //     no refund clicks Deny again and it settles.
+  //     however many times it runs. The withdrawals list flags that row
+  //     (deniedWithoutRefund) and offers Finish refund, which lands here.
   //
   // The DEBIT CHECK RIDES THE SAME CALL, and must. Deny closes the row the
   // moment it claims it, before anything has looked for a debit — so a
@@ -2363,9 +2447,7 @@ export async function denyHeldWithdrawal(
   // 3) The shared four-step ordering (refund -> receipt -> close -> notify).
   // fromStatus 'failed', because the claim above already moved the row there
   // — the helper's default 'pending' selector would silently no-op.
-  // gateway_status is passed back unchanged rather than nulled: a row that
-  // reached 'failed' through the sweep carries the gateway's own status
-  // number, and a mistaken deny on one must not erase it.
+  // gateway_status is passed back unchanged rather than nulled.
   await refundWithdrawal(
     scope,
     row,
@@ -2377,4 +2459,69 @@ export async function denyHeldWithdrawal(
   );
 
   return { id: row.id, status: 'failed', refunded: true };
+}
+
+/**
+ * Which of these rows a Deny closed and never refunded: what its crash leaves
+ * behind, which no sweep revisits. A hand adjustment naming the row counts as
+ * refunded, because Deny would refuse it anyway.
+ */
+export async function deniedWithoutRefund(
+  packs: Pick<
+    GatewayWithdrawals,
+    'listAdminActionAudits' | 'listCreditTransactions'
+  >,
+  rows: readonly {
+    id: string;
+    status: string;
+    customer_id: string;
+    merchant_transaction_id: string;
+    gateway_transaction_id?: string | null;
+  }[],
+): Promise<Set<string>> {
+  const failed = rows.filter((r) => r.status === 'failed');
+  if (failed.length === 0) return new Set();
+  // A re-run writes another row, so this reads more than one per withdrawal.
+  const audits = await packs.listAdminActionAudits(
+    {
+      entity_type: 'gateway_withdrawal',
+      entity_id: failed.map((r) => r.id),
+      action: 'deny_withdrawal',
+    },
+    { select: ['entity_id'], take: failed.length * 20 },
+  );
+  const ids = new Set(audits.map((a) => a.entity_id));
+  const denied = failed
+    .filter((r) => ids.has(r.id))
+    .map((r) => ({
+      row: r,
+      debit: withdrawalIdempotencyReference(
+        r.customer_id,
+        r.merchant_transaction_id,
+      ),
+      refund: withdrawalRefundReference(
+        r.customer_id,
+        r.merchant_transaction_id,
+      ),
+    }));
+  if (denied.length === 0) return new Set();
+  const anchors = denied.flatMap((d) => [d.debit, d.refund]);
+  const ledger = await packs.listCreditTransactions(
+    { source_transaction_id: anchors },
+    { select: ['source_transaction_id'], take: anchors.length },
+  );
+  const seen = new Set(ledger.map((l) => l.source_transaction_id));
+  const stuck = new Set<string>();
+  // One at a time: this reads the customer's adjustments, and these rows are
+  // rare. Every denied row whose refund landed has already dropped out.
+  for (const { row, debit, refund } of denied) {
+    if (!seen.has(debit) || seen.has(refund)) continue;
+    const { hand } = await ledgerTrail(packs, {
+      customerId: row.customer_id,
+      anchor: refund,
+      refs: [row.merchant_transaction_id, row.gateway_transaction_id ?? null],
+    });
+    if (!hand) stuck.add(row.id);
+  }
+  return stuck;
 }

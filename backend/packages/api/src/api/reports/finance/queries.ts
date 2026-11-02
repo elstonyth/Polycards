@@ -122,12 +122,12 @@ export async function statusTotals(
 
 /**
  * Pack sales: revenue per pack from pack_open ledger rows (alias ct,
- * filtered by `ledger`), linked to a pack through the open's pulls
- * (credit_transaction.source_transaction_id = pull.open_id). Packs opened =
- * paid pulls (alias p, filtered by `pulls`). A charge with no linked pull
- * (rows from before open_id, or an open that never produced pulls) is
- * unattributed, so every pack plus unattributed equals economy revenue.
- * ponytail: the DISTINCT scans pull.open_id, which has no index; fine at
+ * filtered by `ledger`), linked to a pack through the open's pulls or, for a
+ * ticket pack, its spins (credit_transaction.source_transaction_id = open_id).
+ * Packs opened = paid pulls and spins (alias p, filtered by `pulls`). A charge
+ * with neither (rows from before open_id, or an open that never produced pulls)
+ * is unattributed, so every pack plus unattributed equals economy revenue.
+ * ponytail: the UNION scans pull.open_id, which has no index; fine at
  * report frequency. Add an index on pull(open_id) if this reaches slow logs.
  */
 export async function packSales(
@@ -141,7 +141,9 @@ export async function packSales(
   const revenue = await db.raw<{ pack_id: string | null; cents: string }>(
     `SELECT op.pack_id, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
       'FROM credit_transaction ct ' +
-      'LEFT JOIN (SELECT DISTINCT open_id, pack_id FROM pull ' +
+      'LEFT JOIN (SELECT open_id, pack_id FROM pull ' +
+      'WHERE open_id IS NOT NULL AND deleted_at IS NULL ' +
+      'UNION SELECT open_id, pack_id FROM ticket_spin ' +
       'WHERE open_id IS NOT NULL AND deleted_at IS NULL) op ' +
       'ON op.open_id = ct.source_transaction_id ' +
       "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open'" +
@@ -152,6 +154,14 @@ export async function packSales(
   // Every open that took money counts beside the money it took: a bonus
   // open's normal part is in the revenue above, so it is in the count too.
   const opened = await packOpens(db, pulls, ['pack', 'bonus']);
+  for (const [slug, n] of await packOpens(
+    db,
+    pulls,
+    ['pack', 'bonus'],
+    'ticket_spin',
+  )) {
+    opened.set(slug, (opened.get(slug) ?? 0) + n);
+  }
   const bySlug = new Map<string, { opened: number; cents: number }>();
   let unattributedCents = 0;
   for (const r of revenue.rows) {
@@ -169,14 +179,17 @@ export async function packSales(
 
 /** Paid packs opened per pack (one pull = one pack; source 'pack'). Shared
  *  by Finance pack-sales and the Growth packs report, so both count alike.
- *  Finance also counts bonus opens, to match its revenue (spec 2026-10-07). */
+ *  Finance also counts bonus opens, to match its revenue (spec 2026-10-07),
+ *  and ticket spins from `ticket_spin`, which has the columns `pulls` filters
+ *  on. Growth stays on `pull` on purpose (spec 2026-10-30 §4). */
 export async function packOpens(
   db: ReportDb,
   pulls: SqlPart,
   sources: readonly ('pack' | 'bonus')[] = ['pack'],
+  table: 'pull' | 'ticket_spin' = 'pull',
 ): Promise<Map<string, number>> {
   const { rows } = await db.raw<{ pack_id: string; n: string }>(
-    'SELECT p.pack_id, COUNT(*)::bigint AS n FROM pull p ' +
+    `SELECT p.pack_id, COUNT(*)::bigint AS n FROM ${table} p ` +
       `WHERE p.deleted_at IS NULL AND p.source IN (${sources.map((s) => `'${s}'`).join(', ')})` +
       pulls.sql +
       ' GROUP BY p.pack_id',

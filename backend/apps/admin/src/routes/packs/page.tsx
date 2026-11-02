@@ -16,7 +16,6 @@ import {
   StatusBadge,
   Tabs,
   FocusModal,
-  Prompt,
   toast,
 } from '@medusajs/ui';
 import {
@@ -27,7 +26,13 @@ import {
   Gift,
 } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
-import { type AdminPack, type AdminPackWrite } from '../../lib/packs-api';
+import {
+  type AdminPack,
+  type AdminPackWrite,
+  type PackLanguage,
+  type PackPrizeType,
+  type PackType,
+} from '../../lib/packs-api';
 import {
   PACK_STATUS_COLOR,
   PACK_STATUS_LABEL,
@@ -49,6 +54,7 @@ import { fmtPct, rm, slugKeystroke, toSlug } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { RowActions } from '../../components/RowActions';
 import { LosslessTab } from './LosslessTab';
 
 // Client-side sort — this list is unpaged, the whole catalog is in hand.
@@ -93,7 +99,13 @@ const CATEGORIES = [
   'soccer',
   'yugioh',
   'riftbound',
+  'poly',
 ] as const;
+// Closed sets mirrored from the API validator (and its DB checks).
+const PACK_TYPES: readonly PackType[] = ['classic', 'original', 'special'];
+const PACK_LANGUAGES: readonly PackLanguage[] = ['en', 'jp'];
+// Radix Select can't hold an empty value, so "not set" travels as this.
+const NONE = 'none';
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Reserved category of the free welcome pack (mirrors FREE_WELCOME_CATEGORY in
@@ -104,7 +116,7 @@ const FREE_WELCOME_CATEGORY = 'free_welcome';
 
 // Columns in the packs table — the expander row spans all of them. Keep in
 // step with the <Table.Header> row below.
-const COLUMN_COUNT = 9;
+const COLUMN_COUNT = 10;
 
 // Pool composition (auto-detected server-side). Graded slabs read as the
 // premium tier, so they get the purple tag; a mixed pool gets its own colour
@@ -121,6 +133,9 @@ type FormState = {
   slug: string;
   title: string;
   category: string;
+  prizeType: PackPrizeType;
+  packType: PackType | null;
+  language: PackLanguage | null;
   price: string;
   image: string;
   displayImage: string;
@@ -134,6 +149,9 @@ const EMPTY_FORM: FormState = {
   slug: '',
   title: '',
   category: 'pokemon',
+  prizeType: 'cards',
+  packType: null,
+  language: null,
   price: '',
   image: '',
   displayImage: '',
@@ -150,6 +168,9 @@ const formFromPack = (p: AdminPack): FormState => ({
   slug: p.slug,
   title: p.title,
   category: p.category,
+  prizeType: p.prize_type ?? 'cards',
+  packType: p.pack_type,
+  language: p.language,
   price: String(p.price),
   image: p.image,
   displayImage: p.display_image ?? '',
@@ -174,7 +195,6 @@ const PacksListPage = () => {
   const [tab, setTab] = useState<'packs' | 'free' | 'lossless'>('packs');
   const [mode, setMode] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [deleteTarget, setDeleteTarget] = useState<AdminPack | null>(null);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | PackStatus>('all');
   // Slugs whose per-set EV/RTP detail row is open (see the chevron in the
@@ -291,6 +311,15 @@ const PacksListPage = () => {
     const payload: AdminPackWrite = {
       title: form.title.trim(),
       category: form.category,
+      // Fixed at creation, so an edit never sends it.
+      ...(mode === 'create' ? { prize_type: form.prizeType } : {}),
+      // The free pack has no tag fields (omitted = keep the stored ones).
+      ...(form.category === FREE_WELCOME_CATEGORY
+        ? {}
+        : {
+            pack_type: form.packType,
+            language: form.packType === 'original' ? form.language : null,
+          }),
       price: priceValue,
       image: form.image.trim(),
       display_image: form.displayImage.trim() || null,
@@ -313,10 +342,7 @@ const PacksListPage = () => {
     }
   };
 
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    const slug = deleteTarget.slug;
-    setDeleteTarget(null);
+  const deletePack = async (slug: string) => {
     try {
       await removePack.mutateAsync(slug);
       toast.success(t('packs.toast.deleted'));
@@ -436,6 +462,7 @@ const PacksListPage = () => {
                 <Table.HeaderCell>{t('packs.list.order')}</Table.HeaderCell>
                 {sortHeader('title', t('packs.list.pack'))}
                 {sortHeader('category', t('packs.list.category'))}
+                <Table.HeaderCell>{t('packs.list.packType')}</Table.HeaderCell>
                 {sortHeader('status', t('packs.list.status'))}
                 {sortHeader('group', 'Group')}
                 {/* Set 1 only — sets 2/3 and the published pair live in the row
@@ -507,6 +534,17 @@ const PacksListPage = () => {
                       <Table.Cell className="text-ui-fg-subtle">
                         {p.category}
                       </Table.Cell>
+                      <Table.Cell className="text-ui-fg-subtle">
+                        {p.pack_type ? (
+                          `${t(`packs.packType.${p.pack_type}`)}${
+                            p.language
+                              ? ` · ${t(`packs.language.${p.language}`)}`
+                              : ''
+                          }`
+                        ) : (
+                          <span className="text-ui-fg-muted">—</span>
+                        )}
+                      </Table.Cell>
                       <Table.Cell>
                         <StatusBadge color={PACK_STATUS_COLOR[packStatusOf(p)]}>
                           {t(PACK_STATUS_LABEL[packStatusOf(p)])}
@@ -550,39 +588,38 @@ const PacksListPage = () => {
                       <Table.Cell className="tabular-nums">
                         {rm(p.price)}
                       </Table.Cell>
-                      <Table.Cell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="small"
-                            variant="secondary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/packs/${p.slug}`);
-                            }}
-                          >
-                            {t('packs.list.winRates')}
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="secondary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEdit(p);
-                            }}
-                          >
-                            {t('packs.list.edit')}
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="transparent"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTarget(p);
-                            }}
-                          >
-                            {t('packs.list.delete')}
-                          </Button>
-                        </div>
+                      {/* stopPropagation: clicks in the menu bubble through its
+                          portal to the row, which would open the pack. */}
+                      <Table.Cell
+                        className="text-right"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <RowActions
+                          subject={p.title}
+                          actions={[
+                            {
+                              label: t('packs.list.winRates'),
+                              onSelect: () => navigate(`/packs/${p.slug}`),
+                            },
+                            {
+                              label: t('packs.list.edit'),
+                              onSelect: () => openEdit(p),
+                            },
+                            {
+                              label: t('packs.list.delete'),
+                              danger: true,
+                              onSelect: () => void deletePack(p.slug),
+                              confirm: {
+                                title: t('packs.delete.title'),
+                                description: t('packs.delete.description', {
+                                  title: p.title,
+                                }),
+                                confirmText: t('packs.delete.confirm'),
+                                cancelText: t('packs.form.cancel'),
+                              },
+                            },
+                          ]}
+                        />
                       </Table.Cell>
                     </Table.Row>
                     {open && (
@@ -765,7 +802,11 @@ const PacksListPage = () => {
                 </FocusModal.Title>
                 <FocusModal.Description asChild>
                   <Text className="text-ui-fg-subtle mt-1" size="small">
-                    {t('packs.form.subtitle')}
+                    {t(
+                      form.prizeType === 'tickets'
+                        ? 'packs.form.subtitleTickets'
+                        : 'packs.form.subtitle',
+                    )}
                   </Text>
                 </FocusModal.Description>
               </div>
@@ -955,7 +996,11 @@ const PacksListPage = () => {
                         disabled
                       />
                       <Text className="text-ui-fg-subtle text-xs">
-                        {t('packs.form.statusCreateHint')}
+                        {t(
+                          form.prizeType === 'tickets'
+                            ? 'packs.form.statusCreateHintTickets'
+                            : 'packs.form.statusCreateHint',
+                        )}
                       </Text>
                     </>
                   ) : (
@@ -996,6 +1041,115 @@ const PacksListPage = () => {
                     </>
                   )}
                 </div>
+                {form.category !== FREE_WELCOME_CATEGORY && (
+                  <>
+                    <div className="flex flex-col gap-y-2">
+                      <Label size="small" weight="plus" htmlFor="pack-prizes">
+                        {t('packs.form.prizes')}
+                      </Label>
+                      {/* Fixed once saved — same disabled-Input treatment as
+                          the immutable slug. */}
+                      {mode === 'create' ? (
+                        <>
+                          <Select
+                            value={form.prizeType}
+                            onValueChange={(v) =>
+                              patch({
+                                prizeType:
+                                  v === 'tickets' ? 'tickets' : 'cards',
+                              })
+                            }
+                          >
+                            <Select.Trigger id="pack-prizes">
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              <Select.Item value="cards">
+                                {t('packs.form.prizesCards')}
+                              </Select.Item>
+                              <Select.Item value="tickets">
+                                {t('packs.form.prizesTickets')}
+                              </Select.Item>
+                            </Select.Content>
+                          </Select>
+                          <Text className="text-ui-fg-subtle text-xs">
+                            {t('packs.form.prizesHint')}
+                          </Text>
+                        </>
+                      ) : (
+                        <Input
+                          id="pack-prizes"
+                          value={t(
+                            form.prizeType === 'tickets'
+                              ? 'packs.form.prizesTickets'
+                              : 'packs.form.prizesCards',
+                          )}
+                          disabled
+                        />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-y-2">
+                      <Label size="small" weight="plus" htmlFor="pack-type">
+                        {t('packs.form.packType')}
+                      </Label>
+                      <Select
+                        value={form.packType ?? NONE}
+                        onValueChange={(v) => {
+                          const packType =
+                            PACK_TYPES.find((x) => x === v) ?? null;
+                          patch({
+                            packType,
+                            // Only an original pack carries a language.
+                            language:
+                              packType === 'original' ? form.language : null,
+                          });
+                        }}
+                      >
+                        <Select.Trigger id="pack-type">
+                          <Select.Value />
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Item value={NONE}>—</Select.Item>
+                          {PACK_TYPES.map((x) => (
+                            <Select.Item key={x} value={x}>
+                              {t(`packs.packType.${x}`)}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-y-2">
+                      <Label size="small" weight="plus" htmlFor="pack-language">
+                        {t('packs.form.language')}
+                      </Label>
+                      <Select
+                        value={form.language ?? NONE}
+                        disabled={form.packType !== 'original'}
+                        onValueChange={(v) =>
+                          patch({
+                            language:
+                              PACK_LANGUAGES.find((x) => x === v) ?? null,
+                          })
+                        }
+                      >
+                        <Select.Trigger id="pack-language">
+                          <Select.Value />
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Item value={NONE}>—</Select.Item>
+                          {PACK_LANGUAGES.map((x) => (
+                            <Select.Item key={x} value={x}>
+                              {t(`packs.language.${x}`)}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select>
+                      <Text className="text-ui-fg-subtle text-xs">
+                        {t('packs.form.languageHint')}
+                      </Text>
+                    </div>
+                  </>
+                )}
                 <div className="flex flex-col gap-y-2">
                   <Label size="small" weight="plus" htmlFor="pack-price">
                     {t('packs.form.price')}
@@ -1025,23 +1179,29 @@ const PacksListPage = () => {
                     onChange={(e) => patch({ rank: e.target.value })}
                   />
                 </div>
-                <div className="flex flex-col gap-y-2">
-                  <Label size="small" weight="plus" htmlFor="pack-buyback">
-                    {t('packs.form.buybackPercent')}
-                  </Label>
-                  <Input
-                    id="pack-buyback"
-                    type="number"
-                    min={90}
-                    max={100}
-                    step={1}
-                    value={form.buybackPercent}
-                    onChange={(e) => patch({ buybackPercent: e.target.value })}
-                  />
-                  <Text className="text-ui-fg-subtle text-xs">
-                    {t('packs.form.buybackHint')}
-                  </Text>
-                </div>
+                {/* Tickets can't be sold back. The default stays in the payload,
+                    which the validator still requires. */}
+                {form.prizeType !== 'tickets' && (
+                  <div className="flex flex-col gap-y-2">
+                    <Label size="small" weight="plus" htmlFor="pack-buyback">
+                      {t('packs.form.buybackPercent')}
+                    </Label>
+                    <Input
+                      id="pack-buyback"
+                      type="number"
+                      min={90}
+                      max={100}
+                      step={1}
+                      value={form.buybackPercent}
+                      onChange={(e) =>
+                        patch({ buybackPercent: e.target.value })
+                      }
+                    />
+                    <Text className="text-ui-fg-subtle text-xs">
+                      {t('packs.form.buybackHint')}
+                    </Text>
+                  </div>
+                )}
               </div>
 
               <div className="bg-ui-bg-subtle flex items-center justify-between rounded-lg px-4 py-3">
@@ -1062,37 +1222,17 @@ const PacksListPage = () => {
 
               {mode === 'create' && (
                 <Text className="text-ui-fg-subtle text-xs">
-                  {t('packs.form.poolHint')}
+                  {t(
+                    form.prizeType === 'tickets'
+                      ? 'packs.form.poolHintTickets'
+                      : 'packs.form.poolHint',
+                  )}
                 </Text>
               )}
             </div>
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>
-
-      <Prompt
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-      >
-        <Prompt.Content>
-          <Prompt.Header>
-            <Prompt.Title>{t('packs.delete.title')}</Prompt.Title>
-            <Prompt.Description>
-              {t('packs.delete.description', {
-                title: deleteTarget?.title ?? '',
-              })}
-            </Prompt.Description>
-          </Prompt.Header>
-          <Prompt.Footer>
-            <Prompt.Cancel>{t('packs.form.cancel')}</Prompt.Cancel>
-            <Prompt.Action onClick={confirmDelete}>
-              {t('packs.delete.confirm')}
-            </Prompt.Action>
-          </Prompt.Footer>
-        </Prompt.Content>
-      </Prompt>
     </Container>
   );
 };

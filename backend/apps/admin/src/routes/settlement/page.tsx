@@ -9,6 +9,7 @@ import { GatewayStrip } from './GatewayStrip';
 import { ExchangeRateCard } from './ExchangeRateCard';
 import { ReportCard } from './ReportCard';
 import { AuditFindings } from './AuditFindings';
+import { IntegrityFindings } from './IntegrityFindings';
 
 // Settlement — one tab per currency the site takes money in (RM, then each
 // regional rail: SGD today, USDT when it ships). Every tab reads the same way,
@@ -70,6 +71,8 @@ const SettlementPage = () => {
           </Text>
         ) : null}
       </Container>
+
+      <IntegrityFindings />
 
       {waiting ? (
         <Container className="px-6 py-8">

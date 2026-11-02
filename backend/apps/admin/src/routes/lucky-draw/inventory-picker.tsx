@@ -5,7 +5,7 @@ import { useInventory } from '../../lib/queries';
 import { resolveImageUrl } from '../../lib/image-url';
 import { rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
-import { inStockCards, poolCardFrom, type PoolCard } from './prize-pool';
+import { poolCardFrom, prizeCards, type PoolCard } from './prize-pool';
 
 // The route truncates ?q= at 100 chars; the input's maxLength matches.
 const MAX_Q = 100;
@@ -35,7 +35,7 @@ const Value = ({ n }: { n: number | null }) => (
   </Text>
 );
 
-/** Pick prize cards from the inventory: in-stock cards only, searched on the
+/** Pick prize cards from the inventory: any registered card, searched on the
  *  server, any number ticked. Picking holds no stock — the card is minted to
  *  the winner at draw time, like a challenge card prize. */
 export const InventoryPicker = ({
@@ -58,7 +58,7 @@ export const InventoryPicker = ({
   }, [search]);
 
   const { data, isError } = useInventory(q || undefined);
-  const rows = inStockCards(data?.rows ?? []);
+  const rows = prizeCards(data?.rows ?? []);
   const picked = new Set(selected.map((c) => c.handle));
 
   const toggle = (handle: string) => {
@@ -117,13 +117,13 @@ export const InventoryPicker = ({
         value={search}
         maxLength={MAX_Q}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search cards in stock…"
+        placeholder="Search cards…"
       />
 
       <div
         className="border-ui-border-base max-h-64 overflow-y-auto rounded-md border"
         role="group"
-        aria-label="Cards in stock"
+        aria-label="Cards"
       >
         {isError ? (
           <Text size="small" className="text-ui-fg-error p-3">
@@ -135,7 +135,7 @@ export const InventoryPicker = ({
           </div>
         ) : rows.length === 0 ? (
           <Text size="small" className="text-ui-fg-subtle p-3">
-            {q ? 'No card in stock matches.' : 'No card is in stock.'}
+            {q ? 'No card matches.' : 'No card is registered yet.'}
           </Text>
         ) : (
           <ul className="divide-ui-border-base divide-y">
@@ -152,12 +152,6 @@ export const InventoryPicker = ({
                     {r.name}
                   </Text>
                   <Value n={r.price} />
-                  <Text
-                    size="small"
-                    className="text-ui-fg-subtle w-24 shrink-0 text-right"
-                  >
-                    {r.on_hand} in stock
-                  </Text>
                 </label>
               </li>
             ))}

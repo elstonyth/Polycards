@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
+import { prizeFrameVariant } from '@/lib/prize-frame';
 import { TicketArt } from '@/components/TicketArt';
 import { num, rm, rm0 } from '@/lib/format';
 import { sellBackNotice } from '@/lib/buyback-copy';
@@ -43,11 +44,19 @@ import { useConsent } from '@/lib/use-consent';
 // The customer's vault: every pulled card still held, each with a sell-back
 // offer (current FMV × the flat buyback rate — the server quotes the percent).
 // Selling removes the card here and credits the site balance shown at the top.
+/** An action on the tickets row: full width in a pair on a phone. */
+const ticketPill = (lead: boolean) =>
+  cn(
+    pillVariants({ variant: lead ? 'primary' : 'secondary', size: 'sm' }),
+    'flex-1 sm:flex-none',
+  );
+
 export default function VaultClient({
   initial,
   addresses,
   initialGifts,
   tickets: initialTickets,
+  spinHref = null,
 }: {
   initial: VaultResult;
   addresses: AddressView[];
@@ -55,10 +64,13 @@ export default function VaultClient({
   initialGifts: PackGift[];
   /** Lucky Draw tickets held; null when unreadable, which hides the row. */
   tickets: number | null;
+  /** Where to spin a ticket pack; null with none on sale. */
+  spinHref?: string | null;
 }) {
   const router = useRouter();
   const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
   const [tickets, setTickets] = useState(initialTickets);
+  const [gettingTickets, setGettingTickets] = useState(false);
   const [items, setItems] = useState<VaultItem[]>(
     initial.ok ? initial.items : [],
   );
@@ -399,38 +411,69 @@ export default function VaultClient({
       </div>
 
       {/* Lucky Draw tickets: always shown when readable, so a player with none
-          is pointed at the tasks that pay them. */}
+          is pointed at what pays them. Get tickets is the lead action until
+          they hold some, then Use is. */}
       {tickets !== null && (
         <section aria-label="Lucky Draw tickets" className="mt-4">
-          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3">
-            <TicketArt width={64} className="shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white">
-                Lucky Draw Tickets ×{num(tickets)}
-              </p>
-              <p className="mt-0.5 text-[12px] text-neutral-400">
-                {tickets > 0 ? (
-                  <>
-                    Put them on the prizes you want, or{' '}
-                    <Link
-                      href="/vault/coin-flip?stake=tickets"
-                      className="font-semibold text-white underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                    >
-                      flip them
-                    </Link>
-                  </>
+          <div className="rounded-2xl border border-white/10 bg-neutral-900 p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <TicketArt width={64} className="shrink-0" />
+              <div className="min-w-0 flex-1 basis-40">
+                <p className="truncate text-sm font-semibold text-white">
+                  Lucky Draw Tickets ×{num(tickets)}
+                </p>
+                <p className="mt-0.5 text-[12px] text-neutral-400">
+                  {tickets > 0 ? (
+                    <>
+                      Put them in the prize pool, or{' '}
+                      <Link
+                        href="/vault/coin-flip?stake=tickets"
+                        className="font-semibold text-white underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                      >
+                        flip them
+                      </Link>
+                    </>
+                  ) : spinHref ? (
+                    'Earn them from tasks or a capsule'
+                  ) : (
+                    'Earn tickets from tasks'
+                  )}
+                </p>
+              </div>
+              <div className="flex w-full gap-2 sm:w-auto">
+                {spinHref ? (
+                  <button
+                    type="button"
+                    aria-expanded={gettingTickets}
+                    onClick={() => setGettingTickets((open) => !open)}
+                    className={ticketPill(tickets === 0)}
+                  >
+                    Get tickets
+                  </button>
                 ) : (
-                  'Earn tickets from tasks'
+                  <Link href="/task" className={ticketPill(tickets === 0)}>
+                    Get tickets
+                  </Link>
                 )}
-              </p>
+                <Link
+                  href={tickets > 0 ? '/lucky-draw?open=1' : '/lucky-draw'}
+                  aria-label="Use tickets in Lucky Draw"
+                  className={ticketPill(tickets > 0)}
+                >
+                  Use
+                </Link>
+              </div>
             </div>
-            <Link
-              href={tickets > 0 ? '/lucky-draw?open=1' : '/task'}
-              aria-label={tickets > 0 ? 'Open Lucky Draw' : undefined}
-              className={cn(pillVariants({ size: 'sm' }), 'px-5')}
-            >
-              {tickets > 0 ? 'Open' : 'Tasks'}
-            </Link>
+            {gettingTickets && spinHref && (
+              <div className="mt-3 flex flex-wrap gap-2 border-t border-white/10 pt-3">
+                <Link href="/task" className={ticketPill(false)}>
+                  Go to tasks
+                </Link>
+                <Link href={spinHref} className={ticketPill(false)}>
+                  Spin a capsule
+                </Link>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -636,9 +679,9 @@ export default function VaultClient({
               // tier frame never appeared here).
               <SlabImage
                 card={item.card}
-                // Won in the weekly challenge → keeps the challenge's prism
-                // frame here, the same one it wore on the stage grid.
-                frameVariant={item.challengePrize ? 'prism' : undefined}
+                // A prize keeps the frame it was won in: the challenge's prism,
+                // or the Lucky Draw's, the same one it wore in the draw.
+                frameVariant={prizeFrameVariant(item)}
                 sizes="(max-width: 1024px) 33vw, 25vw"
                 className="w-full"
               />
@@ -772,9 +815,7 @@ export default function VaultClient({
                         // the tile and the overlay it opens still agree.
                         priceMyr: item.card.priceMyr ?? 0,
                         // The overlay shows the same frame the tile does.
-                        frameVariant: item.challengePrize
-                          ? ('prism' as const)
-                          : undefined,
+                        frameVariant: prizeFrameVariant(item),
                       })
                     }
                     aria-label={`View details for ${item.card.name}`}
@@ -794,8 +835,8 @@ export default function VaultClient({
                     word — it either reads or it shouldn't be there. */}
                 <div className="mt-1 flex flex-col gap-0.5 text-[10px] sm:flex-row sm:items-center sm:justify-between sm:gap-1 sm:text-[11px]">
                   {item.luckyDrawPrize ? (
-                    // No tier and no frame: the bare slab and this word are
-                    // how a Lucky Draw win reads (operator 2026-10-25).
+                    // No tier: its frame and this word are how a Lucky Draw
+                    // win reads.
                     <span className="truncate font-bold uppercase tracking-wider text-neutral-300">
                       Lucky Draw
                     </span>

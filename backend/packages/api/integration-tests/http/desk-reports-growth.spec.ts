@@ -1198,7 +1198,9 @@ medusaIntegrationTestRunner({
               ? t.reward.amount_myr
               : t.reward.type === 'pack'
                 ? t.reward.pack_price_myr
-                : t.reward.card_value_myr,
+                : t.reward.type === 'card'
+                  ? t.reward.card_value_myr
+                  : null,
           ]),
         );
         for (const t of [...r.achievements, ...r.weekly]) {

@@ -71,11 +71,12 @@ export async function GET(
   // free-text reason a staff member typed is never returned.
   const moves = await db.raw<{
     entity_id: string;
+    admin_id: string;
     from_status: string | null;
     to_status: string | null;
     at: Date;
   }>(
-    "SELECT entity_id, before->>'status' AS from_status, after->>'status' AS to_status, created_at AS at " +
+    "SELECT entity_id, admin_id, before->>'status' AS from_status, after->>'status' AS to_status, created_at AS at " +
       "FROM admin_action_audit WHERE deleted_at IS NULL AND entity_type = 'delivery_order' " +
       `AND entity_id IN (${ids.map(() => '?').join(', ')}) ORDER BY created_at`,
     ids,
@@ -107,9 +108,16 @@ export async function GET(
         proof_photos: v?.proof_images.length ?? 0,
         status_changes_by_staff: moves.rows
           .filter((m) => m.entity_id === o.id)
-          .map((m) => ({ from: m.from_status, to: m.to_status, at: m.at })),
+          .map((m) => ({
+            from: m.from_status,
+            to: m.to_status,
+            at: m.at,
+            // 'automatic': moved by the stock allocation (system:* actor),
+            // not by a staff member.
+            by: m.admin_id.startsWith('system:') ? 'automatic' : 'staff',
+          })),
       };
     }),
-    note: 'status_word is what the customer sees (completed reads as delivered). A customer can cancel or change the address only while an order is requested or processed. The delivery address and phone are never shown here. If has_tracking_number is true but tracking_number is null, the number has an unusual format: check it in the admin. Discuss an order only with the player named in player.',
+    note: 'status_word is what the customer sees (completed reads as delivered). A customer can cancel only while an order is requested (the 12am run moves it on), and change the address only while it is requested or processed. The delivery address and phone are never shown here. If has_tracking_number is true but tracking_number is null, the number has an unusual format: check it in the admin. Discuss an order only with the player named in player.',
   });
 }

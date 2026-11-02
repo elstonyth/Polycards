@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mapVaultItem, type BackendVaultItem } from '@/lib/actions/vault-map';
+import { prizeFrameVariant } from '@/lib/prize-frame';
 
 const raw = (buyback: BackendVaultItem['buyback']): BackendVaultItem => ({
   pull_id: 'pull_1',
@@ -79,6 +80,8 @@ describe('mapVaultItem Lucky Draw prize', () => {
     });
     expect(item.luckyDrawPrize).toBe(true);
     expect(item.card.rarity).toBeFalsy();
+    // The flag is what puts the draw's frame on it in the vault.
+    expect(prizeFrameVariant(item)).toBe('lucky-draw');
   });
 
   it('defaults a missing flag to false (older backend)', () => {

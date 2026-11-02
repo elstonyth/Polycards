@@ -55,6 +55,24 @@ describe('coerceCreatePurchaseInvoiceBody', () => {
     expect(() => coerceCreatePurchaseInvoiceBody(b)).toThrow(/negative-qty/i);
   });
 
+  it('carries from_grn_id for a transfer, null when absent', () => {
+    expect(coerceCreatePurchaseInvoiceBody(okBody()).from_grn_id).toBeNull();
+    expect(
+      coerceCreatePurchaseInvoiceBody({ ...okBody(), from_grn_id: ' grn_1 ' })
+        .from_grn_id,
+    ).toBe('grn_1');
+  });
+
+  it('refuses from_grn_id on a reversing invoice (it is inherited)', () => {
+    const b = {
+      ...okBody(),
+      reverses_invoice_id: 'pinv_1',
+      from_grn_id: 'grn_1',
+      lines: [{ ...okBody().lines[0], qty: -10 }],
+    };
+    expect(() => coerceCreatePurchaseInvoiceBody(b)).toThrow(/from_grn_id/);
+  });
+
   it('a non-reversing invoice rejects a negative-qty line', () => {
     const b = okBody();
     b.lines[0].qty = -10;

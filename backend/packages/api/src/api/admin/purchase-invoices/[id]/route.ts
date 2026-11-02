@@ -38,7 +38,18 @@ export async function GET(
     { id: invoice.agent_user_id },
     { take: 1 },
   );
+  const [grn] = invoice.from_grn_id
+    ? await packs.listGoodsReceiveNotes(
+        { id: invoice.from_grn_id },
+        { take: 1, select: ['id', 'display_no'] },
+      )
+    : [];
   res.json({
-    invoice: { ...invoice, agent_email: agent?.email ?? null, lines },
+    invoice: {
+      ...invoice,
+      agent_email: agent?.email ?? null,
+      from_grn_display_no: grn?.display_no ?? null,
+      lines,
+    },
   });
 }

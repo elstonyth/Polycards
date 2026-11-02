@@ -8,6 +8,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import {
   PARTNER_RATE_KEY,
   resolveGroupPolicyForCustomer,
+  SEES_DRAFTS_KEY,
   VERIFICATION_EXEMPT_KEY,
   WITHDRAWALS_BLOCKED_KEY,
 } from '../../modules/packs/group-policy';
@@ -16,6 +17,7 @@ const GROUP_POLICY_KEYS = [
   PARTNER_RATE_KEY,
   WITHDRAWALS_BLOCKED_KEY,
   VERIFICATION_EXEMPT_KEY,
+  SEES_DRAFTS_KEY,
 ] as const;
 
 /**
@@ -52,7 +54,7 @@ export function stripAdditionalData(
 }
 
 export const GROUP_POLICY_METADATA_MESSAGE =
-  'partner_rate_bp, withdrawals_blocked and verification_exempt are set through POST /admin/customer-groups/:id/policy, which checks the rate against the partner bounds and records the change.';
+  'partner_rate_bp, withdrawals_blocked and verification_exempt are set through POST /admin/customer-groups/:id/policy, which checks the rate against the partner bounds and records the change. sees_drafts is set through POST /admin/customer-groups/:id/draft-access, which records the change.';
 
 /**
  * Same matcher as stripAdditionalData: refuse a body whose `metadata` carries
@@ -122,6 +124,37 @@ export function rejectGroupOddsSetUpdate(
         MedusaError.Types.INVALID_DATA,
         GROUP_ODDS_SET_METADATA_MESSAGE,
       ),
+    );
+    return;
+  }
+  next();
+}
+
+export const PRIVATE_FIELDS_MESSAGE =
+  'Those fields are not available on this API.';
+
+/**
+ * Blanket '/store/*' entry: refuse a `fields` query that names customer groups or
+ * the seller. Group metadata holds private settings (odds_set, the withdrawal
+ * block), and the seller holds staff and payment details. Core enforces a route's
+ * `allowed` list only behind the rbac_filter_fields flag, so `fields` reached them
+ * from the customer, address, order and payment collection routes.
+ *
+ * Matches the words, not a route list: every relation into them has the word in
+ * its alias (groups, customer_groups, customer_group_link; seller, sellers), and
+ * wildcards (`*`, `*customer`, `customer.*`) stop at scalar columns. Pinned by
+ * integration-tests/http/store-group-fields.spec.ts.
+ *
+ * JSON.stringify because a repeated `fields` parses to an array or an object.
+ */
+export function refusePrivateFields(
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  if (/group|seller/i.test(JSON.stringify(req.query.fields))) {
+    next(
+      new MedusaError(MedusaError.Types.INVALID_DATA, PRIVATE_FIELDS_MESSAGE),
     );
     return;
   }

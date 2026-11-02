@@ -6,6 +6,7 @@ import {
   resolveFxRate,
   displayMarketPrice,
 } from "../../../modules/packs/pricing";
+import { pullPackTitle } from "../../../modules/packs/pull-history";
 import { parsePaginationParams } from "../../../utils/pagination";
 
 // GET /admin/pulls — the gacha Pull ledger for the operator, plus rollups.
@@ -57,7 +58,8 @@ export async function GET(
   }
   const ledgerFilter: Record<string, unknown> = source ? { source } : {};
 
-  // Optional ?customer_id= — the per-player view. Stricter than ?source=:
+  // Optional ?customer_id= — the per-player view, for API callers: the player
+  // page reads /admin/customers/:id/pulls. Stricter than ?source=:
   // absent means unscoped, but an empty/blank value 400s instead of silently
   // falling back to every customer's pulls. A repeated param arrives as an
   // array and 400s too.
@@ -180,7 +182,8 @@ export async function GET(
       customer_id: p.customer_id,
       customer_email: p.customer_id ? emailById.get(p.customer_id) ?? null : null,
       pack_id: p.pack_id,
-      pack_title: packTitleBySlug.get(p.pack_id) ?? null,
+      // A prize card has no pack row: name where it came from, not its sentinel.
+      pack_title: pullPackTitle(p, packTitleBySlug.get(p.pack_id)),
       // Vault lifecycle: vaulted (customer still holds it) vs bought_back
       // (instant sell-back — amount = the MYR (RM) actually credited).
       status: p.status,

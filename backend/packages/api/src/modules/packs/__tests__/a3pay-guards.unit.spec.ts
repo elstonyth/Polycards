@@ -546,10 +546,9 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
       errorMessage: 'Insufficient beneficiary details',
     });
     const first = packsFor();
-    const error = (await go(first, 330).catch((e: unknown) => e)) as Error;
-    expect(error.message).not.toMatch(/on our side/i);
-    // Refunded as an ordinary definite refusal.
-    expect(first.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    // No proof A3Pay holds nothing, so it waits for the sweep. No "on our side".
+    await expect(go(first, 330)).resolves.toMatchObject({ status: 'pending' });
+    expect(first.withdrawCreditsWithLedger).not.toHaveBeenCalled();
 
     const next = packsFor();
     await go(next, 330).catch(() => undefined);

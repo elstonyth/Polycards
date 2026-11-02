@@ -10,6 +10,7 @@ import {
   usePrompt,
 } from '@medusajs/ui';
 import { useFxHistory, useFxRate, useSetFxRate } from '../../lib/queries';
+import { orderDateTime } from '../../lib/format';
 
 // Pricing control: the USD→MYR exchange rate the storefront reprices against.
 // The ONLY UI that writes /admin/pricing/fx (via useSetFxRate). Saving reprices
@@ -110,7 +111,7 @@ export const FxCard = () => {
           <ul className="mt-2 flex flex-col gap-1">
             {history.changes.map((c, i) => (
               <li key={i} className="text-ui-fg-subtle text-sm">
-                {new Date(c.at).toLocaleString('en-US')} — {c.admin_id}:{' '}
+                {orderDateTime(c.at)} — {c.admin_id}:{' '}
                 {c.after.manual_override
                   ? `override → ${c.after.manual_rate}`
                   : 'override off'}

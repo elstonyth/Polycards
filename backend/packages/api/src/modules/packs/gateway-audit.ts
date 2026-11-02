@@ -34,6 +34,46 @@ export type GatewayAnswer =
   | { kind: 'detail'; state: SettlementState; amount: number }
   | { kind: 'not-found' };
 
+/** What the ledger already holds for a row: its own idempotency anchor, or a
+ *  hand adjustment that names it. A note about money owed is only true once
+ *  this has been read. */
+export type LedgerTrail = { anchored: boolean; hand: boolean };
+
+/**
+ * Read the ledger for one row. `refs` are the row's own references; a hand
+ * credit has no link to a row, so naming one in its reason is the only trail it
+ * leaves (shortcut: an adjustment that names neither is invisible here; the
+ * Credit deposit action exists so staff need not write one).
+ */
+export async function ledgerTrail(
+  packs: {
+    listCreditTransactions(
+      filter: { customer_id: string },
+      config: { take?: number; select?: 'reference'[] },
+    ): Promise<{ reference?: string | null }[]>;
+  },
+  input: { customerId: string; anchor: string; refs: (string | null)[] },
+): Promise<LedgerTrail> {
+  const customer_id = input.customerId;
+  const [anchored] = await packs.listCreditTransactions(
+    { customer_id, source_transaction_id: input.anchor } as { customer_id: string },
+    { take: 1 },
+  );
+  const adjustments = await packs.listCreditTransactions(
+    { customer_id, reason: ['adjustment', 'bonus_grant'] } as {
+      customer_id: string;
+    },
+    { select: ['reference'] },
+  );
+  const refs = input.refs.filter((r): r is string => Boolean(r));
+  return {
+    anchored: Boolean(anchored),
+    hand: adjustments.some((a) =>
+      refs.some((ref) => a.reference?.includes(ref)),
+    ),
+  };
+}
+
 /**
  * Amounts agree when both are known and equal to the cent. A gateway that
  * reports no amount (NaN) cannot contradict ours — the STATE still can — so
@@ -45,11 +85,13 @@ const sameMoney = (a: number | null, b: number): boolean =>
 
 /**
  * What, if anything, the gateway disagrees with. `null` means agreement.
- * Wording is for the admin page, so it says what the operator must do.
+ * Wording is for the admin page, so it says what the operator must do. `ledger`
+ * is read only once there is a note to write (ledgerTrail).
  */
 export function depositAuditNote(
   row: AuditedRow,
   gateway: GatewayAnswer,
+  ledger?: LedgerTrail,
 ): string | null {
   if (gateway.kind === 'not-found') {
     return row.status === 'settled'
@@ -70,7 +112,16 @@ export function depositAuditNote(
   }
   // failed / expired
   if (state === 'success') {
-    return `gateway says PAID (${amount.toFixed(2)}) but the row is ${row.status} — customer paid and was not credited`;
+    const head = `gateway says PAID (${amount.toFixed(2)}) but the row is ${row.status}`;
+    if (ledger?.anchored) {
+      return `${head} — its credit is already on the ledger, do not credit again`;
+    }
+    if (ledger?.hand) {
+      return `${head} — a hand adjustment names this deposit, do not credit again`;
+    }
+    return ledger
+      ? `${head} — customer paid and was not credited. Use Credit deposit on Settlement, never a hand adjustment`
+      : `${head} — customer paid and was not credited`;
   }
   // An expired top-up the gateway still shows pending was simply never paid:
   // the gateway does not close abandoned orders. If the customer pays later,
@@ -84,6 +135,7 @@ export function depositAuditNote(
 export function withdrawalAuditNote(
   row: AuditedRow,
   gateway: GatewayAnswer,
+  ledger?: LedgerTrail,
 ): string | null {
   if (gateway.kind === 'not-found') {
     return row.status === 'settled'
@@ -98,7 +150,14 @@ export function withdrawalAuditNote(
         : `gateway paid out ${amount.toFixed(2)}, row debited ${rowMoney(row.amount)}`;
     }
     if (state === 'failed') {
-      return 'gateway says the payout FAILED but the row is settled — customer was not refunded, investigate';
+      const head = 'gateway says the payout FAILED but the row is settled';
+      if (ledger?.anchored) {
+        return `${head} — its refund is already on the ledger, do not refund again`;
+      }
+      if (ledger?.hand) {
+        return `${head} — a hand adjustment names this payout, do not refund again`;
+      }
+      return `${head} — customer was not refunded, investigate`;
     }
     return 'gateway still reports pending for a payout we marked settled';
   }

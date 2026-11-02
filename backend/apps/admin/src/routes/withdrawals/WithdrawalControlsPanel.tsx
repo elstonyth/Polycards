@@ -1,3 +1,5 @@
+import type { Permission } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -205,6 +207,11 @@ export const WithdrawalControlsPanel = () => {
   const prompt = usePrompt();
   const query = useWithdrawalControls();
   const save = useSaveWithdrawalControls();
+  // Saving asks payment:update. A view-only role still reads what is open and
+  // when: support is asked "why can't I withdraw?".
+  const canEdit = usePermissions().hasPermission(
+    'payment:update' as Permission,
+  );
   const [draft, setDraft] = useState<WithdrawalControls | null>(null);
   const [reason, setReason] = useState('');
 
@@ -273,6 +280,7 @@ export const WithdrawalControlsPanel = () => {
           {t('withdrawalControls.subtitle')}
         </Text>
       </div>
+      <fieldset disabled={!canEdit} className="contents">
       <ChannelEditor
         id="wc-withdrawals"
         label={t('withdrawalControls.withdraw')}
@@ -319,6 +327,7 @@ export const WithdrawalControlsPanel = () => {
           />
         </div>
       </ChannelEditor>
+      </fieldset>
       <div className="flex flex-col gap-1 border-t px-6 py-4">
         <Text size="small" className="text-ui-fg-subtle">
           {t('withdrawalControls.footnote', { floor })}

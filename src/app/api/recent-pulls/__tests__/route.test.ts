@@ -19,6 +19,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { GET } from '@/app/api/recent-pulls/route';
 import { clearTtlCache } from '@/lib/ttl-cache';
+import { parseOne, RecentPollResponseSchema } from '@/lib/data/schemas';
 
 const packRow = (over: Record<string, unknown> = {}) => ({
   slug: 'bronze-pack',
@@ -121,6 +122,63 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     expect(pullsCallsOf()[1]!.query).toEqual({ pack_id: 'bronze-pack' });
   });
 
+  it('the Poly category keeps its own key; any other value collapses to the global memo', async () => {
+    await GET(req('?category=poly'));
+    await GET(req('?category=pokemon'));
+    await GET(req('?category=garbage'));
+    await GET(req());
+
+    expect(pullsCallsOf()).toHaveLength(2);
+    expect(pullsCallsOf()[0]!.query).toEqual({ category: 'poly' });
+    expect(pullsCallsOf()[1]!.query).toBeUndefined();
+  });
+
+  it('the Poly category answers from the Store route, not the catalog', async () => {
+    await GET(req('?category=poly'));
+
+    expect(packsCallsOf()).toHaveLength(0);
+  });
+
+  it('a real pack wins over the category; a tier rides along with it', async () => {
+    await GET(req('?category=poly&pack_id=bronze-pack'));
+    await GET(req('?category=poly&rarity=Immortal'));
+
+    expect(pullsCallsOf()[0]!.query).toEqual({ pack_id: 'bronze-pack' });
+    expect(pullsCallsOf()[1]!.query).toEqual({
+      rarity: 'Immortal',
+      category: 'poly',
+    });
+  });
+
+  // The storefront deploys first, and an older backend ignores ?category.
+  it('card rows answering the Poly category read as an empty feed', async () => {
+    mem = seed({
+      'GET /store/pulls/recent': {
+        body: {
+          pulls: [
+            {
+              id: 'pull_1',
+              handle: 'pikachu',
+              name: 'Pikachu',
+              rarity: 'Common',
+              market_value: 1,
+              marketPriceMyr: 5,
+              image: '/c.png',
+              pack_id: 'bronze-pack',
+              rolled_at: '2026-11-02T00:00:00Z',
+            },
+          ],
+          drought: { Immortal: 74 },
+        },
+      },
+    });
+
+    const poly = await (await GET(req('?category=poly'))).json();
+    expect(poly).toEqual({ pulls: [], drought: {} });
+    const global = await (await GET(req())).json();
+    expect(global.pulls).toHaveLength(1);
+  });
+
   it('the body carries the drought counters alongside the rows', async () => {
     mem = seed({
       'GET /store/pulls/recent': {
@@ -131,6 +189,41 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     const body = await (await GET(req())).json();
     // Unknown tiers and negative counts are dropped at the trust boundary.
     expect(body).toEqual({ pulls: [], drought: { Immortal: 303 } });
+  });
+
+  // The trap is the second hop: the poll schema is a closed object, so a key it
+  // doesn't name is stripped and the first tick would turn the row back into a card.
+  it('a ticket row lands as its amount and keeps it through the poll schema', async () => {
+    mem = seed({
+      'GET /store/pulls/recent': {
+        body: {
+          pulls: [
+            {
+              id: 'tksp_1',
+              tickets: 300,
+              rarity: 'Immortal',
+              pack_id: 'lucky-pack',
+              pack_title: 'Bronze Capsule',
+              who: 'Ann',
+              rolled_at: '2026-11-02T00:00:00Z',
+            },
+          ],
+        },
+      },
+    });
+
+    const body = await (await GET(req())).json();
+    const polled = parseOne(RecentPollResponseSchema, body);
+
+    expect(polled?.pulls[0]).toMatchObject({
+      id: 'tksp_1',
+      tickets: 300,
+      name: '300 tickets',
+      rarity: 'Immortal',
+      priceMyr: null,
+      packName: 'Bronze Capsule',
+      who: 'Ann',
+    });
   });
 
   it('resolving the catalog costs no extra backend hop (getPackCategories is already cached)', async () => {

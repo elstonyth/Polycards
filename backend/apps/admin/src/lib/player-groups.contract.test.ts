@@ -6,10 +6,12 @@ import {
   DEFAULT_PLAYER_GROUP_NAME,
   effectiveOddsSet,
   groupPolicyOf,
+  groupSeesDrafts,
   isDefaultPlayerGroup,
   isPartnerGroup,
   oddsSetOf,
   PARTNER_RATE_KEY,
+  SEES_DRAFTS_KEY,
   VERIFICATION_EXEMPT_KEY,
   WITHDRAWALS_BLOCKED_KEY,
 } from './player-groups';
@@ -40,9 +42,25 @@ describe('partner-policy key names match the backend', () => {
     ['PARTNER_RATE_KEY', PARTNER_RATE_KEY],
     ['WITHDRAWALS_BLOCKED_KEY', WITHDRAWALS_BLOCKED_KEY],
     ['VERIFICATION_EXEMPT_KEY', VERIFICATION_EXEMPT_KEY],
+    ['SEES_DRAFTS_KEY', SEES_DRAFTS_KEY],
   ])('mirrors %s', (name, local) => {
     const m = new RegExp(`${name}\\s*=\\s*'([^']+)'`).exec(src);
     expect(m?.[1]).toBe(local);
+  });
+});
+
+describe('groupSeesDrafts', () => {
+  it('is on only for exactly true, and never for DEFAULT', () => {
+    expect(
+      groupSeesDrafts({ name: 'staff', metadata: { sees_drafts: true } }),
+    ).toBe(true);
+    expect(
+      groupSeesDrafts({ name: 'staff', metadata: { sees_drafts: 'true' } }),
+    ).toBe(false);
+    expect(groupSeesDrafts({ name: 'staff', metadata: null })).toBe(false);
+    expect(
+      groupSeesDrafts({ name: 'DEFAULT', metadata: { sees_drafts: true } }),
+    ).toBe(false);
   });
 });
 

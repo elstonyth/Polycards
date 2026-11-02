@@ -8,6 +8,7 @@ import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import { useCardPrice } from '@/lib/use-card-price';
 import { CardDetail } from '@/components/cards/CardDetail';
 import type { CardView } from '@/lib/card-view';
+import { prizeCardUrl, type FrameVariant } from '@/lib/prize-frame';
 
 /** The minimum a grid knows about a card — enough to open the overlay
  *  INSTANTLY; the endpoint hydrates the rest (set/grade/history) via
@@ -20,9 +21,10 @@ export type CardSeed = Pick<
   /** Cosmetic frame that OVERRIDES the tier frame. A weekly-challenge prize
    *  wears the challenge's prism frame wherever it is shown — the stage grid,
    *  this overlay, the card page opened from it, and the winner's vault — so it
-   *  still reads as a challenge prize rather than as a pack pull. Travels on
-   *  the seed so every surface that opens a card carries it automatically. */
-  frameVariant?: 'prism';
+   *  still reads as a challenge prize rather than as a pack pull, and a Lucky Draw
+   *  prize its own the same way. Travels on the seed so every surface that opens a
+   *  card carries it automatically. */
+  frameVariant?: FrameVariant;
   /** The card's CONFIGURED pixel-Pokémon (mirror of its linked library entry),
    *  for the reel↔card key badge. Optional: surfaces whose grid data lacks it
    *  (vault, a direct /card/<handle> visit) fall back to name-derivation. */
@@ -76,8 +78,6 @@ export function CardDetailOverlay({
   // The URL this overlay writes must round-trip: /card/<handle> reads the
   // prize marker from the query string, so dropping it would make a reload or
   // a shared link render the pack tier where the customer saw the prize frame.
-  const cardUrl = (h: string, variant?: 'prism'): string =>
-    `/card/${encodeURIComponent(h)}${variant === 'prism' ? '?prize=weekly' : ''}`;
   const frameVariant = seed?.frameVariant;
   const frameVariantRef = useRef(frameVariant);
   useEffect(() => {
@@ -92,7 +92,7 @@ export function CardDetailOverlay({
     window.history.pushState(
       { polycardsCardOverlay: true },
       '',
-      cardUrl(handleRef.current ?? '', frameVariantRef.current),
+      prizeCardUrl(handleRef.current ?? '', frameVariantRef.current),
     );
     pushedRef.current = true;
     const onPop = () => {
@@ -116,7 +116,7 @@ export function CardDetailOverlay({
       window.history.replaceState(
         { polycardsCardOverlay: true },
         '',
-        cardUrl(handle, frameVariant),
+        prizeCardUrl(handle, frameVariant),
       );
     }
   }, [handle, frameVariant]);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { useHref, useNavigate } from 'react-router-dom';
+import { useHref, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Checkbox,
   Container,
@@ -17,8 +17,10 @@ import {
 } from '@medusajs/ui';
 import { TruckFast, XMark } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import {
   useBulkUpdateDeliveryOrders,
+  useCheckDeliveryTracking,
   useDeliveryOrders,
   useGatewayDeposits,
   usePulls,
@@ -33,8 +35,10 @@ import type {
 } from '../../lib/admin-rest';
 import {
   DELIVERY_STATUS_LABEL,
+  DELIVERY_TONE,
   deliveryStatusLabel,
   orderDateTime,
+  paymentMethodLabel,
   rm,
 } from '../../lib/format';
 import { resolveImageUrl } from '../../lib/image-url';
@@ -42,6 +46,8 @@ import { useTableSort } from '../../lib/use-table-sort';
 import { applyRangeSelect } from '../../lib/range-select';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { TrackingLine } from '../../components/DeliveryTracking';
+import { depositStatusBadge } from '../../components/PaymentStatusBadge';
 
 export const config: RouteConfig = {
   label: 'pcNav.orders',
@@ -49,6 +55,12 @@ export const config: RouteConfig = {
   icon: TruckFast,
   rank: 10,
   permissions: ['delivery_order:read' as Permission],
+};
+
+// The end of the login chain for a stock-only role (see orders/page.tsx).
+export const handle = {
+  permissions: 'delivery_order:read',
+  redirectTo: '/inventory/list',
 };
 
 const STATUSES: DeliveryStatus[] = [
@@ -59,29 +71,6 @@ const STATUSES: DeliveryStatus[] = [
   'completed',
   'canceled',
 ];
-const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
-  requested: 'orange',
-  processed: 'orange',
-  ready_to_ship: 'orange',
-  shipped: 'blue',
-  completed: 'green',
-  canceled: 'grey',
-};
-
-// Exhaustive over GatewayDeposit['status'], so a new gateway status is a type
-// error here rather than a raw token in the badge.
-const DEPOSIT_TONE: Record<
-  GatewayDeposit['status'],
-  'orange' | 'green' | 'red' | 'purple'
-> = {
-  pending: 'orange',
-  settled: 'green',
-  failed: 'red',
-  // Purple, matching routes/deposits/page.tsx: 'expired' is the sweep giving up
-  // while the gateway never ruled, so it is the likeliest UNCREDITED payment on
-  // the page and must not read as either settled, refused, or still-in-flight.
-  expired: 'purple',
-};
 // Same words as routes/deposits (i18n deposits.statusLabel).
 const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
   pending: 'Awaiting payment',
@@ -297,7 +286,7 @@ const Topups = () => {
                   <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
                     {orderDateTime(d.created_at)}
                   </Table.Cell>
-                  <Table.Cell>{d.payment_method_code}</Table.Cell>
+                  <Table.Cell>{paymentMethodLabel(d.payment_method_code)}</Table.Cell>
                   <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                     {rm(d.amount_requested)}
                   </Table.Cell>
@@ -314,9 +303,12 @@ const Topups = () => {
                     </button>
                   </Table.Cell>
                   <Table.Cell>
-                    <StatusBadge color={DEPOSIT_TONE[d.status]}>
-                      {DEPOSIT_STATUS_LABEL[d.status]}
-                    </StatusBadge>
+                    {depositStatusBadge(
+                        d,
+                        d.stuck
+                          ? 'Needs gateway check'
+                          : DEPOSIT_STATUS_LABEL[d.status],
+                      )}
                   </Table.Cell>
                 </Table.Row>
               ))}
@@ -349,10 +341,24 @@ const DeliveriesPage = () => {
   // Which kind of record the page is showing. 'shipping' is everything the page
   // did before: status tabs, id search, bulk tool, Manage modal.
   const [kind, setKind] = useState<OrderKind>('shipping');
+  // Top-ups are customer money (GET /admin/payments/deposits asks
+  // payment:read). An order handler without it — the Order manager since
+  // 2026-10-28 — gets no tab rather than a tab that 403s.
+  const permissions = usePermissions();
+  const canSeeTopups = permissions.hasPermission('payment:read' as Permission);
+  // "Check tracking" can complete orders (POST /track asks
+  // delivery_order:update); a read-only role gets no button rather than a 403.
+  const canManage = permissions.hasPermission(
+    'delivery_order:update' as Permission,
+  );
+  const canSeePlayer = permissions.hasPermission('customer:read');
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<DeliveryStatus | undefined>(undefined);
   const [page, setPage] = useState(0);
-  const [search, setSearch] = useState('');
-  const [q, setQ] = useState('');
+  // ?q= opens the page on one order (the player page's "Manage in All Orders").
+  const [params] = useSearchParams();
+  const [search, setSearch] = useState(params.get('q') ?? '');
+  const [q, setQ] = useState(params.get('q') ?? '');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<DeliveryStatus>('processed');
   // Re-sorting changes which rows are on screen, so it follows the same rule
@@ -376,6 +382,7 @@ const DeliveriesPage = () => {
   const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
   const bulk = useBulkUpdateDeliveryOrders();
+  const track = useCheckDeliveryTracking();
   const uploadImg = useUploadImage();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
   const [nextStatus, setNextStatus] = useState<DeliveryStatus>('processed');
@@ -433,6 +440,24 @@ const DeliveriesPage = () => {
     setSelected((prev) =>
       applyRangeSelect(prev, pageIds, anchor, id, shiftKey),
     );
+  };
+
+  const checkTracking = async () => {
+    try {
+      const r = await track.mutateAsync();
+      const parts = [
+        `${r.completed.length} completed`,
+        r.problems.length > 0 && `${r.problems.length} need attention`,
+        r.failed.length > 0 && `${r.failed.length} could not be checked`,
+      ].filter(Boolean);
+      const summary = `Checked ${r.checked} shipped orders: ${parts.join(', ')}`;
+      // A carrier that is down reads "0 checked, 14 could not be checked":
+      // not a success.
+      if (r.failed.length > 0 || r.checked === 0) toast.warning(summary);
+      else toast.success(summary);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
   };
 
   // Partial success is the endpoint's contract. Two classes of skip:
@@ -548,18 +573,30 @@ const DeliveriesPage = () => {
             </Text>
           </div>
           {kind === 'shipping' && (
-            <Input
-              type="search"
-              className="w-64"
-              placeholder="Search order id"
-              aria-label="Search orders by id"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
-                clearSelection();
-              }}
-            />
+            <div className="flex items-center gap-2">
+              {canManage && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={checkTracking}
+                  isLoading={track.isPending}
+                >
+                  Check tracking
+                </Button>
+              )}
+              <Input
+                type="search"
+                className="w-64"
+                placeholder="Search order id"
+                aria-label="Search orders by id"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(0);
+                  clearSelection();
+                }}
+              />
+            </div>
           )}
         </div>
         {/* Two tablists now, so each needs its own name to tell them apart.
@@ -569,7 +606,9 @@ const DeliveriesPage = () => {
           <Tabs.List aria-label="Record kind">
             <Tabs.Trigger value="shipping">Shipping</Tabs.Trigger>
             <Tabs.Trigger value="purchases">Pack purchases</Tabs.Trigger>
-            <Tabs.Trigger value="topups">Topups</Tabs.Trigger>
+            {canSeeTopups && (
+              <Tabs.Trigger value="topups">Topups</Tabs.Trigger>
+            )}
           </Tabs.List>
         </Tabs>
         {kind === 'shipping' && (
@@ -594,7 +633,7 @@ const DeliveriesPage = () => {
       </div>
 
       {kind === 'purchases' && <PackPurchases />}
-      {kind === 'topups' && <Topups />}
+      {kind === 'topups' && canSeeTopups && <Topups />}
 
       {kind === 'shipping' && selected.size > 0 && (
         <div
@@ -605,24 +644,32 @@ const DeliveriesPage = () => {
           <Text size="small" weight="plus">
             {selected.size} selected
           </Text>
-          <Select
-            value={bulkStatus}
-            onValueChange={(v) => setBulkStatus(v as DeliveryStatus)}
-          >
-            <Select.Trigger className="w-44" aria-label="Mark selected as">
-              <Select.Value />
-            </Select.Trigger>
-            <Select.Content>
-              {STATUSES.map((s) => (
-                <Select.Item key={s} value={s}>
-                  {DELIVERY_STATUS_LABEL[s]}
-                </Select.Item>
-              ))}
-            </Select.Content>
-          </Select>
-          <Button size="small" onClick={applyBulk} isLoading={bulk.isPending}>
-            Apply
-          </Button>
+          {canManage && (
+            <>
+              <Select
+                value={bulkStatus}
+                onValueChange={(v) => setBulkStatus(v as DeliveryStatus)}
+              >
+                <Select.Trigger className="w-44" aria-label="Mark selected as">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {STATUSES.map((s) => (
+                    <Select.Item key={s} value={s}>
+                      {DELIVERY_STATUS_LABEL[s]}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select>
+              <Button
+                size="small"
+                onClick={applyBulk}
+                isLoading={bulk.isPending}
+              >
+                Apply
+              </Button>
+            </>
+          )}
           {/* A real link, not a window.open() button: middle/ctrl-click, "open
               in new window" and screen-reader link semantics all come free. */}
           <Button size="small" variant="secondary" asChild>
@@ -703,12 +750,25 @@ const DeliveriesPage = () => {
                       {o.items.length}
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle">
-                      {o.customer_email ?? o.customer_id}
+                      {canSeePlayer ? (
+                        <button
+                          type="button"
+                          className="text-ui-fg-interactive hover:underline"
+                          onClick={() =>
+                            navigate(`/customers/${o.customer_id}?tab=orders`)
+                          }
+                        >
+                          {o.customer_email ?? o.customer_id}
+                        </button>
+                      ) : (
+                        (o.customer_email ?? o.customer_id)
+                      )}
                     </Table.Cell>
                     <Table.Cell>
-                      <StatusBadge color={TONE[o.status] ?? 'grey'}>
+                      <StatusBadge color={DELIVERY_TONE[o.status] ?? 'grey'}>
                         {deliveryStatusLabel(o.status)}
                       </StatusBadge>
+                      <TrackingLine order={o} />
                     </Table.Cell>
                     <Table.Cell className="text-right">
                       <Button
@@ -716,7 +776,7 @@ const DeliveriesPage = () => {
                         variant="secondary"
                         onClick={() => openDetail(o)}
                       >
-                        Manage
+                        {canManage ? 'Manage' : 'View'}
                       </Button>
                     </Table.Cell>
                   </Table.Row>
@@ -753,16 +813,18 @@ const DeliveriesPage = () => {
                 variant="secondary"
                 onClick={() => setDetail(null)}
               >
-                Cancel
+                {canManage ? 'Cancel' : 'Close'}
               </Button>
-              <Button
-                size="small"
-                onClick={save}
-                isLoading={update.isPending}
-                disabled={trackingRequired || uploading}
-              >
-                Save
-              </Button>
+              {canManage && (
+                <Button
+                  size="small"
+                  onClick={save}
+                  isLoading={update.isPending}
+                  disabled={trackingRequired || uploading}
+                >
+                  Save
+                </Button>
+              )}
             </div>
           </FocusModal.Header>
           <FocusModal.Body className="flex flex-col items-center overflow-auto p-10">
@@ -849,6 +911,7 @@ const DeliveriesPage = () => {
                   </Text>
                   <Select
                     value={nextStatus}
+                    disabled={!canManage}
                     onValueChange={(v) => setNextStatus(v as DeliveryStatus)}
                   >
                     <Select.Trigger aria-labelledby="delivery-status-label">
@@ -870,6 +933,7 @@ const DeliveriesPage = () => {
                   <Input
                     aria-labelledby="delivery-tracking-label"
                     value={tracking}
+                    disabled={!canManage}
                     onChange={(e) => setTracking(e.target.value)}
                     placeholder="Required to mark shipped"
                     aria-invalid={trackingRequired || undefined}
@@ -902,17 +966,19 @@ const DeliveriesPage = () => {
                     className="hidden"
                     onChange={handleProofFiles}
                   />
-                  <div>
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      type="button"
-                      onClick={() => proofRef.current?.click()}
-                      isLoading={uploading}
-                    >
-                      Upload photos
-                    </Button>
-                  </div>
+                  {canManage && (
+                    <div>
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        type="button"
+                        onClick={() => proofRef.current?.click()}
+                        isLoading={uploading}
+                      >
+                        Upload photos
+                      </Button>
+                    </div>
+                  )}
                   {proofImages.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {proofImages.map((url) => (
@@ -922,14 +988,16 @@ const DeliveriesPage = () => {
                             alt="Delivery proof"
                             className="border-ui-border-base h-20 w-20 rounded border object-cover"
                           />
-                          <button
-                            type="button"
-                            aria-label="Remove photo"
-                            onClick={() => removeProof(url)}
-                            className="bg-ui-bg-base border-ui-border-base text-ui-fg-subtle hover:text-ui-fg-base absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border shadow"
-                          >
-                            <XMark className="h-3 w-3" />
-                          </button>
+                          {canManage && (
+                            <button
+                              type="button"
+                              aria-label="Remove photo"
+                              onClick={() => removeProof(url)}
+                              className="bg-ui-bg-base border-ui-border-base text-ui-fg-subtle hover:text-ui-fg-base absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border shadow"
+                            >
+                              <XMark className="h-3 w-3" />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>

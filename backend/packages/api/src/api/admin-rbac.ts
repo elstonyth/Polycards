@@ -33,6 +33,9 @@ export const OPERATION_BY_METHOD = {
  *  them byte-identical to what the middleware entries check. */
 export const CUSTOM_ADMIN_RESOURCES = {
   announcements: 'announcement',
+  assistant: 'assistant',
+  'assistant-review': 'assistant_review',
+  'assistant-settings': 'assistant_setting',
   automation: 'automation',
   'avatar-frames': 'avatar_frame',
   cards: 'card',
@@ -42,6 +45,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   'delivery-orders': 'delivery_order',
   economy: 'economy',
   gacha: 'gacha',
+  'goods-receive-notes': 'goods_receive_note',
   inventory: 'inventory',
   ledger: 'ledger',
   'lossless-schedules': 'lossless_schedule',
@@ -53,6 +57,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   players: 'player',
   pricecharting: 'pricecharting',
   pricing: 'pricing',
+  procurement: 'procurement',
   'profit-report': 'profit_report',
   pulls: 'pull',
   'purchase-invoices': 'purchase_invoice',
@@ -104,7 +109,7 @@ export const CORE_PREFIX_WRITES: {
     resource: CORE_READ_PREFIXES.customers,
     operation: 'update' as const,
   })),
-  ...['odds-set', 'policy'].map((sub) => ({
+  ...['draft-access', 'odds-set', 'policy'].map((sub) => ({
     matcher: `/admin/customer-groups/*/${sub}`,
     method: 'POST' as const,
     resource: CORE_READ_PREFIXES['customer-groups'],
@@ -118,6 +123,7 @@ export const CORE_PREFIX_WRITES: {
   },
   ...[
     'audit/acknowledge',
+    'deposits/*/credit',
     'fx',
     'gateway',
     'withdrawals/*/approve',
@@ -139,7 +145,9 @@ export const CORE_PREFIX_WRITES: {
  *  payment:read, scripts/create-support-viewer.ts) is refused, while `*:*`
  *  staff and the `*:read` desk bots pass as before. Declared in
  *  policies/admin-surfaces.ts. Resources must be NEW names: Mercur already
- *  owns `payout_account` (its seller payouts, key-unique policy rows). */
+ *  owns `payout_account` (its seller payouts, key-unique policy rows). Core's
+ *  customer reads carry the same values in metadata: redactCustomerSecrets
+ *  applies these policies there. */
 export const SECRET_READS = [
   { matcher: '/admin/players/export', resource: 'partner_credential' },
   {
@@ -167,14 +175,25 @@ const METHODS_BY_OPERATION = Object.entries(OPERATION_BY_METHOD).reduce<
  *
  *  Automation reads and runs on `automation:*` alone, so the automation
  *  operator role (scripts/create-automation-operator.ts) works without
- *  `customer:read`. Saving the account list also asks `customer:read`: it
+ *  `customer:read`. Saving the account list also asks `customer:update`: it
  *  accepts ANY registered customer's email, and a live run then opens packs on
- *  that customer's wallet. Only staff choose which accounts automation touches. */
+ *  that customer's wallet. Only staff choose which accounts automation touches.
+ *  Not `customer:read`, which a view-only role beside the operator role holds
+ *  (scripts/grant-support-viewer.ts). */
 export const adminRbacRoutes: MiddlewareRoute[] = [
   {
     matcher: '/admin/automation/accounts',
     methods: ['POST'],
-    policies: [{ resource: 'customer', operation: 'read' }],
+    policies: [{ resource: 'customer', operation: 'update' }],
+  },
+  {
+    // The mailing list carries customer names, addresses, phones and emails:
+    // on top of procurement:read (the prefix entry below), ask the same
+    // permission the Orders page does, so a purchasing-only role cannot read
+    // customer details through it.
+    matcher: '/admin/procurement/to-ship',
+    methods: ['GET'],
+    policies: [{ resource: 'delivery_order', operation: 'read' }],
   },
   ...Object.entries(CUSTOM_ADMIN_RESOURCES).flatMap(([prefix, resource]) =>
     [`/admin/${prefix}`, `/admin/${prefix}/*`].flatMap((matcher) =>

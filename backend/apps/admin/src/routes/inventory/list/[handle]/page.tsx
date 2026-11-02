@@ -6,7 +6,7 @@ import { ArrowLeft } from '@medusajs/icons';
 import { useInventoryItem } from '../../../../lib/queries';
 import { httpStatus } from '../../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../../lib/format';
-import { resolveImageUrl } from '../../../../lib/image-url';
+import { CardImage } from '../../../../components/CardImage';
 import { Pager } from '../../../../components/Pager';
 import { LoadingSkeleton } from '../../../../components/LoadingSkeleton';
 
@@ -42,11 +42,10 @@ const InventoryItemDetailPage = () => {
   const associated = data?.associated;
   const movements = data?.movements;
 
-  // `cost` and `on_hand` are THREE-STATE and the two zeros mean different
-  // things: cost 0 = bought and free, on_hand 0 = tracked with nothing
-  // shippable, null = no purchase history / tracks no inventory. rm() already
-  // renders null as an em dash and 0 as RM 0.00, and on_hand uses `??` — do NOT
-  // reintroduce a truthiness test on either.
+  // `cost` is THREE-STATE: 0 = bought and free, null = no purchase history.
+  // rm() already renders null as an em dash and 0 as RM 0.00 — do NOT
+  // reintroduce a truthiness test. The six stock buckets follow, in the Stock
+  // list's column order (spec 2026-10-28); none is ever null.
   const stats = item
     ? [
         { label: t('inventory.fmv'), value: rm(item.fmv) },
@@ -57,15 +56,19 @@ const InventoryItemDetailPage = () => {
           title: item.cost === null ? t('inventory.noCost') : undefined,
         },
         {
+          label: t('inventory.toProcure'),
+          value: item.to_procure,
+          tone: item.to_procure > 0 ? 'text-ui-fg-error' : '',
+        },
+        {
           label: t('inventory.onHand'),
-          value: item.on_hand ?? '—',
-          title: item.on_hand === null ? t('inventory.noStock') : undefined,
-          // (null ?? 0) < 0 is false, so an untracked row is never coloured as
-          // a deficit — only a genuinely oversold one is.
-          tone: (item.on_hand ?? 0) < 0 ? 'text-ui-fg-error' : '',
+          value: item.on_hand,
+          // Negative only when more shipped than was ever received.
+          tone: item.on_hand < 0 ? 'text-ui-fg-error' : '',
         },
         { label: t('inventory.inVault'), value: item.in_vault },
         { label: t('inventory.requested'), value: item.requested },
+        { label: t('inventory.readyToShip'), value: item.ready_to_ship },
         { label: t('inventory.shipped'), value: item.shipped },
       ]
     : [];
@@ -97,17 +100,11 @@ const InventoryItemDetailPage = () => {
           ) : (
             <>
               <div className="flex items-center gap-4">
-                {/* `item.photo &&`, not just a src: an empty string resolves to
-                    the page URL and gets refetched as an image. */}
-                {item.photo && (
-                  <img
-                    src={resolveImageUrl(item.photo)}
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                    className="h-16 w-16 shrink-0 rounded object-cover"
-                  />
-                )}
+                <CardImage
+                  src={item.image}
+                  name={item.name}
+                  className="h-24 w-[68px] shrink-0"
+                />
                 <div>
                   <Heading level="h2" className="break-words">
                     {item.name}
@@ -119,7 +116,9 @@ const InventoryItemDetailPage = () => {
                     {/* Plain text for SKU and RAW/GRADED: they are descriptive
                         values, not statuses — same call the list page makes. */}
                     {item.sku} &middot;{' '}
-                    {item.graded ? t('inventory.graded') : t('inventory.raw')}
+                    {item.graded
+                      ? `${t('inventory.slab')}${item.grade ? ` · ${item.grade}` : ''}`
+                      : t('inventory.raw')}
                     {!item.is_card && (
                       <span className="ml-1">({t('inventory.notACard')})</span>
                     )}
@@ -127,7 +126,7 @@ const InventoryItemDetailPage = () => {
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-7">
+              <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-9">
                 {stats.map((s) => (
                   <div key={s.label} title={s.title}>
                     <Text size="small" className="text-ui-fg-subtle">

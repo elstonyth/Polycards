@@ -28,6 +28,15 @@ export const PARTNER_RATE_KEY = 'partner_rate_bp';
 export const WITHDRAWALS_BLOCKED_KEY = 'withdrawals_blocked';
 export const VERIFICATION_EXEMPT_KEY = 'verification_exempt';
 
+/**
+ * Members of a group with this key see Draft packs and can spin Draft ticket
+ * packs, so staff can test before customers see anything. Its own key and not
+ * part of GroupPolicy: that one is empty unless the group is a partner group,
+ * and editGroupPolicy rewrites all of its keys. editGroupDraftAccess is the only
+ * writer. Same safe reading as the rest: anything but exactly true is off.
+ */
+export const SEES_DRAFTS_KEY = 'sees_drafts';
+
 export type GroupPolicy = {
   partner_rate_bp: number | null;
   withdrawals_blocked: boolean;
@@ -93,6 +102,21 @@ export async function resolveGroupPolicyForCustomer(
     group: { id: group.id, name: group.name },
     policy: groupPolicyOf(group),
   };
+}
+
+/** DEFAULT is pinned off whatever its row stores: it holds every customer who
+ *  has no real group, so one stray key must not open every draft to them. */
+export const groupSeesDrafts = (g: PlayerGroupLike): boolean =>
+  !isDefaultPlayerGroup(g) && g.metadata?.[SEES_DRAFTS_KEY] === true;
+
+/** Read at request time from the customer's effective player group: the same
+ *  group whose odds they roll. Never cached, so leaving the group ends access. */
+export async function customerSeesDrafts(
+  container: MedusaContainer,
+  customerId?: string,
+): Promise<boolean> {
+  const group = await resolvePlayerGroup(container, customerId);
+  return group !== null && groupSeesDrafts(group);
 }
 
 /** Conflict rule (spec 2026-09-09): while a customer is in a partner group

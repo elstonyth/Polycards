@@ -174,9 +174,11 @@ export function tgpayDepositCallback(kind: TgpayKind): Handler {
       });
       if (!outcome.applied) {
         logger.error(
-          outcome.reason === 'amount-not-positive'
-            ? `${tag} settled callback for ${merchantTransactionId} carried a non-positive amount (${String(data.amount)}) — refusing to credit`
-            : `${tag} settled callback for ${merchantTransactionId} claims RM ${creditedAmount} but the row asked for RM ${Number(deposit.amount_requested)} (ceiling RM ${GATEWAYS[kind].limits.depositMax}) — refusing to credit; the row remains ${deposit.status} for the sweep`,
+          outcome.reason === 'hand-credited'
+            ? `${tag} settled callback for ${merchantTransactionId}, but a hand adjustment already names this deposit — refusing to credit; the row remains ${deposit.status}`
+            : outcome.reason === 'amount-not-positive'
+              ? `${tag} settled callback for ${merchantTransactionId} carried a non-positive amount (${String(data.amount)}) — refusing to credit`
+              : `${tag} settled callback for ${merchantTransactionId} claims RM ${creditedAmount} but the row asked for RM ${Number(deposit.amount_requested)} (ceiling RM ${GATEWAYS[kind].limits.depositMax}) — refusing to credit; the row remains ${deposit.status} for the sweep`,
         );
         res.status(400).send('rejected');
         return;

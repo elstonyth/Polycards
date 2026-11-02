@@ -16,11 +16,12 @@ import {
   StatusBadge,
   FocusModal,
   Checkbox,
+  IconButton,
   toast,
   usePrompt,
   clx,
 } from '@medusajs/ui';
-import { ArrowLeft } from '@medusajs/icons';
+import { ArrowLeft, Trash } from '@medusajs/icons';
 import type {
   AdminCard,
   AdminPack,
@@ -50,7 +51,9 @@ import {
   usePacks,
   useSaveMembers,
   useSaveOdds,
+  useSaveTicketPrizes,
   useSaveTopHits,
+  useTicketPrizes,
   useTierSettings,
   useUpdatePack,
 } from '../../../lib/queries';
@@ -66,6 +69,7 @@ import {
   setEvRtp,
   tierSplit,
   type EditRow,
+  type SetsPreview,
   type TierEv,
 } from '../../../lib/odds-rows';
 import { resolveImageUrl } from '../../../lib/image-url';
@@ -78,6 +82,14 @@ import { shouldSeedBuffer } from '../../../lib/seed-buffer';
 import { applyRangeSelect } from '../../../lib/range-select';
 import { useTableSort } from '../../../lib/use-table-sort';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
+import {
+  blankTicketRow,
+  isTicketPack,
+  mapTicketPrizesToRows,
+  ticketAmountProblems,
+  ticketRowsToPayload,
+  ticketSaveBlocked,
+} from '../ticket-prizes';
 
 // A card staged by the cards list's bulk "Add to gacha pack" — NOT a pool
 // member yet. Its rarity DEFAULTS from the admin-configured tier price ranges
@@ -110,6 +122,55 @@ const pendingRow = (c: AdminCard, tierRanges: TierRangeMap): EditRow => ({
  *  what "Reset to house default" restores. */
 const houseDefaults = (): Record<string, string> =>
   Object.fromEntries(RARITIES.map((r) => [r, String(DEFAULT_TIER_PCT[r])]));
+
+// A half-typed field ('' or '1.') is NaN — coerced to 0 here rather than
+// asserted away, so the Record<OddsRarity, number> type stays honest.
+const numericDefaults = (
+  defaults: Record<string, string>,
+): Record<OddsRarity, number> =>
+  Object.fromEntries(
+    RARITIES.map((r) => {
+      const n = Number(defaults[r]);
+      return [r, Number.isFinite(n) ? n : 0];
+    }),
+  ) as Record<OddsRarity, number>;
+
+type SetSummary = {
+  n: 1 | 2 | 3;
+  total: number | null;
+  ev: number | null;
+  rtp: number | null;
+  materialized: boolean;
+};
+
+// Per-set readouts: Σ (100% when valid) and the theoretical EV/RTP that set
+// pays. Null for any set the preview could NOT resolve — nothing would be
+// saved, so a number there would be a lie. Set 1 is the exception and stays
+// readable through a set-2/3 failure (see previewSets): it resolves on its own,
+// and blanking it told the operator nothing except that everything broke.
+const setSummaries = (
+  preview: SetsPreview,
+  effective: EditRow[],
+  price: number,
+): SetSummary[] =>
+  ([1, 2, 3] as const).map((n) => {
+    const pct = preview.pct[n];
+    const money = setEvRtp(effective, pct, price);
+    const sum = [...pct.values()].reduce((s, p) => s + p, 0);
+    return {
+      n,
+      total: pct.size === 0 ? null : Math.round(sum * 10_000) / 10_000,
+      ev: money?.ev ?? null,
+      rtp: money?.rtp ?? null,
+      // Whether this set has a table of its OWN, rather than inheriting
+      // 3 → 2 → 1. Keyed off materialization, never off "its EV matches
+      // set 1" — EV is rounded to the ringgit, so two genuinely different
+      // tables can collide there and a live alternate set would go unlisted.
+      materialized:
+        n === 1 ||
+        effective.some((r) => (n === 2 ? r.pctInput2 : r.pctInput3) !== ''),
+    };
+  });
 
 /**
  * Pack odds editor (`/packs/:slug`): edit a pack's prize-pool membership and
@@ -166,18 +227,7 @@ const PackOddsEditorPage = () => {
     setDefaults(houseDefaults());
   }
 
-  // A half-typed field ('' or '1.') is NaN — coerced to 0 here rather than
-  // asserted away, so the Record<OddsRarity, number> type stays honest.
-  const defaultsNum = useMemo(
-    () =>
-      Object.fromEntries(
-        RARITIES.map((r) => {
-          const n = Number(defaults[r]);
-          return [r, Number.isFinite(n) ? n : 0];
-        }),
-      ) as Record<OddsRarity, number>,
-    [defaults],
-  );
+  const defaultsNum = useMemo(() => numericDefaults(defaults), [defaults]);
   const packTitle = data?.pack.title ?? '';
   const packStatus = data?.pack.status ?? '';
 
@@ -515,31 +565,8 @@ const PackOddsEditorPage = () => {
   // Editing a share or a rarity re-splits every dependent row immediately.
   const preview = useMemo(() => previewSets(effective), [effective]);
 
-  // Per-set readouts: Σ (100% when valid) and the theoretical EV/RTP that set
-  // pays. Null for any set the preview could NOT resolve — nothing would be
-  // saved, so a number there would be a lie. Set 1 is the exception and stays
-  // readable through a set-2/3 failure (see previewSets): it resolves on its own,
-  // and blanking it told the operator nothing except that everything broke.
   const sets = useMemo(
-    () =>
-      ([1, 2, 3] as const).map((n) => {
-        const pct = preview.pct[n];
-        const money = setEvRtp(effective, pct, data?.pack.price ?? 0);
-        const sum = [...pct.values()].reduce((s, p) => s + p, 0);
-        return {
-          n,
-          total: pct.size === 0 ? null : Math.round(sum * 10_000) / 10_000,
-          ev: money?.ev ?? null,
-          rtp: money?.rtp ?? null,
-          // Whether this set has a table of its OWN, rather than inheriting
-          // 3 → 2 → 1. Keyed off materialization, never off "its EV matches
-          // set 1" — EV is rounded to the ringgit, so two genuinely different
-          // tables can collide there and a live alternate set would go unlisted.
-          materialized:
-            n === 1 ||
-            effective.some((r) => (n === 2 ? r.pctInput2 : r.pctInput3) !== ''),
-        };
-      }),
+    () => setSummaries(preview, effective, data?.pack.price ?? 0),
     [preview, effective, data],
   );
 
@@ -1290,27 +1317,7 @@ const PackOddsEditorPage = () => {
 
           <div className="flex flex-col gap-3 px-6 py-4">
             <div className="flex items-center justify-between">
-              {/* Every set must total 100% — the balancer guarantees it, so a
-                  reading that is not 100 means the preview refused to resolve.
-                  Inherited sets are omitted: they are set 1 by definition. */}
-              <div className="text-ui-fg-subtle flex gap-5 text-sm tabular-nums">
-                {sets
-                  .filter((s) => s.materialized)
-                  .map((s) => (
-                    <span key={s.n}>
-                      {t('packs.editor.set', { n: s.n })}{' '}
-                      <span
-                        className={
-                          s.total === 100
-                            ? 'text-ui-fg-base'
-                            : 'text-ui-tag-orange-text'
-                        }
-                      >
-                        {s.total === null ? '—' : fmtPct(s.total)}
-                      </span>
-                    </span>
-                  ))}
-              </div>
+              <SetTotals sets={sets} />
               <Button
                 variant="primary"
                 onClick={save}
@@ -1498,6 +1505,31 @@ const PackOddsEditorPage = () => {
         </FocusModal.Content>
       </FocusModal>
     </Container>
+  );
+};
+
+// Every set must total 100% — the balancer guarantees it, so a reading that is
+// not 100 means the preview refused to resolve. Inherited sets are omitted: they
+// are set 1 by definition.
+const SetTotals = ({ sets }: { sets: SetSummary[] }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="text-ui-fg-subtle flex gap-5 text-sm tabular-nums">
+      {sets
+        .filter((s) => s.materialized)
+        .map((s) => (
+          <span key={s.n}>
+            {t('packs.editor.set', { n: s.n })}{' '}
+            <span
+              className={
+                s.total === 100 ? 'text-ui-fg-base' : 'text-ui-tag-orange-text'
+              }
+            >
+              {s.total === null ? '—' : fmtPct(s.total)}
+            </span>
+          </span>
+        ))}
+    </div>
   );
 };
 
@@ -1749,16 +1781,20 @@ const DefaultOddsSection = ({
   onChange,
   onReset,
   split,
+  ticketPack = false,
 }: {
   defaults: Record<string, string>;
   onChange: (rarity: OddsRarity, value: string) => void;
   onReset: () => void;
+  /** Words the card-worded lines for ticket amounts. */
+  ticketPack?: boolean;
   /** Live preview of the split against the pool's CURRENT rarities. Null while
    *  the pool is still loading — the shares stay editable, the explanation of
    *  where they land waits until there are cards to explain. */
   split: TierSplitResult | null;
 }) => {
   const { t } = useTranslation();
+  const worded = ticketPack ? 'packs.defaults.tickets' : 'packs.defaults';
   const total =
     Math.round(
       RARITIES.reduce((s, r) => s + (Number(defaults[r]) || 0), 0) * 10_000,
@@ -1776,12 +1812,12 @@ const DefaultOddsSection = ({
   const tierNote = (r: OddsRarity, tier: TierSplitTier | undefined) => {
     if (split === null || r === 'Common') return null;
     if (!tier || (tier.count === 0 && tier.lockedCount === 0)) {
-      return t('packs.defaults.perCardEmpty');
+      return t(`${worded}.perCardEmpty`);
     }
     if (tier.count === 0) {
       return t('packs.defaults.allLocked', { n: tier.lockedCount });
     }
-    const each = t('packs.defaults.perCard', {
+    const each = t(`${worded}.perCard`, {
       n: tier.count,
       pct: fmtPct(tier.perCardPct),
     });
@@ -1855,19 +1891,19 @@ const DefaultOddsSection = ({
         <Alert variant="warning" className="mt-3">
           {[
             floored.length > 0 &&
-              t('packs.defaults.floored', {
+              t(`${worded}.floored`, {
                 tiers: floored.map((x) => x.rarity).join(', '),
                 min: fmtPct(MIN_PCT),
               }),
             zeroed.length > 0 &&
-              t('packs.defaults.zeroed', {
+              t(`${worded}.zeroed`, {
                 tiers: zeroed.map((x) => x.rarity).join(', '),
               }),
             overspent.length > 0 &&
               t('packs.defaults.overspent', {
                 tiers: overspent.map((x) => x.rarity).join(', '),
               }),
-            noBalancer && t('packs.defaults.noBalancer'),
+            noBalancer && t(`${worded}.noBalancer`),
           ]
             .filter(Boolean)
             .join(' ')}
@@ -1996,8 +2032,9 @@ const PublishedOddsSection = ({
   onSave,
 }: {
   pack: AdminPack;
-  /** The pool, for the live Published EV readout (tier average × tier %). */
-  rows: EditRow[];
+  /** The pool, for the live Published EV readout (tier average × tier %).
+   *  Omitted on a ticket pack: tickets have no value, so no EV is shown. */
+  rows?: EditRow[];
   /** The default-odds table above — seeds a pack that has never published, and
    *  backs "Fill from default odds". Nothing is written until Save, so this
    *  cannot change what the storefront shows on its own. */
@@ -2056,12 +2093,15 @@ const PublishedOddsSection = ({
   // operator is looking at — live against the tier inputs being typed (the
   // packs list carries the saved figure). The gap against the per-set EV chips
   // above is the whole point of showing both.
-  const pubEv = useMemo(() => publishedEvPreview(rows, tiers), [rows, tiers]);
+  const pubEv = useMemo(
+    () => publishedEvPreview(rows ?? [], tiers),
+    [rows, tiers],
+  );
   // Same number, split per tier — which advertised rate is actually carrying
   // the promise. Sits under each input rather than in its own grid so the tier
   // labels are not printed twice.
   const pubEvTiers = useMemo(
-    () => publishedEvByTier(rows, tiers),
+    () => publishedEvByTier(rows ?? [], tiers),
     [rows, tiers],
   );
 
@@ -2201,9 +2241,10 @@ const PublishedOddsSection = ({
         <span className={sum === 100 ? undefined : 'text-ui-tag-orange-text'}>
           {t('packs.published.sum', { sum })}
         </span>
-        {` · ${t('packs.published.ev')} ${pubEv === null ? '—' : rm(pubEv)}`}
+        {rows &&
+          ` · ${t('packs.published.ev')} ${pubEv === null ? '—' : rm(pubEv)}`}
         {!pack.published_odds && ` · ${t('packs.published.notSet')}`}
-        {sumMismatch && (
+        {rows && sumMismatch && (
           <span className="text-ui-tag-orange-text">
             {` · ${t('packs.published.sumWarning', { sum })}`}
           </span>
@@ -2213,4 +2254,394 @@ const PublishedOddsSection = ({
   );
 };
 
-export default PackOddsEditorPage;
+// ── Ticket pack editor ───────────────────────────────────────────────────────
+// The card editor's recipe, rules, save and published odds, on rows that are
+// typed ticket amounts rather than picked cards (spec 2026-10-30 Lucky Pack §2).
+// A row is an EditRow (see ../ticket-prizes), so the same preview, balancer and
+// SetRateCell run on it. Mounted with key={slug}, so nothing resets per pack.
+const TicketPackEditor = ({ pack }: { pack: AdminPack }) => {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { data, isError: loadError, refetch } = useTicketPrizes(pack.slug);
+  const saveTickets = useSaveTicketPrizes();
+  const updatePack = useUpdatePack();
+  const [rows, setRows] = useState<EditRow[] | null>(null);
+  const [defaults, setDefaults] =
+    useState<Record<string, string>>(houseDefaults);
+  const defaultsNum = useMemo(() => numericDefaults(defaults), [defaults]);
+
+  // Seeded once, and again after a save: see shouldSeedBuffer for why a refetch
+  // alone must not wipe edits.
+  const [seededFrom, setSeededFrom] = useState<typeof data>(undefined);
+  if (shouldSeedBuffer(data, seededFrom)) {
+    setSeededFrom(data);
+    setRows(mapTicketPrizesToRows(data.rows));
+  }
+
+  const split = useMemo(
+    () => (rows === null ? null : tierSplit(rows, defaultsNum)),
+    [rows, defaultsNum],
+  );
+  // Everything downstream reads this, never `rows`: see the card editor.
+  const effective = useMemo(
+    () => (rows && split ? applyTierSplit(rows, split) : (rows ?? [])),
+    [rows, split],
+  );
+  const preview = useMemo(() => previewSets(effective), [effective]);
+  // Price 0: setEvRtp answers null, so these carry the set totals and no money.
+  const sets = useMemo(
+    () => setSummaries(preview, effective, 0),
+    [preview, effective],
+  );
+  const amountProblems = useMemo(
+    () => ticketAmountProblems(effective),
+    [effective],
+  );
+  const blocked = ticketSaveBlocked(effective, preview.error);
+  const saving = saveTickets.isPending;
+  // Mirror of the backend activation guard, for the disabled state only.
+  const canActivate = (rows ?? []).some((r) => r.currentPct > 0);
+
+  const setRow = (key: string, patch: Partial<EditRow>) =>
+    setRows(
+      (prev) =>
+        prev?.map((r) => (r.card_id === key ? { ...r, ...patch } : r)) ?? null,
+    );
+
+  // Same as the card editor's: pre-fill with the rate on screen, at the 4dp the
+  // storage floor can hold, or the last saved rate while the preview is errored.
+  const toggleLock = (r: EditRow) => {
+    const derived = preview.pct[1].get(r.card_id) ?? r.currentPct;
+    setRow(r.card_id, {
+      locked: !r.locked,
+      ...(r.locked
+        ? {}
+        : { pctInput: String(Math.round(derived * 10_000) / 10_000) }),
+    });
+  };
+
+  const toggleStatus = async () => {
+    if (updatePack.isPending) return;
+    const next = pack.status === 'active' ? 'draft' : 'active';
+    try {
+      await updatePack.mutateAsync({ ...pack, ...packStatusWrite(next) });
+      toast.success(
+        next === 'active'
+          ? t('packs.editor.activated')
+          : t('packs.editor.deactivated'),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const save = async () => {
+    if (blocked || saving) return;
+    try {
+      await saveTickets.mutateAsync({
+        slug: pack.slug,
+        rows: ticketRowsToPayload(effective),
+      });
+      // The cache is fresh once mutateAsync resolves: reseed from what saved.
+      setSeededFrom(undefined);
+      toast.success(t('packs.editor.saved'));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  if (loadError) {
+    return (
+      <Container className="flex flex-col items-start gap-3 p-6">
+        <Text className="text-ui-fg-subtle">{t('packs.editor.loadError')}</Text>
+        <Button size="small" variant="secondary" onClick={() => refetch()}>
+          Retry
+        </Button>
+      </Container>
+    );
+  }
+
+  return (
+    <Container className="divide-y p-0">
+      <div className="flex items-start justify-between gap-4 px-6 py-4">
+        <div>
+          <button
+            type="button"
+            onClick={() => navigate('/packs')}
+            className="text-ui-fg-subtle hover:text-ui-fg-base mb-2 flex items-center gap-1 text-sm"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {t('packs.editor.back')}
+          </button>
+          <div className="flex items-center gap-2">
+            <Heading level="h2">{pack.title}</Heading>
+            <StatusBadge color={PACK_STATUS_COLOR[packStatusOf(pack)]}>
+              {t(PACK_STATUS_LABEL[packStatusOf(pack)])}
+            </StatusBadge>
+          </div>
+          <Text className="text-ui-fg-subtle mt-1 max-w-2xl" size="small">
+            {t('packs.tickets.subtitle')}
+          </Text>
+        </div>
+        {pack.status === 'draft' ? (
+          <Button
+            size="small"
+            variant="primary"
+            onClick={toggleStatus}
+            isLoading={updatePack.isPending}
+            disabled={!canActivate}
+            title={!canActivate ? t('packs.tickets.activateNeedsRows') : ''}
+          >
+            {t('packs.editor.activate')}
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={toggleStatus}
+            isLoading={updatePack.isPending}
+          >
+            {t('packs.editor.deactivate')}
+          </Button>
+        )}
+      </div>
+
+      {pack.status === 'draft' && (
+        <div className="bg-ui-tag-orange-bg text-ui-tag-orange-text px-6 py-2.5 text-sm">
+          {canActivate
+            ? t('packs.tickets.draftReadyBanner')
+            : t('packs.tickets.draftBanner')}
+        </div>
+      )}
+
+      <DefaultOddsSection
+        ticketPack
+        defaults={defaults}
+        onChange={(rarity, value) =>
+          setDefaults((m) => ({ ...m, [rarity]: value }))
+        }
+        onReset={() => setDefaults(houseDefaults())}
+        split={split}
+      />
+
+      <PublishedOddsSection
+        pack={pack}
+        defaults={defaults}
+        saving={updatePack.isPending}
+        onSave={async (po) => {
+          try {
+            await updatePack.mutateAsync({ ...pack, published_odds: po });
+            toast.success(t('packs.published.saved'));
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : String(err));
+            // Rethrow so the section leaves the typed values alone.
+            throw err;
+          }
+        }}
+      />
+
+      {rows === null ? (
+        <div className="px-6 py-8">
+          <LoadingSkeleton />
+        </div>
+      ) : (
+        <>
+          {rows.length > 0 && preview.error && (
+            <div className="px-6 py-4" role="alert">
+              <Alert variant="error">
+                {preview.error.replace('Common card', 'Common amount')}
+              </Alert>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3">
+            <Button
+              size="small"
+              variant="secondary"
+              onClick={() =>
+                setRows((prev) => [...(prev ?? []), blankTicketRow()])
+              }
+            >
+              {t('packs.tickets.add')}
+            </Button>
+            <Text size="small" className="text-ui-fg-subtle tabular-nums">
+              {t('packs.tickets.count', { count: rows.length })}
+            </Text>
+          </div>
+
+          {rows.length === 0 ? (
+            <Text className="text-ui-fg-subtle px-6 py-6">
+              {t('packs.tickets.empty')}
+            </Text>
+          ) : (
+            <div
+              className="overflow-x-auto"
+              tabIndex={0}
+              role="region"
+              aria-label={t('packs.tickets.region')}
+            >
+              <Table>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.HeaderCell>
+                      {t('packs.tickets.amount')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('packs.editor.rarity')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">
+                      {t('packs.editor.current')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell className="text-center">
+                      {t('packs.editor.lock')}
+                    </Table.HeaderCell>
+                    {([1, 2, 3] as const).map((n) => (
+                      <Table.HeaderCell key={n}>
+                        {t('packs.editor.set', { n })}
+                      </Table.HeaderCell>
+                    ))}
+                    <Table.HeaderCell />
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {effective.map((r) => {
+                    const problem = amountProblems.get(r.card_id);
+                    return (
+                      <Table.Row key={r.card_id}>
+                        <Table.Cell>
+                          <Input
+                            size="small"
+                            inputMode="numeric"
+                            className="w-28 tabular-nums"
+                            value={r.name}
+                            aria-label={t('packs.tickets.amount')}
+                            aria-invalid={problem !== undefined}
+                            onChange={(e) =>
+                              setRow(r.card_id, { name: e.target.value })
+                            }
+                          />
+                          {problem && (
+                            <Text
+                              size="xsmall"
+                              role="alert"
+                              className="text-ui-fg-error mt-1 whitespace-nowrap"
+                            >
+                              {t(`packs.tickets.${problem}`)}
+                            </Text>
+                          )}
+                        </Table.Cell>
+                        <Table.Cell>
+                          <Select
+                            size="small"
+                            value={r.rarity}
+                            onValueChange={(v) =>
+                              setRow(r.card_id, { rarity: v })
+                            }
+                          >
+                            <Select.Trigger
+                              className="w-32"
+                              aria-label={`${t('packs.editor.rarity')}: ${r.name}`}
+                            >
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {RARITIES.map((rarity) => (
+                                <Select.Item key={rarity} value={rarity}>
+                                  {rarity}
+                                </Select.Item>
+                              ))}
+                            </Select.Content>
+                          </Select>
+                        </Table.Cell>
+                        <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
+                          {fmtPct(r.currentPct)}
+                        </Table.Cell>
+                        <Table.Cell className="text-center">
+                          <Switch
+                            checked={r.locked}
+                            aria-label={`${t('packs.editor.lock')}: ${r.name}`}
+                            onCheckedChange={() => toggleLock(r)}
+                          />
+                        </Table.Cell>
+                        {([1, 2, 3] as const).map((n) => (
+                          <SetRateCell
+                            key={n}
+                            set={n}
+                            row={r}
+                            effective={preview.pct[n].get(r.card_id) ?? null}
+                            onChange={(v) =>
+                              setRow(
+                                r.card_id,
+                                n === 1
+                                  ? { pctInput: v }
+                                  : n === 2
+                                    ? { pctInput2: v }
+                                    : { pctInput3: v },
+                              )
+                            }
+                          />
+                        ))}
+                        <Table.Cell className="text-right">
+                          <IconButton
+                            size="small"
+                            variant="transparent"
+                            aria-label={t('packs.tickets.remove')}
+                            onClick={() =>
+                              setRows(
+                                (prev) =>
+                                  prev?.filter(
+                                    (x) => x.card_id !== r.card_id,
+                                  ) ?? null,
+                              )
+                            }
+                          >
+                            <Trash />
+                          </IconButton>
+                        </Table.Cell>
+                      </Table.Row>
+                    );
+                  })}
+                </Table.Body>
+              </Table>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3 px-6 py-4">
+            <SetTotals sets={sets} />
+            <Button
+              variant="primary"
+              onClick={save}
+              isLoading={saving}
+              disabled={saving || blocked}
+            >
+              {saving ? t('packs.editor.saving') : t('packs.editor.save')}
+            </Button>
+          </div>
+        </>
+      )}
+    </Container>
+  );
+};
+
+/** Picks the editor before either fetches: the odds route answers 400 on a ticket
+ *  pack. Anything but a positive 'tickets' (no field, no pack, a failed list) is
+ *  today's card editor. */
+const PackEditorPage = () => {
+  const { slug = '' } = useParams();
+  const { data: packs, isError } = usePacks();
+  if (packs === undefined && !isError) {
+    return (
+      <Container className="px-6 py-8">
+        <LoadingSkeleton />
+      </Container>
+    );
+  }
+  const pack = packs?.find((p) => p.slug === slug);
+  return pack && isTicketPack(pack) ? (
+    <TicketPackEditor key={slug} pack={pack} />
+  ) : (
+    <PackOddsEditorPage />
+  );
+};
+
+export default PackEditorPage;

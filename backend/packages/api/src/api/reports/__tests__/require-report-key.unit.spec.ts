@@ -1,3 +1,4 @@
+import { ASSISTANT_REPORT_KEY } from '../../admin/assistant/bridge';
 import { deskOf, requireReportKey } from '../require-report-key';
 
 const FINANCE = 'f'.repeat(40);
@@ -26,6 +27,8 @@ afterAll(() => {
 function run(
   url: string,
   headers: Record<string, string | string[] | undefined>,
+  // the in-process bridge calls from this machine
+  remoteAddress = '127.0.0.1',
 ) {
   const info = jest.fn();
   const res = {
@@ -51,6 +54,7 @@ function run(
     {
       originalUrl: url,
       headers,
+      socket: { remoteAddress },
       scope: { resolve: () => ({ info }) },
     } as never,
     res as never,
@@ -198,6 +202,51 @@ describe('requireReportKey', () => {
     process.env.REPORT_KEY_FINANCE = `  ${FINANCE}\n`;
     expect(
       run(ECONOMY, { 'x-report-key': FINANCE }).next,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens reports with the in-process assistant key and logs it as assistant', () => {
+    const { next, info } = run(ECONOMY, {
+      'x-report-key': ASSISTANT_REPORT_KEY,
+    });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith(`[reports] assistant ${ECONOMY}`);
+  });
+
+  it('opens them for the assistant even where no desk key is set (local dev)', () => {
+    for (const n of NAMES) delete process.env[n];
+    expect(
+      run(ECONOMY, { 'x-report-key': ASSISTANT_REPORT_KEY }).next,
+    ).toHaveBeenCalledTimes(1);
+    expect(run(ECONOMY, { 'x-report-key': FINANCE }).res.statusCode).toBe(503);
+  });
+
+  it('refuses the assistant key from anywhere but this machine', () => {
+    const key = { 'x-report-key': ASSISTANT_REPORT_KEY };
+    expect(run(ECONOMY, key, '10.244.3.7').res.statusCode).toBe(401);
+    expect(run(ECONOMY, key, '::ffff:10.0.0.1').next).not.toHaveBeenCalled();
+    // through the ingress: forwarded, even when the hop looks local
+    expect(
+      run(ECONOMY, { ...key, 'x-forwarded-for': '203.0.113.9' }).res.statusCode,
+    ).toBe(401);
+    expect(run(ECONOMY, key, '::1').next).toHaveBeenCalledTimes(1);
+    // the desk keys are unchanged: they come from outside by design
+    process.env.REPORT_KEY_FINANCE = FINANCE;
+  });
+
+  it('keeps the assistant off the read-everything admin proxy, but lets it run SQL', () => {
+    const proxy = run('/reports/admin/read?path=/admin/users', {
+      'x-report-key': ASSISTANT_REPORT_KEY,
+    });
+    expect([proxy.res.statusCode, proxy.next.mock.calls.length]).toEqual([
+      401, 0,
+    ]);
+    expect(
+      run('/reports/ADMIN/Read', { 'x-report-key': ASSISTANT_REPORT_KEY }).res
+        .statusCode,
+    ).toBe(401);
+    expect(
+      run('/reports/admin/sql', { 'x-report-key': ASSISTANT_REPORT_KEY }).next,
     ).toHaveBeenCalledTimes(1);
   });
 });

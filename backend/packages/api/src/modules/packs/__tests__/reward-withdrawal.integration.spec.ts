@@ -33,6 +33,7 @@ import Pack from '../models/pack';
 import Card from '../models/card';
 import PackOdds from '../models/pack-odds';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
 // lockedPullIds reads a reward pull's task claim (daily-task lock).
 import TaskDefinition from '../models/task-definition';
 import TaskClaim from '../models/task-claim';
@@ -83,6 +84,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Card,
     PackOdds,
     Pull,
+    TicketSpin,
     CreditTransaction,
     DeliveryOrder,
     DeliveryOrderItem,
@@ -125,6 +127,59 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ]);
       return pull.id;
     };
+
+    // A sell-back that dies between its credit and its flip leaves the pull
+    // vaulted and already paid for. It must not ship as well.
+    describe('a pull a sell-back already paid for', () => {
+      const paidAndVaulted = async (
+        customerId: string,
+        source: 'pack' | 'reward',
+      ) => {
+        const pullId = await seedPull({ customerId, source });
+        await service.createCreditTransactions([
+          {
+            customer_id: customerId,
+            amount: 10,
+            reason: 'buyback',
+            pull_id: pullId,
+          },
+        ]);
+        return pullId;
+      };
+      const nothingShipped = async (customerId: string, pullId: string) => {
+        expect(
+          await service.listDeliveryOrders(
+            { customer_id: customerId },
+            { take: 1 },
+          ),
+        ).toHaveLength(0);
+        const [pull] = await service.listPulls({ id: pullId }, { take: 1 });
+        expect(pull.status).toBe('vaulted');
+      };
+
+      it('will not ship as a prize', async () => {
+        const customerId = 'cus_sold_prize';
+        const pullId = await paidAndVaulted(customerId, 'reward');
+        await expect(
+          service.recordRewardWithdrawal(customerId, pullId, ADDRESS),
+        ).rejects.toThrow(/already sold back/i);
+        await nothingShipped(customerId, pullId);
+      });
+
+      it('will not ship in a vault parcel', async () => {
+        const customerId = 'cus_sold_vault';
+        const pullId = await paidAndVaulted(customerId, 'pack');
+        await expect(
+          service.createDeliveryOrderWithLedger({
+            customerId,
+            snapshot: snapshotAddress(ADDRESS)!,
+            pullIds: [pullId],
+            fx: 4.5,
+          }),
+        ).rejects.toThrow(/already sold back/i);
+        await nothingShipped(customerId, pullId);
+      });
+    });
 
     describe('recordRewardWithdrawal', () => {
       // Run with the global redemption gate OFF — prod's setting. Withdrawal is

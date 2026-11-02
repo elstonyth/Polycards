@@ -12,6 +12,8 @@ import {
 } from '@/lib/coin-flip';
 
 const rules: readonly ErrorRule[] = [
+  // First: it names the card, and a card's name must not trip the rules below.
+  [/is still processing\./i, (text) => text],
   [/enough tickets/i, 'You no longer have that many tickets.'],
   [
     /no longer available|invalid card value/i,
@@ -29,7 +31,6 @@ const rules: readonly ErrorRule[] = [
     'Your cards or coin flip settings changed. Review your flip again.',
   ],
   [/paused|not configured/i, 'Coin flip is currently paused.'],
-  [/still processing/i, 'Your card is still processing. Try again later.'],
   [/playthrough/i, 'Complete your deposit playthrough before flipping a card.'],
   [
     /top.up|deposit/i,

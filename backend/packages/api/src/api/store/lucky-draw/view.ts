@@ -1,6 +1,13 @@
 import type { MedusaRequest } from '@medusajs/framework/http';
 import type PacksModuleService from '../../../modules/packs/service';
-import type { LuckyDrawResultRow } from '../../../modules/packs/service';
+import type {
+  LuckyDrawArtFrame,
+  LuckyDrawEventFacts,
+  LuckyDrawEventResultRow,
+  LuckyDrawPage,
+  LuckyDrawPageGate,
+  LuckyDrawResultRow,
+} from '../../../modules/packs/service';
 import {
   ANONYMOUS_PULLER,
   loadPullerProfiles,
@@ -16,11 +23,10 @@ import {
 //  - the shared half of GET /store/lucky-draw (event, prizes, totals, top 10,
 //    results) lives 10 s behind a single-flight guard; only the viewer's
 //    balance and my_tickets are read per request;
-//  - a drawn prize is immutable, so its ResultView and entry list are kept by
-//    prize id with no expiry (capped, oldest out). A prize that is not drawn
-//    yet is remembered as a miss for only 2 s, so the polls at the draw
-//    minute cost one query per prize per 2 s and a 404 outlives the draw by
-//    at most that.
+//  - a drawn prize or one_winner event is immutable, so its views and entry list
+//    are kept by id with no expiry (capped, oldest out). One that is not drawn
+//    yet is remembered as a miss for only 2 s, so the polls at the draw minute
+//    cost one query per id per 2 s and a 404 outlives the draw by at most that.
 // Names are resolved when a view is first built, so a drawn result keeps the
 // names it had then (a later rename shows after a restart); accepted — the
 // result is a record of the draw.
@@ -39,6 +45,8 @@ export type ResultView = {
   prize_id: string;
   title: string;
   image: string | null;
+  /** How the picture wears the Lucky Draw frame. */
+  frame: LuckyDrawArtFrame;
   value_myr: number;
   drawn_at: string;
   winner: Person | null;
@@ -48,6 +56,39 @@ export type ResultView = {
   /** The revealed draw seed: only a drawn prize has one. */
   seed: string;
   seed_hash: string;
+  // A one_winner event's row in the results feed: the whole pot under its first
+  // prize's id, which the old storefront schema needs to keep the row.
+  event_id?: string;
+  draw_mode?: 'one_winner';
+  event_name?: string;
+  prize_count?: number;
+  tier?: LuckyDrawPageGate['tier'];
+};
+
+/** A one_winner draw's outcome. */
+export type EventResultView = {
+  winner: Person | null;
+  winner_tickets: number;
+  total_tickets: number;
+  entrant_count: number;
+  /** The revealed draw seed: only a drawn event has one. */
+  seed: string;
+  seed_hash: string;
+  drawn_at: string;
+};
+
+export type EventDetail = {
+  result: EventResultView;
+  tier: LuckyDrawPageGate['tier'];
+  prizes: {
+    kind: 'card' | 'credit';
+    title: string;
+    image: string | null;
+    frame: LuckyDrawArtFrame;
+    value_myr: number;
+  }[];
+  entries: EntryView[];
+  ticket_index: number | null;
 };
 
 export type PrizeView = {
@@ -55,6 +96,7 @@ export type PrizeView = {
   kind: 'card' | 'credit';
   title: string;
   image: string | null;
+  frame: LuckyDrawArtFrame;
   value_myr: number;
   draw_at: string;
   seed_hash: string;
@@ -71,14 +113,25 @@ export type ResultDetail = {
   ticket_index: number | null;
 };
 
+/** One running gate, its top list with names. */
+type GateView = Omit<LuckyDrawPageGate, 'top'> & { top: EntryView[] };
+
 type SharedPage = {
+  events: GateView[];
   event: {
     id: string;
     name: string;
     starts_at: string;
     ends_at: string;
+    draw_mode: 'per_prize' | 'one_winner';
+    seed_hash: string | null;
+    total_tickets: number;
+    entrant_count: number;
+    top: EntryView[];
+    result: EventResultView | null;
   } | null;
   prizes: Omit<PrizeView, 'my_tickets'>[];
+  next_event: LuckyDrawPage['next_event'];
 };
 
 const PAGE_TTL_MS = 10_000;
@@ -90,7 +143,15 @@ let pageInFlight: Promise<SharedPage> | null = null;
 const resultCache = new Map<string, ResultView>();
 const detailCache = new Map<string, ResultDetail>();
 const detailInFlight = new Map<string, Promise<ResultDetail | null>>();
-/** Prize id → when its "not drawn yet" answer expires. Keyed by a URL
+// Event rows have their own maps: their prize_id is a real prize's id, whose
+// mirror row must not answer for the prize routes or the other way round.
+const eventRowCache = new Map<string, ResultView>();
+const eventDetailCache = new Map<string, EventDetail>();
+const eventDetailInFlight = new Map<string, Promise<EventDetail | null>>();
+/** Customer ids in entry order, beside each cached detail and never in it: the
+ *  detail is one shared body, and the ids must not leave the server. */
+const eventEntrantIds = new Map<string, string[]>();
+/** Prize or event id → when its "not drawn yet" answer expires. Keyed by a URL
  *  param, so capped like the others. */
 const undrawnUntil = new Map<string, number>();
 
@@ -102,6 +163,10 @@ export function clearLuckyDrawCache(): void {
   resultCache.clear();
   detailCache.clear();
   detailInFlight.clear();
+  eventRowCache.clear();
+  eventDetailCache.clear();
+  eventDetailInFlight.clear();
+  eventEntrantIds.clear();
   undrawnUntil.clear();
 }
 
@@ -153,6 +218,7 @@ function resultView(
     prize_id: row.prize_id,
     title: row.title,
     image: row.image,
+    frame: row.frame,
     value_myr: row.value_myr,
     drawn_at: row.drawn_at,
     winner: row.winner_customer_id ? personOf(row.winner_customer_id) : null,
@@ -164,21 +230,71 @@ function resultView(
   };
 }
 
+function eventResultView(
+  facts: LuckyDrawEventFacts,
+  personOf: (customerId: string) => Person,
+): EventResultView {
+  return {
+    winner: facts.winner_customer_id
+      ? personOf(facts.winner_customer_id)
+      : null,
+    winner_tickets: facts.winner_tickets,
+    total_tickets: facts.total_tickets,
+    entrant_count: facts.entrant_count,
+    seed: facts.seed,
+    seed_hash: facts.seed_hash,
+    drawn_at: facts.drawn_at,
+  };
+}
+
+/** One row of the results feed for a whole event. */
+function eventRowView(
+  row: LuckyDrawEventResultRow,
+  personOf: (customerId: string) => Person,
+): ResultView {
+  return {
+    ...eventResultView(row, personOf),
+    prize_id: row.prizes[0]?.id ?? row.event_id,
+    title: row.event_name,
+    image: row.image,
+    frame: row.frame,
+    value_myr: row.value_myr,
+    event_id: row.event_id,
+    draw_mode: 'one_winner',
+    event_name: row.event_name,
+    prize_count: row.prizes.length,
+    tier: row.tier,
+  };
+}
+
 async function buildSharedPage(
   req: MedusaRequest,
   packs: PacksModuleService,
 ): Promise<SharedPage> {
   const page = await packs.luckyDrawPage();
-  const personOf = await personResolver(
-    req,
-    packs,
-    page.prizes.flatMap((p) => [
+  const personOf = await personResolver(req, packs, [
+    ...page.prizes.flatMap((p) => [
       ...p.top.map((t) => t.customer_id),
       p.result?.winner_customer_id,
     ]),
-  );
+    ...(page.event?.top.map((t) => t.customer_id) ?? []),
+    page.event?.result?.winner_customer_id,
+    ...page.events.flatMap((g) => g.top.map((t) => t.customer_id)),
+  ]);
+  const toEntry = (t: { customer_id: string; tickets: number }) => ({
+    person: personOf(t.customer_id),
+    tickets: t.tickets,
+  });
   return {
-    event: page.event,
+    events: page.events.map((g) => ({ ...g, top: g.top.map(toEntry) })),
+    next_event: page.next_event,
+    event: page.event && {
+      ...page.event,
+      top: page.event.top.map(toEntry),
+      result: page.event.result
+        ? eventResultView(page.event.result, personOf)
+        : null,
+    },
     prizes: page.prizes.map((p) => {
       const result = p.result ? resultView(p.result, personOf) : null;
       if (result) remember(resultCache, p.id, result);
@@ -187,15 +303,13 @@ async function buildSharedPage(
         kind: p.kind,
         title: p.title,
         image: p.image,
+        frame: p.frame,
         value_myr: p.value_myr,
         draw_at: p.draw_at,
         seed_hash: p.seed_hash,
         total_tickets: p.total_tickets,
         entrant_count: p.entrant_count,
-        top: p.top.map((t) => ({
-          person: personOf(t.customer_id),
-          tickets: t.tickets,
-        })),
+        top: p.top.map(toEntry),
         result,
       };
     }),
@@ -238,6 +352,40 @@ export async function luckyDrawLive(
   );
 }
 
+/** When the newest running gate went live: the Draw tab's dot. Null with none
+ *  open. From the same cached page, so it says nothing about prizes or entrants. */
+export async function luckyDrawLatestGateAt(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+): Promise<string | null> {
+  const { events } = await sharedPage(req, packs);
+  const open = events
+    .filter((g) => Date.parse(g.ends_at) > Date.now())
+    .map((g) => g.live_at)
+    .sort();
+  return open[open.length - 1] ?? null;
+}
+
+/** The gates still to draw, and when each ends: what a signed-in tab watches so
+ *  the draw can pop up the moment it lands. Ids and times only. */
+export async function luckyDrawUpcoming(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+): Promise<{ id: string; ends_at: string }[]> {
+  const { events } = await sharedPage(req, packs);
+  return events.map((g) => ({ id: g.id, ends_at: g.ends_at }));
+}
+
+/** This viewer's row in a drawn event's entry list, or null with none: it lets the
+ *  arena pick out their discs. Call after eventDetailFor. */
+export function myEventEntryIndex(
+  eventId: string,
+  customerId: string,
+): number | null {
+  const at = eventEntrantIds.get(eventId)?.indexOf(customerId) ?? -1;
+  return at < 0 ? null : at;
+}
+
 /** The Lucky Draw page for one viewer: the cached shared half plus their own
  *  balance and tickets, read live. */
 export async function luckyDrawPageFor(
@@ -246,20 +394,36 @@ export async function luckyDrawPageFor(
   customerId: string,
 ): Promise<{
   balance: number;
-  event: SharedPage['event'];
+  events: (GateView & { my_tickets: number })[];
+  event: (NonNullable<SharedPage['event']> & { my_tickets: number }) | null;
   prizes: PrizeView[];
+  next_event: SharedPage['next_event'];
 }> {
   const shared = await sharedPage(req, packs);
+  const { event } = shared;
   // Sequential: one manager per request, no parallel queries on it.
   const balance = await packs.luckyDrawBalance(customerId);
   const mine = await packs.luckyDrawMyTickets(
     customerId,
     shared.prizes.map((p) => p.id),
   );
+  const myEventTickets =
+    event?.draw_mode === 'one_winner'
+      ? await packs.luckyDrawMyEventTickets(customerId, event.id)
+      : 0;
+  const myGates = await packs.luckyDrawMyGateTickets(
+    customerId,
+    shared.events.map((g) => g.id),
+  );
   return {
     balance,
-    event: shared.event,
+    events: shared.events.map((g) => ({
+      ...g,
+      my_tickets: myGates[g.id] ?? 0,
+    })),
+    event: event && { ...event, my_tickets: myEventTickets },
     prizes: shared.prizes.map((p) => ({ ...p, my_tickets: mine[p.id] ?? 0 })),
+    next_event: shared.next_event,
   };
 }
 
@@ -289,6 +453,114 @@ export async function resultViewsFor(
     const view = fresh.get(id) ?? resultCache.get(id);
     return view ? [view] : [];
   });
+}
+
+/** The results feed in its own order: event rows and old prize rows. */
+export async function resultFeedFor(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+  rows: { kind: 'event' | 'prize'; id: string }[],
+): Promise<ResultView[]> {
+  const prizes = new Map(
+    (
+      await resultViewsFor(
+        req,
+        packs,
+        rows.filter((r) => r.kind === 'prize').map((r) => r.id),
+      )
+    ).map((v) => [v.prize_id, v]),
+  );
+  const fresh = new Map<string, ResultView>();
+  const missing = rows
+    .filter((r) => r.kind === 'event' && !eventRowCache.has(r.id))
+    .map((r) => r.id);
+  if (missing.length > 0) {
+    const found = await packs.luckyDrawEventResultRows(missing);
+    const personOf = await personResolver(
+      req,
+      packs,
+      found.map((r) => r.winner_customer_id),
+    );
+    for (const row of found) {
+      const view = eventRowView(row, personOf);
+      fresh.set(row.event_id, view);
+      // As in buildEventDetail: a failed customer read must not stick.
+      if (view.winner?.who !== 'Anonymous') {
+        remember(eventRowCache, row.event_id, view);
+      }
+    }
+  }
+  return rows.flatMap((r) => {
+    const view =
+      r.kind === 'event'
+        ? (fresh.get(r.id) ?? eventRowCache.get(r.id))
+        : prizes.get(r.id);
+    return view ? [view] : [];
+  });
+}
+
+async function buildEventDetail(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+  eventId: string,
+): Promise<EventDetail | null> {
+  const found = await packs.luckyDrawEventResult(eventId);
+  if (!found) {
+    remember(undrawnUntil, eventId, Date.now() + UNDRAWN_TTL_MS);
+    return null;
+  }
+  const personOf = await personResolver(req, packs, [
+    found.row.winner_customer_id,
+    ...found.entries.map((e) => e.customer_id),
+  ]);
+  const detail: EventDetail = {
+    result: eventResultView(found.row, personOf),
+    tier: found.row.tier,
+    prizes: found.row.prizes.map((p) => ({
+      kind: p.kind,
+      title: p.title,
+      image: p.image,
+      frame: p.frame,
+      value_myr: p.value_myr,
+    })),
+    entries: found.entries.map((e) => ({
+      person: personOf(e.customer_id),
+      tickets: e.tickets,
+    })),
+    ticket_index: found.ticket_index,
+  };
+  // This cache never expires, and a failed customer read comes back as "Anonymous"
+  // for everyone: a draw must not keep that for good.
+  if (detail.entries.some((e) => e.person.who !== 'Anonymous')) {
+    remember(eventDetailCache, eventId, detail);
+  }
+  remember(
+    eventEntrantIds,
+    eventId,
+    found.entries.map((e) => e.customer_id),
+  );
+  return detail;
+}
+
+/** One drawn one_winner event with its entry list, or null when it is not drawn
+ *  (that miss is remembered for UNDRAWN_TTL_MS). Every open tab polls this at the
+ *  end of an event. */
+export async function eventDetailFor(
+  req: MedusaRequest,
+  packs: PacksModuleService,
+  eventId: string,
+): Promise<EventDetail | null> {
+  const cached = eventDetailCache.get(eventId);
+  if (cached) return cached;
+  if ((undrawnUntil.get(eventId) ?? 0) > Date.now()) return null;
+  let pending = eventDetailInFlight.get(eventId);
+  if (!pending) {
+    pending = buildEventDetail(req, packs, eventId).finally(() => {
+      eventDetailInFlight.delete(eventId);
+    });
+    eventDetailInFlight.set(eventId, pending);
+  }
+  return pending;
 }
 
 async function buildDetail(

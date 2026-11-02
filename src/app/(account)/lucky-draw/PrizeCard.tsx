@@ -2,11 +2,17 @@
 
 import { Gift } from 'lucide-react';
 import { FramedAvatar } from '@/components/FramedAvatar';
+import { SlabImage } from '@/components/SlabImage';
 import { Pill } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
 import { mytClock, mytDate, num, rmAuto } from '@/lib/format';
 import { chancePercent, drawCountdown } from '@/lib/lucky-draw';
-import type { LuckyDrawPerson, LuckyDrawPrize } from '@/lib/data/schemas';
+import type {
+  LuckyDrawArtFrame,
+  LuckyDrawEntry,
+  LuckyDrawPerson,
+  LuckyDrawPrize,
+} from '@/lib/data/schemas';
 
 const CREDIT_ART = '/images/task/credits-coins.webp';
 
@@ -17,15 +23,62 @@ export const mytWhen = (iso: string): string =>
 /** The prize's picture: the card slab or the admin's art, the credit coins
  *  for a credit prize without art, else a neutral gift. Fills its parent.
  *  A plain <img> (FramedAvatar's choice): the admin's image_url is free text,
- *  and next/image throws during render for a host outside remotePatterns. */
-export function PrizeArt({ src, kind }: { src: string | null; kind?: string }) {
+ *  and next/image throws during render for a host outside remotePatterns.
+ *
+ *  A card picture wears the Lucky Draw frame, through SlabImage: the same component
+ *  and geometry as the card's tile in the winner's vault, so the two can't differ. */
+export function PrizeArt({
+  src,
+  kind,
+  eager = false,
+  frame,
+  glowScale = 0.1,
+}: {
+  src: string | null;
+  kind?: string;
+  /** First-screen art: the empty frame must not be what a player sees first. */
+  eager?: boolean;
+  /** How this picture wears the Lucky Draw frame (the backend says). */
+  frame?: LuckyDrawArtFrame;
+  /** The frame's halo: small here, because most of these are thumbnails. */
+  glowScale?: number;
+}) {
   const art = src ?? (kind === 'card' ? null : CREDIT_ART);
+  if (art && frame) {
+    return (
+      <span className="absolute inset-0 flex items-center justify-center [contain:layout] [container-type:size]">
+        <SlabImage
+          plain
+          card={{
+            name: '',
+            image: art,
+            slabImage: frame === 'slab' ? art : null,
+            rarity: null,
+          }}
+          frameVariant="lucky-draw"
+          alt=""
+          priority={eager}
+          glowScale={glowScale}
+          // SlabImage sits a raw card low and small in a slab-sized box, so a mixed row
+          // lines up. Alone in a tile there is no row: its band (0.624 of the box's
+          // height, 0.459 of its height wide, centred 8.45% low) fills the tile instead.
+          // The box itself overhangs the tile, empty: layout containment above keeps
+          // that from scrolling a list sideways.
+          className={
+            frame === 'raw'
+              ? 'pointer-events-none h-[160%] shrink-0 -translate-y-[8.45%] supports-[height:1cqh]:h-[min(160cqh,217cqw)]'
+              : 'h-full shrink-0'
+          }
+        />
+      </span>
+    );
+  }
   return art ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={art}
       alt=""
-      loading="lazy"
+      loading={eager ? 'eager' : 'lazy'}
       decoding="async"
       className="absolute inset-0 h-full w-full object-contain"
     />
@@ -58,15 +111,67 @@ export function PersonChip({
   );
 }
 
-function Figure({ label, value }: { label: string; value: string }) {
+export function Figure({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
   return (
-    <div className="rounded-xl bg-neutral-950/60 px-3 py-2">
+    <div className={cn('rounded-xl bg-neutral-950/60 px-3 py-2', className)}>
       <p className="text-[10px] font-semibold tracking-wide text-neutral-400 uppercase">
         {label}
       </p>
       <p className="font-heading mt-0.5 text-base text-white tabular-nums">
         {value}
       </p>
+    </div>
+  );
+}
+
+/** The ranked entrants of a prize or a pot, top 10 from the backend. */
+export function TopEntrants({
+  top,
+  totalTickets = 0,
+  className,
+}: {
+  top: LuckyDrawEntry[];
+  /** Tickets in the pot, newer than `top` right after your own entry. */
+  totalTickets?: number;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <p className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
+        Top entrants
+      </p>
+      {top.length === 0 ? (
+        <p className="mt-2 text-sm text-neutral-400">
+          {totalTickets > 0
+            ? 'Updating the list…'
+            : 'No entries yet — be the first.'}
+        </p>
+      ) : (
+        <ol className="mt-2 space-y-1.5">
+          {top.map((e, i) => (
+            <li
+              key={i}
+              className="flex items-center gap-2 text-sm text-neutral-200"
+            >
+              <span className="w-5 shrink-0 text-right text-xs text-neutral-400 tabular-nums">
+                {i + 1}
+              </span>
+              <PersonChip person={e.person} className="flex-1" />
+              <span className="shrink-0 text-xs text-neutral-400 tabular-nums">
+                {num(e.tickets)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
@@ -105,7 +210,11 @@ export function PrizeCard({
         {art && (
           <span className="relative aspect-[5/7] w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] p-1.5 sm:w-28">
             <span className="relative block h-full w-full">
-              <PrizeArt src={prize.image} kind={prize.kind} />
+              <PrizeArt
+                src={prize.image}
+                kind={prize.kind}
+                frame={prize.frame}
+              />
             </span>
           </span>
         )}
@@ -147,33 +256,7 @@ export function PrizeCard({
         </span>
       </p>
 
-      <div className="mt-4">
-        <p className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">
-          Top entrants
-        </p>
-        {prize.top.length === 0 ? (
-          <p className="mt-2 text-sm text-neutral-400">
-            No entries yet — be the first.
-          </p>
-        ) : (
-          <ol className="mt-2 space-y-1.5">
-            {prize.top.map((e, i) => (
-              <li
-                key={i}
-                className="flex items-center gap-2 text-sm text-neutral-200"
-              >
-                <span className="w-5 shrink-0 text-right text-xs text-neutral-400 tabular-nums">
-                  {i + 1}
-                </span>
-                <PersonChip person={e.person} className="flex-1" />
-                <span className="shrink-0 text-xs text-neutral-400 tabular-nums">
-                  {num(e.tickets)}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+      <TopEntrants top={prize.top} className="mt-4" />
 
       <div className="mt-auto pt-4">
         {result ? (

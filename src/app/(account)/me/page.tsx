@@ -28,6 +28,7 @@ import {
 import { getVip } from '@/lib/actions/vip';
 import { levelProgressPct } from '@/lib/actions/vip-map';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
+import { avatarForSeed } from '@/lib/avatar-seed';
 import { rm, rm0 } from '@/lib/format';
 import { SlabImage } from '@/components/SlabImage';
 import { toCardView } from '@/lib/card-view';
@@ -113,8 +114,14 @@ export default async function MePage() {
   // matters, by PhoneGateAction on the blocked action itself.
   const needsPhone = !customer.phone;
   const meta = (customer.metadata ?? {}) as Record<string, unknown>;
+  // The same face the leaderboard and feed print: a stored avatar, else the one
+  // the seed assigns. null only when the profile read failed (initial letter).
   const avatarUrl =
-    typeof meta.avatar_url === 'string' ? meta.avatar_url : null;
+    typeof meta.avatar_url === 'string'
+      ? meta.avatar_url
+      : profile
+        ? avatarForSeed(profile.seed)
+        : null;
   const equippedLevel =
     typeof meta.equipped_frame_level === 'number'
       ? meta.equipped_frame_level

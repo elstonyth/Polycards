@@ -73,7 +73,7 @@ describe('LuckyDrawPageSchema', () => {
     const r = LuckyDrawPageSchema.parse(page([prize('p1')]));
     expect(r.prizes[0]?.top[0]?.person).toEqual({
       who: 'Collector8011',
-      avatar: '/images/pfps/pfp-8.webp',
+      avatar: '/images/avatars/avatar-8.webp',
       frame: null,
     });
   });

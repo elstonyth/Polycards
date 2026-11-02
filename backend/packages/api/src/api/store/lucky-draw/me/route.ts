@@ -7,7 +7,8 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 
 // GET /store/lucky-draw/me — the viewer's balance, last 100 ticket movements
-// and every prize they entered with its outcome. Scoped to the verified bearer.
+// and every prize or one_winner event they entered with its outcome. Scoped to
+// the verified bearer.
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,

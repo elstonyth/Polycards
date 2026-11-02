@@ -44,7 +44,12 @@ import { ChevronDown, ChevronRight, ChevronUp, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { num, rmAuto } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
-import { countdownClock, drawCountdown, nextDraw } from '@/lib/lucky-draw';
+import {
+  countdownClock,
+  drawCountdown,
+  nextDraw,
+  potTotal,
+} from '@/lib/lucky-draw';
 import type { LuckyDrawPrize } from '@/lib/data/schemas';
 import { PrizeArt } from './PrizeCard';
 
@@ -373,8 +378,9 @@ export function PrizeWheel({
     hub?.kind === 'next' && nowMs != null
       ? countdownClock(hub.at, nowMs)
       : null;
-  const pool = prizes.reduce((n, p) => n + p.value_myr, 0);
+  const pool = potTotal(prizes);
   const half = metrics.half;
+  const hubLabel = hub?.kind === 'done' ? 'All drawn' : 'Next draw';
   const front = prizes[clamp(active, 0, last)];
 
   return (
@@ -487,7 +493,7 @@ export function PrizeWheel({
               className="font-semibold tracking-[0.24em] text-neutral-400 uppercase"
               style={{ fontSize: Math.max(10, half * 0.055) }}
             >
-              {hub?.kind === 'done' ? 'All drawn' : 'Next draw'}
+              {hubLabel}
             </p>
             {hub?.kind === 'drawing' ? (
               <p
@@ -572,7 +578,7 @@ export function PrizeWheel({
                   )}
                 >
                   <span className="relative block size-full">
-                    <PrizeArt src={p.image} kind={p.kind} />
+                    <PrizeArt src={p.image} kind={p.kind} frame={p.frame} />
                   </span>
                 </span>
               </button>
@@ -622,10 +628,9 @@ export function PrizeWheel({
         )}
       </div>
 
-      <div className="mt-4 lg:mt-0">
-        {opened && front ? (
-          details(front)
-        ) : (
+      <div className="mt-4 space-y-4 lg:mt-0">
+        {opened && front && details(front)}
+        {!(opened && front) && (
           <ol className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
             {prizes.map((p, i) => (
               <li key={p.id}>
@@ -639,7 +644,7 @@ export function PrizeWheel({
                 >
                   <span className="relative aspect-[5/7] w-10 shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/[0.04] p-0.5">
                     <span className="relative block h-full w-full">
-                      <PrizeArt src={p.image} kind={p.kind} />
+                      <PrizeArt src={p.image} kind={p.kind} frame={p.frame} />
                     </span>
                   </span>
                   <span className="min-w-0 flex-1">

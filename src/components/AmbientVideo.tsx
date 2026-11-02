@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { preload } from 'react-dom';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
 
 /**
@@ -10,14 +11,17 @@ import { usePrefersReducedMotion } from '@/lib/use-reveal';
  * needs to pause/seek (that is what the controls-on `HeroVideo` demo player is
  * for). The poster is the clip's own first frame, so there is no pop on play,
  * and it doubles as the LCP image and the reduced-motion still — under
- * `prefers-reduced-motion` the clip never autoplays and the element just shows
- * the poster. `webm` (VP9) is offered first for smaller bytes; `mp4` (H.264) is
+ * `prefers-reduced-motion` the clip never plays and the element just shows
+ * the poster. The clip downloads from hydration on, never ahead of the page's
+ * first paint. `webm` (VP9) is offered first for smaller bytes; `mp4` (H.264) is
  * the universal fallback.
  *
  * It is `aria-hidden`: the motion is decoration whose meaning is always carried
  * by the surrounding text (headings, pack title/price), so exposing it to
  * assistive tech would only add noise.
  */
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
 export function AmbientVideo({
   mp4,
   webm,
@@ -35,15 +39,18 @@ export function AmbientVideo({
    *  (both a <video> and an <img> expose `.currentSrc`). */
   testId?: string;
 }) {
+  // The poster is the LCP, and a <video> poster is found late without this.
+  preload(poster, { as: 'image', fetchPriority: 'high' });
   const ref = useRef<HTMLVideoElement>(null);
   const reduced = usePrefersReducedMotion();
 
-  // SSR renders reduced=false, so the clip may already be playing by the time
-  // the real preference lands — enforce the decision explicitly on mount/change.
+  // Started here, not with `autoPlay`, so the bytes wait for hydration.
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    if (reduced) {
+    // Asked directly as well: `reduced` is false during hydration, and calling
+    // play() there would download the clip for someone who will never see it.
+    if (reduced || window.matchMedia(REDUCED_MOTION).matches) {
       v.pause();
       v.currentTime = 0;
     } else {
@@ -58,11 +65,10 @@ export function AmbientVideo({
       className={className}
       style={{ objectFit: fit }}
       poster={poster}
-      autoPlay={!reduced}
       muted
       loop
       playsInline
-      preload="metadata"
+      preload="none"
       aria-hidden
     >
       {webm ? <source src={webm} type="video/webm" /> : null}

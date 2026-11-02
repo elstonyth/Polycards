@@ -105,7 +105,7 @@ components:
   glass-panel: # compact overlays: modals, sheets, toast (refraction-capable)
     backgroundColor: '#0a0a0a8c' # ink-black / 55%
   glass-chrome: # wide chrome: header, tab bar, banners, sticky bars (frosted only)
-    backgroundColor: '#0a0a0ab3' # ink-black / 70%
+    backgroundColor: '#0a0a0ad1' # ink-black / 82%
   glass-scrim: # full-screen overlay backdrops
     backgroundColor: '#0a0a0acc' # ink-black / 80%
 ---
@@ -178,7 +178,7 @@ A committed dark palette where chrome stays monochrome and every hue is a signal
 
 ### Lucky Draw only — Holo foil (2026-10-24)
 
-- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on three things: the prize wheel's rim, the prize frame in the win reveal, and the win's dust. Never chrome, never buttons, never text, never another surface. No gold anywhere on the wheel (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` / `.holo-ring` in `globals.css` only turn the light and cut the ring (still under reduced motion).
+- **Holo foil** (`#c7f0ff #d8c8ff #ffc9e6 #e9ecf2 #b8f3ea #cfd6ff #ffd6f0`, run as a slowly turning conic gradient): the soft pale cyan / violet / pink shimmer of a premium card's foil. **Lucky Draw only**, and only on these: the arena's rim, its booster chips and the winner's crown, the prize frame on anything that isn't a card (a credit prize or the admin's own art, in the reveal and the pool), the lines of the Lucky Draw slab frame, the win's dust, the pool pass's stub (`holoSheet`, under a pearl veil so a whole surface of it stays a card's shimmer and not candy; 2026-10-31, so the page can't be mistaken for the homepage), and the "Now" dot in How it works. Never chrome, never buttons, never text, never another surface. No gold on the table but the winner's ring (operator, 2026-10-24: "too much gold"). The stops live once in code — `HOLO_STOPS` / `holoConic` in `src/lib/lucky-draw.ts`; `.holo-turn` in `globals.css` only turns the light (still under reduced motion).
 
 ## 3. Typography
 
@@ -234,10 +234,10 @@ Flat, tonally layered, glow-reserved. Depth comes from the three-step neutral ra
 
 ### Navigation
 
-- **Bottom tab bar (mobile, the primary nav):** 6 slots with the shipped labels **Task · Ranks · Games · Home · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; Games, added 2026-10-25, does not navigate: it opens the game picker sheet — Lucky Draw and Coin Flip live — and lights while a game page is open; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: #737373. All six tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
+- **Bottom tab bar (mobile, the primary nav):** 7 slots with the shipped labels **Task · Ranks · Games · Home · Draw · Vault · Me** (Task = the tasks/achievements hub at `/task`; Ranks = `/leaderboard`, which also hosts the Weekly Pulled Value Challenge — the challenge is NOT on Task; Games, added 2026-10-25, does not navigate: it opens the game picker sheet — Coin Flip live — and lights while a game page is open; Draw, moved out of Games 2026-10-30, goes to `/lucky-draw` and sits right of Home so Home stays in the middle; short labels fit 10px tab type). Ink Black bar, hairline top border, safe-area padding. Active tab: Paper White icon + label at strokeWidth 2.25; inactive: neutral-400 (#a3a3a3). All six tabs render uniform — no raised center tab, no floating FAB circle. The bar carries `data-site-chrome` so immersive surfaces (the reel) can inert it.
 - **Header:** Ink Black, logo left; right side balance chip (Graphite pill: "RM 4.49" + white "＋" disc) opening the top-up sheet, present on every screen.
-- **Desktop (≥1024px):** the tab bar hides and the same six destinations render as pills inside the header row (Games opens the picker as a centred dialog) (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
-- **Surfaces without a slot of their own** are owned by a tab through its `match` prefixes, so something always lights up. Me owns the account tree (`/wallet`, `/settings`, `/orders`, `/transactions`, `/bank`, `/bank-withdrawal`, `/notifications`, `/addresses`) plus **`/referral`** — a top-level brand surface reached from the Me quick-access grid, not a sixth tab. Adding a route reachable from Me means adding it to that array in the same change; a route in no `match` array leaves the whole bar dark.
+- **Desktop (≥1024px):** the tab bar hides and the same seven destinations render as pills inside the header row (Games opens the picker as a centred dialog) (logo left, nav center-left, balance chip right); content column widens, same components. This section is the nav contract — `src/components/app-shell/tabs.ts` implements it.
+- **Surfaces without a slot of their own** are owned by a tab through its `match` prefixes, so something always lights up. Me owns the account tree (`/wallet`, `/settings`, `/orders`, `/transactions`, `/bank`, `/bank-withdrawal`, `/notifications`, `/addresses`) plus **`/referral`** — a top-level brand surface reached from the Me quick-access grid, not a tab of its own. Adding a route reachable from Me means adding it to that array in the same change; a route in no `match` array leaves the whole bar dark.
 - **Page transitions (2026-10-25):** every navigation animates through React `<ViewTransition>` (`src/components/PageTransition.tsx`, mounted by `app/template.tsx` and `app/(account)/template.tsx`): the old page fades out fast, the new one fades in with a 10px rise; entering a game from the Games sheet zooms the game up from 96% while the page behind pushes away, and leaving a game reverses it. The header and tab bar sit in the layout and never move. Reduced motion: pages swap instantly.
 
 ### Signature: Sticky Stat Card
@@ -368,26 +368,97 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 
 ### Signature: Lucky Draw (/lucky-draw, 2026-10-24)
 
-Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
-**Games** tab (2026-10-25; Task no longer matches `/lucky-draw`).
+Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
+**Draw** tab (2026-10-30; it sat under Games from 2026-10-25, under Task before that).
 
-- **Tabs** — Prizes · Results · My tickets, the leaderboard's segmented pill.
-- **Prize card** — charcoal card: the prize on a 5:7 pedestal, RM value in
-  Chase Gold Nekst, draw time in MYT with a live countdown, tickets in /
-  entrants / my chance, the top 10 (framed avatars) and one white Enter
-  pill.
-- **The wheel** (style "K — Holo Foil") — matte black and graphite wedges
-  sized by tickets, hair-thin silver lines, the holo-foil rim, a pearl hub, a
-  slim silver pointer that flicks on each edge. Pull-back, ~7 s ease-out,
-  settle, landing inside the winner's wedge (never dead centre). Win: holo
-  dust rises from the wedge, the wheel dims, and the prize rises from the hub
-  in a thin holo frame. Decoration only — the result is stored before the
-  wheel turns. Reduced motion: the winner shows directly, no spin, no dust.
-  Sound (2026-10-25, `drawStart/drawTick/drawStop/drawWin` in
-  `src/lib/slot-sfx.ts`, header mute applies): a soft air swoosh on launch, a
-  light pawl click per wedge edge (at most one per 38 ms), a muted wooden
-  knock on the stop, and a glassy E-major shimmer with high sparkles as the
-  prize rises — quiet and premium, never a casino jingle.
+- **Tabs** — Pool · Results · My entry, the leaderboard's segmented pill. Results
+  is every gate on the platform; My entry is the gates this account joined, each
+  with its tier, tickets, chance and how it ended (the balance lives in the title
+  row and the Vault).
+- **The gate ticket** (`GateTicket`, 2026-11-01, boss's spec: many draws run at
+  once) — each running gate is one pass, cut like the ticket art and torn top to
+  bottom on every screen, so a phone holds the same object a desktop does. The
+  foil stub on the left carries the tier, the clock and the one action in ink;
+  the dark half carries "Prize Pool" (gates have no names of their own), the total
+  in Chase Gold, the prizes, and the player's tickets, chance and Players. One
+  ticket fits whole between the page's controls and the tab bar from 320x568 up,
+  with the next one showing below it (boss: "看得完"). No docked bar: with many
+  gates the action belongs to its ticket.
+- **Tier by foil, not colour** — Economy, Business and First (the operator picks per
+  gate: cheap and short up to dear and long) differ by how much pearl veils the
+  foil, from nearly pearl to full shimmer, and by the word on the stub. No new
+  hue, and grey still means only one thing: tickets have closed.
+- **Filter and sort** — tier chips for the tiers running now and a sort button
+  under the tabs, only with two or more gates. The soonest draw leads by default; the sort is the phone's
+  own picker.
+- **New gate** — a gate that went live since the last visit lights a dot on the
+  Draw tab, sits on top marked NEW for that visit, then falls back to the default
+  sort. A first visit marks nothing: every gate marked new would mean nothing.
+- **Prizes** — one prize stands alone; more swipe sideways, the pack page's Top
+  Hits rail. A tap only zooms the card, and tickets go on the gate.
+- **Players** — the count is a button, opening a sheet with the top 10. The list
+  is not on the page.
+- **After the end** — the stub goes plain grey and says the gate is closed until
+  the draw lands; a drawn gate leaves the list for Results. Gates that have not
+  started are not shown.
+- **Any screen** (`.pool-wide`) — the page breaks out of the account column from
+  640px up. Tickets sit in one column up to `lg`, then as many as fit at 34rem or
+  more, so a lone gate takes the row; clock digits size from the stub's own width (`cqw`).
+- **Enter sheet** — shows the whole gate (tier, every prize, total, closing time)
+  above the stepper, never one card.
+- **How it works** — folded under the list, four steps on a line, the current one marked Now by where
+  the pool is, then the small print under a disclosure.
+- **Old-rule prize card** — kept for any event published before one-winner:
+  charcoal card, the prize on a 5:7 pedestal, draw time, top 10, white Enter pill.
+- **The arena** (2026-11-01, replaces the wheel; boss: the draw is 20 seconds, pops
+  up small for everyone signed in, an X closes it, a tap opens it, and it lives in
+  Results) — one round table under one lamp, ringed in holo foil, with every ticket
+  share a set of discs. Bigger eats smaller, the table closes, the last eight meet
+  one duel at a time, and the last two race for foil chips that can swap the lead
+  before the bigger one takes the other in slow motion. Every disc shows its owner's
+  picture from the first second on a phone-sized table, as a token that gains a soft
+  shadow and a little gloss from the lamp as it grows; only the small corner card
+  starts as silver dust, too small for faces. The viewer's discs ring in Paper White, which is the whole
+  personal story: "12 of 200 your discs alive", "You lead with 31%", "You're in the
+  final". No neon, no glitch type, no grid, no confetti: pacing and stakes carry it.
+  Decoration only, like the wheel it replaces: the winner is drawn and paid on the
+  server first, and the disc that survives is simply seated to them
+  (`src/lib/arena/cast.ts`). The battle runs on the device from the stored seed, so
+  every viewer and every replay plays the same run; the engine takes only a seed and
+  a disc count, so it cannot see a player. A gate has at least 320 discs, so a
+  two-player gate is still a battle, and two per player past that, up to 1,000, so
+  tickets still show on a big gate. They are shared out by tickets with at least one
+  each. Every disc wears its owner's own picture, the same `person.avatar` as every
+  other surface, and the table holds still up to 1.5 s for them so it opens on faces.
+  Twenty seconds on the clock, the winner told at 18.3.
+- **The Lucky Draw frame** ("Smoked", 2026-11-02) — the Rank Reward frame's exact
+  shape in dark smoked glass with one holo line on each edge, like a watch bezel. Art
+  from `scripts/compose-lucky-draw-frame.mjs`, cut to the prism frame's own alpha.
+  It marks a card as a Lucky Draw prize wherever it shows: the draw (`PrizeArt`) and
+  the winner's vault, history, delivery and card page. `SlabImage` draws all of them,
+  and `prizeFrameVariant` is the one rule, so the draw and the vault can't disagree.
+  The backend says how each picture wears it (`frame`: `slab`, `raw` or none). A
+  card here carries no tier, so nothing else competes with it.
+- **The corner card** (`ArenaShow`, mounted by `LiveDrawProvider` in the root layout)
+  — bottom right, above the tab bar and over the free-pack badge and Telegram banner,
+  under sheets. LIVE chip, X (28 to see, 44 to hit), one line under the table. It
+  clears itself 9 s after the winner shows; a win stays until closed. It never covers
+  a way to pay or sell: on a phone it lifts above the pack page's Open bar and the
+  vault and leaderboard action tray (`cornerLift`). Not during a pack rip
+  (`/slots/*/spin`). Draws in the same minute play one after another. Only
+  signed-in tabs watch: a result needs a customer token, and that keeps visitors and
+  bots out of the draw-minute reads. Tabs read the gates still to draw from the shared
+  status and look for each result just after the minute the job runs on, with jitter,
+  only while visible (`src/lib/lucky-draw-watch.ts`).
+- **The full view** — a tap opens the same battle at the same moment, with the prize,
+  the tier, the viewer's line, the top three by share and a line for the big meals.
+  Live has no skip (boss); Results has **Skip to result** and **Watch again**. While a
+  draw plays, Results and My entry hold its outcome back. A draw from Results is
+  rebuilt from stored data, not a video file: player pictures come from other hosts,
+  which a browser won't let a canvas record, and this way old draws replay too. Reduced
+  motion: the winner shows directly, no battle, no dust. Sound (`drawStart/drawTick/
+drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the full
+  view, a tap's gesture having unlocked it, and never from the corner.
 - **Results** — the winner, their tickets, a Watch-the-draw replay and the
   frozen entry list in draw order with ticket ranges. The seed and its hash
   stay off the page (operator 2026-10-25); the server still commits and
@@ -421,6 +492,6 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Lit under the
 The operator dashboard (`backend/apps/admin`) is a product-register surface built on Medusa UI. Source of truth: `docs/superpowers/specs/2026-10-14-admin-redesign-design.md`.
 
 - **Colours:** Medusa UI's own light and dark themes, chosen per operator in the user menu. The darker "Vault" palette was tried on 2026-10-14 and set aside by the operator in favour of the original colours.
-- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too.
+- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too. The Tasks page's preview of the player's card uses Nekst and the storefront's dark surface, because it shows what players see.
 - **Navigation:** the 8-entry sidebar, with unused core Medusa tabs hidden through `src/_navigation.ts`.
 - **Signal colours** on custom pages follow the storefront's meanings: green for money in, red for alerts, gold for "needs action".

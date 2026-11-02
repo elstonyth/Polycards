@@ -7,6 +7,7 @@ import Image from 'next/image';
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   Clock,
   Info,
   Minus,
@@ -23,6 +24,7 @@ import Reveal from '@/components/Reveal';
 import type { PackDetail, RecentFeed } from '@/lib/data/packs';
 import {
   type Pack,
+  type PackTab,
   type ResolvedPack,
   type PackCard,
   CATALOG_GROUP_HEADING,
@@ -31,13 +33,18 @@ import {
   FREE_PULL_LOCKED_MESSAGE,
   factoryVideo,
   groupPacks,
+  isTicketPack,
+  packHref,
 } from '@/lib/packs-data';
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
 import { PublishedOddsList, hasPublishedOddsContent } from './OddsSheet';
+import { IntentLink } from '@/components/IntentLink';
 import { PoolByRarity } from './PoolByRarity';
 import {
   publishedOddsRows,
+  ticketOddsPool,
+  ticketTopHits,
   poolValueRange,
   poolExpectedValue,
   tierValueRanges,
@@ -137,7 +144,7 @@ function PackRail({
       {packs.map((p) => {
         const selected = p.id === activeId;
         return (
-          <Link
+          <IntentLink
             key={p.id}
             ref={selected ? arrived : undefined}
             href={`/slots/${p.id}?count=${qty}`}
@@ -181,7 +188,7 @@ function PackRail({
             <span className="text-[11px] font-semibold tabular-nums text-white/55">
               {rm0(p.priceMyr)}
             </span>
-          </Link>
+          </IntentLink>
         );
       })}
     </div>
@@ -191,6 +198,7 @@ function PackRail({
 export default function PackDetailClient({
   pack,
   siblings,
+  categoryTabs = [],
   detail,
   recentPulls,
   initialQty = 1,
@@ -199,6 +207,9 @@ export default function PackDetailClient({
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
+  /** The category dropdown's options. Under two (an unlisted pack, one franchise)
+   *  the category is a plain label: nothing to switch to. */
+  categoryTabs?: PackTab[];
   /** Backend gacha pool (Top Hits + Pull Odds); null when the backend is down. */
   detail: PackDetail | null;
   /** Live pull history for this pack; an empty feed when there are no pulls /
@@ -235,6 +246,8 @@ export default function PackDetailClient({
   // Ads funnel (lib/pixel.ts): a pack page view. Keyed on the pack, not the
   // mount — switching to a sibling pack can reuse this component.
   useEffect(() => {
+    // A pack nobody can buy yet has no business in the ads funnel.
+    if (active.draft) return;
     trackPixel('ViewContent', {
       content_ids: [active.id],
       content_name: active.name,
@@ -242,7 +255,7 @@ export default function PackDetailClient({
       value: active.priceMyr,
       currency: 'MYR',
     });
-  }, [active.id, active.name, active.priceMyr]);
+  }, [active.id, active.name, active.priceMyr, active.draft]);
   // Back can restore a cached server snapshot with an older initialQty, so
   // the live URL owns quantity as well as pack selection.
   const searchParams = useSearchParams();
@@ -264,7 +277,10 @@ export default function PackDetailClient({
   const [needsVerify, setNeedsVerify] = useState(verifyPrompt !== null);
   // One request refreshes every grid price (60s, visibility-gated), seeded
   // with this route's server snapshot.
-  const liveDetail = usePackDetailPoll(active.id, detail);
+  // A Draft keeps its seed: the poll reads the public route, which finds nothing
+  // for a draft and would blank the page a minute after it loads.
+  const polledDetail = usePackDetailPoll(active.id, detail);
+  const liveDetail = active.draft ? detail : polledDetail;
   const [openCard, setOpenCard] = useState<CardSeed | null>(null);
   // A pool card already IS a card seed (one view) — the overlay reads the
   // fields it needs and ignores the rest.
@@ -278,6 +294,12 @@ export default function PackDetailClient({
   // siblings list is empty (it is not in the catalog), so `active` can never
   // become a different, paid pack.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+  // Pays Lucky Draw tickets: no card to show or sell, so every section below
+  // that assumes one goes. The odds panel and Top Hits stay, in ticket amounts.
+  const ticketPack = isTicketPack(pack);
+  // What this page calls the thing it sells.
+  const noun = ticketPack ? 'capsule' : 'pack';
+  const Noun = ticketPack ? 'Capsule' : 'Pack';
   // One Piece / sports packs: the prize badges never guess a Pokémon.
   const pokemonPack = isPokemonPack(pack.categoryId);
   // The free pack, reached by someone who cannot claim it — a spent claim OR a
@@ -326,7 +348,13 @@ export default function PackDetailClient({
   const giftsPending = giftKey !== null && heldGifts?.key !== giftKey;
   // Sold out (admin): still listed, but the backend refuses a paid open. Only
   // vault gifts may still open it, so quantity is capped at the gifts held.
-  const soldOutPack = active.inStock === false;
+  // A Draft card pack can be looked at but not opened: a card open writes pulls
+  // into the live feeds, so the backend refuses it. A capsule's spins only reach
+  // its own feed, which answers empty while it is a Draft and lists them once it
+  // goes Active: nothing marks a spin as a test.
+  const previewOnly = active.draft === true && !ticketPack;
+  const soldOutPack = active.inStock === false || previewOnly;
+  const unavailableLabel = previewOnly ? 'Preview only' : 'Sold out';
   // The reel (openBatch) caps a single open at 3 packs.
   const maxQty = soldOutPack ? Math.min(3, Math.max(1, held)) : 3;
   const qty = Number.isInteger(count)
@@ -336,7 +364,7 @@ export default function PackDetailClient({
   const vaultGifts = giftsUsed(qty, held);
   const paidCost = priceNum * (qty - vaultGifts);
   const vaultCost = vaultCostLabel(qty, vaultGifts, priceNum);
-  const openLabel = vaultButtonLabel(qty, vaultGifts) ?? 'Open Pack';
+  const openLabel = vaultButtonLabel(qty, vaultGifts) ?? `Open ${Noun}`;
   // Nothing this customer holds covers the open: no buy controls at all.
   const soldOut = soldOutPack && vaultGifts < qty;
   // Baked Polycards tiers animate their factory stage (still poster otherwise).
@@ -356,6 +384,25 @@ export default function PackDetailClient({
     url.searchParams.set('count', String(count));
     window.history.replaceState(null, '', url);
   };
+
+  // A franchise's page is a pack of it, so the dropdown lands on its first one.
+  const switchCategory = (id: string) => {
+    const first = categoryTabs.find((t) => t.id === id)?.firstPackId;
+    if (first) router.push(packHref(first, qty), { scroll: false });
+  };
+  const categoryLabel = (
+    <span className="flex items-center gap-2">
+      <Image
+        src={pack.icon}
+        alt=""
+        aria-hidden
+        width={20}
+        height={20}
+        className="h-5 w-5 object-contain"
+      />
+      {pack.categoryName}
+    </span>
+  );
 
   // The admin-PUBLISHED odds — the ONLY rates players see. Null (unset) hides
   // the whole Pull Odds panel.
@@ -377,8 +424,17 @@ export default function PackDetailClient({
   // value-sorted desc). The FULL pool still feeds the demo spin + odds range.
   // Memoized like `pool` above (stable prop identity for PoolByRarity).
   const topPool = useMemo(
-    () => pool.filter((c) => isTopRarity(c.rarity)),
-    [pool],
+    () =>
+      ticketPack
+        ? ticketTopHits(pool)
+        : pool.filter((c) => isTopRarity(c.rarity)),
+    [ticketPack, pool],
+  );
+
+  // What the odds panel sums: card prices, or on a ticket pack the ticket amounts.
+  const oddsPool = useMemo(
+    () => (ticketPack ? ticketOddsPool(pool) : pool),
+    [ticketPack, pool],
   );
 
   // Sibling selector, sectioned by the SAME backend-derived composition the
@@ -390,12 +446,12 @@ export default function PackDetailClient({
 
   // Card-value range over the FULL pool (not topPool) — one derivation feeding
   // both the odds-panel gate and its range row.
-  const valueRange = useMemo(() => poolValueRange(pool), [pool]);
+  const valueRange = useMemo(() => poolValueRange(oddsPool), [oddsPool]);
 
   // Same derivation per rarity, so each published tier row can state what a
   // card of THAT tier is worth here. The pack-wide range above spans Common to
   // Immortal and so describes no tier in particular.
-  const tierRanges = useMemo(() => tierValueRanges(pool), [pool]);
+  const tierRanges = useMemo(() => tierValueRanges(oddsPool), [oddsPool]);
 
   // Expected value of one pull over the PUBLISHED tiers — what the top row of
   // the odds panel states now (the range only ever described the pool's span).
@@ -404,8 +460,9 @@ export default function PackDetailClient({
   // property than the source) and refuses to preserve the memo.
   const publishedOdds = liveDetail?.publishedOdds ?? null;
   const expectedValue = useMemo(
-    () => (publishedOdds ? poolExpectedValue(pool, publishedOdds.tiers) : null),
-    [pool, publishedOdds],
+    () =>
+      publishedOdds ? poolExpectedValue(oddsPool, publishedOdds.tiers) : null,
+    [oddsPool, publishedOdds],
   );
 
   // Do NOT open/charge here — navigate to the reel, which performs
@@ -451,7 +508,7 @@ export default function PackDetailClient({
         className="-mt-2.5 mb-1.5 inline-flex items-center gap-1.5 py-2.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
-        All packs
+        All {noun}s
       </Link>
 
       {/* ===== MAIN: stage + configurator + card sections =====
@@ -537,9 +594,16 @@ export default function PackDetailClient({
           <div className="flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950">
             {/* Title + buyback */}
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
-              <h1 className="font-heading text-xl font-bold tracking-tight text-white sm:text-2xl">
-                {active.name}
-              </h1>
+              <div className="flex min-w-0 items-center gap-2">
+                <h1 className="font-heading text-xl font-bold tracking-tight text-white sm:text-2xl">
+                  {active.name}
+                </h1>
+                {active.draft && (
+                  <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white/70">
+                    Draft
+                  </span>
+                )}
+              </div>
               {isFreePack ? (
                 // A free pull can be neither sold nor delivered until the first
                 // PAID open, so a buyback rate here would advertise money the
@@ -557,15 +621,17 @@ export default function PackDetailClient({
                   {freeClaimUnavailable ? 'Unavailable' : 'Free'}
                 </span>
               ) : (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
-                  {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% instant
-                  buyback
-                  <Info className="h-3 w-3 opacity-80" aria-hidden />
-                </span>
+                !ticketPack && (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
+                    {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% instant
+                    buyback
+                    <Info className="h-3 w-3 opacity-80" aria-hidden />
+                  </span>
+                )
               )}
             </div>
 
-            {!isFreePack && (
+            {!isFreePack && !ticketPack && (
               <p className="px-5 pt-4 text-[12px] leading-relaxed text-neutral-400">
                 The pack rate applies during the reveal countdown. Leaving the
                 reveal or letting the timer expire changes buyback to{' '}
@@ -609,19 +675,33 @@ export default function PackDetailClient({
                 <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
                   Category
                 </p>
-                <div className="flex h-11 items-center rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white">
-                  <span className="flex items-center gap-2">
-                    <Image
-                      src={pack.icon}
-                      alt=""
+                {categoryTabs.length > 1 ? (
+                  // The native picker, invisible over the box (GateList's sort):
+                  // on a phone it is the OS sheet, with nothing to clip or close.
+                  <label className="relative flex h-11 cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white transition-colors focus-within:ring-2 focus-within:ring-white/40 hover:bg-white/10">
+                    {categoryLabel}
+                    <ChevronDown
+                      className="h-4 w-4 shrink-0 text-white/60"
                       aria-hidden
-                      width={20}
-                      height={20}
-                      className="h-5 w-5 object-contain"
                     />
-                    {pack.categoryName}
-                  </span>
-                </div>
+                    <select
+                      aria-label="Category"
+                      value={pack.categoryId}
+                      onChange={(e) => switchCategory(e.target.value)}
+                      className="absolute inset-0 cursor-pointer bg-neutral-900 text-white opacity-0"
+                    >
+                      {categoryTabs.map((t) => (
+                        <option key={t.id} value={t.id} disabled={t.soon}>
+                          {t.soon ? `${t.tab} (Coming soon)` : t.tab}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="flex h-11 items-center rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white">
+                    {categoryLabel}
+                  </div>
+                )}
               </div>
 
               {/* Pack tiles — an uncataloged pack (the free welcome pack) has
@@ -630,12 +710,15 @@ export default function PackDetailClient({
               {siblings.length > 0 && (
                 <div>
                   <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
-                    Pack
+                    {Noun}
                   </p>
                   {/* One rail per composition group, three tiles across. The
                       panel still never scrolls VERTICALLY — the rails scroll
                       horizontally, so extra tiers cost a swipe, not height. */}
                   <div
+                    // A switched franchise is a new set of rails: remount so
+                    // they centre on the pack instead of keeping the old scroll.
+                    key={pack.categoryId}
                     data-testid="pack-selector"
                     className="flex flex-col gap-2.5"
                   >
@@ -643,13 +726,15 @@ export default function PackDetailClient({
                       <div key={g.id} data-testid="pack-selector-group">
                         <div className="mb-1 flex items-baseline justify-between gap-2">
                           <p className="text-[11px] font-semibold text-white/70">
-                            {CATALOG_GROUP_HEADING[g.id]}
+                            {ticketPack && g.id === 'more'
+                              ? 'More Capsules'
+                              : CATALOG_GROUP_HEADING[g.id]}
                           </p>
-                          <span className="text-[10px] text-white/40">
+                          <span className="text-[10px] text-white/60">
                             <span className="tabular-nums">
                               {g.packs.length}
                             </span>{' '}
-                            {g.packs.length === 1 ? 'pack' : 'packs'}
+                            {g.packs.length === 1 ? noun : `${noun}s`}
                           </span>
                         </div>
                         <PackRail
@@ -682,7 +767,7 @@ export default function PackDetailClient({
                   <Minus className="h-4 w-4" aria-hidden />
                 </button>
                 <span className="flex h-11 flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-sm font-medium tabular-nums text-white">
-                  {qty} {qty === 1 ? 'Pack' : 'Packs'}
+                  {qty} {qty === 1 ? Noun : `${Noun}s`}
                 </span>
                 <button
                   type="button"
@@ -711,7 +796,7 @@ export default function PackDetailClient({
                   primary CTA here is an invitation to a refusal. */}
               {soldOut ? (
                 <Pill variant="secondary" size="lg" disabled className="w-full">
-                  Sold out
+                  {unavailableLabel}
                 </Pill>
               ) : (
                 !freeClaimUnavailable && (
@@ -784,8 +869,10 @@ export default function PackDetailClient({
                     Your one-time welcome pack — nothing charged. The card lands
                     in your vault. {FREE_PULL_LOCKED_MESSAGE}
                   </>
+                ) : previewOnly ? (
+                  <>Draft card packs can be viewed but not opened.</>
                 ) : soldOut ? (
-                  <>This pack is sold out right now.</>
+                  <>This {noun} is sold out right now.</>
                 ) : customer && balance !== null ? (
                   <>
                     Each open costs {rm(priceNum)} from your balance — you have{' '}
@@ -800,8 +887,8 @@ export default function PackDetailClient({
                   </>
                 ) : (
                   <>
-                    Each open costs the pack price from your balance — one pack
-                    per open, recorded to your account.
+                    Each open costs the {noun} price from your balance — one{' '}
+                    {noun} per open, recorded to your account.
                   </>
                 )}
               </p>
@@ -866,31 +953,38 @@ export default function PackDetailClient({
               expectedValue={expectedValue}
               tierRanges={tierRanges}
               rounded="2xl"
+              tickets={ticketPack}
             />
           </Reveal>
         )}
 
-        <Reveal as="section" delay={90} className="h-full min-w-0">
-          <div className="mb-3 flex items-center gap-2">
-            <Clock className="h-4 w-4 text-white/50" aria-hidden />
-            <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-              Recent Pulls
-            </h2>
-          </div>
-          {/* THIS pack's history — seeded from the server snapshot, then
-              polled so anyone's pull shows up here without a reload. Sibling
-              links load the selected pack's route and its own history seed. */}
-          <PullHistory
-            initial={recentPulls}
-            packSlug={active.id}
-            // A feed row IS a card seed (one view). Its pokemonDex/spriteImage
-            // are null: /store/pulls/recent doesn't send them, so threading
-            // them is a backend change, not an omission. The badge falls to
-            // name-derivation for a card opened from this feed — visible only
-            // on a card whose admin-configured sprite differs from its name.
-            onSelect={setOpenCard}
-          />
-        </Reveal>
+        {/* Not on a Draft: its ledger isn't public, and the feed proxy answers an
+            unlisted slug with the global feed, card pulls under a pack that
+            never paid them. */}
+        {!active.draft && (
+          <Reveal as="section" delay={90} className="h-full min-w-0">
+            <div className="mb-3 flex items-center gap-2">
+              <Clock className="h-4 w-4 text-white/50" aria-hidden />
+              <h2 className="font-heading text-lg font-bold tracking-tight text-white">
+                Recent Pulls
+              </h2>
+            </div>
+            {/* THIS pack's history — seeded from the server snapshot, then
+                polled so anyone's pull shows up here without a reload. Sibling
+                links load the selected pack's route and its own history seed. */}
+            <PullHistory
+              initial={recentPulls}
+              packSlug={active.id}
+              // A feed row IS a card seed (one view). Its pokemonDex/spriteImage
+              // are null: /store/pulls/recent doesn't send them, so threading
+              // them is a backend change, not an omission. The badge falls to
+              // name-derivation for a card opened from this feed — visible only
+              // on a card whose admin-configured sprite differs from its name.
+              onSelect={setOpenCard}
+              noun={noun}
+            />
+          </Reveal>
+        )}
       </div>
 
       {/* ===== Mobile buy dock =====
@@ -903,12 +997,15 @@ export default function PackDetailClient({
         data-testid="pack-buy-dock"
         className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t border-white/10 bg-neutral-950 px-fluid py-2.5 lg:hidden"
       >
-        <div className="flex items-center gap-3">
-          <div className="min-w-0 flex-1">
+        {/* A price is never cut short: when it can't fit beside the stepper and
+            the pill, the pill takes its own row. The 999 hands the spare width
+            of a single row to this block, so the pill only grows once alone. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-min flex-[999_1_0%]">
             {/* Free mode states the gift where the total normally sits — the
                 slot must not go empty, or the pill drifts left and the dock
                 reads like a different component. */}
-            <p className="truncate font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
+            <p className="whitespace-nowrap font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
               {freeClaimUnavailable
                 ? 'Unavailable'
                 : isFreePack
@@ -931,7 +1028,9 @@ export default function PackDetailClient({
                       ? qty > vaultGifts
                         ? `+ ${rm(paidCost)}`
                         : 'Gift from Polycards'
-                      : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
+                      : ticketPack
+                        ? 'Lucky Draw tickets'
+                        : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
             </p>
           </div>
           <div
@@ -964,7 +1063,7 @@ export default function PackDetailClient({
           </div>
           {soldOut ? (
             <Pill variant="secondary" size="md" disabled className="px-5">
-              Sold out
+              {unavailableLabel}
             </Pill>
           ) : (
             !freeClaimUnavailable && (
@@ -972,7 +1071,7 @@ export default function PackDetailClient({
                 variant="primary"
                 size="md"
                 onClick={handleGoToReel}
-                className="shrink-0 px-5"
+                className="shrink-0 grow px-4"
               >
                 {customer
                   ? isFreePack

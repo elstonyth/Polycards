@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Badge,
-  Button,
   Container,
   Heading,
   StatusBadge,
@@ -15,31 +14,39 @@ import {
   useCustomerPackGifts,
   useCustomerPulls,
 } from '../../../lib/queries';
-import { orderDateTime, rm, timeAgo } from '../../../lib/format';
+import type { SupportPull } from '../../../lib/admin-rest';
+import { rm } from '../../../lib/format';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { StatTile } from './MoneyCards';
+import { PullDrawer } from './PullsTab';
+import { FilterPills, TableState, When } from './bits';
+import { openableRow } from './row-helpers';
 
 type Sort = 'newest' | 'value';
 const SORTS: Sort[] = ['newest', 'value'];
+type Held = 'vaulted' | 'delivering';
 
 /**
  * The cards a player still holds: how many, what they'd get selling them
  * all back now, and what the storefront shows them as worth; then each
- * vaulted card with its value and its payable-now sell price, newest or most
- * valuable first.
+ * held card with its value and its payable-now sell price, newest or most
+ * valuable first. Cards on their way to the player sit under their own filter,
+ * because they are still owed and the tiles above count them.
  */
 export const VaultTab = ({ customerId }: { customerId: string }) => {
   const { t } = useTranslation();
   const [page, setPage] = useState(0);
   const [sort, setSort] = useState<Sort>('newest');
+  const [held, setHeld] = useState<Held>('vaulted');
+  const [open, setOpen] = useState<SupportPull | null>(null);
   const { data: view } = useCustomerGacha(customerId);
   const { data: money } = useCustomerMoney(customerId);
-  // status:'vaulted' is applied server-side AND keyed, so this never shows a
-  // bought-back card and never collides with the support page's full history.
+  // status is applied server-side AND keyed, so this never shows a bought-back
+  // card and never collides with the Pulls tab's full history.
   const { data, isError } = useCustomerPulls(customerId, page, {
-    status: 'vaulted',
+    status: held,
     sort,
   });
   // Same key as the Gifts and bonus tab, so a send or revoke there refreshes
@@ -81,7 +88,11 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
                 )
               : '—'
           }
-          note={t('playerMoney.sellbackNote')}
+          note={
+            shipping > 0
+              ? t('playerDetail.sellbackInclShipping', { count: shipping })
+              : t('playerMoney.sellbackNote')
+          }
         />
         <StatTile
           label={t('playerMoney.storefrontValue')}
@@ -153,12 +164,7 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
                       {rm(g.value_myr)}
                     </Table.Cell>
                     <Table.Cell className="whitespace-nowrap">
-                      <div className="tabular-nums">
-                        {orderDateTime(g.created_at)}
-                      </div>
-                      <div className="text-ui-fg-subtle txt-compact-xsmall">
-                        {timeAgo(g.created_at)}
-                      </div>
+                      <When iso={g.created_at} />
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle max-w-[20rem] truncate">
                       {g.note}
@@ -172,46 +178,57 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-4">
-        <Heading level="h2">{t('playerMoney.vaultTitle')}</Heading>
-        <div
-          className="flex gap-1"
-          role="group"
-          aria-label={t('playerMoney.vaultTitle')}
-        >
-          {SORTS.map((s) => (
-            <Button
-              key={s}
-              size="small"
-              variant={sort === s ? 'primary' : 'secondary'}
-              aria-pressed={sort === s}
-              onClick={() => {
-                setSort(s);
-                setPage(0);
-              }}
-            >
-              {t(`playerMoney.sort.${s}`)}
-            </Button>
-          ))}
-        </div>
+        <FilterPills
+          label={t('playerMoney.vaultTitle')}
+          value={held}
+          options={[
+            {
+              value: 'vaulted',
+              label: `${t('playerDetail.pullFilter.vaulted')} (${view?.vault.count ?? '…'})`,
+            },
+            {
+              value: 'delivering',
+              label: `${t('playerDetail.pullFilter.delivering')} (${shipping})`,
+            },
+          ]}
+          onChange={(h) => {
+            setHeld(h);
+            setPage(0);
+          }}
+        />
+        <FilterPills
+          label={t('playerDetail.sortBy')}
+          value={sort}
+          options={SORTS.map((s) => ({
+            value: s,
+            label: t(`playerMoney.sort.${s}`),
+          }))}
+          onChange={(s) => {
+            setSort(s);
+            setPage(0);
+          }}
+        />
       </div>
 
       {isError ? (
-        <div className="border-t px-6 py-6">
-          <Text size="small" className="text-ui-fg-error">
-            Failed to load.
-          </Text>
-        </div>
+        <TableState isError />
       ) : !data ? (
         <div className="border-t px-6 py-6">
           <LoadingSkeleton />
         </div>
       ) : rows.length === 0 ? (
-        <div className="border-t px-6 py-6">
-          <Text className="text-ui-fg-subtle">{t('support.empty')}</Text>
-        </div>
+        <TableState
+          empty={
+            held === 'delivering'
+              ? t('playerDetail.noneShipping')
+              : shipping > 0
+                ? t('playerDetail.vaultEmptyShipping', { count: shipping })
+                : t('playerDetail.vaultEmpty')
+          }
+        />
       ) : (
         <>
-          {sellsPaused && (
+          {sellsPaused && held === 'vaulted' && (
             <div className="bg-ui-tag-orange-bg border-t px-6 py-3">
               <Text size="small" className="text-ui-tag-orange-text">
                 {t('playerMoney.sellsPaused')}
@@ -232,14 +249,16 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
                     {t('playerMoney.colFmv')}
                   </Table.HeaderCell>
                   <Table.HeaderCell className="text-right">
-                    {t('playerMoney.colSellNow')}
+                    {held === 'delivering'
+                      ? t('players.order')
+                      : t('playerMoney.colSellNow')}
                   </Table.HeaderCell>
                   <Table.HeaderCell>{t('players.pulledAt')}</Table.HeaderCell>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
                 {rows.map((p) => (
-                  <Table.Row key={p.id}>
+                  <Table.Row key={p.id} {...openableRow(() => setOpen(p))}>
                     <Table.Cell>
                       <div className="flex items-center gap-3 py-1">
                         {/* `?.image`, not just `p.card`: an empty image would
@@ -280,7 +299,11 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
                       {/* No quote: a free welcome card still locked, or a
                           card row that no longer exists. A quote off the FX
                           fallback is greyed: that sell would be refused. */}
-                      {p.quote ? (
+                      {held === 'delivering' ? (
+                        <span className="font-mono text-xs">
+                          {p.order_id ? `#${p.order_id.slice(-6)}` : '—'}
+                        </span>
+                      ) : p.quote ? (
                         <span
                           className={
                             p.quote.firm ? '' : 'text-ui-fg-muted line-through'
@@ -303,12 +326,7 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
                       )}
                     </Table.Cell>
                     <Table.Cell className="whitespace-nowrap">
-                      <div className="tabular-nums">
-                        {orderDateTime(p.rolled_at)}
-                      </div>
-                      <div className="text-ui-fg-subtle txt-compact-xsmall">
-                        {timeAgo(p.rolled_at)}
-                      </div>
+                      <When iso={p.rolled_at} />
                     </Table.Cell>
                   </Table.Row>
                 ))}
@@ -324,6 +342,7 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
           />
         </>
       )}
+      {open && <PullDrawer pull={open} onClose={() => setOpen(null)} />}
     </Container>
   );
 };

@@ -12,6 +12,7 @@ import VipMemberState from '../models/vip-member-state';
 import VipLevel from '../models/vip-level';
 import AdminActionAudit from '../models/admin-action-audit';
 import Pull from '../models/pull';
+import TicketSpin from '../models/ticket-spin';
 import Card from '../models/card';
 import Pack from '../models/pack';
 import { PixelPokemon } from '../models/pixel-pokemon';
@@ -38,6 +39,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipLevel,
     AdminActionAudit,
     Pull,
+    TicketSpin,
     Card,
     Pack,
     PackOdds,
@@ -601,6 +603,144 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(audits.map((a) => a.action).sort()).toEqual(['create', 'edit']);
     });
 
+    it('changing a goal or reward type leaves nothing of the old one behind', async () => {
+      // Medusa's update merges into a JSON column, so a key the new rule lacks
+      // used to survive it, and a stale days then outranked count everywhere that
+      // read it.
+      const { id } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Check in 1 day',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 5 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      await service.saveTaskDefinition({
+        id,
+        kind: 'weekly',
+        title: 'Rip 2 packs',
+        requirement: { type: 'rip_count', count: 2, pack_id: null },
+        reward: { type: 'tickets' },
+        tickets: 20,
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'wrong goal',
+      });
+      const [row] = await service.listTaskDefinitions({ id });
+      expect(row.requirement).toEqual({
+        type: 'rip_count',
+        count: 2,
+        pack_id: null,
+      });
+      expect(row.reward).toEqual({ type: 'tickets' });
+      expect(row.title).toBe('Rip 2 packs');
+      expect(row.tickets).toBe(20);
+      const audits = await service.listAdminActionAudits({
+        entity_type: 'task_definition',
+        entity_id: id,
+        action: 'edit',
+      });
+      expect(audits[0].after).toMatchObject({
+        requirement: row.requirement,
+        reward: row.reward,
+      });
+    });
+
+    it('saving an old row clears the leftover keys it was stored with', async () => {
+      const { id } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Pull 2 Eevee',
+        requirement: { type: 'vault_pixel_count', count: 2, pixel_pokemon_id: null },
+        reward: { type: 'credit', amount_myr: 5 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      // The repository's own update merges, which is how such rows came to be.
+      await service.updateTaskDefinitions({
+        selector: { id },
+        data: { requirement: { days: 1 }, reward: { pack_id: 'old' } },
+      });
+      const [dirty] = await service.listTaskDefinitions({ id });
+      expect(dirty.requirement).toMatchObject({ days: 1 });
+
+      await service.saveTaskDefinition({
+        id,
+        kind: 'weekly',
+        title: 'Pull 2 Eevee',
+        requirement: dirty.requirement,
+        reward: dirty.reward,
+        active: false,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'retire',
+      });
+      const [clean] = await service.listTaskDefinitions({ id });
+      expect(clean.requirement).toEqual({
+        type: 'vault_pixel_count',
+        count: 2,
+        pixel_pokemon_id: null,
+      });
+      expect(clean.reward).toEqual({ type: 'credit', amount_myr: 5 });
+      expect(clean.active).toBe(false);
+    });
+
+    it('taskClaimCounts counts live claims per task', async () => {
+      await service.checkInDaily({ customerId: 'cus_count' });
+      const { id } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Check in once',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      expect((await service.taskClaimCounts()).get(id)).toBeUndefined();
+      const claim = await service.claimTask({
+        customerId: 'cus_count',
+        taskId: id,
+      });
+      if (!claim.claimed) throw new Error('claim refused');
+      expect((await service.taskClaimCounts()).get(id)).toBe(1);
+      await service.softDeleteTaskClaims([claim.claimId]);
+      expect((await service.taskClaimCounts()).get(id)).toBeUndefined();
+    });
+
+    it('ended rows never crowd a live task out of the hub', async () => {
+      // Every planned week adds rows that stay active after they end.
+      const longAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      await service.createTaskDefinitions(
+        Array.from({ length: 500 }, (_, i) => ({
+          kind: 'weekly' as const,
+          title: `Old ${i}`,
+          requirement: { type: 'checkin_days', days: 1 },
+          reward: { type: 'credit', amount_myr: 1 },
+          active: true,
+          sort: 0,
+          tickets: 0,
+          ends_at: longAgo,
+        })),
+      );
+      await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Still live',
+        requirement: { type: 'checkin_days', days: 2 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 1,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      const hub = await service.taskHubFor({ customerId: 'cus_crowd' });
+      expect(hub.tasks.map((t) => t.title)).toEqual(['Still live']);
+    });
+
     it('a closed window declines with its own reason, not "not completed"', async () => {
       // The window can close between the page load and the tap. Answering
       // 'not_completed' over a finished task is the most confusing thing this
@@ -1117,6 +1257,88 @@ moduleIntegrationTestRunner<PacksModuleService>({
             reason: 'reward_credit',
           }),
         ).toHaveLength(1);
+      });
+
+      it('tickets as the whole reward: paid once, and nothing else is', async () => {
+        const { id: taskId } = await service.saveTaskDefinition({
+          ...valid,
+          reward: { type: 'tickets' },
+          tickets: 50,
+        });
+        await service.checkInDaily({ customerId: 'cus_tr1' });
+        const hub = await service.taskHubFor({ customerId: 'cus_tr1' });
+        expect(hub.tasks[0].reward).toEqual({ type: 'tickets', tickets: 50 });
+
+        const first = await service.claimTask({
+          customerId: 'cus_tr1',
+          taskId,
+        });
+        expect(first).toMatchObject({
+          claimed: true,
+          reward: { type: 'tickets' },
+          tickets: 50,
+        });
+        expect(await service.luckyDrawBalance('cus_tr1')).toBe(50);
+        const again = await service.claimTask({
+          customerId: 'cus_tr1',
+          taskId,
+        });
+        expect(again).toEqual({ claimed: false, reason: 'already_claimed' });
+        expect(await service.luckyDrawBalance('cus_tr1')).toBe(50);
+
+        // One ledger row, keyed by the claim. No credit, no card.
+        const rows = await service.listLuckyDrawTickets({
+          customer_id: 'cus_tr1',
+        });
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          delta: 50,
+          reason: 'task_claim',
+          ref: (first as { claimId: string }).claimId,
+        });
+        expect(
+          await service.listCreditTransactions({ customer_id: 'cus_tr1' }),
+        ).toHaveLength(0);
+        expect(
+          await service.listPulls({ customer_id: 'cus_tr1' }),
+        ).toHaveLength(0);
+
+        // Stamped, so it never reads as an unspent free rip: that read is
+        // claim_ref null with a cap, and these would crowd real rips out of it.
+        const [claim] = await service.listTaskClaims({
+          customer_id: 'cus_tr1',
+        });
+        expect(claim.claim_ref).toBe(rows[0].id);
+        expect(claim.reward_snapshot).toEqual({ type: 'tickets', tickets: 50 });
+        // That ref is a ticket row, not a pull: the spin route must not say
+        // "already spun, the card is in your vault" about it.
+        expect(
+          await service.redeemTaskPackClaim({
+            customerId: 'cus_tr1',
+            claimId: claim.id,
+            rollPack: async () => {
+              throw new Error('a tickets claim must never roll');
+            },
+          }),
+        ).toEqual({ redeemed: false, reason: 'not_a_pack_reward' });
+        const after = await service.taskHubFor({ customerId: 'cus_tr1' });
+        expect(after.pending_spins).toEqual([]);
+        expect(after.tasks[0].claimed).toBe(true);
+      });
+
+      it('a reward type this build does not know pays nothing', async () => {
+        const { id: taskId } = await service.saveTaskDefinition(valid);
+        await service.updateTaskDefinitions({
+          selector: { id: taskId },
+          data: { reward: { type: 'mystery' } },
+        });
+        await service.checkInDaily({ customerId: 'cus_tr2' });
+        await expect(
+          service.claimTask({ customerId: 'cus_tr2', taskId }),
+        ).rejects.toThrow(/mystery/);
+        expect(
+          await service.listTaskClaims({ customer_id: 'cus_tr2' }),
+        ).toHaveLength(0);
       });
 
       it('editing tickets after a claim does not change what the claim paid', async () => {

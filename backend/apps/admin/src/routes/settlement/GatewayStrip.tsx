@@ -1,3 +1,5 @@
+import type { Permission } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Badge, Button, Container, Text } from '@medusajs/ui';
@@ -40,6 +42,10 @@ const Tile = ({
 
 export const GatewayStrip = ({ currency }: { currency: string }) => {
   const { t } = useTranslation();
+  // Writes here ask payment:update; a view-only role reads the figures only.
+  const canEdit = usePermissions().hasPermission(
+    'payment:update' as Permission,
+  );
   const balance = useGatewayBalance(currency);
   const audit = useGatewayAudit(currency);
   const [switching, setSwitching] = useState(false);
@@ -137,7 +143,7 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
             ) : null}
           </div>
           {/* Only RM has a choice of gateway; a regional rail runs beside it. */}
-          {currency === LEDGER_CURRENCY ? (
+          {canEdit && currency === LEDGER_CURRENCY ? (
             <GatewaySwitchDrawer open={switching} onOpenChange={setSwitching}>
               <Button
                 variant="transparent"

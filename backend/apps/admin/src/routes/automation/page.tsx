@@ -27,7 +27,7 @@ import type {
   AutomationMonitorSnapshot,
   MonitorLeaderboard,
 } from '../../../../../packages/api/src/api/utils/automation-monitor-types';
-import { rm } from '../../lib/format';
+import { orderDateTime, rm } from '../../lib/format';
 import { SandboxPanel } from './sandbox-panel';
 import { LivePanel } from './live-panel';
 import { OverviewPanel } from './overview-panel';
@@ -47,6 +47,12 @@ export const config: RouteConfig = {
   icon: Robot,
   rank: 35,
   permissions: ['automation:read' as Permission],
+};
+
+// The login chain (see orders/page.tsx) carries on for a role without it.
+export const handle = {
+  permissions: 'automation:read',
+  redirectTo: '/deliveries',
 };
 
 async function readMonitor<T>(path: string, signal: AbortSignal): Promise<T> {
@@ -160,9 +166,9 @@ const SUBTITLE: Record<string, string> = {
 
 export function AutomationPage() {
   const { t } = useTranslation();
-  // Saving the list asks customer:read (api/admin-rbac.ts): the automation
+  // Saving the list asks customer:update (api/admin-rbac.ts): the automation
   // operator runs the accounts staff chose but cannot change them.
-  const canEditAccounts = usePermissions().hasPermission('customer:read');
+  const canEditAccounts = usePermissions().hasPermission('customer:update');
   const [tab, setTab] = useState('overview');
   const activity = useAutomationActivity(7);
   const recent = new Map(
@@ -281,7 +287,7 @@ export function AutomationPage() {
               </Text>
               <Text>
                 {accounts.data
-                  ? new Date(accounts.data.updatedAt).toLocaleString()
+                  ? orderDateTime(accounts.data.updatedAt)
                   : '—'}
               </Text>
             </div>

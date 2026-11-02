@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { PackCategory } from '@/lib/packs-data';
+import { packTabs, type PackCategory } from '@/lib/packs-data';
 
 // The franchise tab on /slots and the home shelf. /slots keeps it in the URL
 // (?category=), so Back to a cached page and a shared link show the same tab;
@@ -24,6 +24,8 @@ vi.mock('@/components/FreePackBadge', () => ({ default: () => null }));
 
 const CatalogClient = (await import('../CatalogClient')).default;
 const ShelfTabs = (await import('@/components/home/ShelfTabs')).default;
+const { ShelfCategoryProvider } =
+  await import('@/components/home/ShelfCategory');
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -103,10 +105,14 @@ test('/slots hides the switch with a single franchise', () => {
 
 test('home shelf: the "All packs" link follows the picked franchise', () => {
   render(
-    createElement(ShelfTabs, {
-      categories,
-      panels: { pokemon: 'POKE', 'one-piece': 'OP' },
-    }),
+    createElement(
+      ShelfCategoryProvider,
+      { categories: packTabs(categories) },
+      createElement(ShelfTabs, {
+        categories: packTabs(categories),
+        panels: { pokemon: 'POKE', 'one-piece': 'OP' },
+      }),
+    ),
   );
   const link = () =>
     [...host.querySelectorAll('a')].find((a) => a.textContent === 'All packs');
