@@ -30,6 +30,9 @@ describe('sqlRefusal', () => {
     'SELECT * FROM pull FOR UPDATE',
     "SELECT nextval('seq')",
     "SELECT * FROM delivery_order WHERE note ILIKE '%for update%'",
+    // Outcomes and the public chance stay readable; only the actual odds hide.
+    "SELECT metadata->>'published_win_percent' FROM ledger_entry WHERE type = 'CF'",
+    "SELECT * FROM admin_action_audit WHERE action = 'edit_odds_set'",
   ])('runs %p', (sql) => {
     expect(sqlRefusal(sql)).toBeNull();
   });
@@ -135,6 +138,16 @@ describe('sqlRefusal', () => {
       'SELECT real_name AS n FROM customer_account_state',
       /real names stay hidden/,
     ],
+    // Owner, 2026-10-30: coin flip's actual odds, rolls and odds sets.
+    ['SELECT * FROM coin_flip_config', /actual odds/],
+    ['TABLE public."COIN_FLIP_ROUND"', /actual odds/],
+    ['SELECT roll AS r FROM coin_flip_round', /actual odds/],
+    [
+      "SELECT before->>'win_percent_2' AS n FROM admin_action_audit",
+      /actual odds/,
+    ],
+    ["SELECT snapshot->>'actual_win_units' FROM x", /actual odds/],
+    ["SELECT metadata->>'odds_set' AS n FROM customer_group", /actual odds/],
     ['SELECT U&"\\0070g_sleep"(1)', /Unicode-escaped/],
     ['SELECT * FROM pull WHERE customer_id = $2', /Placeholders like \$1/],
   ])('refuses %p', (sql, why) => {

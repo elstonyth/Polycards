@@ -310,10 +310,11 @@ function useSoundPlayer() {
   }, []);
 
   const sfx = useCallback(
-    (name: SfxName) => {
+    // `amount` (0-1) scales the cues that take one, e.g. a later, softer bounce.
+    (name: SfxName, amount?: number) => {
       if (mutedRef.current || document.hidden) return;
       if (name === 'reelTick') play('reelTick', 0.6);
-      else playSfx(name);
+      else playSfx(name, amount);
     },
     [play],
   );

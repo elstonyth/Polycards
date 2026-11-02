@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
@@ -16,6 +17,7 @@ import {
   type VaultItem,
   type VaultResult,
 } from '@/lib/actions/vault';
+import { getTicketBalance } from '@/lib/actions/lucky-draw';
 import { type AddressView } from '@/lib/actions/delivery';
 import { getPackGifts } from '@/lib/actions/pack-gifts';
 import type { PackGift } from '@/lib/vault-packs';
@@ -53,7 +55,7 @@ export default function VaultClient({
   initial,
   addresses,
   initialGifts,
-  tickets,
+  tickets: initialTickets,
   spinHref = null,
 }: {
   initial: VaultResult;
@@ -65,7 +67,9 @@ export default function VaultClient({
   /** Where to spin a ticket pack; null with none on sale. */
   spinHref?: string | null;
 }) {
+  const router = useRouter();
   const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
+  const [tickets, setTickets] = useState(initialTickets);
   const [gettingTickets, setGettingTickets] = useState(false);
   const [items, setItems] = useState<VaultItem[]>(
     initial.ok ? initial.items : [],
@@ -238,6 +242,12 @@ export default function VaultClient({
     void getPackGifts()
       .then((g) => {
         if (live && g) setGifts(g);
+      })
+      .catch(() => {});
+    // And for the tickets row: Back can restore a count from before a coin flip.
+    void getTicketBalance()
+      .then((held) => {
+        if (live && held !== null) setTickets(held);
       })
       .catch(() => {});
     return () => {
@@ -413,11 +423,21 @@ export default function VaultClient({
                   Lucky Draw Tickets ×{num(tickets)}
                 </p>
                 <p className="mt-0.5 text-[12px] text-neutral-400">
-                  {tickets > 0
-                    ? 'Put them in the prize pool'
-                    : spinHref
-                      ? 'Earn them from tasks or a capsule'
-                      : 'Earn tickets from tasks'}
+                  {tickets > 0 ? (
+                    <>
+                      Put them in the prize pool, or{' '}
+                      <Link
+                        href="/vault/coin-flip?stake=tickets"
+                        className="font-semibold text-white underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                      >
+                        flip them
+                      </Link>
+                    </>
+                  ) : spinHref ? (
+                    'Earn them from tasks or a capsule'
+                  ) : (
+                    'Earn tickets from tasks'
+                  )}
                 </p>
               </div>
               <div className="flex w-full gap-2 sm:w-auto">
@@ -881,7 +901,7 @@ export default function VaultClient({
       </p>
 
       {items.length > 0 && consent !== null && (
-        <div aria-hidden className="h-36" />
+        <div aria-hidden className="h-52" />
       )}
 
       {items.length > 0 && consent !== null && (
@@ -899,6 +919,13 @@ export default function VaultClient({
           }
           onSell={() => setConfirmBulkSell(true)}
           onDeliver={() => setDeliverOpen(true)}
+          onCoinFlip={() => {
+            if (selected.size > 0 && selected.size <= 20) {
+              const query = new URLSearchParams();
+              for (const id of selected) query.append('pull', id);
+              router.push(`/vault/coin-flip?${query}`);
+            }
+          }}
         />
       )}
 

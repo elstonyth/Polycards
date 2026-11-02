@@ -11,6 +11,7 @@ import { openPackWorkflow } from '../../../../../workflows/open-pack';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
+import { finalizeOpenPulls } from '../../../../../modules/packs/finalize-open-pulls';
 import {
   FLAT_PERCENT,
   UNQUOTED_BUYBACK,
@@ -44,11 +45,13 @@ export async function POST(
   const customerId = req.auth_context.actor_id;
   const { slug } = req.params;
 
-  const { result } = await openPackWorkflow(req.scope).run({
+  const run = await openPackWorkflow(req.scope).run({
     input: { pack_id: slug, customer_id: customerId },
   });
 
   const packsService = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const { result } = run;
+  await finalizeOpenPulls(packsService, run, { customerId, pullIds: [result.pull.id], expectedCount: 1 }, req.scope.resolve(ContainerRegistrationKeys.LOGGER));
 
   // The one-time free welcome open (the claim step stamped source='free' on the
   // pull it just wrote). Read from the PULL, not the pack, so the response can

@@ -16,6 +16,7 @@ import { resolveOddsSetForCustomer } from '../../../../../modules/packs/odds-set
 import { rollTicketSpins } from '../../../../../modules/packs/ticket-spin';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
+import { finalizeOpenPulls } from '../../../../../modules/packs/finalize-open-pulls';
 import {
   bonusShareMyr,
   sellbackHoldBp,
@@ -177,6 +178,7 @@ export async function POST(
     return;
   }
   const { result } = run;
+  await finalizeOpenPulls(packsService, run, { customerId, pullIds: result.pulls.map(pull => pull.id), expectedCount: count }, req.scope.resolve(ContainerRegistrationKeys.LOGGER));
 
   // ⚠ EVERYTHING BELOW IS POST-COMMIT — the workflow has ALREADY debited the
   // customer and written the pull rows, and nothing here can roll that back.

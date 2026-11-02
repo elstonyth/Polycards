@@ -37,6 +37,9 @@ import { LUCKY_DRAW_TIERS } from '@/lib/lucky-draw';
 // Set here because this module is the app's sole `zod` importer.
 z.config({ jitless: true });
 
+// Feature schemas share the CSP-safe parser configuration.
+export { z };
+
 /** The schema type the `Store` port (src/lib/store-port.ts) takes — re-exported
  *  so no other module needs to import zod. */
 export type { ZodType } from 'zod';
@@ -625,6 +628,7 @@ export const CREDIT_REASONS = [
   'delivery_fee',
   // Bonus credit (spec 2026-10-07): an admin grant (+) or take-back (−).
   'bonus_grant',
+  'coin_flip_win',
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 

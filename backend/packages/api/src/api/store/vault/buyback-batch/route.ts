@@ -19,13 +19,12 @@ import { buybackPullWorkflow } from '../../../../workflows/buyback-pull';
 // clears in a single client round-trip and a single rate-limit hit.
 //
 // Money safety is unchanged and per-pull: each iteration is independently
-// atomic (credit row written first under the unique-pull_id guard, then the
-// pull is flipped; the step undoes the credit if the flip fails). A pull that
+// atomic (credit and ownership commit in one customer-locked transaction). A pull that
 // can't be sold — already sold, out for delivery, not owned, a frozen account,
 // or a free welcome pull still locked until the first paid open — is SKIPPED
 // with its reason and reported back; the others still sell. Every gate lives
-// in the step except the lock, which this route reads ONCE for the whole
-// selection (lockedPullIds) instead of once per pull. No pull ever
+// in the shared settlement; this route also skips locked cards before
+// running their workflows. No pull ever
 // leaves 'vaulted' without a matching credit, so a partial batch can never lose
 // a card without paying for it.
 //
@@ -109,10 +108,9 @@ export async function POST(
   // poll. Not worth it for the realistic ≤~300-card case today.
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   // ONE lock read for the selection, not one per pull. A locked pull is
-  // reported without a workflow run; the rest tell the step the lock is
-  // checked. Only the caller's own pulls are read, so a foreign id still
-  // reaches the step and its 404. A lock only ever lifts (the first paid open),
-  // so it cannot appear between this read and the sell.
+  // reported without a workflow run. The settlement rechecks under the credit
+  // lock, as a concurrent pack compensation can remove the first paid open.
+  // Only the caller's own pulls are read, so a foreign id still gets its 404.
   const owned = await packs.listPulls(
     { id: ids, customer_id: customerId },
     { select: ['id', 'source'], take: ids.length },
@@ -131,7 +129,7 @@ export async function POST(
       // delivering, not owned, frozen) surfaces as an `errors` entry instead of
       // aborting the loop — record its reason and keep selling the rest.
       const { result, errors } = await workflow.run({
-        input: { pull_id: id, customer_id: customerId, lock_checked: true },
+        input: { pull_id: id, customer_id: customerId },
         throwOnError: false,
       });
       if (errors && errors.length > 0) {

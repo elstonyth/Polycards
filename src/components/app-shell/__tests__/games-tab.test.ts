@@ -61,9 +61,15 @@ describe('Games tab', () => {
   });
 
   test('the game pages light Games, not Task', () => {
-    for (const path of ['/coin-flip', '/coin-flip/x']) {
+    for (const path of ['/coin-flip', '/coin-flip/x', '/vault/coin-flip']) {
       expect(isTabActive(games, path)).toBe(true);
       expect(isTabActive(task, path)).toBe(false);
+      expect(
+        isTabActive(
+          TABS.find((t) => t.label === 'Vault')!,
+          path,
+        ),
+      ).toBe(false);
     }
     expect(isTabActive(games, '/task')).toBe(false);
   });
@@ -100,7 +106,7 @@ describe('Games tab', () => {
   });
 
   test('Games shows as current while a game is open', async () => {
-    nav.pathname = '/coin-flip';
+    nav.pathname = '/vault/coin-flip';
     await act(async () => root.render(createElement(TabBar)));
     const current = container.querySelectorAll('[aria-current="page"]');
     expect(current).toHaveLength(1);

@@ -40,6 +40,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   'avatar-frames': 'avatar_frame',
   cards: 'card',
   challenge: 'challenge',
+  'coin-flips': 'coin_flip',
   'daily-rewards': 'daily_reward',
   'delivery-orders': 'delivery_order',
   economy: 'economy',

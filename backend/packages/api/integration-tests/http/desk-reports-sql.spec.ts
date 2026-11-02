@@ -1,6 +1,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
+import type PacksModuleService from '../../src/modules/packs/service';
 import { unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -199,6 +200,70 @@ medusaIntegrationTestRunner({
           (await query(`SELECT real_name AS n FROM customer_account_state`))
             .data.message,
         ).toMatch(/real names stay hidden/);
+      });
+
+      // The owner, 2026-10-30. The audit rows and group metadata stay open, so
+      // the odds in them have to hide whatever shape the query gives them.
+      it('never lets coin flip odds or an odds set out', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.saveCoinFlipSettings({
+          settings: {
+            enabled: true,
+            win_percent: 41.25,
+            win_percent_2: 32.75,
+            published_win_percent: 50,
+          },
+          revision: (await packs.coinFlipSettings()).revision,
+          adminId: 'user_desk_check',
+          reason: 'desk bot check',
+        });
+        await customers().createCustomerGroups({
+          name: 'Odds check',
+          metadata: { odds_set: 2 },
+        });
+        const audit = `FROM admin_action_audit a WHERE entity_type LIKE 'coin_flip%'`;
+        for (const sql of [
+          `SELECT before, after ${audit}`,
+          `SELECT after::text AS t ${audit}`,
+          `SELECT left(after::text, 60) AS t ${audit}`,
+          `SELECT a::text AS t ${audit}`,
+          `SELECT to_jsonb(a) AS t ${audit}`,
+          `SELECT array_agg(after)::text AS t ${audit}`,
+          `SELECT ROW(a)::text AS t ${audit}`,
+          `SELECT to_json(after::text)::text AS t ${audit}`,
+        ]) {
+          const res = await query(sql);
+          expect(res.status).toBe(200);
+          expect(res.data.row_count).toBe(1);
+          expect(JSON.stringify(res.data)).not.toMatch(/41\.25|32\.75/);
+        }
+        const published = await query(`SELECT after ${audit}`);
+        expect(published.data.rows[0].after.published_win_percent).toBe(50);
+
+        const group = `FROM customer_group g WHERE name = 'Odds check'`;
+        for (const sql of [
+          `SELECT metadata ${group}`,
+          `SELECT metadata::text AS t ${group}`,
+          `SELECT g::text AS t ${group}`,
+          `SELECT array_agg(metadata)::text AS t ${group}`,
+        ]) {
+          const res = await query(sql);
+          expect(res.status).toBe(200);
+          expect(res.data.row_count).toBe(1);
+          expect(JSON.stringify(res.data)).toContain('[hidden]');
+          expect(JSON.stringify(res.data)).not.toMatch(/odds_set[^,}]*2/);
+        }
+
+        for (const sql of [
+          'SELECT * FROM coin_flip_config',
+          'SELECT roll FROM coin_flip_round',
+          `SELECT after->>'win_percent' AS n ${audit}`,
+          `SELECT metadata->>'odds_set' AS n ${group}`,
+        ]) {
+          const res = await query(sql);
+          expect(res.status).toBe(400);
+          expect(res.data.message).toMatch(/actual odds/);
+        }
       });
 
       it('keeps values as Postgres shows them: a Malaysia time stays one', async () => {

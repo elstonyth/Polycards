@@ -12,6 +12,7 @@ export const CREDIT_REASONS = [
   'referral_commission',
   'delivery_fee',
   'bonus_grant',
+  'coin_flip_win',
 ] as const;
 
 export type CreditReason = (typeof CREDIT_REASONS)[number];

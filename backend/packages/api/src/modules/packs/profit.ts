@@ -124,6 +124,7 @@ export function profitActivity(rows: { reason: string; amount: number }[]) {
     // 0 − x, not −x: an empty period must read 0, never −0.
     pack_sales: (0 - cents('pack_open')) / 100,
     sellbacks: cents('buyback') / 100,
+    coin_flip_payouts: cents('coin_flip_win') / 100,
     promo_given:
       (cents('bonus_grant') +
         cents('reward_credit') +

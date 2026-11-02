@@ -188,6 +188,8 @@ medusaIntegrationTestRunner({
           deliveryFees: 0,
           referralCommission: 0,
           bonusPromo: 0,
+          // Coin flip wins sit outside revenue/net too; none seeded here.
+          coinFlipPayouts: 0,
           net: 38.39,
         });
 

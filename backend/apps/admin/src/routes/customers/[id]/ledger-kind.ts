@@ -7,6 +7,7 @@ export type LedgerKind =
   | 'packOpen'
   | 'packRefund'
   | 'sellback'
+  | 'coinFlip'
   | 'bonusGiven'
   | 'bonusTaken'
   | 'adjustmentIn'
@@ -33,6 +34,8 @@ export function ledgerKind(reason: string, amount: number): LedgerKind {
       return plus ? 'packRefund' : 'packOpen';
     case 'buyback':
       return 'sellback';
+    case 'coin_flip_win':
+      return 'coinFlip';
     case 'bonus_grant':
       return plus ? 'bonusGiven' : 'bonusTaken';
     case 'adjustment':
@@ -76,6 +79,7 @@ export const WALLET_FILTERS = {
   money: ['topup', 'cashout'],
   packs: ['pack_open'],
   sellbacks: ['buyback'],
+  coinFlips: ['coin_flip_win'],
   rewards: [
     'bonus_grant',
     'reward_credit',

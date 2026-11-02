@@ -94,6 +94,7 @@ const GROUPS: Group[] = [
       { path: '/support', label: 'pcNav.customerSupport' },
     ],
   },
+  { path: '/coin-flips', label: 'pcNav.coinFlip', children: [] },
   // Top-level since 2026-10-23: the automation operator role sees only this
   // entry, and a nested entry renders only under a visible parent.
   { path: '/automation', label: 'pcNav.automation', children: [] },

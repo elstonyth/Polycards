@@ -19,6 +19,7 @@ const REASON: Record<string, string> = {
   pack_spin: 'Capsule',
   entry: 'Entered a draw',
   refund: 'Refund',
+  coin_flip: 'Coin flip',
 };
 
 const STATUS = {

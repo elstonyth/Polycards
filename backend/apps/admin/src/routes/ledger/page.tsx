@@ -31,7 +31,7 @@ export const config: RouteConfig = {
 // WP (challenge settlement) is written by settleChallengeWinner (plan 060); RF
 // (the weekly referral commission payout) by payWeeklySettlement. Every type
 // here has a writer, so no option is structurally empty.
-const TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'AD', 'WP', 'WD', 'RF'];
+const TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'AD', 'WP', 'WD', 'RF', 'CF'];
 
 // One colour per kind of movement, so a long day scans by type at a glance:
 // money in green, spending blue, sells and prizes purple, cash out orange.
@@ -47,6 +47,7 @@ const TYPE_COLOR: Record<
   WP: 'purple',
   WD: 'orange',
   RF: 'green',
+  CF: 'purple',
 };
 
 // Type, Player, Time, Wallet, Vault; day rows and the payload span them all.
