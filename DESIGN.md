@@ -472,6 +472,6 @@ drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the fu
 The operator dashboard (`backend/apps/admin`) is a product-register surface built on Medusa UI. Source of truth: `docs/superpowers/specs/2026-10-14-admin-redesign-design.md`.
 
 - **Colours:** Medusa UI's own light and dark themes, chosen per operator in the user menu. The darker "Vault" palette was tried on 2026-10-14 and set aside by the operator in favour of the original colours.
-- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too.
+- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too. The Tasks page's preview of the player's card uses Nekst and the storefront's dark surface, because it shows what players see.
 - **Navigation:** the 8-entry sidebar, with unused core Medusa tabs hidden through `src/_navigation.ts`.
 - **Signal colours** on custom pages follow the storefront's meanings: green for money in, red for alerts, gold for "needs action".
