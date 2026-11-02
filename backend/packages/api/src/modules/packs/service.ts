@@ -7,6 +7,7 @@ import {
   InjectTransactionManager,
   MedusaContext,
   Modules,
+  generateEntityId,
 } from '@medusajs/framework/utils';
 import type {
   Context,
@@ -82,6 +83,7 @@ import AutomationSandbox from './models/automation-sandbox';
 import AutomationLive from './models/automation-live';
 import CustomerAccountState from './models/customer-account-state';
 import PlayerPayoutDetails from './models/player-payout-details';
+import VisitorSignal from './models/visitor-signal';
 import AdminActionAudit from './models/admin-action-audit';
 import VipMemberState from './models/vip-member-state';
 import VipRewardGrant from './models/vip-reward-grant';
@@ -1425,6 +1427,7 @@ class PacksModuleService extends MedusaService({
   AutomationLive,
   CustomerAccountState,
   PlayerPayoutDetails,
+  VisitorSignal,
   AdminActionAudit,
   VipMemberState,
   VipRewardGrant,
@@ -9606,6 +9609,81 @@ class PacksModuleService extends MedusaService({
     return await loadSavedBankAccounts(em, customerId);
   }
 
+  // Which network and browser this account was seen on (ADR 0016). Best effort:
+  // the middleware never awaits it, and nothing refuses a customer because of it.
+  @InjectManager()
+  async recordVisitorSignal(
+    input: { customerId: string; ip: string; deviceId: string | null },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute(
+      'INSERT INTO visitor_signal (id, customer_id, ip, device_id, first_seen_at, last_seen_at) ' +
+        'VALUES (?, ?, ?, ?, now(), now()) ' +
+        'ON CONFLICT (customer_id, ip, device_id) DO UPDATE SET ' +
+        'last_seen_at = now(), hits = visitor_signal.hits + 1, updated_at = now()',
+      [
+        generateEntityId('', 'vsig'),
+        input.customerId,
+        input.ip,
+        input.deviceId ?? '',
+      ],
+    );
+  }
+
+  // Other accounts seen on this customer's browser or network, for support. A
+  // crowded IP lists only its first 10 accounts: a mobile network can put
+  // thousands of strangers on one address, so the smallest groups come first.
+  @InjectManager()
+  async visitorSignalMatches(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    recorded: boolean;
+    device: { customer_id: string; last_seen_at: string }[];
+    ip: { ip: string; accounts: number; customer_ids: string[] }[];
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [seen] = await em.execute<{ n: number }[]>(
+      'SELECT count(*)::int AS n FROM visitor_signal WHERE customer_id = ?',
+      [customerId],
+    );
+    const device = await em.execute<
+      { customer_id: string; last_seen_at: string }[]
+    >(
+      'SELECT customer_id, max(last_seen_at) AS last_seen_at FROM visitor_signal ' +
+        "WHERE customer_id <> ? AND device_id <> '' AND device_id IN " +
+        "(SELECT device_id FROM visitor_signal WHERE customer_id = ? AND device_id <> '') " +
+        'GROUP BY customer_id ORDER BY last_seen_at DESC LIMIT 20',
+      [customerId, customerId],
+    );
+    const ip = await em.execute<
+      { ip: string; accounts: number; customer_ids: string[] }[]
+    >(
+      'SELECT ip, count(DISTINCT customer_id)::int AS accounts, ' +
+        '(array_agg(DISTINCT customer_id))[1:10] AS customer_ids ' +
+        'FROM visitor_signal WHERE customer_id <> ? AND ip IN ' +
+        '(SELECT ip FROM visitor_signal WHERE customer_id = ?) ' +
+        'GROUP BY ip ORDER BY accounts ASC, ip LIMIT 10',
+      [customerId, customerId],
+    );
+    return { recorded: seen.n > 0, device, ip };
+  }
+
+  // The 180 days the privacy page promises (jobs/purge-visitor-signals.ts).
+  @InjectManager()
+  async purgeVisitorSignals(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute(
+      "DELETE FROM visitor_signal WHERE last_seen_at < now() - interval '180 days'",
+    );
+  }
+
   // Has support verified this customer's shared bank account? (ADR 0015.) Read
   // by the payout check, with the same SELECT as savedBankAccountsFor.
   @InjectManager()
@@ -11137,6 +11215,9 @@ class PacksModuleService extends MedusaService({
     );
 
     // Pure personal data, no business value — deleted outright.
+    await em.execute(`delete from "visitor_signal" where "customer_id" = ?`, [
+      customerId,
+    ]);
     await em.execute(
       `delete from "player_payout_details" where "customer_id" = ?`,
       [customerId],

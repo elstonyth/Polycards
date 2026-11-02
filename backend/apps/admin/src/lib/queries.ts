@@ -1358,6 +1358,7 @@ import {
   getCustomerDetail,
   getPayoutDetails,
   getSavedBankAccounts,
+  getVisitorSignals,
   removeSavedBankAccount,
   setBankShareVerified,
   getSpendReport,
@@ -1467,6 +1468,13 @@ export const useSavedBankAccounts = (id: string | null) =>
   useQuery({
     queryKey: qk.savedBankAccounts(id ?? ''),
     queryFn: () => getSavedBankAccounts(id!),
+    enabled: !!id,
+  });
+
+export const useVisitorSignals = (id: string | null) =>
+  useQuery({
+    queryKey: qk.visitorSignals(id ?? ''),
+    queryFn: () => getVisitorSignals(id!),
     enabled: !!id,
   });
 

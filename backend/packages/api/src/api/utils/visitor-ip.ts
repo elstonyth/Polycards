@@ -6,6 +6,7 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { isIP, isIPv6 } from 'node:net';
+import type PacksModuleService from '../../modules/packs/service';
 
 // The visitor address the storefront vouches for.
 //
@@ -30,6 +31,11 @@ import { isIP, isIPv6 } from 'node:net';
 
 const VISITOR_IP_HEADER = 'x-visitor-ip';
 const VISITOR_SIG_HEADER = 'x-visitor-sig';
+// The storefront's browser id (src/lib/visitor-ip.ts). Not signed itself: only a
+// request with a valid pair is read, and only the storefront can make one.
+const VISITOR_DEVICE_HEADER = 'x-visitor-device';
+const DEVICE_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // Both apps keep synced clocks. Five minutes absorbs drift and a slow hop, and
 // bounds how long one signed pair stays usable.
 const MAX_SKEW_S = 300;
@@ -102,6 +108,46 @@ export function visitorBucket(ip: string): string {
     .map((g) => parseInt(g, 16).toString(16))
     .join(':');
   return `${prefix}::/64`;
+}
+
+/**
+ * Notes which network and browser this customer was seen on, for support's
+ * same-device and same-network flags (ADR 0016). After authenticate and the rate
+ * limit, on low-traffic routes only: signup, claims, withdrawal. Never awaited and
+ * never in the way: a failure here must not cost a customer their request, and an
+ * unsigned request records nothing.
+ */
+export function recordVisitorSignal(
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  const ip = vouchedVisitorIp(req);
+  const customerId = (req as { auth_context?: { actor_id?: string } })
+    .auth_context?.actor_id;
+  if (ip && customerId) {
+    const device = req.headers[VISITOR_DEVICE_HEADER];
+    const warn = (error: unknown) =>
+      (req.scope.resolve('logger') as { warn: (msg: string) => void }).warn(
+        `[visitor-signal] not recorded: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    try {
+      req.scope
+        .resolve<Pick<PacksModuleService, 'recordVisitorSignal'>>('packs')
+        .recordVisitorSignal({
+          customerId,
+          ip: visitorBucket(ip),
+          deviceId:
+            typeof device === 'string' && DEVICE_ID.test(device)
+              ? device
+              : null,
+        })
+        .catch(warn);
+    } catch (error) {
+      warn(error);
+    }
+  }
+  next();
 }
 
 /**

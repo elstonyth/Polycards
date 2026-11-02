@@ -19,12 +19,45 @@
  * No secret, no header, or a header that is not exactly one address: nothing
  * is added, and the backend keys that request as it always has. Server-only:
  * the secret must never reach a browser bundle.
+ *
+ * Beside the pair goes a random id for this browser (x-visitor-device, from the
+ * DEVICE_COOKIE first-party cookie), for support's same-device flag (ADR 0016). A
+ * security cookie, so it is set whichever way the cookie banner was answered.
+ * It is created on a write only: an anonymous page must not carry a Set-Cookie,
+ * or the CDN stops caching it.
  */
 import 'server-only';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import type { FetchArgs } from '@medusajs/js-sdk';
+
+const DEVICE_COOKIE = '_polycards_device';
+const DEVICE_COOKIE_MAX_AGE = 60 * 60 * 24 * 400; // the most browsers allow
+const DEVICE_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** This browser's id, or null: none yet on a read, or nowhere to set one (a
+ *  render reads cookies but only a server action or route handler can set them). */
+async function deviceId(write: boolean): Promise<string | null> {
+  try {
+    const store = await cookies();
+    const current = store.get(DEVICE_COOKIE)?.value;
+    if (current && DEVICE_ID.test(current)) return current;
+    if (!write) return null;
+    const fresh = randomUUID();
+    store.set(DEVICE_COOKIE, fresh, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: DEVICE_COOKIE_MAX_AGE,
+    });
+    return fresh;
+  } catch {
+    return null;
+  }
+}
 
 async function visitorPair(
   secret: string,
@@ -60,6 +93,15 @@ export async function withVisitor(
   const read = method === 'GET' || method === 'HEAD';
   if (read && init?.cache !== 'no-store') return init;
   const pair = await visitorPair(secret);
-  // Last, so the pair always names the address that was signed.
-  return pair ? { ...init, headers: { ...init?.headers, ...pair } } : init;
+  if (!pair) return init;
+  const device = await deviceId(!read);
+  return {
+    ...init,
+    // Last, so the pair always names the address that was signed.
+    headers: {
+      ...init?.headers,
+      ...(device ? { 'x-visitor-device': device } : {}),
+      ...pair,
+    },
+  };
 }

@@ -160,6 +160,10 @@ export const SECRET_READS = [
     resource: 'customer_bank_account',
   },
   {
+    matcher: '/admin/customers/*/visitor-signals',
+    resource: 'customer_bank_account',
+  },
+  {
     matcher: '/admin/payments/withdrawals/*/account',
     resource: 'customer_bank_account',
   },

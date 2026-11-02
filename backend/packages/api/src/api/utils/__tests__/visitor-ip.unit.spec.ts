@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
+  recordVisitorSignal,
   requireVouchedVisitor,
   visitorBucket,
   vouchedVisitorIp,
@@ -198,5 +199,105 @@ describe('requireVouchedVisitor', () => {
       ['/store/phone-verification/start', ['POST']],
     ]);
     expect(entries[0].middlewares.trim()).toMatch(/^requireVouchedVisitor,/);
+  });
+});
+
+describe('recordVisitorSignal', () => {
+  const DEVICE = '3f2b8c1e-7a4d-4e9a-9c11-5d6e7f8a9b0c';
+  const ORIGINAL = process.env.STOREFRONT_VISITOR_SECRET;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.STOREFRONT_VISITOR_SECRET;
+    else process.env.STOREFRONT_VISITOR_SECRET = ORIGINAL;
+    jest.restoreAllMocks();
+  });
+
+  const signedHeaders = (
+    ip: string,
+    seconds = Math.floor(Date.now() / 1000),
+  ) => ({
+    'x-visitor-ip': ip,
+    'x-visitor-sig': `${seconds}.${createHmac('sha256', SECRET).update(`${ip}|${seconds}`).digest('hex')}`,
+  });
+
+  const run = (
+    headers: Record<string, string>,
+    record = jest.fn().mockResolvedValue(undefined),
+    actor: string | undefined = 'cus_1',
+  ) => {
+    process.env.STOREFRONT_VISITOR_SECRET = SECRET;
+    const warn = jest.fn();
+    const next = jest.fn();
+    recordVisitorSignal(
+      {
+        headers,
+        auth_context: { actor_id: actor },
+        scope: {
+          resolve: (key: string) =>
+            key === 'logger' ? { warn } : { recordVisitorSignal: record },
+        },
+      } as never,
+      {} as never,
+      next,
+    );
+    return { record, next, warn };
+  };
+
+  it('records a signed visitor with their browser id', () => {
+    const { record, next } = run({
+      ...signedHeaders('175.143.0.1'),
+      'x-visitor-device': DEVICE,
+    });
+    expect(record).toHaveBeenCalledWith({
+      customerId: 'cus_1',
+      ip: '175.143.0.1',
+      deviceId: DEVICE,
+    });
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('stores an IPv6 visitor as their /64', () => {
+    const { record } = run(signedHeaders('2001:db8:1:2:3:4:5:6'));
+    expect(record.mock.calls[0][0].ip).toBe('2001:db8:1:2::/64');
+  });
+
+  it('drops a browser id that is not one of ours', () => {
+    const { record } = run({
+      ...signedHeaders('175.143.0.1'),
+      'x-visitor-device': "x' OR 1=1",
+    });
+    expect(record.mock.calls[0][0].deviceId).toBeNull();
+  });
+
+  it('records nothing for an unsigned request, whatever it claims', () => {
+    const { record, next } = run({
+      'x-visitor-ip': '175.143.0.1',
+      'x-visitor-device': DEVICE,
+    });
+    expect(record).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('records nothing without a customer', () => {
+    const { record, next } = run(signedHeaders('175.143.0.1'), undefined, '');
+    expect(record).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('a failed write never costs the customer their request', async () => {
+    const { next, warn } = run(
+      signedHeaders('175.143.0.1'),
+      jest.fn().mockRejectedValue(new Error('db down')),
+    );
+    expect(next).toHaveBeenCalledWith();
+    await new Promise((r) => setImmediate(r));
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not wait for the write', () => {
+    const { next } = run(
+      signedHeaders('175.143.0.1'),
+      jest.fn().mockReturnValue(new Promise(() => {})),
+    );
+    expect(next).toHaveBeenCalledWith();
   });
 });

@@ -300,6 +300,9 @@ describe('purgeAccountPacksData', () => {
       'delete from "player_payout_details"',
     );
     expect(writesIn(f.sql).join('\n')).toContain(
+      'delete from "visitor_signal"',
+    );
+    expect(writesIn(f.sql).join('\n')).toContain(
       'delete from "notification_read"',
     );
   });
