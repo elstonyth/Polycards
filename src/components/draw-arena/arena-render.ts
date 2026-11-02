@@ -33,7 +33,7 @@ export type ArenaRenderer = {
   draw: (t: number, dt: number) => void;
 };
 
-const TOKEN_MIN_R = 2.2; // css px: below this a face can't be seen, so a dot
+const TOKEN_MIN_R = 1.9; // css px: below this a face can't be seen, so a dot
 const SHADOW_MIN_R = 7;
 const LABEL_MIN_R = 17;
 const DOT_COLOR = '#9a9ea8';
@@ -800,25 +800,4 @@ export function arenaHud(cast: ArenaCast, step: number): ArenaHud {
             share: (byOwner.get(me) ?? 0) / total,
           },
   };
-}
-
-/** The discs worth a picture: owners whose disc gets big, winner and viewer first.
- *  Everyone else stays a dot, so a big gate never loads hundreds of images. */
-export function entriesWorthAPicture(
-  cast: ArenaCast,
-  winner: number,
-  max: number,
-): number[] {
-  const { run, owners, me } = cast;
-  const best = new Map<number, number>();
-  for (let d = 0; d < owners.length; d++) {
-    const owner = owners[d] as number;
-    const peak = run.peak[d] as number;
-    if (peak > (best.get(owner) ?? 0)) best.set(owner, peak);
-  }
-  const ranked = [...best.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
-    .map(([entry]) => entry);
-  const first = me == null ? [winner] : [winner, me];
-  return [...new Set([...first, ...ranked])].slice(0, max);
 }

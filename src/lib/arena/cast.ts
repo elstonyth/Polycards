@@ -1,8 +1,14 @@
 import { arenaRng, type Seed4 } from './engine';
 
-/** A battle's discs, whatever the gate's size: a two-player gate gets a real
- *  battle and a huge one still starts fast on a phone. */
+/** The least a battle has: a two-player gate still gets a real one. */
 export const ARENA_DOTS = 320;
+/** A big gate's table grows with its players, or tickets stop showing: at one disc
+ *  each, 770 tickets and 1 ticket look the same. Two is enough to show them (a 13%
+ *  holder gets 11% of a 326-player table, against 12% at three) and leaves discs big
+ *  enough for a face from the first frame. */
+const DOTS_PER_PLAYER = 2;
+/** Where that stops: past it, discs are too small for a face. */
+export const ARENA_SCALED_DOTS = 1000;
 /** More entrants than discs: every entrant needs one, up to this. */
 export const ARENA_MAX_DOTS = 2000;
 
@@ -34,7 +40,14 @@ export function arenaSeed(text: string): Seed4 {
 
 /** How many discs a battle needs for this many entrants. */
 export const arenaDots = (entrants: number): number =>
-  Math.min(ARENA_MAX_DOTS, Math.max(ARENA_DOTS, entrants));
+  Math.min(
+    ARENA_MAX_DOTS,
+    Math.max(
+      ARENA_DOTS,
+      Math.min(ARENA_SCALED_DOTS, entrants * DOTS_PER_PLAYER),
+      entrants,
+    ),
+  );
 
 /** Discs per entry, in proportion to tickets, adding up to `dots` exactly. One disc
  *  only where a fair share is under one, so what a big holder sees matches their
