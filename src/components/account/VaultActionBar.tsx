@@ -123,7 +123,9 @@ export function VaultActionBar({
           disabled={none || selectedCount > 20 || busy}
           onClick={onCoinFlip}
         >
-          {selectedCount > 20 ? 'Select up to 20 cards to coin flip' : 'Coin flip'}
+          {selectedCount > 20
+            ? 'Select up to 20 cards to coin flip'
+            : 'Coin flip'}
         </Pill>
       )}
     </div>
