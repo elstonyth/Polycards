@@ -27,7 +27,11 @@ import {
 import { store } from '@/lib/store';
 import { friendlyFailure } from '@/lib/errors';
 import { RealNameSchema } from '@/lib/data/schemas';
-import { normalizeRealName, REAL_NAME_INVALID } from '@/lib/real-name';
+import {
+  normalizeRealName,
+  REAL_NAME_INVALID,
+  REAL_NAME_TAKEN,
+} from '@/lib/real-name';
 
 export type ProfileCustomer = {
   id: string;
@@ -141,6 +145,7 @@ const REAL_NAME_RULES: ErrorRule[] = [
     'Your real name is already saved. Contact customer service to correct it.',
   ],
   [/exactly as it appears/i, REAL_NAME_INVALID],
+  [/linked to another/i, REAL_NAME_TAKEN],
 ];
 
 /**

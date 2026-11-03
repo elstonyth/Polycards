@@ -5,6 +5,7 @@ import {
   REAL_NAME_INVALID,
   REAL_NAME_MAX,
   REAL_NAME_MIN,
+  REAL_NAME_TAKEN,
 } from '@/lib/real-name';
 // Plain TS with no Medusa imports, so directly importable across the package
 // boundary (same technique as free-pack-parity.test.ts).
@@ -13,6 +14,7 @@ import {
   REAL_NAME_INVALID as BACKEND_REAL_NAME_INVALID,
   REAL_NAME_MAX as BACKEND_REAL_NAME_MAX,
   REAL_NAME_MIN as BACKEND_REAL_NAME_MIN,
+  REAL_NAME_TAKEN as BACKEND_REAL_NAME_TAKEN,
 } from '../../../backend/packages/api/src/utils/real-name';
 
 // The storefront's check is a courtesy; the backend's is the one that refuses.
@@ -23,6 +25,7 @@ describe('real-name validator parity (storefront ↔ backend)', () => {
     expect(REAL_NAME_MIN).toBe(BACKEND_REAL_NAME_MIN);
     expect(REAL_NAME_MAX).toBe(BACKEND_REAL_NAME_MAX);
     expect(REAL_NAME_INVALID).toBe(BACKEND_REAL_NAME_INVALID);
+    expect(REAL_NAME_TAKEN).toBe(BACKEND_REAL_NAME_TAKEN);
   });
 
   it.each([

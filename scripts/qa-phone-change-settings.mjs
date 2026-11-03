@@ -92,7 +92,11 @@ const { token: apiToken } = await fetch(`${BACKEND}/auth/customer/emailpass`, {
 const named = await fetch(`${BACKEND}/store/customers/me/real-name`, {
   method: 'POST',
   headers: storeHeaders(apiToken),
-  body: JSON.stringify({ real_name: 'Qa Phone Lock' }),
+  body: JSON.stringify({
+    real_name: `Qa Phone Lock ${Math.random()
+      .toString(36)
+      .replace(/[^a-z]/g, '')}`,
+  }),
 });
 check(named.ok, 'seed: real name on file');
 

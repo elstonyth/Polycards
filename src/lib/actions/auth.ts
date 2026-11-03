@@ -30,13 +30,18 @@ import { sdk } from '@/lib/medusa';
 import { store } from '@/lib/store';
 import { UncheckedSchema } from '@/lib/data/schemas';
 import { logger } from '@/lib/logger';
-import { normalizeRealName, REAL_NAME_INVALID } from '@/lib/real-name';
+import {
+  normalizeRealName,
+  REAL_NAME_INVALID,
+  REAL_NAME_TAKEN,
+} from '@/lib/real-name';
 import { saveRealName } from '@/lib/actions/customer';
 import {
   setAuthToken,
   clearAuthToken,
   setOauthState,
   markSignup,
+  markRealNameRefused,
 } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
@@ -356,7 +361,13 @@ export async function signup(input: {
       const saved = await saveRealName({ real_name: realName }).catch(
         () => null,
       );
-      if (!saved?.ok) logger.error('[auth] real name after signup failed');
+      // A name another account holds is the customer's to fix, not an error of
+      // ours, and the gate says why when it opens.
+      if (saved?.ok !== true) {
+        if (saved?.error === REAL_NAME_TAKEN)
+          await markRealNameRefused(result.customer.id);
+        else logger.error('[auth] real name after signup failed');
+      }
       // One-shot referral attribution: the code from the form, else the
       // /r/<code> cookie. Swallows every failure internally — a referral
       // hiccup must never fail a signup.

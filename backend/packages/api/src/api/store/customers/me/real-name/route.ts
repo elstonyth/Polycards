@@ -34,6 +34,7 @@ export async function GET(
 // The storefront calls it right after signup and from the real-name gate /
 // Settings for accounts that have none yet. Once a name is on file it is
 // refused: only customer service changes it (POST /admin/customers/:id/real-name).
+// setRealName also refuses a name another account holds (ADR 0015).
 //
 // The actor comes from the verified bearer, never the body. Register-token
 // bearers carry actor_id '' until POST /store/customers links the identity

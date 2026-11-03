@@ -67,7 +67,11 @@ console.log('login:', await login());
 async function passRealNameGate() {
   const gate = page.getByRole('dialog', { name: 'Add your real name' });
   if (!(await gate.isVisible().catch(() => false))) return;
-  await gate.locator('input[name="real_name"]').fill('Qa Test Customer');
+  await gate.locator('input[name="real_name"]').fill(
+    `Qa Test Customer ${Math.random()
+      .toString(36)
+      .replace(/[^a-z]/g, '')}`,
+  );
   await gate.getByRole('button', { name: 'Continue' }).click();
   await gate.getByRole('button', { name: 'Confirm real name' }).click();
   await gate.waitFor({ state: 'detached', timeout: 20000 });

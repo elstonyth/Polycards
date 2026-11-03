@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
@@ -10,6 +11,7 @@ import {
   REAL_NAME_HINT,
   REAL_NAME_INVALID,
   REAL_NAME_MAX,
+  REAL_NAME_TAKEN,
 } from '@/lib/real-name';
 
 /**
@@ -23,13 +25,15 @@ import {
  */
 export function RealNameEntry({
   onSaved,
+  initialError,
 }: {
   onSaved: (realName: string) => void;
+  initialError?: string;
 }) {
   const [step, setStep] = useState<'entry' | 'confirm'>('entry');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const errorId = useId();
   const hintId = useId();
 
@@ -127,6 +131,14 @@ export function RealNameEntry({
         className={error ? 'text-[12px] text-red-400' : 'sr-only'}
       >
         {error}
+        {error === REAL_NAME_TAKEN && (
+          <>
+            {' '}
+            <Link href="/contact" className="underline">
+              Contact support
+            </Link>
+          </>
+        )}
       </p>
       <Pill type="submit" size="lg" className="w-full">
         Continue

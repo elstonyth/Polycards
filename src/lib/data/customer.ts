@@ -27,6 +27,8 @@ import { CONSENT_KEY } from '@/lib/consent';
 // every backend call 401s.
 const COOKIE_MAX_AGE = 60 * 60 * 24; // 1 day
 
+const REAL_NAME_REFUSED_COOKIE = '_polycards_name_refused';
+
 const OAUTH_STATE_COOKIE = '_polycards_oauth';
 const OAUTH_COOKIE_PATH = '/auth/google';
 
@@ -40,6 +42,27 @@ export async function setAuthToken(token: string): Promise<void> {
     path: '/',
     maxAge: COOKIE_MAX_AGE,
   });
+}
+
+/**
+ * Signup can't show that its real name was refused (ADR 0015), because the
+ * account exists by then. The gate reads this to say why as soon as it opens.
+ * Holds the customer's id, so nobody else signing in here sees it.
+ */
+export async function markRealNameRefused(customerId: string): Promise<void> {
+  const store = await cookies();
+  store.set(REAL_NAME_REFUSED_COOKIE, customerId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 60 * 60,
+  });
+}
+
+export async function realNameWasRefused(customerId: string): Promise<boolean> {
+  const store = await cookies();
+  return store.get(REAL_NAME_REFUSED_COOKIE)?.value === customerId;
 }
 
 /**

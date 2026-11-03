@@ -56,3 +56,10 @@ Accepted, with what covers each:
   delivery fee.
 - Deleting an account frees its numbers, because the deletion scrub cuts its payout rows
   to the last 4 digits. Deletion is operator-run only, so a person decides.
+- A real name another account holds is refused at save, ignoring case and the separators
+  a name may carry (owner, 2026-11-03, chosen over sending it to staff review). Names
+  already on file stay. Real names aren't verified, so one changed letter or a reordered
+  name passes, and the refusal tells whoever tries that a name is on the platform,
+  though never whose, so one account gets 10 tries an hour. Whoever saves a name first
+  holds it, so two real people with one name, or someone whose name a stranger saved,
+  go through support, who can set it from the player page.

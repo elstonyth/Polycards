@@ -19,6 +19,7 @@ import type { MemoryRoutes } from '@/lib/store-memory';
 const mocks = vi.hoisted(() => ({
   setAuthToken: vi.fn(),
   clearAuthToken: vi.fn(),
+  markRealNameRefused: vi.fn(),
   setOauthState: vi.fn(),
   takeOauthState: vi.fn(),
   fetchProfileHandle: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock('@/lib/data/customer', () => ({
   setOauthState: mocks.setOauthState,
   takeOauthState: mocks.takeOauthState,
   markSignup: mocks.markSignup,
+  markRealNameRefused: mocks.markRealNameRefused,
   getAuthToken: vi.fn(),
 }));
 vi.mock('@/lib/phone-verification', () => ({
@@ -110,6 +112,7 @@ import {
   googleCallback,
   checkReferralCode,
 } from '../auth';
+import { REAL_NAME_TAKEN } from '@/lib/real-name';
 import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 import { NextRequest } from 'next/server';
 import { GET as googleCallbackGET } from '@/app/auth/google/callback/route';
@@ -282,6 +285,33 @@ describe('signup — required real name', () => {
     });
     // The account exists; the real-name gate asks again on the next visit.
     expect(r.ok).toBe(true);
+    expect(mocks.markRealNameRefused).not.toHaveBeenCalled();
+    expect(mocks.logError).toHaveBeenCalled();
+  });
+
+  it('leaves the gate a reason when another account holds the name', async () => {
+    backend({
+      ...TOKENS,
+      'POST /store/customers/me/real-name': {
+        status: 400,
+        body: { message: REAL_NAME_TAKEN },
+      },
+    });
+    mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: { id: 'c1', email: 'new@polycards.app', first_name: null },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
+      phone: '010-766 7787',
+    });
+    expect(r.ok).toBe(true);
+    expect(mocks.markRealNameRefused).toHaveBeenCalledWith('c1');
+    expect(mocks.logError).not.toHaveBeenCalled();
   });
 });
 
