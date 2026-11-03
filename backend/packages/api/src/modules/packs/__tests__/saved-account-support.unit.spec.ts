@@ -400,6 +400,11 @@ describe('setHolderNameCleared', () => {
   it('stamps the name with the accounts holding it now, keeps the rest, audits them', async () => {
     const { svc, writes, audits, ctx } = withHolders({ avatar_url: 'a' });
     await svc.setHolderNameCleared(input, ctx);
+    expect(svc.holderNameHolders).toHaveBeenCalledWith(
+      'cus_1',
+      'Tan Ah Kow',
+      ctx,
+    );
     expect(writes[0]).toMatchObject({
       avatar_url: 'a',
       holder_name_cleared: {
@@ -421,13 +426,10 @@ describe('setHolderNameCleared', () => {
     expect(writes).toEqual([]);
   });
 
-  it('refuses a name on many accounts: that is a ring, not a clash', async () => {
-    const { svc, writes, ctx } = withHolders(
-      {},
-      ['cus_2', 'cus_3', 'cus_4', 'cus_5', 'cus_6', 'cus_7'],
-    );
+  it('refuses a name on more than one other account', async () => {
+    const { svc, writes, ctx } = withHolders({}, ['cus_2', 'cus_3']);
     await expect(svc.setHolderNameCleared(input, ctx)).rejects.toThrow(
-      /6 other accounts use this name/,
+      /2 other accounts use this name/,
     );
     expect(writes).toEqual([]);
   });
@@ -443,6 +445,14 @@ describe('setHolderNameCleared', () => {
       stamped.ctx,
     );
     expect(stamped.writes[0].holder_name_cleared).toBeUndefined();
+
+    const never = withHolders({});
+    await never.svc.setHolderNameCleared(
+      { ...input, cleared: false },
+      never.ctx,
+    );
+    expect(never.writes).toEqual([]);
+    expect(never.audits).toEqual([]);
 
     const same = withHolders({
       holder_name_cleared: {

@@ -523,6 +523,16 @@ medusaIntegrationTestRunner({
         );
         expect(saved.status).toBe(200);
         expect(await accounts(b)).toHaveLength(1);
+        // The customer's own record never carries support's note: it names the
+        // other account. Its metadata is served (the saved list is there).
+        const me = await unwrapResponse(
+          api.get('/store/customers/me', asCustomer(b)),
+        );
+        expect(me.status).toBe(200);
+        expect(me.data.customer.metadata).toHaveProperty('bank_accounts');
+        expect(me.data.customer.metadata).not.toHaveProperty(
+          'holder_name_cleared',
+        );
       });
 
       it("a Touch 'n Go under another name than the saved bank is refused", async () => {
