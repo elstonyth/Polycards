@@ -1389,6 +1389,7 @@ import {
   removeSavedBankAccount,
   setBankShareVerified,
   setHolderNameCleared,
+  unbanBankNumber,
   getSpendReport,
   getCustomerMoney,
   type CustomerMoney,
@@ -1545,6 +1546,20 @@ export const useSetBankShareVerified = (id: string) => {
     }) => setBankShareVerified(id, vars.accountId, vars.verified, vars.reason),
     onSuccess: (_data, vars) => {
       toast.success(vars.verified ? 'Bank account verified' : 'Hold put back');
+      invalidateBankAccountCards(qc);
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useUnbanBankNumber = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { bankCode: string; last4: string; reason: string }) =>
+      unbanBankNumber(id, vars.bankCode, vars.last4, vars.reason),
+    onSuccess: () => {
+      toast.success('Bank number taken off the ban list');
       invalidateBankAccountCards(qc);
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
     },

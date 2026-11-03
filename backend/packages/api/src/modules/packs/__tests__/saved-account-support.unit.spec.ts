@@ -514,3 +514,75 @@ describe('holderNameHeldByAnother — a name support cleared', () => {
     ).resolves.toBe(false);
   });
 });
+
+describe('bannedPayoutAccountsOf / liftPayoutAccountBan', () => {
+  const BANNED = '512345670001';
+  const service = (banned: string[]) => {
+    const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
+    const audits: Record<string, unknown>[][] = [];
+    const deleted: unknown[] = [];
+    const execute = jest.fn(async (query: string, params: unknown[] = []) => {
+      if (query.startsWith('SELECT metadata')) {
+        return [{ metadata: { bank_accounts: [ACCOUNT] } }];
+      }
+      if (query.startsWith('SELECT DISTINCT bank_code')) {
+        return [
+          { bank_code: 'MBBEMYKL', account_number: BANNED },
+          // A deleted account's row keeps its last 4 only.
+          { bank_code: 'MBBEMYKL', account_number: '9999' },
+        ];
+      }
+      if (query.startsWith('SELECT account_key')) {
+        const asked = String(params[0]).split(',');
+        return banned
+          .filter((k) => asked.includes(k))
+          .map((account_key) => ({ account_key }));
+      }
+      if (query.startsWith('DELETE')) deleted.push(params[0]);
+      return [];
+    });
+    Object.assign(svc, {
+      createAdminActionAudits: jest.fn(async (rows: Record<string, unknown>[]) => {
+        audits.push(rows);
+      }),
+    });
+    const em = { execute };
+    return { svc, audits, deleted, ctx: { transactionManager: em, manager: em } as never };
+  };
+  const input = {
+    customerId: 'cus_1',
+    adminId: 'user_1',
+    last4: '0001',
+    reason: 'owner approved',
+  };
+
+  it("lists the player's banned numbers by bank and last 4", async () => {
+    const { svc, ctx } = service([BANNED]);
+    await expect(svc.bannedPayoutAccountsOf('cus_1', ctx)).resolves.toEqual([
+      { account_key: BANNED, bank_code: 'MBBEMYKL', last4: '0001' },
+    ]);
+  });
+
+  it('deletes the one match and audits bank and last 4 only', async () => {
+    const { svc, audits, deleted, ctx } = service([BANNED]);
+    await expect(svc.liftPayoutAccountBan(input, ctx)).resolves.toEqual({
+      bank_code: 'MBBEMYKL',
+      last4: '0001',
+    });
+    expect(deleted).toEqual([BANNED]);
+    expect(audits[0][0]).toMatchObject({
+      entity_id: 'cus_1',
+      before: { banned_number: { bank_code: 'MBBEMYKL', last4: '0001' } },
+      after: { banned_number: null },
+    });
+    expect(JSON.stringify(audits)).not.toContain(BANNED);
+  });
+
+  it('refuses a number not banned on this player, and deletes nothing', async () => {
+    const { svc, deleted, ctx } = service([]);
+    await expect(svc.liftPayoutAccountBan(input, ctx)).rejects.toThrow(
+      /No banned bank number ending 0001/,
+    );
+    expect(deleted).toEqual([]);
+  });
+});

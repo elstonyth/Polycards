@@ -36,6 +36,16 @@ export type Proposal =
       /** When the ban this was proposed for began: a newer ban is not lifted
        *  by an old button. */
       banned_at: string;
+    }
+  // Taking a bank number off the ban list (owner, 2026-11-04), named by last 4
+  // among one player's own numbers: the token never carries a full number.
+  | {
+      kind: 'unban_number';
+      customer_id: string;
+      username: string;
+      bank_code: string;
+      last4: string;
+      reason: string;
     };
 
 /** What an unban needs, checked again when the person taps it: its own policy
@@ -133,6 +143,33 @@ export async function saveProposal(
       });
     } catch (err) {
       // Already lifted (a second tap) or never a permanent ban.
+      if (
+        err instanceof MedusaError &&
+        (err.type === MedusaError.Types.NOT_ALLOWED ||
+          err.type === MedusaError.Types.NOT_FOUND)
+      ) {
+        throw new ConfirmRefused(err.message);
+      }
+      throw err;
+    }
+    return { id: proposal.customer_id };
+  }
+  if (proposal.kind === 'unban_number') {
+    if (!(await access.can?.(UNBAN_NEED))) {
+      throw new ConfirmRefused('Your role cannot unban bank numbers.');
+    }
+    try {
+      await container
+        .resolve<PacksModuleService>(PACKS_MODULE)
+        .liftPayoutAccountBan({
+          customerId: proposal.customer_id,
+          adminId: access.userId,
+          last4: proposal.last4,
+          bankCode: proposal.bank_code,
+          reason: proposal.reason,
+        });
+    } catch (err) {
+      // Already lifted (a second tap), or no longer on this player.
       if (
         err instanceof MedusaError &&
         (err.type === MedusaError.Types.NOT_ALLOWED ||

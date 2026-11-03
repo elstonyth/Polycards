@@ -17,6 +17,7 @@ import {
 import type { Need } from './access';
 import { UNBAN_NEED, type Proposal } from './confirm';
 import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
+import { MY_BANKS, SG_BANKS, findBank } from '../../../modules/packs/banks';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 
 // The assistant's own memory and search (owner, 2026-10-29: "it will search
@@ -124,7 +125,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'unban_account',
     label: 'Unban',
     description:
-      'Lift a permanent ban (one person with more than one account, owner 2026-11-03) when staff ask you to unban a player, by shown name or profile handle (never email or phone). Nothing changes until the person taps Unban under your answer. On unban the player can log in again and every saved bank account on it is cleared: they link a bank again themselves, under the normal rules, and a banned bank number stays banned. Only a permanent ban is lifted here; a staff disable or a deleted account is handled on the admin player page. Use ban_reason first if staff want to know why it was banned.',
+      'Lift a permanent ban (one person with more than one account, owner 2026-11-03) when staff ask you to unban a player, by shown name or profile handle (never email or phone). Nothing changes until the person taps Unban under your answer. On unban the player can log in again and every saved bank account on it is cleared: they link a bank again themselves, under the normal rules, and a banned bank number stays banned (unban_bank_number lifts one). Only a permanent ban is lifted here; a staff disable or a deleted account is handled on the admin player page. Use ban_reason first if staff want to know why it was banned.',
     parameters: {
       type: 'object',
       properties: {
@@ -213,6 +214,114 @@ export const AGENT_TOOLS: AgentTool[] = [
         unbanned: false,
         waiting:
           'Nothing has changed yet: an Unban button is under your answer, and the ban is lifted only when the person taps it. Tell them so in one short line, and that the player must link their bank again.',
+      });
+    },
+  },
+  {
+    name: 'unban_bank_number',
+    label: 'Unban bank number',
+    description:
+      "Take a bank number off the ban list (the farm-ring numbers banned 2026-11-03) when staff ask you to unban a bank number or bank account. Name it by the player whose banks or payouts carry it (shown name or profile handle) and its last 4 digits, plus the bank when two of that player's banned numbers end the same. Nothing changes until the person taps the button under your answer. It only lifts the ban: another account that saved or was paid to the same number still holds it, so the customer's own save stays refused as shared until support adds it to its owner on the admin player page. Use ban_reason first to see a player's banned numbers.",
+    parameters: {
+      type: 'object',
+      properties: {
+        username: {
+          type: 'string',
+          description:
+            "The player whose banks or payouts carry the number: shown name or profile handle, exactly as staff wrote it.",
+        },
+        last4: {
+          type: 'string',
+          description: 'The last 4 digits of the bank number, as staff wrote them.',
+        },
+        bank: {
+          type: 'string',
+          description:
+            'The bank, e.g. Maybank or Public Bank, only when needed to tell two numbers apart.',
+        },
+        reason: {
+          type: 'string',
+          description: "Why it is lifted, in staff's words.",
+        },
+      },
+      required: ['username', 'last4'],
+      additionalProperties: false,
+    },
+    needs: [UNBAN_NEED],
+    run: async (args, ctx) => {
+      const username = str(args.username);
+      const last4 = str(args.last4);
+      if (!username) throw new Error('username is required.');
+      if (!/^[0-9]{4}$/.test(last4)) {
+        throw new Error('last4 must be the last 4 digits. Nothing was changed.');
+      }
+      // Only what the person named in this very message: the player as a whole
+      // word, and the 4 digits, so data the model read cannot start one.
+      const text = ctx.userText ?? '';
+      const words = text.toLowerCase().split(/[^a-z0-9_-]+/);
+      if (!words.includes(username.toLowerCase()) || !text.includes(last4)) {
+        throw new Error(
+          'Unban only a bank number the person named in this message, with the player it is on. Nothing was changed.',
+        );
+      }
+      const packs = ctx.container.resolve<PacksModuleService>(PACKS_MODULE);
+      const byName = await packs.findCustomerIdByUsername(username);
+      const byHandle = await packs.findCustomerIdByHandle(username);
+      if (byName && byHandle && byName !== byHandle) {
+        throw new Error(
+          `${username} is a shown name and a different player's handle. Ask staff for the name shown on the profile. Nothing was changed.`,
+        );
+      }
+      const customerId = byName ?? byHandle;
+      if (!customerId) {
+        throw new Error(`No player named ${username}. Nothing was changed.`);
+      }
+      const bankArg = str(args.bank).toLowerCase();
+      const bank = bankArg
+        ? (findBank(bankArg)?.id ??
+          [...MY_BANKS, ...SG_BANKS].find((b) =>
+            b.name.toLowerCase().includes(bankArg),
+          )?.id)
+        : undefined;
+      if (bankArg && !bank) {
+        throw new Error(`No bank called ${args.bank}. Nothing was changed.`);
+      }
+      const matches = (await packs.bannedPayoutAccountsOf(customerId)).filter(
+        (b) => b.last4 === last4 && (!bank || b.bank_code === bank),
+      );
+      if (matches.length === 0) {
+        throw new Error(
+          `${username} has no banned bank number ending ${last4} on their banks or payouts. Nothing was changed.`,
+        );
+      }
+      if (matches.length > 1) {
+        throw new Error(
+          `More than one banned number on ${username} ends ${last4}: ask staff which bank. Nothing was changed.`,
+        );
+      }
+      const [hit] = matches;
+      const bankName = findBank(hit.bank_code)?.name ?? hit.bank_code;
+      const given = str(args.reason).slice(0, 400);
+      const reason =
+        given && squash(text).includes(squash(given))
+          ? given
+          : 'Bank number unbanned on request in the admin assistant';
+      proposeOrRefuse(
+        ctx,
+        {
+          kind: 'unban_number',
+          customer_id: customerId,
+          username,
+          bank_code: hit.bank_code,
+          last4,
+          reason,
+        },
+        `Take ${bankName} …${last4} (on ${username}) off the ban list: it can be saved again. Another account that saved or was paid to it still holds it, so support adds it to its owner on the admin player page. Reason: ${reason}`,
+      );
+      return JSON.stringify({
+        unbanned: false,
+        waiting:
+          'Nothing has changed yet: a button is under your answer, and the number comes off the ban list only when the person taps it. Tell them so in one short line, and that a number other accounts were paid to must be added to its owner by support on the admin player page.',
       });
     },
   },

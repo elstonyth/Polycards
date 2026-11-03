@@ -190,6 +190,10 @@ const Message = memo(function Message({
                     ? p.state === 'saved'
                       ? t('assistant.confirm.unbanned')
                       : t('assistant.confirm.unban')
+                    : p.kind === 'unban_number'
+                      ? p.state === 'saved'
+                        ? t('assistant.confirm.numberUnbanned')
+                        : t('assistant.confirm.unbanNumber')
                     : p.state === 'saved'
                       ? p.kind === 'note'
                         ? t('assistant.confirm.saved')
@@ -202,7 +206,9 @@ const Message = memo(function Message({
                   <span className="text-ui-fg-muted text-[11px]">
                     {p.kind === 'unban'
                       ? t('assistant.confirm.unbanHint')
-                      : t('assistant.confirm.hint')}
+                      : p.kind === 'unban_number'
+                        ? t('assistant.confirm.unbanNumberHint')
+                        : t('assistant.confirm.hint')}
                   </span>
                 )}
               </div>

@@ -1076,6 +1076,10 @@
     "savedBankVerified": "Verified by support {{date}}. Other accounts on this number stay held.",
     "savedBankAdd": "Add bank account",
     "savedBankAddTitle": "Add a bank account for this player?",
+    "savedBankNumberBanned": "Banned number: {{bank}} …{{last4}}",
+    "savedBankNumberUnban": "Unban number",
+    "savedBankNumberUnbanTitle": "Unban {{bank}} …{{last4}}",
+    "savedBankNumberUnbanBody": "Takes this number off the ban list, for every account. It does not add it anywhere: if other accounts saved or were paid to it, a customer save stays refused as shared, so add it to its real owner with Add.",
     "savedBankNameClear": "Same name, different person",
     "savedBankNameClearTitle": "Same name, different person",
     "savedBankNameClearBody": "Only after you have checked that this player and the one other account holding this name are two real people. This player may then save a bank under it. Any account that uses the name later still blocks it. If the other account has not saved or been paid under the name yet, it can't be cleared yet: clear it once it has, if it will save another bank.",
@@ -2182,6 +2186,7 @@
     "tools": {
       "ban_reason": "Why an account is banned",
       "unban_account": "Unban",
+      "unban_bank_number": "Unban bank number",
       "economy": "Economy totals",
       "daily_economy": "Economy per day",
       "payments": "Top-ups and withdrawals",
@@ -2239,6 +2244,9 @@
       "unban": "Unban",
       "unbanned": "Unbanned",
       "unbanHint": "Nothing changes until you tap Unban.",
+      "unbanNumber": "Unban number",
+      "numberUnbanned": "Number unbanned",
+      "unbanNumberHint": "Nothing changes until you tap Unban number.",
       "hint": "Nothing is kept until you tap save."
     },
     "copy": "Copy",

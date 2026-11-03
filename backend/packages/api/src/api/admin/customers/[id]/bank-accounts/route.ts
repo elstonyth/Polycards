@@ -94,6 +94,14 @@ export async function GET(
     // What support can add for a player with none. Banks only: a wallet's owner
     // can save it themselves unless someone was already paid to it.
     banks: [...MY_BANKS, ...SG_BANKS].map((b) => ({ id: b.id, name: b.name })),
+    // This player's numbers on the ban list (bank-accounts/unban-number).
+    banned_numbers: (await packs.bannedPayoutAccountsOf(customerId)).map(
+      (b) => ({
+        bank_code: b.bank_code,
+        bank_name: findBank(b.bank_code)?.name ?? b.bank_code,
+        last4: b.last4,
+      }),
+    ),
     // Names support cleared as two real people's (bank-accounts/name-clash).
     cleared_names: cleared.map((c) => ({
       name: c.name,

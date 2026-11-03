@@ -318,6 +318,37 @@ medusaIntegrationTestRunner({
         expect(ok.status).toBe(200);
       });
 
+      it('support takes a number off the ban list from the player page', async () => {
+        const a = await newCustomer('one-bank-u@test.dev');
+        await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678911'), asCustomer(a)),
+        );
+        const pg = getContainer().resolve(ContainerRegistrationKeys.PG_CONNECTION);
+        await pg.raw(
+          'INSERT INTO banned_payout_account (account_key, bank_code, reason) VALUES (?, ?, ?)',
+          ['512345678911', 'MBBEMYKL', 'test'],
+        );
+        const before = await unwrapResponse(
+          api.get(`/admin/customers/${a}/bank-accounts`, asAdmin()),
+        );
+        expect(before.data.banned_numbers).toEqual([
+          expect.objectContaining({ bank_code: 'MBBEMYKL', last4: '8911' }),
+        ]);
+        const res = await unwrapResponse(
+          api.post(
+            `/admin/customers/${a}/bank-accounts/unban-number`,
+            { last4: '8911', reason: 'owner approved' },
+            asAdmin(),
+          ),
+        );
+        expect(res.status).toBe(200);
+        const left = await pg.raw(
+          'SELECT 1 FROM banned_payout_account WHERE account_key = ?',
+          ['512345678911'],
+        );
+        expect(left.rows).toHaveLength(0);
+      });
+
       it('refuses a banned number at any bank, for support too', async () => {
         const a = await newCustomer('one-bank-l@test.dev');
         await getContainer()

@@ -31,6 +31,7 @@ import {
   useSavedBankAccounts,
   useSetBankShareVerified,
   useSetHolderNameCleared,
+  useUnbanBankNumber,
   useSetCustomerPhone,
   useSetCustomerRealName,
   useSetCustomerReferrer,
@@ -259,12 +260,14 @@ const SavedBankAccountsCard = ({
   const verify = useSetBankShareVerified(customerId);
   const add = useAddSavedBankAccount(customerId);
   const clearName = useSetHolderNameCleared(customerId);
+  const unbanNumber = useUnbanBankNumber(customerId);
   const [dialog, setDialog] = useState<
     | { kind: 'remove'; accountId: string }
     | { kind: 'verify'; accountId: string; to: boolean }
     | { kind: 'add' }
     | { kind: 'clearName' }
     | { kind: 'unclearName'; name: string }
+    | { kind: 'unbanNumber'; bankCode: string; bankName: string; last4: string }
     | null
   >(null);
   const onHold = data?.accounts.some(
@@ -355,6 +358,37 @@ const SavedBankAccountsCard = ({
           {/* One account per currency, Touch 'n Go apart (owner,
               2026-11-03): a wallet or Touch 'n Go may sit beside a bank, so
               Add stays; the server refuses a second one of the same kind. */}
+          {/* Banned numbers on this player's banks or payouts (owner,
+              2026-11-04): support takes one off the ban list. */}
+          {(data.banned_numbers ?? []).map((b) => (
+            <div
+              key={`${b.bank_code}-${b.last4}`}
+              className="flex flex-wrap items-center justify-between gap-2 border-t px-6 py-3"
+            >
+              <StatusBadge color="red">
+                {t('players.savedBankNumberBanned', {
+                  bank: b.bank_name,
+                  last4: b.last4,
+                })}
+              </StatusBadge>
+              {canEdit && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() =>
+                    setDialog({
+                      kind: 'unbanNumber',
+                      bankCode: b.bank_code,
+                      bankName: b.bank_name,
+                      last4: b.last4,
+                    })
+                  }
+                >
+                  {t('players.savedBankNumberUnban')}
+                </Button>
+              )}
+            </div>
+          ))}
           {/* Two real people with one name (owner, 2026-11-04): a cleared
               name no longer counts as another account's for this player. */}
           {(data.cleared_names ?? []).map((c) => (
@@ -440,6 +474,24 @@ const SavedBankAccountsCard = ({
           onSubmit={({ reason }) =>
             verify.mutate(
               { accountId: dialog.accountId, verified: dialog.to, reason },
+              { onSuccess: () => setDialog(null) },
+            )
+          }
+        />
+      )}
+      {dialog?.kind === 'unbanNumber' && (
+        <FieldsDialog
+          title={t('players.savedBankNumberUnbanTitle', {
+            bank: dialog.bankName,
+            last4: dialog.last4,
+          })}
+          description={t('players.savedBankNumberUnbanBody')}
+          fields={[{ key: 'reason', label: t('players.savedBankReason') }]}
+          busy={unbanNumber.isPending}
+          onClose={() => setDialog(null)}
+          onSubmit={({ reason }) =>
+            unbanNumber.mutate(
+              { bankCode: dialog.bankCode, last4: dialog.last4, reason },
               { onSuccess: () => setDialog(null) },
             )
           }

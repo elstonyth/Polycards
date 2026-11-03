@@ -113,6 +113,15 @@ export const CORE_PREFIX_WRITES: {
     resource: CORE_READ_PREFIXES.customers,
     operation: 'update' as const,
   })),
+  // Taking a bank number off the ban list is an unban (owner, 2026-11-04): the
+  // same policy as the assistant's unban_bank_number, so one role decides who
+  // may lift bans, wherever it is done.
+  {
+    matcher: '/admin/customers/*/bank-accounts/unban-number',
+    method: 'POST',
+    resource: 'assistant_unban',
+    operation: 'update',
+  },
   ...['draft-access', 'odds-set', 'policy'].map((sub) => ({
     matcher: `/admin/customer-groups/*/${sub}`,
     method: 'POST' as const,

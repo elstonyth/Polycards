@@ -111,13 +111,14 @@ describe('assistant access', () => {
   });
 
   it('gives yu (Support viewer) one-customer tools only: no lists, no SQL', async () => {
-    // ban_reason and unban_account too (owner, 2026-11-03).
+    // ban_reason and the two unbans too (owner, 2026-11-03 and 11-04).
     expect(await toolsOf(['support_viewer', 'assistant_user'])).toEqual([
       'player',
       'account',
       'ban_reason',
       'order',
       'unban_account',
+      'unban_bank_number',
       'remember',
       'recall',
       'forget',
