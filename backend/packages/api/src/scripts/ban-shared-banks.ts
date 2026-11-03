@@ -175,7 +175,8 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
     log('dry run: nothing written');
     return;
   }
-  if (confirm !== String(ids.length)) {
+  // medusa exec hands a numeric argument over as a number.
+  if (String(confirm) !== String(ids.length)) {
     throw new Error(
       `apply needs the account count as the third argument (${ids.length})`,
     );
