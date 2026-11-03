@@ -21,6 +21,7 @@ import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import {
   rejectCustomerMetadata,
   redactCustomerSecrets,
+  hideStoreCustomerMetadata,
   rejectAdminBankAccountsMetadata,
 } from './utils/customer-metadata-guard';
 import {
@@ -530,6 +531,12 @@ export default defineMiddlewares({
         validateUsernameWrite('signup'),
         requireSignupPhoneProof,
       ],
+    },
+    {
+      // Every customer record a store route returns (the customer's own, via
+      // core's default fields): support's name-clash notes name other accounts.
+      matcher: '/store/customers*',
+      middlewares: [hideStoreCustomerMetadata],
     },
     {
       // /store/customers/me is framework-authenticated; this guard rejects
@@ -1424,6 +1431,11 @@ export default defineMiddlewares({
     },
     {
       matcher: '/admin/customers/*/bank-accounts/verify',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/bank-accounts/name-clash',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

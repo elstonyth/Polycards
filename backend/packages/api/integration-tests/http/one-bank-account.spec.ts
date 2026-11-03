@@ -460,6 +460,97 @@ medusaIntegrationTestRunner({
         expect(wallet.status).toBe(200);
         expect(await accounts(a)).toHaveLength(2);
       });
+
+      it("Touch 'n Go has its own slot beside the RM bank, under the same name", async () => {
+        const a = await newCustomer('one-bank-q@test.dev');
+        const tng = (number: string) => ({
+          ...save(number, 'Slot Owner'),
+          bank_code: 'TNGMY',
+        });
+        await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678907', 'Slot Owner'), asCustomer(a)),
+        );
+        // The linked-name rule reads other accounts only: the owner's own
+        // bank under that name does not block the Touch 'n Go.
+        const first = await unwrapResponse(
+          api.post(ACCOUNTS, tng('120000000007'), asCustomer(a)),
+        );
+        expect(first.status).toBe(200);
+        expect(await accounts(a)).toHaveLength(2);
+        const second = await unwrapResponse(
+          api.post(ACCOUNTS, tng('120000000008'), asCustomer(a)),
+        );
+        expect(second.status).toBe(400);
+        expect(second.data.message).toMatch(
+          /already has a Touch 'n Go account/,
+        );
+        expect(await accounts(a)).toHaveLength(2);
+      });
+
+      it('support clears a name two real people share, for each account on its own', async () => {
+        const a = await newCustomer('one-bank-s@test.dev');
+        const b = await newCustomer('one-bank-t@test.dev');
+        await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678909', 'Shared Name'),
+            asCustomer(a),
+          ),
+        );
+        const refused = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678910', 'Shared Name'),
+            asCustomer(b),
+          ),
+        );
+        expect(refused.status).toBe(400);
+        expect(refused.data.message).toMatch(/already linked to another/);
+        const cleared = await unwrapResponse(
+          api.post(
+            `/admin/customers/${b}/bank-accounts/name-clash`,
+            { holder_name: 'SHARED NAME', cleared: true, reason: 'two people' },
+            asAdmin(),
+          ),
+        );
+        expect(cleared.status).toBe(200);
+        const saved = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678910', 'Shared Name'),
+            asCustomer(b),
+          ),
+        );
+        expect(saved.status).toBe(200);
+        expect(await accounts(b)).toHaveLength(1);
+        // The customer's own record never carries support's note: it names the
+        // other account. Its metadata is served (the saved list is there).
+        const me = await unwrapResponse(
+          api.get('/store/customers/me', asCustomer(b)),
+        );
+        expect(me.status).toBe(200);
+        expect(me.data.customer.metadata).toHaveProperty('bank_accounts');
+        expect(me.data.customer.metadata).not.toHaveProperty(
+          'holder_name_cleared',
+        );
+      });
+
+      it("a Touch 'n Go under another name than the saved bank is refused", async () => {
+        const a = await newCustomer('one-bank-r@test.dev');
+        await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678908', 'Slot Owner'), asCustomer(a)),
+        );
+        const other = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            { ...save('120000000009', 'Another Person'), bank_code: 'TNGMY' },
+            asCustomer(a),
+          ),
+        );
+        expect(other.status).toBe(400);
+        expect(other.data.message).toMatch(/same account holder name/);
+        expect(await accounts(a)).toHaveLength(1);
+      });
     });
   },
 });

@@ -203,9 +203,36 @@ describe('addSavedBankAccount', () => {
     });
     await expect(
       svc.addSavedBankAccount({ ...base, verify: false }, ctx),
-    ).rejects.toThrow(/already has a bank account/);
+    ).rejects.toThrow(/already has an RM bank account/);
     expect(writes).toEqual([]);
     expect(audits).toEqual([]);
+  });
+
+  it("adds a Touch 'n Go beside an RM bank, but never a second one", async () => {
+    const tng = { ...ACCOUNT, id: 'acc_tng', bankCode: 'TNGMY', bankName: "Touch 'n Go eWallet" };
+    const beside = fakeService({ bank_accounts: [OTHER] });
+    await beside.svc.addSavedBankAccount({ ...base, account: tng, verify: false }, beside.ctx);
+    expect(beside.writes[0].bank_accounts).toEqual([OTHER, tng]);
+    const second = fakeService({ bank_accounts: [OTHER, tng] });
+    await expect(
+      second.svc.addSavedBankAccount(
+        { ...base, account: { ...tng, id: 'acc_tng2' }, verify: false },
+        second.ctx,
+      ),
+    ).rejects.toThrow(/already has a Touch 'n Go account/);
+  });
+
+  it('is the way past the one-name rule: it saves a bank under another spelling', async () => {
+    const tng = {
+      ...ACCOUNT,
+      id: 'acc_tng',
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountHolderName: 'Tan Bin Abu',
+    };
+    const { svc, writes, ctx } = fakeService({ bank_accounts: [OTHER] });
+    await svc.addSavedBankAccount({ ...base, account: tng, verify: false }, ctx);
+    expect(writes[0].bank_accounts).toEqual([OTHER, tng]);
   });
 });
 
@@ -348,5 +375,142 @@ describe('anySavedAccountShared', () => {
     expect(await anySavedAccountShared(packs, 'cus_1', [ACCOUNT], {})).toBe(
       false,
     );
+  });
+});
+
+describe('setHolderNameCleared', () => {
+  const input = {
+    customerId: 'cus_1',
+    adminId: 'user_1',
+    holderName: 'Tan Ah Kow',
+    cleared: true,
+    reason: 'two people, checked their banks',
+  };
+  const withHolders = (
+    metadata: Record<string, unknown>,
+    holders: string[] = ['cus_2'],
+  ) => {
+    const made = fakeService(metadata);
+    Object.assign(made.svc, {
+      holderNameHolders: jest.fn(async () => holders),
+    });
+    return made;
+  };
+
+  it('stamps the name with the accounts holding it now, keeps the rest, audits them', async () => {
+    const { svc, writes, audits, ctx } = withHolders({ avatar_url: 'a' });
+    await svc.setHolderNameCleared(input, ctx);
+    expect(svc.holderNameHolders).toHaveBeenCalledWith(
+      'cus_1',
+      'Tan Ah Kow',
+      ctx,
+    );
+    expect(writes[0]).toMatchObject({
+      avatar_url: 'a',
+      holder_name_cleared: {
+        tanahkow: { name: 'Tan Ah Kow', with: ['cus_2'] },
+      },
+    });
+    expect(audits[0][0]).toMatchObject({
+      entity_id: 'cus_1',
+      action: 'edit',
+      after: { holder_name: 'Tan Ah Kow', cleared: true, with: ['cus_2'] },
+    });
+  });
+
+  it('refuses a name no other account holds: there is nothing to clear', async () => {
+    const { svc, writes, ctx } = withHolders({}, []);
+    await expect(svc.setHolderNameCleared(input, ctx)).rejects.toThrow(
+      /nothing to clear/,
+    );
+    expect(writes).toEqual([]);
+  });
+
+  it('refuses a name on more than one other account', async () => {
+    const { svc, writes, ctx } = withHolders({}, ['cus_2', 'cus_3']);
+    await expect(svc.setHolderNameCleared(input, ctx)).rejects.toThrow(
+      /2 other accounts use this name/,
+    );
+    expect(writes).toEqual([]);
+  });
+
+  it('takes it back, and writes nothing when there is nothing to change', async () => {
+    const stamped = withHolders({
+      holder_name_cleared: {
+        tanahkow: { name: 'Tan Ah Kow', at: STAMP, with: ['cus_2'] },
+      },
+    });
+    await stamped.svc.setHolderNameCleared(
+      { ...input, holderName: 'TAN AH-KOW', cleared: false },
+      stamped.ctx,
+    );
+    expect(stamped.writes[0].holder_name_cleared).toBeUndefined();
+
+    const never = withHolders({});
+    await never.svc.setHolderNameCleared(
+      { ...input, cleared: false },
+      never.ctx,
+    );
+    expect(never.writes).toEqual([]);
+    expect(never.audits).toEqual([]);
+
+    const same = withHolders({
+      holder_name_cleared: {
+        tanahkow: { name: 'Tan Ah Kow', at: STAMP, with: ['cus_2'] },
+      },
+    });
+    await same.svc.setHolderNameCleared(input, same.ctx);
+    expect(same.writes).toEqual([]);
+    expect(same.audits).toEqual([]);
+  });
+});
+
+describe('holderNameHeldByAnother — a name support cleared', () => {
+  const service = (metadata: Record<string, unknown>, holders: string[]) => {
+    const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
+    const execute = jest.fn(async (query: string) =>
+      query.startsWith('SELECT metadata')
+        ? [{ metadata }]
+        : holders.map((customer_id) => ({ customer_id })),
+    );
+    const em = { execute };
+    return { svc, ctx: { transactionManager: em, manager: em } as never };
+  };
+  const cleared = {
+    holder_name_cleared: {
+      tanahkow: { name: 'Tan Ah Kow', at: STAMP, with: ['cus_2'] },
+    },
+  };
+
+  it('does not count the account support checked', async () => {
+    const { svc, ctx } = service(cleared, ['cus_2']);
+    await expect(
+      svc.holderNameHeldByAnother('cus_1', 'TAN AH-KOW', ctx),
+    ).resolves.toBe(false);
+  });
+
+  it('still counts an account that holds the name and was not checked', async () => {
+    const { svc, ctx } = service(cleared, ['cus_2', 'cus_3']);
+    await expect(
+      svc.holderNameHeldByAnother('cus_1', 'Tan Ah Kow', ctx),
+    ).resolves.toBe(true);
+  });
+
+  it('still counts any holder of another name, or with no clearing', async () => {
+    const other = service(cleared, ['cus_2']);
+    await expect(
+      other.svc.holderNameHeldByAnother('cus_1', 'Lim Mei Ling', other.ctx),
+    ).resolves.toBe(true);
+    const none = service({}, ['cus_2']);
+    await expect(
+      none.svc.holderNameHeldByAnother('cus_1', 'Tan Ah Kow', none.ctx),
+    ).resolves.toBe(true);
+  });
+
+  it('is held by no one when no other account uses the name', async () => {
+    const { svc, ctx } = service({}, []);
+    await expect(
+      svc.holderNameHeldByAnother('cus_1', 'Tan Ah Kow', ctx),
+    ).resolves.toBe(false);
   });
 });

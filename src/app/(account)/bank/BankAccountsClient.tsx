@@ -19,16 +19,19 @@ import { cn } from '@/lib/utils';
 // Saved payout accounts — list, add. This list is where withdrawals GO: the
 // withdraw form submits an account id and the server resolves the bank details
 // from here, so this page is the only place a payout destination is chosen. One
-// account per currency, and once saved it cannot be changed (ADR 0015, owner
-// 2026-11-03), so the form says so before the save. A bank's holder name is typed
-// twice and both must match. The backend validates with the
-// payout-submit rules; existing accounts are rechecked when listed and used.
+// account per currency, Touch 'n Go apart from the RM bank, and once saved it
+// cannot be changed (ADR 0015, owner 2026-11-03), so the form says so before the
+// save. A bank's holder name is typed twice and both must match. The backend
+// validates with the payout-submit rules; existing accounts are rechecked when listed and used.
 //
 // A newly added account may have to wait out a cooling-off window before it can
 // receive money; the server says when via `usableFrom`. That state is rendered
 // here rather than recomputed — the duration is the backend's to tune, down to
 // and including zero (PAYOUT_DESTINATION_COOLDOWN_HOURS), so no copy on this
 // page may name one.
+
+/** Touch 'n Go eWallet's id (backend banks.ts TNG_BANK_ID). */
+const TNG_BANK_ID = 'TNGMY';
 
 /** A name compared the way a person reads it: case and spacing ignored. */
 const nameKey = (name: string) =>
@@ -96,21 +99,29 @@ export function BankAccountsClient() {
     };
   }, []);
 
-  // One saved account per currency (backend bankCurrency): only currencies
-  // still free are offered. A saved row's currency comes from the bank list,
-  // else from its own view.
-  const currencyOf = (item: { currency?: string; wallet?: string }) =>
-    item.wallet ? 'USDT' : (item.currency ?? 'MYR');
+  // One saved account per slot (backend savedAccountSlot): per currency, and
+  // Touch 'n Go apart from the RM bank. Only slots still free are offered. A
+  // saved row's currency comes from the bank list, else from its own view.
+  const slotOf = (item: {
+    bankCode: string;
+    currency?: string;
+    wallet?: string;
+  }) =>
+    item.bankCode === TNG_BANK_ID
+      ? 'TNG'
+      : item.wallet
+        ? 'USDT'
+        : (item.currency ?? 'MYR');
   const taken = new Set(
     (accounts ?? []).map((account) =>
-      currencyOf(
+      slotOf(
         banks?.find((bank) => bank.bankCode === account.bankCode) ?? account,
       ),
     ),
   );
   // Require the customer's choice, even when only one country is available.
   const countries = bankCountryGroups(
-    (banks ?? []).filter((bank) => !taken.has(currencyOf(bank))),
+    (banks ?? []).filter((bank) => !taken.has(slotOf(bank))),
   );
   // Banks not loaded yet: only a customer with nothing saved may start.
   const canAdd =
@@ -143,6 +154,11 @@ export function BankAccountsClient() {
   const numberInvalid =
     selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
+  // One name on every bank (backend saved-accounts route): a new bank or
+  // Touch 'n Go carries the holder name already saved, so the form names it.
+  const savedName = (accounts ?? []).find(
+    (a) => !a.wallet && a.accountHolderName,
+  )?.accountHolderName;
   const namesMatch = nameKey(holderName) === nameKey(holderConfirm);
   // Not while the second name is still being typed (a prefix of the first).
   const confirmMismatch =
@@ -421,7 +437,9 @@ export function BankAccountsClient() {
               >
                 {confirmMismatch
                   ? 'The two names do not match. Type the same name twice.'
-                  : 'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.'}
+                  : savedName
+                    ? `Use the same name as your saved bank account: ${savedName}. It must also match this bank exactly, or the withdrawal will not be paid. If your banks spell your name differently, contact support.`
+                    : 'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.'}
               </p>
             </>
           )}

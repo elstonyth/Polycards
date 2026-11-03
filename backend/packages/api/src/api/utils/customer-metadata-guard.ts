@@ -6,7 +6,10 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { hasPermission } from '@medusajs/framework';
 import { PARTNER_CREDENTIAL_KEY } from '../../utils/partner-accounts';
-import { BANK_SHARE_VERIFIED_KEY } from '../../modules/packs/saved-accounts';
+import {
+  BANK_SHARE_VERIFIED_KEY,
+  HOLDER_NAME_CLEARED_KEY,
+} from '../../modules/packs/saved-accounts';
 
 // Medusa's stock update-customer route accepts arbitrary `metadata` — read from
 // the installed package, not assumed:
@@ -109,12 +112,29 @@ export function rejectAdminBankAccountsMetadata(
     );
     return;
   }
+  // Same for a name support cleared: written here it would skip the name check
+  // with no audit row and no record of which accounts were checked.
+  if (
+    metadata &&
+    typeof metadata === 'object' &&
+    HOLDER_NAME_CLEARED_KEY in metadata
+  ) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${HOLDER_NAME_CLEARED_KEY} is not writable through this route. Use bank-accounts/name-clash, which is audited.`,
+      ),
+    );
+    return;
+  }
   next();
 }
 
 // customer.metadata keys only a role with their own read policy may receive.
 const SECRET_METADATA = [
   { key: 'bank_accounts', resource: 'customer_bank_account' },
+  // Holder names support cleared as a real clash: names, like the list's.
+  { key: HOLDER_NAME_CLEARED_KEY, resource: 'customer_bank_account' },
   { key: PARTNER_CREDENTIAL_KEY, resource: 'partner_credential' },
 ] as const;
 
@@ -130,6 +150,26 @@ const stripSecretMetadata = (node: unknown, hidden: string[]): void => {
     }
   }
 };
+
+/** Keys a customer never gets back on their own record: support's notes on
+ *  OTHER accounts (holder_name_cleared lists who a name was checked against,
+ *  by customer id, which public seeds can match to a handle). */
+const STORE_HIDDEN_METADATA = [HOLDER_NAME_CLEARED_KEY];
+
+/** Strips STORE_HIDDEN_METADATA from every store customer response. */
+export function hideStoreCustomerMetadata(
+  _req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  const json = res.json.bind(res);
+  res.json = (body: unknown) => {
+    const copy = JSON.parse(JSON.stringify(body ?? null));
+    stripSecretMetadata(copy, STORE_HIDDEN_METADATA);
+    return json(copy);
+  };
+  next();
+}
 
 /**
  * Any admin response can carry customer.metadata whole: `?fields=` walks

@@ -29,12 +29,14 @@ type Body = {
   reason?: unknown;
 };
 
-// POST /admin/customers/:id/bank-accounts/add — support saves a bank account for
-// a player with none (ADR 0015). The override for a customer save refused because
+// POST /admin/customers/:id/bank-accounts/add — support saves a bank account in
+// a free slot (ADR 0015). The override for a customer save refused because
 // another account holds the number, which paid-out rows make permanent. Support
 // vouches for a shared number by adding it, so it arrives verified, unless another
-// account already is. Same checks as a customer save otherwise, cooling-off and
-// the owner's notice included.
+// account already is. It is also the way past the one-name-on-every-bank rule
+// for a name two banks spell differently, so that rule is not checked here.
+// Same checks as a customer save otherwise, cooling-off and the owner's notice
+// included.
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,

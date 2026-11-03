@@ -1,7 +1,10 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { findBank } from '../../../../modules/packs/banks';
-import { payoutAccountKey } from '../../../../modules/packs/saved-accounts';
+import {
+  clearedHolderNames,
+  payoutAccountKey,
+} from '../../../../modules/packs/saved-accounts';
 import { PERMANENT_BAN_REASON_PREFIX } from '../../../utils/disabled-guard';
 import { realNameKeySql } from '../../../../utils/real-name';
 import { findReportPlayer } from '../../player-lookup';
@@ -200,6 +203,23 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
         )
       ).rows.filter((r) => !linked.has(r.customer_id))
     : [];
+  // Pairs support checked as two people with one name (bank-accounts/
+  // name-clash), from either side: not one person, so not linked.
+  const twinIds = [...new Set(sameName.map((r) => r.customer_id))];
+  const stamps = twinIds.length
+    ? (
+        await db.raw<{ id: string; metadata: Record<string, unknown> | null }>(
+          'SELECT id, metadata FROM customer WHERE id = ANY(string_to_array(?, \',\'))',
+          [[id, ...twinIds].join(',')],
+        )
+      ).rows
+    : [];
+  const checkedWith = (of: string) =>
+    Object.values(
+      clearedHolderNames(stamps.find((s) => s.id === of)?.metadata ?? {}),
+    ).flatMap((c) => c.with);
+  const clearedPair = (twin: string) =>
+    checkedWith(id).includes(twin) || checkedWith(twin).includes(id);
   const sameNameAccounts = new Map<
     string,
     { row: AccountRow; banks: Map<string, string> }
@@ -216,7 +236,9 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
     }
     sameNameAccounts.set(r.customer_id, entry);
   }
-  for (const customerId of sameNameAccounts.keys()) linked.add(customerId);
+  for (const customerId of sameNameAccounts.keys()) {
+    if (!clearedPair(customerId)) linked.add(customerId);
+  }
 
   return {
     username: who?.username ?? null,
@@ -238,6 +260,7 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
         handle: row.handle,
         ...banState(row.disabled, row.reason),
         deleted: row.deleted === true,
+        cleared_as_different_person: clearedPair(row.customer_id),
         banks: [...theirs].map(([key, bank]) => ({
           bank,
           last4: key.slice(-4),
@@ -245,7 +268,7 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
       }),
     ),
     ...(lookupNote ? { lookup_note: lookupNote } : {}),
-    note: "A permanent ban (owner, 2026-11-03) is for one person with more than one account: the same bank account, or the same account holder name, on more than one Polycards account. bank_accounts are every bank this player saved or was paid to, by bank name and last 4 digits; other_accounts are the other accounts on that same number, with their settled payouts to it (RM). same_name_accounts used one of this player's holder names at a different bank. linked_accounts_total counts every linked account once, this player not included: the person holds linked_accounts_total + 1 accounts. same_holder_name: true same name, false a different name, null no name to compare. banned = permanent ban; disabled = cannot log in (a ban, or staff); deleted = the account was deleted (its name and handle are gone, its payouts still count). disabled_at is UTC: say it in Malaysia time. Lifting the ban clears the saved banks; the player links a bank again.",
+    note: "A permanent ban (owner, 2026-11-03) is for one person with more than one account: the same bank account, or the same account holder name, on more than one Polycards account. bank_accounts are every bank this player saved or was paid to, by bank name and last 4 digits; other_accounts are the other accounts on that same number, with their settled payouts to it (RM). same_name_accounts used one of this player's holder names at a different bank; cleared_as_different_person true means support checked them as two different people with one name: not one person, not counted in linked_accounts_total, and no reason to ban. linked_accounts_total counts every linked account once, this player not included: the person holds linked_accounts_total + 1 accounts. same_holder_name: true same name, false a different name, null no name to compare. banned = permanent ban; disabled = cannot log in (a ban, or staff); deleted = the account was deleted (its name and handle are gone, its payouts still count). disabled_at is UTC: say it in Malaysia time. Lifting the ban clears the saved banks; the player links a bank again.",
   };
 }
 
@@ -369,7 +392,7 @@ export async function GET(
     if (
       value.length < 2 ||
       value.length > 120 ||
-      value.replace(/[s.'@/,-]/g, '') === ''
+      value.replace(/[\s.'@/,-]/g, '') === ''
     ) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,

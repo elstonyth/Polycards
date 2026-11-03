@@ -10,6 +10,7 @@ import {
   findBank,
 } from '../../../../../modules/packs/banks';
 import {
+  clearedHolderNames,
   heldByAnother,
   parseSavedBankAccounts,
   verifiedBankAccounts,
@@ -45,7 +46,13 @@ export async function GET(
       ).filter((h) => heldByAnother([h], account.bankCode)),
     ),
   );
-  const linkedIds = [...new Set(holders.flat().map((h) => h.customer_id))];
+  const cleared = Object.values(clearedHolderNames(metadata));
+  const linkedIds = [
+    ...new Set([
+      ...holders.flat().map((h) => h.customer_id),
+      ...cleared.flatMap((c) => c.with),
+    ]),
+  ];
   const handles = new Map(
     linkedIds.length === 0
       ? []
@@ -87,6 +94,15 @@ export async function GET(
     // What support can add for a player with none. Banks only: a wallet's owner
     // can save it themselves unless someone was already paid to it.
     banks: [...MY_BANKS, ...SG_BANKS].map((b) => ({ id: b.id, name: b.name })),
+    // Names support cleared as two real people's (bank-accounts/name-clash).
+    cleared_names: cleared.map((c) => ({
+      name: c.name,
+      cleared_at: c.at,
+      with: c.with.map<LinkedCustomer>((id) => ({
+        customer_id: id,
+        handle: handles.get(id) ?? null,
+      })),
+    })),
     accounts: accounts.map((account, i) => ({
       id: account.id,
       bank_name: account.bankName,
