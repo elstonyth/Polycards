@@ -331,6 +331,40 @@ medusaIntegrationTestRunner({
         expect(await statusOf(order)).toBe('requested');
       });
 
+      it('staff can step a ready order back after a GRN reversal; it waits until the cards are covered again', async () => {
+        await makeProduct('alloc-back');
+        const order = await requestOrder('cus_back', ['alloc-back']);
+        const grn = (await receive('alloc-back', 1)).data.goods_receive_note.id;
+        await pressRefresh();
+        expect(await statusOf(order)).toBe('ready_to_ship');
+
+        // The GRN was a typo: reversing it moves no order by itself.
+        const reversed = await unwrapResponse(
+          api.post(`/admin/goods-receive-notes/${grn}/reverse`, {}, headers()),
+        );
+        expect(reversed.status).toBeLessThan(300);
+        expect(await statusOf(order)).toBe('ready_to_ship');
+
+        const back = await unwrapResponse(
+          api.post(
+            `/admin/delivery-orders/${order}`,
+            { status: 'processed' },
+            headers(),
+          ),
+        );
+        expect(back.status).toBe(200);
+        expect(await statusOf(order)).toBe('processed');
+
+        // Short now, so a press leaves it alone.
+        expect((await pressRefresh()).data).toEqual({ ready: 0, failed: 0 });
+        expect(await statusOf(order)).toBe('processed');
+
+        // Back on the shelf, so the next press completes it again.
+        await receive('alloc-back', 1);
+        expect((await pressRefresh()).data).toEqual({ ready: 1, failed: 0 });
+        expect(await statusOf(order)).toBe('ready_to_ship');
+      });
+
       const getToBuy = async () =>
         (await unwrapResponse(api.get('/admin/procurement/to-buy', headers())))
           .data as {

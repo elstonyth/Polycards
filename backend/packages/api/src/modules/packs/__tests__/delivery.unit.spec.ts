@@ -179,6 +179,24 @@ describe("validateDeliveryStatusTransition", () => {
     ).toBe("ok");
   });
 
+  it("lets staff step ready_to_ship back to processed, and no further back", () => {
+    expect(
+      validateDeliveryStatusTransition("ready_to_ship", "processed", false),
+    ).toBe("ok");
+    expect(
+      validateDeliveryStatusTransition("ready_to_ship", "requested", false),
+    ).toBe("invalid_transition");
+    expect(
+      validateDeliveryStatusTransition("processed", "requested", false),
+    ).toBe("invalid_transition");
+    expect(
+      validateDeliveryStatusTransition("shipped", "processed", true),
+    ).toBe("invalid_transition");
+    expect(
+      validateDeliveryStatusTransition("shipped", "ready_to_ship", true),
+    ).toBe("invalid_transition");
+  });
+
   it("rejects illegal transitions", () => {
     expect(validateDeliveryStatusTransition("shipped", "canceled", false)).toBe(
       "invalid_transition",

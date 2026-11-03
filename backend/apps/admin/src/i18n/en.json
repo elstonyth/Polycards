@@ -1403,7 +1403,7 @@
     "reverse": "Reverse",
     "cancel": "Cancel",
     "reverseTitle": "Reverse {{no}}?",
-    "reverseDescription": "This records a reversal GRN that takes every card on this note back off On Hand. It cannot be undone, and this note can no longer be transferred to an invoice. Orders already moved to ready to ship stay there, so check the To ship list.",
+    "reverseDescription": "This records a reversal GRN that takes every card on this note back off On Hand. It cannot be undone, and this note can no longer be transferred to an invoice. Orders already moved to ready to ship stay there: check the To ship list and move any short ones back to Processed.",
     "fromBadge": "From {{no}}",
     "transfer": {
       "button": "Transfer from goods receive note",
