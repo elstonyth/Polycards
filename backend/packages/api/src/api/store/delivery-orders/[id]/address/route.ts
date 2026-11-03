@@ -113,7 +113,7 @@ export async function POST(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       // Cancel-and-re-request is the customer's fix only while they can still
-      // cancel (requested, before the 12am cutoff — delivery.ts
+      // cancel (requested, before a stock run moves it — delivery.ts
       // CUSTOMER_CANCELABLE); after it, only support can.
       CUSTOMER_CANCELABLE.includes(order.status)
         ? 'That address changes the shipping fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.'

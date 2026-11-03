@@ -23,6 +23,7 @@ import {
 import {
   adjustCustomerCredits,
   bulkUpdateDeliveryOrders,
+  allocateDeliveryOrders,
   checkDeliveryTracking,
   createProductFromPriceCharting,
   deleteCard,
@@ -975,6 +976,31 @@ export const useCheckDeliveryTracking = () => {
   return useMutation({
     mutationFn: checkDeliveryTracking,
     onSettled: () => invalidateStock(),
+  });
+};
+
+// The Stock page's Refresh for staff who can move orders. Reload first, message
+// after: the mutation stays pending until the screen shows the moves, and the
+// count never sits over the old numbers. A failed run reloads too, because
+// orders before the failure may have moved.
+export const useAllocateDeliveryOrders = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: allocateDeliveryOrders,
+    onSettled: async (run, error) => {
+      await invalidateStock();
+      if (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return;
+      }
+      if (run?.ready) {
+        toast.success(t('inventory.refreshMoved', { count: run.ready }));
+      }
+      if (run?.failed) {
+        toast.warning(t('inventory.refreshFailed', { count: run.failed }));
+      }
+    },
   });
 };
 
@@ -2373,6 +2399,9 @@ export const useProcurementToShip = (
     queryKey: qk.procurementToShip,
     queryFn: getProcurementToShip,
     enabled: opts.enabled ?? true,
+    // A Refresh pressed on another PC moves orders onto this list at any hour.
+    refetchOnWindowFocus: true,
+    refetchInterval: 10 * 60 * 1000,
   });
 
 // ── Dashboard (spec §7) ──────────────────────────────────────────────────────

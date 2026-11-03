@@ -1,6 +1,7 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import {
   ContainerRegistrationKeys,
+  generateJwtToken,
   Modules,
   ProductStatus,
 } from '@medusajs/framework/utils';
@@ -26,10 +27,11 @@ const ADDRESS = {
   ship_phone: null,
 };
 
-// Orders move by themselves, only at the 12am cutoff (spec 2026-10-28; owner
+// Orders move by themselves at the 12am cutoff (spec 2026-10-28; owner
 // 2026-10-28): a GRN save moves nothing; the 00:00 job completes the oldest
 // waiting order first, moves the rest to processed and freezes that day's
-// to-buy list. Two runs at once never move one order twice.
+// to-buy list. Two runs at once never move one order twice. Staff can do the
+// completing half earlier with the Stock page's Refresh (operator, 2026-11-03).
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
@@ -203,6 +205,130 @@ medusaIntegrationTestRunner({
             (s) => s.id,
           ),
         ).toEqual([first.id]);
+      });
+
+      const pressRefresh = (requestHeaders = headers()) =>
+        unwrapResponse(
+          api.post('/admin/delivery-orders/allocate', {}, requestHeaders),
+        );
+
+      it('Refresh moves complete orders to ready_to_ship now, leaves short ones requested and freezes nothing', async () => {
+        await makeProduct('alloc-now');
+        await makeProduct('alloc-now-2');
+        await makeProduct('alloc-short');
+        const complete = await requestOrder('cus_now', ['alloc-now']);
+        const inBuying = await requestOrder('cus_buying', ['alloc-now-2']);
+        await packs.updateDeliveryOrders([
+          { id: inBuying, status: 'processed' },
+        ]);
+        const short = await requestOrder('cus_short', ['alloc-short']);
+        await receive('alloc-now', 1);
+        await receive('alloc-now-2', 1);
+
+        const res = await pressRefresh();
+        expect(res.status).toBe(200);
+        expect(res.data).toEqual({ ready: 2, failed: 0 });
+        expect(await statusOf(complete)).toBe('ready_to_ship');
+        expect(await statusOf(inBuying)).toBe('ready_to_ship');
+        expect(await statusOf(short)).toBe('requested');
+        expect(
+          await packs.listProcurementSnapshots({}, { take: 5 }),
+        ).toHaveLength(0);
+
+        // The press is audited against the staff member, not the system actor.
+        const audits = await packs.listAdminActionAudits(
+          { entity_id: complete },
+          { take: 5 },
+        );
+        expect(audits).toHaveLength(2); // requested -> processed -> ready
+        for (const audit of audits) {
+          expect(audit.admin_id).toMatch(/^user_/);
+          expect(audit.reason).toBe(
+            'stock allocation (refresh): all cards on hand',
+          );
+        }
+
+        // 12am still does the rest, and the press did not use up its one run.
+        await midnight();
+        expect(await statusOf(short)).toBe('processed');
+        expect(
+          await packs.listProcurementSnapshots({}, { take: 5 }),
+        ).toHaveLength(1);
+      });
+
+      it('Refresh keeps strict oldest-first: a newer order waits behind an older one holding the card', async () => {
+        await makeProduct('alloc-queue');
+        await makeProduct('alloc-missing');
+        const older = await requestOrder('cus_q1', [
+          'alloc-queue',
+          'alloc-missing',
+        ]);
+        const newer = await requestOrder('cus_q2', ['alloc-queue']);
+        await receive('alloc-queue', 1);
+
+        const res = await pressRefresh();
+        expect(res.data).toEqual({ ready: 0, failed: 0 });
+        expect(await statusOf(older)).toBe('requested');
+        expect(await statusOf(newer)).toBe('requested');
+      });
+
+      it('Refresh moves nothing while STOCK_AUTO_ALLOCATION is off', async () => {
+        await makeProduct('alloc-press-off');
+        const order = await requestOrder('cus_press_off', ['alloc-press-off']);
+        await receive('alloc-press-off', 1);
+        process.env.STOCK_AUTO_ALLOCATION = 'false';
+
+        const res = await pressRefresh();
+        expect(res.status).toBe(200);
+        expect(res.data).toEqual({ ready: 0, failed: 0 });
+        expect(await statusOf(order)).toBe('requested');
+      });
+
+      it('Refresh needs delivery_order:update: staff who can only read stock are refused and nothing moves', async () => {
+        await makeProduct('alloc-fence');
+        const order = await requestOrder('cus_fence', ['alloc-fence']);
+        await receive('alloc-fence', 1);
+
+        const container = getContainer();
+        const rbac = container.resolve(Modules.RBAC) as any;
+        const [role] = await rbac.createRbacRoles([{ name: 'alloc-reader' }]);
+        const policies = await rbac.listRbacPolicies({
+          resource: ['inventory', 'inventory_item'],
+          operation: ['read'],
+        });
+        expect(policies).toHaveLength(2);
+        await rbac.createRbacRolePolicies(
+          policies.map((p: { id: string }) => ({
+            role_id: role.id,
+            policy_id: p.id,
+          })),
+        );
+        const { http } = container.resolve(
+          ContainerRegistrationKeys.CONFIG_MODULE,
+        ).projectConfig;
+        const reader = generateJwtToken(
+          {
+            actor_id: 'alloc-reader',
+            actor_type: 'user',
+            auth_identity_id: 'alloc-reader',
+            app_metadata: { user_id: 'alloc-reader', roles: [role.id] },
+            user_metadata: {},
+          },
+          {
+            secret: http.jwtSecret as string,
+            expiresIn: 300,
+            jwtOptions: http.jwtOptions,
+          },
+        );
+
+        const asReader = { headers: { authorization: `Bearer ${reader}` } };
+        // The token works: this staff member can read stock, just not move orders.
+        expect(
+          (await unwrapResponse(api.get('/admin/inventory', asReader))).status,
+        ).toBe(200);
+        const res = await pressRefresh(asReader);
+        expect(res.status).toBe(403);
+        expect(await statusOf(order)).toBe('requested');
       });
 
       const getToBuy = async () =>

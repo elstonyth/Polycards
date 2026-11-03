@@ -152,6 +152,10 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('POST', '/admin/goods-receive-notes/*/reverse')).toEqual([
       'goods_receive_note:update',
     ]);
+    // The Stock page's Refresh: the admin offers the move on this same policy.
+    expect(policyFor('POST', '/admin/delivery-orders/allocate')).toEqual([
+      'delivery_order:update',
+    ]);
   });
 
   it('the mailing list needs the Orders read policy on top of procurement', () => {

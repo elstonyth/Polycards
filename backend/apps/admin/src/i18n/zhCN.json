@@ -162,6 +162,11 @@
     "graded": "评级",
     "slab": "评级卡",
     "raw": "未评级",
+    "refresh": "刷新",
+    "refreshMoved_one": "已有 {{count}} 个订单转为待发货",
+    "refreshMoved_other": "已有 {{count}} 个订单转为待发货",
+    "refreshFailed_one": "{{count}} 个订单未能完成转换，请再次刷新。",
+    "refreshFailed_other": "{{count}} 个订单未能完成转换，请再次刷新。",
     "export": "导出 Excel",
     "sku": "SKU"
   },
@@ -217,7 +222,7 @@
     "reverse": "冲销",
     "cancel": "取消",
     "reverseTitle": "冲销 {{no}}？",
-    "reverseDescription": "这会生成一张冲销收货单，把此单上的所有卡牌从现有库存中扣回。无法撤销，且此单之后不能再转入发票。",
+    "reverseDescription": "这会生成一张冲销收货单，把此单上的所有卡牌从现有库存中扣回。无法撤销，且此单之后不能再转入发票。已转为待发货的订单不会退回，请检查待寄送清单。",
     "fromBadge": "来自 {{no}}",
     "transfer": {
       "button": "从收货单转入",

@@ -40,9 +40,11 @@ export const CUSTOMER_STATUS_WORD: Record<string, string> = {
   delivered: 'delivered',
 };
 
-// The customer's own cancel window closes at the 12am cutoff: once the nightly
-// stock run moves an order out of `requested` (to processed, purchasing starts
-// buying its cards) only the operator may cancel it (owner, 2026-10-28).
+// The customer's own cancel window closes at the 12am cutoff, or earlier for a
+// complete order when staff press the Stock page's Refresh (operator,
+// 2026-11-03): once a stock run moves an order out of `requested` (to processed,
+// purchasing starts buying its cards) only the operator may cancel it (owner,
+// 2026-10-28).
 // Deliberately NARROWER than ALLOWED below, which still routes processed /
 // ready_to_ship -> canceled for the admin surface. Checked twice: by the
 // store cancel route up front, and under the order's lock in

@@ -13,6 +13,17 @@ import { isPhoneGateError } from '@/lib/phone-gate';
 const map = (msg: string) =>
   friendlyError(new Error(msg), DELIVERY_RULES, DELIVERY_FALLBACK);
 
+describe('address edit refused after a stock run moved the order', () => {
+  it('says to contact support, never "try again"', () => {
+    for (const msg of [
+      'This order is already ready to ship — its address can no longer be edited.',
+      'This order can no longer be edited (its status changed).',
+    ]) {
+      expect(map(msg)).toMatch(/can no longer be changed.*contact support/);
+    }
+  });
+});
+
 describe('shipping country and postcode refusals (2026-10-14)', () => {
   it('names both countries, from the new backend sentence or the old one', () => {
     for (const msg of [
