@@ -186,13 +186,17 @@ const Message = memo(function Message({
                   className={`flex w-fit items-center gap-x-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${p.state === 'saved' ? 'border-transparent text-ui-tag-green-text' : 'border-ui-border-base text-ui-fg-base hover:bg-ui-bg-base-hover disabled:opacity-50'}`}
                 >
                   {p.state === 'saved' && <CheckMini />}
-                  {p.state === 'saved'
-                    ? p.kind === 'note'
-                      ? t('assistant.confirm.saved')
-                      : t('assistant.confirm.taskSaved')
-                    : p.kind === 'note'
-                      ? t('assistant.confirm.saveNote')
-                      : t('assistant.confirm.saveTask')}
+                  {p.kind === 'unban'
+                    ? p.state === 'saved'
+                      ? t('assistant.confirm.unbanned')
+                      : t('assistant.confirm.unban')
+                    : p.state === 'saved'
+                      ? p.kind === 'note'
+                        ? t('assistant.confirm.saved')
+                        : t('assistant.confirm.taskSaved')
+                      : p.kind === 'note'
+                        ? t('assistant.confirm.saveNote')
+                        : t('assistant.confirm.saveTask')}
                 </button>
                 {p.state !== 'saved' && (
                   <span className="text-ui-fg-muted text-[11px]">

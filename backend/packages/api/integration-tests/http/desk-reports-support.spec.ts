@@ -268,5 +268,107 @@ medusaIntegrationTestRunner({
         expect((await report('account?username=a')).status).toBe(400);
       });
     });
+
+    describe('GET /reports/support/ban', () => {
+      it('explains a permanent ban by the shared bank, last 4 digits only', async () => {
+        const NUMBER = '512345678955';
+        const [ring] = await customers().createCustomers([
+          {
+            email: 'sp-ring@test.dev',
+            first_name: 'Ring_Mate',
+            metadata: {
+              handle: 'Ring_Handle',
+              bank_accounts: [
+                {
+                  id: 'ring',
+                  bankCode: 'MBBEMYKL',
+                  bankName: 'Maybank',
+                  accountNumber: NUMBER,
+                  accountHolderName: 'Same Person',
+                },
+              ],
+            },
+          },
+        ]);
+        for (const [customer_id, merchant_transaction_id] of [
+          [ownerId, 'sp-wd-1'],
+          [ring.id, 'sp-wd-2'],
+        ]) {
+          await packs().createGatewayWithdrawals([
+            {
+              merchant_transaction_id,
+              customer_id,
+              amount: 40,
+              amount_settled: 40,
+              bank_code: 'MBBEMYKL',
+              account_number: NUMBER,
+              account_holder_name: 'Same Person',
+              status: 'settled' as const,
+              settled_at: new Date(),
+            },
+          ]);
+        }
+        for (const id of [ownerId, ring.id]) {
+          await packs().setAccountDisabled({
+            customerId: id,
+            adminId: 'user_sp_admin',
+            disabled: true,
+            reason:
+              'Permanent ban: shared bank account, more than one account (owner, 2026-11-03)',
+          });
+        }
+        await pg().raw(
+          'INSERT INTO banned_payout_account (account_key, bank_code) VALUES (?, ?)',
+          [NUMBER, 'MBBEMYKL'],
+        );
+
+        const res = await report('ban?username=order_owner');
+        expect(res.status).toBe(200);
+        expect(res.data).toMatchObject({
+          disabled: true,
+          permanent_ban: true,
+          reason: expect.stringMatching(/^Permanent ban:/),
+        });
+        // The fixture's own pre-rule entry has no bank code, so only the
+        // shared Maybank number is listed.
+        expect(res.data.bank_accounts).toEqual([
+          {
+            bank: 'Maybank',
+            last4: '8955',
+            banned_number: true,
+            this_player_payouts: { count: 1, rm: 40 },
+            other_accounts: [
+              {
+                username: 'Ring_Mate',
+                handle: 'Ring_Handle',
+                banned: true,
+                disabled: true,
+                same_holder_name: true,
+                payouts: { count: 1, rm: 40 },
+              },
+            ],
+          },
+        ]);
+        expectNoSecrets(res.data);
+        expect(JSON.stringify(res.data)).not.toContain(NUMBER);
+        expect(JSON.stringify(res.data)).not.toContain('Same Person');
+      });
+
+      it('keeps a staff-typed disable reason private', async () => {
+        await packs().setAccountDisabled({
+          customerId: ownerId,
+          adminId: 'user_sp_admin',
+          disabled: true,
+          reason: 'STAFF-NOTE chargeback',
+        });
+        const res = await report('ban?username=order_owner');
+        expect(res.data).toMatchObject({
+          disabled: true,
+          permanent_ban: false,
+          bank_accounts: [],
+        });
+        expectNoSecrets(res.data);
+      });
+    });
   },
 });

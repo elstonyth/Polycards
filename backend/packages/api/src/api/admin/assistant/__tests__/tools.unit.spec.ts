@@ -1,5 +1,6 @@
 import {
   CORE_READ_PREFIXES,
+  SECRET_READS,
   CUSTOM_ADMIN_RESOURCES,
 } from '../../../admin-rbac';
 import { assistantPolicies } from '../../../../policies/assistant';
@@ -68,6 +69,10 @@ const ROWS: Record<string, [Record<string, unknown>, Record<string, unknown>]> =
     account: [
       { username: 'Ace' },
       { desk: 'support', path: 'account', params: { username: 'Ace' } },
+    ],
+    ban_reason: [
+      { username: 'Ace' },
+      { desk: 'support', path: 'ban', params: { username: 'Ace' } },
     ],
     order: [
       { number: '#A1B2C3' },
@@ -231,6 +236,8 @@ describe('assistant tools', () => {
     const known = new Set<string>([
       ...Object.values(CUSTOM_ADMIN_RESOURCES),
       ...Object.values(CORE_READ_PREFIXES),
+      // The secret reads (full bank details), declared in policies/admin-surfaces.ts.
+      ...SECRET_READS.map((r) => r.resource),
       ...assistantPolicies.policies.map((p) => p.resource),
     ]);
     for (const tool of TOOLS) {

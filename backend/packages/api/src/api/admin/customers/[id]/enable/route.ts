@@ -1,7 +1,11 @@
-import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import { PERMANENT_BAN_REASON_PREFIX } from '../../../../../modules/packs/saved-accounts';
 
 type Body = { reason?: unknown };
 
@@ -15,13 +19,32 @@ export async function POST(
   const customerId = req.params.id;
   const adminId = req.auth_context.actor_id;
   const reason = (req.body as Body)?.reason;
-  if (typeof reason !== 'string' || reason.trim() === '' || reason.length > 500) {
+  if (
+    typeof reason !== 'string' ||
+    reason.trim() === '' ||
+    reason.length > 500
+  ) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'A reason (1–500 chars) is required.',
     );
   }
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // A permanent ban lifts with the saved banks cleared, so the customer links
+  // one again themselves (owner, 2026-11-03).
+  const [state] = await packs.listCustomerAccountStates(
+    { customer_id: customerId, disabled: true },
+    { select: ['disabled_reason'], take: 1 },
+  );
+  if (state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX)) {
+    const { cleared } = await packs.liftPermanentBan({
+      customerId,
+      adminId,
+      reason: reason.trim(),
+    });
+    res.json({ disabled: false, cleared_bank_accounts: cleared });
+    return;
+  }
   await packs.setAccountDisabled({
     customerId,
     adminId,

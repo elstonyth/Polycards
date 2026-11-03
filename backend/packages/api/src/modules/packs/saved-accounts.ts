@@ -37,6 +37,11 @@ export const BANK_ACCOUNT_LOCKED_MESSAGE =
 export const BANNED_PAYOUT_ACCOUNT_MESSAGE =
   'This bank account cannot be used on Polycards.';
 
+/** disabled_reason prefix of a permanent ban for breaking the rules (owner,
+ *  2026-11-03: shared banks, more than one account). The login guard gives it
+ *  its own message; lifting one clears the saved banks (liftPermanentBan). */
+export const PERMANENT_BAN_REASON_PREFIX = 'Permanent ban:';
+
 export const HOLDER_NAME_CONFIRM_MESSAGE =
   'The two names do not match. Type the same name twice.';
 

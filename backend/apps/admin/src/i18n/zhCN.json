@@ -462,6 +462,8 @@
       "saveTask": "保存任务",
       "saved": "已保存",
       "taskSaved": "任务已保存",
+      "unban": "解封",
+      "unbanned": "已解封",
       "hint": "点保存才会保留。"
     },
     "copy": "复制",

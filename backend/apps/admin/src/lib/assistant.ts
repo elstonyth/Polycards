@@ -89,7 +89,7 @@ export type ChatEvent =
    *  taps Save (confirmProposal), so text planted in data can't save one. */
   | {
       type: 'confirm';
-      kind: 'note' | 'schedule';
+      kind: 'note' | 'schedule' | 'unban';
       summary: string;
       token: string;
     }
@@ -126,7 +126,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
  *  A refusal throws with the server's `code`: confirm_expired or
  *  confirm_refused. */
 export const confirmProposal = (token: string) =>
-  call<{ kind: 'note' | 'schedule'; next_run_at: string | null }>(
+  call<{ kind: 'note' | 'schedule' | 'unban'; next_run_at: string | null }>(
     '/admin/assistant/confirm',
     { method: 'POST', body: JSON.stringify({ token }) },
   );

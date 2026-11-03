@@ -40,6 +40,7 @@ const POLICIES: Record<string, string[]> = {
     'pull:read',
     'pack_gift:read',
     'lucky_draw:read',
+    'assistant_unban:update',
   ],
   assistant_user: ['assistant:read', 'assistant:update', 'assistant:delete'],
   assistant_browser: ['assistant_browse:read'],
@@ -110,10 +111,13 @@ describe('assistant access', () => {
   });
 
   it('gives yu (Support viewer) one-customer tools only: no lists, no SQL', async () => {
+    // ban_reason and unban_account too (owner, 2026-11-03).
     expect(await toolsOf(['support_viewer', 'assistant_user'])).toEqual([
       'player',
       'account',
+      'ban_reason',
       'order',
+      'unban_account',
       'remember',
       'recall',
       'forget',

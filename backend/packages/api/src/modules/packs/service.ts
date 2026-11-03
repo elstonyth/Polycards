@@ -49,6 +49,7 @@ import {
   loadSavedBankAccounts,
   parseSavedBankAccounts,
   payoutAccountKey,
+  PERMANENT_BAN_REASON_PREFIX,
   resolveWithdrawalDestination,
   verifiedBankAccounts,
   withBankShareStamp,
@@ -6585,6 +6586,67 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { frozen: true };
+  }
+
+  // Lifting a permanent ban (owner, 2026-11-03): the account logs in again with
+  // no saved bank and no support stamp, so the customer links a bank again
+  // under the save rules. Banned numbers stay banned. One transaction: the
+  // clear, the enable and both audit rows land together or not at all. Only a
+  // permanent ban: a deleted account's tombstone and a staff disable are not
+  // lifted here.
+  @InjectTransactionManager()
+  async liftPermanentBan(
+    input: { customerId: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ cleared: number }> {
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId, disabled: true },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account has no permanent ban to lift.',
+      );
+    }
+    let cleared = 0;
+    await this.mutateCustomerMetadata(
+      {
+        customerId: input.customerId,
+        mutate: (current) => {
+          if (!('bank_accounts' in current) && !('bank_share_verified' in current)) {
+            return null;
+          }
+          const { bank_accounts, bank_share_verified: _stamps, ...rest } = current;
+          cleared = parseSavedBankAccounts(bank_accounts).length;
+          return rest;
+        },
+      },
+      sharedContext,
+    );
+    await this.setAccountDisabled(
+      {
+        customerId: input.customerId,
+        adminId: input.adminId,
+        disabled: false,
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'edit',
+        before: { saved_bank_accounts: cleared },
+        after: { saved_bank_accounts: 0 },
+        reason: `Cleared saved bank accounts on unban: ${input.reason}`,
+      },
+      sharedContext,
+    );
+    return { cleared };
   }
 
   // Player disable switch (POLYCARD-BACK §4.2): blocks LOGIN/session use —

@@ -25,7 +25,10 @@ export const SUPPORT_VIEWER_POLICIES = [
   'pull',
   'pack_gift',
   'lucky_draw',
-].map((resource) => ({ resource, operation: 'read' as const }));
+]
+  .map((resource) => ({ resource, operation: 'read' as 'read' | 'update' }))
+  // Unban through the admin assistant (owner, 2026-11-03): its one write.
+  .concat([{ resource: 'assistant_unban', operation: 'update' }]);
 
 /** The role, created on first use and linked to the DECLARED policy rows.
  *  Never creates a policy: the boot sync soft-deletes undeclared ones

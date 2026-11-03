@@ -2219,6 +2219,8 @@
       "saveTask": "Save task",
       "saved": "Saved",
       "taskSaved": "Task saved",
+      "unban": "Unban",
+      "unbanned": "Unbanned",
       "hint": "Nothing is kept until you tap save."
     },
     "copy": "Copy",

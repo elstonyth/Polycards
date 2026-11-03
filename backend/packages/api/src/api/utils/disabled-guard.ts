@@ -7,14 +7,13 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { IAuthModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+import { PERMANENT_BAN_REASON_PREFIX } from '../../modules/packs/saved-accounts';
 
 const DISABLED_MESSAGE =
   'This account has been disabled. Please contact support.';
 
-/** disabled_reason prefix of a permanent ban for breaking the rules (owner,
- *  2026-11-03: shared banks, more than one account). Such accounts read their
- *  own message, with no offer of support. */
-export const PERMANENT_BAN_REASON_PREFIX = 'Permanent ban:';
+// A permanent ban reads its own message, with no offer of support.
+export { PERMANENT_BAN_REASON_PREFIX };
 
 const BANNED_MESSAGE =
   'This account has been permanently banned for breaking the rules.';
