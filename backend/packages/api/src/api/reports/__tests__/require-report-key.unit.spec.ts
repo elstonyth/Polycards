@@ -1,5 +1,5 @@
 import { ASSISTANT_REPORT_KEY } from '../../admin/assistant/bridge';
-import { deskOf, requireReportKey } from '../require-report-key';
+import { deskOf, maskForLog, requireReportKey } from '../require-report-key';
 
 const FINANCE = 'f'.repeat(40);
 const STORE = 's'.repeat(40);
@@ -139,7 +139,7 @@ describe('requireReportKey', () => {
       { 'x-report-key': STORE },
     );
     expect(info).toHaveBeenCalledWith(
-      '[reports] store /reports/admin/read?path=%2Fadmin%2Fcustomers&q=…@…&phone=+#',
+      '[reports] store /reports/admin/read?path=%2Fadmin%2Fcustomers&q=…@…&phone=…',
     );
   });
 
@@ -248,5 +248,16 @@ describe('requireReportKey', () => {
     expect(
       run('/reports/admin/sql', { 'x-report-key': ASSISTANT_REPORT_KEY }).next,
     ).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('maskForLog', () => {
+  it('masks every ban lookup value whatever its spelling', () => {
+    const line = maskForLog(
+      '/reports/support/ban?bank_account=5123-4567-8955&holder_name=Same%20Person&phone=%2B60%2012%20345&EMAIL=a%40b.c',
+    );
+    expect(line).toBe(
+      '/reports/support/ban?bank_account=…&holder_name=…&phone=…&EMAIL=…',
+    );
   });
 });

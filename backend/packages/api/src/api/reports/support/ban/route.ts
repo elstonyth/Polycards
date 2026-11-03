@@ -6,6 +6,7 @@ import { PERMANENT_BAN_REASON_PREFIX } from '../../../utils/disabled-guard';
 import { realNameKeySql } from '../../../../utils/real-name';
 import { findReportPlayer } from '../../player-lookup';
 import { reportDb, type ReportDb } from '../../sql';
+import { nameGroups } from './name-groups';
 
 // GET /reports/support/ban: why accounts are banned and who is linked with whom,
 // for support and the admin assistant (owner, 2026-11-03). Look up by whatever
@@ -101,21 +102,6 @@ async function accountsOn(db: ReportDb, key: string): Promise<AccountRow[]> {
   ).rows;
 }
 
-/** Numbers each account in a group of holder-name keys shares a group number
- *  with: accounts that used one same name read the same group. */
-function nameGroups(rows: AccountRow[]): Map<string, number | null> {
-  const groupOf = new Map<string, number>();
-  const out = new Map<string, number | null>();
-  for (const row of rows) {
-    const keys = row.keys ?? [];
-    let group = keys.map((k) => groupOf.get(k)).find((g) => g !== undefined);
-    if (group === undefined && keys.length > 0) group = groupOf.size + 1;
-    for (const k of keys) if (group !== undefined) groupOf.set(k, group);
-    out.set(row.customer_id, group ?? null);
-  }
-  return out;
-}
-
 /** One player's ban and every bank they saved or were paid to. */
 async function playerView(db: ReportDb, id: string, lookupNote?: string) {
   const [state] = (
@@ -158,12 +144,14 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
   }
 
   const linked = new Set<string>();
+  const myNames = new Set<string>();
   const banks: Record<string, unknown>[] = [];
   for (const [key, row] of byKey) {
     const accounts = await accountsOn(db, key);
     const mine = new Set(
       accounts.find((a) => a.customer_id === id)?.keys ?? [],
     );
+    for (const k of mine) myNames.add(k);
     const payouts = await payoutsTo(db, key);
     const others = accounts.filter((a) => a.customer_id !== id);
     for (const o of others) linked.add(o.customer_id);
@@ -178,11 +166,57 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
         ...banState(o.disabled, o.reason),
         // Its payouts still count; the name and handle went with the deletion.
         deleted: o.deleted === true,
-        same_holder_name: (o.keys ?? []).some((k) => mine.has(k)),
+        // null when either side has no name on file to compare.
+        same_holder_name:
+          mine.size === 0 || (o.keys ?? []).length === 0
+            ? null
+            : (o.keys ?? []).some((k) => mine.has(k)),
         payouts: payouts(o.customer_id),
       })),
     });
   }
+
+  // Accounts under one of this player's holder names at a DIFFERENT bank
+  // number: linked by the name, not the number.
+  const sameName = myNames.size
+    ? (
+        await db.raw<
+          AccountRow & { bank_code: string; account_number: string }
+        >(
+          `WITH h AS (
+             SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountNumber' AS account_number
+               FROM customer c CROSS JOIN LATERAL ${SAVED}
+              WHERE c.deleted_at IS NULL AND c.id <> ? AND ${NAME("a->>'accountHolderName'")} = ANY(string_to_array(?, ','))
+             UNION SELECT customer_id, bank_code, account_number FROM gateway_withdrawal
+              WHERE ${LIVE_PAYOUT} AND customer_id <> ? AND ${NAME('account_holder_name')} = ANY(string_to_array(?, ','))
+           )
+           SELECT h.customer_id, h.bank_code, h.account_number, c.first_name AS username,
+                  c.metadata->>'handle' AS handle, c.deleted_at IS NOT NULL AS deleted,
+                  s.disabled, s.disabled_reason AS reason
+             FROM h JOIN customer c ON c.id = h.customer_id
+             LEFT JOIN customer_account_state s ON s.customer_id = h.customer_id AND s.deleted_at IS NULL
+            ORDER BY c.first_name`,
+          [id, [...myNames].join(','), id, [...myNames].join(',')],
+        )
+      ).rows.filter((r) => !linked.has(r.customer_id))
+    : [];
+  const sameNameAccounts = new Map<
+    string,
+    { row: AccountRow; banks: Map<string, string> }
+  >();
+  for (const r of sameName) {
+    if (!r.account_number || findBank(r.bank_code)?.wallet) continue;
+    const key = payoutAccountKey(r.account_number, false);
+    const entry = sameNameAccounts.get(r.customer_id) ?? {
+      row: r,
+      banks: new Map<string, string>(),
+    };
+    if (key.length > 4) {
+      entry.banks.set(key, findBank(r.bank_code)?.name ?? r.bank_code);
+    }
+    sameNameAccounts.set(r.customer_id, entry);
+  }
+  for (const customerId of sameNameAccounts.keys()) linked.add(customerId);
 
   return {
     username: who?.username ?? null,
@@ -198,8 +232,20 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
     disabled_at: disabled ? state?.disabled_at : null,
     linked_accounts_total: linked.size,
     bank_accounts: banks,
+    same_name_accounts: [...sameNameAccounts.values()].map(
+      ({ row, banks: theirs }) => ({
+        username: row.username,
+        handle: row.handle,
+        ...banState(row.disabled, row.reason),
+        deleted: row.deleted === true,
+        banks: [...theirs].map(([key, bank]) => ({
+          bank,
+          last4: key.slice(-4),
+        })),
+      }),
+    ),
     ...(lookupNote ? { lookup_note: lookupNote } : {}),
-    note: 'A permanent ban (owner, 2026-11-03) is for one person with more than one account: the same bank account was saved or paid out on more than one Polycards account. bank_accounts are every bank this player saved or was paid to, by bank name and last 4 digits; other_accounts are the other accounts on that same number, with their payouts to it (settled, RM); linked_accounts_total counts them once across all banks. same_holder_name says whether they used the same account holder name. Lifting the ban clears the saved banks; the player links a bank again.',
+    note: "A permanent ban (owner, 2026-11-03) is for one person with more than one account: the same bank account, or the same account holder name, on more than one Polycards account. bank_accounts are every bank this player saved or was paid to, by bank name and last 4 digits; other_accounts are the other accounts on that same number, with their settled payouts to it (RM). same_name_accounts used one of this player's holder names at a different bank. linked_accounts_total counts every linked account once, this player not included: the person holds linked_accounts_total + 1 accounts. same_holder_name: true same name, false a different name, null no name to compare. banned = permanent ban; disabled = cannot log in (a ban, or staff); deleted = the account was deleted (its name and handle are gone, its payouts still count). disabled_at is UTC: say it in Malaysia time. Lifting the ban clears the saved banks; the player links a bank again.",
   };
 }
 
@@ -208,19 +254,23 @@ async function numberView(db: ReportDb, key: string) {
   const accounts = await accountsOn(db, key);
   const payouts = await payoutsTo(db, key);
   const groups = nameGroups(accounts);
-  const [bankRow] = (
+  // Every bank the number is at (the ban matches the digits at any bank).
+  const bankRows = (
     await db.raw<{ bank_code: string }>(
-      `SELECT a->>'bankCode' AS bank_code FROM customer c CROSS JOIN LATERAL ${SAVED} WHERE ${DIGITS("a->>'accountNumber'")} = ?
-       UNION SELECT bank_code FROM gateway_withdrawal WHERE deleted_at IS NULL AND ${DIGITS('account_number')} = ?
-       LIMIT 1`,
+      `SELECT a->>'bankCode' AS bank_code FROM customer c CROSS JOIN LATERAL ${SAVED}
+        WHERE c.deleted_at IS NULL AND ${DIGITS("a->>'accountNumber'")} = ?
+       UNION SELECT bank_code FROM gateway_withdrawal WHERE ${LIVE_PAYOUT} AND ${DIGITS('account_number')} = ?
+       ORDER BY 1`,
       [key, key],
     )
   ).rows;
   return {
     bank_account: {
-      bank: bankRow
-        ? (findBank(bankRow.bank_code)?.name ?? bankRow.bank_code)
-        : null,
+      banks: [
+        ...new Set(
+          bankRows.map((b) => findBank(b.bank_code)?.name ?? b.bank_code),
+        ),
+      ],
       last4: key.slice(-4),
       banned_number: await isBanned(db, key),
     },
@@ -315,10 +365,15 @@ export async function GET(
     return;
   }
   if (by === 'holder_name') {
-    if (value.length < 2 || value.length > 120) {
+    // Separators alone would key to nothing and match no one.
+    if (
+      value.length < 2 ||
+      value.length > 120 ||
+      value.replace(/[s.'@/,-]/g, '') === ''
+    ) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        'holder_name must be 2-120 characters.',
+        'holder_name must be a name of 2-120 characters.',
       );
     }
     res.json(await nameView(db, value));
@@ -336,7 +391,7 @@ export async function GET(
     by === 'email'
       ? (
           await db.raw<{ id: string }>(
-            'SELECT id FROM customer WHERE deleted_at IS NULL AND has_account = true AND lower(email) = lower(?) ORDER BY created_at LIMIT 5',
+            'SELECT id FROM customer WHERE deleted_at IS NULL AND has_account = true AND lower(email) = lower(?) ORDER BY created_at LIMIT 6',
             [value],
           )
         ).rows.map((r) => r.id)
@@ -348,10 +403,12 @@ export async function GET(
               'phone must have at least 8 digits.',
             );
           }
+          // Phones are stored with their country code (+60..., +65...): the
+          // number exactly as typed, with 60 in place of a leading 0, or with 65.
           return (
             await db.raw<{ id: string }>(
-              "SELECT id FROM customer WHERE deleted_at IS NULL AND has_account = true AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') LIKE '%' || ? ORDER BY created_at LIMIT 5",
-              [digits],
+              "SELECT id FROM customer WHERE deleted_at IS NULL AND has_account = true AND regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') IN (?, ?, ?) ORDER BY created_at LIMIT 6",
+              [digits, `60${digits.replace(/^0/, '')}`, `65${digits}`],
             )
           ).rows.map((r) => r.id);
         })();
@@ -366,7 +423,12 @@ export async function GET(
     return;
   }
   res.json({
-    players: await Promise.all(ids.map((id) => playerView(db, id))),
-    note: `More than one account has this ${by}; each is listed with its own bank links.`,
+    // One at a time: each view runs several queries on a small pool.
+    players: await (async () => {
+      const views: Awaited<ReturnType<typeof playerView>>[] = [];
+      for (const id of ids.slice(0, 5)) views.push(await playerView(db, id));
+      return views;
+    })(),
+    note: `More than one account has this ${by}; each is listed with its own bank links.${ids.length > 5 ? ' Only the first 5 are shown: there are more.' : ''}`,
   });
 }

@@ -361,7 +361,11 @@ medusaIntegrationTestRunner({
         );
         expect(byNumber.status).toBe(200);
         expect(byNumber.data).toMatchObject({
-          bank_account: { bank: 'Maybank', last4: '8955', banned_number: true },
+          bank_account: {
+            banks: ['Maybank'],
+            last4: '8955',
+            banned_number: true,
+          },
           account_count: 2,
         });
         const groups = byNumber.data.accounts.map(
@@ -375,7 +379,9 @@ medusaIntegrationTestRunner({
           { bank: 'Maybank', last4: '8955' },
         ]);
         // Email and phone find signed-up accounts only, never a guest twin.
-        await pg().raw('UPDATE customer SET has_account = true WHERE id = ?', [ownerId]);
+        await pg().raw('UPDATE customer SET has_account = true WHERE id = ?', [
+          ownerId,
+        ]);
         const byEmail = await report('ban?email=SP-OWNER%40test.dev');
         expect(byEmail.data).toMatchObject({
           username: 'Order_Owner',
@@ -394,6 +400,68 @@ medusaIntegrationTestRunner({
         ).toBe(400);
         expect((await report('ban?bank_account=1234')).status).toBe(400);
         expect((await report('ban?email=nobody%40test.dev')).status).toBe(404);
+      });
+
+      it('links by name at another bank, lists a shared phone, skips a guest twin', async () => {
+        const make = async (
+          email: string,
+          first_name: string,
+          phone: string,
+          has_account = true,
+        ) => {
+          const [c] = await customers().createCustomers([
+            {
+              email,
+              first_name,
+              phone,
+              has_account,
+              metadata: { handle: first_name },
+            },
+          ]);
+          return c.id;
+        };
+        const a = await make('sp-a@test.dev', 'Name_A', '+60123334444');
+        const b = await make('sp-b@test.dev', 'Name_B', '+60123334444');
+        await make('sp-a@test.dev', 'Guest_A', '+60199990000', false);
+        for (const [customer_id, number, id] of [
+          [a, '511111111111', 'sp-wd-a'],
+          [b, '522222222222', 'sp-wd-b'],
+        ]) {
+          await packs().createGatewayWithdrawals([
+            {
+              merchant_transaction_id: id,
+              customer_id,
+              amount: 10,
+              amount_settled: 10,
+              bank_code: 'MBBEMYKL',
+              account_number: number,
+              account_holder_name: 'One Name',
+              status: 'settled' as const,
+              settled_at: new Date(),
+            },
+          ]);
+        }
+        const byName = await report('ban?username=name_a');
+        expect(byName.data.linked_accounts_total).toBe(1);
+        expect(byName.data.same_name_accounts).toEqual([
+          expect.objectContaining({
+            username: 'Name_B',
+            banks: [{ bank: 'Maybank', last4: '2222' }],
+          }),
+        ]);
+        const byPhone = await report('ban?phone=012-333%204444');
+        expect(
+          byPhone.data.players.map((p: { username: string }) => p.username),
+        ).toEqual(['Name_A', 'Name_B']);
+        const byEmail = await report('ban?email=sp-a%40test.dev');
+        expect(byEmail.data.username).toBe('Name_A');
+        expect((await report('ban?phone=0123334')).status).toBe(400);
+        expect((await report('ban?holder_name=..')).status).toBe(400);
+        for (const r of [byName, byPhone, byEmail]) {
+          expect(JSON.stringify(r.data)).not.toContain('22222222');
+          expect(JSON.stringify(r.data)).not.toContain('One Name');
+          expect(JSON.stringify(r.data)).not.toContain('@');
+        }
       });
 
       it('keeps a staff-typed disable reason private', async () => {
