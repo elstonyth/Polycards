@@ -348,9 +348,9 @@ const SavedBankAccountsCard = ({
               )}
             </div>
           ))}
-          {/* One account per currency (owner, 2026-11-03): a wallet may sit
-              beside a bank, so Add stays; the server refuses a second one in
-              the same currency. */}
+          {/* One account per currency, Touch 'n Go apart (owner,
+              2026-11-03): a wallet or Touch 'n Go may sit beside a bank, so
+              Add stays; the server refuses a second one of the same kind. */}
           {canEdit && (
             <div className="border-t px-6 py-4">
               <Button

@@ -441,6 +441,52 @@ describe('BankAccountsClient — one account per currency', () => {
     await mountWith([WALLET], [USDT]);
     expect(addButton()).toBeUndefined();
   });
+
+  const TNG = {
+    bankCode: 'TNGMY',
+    bankName: "Touch 'n Go eWallet",
+    currency: 'MYR',
+    accountLengths: [12],
+  };
+  const bankOptions = () =>
+    [
+      ...(container.querySelector<HTMLSelectElement>('[aria-label="Bank"]')
+        ?.options ?? []),
+    ]
+      .map((o) => o.value)
+      .filter(Boolean);
+  const saved = (bankCode: string, bankName: string) => ({
+    id: `acc_${bankCode}`,
+    bankCode,
+    bankName,
+    accountNumber: '123456789012',
+    accountHolderName: 'Test Customer',
+    usableFrom: '2026-01-01T00:00:00.000Z',
+    supported: true,
+    currency: 'MYR',
+  });
+
+  it("offers Touch 'n Go beside a saved RM bank, never a second RM bank", async () => {
+    await mountWith([saved('MBB', 'Maybank')], [...MY, TNG]);
+    act(() => addButton()!.click());
+    act(() => countryButton('Malaysia')!.click());
+    expect(bankOptions()).toEqual(['TNGMY']);
+  });
+
+  it("offers RM banks beside a saved Touch 'n Go, never a second one", async () => {
+    await mountWith([saved('TNGMY', "Touch 'n Go eWallet")], [...MY, TNG]);
+    act(() => addButton()!.click());
+    act(() => countryButton('Malaysia')!.click());
+    expect(bankOptions()).toEqual(['MBB', 'CIMB']);
+  });
+
+  it("offers no Add once the RM bank and Touch 'n Go are both saved", async () => {
+    await mountWith(
+      [saved('MBB', 'Maybank'), saved('TNGMY', "Touch 'n Go eWallet")],
+      [...MY, TNG],
+    );
+    expect(addButton()).toBeUndefined();
+  });
 });
 
 describe('BankAccountsClient — holder name typed twice', () => {

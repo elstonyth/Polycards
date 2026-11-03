@@ -56,7 +56,7 @@ import {
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
-import { bankCurrency } from './banks';
+import { savedAccountSlot } from './banks';
 import { challengePackId } from './challenge-prize';
 import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
@@ -10146,9 +10146,9 @@ class PacksModuleService extends MedusaService({
         customerId: input.customerId,
         mutate: (current) => {
           const accounts = parseSavedBankAccounts(current.bank_accounts);
-          const currency = bankCurrency(input.account.bankCode);
+          const slot = savedAccountSlot(input.account.bankCode);
           if (
-            accounts.filter((a) => bankCurrency(a.bankCode) === currency)
+            accounts.filter((a) => savedAccountSlot(a.bankCode) === slot)
               .length >= MAX_SAVED_BANK_ACCOUNTS
           ) {
             throw new MedusaError(

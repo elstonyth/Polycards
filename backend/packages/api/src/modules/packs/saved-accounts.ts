@@ -22,8 +22,8 @@ import type { PaymentGateway } from './gateway';
 // keeps the money path from importing an API route.
 
 /** One saved account per currency per Polycards account (owner, 2026-11-03, ADR
- *  0015): one RM bank, one SGD bank, one USDT wallet (bankCurrency). Once saved
- *  it cannot be changed. */
+ *  0015): one RM bank, one Touch 'n Go, one SGD bank, one USDT wallet
+ *  (savedAccountSlot). Once saved it cannot be changed. */
 export const MAX_SAVED_BANK_ACCOUNTS = 1;
 
 export const ONE_BANK_ACCOUNT_MESSAGE =

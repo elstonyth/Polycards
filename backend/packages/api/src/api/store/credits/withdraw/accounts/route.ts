@@ -4,9 +4,9 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
-  bankCurrency,
   findBank,
   sandboxOnlyBank,
+  savedAccountSlot,
 } from '../../../../../modules/packs/banks';
 import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
 import {
@@ -357,9 +357,9 @@ export async function POST(
     // holder name included, and keeps its original savedAt, so a re-save restarts
     // no cooling-off window and arms no old row.
     if (accounts.some((a) => a.id === account.id)) return null;
-    const currency = bankCurrency(bankCode);
+    const slot = savedAccountSlot(bankCode);
     if (
-      accounts.filter((a) => bankCurrency(a.bankCode) === currency).length >=
+      accounts.filter((a) => savedAccountSlot(a.bankCode) === slot).length >=
       MAX_SAVED_BANK_ACCOUNTS
     ) {
       throw new MedusaError(

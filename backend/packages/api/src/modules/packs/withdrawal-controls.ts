@@ -1,4 +1,4 @@
-import { bankPayoutMinRm, findBank } from './banks';
+import { TNG_BANK_ID, bankPayoutMinRm, findBank } from './banks';
 
 /**
  * Admin withdrawal controls (2026-10-17), set on the admin Withdrawals page
@@ -45,7 +45,7 @@ export type ChannelStatus =
   /** reopens_at: epoch ms, or null when only an admin can reopen it. */
   | { open: false; reopens_at: number | null };
 
-export const TNG_BANK_ID = 'TNGMY';
+export { TNG_BANK_ID };
 /** The provider refuses a Touch 'n Go payout below this — after our debit. */
 export const TNG_MIN_FLOOR_RM = bankPayoutMinRm(TNG_BANK_ID) ?? 0;
 export const TIME_OF_DAY = /^([01]\d|2[0-3]):[0-5]\d$/;
