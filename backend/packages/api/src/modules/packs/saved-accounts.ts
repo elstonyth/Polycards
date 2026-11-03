@@ -7,6 +7,7 @@ import {
   sandboxOnlyBank,
   type Bank,
 } from './banks';
+import { realNameKey } from '../../utils/real-name';
 // Type-only: a value import of gateway.ts from here would cycle through the
 // module index into the service, which imports this file.
 import type { PaymentGateway } from './gateway';
@@ -523,6 +524,49 @@ export function verifiedBankAccounts(
   return Object.fromEntries(
     Object.entries(stamps).filter(([, at]) => typeof at === 'string'),
   ) as Record<string, string>;
+}
+
+/** Holder names support cleared as a real clash (owner, 2026-11-04): another
+ *  person with the same name holds it on another account, so this account's
+ *  own saves skip the other-account name check for it. Keyed by realNameKey;
+ *  only support writes it (setHolderNameCleared). */
+export const HOLDER_NAME_CLEARED_KEY = 'holder_name_cleared';
+
+export type ClearedHolderName = { name: string; at: string };
+
+export function clearedHolderNames(
+  metadata: Record<string, unknown>,
+): Record<string, ClearedHolderName> {
+  const stamps = metadata[HOLDER_NAME_CLEARED_KEY];
+  if (typeof stamps !== 'object' || stamps === null) return {};
+  return Object.fromEntries(
+    Object.entries(stamps).filter(
+      ([, v]) =>
+        typeof v === 'object' &&
+        v !== null &&
+        typeof (v as ClearedHolderName).name === 'string' &&
+        typeof (v as ClearedHolderName).at === 'string',
+    ),
+  ) as Record<string, ClearedHolderName>;
+}
+
+/** The key a holder name is cleared under: stored form, then compared as real
+ *  names are, so the stamp matches what a save checks. */
+export const holderNameKey = (name: string): string =>
+  realNameKey(normalizeHolderName(name));
+
+/** The blob with one name cleared, or the clearing removed by a null. */
+export function withClearedHolderName(
+  metadata: Record<string, unknown>,
+  key: string,
+  stamp: ClearedHolderName | null,
+): Record<string, unknown> {
+  const { [key]: _old, ...others } = clearedHolderNames(metadata);
+  const stamps = stamp === null ? others : { ...others, [key]: stamp };
+  const { [HOLDER_NAME_CLEARED_KEY]: _key, ...rest } = metadata;
+  return Object.keys(stamps).length > 0
+    ? { ...rest, [HOLDER_NAME_CLEARED_KEY]: stamps }
+    : rest;
 }
 
 /** The blob with one account's stamp set, or cleared by a null. */

@@ -1428,6 +1428,11 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      matcher: '/admin/customers/*/bank-accounts/name-clash',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // The GET returns the FULL bank account number, so it needs the limiter at
       // least as much as the write does. It was previously unthrottled, and the
       // coverage guard could not catch that because

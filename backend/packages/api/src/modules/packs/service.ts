@@ -53,6 +53,9 @@ import {
   resolveWithdrawalDestination,
   verifiedBankAccounts,
   withBankShareStamp,
+  clearedHolderNames,
+  holderNameKey,
+  withClearedHolderName,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
@@ -10126,6 +10129,58 @@ class PacksModuleService extends MedusaService({
     }
   }
 
+  // Support found two real people with one name (owner, 2026-11-04): this
+  // account's own saves stop counting the name as another account's. Per account
+  // and per name, so each of the two is cleared on its own, and a third account
+  // using the name is still refused. `cleared: false` takes it back.
+  @InjectTransactionManager()
+  async setHolderNameCleared(
+    input: {
+      customerId: string;
+      adminId: string;
+      holderName: string;
+      cleared: boolean;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const key = holderNameKey(input.holderName);
+    let changed = false;
+    await this.mutateCustomerMetadata(
+      {
+        customerId: input.customerId,
+        mutate: (current) => {
+          if (Boolean(clearedHolderNames(current)[key]) === input.cleared) {
+            return null;
+          }
+          changed = true;
+          return withClearedHolderName(
+            current,
+            key,
+            input.cleared
+              ? { name: input.holderName, at: new Date().toISOString() }
+              : null,
+          );
+        },
+      },
+      sharedContext,
+    );
+    if (changed) {
+      await this.audit(
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { holder_name: input.holderName, cleared: !input.cleared },
+          after: { holder_name: input.holderName, cleared: input.cleared },
+          reason: `${input.cleared ? 'Cleared' : 'Took back'} a holder name shared with another person: ${input.reason}`,
+        },
+        sharedContext,
+      );
+    }
+  }
+
   // Support adds a saved account in a free slot (savedAccountSlot): the one way in
   // for a real owner whose number another account already holds, which a customer
   // save refuses for good because paid-out rows are permanent. The account starts
@@ -10274,7 +10329,9 @@ class PacksModuleService extends MedusaService({
   // Another account already used this holder name on a bank, saved or paid
   // (owner, 2026-11-03: a different bank under the same name is refused too).
   // Names compare as setRealName compares them. A wallet entry carries its
-  // network's name, which no person's name equals.
+  // network's name, which no person's name equals. A name support cleared for
+  // this customer as two real people's (setHolderNameCleared) is not held by
+  // another, for this customer only.
   @InjectManager()
   async holderNameHeldByAnother(
     customerId: string,
@@ -10283,6 +10340,13 @@ class PacksModuleService extends MedusaService({
   ): Promise<boolean> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
+      'SELECT metadata FROM customer WHERE id = ?',
+      [customerId],
+    );
+    if (clearedHolderNames(me?.metadata ?? {})[holderNameKey(holderName)]) {
+      return false;
+    }
     const rows = await em.execute<unknown[]>(
       'SELECT 1 FROM customer c ' +
         "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +

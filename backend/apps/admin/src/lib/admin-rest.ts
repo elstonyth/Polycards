@@ -2049,6 +2049,8 @@ export interface SavedBankAccounts {
     verified_at: string | null;
     linked: { customer_id: string; handle: string | null }[];
   }[];
+  /** Holder names support cleared as two real people's. */
+  cleared_names: { name: string; cleared_at: string }[];
 }
 
 export const getSavedBankAccounts = (id: string) =>
@@ -2099,6 +2101,17 @@ export const setBankShareVerified = (
   postJson<{ verified: boolean }>(
     `/admin/customers/${encodeURIComponent(id)}/bank-accounts/verify`,
     { account_id: accountId, verified, reason },
+  );
+
+export const setHolderNameCleared = (
+  id: string,
+  holderName: string,
+  cleared: boolean,
+  reason: string,
+) =>
+  postJson<{ cleared: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/bank-accounts/name-clash`,
+    { holder_name: holderName, cleared, reason },
   );
 
 export const addSavedBankAccount = (

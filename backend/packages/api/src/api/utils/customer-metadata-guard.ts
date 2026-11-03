@@ -115,6 +115,8 @@ export function rejectAdminBankAccountsMetadata(
 // customer.metadata keys only a role with their own read policy may receive.
 const SECRET_METADATA = [
   { key: 'bank_accounts', resource: 'customer_bank_account' },
+  // Holder names support cleared as a real clash: names, like the list's.
+  { key: 'holder_name_cleared', resource: 'customer_bank_account' },
   { key: PARTNER_CREDENTIAL_KEY, resource: 'partner_credential' },
 ] as const;
 

@@ -377,3 +377,73 @@ describe('anySavedAccountShared', () => {
     );
   });
 });
+
+describe('setHolderNameCleared', () => {
+  const input = {
+    customerId: 'cus_1',
+    adminId: 'user_1',
+    holderName: 'Tan Ah Kow',
+    cleared: true,
+    reason: 'two people, checked their banks',
+  };
+
+  it('stamps the name under its compare key, keeps the rest, audits it', async () => {
+    const { svc, writes, audits, ctx } = fakeService({ avatar_url: 'a' });
+    await svc.setHolderNameCleared(input, ctx);
+    expect(writes[0]).toMatchObject({
+      avatar_url: 'a',
+      holder_name_cleared: { tanahkow: { name: 'Tan Ah Kow' } },
+    });
+    expect(audits[0][0]).toMatchObject({
+      entity_id: 'cus_1',
+      action: 'edit',
+      after: { holder_name: 'Tan Ah Kow', cleared: true },
+    });
+  });
+
+  it('takes it back, and writes nothing when there is nothing to change', async () => {
+    const stamped = fakeService({
+      holder_name_cleared: { tanahkow: { name: 'Tan Ah Kow', at: STAMP } },
+    });
+    await stamped.svc.setHolderNameCleared(
+      { ...input, holderName: 'TAN AH-KOW', cleared: false },
+      stamped.ctx,
+    );
+    expect(stamped.writes[0].holder_name_cleared).toBeUndefined();
+
+    const none = fakeService({});
+    await none.svc.setHolderNameCleared({ ...input, cleared: false }, none.ctx);
+    expect(none.writes).toEqual([]);
+    expect(none.audits).toEqual([]);
+  });
+});
+
+describe('holderNameHeldByAnother — a name support cleared', () => {
+  const service = (metadata: Record<string, unknown>) => {
+    const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
+    const execute = jest.fn(async (query: string) =>
+      query.startsWith('SELECT metadata') ? [{ metadata }] : [{ '?column?': 1 }],
+    );
+    const em = { execute };
+    return { svc, execute, ctx: { transactionManager: em, manager: em } as never };
+  };
+  const cleared = {
+    holder_name_cleared: { tanahkow: { name: 'Tan Ah Kow', at: STAMP } },
+  };
+
+  it('is not held by another for the customer support cleared it for', async () => {
+    const { svc, execute, ctx } = service(cleared);
+    await expect(svc.holderNameHeldByAnother('cus_1', 'TAN AH-KOW', ctx)).resolves.toBe(false);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('is still held by another under any other name', async () => {
+    const { svc, ctx } = service(cleared);
+    await expect(svc.holderNameHeldByAnother('cus_1', 'Lim Mei Ling', ctx)).resolves.toBe(true);
+  });
+
+  it('is still held by another for a customer with no clearing', async () => {
+    const { svc, ctx } = service({});
+    await expect(svc.holderNameHeldByAnother('cus_1', 'Tan Ah Kow', ctx)).resolves.toBe(true);
+  });
+});

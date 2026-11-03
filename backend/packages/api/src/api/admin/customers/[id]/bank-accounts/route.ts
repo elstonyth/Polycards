@@ -10,6 +10,7 @@ import {
   findBank,
 } from '../../../../../modules/packs/banks';
 import {
+  clearedHolderNames,
   heldByAnother,
   parseSavedBankAccounts,
   verifiedBankAccounts,
@@ -87,6 +88,11 @@ export async function GET(
     // What support can add for a player with none. Banks only: a wallet's owner
     // can save it themselves unless someone was already paid to it.
     banks: [...MY_BANKS, ...SG_BANKS].map((b) => ({ id: b.id, name: b.name })),
+    // Names support cleared as two real people's (bank-accounts/name-clash).
+    cleared_names: Object.values(clearedHolderNames(metadata)).map((c) => ({
+      name: c.name,
+      cleared_at: c.at,
+    })),
     accounts: accounts.map((account, i) => ({
       id: account.id,
       bank_name: account.bankName,
