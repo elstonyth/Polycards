@@ -46,6 +46,7 @@ import {
   type Challenge,
   type ChallengeKind,
   type HubTabs,
+  type NoticeLink,
 } from './task-hub';
 import { useClaimTask } from './use-claim-task';
 
@@ -497,7 +498,12 @@ export function TaskHubClient({
   isLoggedIn: boolean;
 }) {
   const [tab, setTab] = useState<TabKey>('daily');
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeState] = useState<{
+    text: string;
+    link?: NoticeLink;
+  } | null>(null);
+  const setNotice = (text: string, link?: NoticeLink) =>
+    setNoticeState({ text, link });
   const { claim, pendingId } = useClaimTask(setNotice);
   const tabs = useMemo(
     () => (taskHub ? splitHub(taskHub.tasks) : null),
@@ -560,7 +566,18 @@ export function TaskHubClient({
           aria-live="polite"
           className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
         >
-          {notice}
+          {notice.text}
+          {notice.link && (
+            <>
+              {' '}
+              <Link
+                href={notice.link.href}
+                className="font-semibold whitespace-nowrap text-white underline underline-offset-2"
+              >
+                {notice.link.label}
+              </Link>
+            </>
+          )}
         </p>
       )}
 

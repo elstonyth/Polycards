@@ -125,6 +125,7 @@ describe('BankAccountsClient — bank country', () => {
     act(() => countryButton('Malaysia')!.click());
     setValue('Bank', 'SCBLMYKX');
     setValue('Account holder name', 'Test Customer');
+    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '0012');
     expect(saveButton().disabled).toBe(true);
     setValue('Account number', '00123');
@@ -152,6 +153,7 @@ describe('BankAccountsClient — bank country', () => {
     act(() => countryButton('Singapore')!.click());
     setValue('Bank', 'PAYNOWSG');
     setValue('Account holder name', 'Test Customer');
+    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '0123456789');
     expect(saveButton().disabled).toBe(true);
     expect(
@@ -241,6 +243,7 @@ describe('BankAccountsClient — bank country', () => {
     act(() => countryButton('Singapore')!.click());
     setValue('Bank', 'MBBESGSG');
     setValue('Account holder name', 'Test Customer');
+    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '123456789012');
     expect(saveButton().disabled).toBe(true);
     expect(container.textContent).toContain(
@@ -271,6 +274,7 @@ describe('BankAccountsClient — bank country', () => {
     act(() => countryButton('Malaysia')!.click());
     setValue('Bank', 'MBB');
     setValue('Account holder name', 'Test Customer');
+    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '12345678901');
     expect(saveButton().disabled).toBe(true);
     setValue('Account number', '123456789012');
@@ -288,6 +292,7 @@ describe('BankAccountsClient — bank country', () => {
     act(() => countryButton('Malaysia')!.click());
     setValue('Bank', 'CIMB');
     setValue('Account holder name', 'Test Customer');
+    setValue('Confirm account holder name', 'Test Customer');
     for (const value of ['1234567890', '12345678901234']) {
       setValue('Account number', value);
       expect(saveButton().disabled).toBe(false);
@@ -315,6 +320,7 @@ describe('BankAccountsClient — bank country', () => {
     act(() => countryButton('Singapore')!.click());
     setValue('Bank', 'HSBCSGSG');
     setValue('Account holder name', 'Test Customer');
+    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '1234567890123456');
     expect(saveButton().disabled).toBe(false);
     expect(
@@ -346,15 +352,16 @@ describe('BankAccountsClient — a tied account', () => {
     });
   };
 
-  it('offers no remove and no second account, and points at support', async () => {
+  it('offers no remove, no second account and no way to change it', async () => {
     fetchSavedBankAccounts.mockResolvedValue({ ok: true, accounts: [SAVED] });
     await mount();
     expect(container.textContent).toContain('Maybank');
     expect(container.querySelector('button[aria-label^="Remove"]')).toBeNull();
     expect(container.textContent).not.toContain('Add bank account');
-    expect(
-      container.querySelector('a[href="/contact"]')?.textContent,
-    ).toContain('contact support');
+    expect(container.textContent).toContain(
+      'One person, one account. A saved bank account cannot be changed later.',
+    );
+    expect(container.querySelector('a[href="/contact"]')).toBeNull();
   });
 
   it('shows why a shared account is on hold', async () => {
@@ -373,12 +380,43 @@ describe('BankAccountsClient — a tied account', () => {
     expect(container.textContent).toContain('Contact support to verify it');
   });
 
-  it('warns before the save that only support can change it', async () => {
+  it('warns before the save that it cannot be changed later', async () => {
     await mount();
     const add = [...container.querySelectorAll('button')].find(
       (b) => b.textContent === 'Add bank account',
     ) as HTMLButtonElement;
     await act(async () => add.click());
-    expect(container.textContent).toContain('contact support');
+    expect(container.textContent).toContain('cannot be changed later');
+    expect(container.textContent).not.toContain('contact support');
+  });
+});
+
+describe('BankAccountsClient — holder name typed twice', () => {
+  it('keeps Save off until both names match, then sends both', async () => {
+    await openAddForm(MY);
+    act(() => countryButton('Malaysia')!.click());
+    setValue('Bank', 'MBB');
+    setValue('Account number', '123456789012');
+    setValue('Account holder name', 'Test Customer');
+    expect(container.textContent).toContain(
+      'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.',
+    );
+    expect(saveButton().disabled).toBe(true);
+    setValue('Confirm account holder name', 'Test Custmer');
+    expect(saveButton().disabled).toBe(true);
+    expect(container.textContent).toContain(
+      'The two names do not match. Type the same name twice.',
+    );
+    // Case and spacing are not a mismatch.
+    setValue('Confirm account holder name', ' test  customer ');
+    expect(saveButton().disabled).toBe(false);
+    addSavedBankAccount.mockResolvedValue({ ok: true, accounts: [] });
+    await act(async () => saveButton().click());
+    expect(addSavedBankAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountHolderName: 'Test Customer',
+        accountHolderNameConfirm: 'test  customer',
+      }),
+    );
   });
 });

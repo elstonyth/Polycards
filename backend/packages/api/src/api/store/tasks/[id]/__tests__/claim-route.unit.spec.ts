@@ -12,10 +12,19 @@ import { POST } from '../claim/route';
 
 const takeCardStockMock = takeCardStock as jest.Mock;
 
-function harness(claimResult: Record<string, unknown>) {
+const MAYBANK = { bankCode: 'MBBEMYKL' };
+
+function harness(
+  claimResult: Record<string, unknown>,
+  { phoneVerified = true, saved = [MAYBANK] as { bankCode: string }[] } = {},
+) {
   const take = jest.fn().mockResolvedValue(true);
   takeCardStockMock.mockReturnValue(take);
-  const packs = { claimTask: jest.fn().mockResolvedValue(claimResult) };
+  const packs = {
+    claimTask: jest.fn().mockResolvedValue(claimResult),
+    getVerificationState: jest.fn().mockResolvedValue({ phoneVerified }),
+    savedBankAccountsFor: jest.fn().mockResolvedValue(saved),
+  };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const req = {
     scope: { resolve: (k: string) => (k === 'logger' ? logger : packs) },
@@ -83,5 +92,23 @@ describe('POST /store/tasks/:id/claim — stock take after commit', () => {
     expect(h.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('inventory down'),
     );
+  });
+});
+
+describe('POST /store/tasks/:id/claim — phone and bank first (owner, 2026-11-03)', () => {
+  it.each([
+    [{ phoneVerified: false }, ['phone']],
+    [{ saved: [] }, ['bank']],
+    [{ saved: [{ bankCode: 'USDTTRC20' }] }, ['bank']],
+    [{ phoneVerified: false, saved: [] }, ['phone', 'bank']],
+  ])('refuses %j with missing %j and claims nothing', async (state, missing) => {
+    const h = harness(cardClaim, state);
+    await POST(h.req, h.res);
+    expect(h.packs.claimTask).not.toHaveBeenCalled();
+    expect(h.json).toHaveBeenCalledWith({
+      claimed: false,
+      reason: 'needs_verification',
+      missing,
+    });
   });
 });

@@ -8,12 +8,17 @@ import {
 // is untouched. (These arrived with the self-service branch and outlived it —
 // the guards themselves are older and had no unit coverage.)
 
-const isAccountDisabled = jest.fn();
+// The guards read the disabled row itself, for the reason that picks the message.
+const listCustomerAccountStates = jest.fn();
+const isAccountDisabled = (disabled: boolean, reason = 'test') =>
+  listCustomerAccountStates.mockResolvedValue(
+    disabled ? [{ disabled_reason: reason }] : [],
+  );
 const listAuthIdentities = jest.fn();
 
 const scope = {
   resolve: jest.fn((key: string) => {
-    if (key === 'packs') return { isAccountDisabled };
+    if (key === 'packs') return { listCustomerAccountStates };
     return { listAuthIdentities };
   }),
 };
@@ -21,7 +26,7 @@ const scope = {
 const mkNext = () => jest.fn();
 
 beforeEach(() => {
-  isAccountDisabled.mockReset();
+  listCustomerAccountStates.mockReset();
   listAuthIdentities.mockReset();
   listAuthIdentities.mockResolvedValue([
     { app_metadata: { customer_id: 'cus_1' } },
@@ -30,7 +35,7 @@ beforeEach(() => {
 
 describe('blockDisabledEmailpassLogin', () => {
   it('refuses a disabled account before a token is minted', async () => {
-    isAccountDisabled.mockResolvedValue(true);
+    isAccountDisabled(true);
     const next = mkNext();
     await blockDisabledEmailpassLogin(
       { body: { email: 'a@b.dev' }, scope } as never,
@@ -42,7 +47,7 @@ describe('blockDisabledEmailpassLogin', () => {
   });
 
   it('lets an active account through', async () => {
-    isAccountDisabled.mockResolvedValue(false);
+    isAccountDisabled(false);
     const next = mkNext();
     await blockDisabledEmailpassLogin(
       { body: { email: 'a@b.dev' }, scope } as never,
@@ -61,7 +66,7 @@ describe('blockDisabledCustomerSession', () => {
     }) as never;
 
   it('refuses a disabled customer holding a live token', async () => {
-    isAccountDisabled.mockResolvedValue(true);
+    isAccountDisabled(true);
     const next = mkNext();
     await blockDisabledCustomerSession(mkSessionReq(), {} as never, next);
     expect(next.mock.calls[0][0]).toBeInstanceOf(Error);
@@ -72,6 +77,21 @@ describe('blockDisabledCustomerSession', () => {
     const next = mkNext();
     await blockDisabledCustomerSession({ scope } as never, {} as never, next);
     expect(next).toHaveBeenCalledWith();
-    expect(isAccountDisabled).not.toHaveBeenCalled();
+    expect(listCustomerAccountStates).not.toHaveBeenCalled();
+  });
+  it('tells a permanently banned account so, with no offer of support', async () => {
+    isAccountDisabled(true, 'Permanent ban: shared bank');
+    const next = mkNext();
+    await blockDisabledCustomerSession(mkSessionReq(), {} as never, next);
+    expect(String(next.mock.calls[0][0].message)).toBe(
+      'This account has been permanently banned for breaking the rules.',
+    );
+    const login = mkNext();
+    await blockDisabledEmailpassLogin(
+      { body: { email: 'a@b.dev' }, scope } as never,
+      {} as never,
+      login,
+    );
+    expect(String(login.mock.calls[0][0].message)).toMatch(/permanently banned/);
   });
 });

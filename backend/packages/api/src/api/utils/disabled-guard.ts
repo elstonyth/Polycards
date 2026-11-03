@@ -8,7 +8,31 @@ import type { IAuthModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 
-const DISABLED_MESSAGE = 'This account has been disabled. Please contact support.';
+const DISABLED_MESSAGE =
+  'This account has been disabled. Please contact support.';
+
+/** disabled_reason prefix of a permanent ban for breaking the rules (owner,
+ *  2026-11-03: shared banks, more than one account). Such accounts read their
+ *  own message, with no offer of support. */
+export const PERMANENT_BAN_REASON_PREFIX = 'Permanent ban:';
+
+const BANNED_MESSAGE =
+  'This account has been permanently banned for breaking the rules.';
+
+/** The refusal for a disabled account, or null when it is not disabled. */
+async function disabledRefusal(
+  packs: PacksModuleService,
+  customerId: string,
+): Promise<string | null> {
+  const [state] = await packs.listCustomerAccountStates(
+    { customer_id: customerId, disabled: true },
+    { select: ['disabled_reason'], take: 1 },
+  );
+  if (!state) return null;
+  return state.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX)
+    ? BANNED_MESSAGE
+    : DISABLED_MESSAGE;
+}
 
 // Both guards fail CLOSED: an unexpected error is handed to next(e), which the
 // framework error handler turns into a 500 — never a silent pass.
@@ -54,8 +78,9 @@ export async function blockDisabledEmailpassLogin(
       return;
     }
     const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-    if (await packs.isAccountDisabled(customerId)) {
-      next(new MedusaError(MedusaError.Types.UNAUTHORIZED, DISABLED_MESSAGE));
+    const refusal = await disabledRefusal(packs, customerId);
+    if (refusal) {
+      next(new MedusaError(MedusaError.Types.UNAUTHORIZED, refusal));
       return;
     }
     next();
@@ -93,8 +118,9 @@ export async function blockDisabledCustomerSession(
       return;
     }
     const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-    if (await packs.isAccountDisabled(auth.actor_id)) {
-      next(new MedusaError(MedusaError.Types.FORBIDDEN, DISABLED_MESSAGE));
+    const refusal = await disabledRefusal(packs, auth.actor_id);
+    if (refusal) {
+      next(new MedusaError(MedusaError.Types.FORBIDDEN, refusal));
       return;
     }
     next();

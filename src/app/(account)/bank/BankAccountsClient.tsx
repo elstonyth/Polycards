@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { Landmark, Wallet } from 'lucide-react';
 import {
   addSavedBankAccount,
@@ -20,16 +19,20 @@ import { cn } from '@/lib/utils';
 // Saved payout accounts — list, add. This list is where withdrawals GO: the
 // withdraw form submits an account id and the server resolves the bank details
 // from here, so this page is the only place a payout destination is chosen. One
-// account per customer, and once saved only support changes it (ADR 0015), so the
-// form says so before the save. Lists that already hold more keep them. The
-// backend validates with the payout-submit rules; existing accounts are rechecked
-// when listed and used.
+// account per currency, and once saved it cannot be changed (ADR 0015, owner
+// 2026-11-03), so the form says so before the save. A bank's holder name is typed
+// twice and both must match. The backend validates with the
+// payout-submit rules; existing accounts are rechecked when listed and used.
 //
 // A newly added account may have to wait out a cooling-off window before it can
 // receive money; the server says when via `usableFrom`. That state is rendered
 // here rather than recomputed — the duration is the backend's to tune, down to
 // and including zero (PAYOUT_DESTINATION_COOLDOWN_HOURS), so no copy on this
 // page may name one.
+
+/** A name compared the way a person reads it: case and spacing ignored. */
+const nameKey = (name: string) =>
+  name.replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** Show only the tail on the list — enough to recognise, nothing to shoulder-surf. */
 const maskAccount = (accountNumber: string) =>
@@ -74,6 +77,7 @@ export function BankAccountsClient() {
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [holderName, setHolderName] = useState('');
+  const [holderConfirm, setHolderConfirm] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -121,11 +125,15 @@ export function BankAccountsClient() {
   const numberInvalid =
     selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
+  const namesMatch = nameKey(holderName) === nameKey(holderConfirm);
+  const confirmMismatch = holderConfirm.trim() !== '' && !namesMatch;
   const formValid =
     selectedBank !== undefined &&
     accountNumberValid &&
     (wallet !== undefined ||
-      (holderName.trim().length >= 2 && holderName.trim().length <= 120));
+      (namesMatch &&
+        holderName.trim().length >= 2 &&
+        holderName.trim().length <= 120));
 
   async function submitAdd() {
     if (submitting || !formValid) return;
@@ -137,6 +145,7 @@ export function BankAccountsClient() {
         bankName: selectedBank.bankName,
         accountNumber,
         accountHolderName: wallet ? '' : holderName.trim(),
+        accountHolderNameConfirm: wallet ? '' : holderConfirm.trim(),
       });
       if (!res.ok) {
         setError(res.error);
@@ -148,6 +157,7 @@ export function BankAccountsClient() {
       setBankCode('');
       setAccountNumber('');
       setHolderName('');
+      setHolderConfirm('');
     } catch {
       // The action catches its own failures — this is for the action CALL
       // itself failing (network), which would otherwise leave silence.
@@ -356,21 +366,42 @@ export function BankAccountsClient() {
                   onChange={(e) => setHolderName(e.target.value)}
                   aria-label="Account holder name"
                   placeholder="Exactly as the bank has it"
+                  aria-describedby="holder-name-warning"
                   className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
                 />
               </label>
+              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
+                Confirm account holder name
+                <input
+                  type="text"
+                  value={holderConfirm}
+                  onChange={(e) => setHolderConfirm(e.target.value)}
+                  aria-label="Confirm account holder name"
+                  aria-invalid={confirmMismatch}
+                  aria-describedby="holder-name-warning"
+                  placeholder="Type the same name again"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
+                />
+              </label>
+              <p
+                id="holder-name-warning"
+                aria-live="polite"
+                className={cn(
+                  'mt-1.5 text-[12px] leading-snug',
+                  confirmMismatch ? 'text-red-300' : 'text-amber-300/80',
+                )}
+              >
+                {confirmMismatch
+                  ? 'The two names do not match. Type the same name twice.'
+                  : 'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.'}
+              </p>
             </>
           )}
 
           <p className="mt-3 text-[12px] leading-snug text-amber-300/80">
-            Each Polycards account has one{' '}
-            {walletGroup ? 'wallet' : 'bank account'}, and it can&apos;t be
-            linked to another Polycards account. Check the details: to change it
-            later, you&apos;ll need to{' '}
-            <Link href="/contact" className="underline underline-offset-2">
-              contact support
-            </Link>
-            .
+            One person, one account. A saved{' '}
+            {walletGroup ? 'wallet' : 'bank account'} cannot be changed later,
+            so check the details before you save.
           </p>
 
           <div className="mt-4 flex gap-2">
@@ -394,15 +425,10 @@ export function BankAccountsClient() {
       ) : (
         accounts !== null && (
           <>
-            {accounts.length > 0 && (
-              <p className="text-[13px] text-neutral-400">
-                To change your bank account,{' '}
-                <Link href="/contact" className="text-white underline">
-                  contact support
-                </Link>
-                .
-              </p>
-            )}
+            <p className="text-[13px] text-neutral-400">
+              One person, one account. A saved bank account cannot be changed
+              later.
+            </p>
             <div className="flex gap-2">
               {accounts.length === 0 && (
                 <Pill

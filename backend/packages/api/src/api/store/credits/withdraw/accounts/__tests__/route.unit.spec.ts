@@ -51,6 +51,9 @@ const mutateCustomerMetadata = jest.fn(
 
 // Other customers holding the same account number (none by default).
 const otherPayoutAccountHolders = jest.fn();
+// Banned numbers and names used elsewhere (owner, 2026-11-03); none by default.
+const payoutAccountBanned = jest.fn();
+const holderNameHeldByAnother = jest.fn();
 
 // The admin withdrawal controls; open by default.
 const withdrawalControls = jest.fn(async () => DEFAULT_WITHDRAWAL_CONTROLS);
@@ -64,6 +67,8 @@ const scope = {
       return {
         mutateCustomerMetadata,
         otherPayoutAccountHolders,
+        payoutAccountBanned,
+        holderNameHeldByAnother,
         withdrawalControls,
       } satisfies FakeFacet<CustomerWallet>;
     if (key === 'notification') return { createNotifications };
@@ -85,10 +90,15 @@ const expectNoStore = (res: never) =>
     'no-store',
   );
 
+// A bank save types the holder name twice; a body without the second copy gets
+// it filled in, so only the tests about it need to say so.
 const mkReq = (body: Record<string, unknown> | null = null) =>
   ({
     auth_context: { actor_id: 'cus_1' },
-    body,
+    body:
+      body && 'account_holder_name' in body && !('account_holder_name_confirm' in body)
+        ? { ...body, account_holder_name_confirm: body.account_holder_name }
+        : body,
     scope,
   }) as never;
 
@@ -145,6 +155,10 @@ beforeEach(() => {
   createNotifications.mockReset();
   otherPayoutAccountHolders.mockReset();
   otherPayoutAccountHolders.mockResolvedValue([]);
+  payoutAccountBanned.mockReset();
+  payoutAccountBanned.mockResolvedValue(false);
+  holderNameHeldByAnother.mockReset();
+  holderNameHeldByAnother.mockResolvedValue(false);
   logger.warn.mockReset();
   logger.error.mockReset();
   retrieveCustomer.mockResolvedValue({ metadata: {} });
@@ -578,13 +592,13 @@ describe('POST accounts — the new-destination notice', () => {
 });
 
 describe('DELETE /store/credits/withdraw/accounts', () => {
-  it('refuses: a tied account only comes off through support', async () => {
+  it('refuses: a saved account cannot be removed or changed', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
     await expect(
       DELETE(mkReq({ id: savedShape().id }), mkRes()),
-    ).rejects.toThrow(/contact support/i);
+    ).rejects.toThrow(/cannot be removed or changed/);
     expect(mutateCustomerMetadata).not.toHaveBeenCalled();
     expect(updateCustomers).not.toHaveBeenCalled();
     expect(createNotifications).not.toHaveBeenCalled();
@@ -962,5 +976,73 @@ describe('GET accounts — a shared bank account is on hold', () => {
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0]
       .accounts;
     expect(account.supported).toBe(true);
+  });
+});
+
+describe('POST accounts — owner rules of 2026-11-03', () => {
+  const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+
+  it('refuses a holder name not typed the same twice, ignoring case and spaces', async () => {
+    await expect(
+      POST(
+        mkReq({ ...VALID_BODY, account_holder_name_confirm: 'Tan Ah Kaw' }),
+        mkRes(),
+      ),
+    ).rejects.toThrow(/do not match/);
+    await expect(
+      POST(mkReq({ ...VALID_BODY, account_holder_name_confirm: undefined }), mkRes()),
+    ).rejects.toThrow(/do not match/);
+    expect(updateCustomers).not.toHaveBeenCalled();
+    await POST(
+      mkReq({ ...VALID_BODY, account_holder_name_confirm: ' tan  AH kow ' }),
+      mkRes(),
+    );
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a banned number and logs only its last 4', async () => {
+    payoutAccountBanned.mockResolvedValue(true);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      /cannot be used on Polycards/,
+    );
+    expect(payoutAccountBanned).toHaveBeenCalledWith('123456789012', false);
+    expect(updateCustomers).not.toHaveBeenCalled();
+    const line = logger.warn.mock.calls[0][0] as string;
+    expect(line).toContain('9012');
+    expect(line).not.toContain('123456789012');
+  });
+
+  it('refuses a holder name another account already used', async () => {
+    holderNameHeldByAnother.mockResolvedValue(true);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      /name is already linked/,
+    );
+    expect(holderNameHeldByAnother).toHaveBeenCalledWith('cus_1', 'Tan Ah Kow');
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it('a wallet needs no second name and skips the name check', async () => {
+    await POST(
+      mkReq({ bank_code: 'USDTTRC20', account_number: TRON }),
+      mkRes(),
+    );
+    expect(holderNameHeldByAnother).not.toHaveBeenCalled();
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('one account per currency: a wallet fits beside an RM bank, a second RM bank does not', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [savedShape({ accountNumber: '999999999999', id: 'x' })],
+      },
+    });
+    await POST(
+      mkReq({ bank_code: 'USDTTRC20', account_number: TRON }),
+      mkRes(),
+    );
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      /already has a bank account for this currency/,
+    );
   });
 });

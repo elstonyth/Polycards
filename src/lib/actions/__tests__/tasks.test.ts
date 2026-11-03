@@ -86,6 +86,25 @@ describe('claimTaskReward', () => {
       ok: true,
       claimed: false,
       reason: 'window_closed',
+      missing: [],
+    });
+  });
+
+  it('carries what a verification refusal still needs, and nothing else', async () => {
+    backend({
+      'POST /store/tasks/:id/claim': {
+        body: {
+          claimed: false,
+          reason: 'needs_verification',
+          missing: ['phone', 'bank', 'real_name'],
+        },
+      },
+    });
+    expect(await claimTaskReward('task_1')).toEqual({
+      ok: true,
+      claimed: false,
+      reason: 'needs_verification',
+      missing: ['phone', 'bank'],
     });
   });
 });

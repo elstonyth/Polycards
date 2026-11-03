@@ -21,16 +21,57 @@ import type { PaymentGateway } from './gateway';
 // .withdrawForCashout), and the admin bank-accounts routes. A module file also
 // keeps the money path from importing an API route.
 
-/** One bank account per Polycards account (owner, 2026-11-03, ADR 0015). Lists
- *  that already hold more were left alone: they refuse a new one, and support
- *  removes the extras. */
+/** One saved account per currency per Polycards account (owner, 2026-11-03, ADR
+ *  0015): one RM bank, one SGD bank, one USDT wallet (bankCurrency). Once saved
+ *  it cannot be changed. */
 export const MAX_SAVED_BANK_ACCOUNTS = 1;
 
 export const ONE_BANK_ACCOUNT_MESSAGE =
-  'Your Polycards account already has a bank account. Contact support to change it.';
+  'Your Polycards account already has a bank account for this currency. It cannot be changed.';
 
 export const BANK_ACCOUNT_LOCKED_MESSAGE =
-  'A saved bank account cannot be removed here. Contact support to change it.';
+  'A saved bank account cannot be removed or changed.';
+
+/** The farm rings' numbers, banned for good (owner, 2026-11-03). The list lives
+ *  in the banned_payout_account table only: the repo is public. */
+export const BANNED_PAYOUT_ACCOUNT_MESSAGE =
+  'This bank account cannot be used on Polycards.';
+
+export const HOLDER_NAME_CONFIRM_MESSAGE =
+  'The two names do not match. Type the same name twice.';
+
+/** A different bank under a name another account already used (owner,
+ *  2026-11-03). */
+export const HOLDER_NAME_LINKED_MESSAGE =
+  'This name is already linked to another Polycards account.';
+
+/** A customer types a bank's holder name twice, and the two must match (owner,
+ *  2026-11-03): a name that differs from the bank's is never paid out. A wallet
+ *  has no holder. */
+export function holderConfirmMismatch(args: {
+  bank: Bank;
+  holderName: string;
+  holderConfirm: unknown;
+}): boolean {
+  if (args.bank.wallet) return false;
+  const typed = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+  return (
+    typeof args.holderConfirm !== 'string' ||
+    typed(args.holderConfirm) !== typed(args.holderName)
+  );
+}
+
+/** How banned numbers are stored and matched: digits without leading zeros for a
+ *  bank, at any bank, as otherPayoutAccountHolders compares them; a wallet
+ *  address whole. */
+export function payoutAccountKey(
+  accountNumber: string,
+  wallet: boolean,
+): string {
+  return wallet
+    ? accountNumber.toLowerCase()
+    : accountNumber.replace(/\D/g, '').replace(/^0+/, '');
+}
 
 export type SavedBankAccount = {
   id: string;

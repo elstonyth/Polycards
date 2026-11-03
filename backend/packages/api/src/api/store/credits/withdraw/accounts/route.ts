@@ -3,7 +3,11 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
-import { findBank, sandboxOnlyBank } from '../../../../../modules/packs/banks';
+import {
+  bankCurrency,
+  findBank,
+  sandboxOnlyBank,
+} from '../../../../../modules/packs/banks';
 import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
 import {
   regionalPayoutGateways,
@@ -16,12 +20,16 @@ import {
 } from '../../../../../modules/packs/facets';
 import {
   BANK_ACCOUNT_LOCKED_MESSAGE,
+  BANNED_PAYOUT_ACCOUNT_MESSAGE,
+  HOLDER_NAME_CONFIRM_MESSAGE,
+  HOLDER_NAME_LINKED_MESSAGE,
   MAX_SAVED_BANK_ACCOUNTS,
   ONE_BANK_ACCOUNT_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   SHARED_SAVE_MESSAGE,
   anySavedAccountShared,
   blocksNewSave,
+  holderConfirmMismatch,
   newSavedBankAccount,
   parseSavedBankAccounts,
   savedBankAccountId,
@@ -232,6 +240,7 @@ export async function POST(
     bank_code?: unknown;
     account_number?: unknown;
     account_holder_name?: unknown;
+    account_holder_name_confirm?: unknown;
   };
 
   // Same gate as the payout submit, so the saved list can never hold an
@@ -264,6 +273,41 @@ export async function POST(
     (body.account_holder_name as string | undefined) ?? '',
   );
   const { accountNumber, bankCode } = account;
+  if (
+    holderConfirmMismatch({
+      bank,
+      holderName: account.accountHolderName,
+      holderConfirm: body.account_holder_name_confirm,
+    })
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      HOLDER_NAME_CONFIRM_MESSAGE,
+    );
+  }
+  const packs = resolvePacks<CustomerWallet>(req.scope);
+  if (
+    await packs.payoutAccountBanned(accountNumber, bank.wallet !== undefined)
+  ) {
+    req.scope
+      .resolve('logger')
+      .warn(
+        `[saved-accounts] refused a banned payout account for ${customerId} (${bankCode} …${accountNumber.slice(-4)})`,
+      );
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      BANNED_PAYOUT_ACCOUNT_MESSAGE,
+    );
+  }
+  if (
+    !bank.wallet &&
+    (await packs.holderNameHeldByAnother(customerId, account.accountHolderName))
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      HOLDER_NAME_LINKED_MESSAGE,
+    );
+  }
 
   // Looked up before the lock (it reads OTHER customers, which this
   // customer's metadata lock does not cover) but applied inside it, where
@@ -277,7 +321,7 @@ export async function POST(
   // is the answer to that (ADR 0015). Support's verification lifts a payout hold
   // on a number already saved; it never lets a new one in.
   const shared = blocksNewSave(
-    await resolvePacks<CustomerWallet>(req.scope).otherPayoutAccountHolders(
+    await packs.otherPayoutAccountHolders(
       customerId,
       accountNumber,
       bank.wallet !== undefined,
@@ -290,11 +334,15 @@ export async function POST(
   // MAX-1 accounts and both be allowed through.
   let added = false;
   const saved = await mutateAccounts(req, customerId, (accounts) => {
-    // Already theirs: nothing to do. A tied account changes through support, its
+    // Already theirs: nothing to do. A saved account cannot be changed, its
     // holder name included, and keeps its original savedAt, so a re-save restarts
     // no cooling-off window and arms no old row.
     if (accounts.some((a) => a.id === account.id)) return null;
-    if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
+    const currency = bankCurrency(bankCode);
+    if (
+      accounts.filter((a) => bankCurrency(a.bankCode) === currency).length >=
+      MAX_SAVED_BANK_ACCOUNTS
+    ) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         ONE_BANK_ACCOUNT_MESSAGE,

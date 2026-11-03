@@ -87,6 +87,8 @@ export type CustomerWallet = Pick<
   | 'listTicketSpins'
   | 'mutateCustomerMetadata'
   | 'otherPayoutAccountHolders'
+  | 'payoutAccountBanned'
+  | 'holderNameHeldByAnother'
   | 'walletSummary'
   | 'withdrawalControls'
 >;

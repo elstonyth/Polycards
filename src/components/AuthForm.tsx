@@ -918,6 +918,12 @@ export default function AuthForm({
         )}
 
         {isSignup && (
+          <p className="text-center text-[12px] text-white/50">
+            One person, one account. Extra accounts are banned.
+          </p>
+        )}
+
+        {isSignup && (
           // Turnstile slot — empty unless Cloudflare wants a click.
           <div
             ref={challengeRef}

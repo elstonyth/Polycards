@@ -4,11 +4,15 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
-import { findBank, sandboxOnlyBank } from '../../../../../../modules/packs/banks';
+import {
+  findBank,
+  sandboxOnlyBank,
+} from '../../../../../../modules/packs/banks';
 import { resolveActiveGateway } from '../../../../../../modules/packs/gateway';
 import { withdrawalDetailsError } from '../../../../../../modules/packs/gateway-withdrawal';
 import { sendSavedAccountAddedNotice } from '../../../../../../modules/packs/saved-account-notice';
 import {
+  BANNED_PAYOUT_ACCOUNT_MESSAGE,
   heldByAnother,
   newSavedBankAccount,
   verifiedElsewhere,
@@ -68,6 +72,18 @@ export async function POST(
 
   const customerId = req.params.id;
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // A banned number stays banned, support's add included (owner, 2026-11-03).
+  if (
+    await packs.payoutAccountBanned(
+      account.accountNumber,
+      bank.wallet !== undefined,
+    )
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      BANNED_PAYOUT_ACCOUNT_MESSAGE,
+    );
+  }
   const holders = (
     await packs.otherPayoutAccountHolders(
       customerId,

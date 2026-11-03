@@ -17,6 +17,7 @@ import {
   splitHub,
   stubName,
   ticketCountLabel,
+  verificationNotice,
 } from '../task-hub';
 
 const task = (
@@ -305,6 +306,27 @@ describe('claimNotice — Lucky Draw tickets', () => {
       expect(claimNotice({ type: 'credit', amount_myr: 5 }, tickets)).toBe(
         base,
       );
+  });
+});
+
+describe('verificationNotice', () => {
+  it('names only what is missing and links to the screen that fixes it', () => {
+    expect(verificationNotice(['phone', 'bank'])).toEqual({
+      text: 'To claim rewards, verify your phone number and add your bank account.',
+      link: { href: '/settings', label: 'Go to Settings →' },
+    });
+    expect(verificationNotice(['phone'])).toEqual({
+      text: 'To claim rewards, verify your phone number in Settings.',
+      link: { href: '/settings', label: 'Go to Settings →' },
+    });
+    expect(verificationNotice(['bank'])).toEqual({
+      text: 'To claim rewards, add your bank account.',
+      link: { href: '/bank', label: 'Add bank account →' },
+    });
+  });
+
+  it('asks for both when the backend names nothing', () => {
+    expect(verificationNotice([]).link.href).toBe('/settings');
   });
 });
 

@@ -69,6 +69,56 @@ medusaIntegrationTestRunner({
           password: PASSWORD,
         });
         customerToken = login.data.token;
+        // A reward needs a verified phone and a saved bank (owner, 2026-11-03).
+        const [player] = await container
+          .resolve(Modules.CUSTOMER)
+          .listCustomers({ email: 'tasks-player@test.dev' }, { take: 1 });
+        const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+        const [state] = await packs.listCustomerAccountStates(
+          { customer_id: player.id },
+          { take: 1 },
+        );
+        await (state
+          ? packs.updateCustomerAccountStates({
+              selector: { id: state.id },
+              data: { phone_verified_at: new Date() },
+            })
+          : packs.createCustomerAccountStates([
+              { customer_id: player.id, phone_verified_at: new Date() },
+            ]));
+        await container.resolve(Modules.CUSTOMER).updateCustomers(player.id, {
+          metadata: {
+            bank_accounts: [
+              {
+                id: 'tasks-bank',
+                bankCode: 'MBBEMYKL',
+                bankName: 'Maybank',
+                accountNumber: '512345678901',
+                accountHolderName: 'Tasks Player',
+                savedAt: '2026-01-01T00:00:00.000Z',
+              },
+            ],
+          },
+        });
+      });
+
+      it('refuses a reward until the phone is verified and a bank is saved', async () => {
+        const container = getContainer();
+        const [player] = await container
+          .resolve(Modules.CUSTOMER)
+          .listCustomers({ email: 'tasks-player@test.dev' }, { take: 1 });
+        await container
+          .resolve(Modules.CUSTOMER)
+          .updateCustomers(player.id, { metadata: { bank_accounts: [] } });
+        const claim = await unwrapResponse(
+          api.post('/store/tasks/any-task/claim', {}, { headers: authed() }),
+        );
+        expect(claim.status).toBe(200);
+        expect(claim.data).toEqual({
+          claimed: false,
+          reason: 'needs_verification',
+          missing: ['bank'],
+        });
       });
 
       it('401s without auth', async () => {

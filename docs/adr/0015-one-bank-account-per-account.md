@@ -63,3 +63,31 @@ Accepted, with what covers each:
   though never whose, so one account gets 10 tries an hour. Whoever saves a name first
   holds it, so two real people with one name, or someone whose name a stranger saved,
   go through support, who can set it from the player page.
+
+## Amendment, 2026-11-03: banned numbers, one name, one account per currency
+
+The owner tightened the rule after the farm rings were listed:
+
+- **Banned numbers.** The rings' bank numbers are banned for good in
+  `banned_payout_account`, matched on digits without leading zeros at any bank. The
+  list is filled on production only, never from the repo. A banned number is refused
+  at customer save and at support's add.
+- **Banned accounts.** Every listed account is disabled with a `Permanent ban:`
+  reason. Login and every session are refused with their own message, with no offer
+  of support. Held payouts are denied; pending ones were already with the gateway.
+- **One name.** A bank holder name another account already used, saved or paid, is
+  refused at save at any bank. Names compare as real names do. Wallets have no holder.
+- **Typed twice.** A bank's holder name is typed twice and both must match. A name that
+  differs from the bank's is not paid out.
+- **One account per currency**, replacing one account in total: one RM bank, one SGD
+  bank, one USDT wallet (`bankCurrency`, fixed per bank so a gateway switch never
+  moves it). A saved account cannot be changed. Support no longer changes one on
+  request either; the admin add and remove tools stay for the owner's own fixes.
+- **Reset.** Every customer's saved list and share stamps were cleared once, after a
+  private backup, so everyone saves again under these rules. Payout rows keep their
+  own destination, so open payouts were untouched.
+- **Rewards.** Task claims need a verified phone and a saved bank, like the welcome
+  pack.
+
+Accepted: two real people with one name, or a name a ring account used first, go
+through support. A banned account's balance and vault stay locked.

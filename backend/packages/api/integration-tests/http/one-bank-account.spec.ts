@@ -1,5 +1,5 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
-import { Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import jwt from 'jsonwebtoken';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import { savedBankAccountId } from '../../src/modules/packs/saved-accounts';
@@ -18,6 +18,7 @@ const save = (number = NUMBER, holder = 'Test Holder') => ({
   bank_code: 'MBBEMYKL',
   account_number: number,
   account_holder_name: holder,
+  account_holder_name_confirm: holder,
 });
 
 medusaIntegrationTestRunner({
@@ -292,6 +293,116 @@ medusaIntegrationTestRunner({
           ),
         );
         expect(create.status).toBe(400);
+      });
+
+      // Owner, 2026-11-03: the name typed twice, banned numbers, one name per
+      // person at any bank, one account per currency.
+      it('refuses a holder name that was not typed the same twice', async () => {
+        const a = await newCustomer('one-bank-k@test.dev');
+        const res = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            { ...save(), account_holder_name_confirm: 'Test Holdr' },
+            asCustomer(a),
+          ),
+        );
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/do not match/);
+        const ok = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            { ...save(), account_holder_name_confirm: ' test  holder ' },
+            asCustomer(a),
+          ),
+        );
+        expect(ok.status).toBe(200);
+      });
+
+      it('refuses a banned number at any bank, for support too', async () => {
+        const a = await newCustomer('one-bank-l@test.dev');
+        await getContainer()
+          .resolve(ContainerRegistrationKeys.PG_CONNECTION)
+          .raw(
+            'INSERT INTO banned_payout_account (account_key, bank_code, reason) VALUES (?, ?, ?)',
+            ['512345678903', 'PBBEMYKL', 'test'],
+          );
+        const res = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678903'), asCustomer(a)),
+        );
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/cannot be used/);
+        const added = await unwrapResponse(
+          api.post(
+            `/admin/customers/${a}/bank-accounts/add`,
+            { ...save('512345678903'), reason: 'try' },
+            asAdmin(),
+          ),
+        );
+        expect(added.status).toBe(400);
+        expect(await accounts(a)).toEqual([]);
+      });
+
+      it('refuses a name another account used, saved or paid, at another bank', async () => {
+        const a = await newCustomer('one-bank-m@test.dev');
+        const b = await newCustomer('one-bank-n@test.dev');
+        const c = await newCustomer('one-bank-o@test.dev');
+        await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678904', 'Ring Name'), asCustomer(a)),
+        );
+        const saved = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            {
+              ...save('7012345678', 'RING  name'),
+              bank_code: 'CIBBMYKL',
+            },
+            asCustomer(b),
+          ),
+        );
+        expect(saved.status).toBe(400);
+        expect(saved.data.message).toMatch(/name is already linked/);
+
+        await packs().createGatewayWithdrawals([
+          {
+            merchant_transaction_id: 'one-bank-wd-4',
+            customer_id: a,
+            amount: 100,
+            amount_settled: 100,
+            bank_code: 'PBBEMYKL',
+            account_number: '6012345678',
+            account_holder_name: 'Paid Name',
+            status: 'settled',
+            settled_at: new Date(),
+          },
+        ]);
+        const paid = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678905', 'Paid Name'), asCustomer(c)),
+        );
+        expect(paid.status).toBe(400);
+        expect(paid.data.message).toMatch(/name is already linked/);
+      });
+
+      it('one account per currency: an RM bank and a USDT wallet both fit', async () => {
+        const a = await newCustomer('one-bank-p@test.dev');
+        await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678906', 'Wallet Owner'),
+            asCustomer(a),
+          ),
+        );
+        const wallet = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            {
+              bank_code: 'USDTTRC20',
+              account_number: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+            },
+            asCustomer(a),
+          ),
+        );
+        expect(wallet.status).toBe(200);
+        expect(await accounts(a)).toHaveLength(2);
       });
     });
   },

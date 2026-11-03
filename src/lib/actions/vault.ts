@@ -449,13 +449,16 @@ export async function addSavedBankAccount(input: {
   bankName: string;
   accountNumber: string;
   accountHolderName: string;
+  /** The holder name typed a second time; the backend refuses a mismatch. */
+  accountHolderNameConfirm: string;
 }): Promise<SavedBankAccountsResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (
     typeof input.bankCode !== 'string' ||
     typeof input.bankName !== 'string' ||
     typeof input.accountNumber !== 'string' ||
-    typeof input.accountHolderName !== 'string'
+    typeof input.accountHolderName !== 'string' ||
+    typeof input.accountHolderNameConfirm !== 'string'
   ) {
     return { ok: false, error: 'Fill in every bank field.' };
   }
@@ -467,6 +470,7 @@ export async function addSavedBankAccount(input: {
       bank_name: input.bankName,
       account_number: input.accountNumber,
       account_holder_name: input.accountHolderName,
+      account_holder_name_confirm: input.accountHolderNameConfirm,
     },
   );
   if (!r.ok) return vaultFailure(r, LOGIN_FIRST);

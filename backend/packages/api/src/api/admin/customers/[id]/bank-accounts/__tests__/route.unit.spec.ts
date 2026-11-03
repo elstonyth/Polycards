@@ -20,6 +20,7 @@ const STAMP = '2026-11-03T00:00:00.000Z';
 
 const packs = {
   otherPayoutAccountHolders: jest.fn(),
+  payoutAccountBanned: jest.fn(),
   createAdminActionAudits: jest.fn(),
   removeSavedBankAccount: jest.fn(),
   setBankShareVerified: jest.fn(),
@@ -57,6 +58,7 @@ const holderOn = (customer: string, bank = 'MBBEMYKL') => ({
 beforeEach(() => {
   jest.clearAllMocks();
   packs.otherPayoutAccountHolders.mockResolvedValue([]);
+  packs.payoutAccountBanned.mockResolvedValue(false);
   packs.createAdminActionAudits.mockResolvedValue(undefined);
   customers.retrieveCustomer.mockResolvedValue({
     metadata: { bank_accounts: [ACCOUNT] },

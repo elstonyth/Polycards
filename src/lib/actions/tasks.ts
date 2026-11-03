@@ -68,7 +68,15 @@ export async function checkInToday(): Promise<CheckInResult> {
  *  scheduled task can end between the page load and the tap, and answering
  *  "not completed yet" over a finished 3/3 row is the worst thing to say. */
 export type ClaimFailure =
-  'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
+  | 'not_found'
+  | 'not_completed'
+  | 'already_claimed'
+  | 'window_closed'
+  // A verified phone and a saved bank come first (owner 2026-11-03).
+  | 'needs_verification';
+
+/** What a `needs_verification` refusal says is still missing. */
+export type ClaimRequirement = 'phone' | 'bank';
 
 export type ClaimResult =
   | {
@@ -84,6 +92,8 @@ export type ClaimResult =
       ok: true;
       claimed: false;
       reason: ClaimFailure;
+      /** Filled for `needs_verification`; empty otherwise. */
+      missing: ClaimRequirement[];
     }
   | { ok: false; error: string };
 
@@ -96,7 +106,7 @@ type RawClaim =
       reward: { type: string; pack_id?: string };
       claimId?: string;
     }
-  | { claimed: false; reason: ClaimFailure };
+  | { claimed: false; reason: ClaimFailure; missing?: unknown };
 
 export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
   const r = await store.post(
@@ -123,7 +133,12 @@ export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
           : null;
       return { ok: true, claimed: true, rewardType: raw.reward.type, spin };
     }
-    return { ok: true, claimed: false, reason: raw.reason };
+    const missing = Array.isArray(raw.missing)
+      ? raw.missing.filter(
+          (m): m is ClaimRequirement => m === 'phone' || m === 'bank',
+        )
+      : [];
+    return { ok: true, claimed: false, reason: raw.reason, missing };
   } catch (error) {
     logger.error('[tasks] response projection failed:', error);
     return { ok: false, error: 'Could not claim. Please try again.' };
