@@ -1306,8 +1306,8 @@ export const checkDeliveryTracking = () =>
     failed: string[];
   }>('/admin/delivery-orders/track', {});
 
-// Move every order with all its cards on hand to ready_to_ship now — the Stock
-// page's Refresh. The rest of the 12am run still waits for 12am.
+// Move the open orders the stock covers, oldest first, to ready_to_ship now —
+// the Stock page's Refresh. The rest of the 12am run still waits for 12am.
 export const allocateDeliveryOrders = () =>
   postJson<{ ready: number; failed: number }>(
     '/admin/delivery-orders/allocate',

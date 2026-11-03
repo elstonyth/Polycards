@@ -1,9 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import i18next from 'i18next';
 import en from './en.json';
+import zhCN from './zhCN.json';
 
 // Counts on the finance pages pass `count` for plurals and print it through
 // i18next's built-in number formatter, so 2163 reads "2,163".
+// The dashboard's code `zhCN` is not a valid Intl locale, so i18next falls back
+// to one/other even in Chinese: a key with no `_one` shows English for 1.
+describe('Stock page Refresh counts in Chinese', () => {
+  it('stay Chinese when the count is 1', async () => {
+    const i = i18next.createInstance();
+    await i.init({
+      lng: 'zhCN',
+      fallbackLng: 'en',
+      resources: {
+        en: { translation: en },
+        zhCN: { translation: zhCN },
+      },
+      interpolation: { escapeValue: false },
+    });
+    for (const count of [1, 2]) {
+      expect(i.t('inventory.refreshMoved', { count })).toBe(
+        `已有 ${count} 个订单转为待发货`,
+      );
+      expect(i.t('inventory.refreshFailed', { count })).toBe(
+        `${count} 个订单未能完成转换，请再次刷新。`,
+      );
+    }
+  });
+});
+
 describe('finance page counts', () => {
   it('read with thousands separators and keep their plurals', async () => {
     const i = i18next.createInstance();

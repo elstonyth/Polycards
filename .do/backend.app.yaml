@@ -445,7 +445,8 @@ envs:
   # all on hand go to ready_to_ship, the other requested ones to processed,
   # then the to-buy list is frozen for the day. Off unless "true". Turned on
   # 2026-10-29 at the owner's request. App-level, so the backend service (the
-  # to-buy route) and the worker (the job) both read it.
+  # to-buy route, and the Stock page's Refresh move, which does nothing while
+  # this is off) and the worker (the job) both read it.
   - key: STOCK_AUTO_ALLOCATION
     scope: RUN_TIME
     value: "true"

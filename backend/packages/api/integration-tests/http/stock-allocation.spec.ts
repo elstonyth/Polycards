@@ -296,6 +296,7 @@ medusaIntegrationTestRunner({
           resource: ['inventory', 'inventory_item'],
           operation: ['read'],
         });
+        expect(policies).toHaveLength(2);
         await rbac.createRbacRolePolicies(
           policies.map((p: { id: string }) => ({
             role_id: role.id,
@@ -320,9 +321,12 @@ medusaIntegrationTestRunner({
           },
         );
 
-        const res = await pressRefresh({
-          headers: { authorization: `Bearer ${reader}` },
-        });
+        const asReader = { headers: { authorization: `Bearer ${reader}` } };
+        // The token works: this staff member can read stock, just not move orders.
+        expect(
+          (await unwrapResponse(api.get('/admin/inventory', asReader))).status,
+        ).toBe(200);
+        const res = await pressRefresh(asReader);
         expect(res.status).toBe(403);
         expect(await statusOf(order)).toBe('requested');
       });

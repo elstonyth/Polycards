@@ -979,24 +979,28 @@ export const useCheckDeliveryTracking = () => {
   });
 };
 
-// The Stock page's Refresh for staff who can move orders. onSettled RETURNS the
-// invalidation, so the mutation stays pending until the screen shows the moves;
-// a refused or failed run still reloads, the numbers may have changed anyway.
+// The Stock page's Refresh for staff who can move orders. Reload first, message
+// after: the mutation stays pending until the screen shows the moves, and the
+// count never sits over the old numbers. A failed run reloads too, because
+// orders before the failure may have moved.
 export const useAllocateDeliveryOrders = () => {
   const { t } = useTranslation();
   const invalidateStock = useInvalidateStock();
   return useMutation({
     mutationFn: allocateDeliveryOrders,
-    onSuccess: ({ ready, failed }) => {
-      if (ready > 0) {
-        toast.success(t('inventory.refreshMoved', { count: ready }));
+    onSettled: async (run, error) => {
+      await invalidateStock();
+      if (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return;
       }
-      if (failed > 0) {
-        toast.warning(t('inventory.refreshFailed', { count: failed }));
+      if (run?.ready) {
+        toast.success(t('inventory.refreshMoved', { count: run.ready }));
+      }
+      if (run?.failed) {
+        toast.warning(t('inventory.refreshFailed', { count: run.failed }));
       }
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-    onSettled: () => invalidateStock(),
   });
 };
 
@@ -2395,6 +2399,9 @@ export const useProcurementToShip = (
     queryKey: qk.procurementToShip,
     queryFn: getProcurementToShip,
     enabled: opts.enabled ?? true,
+    // A Refresh pressed on another PC moves orders onto this list at any hour.
+    refetchOnWindowFocus: true,
+    refetchInterval: 10 * 60 * 1000,
   });
 
 // ── Dashboard (spec §7) ──────────────────────────────────────────────────────

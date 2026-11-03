@@ -15,9 +15,8 @@ import {
 // orders whose cards are all on hand become ready_to_ship (oldest first) and
 // the rest of the requested ones become processed — they are on that night's
 // to-buy list. Then the to-buy list is frozen for the day
-// (GET /admin/procurement/to-buy). The only other automatic mover is the Stock
-// page's Refresh, which does the ready_to_ship half alone
-// (admin/delivery-orders/allocate).
+// (GET /admin/procurement/to-buy). Staff can do the ready_to_ship half earlier
+// with the Stock page's Refresh (admin/delivery-orders/allocate), or by hand.
 //
 // Once per day: the day is done once its snapshot exists, so a redelivered or
 // repeated run neither moves orders placed since 12am nor swaps the list

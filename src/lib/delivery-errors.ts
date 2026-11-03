@@ -77,6 +77,13 @@ export const DELIVERY_RULES: ErrorRule[] = [
     /changes the shipping fee zone/i,
     'That address changes the delivery fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',
   ],
+  // The order left the address window, possibly while the page was open (a
+  // stock run can move it at any hour). A retry can never work, so this must
+  // not fall through to the generic "try again".
+  [
+    /can no longer be edited|its status changed/i,
+    'This order is already being prepared for shipping, so its address can no longer be changed — please contact support.',
+  ],
   // Specific per-status reasons (sim P3 #9) — must precede the generic rule.
   [
     /already in a pending delivery/i,

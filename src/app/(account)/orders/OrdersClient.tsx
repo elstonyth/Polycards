@@ -118,12 +118,14 @@ function EditAddressModal({
   onAddAddress,
   onClose,
   onSaved,
+  onRefused,
 }: {
   order: DeliveryOrderView;
   addresses: AddressView[];
   onAddAddress: (address: AddressView) => void;
   onClose: () => void;
   onSaved: (address: DeliveryOrderView['address']) => void;
+  onRefused: () => void;
 }) {
   // No default selection in edit mode — changing an order's destination must be
   // an explicit choice (avoids silently re-shipping to addresses[0] on save).
@@ -174,6 +176,9 @@ function EditAddressModal({
       const res = await editDeliveryAddress(order.id, selectedAddr);
       if (!res.ok) {
         setError(res.error);
+        // The order may have moved on while the page was open: refresh the rows
+        // so its Change address button goes.
+        if (!res.needsAuth) onRefused();
         return;
       }
       // Reflect the new destination in the row from the selected address book
@@ -736,6 +741,13 @@ export default function OrdersClient({
     };
   }, []);
 
+  const reloadOrders = () =>
+    void getDeliveryOrders()
+      .then((r) => {
+        if (r.ok) setOrders(r.orders);
+      })
+      .catch(() => {});
+
   return (
     <>
       <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
@@ -874,6 +886,7 @@ export default function OrdersClient({
             );
             setEditing(null);
           }}
+          onRefused={reloadOrders}
         />
       )}
 
@@ -892,13 +905,7 @@ export default function OrdersClient({
             setCanceledIds((prev) => new Set(prev).add(canceling.id));
             setCanceling(null);
           }}
-          onRefused={() =>
-            void getDeliveryOrders()
-              .then((r) => {
-                if (r.ok) setOrders(r.orders);
-              })
-              .catch(() => {})
-          }
+          onRefused={reloadOrders}
         />
       )}
     </>
