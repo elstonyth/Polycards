@@ -5,6 +5,7 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import { includesBank } from '../../../../../modules/packs/saved-accounts';
 import { takeCardStock } from '../../../../../modules/packs/card-stock';
 import { rollOne } from '../../../../../workflows/steps/roll-pack';
 import { resolveOddsSetForCustomer } from '../../../../../modules/packs/odds-sets';
@@ -23,6 +24,21 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
   }
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // A reward needs a verified phone and a saved bank (owner, 2026-11-03), as the
+  // welcome pack does: one number and one bank per person. A wallet alone does
+  // not count, since a fresh one costs nothing.
+  const [{ phoneVerified }, saved] = await Promise.all([
+    packs.getVerificationState(customerId),
+    packs.savedBankAccountsFor(customerId),
+  ]);
+  const missing = [
+    ...(phoneVerified ? [] : (['phone'] as const)),
+    ...(includesBank(saved) ? [] : (['bank'] as const)),
+  ];
+  if (missing.length > 0) {
+    res.json({ claimed: false, reason: 'needs_verification', missing });
+    return;
+  }
   const result = await packs.claimTask({
     customerId,
     taskId: req.params.id,

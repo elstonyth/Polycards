@@ -67,6 +67,7 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     savedBankAccountsFor: jest.fn().mockResolvedValue(savedAccounts),
     // Other customers on the same number. None by default.
     otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
+    payoutAccountBanned: jest.fn().mockResolvedValue(false),
     // Support's verification of a shared number. Not verified by default.
     bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
     createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
@@ -1754,6 +1755,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         listGatewayWithdrawals: jest.fn().mockResolvedValue([heldRow]),
         listCustomerAccountStates: jest.fn().mockResolvedValue([]),
         otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
+        payoutAccountBanned: jest.fn().mockResolvedValue(false),
         bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
         claimWithdrawalAgainstDebit: jest
           .fn()

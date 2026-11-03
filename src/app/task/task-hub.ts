@@ -121,6 +121,40 @@ export function claimNotice(
   return rewardNotice(reward) + ticketsExtra(tickets);
 }
 
+export type NoticeLink = { href: string; label: string };
+
+/** A claim refused for missing checks (owner 2026-11-03): a verified phone and
+ *  a saved bank before any task reward. Names only what is left, and links to
+ *  Settings while the phone is, then to the Bank page. */
+export function verificationNotice(missing: readonly string[]): {
+  text: string;
+  link: NoticeLink;
+} {
+  const phone = missing.includes('phone');
+  const bank = missing.includes('bank');
+  const settings = { href: '/settings', label: 'Go to Settings →' };
+  if (bank && !phone)
+    return {
+      text: 'To claim rewards, add your bank account.',
+      link: { href: '/bank', label: 'Add bank account →' },
+    };
+  if (phone && !bank)
+    return {
+      text: 'To claim rewards, verify your phone number in Settings.',
+      link: settings,
+    };
+  if (phone && bank)
+    return {
+      text: 'To claim rewards, verify your phone number and add your bank account.',
+      link: settings,
+    };
+  // Nothing this build knows was named: no claim about what is left.
+  return {
+    text: 'Finish verifying your account to claim rewards.',
+    link: settings,
+  };
+}
+
 function rewardNotice(reward: TaskEntry['reward']): string {
   if (reward.type === 'credit') {
     const amount = reward.amount_myr;

@@ -13,6 +13,7 @@
  */
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
+import { ACCOUNT_BLOCKED } from '@/lib/errors';
 import {
   parseOne,
   TaskHubSchema,
@@ -33,8 +34,12 @@ const loggedOut = (f: Failure): string | null =>
     ? 'Please log in first.'
     : null;
 
+/** …and a banned or disabled account, whose refusal says why. */
+const blocked = (f: Failure): string | null =>
+  ACCOUNT_BLOCKED.test(f.text) ? f.text : null;
+
 const checkInError = (f: Failure): string =>
-  loggedOut(f) ?? 'Could not check in. Please try again.';
+  loggedOut(f) ?? blocked(f) ?? 'Could not check in. Please try again.';
 
 export async function getTaskHub(): Promise<TaskHub | null> {
   // Logged out, a failed read, or a hub that did not parse: null, and the tab
@@ -68,7 +73,15 @@ export async function checkInToday(): Promise<CheckInResult> {
  *  scheduled task can end between the page load and the tap, and answering
  *  "not completed yet" over a finished 3/3 row is the worst thing to say. */
 export type ClaimFailure =
-  'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
+  | 'not_found'
+  | 'not_completed'
+  | 'already_claimed'
+  | 'window_closed'
+  // A verified phone and a saved bank come first (owner 2026-11-03).
+  | 'needs_verification';
+
+/** What a `needs_verification` refusal says is still missing. */
+export type ClaimRequirement = 'phone' | 'bank';
 
 export type ClaimResult =
   | {
@@ -84,6 +97,8 @@ export type ClaimResult =
       ok: true;
       claimed: false;
       reason: ClaimFailure;
+      /** Filled for `needs_verification`; empty otherwise. */
+      missing: ClaimRequirement[];
     }
   | { ok: false; error: string };
 
@@ -96,7 +111,7 @@ type RawClaim =
       reward: { type: string; pack_id?: string };
       claimId?: string;
     }
-  | { claimed: false; reason: ClaimFailure };
+  | { claimed: false; reason: ClaimFailure; missing?: unknown };
 
 export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
   const r = await store.post(
@@ -107,7 +122,7 @@ export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
   if (!r.ok) {
     return {
       ok: false,
-      error: loggedOut(r) ?? 'Could not claim. Please try again.',
+      error: loggedOut(r) ?? blocked(r) ?? 'Could not claim. Please try again.',
     };
   }
   // JSON parsing accepts null and malformed nested objects; preserve the
@@ -123,7 +138,12 @@ export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
           : null;
       return { ok: true, claimed: true, rewardType: raw.reward.type, spin };
     }
-    return { ok: true, claimed: false, reason: raw.reason };
+    const missing = Array.isArray(raw.missing)
+      ? raw.missing.filter(
+          (m): m is ClaimRequirement => m === 'phone' || m === 'bank',
+        )
+      : [];
+    return { ok: true, claimed: false, reason: raw.reason, missing };
   } catch (error) {
     logger.error('[tasks] response projection failed:', error);
     return { ok: false, error: 'Could not claim. Please try again.' };
@@ -184,7 +204,10 @@ export async function spinTaskReward(
   if (!r.ok) {
     return {
       ok: false,
-      error: loggedOut(r) ?? 'Could not spin your free rip. Try again.',
+      error:
+        loggedOut(r) ??
+        blocked(r) ??
+        'Could not spin your free rip. Try again.',
     };
   }
   // JSON parsing accepts null and malformed nested objects; preserve the

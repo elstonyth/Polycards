@@ -66,7 +66,7 @@ function unusableReason(account: SavedBankAccount, now: Date): string | null {
     );
   }
   if (typeof account.usableFrom !== 'string') {
-    return 'contact support to update it';
+    return 'contact support to activate it';
   }
   const wait = timeUntil(account.usableFrom, now);
   return wait ? `available ${wait}` : null;
@@ -141,8 +141,9 @@ const REMEDIES: [RegExp, string | null, string][] = [
   // packs"), kept for a storefront-first deploy; drop once both are live.
   [/is for opening packs/i, '/slots', 'Open packs'],
   [/more on packs/i, '/slots', 'Open packs'],
-  // Above the /bank account/ rule: a shared or locked account changes through
-  // support, the /bank page cannot help (ADR 0015).
+  // Above the /bank account/ rule: a shared account on hold is support's to
+  // verify, and a saved account cannot be changed at all, so the /bank page
+  // cannot help (ADR 0015).
   [/under review|contact support/i, '/contact', 'Contact support'],
   [/add an email address/i, '/settings', 'Add an email address'],
   [
@@ -150,7 +151,7 @@ const REMEDIES: [RegExp, string | null, string][] = [
     // are fine", and linking it to /bank would contradict it.
     /bank account|account number|account holder name|choose (?:a|another) bank|mobile number linked to PayNow/i,
     '/bank',
-    'Manage bank accounts',
+    'View bank accounts',
   ],
 ];
 
@@ -688,7 +689,7 @@ export default function WithdrawForm({
                   href="/bank"
                   className="text-white/80 underline underline-offset-2 hover:text-white"
                 >
-                  {walletGroup ? 'Manage wallets' : 'Manage bank accounts'}
+                  {walletGroup ? 'View wallets' : 'View bank accounts'}
                 </Link>
               </p>
             ) : (

@@ -23,6 +23,7 @@ const REASON_COPY: Record<GoogleFailReason, string> = {
   exists:
     'An account with this email already exists. Sign in with your password instead.',
   disabled: 'This account has been disabled. Please contact support.',
+  banned: 'This account has been permanently banned for breaking the rules.',
   failed: DEFAULT_REASON,
 };
 const isReason = (r: string): r is GoogleFailReason =>

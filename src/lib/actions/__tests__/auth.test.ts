@@ -540,6 +540,20 @@ describe('login — disabled account message (§4.2)', () => {
     expect(mocks.setAuthToken).not.toHaveBeenCalled();
   });
 
+  it('shows a permanent ban as its own message', async () => {
+    const banned =
+      'This account has been permanently banned for breaking the rules.';
+    refuses('POST /auth/customer/emailpass', banned, 401);
+
+    const r = await login({
+      email: 'ring@polycards.app',
+      password: 'PolycardsTest123!',
+    });
+
+    expect(r).toEqual({ ok: false, error: banned });
+    expect(mocks.setAuthToken).not.toHaveBeenCalled();
+  });
+
   it('still falls back to the generic message for an unrelated failure', async () => {
     refuses('POST /auth/customer/emailpass', 'socket hang up', 500);
 

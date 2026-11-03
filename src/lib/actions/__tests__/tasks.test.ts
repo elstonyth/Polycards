@@ -86,6 +86,40 @@ describe('claimTaskReward', () => {
       ok: true,
       claimed: false,
       reason: 'window_closed',
+      missing: [],
+    });
+  });
+
+  it('tells a banned customer why, instead of asking them to retry', async () => {
+    const banned =
+      'This account has been permanently banned for breaking the rules.';
+    backend({
+      'POST /store/tasks/:id/claim': {
+        status: 403,
+        body: { message: banned },
+      },
+    });
+    expect(await claimTaskReward('task_1')).toEqual({
+      ok: false,
+      error: banned,
+    });
+  });
+
+  it('carries what a verification refusal still needs, and nothing else', async () => {
+    backend({
+      'POST /store/tasks/:id/claim': {
+        body: {
+          claimed: false,
+          reason: 'needs_verification',
+          missing: ['phone', 'bank', 'real_name'],
+        },
+      },
+    });
+    expect(await claimTaskReward('task_1')).toEqual({
+      ok: true,
+      claimed: false,
+      reason: 'needs_verification',
+      missing: ['phone', 'bank'],
     });
   });
 });

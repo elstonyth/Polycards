@@ -4,12 +4,19 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
-import { findBank, sandboxOnlyBank } from '../../../../../../modules/packs/banks';
+import {
+  findBank,
+  sandboxOnlyBank,
+} from '../../../../../../modules/packs/banks';
 import { resolveActiveGateway } from '../../../../../../modules/packs/gateway';
 import { withdrawalDetailsError } from '../../../../../../modules/packs/gateway-withdrawal';
 import { sendSavedAccountAddedNotice } from '../../../../../../modules/packs/saved-account-notice';
 import {
+  BANNED_PAYOUT_ACCOUNT_MESSAGE,
+  HOLDER_NAME_INVALID_MESSAGE,
   heldByAnother,
+  holderNameInvalid,
+  normalizeHolderName,
   newSavedBankAccount,
   verifiedElsewhere,
 } from '../../../../../../modules/packs/saved-accounts';
@@ -63,11 +70,31 @@ export async function POST(
   const account = newSavedBankAccount(
     bank,
     body.account_number as string,
-    (body.account_holder_name as string | undefined) ?? '',
+    normalizeHolderName((body.account_holder_name as string | undefined) ?? ''),
   );
+  // Stored and compared as a customer save stores it, so the one-name rule sees
+  // support's entries too.
+  if (!bank.wallet && holderNameInvalid(account.accountHolderName)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      HOLDER_NAME_INVALID_MESSAGE,
+    );
+  }
 
   const customerId = req.params.id;
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // A banned number stays banned, support's add included (owner, 2026-11-03).
+  if (
+    await packs.payoutAccountBanned(
+      account.accountNumber,
+      bank.wallet !== undefined,
+    )
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      BANNED_PAYOUT_ACCOUNT_MESSAGE,
+    );
+  }
   const holders = (
     await packs.otherPayoutAccountHolders(
       customerId,

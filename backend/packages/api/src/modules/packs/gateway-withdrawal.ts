@@ -5,6 +5,7 @@ import {
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   bankSupportedBy,
   anySavedAccountShared,
+  BANNED_PAYOUT_ACCOUNT_MESSAGE,
   heldByAnother,
   resolveWithdrawalDestination,
   savedBankAccountId,
@@ -751,6 +752,19 @@ export async function startWithdrawal(
   const detailsInvalid = withdrawalDetailsError(precheckDestination);
   if (detailsInvalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, detailsInvalid);
+  }
+  // A banned number never pays, even one saved before it was banned (owner,
+  // 2026-11-03).
+  if (
+    await packs.payoutAccountBanned(
+      precheckDestination.accountNumber,
+      findBank(precheckDestination.bankCode)?.wallet !== undefined,
+    )
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      BANNED_PAYOUT_ACCOUNT_MESSAGE,
+    );
   }
   // The admin's Touch 'n Go switch. Ahead of the bank check so the customer
   // reads "Touch 'n Go is paused", not "not available with the provider".
@@ -1992,6 +2006,18 @@ export async function submitHeldWithdrawal(
   // pay on a click. Judged on the row's own number, not the saved list, which
   // support may already have changed. The row stays held.
   const rowBank = findBank(row.bank_code);
+  // A banned number never pays on a click either (owner, 2026-11-03).
+  if (
+    await packs.payoutAccountBanned(
+      row.account_number,
+      rowBank?.wallet !== undefined,
+    )
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This bank account is banned on Polycards. Deny the withdrawal.',
+    );
+  }
   const rowAccountId = savedBankAccountId(
     rowBank?.id ?? row.bank_code,
     row.account_number,

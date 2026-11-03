@@ -97,6 +97,7 @@ export type GoogleFailReason =
   | 'email'
   | 'exists'
   | 'disabled'
+  | 'banned'
   | 'failed';
 
 export type GoogleCallbackResult =
@@ -175,6 +176,11 @@ const AUTH_RULES: ErrorRule[] = [
   [
     /account has been disabled/i,
     'This account has been disabled. Please contact support.',
+  ],
+  // A ring account banned for good (owner 2026-11-03): same block, own text.
+  [
+    /permanently banned/i,
+    'This account has been permanently banned for breaking the rules.',
   ],
 ];
 
@@ -627,7 +633,9 @@ export async function googleCallback(query: {
       ? 'exists'
       : /account has been disabled/i.test(text)
         ? 'disabled'
-        : 'failed';
+        : /permanently banned/i.test(text)
+          ? 'banned'
+          : 'failed';
     return { ok: false, reason };
   }
 }

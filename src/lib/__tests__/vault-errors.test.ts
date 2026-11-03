@@ -17,6 +17,15 @@ const map = (msg: string) =>
   friendlyError(new Error(msg), VAULT_RULES, VAULT_FALLBACK);
 
 describe('VAULT_RULES backend-message contract', () => {
+  it('says why a banned or disabled account is refused', () => {
+    for (const msg of [
+      'This account has been permanently banned for breaking the rules.',
+      'This account has been disabled. Please contact support.',
+    ]) {
+      expect(map(msg)).toBe(msg);
+    }
+  });
+
   it('reports a gateway refusal as a gateway problem, not a bad amount', () => {
     // packs/gateway-deposit.ts, the GatewayError branch.
     const refusal =
@@ -170,6 +179,12 @@ describe('VAULT_RULES backend-message contract', () => {
       'This bank account is linked to another Polycards account. If it is yours, contact support.',
       'Your Polycards account already has a bank account. Contact support to change it.',
       'A saved bank account cannot be removed here. Contact support to change it.',
+      // the 2026-11-03 rules: name typed twice, banned numbers, per currency
+      'The two names do not match. Type the same name twice.',
+      'This name is already linked to another Polycards account.',
+      'This bank account cannot be used on Polycards.',
+      'Your Polycards account already has a bank account for this currency. It cannot be changed.',
+      'A saved bank account cannot be removed or changed.',
       // gateway-withdrawal.ts startWithdrawal / withdrawalDetailsError
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
       'Add an email address to your account before withdrawing.',

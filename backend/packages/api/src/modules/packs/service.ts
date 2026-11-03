@@ -48,12 +48,14 @@ import {
   MAX_SAVED_BANK_ACCOUNTS,
   loadSavedBankAccounts,
   parseSavedBankAccounts,
+  payoutAccountKey,
   resolveWithdrawalDestination,
   verifiedBankAccounts,
   withBankShareStamp,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
+import { bankCurrency } from './banks';
 import { challengePackId } from './challenge-prize';
 import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
@@ -9790,8 +9792,8 @@ class PacksModuleService extends MedusaService({
 
   // One customer's saved payout destinations, unlocked.
   //
-  // Exists for ONE caller: gateway-withdrawal.ts's pre-row destination
-  // precheck, which has no transaction of its own. The decision that matters
+  // Callers with no transaction of their own: gateway-withdrawal.ts's pre-row
+  // destination precheck, the A3Pay payer-name lookup and the task claim gate. The decision that matters
   // does not come through here — withdrawForCashout calls loadSavedBankAccounts
   // directly on its own locked transaction manager, so this method cannot be
   // swapped underneath it.
@@ -10064,10 +10066,14 @@ class PacksModuleService extends MedusaService({
         customerId: input.customerId,
         mutate: (current) => {
           const accounts = parseSavedBankAccounts(current.bank_accounts);
-          if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {
+          const currency = bankCurrency(input.account.bankCode);
+          if (
+            accounts.filter((a) => bankCurrency(a.bankCode) === currency)
+              .length >= MAX_SAVED_BANK_ACCOUNTS
+          ) {
             throw new MedusaError(
               MedusaError.Types.NOT_ALLOWED,
-              'This player already has a bank account. Remove it first.',
+              'This player already has a bank account for this currency. Remove it first.',
             );
           }
           return {
@@ -10157,6 +10163,50 @@ class PacksModuleService extends MedusaService({
         "AND status IN ('pending', 'held', 'settled')",
       [customerId, accountNumber, customerId, accountNumber],
     );
+  }
+
+  // A permanently banned payout number (owner, 2026-11-03): the farm rings'
+  // banks, in banned_payout_account only (the repo is public). Matched on
+  // payoutAccountKey, so at any bank and however it is padded.
+  @InjectManager()
+  async payoutAccountBanned(
+    accountNumber: string,
+    wallet = false,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<unknown[]>(
+      'SELECT 1 FROM banned_payout_account WHERE account_key = ? LIMIT 1',
+      [payoutAccountKey(accountNumber, wallet)],
+    );
+    return rows.length > 0;
+  }
+
+  // Another account already used this holder name on a bank, saved or paid
+  // (owner, 2026-11-03: a different bank under the same name is refused too).
+  // Names compare as setRealName compares them. A wallet entry carries its
+  // network's name, which no person's name equals.
+  @InjectManager()
+  async holderNameHeldByAnother(
+    customerId: string,
+    holderName: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<unknown[]>(
+      'SELECT 1 FROM customer c ' +
+        "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
+        "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
+        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${realNameKeySql("a->>'accountHolderName'")} = ${realNameKeySql('?::text')} AND ${realNameKeySql("a->>'accountHolderName'")} <> '' ` +
+        'UNION ALL ' +
+        'SELECT 1 FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
+        `AND ${realNameKeySql('account_holder_name')} = ${realNameKeySql('?::text')} AND ${realNameKeySql('account_holder_name')} <> '' ` +
+        "AND status IN ('pending', 'held', 'settled') LIMIT 1",
+      [customerId, holderName, customerId, holderName],
+    );
+    return rows.length > 0;
   }
 
   // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob

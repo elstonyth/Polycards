@@ -43,6 +43,7 @@ export type GatewayWithdrawals = Pick<
   | 'listFxRates'
   | 'listGatewayWithdrawals'
   | 'otherPayoutAccountHolders'
+  | 'payoutAccountBanned'
   | 'savedBankAccountsFor'
   | 'updateGatewayWithdrawals'
   | 'walletSummary'
@@ -87,6 +88,8 @@ export type CustomerWallet = Pick<
   | 'listTicketSpins'
   | 'mutateCustomerMetadata'
   | 'otherPayoutAccountHolders'
+  | 'payoutAccountBanned'
+  | 'holderNameHeldByAnother'
   | 'walletSummary'
   | 'withdrawalControls'
 >;

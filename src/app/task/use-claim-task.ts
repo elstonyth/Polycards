@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { claimTaskReward } from '@/lib/actions/tasks';
 import type { TaskEntry } from '@/lib/data/schemas';
-import { claimNotice } from './task-hub';
+import { claimNotice, verificationNotice, type NoticeLink } from './task-hub';
 
 // Every way a claim can decline, in the customer's words.
 const CLAIM_FAILURE_COPY: Record<string, string> = {
@@ -19,7 +19,9 @@ const CLAIM_FALLBACK = 'Could not claim this right now.';
  *  reward is a free RIP, so its claim hands the player to the slot to take
  *  it; the entitlement is already recorded server-side, so if they never
  *  arrive it waits for them on /task rather than evaporating. */
-export function useClaimTask(onDone: (message: string) => void) {
+export function useClaimTask(
+  onDone: (message: string, link?: NoticeLink) => void,
+) {
   const [pending, startTransition] = useTransition();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const router = useRouter();
@@ -38,6 +40,13 @@ export function useClaimTask(onDone: (message: string) => void) {
         onDone(
           claimNotice({ ...task.reward, type: res.rewardType }, task.tickets),
         );
+      } else if (
+        res.ok &&
+        !res.claimed &&
+        res.reason === 'needs_verification'
+      ) {
+        const { text, link } = verificationNotice(res.missing);
+        onDone(text, link);
       } else if (res.ok && !res.claimed) {
         onDone(CLAIM_FAILURE_COPY[res.reason] ?? CLAIM_FALLBACK);
       } else if (!res.ok) {
