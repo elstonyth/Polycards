@@ -372,13 +372,22 @@ describe('GET bank-accounts — cleared names', () => {
     customers.retrieveCustomer.mockResolvedValue({
       metadata: {
         bank_accounts: [ACCOUNT],
-        holder_name_cleared: { testholder: { name: 'Test Holder', at: STAMP } },
+        holder_name_cleared: {
+          testholder: { name: 'Test Holder', at: STAMP, with: ['cus_2'] },
+        },
       },
     });
+    customers.listCustomers.mockResolvedValue([
+      { id: 'cus_2', metadata: { handle: 'Collector2' } },
+    ]);
     const res = mkRes();
     await GET(mkReq(), res as never);
     expect(res.json.mock.calls[0][0].cleared_names).toEqual([
-      { name: 'Test Holder', cleared_at: STAMP },
+      {
+        name: 'Test Holder',
+        cleared_at: STAMP,
+        with: [{ customer_id: 'cus_2', handle: 'Collector2' }],
+      },
     ]);
   });
 });

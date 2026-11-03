@@ -845,6 +845,10 @@ interface SettleSnapshot {
 /** Far more than any real customer's networks and browsers in 180 days. */
 const VISITOR_SIGNAL_ROWS_PER_CUSTOMER = 200;
 
+/** The most other accounts support may clear one shared holder name against:
+ *  two real people share a name, a ring shares it many times. */
+const MAX_NAME_CLASH_HOLDERS = 5;
+
 export type AdminAuditRow = Pick<
   InferTypeOf<typeof AdminActionAudit>,
   | 'admin_id'
@@ -10160,6 +10164,13 @@ class PacksModuleService extends MedusaService({
         'No other account holds this name, so there is nothing to clear.',
       );
     }
+    // Two real people share a name; a name on many accounts is a ring.
+    if (input.cleared && holders.length > MAX_NAME_CLASH_HOLDERS) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${holders.length} other accounts use this name. That is not one shared name: check them as a ring instead.`,
+      );
+    }
     let changed = false;
     await this.mutateCustomerMetadata(
       {
@@ -10387,7 +10398,8 @@ class PacksModuleService extends MedusaService({
   }
 
   // The other accounts that saved or were paid under this holder name, as
-  // holderNameHeldByAnother counts them. Bounded: a name is on a handful.
+  // holderNameHeldByAnother counts them. Never truncated: the decision needs
+  // every holder, or an unchecked one could slip past a clearing.
   @InjectManager()
   async holderNameHolders(
     customerId: string,
@@ -10404,7 +10416,7 @@ class PacksModuleService extends MedusaService({
         'UNION ' +
         'SELECT customer_id FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
         `AND ${realNameKeySql('account_holder_name')} = ${realNameKeySql('?::text')} AND ${realNameKeySql('account_holder_name')} <> '' ` +
-        "AND status IN ('pending', 'held', 'settled') LIMIT 50",
+        "AND status IN ('pending', 'held', 'settled')",
       [customerId, holderName, customerId, holderName],
     );
     return rows.map((r) => r.customer_id);
