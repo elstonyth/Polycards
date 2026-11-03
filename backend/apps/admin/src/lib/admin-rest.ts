@@ -2050,7 +2050,12 @@ export interface SavedBankAccounts {
     linked: { customer_id: string; handle: string | null }[];
   }[];
   /** Holder names support cleared as two real people's. */
-  cleared_names: { name: string; cleared_at: string }[];
+  cleared_names: {
+    name: string;
+    cleared_at: string;
+    /** The accounts that held the name when support checked. */
+    with: { customer_id: string; handle: string | null }[];
+  }[];
 }
 
 export const getSavedBankAccounts = (id: string) =>

@@ -362,12 +362,18 @@ const SavedBankAccountsCard = ({
               key={c.name}
               className="flex flex-wrap items-center justify-between gap-2 border-t px-6 py-3"
             >
-              <StatusBadge color="green">
-                {t('players.savedBankNameCleared', {
-                  name: c.name,
-                  date: orderDateTime(c.cleared_at),
-                })}
-              </StatusBadge>
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge color="green">
+                  {t('players.savedBankNameCleared', {
+                    name: c.name,
+                    date: orderDateTime(c.cleared_at),
+                  })}
+                </StatusBadge>
+                <Text size="small" className="text-ui-fg-subtle">
+                  {t('players.savedBankNameClearedWith')}:{' '}
+                  <PlayerLinks players={c.with} />
+                </Text>
+              </div>
               {canEdit && (
                 <Button
                   size="small"

@@ -528,11 +528,12 @@ export function verifiedBankAccounts(
 
 /** Holder names support cleared as a real clash (owner, 2026-11-04): another
  *  person with the same name holds it on another account, so this account's
- *  own saves skip the other-account name check for it. Keyed by realNameKey;
- *  only support writes it (setHolderNameCleared). */
+ *  own saves stop counting THOSE accounts' use of it. `with` is who held it
+ *  when support checked; an account that uses the name later still counts.
+ *  Keyed by realNameKey; only support writes it (setHolderNameCleared). */
 export const HOLDER_NAME_CLEARED_KEY = 'holder_name_cleared';
 
-export type ClearedHolderName = { name: string; at: string };
+export type ClearedHolderName = { name: string; at: string; with: string[] };
 
 export function clearedHolderNames(
   metadata: Record<string, unknown>,
@@ -545,7 +546,8 @@ export function clearedHolderNames(
         typeof v === 'object' &&
         v !== null &&
         typeof (v as ClearedHolderName).name === 'string' &&
-        typeof (v as ClearedHolderName).at === 'string',
+        typeof (v as ClearedHolderName).at === 'string' &&
+        Array.isArray((v as ClearedHolderName).with),
     ),
   ) as Record<string, ClearedHolderName>;
 }

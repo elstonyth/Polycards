@@ -9,7 +9,7 @@ const run = (body: unknown) => {
 };
 
 describe('rejectAdminBankAccountsMetadata', () => {
-  it.each(['bank_accounts', 'bank_share_verified'])('refuses %s', (key) => {
+  it.each(['bank_accounts', 'bank_share_verified', 'holder_name_cleared'])('refuses %s', (key) => {
     const next = run({ metadata: { handle: 'x', [key]: 'anything' } });
     expect(next).toHaveBeenCalledTimes(1);
     expect(next.mock.calls[0][0]?.message).toContain(key);

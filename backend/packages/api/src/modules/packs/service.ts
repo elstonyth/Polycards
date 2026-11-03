@@ -10130,9 +10130,11 @@ class PacksModuleService extends MedusaService({
   }
 
   // Support found two real people with one name (owner, 2026-11-04): this
-  // account's own saves stop counting the name as another account's. Per account
-  // and per name, so each of the two is cleared on its own, and a third account
-  // using the name is still refused. `cleared: false` takes it back.
+  // account's own saves stop counting the accounts that hold the name NOW (the
+  // ones support checked) as another person's. Per account and per name, so each
+  // of the two is cleared on its own; an account that uses the name later still
+  // counts, and so does every save by any other account. `cleared: false` takes
+  // it back.
   @InjectTransactionManager()
   async setHolderNameCleared(
     input: {
@@ -10145,12 +10147,32 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const key = holderNameKey(input.holderName);
+    const holders = input.cleared
+      ? await this.holderNameHolders(
+          input.customerId,
+          input.holderName,
+          sharedContext,
+        )
+      : [];
+    if (input.cleared && holders.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'No other account holds this name, so there is nothing to clear.',
+      );
+    }
     let changed = false;
     await this.mutateCustomerMetadata(
       {
         customerId: input.customerId,
         mutate: (current) => {
-          if (Boolean(clearedHolderNames(current)[key]) === input.cleared) {
+          const stamp = clearedHolderNames(current)[key];
+          if (
+            input.cleared
+              ? stamp !== undefined &&
+                stamp.with.length === holders.length &&
+                holders.every((id) => stamp.with.includes(id))
+              : stamp === undefined
+          ) {
             return null;
           }
           changed = true;
@@ -10158,7 +10180,11 @@ class PacksModuleService extends MedusaService({
             current,
             key,
             input.cleared
-              ? { name: input.holderName, at: new Date().toISOString() }
+              ? {
+                  name: input.holderName,
+                  at: new Date().toISOString(),
+                  with: holders,
+                }
               : null,
           );
         },
@@ -10172,8 +10198,12 @@ class PacksModuleService extends MedusaService({
           entity_type: 'customer',
           entity_id: input.customerId,
           action: 'edit',
-          before: { holder_name: input.holderName, cleared: !input.cleared },
-          after: { holder_name: input.holderName, cleared: input.cleared },
+          before: { holder_name: input.holderName },
+          after: {
+            holder_name: input.holderName,
+            cleared: input.cleared,
+            with: holders,
+          },
           reason: `${input.cleared ? 'Cleared' : 'Took back'} a holder name shared with another person: ${input.reason}`,
         },
         sharedContext,
@@ -10329,36 +10359,55 @@ class PacksModuleService extends MedusaService({
   // Another account already used this holder name on a bank, saved or paid
   // (owner, 2026-11-03: a different bank under the same name is refused too).
   // Names compare as setRealName compares them. A wallet entry carries its
-  // network's name, which no person's name equals. A name support cleared for
-  // this customer as two real people's (setHolderNameCleared) is not held by
-  // another, for this customer only.
+  // network's name, which no person's name equals. The accounts support
+  // checked as another person with this name (setHolderNameCleared) do not
+  // count, for this customer only; any other account still does.
   @InjectManager()
   async holderNameHeldByAnother(
     customerId: string,
     holderName: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
+    const others = await this.holderNameHolders(
+      customerId,
+      holderName,
+      sharedContext,
+    );
+    if (others.length === 0) return false;
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
       'SELECT metadata FROM customer WHERE id = ?',
       [customerId],
     );
-    if (clearedHolderNames(me?.metadata ?? {})[holderNameKey(holderName)]) {
-      return false;
-    }
-    const rows = await em.execute<unknown[]>(
-      'SELECT 1 FROM customer c ' +
+    const checked =
+      clearedHolderNames(me?.metadata ?? {})[holderNameKey(holderName)]?.with ??
+      [];
+    return others.some((id) => !checked.includes(id));
+  }
+
+  // The other accounts that saved or were paid under this holder name, as
+  // holderNameHeldByAnother counts them. Bounded: a name is on a handful.
+  @InjectManager()
+  async holderNameHolders(
+    customerId: string,
+    holderName: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ customer_id: string }[]>(
+      'SELECT c.id AS customer_id FROM customer c ' +
         "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
         "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
         `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${realNameKeySql("a->>'accountHolderName'")} = ${realNameKeySql('?::text')} AND ${realNameKeySql("a->>'accountHolderName'")} <> '' ` +
-        'UNION ALL ' +
-        'SELECT 1 FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
+        'UNION ' +
+        'SELECT customer_id FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
         `AND ${realNameKeySql('account_holder_name')} = ${realNameKeySql('?::text')} AND ${realNameKeySql('account_holder_name')} <> '' ` +
-        "AND status IN ('pending', 'held', 'settled') LIMIT 1",
+        "AND status IN ('pending', 'held', 'settled') LIMIT 50",
       [customerId, holderName, customerId, holderName],
     );
-    return rows.length > 0;
+    return rows.map((r) => r.customer_id);
   }
 
   // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob
