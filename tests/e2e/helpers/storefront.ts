@@ -2,7 +2,7 @@
 // ported verbatim from the proven scripts/qa-claw-e2e.mjs — the open animation
 // has no clean end-signal, so fixed settles are intentional, not laziness.
 import { type Page, expect } from '@playwright/test';
-import { BASE } from './constants';
+import { BASE, uniqueRealName } from './constants';
 
 export async function gotoPack(page: Page, slug: string): Promise<void> {
   // The pack detail lives at /slots/<slug> now (the /claw route 308-redirects here);
@@ -43,7 +43,7 @@ async function submitSignup(
     .click();
   await page.fill('input[name="username"]', username);
   // Spec 2026-10-06: a real name and its confirm checkbox are required.
-  await page.fill('input[name="realName"]', 'Playwright Tester');
+  await page.fill('input[name="realName"]', uniqueRealName());
   await page.check('input[name="realNameConfirm"]');
   await page.fill('input[name="email"]', email);
   await page.fill('input[name="password"]', password);

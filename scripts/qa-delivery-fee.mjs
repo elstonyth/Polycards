@@ -76,7 +76,11 @@ const token = login.token;
 await api('/store/customers/me/real-name', {
   method: 'POST',
   token,
-  body: { real_name: 'Qa Delivery Fee' },
+  body: {
+    real_name: `Qa Delivery Fee ${Math.random()
+      .toString(36)
+      .replace(/[^a-z]/g, '')}`,
+  },
 });
 
 const { packs } = await api('/store/packs', { token });

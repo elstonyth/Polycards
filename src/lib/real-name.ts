@@ -18,6 +18,9 @@ const REAL_NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'@/,-]*$/u;
 export const REAL_NAME_INVALID =
   'Enter your full name exactly as it appears on your IC (letters only, 3–100 characters).';
 
+export const REAL_NAME_TAKEN =
+  'This name is already linked to another Polycards account. Enter your full name as on your IC, or contact support if this is your full name.';
+
 /** Trim, collapse inner whitespace, and validate. The stored form, or null. */
 export function normalizeRealName(input: unknown): string | null {
   if (typeof input !== 'string') return null;

@@ -17,3 +17,8 @@ export const ADMIN_PASSWORD = process.env.PW_ADMIN_PASSWORD ?? '';
 
 // Unique-per-run id so reruns never collide on email/slug.
 export const stamp = (): string => `${Date.now()}`;
+
+// A second account can't save a name another account holds (ADR 0015), and a
+// real name takes letters only, so a run's stamp can't be used as it is.
+export const uniqueRealName = (): string =>
+  `Playwright Tester ${`${stamp()}${Math.random()}`.replace(/\D/g, '').replace(/\d/g, (d) => 'abcdefghij'[Number(d)] ?? '')}`;

@@ -2,7 +2,14 @@
 // odds, opens). The storefront's "Open Pack" button is just a server action over
 // POST /store/packs/{slug}/open, so opening via this client exercises the exact
 // same code path the UI does — just without the slow reveal animation.
-import { BACKEND, PK, ADMIN_EMAIL, ADMIN_PASSWORD, stamp } from './constants';
+import {
+  BACKEND,
+  PK,
+  ADMIN_EMAIL,
+  ADMIN_PASSWORD,
+  stamp,
+  uniqueRealName,
+} from './constants';
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -89,7 +96,7 @@ export async function createCustomer(fundUsd = 0): Promise<CustomerCreds> {
   await api('/store/customers/me/real-name', {
     method: 'POST',
     token: login.token,
-    body: { real_name: 'Playwright Tester' },
+    body: { real_name: uniqueRealName() },
   });
   const creds: CustomerCreds = { email, password, token: login.token };
   if (fundUsd > 0) await topup(creds.token, fundUsd);

@@ -778,6 +778,21 @@ export const RATE_LIMITS = {
   },
 
   /**
+   * The real-name write, per customer. A refusal says a name is on the platform
+   * (ADR 0015), so this bounds how many names one account can try. Well above
+   * what a person retyping their own name needs.
+   */
+  'real-name-write': {
+    message: 'Too many attempts.',
+    defaults: {
+      burstLimit: 5,
+      burstWindowMs: 60_000,
+      limit: 10,
+      windowMs: 3_600_000,
+    },
+  },
+
+  /**
    * The auth-endpoint limiter, PER ADDRESS (login / register / password reset /
    * reset-completion). These routes are PUBLIC — there is no auth_context yet —
    * so the middleware keys on the caller's address (its designed fallback).

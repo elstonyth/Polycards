@@ -5,6 +5,7 @@
  * Asserted contracts:
  *  - setRealName: the customer's write lands ONCE; a second (or concurrent)
  *    write is refused and never overwrites.
+ *  - setRealName: a name another account holds is refused (ADR 0015).
  *  - getVerificationState: the two facts the welcome-pack gate reads.
  *  - adminSetRealName: overwrites, audited with before/after/reason.
  *  - recordAdminPhoneChange: audits the move (the route writes + stamps).
@@ -20,6 +21,7 @@ import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
 import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
+import { REAL_NAME_TAKEN } from '../../../utils/real-name';
 
 jest.setTimeout(300 * 1000);
 
@@ -73,6 +75,94 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(results.filter(Boolean)).toHaveLength(1);
         const winner = results[0] ? 'First Name A' : 'Second Name B';
         expect((await stateOf('cus_rn_3'))!.real_name).toBe(winner);
+      });
+    });
+
+    // One person, one account (ADR 0015). Names already on file stay as they
+    // are; this only refuses a new save.
+    describe('setRealName (a name another account holds)', () => {
+      const nameOf = async (customerId: string) =>
+        (await stateOf(customerId))?.real_name ?? null;
+
+      it('refuses it ignoring case, spacing and separators, and writes nothing', async () => {
+        await service.setRealName('cus_dup_1', 'Tan Ah-Kow');
+
+        for (const same of [
+          'Tan Ah-Kow',
+          'TAN AH KOW',
+          'tan ahkow',
+          "Tan Ah K'ow",
+          'Tan.Ah/Kow',
+        ]) {
+          await expect(service.setRealName('cus_dup_2', same)).rejects.toThrow(
+            REAL_NAME_TAKEN,
+          );
+        }
+        expect(await nameOf('cus_dup_2')).toBeNull();
+
+        expect(await service.setRealName('cus_dup_2', 'Tan Ah Kau')).toBe(true);
+        expect(await nameOf('cus_dup_2')).toBe('Tan Ah Kau');
+      });
+
+      // Comparing on Latin letters alone would make every Chinese name equal.
+      it('keeps names in other scripts apart', async () => {
+        expect(await service.setRealName('cus_dup_3', '陈大文')).toBe(true);
+        expect(await service.setRealName('cus_dup_4', '陈小文')).toBe(true);
+        await expect(service.setRealName('cus_dup_5', '陈大文')).rejects.toThrow(
+          REAL_NAME_TAKEN,
+        );
+      });
+
+      // Postgres lower() follows the database locale, and a C locale would miss this.
+      it('folds case beyond ASCII', async () => {
+        expect(await service.setRealName('cus_dup_13', 'ÉRIC TAN')).toBe(true);
+        await expect(
+          service.setRealName('cus_dup_14', 'éric tan'),
+        ).rejects.toThrow(REAL_NAME_TAKEN);
+      });
+
+      it('lets exactly one of two accounts racing for a name win', async () => {
+        const results = await Promise.allSettled([
+          service.setRealName('cus_dup_6', 'Lim Siew Hua'),
+          service.setRealName('cus_dup_7', 'LIM SIEW HUA'),
+        ]);
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        const refused = results.find((r) => r.status === 'rejected');
+        expect((refused as PromiseRejectedResult).reason.message).toBe(
+          REAL_NAME_TAKEN,
+        );
+      });
+
+      it('tells the holder their own name is on file, not taken', async () => {
+        await service.setRealName('cus_dup_8', 'Wong Kar Wai');
+        expect(await service.setRealName('cus_dup_8', 'WONG KAR WAI')).toBe(
+          false,
+        );
+      });
+
+      // Account deletion keeps the row as a tombstone and blanks the name.
+      it('frees the name once its holder is gone', async () => {
+        await service.setRealName('cus_dup_9', 'Ong Bee Lian');
+        const held = (await stateOf('cus_dup_9'))!;
+        await service.updateCustomerAccountStates({
+          selector: { id: held.id },
+          data: { disabled: true, real_name: null, real_name_set_at: null },
+        });
+        expect(await service.setRealName('cus_dup_10', 'Ong Bee Lian')).toBe(
+          true,
+        );
+      });
+
+      // The way out for two real people with one name.
+      it('leaves support able to set a name another account holds', async () => {
+        await service.setRealName('cus_dup_11', 'Siti Aminah');
+        await service.adminSetRealName({
+          customerId: 'cus_dup_12',
+          adminId: 'user_cs',
+          realName: 'Siti Aminah',
+          reason: 'different person, IC checked',
+        });
+        expect(await nameOf('cus_dup_12')).toBe('Siti Aminah');
       });
     });
 
