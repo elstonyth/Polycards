@@ -69,9 +69,12 @@ describe('Games tab', () => {
     for (const path of ['/coin-flip', '/coin-flip/x', '/vault/coin-flip']) {
       expect(isTabActive(games, path)).toBe(true);
       expect(isTabActive(task, path)).toBe(false);
-      expect(isTabActive(TABS.find((t) => t.label === 'Vault')!, path)).toBe(
-        false,
-      );
+      expect(
+        isTabActive(
+          TABS.find((t) => t.label === 'Vault')!,
+          path,
+        ),
+      ).toBe(false);
     }
     expect(isTabActive(games, '/task')).toBe(false);
   });
