@@ -266,7 +266,7 @@ export const TOOLS: AssistantTool[] = [
     name: 'player',
     label: "A player's money",
     description:
-      "One player's account by username (never email): join date, current player group, disabled flag, credit balance, vault cards and value, lifetime and last-30-days ledger totals (revenue = their pack spend, payouts = buybacks to them, cashout = their withdrawals as a signed sum, negative = taken from their wallet, pending ones included; their withdrawals by status say what was paid), and their deposits and withdrawals by status. last_30_days_window gives that rolling window's exact start and end as UTC instants; state it in Malaysia time. Amounts in RM (MYR).",
+      "One player's account by username. For an email, phone or bank account, call ban_reason first and use the username it returns: join date, current player group, disabled flag, credit balance, vault cards and value, lifetime and last-30-days ledger totals (revenue = their pack spend, payouts = buybacks to them, cashout = their withdrawals as a signed sum, negative = taken from their wallet, pending ones included; their withdrawals by status say what was paid), and their deposits and withdrawals by status. last_30_days_window gives that rolling window's exact start and end as UTC instants; state it in Malaysia time. Amounts in RM (MYR).",
     parameters: object(
       {
         username: str(
@@ -282,7 +282,7 @@ export const TOOLS: AssistantTool[] = [
     name: 'account',
     label: 'Account status',
     description:
-      "One player's account status by shown name or profile handle (never email or phone): join date, disabled, frozen, phone verified yes/no, VIP level, paid pack pulls (lifetime and last 30 days; free and prize draws not counted), the last 5 delivery orders, and deposits and withdrawals created in the last 30 days by status. If the reply has a lookup_note, tell staff what it says. Amounts in RM (MYR).",
+      "One player's account status by shown name or profile handle. For an email, phone or bank account, call ban_reason first and use the username it returns: join date, disabled, frozen, phone verified yes/no, VIP level, paid pack pulls (lifetime and last 30 days; free and prize draws not counted), the last 5 delivery orders, and deposits and withdrawals created in the last 30 days by status. If the reply has a lookup_note, tell staff what it says. Amounts in RM (MYR).",
     parameters: object(
       {
         username: str(
@@ -299,19 +299,30 @@ export const TOOLS: AssistantTool[] = [
     name: 'ban_reason',
     label: 'Why an account is banned',
     description:
-      "Why one player's account is disabled or banned, by shown name or profile handle (never email or phone). For a permanent ban (one person with more than one account, owner 2026-11-03) it lists each bank account the player saved or was paid to (bank name and last 4 digits), whether that number is banned, and every OTHER account on the same number: its shown name, handle, whether it is banned, whether it used the same account holder name, and its settled payouts to that number. Use it whenever staff ask why an account was banned or which accounts share a bank; explain the link in plain words (for example: both accounts cashed out to Maybank ending 1605). A disable typed by staff keeps its reason on the admin player page. If staff ask to unban, use unban_account. Amounts in RM (MYR).",
-    parameters: object(
-      {
-        username: str(
-          "The player's shown name, or their profile handle (the part after /profile/ in their link).",
-        ),
-      },
-      ['username'],
-    ),
+      "Why accounts are banned and who is linked with whom (one person, more than one account; owner 2026-11-03). Look up by whatever staff give, exactly ONE of: username (shown name or profile handle), email, phone, bank_account (the account number staff pasted), or holder_name (the bank account holder name). For a player (username, email or phone) it gives the ban state and reason, linked_accounts_total, and each bank the player saved or was paid to (bank name and last 4 digits), whether that number is banned, and every OTHER account on it: shown name, handle, banned or not, same account holder name or not, and settled payouts to it. For a bank_account it lists every account that saved it or was paid to it, with holder_name_group (accounts with the same holder_name_group value used the same holder name) and payouts. The player view also lists same_name_accounts: accounts under one of the player's holder names at a different bank. For a holder_name it lists every account that used that name and the banks it used. Which key: a Collector#### name or a handle is username; text with @ is email; a number staff call a phone (电话/手机/HP/WhatsApp) or that starts with +60, 60, 01 or 65 is phone; any other long number is bank_account; a person's name (with spaces, as on an IC or a bank) is holder_name. If a lookup finds nobody (not found, or account_count 0), try the other likely key once before saying nobody. It always starts from one detail: with none, ask staff for a name, email, phone or bank number. The person holds linked_accounts_total + 1 accounts. Use it whenever staff ask why an account is banned, who shares a bank, how many accounts someone has, or who owns a bank account or name. Explain the links in plain words (for example: these 3 accounts all cashed out to Hong Leong ending 8014 under one name). Never repeat a full bank account number, email, phone or holder name back: say the bank and last 4 digits. A disable typed by staff keeps its reason on the admin player page. If staff ask to unban, use unban_account. Amounts in RM (MYR).",
+    parameters: object({
+      username: str(
+        "The player's shown name, or their profile handle (the part after /profile/ in their link).",
+      ),
+      email: str("The account's email address."),
+      phone: str("The account's phone number, any format (at least 8 digits)."),
+      bank_account: str('A bank account number, any format.'),
+      holder_name: str('A bank account holder name.'),
+    }),
     // Bank name and last 4 only, so the Support viewer (yu) may read it; it
     // carries payout sums, so the payment screens' policy too.
     needs: [read('customer'), read('payment')],
-    run: report('support', 'ban', (a) => ({ username: s(a.username) })),
+    // A number may arrive unquoted; read it as the digits it is.
+    run: report('support', 'ban', (a) => {
+      const v = (x: unknown) => (typeof x === 'number' ? String(x) : s(x));
+      return {
+        username: s(a.username),
+        email: s(a.email),
+        phone: v(a.phone),
+        bank_account: v(a.bank_account),
+        holder_name: s(a.holder_name),
+      };
+    }),
   },
   {
     name: 'order',

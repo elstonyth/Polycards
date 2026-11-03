@@ -131,6 +131,9 @@ export const maskForLog = (text: string): string =>
     .replace(/%40/gi, '@')
     .replace(/%2B/gi, '+')
     .replace(/[^\s'"&=?(),;]+@[^\s'"&=?(),;]+/g, '…@…')
+    // The ban report's lookups (reports/support/ban) are personal data however
+    // they are spelled: a number typed in short groups, a name, a phone.
+    .replace(/((?:holder_name|bank_account|phone|email)=)[^&#\s]*/gi, '$1…')
     .replace(/\d{5,}/g, '#');
 
 function sameKey(given: string, expected: string): boolean {
