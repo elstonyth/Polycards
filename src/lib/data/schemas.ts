@@ -570,7 +570,7 @@ export const FreePackSchema = z.looseObject({
   /** Authed answers only (spec 2026-10-06): what the claim would still be
    *  refused for. Optional for deploy skew — absent reads as nothing missing,
    *  and the backend claim step stays the enforcement. */
-  missing: z.array(z.enum(['phone', 'real_name'])).optional(),
+  missing: z.array(z.enum(['phone', 'real_name', 'bank'])).optional(),
   /** Anonymous answers only: "an active free pack exists" (the signup hook). */
   promo: z.boolean().optional(),
 });

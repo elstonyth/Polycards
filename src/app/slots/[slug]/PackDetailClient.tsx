@@ -65,6 +65,7 @@ import {
   vaultCostLabel,
 } from '@/lib/vault-packs';
 import {
+  freePackVerifyLink,
   freePackVerifyMessage,
   type FreePackRequirement,
 } from '@/lib/packs-data';
@@ -272,9 +273,10 @@ export default function PackDetailClient({
       : null;
   const [openError, setOpenError] = useState<string | null>(verifyPrompt);
   const [needsTopUp, setNeedsTopUp] = useState(false);
-  // The free pack's verification prompt: adds the Settings link under the
-  // message.
+  // The free pack's verification prompt: adds the Settings (or Bank) link
+  // under the message.
   const [needsVerify, setNeedsVerify] = useState(verifyPrompt !== null);
+  const verifyLink = freePackVerifyLink(freePackMissing);
   // One request refreshes every grid price (60s, visibility-gated), seeded
   // with this route's server snapshot.
   // A Draft keeps its seed: the poll reads the public route, which finds nothing
@@ -828,10 +830,10 @@ export default function PackDetailClient({
                     <>
                       {' '}
                       <Link
-                        href="/settings"
+                        href={verifyLink.href}
                         className="font-bold text-white underline underline-offset-2"
                       >
-                        Go to Settings →
+                        {verifyLink.label}
                       </Link>
                     </>
                   )}
@@ -1089,10 +1091,10 @@ export default function PackDetailClient({
               <>
                 {' '}
                 <Link
-                  href="/settings"
+                  href={verifyLink.href}
                   className="font-bold text-white underline underline-offset-2"
                 >
-                  Go to Settings →
+                  {verifyLink.label}
                 </Link>
               </>
             )}

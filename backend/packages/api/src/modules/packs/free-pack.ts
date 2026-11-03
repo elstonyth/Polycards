@@ -14,6 +14,11 @@ export const FREE_PACK_VERIFICATION_MESSAGE =
 export const FREE_PACK_SHARED_PHONE_MESSAGE =
   'This phone number is linked to more than one account, so the welcome pack can’t be claimed. Contact customer service.';
 
+/** Refusal when the account has no bank account saved (owner, 2026-11-03): a
+ *  bank number sits on one account only (ADR 0015), so one welcome pack. */
+export const FREE_PACK_BANK_MESSAGE =
+  'Add your bank account to claim the welcome pack.';
+
 /** User-facing reason shown whenever a locked free pull is refused. "Paid
  *  yourself" is hasPaidOpen's rule: only a paid pull unlocks, bonus credit
  *  included; gifts are 'gift', free rips 'reward'. Short: it fits the 9px vault

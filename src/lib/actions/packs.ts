@@ -110,6 +110,11 @@ const PACKS_RULES: ErrorRule[] = [
     /add your real name/i,
     'To claim your welcome pack, verify your phone number and add your real name in Settings.',
   ],
+  // The saved bank it also needs (owner 2026-11-03, FREE_PACK_BANK_MESSAGE).
+  [
+    /add your bank account/i,
+    'To claim your welcome pack, add your bank account.',
+  ],
   // A pack whose prize pool is empty/zero-weight (mid-setup in admin). Must
   // precede the generic not-found rule: the backend throws it as NOT_FOUND.
   [

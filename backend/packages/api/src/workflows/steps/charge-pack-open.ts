@@ -104,7 +104,9 @@ export const chargePackOpenStep = createStep(
     );
   },
   async (data: CompensateData, { container }) => {
-    if (!data) return; // free-pack open wrote no debit -> nothing to reverse
+    // free-pack open wrote no debit -> nothing to reverse. Checks open_id, not
+    // data: with no compensate input Medusa passes the step's OUTPUT here instead.
+    if (!data?.open_id) return;
     // The open is append-only: undo it with cascading compensating rows, NOT a
     // delete. reverseOpen reverses the recruit's debit AND claws back every
     // commission (direct + override) paid for this open_id, so a failure after

@@ -25,8 +25,9 @@ export const FREE_WELCOME_CATEGORY = 'free_welcome';
 export const FREE_PULL_LOCKED_MESSAGE =
   'Pay for one pack yourself to unlock selling & delivery.';
 
-/** What the backend claim step still refuses for (spec 2026-10-06). */
-export type FreePackRequirement = 'phone' | 'real_name';
+/** What the backend claim step still refuses for (spec 2026-10-06; the saved
+ *  bank, owner 2026-11-03). */
+export type FreePackRequirement = 'phone' | 'real_name' | 'bank';
 
 /** The prompt the free pack's detail page shows instead of opening, naming
  *  exactly what is left (spec 2026-10-06). Client-safe, which is why it lives
@@ -34,13 +35,27 @@ export type FreePackRequirement = 'phone' | 'real_name';
 export function freePackVerifyMessage(missing: FreePackRequirement[]): string {
   const phone = missing.includes('phone');
   const name = missing.includes('real_name');
+  const bank = missing.includes('bank');
+  if (!phone && !name)
+    return 'To claim your welcome pack, add your bank account.';
   const todo =
     phone && name
       ? 'verify your phone number and add your real name'
       : phone
         ? 'verify your phone number'
         : 'add your real name';
-  return `To claim your welcome pack, ${todo} in Settings.`;
+  return `To claim your welcome pack, ${todo} in Settings${bank ? ', then add your bank account' : ''}.`;
+}
+
+/** Where the prompt's link goes: Settings while the phone or name is left, then
+ *  the Bank page. */
+export function freePackVerifyLink(missing: FreePackRequirement[]): {
+  href: string;
+  label: string;
+} {
+  return missing.every((m) => m === 'bank')
+    ? { href: '/bank', label: 'Add bank account →' }
+    : { href: '/settings', label: 'Go to Settings →' };
 }
 
 export type Pack = {

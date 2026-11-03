@@ -4,10 +4,12 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import {
+  FREE_PACK_BANK_MESSAGE,
   FREE_PACK_SHARED_PHONE_MESSAGE,
   FREE_PACK_VERIFICATION_MESSAGE,
   FREE_WELCOME_CATEGORY,
 } from '../../modules/packs/free-pack';
+import { hasSavedBank } from '../../modules/packs/saved-accounts';
 
 export type ClaimFreePackInput = { pack_id: string; customer_id: string };
 export type ClaimFreePackResult = { free: boolean };
@@ -74,9 +76,10 @@ export const claimFreePackStep = createStep(
     const customers = container.resolve<ICustomerModuleService>(
       Modules.CUSTOMER,
     );
-    const { phone } = await customers.retrieveCustomer(input.customer_id, {
-      select: ['phone'],
-    });
+    const { phone, metadata } = await customers.retrieveCustomer(
+      input.customer_id,
+      { select: ['phone', 'metadata'] },
+    );
     const holders = phone
       ? await customers.listCustomers(
           { phone, has_account: true } as unknown as CustomerFilters,
@@ -87,6 +90,14 @@ export const claimFreePackStep = createStep(
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         FREE_PACK_SHARED_PHONE_MESSAGE,
+      );
+    }
+    // A saved bank first (owner, 2026-11-03): one bank number, one account (ADR
+    // 0015), so one welcome pack. Also before the claim.
+    if (!hasSavedBank(metadata)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PACK_BANK_MESSAGE,
       );
     }
     const claimed = await packs.claimFreePack(input.customer_id);
@@ -102,7 +113,9 @@ export const claimFreePackStep = createStep(
     );
   },
   async (data: CompensateData | undefined, { container }) => {
-    if (!data) return;
+    // A paid open's no-op branch passes no compensate input, so Medusa hands
+    // its OUTPUT ({ free: false }) here: only a won claim carries customer_id.
+    if (!data?.customer_id) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     await packs.clearFreePackClaim(data.customer_id);
   },

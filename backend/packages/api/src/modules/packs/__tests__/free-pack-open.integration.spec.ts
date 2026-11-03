@@ -69,6 +69,20 @@ jest.setTimeout(300 * 1000);
 const FREE_SLUG = 'free-welcome';
 const PAID_SLUG = 'bronze-pack';
 const PAID_PRICE = 10;
+const MAYBANK = {
+  id: 'acct-maybank',
+  bankCode: 'MBBEMYKL',
+  bankName: 'Maybank',
+  accountNumber: '112233445566',
+  accountHolderName: 'Tan Ah Kow',
+};
+const USDT_WALLET = {
+  id: 'acct-usdt',
+  bankCode: 'USDTTRC20',
+  bankName: 'USDT · TRC20 (Tron)',
+  accountNumber: 'TXYZ1234567890abcdefghijklmnopqrs',
+  accountHolderName: '',
+};
 
 moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
@@ -101,7 +115,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
     const packsWith = (overrides: Record<string, unknown>) =>
       new Proxy(service as unknown as Record<string, unknown>, {
         get: (target, prop) =>
-          prop in overrides ? overrides[prop as string] : target[prop as string],
+          prop in overrides
+            ? overrides[prop as string]
+            : target[prop as string],
       });
 
     // The open saga touches modules this feature has nothing to do with: the
@@ -111,11 +127,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
     // real accounts (spec 2026-10-06). Every test customer gets its own number
     // unless a test puts two on the same one through `phoneOf`.
     const phoneOf = new Map<string, string>();
+    // It also needs a saved bank (owner, 2026-11-03): every test customer has
+    // one unless a test gives it its own list through `banksOf`.
+    const banksOf = new Map<string, unknown[]>();
     const fakeCustomers = {
       listCustomerGroups: async () => [],
       retrieveCustomer: async (id: string) => ({
         id,
-        phone: phoneOf.get(id) ?? `+6011${[...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1e8, 7)}`,
+        phone:
+          phoneOf.get(id) ??
+          `+6011${[...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1e8, 7)}`,
+        metadata: { bank_accounts: banksOf.get(id) ?? [MAYBANK] },
       }),
       listCustomers: async (filter: { phone?: string }) =>
         [...phoneOf.entries()]
@@ -154,11 +176,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
     const container = buildContainer();
 
-    const open = (
-      packId: string,
-      customerId: string,
-      scope = container,
-    ) =>
+    const open = (packId: string, customerId: string, scope = container) =>
       openPackWorkflow(scope).run({
         input: { pack_id: packId, customer_id: customerId },
       });
@@ -436,6 +454,33 @@ moduleIntegrationTestRunner<PacksModuleService>({
         }
       });
 
+      // A saved bank first (owner, 2026-11-03); a USDT wallet alone is not one.
+      it.each([
+        ['nothing saved', []],
+        ['only a USDT wallet', [USDT_WALLET]],
+      ] as const)(
+        'an account with %s cannot open the free pack, and the claim survives',
+        async (_label, saved) => {
+          await stampEligible(customerId);
+          banksOf.set(customerId, [...saved]);
+          try {
+            expect(await openFails(FREE_SLUG, customerId)).toMatch(
+              /add your bank account/i,
+            );
+            expect(
+              (await claimState(customerId))!.free_pack_claimed_at,
+            ).toBeNull();
+
+            // Saving a bank unlocks the same, unspent claim.
+            banksOf.set(customerId, [...saved, MAYBANK]);
+            const { result } = await open(FREE_SLUG, customerId);
+            expect(result.price).toBe(0);
+          } finally {
+            banksOf.clear();
+          }
+        },
+      );
+
       it('second free open is refused (claim consumed)', async () => {
         await stampEligible(customerId);
         await open(FREE_SLUG, customerId);
@@ -500,9 +545,36 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((await latestPull(customerId, FREE_SLUG)).source).toBe('free');
       });
 
-      // The other half of that property: the no-op branch carries NO
-      // compensate payload, so a failed PAID open must not hand back a free
-      // pack the customer already spent.
+      // A free open writes no debit, so its rollback must never reach
+      // reverseOpen without an open id: that matched every customer's opens.
+      it("a failed free open reverses nobody else's opens", async () => {
+        await fund(strangerId, 100);
+        await open(PAID_SLUG, strangerId);
+        const before = await service.creditBalance(strangerId);
+        await stampEligible(customerId);
+        const brokenRecord = buildContainer(
+          packsWith({
+            recordPullsWithLedger: async () => {
+              throw new Error('record exploded');
+            },
+          }),
+        );
+
+        expect(await openFails(FREE_SLUG, customerId, brokenRecord)).toMatch(
+          /record exploded/,
+        );
+        expect(await service.creditBalance(strangerId)).toBe(before);
+        const rows = await service.listCreditTransactions({
+          customer_id: strangerId,
+        });
+        expect(
+          rows.filter((r) => String(r.reference ?? '').startsWith('reversal:')),
+        ).toHaveLength(0);
+      });
+
+      // The other half of that property: the no-op branch has no claim to
+      // hand back, so a failed PAID open must not hand back a free pack the
+      // customer already spent.
       it('a failed PAID open does not resurrect a spent claim', async () => {
         await stampEligible(customerId);
         await open(FREE_SLUG, customerId); // spend the claim for real
@@ -517,9 +589,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
             },
           }),
         );
-        expect(
-          await openFails(PAID_SLUG, customerId, brokenRecord),
-        ).toMatch(/record exploded/);
+        expect(await openFails(PAID_SLUG, customerId, brokenRecord)).toMatch(
+          /record exploded/,
+        );
 
         expect((await claimState(customerId))!.free_pack_claimed_at).toEqual(
           claimedAt,

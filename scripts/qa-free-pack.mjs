@@ -315,15 +315,25 @@ try {
   }).then(json);
   ok(`registered ${email}`);
 
-  // The claim needs a verified phone AND a real name (spec 2026-10-06). The
-  // customer-service routes set both without an OTP round trip; a random
-  // number keeps one-phone-one-account happy across reruns.
+  // The claim needs a verified phone AND a real name (spec 2026-10-06), and a
+  // saved bank (owner, 2026-11-03). The customer-service routes set all three
+  // without an OTP round trip; random numbers keep one-phone-one-account and
+  // one-bank-one-account happy across reruns.
   const customerId = created.customer?.id;
   if (!customerId) throw new Error('signup returned no customer id');
   const qaPhone = `+6011${String(Date.now()).slice(-8)}`;
   for (const [path, body] of [
     ['phone', { new_phone: qaPhone, reason: 'qa-free-pack gate' }],
     ['real-name', { real_name: 'Qa Free Pack', reason: 'qa-free-pack gate' }],
+    [
+      'bank-accounts/add',
+      {
+        bank_code: 'MBBEMYKL',
+        account_number: String(Date.now()).slice(-12).padStart(12, '1'),
+        account_holder_name: 'Qa Free Pack',
+        reason: 'qa-free-pack gate',
+      },
+    ],
   ]) {
     const res = await fetch(`${API}/admin/customers/${customerId}/${path}`, {
       method: 'POST',
@@ -336,7 +346,7 @@ try {
       );
     }
   }
-  ok('verified phone + real name on file');
+  ok('verified phone, real name and bank on file');
 
   browser = await chromium.launch({ headless: true });
 
