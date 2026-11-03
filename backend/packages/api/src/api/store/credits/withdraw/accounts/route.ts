@@ -22,6 +22,7 @@ import {
   BANK_ACCOUNT_LOCKED_MESSAGE,
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
   HOLDER_NAME_CONFIRM_MESSAGE,
+  HOLDER_NAME_DIFFERENT_MESSAGE,
   HOLDER_NAME_INVALID_MESSAGE,
   HOLDER_NAME_LINKED_MESSAGE,
   MAX_SAVED_BANK_ACCOUNTS,
@@ -48,6 +49,7 @@ import {
   isTngBank,
   tngPausedReason,
 } from '../../../../../modules/packs/withdrawal-controls';
+import { realNameKey } from '../../../../../utils/real-name';
 
 // Saved payout bank accounts — GET (list) / POST (add) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
@@ -366,6 +368,24 @@ export async function POST(
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         slot === 'TNG' ? ONE_TNG_ACCOUNT_MESSAGE : ONE_BANK_ACCOUNT_MESSAGE,
+      );
+    }
+    // One name on every bank (owner, 2026-11-03): a Touch 'n Go or another
+    // country's bank carries the holder name already saved, compared as real
+    // names are. Wallets have no holder. Support's add is the way past it for a
+    // name the two banks spell differently.
+    const named = accounts.find(
+      (a) => !findBank(a.bankCode)?.wallet && a.accountHolderName,
+    );
+    if (
+      !bank.wallet &&
+      named &&
+      realNameKey(named.accountHolderName) !==
+        realNameKey(account.accountHolderName)
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        HOLDER_NAME_DIFFERENT_MESSAGE,
       );
     }
     if (shared) {

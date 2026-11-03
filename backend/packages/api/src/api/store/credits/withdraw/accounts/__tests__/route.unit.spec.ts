@@ -1061,6 +1061,32 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
       POST(mkReq({ ...TNG, account_number: '120000000002' }), mkRes()),
     ).rejects.toThrow(/already has a Touch 'n Go account/);
   });
+
+  it('one name on every bank: a Touch \'n Go under another name is refused', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [savedShape({ accountNumber: '999999999999', id: 'x' })],
+      },
+    });
+    const TNG = { ...VALID_BODY, bank_code: 'TNGMY', account_number: '120000000001' };
+    await expect(
+      POST(mkReq({ ...TNG, account_holder_name: 'Lim Mei Ling' }), mkRes()),
+    ).rejects.toThrow(/same account holder name as your saved bank account/);
+    expect(updateCustomers).not.toHaveBeenCalled();
+    // Case and separators do not make it another name.
+    await POST(mkReq({ ...TNG, account_holder_name: 'TAN AH-KOW' }), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('one name on every bank: a USDT wallet beside a bank needs no name', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [savedShape({ accountNumber: '999999999999', id: 'x' })],
+      },
+    });
+    await POST(mkReq({ bank_code: 'USDTTRC20', account_number: TRON }), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('POST accounts — holder names compare as one person reads them', () => {

@@ -154,6 +154,11 @@ export function BankAccountsClient() {
   const numberInvalid =
     selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
+  // One name on every bank (backend saved-accounts route): a new bank or
+  // Touch 'n Go carries the holder name already saved, so the form names it.
+  const savedName = (accounts ?? []).find(
+    (a) => !a.wallet && a.accountHolderName,
+  )?.accountHolderName;
   const namesMatch = nameKey(holderName) === nameKey(holderConfirm);
   // Not while the second name is still being typed (a prefix of the first).
   const confirmMismatch =
@@ -432,7 +437,9 @@ export function BankAccountsClient() {
               >
                 {confirmMismatch
                   ? 'The two names do not match. Type the same name twice.'
-                  : 'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.'}
+                  : savedName
+                    ? `Use the same name as your saved bank account: ${savedName}. All bank accounts on one Polycards account must be in one name.`
+                    : 'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.'}
               </p>
             </>
           )}

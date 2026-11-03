@@ -484,6 +484,23 @@ medusaIntegrationTestRunner({
         expect(second.data.message).toMatch(/already has a Touch 'n Go account/);
         expect(await accounts(a)).toHaveLength(2);
       });
+
+      it("a Touch 'n Go under another name than the saved bank is refused", async () => {
+        const a = await newCustomer('one-bank-r@test.dev');
+        await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678908', 'Slot Owner'), asCustomer(a)),
+        );
+        const other = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            { ...save('120000000009', 'Another Person'), bank_code: 'TNGMY' },
+            asCustomer(a),
+          ),
+        );
+        expect(other.status).toBe(400);
+        expect(other.data.message).toMatch(/same account holder name/);
+        expect(await accounts(a)).toHaveLength(1);
+      });
     });
   },
 });

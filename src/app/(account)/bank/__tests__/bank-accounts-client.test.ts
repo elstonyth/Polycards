@@ -489,6 +489,15 @@ describe('BankAccountsClient — one account per currency', () => {
     expect(bankOptions()).toEqual(['MBB', 'CIMB']);
   });
 
+  it('names the saved holder name when another bank is added', async () => {
+    await mountWith([saved('MBB', 'Maybank')], [...MY, TNG]);
+    act(() => addButton()!.click());
+    act(() => countryButton('Malaysia')!.click());
+    expect(container.textContent).toContain(
+      'Use the same name as your saved bank account: Test Customer.',
+    );
+  });
+
   it("offers no Add once the RM bank and Touch 'n Go are both saved", async () => {
     await mountWith(
       [saved('MBB', 'Maybank'), saved('TNGMY', "Touch 'n Go eWallet")],

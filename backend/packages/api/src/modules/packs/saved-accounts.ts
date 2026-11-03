@@ -54,6 +54,11 @@ export const HOLDER_NAME_CONFIRM_MESSAGE =
 export const HOLDER_NAME_LINKED_MESSAGE =
   'This name is already linked to another Polycards account.';
 
+/** A bank or Touch 'n Go under another name than the one already saved on
+ *  this account (owner, 2026-11-03): one account, one person, one name. */
+export const HOLDER_NAME_DIFFERENT_MESSAGE =
+  'Use the same account holder name as your saved bank account. All bank accounts on one Polycards account must be in one name.';
+
 export const HOLDER_NAME_INVALID_MESSAGE =
   'Enter the account holder name in English letters, exactly as your bank shows it.';
 

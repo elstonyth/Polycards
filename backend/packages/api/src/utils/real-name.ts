@@ -28,6 +28,10 @@ export const REAL_NAME_TAKEN =
 export const realNameKeySql = (expr: string): string =>
   `lower(regexp_replace(${expr}, '[ .''@/,-]', '', 'g'))`;
 
+/** realNameKeySql, for two names already in hand. */
+export const realNameKey = (name: string): string =>
+  name.replace(/[ .'@/,-]/g, '').toLowerCase();
+
 /**
  * Trim, collapse inner whitespace, and validate. Returns the stored form, or
  * null when the input is not an acceptable real name.
