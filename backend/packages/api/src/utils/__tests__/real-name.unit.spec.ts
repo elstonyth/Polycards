@@ -1,4 +1,4 @@
-import { normalizeRealName } from '../real-name';
+import { normalizeRealName, realNameKey } from '../real-name';
 
 describe('normalizeRealName', () => {
   it.each([
@@ -30,5 +30,21 @@ describe('normalizeRealName', () => {
     expect(normalizeRealName(null)).toBeNull();
     expect(normalizeRealName(42)).toBeNull();
     expect(normalizeRealName({ name: 'Tan Ah Kow' })).toBeNull();
+  });
+});
+
+describe('realNameKey', () => {
+  it.each([
+    ['Tan Ah Kow', 'TAN AH-KOW'],
+    ["Siti Nur'Aisyah", 'siti nuraisyah'],
+    ['Ali bin Abu.', 'ALI BIN ABU'],
+    ['Raj a/l Kumar', 'raj al kumar'],
+    ['Mohd @ Ali, Jr', 'mohdalijr'],
+  ])('%s and %s are one name', (a, b) => {
+    expect(realNameKey(a)).toBe(realNameKey(b));
+  });
+
+  it('keeps different names apart', () => {
+    expect(realNameKey('Tan Ah Kow')).not.toBe(realNameKey('Lim Mei Ling'));
   });
 });

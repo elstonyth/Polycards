@@ -82,8 +82,13 @@ The owner tightened the rule after the farm rings were listed:
 - **One account per currency**, replacing one account in total: one RM bank, one SGD
   bank, one USDT wallet (`bankCurrency`, fixed per bank so a gateway switch never
   moves it). Touch 'n Go has its own slot beside the RM bank (owner, 2026-11-03;
-  `savedAccountSlot`). A saved account cannot be changed. Support no longer changes one on
-  request either; the admin add and remove tools stay for the owner's own fixes.
+  `savedAccountSlot`). A saved account cannot be changed. Support no longer
+  changes one on request either; the admin add and remove tools stay for the
+  owner's own fixes.
+- **Same name on every bank** (owner, 2026-11-03). A bank or Touch 'n Go saved
+  beside another carries a holder name already saved on that account, compared as
+  real names are. A wallet has none. Support's add is the way past it for a name
+  two banks spell differently, and the refusal says to contact support.
 - **Reset.** Every customer's saved list and share stamps were cleared once, after a
   private backup, so everyone saves again under these rules. Payout rows keep their
   own destination, so open payouts were untouched.
