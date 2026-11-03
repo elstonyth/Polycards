@@ -5,16 +5,14 @@ import {
   paymentGateway,
   setActiveGateway,
 } from '../gateway';
-import {
-  isPayinVerifyFail,
-  regionalDepositGateway,
-} from '../gateway-deposit';
+import { isPayinVerifyFail, regionalDepositGateway } from '../gateway-deposit';
 import {
   payoutCurrencyFor,
   payoutGatewayFor,
   regionalPayoutGateways,
 } from '../gateway-withdrawal';
-import { regionalDepositBand } from '../payment-fx';
+import { reconcileAction } from '../gateway-reconcile';
+import { nudgedDeposit, regionalDepositBand } from '../payment-fx';
 
 // A3Pay (SGD) runs BESIDE the active RM gateway and must never become it:
 // that would send every RM top-up to an SGD rail.
@@ -104,6 +102,33 @@ describe('routing to the regional rail', () => {
     expect(GATEWAYS.a3pay.hooks.payoutVerify).toBe(
       '/hooks/a3pay/payout-verify',
     );
+  });
+
+  it('a paid S$100.11 on a row locked at S$100 settles (2026-11-04, PC-ad171adf…)', () => {
+    const windowCents = GATEWAYS.a3pay.payinNudgeCents;
+    const fx = {
+      ledgerAmount: 316.56,
+      gatewayAmount: 100,
+      currency: 'SGD',
+    };
+    expect(
+      reconcileAction({
+        state: 'success',
+        amount: 316.9,
+        createdAt: new Date('2026-11-03T17:12:19Z'),
+        now: new Date('2026-11-03T17:32:01Z'),
+        lock: { fx, reported: 100.11, windowCents },
+        ceiling: GATEWAYS.a3pay.limits.depositMax,
+      }),
+    ).toEqual({ kind: 'settle', amount: 316.9 });
+    // And at submit the row re-locks to the S$100.11 the customer is asked for.
+    expect(
+      nudgedDeposit(
+        { gatewayAmount: 100, mid: 3.18, markup: 0.0159 },
+        100.11,
+        windowCents,
+      )?.gatewayAmount,
+    ).toBe(100.11);
   });
 });
 
