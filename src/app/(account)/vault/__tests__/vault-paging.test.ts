@@ -224,10 +224,11 @@ describe('Lucky Draw tickets row', () => {
     expect(link('Use')?.getAttribute('href')).toBe('/lucky-draw?open=1');
   });
 
-  test('coin flip is not open: nothing in the vault leads to it', async () => {
+  test('coin flip is open: held tickets can be flipped', async () => {
     await mount(3);
-    expect(container.querySelector('a[href^="/vault/coin-flip"]')).toBeNull();
-    expect(container.textContent).not.toMatch(/flip/i);
+    expect(link('flip them')?.getAttribute('href')).toBe(
+      '/vault/coin-flip?stake=tickets',
+    );
   });
 
   test('no ticket pack on sale: Get tickets goes straight to the tasks', async () => {

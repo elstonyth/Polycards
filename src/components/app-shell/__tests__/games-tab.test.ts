@@ -69,12 +69,9 @@ describe('Games tab', () => {
     for (const path of ['/coin-flip', '/coin-flip/x', '/vault/coin-flip']) {
       expect(isTabActive(games, path)).toBe(true);
       expect(isTabActive(task, path)).toBe(false);
-      expect(
-        isTabActive(
-          TABS.find((t) => t.label === 'Vault')!,
-          path,
-        ),
-      ).toBe(false);
+      expect(isTabActive(TABS.find((t) => t.label === 'Vault')!, path)).toBe(
+        false,
+      );
     }
     expect(isTabActive(games, '/task')).toBe(false);
   });
@@ -110,13 +107,13 @@ describe('Games tab', () => {
     expect(opened).toHaveBeenCalledTimes(1);
   });
 
-  test('Coin Flip is coming soon: the tile says so and leads nowhere', async () => {
+  test('Coin Flip is open: the tile goes to the game', async () => {
     const { GamesSheetBody } = await import('../GamesSheetBody');
     await act(async () =>
       root.render(createElement(GamesSheetBody, { openedOn: '/' })),
     );
-    expect(document.body.textContent).toContain('Coming soon');
-    expect(document.querySelector('a[href^="/vault/coin-flip"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Coming soon');
+    expect(document.querySelector('a[href="/vault/coin-flip"]')).not.toBeNull();
   });
 
   test('Games shows as current while a game is open', async () => {
