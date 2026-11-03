@@ -413,6 +413,8 @@ describe('POST bank-accounts/unban-number', () => {
       bankCode: null,
       lifted: true,
       reason: 'owner ok',
+      // No roles on this request: never the ban-list fallback.
+      fromBanList: false,
     });
     expect(res.json).toHaveBeenCalledWith({
       bank_code: 'MBBEMYKL',

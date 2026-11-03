@@ -10421,14 +10421,18 @@ class PacksModuleService extends MedusaService({
   }
 
   // The one banned number support means by these last 4 (owner, 2026-11-04):
-  // first among this player's own numbers, then, for a player whose save was
-  // refused (nothing on their list), anywhere on the ban list. The bank only
-  // breaks a tie. Refused when nothing or more than one matches.
+  // first among this player's own numbers, then, only when `fromBanList`, for a
+  // player whose save was refused (nothing on their list), anywhere on the ban
+  // list. That fallback names a number by 4 digits alone, so the callers allow
+  // it to admins only (security review): a ring cannot talk a support viewer
+  // into giving one of its numbers to a fresh account. The bank only breaks a
+  // tie. Refused when nothing or more than one matches.
   @InjectManager()
   async resolveBannedPayoutAccount(
     customerId: string,
     last4: string,
     bankCode?: string | null,
+    fromBanList = false,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     account_key: string;
@@ -10442,6 +10446,12 @@ class PacksModuleService extends MedusaService({
     let candidates = (
       await this.bannedPayoutAccountsOf(customerId, sharedContext)
     ).filter((b) => b.last4 === last4);
+    if (candidates.length === 0 && !fromBanList) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `No banned bank number ending ${last4} is on this player's banks or payouts. An admin can unban one from the ban list for a player whose save was refused.`,
+      );
+    }
     if (candidates.length === 0) {
       foundOn = 'ban_list';
       candidates = (
@@ -10501,6 +10511,8 @@ class PacksModuleService extends MedusaService({
       bankCode?: string | null;
       lifted: boolean;
       reason: string;
+      /** Admins only: see resolveBannedPayoutAccount. */
+      fromBanList?: boolean;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ bank_code: string; last4: string; lifted: boolean; changed: boolean }> {
@@ -10508,6 +10520,7 @@ class PacksModuleService extends MedusaService({
       input.customerId,
       input.last4,
       input.bankCode,
+      input.fromBanList === true,
       sharedContext,
     );
     let changed = false;

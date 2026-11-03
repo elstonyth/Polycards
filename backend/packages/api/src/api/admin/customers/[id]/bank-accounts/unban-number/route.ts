@@ -2,6 +2,7 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
+import { hasPermission } from '@medusajs/framework';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
@@ -19,7 +20,8 @@ type Body = {
 // only breaks a tie), among the player's own numbers or, for one whose save was
 // refused, the whole ban list. `lifted: false` bans it for them again. Audited.
 // The shared-number rule still applies: if another account was paid to it,
-// support adds it with Add. Gated on assistant_unban:update (admin-rbac.ts).
+// support adds it with Add. Gated on assistant_unban:update (admin-rbac.ts);
+// the ban-list fallback also needs customer:update (security review).
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,
@@ -57,6 +59,20 @@ export async function POST(
       'A reason (1–500 chars) is required.',
     );
   }
+  const roles =
+    (
+      req as unknown as {
+        auth_context?: { app_metadata?: { roles?: string[] } };
+      }
+    ).auth_context?.app_metadata?.roles ?? [];
+  // hasPermission answers true for an empty role list: never here.
+  const fromBanList =
+    roles.length > 0 &&
+    (await hasPermission({
+      roles,
+      actions: { resource: 'customer', operation: 'update' },
+      container: req.scope,
+    }));
   const done = await req.scope
     .resolve<PacksModuleService>(PACKS_MODULE)
     .setPayoutBanLifted({
@@ -66,6 +82,7 @@ export async function POST(
       bankCode: bankCode || null,
       lifted,
       reason: reason.trim(),
+      fromBanList,
     });
   res.json(done);
 }

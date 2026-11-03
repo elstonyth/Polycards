@@ -590,12 +590,21 @@ describe('unbanning a bank number for one player', () => {
     expect(JSON.stringify(audits)).not.toContain(OWN);
   });
 
-  it('finds a number the player never held on the ban list (their save was refused)', async () => {
+  it('finds a number the player never held on the ban list, for an admin only', async () => {
+    const viewer = service(
+      [{ account_key: '777777770001', bank_code: 'PBBEMYKL' }],
+      {},
+    );
+    await expect(viewer.svc.setPayoutBanLifted(input, viewer.ctx)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_FOUND,
+      message: expect.stringMatching(/An admin can unban one from the ban list/),
+    });
+    expect(viewer.writes).toEqual([]);
     const { svc, writes, audits, ctx } = service(
       [{ account_key: '777777770001', bank_code: 'PBBEMYKL' }],
       {},
     );
-    await svc.setPayoutBanLifted(input, ctx);
+    await svc.setPayoutBanLifted({ ...input, fromBanList: true }, ctx);
     expect(writes[0]).toMatchObject({
       payout_ban_lifted: { '777777770001': { bank_code: 'PBBEMYKL' } },
     });
@@ -608,18 +617,25 @@ describe('unbanning a bank number for one player', () => {
       { account_key: '222222220001', bank_code: 'PBBEMYKL' },
     ];
     const tie = service(two, {});
-    await expect(svc(tie).setPayoutBanLifted(input, tie.ctx)).rejects.toMatchObject({
+    await expect(
+      svc(tie).setPayoutBanLifted({ ...input, fromBanList: true }, tie.ctx),
+    ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
       message: expect.stringMatching(/2 banned numbers end 0001 \(Maybank, Public Bank\)/),
     });
     const picked = service(two, {});
-    await picked.svc.setPayoutBanLifted({ ...input, bankCode: 'PBBEMYKL' }, picked.ctx);
+    await picked.svc.setPayoutBanLifted(
+      { ...input, bankCode: 'PBBEMYKL', fromBanList: true },
+      picked.ctx,
+    );
     expect(Object.keys(picked.writes[0].payout_ban_lifted as object)).toEqual(['222222220001']);
   });
 
   it('refuses when nothing ends that way', async () => {
     const { svc: s, writes, ctx } = service([], {});
-    await expect(s.setPayoutBanLifted(input, ctx)).rejects.toMatchObject({
+    await expect(
+      s.setPayoutBanLifted({ ...input, fromBanList: true }, ctx),
+    ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_FOUND,
     });
     expect(writes).toEqual([]);

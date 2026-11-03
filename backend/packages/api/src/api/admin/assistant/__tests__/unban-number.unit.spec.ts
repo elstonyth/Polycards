@@ -117,7 +117,13 @@ describe('unban_bank_number', () => {
       { username: 'TestPlayer', last4: '0001', bank: 'public bank' },
       'unban public bank 0001 for TestPlayer',
     ).done;
-    expect(packs.resolveBannedPayoutAccount).toHaveBeenCalledWith('cus_1', '0001', 'PBBEMYKL');
+    // A super admin may use the ban-list fallback.
+    expect(packs.resolveBannedPayoutAccount).toHaveBeenCalledWith(
+      'cus_1',
+      '0001',
+      'PBBEMYKL',
+      true,
+    );
     packs.resolveBannedPayoutAccount.mockRejectedValue(
       new MedusaError(MedusaError.Types.NOT_ALLOWED, '2 banned numbers end 0001 (Maybank, Public Bank). Say which bank.'),
     );
@@ -150,7 +156,16 @@ describe('saveProposal unban_number', () => {
       bankCode: 'MBBEMYKL',
       lifted: true,
       reason: 'owner approved',
+      fromBanList: true,
     });
+  });
+
+  it('a Support viewer (no customer:update) gets no ban-list fallback on tap', async () => {
+    const can = jest.fn(async (n: unknown) => n === UNBAN_NEED);
+    await saveProposal(NUMBER, { userId: 'user_2', superAdmin: false, can }, container);
+    expect(packs.setPayoutBanLifted).toHaveBeenCalledWith(
+      expect.objectContaining({ fromBanList: false }),
+    );
   });
 
   it('refuses without the role, and a refusal on tap reads as refused', async () => {

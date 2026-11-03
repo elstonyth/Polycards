@@ -15,7 +15,7 @@ import {
   MAX_DECODE_PIXELS,
 } from '../../utils/image-fetch';
 import type { Need } from './access';
-import { UNBAN_NEED, type Proposal } from './confirm';
+import { BAN_LIST_NEED, UNBAN_NEED, type Proposal } from './confirm';
 import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
 import { MY_BANKS, SG_BANKS, findBank } from '../../../modules/packs/banks';
 import { MAX_SCHEDULES, nextRun } from './schedule';
@@ -36,7 +36,11 @@ import { MAX_SCHEDULES, nextRun } from './schedule';
 
 type Ctx = {
   container: MedusaContainer;
-  access: { userId: string; superAdmin: boolean };
+  access: {
+    userId: string;
+    superAdmin: boolean;
+    can?(need: Need): Promise<boolean>;
+  };
   /** The asker's message this turn. */
   userText?: string;
   /** Shows the person a note or task to save with a tap (confirm.ts). */
@@ -221,7 +225,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'unban_bank_number',
     label: 'Unban bank number',
     description:
-      "Unban a banned bank number for ONE player (farm-ring numbers were banned 2026-11-03) when staff ask to unban a bank number or bank account for someone: that player may then save it and be paid to it, and it stays banned for every other account. Staff must name, in one message, the player it is for (shown name or profile handle) and the number's last 4 digits; pass the bank only when two banned numbers end the same. The player can be the one whose save was refused: the number need not be on their account. Nothing changes until the person taps the button under your answer. If another account was paid to the number, the player's own save is still refused as shared: support then adds it on the admin player page. ban_reason shows a player's banned numbers.",
+      "Unban a banned bank number for ONE player (farm-ring numbers were banned 2026-11-03) when staff ask to unban a bank number or bank account for someone: that player may then save it and be paid to it, and it stays banned for every other account. Staff must name, in one message, the player it is for (shown name or profile handle) and the number's last 4 digits; pass the bank only when two banned numbers end the same. For an admin the player can be the one whose save was refused (the number need not be on their account); for anyone else the number must be on that player's banks or payouts. Nothing changes until the person taps the button under your answer. If another account was paid to the number, the player's own save is still refused as shared: support then adds it on the admin player page. ban_reason shows a player's banned numbers.",
     parameters: {
       type: 'object',
       properties: {
@@ -293,7 +297,13 @@ export const AGENT_TOOLS: AgentTool[] = [
         : null;
       let hit;
       try {
-        hit = await packs.resolveBannedPayoutAccount(customerId, last4, bank);
+        hit = await packs.resolveBannedPayoutAccount(
+          customerId,
+          last4,
+          bank,
+          ctx.access.superAdmin ||
+            ((await ctx.access.can?.(BAN_LIST_NEED)) ?? false),
+        );
       } catch (err) {
         throw new Error(
           `${err instanceof Error ? err.message : String(err)} ${resend}`,

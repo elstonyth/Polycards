@@ -456,7 +456,7 @@ const SavedBankAccountsCard = ({
               >
                 {t('players.savedBankNameClear')}
               </Button>
-              {canUnban && (
+              {canUnban && canEdit && (
                 <Button
                   size="small"
                   variant="secondary"

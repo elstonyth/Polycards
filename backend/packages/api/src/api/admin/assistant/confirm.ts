@@ -55,6 +55,10 @@ export const UNBAN_NEED: Need = {
   operation: 'update',
 };
 
+/** Unbanning a number the player never held (by the ban list) needs this too:
+ *  admins, not the Support viewer (security review). */
+export const BAN_LIST_NEED: Need = { resource: 'customer', operation: 'update' };
+
 /** A scheduled run has nobody to tap: no lasting writes, and no unban of any
  *  kind (every tool that needs the unban policy). */
 export const scheduledRunAllows = (t: { name: string; needs: Need[] }): boolean =>
@@ -179,6 +183,8 @@ export async function saveProposal(
           bankCode: proposal.bank_code || null,
           lifted: true,
           reason: proposal.reason,
+          fromBanList:
+            access.superAdmin || ((await access.can?.(BAN_LIST_NEED)) ?? false),
         });
     } catch (err) {
       // The ban is gone, or now matches more than one number.
