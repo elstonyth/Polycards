@@ -20,7 +20,7 @@ import {
   mapFreePackState,
   getFreePackState,
 } from '../free-pack';
-import { freePackVerifyMessage } from '@/lib/packs-data';
+import { freePackVerifyLink, freePackVerifyMessage } from '@/lib/packs-data';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -198,6 +198,18 @@ describe('free pack verification requirements', () => {
     expect(freePackVerifyMessage(['real_name'])).toMatch(
       /add your real name in Settings/,
     );
+    expect(freePackVerifyMessage(['bank'])).toBe(
+      'To claim your welcome pack, add your bank account.',
+    );
+    expect(freePackVerifyMessage(['phone', 'bank'])).toMatch(
+      /verify your phone number in Settings, then add your bank account/,
+    );
+  });
+
+  it('links to Settings first, then the Bank page', () => {
+    expect(freePackVerifyLink(['phone', 'bank']).href).toBe('/settings');
+    expect(freePackVerifyLink(['real_name']).href).toBe('/settings');
+    expect(freePackVerifyLink(['bank']).href).toBe('/bank');
   });
 
   it('reads `missing` off the authed backend answer', async () => {

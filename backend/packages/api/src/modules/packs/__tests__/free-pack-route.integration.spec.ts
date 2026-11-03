@@ -94,11 +94,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
     // real accounts (spec 2026-10-06). Every test customer gets its own number
     // unless a test puts two on the same one through `phoneOf`.
     const phoneOf = new Map<string, string>();
+    // It also needs a saved bank (owner, 2026-11-03): every test customer has
+    // one unless a test gives it its own list through `banksOf`.
+    const banksOf = new Map<string, unknown[]>();
+    const MAYBANK = {
+      id: 'acct-maybank',
+      bankCode: 'MBBEMYKL',
+      bankName: 'Maybank',
+      accountNumber: '112233445566',
+      accountHolderName: 'Tan Ah Kow',
+    };
     const fakeCustomers = {
       listCustomerGroups: async () => [],
       retrieveCustomer: async (id: string) => ({
         id,
         phone: phoneOf.get(id) ?? `+6011${[...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1e8, 7)}`,
+        metadata: { bank_accounts: banksOf.get(id) ?? [MAYBANK] },
       }),
       listCustomers: async (filter: { phone?: string }) =>
         [...phoneOf.entries()]
@@ -307,6 +318,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
           image: FREE_IMAGE,
           missing: [],
         });
+      });
+
+      it('lists the bank while none is saved, and drops it once one is', async () => {
+        await stampEligible();
+        banksOf.set(customerId, []);
+        try {
+          expect((await eligibility()).missing).toEqual(['bank']);
+          banksOf.set(customerId, [MAYBANK]);
+          expect((await eligibility()).missing).toEqual([]);
+        } finally {
+          banksOf.clear();
+        }
       });
 
       it('claimed → not eligible', async () => {

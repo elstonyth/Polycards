@@ -362,6 +362,17 @@ export function heldByAnother(
   return holders.some((h) => findBank(h.bank_code)?.id === bank?.id);
 }
 
+/** Has the customer saved a bank, not only a USDT wallet? The welcome pack needs
+ *  one (owner, 2026-11-03): a bank number sits on one account only, while a fresh
+ *  wallet costs nothing. Takes the customer's metadata. */
+export function hasSavedBank(
+  metadata: Record<string, unknown> | null | undefined,
+): boolean {
+  return parseSavedBankAccounts(metadata?.bank_accounts).some(
+    (a) => findBank(a.bankCode)?.wallet === undefined,
+  );
+}
+
 /** Does a new save of this destination get refused? Stricter than a hold on one
  *  point only: a wallet's address is public on-chain and has no holder name, so
  *  a stranger who merely saved it must not stop its owner saving it. Only one

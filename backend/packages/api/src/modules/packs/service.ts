@@ -5705,6 +5705,14 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ reversed: number }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // No id must never mean no filter: the list below would match every
+    // customer's opens and reverse them all.
+    if (!sourceTransactionId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'reverseOpen needs an open id.',
+      );
+    }
 
     // 1) Collect ALL originals for this open, PAGED — a full compensation must
     //    never silently truncate. Exclude compensating rows from a prior run:

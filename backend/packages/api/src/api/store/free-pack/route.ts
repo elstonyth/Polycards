@@ -2,8 +2,11 @@ import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
+import { Modules } from '@medusajs/framework/utils';
+import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
+import { hasSavedBank } from '../../../modules/packs/saved-accounts';
 
 // GET /store/free-pack — feeds the storefront's floating FREE PACK badge.
 //
@@ -79,10 +82,18 @@ export async function GET(
   // for (spec 2026-10-06), so the storefront can send the customer to finish
   // verifying instead of letting them hit the refusal at the reel. `eligible`
   // keeps its meaning (stamped, unclaimed, a pack is live) — the pack is still
-  // theirs, it just waits. Read off the row already fetched: no extra query.
-  const missing: ('phone' | 'real_name')[] = [];
+  // theirs, it just waits. Phone and name read off the row already fetched.
+  const missing: ('phone' | 'real_name' | 'bank')[] = [];
   if (!state?.phone_verified_at) missing.push('phone');
   if (!state?.real_name) missing.push('real_name');
+  // The saved bank (owner, 2026-11-03) lives in customer metadata, so it costs a
+  // read: only for an eligible account, the one the storefront prompts.
+  if (active) {
+    const { metadata } = await req.scope
+      .resolve<ICustomerModuleService>(Modules.CUSTOMER)
+      .retrieveCustomer(customerId, { select: ['metadata'] });
+    if (!hasSavedBank(metadata)) missing.push('bank');
+  }
 
   res.json({
     eligible: active != null,

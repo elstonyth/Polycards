@@ -125,6 +125,19 @@ describe('openPack', () => {
     });
   });
 
+  it('names the saved bank the welcome pack still needs', async () => {
+    backend({
+      'POST /store/packs/:slug/open': {
+        status: 400,
+        body: { message: 'Add your bank account to claim the welcome pack.' },
+      },
+    });
+    expect(await openPack('free-151')).toMatchObject({
+      ok: false,
+      error: 'To claim your welcome pack, add your bank account.',
+    });
+  });
+
   it('maps an empty prize pool ahead of the generic not-found copy', async () => {
     backend({
       'POST /store/packs/:slug/open': {
