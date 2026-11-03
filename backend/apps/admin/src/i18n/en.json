@@ -1076,7 +1076,7 @@
     "savedBankVerified": "Verified by support {{date}}. Other accounts on this number stay held.",
     "savedBankAdd": "Add bank account",
     "savedBankAddTitle": "Add a bank account for this player?",
-    "savedBankAddBody": "Only after you have checked that it belongs to them. If another account holds the number, this verifies it for this player. They are told, and it starts the usual wait before first use.",
+    "savedBankAddBody": "Only after you have checked that it belongs to them. If another account holds the number, this verifies it for this player. The name may differ from their other banks (a spelling their banks differ on): it is not checked, so check it against the bank's own record. They are told, and it starts the usual wait before first use.",
     "savedBankChooseBank": "Bank",
     "savedBankChoose": "Choose a bank",
     "savedBankNumber": "Account number",

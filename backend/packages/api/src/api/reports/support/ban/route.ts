@@ -369,7 +369,7 @@ export async function GET(
     if (
       value.length < 2 ||
       value.length > 120 ||
-      value.replace(/[s.'@/,-]/g, '') === ''
+      value.replace(/[\s.'@/,-]/g, '') === ''
     ) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,

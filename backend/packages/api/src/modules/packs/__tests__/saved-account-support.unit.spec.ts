@@ -221,6 +221,19 @@ describe('addSavedBankAccount', () => {
       ),
     ).rejects.toThrow(/already has a Touch 'n Go account/);
   });
+
+  it('is the way past the one-name rule: it saves a bank under another spelling', async () => {
+    const tng = {
+      ...ACCOUNT,
+      id: 'acc_tng',
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountHolderName: 'Tan Bin Abu',
+    };
+    const { svc, writes, ctx } = fakeService({ bank_accounts: [OTHER] });
+    await svc.addSavedBankAccount({ ...base, account: tng, verify: false }, ctx);
+    expect(writes[0].bank_accounts).toEqual([OTHER, tng]);
+  });
 });
 
 describe('bankShareVerifiedFor', () => {

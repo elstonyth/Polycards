@@ -371,18 +371,25 @@ export async function POST(
       );
     }
     // One name on every bank (owner, 2026-11-03): a Touch 'n Go or another
-    // country's bank carries the holder name already saved, compared as real
-    // names are. Wallets have no holder. Support's add is the way past it for a
-    // name the two banks spell differently.
-    const named = accounts.find(
-      (a) => !findBank(a.bankCode)?.wallet && a.accountHolderName,
-    );
+    // country's bank carries a holder name already saved, compared as real
+    // names are (saved names normalized first: older lists predate it). Wallets
+    // have no holder. Any saved name will do, since support's add, the way past
+    // this for a name two banks spell differently, may leave two on the list.
+    const savedNames = accounts
+      .filter((a) => !findBank(a.bankCode)?.wallet)
+      .map((a) => realNameKey(normalizeHolderName(a.accountHolderName ?? '')))
+      .filter(Boolean);
     if (
       !bank.wallet &&
-      named &&
-      realNameKey(named.accountHolderName) !==
-        realNameKey(account.accountHolderName)
+      savedNames.length > 0 &&
+      !savedNames.includes(realNameKey(account.accountHolderName))
     ) {
+      // Logged like the other refusals, so repeated tries show up. No name.
+      req.scope
+        .resolve('logger')
+        .warn(
+          `[saved-accounts] refused a holder name unlike the saved one, for ${customerId}`,
+        );
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         HOLDER_NAME_DIFFERENT_MESSAGE,

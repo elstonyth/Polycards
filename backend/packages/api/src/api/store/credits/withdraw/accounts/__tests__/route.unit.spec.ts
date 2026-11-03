@@ -1078,6 +1078,84 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
     expect(updateCustomers).toHaveBeenCalledTimes(1);
   });
 
+  it('one name on every bank: an SGD bank under another name is refused too', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [savedShape({ accountNumber: '999999999999', id: 'x' })],
+      },
+    });
+    await expect(
+      POST(
+        mkReq({
+          bank_code: 'DBSSSGSG',
+          account_number: '0123456789',
+          account_holder_name: 'Lim Mei Ling',
+        }),
+        mkRes(),
+      ),
+    ).rejects.toThrow(/same account holder name as your saved bank account/);
+  });
+
+  it('one name on every bank: a saved wallet sets no name', async () => {
+    const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [
+          savedShape({
+            id: savedBankAccountId('USDTTRC20', TRON),
+            bankCode: 'USDTTRC20',
+            bankName: 'USDT · TRC20 (Tron)',
+            accountNumber: TRON,
+            accountHolderName: 'USDT · TRC20 (Tron)',
+          }),
+        ],
+      },
+    });
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('one name on every bank: an older entry with no name blocks nothing', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [
+          savedShape({ accountNumber: '999999999999', id: 'x', accountHolderName: '' }),
+        ],
+      },
+    });
+    await POST(
+      mkReq({ ...VALID_BODY, bank_code: 'TNGMY', account_number: '120000000001' }),
+      mkRes(),
+    );
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('one name on every bank: any saved name will do once support saved two', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [
+          savedShape({ accountNumber: '999999999999', id: 'x' }),
+          savedShape({
+            id: 'y',
+            bankCode: 'TNGMY',
+            bankName: "Touch 'n Go eWallet",
+            accountNumber: '120000000001',
+            accountHolderName: 'Tan Ah Kow Bin Abu',
+          }),
+        ],
+      },
+    });
+    await POST(
+      mkReq({
+        bank_code: 'DBSSSGSG',
+        account_number: '0123456789',
+        account_holder_name: 'Tan Ah Kow Bin Abu',
+      }),
+      mkRes(),
+    );
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
   it('one name on every bank: a USDT wallet beside a bank needs no name', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: {

@@ -498,6 +498,16 @@ describe('BankAccountsClient — one account per currency', () => {
     );
   });
 
+  it('names no holder when only a wallet is saved', async () => {
+    await mountWith([WALLET], [...MY, TNG]);
+    act(() => addButton()!.click());
+    act(() => countryButton('Malaysia')!.click());
+    expect(container.textContent).toContain(
+      'Type the name exactly as your bank shows it.',
+    );
+    expect(container.textContent).not.toContain('Use the same name');
+  });
+
   it("offers no Add once the RM bank and Touch 'n Go are both saved", async () => {
     await mountWith(
       [saved('MBB', 'Maybank'), saved('TNGMY', "Touch 'n Go eWallet")],

@@ -28,7 +28,9 @@ export const REAL_NAME_TAKEN =
 export const realNameKeySql = (expr: string): string =>
   `lower(regexp_replace(${expr}, '[ .''@/,-]', '', 'g'))`;
 
-/** realNameKeySql, for two names already in hand. */
+/** The characters realNameKeySql strips, for two names already in hand. Case
+ *  folds as JS folds it, so only ASCII letters are sure to key as the SQL
+ *  does: compare a JS key with a JS key. */
 export const realNameKey = (name: string): string =>
   name.replace(/[ .'@/,-]/g, '').toLowerCase();
 

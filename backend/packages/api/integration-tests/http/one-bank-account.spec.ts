@@ -470,8 +470,8 @@ medusaIntegrationTestRunner({
         await unwrapResponse(
           api.post(ACCOUNTS, save('512345678907', 'Slot Owner'), asCustomer(a)),
         );
-        // The one-name rule reads other accounts only: the owner's own bank
-        // under that name does not block the Touch 'n Go.
+        // The linked-name rule reads other accounts only: the owner's own
+        // bank under that name does not block the Touch 'n Go.
         const first = await unwrapResponse(
           api.post(ACCOUNTS, tng('120000000007'), asCustomer(a)),
         );

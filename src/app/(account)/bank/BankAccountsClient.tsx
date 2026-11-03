@@ -438,7 +438,7 @@ export function BankAccountsClient() {
                 {confirmMismatch
                   ? 'The two names do not match. Type the same name twice.'
                   : savedName
-                    ? `Use the same name as your saved bank account: ${savedName}. All bank accounts on one Polycards account must be in one name.`
+                    ? `Use the same name as your saved bank account: ${savedName}. It must also match this bank exactly, or the withdrawal will not be paid. If your banks spell your name differently, contact support.`
                     : 'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.'}
               </p>
             </>
