@@ -9,6 +9,7 @@ import { PARTNER_CREDENTIAL_KEY } from '../../utils/partner-accounts';
 import {
   BANK_SHARE_VERIFIED_KEY,
   HOLDER_NAME_CLEARED_KEY,
+  PAYOUT_BAN_LIFTED_KEY,
 } from '../../modules/packs/saved-accounts';
 
 // Medusa's stock update-customer route accepts arbitrary `metadata` — read from
@@ -117,6 +118,19 @@ export function rejectAdminBankAccountsMetadata(
   if (
     metadata &&
     typeof metadata === 'object' &&
+    PAYOUT_BAN_LIFTED_KEY in metadata
+  ) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${PAYOUT_BAN_LIFTED_KEY} is not writable through this route. Use bank-accounts/unban-number, which is audited.`,
+      ),
+    );
+    return;
+  }
+  if (
+    metadata &&
+    typeof metadata === 'object' &&
     HOLDER_NAME_CLEARED_KEY in metadata
   ) {
     next(
@@ -135,6 +149,8 @@ const SECRET_METADATA = [
   { key: 'bank_accounts', resource: 'customer_bank_account' },
   // Holder names support cleared as a real clash: names, like the list's.
   { key: HOLDER_NAME_CLEARED_KEY, resource: 'customer_bank_account' },
+  // Numbers unbanned for one player: full numbers, like the list's.
+  { key: PAYOUT_BAN_LIFTED_KEY, resource: 'customer_bank_account' },
   { key: PARTNER_CREDENTIAL_KEY, resource: 'partner_credential' },
 ] as const;
 
@@ -154,7 +170,7 @@ const stripSecretMetadata = (node: unknown, hidden: string[]): void => {
 /** Keys a customer never gets back on their own record: support's notes on
  *  OTHER accounts (holder_name_cleared lists who a name was checked against,
  *  by customer id, which public seeds can match to a handle). */
-const STORE_HIDDEN_METADATA = [HOLDER_NAME_CLEARED_KEY];
+const STORE_HIDDEN_METADATA = [HOLDER_NAME_CLEARED_KEY, PAYOUT_BAN_LIFTED_KEY];
 
 /** Strips STORE_HIDDEN_METADATA from every store customer response. */
 export function hideStoreCustomerMetadata(

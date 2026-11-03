@@ -1389,6 +1389,7 @@ import {
   removeSavedBankAccount,
   setBankShareVerified,
   setHolderNameCleared,
+  unbanBankNumber,
   getSpendReport,
   getCustomerMoney,
   type CustomerMoney,
@@ -1549,6 +1550,28 @@ export const useSetBankShareVerified = (id: string) => {
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useUnbanBankNumber = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: Parameters<typeof unbanBankNumber>[1]) =>
+      unbanBankNumber(id, vars),
+    onSuccess: (data) => {
+      toast.success(
+        data.lifted
+          ? `…${data.last4} unbanned for this player. If another account was paid to it, add it with Add.`
+          : `…${data.last4} banned again for this player`,
+      );
+      invalidateBankAccountCards(qc);
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
+    },
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+      // Someone else may have changed it meanwhile: show what is true now.
+      invalidateBankAccountCards(qc);
+    },
   });
 };
 

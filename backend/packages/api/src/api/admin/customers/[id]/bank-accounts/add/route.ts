@@ -90,6 +90,7 @@ export async function POST(
     await packs.payoutAccountBanned(
       account.accountNumber,
       bank.wallet !== undefined,
+      customerId,
     )
   ) {
     throw new MedusaError(

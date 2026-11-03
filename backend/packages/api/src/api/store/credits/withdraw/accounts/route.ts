@@ -299,7 +299,11 @@ export async function POST(
   }
   const packs = resolvePacks<CustomerWallet>(req.scope);
   if (
-    await packs.payoutAccountBanned(accountNumber, bank.wallet !== undefined)
+    await packs.payoutAccountBanned(
+      accountNumber,
+      bank.wallet !== undefined,
+      customerId,
+    )
   ) {
     req.scope
       .resolve('logger')

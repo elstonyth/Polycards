@@ -4,6 +4,7 @@ import { POST as ADD } from '../add/route';
 import { POST as REMOVE } from '../remove/route';
 import { POST as VERIFY } from '../verify/route';
 import { POST as NAME_CLASH } from '../name-clash/route';
+import { POST as UNBAN_NUMBER } from '../unban-number/route';
 
 // What support sees and does for a tied bank account (ADR 0015). The service
 // methods are pinned in modules/packs/__tests__/saved-account-support; these pin
@@ -27,6 +28,8 @@ const packs = {
   setBankShareVerified: jest.fn(),
   addSavedBankAccount: jest.fn(),
   setHolderNameCleared: jest.fn(),
+  bannedPayoutAccountsOf: jest.fn(),
+  setPayoutBanLifted: jest.fn(),
 };
 const customers = { retrieveCustomer: jest.fn(), listCustomers: jest.fn() };
 const notifications = { createNotifications: jest.fn() };
@@ -67,6 +70,13 @@ beforeEach(() => {
     email: 'a@b.test',
   });
   customers.listCustomers.mockResolvedValue([]);
+  packs.bannedPayoutAccountsOf.mockResolvedValue([]);
+  packs.setPayoutBanLifted.mockResolvedValue({
+    bank_code: 'MBBEMYKL',
+    last4: '8901',
+    lifted: true,
+    changed: true,
+  });
 });
 
 describe('GET bank-accounts', () => {
@@ -389,5 +399,63 @@ describe('GET bank-accounts — cleared names', () => {
         with: [{ customer_id: 'cus_2', handle: 'Collector2' }],
       },
     ]);
+  });
+});
+
+describe('POST bank-accounts/unban-number', () => {
+  it('lifts the named number for this player, as the admin', async () => {
+    const res = mkRes();
+    await UNBAN_NUMBER(mkReq({ last4: '8901', reason: ' owner ok ' }), res as never);
+    expect(packs.setPayoutBanLifted).toHaveBeenCalledWith({
+      customerId: 'cus_1',
+      adminId: 'user_1',
+      last4: '8901',
+      bankCode: null,
+      lifted: true,
+      reason: 'owner ok',
+      // No roles on this request: never the ban-list fallback.
+      fromBanList: false,
+    });
+    expect(res.json).toHaveBeenCalledWith({
+      bank_code: 'MBBEMYKL',
+      last4: '8901',
+      lifted: true,
+      changed: true,
+    });
+  });
+
+  it.each([
+    [{ last4: '89', reason: 'x' }, /last 4/],
+    [{ last4: 'AB01', reason: 'x' }, /last 4/],
+    [{ last4: '8901', reason: '' }, /reason/],
+    [{ last4: '8901', bank_code: 7, reason: 'x' }, /bank/],
+    [{ last4: '8901', lifted: 'yes', reason: 'x' }, /true or false/],
+  ])('refuses %j', async (bad, message) => {
+    await expect(UNBAN_NUMBER(mkReq(bad), mkRes() as never)).rejects.toThrow(message);
+    expect(packs.setPayoutBanLifted).not.toHaveBeenCalled();
+  });
+
+  it("GET lists the player's banned numbers by bank name and last 4", async () => {
+    packs.bannedPayoutAccountsOf.mockResolvedValue([
+      {
+        account_key: '512345678901',
+        bank_code: 'MBBEMYKL',
+        last4: '8901',
+        lifted_for_player: true,
+      },
+    ]);
+    const res = mkRes();
+    await GET(mkReq(), res as never);
+    expect(res.json.mock.calls[0][0].banned_numbers).toEqual([
+      {
+        bank_code: 'MBBEMYKL',
+        bank_name: 'Maybank',
+        last4: '8901',
+        lifted_for_player: true,
+      },
+    ]);
+    expect(JSON.stringify(res.json.mock.calls[0][0].banned_numbers)).not.toContain(
+      '512345678901',
+    );
   });
 });

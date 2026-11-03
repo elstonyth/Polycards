@@ -2049,6 +2049,14 @@ export interface SavedBankAccounts {
     verified_at: string | null;
     linked: { customer_id: string; handle: string | null }[];
   }[];
+  /** This player's bank numbers on the ban list. */
+  banned_numbers?: {
+    bank_code: string;
+    bank_name: string;
+    last4: string;
+    /** Unbanned for this player only (still banned for everyone else). */
+    lifted_for_player: boolean;
+  }[];
   /** Holder names support cleared as two real people's. */
   cleared_names: {
     name: string;
@@ -2106,6 +2114,20 @@ export const setBankShareVerified = (
   postJson<{ verified: boolean }>(
     `/admin/customers/${encodeURIComponent(id)}/bank-accounts/verify`,
     { account_id: accountId, verified, reason },
+  );
+
+export const unbanBankNumber = (
+  id: string,
+  details: {
+    bank_code: string | null;
+    last4: string;
+    lifted: boolean;
+    reason: string;
+  },
+) =>
+  postJson<{ bank_code: string; last4: string; lifted: boolean; changed: boolean }>(
+    `/admin/customers/${encodeURIComponent(id)}/bank-accounts/unban-number`,
+    details,
   );
 
 export const setHolderNameCleared = (

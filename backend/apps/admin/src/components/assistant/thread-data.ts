@@ -29,7 +29,7 @@ export type UiMessage = {
 
 export type Proposal = {
   token: string;
-  kind: 'note' | 'schedule' | 'unban';
+  kind: 'note' | 'schedule' | 'unban' | 'unban_number';
   summary: string;
   state: 'waiting' | 'saving' | 'saved';
 };

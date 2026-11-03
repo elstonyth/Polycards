@@ -318,6 +318,47 @@ medusaIntegrationTestRunner({
         expect(ok.status).toBe(200);
       });
 
+      it('support unbans a number for one player; it stays banned for the others', async () => {
+        const a = await newCustomer('one-bank-u@test.dev');
+        const b = await newCustomer('one-bank-v@test.dev');
+        const pg = getContainer().resolve(ContainerRegistrationKeys.PG_CONNECTION);
+        await pg.raw(
+          'INSERT INTO banned_payout_account (account_key, bank_code, reason) VALUES (?, ?, ?)',
+          ['512345678911', 'MBBEMYKL', 'test'],
+        );
+        // a's save was refused: the number is on no list of a's.
+        const refused = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678911'), asCustomer(a)),
+        );
+        expect(refused.status).toBe(400);
+        expect(refused.data.message).toMatch(/cannot be used/);
+        const res = await unwrapResponse(
+          api.post(
+            `/admin/customers/${a}/bank-accounts/unban-number`,
+            { last4: '8911', reason: 'owner approved' },
+            asAdmin(),
+          ),
+        );
+        expect(res.status).toBe(200);
+        expect(res.data).toMatchObject({ lifted: true, changed: true });
+        const saved = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678911'), asCustomer(a)),
+        );
+        expect(saved.status).toBe(200);
+        const listed = await unwrapResponse(
+          api.get(`/admin/customers/${a}/bank-accounts`, asAdmin()),
+        );
+        expect(listed.data.banned_numbers).toEqual([
+          expect.objectContaining({ last4: '8911', lifted_for_player: true }),
+        ]);
+        // Still banned for everyone else.
+        const other = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678911', 'Other Holder'), asCustomer(b)),
+        );
+        expect(other.status).toBe(400);
+        expect(other.data.message).toMatch(/cannot be used/);
+      });
+
       it('refuses a banned number at any bank, for support too', async () => {
         const a = await newCustomer('one-bank-l@test.dev');
         await getContainer()

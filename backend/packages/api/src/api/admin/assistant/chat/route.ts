@@ -7,12 +7,12 @@ import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
-import { accessFor, allowedTools, LASTING_WRITES } from '../access';
+import { accessFor, allowedTools } from '../access';
 import { runTurn } from '../engine';
 import { storeImage } from '../images';
 import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
 import { memoryFor } from '../agent-tools';
-import { sealProposal } from '../confirm';
+import { scheduledRunAllows, sealProposal } from '../confirm';
 import {
   cutToolMarkup,
   generationCost,
@@ -379,12 +379,11 @@ export async function POST(
       key,
       model: settings.chat_model,
       access,
-      // A scheduled run has nobody to tap: no lasting writes, and no unban.
+      // A scheduled run has nobody to tap: no lasting writes, and no unbans.
       tools: (await allowedTools(access, TOOLS)).filter(
         (t) =>
           !(
-            input.text.startsWith(SCHEDULED_PREFIX) &&
-            (LASTING_WRITES.has(t.name) || t.name === 'unban_account')
+            input.text.startsWith(SCHEDULED_PREFIX) && !scheduledRunAllows(t)
           ),
       ),
       history,

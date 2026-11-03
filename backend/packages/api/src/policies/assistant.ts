@@ -25,7 +25,9 @@ export const assistantPolicies = definePolicies([
   },
   {
     // unban_account: lift a permanent ban (owner, 2026-11-03), with the saved
-    // banks cleared. Granted to the Support viewer (yu) beside super admins.
+    // banks cleared; unban_bank_number: unban a number for one player
+    // (2026-11-04), also the player page's bank-accounts/unban-number route.
+    // Granted to the Support viewer (yu) beside super admins.
     name: 'Polycards update assistant_unban',
     resource: 'assistant_unban',
     operation: 'update',

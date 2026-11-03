@@ -573,6 +573,48 @@ export function withClearedHolderName(
     : rest;
 }
 
+/** Bank numbers support unbanned for this one account (owner, 2026-11-04):
+ *  each stays banned for every other account, so a lifted ring number cannot
+ *  come back to the ring. Keyed by payoutAccountKey; holds full numbers like
+ *  the saved list, so it is fenced and stripped like it. Only support writes it
+ *  (setPayoutBanLifted). */
+export const PAYOUT_BAN_LIFTED_KEY = 'payout_ban_lifted';
+
+export type LiftedPayoutBan = { bank_code: string; at: string };
+
+export function liftedPayoutBans(
+  metadata: Record<string, unknown>,
+): Record<string, LiftedPayoutBan> {
+  const stamps = metadata[PAYOUT_BAN_LIFTED_KEY];
+  const out = Object.create(null) as Record<string, LiftedPayoutBan>;
+  if (typeof stamps !== 'object' || stamps === null) return out;
+  return Object.assign(
+    out,
+    Object.fromEntries(
+      Object.entries(stamps).filter(
+        ([, v]) =>
+          typeof v === 'object' &&
+          v !== null &&
+          typeof (v as LiftedPayoutBan).at === 'string',
+      ),
+    ),
+  );
+}
+
+/** The blob with one number's lift set, or removed by a null. */
+export function withLiftedPayoutBan(
+  metadata: Record<string, unknown>,
+  key: string,
+  stamp: LiftedPayoutBan | null,
+): Record<string, unknown> {
+  const { [key]: _old, ...others } = liftedPayoutBans(metadata);
+  const stamps = stamp === null ? others : { ...others, [key]: stamp };
+  const { [PAYOUT_BAN_LIFTED_KEY]: _key, ...rest } = metadata;
+  return Object.keys(stamps).length > 0
+    ? { ...rest, [PAYOUT_BAN_LIFTED_KEY]: stamps }
+    : rest;
+}
+
 /** The blob with one account's stamp set, or cleared by a null. */
 export function withBankShareStamp(
   metadata: Record<string, unknown>,

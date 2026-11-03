@@ -68,7 +68,8 @@ Accepted, with what covers each:
 
 The owner tightened the rule after the farm rings were listed:
 
-- **Banned numbers.** The rings' bank numbers are banned for good in
+- **Banned numbers.** The rings' bank numbers are banned (until support unbans one for a
+  player, below) in
   `banned_payout_account`, matched on digits without leading zeros at any bank. The
   list is filled on production only, never from the repo. A banned number is refused
   at customer save and at support's add.
@@ -89,6 +90,12 @@ The owner tightened the rule after the farm rings were listed:
   beside another carries a holder name already saved on that account, compared as
   real names are. A wallet has none. Support's add is the way past it for a name
   two banks spell differently, and the refusal says to contact support.
+- **Unbanning a number** (owner, 2026-11-04). Support unbans a banned number for ONE
+  player, from the player page or the admin assistant (policy `assistant_unban`):
+  that player may save it and be paid to it, and it stays banned for every other
+  account, so a lifted ring number cannot come back to the ring. Named by its last
+  4 among the player's numbers or, for a player whose save was refused, the whole
+  ban list; audited as bank and last 4. The shared-number rule still applies.
 - **Same name, different person** (owner, 2026-11-04). Two real people can share a
   name. Support checks, then clears the name on each account from the player page
   (`bank-accounts/name-clash`): it records the one other account holding the name,

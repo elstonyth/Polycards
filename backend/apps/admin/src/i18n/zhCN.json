@@ -373,6 +373,7 @@
     "tools": {
       "ban_reason": "封号原因",
       "unban_account": "解封",
+      "unban_bank_number": "解封银行账号",
       "economy": "经济总览",
       "daily_economy": "每日经济",
       "payments": "充值与提款",
@@ -474,6 +475,9 @@
       "unban": "解封",
       "unbanned": "已解封",
       "unbanHint": "点「解封」后才会生效。",
+      "unbanNumber": "解封银行账号",
+      "numberUnbanned": "银行账号已解封",
+      "unbanNumberHint": "点「解封银行账号」后才会生效。",
       "hint": "点保存才会保留。"
     },
     "copy": "复制",

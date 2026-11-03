@@ -6,7 +6,7 @@ import type AssistantModuleService from '../../../modules/assistant/service';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import type { Need } from './access';
+import { LASTING_WRITES, type Need } from './access';
 
 // What lasts waits for a tap (security review 2026-10-29). A note or a
 // scheduled task would stay in front of the model in every later chat or run,
@@ -36,6 +36,16 @@ export type Proposal =
       /** When the ban this was proposed for began: a newer ban is not lifted
        *  by an old button. */
       banned_at: string;
+    }
+  // Unbanning a bank number for one player (owner, 2026-11-04), named by its
+  // last 4 (and bank for a tie): the token never carries a full number.
+  | {
+      kind: 'unban_number';
+      customer_id: string;
+      username: string;
+      bank_code: string;
+      last4: string;
+      reason: string;
     };
 
 /** What an unban needs, checked again when the person taps it: its own policy
@@ -44,6 +54,21 @@ export const UNBAN_NEED: Need = {
   resource: 'assistant_unban',
   operation: 'update',
 };
+
+/** Unbanning a number the player never held (by the ban list) needs this too:
+ *  admins, not the Support viewer (security review). */
+export const BAN_LIST_NEED: Need = { resource: 'customer', operation: 'update' };
+
+/** A scheduled run has nobody to tap: no lasting writes, and no unban of any
+ *  kind (every tool that needs the unban policy). */
+export const scheduledRunAllows = (t: { name: string; needs: Need[] }): boolean =>
+  !LASTING_WRITES.has(t.name) &&
+  !t.needs.some(
+    (n) =>
+      typeof n === 'object' &&
+      n.resource === UNBAN_NEED.resource &&
+      n.operation === UNBAN_NEED.operation,
+  );
 
 const TTL_MS = 30 * 60_000;
 const MAX_TOKEN = 8000;
@@ -137,6 +162,37 @@ export async function saveProposal(
         err instanceof MedusaError &&
         (err.type === MedusaError.Types.NOT_ALLOWED ||
           err.type === MedusaError.Types.NOT_FOUND)
+      ) {
+        throw new ConfirmRefused(err.message);
+      }
+      throw err;
+    }
+    return { id: proposal.customer_id };
+  }
+  if (proposal.kind === 'unban_number') {
+    if (!(await access.can?.(UNBAN_NEED))) {
+      throw new ConfirmRefused('Your role cannot unban bank numbers.');
+    }
+    try {
+      await container
+        .resolve<PacksModuleService>(PACKS_MODULE)
+        .setPayoutBanLifted({
+          customerId: proposal.customer_id,
+          adminId: access.userId,
+          last4: proposal.last4,
+          bankCode: proposal.bank_code || null,
+          lifted: true,
+          reason: proposal.reason,
+          fromBanList:
+            access.superAdmin || ((await access.can?.(BAN_LIST_NEED)) ?? false),
+        });
+    } catch (err) {
+      // The ban is gone, or now matches more than one number.
+      if (
+        err instanceof MedusaError &&
+        (err.type === MedusaError.Types.NOT_ALLOWED ||
+          err.type === MedusaError.Types.NOT_FOUND ||
+          err.type === MedusaError.Types.INVALID_DATA)
       ) {
         throw new ConfirmRefused(err.message);
       }
