@@ -11,7 +11,7 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 // "View and record": the Stock list and item pages (`inventory:read`), goods
 // receive notes and purchase invoices to read and create
 // (`goods_receive_note`, `purchase_invoice` read + update — update covers a
-// GRN reversal and a transfer into an invoice), and the Procurement to-buy
+// GRN edit, a GRN reversal and a transfer into an invoice), and the Procurement to-buy
 // list (`procurement:read`; the to-ship list also needs `delivery_order:read`,
 // which the Order manager role carries). `store:read` because the admin shell
 // errors without it. 2026-10-28 owner, "full access on stock": also the

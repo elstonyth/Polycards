@@ -129,6 +129,8 @@ export async function describeGrns(container: MedusaContainer, grns: Grn[]) {
       agent_user_id: g.agent_user_id,
       agent_email: emailBy.get(g.agent_user_id) ?? null,
       created_at: g.created_at,
+      // The edit form sends it back, so a save over someone else's is refused.
+      updated_at: g.updated_at,
       status,
       invoice,
       reversed_by: reversedBy,

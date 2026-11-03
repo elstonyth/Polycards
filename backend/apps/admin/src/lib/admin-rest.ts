@@ -2633,6 +2633,8 @@ export interface AdminGoodsReceiveNote {
   agent_user_id: string;
   agent_email: string | null;
   created_at: string;
+  /** Sent back by the edit form, so a save over someone else's is refused. */
+  updated_at: string;
   status: GrnStatus;
   invoice: GrnRef | null;
   reversed_by: GrnRef | null;
@@ -2695,6 +2697,19 @@ export interface CreateGoodsReceiveNoteBody {
 // the id is read from it.
 export const createGoodsReceiveNote = (body: CreateGoodsReceiveNoteBody) =>
   postJson<{ goods_receive_note: GrnRef }>('/admin/goods-receive-notes', body);
+
+// Same body as a new GRN, under the same number, plus the note's updated_at
+// as the form loaded it. Only an OPEN GRN can be edited, and not one saved by
+// someone else since; anything else is a 400 with a readable message, which
+// the mutation toasts.
+export const updateGoodsReceiveNote = (
+  id: string,
+  body: CreateGoodsReceiveNoteBody & { expected_updated_at: string },
+) =>
+  postJson<{ goods_receive_note: GrnRef }>(
+    `/admin/goods-receive-notes/${encodeURIComponent(id)}`,
+    body,
+  );
 
 // Only an OPEN GRN can be reversed; anything else is a 400 with a readable
 // message, which the mutation toasts.

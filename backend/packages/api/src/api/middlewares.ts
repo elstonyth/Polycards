@@ -1823,6 +1823,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Edit. ":id" is one path segment, so this matches neither "/:id/reverse"
+      // nor a create sent to "/admin/goods-receive-notes/" — each is charged once.
+      matcher: '/admin/goods-receive-notes/:id',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
       matcher: '/admin/goods-receive-notes/*/reverse',
       method: ['POST'],
       middlewares: [adminActionRateLimit],

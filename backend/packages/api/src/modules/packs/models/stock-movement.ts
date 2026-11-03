@@ -23,7 +23,10 @@ export const StockMovement = model
       'shipped',
       'completed',
       'adjustment',
-      'goods_receive', // one row per GRN line (Migration20261028150000)
+      // One row per GRN line (Migration20261028150000), plus one per card whose
+      // qty an edit changed, for the difference (ref_id may name a line the
+      // edit soft-deleted).
+      'goods_receive',
     ]),
     qty: model.number(), // signed
     ref_id: model.text(), // e.g. the purchase_invoice_line id, for 'purchase'

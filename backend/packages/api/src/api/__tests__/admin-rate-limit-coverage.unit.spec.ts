@@ -280,4 +280,35 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
 
     expect(failures).toEqual([]);
   });
+
+  it('goods receive notes: each write is charged once by the real Express matcher', () => {
+    // The text model above writes a route's [id] as "*" and knows nothing of
+    // non-strict trailing slashes, so this asks the installed Express (the
+    // router Medusa mounts these matchers on) directly.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Layer = require('express/lib/router/layer') as new (
+      path: string,
+      options: { sensitive: boolean; strict: boolean; end: boolean },
+      fn: () => void,
+    ) => { match(path: string): boolean };
+    const grn = extractAdminActionRateLimitEntries()
+      .filter((e) => e.matcher.startsWith('/admin/goods-receive-notes'))
+      .map(
+        (e) =>
+          new Layer(
+            e.matcher,
+            { sensitive: false, strict: false, end: true },
+            () => {},
+          ),
+      );
+    for (const url of [
+      '/admin/goods-receive-notes',
+      '/admin/goods-receive-notes/',
+      '/admin/goods-receive-notes/grn_1',
+      '/admin/goods-receive-notes/grn_1/',
+      '/admin/goods-receive-notes/grn_1/reverse',
+    ]) {
+      expect([url, grn.filter((l) => l.match(url)).length]).toEqual([url, 1]);
+    }
+  });
 });

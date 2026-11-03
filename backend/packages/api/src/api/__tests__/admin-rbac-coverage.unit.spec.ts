@@ -152,6 +152,10 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('POST', '/admin/goods-receive-notes/*/reverse')).toEqual([
       'goods_receive_note:update',
     ]);
+    // An edit is the same staff as a new GRN.
+    expect(policyFor('POST', '/admin/goods-receive-notes/*')).toEqual([
+      'goods_receive_note:update',
+    ]);
     // The Stock page's Refresh: the admin offers the move on this same policy.
     expect(policyFor('POST', '/admin/delivery-orders/allocate')).toEqual([
       'delivery_order:update',

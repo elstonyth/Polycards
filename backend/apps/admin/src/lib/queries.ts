@@ -2263,6 +2263,7 @@ import {
   getProcurementToShip,
   listGoodsReceiveNotes,
   reverseGoodsReceiveNote,
+  updateGoodsReceiveNote,
   type AdminGoodsReceiveNoteDetail,
   type CreateGoodsReceiveNoteBody,
   type GoodsReceiveNotesPage,
@@ -2362,6 +2363,33 @@ export const useCreateGoodsReceiveNote = () => {
       invalidateStock();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// An edit moves on hand by the difference — same invalidation as a save.
+// Awaited before mutateAsync resolves, so the detail page the form navigates
+// to never shows the old lines. A refused save (transferred meanwhile, or
+// saved by someone else) re-reads the note, so the edit page catches up.
+export const useUpdateGoodsReceiveNote = () => {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: CreateGoodsReceiveNoteBody & { expected_updated_at: string };
+    }) => updateGoodsReceiveNote(id, body),
+    onSuccess: () => {
+      toast.success(t('grn.edited'));
+      return invalidateStock();
+    },
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+      void qc.invalidateQueries({ queryKey: qk.goodsReceiveNoteKey });
+    },
   });
 };
 

@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest';
 import {
   draftError,
   grnDraftError,
+  grnDraftLines,
+  grnQtyLowered,
   invoiceFormLines,
   moneyError,
   mytMidnightIso,
@@ -25,6 +27,33 @@ const line = (over: Partial<DraftLine> = {}): DraftLine => ({
   qty: '2',
   unit_cost: '120.50',
   ...over,
+});
+
+describe('GRN edit', () => {
+  test('starts the form from the saved lines, FMV at 2dp', () => {
+    expect(
+      grnDraftLines([
+        { card_handle: 'a', card_name: 'A', fmv_snapshot: '12.5', qty: 3 },
+      ]),
+    ).toEqual([
+      { card_handle: 'a', card_name: 'A', fmv_snapshot: '12.50', qty: '3' },
+    ]);
+  });
+
+  test('warns only when a card ends with fewer units, counted across lines', () => {
+    const saved = [{ card_handle: 'a', qty: 3 }];
+    expect(grnQtyLowered(saved, [{ card_handle: 'a', qty: '3' }])).toBe(false);
+    expect(grnQtyLowered(saved, [{ card_handle: 'a', qty: '4' }])).toBe(false);
+    expect(
+      grnQtyLowered(saved, [
+        { card_handle: 'a', qty: '1' },
+        { card_handle: 'a', qty: '2' },
+      ]),
+    ).toBe(false);
+    expect(grnQtyLowered(saved, [{ card_handle: 'a', qty: '2' }])).toBe(true);
+    // Taking a card off the note lowers it to 0, whatever else is added.
+    expect(grnQtyLowered(saved, [{ card_handle: 'b', qty: '9' }])).toBe(true);
+  });
 });
 
 describe('moneyError', () => {

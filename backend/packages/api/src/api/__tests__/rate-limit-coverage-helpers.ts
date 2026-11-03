@@ -103,7 +103,11 @@ export function getMethodsOf(fileText: string): boolean {
  */
 export function matcherToRegExp(matcher: string): RegExp {
   const escaped = matcher.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = escaped.split('*').join('.*');
+  // A ":param" is one segment; a route file's [param] is written "*" here.
+  const pattern = escaped
+    .split('*')
+    .join('.*')
+    .replace(/:[A-Za-z_]\w*/g, '[^/]+');
   return new RegExp(`^${pattern}$`);
 }
 

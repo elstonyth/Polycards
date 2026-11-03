@@ -3,16 +3,15 @@ import type {
   MedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import { resolveFxRateStrict } from '../../../modules/packs/pricing';
 import { createGoodsReceiveNoteWorkflow } from '../../../workflows/create-goods-receive-note';
 import {
   parsePaginationParams,
   parseSortParam,
 } from '../../../utils/pagination';
-import { coerceCreateGoodsReceiveNoteBody } from './validate';
+import { checkGrnLines, coerceCreateGoodsReceiveNoteBody } from './validate';
 import { closedGrnIds, describeGrns } from './view';
 
 // POST /admin/goods-receive-notes — record cards that arrived before their
@@ -25,32 +24,7 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const body = coerceCreateGoodsReceiveNoteBody(req.body);
-  // Same gate as a purchase invoice: the form's FMV prefill is priced off
-  // the FX rate, so refuse while that rate is unknown.
-  await resolveFxRateStrict(
-    req.scope.resolve<PacksModuleService>(PACKS_MODULE),
-  );
-
-  // Same existence gate as purchase-invoices/route.ts: every line must name a
-  // real product handle.
-  const productModule = req.scope.resolve(Modules.PRODUCT);
-  const handles = [...new Set(body.lines.map((l) => l.card_handle))];
-  const products = await productModule.listProducts(
-    { handle: handles },
-    { take: handles.length, select: ['handle'] },
-  );
-  const valid = new Set(products.map((p) => p.handle));
-  const unknown = body.lines
-    .map((l, i) => ({ i, card_handle: l.card_handle }))
-    .filter(({ card_handle }) => !valid.has(card_handle));
-  if (unknown.length) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      `Unknown card_handle — no matching product for ${unknown
-        .map(({ i, card_handle }) => `lines[${i}] ('${card_handle}')`)
-        .join(', ')}.`,
-    );
-  }
+  await checkGrnLines(req.scope, body.lines);
 
   const { result } = await createGoodsReceiveNoteWorkflow(req.scope).run({
     input: {
