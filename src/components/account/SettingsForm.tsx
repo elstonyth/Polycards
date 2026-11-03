@@ -539,8 +539,8 @@ function RealNameField({
         className={READONLY_CLASS}
       />
       <span className="mt-1 block text-[11px] text-white/55">
-        Private — only used to verify prize winners. To correct it, contact
-        customer service.
+        Private — used to verify prize winners and to protect your account from
+        fraud. To correct it, contact customer service.
       </span>
     </label>
   );
