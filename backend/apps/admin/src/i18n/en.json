@@ -1069,7 +1069,7 @@
     "tabHistory": "History",
     "identityTitle": "Player details",
     "savedBankTitle": "Saved bank account",
-    "savedBankSubtitle": "What this player withdraws to. Players cannot remove it or add a second one, so changes come through here.",
+    "savedBankSubtitle": "What this player withdraws to: one per currency, plus one Touch 'n Go. Players cannot remove or change them, so changes come through here.",
     "savedBankEmpty": "No saved bank account. The player can add one on their Bank accounts page.",
     "savedBankHold": "Withdrawals on hold: a saved number is also on another account. Verify it or remove it to release them.",
     "savedBankShared": "Also on another account",

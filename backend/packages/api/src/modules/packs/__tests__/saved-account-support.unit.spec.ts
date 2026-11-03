@@ -203,9 +203,23 @@ describe('addSavedBankAccount', () => {
     });
     await expect(
       svc.addSavedBankAccount({ ...base, verify: false }, ctx),
-    ).rejects.toThrow(/already has a bank account/);
+    ).rejects.toThrow(/already has an RM bank account/);
     expect(writes).toEqual([]);
     expect(audits).toEqual([]);
+  });
+
+  it("adds a Touch 'n Go beside an RM bank, but never a second one", async () => {
+    const tng = { ...ACCOUNT, id: 'acc_tng', bankCode: 'TNGMY', bankName: "Touch 'n Go eWallet" };
+    const beside = fakeService({ bank_accounts: [OTHER] });
+    await beside.svc.addSavedBankAccount({ ...base, account: tng, verify: false }, beside.ctx);
+    expect(beside.writes[0].bank_accounts).toEqual([OTHER, tng]);
+    const second = fakeService({ bank_accounts: [OTHER, tng] });
+    await expect(
+      second.svc.addSavedBankAccount(
+        { ...base, account: { ...tng, id: 'acc_tng2' }, verify: false },
+        second.ctx,
+      ),
+    ).rejects.toThrow(/already has a Touch 'n Go account/);
   });
 });
 

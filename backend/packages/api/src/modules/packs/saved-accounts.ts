@@ -22,12 +22,16 @@ import type { PaymentGateway } from './gateway';
 // keeps the money path from importing an API route.
 
 /** One saved account per currency per Polycards account (owner, 2026-11-03, ADR
- *  0015): one RM bank, one SGD bank, one USDT wallet (bankCurrency). Once saved
- *  it cannot be changed. */
+ *  0015): one RM bank, one Touch 'n Go, one SGD bank, one USDT wallet
+ *  (savedAccountSlot). Once saved it cannot be changed. */
 export const MAX_SAVED_BANK_ACCOUNTS = 1;
 
 export const ONE_BANK_ACCOUNT_MESSAGE =
   'Your Polycards account already has a bank account for this currency. It cannot be changed.';
+
+/** A second Touch 'n Go: it has its own slot beside the RM bank. */
+export const ONE_TNG_ACCOUNT_MESSAGE =
+  "Your Polycards account already has a Touch 'n Go account. It cannot be changed.";
 
 export const BANK_ACCOUNT_LOCKED_MESSAGE =
   'A saved bank account cannot be removed or changed.';

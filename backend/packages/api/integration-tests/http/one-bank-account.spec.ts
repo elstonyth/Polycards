@@ -460,6 +460,30 @@ medusaIntegrationTestRunner({
         expect(wallet.status).toBe(200);
         expect(await accounts(a)).toHaveLength(2);
       });
+
+      it("Touch 'n Go has its own slot beside the RM bank, under the same name", async () => {
+        const a = await newCustomer('one-bank-q@test.dev');
+        const tng = (number: string) => ({
+          ...save(number, 'Slot Owner'),
+          bank_code: 'TNGMY',
+        });
+        await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678907', 'Slot Owner'), asCustomer(a)),
+        );
+        // The one-name rule reads other accounts only: the owner's own bank
+        // under that name does not block the Touch 'n Go.
+        const first = await unwrapResponse(
+          api.post(ACCOUNTS, tng('120000000007'), asCustomer(a)),
+        );
+        expect(first.status).toBe(200);
+        expect(await accounts(a)).toHaveLength(2);
+        const second = await unwrapResponse(
+          api.post(ACCOUNTS, tng('120000000008'), asCustomer(a)),
+        );
+        expect(second.status).toBe(400);
+        expect(second.data.message).toMatch(/already has a Touch 'n Go account/);
+        expect(await accounts(a)).toHaveLength(2);
+      });
     });
   },
 });

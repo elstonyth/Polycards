@@ -1045,6 +1045,22 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
       /already has a bank account for this currency/,
     );
   });
+
+  it("Touch 'n Go has its own slot: it fits beside an RM bank, a second one does not", async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [savedShape({ accountNumber: '999999999999', id: 'x' })],
+      },
+    });
+    const TNG = { ...VALID_BODY, bank_code: 'TNGMY', account_number: '120000000001' };
+    await POST(mkReq(TNG), mkRes());
+    const saved = updateCustomers.mock.calls[0][1].metadata.bank_accounts;
+    expect(saved.map((a: { bankCode: string }) => a.bankCode)).toEqual(['MBBEMYKL', 'TNGMY']);
+    retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: saved } });
+    await expect(
+      POST(mkReq({ ...TNG, account_number: '120000000002' }), mkRes()),
+    ).rejects.toThrow(/already has a Touch 'n Go account/);
+  });
 });
 
 describe('POST accounts — holder names compare as one person reads them', () => {

@@ -241,8 +241,8 @@ const VisitorSignalsCard = ({ customerId }: { customerId: string }) => {
   );
 };
 
-/** The account withdrawals actually go to, and the only way to change it: a
- *  player can neither remove it nor add a second one (ADR 0015). Holds come from
+/** The accounts withdrawals actually go to, and the only way to change them: a
+ *  player can neither remove nor change one (ADR 0015). Holds come from
  *  the same check the payout runs: any unverified shared number holds the whole
  *  player, so the warning sits on the card, not on a row. */
 const SavedBankAccountsCard = ({
@@ -348,9 +348,9 @@ const SavedBankAccountsCard = ({
               )}
             </div>
           ))}
-          {/* One account per currency (owner, 2026-11-03): a wallet may sit
-              beside a bank, so Add stays; the server refuses a second one in
-              the same currency. */}
+          {/* One account per currency, Touch 'n Go apart (owner,
+              2026-11-03): a wallet or Touch 'n Go may sit beside a bank, so
+              Add stays; the server refuses a second one of the same kind. */}
           {canEdit && (
             <div className="border-t px-6 py-4">
               <Button

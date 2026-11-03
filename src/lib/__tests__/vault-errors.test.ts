@@ -184,6 +184,7 @@ describe('VAULT_RULES backend-message contract', () => {
       'This name is already linked to another Polycards account.',
       'This bank account cannot be used on Polycards.',
       'Your Polycards account already has a bank account for this currency. It cannot be changed.',
+      "Your Polycards account already has a Touch 'n Go account. It cannot be changed.",
       'A saved bank account cannot be removed or changed.',
       // gateway-withdrawal.ts startWithdrawal / withdrawalDetailsError
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
