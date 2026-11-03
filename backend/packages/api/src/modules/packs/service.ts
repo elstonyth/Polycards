@@ -6599,6 +6599,13 @@ class PacksModuleService extends MedusaService({
     input: { customerId: string; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ cleared: number }> {
+    // The metadata lock first, the one every writer of the saved list takes
+    // (re-entrant below): two lifts at once queue here, and the second finds
+    // the ban already gone instead of lifting it twice.
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${input.customerId}`,
+    ]);
     const [state] = await this.listCustomerAccountStates(
       { customer_id: input.customerId, disabled: true },
       { take: 1 },
@@ -6610,7 +6617,8 @@ class PacksModuleService extends MedusaService({
         'This account has no permanent ban to lift.',
       );
     }
-    let cleared = 0;
+    let cleared: { bank: string; last4: string }[] = [];
+    let changed = false;
     await this.mutateCustomerMetadata(
       {
         customerId: input.customerId,
@@ -6618,8 +6626,13 @@ class PacksModuleService extends MedusaService({
           if (!('bank_accounts' in current) && !('bank_share_verified' in current)) {
             return null;
           }
-          const { bank_accounts, bank_share_verified: _stamps, ...rest } = current;
-          cleared = parseSavedBankAccounts(bank_accounts).length;
+          const { bank_accounts, bank_share_verified: _stamps, ...rest } =
+            current;
+          cleared = parseSavedBankAccounts(bank_accounts).map((a) => ({
+            bank: a.bankName,
+            last4: a.accountNumber.slice(-4),
+          }));
+          changed = true;
           return rest;
         },
       },
@@ -6634,19 +6647,23 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
-    await this.audit(
-      {
-        admin_id: input.adminId,
-        entity_type: 'customer',
-        entity_id: input.customerId,
-        action: 'edit',
-        before: { saved_bank_accounts: cleared },
-        after: { saved_bank_accounts: 0 },
-        reason: `Cleared saved bank accounts on unban: ${input.reason}`,
-      },
-      sharedContext,
-    );
-    return { cleared };
+    // Bank name and last 4 only, like the other saved-bank audit rows; none
+    // when there was nothing to clear.
+    if (changed) {
+      await this.audit(
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { saved_bank_accounts: cleared },
+          after: { saved_bank_accounts: [] },
+          reason: `Cleared saved bank accounts on unban: ${input.reason}`,
+        },
+        sharedContext,
+      );
+    }
+    return { cleared: cleared.length };
   }
 
   // Player disable switch (POLYCARD-BACK §4.2): blocks LOGIN/session use —

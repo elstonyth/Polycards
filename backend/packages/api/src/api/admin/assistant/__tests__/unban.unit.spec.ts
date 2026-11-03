@@ -13,6 +13,7 @@ import {
 
 jest.mock('../../../utils/image-fetch', () => ({ fetchImage: jest.fn() }));
 
+const BANNED_AT = '2026-11-03T10:19:00.000Z';
 const BAN =
   'Permanent ban: shared bank account, more than one account (owner, 2026-11-03)';
 const packs = {
@@ -21,7 +22,14 @@ const packs = {
   listCustomerAccountStates: jest.fn(),
   liftPermanentBan: jest.fn(),
 };
-const container = { resolve: () => packs } as never;
+const customers = {
+  listCustomers: jest.fn(async () => [
+    { first_name: 'Collector6903', metadata: { handle: 'Heng_Handle' } },
+  ]),
+};
+const container = {
+  resolve: (k: string) => (k === 'customer' ? customers : packs),
+} as never;
 const admin = { userId: 'user_1', superAdmin: true };
 const unban = AGENT_TOOLS.find((t) => t.name === 'unban_account')!;
 
@@ -29,7 +37,9 @@ beforeEach(() => {
   jest.clearAllMocks();
   packs.findCustomerIdByUsername.mockResolvedValue('cus_1');
   packs.findCustomerIdByHandle.mockResolvedValue(null);
-  packs.listCustomerAccountStates.mockResolvedValue([{ disabled_reason: BAN }]);
+  packs.listCustomerAccountStates.mockResolvedValue([
+    { disabled_reason: BAN, disabled_at: BANNED_AT },
+  ]);
   packs.liftPermanentBan.mockResolvedValue({ cleared: 2 });
 });
 
@@ -49,7 +59,7 @@ describe('unban_account', () => {
       {
         container,
         access: admin,
-        userText: 'please unban collector6903',
+        userText: 'please unban collector6903, owner approved',
         propose,
       },
     );
@@ -59,8 +69,11 @@ describe('unban_account', () => {
         customer_id: 'cus_1',
         username: 'Collector6903',
         reason: 'owner approved',
+        banned_at: BANNED_AT,
       },
-      expect.stringContaining('link a bank again'),
+      expect.stringMatching(
+        /^Unban Collector6903 \(@Heng_Handle\):.*link a bank again/,
+      ),
     );
     expect(JSON.parse(out)).toMatchObject({ unbanned: false });
     expect(packs.liftPermanentBan).not.toHaveBeenCalled();
@@ -80,6 +93,26 @@ describe('unban_account', () => {
       ),
     ).rejects.toThrow(/named in this message/);
     expect(propose).not.toHaveBeenCalled();
+  });
+
+  it('matches the name as a whole word, in any language around it', async () => {
+    const propose = jest.fn();
+    await expect(
+      unban.run(
+        { username: 'Collector69' },
+        { container, access: admin, userText: 'unban Collector6903', propose },
+      ),
+    ).rejects.toThrow(/named in this message/);
+    await unban.run(
+      { username: 'Collector6903' },
+      {
+        container,
+        access: admin,
+        userText: '帮我解封Collector6903，谢谢',
+        propose,
+      },
+    );
+    expect(propose).toHaveBeenCalledTimes(1);
   });
 
   it('refuses an account with no permanent ban (staff disable, deleted)', async () => {
@@ -121,6 +154,7 @@ describe('saveProposal unban', () => {
     customer_id: 'cus_1',
     username: 'Collector6903',
     reason: 'owner approved',
+    banned_at: BANNED_AT,
   };
 
   it('lifts the ban as the person who tapped, when their role still may', async () => {
@@ -164,5 +198,19 @@ describe('saveProposal unban', () => {
         container,
       ),
     ).rejects.toThrow(ConfirmRefused);
+  });
+
+  it('refuses a button made for an earlier ban', async () => {
+    packs.listCustomerAccountStates.mockResolvedValue([
+      { disabled_reason: BAN, disabled_at: '2026-11-03T12:00:00.000Z' },
+    ]);
+    await expect(
+      saveProposal(
+        UNBAN,
+        { ...admin, can: jest.fn().mockResolvedValue(true) },
+        container,
+      ),
+    ).rejects.toThrow(/ban changed/);
+    expect(packs.liftPermanentBan).not.toHaveBeenCalled();
   });
 });

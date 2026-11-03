@@ -200,7 +200,9 @@ const Message = memo(function Message({
                 </button>
                 {p.state !== 'saved' && (
                   <span className="text-ui-fg-muted text-[11px]">
-                    {t('assistant.confirm.hint')}
+                    {p.kind === 'unban'
+                      ? t('assistant.confirm.unbanHint')
+                      : t('assistant.confirm.hint')}
                   </span>
                 )}
               </div>

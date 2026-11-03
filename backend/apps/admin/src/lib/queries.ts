@@ -1463,6 +1463,9 @@ export const useSetPlayerDisabled = () => {
       qc.invalidateQueries({ queryKey: qk.playersKey });
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+      // Lifting a permanent ban clears the saved banks (owner, 2026-11-03).
+      qc.invalidateQueries({ queryKey: qk.savedBankAccounts(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.payoutDetails(vars.id) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

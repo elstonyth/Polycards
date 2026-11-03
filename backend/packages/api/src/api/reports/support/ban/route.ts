@@ -15,6 +15,9 @@ import { reportDb } from '../../sql';
 // A disable typed by staff keeps its reason private, like the account report.
 // No email, phone, customer id or full account number.
 
+const PERMANENT_BAN_TEXT =
+  'Permanent ban: the same bank account was used on more than one Polycards account (one person, one account).';
+
 type NumberRow = { bank_code: string; account_number: string };
 type Holder = {
   customer_id: string;
@@ -23,6 +26,7 @@ type Holder = {
   disabled: boolean | null;
   reason: string | null;
   same_name: boolean;
+  deleted: boolean;
 };
 
 export async function GET(
@@ -51,7 +55,8 @@ export async function GET(
     await db.raw<NumberRow>(
       `SELECT a->>'bankCode' AS bank_code, a->>'accountNumber' AS account_number FROM customer c CROSS JOIN LATERAL ${saved} WHERE c.id = ?
        UNION SELECT bank_code, account_number FROM gateway_withdrawal
-        WHERE deleted_at IS NULL AND customer_id = ? AND status IN ('pending', 'held', 'settled')`,
+        WHERE deleted_at IS NULL AND customer_id = ? AND status IN ('pending', 'held', 'settled')
+       ORDER BY 1, 2`,
       [id, id],
     )
   ).rows;
@@ -71,23 +76,24 @@ export async function GET(
     const holders = (
       await db.raw<Holder>(
         `WITH mine AS (
-           SELECT ${realNameKeySql("a->>'accountHolderName'")} AS k FROM customer c CROSS JOIN LATERAL ${saved}
+           SELECT NULLIF(${realNameKeySql("a->>'accountHolderName'")}, '') AS k FROM customer c CROSS JOIN LATERAL ${saved}
             WHERE c.id = ? AND ${digits.replace('%s', "a->>'accountNumber'")}
-           UNION SELECT ${realNameKeySql('account_holder_name')} FROM gateway_withdrawal
-            WHERE deleted_at IS NULL AND customer_id = ? AND ${digits.replace('%s', 'account_number')}
+           UNION SELECT NULLIF(${realNameKeySql('account_holder_name')}, '') FROM gateway_withdrawal
+            WHERE deleted_at IS NULL AND customer_id = ? AND status IN ('pending', 'held', 'settled') AND ${digits.replace('%s', 'account_number')}
          ), others AS (
-           SELECT c.id AS customer_id, ${realNameKeySql("a->>'accountHolderName'")} AS k FROM customer c CROSS JOIN LATERAL ${saved}
+           SELECT c.id AS customer_id, NULLIF(${realNameKeySql("a->>'accountHolderName'")}, '') AS k FROM customer c CROSS JOIN LATERAL ${saved}
             WHERE c.deleted_at IS NULL AND c.id <> ? AND ${digits.replace('%s', "a->>'accountNumber'")}
-           UNION SELECT customer_id, ${realNameKeySql('account_holder_name')} FROM gateway_withdrawal
+           UNION SELECT customer_id, NULLIF(${realNameKeySql('account_holder_name')}, '') FROM gateway_withdrawal
             WHERE deleted_at IS NULL AND customer_id <> ? AND status IN ('pending', 'held', 'settled')
               AND ${digits.replace('%s', 'account_number')}
          )
          SELECT o.customer_id, c.first_name AS username, c.metadata->>'handle' AS handle,
-                s.disabled, s.disabled_reason AS reason,
-                bool_or(o.k IN (SELECT k FROM mine)) AS same_name
+                c.deleted_at IS NOT NULL AS deleted, s.disabled, s.disabled_reason AS reason,
+                bool_or(o.k IN (SELECT k FROM mine WHERE k IS NOT NULL)) AS same_name
            FROM others o JOIN customer c ON c.id = o.customer_id
            LEFT JOIN customer_account_state s ON s.customer_id = o.customer_id AND s.deleted_at IS NULL
-          GROUP BY o.customer_id, c.first_name, c.metadata, s.disabled, s.disabled_reason`,
+          GROUP BY o.customer_id, c.id, s.id
+          ORDER BY c.first_name`,
         [id, key, id, key, id, key, id, key],
       )
     ).rows;
@@ -122,6 +128,8 @@ export async function GET(
           h.disabled === true &&
           (h.reason ?? '').startsWith(PERMANENT_BAN_REASON_PREFIX),
         disabled: h.disabled === true,
+        // Its payouts still count; the name and handle went with the deletion.
+        deleted: h.deleted === true,
         same_holder_name: h.same_name === true,
         payouts: payouts(h.customer_id),
       })),
@@ -131,15 +139,15 @@ export async function GET(
   res.json({
     disabled,
     permanent_ban: permanent,
-    // Our own fixed text for a permanent ban; a staff-typed reason stays out.
+    // Fixed text, never the stored one: staff-typed text stays out.
     reason: permanent
-      ? state?.disabled_reason
+      ? PERMANENT_BAN_TEXT
       : disabled
         ? 'Disabled by staff (the reason is on the admin player page).'
         : null,
     disabled_at: disabled ? state?.disabled_at : null,
     bank_accounts: banks,
     ...(lookupNote ? { lookup_note: lookupNote } : {}),
-    note: 'A permanent ban (owner, 2026-11-03) is for one person with more than one account: the same bank account was saved or paid out on more than one Polycards account. bank_accounts are every bank this player saved or was paid to, by bank name and last 4 digits; other_accounts are the other accounts on that same number, with their payouts to it (settled, RM). same_holder_name says whether they used the same account holder name. Unbanning is done on the admin player page.',
+    note: 'A permanent ban (owner, 2026-11-03) is for one person with more than one account: the same bank account was saved or paid out on more than one Polycards account. bank_accounts are every bank this player saved or was paid to, by bank name and last 4 digits; other_accounts are the other accounts on that same number, with their payouts to it (settled, RM). same_holder_name says whether they used the same account holder name. Lifting the ban clears the saved banks; the player links a bank again.',
   });
 }

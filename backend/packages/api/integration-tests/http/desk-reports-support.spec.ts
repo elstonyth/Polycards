@@ -343,6 +343,7 @@ medusaIntegrationTestRunner({
                 handle: 'Ring_Handle',
                 banned: true,
                 disabled: true,
+                deleted: false,
                 same_holder_name: true,
                 payouts: { count: 1, rm: 40 },
               },

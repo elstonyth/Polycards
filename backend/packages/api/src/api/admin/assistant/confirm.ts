@@ -28,7 +28,15 @@ export type Proposal =
     }
   // Lifting a permanent ban (owner, 2026-11-03): the account logs in again with
   // its saved banks cleared, so the customer links one again themselves.
-  | { kind: 'unban'; customer_id: string; username: string; reason: string };
+  | {
+      kind: 'unban';
+      customer_id: string;
+      username: string;
+      reason: string;
+      /** When the ban this was proposed for began: a newer ban is not lifted
+       *  by an old button. */
+      banned_at: string;
+    };
 
 /** What an unban needs, checked again when the person taps it: its own policy
  *  (policies/assistant.ts), held by super admins and the Support viewer. */
@@ -105,6 +113,18 @@ export async function saveProposal(
       throw new ConfirmRefused('Your role cannot unban players.');
     }
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    const [state] = await packs.listCustomerAccountStates(
+      { customer_id: proposal.customer_id, disabled: true },
+      { select: ['disabled_at'], take: 1 },
+    );
+    if (
+      !state?.disabled_at ||
+      new Date(state.disabled_at).toISOString() !== proposal.banned_at
+    ) {
+      throw new ConfirmRefused(
+        'The ban changed since this was proposed. Ask again.',
+      );
+    }
     try {
       await packs.liftPermanentBan({
         customerId: proposal.customer_id,
@@ -115,7 +135,8 @@ export async function saveProposal(
       // Already lifted (a second tap) or never a permanent ban.
       if (
         err instanceof MedusaError &&
-        err.type === MedusaError.Types.NOT_ALLOWED
+        (err.type === MedusaError.Types.NOT_ALLOWED ||
+          err.type === MedusaError.Types.NOT_FOUND)
       ) {
         throw new ConfirmRefused(err.message);
       }
