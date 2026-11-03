@@ -3,13 +3,20 @@ import {
   SUPPORT_VIEWER_ROLE,
 } from '../create-support-viewer';
 import { CUSTOM_ADMIN_RESOURCES } from '../../api/admin-rbac';
+import { assistantPolicies } from '../../policies/assistant';
 
-// The Support viewer must stay VIEW-ONLY: one write policy here would let a
-// support login edit balances, approve payouts or change players.
+// The Support viewer must stay VIEW-ONLY on admin routes: a write policy there
+// would let a support login edit balances, approve payouts or change players.
+// Its one write is the assistant's unban, which no admin route checks.
 describe('Support viewer role', () => {
-  it('holds read policies only', () => {
+  it('holds read policies only, beside the assistant unban (owner, 2026-11-03)', () => {
     expect(SUPPORT_VIEWER_POLICIES.length).toBeGreaterThan(0);
-    for (const p of SUPPORT_VIEWER_POLICIES) expect(p.operation).toBe('read');
+    for (const p of SUPPORT_VIEWER_POLICIES) {
+      expect(
+        p.operation === 'read' ||
+          (p.resource === 'assistant_unban' && p.operation === 'update'),
+      ).toBe(true);
+    }
   });
 
   it('names only declared resources (core, or the custom admin table)', () => {
@@ -18,6 +25,7 @@ describe('Support viewer role', () => {
       'customer',
       'payment',
       ...Object.values(CUSTOM_ADMIN_RESOURCES),
+      ...assistantPolicies.policies.map((p) => p.resource),
     ]);
     for (const p of SUPPORT_VIEWER_POLICIES)
       expect(known.has(p.resource)).toBe(true);

@@ -296,6 +296,24 @@ export const TOOLS: AssistantTool[] = [
     run: report('support', 'account', (a) => ({ username: s(a.username) })),
   },
   {
+    name: 'ban_reason',
+    label: 'Why an account is banned',
+    description:
+      "Why one player's account is disabled or banned, by shown name or profile handle (never email or phone). For a permanent ban (one person with more than one account, owner 2026-11-03) it lists each bank account the player saved or was paid to (bank name and last 4 digits), whether that number is banned, and every OTHER account on the same number: its shown name, handle, whether it is banned, whether it used the same account holder name, and its settled payouts to that number. Use it whenever staff ask why an account was banned or which accounts share a bank; explain the link in plain words (for example: both accounts cashed out to Maybank ending 1605). A disable typed by staff keeps its reason on the admin player page. If staff ask to unban, use unban_account. Amounts in RM (MYR).",
+    parameters: object(
+      {
+        username: str(
+          "The player's shown name, or their profile handle (the part after /profile/ in their link).",
+        ),
+      },
+      ['username'],
+    ),
+    // Bank name and last 4 only, so the Support viewer (yu) may read it; it
+    // carries payout sums, so the payment screens' policy too.
+    needs: [read('customer'), read('payment')],
+    run: report('support', 'ban', (a) => ({ username: s(a.username) })),
+  },
+  {
     name: 'order',
     label: 'Delivery order',
     description:

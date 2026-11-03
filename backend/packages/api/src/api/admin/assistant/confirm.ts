@@ -1,8 +1,12 @@
 import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import type { MedusaContainer } from '@medusajs/framework/types';
+import { MedusaError } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
 import { MAX_SCHEDULES, nextRun } from './schedule';
+import { PACKS_MODULE } from '../../../modules/packs';
+import type PacksModuleService from '../../../modules/packs/service';
+import type { Need } from './access';
 
 // What lasts waits for a tap (security review 2026-10-29). A note or a
 // scheduled task would stay in front of the model in every later chat or run,
@@ -21,7 +25,25 @@ export type Proposal =
       every: 'day' | 'week';
       at_time: string;
       weekday: number | null;
+    }
+  // Lifting a permanent ban (owner, 2026-11-03): the account logs in again with
+  // its saved banks cleared, so the customer links one again themselves.
+  | {
+      kind: 'unban';
+      customer_id: string;
+      username: string;
+      reason: string;
+      /** When the ban this was proposed for began: a newer ban is not lifted
+       *  by an old button. */
+      banned_at: string;
     };
+
+/** What an unban needs, checked again when the person taps it: its own policy
+ *  (policies/assistant.ts), held by super admins and the Support viewer. */
+export const UNBAN_NEED: Need = {
+  resource: 'assistant_unban',
+  operation: 'update',
+};
 
 const TTL_MS = 30 * 60_000;
 const MAX_TOKEN = 8000;
@@ -78,10 +100,50 @@ export function openProposal(
  *  second tap on the same note saves nothing more. */
 export async function saveProposal(
   proposal: Proposal,
-  access: { userId: string; superAdmin: boolean },
+  access: {
+    userId: string;
+    superAdmin: boolean;
+    can?(need: Need): Promise<boolean>;
+  },
   container: MedusaContainer,
   now = new Date(),
 ): Promise<{ id: string; next_run_at?: Date }> {
+  if (proposal.kind === 'unban') {
+    if (!(await access.can?.(UNBAN_NEED))) {
+      throw new ConfirmRefused('Your role cannot unban players.');
+    }
+    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    const [state] = await packs.listCustomerAccountStates(
+      { customer_id: proposal.customer_id, disabled: true },
+      { select: ['disabled_at'], take: 1 },
+    );
+    if (
+      !state?.disabled_at ||
+      new Date(state.disabled_at).toISOString() !== proposal.banned_at
+    ) {
+      throw new ConfirmRefused(
+        'The ban changed since this was proposed. Ask again.',
+      );
+    }
+    try {
+      await packs.liftPermanentBan({
+        customerId: proposal.customer_id,
+        adminId: access.userId,
+        reason: proposal.reason,
+      });
+    } catch (err) {
+      // Already lifted (a second tap) or never a permanent ban.
+      if (
+        err instanceof MedusaError &&
+        (err.type === MedusaError.Types.NOT_ALLOWED ||
+          err.type === MedusaError.Types.NOT_FOUND)
+      ) {
+        throw new ConfirmRefused(err.message);
+      }
+      throw err;
+    }
+    return { id: proposal.customer_id };
+  }
   const assistant = container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
   if (proposal.kind === 'note') {
     if (proposal.shared && !access.superAdmin) {

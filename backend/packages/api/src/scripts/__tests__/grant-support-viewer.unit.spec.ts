@@ -81,8 +81,9 @@ describe('grantSupportViewer', () => {
   // The boundary this role depends on: an automation operator can hold it, and
   // must never get to choose whose wallet a live run spends.
   it('carries no write policy that would open the Automation account list', () => {
-    expect(SUPPORT_VIEWER_POLICIES.map((p) => p.operation)).not.toContain(
-      'update',
-    );
+    // Its one write is the assistant unban, which opens no admin route.
+    expect(
+      SUPPORT_VIEWER_POLICIES.filter((p) => p.operation !== 'read'),
+    ).toEqual([{ resource: 'assistant_unban', operation: 'update' }]);
   });
 });

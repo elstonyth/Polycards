@@ -23,4 +23,12 @@ export const assistantPolicies = definePolicies([
     operation: 'read',
     description: 'Let the admin assistant read admin screens for the asker.',
   },
+  {
+    // unban_account: lift a permanent ban (owner, 2026-11-03), with the saved
+    // banks cleared. Granted to the Support viewer (yu) beside super admins.
+    name: 'Polycards update assistant_unban',
+    resource: 'assistant_unban',
+    operation: 'update',
+    description: 'Lift a permanent ban with the admin assistant.',
+  },
 ]);

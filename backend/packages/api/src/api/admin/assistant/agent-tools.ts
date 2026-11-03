@@ -1,4 +1,8 @@
-import type { MedusaContainer } from '@medusajs/framework/types';
+import type {
+  ICustomerModuleService,
+  MedusaContainer,
+} from '@medusajs/framework/types';
+import { Modules } from '@medusajs/framework/utils';
 import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
@@ -11,7 +15,8 @@ import {
   MAX_DECODE_PIXELS,
 } from '../../utils/image-fetch';
 import type { Need } from './access';
-import type { Proposal } from './confirm';
+import { UNBAN_NEED, type Proposal } from './confirm';
+import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 
 // The assistant's own memory and search (owner, 2026-10-29: "it will search
@@ -115,6 +120,102 @@ async function conversationIds(ctx: Ctx): Promise<string[]> {
 }
 
 export const AGENT_TOOLS: AgentTool[] = [
+  {
+    name: 'unban_account',
+    label: 'Unban',
+    description:
+      'Lift a permanent ban (one person with more than one account, owner 2026-11-03) when staff ask you to unban a player, by shown name or profile handle (never email or phone). Nothing changes until the person taps Unban under your answer. On unban the player can log in again and every saved bank account on it is cleared: they link a bank again themselves, under the normal rules, and a banned bank number stays banned. Only a permanent ban is lifted here; a staff disable or a deleted account is handled on the admin player page. Use ban_reason first if staff want to know why it was banned.',
+    parameters: {
+      type: 'object',
+      properties: {
+        username: {
+          type: 'string',
+          description:
+            "The player's shown name, or their profile handle, exactly as staff wrote it.",
+        },
+        reason: {
+          type: 'string',
+          description:
+            "Why it is lifted, in staff's words (for example: owner approved after the customer explained).",
+        },
+      },
+      required: ['username'],
+      additionalProperties: false,
+    },
+    needs: [UNBAN_NEED],
+    run: async (args, ctx) => {
+      const username = str(args.username);
+      if (!username) throw new Error('username is required.');
+      // Only a player the person named in this very message, as a whole word: a
+      // name in data the model read (a customer field, a past chat) must not
+      // start one, and Collector1 must not match a message naming Collector12.
+      const words = (ctx.userText ?? '').toLowerCase().split(/[^a-z0-9_-]+/);
+      if (!words.includes(username.toLowerCase())) {
+        throw new Error(
+          'Unban only a player the person named in this message. Nothing was changed.',
+        );
+      }
+      const packs = ctx.container.resolve<PacksModuleService>(PACKS_MODULE);
+      const byName = await packs.findCustomerIdByUsername(username);
+      const byHandle = await packs.findCustomerIdByHandle(username);
+      if (byName && byHandle && byName !== byHandle) {
+        throw new Error(
+          `${username} is a shown name and a different player's handle. Ask staff for the name shown on the profile. Nothing was changed.`,
+        );
+      }
+      const customerId = byName ?? byHandle;
+      if (!customerId) {
+        throw new Error(`No player named ${username}. Nothing was changed.`);
+      }
+      const [state] = await packs.listCustomerAccountStates(
+        { customer_id: customerId, disabled: true },
+        { select: ['disabled_reason', 'disabled_at'], take: 1 },
+      );
+      if (
+        !state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX) ||
+        !state.disabled_at
+      ) {
+        throw new Error(
+          `${username} has no permanent ban to lift. A staff disable or a deleted account is handled on the admin player page. Nothing was changed.`,
+        );
+      }
+      // The card names the account as it really is, not as the model spelled it.
+      const [customer] = await ctx.container
+        .resolve<ICustomerModuleService>(Modules.CUSTOMER)
+        .listCustomers(
+          { id: customerId },
+          { select: ['first_name', 'metadata'], take: 1 },
+        );
+      const shown = customer?.first_name ?? username;
+      const handle =
+        typeof customer?.metadata?.handle === 'string'
+          ? customer.metadata.handle
+          : null;
+      // The reason lands in the audit under this person's name, so it must be
+      // their own words from this message; otherwise a plain default.
+      const given = str(args.reason).slice(0, 400);
+      const reason =
+        given && squash(ctx.userText ?? '').includes(squash(given))
+          ? given
+          : 'Unbanned on request in the admin assistant';
+      proposeOrRefuse(
+        ctx,
+        {
+          kind: 'unban',
+          customer_id: customerId,
+          username,
+          reason,
+          banned_at: new Date(state.disabled_at).toISOString(),
+        },
+        `Unban ${shown}${handle && handle !== shown ? ` (@${handle})` : ''}: they can log in again. Their saved bank accounts are cleared, so they link a bank again themselves; a banned bank number stays banned. Reason: ${reason}`,
+      );
+      return JSON.stringify({
+        unbanned: false,
+        waiting:
+          'Nothing has changed yet: an Unban button is under your answer, and the ban is lifted only when the person taps it. Tell them so in one short line, and that the player must link their bank again.',
+      });
+    },
+  },
   {
     name: 'remember',
     label: 'Remember',

@@ -364,6 +364,8 @@
       "voiceCost": "其中语音：USD {{cost}}"
     },
     "tools": {
+      "ban_reason": "封号原因",
+      "unban_account": "解封",
       "economy": "经济总览",
       "daily_economy": "每日经济",
       "payments": "充值与提款",
@@ -445,7 +447,7 @@
       "bad_stt_model": "设置 → AI 助手里的听写模型无法使用，需要管理员换一个。",
       "no_audio": "朗读模型没有返回声音。请再试一次，或在设置 → AI 助手换一个朗读模型。",
       "confirm_expired": "已过期，请重新提问。",
-      "confirm_refused": "保存失败：{{reason}}"
+      "confirm_refused": "未能完成：{{reason}}"
     },
     "spend": {
       "today": "今日已用 USD {{spent}} / {{cap}}",
@@ -462,6 +464,9 @@
       "saveTask": "保存任务",
       "saved": "已保存",
       "taskSaved": "任务已保存",
+      "unban": "解封",
+      "unbanned": "已解封",
+      "unbanHint": "点「解封」后才会生效。",
       "hint": "点保存才会保留。"
     },
     "copy": "复制",

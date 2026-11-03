@@ -382,6 +382,62 @@ medusaIntegrationTestRunner({
         expect(paid.data.message).toMatch(/name is already linked/);
       });
 
+      it('lifting a permanent ban clears the saved banks, a staff disable keeps them', async () => {
+        const a = await newCustomer('one-bank-q@test.dev');
+        await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678907', 'Banned Owner'),
+            asCustomer(a),
+          ),
+        );
+        await packs().setAccountDisabled({
+          customerId: a,
+          adminId: 'user_test',
+          disabled: true,
+          reason:
+            'Permanent ban: shared bank account, more than one account (owner, 2026-11-03)',
+        });
+        const lifted = await unwrapResponse(
+          api.post(
+            `/admin/customers/${a}/enable`,
+            { reason: 'owner approved' },
+            asAdmin(),
+          ),
+        );
+        expect(lifted.status).toBe(200);
+        expect(lifted.data).toMatchObject({
+          disabled: false,
+          cleared_bank_accounts: 1,
+        });
+        expect(await accounts(a)).toEqual([]);
+        expect(await packs().isAccountDisabled(a)).toBe(false);
+
+        const b = await newCustomer('one-bank-r@test.dev');
+        await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678908', 'Staff Disabled'),
+            asCustomer(b),
+          ),
+        );
+        await packs().setAccountDisabled({
+          customerId: b,
+          adminId: 'user_test',
+          disabled: true,
+          reason: 'chargeback check',
+        });
+        const enabled = await unwrapResponse(
+          api.post(
+            `/admin/customers/${b}/enable`,
+            { reason: 'checked' },
+            asAdmin(),
+          ),
+        );
+        expect(enabled.data).toEqual({ disabled: false });
+        expect(await accounts(b)).toHaveLength(1);
+      });
+
       it('one account per currency: an RM bank and a USDT wallet both fit', async () => {
         const a = await newCustomer('one-bank-p@test.dev');
         await unwrapResponse(

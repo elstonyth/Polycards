@@ -379,11 +379,12 @@ export async function POST(
       key,
       model: settings.chat_model,
       access,
+      // A scheduled run has nobody to tap: no lasting writes, and no unban.
       tools: (await allowedTools(access, TOOLS)).filter(
         (t) =>
           !(
             input.text.startsWith(SCHEDULED_PREFIX) &&
-            LASTING_WRITES.has(t.name)
+            (LASTING_WRITES.has(t.name) || t.name === 'unban_account')
           ),
       ),
       history,
