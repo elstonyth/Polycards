@@ -1059,7 +1059,7 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
     retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: saved } });
     await expect(
       POST(mkReq({ ...TNG, account_number: '120000000002' }), mkRes()),
-    ).rejects.toThrow(/already has a bank account for this currency/);
+    ).rejects.toThrow(/already has a Touch 'n Go account/);
   });
 });
 

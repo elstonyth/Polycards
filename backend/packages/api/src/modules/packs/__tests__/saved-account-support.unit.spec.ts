@@ -203,7 +203,7 @@ describe('addSavedBankAccount', () => {
     });
     await expect(
       svc.addSavedBankAccount({ ...base, verify: false }, ctx),
-    ).rejects.toThrow(/already has a bank account/);
+    ).rejects.toThrow(/already has an RM bank account/);
     expect(writes).toEqual([]);
     expect(audits).toEqual([]);
   });
@@ -219,7 +219,7 @@ describe('addSavedBankAccount', () => {
         { ...base, account: { ...tng, id: 'acc_tng2' }, verify: false },
         second.ctx,
       ),
-    ).rejects.toThrow(/already has a bank account/);
+    ).rejects.toThrow(/already has a Touch 'n Go account/);
   });
 });
 

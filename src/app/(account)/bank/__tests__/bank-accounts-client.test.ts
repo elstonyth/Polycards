@@ -480,6 +480,15 @@ describe('BankAccountsClient — one account per currency', () => {
     expect(bankOptions()).toEqual(['MBB', 'CIMB']);
   });
 
+  it("keeps RM banks on offer when a saved Touch 'n Go is off the bank list", async () => {
+    // Touch 'n Go payouts switched off: the list drops it, and the saved row's
+    // own bank code still marks the slot as taken.
+    await mountWith([saved('TNGMY', "Touch 'n Go eWallet")], MY);
+    act(() => addButton()!.click());
+    act(() => countryButton('Malaysia')!.click());
+    expect(bankOptions()).toEqual(['MBB', 'CIMB']);
+  });
+
   it("offers no Add once the RM bank and Touch 'n Go are both saved", async () => {
     await mountWith(
       [saved('MBB', 'Maybank'), saved('TNGMY', "Touch 'n Go eWallet")],

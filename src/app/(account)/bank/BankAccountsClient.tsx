@@ -20,10 +20,9 @@ import { cn } from '@/lib/utils';
 // withdraw form submits an account id and the server resolves the bank details
 // from here, so this page is the only place a payout destination is chosen. One
 // account per currency, Touch 'n Go apart from the RM bank, and once saved it
-// cannot be changed (ADR 0015, owner
-// 2026-11-03), so the form says so before the save. A bank's holder name is typed
-// twice and both must match. The backend validates with the
-// payout-submit rules; existing accounts are rechecked when listed and used.
+// cannot be changed (ADR 0015, owner 2026-11-03), so the form says so before the
+// save. A bank's holder name is typed twice and both must match. The backend
+// validates with the payout-submit rules; existing accounts are rechecked when listed and used.
 //
 // A newly added account may have to wait out a cooling-off window before it can
 // receive money; the server says when via `usableFrom`. That state is rendered

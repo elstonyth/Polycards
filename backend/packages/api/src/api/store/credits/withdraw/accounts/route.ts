@@ -26,6 +26,7 @@ import {
   HOLDER_NAME_LINKED_MESSAGE,
   MAX_SAVED_BANK_ACCOUNTS,
   ONE_BANK_ACCOUNT_MESSAGE,
+  ONE_TNG_ACCOUNT_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   SHARED_SAVE_MESSAGE,
   anySavedAccountShared,
@@ -364,7 +365,7 @@ export async function POST(
     ) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        ONE_BANK_ACCOUNT_MESSAGE,
+        slot === 'TNG' ? ONE_TNG_ACCOUNT_MESSAGE : ONE_BANK_ACCOUNT_MESSAGE,
       );
     }
     if (shared) {

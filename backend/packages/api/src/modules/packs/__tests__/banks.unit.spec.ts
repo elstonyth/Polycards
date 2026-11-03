@@ -6,7 +6,23 @@ import {
   canonicalBankCode,
   findBank,
   gatewayBankCode,
+  savedAccountSlot,
 } from '../banks';
+
+describe('savedAccountSlot', () => {
+  it("gives Touch 'n Go its own slot under any of its codes", () => {
+    for (const code of ['TNGMY', 'MYTNGO', 'TNGDRMYKL']) {
+      expect(savedAccountSlot(code)).toBe('TNG');
+    }
+  });
+
+  it('keeps one slot per currency for everything else', () => {
+    expect(savedAccountSlot('MBBEMYKL')).toBe('MYR');
+    expect(savedAccountSlot('DBSSSGSG')).toBe('SGD');
+    expect(savedAccountSlot('USDTTRC20')).toBe('USDT');
+    expect(savedAccountSlot(null)).toBe('MYR');
+  });
+});
 
 describe('bank registry', () => {
   it('ids are unique, uppercase alphanumeric (the withdrawal validator admits nothing else)', () => {

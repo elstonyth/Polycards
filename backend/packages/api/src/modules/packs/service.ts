@@ -10126,7 +10126,7 @@ class PacksModuleService extends MedusaService({
     }
   }
 
-  // Support adds a bank account for a player whose list is empty: the one way in
+  // Support adds a saved account in a free slot (savedAccountSlot): the one way in
   // for a real owner whose number another account already holds, which a customer
   // save refuses for good because paid-out rows are permanent. The account starts
   // its cooling-off window like any other. `verify` stamps it when it is shared.
@@ -10151,9 +10151,17 @@ class PacksModuleService extends MedusaService({
             accounts.filter((a) => savedAccountSlot(a.bankCode) === slot)
               .length >= MAX_SAVED_BANK_ACCOUNTS
           ) {
+            // Names the slot: an RM bank and a Touch 'n Go share a currency, so
+            // "this currency" would not say which one to remove.
+            const held = {
+              MYR: 'an RM bank account',
+              TNG: "a Touch 'n Go account",
+              SGD: 'an SGD bank account',
+              USDT: 'a USDT wallet',
+            }[slot];
             throw new MedusaError(
               MedusaError.Types.NOT_ALLOWED,
-              'This player already has a bank account for this currency. Remove it first.',
+              `This player already has ${held}. Remove it first.`,
             );
           }
           return {
