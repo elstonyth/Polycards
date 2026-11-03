@@ -89,6 +89,11 @@ The owner tightened the rule after the farm rings were listed:
   beside another carries a holder name already saved on that account, compared as
   real names are. A wallet has none. Support's add is the way past it for a name
   two banks spell differently, and the refusal says to contact support.
+- **Same name, different person** (owner, 2026-11-04). Two real people can share a
+  name. Support checks, then clears the name on each account from the player page
+  (`bank-accounts/name-clash`); that account's saves then stop counting the other's
+  use of it. Per account and per name, audited, and it can be taken back; a third
+  account using the name is still refused.
 - **Reset.** Every customer's saved list and share stamps were cleared once, after a
   private backup, so everyone saves again under these rules. Payout rows keep their
   own destination, so open payouts were untouched.
