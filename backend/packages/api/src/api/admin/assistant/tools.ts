@@ -299,19 +299,26 @@ export const TOOLS: AssistantTool[] = [
     name: 'ban_reason',
     label: 'Why an account is banned',
     description:
-      "Why one player's account is disabled or banned, by shown name or profile handle (never email or phone). For a permanent ban (one person with more than one account, owner 2026-11-03) it lists each bank account the player saved or was paid to (bank name and last 4 digits), whether that number is banned, and every OTHER account on the same number: its shown name, handle, whether it is banned, whether it used the same account holder name, and its settled payouts to that number. Use it whenever staff ask why an account was banned or which accounts share a bank; explain the link in plain words (for example: both accounts cashed out to Maybank ending 1605). A disable typed by staff keeps its reason on the admin player page. If staff ask to unban, use unban_account. Amounts in RM (MYR).",
-    parameters: object(
-      {
-        username: str(
-          "The player's shown name, or their profile handle (the part after /profile/ in their link).",
-        ),
-      },
-      ['username'],
-    ),
+      'Why accounts are banned and who is linked with whom (one person, more than one account; owner 2026-11-03). Look up by whatever staff give, exactly ONE of: username (shown name or profile handle), email, phone, bank_account (the account number staff pasted), or holder_name (the bank account holder name). For a player (username, email or phone) it gives the ban state and reason, linked_accounts_total, and each bank the player saved or was paid to (bank name and last 4 digits), whether that number is banned, and every OTHER account on it: shown name, handle, banned or not, same account holder name or not, and settled payouts to it. For a bank_account it lists every account that saved it or was paid to it, with holder_name_group (same number = same holder name) and payouts. For a holder_name it lists every account that used that name and the banks it used. Use it whenever staff ask why an account is banned, who shares a bank, how many accounts someone has, or who owns a bank account or name. Explain the links in plain words (for example: these 3 accounts all cashed out to Hong Leong ending 8014 under one name). Never repeat a full bank account number, email or phone back: say the bank and last 4 digits. A disable typed by staff keeps its reason on the admin player page. If staff ask to unban, use unban_account. Amounts in RM (MYR).',
+    parameters: object({
+      username: str(
+        "The player's shown name, or their profile handle (the part after /profile/ in their link).",
+      ),
+      email: str("The account's email address."),
+      phone: str("The account's phone number, any format (at least 8 digits)."),
+      bank_account: str('A bank account number, any format.'),
+      holder_name: str('A bank account holder name.'),
+    }),
     // Bank name and last 4 only, so the Support viewer (yu) may read it; it
     // carries payout sums, so the payment screens' policy too.
     needs: [read('customer'), read('payment')],
-    run: report('support', 'ban', (a) => ({ username: s(a.username) })),
+    run: report('support', 'ban', (a) => ({
+      username: s(a.username),
+      email: s(a.email),
+      phone: s(a.phone),
+      bank_account: s(a.bank_account),
+      holder_name: s(a.holder_name),
+    })),
   },
   {
     name: 'order',

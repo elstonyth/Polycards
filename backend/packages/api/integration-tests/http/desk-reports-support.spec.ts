@@ -353,6 +353,47 @@ medusaIntegrationTestRunner({
         expectNoSecrets(res.data);
         expect(JSON.stringify(res.data)).not.toContain(NUMBER);
         expect(JSON.stringify(res.data)).not.toContain('Same Person');
+        expect(res.data.linked_accounts_total).toBe(1);
+
+        // By whatever staff have: the number, the holder name, email, phone.
+        const byNumber = await report(
+          `ban?bank_account=${encodeURIComponent('5123-4567-8955')}`,
+        );
+        expect(byNumber.status).toBe(200);
+        expect(byNumber.data).toMatchObject({
+          bank_account: { bank: 'Maybank', last4: '8955', banned_number: true },
+          account_count: 2,
+        });
+        const groups = byNumber.data.accounts.map(
+          (a: { holder_name_group: number | null }) => a.holder_name_group,
+        );
+        expect(groups[0]).not.toBeNull();
+        expect(new Set(groups).size).toBe(1);
+        const byName = await report('ban?holder_name=same%20person');
+        expect(byName.data).toMatchObject({ account_count: 2 });
+        expect(byName.data.accounts[0].banks).toEqual([
+          { bank: 'Maybank', last4: '8955' },
+        ]);
+        // Email and phone find signed-up accounts only, never a guest twin.
+        await pg().raw('UPDATE customer SET has_account = true WHERE id = ?', [ownerId]);
+        const byEmail = await report('ban?email=SP-OWNER%40test.dev');
+        expect(byEmail.data).toMatchObject({
+          username: 'Order_Owner',
+          permanent_ban: true,
+        });
+        const byPhone = await report('ban?phone=0188888888');
+        expect(byPhone.data).toMatchObject({ username: 'Order_Owner' });
+        for (const r of [byNumber, byName, byEmail, byPhone]) {
+          expectNoSecrets(r.data);
+          expect(JSON.stringify(r.data)).not.toContain(NUMBER);
+          expect(JSON.stringify(r.data)).not.toContain('Same Person');
+        }
+        expect((await report('ban')).status).toBe(400);
+        expect(
+          (await report('ban?username=order_owner&email=a%40b.c')).status,
+        ).toBe(400);
+        expect((await report('ban?bank_account=1234')).status).toBe(400);
+        expect((await report('ban?email=nobody%40test.dev')).status).toBe(404);
       });
 
       it('keeps a staff-typed disable reason private', async () => {
