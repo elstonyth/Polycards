@@ -233,6 +233,11 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     },
     // WD 1.5% (back office, above): a S$50.79 payout cost S$51.55 live.
     payoutFeePercent: 1.5,
+    // A3Pay's nudge grows with how many same-amount orders are open on its
+    // shared collection account: S$100 orders reached .08, .09 and then .11
+    // (2026-11-04, PC-ad171adf…), and the default 10-cent window left a paid
+    // S$100.11 unlocked and quarantined. Up to S$1, as GlobePay365's.
+    payinNudgeCents: 100,
   },
 
   // USDT, beside the active RM gateway like A3Pay — and on the same platform
