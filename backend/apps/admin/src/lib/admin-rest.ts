@@ -2696,6 +2696,18 @@ export interface CreateGoodsReceiveNoteBody {
 export const createGoodsReceiveNote = (body: CreateGoodsReceiveNoteBody) =>
   postJson<{ goods_receive_note: GrnRef }>('/admin/goods-receive-notes', body);
 
+// Same body as a new GRN, under the same number. Only an OPEN GRN can be
+// edited; anything else is a 400 with a readable message, which the mutation
+// toasts.
+export const updateGoodsReceiveNote = (
+  id: string,
+  body: CreateGoodsReceiveNoteBody,
+) =>
+  postJson<{ goods_receive_note: GrnRef }>(
+    `/admin/goods-receive-notes/${encodeURIComponent(id)}`,
+    body,
+  );
+
 // Only an OPEN GRN can be reversed; anything else is a 400 with a readable
 // message, which the mutation toasts.
 export const reverseGoodsReceiveNote = (id: string) =>

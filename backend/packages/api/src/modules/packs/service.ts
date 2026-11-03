@@ -252,6 +252,7 @@ import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
 import { fromSen, LEDGER_CURRENCY, toMoney, toSen } from './money';
+import { grnQtyDelta } from './grn-delta';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   resolveFxRate,
@@ -18249,11 +18250,12 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // Loads a GRN for a reversal or a transfer, under its lock, and refuses one
-  // whose fate is already decided. Must run inside the caller's transaction.
+  // Loads a GRN for a reversal, a transfer or an edit, under its lock, and
+  // refuses one whose fate is already decided. Must run inside the caller's
+  // transaction.
   private async lockOpenGoodsReceiveNote(
     grnId: string,
-    use: 'reverse' | 'transfer',
+    use: 'reverse' | 'transfer' | 'edit',
     sharedContext: Context,
   ) {
     await this.lockGoodsReceiveNote(grnId, sharedContext);
@@ -18271,7 +18273,7 @@ class PacksModuleService extends MedusaService({
     if (grn.reverses_grn_id) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        `${grn.display_no} is itself a reversal and cannot be ${use === 'reverse' ? 'reversed' : 'transferred'}.`,
+        `${grn.display_no} is itself a reversal and cannot be ${{ reverse: 'reversed', transfer: 'transferred', edit: 'edited' }[use]}.`,
       );
     }
     const [reversal] = await this.listGoodsReceiveNotes(
@@ -18420,6 +18422,102 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { ...grn, lines };
+  }
+
+  // Edits an open GRN in place (owner 2026-11-03: a typo no longer needs a
+  // reversal plus a new note). Same lock and "still open" check as a reversal
+  // or a transfer, so an edit cannot race either. The old lines are
+  // soft-deleted and the new ones written under the same GRN number;
+  // stock_movement stays append-only, so each card whose qty changed gets one
+  // 'goods_receive' row for the difference. Returns that difference too, for
+  // the Medusa counter.
+  @InjectTransactionManager()
+  async updateGoodsReceiveNoteWithLines(
+    grnId: string,
+    input: {
+      date: string;
+      supplier: string;
+      agent_user_id: string;
+      lines: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: number;
+        qty: number;
+      }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    // The route validator already refuses these; repeated here because the
+    // method is public.
+    if (input.lines.length === 0 || input.lines.some((l) => !(l.qty > 0))) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Goods receive note lines need a quantity above 0; to take every card off, reverse the note.',
+      );
+    }
+    const { grn, lines: before } = await this.lockOpenGoodsReceiveNote(
+      grnId,
+      'edit',
+      sharedContext,
+    );
+
+    await this.softDeleteGoodsReceiveNoteLines(
+      before.map((l) => l.id),
+      {},
+      sharedContext,
+    );
+    const [updated] = await this.updateGoodsReceiveNotes(
+      [{ id: grn.id, date: new Date(input.date), supplier: input.supplier }],
+      sharedContext,
+    );
+    const lines = await this.createGoodsReceiveNoteLines(
+      input.lines.map((l) => ({
+        grn_id: grn.id,
+        card_handle: l.card_handle,
+        card_name: l.card_name,
+        fmv_snapshot: l.fmv_snapshot,
+        qty: l.qty,
+      })),
+      sharedContext,
+    );
+    const delta = grnQtyDelta(before, lines);
+    if (delta.length) {
+      await this.createStockMovements(
+        delta.map((d) => ({
+          card_handle: d.card_handle,
+          kind: 'goods_receive' as const,
+          qty: d.qty,
+          ref_id: d.ref_id,
+        })),
+        sharedContext,
+      );
+    }
+
+    const snapshot = (
+      g: { date: Date; supplier: string },
+      ls: { card_handle: string; fmv_snapshot: unknown; qty: number }[],
+    ) => ({
+      date: new Date(g.date).toISOString(),
+      supplier: g.supplier,
+      lines: ls.map((l) => ({
+        card_handle: l.card_handle,
+        fmv_snapshot: Number(l.fmv_snapshot),
+        qty: Number(l.qty),
+      })),
+    });
+    await this.audit(
+      {
+        admin_id: input.agent_user_id,
+        entity_type: 'goods_receive_note',
+        entity_id: grn.id,
+        action: 'edit',
+        before: snapshot(grn, before),
+        after: snapshot(updated, lines),
+        reason: 'goods receive note edited',
+      },
+      sharedContext,
+    );
+    return { ...updated, lines, delta };
   }
 
   // Compensation-only hard delete, the twin of deletePurchaseInvoiceCascade:

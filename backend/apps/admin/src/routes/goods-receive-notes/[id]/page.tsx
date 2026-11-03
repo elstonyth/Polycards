@@ -33,8 +33,9 @@ const GoodsReceiveNoteDetailPage = () => {
   // Only a 404 means "no such GRN" — a 500 or an expired session is not.
   const notFound = httpStatus(error) === 404;
   const grn = data?.goods_receive_note;
-  // Both actions exist only while the GRN waits for its invoice: a transferred
-  // GRN is corrected by reversing its invoice, and a reversal is final.
+  // Every action exists only while the GRN waits for its invoice: a
+  // transferred GRN is corrected by reversing its invoice, and a reversal is
+  // final.
   const open = grn?.status === 'open';
 
   // Number(): bigNumber column, may arrive as a numeric string.
@@ -93,6 +94,18 @@ const GoodsReceiveNoteDetailPage = () => {
                 </div>
                 {open ? (
                   <div className="flex items-center gap-2">
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      disabled={reverse.isPending}
+                      onClick={() =>
+                        navigate(
+                          `/goods-receive-notes/${encodeURIComponent(grn.id)}/edit`,
+                        )
+                      }
+                    >
+                      {t('grn.edit')}
+                    </Button>
                     <Button
                       size="small"
                       variant="secondary"

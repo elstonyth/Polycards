@@ -1823,7 +1823,9 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
-      matcher: '/admin/goods-receive-notes/*/reverse',
+      // Edit (POST /:id) and reverse (POST /:id/reverse): "*" spans "/", so
+      // this one entry covers both.
+      matcher: '/admin/goods-receive-notes/*',
       method: ['POST'],
       middlewares: [adminActionRateLimit],
     },

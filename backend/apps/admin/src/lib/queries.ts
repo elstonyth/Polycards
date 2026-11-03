@@ -2263,6 +2263,7 @@ import {
   getProcurementToShip,
   listGoodsReceiveNotes,
   reverseGoodsReceiveNote,
+  updateGoodsReceiveNote,
   type AdminGoodsReceiveNoteDetail,
   type CreateGoodsReceiveNoteBody,
   type GoodsReceiveNotesPage,
@@ -2359,6 +2360,21 @@ export const useCreateGoodsReceiveNote = () => {
       createGoodsReceiveNote(body),
     onSuccess: () => {
       toast.success(t('grn.created'));
+      invalidateStock();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// An edit moves on hand by the difference — same invalidation as a save.
+export const useUpdateGoodsReceiveNote = () => {
+  const { t } = useTranslation();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: CreateGoodsReceiveNoteBody }) =>
+      updateGoodsReceiveNote(id, body),
+    onSuccess: () => {
+      toast.success(t('grn.edited'));
       invalidateStock();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),

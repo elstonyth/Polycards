@@ -1,4 +1,8 @@
-import { MedusaError } from '@medusajs/framework/utils';
+import type { MedusaContainer } from '@medusajs/framework/types';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../../modules/packs';
+import type PacksModuleService from '../../../modules/packs/service';
+import { resolveFxRateStrict } from '../../../modules/packs/pricing';
 import type { GoodsReceiveNoteLineInput } from '../../../workflows/steps/create-goods-receive-note-records';
 
 const bad = (message: string): never => {
@@ -12,8 +16,9 @@ export type CreateGoodsReceiveNoteBody = {
 };
 
 // Same limits as purchase-invoices/validate.ts. A GRN body carries no cost
-// and only positive quantities: a correction is POST /:id/reverse, which
-// builds its own negative lines from the GRN it undoes.
+// and only positive quantities: a correction is an edit (POST /:id, same
+// body) or POST /:id/reverse, which builds its own negative lines from the
+// GRN it undoes.
 const MAX_LINES = 200;
 const MAX_TEXT = 256;
 const MAX_MONEY = 1_000_000;
@@ -73,6 +78,36 @@ export function coerceCreateGoodsReceiveNoteBody(
     };
   });
   return { date: b.date as string, supplier, lines };
+}
+
+// The checks a new GRN and an edit both need before they save.
+export async function checkGrnLines(
+  scope: MedusaContainer,
+  lines: GoodsReceiveNoteLineInput[],
+): Promise<void> {
+  // Same gate as a purchase invoice: the form's FMV prefill is priced off
+  // the FX rate, so refuse while that rate is unknown.
+  await resolveFxRateStrict(scope.resolve<PacksModuleService>(PACKS_MODULE));
+
+  // Same existence gate as purchase-invoices/route.ts: every line must name a
+  // real product handle.
+  const productModule = scope.resolve(Modules.PRODUCT);
+  const handles = [...new Set(lines.map((l) => l.card_handle))];
+  const products = await productModule.listProducts(
+    { handle: handles },
+    { take: handles.length, select: ['handle'] },
+  );
+  const valid = new Set(products.map((p) => p.handle));
+  const unknown = lines
+    .map((l, i) => ({ i, card_handle: l.card_handle }))
+    .filter(({ card_handle }) => !valid.has(card_handle));
+  if (unknown.length) {
+    bad(
+      `Unknown card_handle — no matching product for ${unknown
+        .map(({ i, card_handle }) => `lines[${i}] ('${card_handle}')`)
+        .join(', ')}.`,
+    );
+  }
 }
 
 export default coerceCreateGoodsReceiveNoteBody;

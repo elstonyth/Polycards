@@ -165,6 +165,34 @@ export function grnDraftError(
   return i === -1 ? null : `Line ${i + 1} qty must be above 0.`;
 }
 
+/** The saved lines of a GRN as the edit form starts from them. */
+export function grnDraftLines(
+  lines: { card_handle: string; card_name: string; fmv_snapshot: number | string; qty: number }[],
+): GrnDraftLine[] {
+  return lines.map((l) => ({
+    card_handle: l.card_handle,
+    card_name: l.card_name,
+    // bigNumber column: may arrive as a numeric string.
+    fmv_snapshot: Number(l.fmv_snapshot).toFixed(2),
+    qty: String(l.qty),
+  }));
+}
+
+/** True when an edit leaves any card with fewer units on the note than it had
+ *  saved, counted per card across lines — On Hand then goes down, so the form
+ *  warns before it saves. */
+export function grnQtyLowered(
+  saved: { card_handle: string; qty: number | string }[],
+  draft: { card_handle: string; qty: number | string }[],
+): boolean {
+  const left = new Map<string, number>();
+  for (const l of saved)
+    left.set(l.card_handle, (left.get(l.card_handle) ?? 0) + Number(l.qty));
+  for (const l of draft)
+    left.set(l.card_handle, (left.get(l.card_handle) ?? 0) - Number(l.qty));
+  return [...left.values()].some((n) => n > 0);
+}
+
 /**
  * A date-only value is the OPERATOR'S Asia/Kuala_Lumpur calendar day — the same
  * decision Epic 4 settled for the ledger's date filters, for the same reason:
