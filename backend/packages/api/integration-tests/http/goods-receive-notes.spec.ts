@@ -365,7 +365,9 @@ medusaIntegrationTestRunner({
           lines: [lineOf('grn-edit-a', 1), lineOf('grn-edit-b', 2)],
         });
         expect(res.status).toBe(200);
-        expect(res.data.goods_receive_note.display_no).toBe(received.display_no);
+        expect(res.data.goods_receive_note.display_no).toBe(
+          received.display_no,
+        );
 
         const after = await detail(received.id);
         expect(after).toMatchObject({
@@ -378,12 +380,11 @@ medusaIntegrationTestRunner({
           '2026-10-30T16:00:00.000Z',
         );
         expect(
-          after.lines.map((l: { card_handle: string; qty: number }) =>
-            `${l.card_handle} x ${l.qty}`,
+          after.lines.map(
+            (l: { card_handle: string; qty: number }) =>
+              `${l.card_handle} x ${l.qty}`,
           ),
-        ).toEqual(
-          expect.arrayContaining(['grn-edit-a x 1', 'grn-edit-b x 2']),
-        );
+        ).toEqual(expect.arrayContaining(['grn-edit-a x 1', 'grn-edit-b x 2']));
         expect(after.lines).toHaveLength(2);
 
         expect(await stockOf('grn-edit-a')).toMatchObject({
@@ -461,7 +462,8 @@ medusaIntegrationTestRunner({
         expect(late.status).toBe(400);
         expect(late.data.message).toMatch(/already transferred/);
 
-        const undone = (await grn('grn-edit-closed', 1)).data.goods_receive_note;
+        const undone = (await grn('grn-edit-closed', 1)).data
+          .goods_receive_note;
         const reversal = (await reverse(undone.id)).data.goods_receive_note;
         const reversed = await edit(undone.id, {
           lines: [lineOf('grn-edit-closed', 5)],

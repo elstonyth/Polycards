@@ -167,7 +167,12 @@ export function grnDraftError(
 
 /** The saved lines of a GRN as the edit form starts from them. */
 export function grnDraftLines(
-  lines: { card_handle: string; card_name: string; fmv_snapshot: number | string; qty: number }[],
+  lines: {
+    card_handle: string;
+    card_name: string;
+    fmv_snapshot: number | string;
+    qty: number;
+  }[],
 ): GrnDraftLine[] {
   return lines.map((l) => ({
     card_handle: l.card_handle,

@@ -2371,8 +2371,13 @@ export const useUpdateGoodsReceiveNote = () => {
   const { t } = useTranslation();
   const invalidateStock = useInvalidateStock();
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: CreateGoodsReceiveNoteBody }) =>
-      updateGoodsReceiveNote(id, body),
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: CreateGoodsReceiveNoteBody;
+    }) => updateGoodsReceiveNote(id, body),
     onSuccess: () => {
       toast.success(t('grn.edited'));
       invalidateStock();

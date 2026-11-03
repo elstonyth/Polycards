@@ -27,7 +27,8 @@ const EditGoodsReceiveNotePage = () => {
             : t('grn.detailLoadError')
           : t('grn.notEditable', {
               no: grn.display_no,
-              status: t(`grn.status.${grn.status}`),
+              // Mid-sentence in English; a no-op in Chinese.
+              status: t(`grn.status.${grn.status}`).toLowerCase(),
             })}
       </Text>
       <Link

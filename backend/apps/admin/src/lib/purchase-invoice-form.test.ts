@@ -35,7 +35,9 @@ describe('GRN edit', () => {
       grnDraftLines([
         { card_handle: 'a', card_name: 'A', fmv_snapshot: '12.5', qty: 3 },
       ]),
-    ).toEqual([{ card_handle: 'a', card_name: 'A', fmv_snapshot: '12.50', qty: '3' }]);
+    ).toEqual([
+      { card_handle: 'a', card_name: 'A', fmv_snapshot: '12.50', qty: '3' },
+    ]);
   });
 
   test('warns only when a card ends with fewer units, counted across lines', () => {
