@@ -145,6 +145,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await MikroOrmWrapper.forkManager().execute(
         'create table if not exists "customer" ("id" text primary key, "metadata" jsonb, "deleted_at" timestamptz null)',
       );
+      // The banned-number table is raw SQL too (Migration20261103230000).
+      await MikroOrmWrapper.forkManager().execute(
+        'create table if not exists "banned_payout_account" ("account_key" text not null primary key, "bank_code" text null, "reason" text null, "created_at" timestamptz not null default now())',
+      );
       sent = [];
       logged = [];
       called = [];
@@ -264,6 +268,28 @@ moduleIntegrationTestRunner<PacksModuleService>({
         ).rejects.toThrow(/linked to another Polycards account/);
         expect(fakeGateway.calls.withdrawals).toEqual([]);
         expect((await reread(row.id)).status).toBe('held');
+      });
+
+      it('refuses a banned number, and the row stays held (owner, 2026-11-03)', async () => {
+        const row = await seed();
+        const em = MikroOrmWrapper.forkManager();
+        await em.execute(
+          'insert into "banned_payout_account" ("account_key") values (?)',
+          [ACCOUNT_NUMBER.replace(/^0+/, '')],
+        );
+        try {
+          await expect(
+            submitHeldWithdrawal(scope, {
+              withdrawalId: row.id,
+              adminId: 'admin_1',
+              payerIp: '10.0.0.1',
+            }),
+          ).rejects.toThrow(/banned on Polycards/);
+          expect(fakeGateway.calls.withdrawals).toEqual([]);
+          expect((await reread(row.id)).status).toBe('held');
+        } finally {
+          await em.execute('delete from "banned_payout_account"');
+        }
       });
 
       it('submits the row’s OWN stored destination, stamps the gateway id and moves no money', async () => {
