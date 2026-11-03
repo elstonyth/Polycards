@@ -136,6 +136,10 @@ export type TransitionVerdict =
 
 // Allowed admin transitions. Cancel is only legal before the parcel ships
 // (a shipped parcel can't revert to the vault). completed/canceled are terminal.
+// ready_to_ship -> processed is staff's one step back, for an order whose cards
+// turn out not to be there, such as a GRN reversed after a stock run (operator,
+// 2026-11-03). The stock run itself only moves forward, and takes the order on
+// again once the stock covers it. Customer cancel stays closed either way.
 //
 // Same two-layer shape as CUSTOMER_STATUS_WORD, for the same reason.
 // CANONICAL_ALLOWED is Record<DeliveryStatus, …>, so the real pipeline keeps
@@ -151,7 +155,7 @@ export type TransitionVerdict =
 const CANONICAL_ALLOWED: Record<DeliveryStatus, DeliveryStatus[]> = {
   requested: ['processed', 'canceled'],
   processed: ['ready_to_ship', 'canceled'],
-  ready_to_ship: ['shipped', 'canceled'],
+  ready_to_ship: ['shipped', 'processed', 'canceled'],
   shipped: ['completed'],
   completed: [],
   canceled: [],

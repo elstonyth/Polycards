@@ -105,7 +105,7 @@ row), reward
 **Delivery Order**:
 A customer's request to physically ship one or more vaulted Pulls, with its own
 `requested → processed → ready_to_ship → shipped → completed` status (cancel is
-legal pre-ship). A shipment reaching _completed_ (the customer is told
+legal pre-ship, and staff can step ready_to_ship back to processed). A shipment reaching _completed_ (the customer is told
 "delivered") is a different fact from a Pull being _delivered_ — do not conflate
 the two lifecycles.
 _Avoid_: order (a DeliveryOrder is not a Medusa checkout order)
