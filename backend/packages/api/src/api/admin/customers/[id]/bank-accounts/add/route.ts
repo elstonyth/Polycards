@@ -13,7 +13,10 @@ import { withdrawalDetailsError } from '../../../../../../modules/packs/gateway-
 import { sendSavedAccountAddedNotice } from '../../../../../../modules/packs/saved-account-notice';
 import {
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
+  HOLDER_NAME_INVALID_MESSAGE,
   heldByAnother,
+  holderNameInvalid,
+  normalizeHolderName,
   newSavedBankAccount,
   verifiedElsewhere,
 } from '../../../../../../modules/packs/saved-accounts';
@@ -67,8 +70,16 @@ export async function POST(
   const account = newSavedBankAccount(
     bank,
     body.account_number as string,
-    (body.account_holder_name as string | undefined) ?? '',
+    normalizeHolderName((body.account_holder_name as string | undefined) ?? ''),
   );
+  // Stored and compared as a customer save stores it, so the one-name rule sees
+  // support's entries too.
+  if (!bank.wallet && holderNameInvalid(account.accountHolderName)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      HOLDER_NAME_INVALID_MESSAGE,
+    );
+  }
 
   const customerId = req.params.id;
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);

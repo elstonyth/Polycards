@@ -143,8 +143,14 @@ export function verificationNotice(missing: readonly string[]): {
       text: 'To claim rewards, verify your phone number in Settings.',
       link: settings,
     };
+  if (phone && bank)
+    return {
+      text: 'To claim rewards, verify your phone number and add your bank account.',
+      link: settings,
+    };
+  // Nothing this build knows was named: no claim about what is left.
   return {
-    text: 'To claim rewards, verify your phone number and add your bank account.',
+    text: 'Finish verifying your account to claim rewards.',
     link: settings,
   };
 }

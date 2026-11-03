@@ -391,7 +391,90 @@ describe('BankAccountsClient — a tied account', () => {
   });
 });
 
+describe('BankAccountsClient — one account per currency', () => {
+  const USDT = {
+    bankCode: 'USDTTRC20',
+    bankName: 'USDT (TRC20)',
+    currency: 'USDT',
+    wallet: 'tron',
+  };
+  const WALLET = {
+    id: 'acc_w',
+    bankCode: 'USDTTRC20',
+    bankName: 'USDT (TRC20)',
+    accountNumber: 'TXYZ',
+    accountHolderName: 'USDT (TRC20)',
+    usableFrom: '2026-01-01T00:00:00.000Z',
+    supported: true,
+    wallet: 'tron',
+  };
+  const mountWith = async (accounts: unknown[], banks: unknown[]) => {
+    fetchSavedBankAccounts.mockResolvedValue({ ok: true, accounts });
+    fetchWithdrawBanks.mockResolvedValue({ ok: true, banks });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(BankAccountsClient));
+    });
+  };
+  const addButton = () =>
+    [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Add bank account',
+    );
+
+  it('lets a wallet-only customer add a bank, never a second wallet', async () => {
+    await mountWith([WALLET], [...MY, ...SG, USDT]);
+    act(() => addButton()!.click());
+    expect(countryButton('Malaysia')).toBeDefined();
+    expect(countryButton('Singapore')).toBeDefined();
+    expect(countryButton('USDT')).toBeUndefined();
+  });
+
+  it('offers the wallet while none is saved', async () => {
+    await mountWith([], [...MY, USDT]);
+    act(() => addButton()!.click());
+    expect(countryButton('USDT')).toBeDefined();
+  });
+
+  it('offers no Add once every currency has its account', async () => {
+    await mountWith([WALLET], [USDT]);
+    expect(addButton()).toBeUndefined();
+  });
+});
+
 describe('BankAccountsClient — holder name typed twice', () => {
+  it('stays quiet while the second name is still being typed, and Cancel clears both', async () => {
+    await openAddForm(MY);
+    act(() => countryButton('Malaysia')!.click());
+    setValue('Bank', 'MBB');
+    setValue('Account holder name', 'Test Customer');
+    setValue('Confirm account holder name', 'test cus');
+    expect(container.textContent).not.toContain('The two names do not match');
+    expect(
+      container
+        .querySelector('[aria-label="Confirm account holder name"]')
+        ?.getAttribute('autocomplete'),
+    ).toBe('off');
+    const cancel = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Cancel',
+    )!;
+    act(() => cancel.click());
+    const add = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Add bank account',
+    )!;
+    act(() => add.click());
+    for (const label of [
+      'Account holder name',
+      'Confirm account holder name',
+    ]) {
+      expect(
+        container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
+          .value,
+      ).toBe('');
+    }
+  });
+
   it('keeps Save off until both names match, then sends both', async () => {
     await openAddForm(MY);
     act(() => countryButton('Malaysia')!.click());

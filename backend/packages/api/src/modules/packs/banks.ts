@@ -328,14 +328,14 @@ export function bankPayoutMinRm(alias: string | null | undefined): number | null
 }
 
 /** The currency a destination is paid in, fixed per bank so a gateway switch
- *  never changes it: USDT for a wallet, SGD for a Singapore bank (A3Pay's), RM
+ *  never changes it: USDT for a wallet, SGD for a Singapore bank, RM
  *  otherwise. One saved account per currency (owner, 2026-11-03). */
 export function bankCurrency(
   alias: string | null | undefined,
 ): 'USDT' | 'SGD' | 'MYR' {
   const bank = findBank(alias);
   if (bank?.wallet) return 'USDT';
-  return bank?.codes.a3pay ? 'SGD' : 'MYR';
+  return SG_BANKS.some((b) => b.id === bank?.id) ? 'SGD' : 'MYR';
 }
 
 /** Canonical id for any alias, or null if the bank is unknown. */

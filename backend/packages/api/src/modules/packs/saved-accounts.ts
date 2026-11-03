@@ -45,6 +45,32 @@ export const HOLDER_NAME_CONFIRM_MESSAGE =
 export const HOLDER_NAME_LINKED_MESSAGE =
   'This name is already linked to another Polycards account.';
 
+export const HOLDER_NAME_INVALID_MESSAGE =
+  'Enter the account holder name in English letters, exactly as your bank shows it.';
+
+/** A bank holder name as stored and compared: NFKC, invisible format characters
+ *  dropped, any run of Unicode spaces one space. Look-alike spellings of one
+ *  name must not pass the one-name rule as different names. */
+export function normalizeHolderName(raw: string): string {
+  return raw
+    .normalize('NFKC')
+    .replace(/\p{Cf}/gu, '')
+    .replace(/\p{White_Space}+/gu, ' ')
+    .trim();
+}
+
+// Latin letters (accents included), digits and the punctuation bank names
+// carry. Other scripts are refused: a Cyrillic look-alike would read as the
+// same name to staff and as a new one to the check.
+const HOLDER_NAME_RE =
+  /^[\p{Script=Latin}0-9][\p{Script=Latin}0-9 .'@/,&()-]*$/u;
+
+/** Is this normalized holder name refused? It must hold at least one letter, or
+ *  its comparison key (separators stripped) would be empty and match nothing. */
+export function holderNameInvalid(name: string): boolean {
+  return !HOLDER_NAME_RE.test(name) || !/\p{Script=Latin}/u.test(name);
+}
+
 /** A customer types a bank's holder name twice, and the two must match (owner,
  *  2026-11-03): a name that differs from the bank's is never paid out. A wallet
  *  has no holder. */
@@ -54,7 +80,7 @@ export function holderConfirmMismatch(args: {
   holderConfirm: unknown;
 }): boolean {
   if (args.bank.wallet) return false;
-  const typed = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+  const typed = (s: string) => normalizeHolderName(s).toLowerCase();
   return (
     typeof args.holderConfirm !== 'string' ||
     typed(args.holderConfirm) !== typed(args.holderName)
@@ -63,14 +89,20 @@ export function holderConfirmMismatch(args: {
 
 /** How banned numbers are stored and matched: digits without leading zeros for a
  *  bank, at any bank, as otherPayoutAccountHolders compares them; a wallet
- *  address whole. */
+ *  address whole (an EVM one in lower case, as newSavedBankAccount stores it;
+ *  a Tron address is case-sensitive). */
 export function payoutAccountKey(
   accountNumber: string,
-  wallet: boolean,
+  wallet: false | 'tron' | 'evm' | boolean,
 ): string {
-  return wallet
-    ? accountNumber.toLowerCase()
-    : accountNumber.replace(/\D/g, '').replace(/^0+/, '');
+  if (!wallet) return accountNumber.replace(/\D/g, '').replace(/^0+/, '');
+  return wallet === 'evm' ? accountNumber.toLowerCase() : accountNumber;
+}
+
+/** Does this list hold a bank, not only USDT wallets? The welcome pack and task
+ *  rewards need one (owner, 2026-11-03): a fresh wallet costs nothing. */
+export function includesBank(accounts: SavedBankAccount[]): boolean {
+  return accounts.some((a) => findBank(a.bankCode)?.wallet === undefined);
 }
 
 export type SavedBankAccount = {
@@ -409,9 +441,7 @@ export function heldByAnother(
 export function hasSavedBank(
   metadata: Record<string, unknown> | null | undefined,
 ): boolean {
-  return parseSavedBankAccounts(metadata?.bank_accounts).some(
-    (a) => findBank(a.bankCode)?.wallet === undefined,
-  );
+  return includesBank(parseSavedBankAccounts(metadata?.bank_accounts));
 }
 
 /** Does a new save of this destination get refused? Stricter than a hold on one

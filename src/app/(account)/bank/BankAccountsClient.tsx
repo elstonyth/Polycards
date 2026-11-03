@@ -58,7 +58,7 @@ function payoutStatus(
   }
   if (typeof account.usableFrom !== 'string') {
     // Saved before the cooling-off rule existed: waiting will never arm it.
-    return { label: 'Contact support to update this account', ready: false };
+    return { label: 'Contact support to activate this account', ready: false };
   }
   const wait = timeUntil(account.usableFrom, now);
   return wait
@@ -96,8 +96,26 @@ export function BankAccountsClient() {
     };
   }, []);
 
+  // One saved account per currency (backend bankCurrency): only currencies
+  // still free are offered. A saved row's currency comes from the bank list,
+  // else from its own view.
+  const currencyOf = (item: { currency?: string; wallet?: string }) =>
+    item.wallet ? 'USDT' : (item.currency ?? 'MYR');
+  const taken = new Set(
+    (accounts ?? []).map((account) =>
+      currencyOf(
+        banks?.find((bank) => bank.bankCode === account.bankCode) ?? account,
+      ),
+    ),
+  );
   // Require the customer's choice, even when only one country is available.
-  const countries = bankCountryGroups(banks ?? []);
+  const countries = bankCountryGroups(
+    (banks ?? []).filter((bank) => !taken.has(currencyOf(bank))),
+  );
+  // Banks not loaded yet: only a customer with nothing saved may start.
+  const canAdd =
+    accounts !== null &&
+    (banks === null ? accounts.length === 0 : countries.length > 0);
   const shown = countries.find((group) => group.country === country);
   const selectedBank = shown?.items.find((bank) => bank.bankCode === bankCode);
   // A USDT wallet takes an address and no holder name. Its checksum is the
@@ -126,7 +144,15 @@ export function BankAccountsClient() {
     selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
   const namesMatch = nameKey(holderName) === nameKey(holderConfirm);
-  const confirmMismatch = holderConfirm.trim() !== '' && !namesMatch;
+  // Not while the second name is still being typed (a prefix of the first).
+  const confirmMismatch =
+    holderConfirm.trim() !== '' &&
+    !namesMatch &&
+    !nameKey(holderName).startsWith(nameKey(holderConfirm));
+  const resetNames = () => {
+    setHolderName('');
+    setHolderConfirm('');
+  };
   const formValid =
     selectedBank !== undefined &&
     accountNumberValid &&
@@ -156,8 +182,7 @@ export function BankAccountsClient() {
       setCountry('');
       setBankCode('');
       setAccountNumber('');
-      setHolderName('');
-      setHolderConfirm('');
+      resetNames();
     } catch {
       // The action catches its own failures — this is for the action CALL
       // itself failing (network), which would otherwise leave silence.
@@ -239,6 +264,7 @@ export function BankAccountsClient() {
               setCountry(next);
               setBankCode('');
               setAccountNumber('');
+              resetNames();
               setError(null);
             }}
             className="mb-3"
@@ -253,6 +279,7 @@ export function BankAccountsClient() {
                 // Digits for a bank, an address for a wallet: never carry one
                 // over as the other.
                 setAccountNumber('');
+                resetNames();
                 setError(null);
               }}
               disabled={!shown}
@@ -377,6 +404,7 @@ export function BankAccountsClient() {
                   value={holderConfirm}
                   onChange={(e) => setHolderConfirm(e.target.value)}
                   aria-label="Confirm account holder name"
+                  autoComplete="off"
                   aria-invalid={confirmMismatch}
                   aria-describedby="holder-name-warning"
                   placeholder="Type the same name again"
@@ -415,7 +443,10 @@ export function BankAccountsClient() {
             </Pill>
             <button
               type="button"
-              onClick={() => setAdding(false)}
+              onClick={() => {
+                setAdding(false);
+                resetNames();
+              }}
               className={cn(pillVariants({ variant: 'secondary', size: 'lg' }))}
             >
               Cancel
@@ -430,7 +461,7 @@ export function BankAccountsClient() {
               later.
             </p>
             <div className="flex gap-2">
-              {accounts.length === 0 && (
+              {canAdd && (
                 <Pill
                   onClick={() => setAdding(true)}
                   size="lg"
@@ -442,7 +473,7 @@ export function BankAccountsClient() {
               <WithdrawLink
                 className={cn(
                   pillVariants({ variant: 'secondary', size: 'lg' }),
-                  accounts.length > 0 && 'flex-1',
+                  !canAdd && 'flex-1',
                 )}
               >
                 Withdraw

@@ -1046,3 +1046,41 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
     );
   });
 });
+
+describe('POST accounts — holder names compare as one person reads them', () => {
+  it('stores the name with invisible characters and odd spaces folded away', async () => {
+    await POST(
+      mkReq({
+        ...VALID_BODY,
+        account_holder_name: 'Tan​ Ah  Kow',
+        account_holder_name_confirm: 'tan ah kow',
+      }),
+      mkRes(),
+    );
+    expect(holderNameHeldByAnother).toHaveBeenCalledWith('cus_1', 'Tan Ah Kow');
+    expect(
+      updateCustomers.mock.calls[0][1].metadata.bank_accounts[0].accountHolderName,
+    ).toBe('Tan Ah Kow');
+  });
+
+  it.each([['Таn Ah Kow'], ['--'], ['Tan Ah Kow 😀']])(
+    'refuses %j: Latin letters, digits and name punctuation only',
+    async (name) => {
+      await expect(
+        POST(mkReq({ ...VALID_BODY, account_holder_name: name }), mkRes()),
+      ).rejects.toThrow(/English letters/);
+      expect(updateCustomers).not.toHaveBeenCalled();
+    },
+  );
+
+  it('takes a save back off when another account saved the name at the same moment', async () => {
+    holderNameHeldByAnother
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      /name is already linked/,
+    );
+    expect(mutateCustomerMetadata).toHaveBeenCalledTimes(2);
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+});

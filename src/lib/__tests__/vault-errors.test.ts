@@ -17,6 +17,15 @@ const map = (msg: string) =>
   friendlyError(new Error(msg), VAULT_RULES, VAULT_FALLBACK);
 
 describe('VAULT_RULES backend-message contract', () => {
+  it('says why a banned or disabled account is refused', () => {
+    for (const msg of [
+      'This account has been permanently banned for breaking the rules.',
+      'This account has been disabled. Please contact support.',
+    ]) {
+      expect(map(msg)).toBe(msg);
+    }
+  });
+
   it('reports a gateway refusal as a gateway problem, not a bad amount', () => {
     // packs/gateway-deposit.ts, the GatewayError branch.
     const refusal =

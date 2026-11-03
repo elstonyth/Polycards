@@ -90,6 +90,21 @@ describe('claimTaskReward', () => {
     });
   });
 
+  it('tells a banned customer why, instead of asking them to retry', async () => {
+    const banned =
+      'This account has been permanently banned for breaking the rules.';
+    backend({
+      'POST /store/tasks/:id/claim': {
+        status: 403,
+        body: { message: banned },
+      },
+    });
+    expect(await claimTaskReward('task_1')).toEqual({
+      ok: false,
+      error: banned,
+    });
+  });
+
   it('carries what a verification refusal still needs, and nothing else', async () => {
     backend({
       'POST /store/tasks/:id/claim': {

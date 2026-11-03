@@ -81,6 +81,10 @@ export const COPY = {
 export const RATE_LIMITED = /too many|rate.?limit|429/i;
 export const UNAUTHORIZED = /unauthorized|not authenticated|401/i;
 
+/** The backend's disabled-account guard (403 on every call, 401 at login): a
+ *  banned or disabled customer reads why instead of a generic retry line. */
+export const ACCOUNT_BLOCKED = /permanently banned|account has been disabled/i;
+
 /**
  * The shared transport tier — consulted only after the caller's own rules.
  *

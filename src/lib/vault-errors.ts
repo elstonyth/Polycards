@@ -15,7 +15,12 @@
  * amount was malformed while the real cause (the gateway refusing the submit)
  * never reached the UI.
  */
-import { COPY, UNAUTHORIZED, type ErrorRule } from '@/lib/errors';
+import {
+  ACCOUNT_BLOCKED,
+  COPY,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
 
 // No rate-limit rule: this table's copy WAS the shared sentence, so the
 // transport tier in lib/errors.ts answers a 429 now (friendlyFailure) — but
@@ -32,6 +37,8 @@ import { COPY, UNAUTHORIZED, type ErrorRule } from '@/lib/errors';
 // it — so N never grows past two digits today; re-check this comment if a
 // window ever widens past ~400s.
 export const VAULT_RULES: ErrorRule[] = [
+  // First: a banned session's 403 must say so, not ask for a login.
+  [ACCOUNT_BLOCKED, (text) => text],
   [UNAUTHORIZED, 'Please log in to view your vault.'],
   // requirePhoneVerified (backend api/utils/phone-verification-guard.ts) —
   // above every broad rule below, per the ORDER note in the file header. Names

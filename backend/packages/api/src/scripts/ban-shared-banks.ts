@@ -11,22 +11,25 @@ import { PERMANENT_BAN_REASON_PREFIX } from '../api/utils/disabled-guard';
  * Operator script (owner, 2026-11-03): ban the bank numbers the farm rings
  * shared, and every account on the owner's list for them, for good.
  *
- * The list is a local JSON file, never the repo (it is public):
+ * The list is a local JSON file, never the repo (it is public). Bank numbers
+ * only, no wallets:
  *   [{ "number": "...", "bank": "MBBEMYKL", "expected": 3, "handles": ["..."] }]
  *
- * DRY RUN BY DEFAULT: for each number, prints how many accounts saved it or were
- * paid to it against the owner's count, and any handle on one side only.
+ * DRY RUN BY DEFAULT: for each number, how many live accounts saved it or were
+ * paid to it against the owner's count, and any handle on one side only; then
+ * the accounts it will ban, including those matched by handle alone.
  *   medusa exec ./src/scripts/ban-shared-banks.ts <list.json>
  * APPLY: the third argument must equal the number of accounts the dry run says
  * it will ban, so a changed list cannot slip through:
  *   medusa exec ./src/scripts/ban-shared-banks.ts <list.json> apply <count>
  *
  * Apply writes each number to banned_payout_account, disables each listed
- * account with a "Permanent ban:" reason (audited, login and every session
- * refused), and denies its held withdrawals, so no admin can approve one later.
+ * account with a "Permanent ban:" reason (audited; login and every session
+ * refused), then denies its held withdrawals so no admin can approve one later.
  * Only accounts on the owner's list are banned: one found on a number but not
  * listed is printed and left alone. Pending (already submitted) payouts cannot
- * be recalled and are printed.
+ * be recalled and are printed. Safe to re-run: done steps are skipped.
+ * Keep the admin Withdraw switch off while it runs.
  */
 
 type ListRow = {
@@ -38,19 +41,46 @@ type ListRow = {
 
 const REASON = `${PERMANENT_BAN_REASON_PREFIX} shared bank account, more than one account (owner, 2026-11-03)`;
 
+const normHandle = (h: string) => h.trim().replace(/^@/, '').toLowerCase();
+
 export default async function banSharedBanks({ container, args }: ExecArgs) {
   const [file, mode, confirm] = args;
   if (!file)
     throw new Error('Usage: ban-shared-banks.ts <list.json> [apply <count>]');
   const list = JSON.parse(readFileSync(file, 'utf8')) as ListRow[];
+  for (const row of list) {
+    if (!/^[\d\s-]+$/.test(row.number)) {
+      throw new Error(
+        `not a bank number (wallets are not supported): …${row.number.slice(-4)}`,
+      );
+    }
+    if (payoutAccountKey(row.number, false).length <= 4) {
+      throw new Error(
+        `number too short to ban safely: …${row.number.slice(-4)}`,
+      );
+    }
+    row.handles = row.handles.map(normHandle);
+    if (row.handles.some((h) => h === '')) {
+      throw new Error(`empty handle on …${row.number.slice(-4)}`);
+    }
+  }
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const log = (line: string) => console.log(line);
 
   const db = (await knex.raw('SELECT current_database() AS db')).rows[0].db;
-  log(`database: ${db}; ${list.length} numbers; mode: ${mode ?? 'dry run'}`);
+  const users = container.resolve(Modules.USER);
+  const [admin] = await users.listUsers(
+    { email: 'admin@polycards.gg' },
+    { take: 1 },
+  );
+  if (!admin) throw new Error('admin@polycards.gg not found');
+  log(
+    `database: ${db}; ${list.length} numbers; admin found; mode: ${mode ?? 'dry run'}`,
+  );
 
   const toBan = new Map<string, string>(); // customer id -> handle
+  const onNumbers = new Set<string>();
   const keys: { key: string; bank: string | null }[] = [];
   for (const row of list) {
     const key = payoutAccountKey(row.number, false);
@@ -64,38 +94,37 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
          UNION
          SELECT c.id, c.metadata->>'handle' AS handle FROM gateway_withdrawal w
            JOIN customer c ON c.id = w.customer_id AND c.deleted_at IS NULL
-          WHERE w.deleted_at IS NULL AND ltrim(regexp_replace(w.account_number, '[^0-9]', '', 'g'), '0') = ?`,
+          WHERE w.deleted_at IS NULL AND w.status IN ('pending', 'held', 'settled')
+            AND ltrim(regexp_replace(w.account_number, '[^0-9]', '', 'g'), '0') = ?`,
         [key, key],
       )
     ).rows;
-    const listed = new Set(row.handles.map((h) => h.toLowerCase()));
-    const foundHandles = new Set(
-      found.map((f) => (f.handle ?? '').toLowerCase()),
-    );
+    const listed = new Set(row.handles);
+    const handleOf = (f: { handle: string | null }) =>
+      (f.handle ?? '').toLowerCase();
     const notListed = found.filter(
-      (f) => !listed.has((f.handle ?? '').toLowerCase()),
+      (f) => !f.handle || !listed.has(handleOf(f)),
     );
-    const notFound = row.handles.filter(
-      (h) => !foundHandles.has(h.toLowerCase()),
-    );
+    const foundHandles = new Set(found.map(handleOf));
+    const notFound = row.handles.filter((h) => !foundHandles.has(h));
     for (const f of found) {
-      if (listed.has((f.handle ?? '').toLowerCase()))
-        toBan.set(f.id, f.handle ?? f.id);
+      onNumbers.add(f.id);
+      if (f.handle && listed.has(handleOf(f))) toBan.set(f.id, f.handle);
     }
     log(
       `…${key.slice(-4)}: owner ${row.expected ?? row.handles.length}, found ${found.length}` +
         (notListed.length
-          ? `; found, not listed: ${notListed.map((f) => f.handle ?? f.id).join(', ')}`
+          ? `; found, NOT listed (left alone): ${notListed.map((f) => f.handle ?? f.id).join(', ')}`
           : '') +
-        (notFound.length ? `; listed, not found: ${notFound.join(', ')}` : ''),
+        (notFound.length
+          ? `; listed, not on this number: ${notFound.join(', ')}`
+          : ''),
     );
   }
 
-  // Handles listed under a number they no longer show on (a saved list already
-  // changed) are still the owner's ban: resolve them by handle.
-  const allListed = [
-    ...new Set(list.flatMap((r) => r.handles.map((h) => h.toLowerCase()))),
-  ];
+  // A listed handle no longer on its number (its saved list changed) is still
+  // the owner's ban: resolve it by handle, and say so.
+  const allListed = [...new Set(list.flatMap((r) => r.handles))];
   const byHandle: { id: string; handle: string }[] = (
     await knex.raw(
       `SELECT id, metadata->>'handle' AS handle FROM customer
@@ -103,29 +132,43 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
       [allListed.join(',')],
     )
   ).rows;
+  const handleOnly = byHandle.filter((c) => !onNumbers.has(c.id));
   for (const c of byHandle) toBan.set(c.id, c.handle);
   const missing = allListed.filter(
     (h) => !byHandle.some((c) => c.handle.toLowerCase() === h),
   );
-  log(`accounts to ban: ${toBan.size} of ${allListed.length} listed handles`);
+  if (handleOnly.length) {
+    log(
+      `banned by handle only (on none of the numbers now): ${handleOnly.map((c) => c.handle).join(', ')}`,
+    );
+  }
   if (missing.length)
     log(`listed handles with no live account: ${missing.join(', ')}`);
 
   const ids = [...toBan.keys()];
-  const open: {
-    id: string;
-    customer_id: string;
-    status: string;
-    amount: string;
-  }[] = (
-    await knex.raw(
-      `SELECT id, customer_id, status, amount::text FROM gateway_withdrawal
-        WHERE deleted_at IS NULL AND status IN ('held', 'pending') AND customer_id = ANY(string_to_array(?, ','))`,
-      [ids.join(',')],
-    )
-  ).rows;
+  const already = new Set<string>(
+    (
+      await knex.raw(
+        `SELECT customer_id FROM customer_account_state
+          WHERE deleted_at IS NULL AND disabled = true AND disabled_reason LIKE ?
+            AND customer_id = ANY(string_to_array(?, ','))`,
+        [`${PERMANENT_BAN_REASON_PREFIX}%`, ids.join(',')],
+      )
+    ).rows.map((r: { customer_id: string }) => r.customer_id),
+  );
+  const openPayouts = async () =>
+    (
+      await knex.raw(
+        `SELECT id, customer_id, status FROM gateway_withdrawal
+          WHERE deleted_at IS NULL AND status IN ('held', 'pending') AND customer_id = ANY(string_to_array(?, ','))`,
+        [ids.join(',')],
+      )
+    ).rows as { id: string; customer_id: string; status: string }[];
+  const open = await openPayouts();
   log(
-    `their open payouts: ${open.filter((w) => w.status === 'held').length} held (denied on apply), ${open.filter((w) => w.status === 'pending').length} pending (cannot be recalled)`,
+    `accounts to ban: ${ids.length} (${already.size} already banned) of ${allListed.length} listed handles; ` +
+      `their open payouts: ${open.filter((w) => w.status === 'held').length} held (denied on apply), ` +
+      `${open.filter((w) => w.status === 'pending').length} pending (cannot be recalled)`,
   );
 
   if (mode !== 'apply') {
@@ -138,13 +181,6 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
     );
   }
 
-  const users = container.resolve(Modules.USER);
-  const [admin] = await users.listUsers(
-    { email: 'admin@polycards.gg' },
-    { take: 1 },
-  );
-  if (!admin) throw new Error('admin@polycards.gg not found');
-
   for (const { key, bank } of keys) {
     await knex.raw(
       `INSERT INTO banned_payout_account (account_key, bank_code, reason) VALUES (?, ?, ?)
@@ -156,6 +192,7 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
 
   let disabled = 0;
   for (const id of ids) {
+    if (already.has(id)) continue;
     await packs.setAccountDisabled({
       customerId: id,
       adminId: admin.id,
@@ -164,18 +201,27 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
     });
     disabled++;
   }
-  log(`accounts banned: ${disabled}`);
+  log(`accounts banned now: ${disabled}; already banned: ${already.size}`);
 
-  for (const w of open.filter((r) => r.status === 'held')) {
-    const result = await denyHeldWithdrawal(container, {
-      withdrawalId: w.id,
-      adminId: admin.id,
-    });
-    log(`denied held payout ${w.id}: ${JSON.stringify(result)}`);
+  // Read again after the bans: a payout held in between is denied too.
+  const after = await openPayouts();
+  const failures: string[] = [];
+  for (const w of after.filter((r) => r.status === 'held')) {
+    try {
+      const result = await denyHeldWithdrawal(container, {
+        withdrawalId: w.id,
+        adminId: admin.id,
+      });
+      log(`denied held payout ${w.id}: ${JSON.stringify(result)}`);
+    } catch (e) {
+      failures.push(`${w.id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
-  for (const w of open.filter((r) => r.status === 'pending')) {
+  for (const w of after.filter((r) => r.status === 'pending')) {
     log(
       `pending payout left with the gateway: ${w.id} (${toBan.get(w.customer_id)})`,
     );
   }
+  if (failures.length)
+    log(`deny FAILED, finish these in admin: ${failures.join('; ')}`);
 }

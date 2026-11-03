@@ -1,6 +1,9 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../modules/packs';
+import type PacksModuleService from '../modules/packs/service';
 
 /**
  * Operator script (owner, 2026-11-03): clear every customer's saved bank
@@ -9,52 +12,89 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
  * currency). Payout rows keep their own destination, so pending and held
  * payouts are untouched.
  *
+ * Disabled accounts are skipped: a banned ring account keeps its saved names
+ * and numbers, so the same-name and shared-number checks still see them.
+ *
  * DRY RUN BY DEFAULT: counts what would be cleared.
- *   medusa exec ./src/scripts/reset-saved-banks.ts <backup.json>
- * APPLY: writes every cleared value to <backup.json> first (a new file, kept off
- * the repo: it holds account numbers), then clears them in one statement that
- * edits each row's current blob, so a key another writer sets meanwhile stays.
- *   medusa exec ./src/scripts/reset-saved-banks.ts <backup.json> apply
+ *   medusa exec ./src/scripts/reset-saved-banks.ts <backup.jsonl>
+ * APPLY: one customer at a time under the same `metadata:` lock every writer of
+ * the blob takes, so a concurrent avatar or bank save can't put the keys back.
+ * Each cleared value is appended to <backup.jsonl> (an absolute path to a new
+ * file off the repo: it holds account numbers) before that customer's write,
+ * so a crash halfway leaves a backup of everything cleared. Safe to re-run.
+ *   medusa exec ./src/scripts/reset-saved-banks.ts <backup.jsonl> apply
  */
 export default async function resetSavedBanks({ container, args }: ExecArgs) {
   const [file, mode] = args;
-  if (!file)
-    throw new Error('Usage: reset-saved-banks.ts <backup.json> [apply]');
+  if (!file || !isAbsolute(file)) {
+    throw new Error(
+      'Usage: reset-saved-banks.ts <absolute backup.jsonl> [apply]',
+    );
+  }
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION);
-  const where =
-    "(metadata->'bank_accounts' IS NOT NULL OR metadata->'bank_share_verified' IS NOT NULL)";
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
   const db = (await knex.raw('SELECT current_database() AS db')).rows[0].db;
-  const rows: {
-    id: string;
-    bank_accounts: unknown;
-    bank_share_verified: unknown;
-  }[] = (
+  const ids: string[] = (
     await knex.raw(
-      `SELECT id, metadata->'bank_accounts' AS bank_accounts, metadata->'bank_share_verified' AS bank_share_verified
-         FROM customer WHERE ${where}`,
+      `SELECT c.id FROM customer c
+        WHERE c.deleted_at IS NULL
+          AND (c.metadata->'bank_accounts' IS NOT NULL OR c.metadata->'bank_share_verified' IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM customer_account_state s
+                           WHERE s.customer_id = c.id AND s.disabled = true AND s.deleted_at IS NULL)
+        ORDER BY c.id`,
     )
-  ).rows;
+  ).rows.map((r: { id: string }) => r.id);
   console.log(
-    `database: ${db}; customers with saved banks or stamps: ${rows.length}; mode: ${mode ?? 'dry run'}`,
+    `database: ${db}; customers to clear: ${ids.length}; mode: ${mode ?? 'dry run'}`,
   );
   if (mode !== 'apply') {
     console.log('dry run: nothing written');
     return;
   }
-  if (existsSync(file))
-    throw new Error(`${file} already exists: pick a new backup path`);
-  writeFileSync(
-    file,
-    JSON.stringify({ taken_at: new Date().toISOString(), rows }, null, 1),
-  );
-  console.log(`backup written: ${rows.length} rows`);
+  if (existsSync(file)) {
+    console.log(`appending to the existing backup ${file}`);
+  }
 
-  const updated = await knex.raw(
-    `UPDATE customer SET metadata = metadata - 'bank_accounts' - 'bank_share_verified' WHERE ${where}`,
-  );
+  let cleared = 0;
+  let failed = 0;
+  for (const customerId of ids) {
+    try {
+      await packs.mutateCustomerMetadata({
+        customerId,
+        mutate: (current) => {
+          if (
+            !('bank_accounts' in current) &&
+            !('bank_share_verified' in current)
+          ) {
+            return null;
+          }
+          const { bank_accounts, bank_share_verified, ...rest } = current;
+          appendFileSync(
+            file,
+            `${JSON.stringify({ customer_id: customerId, at: new Date().toISOString(), bank_accounts, bank_share_verified })}\n`,
+          );
+          cleared++;
+          return rest;
+        },
+      });
+    } catch (e) {
+      failed++;
+      console.log(
+        `failed ${customerId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
   const left = (
-    await knex.raw(`SELECT count(*)::int AS n FROM customer WHERE ${where}`)
+    await knex.raw(
+      `SELECT count(*)::int AS n FROM customer c
+        WHERE c.deleted_at IS NULL
+          AND (c.metadata->'bank_accounts' IS NOT NULL OR c.metadata->'bank_share_verified' IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM customer_account_state s
+                           WHERE s.customer_id = c.id AND s.disabled = true AND s.deleted_at IS NULL)`,
+    )
   ).rows[0].n;
-  console.log(`cleared: ${updated.rowCount}; still holding one: ${left}`);
+  console.log(
+    `cleared: ${cleared}; failed: ${failed}; still holding one: ${left}`,
+  );
 }

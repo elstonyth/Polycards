@@ -22,6 +22,7 @@ import {
   BANK_ACCOUNT_LOCKED_MESSAGE,
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
   HOLDER_NAME_CONFIRM_MESSAGE,
+  HOLDER_NAME_INVALID_MESSAGE,
   HOLDER_NAME_LINKED_MESSAGE,
   MAX_SAVED_BANK_ACCOUNTS,
   ONE_BANK_ACCOUNT_MESSAGE,
@@ -30,7 +31,9 @@ import {
   anySavedAccountShared,
   blocksNewSave,
   holderConfirmMismatch,
+  holderNameInvalid,
   newSavedBankAccount,
+  normalizeHolderName,
   parseSavedBankAccounts,
   savedBankAccountId,
   savedBankAccountViews,
@@ -270,7 +273,7 @@ export async function POST(
   const account = newSavedBankAccount(
     bank,
     body.account_number as string,
-    (body.account_holder_name as string | undefined) ?? '',
+    normalizeHolderName((body.account_holder_name as string | undefined) ?? ''),
   );
   const { accountNumber, bankCode } = account;
   if (
@@ -283,6 +286,12 @@ export async function POST(
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       HOLDER_NAME_CONFIRM_MESSAGE,
+    );
+  }
+  if (!bank.wallet && holderNameInvalid(account.accountHolderName)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      HOLDER_NAME_INVALID_MESSAGE,
     );
   }
   const packs = resolvePacks<CustomerWallet>(req.scope);
@@ -299,15 +308,25 @@ export async function POST(
       BANNED_PAYOUT_ACCOUNT_MESSAGE,
     );
   }
-  if (
+  const nameLinked = async () =>
     !bank.wallet &&
-    (await packs.holderNameHeldByAnother(customerId, account.accountHolderName))
-  ) {
+    (await packs.holderNameHeldByAnother(
+      customerId,
+      account.accountHolderName,
+    ));
+  const refuseLinkedName = (): never => {
+    // Logged like a shared number, so a run of probes shows up. No name: PII.
+    req.scope
+      .resolve('logger')
+      .warn(
+        `[saved-accounts] refused a holder name another account used, for ${customerId}`,
+      );
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       HOLDER_NAME_LINKED_MESSAGE,
     );
-  }
+  };
+  if (await nameLinked()) refuseLinkedName();
 
   // Looked up before the lock (it reads OTHER customers, which this
   // customer's metadata lock does not cover) but applied inside it, where
@@ -361,6 +380,16 @@ export async function POST(
     added = true;
     return [...accounts, account];
   });
+  // The name lookup reads other customers, which this customer's lock does not
+  // cover, so two accounts saving one name at once both pass it. Look again now
+  // the save is visible: a racer takes its entry back off. Both racers may, and
+  // the next try is serial.
+  if (added && (await nameLinked())) {
+    await mutateAccounts(req, customerId, (accounts) =>
+      accounts.filter((a) => a.id !== account.id),
+    );
+    refuseLinkedName();
+  }
 
   // A NEW payout destination is the event worth telling the account owner
   // about: it is the first half of "steal a token, wait out the cooling-off,

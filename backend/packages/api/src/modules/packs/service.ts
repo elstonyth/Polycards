@@ -9792,8 +9792,8 @@ class PacksModuleService extends MedusaService({
 
   // One customer's saved payout destinations, unlocked.
   //
-  // Exists for ONE caller: gateway-withdrawal.ts's pre-row destination
-  // precheck, which has no transaction of its own. The decision that matters
+  // Callers with no transaction of their own: gateway-withdrawal.ts's pre-row
+  // destination precheck, the A3Pay payer-name lookup and the task claim gate. The decision that matters
   // does not come through here — withdrawForCashout calls loadSavedBankAccounts
   // directly on its own locked transaction manager, so this method cannot be
   // swapped underneath it.
@@ -10199,10 +10199,10 @@ class PacksModuleService extends MedusaService({
       'SELECT 1 FROM customer c ' +
         "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
         "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${realNameKeySql("a->>'accountHolderName'")} = ${realNameKeySql('?::text')} ` +
+        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${realNameKeySql("a->>'accountHolderName'")} = ${realNameKeySql('?::text')} AND ${realNameKeySql("a->>'accountHolderName'")} <> '' ` +
         'UNION ALL ' +
         'SELECT 1 FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
-        `AND ${realNameKeySql('account_holder_name')} = ${realNameKeySql('?::text')} ` +
+        `AND ${realNameKeySql('account_holder_name')} = ${realNameKeySql('?::text')} AND ${realNameKeySql('account_holder_name')} <> '' ` +
         "AND status IN ('pending', 'held', 'settled') LIMIT 1",
       [customerId, holderName, customerId, holderName],
     );

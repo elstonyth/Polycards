@@ -325,8 +325,13 @@ describe('verificationNotice', () => {
     });
   });
 
-  it('asks for both when the backend names nothing', () => {
-    expect(verificationNotice([]).link.href).toBe('/settings');
+  it('names nothing it was not told about', () => {
+    for (const missing of [[], ['real_name']]) {
+      expect(verificationNotice(missing)).toEqual({
+        text: 'Finish verifying your account to claim rewards.',
+        link: { href: '/settings', label: 'Go to Settings →' },
+      });
+    }
   });
 });
 

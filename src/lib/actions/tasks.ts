@@ -13,6 +13,7 @@
  */
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
+import { ACCOUNT_BLOCKED } from '@/lib/errors';
 import {
   parseOne,
   TaskHubSchema,
@@ -33,8 +34,12 @@ const loggedOut = (f: Failure): string | null =>
     ? 'Please log in first.'
     : null;
 
+/** …and a banned or disabled account, whose refusal says why. */
+const blocked = (f: Failure): string | null =>
+  ACCOUNT_BLOCKED.test(f.text) ? f.text : null;
+
 const checkInError = (f: Failure): string =>
-  loggedOut(f) ?? 'Could not check in. Please try again.';
+  loggedOut(f) ?? blocked(f) ?? 'Could not check in. Please try again.';
 
 export async function getTaskHub(): Promise<TaskHub | null> {
   // Logged out, a failed read, or a hub that did not parse: null, and the tab
@@ -117,7 +122,7 @@ export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
   if (!r.ok) {
     return {
       ok: false,
-      error: loggedOut(r) ?? 'Could not claim. Please try again.',
+      error: loggedOut(r) ?? blocked(r) ?? 'Could not claim. Please try again.',
     };
   }
   // JSON parsing accepts null and malformed nested objects; preserve the
@@ -199,7 +204,10 @@ export async function spinTaskReward(
   if (!r.ok) {
     return {
       ok: false,
-      error: loggedOut(r) ?? 'Could not spin your free rip. Try again.',
+      error:
+        loggedOut(r) ??
+        blocked(r) ??
+        'Could not spin your free rip. Try again.',
     };
   }
   // JSON parsing accepts null and malformed nested objects; preserve the

@@ -169,7 +169,7 @@ describe('WithdrawForm', () => {
     ]) {
       expect(withdrawRemedy(error)).toEqual({
         href: '/bank',
-        label: 'Manage bank accounts',
+        label: 'View bank accounts',
       });
     }
   });

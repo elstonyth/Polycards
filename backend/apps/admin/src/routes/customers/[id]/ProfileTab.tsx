@@ -288,9 +288,69 @@ const SavedBankAccountsCard = ({
         <div className="border-t px-6 py-6">
           <LoadingSkeleton />
         </div>
-      ) : data.accounts.length === 0 ? (
+      ) : (
         <>
-          <TableState empty={t('players.savedBankEmpty')} />
+          {data.accounts.length === 0 && (
+            <TableState empty={t('players.savedBankEmpty')} />
+          )}
+          {data.accounts.map((account) => (
+            <div key={account.id} className="border-t px-6 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Text size="small" weight="plus">
+                  {account.bank_name} · {account.account_number} ·{' '}
+                  {account.account_holder_name}
+                </Text>
+                {canEdit && (
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() =>
+                      setDialog({ kind: 'remove', accountId: account.id })
+                    }
+                  >
+                    {t('players.savedBankRemove')}
+                  </Button>
+                )}
+              </div>
+              {(account.linked.length > 0 || account.verified_at) && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <StatusBadge color={account.verified_at ? 'green' : 'orange'}>
+                    {account.verified_at
+                      ? t('players.savedBankVerified', {
+                          date: orderDateTime(account.verified_at),
+                        })
+                      : t('players.savedBankShared')}
+                  </StatusBadge>
+                  {canEdit && (
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      onClick={() =>
+                        setDialog({
+                          kind: 'verify',
+                          accountId: account.id,
+                          to: !account.verified_at,
+                        })
+                      }
+                    >
+                      {account.verified_at
+                        ? t('players.savedBankUnverify')
+                        : t('players.savedBankVerify')}
+                    </Button>
+                  )}
+                </div>
+              )}
+              {account.linked.length > 0 && (
+                <Text size="small" className="text-ui-fg-subtle mt-2">
+                  {t('players.savedBankLinked')}:{' '}
+                  <PlayerLinks players={account.linked} />
+                </Text>
+              )}
+            </div>
+          ))}
+          {/* One account per currency (owner, 2026-11-03): a wallet may sit
+              beside a bank, so Add stays; the server refuses a second one in
+              the same currency. */}
           {canEdit && (
             <div className="border-t px-6 py-4">
               <Button
@@ -303,62 +363,6 @@ const SavedBankAccountsCard = ({
             </div>
           )}
         </>
-      ) : (
-        data.accounts.map((account) => (
-          <div key={account.id} className="border-t px-6 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Text size="small" weight="plus">
-                {account.bank_name} · {account.account_number} ·{' '}
-                {account.account_holder_name}
-              </Text>
-              {canEdit && (
-                <Button
-                  size="small"
-                  variant="secondary"
-                  onClick={() =>
-                    setDialog({ kind: 'remove', accountId: account.id })
-                  }
-                >
-                  {t('players.savedBankRemove')}
-                </Button>
-              )}
-            </div>
-            {(account.linked.length > 0 || account.verified_at) && (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <StatusBadge color={account.verified_at ? 'green' : 'orange'}>
-                  {account.verified_at
-                    ? t('players.savedBankVerified', {
-                        date: orderDateTime(account.verified_at),
-                      })
-                    : t('players.savedBankShared')}
-                </StatusBadge>
-                {canEdit && (
-                  <Button
-                    size="small"
-                    variant="secondary"
-                    onClick={() =>
-                      setDialog({
-                        kind: 'verify',
-                        accountId: account.id,
-                        to: !account.verified_at,
-                      })
-                    }
-                  >
-                    {account.verified_at
-                      ? t('players.savedBankUnverify')
-                      : t('players.savedBankVerify')}
-                  </Button>
-                )}
-              </div>
-            )}
-            {account.linked.length > 0 && (
-              <Text size="small" className="text-ui-fg-subtle mt-2">
-                {t('players.savedBankLinked')}:{' '}
-                <PlayerLinks players={account.linked} />
-              </Text>
-            )}
-          </div>
-        ))
       )}
       {dialog?.kind === 'remove' && (
         <FieldsDialog

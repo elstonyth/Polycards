@@ -5,7 +5,7 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
-import { findBank } from '../../../../../modules/packs/banks';
+import { includesBank } from '../../../../../modules/packs/saved-accounts';
 import { takeCardStock } from '../../../../../modules/packs/card-stock';
 import { rollOne } from '../../../../../workflows/steps/roll-pack';
 import { resolveOddsSetForCustomer } from '../../../../../modules/packs/odds-sets';
@@ -33,9 +33,7 @@ export async function POST(
   ]);
   const missing = [
     ...(phoneVerified ? [] : (['phone'] as const)),
-    ...(saved.some((a) => !findBank(a.bankCode)?.wallet)
-      ? []
-      : (['bank'] as const)),
+    ...(includesBank(saved) ? [] : (['bank'] as const)),
   ];
   if (missing.length > 0) {
     res.json({ claimed: false, reason: 'needs_verification', missing });

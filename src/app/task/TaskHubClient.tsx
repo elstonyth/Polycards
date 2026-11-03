@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -504,6 +504,17 @@ export function TaskHubClient({
   } | null>(null);
   const setNotice = (text: string, link?: NoticeLink) =>
     setNoticeState({ text, link });
+  const noticeRef = useRef<HTMLParagraphElement>(null);
+  const reducedMotion = usePrefersReducedMotion();
+  // A notice with a step to take sits at the top: bring it to a player who
+  // tapped Claim further down the list.
+  useEffect(() => {
+    if (notice?.link)
+      noticeRef.current?.scrollIntoView({
+        block: 'nearest',
+        behavior: reducedMotion ? 'auto' : 'smooth',
+      });
+  }, [notice, reducedMotion]);
   const { claim, pendingId } = useClaimTask(setNotice);
   const tabs = useMemo(
     () => (taskHub ? splitHub(taskHub.tasks) : null),
@@ -561,25 +572,29 @@ export function TaskHubClient({
         })}
       </div>
 
-      {notice && (
-        <p
-          aria-live="polite"
-          className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
-        >
-          {notice.text}
-          {notice.link && (
-            <>
-              {' '}
-              <Link
-                href={notice.link.href}
-                className="font-semibold whitespace-nowrap text-white underline underline-offset-2"
-              >
-                {notice.link.label}
-              </Link>
-            </>
-          )}
-        </p>
-      )}
+      {/* Always mounted, so screen readers hear every notice. */}
+      <p
+        ref={noticeRef}
+        aria-live="polite"
+        className={
+          notice
+            ? 'mt-4 scroll-mt-20 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300'
+            : 'sr-only'
+        }
+      >
+        {notice?.text}
+        {notice?.link && (
+          <>
+            {' '}
+            <Link
+              href={notice.link.href}
+              className="font-semibold whitespace-nowrap text-white underline underline-offset-2"
+            >
+              {notice.link.label}
+            </Link>
+          </>
+        )}
+      </p>
 
       <div className="mt-4">
         {!taskHub || !tabs ? (
