@@ -151,6 +151,26 @@ const stripSecretMetadata = (node: unknown, hidden: string[]): void => {
   }
 };
 
+/** Keys a customer never gets back on their own record: support's notes on
+ *  OTHER accounts (holder_name_cleared lists who a name was checked against,
+ *  by customer id, which public seeds can match to a handle). */
+const STORE_HIDDEN_METADATA = [HOLDER_NAME_CLEARED_KEY];
+
+/** Strips STORE_HIDDEN_METADATA from every store customer response. */
+export function hideStoreCustomerMetadata(
+  _req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  const json = res.json.bind(res);
+  res.json = (body: unknown) => {
+    const copy = JSON.parse(JSON.stringify(body ?? null));
+    stripSecretMetadata(copy, STORE_HIDDEN_METADATA);
+    return json(copy);
+  };
+  next();
+}
+
 /**
  * Any admin response can carry customer.metadata whole: `?fields=` walks
  * relations (an order's customer, a group's customers) and writes echo the

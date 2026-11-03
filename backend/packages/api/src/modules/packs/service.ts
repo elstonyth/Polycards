@@ -54,6 +54,7 @@ import {
   verifiedBankAccounts,
   withBankShareStamp,
   clearedHolderNames,
+  HOLDER_NAME_CLEARED_KEY,
   holderNameKey,
   withClearedHolderName,
   type SavedBankAccount,
@@ -846,8 +847,9 @@ interface SettleSnapshot {
 const VISITOR_SIGNAL_ROWS_PER_CUSTOMER = 200;
 
 /** The most other accounts support may clear one shared holder name against:
- *  two real people share a name, a ring shares it many times. */
-const MAX_NAME_CLASH_HOLDERS = 5;
+ *  two real people share a name, so one, the account support checked. A name
+ *  on more is a ring, or needs the owner. */
+const MAX_NAME_CLASH_HOLDERS = 1;
 
 export type AdminAuditRow = Pick<
   InferTypeOf<typeof AdminActionAudit>,
@@ -6631,11 +6633,19 @@ class PacksModuleService extends MedusaService({
       {
         customerId: input.customerId,
         mutate: (current) => {
-          if (!('bank_accounts' in current) && !('bank_share_verified' in current)) {
+          if (
+            !('bank_accounts' in current) &&
+            !('bank_share_verified' in current) &&
+            !(HOLDER_NAME_CLEARED_KEY in current)
+          ) {
             return null;
           }
-          const { bank_accounts, bank_share_verified: _stamps, ...rest } =
-            current;
+          const {
+            bank_accounts,
+            bank_share_verified: _stamps,
+            [HOLDER_NAME_CLEARED_KEY]: _names,
+            ...rest
+          } = current;
           cleared = parseSavedBankAccounts(bank_accounts).map((a) => ({
             bank: a.bankName,
             last4: a.accountNumber.slice(-4),
@@ -10168,7 +10178,7 @@ class PacksModuleService extends MedusaService({
     if (input.cleared && holders.length > MAX_NAME_CLASH_HOLDERS) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        `${holders.length} other accounts use this name. That is not one shared name: check them as a ring instead.`,
+        `${holders.length} other accounts use this name. Clearing covers two people with one name; ask the owner about the rest.`,
       );
     }
     let changed = false;

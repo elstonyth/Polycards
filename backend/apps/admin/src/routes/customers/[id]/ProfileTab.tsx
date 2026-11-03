@@ -371,7 +371,7 @@ const SavedBankAccountsCard = ({
                 </StatusBadge>
                 <Text size="small" className="text-ui-fg-subtle">
                   {t('players.savedBankNameClearedWith')}:{' '}
-                  <PlayerLinks players={c.with} />
+                  <PlayerLinks players={c.with ?? []} />
                 </Text>
               </div>
               {canEdit && (

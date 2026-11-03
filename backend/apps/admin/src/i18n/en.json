@@ -1078,7 +1078,7 @@
     "savedBankAddTitle": "Add a bank account for this player?",
     "savedBankNameClear": "Same name, different person",
     "savedBankNameClearTitle": "Same name, different person",
-    "savedBankNameClearBody": "Only after you have checked that this player and the other account are two real people who share this name. This player may then save a bank under it although the accounts that hold it now use it. An account that uses the name later still blocks it. Clear the other account too if it also needs to save.",
+    "savedBankNameClearBody": "Only after you have checked that this player and the one other account holding this name are two real people. This player may then save a bank under it. Any account that uses the name later still blocks it. If the other account has not saved or been paid under the name yet, it can't be cleared yet: clear it once it has, if it will save another bank.",
     "savedBankNameCleared": "Cleared as a shared name: {{name}} ({{date}})",
     "savedBankNameClearedWith": "Checked against",
     "savedBankNameUnclear": "Take back",

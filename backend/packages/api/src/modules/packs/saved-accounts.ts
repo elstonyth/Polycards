@@ -53,7 +53,7 @@ export const HOLDER_NAME_CONFIRM_MESSAGE =
 /** A different bank under a name another account already used (owner,
  *  2026-11-03). */
 export const HOLDER_NAME_LINKED_MESSAGE =
-  'This name is already linked to another Polycards account.';
+  'This name is already linked to another Polycards account. If you are a different person with the same name, contact support.';
 
 /** A bank or Touch 'n Go under another name than the one already saved on
  *  this account (owner, 2026-11-03): one account, one person, one name. */
@@ -539,8 +539,10 @@ export function clearedHolderNames(
   metadata: Record<string, unknown>,
 ): Record<string, ClearedHolderName> {
   const stamps = metadata[HOLDER_NAME_CLEARED_KEY];
-  if (typeof stamps !== 'object' || stamps === null) return {};
-  return Object.fromEntries(
+  // No prototype: a name keyed 'constructor' must not find Object's.
+  const out = Object.create(null) as Record<string, ClearedHolderName>;
+  if (typeof stamps !== 'object' || stamps === null) return out;
+  return Object.assign(out, Object.fromEntries(
     Object.entries(stamps).filter(
       ([, v]) =>
         typeof v === 'object' &&
@@ -549,7 +551,7 @@ export function clearedHolderNames(
         typeof (v as ClearedHolderName).at === 'string' &&
         Array.isArray((v as ClearedHolderName).with),
     ),
-  ) as Record<string, ClearedHolderName>;
+  ));
 }
 
 /** The key a holder name is cleared under: stored form, then compared as real

@@ -1558,7 +1558,7 @@ export const useSetHolderNameCleared = (id: string) => {
     mutationFn: (vars: { holderName: string; cleared: boolean; reason: string }) =>
       setHolderNameCleared(id, vars.holderName, vars.cleared, vars.reason),
     onSuccess: (_data, vars) => {
-      toast.success(vars.cleared ? 'Name cleared for this player' : 'Name clearing taken back');
+      toast.success(vars.cleared ? 'Name cleared for this player' : 'Shared name taken back');
       invalidateBankAccountCards(qc);
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
     },
