@@ -54,13 +54,13 @@
     "multer": "^2.5.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "resend": "^6.34.1",
+    "resend": "^6.37.0",
     "sharp": "^0.35.5",
     "write-excel-file": "^4.1.1"
   },
   "devDependencies": {
     "@medusajs/test-utils": "2.19.0",
-    "@swc/core": "^1.16.20",
+    "@swc/core": "^1.16.21",
     "@swc/jest": "^0.2.36",
     "@types/jest": "^30.0.0",
     "@types/multer": "^2.3.0",
