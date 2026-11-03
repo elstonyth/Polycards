@@ -7,7 +7,8 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { updateGoodsReceiveNoteWorkflow } from '../../../../workflows/update-goods-receive-note';
-import { checkGrnLines, coerceCreateGoodsReceiveNoteBody } from '../validate';
+import { pageAll } from '../../../utils/page-all';
+import { checkGrnLines, coerceEditGoodsReceiveNoteBody } from '../validate';
 import { describeGrns } from '../view';
 
 // GET /admin/goods-receive-notes/:id — one GRN with its lines, its status and
@@ -40,16 +41,27 @@ export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const body = coerceCreateGoodsReceiveNoteBody(req.body);
-  await checkGrnLines(req.scope, body.lines);
+  const body = coerceEditGoodsReceiveNoteBody(req.body);
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const current = await pageAll((opts) =>
+    packs.listGoodsReceiveNoteLines({ grn_id: req.params.id }, opts),
+  );
+  await checkGrnLines(
+    req.scope,
+    body.lines,
+    new Set(current.map((l) => l.card_handle)),
+  );
   const { result } = await updateGoodsReceiveNoteWorkflow(req.scope).run({
     input: {
       grn_id: req.params.id,
       date: body.date,
       supplier: body.supplier,
       agent_user_id: req.auth_context.actor_id,
+      expected_updated_at: body.expected_updated_at,
       lines: body.lines,
     },
   });
-  res.json({ goods_receive_note: result });
+  // `delta` is the counter step's input, not part of the note.
+  const { delta: _delta, ...grn } = result;
+  res.json({ goods_receive_note: grn });
 }

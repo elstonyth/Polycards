@@ -16,7 +16,10 @@ const EditGoodsReceiveNotePage = () => {
   const { data, isError, error } = useGoodsReceiveNote(id ?? null);
   const grn = data?.goods_receive_note;
 
-  if (grn?.status === 'open') return <GrnForm editing={grn} />;
+  // key: another note, or this one saved by someone else, starts a fresh form
+  // rather than keeping the old draft (a plain refetch keeps what was typed).
+  if (grn?.status === 'open')
+    return <GrnForm key={`${grn.id}:${grn.updated_at}`} editing={grn} />;
   if (!grn && !isError) return <LoadingSkeleton />;
   return (
     <Container className="flex flex-col items-start gap-y-2 px-6 py-4">
@@ -27,8 +30,7 @@ const EditGoodsReceiveNotePage = () => {
             : t('grn.detailLoadError')
           : t('grn.notEditable', {
               no: grn.display_no,
-              // Mid-sentence in English; a no-op in Chinese.
-              status: t(`grn.status.${grn.status}`).toLowerCase(),
+              status: t(`grn.status.${grn.status}`),
             })}
       </Text>
       <Link

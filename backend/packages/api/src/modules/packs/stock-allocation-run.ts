@@ -42,8 +42,9 @@ export const stockAutoAllocationEnabled = (
 // status under the order's own lock, so a second run racing this one fails
 // that order's move cleanly (counted in `failed`) instead of moving it twice.
 // shortcut: no lock across a whole run, so a run that read stock just before
-// a GRN reversal can still mark one order ready on stock that has since
-// gone; add a run-wide advisory lock if reversals ever race saves in practice.
+// a GRN reversal or an edit that lowers a qty can still mark one order ready
+// on stock that has since gone; add a run-wide advisory lock if those ever
+// race saves in practice. Staff move such an order back to processed (#961).
 //
 // No customer notification: processed and ready_to_ship are not notifiable
 // statuses (feed-events.ts), the same as when staff move an order by hand.

@@ -1,9 +1,11 @@
 import { model } from '@medusajs/framework/utils';
 
 // GoodsReceiveNote — cards that arrived BEFORE the supplier's invoice did
-// (operator spec 2026-10-28). Same immutable shape as PurchaseInvoice: a
-// mistake is fixed by a reversal GRN (reverses_grn_id, negative-qty mirror of
-// every line), never an edit. No cost: cost arrives with the invoice, which is
+// (operator spec 2026-10-28). Same shape as PurchaseInvoice: a mistake is
+// fixed by a reversal GRN (reverses_grn_id, negative-qty mirror of every
+// line) or, while the note is still open, by an edit in place (owner
+// 2026-11-03, service.updateGoodsReceiveNoteWithLines: the old lines are
+// soft-deleted). No cost: cost arrives with the invoice, which is
 // written later through "transfer from goods receive note"
 // (purchase_invoice.from_grn_id). Whether a GRN was transferred is read from
 // that column — there is deliberately no flag here to drift out of step.

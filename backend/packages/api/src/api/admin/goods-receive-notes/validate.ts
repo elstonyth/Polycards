@@ -80,10 +80,28 @@ export function coerceCreateGoodsReceiveNoteBody(
   return { date: b.date as string, supplier, lines };
 }
 
-// The checks a new GRN and an edit both need before they save.
+// An edit's body is a new GRN's plus, from the admin form, the note's
+// updated_at as it was loaded (optional, so a script can still edit).
+export function coerceEditGoodsReceiveNoteBody(
+  raw: unknown,
+): CreateGoodsReceiveNoteBody & { expected_updated_at?: string } {
+  const body = coerceCreateGoodsReceiveNoteBody(raw);
+  const expected = (raw as Record<string, unknown>).expected_updated_at;
+  if (expected === undefined) return body;
+  if (typeof expected !== 'string' || Number.isNaN(Date.parse(expected))) {
+    bad("'expected_updated_at' must be a valid date string.");
+  }
+  return { ...body, expected_updated_at: expected as string };
+}
+
+// The checks a new GRN and an edit both need before they save. `kept` are
+// handles already on the note being edited: they pass even if their product
+// was deleted since, the same allowance a transfer gets
+// (purchase-invoices/route.ts), so fixing a date never forces a card off.
 export async function checkGrnLines(
   scope: MedusaContainer,
   lines: GoodsReceiveNoteLineInput[],
+  kept: ReadonlySet<string> = new Set(),
 ): Promise<void> {
   // Same gate as a purchase invoice: the form's FMV prefill is priced off
   // the FX rate, so refuse while that rate is unknown.
@@ -100,7 +118,7 @@ export async function checkGrnLines(
   const valid = new Set(products.map((p) => p.handle));
   const unknown = lines
     .map((l, i) => ({ i, card_handle: l.card_handle }))
-    .filter(({ card_handle }) => !valid.has(card_handle));
+    .filter(({ card_handle }) => !valid.has(card_handle) && !kept.has(card_handle));
   if (unknown.length) {
     bad(
       `Unknown card_handle — no matching product for ${unknown

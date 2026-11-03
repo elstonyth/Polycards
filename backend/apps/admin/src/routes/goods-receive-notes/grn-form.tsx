@@ -125,7 +125,10 @@ export const GrnForm = ({
     };
     try {
       const res = editing
-        ? await update.mutateAsync({ id: editing.id, body })
+        ? await update.mutateAsync({
+            id: editing.id,
+            body: { ...body, expected_updated_at: editing.updated_at },
+          })
         : await create.mutateAsync(body);
       navigate(`/goods-receive-notes/${res.goods_receive_note.id}`);
     } catch {

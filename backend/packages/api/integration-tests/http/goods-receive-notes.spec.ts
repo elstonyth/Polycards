@@ -430,7 +430,23 @@ medusaIntegrationTestRunner({
             supplier: 'Early Supplier',
             lines: [{ card_handle: 'grn-edit-a', qty: 3, fmv_snapshot: 100 }],
           },
-          after: { supplier: 'Right Supplier' },
+          after: {
+            supplier: 'Right Supplier',
+            lines: [
+              {
+                card_handle: 'grn-edit-a',
+                card_name: 'grn-edit-a',
+                qty: 1,
+                fmv_snapshot: 100,
+              },
+              {
+                card_handle: 'grn-edit-b',
+                card_name: 'grn-edit-b',
+                qty: 2,
+                fmv_snapshot: 100,
+              },
+            ],
+          },
         });
 
         // A transfer now mirrors the edited lines.
@@ -501,7 +517,168 @@ medusaIntegrationTestRunner({
           lines: [lineOf('grn-edit-bad', 1)],
         });
         expect(missing.status).toBe(404);
+        const badToken = await edit(received.id, {
+          expected_updated_at: 'yesterday-ish',
+          lines: [lineOf('grn-edit-bad', 1)],
+        });
+        expect(badToken.status).toBe(400);
+        // The service's own guard, for callers that skip the route.
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await expect(
+          packs.updateGoodsReceiveNoteWithLines(received.id, {
+            date: '2026-10-28T00:00:00.000Z',
+            supplier: 'Early Supplier',
+            agent_user_id: 'user_test',
+            lines: [],
+          }),
+        ).rejects.toThrow(/quantity above 0/);
         expect(await stockOf('grn-edit-bad')).toMatchObject({ on_hand: 2 });
+      });
+
+      it('edit: a stale form is refused, and of two saves at once only one lands', async () => {
+        await makeProduct('grn-edit-race', true);
+        const received = (await grn('grn-edit-race', 3)).data
+          .goods_receive_note;
+        const loaded = (await detail(received.id)).updated_at;
+
+        // Lines only, same date and supplier: the save still counts as a change.
+        const first = await edit(received.id, {
+          expected_updated_at: loaded,
+          lines: [lineOf('grn-edit-race', 4)],
+        });
+        expect(first.status).toBe(200);
+        const stale = await edit(received.id, {
+          expected_updated_at: loaded,
+          lines: [lineOf('grn-edit-race', 2)],
+        });
+        expect(stale.status).toBe(400);
+        expect(stale.data.message).toMatch(/changed by someone else/);
+        expect(await stockOf('grn-edit-race')).toMatchObject({
+          on_hand: 4,
+          counter: 4,
+        });
+
+        // Two saves from one loaded form at once: the GRN lock runs them one
+        // after the other, and the second sees the first's updated_at.
+        const now = (await detail(received.id)).updated_at;
+        const both = await Promise.all(
+          [5, 6].map((qty) =>
+            edit(received.id, {
+              expected_updated_at: now,
+              lines: [lineOf('grn-edit-race', qty)],
+            }),
+          ),
+        );
+        expect(both.map((r) => r.status).sort()).toEqual([200, 400]);
+        const total = (await detail(received.id)).total_qty;
+        expect([5, 6]).toContain(total);
+        expect(await stockOf('grn-edit-race')).toMatchObject({
+          on_hand: total,
+          counter: total,
+        });
+      });
+
+      it('edit: a date fix keeps the lines, and a card whose product was deleted can stay', async () => {
+        await makeProduct('grn-edit-gone', true);
+        await makeProduct('grn-edit-other', true);
+        const received = (await grn('grn-edit-gone', 2)).data
+          .goods_receive_note;
+        const idsBefore = (await detail(received.id)).lines.map(
+          (l: { id: string }) => l.id,
+        );
+        const productModule = getContainer().resolve(Modules.PRODUCT);
+        const [gone] = await productModule.listProducts({
+          handle: 'grn-edit-gone',
+        });
+        await productModule.softDeleteProducts([gone.id]);
+
+        const dateFix = await edit(received.id, {
+          date: '2026-10-29T16:00:00.000Z',
+          lines: [lineOf('grn-edit-gone', 2)],
+        });
+        expect(dateFix.status).toBe(200);
+        expect(dateFix.data.goods_receive_note.delta).toBeUndefined();
+        const after = await detail(received.id);
+        expect(new Date(after.date).toISOString()).toBe(
+          '2026-10-29T16:00:00.000Z',
+        );
+        expect(after.lines.map((l: { id: string }) => l.id)).toEqual(
+          idsBefore,
+        );
+        // No stock moved (the inventory page is gone with the product).
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        expect(
+          (await packs.listStockMovements({ card_handle: 'grn-edit-gone' })).map(
+            (m) => Number(m.qty),
+          ),
+        ).toEqual([2]);
+
+        // ...but a deleted card cannot be added to another note.
+        const other = (await grn('grn-edit-other', 1)).data.goods_receive_note;
+        const added = await edit(other.id, {
+          lines: [lineOf('grn-edit-other', 1), lineOf('grn-edit-gone', 1)],
+        });
+        expect(added.status).toBe(400);
+        expect(added.data.message).toMatch(/Unknown card_handle/);
+      });
+
+      it('edit: taking a card off, then reversing, nets everything to zero', async () => {
+        await makeProduct('grn-edit-keep', true);
+        await makeProduct('grn-edit-drop', true);
+        const received = (await grn('grn-edit-keep', 2)).data
+          .goods_receive_note;
+        expect(
+          (
+            await edit(received.id, {
+              lines: [lineOf('grn-edit-keep', 2), lineOf('grn-edit-drop', 3)],
+            })
+          ).status,
+        ).toBe(200);
+        expect(await stockOf('grn-edit-drop')).toMatchObject({
+          on_hand: 3,
+          counter: 3,
+        });
+
+        // The card comes off the note entirely.
+        expect(
+          (await edit(received.id, { lines: [lineOf('grn-edit-keep', 1)] }))
+            .status,
+        ).toBe(200);
+        expect(await stockOf('grn-edit-drop')).toMatchObject({
+          on_hand: 0,
+          counter: 0,
+        });
+        expect(await movements('grn-edit-drop')).toEqual([
+          'goods_receive:-3',
+          'goods_receive:3',
+        ]);
+        expect(await stockOf('grn-edit-keep')).toMatchObject({
+          on_hand: 1,
+          counter: 1,
+        });
+
+        // A reversal undoes the note as edited, not as first saved.
+        const undo = await reverse(received.id);
+        expect(undo.status).toBe(201);
+        expect(
+          undo.data.goods_receive_note.lines.map(
+            (l: { card_handle: string; qty: number }) =>
+              `${l.card_handle} x ${l.qty}`,
+          ),
+        ).toEqual(['grn-edit-keep x -1']);
+        expect(await stockOf('grn-edit-keep')).toMatchObject({
+          on_hand: 0,
+          counter: 0,
+        });
+        expect(await stockOf('grn-edit-drop')).toMatchObject({
+          on_hand: 0,
+          counter: 0,
+        });
+        expect(await movements('grn-edit-keep')).toEqual([
+          'goods_receive:-1',
+          'goods_receive:-1',
+          'goods_receive:2',
+        ]);
       });
     });
   },

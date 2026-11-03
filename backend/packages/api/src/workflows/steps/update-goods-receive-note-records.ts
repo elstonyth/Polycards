@@ -8,6 +8,8 @@ export type UpdateGoodsReceiveNoteRecordsInput = {
   date: string;
   supplier: string;
   agent_user_id: string;
+  // The note's updated_at as the editor loaded it; a later save is refused.
+  expected_updated_at?: string;
   lines: GoodsReceiveNoteLineInput[];
 };
 
