@@ -55,6 +55,8 @@ import {
   withBankShareStamp,
   clearedHolderNames,
   HOLDER_NAME_CLEARED_KEY,
+  liftedPayoutBans,
+  withLiftedPayoutBan,
   holderNameKey,
   withClearedHolderName,
   type SavedBankAccount,
@@ -10359,27 +10361,39 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // The numbers this customer saved or was paid to that are on the ban list
-  // (owner, 2026-11-03), by canonical bank and last 4: what support sees and
-  // lifts. account_key (the full number) stays on the server.
+  // The numbers this customer saved, was paid to (any status) or had lifted
+  // that are on the ban list (owner, 2026-11-03), by bank and last 4: what
+  // support sees and lifts for this player. account_key (the full number)
+  // stays on the server.
   @InjectManager()
   async bannedPayoutAccountsOf(
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ account_key: string; bank_code: string; last4: string }[]> {
+  ): Promise<
+    {
+      account_key: string;
+      bank_code: string;
+      last4: string;
+      lifted_for_player: boolean;
+    }[]
+  > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
-      'SELECT metadata FROM customer WHERE id = ?',
+      'SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL',
       [customerId],
     );
     const paid = await em.execute<
       { bank_code: string; account_number: string }[]
     >(
-      'SELECT DISTINCT bank_code, account_number FROM gateway_withdrawal WHERE customer_id = ? AND deleted_at IS NULL',
+      'SELECT bank_code, account_number FROM gateway_withdrawal WHERE customer_id = ? AND deleted_at IS NULL ORDER BY created_at',
       [customerId],
     );
-    const byKey = new Map<string, string>();
+    const lifted = liftedPayoutBans(me?.metadata ?? {});
+    // First bank seen wins, so the list and a later lift agree on it.
+    const byKey = new Map<string, string>(
+      Object.entries(lifted).map(([key, l]) => [key, l.bank_code]),
+    );
     for (const { bankCode, accountNumber } of [
       ...parseSavedBankAccounts(me?.metadata?.bank_accounts),
       ...paid.map((p) => ({
@@ -10388,9 +10402,10 @@ class PacksModuleService extends MedusaService({
       })),
     ]) {
       const bank = findBank(bankCode);
-      // A payout row of a deleted account keeps its last 4 only.
-      if (!bank || accountNumber.replace(/\W/g, '').length <= 4) continue;
-      byKey.set(payoutAccountKey(accountNumber, bank.wallet ?? false), bank.id);
+      const key = payoutAccountKey(accountNumber, bank?.wallet ?? false);
+      // A cut payout row (deleted account, freed number) keeps its last 4 only.
+      if (key.length <= 4 || byKey.has(key)) continue;
+      byKey.set(key, bank?.id ?? bankCode);
     }
     if (byKey.size === 0) return [];
     const banned = await em.execute<{ account_key: string }[]>(
@@ -10401,86 +10416,177 @@ class PacksModuleService extends MedusaService({
       account_key,
       bank_code: byKey.get(account_key) as string,
       last4: account_key.slice(-4),
+      lifted_for_player: Boolean(lifted[account_key]),
     }));
   }
 
-  // Support takes a number off the ban list (owner, 2026-11-04), named by its
-  // last 4 (and bank, when two match) among this customer's own numbers, so no
-  // one types a full number. Audited on that customer. It only lifts the ban:
-  // another account that shares the number still holds it, so a customer save
-  // stays refused as shared until support adds or verifies it.
+  // The one banned number support means by these last 4 (owner, 2026-11-04):
+  // first among this player's own numbers, then, for a player whose save was
+  // refused (nothing on their list), anywhere on the ban list. The bank only
+  // breaks a tie. Refused when nothing or more than one matches.
+  @InjectManager()
+  async resolveBannedPayoutAccount(
+    customerId: string,
+    last4: string,
+    bankCode?: string | null,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    account_key: string;
+    bank_code: string;
+    last4: string;
+    found_on: 'player' | 'ban_list';
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    let foundOn: 'player' | 'ban_list' = 'player';
+    let candidates = (
+      await this.bannedPayoutAccountsOf(customerId, sharedContext)
+    ).filter((b) => b.last4 === last4);
+    if (candidates.length === 0) {
+      foundOn = 'ban_list';
+      candidates = (
+        await em.execute<{ account_key: string; bank_code: string | null }[]>(
+          'SELECT account_key, bank_code FROM banned_payout_account WHERE right(account_key, 4) = ? ORDER BY created_at',
+          [last4],
+        )
+      ).map((r) => ({
+        account_key: r.account_key,
+        bank_code: findBank(r.bank_code)?.id ?? r.bank_code ?? '',
+        last4,
+        lifted_for_player: false,
+      }));
+    }
+    const bank = bankCode ? findBank(bankCode)?.id : null;
+    if (candidates.length > 1 && bank) {
+      candidates = candidates.filter((c) => c.bank_code === bank);
+    }
+    if (candidates.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `No banned bank number ends ${last4}.`,
+      );
+    }
+    if (candidates.length > 1) {
+      const banks = [
+        ...new Set(
+          candidates.map((c) => findBank(c.bank_code)?.name ?? (c.bank_code || 'an unknown bank')),
+        ),
+      ].join(', ');
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${candidates.length} banned numbers end ${last4} (${banks}). Say which bank.`,
+      );
+    }
+    const [hit] = candidates;
+    return {
+      account_key: hit.account_key,
+      bank_code: hit.bank_code,
+      last4,
+      found_on: foundOn,
+    };
+  }
+
+  // Support unbans a number FOR THIS PLAYER (owner, 2026-11-04; security
+  // review): this player may save it and be paid to it, every other account
+  // still may not, so a lifted ring number cannot come back to the ring. It does
+  // not touch the shared-number rule: if another account was paid to it, this
+  // player's own save is still refused as shared and support adds it.
+  // `lifted: false` bans it for them again. Audited on the player.
   @InjectTransactionManager()
-  async liftPayoutAccountBan(
+  async setPayoutBanLifted(
     input: {
       customerId: string;
       adminId: string;
       last4: string;
       bankCode?: string | null;
+      lifted: boolean;
       reason: string;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ bank_code: string; last4: string }> {
-    const bank = input.bankCode ? findBank(input.bankCode)?.id : null;
-    if (input.bankCode && !bank) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'Pick a bank from the list.',
-      );
-    }
-    const matches = (
-      await this.bannedPayoutAccountsOf(input.customerId, sharedContext)
-    ).filter(
-      (b) => b.last4 === input.last4 && (!bank || b.bank_code === bank),
+  ): Promise<{ bank_code: string; last4: string; lifted: boolean; changed: boolean }> {
+    const hit = await this.resolveBannedPayoutAccount(
+      input.customerId,
+      input.last4,
+      input.bankCode,
+      sharedContext,
     );
-    if (matches.length === 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `No banned bank number ending ${input.last4} on this player.`,
-      );
-    }
-    if (matches.length > 1) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        `More than one banned number on this player ends ${input.last4}. Say which bank.`,
-      );
-    }
-    const [hit] = matches;
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('DELETE FROM banned_payout_account WHERE account_key = ?', [
-      hit.account_key,
-    ]);
-    await this.audit(
+    let changed = false;
+    await this.mutateCustomerMetadata(
       {
-        admin_id: input.adminId,
-        entity_type: 'customer',
-        entity_id: input.customerId,
-        action: 'edit',
-        // Bank and last 4 only, the rule every bank audit row follows.
-        before: { banned_number: { bank_code: hit.bank_code, last4: hit.last4 } },
-        after: { banned_number: null },
-        reason: `Unbanned bank number …${hit.last4}: ${input.reason}`,
+        customerId: input.customerId,
+        mutate: (current) => {
+          if (
+            Boolean(liftedPayoutBans(current)[hit.account_key]) === input.lifted
+          ) {
+            return null;
+          }
+          changed = true;
+          return withLiftedPayoutBan(
+            current,
+            hit.account_key,
+            input.lifted
+              ? { bank_code: hit.bank_code, at: new Date().toISOString() }
+              : null,
+          );
+        },
       },
       sharedContext,
     );
-    return { bank_code: hit.bank_code, last4: hit.last4 };
+    if (changed) {
+      await this.audit(
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          // Bank and last 4 only, the rule every bank audit row follows.
+          before: {
+            banned_number: { bank_code: hit.bank_code, last4: hit.last4 },
+            lifted_for_player: !input.lifted,
+          },
+          after: {
+            banned_number: { bank_code: hit.bank_code, last4: hit.last4 },
+            lifted_for_player: input.lifted,
+            found_on: hit.found_on,
+          },
+          reason: `${input.lifted ? 'Unbanned' : 'Banned again'} bank number …${hit.last4} for this player: ${input.reason}`,
+        },
+        sharedContext,
+      );
+    }
+    return {
+      bank_code: hit.bank_code,
+      last4: hit.last4,
+      lifted: input.lifted,
+      changed,
+    };
   }
 
   // A permanently banned payout number (owner, 2026-11-03): the farm rings'
   // banks, in banned_payout_account only (the repo is public). Matched on
-  // payoutAccountKey, so at any bank and however it is padded.
+  // payoutAccountKey, so at any bank and however it is padded. Not banned for
+  // the one customer support unbanned it for (setPayoutBanLifted).
   @InjectManager()
   async payoutAccountBanned(
     accountNumber: string,
     wallet = false,
+    customerId: string | null = null,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    const key = payoutAccountKey(accountNumber, wallet);
     const rows = await em.execute<unknown[]>(
       'SELECT 1 FROM banned_payout_account WHERE account_key = ? LIMIT 1',
-      [payoutAccountKey(accountNumber, wallet)],
+      [key],
     );
-    return rows.length > 0;
+    if (rows.length === 0) return false;
+    if (!customerId) return true;
+    const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
+      'SELECT metadata FROM customer WHERE id = ?',
+      [customerId],
+    );
+    return !liftedPayoutBans(me?.metadata ?? {})[key];
   }
 
   // Another account already used this holder name on a bank, saved or paid

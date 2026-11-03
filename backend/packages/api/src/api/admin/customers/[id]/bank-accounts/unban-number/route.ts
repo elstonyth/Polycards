@@ -6,26 +6,46 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 
-type Body = { last4?: unknown; bank_code?: unknown; reason?: unknown };
+type Body = {
+  last4?: unknown;
+  bank_code?: unknown;
+  lifted?: unknown;
+  reason?: unknown;
+};
 
-// POST /admin/customers/:id/bank-accounts/unban-number — support takes one of
-// this player's bank numbers off the ban list (owner, 2026-11-04), named by its
-// last 4 (and bank when two match). Audited. Other accounts on the number still
-// hold it: a customer save stays refused as shared until support adds or
-// verifies it.
+// POST /admin/customers/:id/bank-accounts/unban-number — support unbans a bank
+// number FOR THIS PLAYER (owner, 2026-11-04): they may save it and be paid to
+// it; it stays banned for every other account. Named by its last 4 (the bank
+// only breaks a tie), among the player's own numbers or, for one whose save was
+// refused, the whole ban list. `lifted: false` bans it for them again. Audited.
+// The shared-number rule still applies: if another account was paid to it,
+// support adds it with Add. Gated on assistant_unban:update (admin-rbac.ts).
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,
 ): Promise<void> {
-  const { last4, bank_code: bankCode, reason } = req.body ?? {};
-  if (typeof last4 !== 'string' || !/^[0-9A-Za-z]{4}$/.test(last4)) {
+  const { last4, bank_code: bankCode, lifted = true, reason } = req.body ?? {};
+  if (typeof last4 !== 'string' || !/^[0-9]{4}$/.test(last4)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'Give the last 4 of the bank number.',
+      'Give the last 4 digits of the bank number.',
     );
   }
-  if (bankCode !== undefined && bankCode !== null && typeof bankCode !== 'string') {
-    throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Pick a bank from the list.');
+  if (
+    bankCode !== undefined &&
+    bankCode !== null &&
+    typeof bankCode !== 'string'
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Pick a bank from the list.',
+    );
+  }
+  if (typeof lifted !== 'boolean') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'lifted must be true or false.',
+    );
   }
   if (
     typeof reason !== 'string' ||
@@ -37,14 +57,15 @@ export async function POST(
       'A reason (1–500 chars) is required.',
     );
   }
-  const lifted = await req.scope
+  const done = await req.scope
     .resolve<PacksModuleService>(PACKS_MODULE)
-    .liftPayoutAccountBan({
+    .setPayoutBanLifted({
       customerId: req.params.id,
       adminId: req.auth_context.actor_id,
       last4,
       bankCode: bankCode || null,
+      lifted,
       reason: reason.trim(),
     });
-  res.json({ unbanned: true, ...lifted });
+  res.json(done);
 }

@@ -759,6 +759,7 @@ export async function startWithdrawal(
     await packs.payoutAccountBanned(
       precheckDestination.accountNumber,
       findBank(precheckDestination.bankCode)?.wallet !== undefined,
+      input.customerId,
     )
   ) {
     throw new MedusaError(
@@ -2011,6 +2012,7 @@ export async function submitHeldWithdrawal(
     await packs.payoutAccountBanned(
       row.account_number,
       rowBank?.wallet !== undefined,
+      row.customer_id,
     )
   ) {
     throw new MedusaError(

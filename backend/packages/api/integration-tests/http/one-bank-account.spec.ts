@@ -318,22 +318,20 @@ medusaIntegrationTestRunner({
         expect(ok.status).toBe(200);
       });
 
-      it('support takes a number off the ban list from the player page', async () => {
+      it('support unbans a number for one player; it stays banned for the others', async () => {
         const a = await newCustomer('one-bank-u@test.dev');
-        await unwrapResponse(
-          api.post(ACCOUNTS, save('512345678911'), asCustomer(a)),
-        );
+        const b = await newCustomer('one-bank-v@test.dev');
         const pg = getContainer().resolve(ContainerRegistrationKeys.PG_CONNECTION);
         await pg.raw(
           'INSERT INTO banned_payout_account (account_key, bank_code, reason) VALUES (?, ?, ?)',
           ['512345678911', 'MBBEMYKL', 'test'],
         );
-        const before = await unwrapResponse(
-          api.get(`/admin/customers/${a}/bank-accounts`, asAdmin()),
+        // a's save was refused: the number is on no list of a's.
+        const refused = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678911'), asCustomer(a)),
         );
-        expect(before.data.banned_numbers).toEqual([
-          expect.objectContaining({ bank_code: 'MBBEMYKL', last4: '8911' }),
-        ]);
+        expect(refused.status).toBe(400);
+        expect(refused.data.message).toMatch(/cannot be used/);
         const res = await unwrapResponse(
           api.post(
             `/admin/customers/${a}/bank-accounts/unban-number`,
@@ -342,11 +340,23 @@ medusaIntegrationTestRunner({
           ),
         );
         expect(res.status).toBe(200);
-        const left = await pg.raw(
-          'SELECT 1 FROM banned_payout_account WHERE account_key = ?',
-          ['512345678911'],
+        expect(res.data).toMatchObject({ lifted: true, changed: true });
+        const saved = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678911'), asCustomer(a)),
         );
-        expect(left.rows).toHaveLength(0);
+        expect(saved.status).toBe(200);
+        const listed = await unwrapResponse(
+          api.get(`/admin/customers/${a}/bank-accounts`, asAdmin()),
+        );
+        expect(listed.data.banned_numbers).toEqual([
+          expect.objectContaining({ last4: '8911', lifted_for_player: true }),
+        ]);
+        // Still banned for everyone else.
+        const other = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678911', 'Other Holder'), asCustomer(b)),
+        );
+        expect(other.status).toBe(400);
+        expect(other.data.message).toMatch(/cannot be used/);
       });
 
       it('refuses a banned number at any bank, for support too', async () => {

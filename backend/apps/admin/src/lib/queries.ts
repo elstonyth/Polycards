@@ -1556,14 +1556,22 @@ export const useSetBankShareVerified = (id: string) => {
 export const useUnbanBankNumber = (id: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { bankCode: string; last4: string; reason: string }) =>
-      unbanBankNumber(id, vars.bankCode, vars.last4, vars.reason),
-    onSuccess: () => {
-      toast.success('Bank number taken off the ban list');
+    mutationFn: (vars: Parameters<typeof unbanBankNumber>[1]) =>
+      unbanBankNumber(id, vars),
+    onSuccess: (data) => {
+      toast.success(
+        data.lifted
+          ? `…${data.last4} unbanned for this player. If another account was paid to it, add it with Add.`
+          : `…${data.last4} banned again for this player`,
+      );
       invalidateBankAccountCards(qc);
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+      // Someone else may have changed it meanwhile: show what is true now.
+      invalidateBankAccountCards(qc);
+    },
   });
 };
 

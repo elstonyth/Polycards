@@ -137,6 +137,10 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('POST', '/admin/customers/*/credits')).toEqual([
       'customer:update',
     ]);
+    // Unbanning a number is an unban: the assistant's policy, not customer:update.
+    expect(
+      policyFor('POST', '/admin/customers/*/bank-accounts/unban-number'),
+    ).toEqual(['assistant_unban:update']);
     expect(policyFor('POST', '/admin/payments/withdrawals/*/approve')).toEqual([
       'payment:update',
     ]);

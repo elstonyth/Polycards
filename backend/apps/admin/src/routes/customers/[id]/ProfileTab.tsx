@@ -54,6 +54,10 @@ import { FieldsDialog, TableState } from './bits';
 // (customer:update, api/admin-rbac.ts), never as a button that 403s.
 const useCanEdit = () =>
   usePermissions().hasPermission('customer:update' as Permission);
+// Unbans have their own policy (assistant_unban:update, admin-rbac.ts), the
+// assistant's: the number buttons show only to a role that may lift one.
+const useCanUnban = () =>
+  usePermissions().hasPermission('assistant_unban:update' as Permission);
 
 const BankForm = ({
   customerId,
@@ -261,13 +265,21 @@ const SavedBankAccountsCard = ({
   const add = useAddSavedBankAccount(customerId);
   const clearName = useSetHolderNameCleared(customerId);
   const unbanNumber = useUnbanBankNumber(customerId);
+  const canUnban = useCanUnban();
   const [dialog, setDialog] = useState<
     | { kind: 'remove'; accountId: string }
     | { kind: 'verify'; accountId: string; to: boolean }
     | { kind: 'add' }
     | { kind: 'clearName' }
     | { kind: 'unclearName'; name: string }
-    | { kind: 'unbanNumber'; bankCode: string; bankName: string; last4: string }
+    | {
+        kind: 'unbanNumber';
+        bankCode: string;
+        bankName: string;
+        last4: string;
+        lift: boolean;
+      }
+    | { kind: 'unbanOtherNumber' }
     | null
   >(null);
   const onHold = data?.accounts.some(
@@ -365,13 +377,15 @@ const SavedBankAccountsCard = ({
               key={`${b.bank_code}-${b.last4}`}
               className="flex flex-wrap items-center justify-between gap-2 border-t px-6 py-3"
             >
-              <StatusBadge color="red">
-                {t('players.savedBankNumberBanned', {
-                  bank: b.bank_name,
-                  last4: b.last4,
-                })}
+              <StatusBadge color={b.lifted_for_player ? 'green' : 'red'}>
+                {t(
+                  b.lifted_for_player
+                    ? 'players.savedBankNumberLifted'
+                    : 'players.savedBankNumberBanned',
+                  { bank: b.bank_name, last4: b.last4 },
+                )}
               </StatusBadge>
-              {canEdit && (
+              {canUnban && (
                 <Button
                   size="small"
                   variant="secondary"
@@ -381,10 +395,15 @@ const SavedBankAccountsCard = ({
                       bankCode: b.bank_code,
                       bankName: b.bank_name,
                       last4: b.last4,
+                      lift: !b.lifted_for_player,
                     })
                   }
                 >
-                  {t('players.savedBankNumberUnban')}
+                  {t(
+                    b.lifted_for_player
+                      ? 'players.savedBankNumberReban'
+                      : 'players.savedBankNumberUnban',
+                  )}
                 </Button>
               )}
             </div>
@@ -437,6 +456,15 @@ const SavedBankAccountsCard = ({
               >
                 {t('players.savedBankNameClear')}
               </Button>
+              {canUnban && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() => setDialog({ kind: 'unbanOtherNumber' })}
+                >
+                  {t('players.savedBankNumberOther')}
+                </Button>
+              )}
             </div>
           )}
         </>
@@ -481,17 +509,65 @@ const SavedBankAccountsCard = ({
       )}
       {dialog?.kind === 'unbanNumber' && (
         <FieldsDialog
-          title={t('players.savedBankNumberUnbanTitle', {
-            bank: dialog.bankName,
-            last4: dialog.last4,
-          })}
-          description={t('players.savedBankNumberUnbanBody')}
+          title={t(
+            dialog.lift
+              ? 'players.savedBankNumberUnbanTitle'
+              : 'players.savedBankNumberRebanTitle',
+            { bank: dialog.bankName, last4: dialog.last4 },
+          )}
+          description={t(
+            dialog.lift
+              ? 'players.savedBankNumberUnbanBody'
+              : 'players.savedBankNumberRebanBody',
+          )}
           fields={[{ key: 'reason', label: t('players.savedBankReason') }]}
           busy={unbanNumber.isPending}
           onClose={() => setDialog(null)}
           onSubmit={({ reason }) =>
             unbanNumber.mutate(
-              { bankCode: dialog.bankCode, last4: dialog.last4, reason },
+              {
+                bank_code: dialog.bankCode,
+                last4: dialog.last4,
+                lifted: dialog.lift,
+                reason,
+              },
+              { onSuccess: () => setDialog(null) },
+            )
+          }
+        />
+      )}
+      {dialog?.kind === 'unbanOtherNumber' && (
+        <FieldsDialog
+          title={t('players.savedBankNumberOtherTitle')}
+          description={t('players.savedBankNumberOtherBody')}
+          fields={[
+            {
+              key: 'last4',
+              label: t('players.savedBankNumberLast4'),
+              valid: (v) => /^[0-9]{4}$/.test(v),
+            },
+            {
+              key: 'bank_code',
+              label: t('players.savedBankNumberBank'),
+              placeholder: t('players.savedBankChoose'),
+              optional: true,
+              options: (data?.banks ?? []).map((b) => ({
+                value: b.id,
+                label: b.name,
+              })),
+            },
+            { key: 'reason', label: t('players.savedBankReason') },
+          ]}
+          busy={unbanNumber.isPending}
+          onClose={() => setDialog(null)}
+          onSubmit={({ last4, bank_code, reason }) =>
+            unbanNumber.mutate(
+              {
+                bank_code: (bank_code as string) || null,
+                last4: (last4 as string).trim(),
+                lifted: true,
+                reason,
+              },
               { onSuccess: () => setDialog(null) },
             )
           }

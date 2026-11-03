@@ -21,6 +21,7 @@ describe('hideStoreCustomerMetadata', () => {
         metadata: {
           handle: 'x',
           holder_name_cleared: { tanahkow: { name: 'n', at: 't', with: ['cus_2'] } },
+          payout_ban_lifted: { '512345670001': { bank_code: 'MBBEMYKL', at: 't' } },
         },
       },
     });
@@ -29,7 +30,12 @@ describe('hideStoreCustomerMetadata', () => {
 });
 
 describe('rejectAdminBankAccountsMetadata', () => {
-  it.each(['bank_accounts', 'bank_share_verified', 'holder_name_cleared'])('refuses %s', (key) => {
+  it.each([
+    'bank_accounts',
+    'bank_share_verified',
+    'holder_name_cleared',
+    'payout_ban_lifted',
+  ])('refuses %s', (key) => {
     const next = run({ metadata: { handle: 'x', [key]: 'anything' } });
     expect(next).toHaveBeenCalledTimes(1);
     expect(next.mock.calls[0][0]?.message).toContain(key);

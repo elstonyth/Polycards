@@ -1005,7 +1005,8 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       /cannot be used on Polycards/,
     );
-    expect(payoutAccountBanned).toHaveBeenCalledWith('123456789012', false);
+    // Asked for this customer: a number support unbanned for them passes.
+    expect(payoutAccountBanned).toHaveBeenCalledWith('123456789012', false, 'cus_1');
     expect(updateCustomers).not.toHaveBeenCalled();
     const line = logger.warn.mock.calls[0][0] as string;
     expect(line).toContain('9012');

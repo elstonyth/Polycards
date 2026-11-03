@@ -1,3 +1,4 @@
+import { MedusaError } from '@medusajs/framework/utils';
 import PacksModuleService from '../service';
 import {
   anySavedAccountShared,
@@ -515,30 +516,37 @@ describe('holderNameHeldByAnother — a name support cleared', () => {
   });
 });
 
-describe('bannedPayoutAccountsOf / liftPayoutAccountBan', () => {
-  const BANNED = '512345670001';
-  const service = (banned: string[]) => {
+describe('unbanning a bank number for one player', () => {
+  const OWN = '512345670001';
+  const service = (
+    banned: { account_key: string; bank_code: string | null }[],
+    metadata: Record<string, unknown> = { bank_accounts: [ACCOUNT] },
+  ) => {
     const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
     const audits: Record<string, unknown>[][] = [];
-    const deleted: unknown[] = [];
+    const writes: Record<string, unknown>[] = [];
     const execute = jest.fn(async (query: string, params: unknown[] = []) => {
-      if (query.startsWith('SELECT metadata')) {
-        return [{ metadata: { bank_accounts: [ACCOUNT] } }];
-      }
-      if (query.startsWith('SELECT DISTINCT bank_code')) {
+      if (query.startsWith('SELECT metadata')) return [{ metadata }];
+      if (query.startsWith('SELECT bank_code, account_number')) {
         return [
-          { bank_code: 'MBBEMYKL', account_number: BANNED },
-          // A deleted account's row keeps its last 4 only.
+          { bank_code: 'MBBEMYKL', account_number: OWN },
+          // A cut row keeps its last 4 only.
           { bank_code: 'MBBEMYKL', account_number: '9999' },
         ];
       }
-      if (query.startsWith('SELECT account_key')) {
+      if (query.startsWith('SELECT account_key FROM banned_payout_account WHERE account_key')) {
         const asked = String(params[0]).split(',');
-        return banned
-          .filter((k) => asked.includes(k))
-          .map((account_key) => ({ account_key }));
+        return banned.filter((b) => asked.includes(b.account_key));
       }
-      if (query.startsWith('DELETE')) deleted.push(params[0]);
+      if (query.startsWith('SELECT account_key, bank_code FROM banned_payout_account')) {
+        return banned.filter((b) => b.account_key.endsWith(String(params[0])));
+      }
+      if (query.startsWith('SELECT 1 FROM banned_payout_account')) {
+        return banned.some((b) => b.account_key === params[0]) ? [{}] : [];
+      }
+      if (query.startsWith('UPDATE customer')) {
+        writes.push(JSON.parse(params[0] as string));
+      }
       return [];
     });
     Object.assign(svc, {
@@ -547,42 +555,97 @@ describe('bannedPayoutAccountsOf / liftPayoutAccountBan', () => {
       }),
     });
     const em = { execute };
-    return { svc, audits, deleted, ctx: { transactionManager: em, manager: em } as never };
+    return { svc, audits, writes, ctx: { transactionManager: em, manager: em } as never };
   };
   const input = {
     customerId: 'cus_1',
     adminId: 'user_1',
     last4: '0001',
+    lifted: true,
     reason: 'owner approved',
   };
 
-  it("lists the player's banned numbers by bank and last 4", async () => {
-    const { svc, ctx } = service([BANNED]);
+  it("lists the player's banned numbers, skipping cut rows", async () => {
+    const { svc, ctx } = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }]);
     await expect(svc.bannedPayoutAccountsOf('cus_1', ctx)).resolves.toEqual([
-      { account_key: BANNED, bank_code: 'MBBEMYKL', last4: '0001' },
+      { account_key: OWN, bank_code: 'MBBEMYKL', last4: '0001', lifted_for_player: false },
     ]);
   });
 
-  it('deletes the one match and audits bank and last 4 only', async () => {
-    const { svc, audits, deleted, ctx } = service([BANNED]);
-    await expect(svc.liftPayoutAccountBan(input, ctx)).resolves.toEqual({
+  it('stamps the lift on this player only, audited with bank and last 4', async () => {
+    const { svc, audits, writes, ctx } = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }]);
+    await expect(svc.setPayoutBanLifted(input, ctx)).resolves.toMatchObject({
       bank_code: 'MBBEMYKL',
       last4: '0001',
+      lifted: true,
+      changed: true,
     });
-    expect(deleted).toEqual([BANNED]);
+    expect(writes[0]).toMatchObject({
+      payout_ban_lifted: { [OWN]: { bank_code: 'MBBEMYKL' } },
+    });
     expect(audits[0][0]).toMatchObject({
       entity_id: 'cus_1',
-      before: { banned_number: { bank_code: 'MBBEMYKL', last4: '0001' } },
-      after: { banned_number: null },
+      after: { lifted_for_player: true, found_on: 'player' },
     });
-    expect(JSON.stringify(audits)).not.toContain(BANNED);
+    expect(JSON.stringify(audits)).not.toContain(OWN);
   });
 
-  it('refuses a number not banned on this player, and deletes nothing', async () => {
-    const { svc, deleted, ctx } = service([]);
-    await expect(svc.liftPayoutAccountBan(input, ctx)).rejects.toThrow(
-      /No banned bank number ending 0001/,
+  it('finds a number the player never held on the ban list (their save was refused)', async () => {
+    const { svc, writes, audits, ctx } = service(
+      [{ account_key: '777777770001', bank_code: 'PBBEMYKL' }],
+      {},
     );
-    expect(deleted).toEqual([]);
+    await svc.setPayoutBanLifted(input, ctx);
+    expect(writes[0]).toMatchObject({
+      payout_ban_lifted: { '777777770001': { bank_code: 'PBBEMYKL' } },
+    });
+    expect(audits[0][0]).toMatchObject({ after: { found_on: 'ban_list' } });
+  });
+
+  it('uses the bank only to break a tie, and names the banks when it cannot', async () => {
+    const two = [
+      { account_key: '111111110001', bank_code: 'MBBEMYKL' },
+      { account_key: '222222220001', bank_code: 'PBBEMYKL' },
+    ];
+    const tie = service(two, {});
+    await expect(svc(tie).setPayoutBanLifted(input, tie.ctx)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/2 banned numbers end 0001 \(Maybank, Public Bank\)/),
+    });
+    const picked = service(two, {});
+    await picked.svc.setPayoutBanLifted({ ...input, bankCode: 'PBBEMYKL' }, picked.ctx);
+    expect(Object.keys(picked.writes[0].payout_ban_lifted as object)).toEqual(['222222220001']);
+  });
+
+  it('refuses when nothing ends that way', async () => {
+    const { svc: s, writes, ctx } = service([], {});
+    await expect(s.setPayoutBanLifted(input, ctx)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_FOUND,
+    });
+    expect(writes).toEqual([]);
+  });
+
+  it('bans it again for the player, and a second tap changes nothing', async () => {
+    const lifted = { payout_ban_lifted: { [OWN]: { bank_code: 'MBBEMYKL', at: STAMP } } };
+    const again = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }], { ...lifted });
+    await expect(
+      again.svc.setPayoutBanLifted({ ...input, lifted: true }, again.ctx),
+    ).resolves.toMatchObject({ changed: false });
+    expect(again.writes).toEqual([]);
+    const back = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }], { ...lifted });
+    await back.svc.setPayoutBanLifted({ ...input, lifted: false }, back.ctx);
+    expect(back.writes[0].payout_ban_lifted).toBeUndefined();
+  });
+
+  it('payoutAccountBanned: not banned for the player it was lifted for, banned for anyone else', async () => {
+    const banned = [{ account_key: OWN, bank_code: 'MBBEMYKL' }];
+    const lifted = service(banned, {
+      payout_ban_lifted: { [OWN]: { bank_code: 'MBBEMYKL', at: STAMP } },
+    });
+    await expect(lifted.svc.payoutAccountBanned(OWN, false, 'cus_1', lifted.ctx)).resolves.toBe(false);
+    const other = service(banned, {});
+    await expect(other.svc.payoutAccountBanned(OWN, false, 'cus_2', other.ctx)).resolves.toBe(true);
+    await expect(other.svc.payoutAccountBanned(OWN, false, null, other.ctx)).resolves.toBe(true);
   });
 });
+const svc = (made: { svc: PacksModuleService }) => made.svc;

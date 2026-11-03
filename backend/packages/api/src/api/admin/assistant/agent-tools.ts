@@ -125,7 +125,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'unban_account',
     label: 'Unban',
     description:
-      'Lift a permanent ban (one person with more than one account, owner 2026-11-03) when staff ask you to unban a player, by shown name or profile handle (never email or phone). Nothing changes until the person taps Unban under your answer. On unban the player can log in again and every saved bank account on it is cleared: they link a bank again themselves, under the normal rules, and a banned bank number stays banned (unban_bank_number lifts one). Only a permanent ban is lifted here; a staff disable or a deleted account is handled on the admin player page. Use ban_reason first if staff want to know why it was banned.',
+      'Lift a permanent ban (one person with more than one account, owner 2026-11-03) when staff ask you to unban a player, by shown name or profile handle (never email or phone). Nothing changes until the person taps Unban under your answer. On unban the player can log in again and every saved bank account on it is cleared: they link a bank again themselves, under the normal rules, and a banned bank number stays banned (unban_bank_number unbans one for a player). Only a permanent ban is lifted here; a staff disable or a deleted account is handled on the admin player page. Use ban_reason first if staff want to know why it was banned.',
     parameters: {
       type: 'object',
       properties: {
@@ -208,7 +208,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           reason,
           banned_at: new Date(state.disabled_at).toISOString(),
         },
-        `Unban ${shown}${handle && handle !== shown ? ` (@${handle})` : ''}: they can log in again. Their saved bank accounts are cleared, so they link a bank again themselves; a banned bank number stays banned. Reason: ${reason}`,
+        `Unban ${shown}${handle && handle !== shown ? ` (@${handle})` : ''}: they can log in again. Their saved bank accounts are cleared, so they link a bank again themselves; a banned bank number stays banned unless you also unban it for them. Reason: ${reason}`,
       );
       return JSON.stringify({
         unbanned: false,
@@ -221,14 +221,14 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'unban_bank_number',
     label: 'Unban bank number',
     description:
-      "Take a bank number off the ban list (the farm-ring numbers banned 2026-11-03) when staff ask you to unban a bank number or bank account. Name it by the player whose banks or payouts carry it (shown name or profile handle) and its last 4 digits, plus the bank when two of that player's banned numbers end the same. Nothing changes until the person taps the button under your answer. It only lifts the ban: another account that saved or was paid to the same number still holds it, so the customer's own save stays refused as shared until support adds it to its owner on the admin player page. Use ban_reason first to see a player's banned numbers.",
+      "Unban a banned bank number for ONE player (farm-ring numbers were banned 2026-11-03) when staff ask to unban a bank number or bank account for someone: that player may then save it and be paid to it, and it stays banned for every other account. Staff must name, in one message, the player it is for (shown name or profile handle) and the number's last 4 digits; pass the bank only when two banned numbers end the same. The player can be the one whose save was refused: the number need not be on their account. Nothing changes until the person taps the button under your answer. If another account was paid to the number, the player's own save is still refused as shared: support then adds it on the admin player page. ban_reason shows a player's banned numbers.",
     parameters: {
       type: 'object',
       properties: {
         username: {
           type: 'string',
           description:
-            "The player whose banks or payouts carry the number: shown name or profile handle, exactly as staff wrote it.",
+            "The player the number is unbanned for: shown name or profile handle, exactly as staff wrote it.",
         },
         last4: {
           type: 'string',
@@ -237,11 +237,11 @@ export const AGENT_TOOLS: AgentTool[] = [
         bank: {
           type: 'string',
           description:
-            'The bank, e.g. Maybank or Public Bank, only when needed to tell two numbers apart.',
+            'The bank, e.g. Maybank or Public Bank, only when two banned numbers end the same.',
         },
         reason: {
           type: 'string',
-          description: "Why it is lifted, in staff's words.",
+          description: "Why it is unbanned, in staff's words.",
         },
       },
       required: ['username', 'last4'],
@@ -249,19 +249,24 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
     needs: [UNBAN_NEED],
     run: async (args, ctx) => {
+      const resend =
+        'Ask them to send it again in one message with the player and the last 4, for example: "unban Maybank 2135 for Collector123". Nothing was changed.';
       const username = str(args.username);
-      const last4 = str(args.last4);
-      if (!username) throw new Error('username is required.');
+      // The model may send the digits unquoted.
+      const last4 =
+        typeof args.last4 === 'number' ? String(args.last4) : str(args.last4);
+      if (!username) throw new Error(`username is required. ${resend}`);
       if (!/^[0-9]{4}$/.test(last4)) {
-        throw new Error('last4 must be the last 4 digits. Nothing was changed.');
+        throw new Error(`last4 must be the last 4 digits of the bank number. ${resend}`);
       }
-      // Only what the person named in this very message: the player as a whole
-      // word, and the 4 digits, so data the model read cannot start one.
+      // Only what the person named in this very message, each as its own word,
+      // so data the model read (a customer field, a past chat) cannot start one,
+      // and digits inside a name or a phone number do not count.
       const text = ctx.userText ?? '';
       const words = text.toLowerCase().split(/[^a-z0-9_-]+/);
-      if (!words.includes(username.toLowerCase()) || !text.includes(last4)) {
+      if (!words.includes(username.toLowerCase()) || !words.includes(last4)) {
         throw new Error(
-          'Unban only a bank number the person named in this message, with the player it is on. Nothing was changed.',
+          `Unban a bank number only when the person names, in this message, the player it is for and its last 4 digits. ${resend}`,
         );
       }
       const packs = ctx.container.resolve<PacksModuleService>(PACKS_MODULE);
@@ -269,38 +274,44 @@ export const AGENT_TOOLS: AgentTool[] = [
       const byHandle = await packs.findCustomerIdByHandle(username);
       if (byName && byHandle && byName !== byHandle) {
         throw new Error(
-          `${username} is a shown name and a different player's handle. Ask staff for the name shown on the profile. Nothing was changed.`,
+          `${username} is a shown name and a different player's handle. Ask staff for the name shown on the profile. ${resend}`,
         );
       }
       const customerId = byName ?? byHandle;
       if (!customerId) {
-        throw new Error(`No player named ${username}. Nothing was changed.`);
+        throw new Error(`No player named ${username}. ${resend}`);
       }
-      const bankArg = str(args.bank).toLowerCase();
+      // The bank only breaks a tie: a name the model or staff spelled loosely
+      // must not refuse a number its last 4 already names.
+      const bankArg = str(args.bank).toLowerCase().replace(/\s+/g, '');
       const bank = bankArg
         ? (findBank(bankArg)?.id ??
           [...MY_BANKS, ...SG_BANKS].find((b) =>
-            b.name.toLowerCase().includes(bankArg),
-          )?.id)
-        : undefined;
-      if (bankArg && !bank) {
-        throw new Error(`No bank called ${args.bank}. Nothing was changed.`);
-      }
-      const matches = (await packs.bannedPayoutAccountsOf(customerId)).filter(
-        (b) => b.last4 === last4 && (!bank || b.bank_code === bank),
-      );
-      if (matches.length === 0) {
+            b.name.toLowerCase().replace(/\s+/g, '').includes(bankArg),
+          )?.id ??
+          null)
+        : null;
+      let hit;
+      try {
+        hit = await packs.resolveBannedPayoutAccount(customerId, last4, bank);
+      } catch (err) {
         throw new Error(
-          `${username} has no banned bank number ending ${last4} on their banks or payouts. Nothing was changed.`,
+          `${err instanceof Error ? err.message : String(err)} ${resend}`,
         );
       }
-      if (matches.length > 1) {
-        throw new Error(
-          `More than one banned number on ${username} ends ${last4}: ask staff which bank. Nothing was changed.`,
+      // The card names the account as it really is, not as the model spelled it.
+      const [customer] = await ctx.container
+        .resolve<ICustomerModuleService>(Modules.CUSTOMER)
+        .listCustomers(
+          { id: customerId },
+          { select: ['first_name', 'metadata'], take: 1 },
         );
-      }
-      const [hit] = matches;
-      const bankName = findBank(hit.bank_code)?.name ?? hit.bank_code;
+      const shown = customer?.first_name ?? username;
+      const handle =
+        typeof customer?.metadata?.handle === 'string'
+          ? customer.metadata.handle
+          : null;
+      const bankName = findBank(hit.bank_code)?.name ?? (hit.bank_code || 'the bank');
       const given = str(args.reason).slice(0, 400);
       const reason =
         given && squash(text).includes(squash(given))
@@ -316,12 +327,12 @@ export const AGENT_TOOLS: AgentTool[] = [
           last4,
           reason,
         },
-        `Take ${bankName} …${last4} (on ${username}) off the ban list: it can be saved again. Another account that saved or was paid to it still holds it, so support adds it to its owner on the admin player page. Reason: ${reason}`,
+        `Unban ${bankName} …${last4} for ${shown}${handle && handle !== shown ? ` (@${handle})` : ''} only: they may save it and be paid to it; it stays banned for every other account. If another account was paid to it, support still adds it for them on the admin player page. Reason: ${reason}`,
       );
       return JSON.stringify({
         unbanned: false,
         waiting:
-          'Nothing has changed yet: a button is under your answer, and the number comes off the ban list only when the person taps it. Tell them so in one short line, and that a number other accounts were paid to must be added to its owner by support on the admin player page.',
+          'Nothing has changed yet: a button is under your answer, and the number is unbanned for this player only when the person taps it. Tell them so in one short line, and that if another account was paid to it, support adds it for the player on the admin player page.',
       });
     },
   },
