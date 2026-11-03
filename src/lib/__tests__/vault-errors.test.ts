@@ -181,7 +181,7 @@ describe('VAULT_RULES backend-message contract', () => {
       'A saved bank account cannot be removed here. Contact support to change it.',
       // the 2026-11-03 rules: name typed twice, banned numbers, per currency
       'The two names do not match. Type the same name twice.',
-      'This name is already linked to another Polycards account.',
+      'This name is already linked to another Polycards account. If you are a different person with the same name, contact support.',
       'This bank account cannot be used on Polycards.',
       'Your Polycards account already has a bank account for this currency. It cannot be changed.',
       "Your Polycards account already has a Touch 'n Go account. It cannot be changed.",

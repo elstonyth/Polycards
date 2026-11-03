@@ -89,6 +89,13 @@ The owner tightened the rule after the farm rings were listed:
   beside another carries a holder name already saved on that account, compared as
   real names are. A wallet has none. Support's add is the way past it for a name
   two banks spell differently, and the refusal says to contact support.
+- **Same name, different person** (owner, 2026-11-04). Two real people can share a
+  name. Support checks, then clears the name on each account from the player page
+  (`bank-accounts/name-clash`): it records the one other account holding the name,
+  and that account's use of it stops counting for this player. Any account that
+  uses the name later still blocks; a name on more than one other account is not
+  cleared. Per account and per name, audited, taken back on request, and removed
+  when a permanent ban is lifted. The ban report marks a cleared pair as two people.
 - **Reset.** Every customer's saved list and share stamps were cleared once, after a
   private backup, so everyone saves again under these rules. Payout rows keep their
   own destination, so open payouts were untouched.

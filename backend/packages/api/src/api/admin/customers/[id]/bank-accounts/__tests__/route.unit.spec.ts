@@ -3,6 +3,7 @@ import { GET } from '../route';
 import { POST as ADD } from '../add/route';
 import { POST as REMOVE } from '../remove/route';
 import { POST as VERIFY } from '../verify/route';
+import { POST as NAME_CLASH } from '../name-clash/route';
 
 // What support sees and does for a tied bank account (ADR 0015). The service
 // methods are pinned in modules/packs/__tests__/saved-account-support; these pin
@@ -25,6 +26,7 @@ const packs = {
   removeSavedBankAccount: jest.fn(),
   setBankShareVerified: jest.fn(),
   addSavedBankAccount: jest.fn(),
+  setHolderNameCleared: jest.fn(),
 };
 const customers = { retrieveCustomer: jest.fn(), listCustomers: jest.fn() };
 const notifications = { createNotifications: jest.fn() };
@@ -335,5 +337,57 @@ describe('POST bank-accounts/add', () => {
       /Collector2 is already verified/,
     );
     expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST bank-accounts/name-clash', () => {
+  const body = { holder_name: '  Tan  Ah Kow ', cleared: true, reason: 'checked' };
+
+  it('clears the stored form of the name for this player, as the admin', async () => {
+    const res = mkRes();
+    await NAME_CLASH(mkReq(body), res as never);
+    expect(packs.setHolderNameCleared).toHaveBeenCalledWith({
+      customerId: 'cus_1',
+      adminId: 'user_1',
+      holderName: 'Tan Ah Kow',
+      cleared: true,
+      reason: 'checked',
+    });
+    expect(res.json).toHaveBeenCalledWith({ cleared: true });
+  });
+
+  it.each([
+    [{ ...body, holder_name: 'x' }, /holder name/],
+    [{ ...body, holder_name: '陈大文' }, /English letters/],
+    [{ ...body, cleared: 'yes' }, /true or false/],
+    [{ ...body, reason: ' ' }, /reason/],
+  ])('refuses %j', async (bad, message) => {
+    await expect(NAME_CLASH(mkReq(bad), mkRes() as never)).rejects.toThrow(message);
+    expect(packs.setHolderNameCleared).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET bank-accounts — cleared names', () => {
+  it('lists the names support cleared for this player', async () => {
+    customers.retrieveCustomer.mockResolvedValue({
+      metadata: {
+        bank_accounts: [ACCOUNT],
+        holder_name_cleared: {
+          testholder: { name: 'Test Holder', at: STAMP, with: ['cus_2'] },
+        },
+      },
+    });
+    customers.listCustomers.mockResolvedValue([
+      { id: 'cus_2', metadata: { handle: 'Collector2' } },
+    ]);
+    const res = mkRes();
+    await GET(mkReq(), res as never);
+    expect(res.json.mock.calls[0][0].cleared_names).toEqual([
+      {
+        name: 'Test Holder',
+        cleared_at: STAMP,
+        with: [{ customer_id: 'cus_2', handle: 'Collector2' }],
+      },
+    ]);
   });
 });

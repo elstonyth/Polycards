@@ -30,6 +30,7 @@ import {
   useSavePayoutDetails,
   useSavedBankAccounts,
   useSetBankShareVerified,
+  useSetHolderNameCleared,
   useSetCustomerPhone,
   useSetCustomerRealName,
   useSetCustomerReferrer,
@@ -257,10 +258,13 @@ const SavedBankAccountsCard = ({
   const remove = useRemoveSavedBankAccount(customerId);
   const verify = useSetBankShareVerified(customerId);
   const add = useAddSavedBankAccount(customerId);
+  const clearName = useSetHolderNameCleared(customerId);
   const [dialog, setDialog] = useState<
     | { kind: 'remove'; accountId: string }
     | { kind: 'verify'; accountId: string; to: boolean }
     | { kind: 'add' }
+    | { kind: 'clearName' }
+    | { kind: 'unclearName'; name: string }
     | null
   >(null);
   const onHold = data?.accounts.some(
@@ -351,14 +355,53 @@ const SavedBankAccountsCard = ({
           {/* One account per currency, Touch 'n Go apart (owner,
               2026-11-03): a wallet or Touch 'n Go may sit beside a bank, so
               Add stays; the server refuses a second one of the same kind. */}
+          {/* Two real people with one name (owner, 2026-11-04): a cleared
+              name no longer counts as another account's for this player. */}
+          {(data.cleared_names ?? []).map((c) => (
+            <div
+              key={c.name}
+              className="flex flex-wrap items-center justify-between gap-2 border-t px-6 py-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge color="green">
+                  {t('players.savedBankNameCleared', {
+                    name: c.name,
+                    date: orderDateTime(c.cleared_at),
+                  })}
+                </StatusBadge>
+                <Text size="small" className="text-ui-fg-subtle">
+                  {t('players.savedBankNameClearedWith')}:{' '}
+                  <PlayerLinks players={c.with ?? []} />
+                </Text>
+              </div>
+              {canEdit && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() =>
+                    setDialog({ kind: 'unclearName', name: c.name })
+                  }
+                >
+                  {t('players.savedBankNameUnclear')}
+                </Button>
+              )}
+            </div>
+          ))}
           {canEdit && (
-            <div className="border-t px-6 py-4">
+            <div className="flex flex-wrap gap-2 border-t px-6 py-4">
               <Button
                 size="small"
                 variant="secondary"
                 onClick={() => setDialog({ kind: 'add' })}
               >
                 {t('players.savedBankAdd')}
+              </Button>
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => setDialog({ kind: 'clearName' })}
+              >
+                {t('players.savedBankNameClear')}
               </Button>
             </div>
           )}
@@ -397,6 +440,41 @@ const SavedBankAccountsCard = ({
           onSubmit={({ reason }) =>
             verify.mutate(
               { accountId: dialog.accountId, verified: dialog.to, reason },
+              { onSuccess: () => setDialog(null) },
+            )
+          }
+        />
+      )}
+      {dialog?.kind === 'clearName' && (
+        <FieldsDialog
+          title={t('players.savedBankNameClearTitle')}
+          description={t('players.savedBankNameClearBody')}
+          fields={[
+            { key: 'holder_name', label: t('players.savedBankHolder') },
+            { key: 'reason', label: t('players.savedBankReason') },
+          ]}
+          busy={clearName.isPending}
+          onClose={() => setDialog(null)}
+          onSubmit={({ holder_name, reason }) =>
+            clearName.mutate(
+              { holderName: holder_name, cleared: true, reason },
+              { onSuccess: () => setDialog(null) },
+            )
+          }
+        />
+      )}
+      {dialog?.kind === 'unclearName' && (
+        <FieldsDialog
+          title={t('players.savedBankNameUnclearTitle')}
+          description={t('players.savedBankNameUnclearBody', {
+            name: dialog.name,
+          })}
+          fields={[{ key: 'reason', label: t('players.savedBankReason') }]}
+          busy={clearName.isPending}
+          onClose={() => setDialog(null)}
+          onSubmit={({ reason }) =>
+            clearName.mutate(
+              { holderName: dialog.name, cleared: false, reason },
               { onSuccess: () => setDialog(null) },
             )
           }

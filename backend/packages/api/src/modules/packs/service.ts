@@ -53,6 +53,10 @@ import {
   resolveWithdrawalDestination,
   verifiedBankAccounts,
   withBankShareStamp,
+  clearedHolderNames,
+  HOLDER_NAME_CLEARED_KEY,
+  holderNameKey,
+  withClearedHolderName,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
@@ -841,6 +845,11 @@ interface SettleSnapshot {
 // hand-listed so the entity_type/action enums cannot drift from the DB CHECK.
 /** Far more than any real customer's networks and browsers in 180 days. */
 const VISITOR_SIGNAL_ROWS_PER_CUSTOMER = 200;
+
+/** The most other accounts support may clear one shared holder name against:
+ *  two real people share a name, so one, the account support checked. A name
+ *  on more is a ring, or needs the owner. */
+const MAX_NAME_CLASH_HOLDERS = 1;
 
 export type AdminAuditRow = Pick<
   InferTypeOf<typeof AdminActionAudit>,
@@ -6624,11 +6633,19 @@ class PacksModuleService extends MedusaService({
       {
         customerId: input.customerId,
         mutate: (current) => {
-          if (!('bank_accounts' in current) && !('bank_share_verified' in current)) {
+          if (
+            !('bank_accounts' in current) &&
+            !('bank_share_verified' in current) &&
+            !(HOLDER_NAME_CLEARED_KEY in current)
+          ) {
             return null;
           }
-          const { bank_accounts, bank_share_verified: _stamps, ...rest } =
-            current;
+          const {
+            bank_accounts,
+            bank_share_verified: _stamps,
+            [HOLDER_NAME_CLEARED_KEY]: _names,
+            ...rest
+          } = current;
           cleared = parseSavedBankAccounts(bank_accounts).map((a) => ({
             bank: a.bankName,
             last4: a.accountNumber.slice(-4),
@@ -10126,6 +10143,95 @@ class PacksModuleService extends MedusaService({
     }
   }
 
+  // Support found two real people with one name (owner, 2026-11-04): this
+  // account's own saves stop counting the accounts that hold the name NOW (the
+  // ones support checked) as another person's. Per account and per name, so each
+  // of the two is cleared on its own; an account that uses the name later still
+  // counts, and so does every save by any other account. `cleared: false` takes
+  // it back.
+  @InjectTransactionManager()
+  async setHolderNameCleared(
+    input: {
+      customerId: string;
+      adminId: string;
+      holderName: string;
+      cleared: boolean;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const key = holderNameKey(input.holderName);
+    const holders = input.cleared
+      ? await this.holderNameHolders(
+          input.customerId,
+          input.holderName,
+          sharedContext,
+        )
+      : [];
+    if (input.cleared && holders.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'No other account holds this name, so there is nothing to clear.',
+      );
+    }
+    // Two real people share a name; a name on many accounts is a ring.
+    if (input.cleared && holders.length > MAX_NAME_CLASH_HOLDERS) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${holders.length} other accounts use this name. Clearing covers two people with one name; ask the owner about the rest.`,
+      );
+    }
+    let changed = false;
+    await this.mutateCustomerMetadata(
+      {
+        customerId: input.customerId,
+        mutate: (current) => {
+          const stamp = clearedHolderNames(current)[key];
+          if (
+            input.cleared
+              ? stamp !== undefined &&
+                stamp.with.length === holders.length &&
+                holders.every((id) => stamp.with.includes(id))
+              : stamp === undefined
+          ) {
+            return null;
+          }
+          changed = true;
+          return withClearedHolderName(
+            current,
+            key,
+            input.cleared
+              ? {
+                  name: input.holderName,
+                  at: new Date().toISOString(),
+                  with: holders,
+                }
+              : null,
+          );
+        },
+      },
+      sharedContext,
+    );
+    if (changed) {
+      await this.audit(
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { holder_name: input.holderName },
+          after: {
+            holder_name: input.holderName,
+            cleared: input.cleared,
+            with: holders,
+          },
+          reason: `${input.cleared ? 'Cleared' : 'Took back'} a holder name shared with another person: ${input.reason}`,
+        },
+        sharedContext,
+      );
+    }
+  }
+
   // Support adds a saved account in a free slot (savedAccountSlot): the one way in
   // for a real owner whose number another account already holds, which a customer
   // save refuses for good because paid-out rows are permanent. The account starts
@@ -10274,27 +10380,56 @@ class PacksModuleService extends MedusaService({
   // Another account already used this holder name on a bank, saved or paid
   // (owner, 2026-11-03: a different bank under the same name is refused too).
   // Names compare as setRealName compares them. A wallet entry carries its
-  // network's name, which no person's name equals.
+  // network's name, which no person's name equals. The accounts support
+  // checked as another person with this name (setHolderNameCleared) do not
+  // count, for this customer only; any other account still does.
   @InjectManager()
   async holderNameHeldByAnother(
     customerId: string,
     holderName: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
+    const others = await this.holderNameHolders(
+      customerId,
+      holderName,
+      sharedContext,
+    );
+    if (others.length === 0) return false;
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<unknown[]>(
-      'SELECT 1 FROM customer c ' +
+    const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
+      'SELECT metadata FROM customer WHERE id = ?',
+      [customerId],
+    );
+    const checked =
+      clearedHolderNames(me?.metadata ?? {})[holderNameKey(holderName)]?.with ??
+      [];
+    return others.some((id) => !checked.includes(id));
+  }
+
+  // The other accounts that saved or were paid under this holder name, as
+  // holderNameHeldByAnother counts them. Never truncated: the decision needs
+  // every holder, or an unchecked one could slip past a clearing.
+  @InjectManager()
+  async holderNameHolders(
+    customerId: string,
+    holderName: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ customer_id: string }[]>(
+      'SELECT c.id AS customer_id FROM customer c ' +
         "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
         "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
         `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${realNameKeySql("a->>'accountHolderName'")} = ${realNameKeySql('?::text')} AND ${realNameKeySql("a->>'accountHolderName'")} <> '' ` +
-        'UNION ALL ' +
-        'SELECT 1 FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
+        'UNION ' +
+        'SELECT customer_id FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
         `AND ${realNameKeySql('account_holder_name')} = ${realNameKeySql('?::text')} AND ${realNameKeySql('account_holder_name')} <> '' ` +
-        "AND status IN ('pending', 'held', 'settled') LIMIT 1",
+        "AND status IN ('pending', 'held', 'settled')",
       [customerId, holderName, customerId, holderName],
     );
-    return rows.length > 0;
+    return rows.map((r) => r.customer_id);
   }
 
   // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob

@@ -481,8 +481,58 @@ medusaIntegrationTestRunner({
           api.post(ACCOUNTS, tng('120000000008'), asCustomer(a)),
         );
         expect(second.status).toBe(400);
-        expect(second.data.message).toMatch(/already has a Touch 'n Go account/);
+        expect(second.data.message).toMatch(
+          /already has a Touch 'n Go account/,
+        );
         expect(await accounts(a)).toHaveLength(2);
+      });
+
+      it('support clears a name two real people share, for each account on its own', async () => {
+        const a = await newCustomer('one-bank-s@test.dev');
+        const b = await newCustomer('one-bank-t@test.dev');
+        await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678909', 'Shared Name'),
+            asCustomer(a),
+          ),
+        );
+        const refused = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678910', 'Shared Name'),
+            asCustomer(b),
+          ),
+        );
+        expect(refused.status).toBe(400);
+        expect(refused.data.message).toMatch(/already linked to another/);
+        const cleared = await unwrapResponse(
+          api.post(
+            `/admin/customers/${b}/bank-accounts/name-clash`,
+            { holder_name: 'SHARED NAME', cleared: true, reason: 'two people' },
+            asAdmin(),
+          ),
+        );
+        expect(cleared.status).toBe(200);
+        const saved = await unwrapResponse(
+          api.post(
+            ACCOUNTS,
+            save('512345678910', 'Shared Name'),
+            asCustomer(b),
+          ),
+        );
+        expect(saved.status).toBe(200);
+        expect(await accounts(b)).toHaveLength(1);
+        // The customer's own record never carries support's note: it names the
+        // other account. Its metadata is served (the saved list is there).
+        const me = await unwrapResponse(
+          api.get('/store/customers/me', asCustomer(b)),
+        );
+        expect(me.status).toBe(200);
+        expect(me.data.customer.metadata).toHaveProperty('bank_accounts');
+        expect(me.data.customer.metadata).not.toHaveProperty(
+          'holder_name_cleared',
+        );
       });
 
       it("a Touch 'n Go under another name than the saved bank is refused", async () => {

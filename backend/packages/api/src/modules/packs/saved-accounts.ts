@@ -7,6 +7,7 @@ import {
   sandboxOnlyBank,
   type Bank,
 } from './banks';
+import { realNameKey } from '../../utils/real-name';
 // Type-only: a value import of gateway.ts from here would cycle through the
 // module index into the service, which imports this file.
 import type { PaymentGateway } from './gateway';
@@ -52,7 +53,7 @@ export const HOLDER_NAME_CONFIRM_MESSAGE =
 /** A different bank under a name another account already used (owner,
  *  2026-11-03). */
 export const HOLDER_NAME_LINKED_MESSAGE =
-  'This name is already linked to another Polycards account.';
+  'This name is already linked to another Polycards account. If you are a different person with the same name, contact support.';
 
 /** A bank or Touch 'n Go under another name than the one already saved on
  *  this account (owner, 2026-11-03): one account, one person, one name. */
@@ -523,6 +524,53 @@ export function verifiedBankAccounts(
   return Object.fromEntries(
     Object.entries(stamps).filter(([, at]) => typeof at === 'string'),
   ) as Record<string, string>;
+}
+
+/** Holder names support cleared as a real clash (owner, 2026-11-04): another
+ *  person with the same name holds it on another account, so this account's
+ *  own saves stop counting THOSE accounts' use of it. `with` is who held it
+ *  when support checked; an account that uses the name later still counts.
+ *  Keyed by realNameKey; only support writes it (setHolderNameCleared). */
+export const HOLDER_NAME_CLEARED_KEY = 'holder_name_cleared';
+
+export type ClearedHolderName = { name: string; at: string; with: string[] };
+
+export function clearedHolderNames(
+  metadata: Record<string, unknown>,
+): Record<string, ClearedHolderName> {
+  const stamps = metadata[HOLDER_NAME_CLEARED_KEY];
+  // No prototype: a name keyed 'constructor' must not find Object's.
+  const out = Object.create(null) as Record<string, ClearedHolderName>;
+  if (typeof stamps !== 'object' || stamps === null) return out;
+  return Object.assign(out, Object.fromEntries(
+    Object.entries(stamps).filter(
+      ([, v]) =>
+        typeof v === 'object' &&
+        v !== null &&
+        typeof (v as ClearedHolderName).name === 'string' &&
+        typeof (v as ClearedHolderName).at === 'string' &&
+        Array.isArray((v as ClearedHolderName).with),
+    ),
+  ));
+}
+
+/** The key a holder name is cleared under: stored form, then compared as real
+ *  names are, so the stamp matches what a save checks. */
+export const holderNameKey = (name: string): string =>
+  realNameKey(normalizeHolderName(name));
+
+/** The blob with one name cleared, or the clearing removed by a null. */
+export function withClearedHolderName(
+  metadata: Record<string, unknown>,
+  key: string,
+  stamp: ClearedHolderName | null,
+): Record<string, unknown> {
+  const { [key]: _old, ...others } = clearedHolderNames(metadata);
+  const stamps = stamp === null ? others : { ...others, [key]: stamp };
+  const { [HOLDER_NAME_CLEARED_KEY]: _key, ...rest } = metadata;
+  return Object.keys(stamps).length > 0
+    ? { ...rest, [HOLDER_NAME_CLEARED_KEY]: stamps }
+    : rest;
 }
 
 /** The blob with one account's stamp set, or cleared by a null. */

@@ -1388,6 +1388,7 @@ import {
   getVisitorSignals,
   removeSavedBankAccount,
   setBankShareVerified,
+  setHolderNameCleared,
   getSpendReport,
   getCustomerMoney,
   type CustomerMoney,
@@ -1544,6 +1545,20 @@ export const useSetBankShareVerified = (id: string) => {
     }) => setBankShareVerified(id, vars.accountId, vars.verified, vars.reason),
     onSuccess: (_data, vars) => {
       toast.success(vars.verified ? 'Bank account verified' : 'Hold put back');
+      invalidateBankAccountCards(qc);
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useSetHolderNameCleared = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { holderName: string; cleared: boolean; reason: string }) =>
+      setHolderNameCleared(id, vars.holderName, vars.cleared, vars.reason),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.cleared ? 'Name cleared for this player' : 'Shared name taken back');
       invalidateBankAccountCards(qc);
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
     },
