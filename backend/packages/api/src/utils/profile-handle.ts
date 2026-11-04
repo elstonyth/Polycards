@@ -120,8 +120,12 @@ export function suffixedUsername(
   attempt: number,
 ): string {
   if (GENERATED_RE.test(base)) {
+    // Attempt FIRST in the seed: seedOf is a 31x rolling hash, so varying the
+    // last character only steps the number by one (5152, 5153, ...) and the
+    // tries would probe one block of taken numbers. Varying the first spreads
+    // them across the pool.
     return generatedUsername(
-      `${seed}#${attempt}`,
+      `${attempt}#${seed}`,
       4 + Math.floor(attempt / REROLLS_PER_WIDTH),
     );
   }
