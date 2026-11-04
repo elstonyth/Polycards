@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 const read = vi.hoisted(() => vi.fn());
-vi.mock('@/lib/actions/coin-flip', () => ({ getCoinFlipHistory: read }));
+const everyone = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/actions/coin-flip', () => ({
+  getCoinFlipHistory: read,
+  getCoinFlipFeed: everyone,
+}));
 vi.mock('next/image', () => ({
   default: ({ src }: { src: string }) => createElement('img', { src }),
 }));
@@ -16,6 +20,7 @@ let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
   read.mockReset();
+  everyone.mockReset();
   read.mockResolvedValue({
     ok: true,
     rounds: [],
@@ -293,4 +298,73 @@ it('names the filter when it has no rows, and hides the tally before any flip', 
   });
   await act(async () => button('Won').click());
   expect(host.textContent).toContain('No won flips yet.');
+});
+
+describe('everyone view', () => {
+  const played = (who: string, status: 'won' | 'lost') => ({
+    ...flip(status, [card(`${who}-card`, 'Abra', 100)]),
+    id: `feed_${who}`,
+    who,
+    seed: 7,
+    profile_handle: null,
+    avatar_url: null,
+    frame_url: null,
+  });
+  const show = (paused = false) =>
+    act(async () =>
+      root.render(createElement(CoinFlipHistory, { paused, everyone: true })),
+    );
+  afterEach(() => vi.useRealTimers());
+
+  it("opens on every player's flips, named and not clickable", async () => {
+    everyone.mockResolvedValue({
+      ok: true,
+      rounds: [played('Ash', 'won'), played('Misty', 'lost')],
+    });
+    await show();
+    expect(everyone).toHaveBeenCalledExactlyOnceWith('all');
+    expect(read).not.toHaveBeenCalled();
+    expect(button('Everyone').getAttribute('aria-pressed')).toBe('true');
+    expect(host.textContent).toContain('Ash');
+    expect(host.textContent).toContain('Misty');
+    expect(host.textContent).toContain('Called Tail');
+    expect(host.querySelector('a[href*="round="]')).toBeNull();
+    expect(host.textContent).not.toContain('Landed');
+    expect(button('Next')).toBeUndefined();
+  });
+
+  it('filters everyone on the server and switches to your own flips', async () => {
+    everyone.mockResolvedValue({ ok: true, rounds: [] });
+    await show();
+    expect(host.textContent).toContain('No flips yet.');
+    await act(async () => button('Lost').click());
+    expect(everyone).toHaveBeenLastCalledWith('lost');
+    read.mockResolvedValue({
+      ok: true,
+      rounds: [flip('won', [card('a', 'Abra', 100)])],
+      count: 1,
+      totals: { head: 0, tail: 1 },
+    });
+    await act(async () => button('Mine').click());
+    expect(read).toHaveBeenLastCalledWith(1, 'all');
+    expect(button('All').getAttribute('aria-pressed')).toBe('true');
+    expect(row('round_won')).not.toBeNull();
+  });
+
+  it('refreshes every 10 seconds, but not while a toss is in the air', async () => {
+    vi.useFakeTimers();
+    everyone.mockResolvedValue({ ok: true, rounds: [] });
+    await show();
+    await act(async () => vi.advanceTimersByTime(10_000));
+    expect(everyone).toHaveBeenCalledTimes(2);
+    await show(true);
+    await act(async () => vi.advanceTimersByTime(30_000));
+    expect(everyone).toHaveBeenCalledTimes(2);
+  });
+
+  it('the Transactions page keeps showing only your own flips', async () => {
+    await render(false);
+    expect(everyone).not.toHaveBeenCalled();
+    expect(button('Everyone')).toBeUndefined();
+  });
 });

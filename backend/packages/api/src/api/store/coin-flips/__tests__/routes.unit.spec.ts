@@ -1,6 +1,7 @@
 import { POST as quote } from '../quotes/route';
 import { POST as accept } from '../[id]/accept/route';
 import { GET as history } from '../route';
+import { GET as recent, clearRecentCoinFlipsCache } from '../recent/route';
 import { GET as settings } from '../settings/route';
 
 const privateRound = {
@@ -89,4 +90,47 @@ it('shows published settings while keeping admin odds out of the storefront', as
   const res = { json: jest.fn() };
   await settings({ auth_context: { actor_id: 'owner' }, scope: { resolve: (key: string) => key === 'customer' ? { listCustomerGroups: async () => [] } : service } } as never, res as never);
   expect(res.json).toHaveBeenCalledWith({ enabled: true, published_win_percent: 50, eligible: true, reason: null });
+});
+
+describe('everyone feed', () => {
+  beforeEach(() => clearRecentCoinFlipsCache());
+  const feed = (rounds: unknown[], disabled: string[] = []) => {
+    const service = {
+      listCoinFlipRounds: jest.fn().mockResolvedValue(rounds),
+      disabledCustomerIds: jest.fn().mockResolvedValue(new Set(disabled)),
+      siteSettings: jest.fn().mockResolvedValue({ avatar_frames: {} }),
+    };
+    const customers = { listCustomers: jest.fn().mockResolvedValue([{ id: 'owner', first_name: 'Ash', metadata: {} }]) };
+    const res = { json: jest.fn() };
+    const run = (query: Record<string, unknown> = {}) => recent({
+      auth_context: { actor_id: 'viewer' }, query,
+      scope: { resolve: (key: string) => key === 'customer' ? customers : service },
+    } as never, res as never);
+    return { service, res, run };
+  };
+
+  it("lists every player's settled flips with their public name, never ids or odds", async () => {
+    const { service, res, run } = feed([privateRound, { ...privateRound, id: 'hidden', customer_id: 'banned' }], ['banned']);
+    await run();
+    expect(service.listCoinFlipRounds.mock.calls[0][0]).toEqual({ status: ['won', 'lost'] });
+    const body = res.json.mock.calls[0][0];
+    expect(body.rounds).toHaveLength(1);
+    expect(body.rounds[0]).toMatchObject({ id: 'round', status: 'lost', who: 'Ash', landed_side: 'tail' });
+    expect(JSON.stringify(body)).not.toMatch(/customer_id|owner|banned|actual_win|odds_set|group_id|roll|snapshot/);
+  });
+
+  it.each([['won', ['won']], ['lost', ['lost']], ['quoted', ['won', 'lost']]])(
+    'status %j only ever reads settled rounds', async (status, expected) => {
+      const { service, run } = feed([]);
+      await run({ status });
+      expect(service.listCoinFlipRounds.mock.calls[0][0]).toEqual({ status: expected });
+    });
+
+  it('answers polls from one read per window', async () => {
+    const { service, res, run } = feed([privateRound]);
+    await run();
+    await run();
+    expect(service.listCoinFlipRounds).toHaveBeenCalledTimes(1);
+    expect(res.json.mock.calls[1][0]).toEqual(res.json.mock.calls[0][0]);
+  });
 });
