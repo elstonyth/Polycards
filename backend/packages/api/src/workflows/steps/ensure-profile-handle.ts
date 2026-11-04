@@ -22,7 +22,8 @@ export type EnsureProfileHandleResult = {
 // Every storefront login and signup makes that first call (GET
 // /store/profiles/me), so the handle is fixed from the name the account was
 // registered with — the one typed at signup, else an anonymous
-// "Collector####" — before the player can have renamed. A later rename changes
+// "Collector####" (5 or 6 digits once the 4-digit numbers are crowded) —
+// before the player can have renamed. A later rename changes
 // only the display name; see utils/profile-handle.ts for why the two are kept
 // apart.
 //

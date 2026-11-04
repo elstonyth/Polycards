@@ -333,9 +333,11 @@ const MAX_BATCH = 50;
  * `group_id` (null/omitted = DEFAULT, same contract as
  * POST /admin/customers/:id/group) and answers with every credential — the
  * same rows GET /admin/players/export serves later. `display_name` is
- * optional: blank = auto ("Collector####"); typed = validated and must be
- * free, then account #1 gets it exactly and the rest of the batch get
- * numbered variants (claimUsername's rule).
+ * optional: blank = auto ("Collector" + 4 digits, 5 or 6 once the 4-digit
+ * numbers are crowded); typed = validated and must be free, then account #1
+ * gets it exactly and the rest of the batch get numbered variants
+ * (claimUsername's rule). Account #1 also gets a numbered variant when the
+ * typed name is another player's profile handle, so its name and handle match.
  *
  * Sequential, no batch rollback: accounts minted before a failure stay (they
  * are valid logins, visible in the list and the export); the operator sees

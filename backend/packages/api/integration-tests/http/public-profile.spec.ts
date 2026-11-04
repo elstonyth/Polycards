@@ -801,6 +801,29 @@ medusaIntegrationTestRunner({
         }
       });
 
+      // A handle frozen later must not land on a name someone else holds:
+      // that player may have no handle yet, and would then get a different one.
+      it("a handle never takes another player's display name", async () => {
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [owner, other] = await customerModule.createCustomers([
+          { email: 'pp-hn-owner@test.dev', first_name: 'Name_Only_Owner' },
+          { email: 'pp-hn-other@test.dev', first_name: 'Other_Player' },
+        ]);
+        const theirs = await packs.claimHandle({
+          customerId: other.id,
+          desired: 'Name_Only_Owner',
+        });
+        expect(theirs).toMatch(/^Name_Only_Owner\d{4}$/);
+        // The name's owner still gets the matching handle on first login.
+        expect(
+          await packs.claimHandle({
+            customerId: owner.id,
+            desired: 'Name_Only_Owner',
+          }),
+        ).toBe('Name_Only_Owner');
+      });
+
       // The username guard must NOT reach /store/customers/me/addresses. An
       // address `first_name` is a real person's name — spaces and all — and it
       // is not unique; two customers may ship to the same Ada. Medusa keeps

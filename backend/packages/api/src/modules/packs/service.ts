@@ -10896,10 +10896,13 @@ class PacksModuleService extends MedusaService({
     const desired = USERNAME_RE.test(input.desired.trim())
       ? input.desired.trim()
       : generatedUsername(input.customerId);
+    // Another player's display name counts as taken too: they may not have
+    // a handle yet (it is frozen from that name on their first login), and
+    // taking it would split their name from their link.
     const free = async (candidate: string): Promise<boolean> => {
       const [row] = await em.execute<{ n: string }[]>(
-        "SELECT COUNT(*)::int AS n FROM customer WHERE lower(metadata->>'handle') = lower(?) AND deleted_at IS NULL AND id <> ?",
-        [candidate, input.customerId],
+        "SELECT COUNT(*)::int AS n FROM customer WHERE (lower(metadata->>'handle') = lower(?) OR lower(first_name) = lower(?)) AND deleted_at IS NULL AND id <> ?",
+        [candidate, candidate, input.customerId],
       );
       return Number(row?.n ?? 0) === 0;
     };
@@ -10964,6 +10967,13 @@ class PacksModuleService extends MedusaService({
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       'username:alloc',
+    ]);
+    // Also the handle allocator's lock, because the probe below reads
+    // handles: without it a concurrent claimHandle could take this name as a
+    // handle between the probe and the write. Order is username then handle,
+    // and claimHandle never takes username:alloc, so this cannot deadlock.
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      'profile_handle:alloc',
     ]);
 
     // `id <> ?` so re-claiming your own name (a case-only edit, or a no-op
