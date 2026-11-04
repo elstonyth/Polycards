@@ -456,7 +456,9 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
   draw plays, Results and My entry hold its outcome back. A draw from Results is
   rebuilt from stored data, not a video file: player pictures come from other hosts,
   which a browser won't let a canvas record, and this way old draws replay too. Reduced
-  motion: the winner shows directly, no battle, no dust. Sound (`drawStart/drawTick/
+  motion still plays the battle (owner 2026-11-04, after a player with Reduce Motion on
+  could not see the draw: the battle is the draw itself); only the dust, the zooms and
+  the entrances stay still. Sound (`drawStart/drawTick/
 drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the full
   view, a tap's gesture having unlocked it, and never from the corner.
 - **Results** — the winner, their tickets, a Watch-the-draw replay and the
@@ -471,7 +473,7 @@ drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the fu
 - **Do** keep chrome monochrome: ink/charcoal/graphite/white everywhere a color isn't a tier, rarity, or money signal (The Signal Rule).
 - **Do** set meaningful RM values in Nekst Black at Title size or larger, with Buyback Green reserved for money-in and Chase Gold for prizes.
 - **Do** give every interactive element all states: default, press (scale 0.98), focus-visible ring, disabled, loading (skeleton, not spinner).
-- **Do** honor `prefers-reduced-motion` on every animation via the existing `usePrefersReducedMotion`/`Reveal` foundation — content is always visible immediately.
+- **Do** honor `prefers-reduced-motion` on every animation via the existing `usePrefersReducedMotion`/`Reveal` foundation — content is always visible immediately. One exception: the Lucky Draw battle plays under reduced motion, because it is the draw itself (owner 2026-11-04); its decoration still stays still.
 - **Do** keep tap targets ≥44px and the primary CTA inside thumb reach on phone screens.
 - **Do** use skeletons shaped like the content (card tiles, list rows) for loading.
 
