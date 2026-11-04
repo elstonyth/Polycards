@@ -10818,9 +10818,13 @@ class PacksModuleService extends MedusaService({
   ): Promise<string | null> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    // An old handle kept as metadata.handle_alias counts too: it was that
+    // player's public name (Telegram posts print it), so the username guard
+    // must not let someone else take it. The owner may still take it back
+    // (the guard compares ids). A real name wins the ORDER BY.
     const rows = await em.execute<{ id: string }[]>(
-      'SELECT id FROM customer WHERE lower(first_name) = lower(?) AND deleted_at IS NULL LIMIT 1',
-      [username],
+      "SELECT id FROM customer WHERE (lower(first_name) = lower(?) OR lower(metadata->>'handle_alias') = lower(?)) AND deleted_at IS NULL ORDER BY (lower(first_name) = lower(?)) IS TRUE DESC LIMIT 1",
+      [username, username, username],
     );
     return rows[0]?.id ?? null;
   }
@@ -10838,9 +10842,10 @@ class PacksModuleService extends MedusaService({
   ): Promise<string | null> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    // An old handle moved by Migration20261104120000 is kept as
-    // metadata.handle_alias and still finds its account. The two are kept
-    // apart by every allocator; the ORDER BY prefers a real handle anyway.
+    // An old handle kept as metadata.handle_alias (a one-off move keeps
+    // the previous value there, indexed by Migration20261104110000) still
+    // finds its account. Every allocator keeps the two apart; the ORDER BY
+    // prefers a real handle anyway.
     const rows = await em.execute<{ id: string }[]>(
       "SELECT id FROM customer WHERE (lower(metadata->>'handle') = lower(?) OR lower(metadata->>'handle_alias') = lower(?)) AND deleted_at IS NULL ORDER BY (lower(metadata->>'handle') = lower(?)) IS TRUE DESC LIMIT 1",
       [handle, handle, handle],
@@ -10853,9 +10858,9 @@ class PacksModuleService extends MedusaService({
    * `desired` (the display name at that moment) or the next free deterministic
    * variant of it, and returned UNCHANGED on every call after that, whatever
    * `desired` then says. That second half is the whole point — a rename must
-   * never move the link (utils/profile-handle.ts). The one exception is
-   * Migration20261104120000, which moved the 8-digit generated handles and
-   * kept each old one as `metadata.handle_alias`, so the old link still works.
+   * never move the link (utils/profile-handle.ts). A one-off move keeps the
+   * old value as `metadata.handle_alias`, which this probe treats as taken and
+   * findCustomerIdByHandle still resolves, so the old link keeps working.
    *
    * Locking mirrors assignReferralCode: the global `profile_handle:alloc` lock
    * serializes the uniqueness probe with the write, then the per-customer
@@ -10957,9 +10962,10 @@ class PacksModuleService extends MedusaService({
    * A candidate must also be free as a HANDLE. The handle is frozen from this
    * name on the first login (ensure-profile-handle), so a name that is some
    * other player's handle gives the account a name and a link that differ.
-   * That happened to 330 prod accounts by 2026-11-04: Collector6340 renamed
-   * away, the next Collector6340 took the freed name, and its handle came out
-   * as Collector63408743.
+   * That happened to 139 prod accounts by 2026-11-04 (name Collector####,
+   * handle Collector########): Collector6340 renamed away, the next
+   * Collector6340 took the freed name, and its handle came out as
+   * Collector63408743.
    */
   @InjectTransactionManager()
   async claimUsername(

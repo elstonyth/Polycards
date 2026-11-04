@@ -17,11 +17,12 @@
 // before the change stopped working because of it.
 //
 // One handle move since (owner's call, 2026-11-04): Migration20261104120000
-// gave the 2,229 accounts with an 8-digit generated "Collector########" a
-// standard Collector#### name and handle. Each old handle is kept as
-// `metadata.handle_alias`, unique like a handle and treated as taken by every
-// allocator, so the old link still resolves and the storefront redirects it.
-// Do not drop the alias: that would break those links.
+// moved the 2,229 accounts with an 8-digit generated "Collector########" name
+// or handle to a fresh standard number (name and handle together where the
+// name was generated; a name the player chose was kept). Each old handle is
+// kept as `metadata.handle_alias`: unique, refused as a handle or a name for
+// anyone else, and still resolved, so the old link works and the storefront
+// redirects it. Do not drop the alias: that would break those links.
 //
 // Both values share one shape: ASCII `A-Za-z0-9_-`, 3..30, so either is a URL
 // segment without percent-encoding, and both are unique CASE-INSENSITIVELY
@@ -127,8 +128,12 @@ export function suffixedUsername(
   attempt: number,
 ): string {
   if (GENERATED_RE.test(base)) {
+    // Attempt FIRST in the seed: seedOf is a 31x rolling hash, so varying the
+    // last character only steps the number by one (5152, 5153, ...) and the
+    // tries would probe one block of taken numbers. Varying the first spreads
+    // them across the pool.
     return generatedUsername(
-      `${seed}#${attempt}`,
+      `${attempt}#${seed}`,
       4 + Math.floor(attempt / REROLLS_PER_WIDTH),
     );
   }

@@ -143,9 +143,16 @@ describe('GRN edit page', () => {
     expect(body).toMatchObject({
       supplier: 'Typo Supplier',
       expected_updated_at: '2026-11-03T10:00:00.000Z',
-      lines: [{ card_handle: 'abra', card_name: 'Abra', fmv_snapshot: 10, qty: 1 }],
+      lines: [
+        { card_handle: 'abra', card_name: 'Abra', fmv_snapshot: 10, qty: 1 },
+      ],
     });
-    expect(host.textContent).toContain('detail page');
+    // Polled, not one fixed settle(): the save awaits the stock invalidation's
+    // refetch before it navigates, which can outlast 20 ms on a loaded CI box.
+    await vi.waitFor(async () => {
+      await settle();
+      expect(host.textContent).toContain('detail page');
+    });
   });
 
   it('saves more cards straight away', async () => {

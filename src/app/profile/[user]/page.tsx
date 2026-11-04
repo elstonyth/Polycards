@@ -58,9 +58,12 @@ export default async function ProfilePage({
   searchParams,
 }: {
   params: Promise<{ user: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string | string[] }>;
 }) {
-  const [{ user: handle }, { tab }] = await Promise.all([params, searchParams]);
+  const [{ user: handle }, query] = await Promise.all([params, searchParams]);
+  // A repeated key (?tab=a&tab=b) arrives as an array; take the first, or
+  // tabFromParam's toLowerCase throws and the page 500s.
+  const tab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
   // The weekly board is the same memoised read /leaderboard renders, so the
   // profile's rank is that board's row, not a second computation of it.
   // Started alongside, awaited only once there is a profile to rank

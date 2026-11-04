@@ -44,6 +44,7 @@ medusaIntegrationTestRunner({
         ) as unknown as Knex;
         const customers = container.resolve(Modules.CUSTOMER);
         const bank = [{ id: 'acct_1', bankCode: 'MBB', last4: '1234' }];
+        const ids: string[] = [];
 
         const [both, split, ownName, noHandle, holder, arrayBlob, normal] =
           await customers.createCustomers([
@@ -96,9 +97,50 @@ medusaIntegrationTestRunner({
         ]);
         await customers.softDeleteCustomers([gone.id]);
 
+        // The retry path, which is the common one on prod (half the 4-digit
+        // numbers are taken): every 4-digit try of this row is held by
+        // someone, so it must move on to 5 digits.
+        const [crowded, gap] = await customers.createCustomers([
+          {
+            email: 'hb-crowded@test.dev',
+            first_name: 'Collector24246868',
+            metadata: { handle: 'Collector24246868' },
+          },
+          {
+            // E: a 4-digit generated name, no handle yet, and the name is
+            // already someone else's handle.
+            email: 'hb-gap@test.dev',
+            first_name: 'Collector5151',
+          },
+        ]);
+        const tries = await knex.raw(
+          `select distinct 'Collector' || lpad((((hashtextextended(? || '#' || n, 1104) & 9223372036854775807) % 10000))::text, 4, '0') as c from generate_series(0, 7) n`,
+          [crowded.id],
+        );
+        const held = tries.rows.map((t) => String(t.c));
+        await customers.createCustomers([
+          // A try that is already a seeded handle is held anyway.
+          ...held
+            .filter(
+              (h) =>
+                !['Collector3333', 'Collector1234', 'Collector5151'].includes(h),
+            )
+            .map((h, i) => ({
+            email: `hb-held-${i}@test.dev`,
+            first_name: `Held_${i}`,
+            metadata: { handle: h },
+          })),
+          {
+            email: 'hb-gap-holder@test.dev',
+            first_name: 'Gap_Holder',
+            metadata: { handle: 'Collector5151' },
+          },
+        ]);
+        ids.push(crowded.id, gap.id);
+
         for (const statement of await upSql()) await knex.raw(statement);
 
-        const ids = [
+        ids.unshift(
           both.id,
           split.id,
           ownName.id,
@@ -107,7 +149,7 @@ medusaIntegrationTestRunner({
           arrayBlob.id,
           normal.id,
           gone.id,
-        ];
+        );
         const read = async () => {
           const { rows } = await knex.raw(
             `select id, first_name, metadata from customer where id in (${ids.map(() => '?').join(', ')})`,
@@ -161,6 +203,17 @@ medusaIntegrationTestRunner({
         expect(row(arrayBlob.id).metadata).toEqual([1, 2]);
         expect(row(normal.id).metadata).toEqual({ handle: 'Collector1234' });
         expect(row(gone.id).first_name).toBe('Collector12123434');
+
+        const crowdedRow = row(crowded.id);
+        expect(crowdedRow.first_name).toMatch(/^Collector\d{5}$/);
+        expect(crowdedRow.metadata.handle).toBe(crowdedRow.first_name);
+        expect(held).not.toContain(crowdedRow.first_name);
+        const gapRow = row(gap.id);
+        expect(gapRow.first_name).toMatch(STANDARD);
+        expect(gapRow.first_name).not.toBe('Collector5151');
+        expect(gapRow.metadata).toEqual({
+          name_before_handle_backfill: 'Collector5151',
+        });
 
         // Every new value is different from every other.
         const fresh = [a.first_name, b.first_name, c.metadata.handle, d.first_name];

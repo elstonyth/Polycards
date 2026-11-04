@@ -783,7 +783,7 @@ medusaIntegrationTestRunner({
           {
             email: 'pp-gen-squat-b@test.dev',
             first_name: generatedUsername(nameTaken.id),
-            metadata: { handle: generatedUsername(nameTaken.id) },
+            metadata: { handle: 'Squatter_B_Own' },
           },
         ]);
 
@@ -822,6 +822,86 @@ medusaIntegrationTestRunner({
             desired: 'Name_Only_Owner',
           }),
         ).toBe('Name_Only_Owner');
+      });
+
+      // metadata.handle_alias: an old handle kept after a one-off move. The old
+      // link must still find the player (and answer with the current handle,
+      // which the storefront redirects to), and nobody else may take it as a
+      // handle or a name. Its owner may take it back as a name.
+      it('an old handle kept as an alias still resolves and stays reserved', async () => {
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [moved] = await customerModule.createCustomers([
+          {
+            email: 'pp-alias-owner@test.dev',
+            first_name: 'Moved_Handle',
+            metadata: { handle: 'Moved_Handle', handle_alias: 'Old_Alias_77' },
+          },
+        ]);
+
+        const old = await getProfile('old_alias_77');
+        expect(old.status).toBe(200);
+        expect(old.data.handle).toBe('Moved_Handle');
+        expect((await getProfile('Moved_Handle')).data.handle).toBe(
+          'Moved_Handle',
+        );
+
+        const token = await registerCustomer('pp-alias-taker@test.dev');
+        const rename = (first_name: string, bearer: string) =>
+          unwrapResponse(
+            api.post(
+              '/store/customers/me',
+              { first_name },
+              {
+                headers: { ...storeHeaders, authorization: `Bearer ${bearer}` },
+              },
+            ),
+          );
+        const taken = await rename('Old_Alias_77', token);
+        expect(taken.status).toBe(422);
+        expect(taken.data.message).toMatch(/already taken/i);
+
+        const [other] = await customerModule.createCustomers([
+          { email: 'pp-alias-other@test.dev', first_name: 'Alias_Other' },
+        ]);
+        expect(
+          (
+            await packs.claimHandle({
+              customerId: other.id,
+              desired: 'Old_Alias_77',
+            })
+          ).toLowerCase(),
+        ).not.toBe('old_alias_77');
+        expect(
+          (
+            await packs.claimUsername({
+              customerId: other.id,
+              desired: 'Old_Alias_77',
+            })
+          ).toLowerCase(),
+        ).not.toBe('old_alias_77');
+
+        // The owner taking their old name back is not a claim on anyone's.
+        expect(await packs.findCustomerIdByUsername('Old_Alias_77')).toBe(
+          moved.id,
+        );
+
+        // A row edited by hand so one value is a handle AND another row's
+        // alias: the real handle wins, so the lookup is never ambiguous.
+        const [holder, aliased] = await customerModule.createCustomers([
+          {
+            email: 'pp-alias-holder@test.dev',
+            first_name: 'Alias_Holder',
+            metadata: { handle: 'Both_Ways' },
+          },
+          {
+            email: 'pp-alias-aliased@test.dev',
+            first_name: 'Alias_Aliased',
+            metadata: { handle: 'Aliased_Now', handle_alias: 'Both_Ways' },
+          },
+        ]);
+        expect(aliased.id).not.toBe(holder.id);
+        expect(await packs.findCustomerIdByHandle('both_ways')).toBe(holder.id);
       });
 
       // The username guard must NOT reach /store/customers/me/addresses. An

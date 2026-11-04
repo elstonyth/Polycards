@@ -14,6 +14,8 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 //             but it was still another player's handle, so the two split)
 //   C    201  renamed to a name of their own, handle Collector########
 //   D     20  name Collector########, no handle yet (never opened a profile)
+//   E      1  name Collector####, no handle yet, and that name is already
+//             someone else's handle (its first login would split the two)
 //
 // The owner's rules (2026-11-04): each account gets a fresh "Collector" +
 // 4 digits (5 or 6 only when the 4-digit tries are taken), the same for name
@@ -21,32 +23,37 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // handle changes; the old handle keeps resolving and the storefront redirects
 // it to the new one.
 //
-// This is the one time a handle is moved (utils/profile-handle.ts says why
-// handles are otherwise permanent). It is safe because the old handle stays
-// reserved: `metadata.handle_alias` is unique like a handle, every allocator
-// treats it as taken, and findCustomerIdByHandle resolves it.
+// This is the one time handles are moved (utils/profile-handle.ts says why
+// they are otherwise permanent). It is safe because the old handle stays
+// reserved as `metadata.handle_alias`: unique (Migration20261104110000),
+// refused by claimUsername, claimHandle and the username guard, and resolved
+// by findCustomerIdByHandle. That code shipped in the deploy BEFORE this one,
+// so the pods still serving while this runs (pre-deploy migrate) already
+// honour aliases.
 //
 // Before-state, for a manual revert: `handle_alias` is the old handle and
 // `name_before_handle_backfill` the old display name, written wherever the
-// name changes. down() does not restore them: the old 4-digit names (B) may
-// have been taken by new signups since.
+// name changes. down() does not restore them: the old 4-digit names (B, E)
+// may have been taken by new signups since.
 //
-// Runs under the same advisory locks as claimUsername and claimHandle (same
-// order: username, then handle), so a signup during the deploy cannot pick a
-// number this run is handing out. The blob is merged (`||`), never replaced,
-// and a row whose metadata is not a JSON object is left alone, as in
-// Migration20260930140000. Re-running finds no rows, so a retried deploy is a
-// no-op.
+// Locking, in this order:
+//  1. `username:alloc` then `profile_handle:alloc`, the allocators' own
+//     advisory locks in their own order, so no signup can pick a number this
+//     run is handing out.
+//  2. ACCESS EXCLUSIVE on customer for the rest of the run (~0.2 s on a copy
+//     of prod). The app's metadata writers read the whole blob and write it
+//     back; one that read a row before this commits would write the old blob
+//     over it afterwards, putting the 8-digit handle back and dropping the
+//     alias. Only a lock that blocks their read prevents that; one advisory
+//     lock per row would need ~2,229 entries in a lock table of 64 x 50.
+//     lock_timeout bounds the wait for in-flight readers: past 5 s the
+//     migration fails and the deploy rolls back, nothing half-done.
+//
+// The blob is merged (`||`), never replaced, and a row whose metadata is not
+// a JSON object is left alone, as in Migration20260930140000. Re-running finds
+// no rows, so a retried deploy is a no-op.
 export class Migration20261104120000 extends Migration {
   override async up(): Promise<void> {
-    // Same shape as IDX_customer_handle_lower_unique. The expression must stay
-    // byte-for-byte what findCustomerIdByHandle and the claim probes query.
-    this.addSql(`
-      create unique index if not exists "IDX_customer_handle_alias_lower_unique"
-        on "customer" (lower(metadata->>'handle_alias'))
-        where "deleted_at" is null;
-    `);
-
     this.addSql(`
       do $$
       declare
@@ -58,18 +65,27 @@ export class Migration20261104120000 extends Migration {
         moved_handle int := 0;
         renamed_name int := 0;
       begin
+        perform set_config('lock_timeout', '5s', true);
         perform pg_advisory_xact_lock(hashtextextended('username:alloc', 0));
         perform pg_advisory_xact_lock(hashtextextended('profile_handle:alloc', 0));
+        lock table customer in access exclusive mode;
 
         for r in
-          select id, first_name, metadata->>'handle' as handle
-            from customer
-            where deleted_at is null
-              and (metadata is null or jsonb_typeof(metadata) = 'object')
-              and (metadata->>'handle' ~ '^Collector[0-9]{8}$'
-                   or (first_name ~ '^Collector[0-9]{8}$'
-                       and metadata->>'handle' is null))
-            order by created_at, id
+          select c.id, c.first_name, c.metadata->>'handle' as handle
+            from customer c
+            where c.deleted_at is null
+              and (c.metadata is null or jsonb_typeof(c.metadata) = 'object')
+              and (c.metadata->>'handle' ~ '^Collector[0-9]{8}$'
+                   or (c.metadata->>'handle' is null
+                       and (c.first_name ~ '^Collector[0-9]{8}$'
+                            or (c.first_name ~ '^Collector[0-9]{4,}$'
+                                and exists (
+                                  select 1 from customer o
+                                    where o.id <> c.id
+                                      and o.deleted_at is null
+                                      and (lower(o.metadata->>'handle') = lower(c.first_name)
+                                           or lower(o.metadata->>'handle_alias') = lower(c.first_name)))))))
+            order by c.created_at, c.id
         loop
           -- The new suffix rule (utils/profile-handle.ts suffixedUsername):
           -- 8 tries at 4 digits, then 8 at 5, then 8 at 6. Free means free as
@@ -95,7 +111,8 @@ export class Migration20261104120000 extends Migration {
           end loop;
 
           if r.handle is null then
-            -- D: only the name. The handle is frozen from it on first login.
+            -- D and E: only the name. The handle is frozen from it on first
+            -- login, and the new name is free as a handle.
             update customer
               set first_name = cand,
                   metadata = coalesce(metadata, '{}'::jsonb)
@@ -132,10 +149,8 @@ export class Migration20261104120000 extends Migration {
   }
 
   override async down(): Promise<void> {
-    // Only the index comes off. The renames stay: see the header for why, and
-    // for the metadata keys a manual revert would read.
-    this.addSql(
-      'drop index if exists "IDX_customer_handle_alias_lower_unique";',
-    );
+    // Nothing to undo automatically: see the header for why the renames stay,
+    // and for the metadata keys a manual revert would read. The alias index
+    // belongs to Migration20261104110000.
   }
 }

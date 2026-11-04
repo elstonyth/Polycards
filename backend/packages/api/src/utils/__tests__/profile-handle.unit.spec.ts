@@ -109,9 +109,26 @@ describe("suffixedUsername on a generated name", () => {
     expect(new Set(tries).size).toBeGreaterThan(1);
   });
 
+  it("spreads its tries across the pool instead of one block", () => {
+    // A run like 5152..5159 would keep landing in the same crowded block.
+    const nums = Array.from({ length: 8 }, (_, i) =>
+      Number(suffixedUsername("Collector6340", "cus_1", i).slice(9)),
+    );
+    expect(Math.max(...nums) - Math.min(...nums)).toBeGreaterThan(100);
+  });
+
   it("grows to 5 digits once the 4-digit tries are spent", () => {
+    expect(suffixedUsername("Collector6340", "cus_1", 7)).toMatch(
+      /^Collector\d{4}$/,
+    );
     expect(suffixedUsername("Collector6340", "cus_1", 8)).toMatch(
       /^Collector\d{5}$/,
+    );
+    expect(suffixedUsername("Collector6340", "cus_1", 15)).toMatch(
+      /^Collector\d{5}$/,
+    );
+    expect(suffixedUsername("Collector6340", "cus_1", 16)).toMatch(
+      /^Collector\d{6}$/,
     );
   });
 
