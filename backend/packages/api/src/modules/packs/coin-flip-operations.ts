@@ -26,7 +26,9 @@ export async function lockCoinFlipCustomer(customerId: string, context: Context)
 
 async function eligible(service: PacksModuleService, customerId: string, context: Context): Promise<void> {
   if (await service.isAccountDisabled(customerId, context)) refuse('This account is unavailable.');
-  assertCoinFlipEligible(await service.walletSummary(customerId, undefined, context));
+  const [group] = await coinFlipManager(context).execute<{ name: string | null; metadata: Record<string, unknown> | null }[]>(
+    `SELECT cg.name, cg.metadata FROM (${EFFECTIVE_GROUP_SQL}) g JOIN customer_group cg ON cg.id = g.group_id WHERE g.customer_id = ?`, [customerId]);
+  assertCoinFlipEligible(await service.walletSummary(customerId, undefined, context), group ? groupPolicyOf(group).withdrawals_blocked : false);
 }
 
 async function cardForFlip(service: PacksModuleService, customerId: string, pullId: string, context: Context) {
@@ -55,7 +57,6 @@ async function terms(customerId: string, context: Context) {
     WHERE c.id = ? AND c.deleted_at IS NULL FOR SHARE OF c`, [customerId, COIN_FLIP_CONFIG_ID]);
   if (!row?.enabled) return refuse('Coin flip is currently paused.');
   if (row.published_win_units == null) return refuse('Coin flip is not configured.');
-  if (groupPolicyOf({ name: row.group_name, metadata: row.group_metadata }).withdrawals_blocked) return refuse('Withdrawals are not available on this account.');
   const set = coerceOddsSet(row.odds_set);
   return { config: row, groupId: row.group_id, set, actual: effectiveCoinWinUnits(row, set), now: new Date(row.db_now) };
 }
