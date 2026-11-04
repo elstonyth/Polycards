@@ -801,6 +801,23 @@ medusaIntegrationTestRunner({
         }
       });
 
+      // The race a review found: the first-login step reads the name, a
+      // backfill or rename changes it, then the handle is claimed with the
+      // stale copy. The name read under the lock wins.
+      it('freezes the name the account has now, not the caller copy', async () => {
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [renamed] = await customerModule.createCustomers([
+          { email: 'pp-stale@test.dev', first_name: 'Current_Name' },
+        ]);
+        expect(
+          await packs.claimHandle({
+            customerId: renamed.id,
+            desired: 'Collector12345678',
+          }),
+        ).toBe('Current_Name');
+      });
+
       // A handle frozen later must not land on a name someone else holds:
       // that player may have no handle yet, and would then get a different one.
       it("a handle never takes another player's display name", async () => {
@@ -808,7 +825,7 @@ medusaIntegrationTestRunner({
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         const [owner, other] = await customerModule.createCustomers([
           { email: 'pp-hn-owner@test.dev', first_name: 'Name_Only_Owner' },
-          { email: 'pp-hn-other@test.dev', first_name: 'Other_Player' },
+          { email: 'pp-hn-other@test.dev' },
         ]);
         const theirs = await packs.claimHandle({
           customerId: other.id,
@@ -862,7 +879,7 @@ medusaIntegrationTestRunner({
         expect(taken.data.message).toMatch(/already taken/i);
 
         const [other] = await customerModule.createCustomers([
-          { email: 'pp-alias-other@test.dev', first_name: 'Alias_Other' },
+          { email: 'pp-alias-other@test.dev' },
         ]);
         expect(
           (
