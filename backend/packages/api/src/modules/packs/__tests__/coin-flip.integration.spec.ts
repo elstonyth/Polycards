@@ -313,16 +313,39 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await expect(service.quoteCoinFlip(await seed('free'))).rejects.toThrow();
     });
 
-    it('requires the effective partner group to allow withdrawals', async () => {
-      const input = await seed();
-      const q = await service.quoteCoinFlip(input);
+    it('lets a withdrawal-blocked group flip without a top-up or finished playthrough, never while frozen', async () => {
       const em = MikroOrmWrapper.forkManager();
       await em.execute("INSERT INTO customer_group (id, name, metadata) VALUES ('blocked', 'Partner', '{\"partner_rate_bp\":100,\"withdrawals_blocked\":true}')");
-      await em.execute("INSERT INTO customer_group_customer (customer_id, customer_group_id) VALUES (?, 'blocked')", [input.customerId]);
-      await expect(service.quoteCoinFlip(input)).rejects.toThrow(/Withdrawals are not available/);
-      await expect(service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })).rejects.toThrow(/Withdrawals are not available/);
-      await em.execute("UPDATE customer_group SET metadata = '{\"withdrawals_blocked\":true}' WHERE id = 'blocked'");
-      expect((await service.quoteCoinFlip(input)).status).toBe('quoted');
+      const join = (customerId: string) =>
+        em.execute("INSERT INTO customer_group_customer (customer_id, customer_group_id) VALUES (?, 'blocked')", [customerId]);
+      const noTopup = async () => {
+        const customerId = `coin_${randomUUID()}`;
+        const [card] = await service.createCards([{ handle: customerId, name: 'Pikachu', set: 'Base',
+          grader: 'PSA', grade: '10', market_value: 20, market_multiplier: 1.25, image: '/pikachu.png' }]);
+        const [pull] = await service.createPulls([{ customer_id: customerId, card_id: card.handle,
+          pack_id: 'coin-test', rolled_at: new Date(), source: 'pack', bonus_bp: 0,
+          stock_earmarked: true, flip_eligible_at: new Date() }]);
+        return { customerId, pullId: pull.id };
+      };
+      // Outside such a group both gates still hold.
+      const fresh = await noTopup();
+      await expect(service.quoteCoinFlip(fresh)).rejects.toThrow(/top up/i);
+      const unplayed = await seed();
+      await service.createCreditTransactions([{ customer_id: unplayed.customerId, amount: 10, reason: 'topup', external_funded_cents: 1000 }]);
+      await expect(service.quoteCoinFlip(unplayed)).rejects.toThrow(/playthrough/i);
+      // Inside it, neither applies: nothing a member wins can leave the account.
+      for (const input of [fresh, unplayed]) {
+        await join(input.customerId);
+        const q = await service.quoteCoinFlip(input);
+        expect((await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })).status).toBe('won');
+        expect(await wins(input.customerId)).toHaveLength(1);
+      }
+      expect((await service.walletSummary(fresh.customerId)).withdrawable).toBe(0);
+      // A freeze still stops a member.
+      const frozen = await noTopup();
+      await join(frozen.customerId);
+      await service.createCustomerAccountStates([{ customer_id: frozen.customerId, frozen: true }]);
+      await expect(service.quoteCoinFlip(frozen)).rejects.toThrow(/review/i);
     });
 
     it('can sell after a win, preserving the gift buyback cash rule', async () => {

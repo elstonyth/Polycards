@@ -220,8 +220,11 @@ export function assertCoinFlipEligible(wallet: {
   isFrozen: boolean;
   hasTopup: boolean;
   playthrough: { remaining: number };
-}): void {
+}, withdrawalsBlocked = false): void {
   if (wallet.isFrozen) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Coin flips are unavailable while your account is under review.');
+  // The top-up and playthrough gates guard cash-out. A withdrawal-blocked group
+  // can never cash out (blockGroupWithdrawals), so its members flip without them.
+  if (withdrawalsBlocked) return;
   if (!wallet.hasTopup) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
   if (!Number.isFinite(wallet.playthrough.remaining) || wallet.playthrough.remaining > 0) {
     throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Complete your deposit playthrough before flipping a card.');

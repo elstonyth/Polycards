@@ -23,7 +23,7 @@ must be played through once, like a deposit.)
 
 ### Approved coin-flip exception (2026-10-28)
 
-Bonus- and gift-funded cards may be staked by an already withdrawal-eligible account. A win keeps the card and creates `coin_flip_win` normal Credit with `bonus_cents = 0` and `external_funded_cents = 0`; this payout adds no playthrough. The original Pull source and bonus basis remain unchanged, so a later buyback still follows the external-funded playthrough rules below. A loss creates no Credit and forfeits the Pull without restocking. Account freezes, phone checks and withdrawal-blocked group policy continue to apply. This is an explicit exception to the earlier general funding-conversion rule, not a change to buyback or bonus-wallet accounting.
+Bonus- and gift-funded cards may be staked by an already withdrawal-eligible account. A win keeps the card and creates `coin_flip_win` normal Credit with `bonus_cents = 0` and `external_funded_cents = 0`; this payout adds no playthrough. The original Pull source and bonus basis remain unchanged, so a later buyback still follows the external-funded playthrough rules below. A loss creates no Credit and forfeits the Pull without restocking. Account freezes and phone checks continue to apply. A withdrawal-blocked group no longer stops a flip (owner, 2026-11-04): its members skip the top-up and playthrough checks, because their winnings can only be spent on packs, and the withdrawal block itself is unchanged. This is an explicit exception to the earlier general funding-conversion rule, not a change to buyback or bonus-wallet accounting.
 
 ### Existing credit flows
 

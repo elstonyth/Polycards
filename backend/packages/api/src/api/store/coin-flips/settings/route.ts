@@ -10,13 +10,12 @@ export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse):
   const [config, wallet, group] = await Promise.all([packs.coinFlipSettings(), packs.walletSummary(req.auth_context.actor_id), resolveGroupPolicyForCustomer(req.scope, req.auth_context.actor_id)]);
   let reason: string | null = config.enabled ? null : 'Coin flip is currently paused.';
   if (config.enabled) {
-    try { assertCoinFlipEligible(wallet); }
+    try { assertCoinFlipEligible(wallet, group?.policy.withdrawals_blocked === true); }
     catch (error) {
       if (!(error instanceof MedusaError)) throw error;
       reason = error.message;
     }
   }
-  if (group?.policy.withdrawals_blocked) reason = 'Withdrawals are not available on this account.';
   res.json({ enabled: config.enabled,
     published_win_percent: config.published_win_percent, eligible: reason === null, reason });
 }
