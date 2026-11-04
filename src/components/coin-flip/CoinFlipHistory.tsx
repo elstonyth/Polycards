@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Clock } from 'lucide-react';
 import { getCoinFlipFeed, getCoinFlipHistory } from '@/lib/actions/coin-flip';
 import type {
@@ -101,6 +101,24 @@ function LatestResults({
 }) {
   // Rows come newest first; the strip reads oldest to newest.
   const sides = rounds.flatMap((round) => round.landed_side ?? []).reverse();
+  const row = useRef<HTMLDivElement>(null);
+  // Fade the left edge only while older beads are cut off there, never over a
+  // row that fits.
+  useEffect(() => {
+    const el = row.current;
+    if (!el) return;
+    const check = () => {
+      const first = el.firstElementChild;
+      el.dataset.clipped = String(
+        !!first &&
+          first.getBoundingClientRect().left <
+            el.getBoundingClientRect().left - 0.5,
+      );
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [sides.length]);
   if (sides.length === 0) return null;
   return (
     <div
@@ -128,12 +146,13 @@ function LatestResults({
         </p>
       </div>
       <div
+        ref={row}
         role="img"
         aria-label={`Latest results, oldest to newest: ${sides.map(coinSideLabel).join(', ')}`}
         // One row, packed to the right. On a phone the oldest beads run off the
-        // left edge and fade; the list below holds every flip. The padding,
+        // left edge, faded; the list below holds every flip. The padding,
         // cancelled by the margin, leaves the ripple room inside the clip.
-        className="-my-2 flex items-center justify-end gap-1.5 overflow-hidden py-2 pr-2 [mask-image:linear-gradient(to_left,black_80%,transparent)] @3xl:justify-start @3xl:[mask-image:none]"
+        className="-my-2 flex items-center justify-end gap-1.5 overflow-hidden py-2 pr-2 data-[clipped=true]:[mask-image:linear-gradient(to_left,black_80%,transparent)] @3xl:justify-start"
       >
         {sides.map((side, i) => (
           <Bead key={i} side={side} newest={i === sides.length - 1} />
