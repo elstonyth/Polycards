@@ -983,11 +983,20 @@ const DeliveriesPage = () => {
                     <div className="flex flex-wrap gap-2">
                       {proofImages.map((url) => (
                         <div key={url} className="relative">
-                          <img
-                            src={resolveImageUrl(url)}
-                            alt="Delivery proof"
-                            className="border-ui-border-base h-20 w-20 rounded border object-cover"
-                          />
+                          {/* Tap to see it full size (staff 2026-11-04). */}
+                          <a
+                            href={resolveImageUrl(url) || undefined}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Open delivery photo full size"
+                            className="block cursor-zoom-in"
+                          >
+                            <img
+                              src={resolveImageUrl(url)}
+                              alt="Delivery proof"
+                              className="border-ui-border-base h-20 w-20 rounded border object-cover"
+                            />
+                          </a>
                           {canManage && (
                             <button
                               type="button"

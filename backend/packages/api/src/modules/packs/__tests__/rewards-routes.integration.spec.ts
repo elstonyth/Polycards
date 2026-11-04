@@ -72,6 +72,7 @@ const ADDRESS = {
   postalCode: '50000',
   countryCode: 'my',
 };
+const PROFILE_PHONE = '+60107667787';
 
 moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
@@ -101,9 +102,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
     FxRate,
   ],
   testSuite: ({ service }) => {
-    // Build a mock req/res. scope.resolve returns the real packs service for every
-    // module token — the reward routes only touch PACKS_MODULE (the withdraw route
-    // no longer resolves the CUSTOMER address book).
+    // Build a mock req/res. scope.resolve returns the real packs service for
+    // PACKS_MODULE. The withdraw route reads the CUSTOMER profile only for its
+    // phone fallback (2026-11-04); a stub with a known phone stands in for it.
     type ResCapture = { status?: number; body?: unknown };
     const makeReqRes = (opts: {
       customerId?: string;
@@ -125,7 +126,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
         auth_context: { actor_id: opts.customerId },
         params: opts.params ?? {},
         body: opts.body,
-        scope: { resolve: () => service },
+        scope: {
+          resolve: (key: string) =>
+            key === PACKS_MODULE
+              ? service
+              : {
+                  listCustomers: async () => [
+                    { id: opts.customerId, phone: PROFILE_PHONE },
+                  ],
+                },
+        },
       };
       return { req, res, captured };
     };
@@ -263,6 +273,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((captured.body as { status: string }).status).toBe('requested');
         const [after] = await service.listPulls({ id: pull.id }, { take: 1 });
         expect(after.status).toBe('delivering');
+        // No phone on the address: the profile phone reaches the order, so
+        // staff can call the player (2026-11-04).
+        const [order] = await service.listDeliveryOrders(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(order.ship_phone).toBe(PROFILE_PHONE);
       });
 
       it('POST /rewards/withdraw rejects an incomplete address (INVALID_DATA) without shipping', async () => {
