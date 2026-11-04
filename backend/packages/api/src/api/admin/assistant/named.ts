@@ -53,12 +53,11 @@ export async function namedPlayer(
     );
   }
   const byHandle = await packs.findCustomerIdByHandle(name);
+  // "@" settles a clash; with no such handle, it was just a way to write a name.
   if (
-    handleIn(text, name) ||
-    (opts.readOnly && username.trim().startsWith('@'))
+    byHandle &&
+    (handleIn(text, name) || (opts.readOnly && username.trim().startsWith('@')))
   ) {
-    if (!byHandle)
-      throw new Error(`No player has the handle @${name}. ${tail}`);
     return byHandle;
   }
   const byName = await packs.findCustomerIdByUsername(name);

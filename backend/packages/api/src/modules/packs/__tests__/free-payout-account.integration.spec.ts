@@ -128,6 +128,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           customerId: 'cus_player',
           adminId: 'user_1',
           accountKey: NUMBER,
+          bankCode: 'MBBEMYKL',
           fromIds: ['cus_twin'],
           reason: 'owner approved',
         }),
@@ -161,6 +162,55 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(JSON.stringify(audits)).not.toContain(NUMBER);
     });
 
+    it('leaves the same digits at another bank alone: a different account', async () => {
+      await em().execute(
+        'insert into "customer" ("id", "metadata") values (?, ?::jsonb)',
+        [
+          'cus_other_bank',
+          JSON.stringify({
+            bank_accounts: [
+              {
+                ...saved(NUMBER, STRANGER),
+                bankCode: 'PBBEMYKL',
+                bankName: 'Public Bank',
+              },
+            ],
+          }),
+        ],
+      );
+      const [row] = await service.createGatewayWithdrawals([
+        {
+          merchant_transaction_id: 'PW-FREE-PBB',
+          customer_id: 'cus_other_bank',
+          amount: 100,
+          bank_code: 'PBBEMYKL',
+          account_number: NUMBER,
+          account_holder_name: STRANGER,
+          gateway: 'fake',
+          status: 'settled',
+        },
+      ]);
+      expect(
+        await service.payoutAccountHoldersAt('cus_player', NUMBER, 'MBBEMYKL'),
+      ).toEqual(['cus_twin']);
+      await service.freePayoutAccount({
+        customerId: 'cus_player',
+        adminId: 'user_1',
+        accountKey: NUMBER,
+        bankCode: 'MBBEMYKL',
+        fromIds: ['cus_twin'],
+        reason: 'owner approved',
+      });
+      const [kept] = await em().execute<{ account_number: string }[]>(
+        'select account_number from gateway_withdrawal where id = ?',
+        [row.id],
+      );
+      expect(kept.account_number).toBe(NUMBER);
+      expect((await metadataOf('cus_other_bank')).bank_accounts).toHaveLength(
+        1,
+      );
+    });
+
     it('frees the name too when the number was its only use', async () => {
       await em().execute(
         `update customer set metadata = '{}'::jsonb where id = 'cus_twin'`,
@@ -172,6 +222,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         customerId: 'cus_player',
         adminId: 'user_1',
         accountKey: NUMBER,
+        bankCode: 'MBBEMYKL',
         fromIds: ['cus_twin'],
         reason: 'owner approved',
       });
@@ -187,16 +238,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
           customerId: 'cus_stranger',
           adminId: 'user_1',
           accountKey: NUMBER,
+          bankCode: 'MBBEMYKL',
           fromIds: ['cus_twin'],
           reason: 'x',
         }),
-      ).rejects.toThrow(/now holds …0001 too/);
+      ).rejects.toThrow(/now holds Maybank …0001 too/);
       await payout('cus_twin', NUMBER, 'pending');
       await expect(
         service.freePayoutAccount({
           customerId: 'cus_player',
           adminId: 'user_1',
           accountKey: NUMBER,
+          bankCode: 'MBBEMYKL',
           fromIds: ['cus_twin'],
           reason: 'x',
         }),
@@ -231,6 +284,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           customerId: 'cus_player',
           adminId: 'user_1',
           accountKey: NUMBER,
+          bankCode: 'MBBEMYKL',
           fromIds: ['cus_twin'],
           reason: 'x',
         }),

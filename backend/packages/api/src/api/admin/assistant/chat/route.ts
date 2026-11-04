@@ -30,7 +30,7 @@ import { userLock } from '../user-lock';
 //   conversation {id,title} · text {delta} · tool {id,name,label,status,ms}
 //   image {url} · error {message} · done {message_id,cost_usd} · ping
 //   transcript {text} — a spoken question (body.audio) as it was heard
-//   confirm {kind,summary,token} — a note or task to save with a tap (confirm.ts)
+//   confirm {kind,summary,token} — a proposal applied with a tap (confirm.ts)
 // The headers go out at once and a ping every 10 s keeps proxies from
 // timing the request out while a poster or a query runs. Read-only: the only
 // rows written are the conversation and its messages.
@@ -388,6 +388,11 @@ export async function POST(
       ),
       history,
       userText: input.text,
+      // Staff-typed, like this message: a change they asked for there, then
+      // answered "yes" to here, still names its player (agent-tools.ts).
+      askedBefore: history.filter((m) => m.role === 'user').at(-1)?.content as
+        | string
+        | undefined,
       images: input.images,
       spoken: input.spoken,
       signal: ctl.signal,
@@ -403,8 +408,9 @@ export async function POST(
         imageStyle: settings.image_style?.trim() || DEFAULT_IMAGE_STYLE,
         styleRefs: await styleRefs(settings.style_refs),
         attachments: input.images,
-        // A note or task the person saves with a tap (confirm.ts); a
-        // scheduled run has nobody to tap, and no such tools.
+        // What the person applies with a tap (confirm.ts: a note, a task, an
+        // unban, a freed number, a cleared name); a scheduled run has nobody
+        // to tap, and no such tools.
         propose: (proposal, summary) =>
           send({
             type: 'confirm',

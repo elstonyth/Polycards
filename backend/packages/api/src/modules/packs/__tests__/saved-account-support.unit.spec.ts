@@ -503,12 +503,15 @@ describe('freePayoutAccount', () => {
     customerId: 'cus_1',
     adminId: 'user_1',
     accountKey: KEY,
+    bankCode: 'MBBEMYKL',
     fromIds: ['cus_2'],
     reason: 'owner approved',
   };
   // The other account's saved list holds the number and another one; its
-  // payout rows are cut by the UPDATE, which the fake answers with 2 rows.
-  const freeing = (opts: { holders?: string[][]; onTheWay?: boolean } = {}) => {
+  // payout rows to the number are two at this bank and one at another.
+  const freeing = (
+    opts: { holders?: string[][]; onTheWay?: boolean; live?: boolean } = {},
+  ) => {
     const made = fakeService({
       bank_accounts: [ACCOUNT, OTHER],
       bank_share_verified: { [ACCOUNT.id]: STAMP, [OTHER.id]: STAMP },
@@ -519,33 +522,47 @@ describe('freePayoutAccount', () => {
       made.ctx as unknown as { transactionManager: { execute: jest.Mock } }
     ).transactionManager;
     const base = em.execute.getMockImplementation()!;
-    const sql: string[] = [];
+    const cut: unknown[][] = [];
     em.execute.mockImplementation(
       async (query: string, params: unknown[] = []) => {
-        sql.push(query);
-        if (query.startsWith('SELECT 1 FROM gateway_withdrawal')) {
-          return opts.onTheWay ? [{}] : [];
+        if (query.startsWith('SELECT id FROM customer')) {
+          return opts.live === false
+            ? []
+            : String(params[0])
+                .split(',')
+                .map((id) => ({ id }));
+        }
+        if (query.includes("status IN ('pending', 'held')")) {
+          return opts.onTheWay ? [{ id: 'gw_9', bank_code: 'MBBEMYKL' }] : [];
+        }
+        if (query.startsWith('SELECT id, bank_code FROM gateway_withdrawal')) {
+          return [
+            { id: 'gw_1', bank_code: 'MBBEMYKL' },
+            { id: 'gw_2', bank_code: 'MYMB2U' },
+            { id: 'gw_3', bank_code: 'PBBEMYKL' },
+          ];
         }
         if (query.startsWith('UPDATE gateway_withdrawal')) {
-          return [{ id: 'gw_1' }, { id: 'gw_2' }];
+          cut.push(params);
+          return [];
         }
         return base(query, params);
       },
     );
     Object.assign(made.svc, {
       otherPayoutAccountHolders: jest.fn(async () =>
-        (rounds[round++] ?? []).map((customer_id) => ({
-          customer_id,
-          bank_code: 'MBBEMYKL',
-          holder_name: null,
-        })),
+        (rounds[round++] ?? []).flatMap((customer_id) => [
+          { customer_id, bank_code: 'MBBEMYKL', holder_name: null },
+          // The same digits at another bank: someone else's account.
+          { customer_id: 'cus_9', bank_code: 'PBBEMYKL', holder_name: null },
+        ]),
       ),
     });
-    return { ...made, sql };
+    return { ...made, cut };
   };
 
-  it('takes the number off the listed account and cuts its payout rows, audited last 4 only', async () => {
-    const { svc, writes, audits, ctx, sql } = freeing();
+  it('takes the number off the listed account at this bank only, audited last 4 and row ids', async () => {
+    const { svc, writes, audits, ctx, cut } = freeing();
     await expect(svc.freePayoutAccount(input, ctx)).resolves.toEqual({
       from: [{ customer_id: 'cus_2', saved: 1, payouts: 2 }],
     });
@@ -553,13 +570,17 @@ describe('freePayoutAccount', () => {
       bank_accounts: [OTHER],
       bank_share_verified: { [OTHER.id]: STAMP },
     });
-    expect(sql.find((q) => q.startsWith('UPDATE gateway_withdrawal'))).toMatch(
-      /account_number = right\(account_number, 4\), account_holder_name = ''/,
-    );
+    // Maybank's rows by id, under any of its codes; not the Public Bank row.
+    expect(cut).toEqual([['gw_1,gw_2']]);
     expect(audits.map((a) => a[0])).toMatchObject([
       {
         entity_id: 'cus_2',
-        before: { account_last4: '9012', saved_entries: 1, payout_rows: 2 },
+        before: {
+          bank_code: 'MBBEMYKL',
+          account_last4: '9012',
+          saved_entries: 1,
+          payout_row_ids: ['gw_1', 'gw_2'],
+        },
         after: { freed_for: 'cus_1' },
       },
       { entity_id: 'cus_1', after: { account_last4: '9012', held_by: [] } },
@@ -567,10 +588,17 @@ describe('freePayoutAccount', () => {
     expect(JSON.stringify(audits)).not.toContain(KEY);
   });
 
+  it('cuts a deleted account’s rows without touching its saved list', async () => {
+    const { svc, writes, ctx, cut } = freeing({ live: false });
+    await svc.freePayoutAccount(input, ctx);
+    expect(writes).toEqual([]);
+    expect(cut).toHaveLength(1);
+  });
+
   it('refuses an account the person was not shown, and nobody at all', async () => {
     const more = freeing({ holders: [['cus_2', 'cus_3']] });
     await expect(more.svc.freePayoutAccount(input, more.ctx)).rejects.toThrow(
-      /now holds …9012 too/,
+      /now holds Maybank …9012 too/,
     );
     expect(more.writes).toEqual([]);
     const none = freeing({ holders: [[]] });
@@ -594,10 +622,13 @@ describe('freePayoutAccount', () => {
     );
   });
 
-  it('refuses anything but a bank number', async () => {
+  it('refuses anything but a bank number at a known bank', async () => {
     const { svc, ctx } = freeing();
     await expect(
       svc.freePayoutAccount({ ...input, accountKey: '9012' }, ctx),
+    ).rejects.toThrow(/Not a bank account number/);
+    await expect(
+      svc.freePayoutAccount({ ...input, bankCode: 'USDTTRC20' }, ctx),
     ).rejects.toThrow(/Not a bank account number/);
   });
 });

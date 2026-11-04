@@ -40,6 +40,9 @@ export type ToolCtx = {
   readOutside?: boolean;
   /** The asker's message this turn. */
   userText?: string;
+  /** The asker's own message before it in this chat, so a change they asked
+   *  for and then answered "yes" to still names its player (agent-tools.ts). */
+  askedBefore?: string;
   /** Adds an image model's cost to the turn. */
   addCost(usd: number): void;
   /** Shows the person a note or task to save with a tap (confirm.ts). */

@@ -1,6 +1,9 @@
 import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import type { MedusaContainer } from '@medusajs/framework/types';
-import { MedusaError } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+} from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
 import { MAX_SCHEDULES, nextRun } from './schedule';
@@ -8,6 +11,7 @@ import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { LASTING_WRITES, type Need } from './access';
 import { findBank } from '../../../modules/packs/banks';
+import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
 
 // What lasts waits for a tap (security review 2026-10-29). A note or a
 // scheduled task would stay in front of the model in every later chat or run,
@@ -57,6 +61,8 @@ export type Proposal =
       username: string;
       bank_code: string;
       last4: string;
+      /** numberMark of the full number: the tap frees exactly that one. */
+      number_mark: string;
       from: string[];
       reason: string;
     }
@@ -86,6 +92,19 @@ export const BAN_LIST_NEED: Need = {
   resource: 'customer',
   operation: 'update',
 };
+
+/** A keyed fingerprint of a full bank number (security review 2026-11-04):
+ *  the token carries this, never the number, and the tap frees only the
+ *  number it matches. Keyed by the JWT secret, so last 4 + a fingerprint
+ *  cannot be guessed back into the number. */
+export function numberMark(accountKey: string, container: MedusaContainer): string {
+  const secret = container.resolve(ContainerRegistrationKeys.CONFIG_MODULE)
+    .projectConfig.http.jwtSecret as string;
+  const key = Buffer.from(
+    hkdfSync('sha256', secret, 'polycards-assistant', 'number-mark-v1', 32),
+  );
+  return createHmac('sha256', key).update(accountKey).digest('base64url');
+}
 
 /** The one bank number these last 4 (and bank, for a tie) mean among `keys`;
  *  null for none or more than one. */
@@ -261,6 +280,17 @@ export async function saveProposal(
       );
     }
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    // An unban clears a name clearing, and freeing for a banned player frees
+    // nothing they can use: the Unban card first.
+    const [state] = await packs.listCustomerAccountStates(
+      { customer_id: proposal.customer_id, disabled: true },
+      { select: ['disabled_reason'], take: 1 },
+    );
+    if (state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX)) {
+      throw new ConfirmRefused(
+        'This player is still banned: tap Unban first, then this.',
+      );
+    }
     try {
       if (proposal.kind === 'name_clash') {
         await packs.setHolderNameCleared({
@@ -273,26 +303,28 @@ export async function saveProposal(
         });
         return { id: proposal.customer_id };
       }
-      // The number again from the accounts it is freed from: the token holds
-      // its last 4 only.
-      const key = oneNumber(
-        (
-          await Promise.all(
-            proposal.from.map((id) => packs.payoutAccountsOf(id)),
-          )
-        ).flat(),
-        proposal.last4,
-        proposal.bank_code || null,
-      );
+      // The number again from the accounts it is freed from, by its
+      // fingerprint: the token holds its last 4 only.
+      const key = (
+        await Promise.all(proposal.from.map((id) => packs.payoutAccountsOf(id)))
+      )
+        .flat()
+        .map((k) => k.account_key)
+        .find(
+          (k) =>
+            k.slice(-4) === proposal.last4 &&
+            numberMark(k, container) === proposal.number_mark,
+        );
       if (!key) {
         throw new ConfirmRefused(
-          `Those accounts no longer hold one number ending ${proposal.last4}. Ask again.`,
+          `Those accounts no longer hold that number ending ${proposal.last4}. Ask again.`,
         );
       }
       await packs.freePayoutAccount({
         customerId: proposal.customer_id,
         adminId: access.userId,
         accountKey: key,
+        bankCode: proposal.bank_code,
         fromIds: proposal.from,
         reason: proposal.reason,
       });

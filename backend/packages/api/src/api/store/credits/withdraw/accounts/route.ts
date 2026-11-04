@@ -34,6 +34,8 @@ import {
   blocksNewSave,
   holderConfirmMismatch,
   holderNameInvalid,
+  holderUnlikeSaved,
+  savedSlotFull,
   newSavedBankAccount,
   normalizeHolderName,
   parseSavedBankAccounts,
@@ -364,30 +366,16 @@ export async function POST(
     // holder name included, and keeps its original savedAt, so a re-save restarts
     // no cooling-off window and arms no old row.
     if (accounts.some((a) => a.id === account.id)) return null;
-    const slot = savedAccountSlot(bankCode);
-    if (
-      accounts.filter((a) => savedAccountSlot(a.bankCode) === slot).length >=
-      MAX_SAVED_BANK_ACCOUNTS
-    ) {
+    if (savedSlotFull(accounts, bankCode)) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        slot === 'TNG' ? ONE_TNG_ACCOUNT_MESSAGE : ONE_BANK_ACCOUNT_MESSAGE,
+        savedAccountSlot(bankCode) === 'TNG'
+          ? ONE_TNG_ACCOUNT_MESSAGE
+          : ONE_BANK_ACCOUNT_MESSAGE,
       );
     }
-    // One name on every bank (owner, 2026-11-03): a Touch 'n Go or another
-    // country's bank carries a holder name already saved, compared as real
-    // names are (saved names normalized first: older lists predate it). Wallets
-    // have no holder. Any saved name will do, since support's add, the way past
-    // this for a name two banks spell differently, may leave two on the list.
-    const savedNames = accounts
-      .filter((a) => !findBank(a.bankCode)?.wallet)
-      .map((a) => realNameKey(normalizeHolderName(a.accountHolderName ?? '')))
-      .filter(Boolean);
-    if (
-      !bank.wallet &&
-      savedNames.length > 0 &&
-      !savedNames.includes(realNameKey(account.accountHolderName))
-    ) {
+    // One name on every bank (holderUnlikeSaved).
+    if (holderUnlikeSaved(accounts, bankCode, account.accountHolderName)) {
       // Logged like the other refusals, so repeated tries show up. No name.
       req.scope
         .resolve('logger')

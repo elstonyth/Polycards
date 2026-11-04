@@ -5,6 +5,7 @@ import {
   findBank,
   gatewayBankCode,
   sandboxOnlyBank,
+  savedAccountSlot,
   type Bank,
 } from './banks';
 import { realNameKey } from '../../utils/real-name';
@@ -26,6 +27,39 @@ import type { PaymentGateway } from './gateway';
  *  0015): one RM bank, one Touch 'n Go, one SGD bank, one USDT wallet
  *  (savedAccountSlot). Once saved it cannot be changed. */
 export const MAX_SAVED_BANK_ACCOUNTS = 1;
+
+/** Is the list's slot for this bank (an RM bank, a Touch 'n Go, an SGD bank, a
+ *  wallet: savedAccountSlot) full? The customer save refuses then; support
+ *  removes one first. Shared with the admin assistant's bank_save_check. */
+export function savedSlotFull(
+  accounts: SavedBankAccount[],
+  bankCode: string,
+): boolean {
+  const slot = savedAccountSlot(bankCode);
+  return (
+    accounts.filter((a) => savedAccountSlot(a.bankCode) === slot).length >=
+    MAX_SAVED_BANK_ACCOUNTS
+  );
+}
+
+/** One name on every bank (owner, 2026-11-03): a new bank, Touch 'n Go or
+ *  another country's bank must carry a holder name already saved, compared as
+ *  real names are (saved names normalized first: older lists predate it).
+ *  Wallets have no holder. Any saved name will do, since support's add, the way
+ *  past this for a name two banks spell differently, may leave two on the
+ *  list. Shared with the admin assistant's bank_save_check. */
+export function holderUnlikeSaved(
+  accounts: SavedBankAccount[],
+  bankCode: string,
+  holderName: string,
+): boolean {
+  if (findBank(bankCode)?.wallet) return false;
+  const savedNames = accounts
+    .filter((a) => !findBank(a.bankCode)?.wallet)
+    .map((a) => realNameKey(normalizeHolderName(a.accountHolderName ?? '')))
+    .filter(Boolean);
+  return savedNames.length > 0 && !savedNames.includes(realNameKey(holderName));
+}
 
 export const ONE_BANK_ACCOUNT_MESSAGE =
   'Your Polycards account already has a bank account for this currency. It cannot be changed.';

@@ -74,6 +74,8 @@ export async function runTurn(opts: {
   tools: AssistantTool[];
   history: ChatMessage[];
   userText: string;
+  /** The asker's previous message in this chat (ToolCtx.askedBefore). */
+  askedBefore?: string;
   images: string[];
   ctx: Omit<ToolCtx, 'addCost' | 'signal' | 'access'>;
   emit: (e: TurnEvent) => void;
@@ -106,6 +108,7 @@ export async function runTurn(opts: {
     ...opts.ctx,
     access: opts.access,
     userText: opts.userText,
+    askedBefore: opts.askedBefore,
     signal: turnSignal,
     // Screenshots may be text a customer wrote: no lasting writes this turn.
     readOutside: opts.images.length > 0,

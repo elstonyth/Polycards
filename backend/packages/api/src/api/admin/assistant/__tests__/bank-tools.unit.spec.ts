@@ -3,6 +3,7 @@ import { AGENT_TOOLS } from '../agent-tools';
 import {
   BAN_LIST_NEED,
   ConfirmRefused,
+  numberMark,
   oneNumber,
   saveProposal,
   scheduledRunAllows,
@@ -48,7 +49,7 @@ const packs = {
   ),
   payoutAccountsOf: jest.fn(),
   resolveBannedPayoutAccount: jest.fn(),
-  otherPayoutAccountHolders: jest.fn(),
+  payoutAccountHoldersAt: jest.fn(),
   payoutAccountBanned: jest.fn(),
   holderNameHolders: jest.fn(),
   freePayoutAccount: jest.fn(),
@@ -66,16 +67,29 @@ const customers = {
     })),
   ),
 };
+const config = { projectConfig: { http: { jwtSecret: 'test-secret' } } };
 const container = {
-  resolve: (k: string) => (k === 'customer' ? customers : packs),
+  resolve: (k: string) =>
+    k === 'customer' ? customers : k === 'configModule' ? config : packs,
 } as never;
 const admin = { userId: 'user_1', superAdmin: true, can: async () => true };
 const tool = (name: string) => AGENT_TOOLS.find((t) => t.name === name)!;
-const run = (name: string, args: Record<string, unknown>, userText: string) => {
+const run = (
+  name: string,
+  args: Record<string, unknown>,
+  userText: string,
+  askedBefore?: string,
+) => {
   const propose = jest.fn();
   return {
     propose,
-    done: tool(name).run(args, { container, access: admin, userText, propose }),
+    done: tool(name).run(args, {
+      container,
+      access: admin,
+      userText,
+      askedBefore,
+      propose,
+    } as never),
   };
 };
 
@@ -93,10 +107,7 @@ beforeEach(() => {
   packs.payoutAccountsOf.mockResolvedValue([
     { account_key: KEY, bank_code: 'MBBEMYKL', wallet: false },
   ]);
-  packs.otherPayoutAccountHolders.mockResolvedValue([
-    { customer_id: 'cus_y1', bank_code: 'MBBEMYKL', holder_name: 'Tan Ah Kow' },
-    { customer_id: 'cus_y1', bank_code: 'MBBEMYKL', holder_name: null },
-  ]);
+  packs.payoutAccountHoldersAt.mockResolvedValue(['cus_y1']);
   packs.payoutAccountBanned.mockResolvedValue(false);
   packs.holderNameHolders.mockResolvedValue(['cus_y1', 'cus_y2']);
 });
@@ -108,6 +119,7 @@ describe('namedIn', () => {
     expect(namedIn('unban Ah Boy 881', 'Ah Boy 88')).toBe(false);
     expect(namedIn('unban Collector12', 'Collector1')).toBe(false);
     expect(namedIn('unban @Collector1', '@Collector1')).toBe(true);
+    expect(namedIn('please', 'Lee')).toBe(false);
     expect(namedIn('anything', '')).toBe(false);
   });
 });
@@ -128,17 +140,29 @@ describe('who the person named', () => {
     });
   });
 
-  it('"@name" means the handle', async () => {
+  it('"@name" means the handle; with no such handle, it is just the name', async () => {
     packs.findCustomerIdByUsername.mockResolvedValue('cus_y2');
     packs.findCustomerIdByHandle.mockResolvedValue('cus_y1');
     banned = ['cus_y1', 'cus_y2'];
-    const { propose, done } = run(
+    const handle = run(
       'unban_account',
       { username: 'RingOne' },
-      'unban @RingOne please',
+      'unban @RingOne',
     );
-    await done;
-    expect(propose.mock.calls[0][0]).toMatchObject({ customer_id: 'cus_y1' });
+    await handle.done;
+    expect(handle.propose.mock.calls[0][0]).toMatchObject({
+      customer_id: 'cus_y1',
+    });
+    packs.findCustomerIdByHandle.mockResolvedValue(null);
+    const name = run(
+      'unban_account',
+      { username: 'RingOne' },
+      'unban @RingOne',
+    );
+    await name.done;
+    expect(name.propose.mock.calls[0][0]).toMatchObject({
+      customer_id: 'cus_y2',
+    });
   });
 
   it('a shown name with a space is found', async () => {
@@ -164,15 +188,19 @@ describe('bank_save_check', () => {
 
   it('names each block and its fix, never the number or the name', async () => {
     packs.payoutAccountBanned.mockResolvedValue(true);
-    const { done } = run(
+    const raw = await run(
       'bank_save_check',
       { username: 'Test Player', last4: '0001' },
       'why can Test Player not add Maybank 0001',
-    );
-    const raw = await done;
+    ).done;
     expect(raw).not.toContain(KEY);
     expect(raw).not.toMatch(/tan ah kow/i);
     const out = JSON.parse(raw);
+    expect(packs.payoutAccountHoldersAt).toHaveBeenCalledWith(
+      'cus_x',
+      KEY,
+      'MBBEMYKL',
+    );
     expect(out).toMatchObject({
       player: 'Test Player (@Test_Handle), open',
       can_save: false,
@@ -183,18 +211,18 @@ describe('bank_save_check', () => {
         other_accounts: ['RingOne, banned'],
         blocks_save: true,
       },
-      name: {
-        checked: 'the real name on file',
-        blocks_save: true,
-      },
+      name: { checked: 'the real name on file', blocks_save: true },
     });
-    expect(out.fixes.join(' ')).toMatch(/unban_bank_number/);
-    expect(out.fixes.join(' ')).toMatch(/free_bank_number/);
-    expect(out.fixes.join(' ')).toMatch(/clear_name_clash/);
+    const fixes = out.fixes.join(' ');
+    expect(fixes).toMatch(/unban_bank_number/);
+    expect(fixes).toMatch(/free_bank_number/);
+    expect(fixes).toMatch(
+      /Freeing the number may free it too.*clear_name_clash/,
+    );
   });
 
-  it('says can_save when nothing blocks', async () => {
-    packs.otherPayoutAccountHolders.mockResolvedValue([]);
+  it('says can_save when nothing blocks, and null when a part is unchecked', async () => {
+    packs.payoutAccountHoldersAt.mockResolvedValue([]);
     packs.holderNameHolders.mockResolvedValue(['cus_y2']);
     metadata = {
       holder_name_cleared: {
@@ -208,7 +236,67 @@ describe('bank_save_check', () => {
         'check Test Player 0001',
       ).done,
     );
-    expect(out).toMatchObject({ can_save: true, fixes: [] });
+    expect(out).toMatchObject({ can_save: true, fixes: [], unchecked: [] });
+    const noNumber = JSON.parse(
+      await run(
+        'bank_save_check',
+        { username: 'Test Player' },
+        'check Test Player',
+      ).done,
+    );
+    expect(noNumber.can_save).toBeNull();
+  });
+
+  it('a number it cannot find leaves the name checked, and the bank unknown is said', async () => {
+    packs.payoutAccountsOf.mockResolvedValue([]);
+    packs.resolveBannedPayoutAccount.mockRejectedValue(new Error('none'));
+    const out = JSON.parse(
+      await run(
+        'bank_save_check',
+        { username: 'Test Player', last4: '9999' },
+        'check Test Player 9999',
+      ).done,
+    );
+    expect(out.number.not_checked).toMatch(/No bank number ending 9999/);
+    expect(out.name.blocks_save).toBe(true);
+    expect(out.can_save).toBe(false);
+
+    const typed = JSON.parse(
+      await run(
+        'bank_save_check',
+        { username: 'Test Player', bank_account: '7777 8888 9999' },
+        'check Test Player 777788889999',
+      ).done,
+    );
+    expect(typed.number).toMatchObject({ not_checked: 'which bank it is at' });
+  });
+
+  it('checks the number as typed against the bank rules', async () => {
+    packs.payoutAccountHoldersAt.mockResolvedValue([]);
+    packs.holderNameHolders.mockResolvedValue([]);
+    const out = JSON.parse(
+      await run(
+        'bank_save_check',
+        { username: 'Test Player', bank: 'Maybank', bank_account: '51234' },
+        'check Test Player Maybank 51234',
+      ).done,
+    );
+    expect(out.fixes.join(' ')).toMatch(/would be refused/);
+  });
+
+  it('an admin-only fix says so to the Support viewer', async () => {
+    const support = {
+      userId: 'user_2',
+      superAdmin: false,
+      can: async (n: unknown) => n !== BAN_LIST_NEED,
+    };
+    const out = JSON.parse(
+      await tool('bank_save_check').run(
+        { username: 'Test Player', last4: '0001' },
+        { container, access: support, userText: 'check Test Player 0001' },
+      ),
+    );
+    expect(out.fixes.join(' ')).toMatch(/Only an admin can do this/);
   });
 });
 
@@ -218,7 +306,7 @@ describe('free_bank_number', () => {
     expect(scheduledRunAllows(tool('free_bank_number'))).toBe(false);
   });
 
-  it('proposes freeing it from every other account on it, last 4 only', async () => {
+  it('proposes freeing it from every other account at that bank, by fingerprint', async () => {
     const { propose, done } = run(
       'free_bank_number',
       { username: 'Test Player', last4: '0001', reason: 'owner approved' },
@@ -232,6 +320,7 @@ describe('free_bank_number', () => {
       username: 'Test Player',
       bank_code: 'MBBEMYKL',
       last4: '0001',
+      number_mark: numberMark(KEY, container),
       from: ['cus_y1'],
       reason: 'owner approved',
     });
@@ -240,28 +329,47 @@ describe('free_bank_number', () => {
     expect(packs.freePayoutAccount).not.toHaveBeenCalled();
   });
 
-  it('refuses what the person did not name in this message', async () => {
+  it('refuses what the person did not name', async () => {
     await expect(
       run(
         'free_bank_number',
         { username: 'Test Player', last4: '0001' },
         'free it',
       ).done,
-    ).rejects.toThrow(/names, in this message/);
+    ).rejects.toThrow(/named in this message/);
     await expect(
       run(
         'free_bank_number',
         { username: 'Test Player', last4: '0001' },
-        'free 0001 for the one in that note',
+        'free it for Test Player',
       ).done,
-    ).rejects.toThrow(/named in this message/);
+    ).rejects.toThrow(/last 4 the person typed/);
+    // A junk full number does not skip the last 4 check.
+    await expect(
+      run(
+        'free_bank_number',
+        { username: 'Test Player', last4: '0001', bank_account: 'none' },
+        'free it for Test Player',
+      ).done,
+    ).rejects.toThrow(/full bank number, or left out/);
   });
 
-  it('takes a full number only as typed in this message', async () => {
+  it('a "yes" reply works when the message before named it', async () => {
+    const { propose, done } = run(
+      'free_bank_number',
+      { username: 'Test Player', last4: '0001' },
+      'yes',
+      'let Test Player add Maybank 0001',
+    );
+    await done;
+    expect(propose).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes a full number only as typed, even right after a name ending in digits', async () => {
     const { propose, done } = run(
       'free_bank_number',
       { username: 'Test Player', bank_account: '5123 4567 0001' },
-      'free 5123-4567-0001 for Test Player',
+      'Test Player Abc777 5123-4567-0001 Maybank',
     );
     await done;
     expect(propose.mock.calls[0][0]).toMatchObject({ last4: '0001' });
@@ -274,17 +382,19 @@ describe('free_bank_number', () => {
     ).rejects.toThrow(/as the person typed it/);
   });
 
-  it('refuses a banned player, and a number nobody else holds', async () => {
-    banned = ['cus_x'];
+  it('asks the bank when it is not known, and refuses a number nobody else holds', async () => {
+    packs.payoutAccountsOf.mockResolvedValue([]);
     await expect(
       run(
         'free_bank_number',
-        { username: 'Test Player', last4: '0001' },
-        'free 0001 for Test Player',
+        { username: 'Test Player', bank_account: '512345670001' },
+        'free 512345670001 for Test Player',
       ).done,
-    ).rejects.toThrow(/unban the account first/);
-    banned = [];
-    packs.otherPayoutAccountHolders.mockResolvedValue([]);
+    ).rejects.toThrow(/Which bank/);
+    packs.payoutAccountsOf.mockResolvedValue([
+      { account_key: KEY, bank_code: 'MBBEMYKL', wallet: false },
+    ]);
+    packs.payoutAccountHoldersAt.mockResolvedValue([]);
     await expect(
       run(
         'free_bank_number',
@@ -292,6 +402,31 @@ describe('free_bank_number', () => {
         'free 0001 for Test Player',
       ).done,
     ).rejects.toThrow(/nothing to free/);
+  });
+
+  it('a banned player gets the card, which says to tap Unban first', async () => {
+    banned = ['cus_x', 'cus_y1'];
+    const { propose, done } = run(
+      'free_bank_number',
+      { username: 'Test Player', last4: '0001' },
+      'free 0001 for Test Player',
+    );
+    await done;
+    expect(propose.mock.calls[0][1]).toMatch(/^Tap Unban first/);
+  });
+
+  it('keeps a bank number out of the audit reason', async () => {
+    const { propose, done } = run(
+      'free_bank_number',
+      {
+        username: 'Test Player',
+        last4: '0001',
+        reason: 'owner ok, paid to 5123 4567 0001',
+      },
+      'free 0001 for Test Player, owner ok, paid to 5123 4567 0001',
+    );
+    await done;
+    expect(propose.mock.calls[0][0].reason).toBe('owner ok, paid to [number]');
   });
 });
 
@@ -301,7 +436,7 @@ describe('clear_name_clash', () => {
     expect(scheduledRunAllows(tool('clear_name_clash'))).toBe(false);
   });
 
-  it('lists every other account on the name, any number of them', async () => {
+  it('lists every other account on the name, any number of them, the name masked', async () => {
     const { propose, done } = run(
       'clear_name_clash',
       { username: 'Test Player' },
@@ -315,18 +450,43 @@ describe('clear_name_clash', () => {
       holder_name: 'Tan Ah Kow',
       with: ['cus_y1', 'cus_y2'],
     });
+    expect(summary).toMatch(/\(T\*\* A\* K\*\*\)/);
     expect(summary).toMatch(
       /2 other accounts use it: RingOne, banned; OpenTwo, open/,
     );
     expect(summary).not.toMatch(/tan ah kow/i);
   });
 
-  it('takes a typed name only from this message', async () => {
+  it('prefers the name on their saved bank over the real name', async () => {
+    metadata = {
+      bank_accounts: [
+        {
+          id: 'b1',
+          bankCode: 'MBBEMYKL',
+          bankName: 'Maybank',
+          accountNumber: '998877665544',
+          accountHolderName: 'Lim Ah Lian',
+          savedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    };
+    const { propose, done } = run(
+      'clear_name_clash',
+      { username: 'Test Player' },
+      'clear the name for Test Player',
+    );
+    await done;
+    expect(propose.mock.calls[0][0]).toMatchObject({
+      holder_name: 'Lim Ah Lian',
+    });
+  });
+
+  it('takes a typed name only as a whole phrase the person typed', async () => {
     await expect(
       run(
         'clear_name_clash',
-        { username: 'Test Player', holder_name: 'Lim Ah Lian' },
-        'clear the name for Test Player',
+        { username: 'Test Player', holder_name: 'Lee' },
+        'please clear the name for Test Player',
       ).done,
     ).rejects.toThrow(/as the person typed it/);
     const { propose, done } = run(
@@ -366,6 +526,7 @@ describe('saveProposal: free_number and name_clash', () => {
     username: 'Test Player',
     bank_code: 'MBBEMYKL',
     last4: '0001',
+    number_mark: numberMark(KEY, container),
     from: ['cus_y1'],
     reason: 'owner approved',
   };
@@ -378,7 +539,11 @@ describe('saveProposal: free_number and name_clash', () => {
     reason: 'different people',
   };
 
-  it('frees the number found again on those accounts, as the person who tapped', async () => {
+  it('frees exactly the number the card was made for, as the person who tapped', async () => {
+    packs.payoutAccountsOf.mockResolvedValue([
+      { account_key: '999990001', bank_code: 'MBBEMYKL', wallet: false },
+      { account_key: KEY, bank_code: 'MBBEMYKL', wallet: false },
+    ]);
     await expect(saveProposal(FREE, admin, container)).resolves.toEqual({
       id: 'cus_x',
     });
@@ -387,6 +552,7 @@ describe('saveProposal: free_number and name_clash', () => {
       customerId: 'cus_x',
       adminId: 'user_1',
       accountKey: KEY,
+      bankCode: 'MBBEMYKL',
       fromIds: ['cus_y1'],
       reason: 'owner approved',
     });
@@ -404,7 +570,7 @@ describe('saveProposal: free_number and name_clash', () => {
     });
   });
 
-  it('refuses a role that is not an admin now, and changes nothing', async () => {
+  it('refuses a role that is not an admin now, or a player still banned', async () => {
     const support = {
       ...admin,
       superAdmin: false,
@@ -413,17 +579,20 @@ describe('saveProposal: free_number and name_clash', () => {
     await expect(saveProposal(FREE, support, container)).rejects.toBeInstanceOf(
       ConfirmRefused,
     );
-    await expect(saveProposal(NAME, support, container)).rejects.toBeInstanceOf(
-      ConfirmRefused,
+    banned = ['cus_x'];
+    await expect(saveProposal(NAME, admin, container)).rejects.toThrow(
+      /tap Unban first/,
     );
     expect(packs.freePayoutAccount).not.toHaveBeenCalled();
     expect(packs.setHolderNameCleared).not.toHaveBeenCalled();
   });
 
   it('a changed account, a payout on its way or a second tap reads as refused', async () => {
-    packs.payoutAccountsOf.mockResolvedValue([]);
+    packs.payoutAccountsOf.mockResolvedValue([
+      { account_key: '999990001', bank_code: 'MBBEMYKL', wallet: false },
+    ]);
     await expect(saveProposal(FREE, admin, container)).rejects.toThrow(
-      /no longer hold/,
+      /no longer hold that number/,
     );
     packs.payoutAccountsOf.mockResolvedValue([
       { account_key: KEY, bank_code: 'MBBEMYKL', wallet: false },

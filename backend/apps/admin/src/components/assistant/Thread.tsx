@@ -48,6 +48,13 @@ const CONFIRM_TEXT: Record<
     hint: 'assistant.confirm.clearNameHint',
   },
 };
+// A kind this build does not know yet (a newer server) still shows a button.
+const confirmText = (kind: ProposalKind) =>
+  CONFIRM_TEXT[kind] ?? {
+    tap: 'assistant.confirm.saveNote',
+    done: 'assistant.confirm.saved',
+    hint: 'assistant.confirm.hint',
+  };
 
 export function Thread({
   messages,
@@ -227,13 +234,13 @@ const Message = memo(function Message({
                   {p.state === 'saved' && <CheckMini />}
                   {t(
                     p.state === 'saved'
-                      ? CONFIRM_TEXT[p.kind].done
-                      : CONFIRM_TEXT[p.kind].tap,
+                      ? confirmText(p.kind).done
+                      : confirmText(p.kind).tap,
                   )}
                 </button>
                 {p.state !== 'saved' && (
                   <span className="text-ui-fg-muted text-[11px]">
-                    {t(CONFIRM_TEXT[p.kind].hint)}
+                    {t(confirmText(p.kind).hint)}
                   </span>
                 )}
               </div>
