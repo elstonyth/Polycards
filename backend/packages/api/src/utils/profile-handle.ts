@@ -16,6 +16,14 @@
 // live account's then-current name as its handle, so no link that worked
 // before the change stopped working because of it.
 //
+// One handle move since (owner's call, 2026-11-04): Migration20261104120000
+// moved the 2,229 accounts with an 8-digit generated "Collector########" name
+// or handle to a fresh standard number (name and handle together where the
+// name was generated; a name the player chose was kept). Each old handle is
+// kept as `metadata.handle_alias`: unique, refused as a handle or a name for
+// anyone else, and still resolved, so the old link works and the storefront
+// redirects it. Do not drop the alias: that would break those links.
+//
 // Both values share one shape: ASCII `A-Za-z0-9_-`, 3..30, so either is a URL
 // segment without percent-encoding, and both are unique CASE-INSENSITIVELY
 // (partial unique indexes on lower(first_name) — Migration20260904120000 — and
