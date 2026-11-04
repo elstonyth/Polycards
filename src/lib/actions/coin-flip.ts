@@ -8,7 +8,6 @@ import {
   CoinFlipReceiptSchema,
   CoinFlipSettingsSchema,
   type CoinFlipFailure,
-  type CoinFlipHistoryFilter,
   type CoinSide,
 } from '@/lib/coin-flip';
 
@@ -100,11 +99,9 @@ export async function acceptCoinFlip(id: string) {
         'Could not confirm the flip. Check its status before trying again.',
       );
 }
-export async function getCoinFlipFeed(filter: CoinFlipHistoryFilter = 'all') {
-  const status =
-    filter === 'won' || filter === 'lost' ? `?status=${filter}` : '';
+export async function getCoinFlipFeed() {
   const result = await store.get(
-    `/store/coin-flips/recent${status}`,
+    '/store/coin-flips/recent',
     CoinFlipFeedSchema,
   );
   return result.ok
@@ -120,17 +117,12 @@ export async function getCoinFlipRound(id: string) {
     ? { ok: true as const, ...result.data }
     : failure(result, 'Could not read this flip. Check it again.');
 }
-export async function getCoinFlipHistory(
-  page = 1,
-  filter: CoinFlipHistoryFilter = 'all',
-) {
+export async function getCoinFlipHistory(page = 1) {
   const offset =
     (Math.max(1, Math.min(10000, Number.isSafeInteger(page) ? page : 1)) - 1) *
     10;
-  const status =
-    filter === 'won' || filter === 'lost' ? `&status=${filter}` : '';
   const result = await store.get(
-    `/store/coin-flips?limit=10&offset=${offset}${status}`,
+    `/store/coin-flips?limit=10&offset=${offset}`,
     CoinFlipHistorySchema,
   );
   return result.ok
