@@ -304,8 +304,13 @@ it('shows how each shown flip landed in one row, newest last and biggest', async
   });
   read.mockResolvedValue({
     ok: true,
-    // Newest first, as the server sends them.
-    rounds: [landed('c', 'tail'), landed('b', 'head'), landed('a', 'head')],
+    // Newest first, as the server sends them. The newest was called Head and
+    // lost: the strip shows where the coin landed, not the call.
+    rounds: [
+      { ...landed('c', 'tail'), status: 'lost', chosen_side: 'head' },
+      landed('b', 'head'),
+      landed('a', 'head'),
+    ],
     count: 3,
     totals: { head: 2, tail: 1 },
   });
@@ -319,6 +324,21 @@ it('shows how each shown flip landed in one row, newest last and biggest', async
   expect(road.lastElementChild!.className).toContain('size-10');
   expect(road.firstElementChild!.className).toContain('size-7');
   expect(host.textContent).toContain('Latest results');
+});
+
+it('drops the strip with the rows when the next page fails to load', async () => {
+  read.mockResolvedValue({
+    ok: true,
+    rounds: [flip('won', [card('a', 'Abra', 100)])],
+    count: 25,
+    totals: { head: 0, tail: 1 },
+  });
+  await render(false);
+  expect(host.querySelector('[role=img]')).not.toBeNull();
+  read.mockResolvedValueOnce({ ok: false });
+  await act(async () => button('Next').click());
+  expect(host.querySelector('[role=alert]')).not.toBeNull();
+  expect(host.querySelector('[role=img]')).toBeNull();
 });
 
 describe('everyone view', () => {

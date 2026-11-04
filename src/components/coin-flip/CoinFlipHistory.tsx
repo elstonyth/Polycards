@@ -462,7 +462,8 @@ export function CoinFlipHistory({
             <LandedTile side="tail" count={history.totals.tail} />
           </div>
         )}
-      {history && <LatestResults rounds={history.rounds} />}
+      {/* Not over an error: the rows it describes are gone from view. */}
+      {history && !error && <LatestResults rounds={history.rounds} />}
       {error ? (
         <p role="alert" className="text-sm text-red-300">
           {error}
