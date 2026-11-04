@@ -10838,9 +10838,12 @@ class PacksModuleService extends MedusaService({
   ): Promise<string | null> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    // An old handle moved by Migration20261104120000 is kept as
+    // metadata.handle_alias and still finds its account. The two are kept
+    // apart by every allocator; the ORDER BY prefers a real handle anyway.
     const rows = await em.execute<{ id: string }[]>(
-      "SELECT id FROM customer WHERE lower(metadata->>'handle') = lower(?) AND deleted_at IS NULL LIMIT 1",
-      [handle],
+      "SELECT id FROM customer WHERE (lower(metadata->>'handle') = lower(?) OR lower(metadata->>'handle_alias') = lower(?)) AND deleted_at IS NULL ORDER BY (lower(metadata->>'handle') = lower(?)) IS TRUE DESC LIMIT 1",
+      [handle, handle, handle],
     );
     return rows[0]?.id ?? null;
   }
@@ -10850,7 +10853,9 @@ class PacksModuleService extends MedusaService({
    * `desired` (the display name at that moment) or the next free deterministic
    * variant of it, and returned UNCHANGED on every call after that, whatever
    * `desired` then says. That second half is the whole point — a rename must
-   * never move the link (utils/profile-handle.ts).
+   * never move the link (utils/profile-handle.ts). The one exception is
+   * Migration20261104120000, which moved the 8-digit generated handles and
+   * kept each old one as `metadata.handle_alias`, so the old link still works.
    *
    * Locking mirrors assignReferralCode: the global `profile_handle:alloc` lock
    * serializes the uniqueness probe with the write, then the per-customer
@@ -10898,11 +10903,12 @@ class PacksModuleService extends MedusaService({
       : generatedUsername(input.customerId);
     // Another player's display name counts as taken too: they may not have
     // a handle yet (it is frozen from that name on their first login), and
-    // taking it would split their name from their link.
+    // taking it would split their name from their link. So does an old
+    // handle kept as an alias: it still resolves to its owner.
     const free = async (candidate: string): Promise<boolean> => {
       const [row] = await em.execute<{ n: string }[]>(
-        "SELECT COUNT(*)::int AS n FROM customer WHERE (lower(metadata->>'handle') = lower(?) OR lower(first_name) = lower(?)) AND deleted_at IS NULL AND id <> ?",
-        [candidate, candidate, input.customerId],
+        "SELECT COUNT(*)::int AS n FROM customer WHERE (lower(metadata->>'handle') = lower(?) OR lower(first_name) = lower(?) OR lower(metadata->>'handle_alias') = lower(?)) AND deleted_at IS NULL AND id <> ?",
+        [candidate, candidate, candidate, input.customerId],
       );
       return Number(row?.n ?? 0) === 0;
     };
@@ -10980,8 +10986,8 @@ class PacksModuleService extends MedusaService({
     // save) reads as free instead of colliding with yourself.
     const free = async (candidate: string): Promise<boolean> => {
       const [row] = await em.execute<{ n: string }[]>(
-        "SELECT COUNT(*)::int AS n FROM customer WHERE (lower(first_name) = lower(?) OR lower(metadata->>'handle') = lower(?)) AND deleted_at IS NULL AND id <> ?",
-        [candidate, candidate, input.customerId],
+        "SELECT COUNT(*)::int AS n FROM customer WHERE (lower(first_name) = lower(?) OR lower(metadata->>'handle') = lower(?) OR lower(metadata->>'handle_alias') = lower(?)) AND deleted_at IS NULL AND id <> ?",
+        [candidate, candidate, candidate, input.customerId],
       );
       return Number(row?.n ?? 0) === 0;
     };

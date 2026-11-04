@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { getPublicProfile } from '@/lib/data/profiles';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { getLeaderboard } from '@/lib/data/leaderboard';
@@ -95,6 +95,14 @@ export default async function ProfilePage({
         </div>
       </div>
     );
+  }
+  // An old handle kept as an alias (the 2026-11-04 backfill of 8-digit
+  // "Collector########" handles) answers with the account's current one: send
+  // the visitor to that URL. Case-only differences render as typed, like
+  // before. Temporary (307), not 308, so a browser never caches the move.
+  if (result.profile.handle.toLowerCase() !== handle.toLowerCase()) {
+    const query = tab ? `?tab=${encodeURIComponent(tab)}` : '';
+    redirect(`/profile/${encodeURIComponent(result.profile.handle)}${query}`);
   }
   const view = toProfileView(
     result.profile,

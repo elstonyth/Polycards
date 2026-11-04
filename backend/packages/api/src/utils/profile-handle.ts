@@ -16,6 +16,13 @@
 // live account's then-current name as its handle, so no link that worked
 // before the change stopped working because of it.
 //
+// One handle move since (owner's call, 2026-11-04): Migration20261104120000
+// gave the 2,229 accounts with an 8-digit generated "Collector########" a
+// standard Collector#### name and handle. Each old handle is kept as
+// `metadata.handle_alias`, unique like a handle and treated as taken by every
+// allocator, so the old link still resolves and the storefront redirects it.
+// Do not drop the alias: that would break those links.
+//
 // Both values share one shape: ASCII `A-Za-z0-9_-`, 3..30, so either is a URL
 // segment without percent-encoding, and both are unique CASE-INSENSITIVELY
 // (partial unique indexes on lower(first_name) — Migration20260904120000 — and
