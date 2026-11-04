@@ -487,6 +487,9 @@
       "clearName": "清除同名",
       "nameCleared": "同名已清除",
       "clearNameHint": "点「清除同名」后才会生效。",
+      "confirm": "确认",
+      "done": "已完成",
+      "confirmHint": "点「确认」后才会生效。",
       "hint": "点保存才会保留。"
     },
     "copy": "复制",

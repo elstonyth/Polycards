@@ -51,9 +51,9 @@ const CONFIRM_TEXT: Record<
 // A kind this build does not know yet (a newer server) still shows a button.
 const confirmText = (kind: ProposalKind) =>
   CONFIRM_TEXT[kind] ?? {
-    tap: 'assistant.confirm.saveNote',
-    done: 'assistant.confirm.saved',
-    hint: 'assistant.confirm.hint',
+    tap: 'assistant.confirm.confirm',
+    done: 'assistant.confirm.done',
+    hint: 'assistant.confirm.confirmHint',
   };
 
 export function Thread({

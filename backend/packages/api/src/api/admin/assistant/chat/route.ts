@@ -390,9 +390,12 @@ export async function POST(
       userText: input.text,
       // Staff-typed, like this message: a change they asked for there, then
       // answered "yes" to here, still names its player (agent-tools.ts).
-      askedBefore: history.filter((m) => m.role === 'user').at(-1)?.content as
-        | string
-        | undefined,
+      askedBefore: earlier
+        .filter(
+          (m) => m.role === 'user' && !m.content.startsWith(SCHEDULED_PREFIX),
+        )
+        .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0]
+        ?.content,
       images: input.images,
       spoken: input.spoken,
       signal: ctl.signal,

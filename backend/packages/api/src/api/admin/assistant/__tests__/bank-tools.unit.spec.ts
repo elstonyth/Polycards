@@ -404,6 +404,32 @@ describe('free_bank_number', () => {
     ).rejects.toThrow(/nothing to free/);
   });
 
+  it('ignores a bank the model sent that staff never typed', async () => {
+    const { propose, done } = run(
+      'free_bank_number',
+      { username: 'Test Player', last4: '0001', bank: 'CIMB' },
+      'free 0001 for Test Player',
+    );
+    await done;
+    expect(packs.payoutAccountHoldersAt).toHaveBeenCalledWith(
+      'cus_x',
+      KEY,
+      'MBBEMYKL',
+    );
+    expect(propose.mock.calls[0][0]).toMatchObject({ bank_code: 'MBBEMYKL' });
+  });
+
+  it('does not join the end of one message to the start of the other', async () => {
+    await expect(
+      run(
+        'free_bank_number',
+        { username: 'Test Player', bank_account: '512345670001' },
+        '670001 for Test Player Maybank',
+        'free 512345',
+      ).done,
+    ).rejects.toThrow(/as the person typed it/);
+  });
+
   it('a banned player gets the card, which says to tap Unban first', async () => {
     banned = ['cus_x', 'cus_y1'];
     const { propose, done } = run(

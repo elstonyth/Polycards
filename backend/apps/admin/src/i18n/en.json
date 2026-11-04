@@ -2265,6 +2265,9 @@
       "clearName": "Clear name",
       "nameCleared": "Name cleared",
       "clearNameHint": "Nothing changes until you tap Clear name.",
+      "confirm": "Confirm",
+      "done": "Done",
+      "confirmHint": "Nothing changes until you tap Confirm.",
       "hint": "Nothing is kept until you tap save."
     },
     "copy": "Copy",

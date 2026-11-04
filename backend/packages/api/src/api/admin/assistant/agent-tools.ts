@@ -115,8 +115,11 @@ const packsOf = (ctx: Ctx) => ctx.container.resolve<Packs>(PACKS_MODULE);
 /** What the person typed: this message, and their message before it, so a
  *  change they asked for and then answered "yes" to still names its player.
  *  Both are their own words; a tool result never is. */
+// Joined by a character no name, number or reason match can step over, so
+// nothing is put together from the end of one message and the start of the
+// other.
 const staffText = (ctx: Ctx) =>
-  [ctx.userText, ctx.askedBefore].filter(Boolean).join('\n');
+  [ctx.userText, ctx.askedBefore].filter(Boolean).join('\n\u0000\n');
 
 /** When the permanent ban on this account began, or null for none. */
 async function permanentBan(
@@ -152,9 +155,16 @@ const digitsArg = (v: unknown) =>
   typeof v === 'number' ? String(v) : str(v).replace(/[\s-]/g, '');
 
 /** The bank staff named, as its id: a name spelled loosely still finds it. */
-const bankOf = (args: Record<string, unknown>): string | null => {
+const bankOf = (
+  args: Record<string, unknown>,
+  /** For a change: only a bank the person typed. */
+  typed?: string,
+): string | null => {
   const raw = str(args.bank).toLowerCase().replace(/\s+/g, '');
   if (!raw) return null;
+  if (typed !== undefined && !typed.toLowerCase().replace(/\s+/g, '').includes(raw)) {
+    return null;
+  }
   return (
     findBank(raw)?.id ??
     [...MY_BANKS, ...SG_BANKS].find((b) =>
@@ -226,7 +236,9 @@ async function numberFor(
 }> {
   const packs = packsOf(ctx);
   const text = staffText(ctx);
-  const bank = bankOf(args);
+  // For a change, a bank the model sent but staff never typed is ignored: it
+  // would choose whose rows are cut.
+  const bank = bankOf(args, write ? text : undefined);
   const own = await packs.payoutAccountsOf(customerId);
   const raw = digitsArg(args.bank_account);
   if (raw) {
@@ -359,7 +371,7 @@ const masked = (name: string) =>
 const reasonOf = (args: Record<string, unknown>, ctx: Ctx, fallback: string) => {
   const given = str(args.reason).slice(0, 400);
   return given && squash(staffText(ctx)).includes(squash(given))
-    ? given.replace(/\d(?:[\s-]*\d){4,}/g, '[number]')
+    ? given.replace(/\d(?:[\s.\-]*\d){4,}/g, '[number]')
     : fallback;
 };
 
