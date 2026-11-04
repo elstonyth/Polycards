@@ -15,9 +15,26 @@ import {
   MAX_DECODE_PIXELS,
 } from '../../utils/image-fetch';
 import type { Need } from './access';
-import { BAN_LIST_NEED, UNBAN_NEED, type Proposal } from './confirm';
-import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
-import { MY_BANKS, SG_BANKS, findBank } from '../../../modules/packs/banks';
+import { BAN_LIST_NEED, oneNumber, UNBAN_NEED, type Proposal } from './confirm';
+import {
+  blocksNewSave,
+  clearedHolderNames,
+  HOLDER_NAME_INVALID_MESSAGE,
+  holderNameInvalid,
+  holderNameKey,
+  normalizeHolderName,
+  parseSavedBankAccounts,
+  payoutAccountKey,
+  PERMANENT_BAN_REASON_PREFIX,
+} from '../../../modules/packs/saved-accounts';
+import {
+  MY_BANKS,
+  SG_BANKS,
+  findBank,
+  savedAccountSlot,
+} from '../../../modules/packs/banks';
+import { realNameKey } from '../../../utils/real-name';
+import { namedIn, namedPlayer } from './named';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 
 // The assistant's own memory and search (owner, 2026-10-29: "it will search
@@ -86,6 +103,221 @@ const assistantOf = (ctx: Ctx) =>
   ctx.container.resolve<AssistantModuleService>(ASSISTANT_MODULE);
 const day = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
 
+// The bank tools (owner, 2026-11-04: staff do in the chat what support did by
+// hand, checked first and changed only on a tap).
+type Packs = PacksModuleService;
+const packsOf = (ctx: Ctx) => ctx.container.resolve<Packs>(PACKS_MODULE);
+
+/** When the permanent ban on this account began, or null for none. */
+async function permanentBan(
+  packs: Packs,
+  customerId: string,
+): Promise<{ disabled_at: Date } | null> {
+  const [state] = await packs.listCustomerAccountStates(
+    { customer_id: customerId, disabled: true },
+    { select: ['disabled_reason', 'disabled_at'], take: 1 },
+  );
+  return state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX) &&
+    state.disabled_at
+    ? { disabled_at: state.disabled_at }
+    : null;
+}
+
+/** The last 4 as its own word in the message: digits inside a name or a phone
+ *  number do not count. */
+const last4Named = (text: string, last4: string) =>
+  text
+    .toLowerCase()
+    .split(/[^a-z0-9_-]+/)
+    .includes(last4);
+
+/** A full number staff typed in this message, spaced or dashed any way. */
+const numberNamed = (text: string, key: string) =>
+  text
+    .replace(/[\s-]/g, '')
+    .split(/\D+/)
+    .some((d) => d.replace(/^0+/, '') === key);
+
+/** The digits staff sent: a number may arrive unquoted. */
+const digitsArg = (v: unknown) =>
+  typeof v === 'number' ? String(v) : str(v).replace(/[\s-]/g, '');
+
+/** Shown name, handle and ban for each account, as the card names them. */
+async function whoAre(ctx: Ctx, ids: string[]) {
+  if (ids.length === 0) return [];
+  const [customers, states] = await Promise.all([
+    ctx.container
+      .resolve<ICustomerModuleService>(Modules.CUSTOMER)
+      .listCustomers(
+        { id: ids },
+        { select: ['id', 'first_name', 'metadata'], take: ids.length },
+      ),
+    packsOf(ctx).listCustomerAccountStates(
+      { customer_id: ids, disabled: true },
+      { select: ['customer_id', 'disabled_reason'], take: ids.length },
+    ),
+  ]);
+  return ids.map((id) => {
+    const c = customers.find((x) => x.id === id);
+    const handle =
+      typeof c?.metadata?.handle === 'string' ? c.metadata.handle : null;
+    const shown = c?.first_name ?? handle ?? 'a deleted account';
+    const banned = states.some(
+      (s) =>
+        s.customer_id === id &&
+        s.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX),
+    );
+    const name = `${shown}${handle && handle !== shown ? ` (@${handle})` : ''}`;
+    return {
+      id,
+      name,
+      banned,
+      label: `${name}, ${banned ? 'banned' : 'open'}`,
+    };
+  });
+}
+
+/**
+ * The bank number staff mean for this player: the full number they typed in
+ * this message, else by last 4 (the bank breaks a tie) among the player's own
+ * numbers (saved, paid to, unbanned for them), else, for an admin, a banned
+ * one off the ban list (a player whose save was refused has nothing on file).
+ * A bank only, never a wallet. Never returned to the model.
+ */
+async function numberFor(
+  ctx: Ctx,
+  customerId: string,
+  args: Record<string, unknown>,
+  resend: string,
+): Promise<{ key: string; bankCode: string; last4: string }> {
+  const packs = packsOf(ctx);
+  const text = ctx.userText ?? '';
+  const bankArg = str(args.bank).toLowerCase().replace(/\s+/g, '');
+  const bank = bankArg
+    ? (findBank(bankArg)?.id ??
+      [...MY_BANKS, ...SG_BANKS].find((b) =>
+        b.name.toLowerCase().replace(/\s+/g, '').includes(bankArg),
+      )?.id ??
+      null)
+    : null;
+  const own = await packs.payoutAccountsOf(customerId);
+  const typed = payoutAccountKey(digitsArg(args.bank_account), false);
+  if (typed) {
+    if (typed.length <= 4 || !numberNamed(text, typed)) {
+      throw new Error(
+        `Use a full number only as the person typed it in this message. ${resend}`,
+      );
+    }
+    const mine = own.find((n) => n.account_key === typed);
+    return {
+      key: typed,
+      bankCode: bank ?? mine?.bank_code ?? '',
+      last4: typed.slice(-4),
+    };
+  }
+  const last4 = digitsArg(args.last4);
+  if (!/^[0-9]{4}$/.test(last4)) {
+    throw new Error(
+      `Give the last 4 digits of the bank number, or the full number. ${resend}`,
+    );
+  }
+  const matches = own.filter(
+    (n) => !n.wallet && n.account_key.slice(-4) === last4,
+  );
+  const key = oneNumber(own, last4, bank);
+  if (key) {
+    const hit = matches.find((n) => n.account_key === key);
+    return { key, bankCode: hit?.bank_code ?? bank ?? '', last4 };
+  }
+  if (matches.length > 1) {
+    const banks = [
+      ...new Set(
+        matches.map((n) => findBank(n.bank_code)?.name ?? n.bank_code),
+      ),
+    ].join(', ');
+    throw new Error(
+      `${matches.length} of this player's numbers end ${last4} (${banks}). Ask which bank. ${resend}`,
+    );
+  }
+  const admin =
+    ctx.access.superAdmin || ((await ctx.access.can?.(BAN_LIST_NEED)) ?? false);
+  if (admin) {
+    try {
+      const hit = await packs.resolveBannedPayoutAccount(
+        customerId,
+        last4,
+        bank,
+        true,
+      );
+      return { key: hit.account_key, bankCode: hit.bank_code, last4 };
+    } catch {
+      // Not on the ban list either: asked for in full below.
+    }
+  }
+  throw new Error(
+    `No bank number ending ${last4} is on this player${admin ? ' or on the ban list' : ''}. Ask staff to paste the full number in one message with the player. ${resend}`,
+  );
+}
+
+/** The holder name: as staff typed it in this message, else the real name on
+ *  file. Never returned to the model. */
+async function holderNameFor(
+  ctx: Ctx,
+  customerId: string,
+  args: Record<string, unknown>,
+): Promise<{ name: string; typed: boolean } | null> {
+  const given = normalizeHolderName(str(args.holder_name));
+  if (given) {
+    if (!squash(ctx.userText ?? '').includes(squash(given))) {
+      throw new Error(
+        'Use a holder name only as the person typed it in this message; otherwise leave it out and the real name on file is used. Nothing was changed.',
+      );
+    }
+    return { name: given, typed: true };
+  }
+  const [state] = await packsOf(ctx).listCustomerAccountStates(
+    { customer_id: customerId },
+    { select: ['real_name'], take: 1 },
+  );
+  const onFile = normalizeHolderName(state?.real_name ?? '');
+  return onFile ? { name: onFile, typed: false } : null;
+}
+
+/** The reason as the person wrote it in this message, else a plain default:
+ *  it lands in the audit under their name. */
+const reasonOf = (
+  args: Record<string, unknown>,
+  ctx: Ctx,
+  fallback: string,
+) => {
+  const given = str(args.reason).slice(0, 400);
+  return given && squash(ctx.userText ?? '').includes(squash(given))
+    ? given
+    : fallback;
+};
+
+const PLAYER_ARG = {
+  type: 'string',
+  description:
+    "The player's shown name, or their profile handle, exactly as staff wrote it (with @ when staff wrote @ for a handle).",
+};
+const NUMBER_ARGS = {
+  last4: {
+    type: 'string',
+    description: 'The last 4 digits of the bank number, as staff wrote them.',
+  },
+  bank: {
+    type: 'string',
+    description:
+      'The bank, e.g. Maybank or Public Bank, only when two numbers end the same.',
+  },
+  bank_account: {
+    type: 'string',
+    description:
+      'The full bank number, only when staff pasted it in this message.',
+  },
+};
+
 /** The notes a person's chat starts with: everyone's shared notes first,
  *  then their own, each newest first, within a size budget. */
 export async function memoryFor(
@@ -151,35 +383,26 @@ export const AGENT_TOOLS: AgentTool[] = [
     run: async (args, ctx) => {
       const username = str(args.username);
       if (!username) throw new Error('username is required.');
-      // Only a player the person named in this very message, as a whole word: a
-      // name in data the model read (a customer field, a past chat) must not
-      // start one, and Collector1 must not match a message naming Collector12.
-      const words = (ctx.userText ?? '').toLowerCase().split(/[^a-z0-9_-]+/);
-      if (!words.includes(username.toLowerCase())) {
-        throw new Error(
-          'Unban only a player the person named in this message. Nothing was changed.',
-        );
-      }
       const packs = ctx.container.resolve<PacksModuleService>(PACKS_MODULE);
-      const byName = await packs.findCustomerIdByUsername(username);
-      const byHandle = await packs.findCustomerIdByHandle(username);
-      if (byName && byHandle && byName !== byHandle) {
-        throw new Error(
-          `${username} is a shown name and a different player's handle. Ask staff for the name shown on the profile. Nothing was changed.`,
-        );
-      }
-      const customerId = byName ?? byHandle;
-      if (!customerId) {
-        throw new Error(`No player named ${username}. Nothing was changed.`);
-      }
-      const [state] = await packs.listCustomerAccountStates(
-        { customer_id: customerId, disabled: true },
-        { select: ['disabled_reason', 'disabled_at'], take: 1 },
+      // Only a player the person named in this very message (named.ts). A
+      // shown name that is another player's handle means the banned one.
+      const customerId = await namedPlayer(
+        packs,
+        username,
+        ctx.userText ?? '',
+        'Nothing was changed.',
+        {
+          pick: async (byName, byHandle) => {
+            const [a, b] = await Promise.all([
+              permanentBan(packs, byName),
+              permanentBan(packs, byHandle),
+            ]);
+            return a && !b ? byName : b && !a ? byHandle : null;
+          },
+        },
       );
-      if (
-        !state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX) ||
-        !state.disabled_at
-      ) {
+      const state = await permanentBan(packs, customerId);
+      if (!state) {
         throw new Error(
           `${username} has no permanent ban to lift. A staff disable or a deleted account is handled on the admin player page. Nothing was changed.`,
         );
@@ -232,11 +455,12 @@ export const AGENT_TOOLS: AgentTool[] = [
         username: {
           type: 'string',
           description:
-            "The player the number is unbanned for: shown name or profile handle, exactly as staff wrote it.",
+            'The player the number is unbanned for: shown name or profile handle, exactly as staff wrote it.',
         },
         last4: {
           type: 'string',
-          description: 'The last 4 digits of the bank number, as staff wrote them.',
+          description:
+            'The last 4 digits of the bank number, as staff wrote them.',
         },
         bank: {
           type: 'string',
@@ -261,30 +485,21 @@ export const AGENT_TOOLS: AgentTool[] = [
         typeof args.last4 === 'number' ? String(args.last4) : str(args.last4);
       if (!username) throw new Error(`username is required. ${resend}`);
       if (!/^[0-9]{4}$/.test(last4)) {
-        throw new Error(`last4 must be the last 4 digits of the bank number. ${resend}`);
+        throw new Error(
+          `last4 must be the last 4 digits of the bank number. ${resend}`,
+        );
       }
-      // Only what the person named in this very message, each as its own word,
-      // so data the model read (a customer field, a past chat) cannot start one,
-      // and digits inside a name or a phone number do not count.
+      // Only what the person named in this very message, so data the model
+      // read (a customer field, a past chat) cannot start one; the last 4 as
+      // its own word, so digits inside a name or a phone number do not count.
       const text = ctx.userText ?? '';
-      const words = text.toLowerCase().split(/[^a-z0-9_-]+/);
-      if (!words.includes(username.toLowerCase()) || !words.includes(last4)) {
+      if (!namedIn(text, username) || !last4Named(text, last4)) {
         throw new Error(
           `Unban a bank number only when the person names, in this message, the player it is for and its last 4 digits. ${resend}`,
         );
       }
       const packs = ctx.container.resolve<PacksModuleService>(PACKS_MODULE);
-      const byName = await packs.findCustomerIdByUsername(username);
-      const byHandle = await packs.findCustomerIdByHandle(username);
-      if (byName && byHandle && byName !== byHandle) {
-        throw new Error(
-          `${username} is a shown name and a different player's handle. Ask staff for the name shown on the profile. ${resend}`,
-        );
-      }
-      const customerId = byName ?? byHandle;
-      if (!customerId) {
-        throw new Error(`No player named ${username}. ${resend}`);
-      }
+      const customerId = await namedPlayer(packs, username, text, resend);
       // The bank only breaks a tie: a name the model or staff spelled loosely
       // must not refuse a number its last 4 already names.
       const bankArg = str(args.bank).toLowerCase().replace(/\s+/g, '');
@@ -321,7 +536,8 @@ export const AGENT_TOOLS: AgentTool[] = [
         typeof customer?.metadata?.handle === 'string'
           ? customer.metadata.handle
           : null;
-      const bankName = findBank(hit.bank_code)?.name ?? (hit.bank_code || 'the bank');
+      const bankName =
+        findBank(hit.bank_code)?.name ?? (hit.bank_code || 'the bank');
       const given = str(args.reason).slice(0, 400);
       const reason =
         given && squash(text).includes(squash(given))
@@ -343,6 +559,332 @@ export const AGENT_TOOLS: AgentTool[] = [
         unbanned: false,
         waiting:
           'Nothing has changed yet: a button is under your answer, and the number is unbanned for this player only when the person taps it. Tell them so in one short line, and that if another account was paid to it, support adds it for the player on the admin player page.',
+      });
+    },
+  },
+  {
+    name: 'bank_save_check',
+    label: 'Why a bank save is refused',
+    description:
+      "Check, the way the app checks a player's own save, why a player cannot add (save, link) a bank account, and what fixes each block (owner, 2026-11-04). Use it whenever staff say a player cannot add a bank or is refused, before proposing unban_bank_number, free_bank_number or clear_name_clash, and again after staff tap one, to confirm it worked. Give the player (shown name or profile handle; '@name' means the handle) and the bank number's last 4 (the bank only for a tie), or the full number if staff pasted it in this message; holder_name only if staff typed the name the player saves under (otherwise the real name on file is used). Each check comes back yes or no with its fix, in `fixes`; can_save true means nothing blocks. Explain it in plain words; never repeat a full number or a holder name back.",
+    parameters: {
+      type: 'object',
+      properties: {
+        username: PLAYER_ARG,
+        ...NUMBER_ARGS,
+        holder_name: {
+          type: 'string',
+          description:
+            'The holder name the player saves under, only when staff typed it in this message.',
+        },
+      },
+      required: ['username'],
+      additionalProperties: false,
+    },
+    // What ban_reason reads: bank and last 4 only, other accounts by name.
+    needs: [
+      { resource: 'customer', operation: 'read' },
+      { resource: 'payment', operation: 'read' },
+    ],
+    run: async (args, ctx) => {
+      const packs = packsOf(ctx);
+      const again = 'Ask staff for the player and the number again.';
+      const customerId = await namedPlayer(
+        packs,
+        str(args.username),
+        ctx.userText ?? '',
+        again,
+        { readOnly: true },
+      );
+      const [me] = await whoAre(ctx, [customerId]);
+      const [customer] = await ctx.container
+        .resolve<ICustomerModuleService>(Modules.CUSTOMER)
+        .listCustomers({ id: customerId }, { select: ['metadata'], take: 1 });
+      const metadata = customer?.metadata ?? {};
+      const saved = parseSavedBankAccounts(metadata.bank_accounts);
+      const fixes: string[] = [];
+      if (me.banned) {
+        fixes.push(
+          'The account is permanently banned: unban_account first. An unban clears the saved banks and any name clearing, so do it before the steps below.',
+        );
+      }
+      const out: Record<string, unknown> = {
+        player: me.label,
+        banned: me.banned,
+        saved_banks: saved.map((a) => ({
+          bank: a.bankName,
+          last4: a.accountNumber.slice(-4),
+        })),
+      };
+      let bankCode: string | null = null;
+      let key: string | null = null;
+      if (digitsArg(args.last4) || digitsArg(args.bank_account)) {
+        const n = await numberFor(ctx, customerId, args, again);
+        key = n.key;
+        bankCode = findBank(n.bankCode)?.id ?? null;
+        const holders = await packs.otherPayoutAccountHolders(
+          customerId,
+          n.key,
+        );
+        const others = await whoAre(ctx, [
+          ...new Set(holders.map((h) => h.customer_id)),
+        ]);
+        const bannedForPlayer = await packs.payoutAccountBanned(
+          n.key,
+          false,
+          customerId,
+        );
+        const bankName = findBank(n.bankCode)?.name ?? 'the bank';
+        out.number = {
+          bank: bankName,
+          last4: n.last4,
+          banned: await packs.payoutAccountBanned(n.key, false),
+          banned_for_this_player: bannedForPlayer,
+          already_saved: saved.some(
+            (a) => payoutAccountKey(a.accountNumber, false) === n.key,
+          ),
+          other_accounts: others.map((o) => o.label),
+          blocks_save: bankCode
+            ? blocksNewSave(holders, bankCode)
+            : holders.length > 0,
+        };
+        if (bannedForPlayer) {
+          fixes.push(
+            `${bankName} …${n.last4} is banned for this player: unban_bank_number unbans it for them only.`,
+          );
+        }
+        if (others.length > 0) {
+          fixes.push(
+            `${bankName} …${n.last4} is on ${others.length} other account${others.length === 1 ? '' : 's'} (${others.map((o) => o.label).join('; ')}): free_bank_number (admins) takes it off them so this player can save it.`,
+          );
+        }
+        const slot = bankCode ? savedAccountSlot(bankCode) : null;
+        if (
+          slot &&
+          saved.some(
+            (a) =>
+              savedAccountSlot(a.bankCode) === slot &&
+              payoutAccountKey(a.accountNumber, false) !== n.key,
+          )
+        ) {
+          fixes.push(
+            'The player already has a bank saved in that slot: support removes it on the admin player page first.',
+          );
+        }
+      }
+      const holder = await holderNameFor(ctx, customerId, args);
+      if (!holder) {
+        out.name =
+          'No holder name was given and none is on file: ask staff for the name the player saves under, to check it.';
+      } else {
+        const holders = await packs.holderNameHolders(customerId, holder.name);
+        const cleared =
+          clearedHolderNames(metadata)[holderNameKey(holder.name)]?.with ?? [];
+        const others = await whoAre(ctx, holders);
+        const blocking = others.filter((o) => !cleared.includes(o.id));
+        out.name = {
+          checked: holder.typed
+            ? 'the name staff typed'
+            : 'the real name on file',
+          format_ok: !holderNameInvalid(holder.name),
+          other_accounts: others.map((o) => ({
+            account: o.label,
+            cleared_for_this_player: cleared.includes(o.id),
+          })),
+          blocks_save: blocking.length > 0,
+        };
+        if (holderNameInvalid(holder.name)) {
+          fixes.push(
+            `The name would be refused: ${HOLDER_NAME_INVALID_MESSAGE}`,
+          );
+        }
+        if (blocking.length > 0) {
+          fixes.push(
+            `The name is used by ${blocking.length} other account${blocking.length === 1 ? '' : 's'} (${blocking.map((o) => o.label).join('; ')}). ${key ? 'Free the number first (it can free the name too), then check again; whoever still holds the name needs ' : 'That needs '}clear_name_clash (admins), once staff confirm they are different people or the owner allowed it.`,
+          );
+        }
+        const savedNames = saved
+          .filter((a) => findBank(a.bankCode)?.wallet === undefined)
+          .map((a) =>
+            realNameKey(normalizeHolderName(a.accountHolderName ?? '')),
+          )
+          .filter(Boolean);
+        if (
+          savedNames.length > 0 &&
+          !savedNames.includes(realNameKey(holder.name))
+        ) {
+          fixes.push(
+            'A different holder name is already saved on this account: a new bank must use it, or support adds the bank on the admin player page.',
+          );
+        }
+      }
+      return JSON.stringify({ ...out, fixes, can_save: fixes.length === 0 });
+    },
+  },
+  {
+    name: 'free_bank_number',
+    label: 'Free bank number',
+    description:
+      "Take a bank number off every OTHER account that saved it or was paid to it, so the player staff name can save it themselves (owner, 2026-11-04). Use it only when staff ask in this message to free the number or let the player add it, naming the player and the number's last 4 (or pasting it in full) in that one message; run bank_save_check first. Those accounts lose their saved entry of it, and their payouts to it keep the last 4 only, with no name: this cannot be undone, and it is audited. It does not unban a banned number (unban_bank_number) and needs the account unbanned first (unban_account). Nothing changes until the person taps the button under your answer. Admins only.",
+    parameters: {
+      type: 'object',
+      properties: {
+        username: PLAYER_ARG,
+        ...NUMBER_ARGS,
+        reason: { type: 'string', description: "Why, in staff's words." },
+      },
+      required: ['username'],
+      additionalProperties: false,
+    },
+    needs: [UNBAN_NEED, BAN_LIST_NEED],
+    run: async (args, ctx) => {
+      const resend =
+        'Ask them to send it again in one message with the player and the last 4, for example: "free Maybank 0001 for Collector123". Nothing was changed.';
+      const text = ctx.userText ?? '';
+      const last4 = digitsArg(args.last4);
+      if (
+        !digitsArg(args.bank_account) &&
+        (!/^[0-9]{4}$/.test(last4) || !last4Named(text, last4))
+      ) {
+        throw new Error(
+          `Free a bank number only when the person names, in this message, the player and its last 4 digits. ${resend}`,
+        );
+      }
+      const packs = packsOf(ctx);
+      const customerId = await namedPlayer(
+        packs,
+        str(args.username),
+        text,
+        resend,
+      );
+      if (await permanentBan(packs, customerId)) {
+        throw new Error(
+          'This player is banned: unban the account first (unban_account), then free the number. Nothing was changed.',
+        );
+      }
+      const n = await numberFor(ctx, customerId, args, resend);
+      const others = await whoAre(ctx, [
+        ...new Set(
+          (await packs.otherPayoutAccountHolders(customerId, n.key)).map(
+            (h) => h.customer_id,
+          ),
+        ),
+      ]);
+      const bankName = findBank(n.bankCode)?.name ?? 'The bank number';
+      if (others.length === 0) {
+        throw new Error(
+          `No other account holds ${bankName} …${n.last4}, so there is nothing to free. Run bank_save_check for what blocks the save. Nothing was changed.`,
+        );
+      }
+      const [me] = await whoAre(ctx, [customerId]);
+      const reason = reasonOf(
+        args,
+        ctx,
+        'Bank number freed on request in the admin assistant',
+      );
+      proposeOrRefuse(
+        ctx,
+        {
+          kind: 'free_number',
+          customer_id: customerId,
+          username: str(args.username),
+          bank_code: findBank(n.bankCode)?.id ?? '',
+          last4: n.last4,
+          from: others.map((o) => o.id),
+          reason,
+        },
+        `Free ${bankName} …${n.last4} for ${me.name}: it comes off ${others.length} other account${others.length === 1 ? '' : 's'}: ${others.map((o) => o.label).join('; ')}. They lose their saved entry of it, and their payouts to it keep the last 4 only, with no name. This cannot be undone. The player then saves it themselves${(await packs.payoutAccountBanned(n.key, false, customerId)) ? ', once it is also unbanned for them' : ''}. Reason: ${reason}`,
+      );
+      return JSON.stringify({
+        freed: false,
+        waiting:
+          'Nothing has changed yet: a Free bank number button is under your answer, and the number comes off those accounts only when the person taps it. Tell them so in one short line, and that it cannot be undone.',
+      });
+    },
+  },
+  {
+    name: 'clear_name_clash',
+    label: 'Clear shared name',
+    description:
+      "Let a player save banks under a holder name other accounts also used, when staff ask in this message, naming the player, after they checked these are different people or the owner allowed it (owner, 2026-11-04). The name is the one staff typed in this message, else the player's real name on file. Every other account using it now is listed on the card, any number of them; only those stop counting against this player's saves, and an account that uses the name later still does. If the name is on a number's payout rows, free_bank_number may free it first: check again (bank_save_check) before this. Unban the account first if it is banned (an unban clears this). Nothing changes until the person taps the button under your answer. Admins only.",
+    parameters: {
+      type: 'object',
+      properties: {
+        username: PLAYER_ARG,
+        holder_name: {
+          type: 'string',
+          description:
+            'The holder name, only when staff typed it in this message.',
+        },
+        reason: { type: 'string', description: "Why, in staff's words." },
+      },
+      required: ['username'],
+      additionalProperties: false,
+    },
+    needs: [UNBAN_NEED, BAN_LIST_NEED],
+    run: async (args, ctx) => {
+      const packs = packsOf(ctx);
+      const tail = 'Nothing was changed.';
+      const customerId = await namedPlayer(
+        packs,
+        str(args.username),
+        ctx.userText ?? '',
+        tail,
+      );
+      if (await permanentBan(packs, customerId)) {
+        throw new Error(
+          `This player is banned: unban the account first (unban_account), then clear the name. ${tail}`,
+        );
+      }
+      const holder = await holderNameFor(ctx, customerId, args);
+      if (!holder) {
+        throw new Error(
+          `No real name is on file for this player: ask staff to type the name in one message with the player. ${tail}`,
+        );
+      }
+      if (holderNameInvalid(holder.name)) {
+        throw new Error(`${HOLDER_NAME_INVALID_MESSAGE} ${tail}`);
+      }
+      const holders = await packs.holderNameHolders(customerId, holder.name);
+      const [customer] = await ctx.container
+        .resolve<ICustomerModuleService>(Modules.CUSTOMER)
+        .listCustomers({ id: customerId }, { select: ['metadata'], take: 1 });
+      const cleared =
+        clearedHolderNames(customer?.metadata ?? {})[holderNameKey(holder.name)]
+          ?.with ?? [];
+      if (holders.length === 0) {
+        throw new Error(
+          `No other account uses this name, so there is nothing to clear. ${tail}`,
+        );
+      }
+      if (holders.every((id) => cleared.includes(id))) {
+        throw new Error(
+          `The name is already cleared for every account that uses it. ${tail}`,
+        );
+      }
+      const others = await whoAre(ctx, holders);
+      const [me] = await whoAre(ctx, [customerId]);
+      const reason = reasonOf(
+        args,
+        ctx,
+        'Shared holder name cleared on request in the admin assistant',
+      );
+      proposeOrRefuse(
+        ctx,
+        {
+          kind: 'name_clash',
+          customer_id: customerId,
+          username: str(args.username),
+          holder_name: holder.name,
+          with: holders,
+          reason,
+        },
+        `Clear ${holder.typed ? 'the name you gave' : 'the real name on file'} for ${me.name}: ${others.length} other account${others.length === 1 ? '' : 's'} use it: ${others.map((o) => o.label).join('; ')}. Their use of it stops blocking this player's bank saves; an account that uses it later still does. It can be taken back on the admin player page. Reason: ${reason}`,
+      );
+      return JSON.stringify({
+        cleared: false,
+        waiting:
+          'Nothing has changed yet: a Clear name button is under your answer, and the name is cleared only when the person taps it. Tell them so in one short line.',
       });
     },
   },

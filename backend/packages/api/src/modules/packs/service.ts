@@ -10160,6 +10160,10 @@ class PacksModuleService extends MedusaService({
       holderName: string;
       cleared: boolean;
       reason: string;
+      /** The other accounts the person was shown: the assistant's card lists
+       *  every one (owner, 2026-11-04: "allow, list them all"). Given, any
+       *  number of them may be cleared, but only those; without it, one. */
+      onlyWith?: string[];
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
@@ -10177,8 +10181,16 @@ class PacksModuleService extends MedusaService({
         'No other account holds this name, so there is nothing to clear.',
       );
     }
-    // Two real people share a name; a name on many accounts is a ring.
-    if (input.cleared && holders.length > MAX_NAME_CLASH_HOLDERS) {
+    const shown = input.onlyWith;
+    if (input.cleared && shown && holders.some((id) => !shown.includes(id))) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Another account now uses this name too. Ask again.',
+      );
+    }
+    // Two real people share a name; a name on many accounts is a ring, unless
+    // the person was shown every one of them.
+    if (input.cleared && !shown && holders.length > MAX_NAME_CLASH_HOLDERS) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         `${holders.length} other accounts use this name. Clearing covers two people with one name; ask the owner about the rest.`,
@@ -10362,6 +10374,196 @@ class PacksModuleService extends MedusaService({
     );
   }
 
+  // Every number this customer saved, was paid to (any status) or had a ban
+  // lifted for, one entry per key: what support's last 4 can mean for this
+  // player (bannedPayoutAccountsOf, the assistant's bank tools). A lift comes
+  // first, then the first bank seen, so the list and a later lift agree on the
+  // bank. A cut payout row (deleted account, freed number) keeps its last 4
+  // only and is skipped.
+  @InjectManager()
+  async payoutAccountsOf(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ account_key: string; bank_code: string; wallet: boolean }[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
+      'SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+    const paid = await em.execute<
+      { bank_code: string; account_number: string }[]
+    >(
+      'SELECT bank_code, account_number FROM gateway_withdrawal WHERE customer_id = ? AND deleted_at IS NULL ORDER BY created_at',
+      [customerId],
+    );
+    const byKey = new Map<string, { bank_code: string; wallet: boolean }>(
+      Object.entries(liftedPayoutBans(me?.metadata ?? {})).map(([key, l]) => [
+        key,
+        {
+          bank_code: l.bank_code,
+          wallet: findBank(l.bank_code)?.wallet !== undefined,
+        },
+      ]),
+    );
+    for (const { bankCode, accountNumber } of [
+      ...parseSavedBankAccounts(me?.metadata?.bank_accounts),
+      ...paid.map((p) => ({
+        bankCode: p.bank_code,
+        accountNumber: p.account_number,
+      })),
+    ]) {
+      const bank = findBank(bankCode);
+      const key = payoutAccountKey(accountNumber, bank?.wallet ?? false);
+      if (key.length <= 4 || byKey.has(key)) continue;
+      byKey.set(key, {
+        bank_code: bank?.id ?? bankCode,
+        wallet: bank?.wallet !== undefined,
+      });
+    }
+    return [...byKey].map(([account_key, n]) => ({ account_key, ...n }));
+  }
+
+  // Support frees a bank number from the other accounts on it, so this player
+  // can save it themselves (owner, 2026-11-04: "let them add it, we record the
+  // change"; the unban-pair cases): each of those accounts loses its saved
+  // entries of the number, verification included, and its payout rows to it are
+  // cut to the last 4 with no holder name, as account deletion cuts them. Paid-
+  // out rows are what keep a number "shared" for good, so this is the only way
+  // past blocksNewSave for the player's own save, and it stops those rows
+  // counting the name on them too. Cannot be undone: the audit rows keep bank
+  // and last 4 only. Refused while a payout to it is on its way, and when an
+  // account the caller did not list holds it (the person approved those
+  // accounts and no others). One transaction, checked again before commit.
+  @InjectTransactionManager()
+  async freePayoutAccount(
+    input: {
+      customerId: string;
+      adminId: string;
+      accountKey: string;
+      fromIds: string[];
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ from: { customer_id: string; saved: number; payouts: number }[] }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const key = input.accountKey;
+    const last4 = key.slice(-4);
+    if (!/^[1-9][0-9]{4,}$/.test(key)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Not a bank account number.',
+      );
+    }
+    const holders = async () => [
+      ...new Set(
+        (
+          await this.otherPayoutAccountHolders(
+            input.customerId,
+            key,
+            false,
+            sharedContext,
+          )
+        )
+          // A wallet address whose digits happen to match is not this number.
+          .filter((h) => findBank(h.bank_code)?.wallet === undefined)
+          .map((h) => h.customer_id),
+      ),
+    ];
+    const before = await holders();
+    if (before.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `No other account holds …${last4} now, so there is nothing to free.`,
+      );
+    }
+    if (before.some((id) => !input.fromIds.includes(id))) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Another account now holds …${last4} too. Ask again.`,
+      );
+    }
+    const DIGITS =
+      "ltrim(regexp_replace(account_number, '[^0-9]', '', 'g'), '0')";
+    const onTheWay = await em.execute<unknown[]>(
+      `SELECT 1 FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id = ANY(string_to_array(?, ',')) AND status IN ('pending', 'held') AND ${DIGITS} = ? LIMIT 1`,
+      [before.join(','), key],
+    );
+    if (onTheWay.length > 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `A payout to …${last4} is still on its way. Try again once it has settled or failed.`,
+      );
+    }
+    const from: { customer_id: string; saved: number; payouts: number }[] = [];
+    for (const id of before) {
+      let saved = 0;
+      await this.mutateCustomerMetadata(
+        {
+          customerId: id,
+          mutate: (current) => {
+            const accounts = parseSavedBankAccounts(current.bank_accounts);
+            const gone = accounts.filter(
+              (a) =>
+                findBank(a.bankCode)?.wallet === undefined &&
+                payoutAccountKey(a.accountNumber, false) === key,
+            );
+            if (gone.length === 0) return null;
+            saved = gone.length;
+            let next = current;
+            for (const a of gone) next = withBankShareStamp(next, a.id, null);
+            return {
+              ...next,
+              bank_accounts: accounts.filter((a) => !gone.includes(a)),
+            };
+          },
+        },
+        sharedContext,
+      );
+      const cut = await em.execute<{ id: string }[]>(
+        `UPDATE gateway_withdrawal SET account_number = right(account_number, 4), account_holder_name = '' WHERE customer_id = ? AND deleted_at IS NULL AND ${DIGITS} = ? AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4 RETURNING id`,
+        [id, key],
+      );
+      from.push({ customer_id: id, saved, payouts: cut.length });
+      await this.audit(
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: id,
+          action: 'edit',
+          // Last 4 only, the rule every bank audit row follows.
+          before: {
+            account_last4: last4,
+            saved_entries: saved,
+            payout_rows: cut.length,
+          },
+          after: { account_last4: last4, freed_for: input.customerId },
+          reason: `Freed bank number …${last4} for another player: ${input.reason}`,
+        },
+        sharedContext,
+      );
+    }
+    if ((await holders()).length > 0) {
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        `…${last4} is still held by another account. Nothing was changed; ask again.`,
+      );
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'edit',
+        before: { account_last4: last4, held_by: before },
+        after: { account_last4: last4, held_by: [] },
+        reason: `Freed bank number …${last4} from ${before.length} other account${before.length === 1 ? '' : 's'} so this player can save it: ${input.reason}`,
+      },
+      sharedContext,
+    );
+    return { from };
+  }
+
   // The numbers this customer saved, was paid to (any status) or had lifted
   // that are on the ban list (owner, 2026-11-03), by bank and last 4: what
   // support sees and lifts for this player. account_key (the full number)
@@ -10384,30 +10586,13 @@ class PacksModuleService extends MedusaService({
       'SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL',
       [customerId],
     );
-    const paid = await em.execute<
-      { bank_code: string; account_number: string }[]
-    >(
-      'SELECT bank_code, account_number FROM gateway_withdrawal WHERE customer_id = ? AND deleted_at IS NULL ORDER BY created_at',
-      [customerId],
-    );
     const lifted = liftedPayoutBans(me?.metadata ?? {});
-    // First bank seen wins, so the list and a later lift agree on it.
     const byKey = new Map<string, string>(
-      Object.entries(lifted).map(([key, l]) => [key, l.bank_code]),
+      (await this.payoutAccountsOf(customerId, sharedContext)).map((n) => [
+        n.account_key,
+        n.bank_code,
+      ]),
     );
-    for (const { bankCode, accountNumber } of [
-      ...parseSavedBankAccounts(me?.metadata?.bank_accounts),
-      ...paid.map((p) => ({
-        bankCode: p.bank_code,
-        accountNumber: p.account_number,
-      })),
-    ]) {
-      const bank = findBank(bankCode);
-      const key = payoutAccountKey(accountNumber, bank?.wallet ?? false);
-      // A cut payout row (deleted account, freed number) keeps its last 4 only.
-      if (key.length <= 4 || byKey.has(key)) continue;
-      byKey.set(key, bank?.id ?? bankCode);
-    }
     if (byKey.size === 0) return [];
     const banned = await em.execute<{ account_key: string }[]>(
       "SELECT account_key FROM banned_payout_account WHERE account_key = ANY(string_to_array(?, ','))",

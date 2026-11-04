@@ -210,9 +210,17 @@ describe('addSavedBankAccount', () => {
   });
 
   it("adds a Touch 'n Go beside an RM bank, but never a second one", async () => {
-    const tng = { ...ACCOUNT, id: 'acc_tng', bankCode: 'TNGMY', bankName: "Touch 'n Go eWallet" };
+    const tng = {
+      ...ACCOUNT,
+      id: 'acc_tng',
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+    };
     const beside = fakeService({ bank_accounts: [OTHER] });
-    await beside.svc.addSavedBankAccount({ ...base, account: tng, verify: false }, beside.ctx);
+    await beside.svc.addSavedBankAccount(
+      { ...base, account: tng, verify: false },
+      beside.ctx,
+    );
     expect(beside.writes[0].bank_accounts).toEqual([OTHER, tng]);
     const second = fakeService({ bank_accounts: [OTHER, tng] });
     await expect(
@@ -232,7 +240,10 @@ describe('addSavedBankAccount', () => {
       accountHolderName: 'Tan Bin Abu',
     };
     const { svc, writes, ctx } = fakeService({ bank_accounts: [OTHER] });
-    await svc.addSavedBankAccount({ ...base, account: tng, verify: false }, ctx);
+    await svc.addSavedBankAccount(
+      { ...base, account: tng, verify: false },
+      ctx,
+    );
     expect(writes[0].bank_accounts).toEqual([OTHER, tng]);
   });
 });
@@ -464,11 +475,138 @@ describe('setHolderNameCleared', () => {
     expect(same.writes).toEqual([]);
     expect(same.audits).toEqual([]);
   });
+
+  it('clears any number of accounts the person was shown, but only those', async () => {
+    const shown = withHolders({}, ['cus_2', 'cus_3']);
+    await shown.svc.setHolderNameCleared(
+      { ...input, onlyWith: ['cus_2', 'cus_3'] },
+      shown.ctx,
+    );
+    expect(shown.writes[0]).toMatchObject({
+      holder_name_cleared: { tanahkow: { with: ['cus_2', 'cus_3'] } },
+    });
+
+    const grew = withHolders({}, ['cus_2', 'cus_3', 'cus_4']);
+    await expect(
+      grew.svc.setHolderNameCleared(
+        { ...input, onlyWith: ['cus_2', 'cus_3'] },
+        grew.ctx,
+      ),
+    ).rejects.toThrow(/now uses this name too/);
+    expect(grew.writes).toEqual([]);
+  });
+});
+
+describe('freePayoutAccount', () => {
+  const KEY = '123456789012';
+  const input = {
+    customerId: 'cus_1',
+    adminId: 'user_1',
+    accountKey: KEY,
+    fromIds: ['cus_2'],
+    reason: 'owner approved',
+  };
+  // The other account's saved list holds the number and another one; its
+  // payout rows are cut by the UPDATE, which the fake answers with 2 rows.
+  const freeing = (opts: { holders?: string[][]; onTheWay?: boolean } = {}) => {
+    const made = fakeService({
+      bank_accounts: [ACCOUNT, OTHER],
+      bank_share_verified: { [ACCOUNT.id]: STAMP, [OTHER.id]: STAMP },
+    });
+    const rounds = opts.holders ?? [['cus_2'], []];
+    let round = 0;
+    const em = (
+      made.ctx as unknown as { transactionManager: { execute: jest.Mock } }
+    ).transactionManager;
+    const base = em.execute.getMockImplementation()!;
+    const sql: string[] = [];
+    em.execute.mockImplementation(
+      async (query: string, params: unknown[] = []) => {
+        sql.push(query);
+        if (query.startsWith('SELECT 1 FROM gateway_withdrawal')) {
+          return opts.onTheWay ? [{}] : [];
+        }
+        if (query.startsWith('UPDATE gateway_withdrawal')) {
+          return [{ id: 'gw_1' }, { id: 'gw_2' }];
+        }
+        return base(query, params);
+      },
+    );
+    Object.assign(made.svc, {
+      otherPayoutAccountHolders: jest.fn(async () =>
+        (rounds[round++] ?? []).map((customer_id) => ({
+          customer_id,
+          bank_code: 'MBBEMYKL',
+          holder_name: null,
+        })),
+      ),
+    });
+    return { ...made, sql };
+  };
+
+  it('takes the number off the listed account and cuts its payout rows, audited last 4 only', async () => {
+    const { svc, writes, audits, ctx, sql } = freeing();
+    await expect(svc.freePayoutAccount(input, ctx)).resolves.toEqual({
+      from: [{ customer_id: 'cus_2', saved: 1, payouts: 2 }],
+    });
+    expect(writes[0]).toEqual({
+      bank_accounts: [OTHER],
+      bank_share_verified: { [OTHER.id]: STAMP },
+    });
+    expect(sql.find((q) => q.startsWith('UPDATE gateway_withdrawal'))).toMatch(
+      /account_number = right\(account_number, 4\), account_holder_name = ''/,
+    );
+    expect(audits.map((a) => a[0])).toMatchObject([
+      {
+        entity_id: 'cus_2',
+        before: { account_last4: '9012', saved_entries: 1, payout_rows: 2 },
+        after: { freed_for: 'cus_1' },
+      },
+      { entity_id: 'cus_1', after: { account_last4: '9012', held_by: [] } },
+    ]);
+    expect(JSON.stringify(audits)).not.toContain(KEY);
+  });
+
+  it('refuses an account the person was not shown, and nobody at all', async () => {
+    const more = freeing({ holders: [['cus_2', 'cus_3']] });
+    await expect(more.svc.freePayoutAccount(input, more.ctx)).rejects.toThrow(
+      /now holds …9012 too/,
+    );
+    expect(more.writes).toEqual([]);
+    const none = freeing({ holders: [[]] });
+    await expect(none.svc.freePayoutAccount(input, none.ctx)).rejects.toThrow(
+      /nothing to free/,
+    );
+  });
+
+  it('refuses while a payout to it is on its way', async () => {
+    const { svc, writes, ctx } = freeing({ onTheWay: true });
+    await expect(svc.freePayoutAccount(input, ctx)).rejects.toThrow(
+      /still on its way/,
+    );
+    expect(writes).toEqual([]);
+  });
+
+  it('rolls back when the number is still held after (a racer)', async () => {
+    const { svc, ctx } = freeing({ holders: [['cus_2'], ['cus_2']] });
+    await expect(svc.freePayoutAccount(input, ctx)).rejects.toThrow(
+      /still held by another account/,
+    );
+  });
+
+  it('refuses anything but a bank number', async () => {
+    const { svc, ctx } = freeing();
+    await expect(
+      svc.freePayoutAccount({ ...input, accountKey: '9012' }, ctx),
+    ).rejects.toThrow(/Not a bank account number/);
+  });
 });
 
 describe('holderNameHeldByAnother — a name support cleared', () => {
   const service = (metadata: Record<string, unknown>, holders: string[]) => {
-    const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
     const execute = jest.fn(async (query: string) =>
       query.startsWith('SELECT metadata')
         ? [{ metadata }]
@@ -522,7 +660,9 @@ describe('unbanning a bank number for one player', () => {
     banned: { account_key: string; bank_code: string | null }[],
     metadata: Record<string, unknown> = { bank_accounts: [ACCOUNT] },
   ) => {
-    const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
     const audits: Record<string, unknown>[][] = [];
     const writes: Record<string, unknown>[] = [];
     const execute = jest.fn(async (query: string, params: unknown[] = []) => {
@@ -534,11 +674,19 @@ describe('unbanning a bank number for one player', () => {
           { bank_code: 'MBBEMYKL', account_number: '9999' },
         ];
       }
-      if (query.startsWith('SELECT account_key FROM banned_payout_account WHERE account_key')) {
+      if (
+        query.startsWith(
+          'SELECT account_key FROM banned_payout_account WHERE account_key',
+        )
+      ) {
         const asked = String(params[0]).split(',');
         return banned.filter((b) => asked.includes(b.account_key));
       }
-      if (query.startsWith('SELECT account_key, bank_code FROM banned_payout_account')) {
+      if (
+        query.startsWith(
+          'SELECT account_key, bank_code FROM banned_payout_account',
+        )
+      ) {
         return banned.filter((b) => b.account_key.endsWith(String(params[0])));
       }
       if (query.startsWith('SELECT 1 FROM banned_payout_account')) {
@@ -550,12 +698,19 @@ describe('unbanning a bank number for one player', () => {
       return [];
     });
     Object.assign(svc, {
-      createAdminActionAudits: jest.fn(async (rows: Record<string, unknown>[]) => {
-        audits.push(rows);
-      }),
+      createAdminActionAudits: jest.fn(
+        async (rows: Record<string, unknown>[]) => {
+          audits.push(rows);
+        },
+      ),
     });
     const em = { execute };
-    return { svc, audits, writes, ctx: { transactionManager: em, manager: em } as never };
+    return {
+      svc,
+      audits,
+      writes,
+      ctx: { transactionManager: em, manager: em } as never,
+    };
   };
   const input = {
     customerId: 'cus_1',
@@ -568,12 +723,19 @@ describe('unbanning a bank number for one player', () => {
   it("lists the player's banned numbers, skipping cut rows", async () => {
     const { svc, ctx } = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }]);
     await expect(svc.bannedPayoutAccountsOf('cus_1', ctx)).resolves.toEqual([
-      { account_key: OWN, bank_code: 'MBBEMYKL', last4: '0001', lifted_for_player: false },
+      {
+        account_key: OWN,
+        bank_code: 'MBBEMYKL',
+        last4: '0001',
+        lifted_for_player: false,
+      },
     ]);
   });
 
   it('stamps the lift on this player only, audited with bank and last 4', async () => {
-    const { svc, audits, writes, ctx } = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }]);
+    const { svc, audits, writes, ctx } = service([
+      { account_key: OWN, bank_code: 'MBBEMYKL' },
+    ]);
     await expect(svc.setPayoutBanLifted(input, ctx)).resolves.toMatchObject({
       bank_code: 'MBBEMYKL',
       last4: '0001',
@@ -595,9 +757,13 @@ describe('unbanning a bank number for one player', () => {
       [{ account_key: '777777770001', bank_code: 'PBBEMYKL' }],
       {},
     );
-    await expect(viewer.svc.setPayoutBanLifted(input, viewer.ctx)).rejects.toMatchObject({
+    await expect(
+      viewer.svc.setPayoutBanLifted(input, viewer.ctx),
+    ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_FOUND,
-      message: expect.stringMatching(/An admin can unban one from the ban list/),
+      message: expect.stringMatching(
+        /An admin can unban one from the ban list/,
+      ),
     });
     expect(viewer.writes).toEqual([]);
     const { svc, writes, audits, ctx } = service(
@@ -621,14 +787,18 @@ describe('unbanning a bank number for one player', () => {
       svc(tie).setPayoutBanLifted({ ...input, fromBanList: true }, tie.ctx),
     ).rejects.toMatchObject({
       type: MedusaError.Types.NOT_ALLOWED,
-      message: expect.stringMatching(/2 banned numbers end 0001 \(Maybank, Public Bank\)/),
+      message: expect.stringMatching(
+        /2 banned numbers end 0001 \(Maybank, Public Bank\)/,
+      ),
     });
     const picked = service(two, {});
     await picked.svc.setPayoutBanLifted(
       { ...input, bankCode: 'PBBEMYKL', fromBanList: true },
       picked.ctx,
     );
-    expect(Object.keys(picked.writes[0].payout_ban_lifted as object)).toEqual(['222222220001']);
+    expect(Object.keys(picked.writes[0].payout_ban_lifted as object)).toEqual([
+      '222222220001',
+    ]);
   });
 
   it('refuses when nothing ends that way', async () => {
@@ -642,13 +812,19 @@ describe('unbanning a bank number for one player', () => {
   });
 
   it('bans it again for the player, and a second tap changes nothing', async () => {
-    const lifted = { payout_ban_lifted: { [OWN]: { bank_code: 'MBBEMYKL', at: STAMP } } };
-    const again = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }], { ...lifted });
+    const lifted = {
+      payout_ban_lifted: { [OWN]: { bank_code: 'MBBEMYKL', at: STAMP } },
+    };
+    const again = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }], {
+      ...lifted,
+    });
     await expect(
       again.svc.setPayoutBanLifted({ ...input, lifted: true }, again.ctx),
     ).resolves.toMatchObject({ changed: false });
     expect(again.writes).toEqual([]);
-    const back = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }], { ...lifted });
+    const back = service([{ account_key: OWN, bank_code: 'MBBEMYKL' }], {
+      ...lifted,
+    });
     await back.svc.setPayoutBanLifted({ ...input, lifted: false }, back.ctx);
     expect(back.writes[0].payout_ban_lifted).toBeUndefined();
   });
@@ -658,10 +834,16 @@ describe('unbanning a bank number for one player', () => {
     const lifted = service(banned, {
       payout_ban_lifted: { [OWN]: { bank_code: 'MBBEMYKL', at: STAMP } },
     });
-    await expect(lifted.svc.payoutAccountBanned(OWN, false, 'cus_1', lifted.ctx)).resolves.toBe(false);
+    await expect(
+      lifted.svc.payoutAccountBanned(OWN, false, 'cus_1', lifted.ctx),
+    ).resolves.toBe(false);
     const other = service(banned, {});
-    await expect(other.svc.payoutAccountBanned(OWN, false, 'cus_2', other.ctx)).resolves.toBe(true);
-    await expect(other.svc.payoutAccountBanned(OWN, false, null, other.ctx)).resolves.toBe(true);
+    await expect(
+      other.svc.payoutAccountBanned(OWN, false, 'cus_2', other.ctx),
+    ).resolves.toBe(true);
+    await expect(
+      other.svc.payoutAccountBanned(OWN, false, null, other.ctx),
+    ).resolves.toBe(true);
   });
 });
 const svc = (made: { svc: PacksModuleService }) => made.svc;

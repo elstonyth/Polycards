@@ -9,6 +9,45 @@ import { Markdown } from './Markdown';
 import { ToolSteps } from './ToolSteps';
 import { DRAWS, type UiMessage } from './thread-data';
 import { SpeakerIcon } from './VoiceIcons';
+import type { ProposalKind } from '../../lib/assistant';
+
+// The tap button's words for each kind: every kind listed, so a new one cannot
+// fall back to "Save task".
+const CONFIRM_TEXT: Record<
+  ProposalKind,
+  { tap: string; done: string; hint: string }
+> = {
+  note: {
+    tap: 'assistant.confirm.saveNote',
+    done: 'assistant.confirm.saved',
+    hint: 'assistant.confirm.hint',
+  },
+  schedule: {
+    tap: 'assistant.confirm.saveTask',
+    done: 'assistant.confirm.taskSaved',
+    hint: 'assistant.confirm.hint',
+  },
+  unban: {
+    tap: 'assistant.confirm.unban',
+    done: 'assistant.confirm.unbanned',
+    hint: 'assistant.confirm.unbanHint',
+  },
+  unban_number: {
+    tap: 'assistant.confirm.unbanNumber',
+    done: 'assistant.confirm.numberUnbanned',
+    hint: 'assistant.confirm.unbanNumberHint',
+  },
+  free_number: {
+    tap: 'assistant.confirm.freeNumber',
+    done: 'assistant.confirm.numberFreed',
+    hint: 'assistant.confirm.freeNumberHint',
+  },
+  name_clash: {
+    tap: 'assistant.confirm.clearName',
+    done: 'assistant.confirm.nameCleared',
+    hint: 'assistant.confirm.clearNameHint',
+  },
+};
 
 export function Thread({
   messages,
@@ -186,29 +225,15 @@ const Message = memo(function Message({
                   className={`flex w-fit items-center gap-x-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${p.state === 'saved' ? 'border-transparent text-ui-tag-green-text' : 'border-ui-border-base text-ui-fg-base hover:bg-ui-bg-base-hover disabled:opacity-50'}`}
                 >
                   {p.state === 'saved' && <CheckMini />}
-                  {p.kind === 'unban'
-                    ? p.state === 'saved'
-                      ? t('assistant.confirm.unbanned')
-                      : t('assistant.confirm.unban')
-                    : p.kind === 'unban_number'
-                      ? p.state === 'saved'
-                        ? t('assistant.confirm.numberUnbanned')
-                        : t('assistant.confirm.unbanNumber')
-                    : p.state === 'saved'
-                      ? p.kind === 'note'
-                        ? t('assistant.confirm.saved')
-                        : t('assistant.confirm.taskSaved')
-                      : p.kind === 'note'
-                        ? t('assistant.confirm.saveNote')
-                        : t('assistant.confirm.saveTask')}
+                  {t(
+                    p.state === 'saved'
+                      ? CONFIRM_TEXT[p.kind].done
+                      : CONFIRM_TEXT[p.kind].tap,
+                  )}
                 </button>
                 {p.state !== 'saved' && (
                   <span className="text-ui-fg-muted text-[11px]">
-                    {p.kind === 'unban'
-                      ? t('assistant.confirm.unbanHint')
-                      : p.kind === 'unban_number'
-                        ? t('assistant.confirm.unbanNumberHint')
-                        : t('assistant.confirm.hint')}
+                    {t(CONFIRM_TEXT[p.kind].hint)}
                   </span>
                 )}
               </div>
