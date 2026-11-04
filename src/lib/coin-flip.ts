@@ -111,7 +111,6 @@ export type CoinFlipRound = z.infer<typeof CoinFlipRoundSchema>;
 export type CoinFlipSettings = z.infer<typeof CoinFlipSettingsSchema>;
 export type CoinFlipHistory = z.infer<typeof CoinFlipHistorySchema>;
 export type CoinFlipFeedRound = z.infer<typeof CoinFlipFeedRoundSchema>;
-export type CoinFlipHistoryFilter = 'all' | 'won' | 'lost';
 export type CoinFlipFailure = {
   ok: false;
   error: string;

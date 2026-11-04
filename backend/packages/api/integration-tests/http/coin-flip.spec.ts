@@ -73,9 +73,9 @@ medusaIntegrationTestRunner({
       const history = await api.get('/store/coin-flips?limit=1', { headers: owner.headers });
       expect(history.data).toMatchObject({ count: 2, limit: 1, totals: { head: 0, tail: 2 } });
       expect(history.data.rounds[0].status).toBe('lost');
+      // The won/lost filter is gone: a status query still lists every settled flip.
       const wonOnly = await api.get('/store/coin-flips?status=won', { headers: owner.headers });
-      expect(wonOnly.data).toMatchObject({ count: 1, totals: { head: 0, tail: 2 } });
-      expect(wonOnly.data.rounds[0].status).toBe('won');
+      expect(wonOnly.data).toMatchObject({ count: 2, totals: { head: 0, tail: 2 } });
       const report = await api.get('/admin/coin-flips', { headers: adminHeaders });
       expect(report.data.totals).toEqual({ wins: 1, losses: 1, payouts: 100, forfeited_value: 200 });
       expect(report.data.rounds[0].snapshot.actual_win_units).toBe(0);

@@ -18,8 +18,7 @@ import { loadPullerProfiles } from '../../pulls/pullers';
 const RECENT_LIMIT = 20;
 // Over-fetch so dropped disabled players don't shorten the list.
 const FETCH_LIMIT = RECENT_LIMIT * 2;
-// Every open coin flip page polls this. One read per status per 5s window per
-// process, and requests in that window share the read already in flight.
+// Every open coin flip page polls this. One read per 5s window per process, and requests in that window share the read already in flight.
 const CACHE_TTL_MS = 5_000;
 const cache = new Map<string, { expires: number; body: Promise<unknown> }>();
 
@@ -32,8 +31,8 @@ export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const only = req.query.status;
-  const status = only === 'won' || only === 'lost' ? [only] : ['won', 'lost'];
+  // Settled rounds only. The won/lost filter left with its storefront tabs.
+  const status = ['won', 'lost'];
   const key = status.join();
   let hit = cache.get(key);
   if (!hit || hit.expires <= Date.now()) {

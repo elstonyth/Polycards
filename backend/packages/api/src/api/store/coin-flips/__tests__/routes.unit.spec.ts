@@ -68,18 +68,13 @@ it('only serializes public history fields and only queries owned terminal rounds
   expect(JSON.stringify(res.json.mock.calls)).not.toMatch(/actual_win|odds_set|group_id|roll|snapshot/);
 });
 
-it.each([
-  ['won', ['won']],
-  ['lost', ['lost']],
-  ['quoted', ['won', 'lost']],
-  [['won', 'quoted'], ['won', 'lost']],
-])('history status %j only ever reads settled rounds', async (status, expected) => {
+it.each(['won', 'lost', 'quoted', ['won', 'quoted']])('history ignores status %j and only reads settled rounds', async (status) => {
   const service = {
     listAndCountCoinFlipRounds: jest.fn().mockResolvedValue([[], 0]),
     coinFlipLandedCounts: jest.fn().mockResolvedValue({ head: 0, tail: 0 }),
   };
   await history({ auth_context: { actor_id: 'owner' }, scope: { resolve: () => service }, query: { status } } as never, { json: jest.fn() } as never);
-  expect(service.listAndCountCoinFlipRounds.mock.calls[0][0]).toEqual({ customer_id: 'owner', status: expected });
+  expect(service.listAndCountCoinFlipRounds.mock.calls[0][0]).toEqual({ customer_id: 'owner', status: ['won', 'lost'] });
 });
 
 it('shows published settings while keeping admin odds out of the storefront', async () => {
@@ -119,11 +114,11 @@ describe('everyone feed', () => {
     expect(JSON.stringify(body)).not.toMatch(/customer_id|owner|banned|actual_win|odds_set|group_id|roll|snapshot/);
   });
 
-  it.each([['won', ['won']], ['lost', ['lost']], ['quoted', ['won', 'lost']]])(
-    'status %j only ever reads settled rounds', async (status, expected) => {
+  it.each(['won', 'lost', 'quoted'])(
+    'ignores status %j and only reads settled rounds', async (status) => {
       const { service, run } = feed([]);
       await run({ status });
-      expect(service.listCoinFlipRounds.mock.calls[0][0]).toEqual({ status: expected });
+      expect(service.listCoinFlipRounds.mock.calls[0][0]).toEqual({ status: ['won', 'lost'] });
     });
 
   it('answers polls from one read per window', async () => {

@@ -49,7 +49,7 @@ it('does not request history when mounted during a toss', async () => {
   await render(true);
   expect(read).not.toHaveBeenCalled();
   await render(false);
-  expect(read).toHaveBeenCalledExactlyOnceWith(1, 'all');
+  expect(read).toHaveBeenCalledExactlyOnceWith(1);
 });
 it('discards in-flight history and locks pagination until the toss is revealed', async () => {
   await render(false);
@@ -61,17 +61,15 @@ it('discards in-flight history and locks pagination until the toss is revealed',
       }),
   );
   await act(async () => button('Next').click());
-  expect(read).toHaveBeenLastCalledWith(2, 'all');
+  expect(read).toHaveBeenLastCalledWith(2);
   await render(true);
   expect(button('Previous').disabled).toBe(true);
   expect(button('Next').disabled).toBe(true);
-  expect(button('Won').disabled).toBe(true);
   await act(async () => resolve({ ok: false }));
   expect(host.querySelector('[role=alert]')).toBeNull();
   await render(false);
   expect(read).toHaveBeenCalledTimes(3);
   expect(button('Previous').disabled).toBe(false);
-  expect(button('Won').disabled).toBe(false);
 });
 
 const card = (id: string, name: string, stake: number) => ({
@@ -235,7 +233,7 @@ it('shows the cards put in, the call and the result on each row', async () => {
   );
 });
 
-it('filters on the server, back at page one, and keeps the all-time tally', async () => {
+it('pages on the server, keeps the all-time tally, and has no result filter', async () => {
   read.mockResolvedValue({
     ok: true,
     rounds: [flip('won', [card('a', 'Abra', 100)])],
@@ -244,15 +242,14 @@ it('filters on the server, back at page one, and keeps the all-time tally', asyn
   });
   await render(false);
   await act(async () => button('Next').click());
-  expect(read).toHaveBeenLastCalledWith(2, 'all');
-  await act(async () => button('Won').click());
-  expect(read).toHaveBeenLastCalledWith(1, 'won');
-  expect(button('Won').getAttribute('aria-pressed')).toBe('true');
+  expect(read).toHaveBeenLastCalledWith(2);
   expect(host.textContent).toContain('20Landed Head');
   expect(host.textContent).toContain('5Landed Tail');
+  for (const gone of ['All', 'Won', 'Lost'])
+    expect(button(gone)).toBeUndefined();
 });
 
-it('locks the pager while a filter is loading, so it cannot land past the end', async () => {
+it('locks the pager while a page is loading, so it cannot land past the end', async () => {
   read.mockResolvedValue({
     ok: true,
     rounds: [flip('won', [card('a', 'Abra', 100)])],
@@ -267,8 +264,9 @@ it('locks the pager while a filter is loading, so it cannot land past the end', 
         resolve = done;
       }),
   );
-  await act(async () => button('Won').click());
+  await act(async () => button('Next').click());
   expect(button('Next').disabled).toBe(true);
+  expect(button('Previous').disabled).toBe(true);
   await act(async () =>
     resolve({
       ok: true,
@@ -280,7 +278,7 @@ it('locks the pager while a filter is loading, so it cannot land past the end', 
   expect(button('Next').disabled).toBe(false);
 });
 
-it('names the filter when it has no rows, and hides the tally before any flip', async () => {
+it('says so when there are no flips, and hides the tally and strip before any', async () => {
   read.mockResolvedValue({
     ok: true,
     rounds: [],
@@ -290,14 +288,91 @@ it('names the filter when it has no rows, and hides the tally before any flip', 
   await render(false);
   expect(host.textContent).toContain('Your completed flips will appear here.');
   expect(host.textContent).not.toContain('Landed');
+  expect(host.querySelector('[role=img]')).toBeNull();
+});
+
+it('shows how each shown flip landed in one row, the newest last and rippling', async () => {
+  const landed = (id: string, side: 'head' | 'tail') => ({
+    ...flip('won', []),
+    id,
+    card: null,
+    stake_amount: 0,
+    win_amount: 0,
+    tickets: 1,
+    chosen_side: side,
+    landed_side: side,
+  });
   read.mockResolvedValue({
     ok: true,
-    rounds: [],
-    count: 0,
-    totals: { head: 0, tail: 3 },
+    // Newest first, as the server sends them. The newest was called Head and
+    // lost: the strip shows where the coin landed, not the call.
+    rounds: [
+      { ...landed('c', 'tail'), status: 'lost', chosen_side: 'head' },
+      landed('b', 'head'),
+      landed('a', 'head'),
+    ],
+    count: 3,
+    totals: { head: 2, tail: 1 },
   });
-  await act(async () => button('Won').click());
-  expect(host.textContent).toContain('No won flips yet.');
+  await render(false);
+  const road = host.querySelector('[role=img]')!;
+  expect(road.textContent).toBe('HHT');
+  expect(road.getAttribute('aria-label')).toBe(
+    'Latest results, oldest to newest: Head, Head, Tail',
+  );
+  expect(road.className).not.toContain('flex-wrap');
+  // Same size beads; only the newest ripples.
+  expect(road.querySelectorAll('.size-7')).toHaveLength(3);
+  expect(road.querySelectorAll('.animate-ping')).toHaveLength(1);
+  expect(road.lastElementChild!.querySelector('.animate-ping')).not.toBeNull();
+  expect(host.textContent).toContain('Latest results');
+});
+
+it('drops the strip with the rows when the next page fails to load', async () => {
+  read.mockResolvedValue({
+    ok: true,
+    rounds: [flip('won', [card('a', 'Abra', 100)])],
+    count: 25,
+    totals: { head: 0, tail: 1 },
+  });
+  await render(false);
+  expect(host.querySelector('[role=img]')).not.toBeNull();
+  read.mockResolvedValueOnce({ ok: false });
+  await act(async () => button('Next').click());
+  expect(host.querySelector('[role=alert]')).not.toBeNull();
+  expect(host.querySelector('[role=img]')).toBeNull();
+});
+
+it('shows the strip on page one only, dimmed while the next page loads', async () => {
+  read.mockResolvedValue({
+    ok: true,
+    rounds: [flip('won', [card('a', 'Abra', 100)])],
+    count: 25,
+    totals: { head: 0, tail: 1 },
+  });
+  await render(false);
+  const strip = () => host.querySelector('[role=img]');
+  expect(strip()!.parentElement!.className).not.toContain('opacity-50');
+  let resolve!: (value: unknown) => void;
+  read.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await act(async () => button('Next').click());
+  expect(strip()!.parentElement!.className).toContain('opacity-50');
+  await act(async () =>
+    resolve({
+      ok: true,
+      rounds: [flip('won', [card('b', 'Eevee', 50)])],
+      count: 25,
+      totals: { head: 0, tail: 1 },
+    }),
+  );
+  expect(strip()).toBeNull();
+  await act(async () => button('Previous').click());
+  expect(strip()).not.toBeNull();
 });
 
 describe('everyone view', () => {
@@ -322,7 +397,7 @@ describe('everyone view', () => {
       rounds: [played('Ash', 'won'), played('Misty', 'lost')],
     });
     await show();
-    expect(everyone).toHaveBeenCalledExactlyOnceWith('all');
+    expect(everyone).toHaveBeenCalledExactlyOnceWith();
     expect(read).not.toHaveBeenCalled();
     expect(button('Everyone').getAttribute('aria-pressed')).toBe('true');
     expect(host.textContent).toContain('Ash');
@@ -333,12 +408,10 @@ describe('everyone view', () => {
     expect(button('Next')).toBeUndefined();
   });
 
-  it('filters everyone on the server and switches to your own flips', async () => {
+  it('switches from everyone to your own flips', async () => {
     everyone.mockResolvedValue({ ok: true, rounds: [] });
     await show();
     expect(host.textContent).toContain('No flips yet.');
-    await act(async () => button('Lost').click());
-    expect(everyone).toHaveBeenLastCalledWith('lost');
     read.mockResolvedValue({
       ok: true,
       rounds: [flip('won', [card('a', 'Abra', 100)])],
@@ -346,8 +419,8 @@ describe('everyone view', () => {
       totals: { head: 0, tail: 1 },
     });
     await act(async () => button('Mine').click());
-    expect(read).toHaveBeenLastCalledWith(1, 'all');
-    expect(button('All').getAttribute('aria-pressed')).toBe('true');
+    expect(read).toHaveBeenLastCalledWith(1);
+    expect(button('Mine').getAttribute('aria-pressed')).toBe('true');
     expect(row('round_won')).not.toBeNull();
   });
 
