@@ -53,15 +53,24 @@ const segment = (on: boolean) =>
   );
 
 // Latest results (owner 2026-11-04, a plain take on a baccarat bead plate): how
-// each flip in the list below landed, newest first. Head and Tail are not
-// outcomes, so neither takes green: Head is a solid bead, Tail an outlined one.
-function Bead({ side, small = false }: { side: CoinSide; small?: boolean }) {
+// each flip in the list below landed, in one row with the newest at the right,
+// drawn bigger so it reads as the latest. Head and Tail are not outcomes, so
+// neither takes green: Head is a solid bead, Tail an outlined one.
+function Bead({
+  side,
+  size = 'md',
+}: {
+  side: CoinSide;
+  size?: 'sm' | 'md' | 'lg';
+}) {
   return (
     <span
       aria-hidden
       className={cn(
         'flex shrink-0 items-center justify-center rounded-full font-bold leading-none',
-        small ? 'size-4 text-[9px]' : 'size-7 text-[11px]',
+        size === 'sm' && 'size-4 text-[9px]',
+        size === 'md' && 'size-7 text-[11px]',
+        size === 'lg' && 'size-10 text-sm',
         side === 'head'
           ? 'bg-neutral-100 text-neutral-950'
           : 'text-white ring-1 ring-white/45 ring-inset',
@@ -73,7 +82,8 @@ function Bead({ side, small = false }: { side: CoinSide; small?: boolean }) {
 }
 
 function LatestResults({ rounds }: { rounds: Shown['rounds'] }) {
-  const sides = rounds.flatMap((round) => round.landed_side ?? []);
+  // Rows come newest first; the strip reads oldest to newest.
+  const sides = rounds.flatMap((round) => round.landed_side ?? []).reverse();
   if (sides.length === 0) return null;
   return (
     <div className="rounded-2xl border border-white/10 bg-neutral-900 p-3">
@@ -81,27 +91,33 @@ function LatestResults({ rounds }: { rounds: Shown['rounds'] }) {
         <p className="text-sm font-semibold text-white">
           Latest results{' '}
           <span className="text-[12px] font-normal text-neutral-400">
-            · newest first
+            · newest on the right
           </span>
         </p>
         <p className="flex items-center gap-3 text-[12px] text-neutral-400">
           <span className="flex items-center gap-1.5">
-            <Bead side="head" small />
+            <Bead side="head" size="sm" />
             Head
           </span>
           <span className="flex items-center gap-1.5">
-            <Bead side="tail" small />
+            <Bead side="tail" size="sm" />
             Tail
           </span>
         </p>
       </div>
       <div
         role="img"
-        aria-label={`Latest results, newest first: ${sides.map(coinSideLabel).join(', ')}`}
-        className="flex flex-wrap gap-1.5"
+        aria-label={`Latest results, oldest to newest: ${sides.map(coinSideLabel).join(', ')}`}
+        // One row, packed to the right. On a phone the oldest beads run off the
+        // left edge and fade; the list below holds every flip.
+        className="flex items-center justify-end gap-1.5 overflow-hidden [mask-image:linear-gradient(to_left,black_80%,transparent)] @3xl:justify-start @3xl:[mask-image:none]"
       >
         {sides.map((side, i) => (
-          <Bead key={i} side={side} />
+          <Bead
+            key={i}
+            side={side}
+            size={i === sides.length - 1 ? 'lg' : 'md'}
+          />
         ))}
       </div>
     </div>

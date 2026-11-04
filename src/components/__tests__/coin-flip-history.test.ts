@@ -291,7 +291,7 @@ it('says so when there are no flips, and hides the tally and road before any', a
   expect(host.querySelector('[role=img]')).toBeNull();
 });
 
-it('shows how each shown flip landed, newest first', async () => {
+it('shows how each shown flip landed in one row, newest last and biggest', async () => {
   const landed = (id: string, side: 'head' | 'tail') => ({
     ...flip('won', []),
     id,
@@ -311,10 +311,13 @@ it('shows how each shown flip landed, newest first', async () => {
   });
   await render(false);
   const road = host.querySelector('[role=img]')!;
-  expect(road.textContent).toBe('THH');
+  expect(road.textContent).toBe('HHT');
   expect(road.getAttribute('aria-label')).toBe(
-    'Latest results, newest first: Tail, Head, Head',
+    'Latest results, oldest to newest: Head, Head, Tail',
   );
+  expect(road.className).not.toContain('flex-wrap');
+  expect(road.lastElementChild!.className).toContain('size-10');
+  expect(road.firstElementChild!.className).toContain('size-7');
   expect(host.textContent).toContain('Latest results');
 });
 
