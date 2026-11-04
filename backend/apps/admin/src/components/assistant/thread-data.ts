@@ -1,4 +1,4 @@
-import type { StoredMessage } from '../../lib/assistant';
+import type { ProposalKind, StoredMessage } from '../../lib/assistant';
 import type { Step } from './ToolSteps';
 
 // The chat's message shape and how stored messages become it (kept apart from
@@ -29,7 +29,7 @@ export type UiMessage = {
 
 export type Proposal = {
   token: string;
-  kind: 'note' | 'schedule' | 'unban' | 'unban_number';
+  kind: ProposalKind;
   summary: string;
   state: 'waiting' | 'saving' | 'saved';
 };

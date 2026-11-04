@@ -67,6 +67,16 @@ function roundEstimate(messages: ChatMessage[]): number {
   return (JSON.stringify(messages).length / 3) * 15e-6 + 0.05;
 }
 
+/** Tool arguments as the chat record keeps them (conversations, review): a
+ *  full bank number or a holder name staff pasted for the bank tools is the
+ *  customer's, so it is not stored with them. */
+const kept = (args: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(args).map(([k, v]) =>
+      k === 'bank_account' || k === 'holder_name' ? [k, '[hidden]'] : [k, v],
+    ),
+  );
+
 export async function runTurn(opts: {
   key: string;
   model: string;
@@ -74,6 +84,8 @@ export async function runTurn(opts: {
   tools: AssistantTool[];
   history: ChatMessage[];
   userText: string;
+  /** The asker's previous message in this chat (ToolCtx.askedBefore). */
+  askedBefore?: string;
   images: string[];
   ctx: Omit<ToolCtx, 'addCost' | 'signal' | 'access'>;
   emit: (e: TurnEvent) => void;
@@ -106,6 +118,7 @@ export async function runTurn(opts: {
     ...opts.ctx,
     access: opts.access,
     userText: opts.userText,
+    askedBefore: opts.askedBefore,
     signal: turnSignal,
     // Screenshots may be text a customer wrote: no lasting writes this turn.
     readOutside: opts.images.length > 0,
@@ -322,7 +335,7 @@ async function runTool(
   try {
     const out = await tool.run(args, ctx);
     const ms = Date.now() - started;
-    result.tools.push({ name: tool.name, args, ok: true, ms });
+    result.tools.push({ name: tool.name, args: kept(args), ok: true, ms });
     emit({
       type: 'tool',
       id: call.id,
@@ -339,7 +352,7 @@ async function runTool(
     if (cost > 0) ctx.addCost(cost);
     if (ctx.signal.aborted) throw err;
     const ms = Date.now() - started;
-    result.tools.push({ name: tool.name, args, ok: false, ms });
+    result.tools.push({ name: tool.name, args: kept(args), ok: false, ms });
     emit({
       type: 'tool',
       id: call.id,

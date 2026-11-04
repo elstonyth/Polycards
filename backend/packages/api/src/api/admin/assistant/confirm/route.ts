@@ -6,8 +6,9 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { accessFor } from '../access';
 import { ConfirmRefused, openProposal, saveProposal } from '../confirm';
 
-// POST /admin/assistant/confirm {token}: the person taps Save on a note or a
-// scheduled task the assistant proposed (confirm.ts). Only their own, only
+// POST /admin/assistant/confirm {token}: the person taps the button on what
+// the assistant proposed (confirm.ts: a note, a task, an unban, a freed number,
+// a cleared name). Only their own, only
 // within 30 minutes; checked again as their roles stand now.
 
 type Body = { token?: unknown };

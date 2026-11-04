@@ -3,6 +3,15 @@
 
 declare const __BACKEND_URL__: string;
 
+/** What the assistant may propose for a tap (backend confirm.ts). */
+export type ProposalKind =
+  | 'note'
+  | 'schedule'
+  | 'unban'
+  | 'unban_number'
+  | 'free_number'
+  | 'name_clash';
+
 export type AssistantTool = { name: string; label: string };
 
 export type AssistantMe = {
@@ -89,7 +98,7 @@ export type ChatEvent =
    *  taps Save (confirmProposal), so text planted in data can't save one. */
   | {
       type: 'confirm';
-      kind: 'note' | 'schedule' | 'unban' | 'unban_number';
+      kind: ProposalKind;
       summary: string;
       token: string;
     }
@@ -126,7 +135,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
  *  A refusal throws with the server's `code`: confirm_expired or
  *  confirm_refused. */
 export const confirmProposal = (token: string) =>
-  call<{ kind: 'note' | 'schedule' | 'unban' | 'unban_number'; next_run_at: string | null }>(
+  call<{ kind: ProposalKind; next_run_at: string | null }>(
     '/admin/assistant/confirm',
     { method: 'POST', body: JSON.stringify({ token }) },
   );

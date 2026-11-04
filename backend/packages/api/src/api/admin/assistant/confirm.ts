@@ -1,12 +1,17 @@
 import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import type { MedusaContainer } from '@medusajs/framework/types';
-import { MedusaError } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+} from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { LASTING_WRITES, type Need } from './access';
+import { findBank } from '../../../modules/packs/banks';
+import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
 
 // What lasts waits for a tap (security review 2026-10-29). A note or a
 // scheduled task would stay in front of the model in every later chat or run,
@@ -46,6 +51,30 @@ export type Proposal =
       bank_code: string;
       last4: string;
       reason: string;
+    }
+  // Freeing a bank number from the other accounts on it, so this player saves
+  // it themselves (owner, 2026-11-04): the accounts the person was shown, by
+  // id; the number by bank and last 4 again, never in full.
+  | {
+      kind: 'free_number';
+      customer_id: string;
+      username: string;
+      bank_code: string;
+      last4: string;
+      /** numberMark of the full number: the tap frees exactly that one. */
+      number_mark: string;
+      from: string[];
+      reason: string;
+    }
+  // One name, different people (owner, 2026-11-04: any number of other
+  // accounts, each listed on the card): this player's saves stop counting them.
+  | {
+      kind: 'name_clash';
+      customer_id: string;
+      username: string;
+      holder_name: string;
+      with: string[];
+      reason: string;
     };
 
 /** What an unban needs, checked again when the person taps it: its own policy
@@ -56,12 +85,53 @@ export const UNBAN_NEED: Need = {
 };
 
 /** Unbanning a number the player never held (by the ban list) needs this too:
- *  admins, not the Support viewer (security review). */
-export const BAN_LIST_NEED: Need = { resource: 'customer', operation: 'update' };
+ *  admins, not the Support viewer (security review). So do freeing a number
+ *  from other accounts and clearing a shared name (owner, 2026-11-04: admins
+ *  only): they change other accounts, or let a name past them. */
+export const BAN_LIST_NEED: Need = {
+  resource: 'customer',
+  operation: 'update',
+};
+
+/** A keyed fingerprint of a full bank number (security review 2026-11-04):
+ *  the token carries this, never the number, and the tap frees only the
+ *  number it matches. Keyed by the JWT secret, so last 4 + a fingerprint
+ *  cannot be guessed back into the number. */
+export function numberMark(accountKey: string, container: MedusaContainer): string {
+  const secret = container.resolve(ContainerRegistrationKeys.CONFIG_MODULE)
+    .projectConfig.http.jwtSecret as string;
+  const key = Buffer.from(
+    hkdfSync('sha256', secret, 'polycards-assistant', 'number-mark-v1', 32),
+  );
+  return createHmac('sha256', key).update(accountKey).digest('base64url');
+}
+
+/** The one bank number these last 4 (and bank, for a tie) mean among `keys`;
+ *  null for none or more than one. */
+export function oneNumber(
+  keys: { account_key: string; bank_code: string; wallet: boolean }[],
+  last4: string,
+  bankCode: string | null,
+): string | null {
+  let hits = [
+    ...new Map(
+      keys
+        .filter((k) => !k.wallet && k.account_key.slice(-4) === last4)
+        .map((k) => [k.account_key, k]),
+    ).values(),
+  ];
+  if (hits.length > 1 && bankCode) {
+    hits = hits.filter((k) => findBank(k.bank_code)?.id === bankCode);
+  }
+  return hits.length === 1 ? hits[0].account_key : null;
+}
 
 /** A scheduled run has nobody to tap: no lasting writes, and no unban of any
  *  kind (every tool that needs the unban policy). */
-export const scheduledRunAllows = (t: { name: string; needs: Need[] }): boolean =>
+export const scheduledRunAllows = (t: {
+  name: string;
+  needs: Need[];
+}): boolean =>
   !LASTING_WRITES.has(t.name) &&
   !t.needs.some(
     (n) =>
@@ -193,6 +263,79 @@ export async function saveProposal(
         (err.type === MedusaError.Types.NOT_ALLOWED ||
           err.type === MedusaError.Types.NOT_FOUND ||
           err.type === MedusaError.Types.INVALID_DATA)
+      ) {
+        throw new ConfirmRefused(err.message);
+      }
+      throw err;
+    }
+    return { id: proposal.customer_id };
+  }
+  if (proposal.kind === 'free_number' || proposal.kind === 'name_clash') {
+    if (
+      !(await access.can?.(UNBAN_NEED)) ||
+      !(await access.can?.(BAN_LIST_NEED))
+    ) {
+      throw new ConfirmRefused(
+        'Only an admin can free a bank number or clear a shared name.',
+      );
+    }
+    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    // An unban clears a name clearing, and freeing for a banned player frees
+    // nothing they can use: the Unban card first.
+    const [state] = await packs.listCustomerAccountStates(
+      { customer_id: proposal.customer_id, disabled: true },
+      { select: ['disabled_reason'], take: 1 },
+    );
+    if (state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX)) {
+      throw new ConfirmRefused(
+        'This player is still banned: tap Unban first, then this.',
+      );
+    }
+    try {
+      if (proposal.kind === 'name_clash') {
+        await packs.setHolderNameCleared({
+          customerId: proposal.customer_id,
+          adminId: access.userId,
+          holderName: proposal.holder_name,
+          cleared: true,
+          reason: proposal.reason,
+          onlyWith: proposal.with,
+        });
+        return { id: proposal.customer_id };
+      }
+      // The number again from the accounts it is freed from, by its
+      // fingerprint: the token holds its last 4 only.
+      const key = (
+        await Promise.all(proposal.from.map((id) => packs.payoutAccountsOf(id)))
+      )
+        .flat()
+        .map((k) => k.account_key)
+        .find(
+          (k) =>
+            k.slice(-4) === proposal.last4 &&
+            numberMark(k, container) === proposal.number_mark,
+        );
+      if (!key) {
+        throw new ConfirmRefused(
+          `Those accounts no longer hold that number ending ${proposal.last4}. Ask again.`,
+        );
+      }
+      await packs.freePayoutAccount({
+        customerId: proposal.customer_id,
+        adminId: access.userId,
+        accountKey: key,
+        bankCode: proposal.bank_code,
+        fromIds: proposal.from,
+        reason: proposal.reason,
+      });
+    } catch (err) {
+      // Already done, changed since, or a payout still on its way.
+      if (
+        err instanceof MedusaError &&
+        (err.type === MedusaError.Types.NOT_ALLOWED ||
+          err.type === MedusaError.Types.NOT_FOUND ||
+          err.type === MedusaError.Types.INVALID_DATA ||
+          err.type === MedusaError.Types.CONFLICT)
       ) {
         throw new ConfirmRefused(err.message);
       }

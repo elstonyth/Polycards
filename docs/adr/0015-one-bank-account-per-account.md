@@ -33,9 +33,10 @@ What follows:
   Removing an account clears its verification, so it never vouches for the next number.
 - **Admin Approve runs the same check** on a held row's own number, so a row held before
   this shipped, or on a number since removed, cannot pay on a click.
-- **Support can add a bank account for a player with none.** That is the override for a
-  real owner whose number another account holds, whose own save stays refused for good.
-  It arrives verified if shared, and starts the usual wait before first use.
+- **Support can add a bank account for a player with none.** That is one override for a
+  real owner whose number another account holds, whose own save stays refused while
+  those rows stand (the other: freeing the number, amendment below). It arrives
+  verified if shared, and starts the usual wait before first use.
 - **Lists that already hold several accounts were left alone.** They refuse a new one,
   and support removes the extras. Rewriting 166 customers' lists by script was not worth
   it. The one-shot backfill of saved accounts is retired, since a re-run would put back
@@ -55,7 +56,8 @@ Accepted, with what covers each:
 - A hold stops withdrawals only. Card deliveries still ship, and still cost the zone
   delivery fee.
 - Deleting an account frees its numbers, because the deletion scrub cuts its payout rows
-  to the last 4 digits. Deletion is operator-run only, so a person decides.
+  to the last 4 digits. Deletion is operator-run only, so a person decides. Freeing a
+  number (amendment below) does the same cut for one number on chosen accounts.
 - A real name another account holds is refused at save, ignoring case and the separators
   a name may carry (owner, 2026-11-03, chosen over sending it to staff review). Names
   already on file stay. Real names aren't verified, so one changed letter or a reordered
@@ -100,9 +102,22 @@ The owner tightened the rule after the farm rings were listed:
   name. Support checks, then clears the name on each account from the player page
   (`bank-accounts/name-clash`): it records the one other account holding the name,
   and that account's use of it stops counting for this player. Any account that
-  uses the name later still blocks; a name on more than one other account is not
-  cleared. Per account and per name, audited, taken back on request, and removed
-  when a permanent ban is lifted. The ban report marks a cleared pair as two people.
+  uses the name later still blocks; from the player page, a name on more than one
+  other account is not cleared. From the admin assistant (admins only, owner
+  2026-11-04) it clears against every account using the name now, each listed on the
+  card before the tap. Per account and per name, audited, taken back on request, and
+  removed when a permanent ban is lifted. The ban report marks a cleared pair as two
+  people.
+- **Freeing a number** (owner, 2026-11-04: "let them add it, we record the change").
+  An admin, through the admin assistant and on a tap, takes a bank number off every
+  other account holding it at that bank, so one player saves it themselves: those
+  accounts lose the saved entry and its verification, and their settled or failed
+  payout rows to it are cut to the last 4 with a blank holder name, as deletion cuts
+  them. The same digits at another bank are left alone. Refused while a payout to it
+  is pending or held, or when an account the card did not list holds it; one
+  transaction, re-checked before commit. Cannot be undone; audited as bank, last 4 and
+  the cut row ids. The assistant checks a save first (`bank_save_check`, the save's
+  own rules), then proposes each fix as its own card.
 - **Reset.** Every customer's saved list and share stamps were cleared once, after a
   private backup, so everyone saves again under these rules. Payout rows keep their
   own destination, so open payouts were untouched.
