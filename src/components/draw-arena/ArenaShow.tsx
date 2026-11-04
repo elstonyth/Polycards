@@ -172,16 +172,18 @@ export function ArenaShow({
     wasExpanded.current = expanded;
   }, [expanded]);
 
-  // No battle to play: a list that doesn't add up, or reduced motion. The result
-  // is told as it stands, straight away.
-  const skipShow = reduced || win < 0 || broken;
+  // No battle to play: a list that doesn't add up. The result is told as it
+  // stands, straight away. Reduced motion still plays it: the battle is the draw
+  // itself, and a customer with Reduce Motion on asked to watch it (2026-11-04).
+  // Only the decoration around it (dust, zooms, entrances) stays still.
+  const skipShow = win < 0 || broken;
   const told = skipShow || revealed;
   const over = skipShow || ended;
 
   // Run the battle in slices, so a slow phone keeps scrolling while it works. The
   // seed is the draw's own, so every device and every replay plays the same run.
   useEffect(() => {
-    if (reduced || win < 0) return;
+    if (win < 0) return;
     const seed = arenaSeed(`${result.seed}:${result.prize_id}`);
     const dots = arenaDots(entries.length);
     const sim = new ArenaSim(seed, dots);
@@ -231,14 +233,14 @@ export function ArenaShow({
     };
     raf = requestAnimationFrame(slice);
     return () => cancelAnimationFrame(raf);
-  }, [entries, myIndex, reduced, result.prize_id, result.seed, win]);
+  }, [entries, myIndex, result.prize_id, result.seed, win]);
 
   // The show itself: one clock, one canvas, from the first frame. A hidden tab
   // pauses the frames, so it picks up where it was instead of jumping to the end.
   useEffect(() => {
     const canvas = canvasRef.current;
     const stage = stageRef.current;
-    if (!cast || !canvas || !stage || reduced) return;
+    if (!cast || !canvas || !stage) return;
     const sprites = loadTokenSprites(people);
     let lastTick = 0;
     const onEvent = (e: ArenaEvent) => {
@@ -362,7 +364,7 @@ export function ArenaShow({
       watcher.disconnect();
       sprites.stop();
     };
-  }, [cast, people, reduced, take]);
+  }, [cast, people, take]);
 
   // The dust, once, as the winner is told.
   useEffect(() => {
