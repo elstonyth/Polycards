@@ -278,7 +278,7 @@ it('locks the pager while a page is loading, so it cannot land past the end', as
   expect(button('Next').disabled).toBe(false);
 });
 
-it('says so when there are no flips, and hides the tally and road before any', async () => {
+it('says so when there are no flips, and hides the tally and strip before any', async () => {
   read.mockResolvedValue({
     ok: true,
     rounds: [],
@@ -341,6 +341,38 @@ it('drops the strip with the rows when the next page fails to load', async () =>
   await act(async () => button('Next').click());
   expect(host.querySelector('[role=alert]')).not.toBeNull();
   expect(host.querySelector('[role=img]')).toBeNull();
+});
+
+it('shows the strip on page one only, dimmed while the next page loads', async () => {
+  read.mockResolvedValue({
+    ok: true,
+    rounds: [flip('won', [card('a', 'Abra', 100)])],
+    count: 25,
+    totals: { head: 0, tail: 1 },
+  });
+  await render(false);
+  const strip = () => host.querySelector('[role=img]');
+  expect(strip()!.parentElement!.className).not.toContain('opacity-50');
+  let resolve!: (value: unknown) => void;
+  read.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await act(async () => button('Next').click());
+  expect(strip()!.parentElement!.className).toContain('opacity-50');
+  await act(async () =>
+    resolve({
+      ok: true,
+      rounds: [flip('won', [card('b', 'Eevee', 50)])],
+      count: 25,
+      totals: { head: 0, tail: 1 },
+    }),
+  );
+  expect(strip()).toBeNull();
+  await act(async () => button('Previous').click());
+  expect(strip()).not.toBeNull();
 });
 
 describe('everyone view', () => {

@@ -92,12 +92,23 @@ function Bead({
   );
 }
 
-function LatestResults({ rounds }: { rounds: Shown['rounds'] }) {
+function LatestResults({
+  rounds,
+  dim,
+}: {
+  rounds: Shown['rounds'];
+  dim: boolean;
+}) {
   // Rows come newest first; the strip reads oldest to newest.
   const sides = rounds.flatMap((round) => round.landed_side ?? []).reverse();
   if (sides.length === 0) return null;
   return (
-    <div className="rounded-2xl border border-white/10 bg-neutral-900 p-3">
+    <div
+      className={cn(
+        'rounded-2xl border border-white/10 bg-neutral-900 p-3 transition-opacity duration-300',
+        dim && 'opacity-50',
+      )}
+    >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
         <p className="text-sm font-semibold text-white">
           Latest results{' '}
@@ -427,7 +438,7 @@ export function CoinFlipHistory({
     return () => clearInterval(id);
   }, [view, paused]);
   const pending = shownScope !== scope;
-  const [shownView] = shownScope.split(':');
+  const [shownView, shownPage] = shownScope.split(':');
   return (
     <section
       aria-label="Coin flip history"
@@ -470,8 +481,11 @@ export function CoinFlipHistory({
             <LandedTile side="tail" count={history.totals.tail} />
           </div>
         )}
-      {/* Not over an error: the rows it describes are gone from view. */}
-      {history && !error && <LatestResults rounds={history.rounds} />}
+      {/* Not over an error: the rows it describes are gone from view. Page one
+          only: later pages are not the latest. Dims with the rows in transit. */}
+      {history && !error && shownPage === '1' && (
+        <LatestResults rounds={history.rounds} dim={pending} />
+      )}
       {error ? (
         <p role="alert" className="text-sm text-red-300">
           {error}
