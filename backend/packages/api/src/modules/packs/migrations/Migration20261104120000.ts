@@ -12,7 +12,8 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 //   A  1,869  name and handle both Collector########
 //   B    139  name Collector####, handle Collector######## (the name was free,
 //             but it was still another player's handle, so the two split)
-//   C    201  renamed to a name of their own, handle Collector########
+//   C    201  renamed to a name of their own, handle Collector######## (3
+//             of them a Collector-shaped name the handle did not grow from)
 //   D     20  name Collector########, no handle yet (never opened a profile)
 //   E      1  name Collector####, no handle yet, and that name is already
 //             someone else's handle (its first login would split the two)
@@ -87,9 +88,12 @@ export class Migration20261104120000 extends Migration {
                                            or lower(o.metadata->>'handle_alias') = lower(c.first_name)))))))
             order by c.created_at, c.id
         loop
-          -- The new suffix rule (utils/profile-handle.ts suffixedUsername):
-          -- 8 tries at 4 digits, then 8 at 5, then 8 at 6. Free means free as
-          -- a name, a handle and an alias, so name and handle can match.
+          -- The new suffix rule's policy (utils/profile-handle.ts
+          -- suffixedUsername): 8 tries at 4 digits, then 8 at 5, then 8 at 6.
+          -- The numbers come from Postgres's own hash, not seedOf, so they are
+          -- not the ones a signup would pick; only the width and collision
+          -- policy is shared. Free means free as a name, a handle and an
+          -- alias, so name and handle can match.
           attempt := 0;
           loop
             width := 4 + attempt / 8;
@@ -120,8 +124,13 @@ export class Migration20261104120000 extends Migration {
                   updated_at = now()
               where id = r.id;
             renamed_name := renamed_name + 1;
-          elsif coalesce(r.first_name ~ '^Collector[0-9]{4,}$', false) then
-            -- A and B: a generated name, so name and handle both move.
+          elsif coalesce(r.first_name ~ '^Collector[0-9]{4,}$', false)
+                and left(lower(r.handle), length(r.first_name)) = lower(r.first_name) then
+            -- A and B: a generated name, so name and handle both move. The
+            -- shape alone is not proof (a player can type "Collector5555"):
+            -- the handle must have grown from the name, as the old suffix
+            -- rule made it. 3 prod rows have a Collector name unrelated to
+            -- their handle; they keep it, like C.
             update customer
               set first_name = cand,
                   metadata = metadata || jsonb_build_object(

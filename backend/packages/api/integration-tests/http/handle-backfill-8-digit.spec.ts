@@ -100,11 +100,18 @@ medusaIntegrationTestRunner({
         // The retry path, which is the common one on prod (half the 4-digit
         // numbers are taken): every 4-digit try of this row is held by
         // someone, so it must move on to 5 digits.
-        const [crowded, gap] = await customers.createCustomers([
+        const [crowded, typedCollector, gap] = await customers.createCustomers([
           {
             email: 'hb-crowded@test.dev',
             first_name: 'Collector24246868',
             metadata: { handle: 'Collector24246868' },
+          },
+          {
+            // C with a Collector-shaped name the player typed: the handle did
+            // not grow from it, so the name is theirs and stays.
+            email: 'hb-typed-collector@test.dev',
+            first_name: 'Collector5555',
+            metadata: { handle: 'Collector13135757' },
           },
           {
             // E: a 4-digit generated name, no handle yet, and the name is
@@ -123,7 +130,12 @@ medusaIntegrationTestRunner({
           ...held
             .filter(
               (h) =>
-                !['Collector3333', 'Collector1234', 'Collector5151'].includes(h),
+                ![
+                  'Collector3333',
+                  'Collector1234',
+                  'Collector5151',
+                  'Collector5555',
+                ].includes(h),
             )
             .map((h, i) => ({
             email: `hb-held-${i}@test.dev`,
@@ -136,7 +148,7 @@ medusaIntegrationTestRunner({
             metadata: { handle: 'Collector5151' },
           },
         ]);
-        ids.push(crowded.id, gap.id);
+        ids.push(crowded.id, typedCollector.id, gap.id);
 
         for (const statement of await upSql()) await knex.raw(statement);
 
@@ -208,6 +220,15 @@ medusaIntegrationTestRunner({
         expect(crowdedRow.first_name).toMatch(/^Collector\d{5}$/);
         expect(crowdedRow.metadata.handle).toBe(crowdedRow.first_name);
         expect(held).not.toContain(crowdedRow.first_name);
+        const typedRow = row(typedCollector.id);
+        expect(typedRow.first_name).toBe('Collector5555');
+        expect(typedRow.metadata.handle).toMatch(STANDARD);
+        expect(typedRow.metadata).toMatchObject({
+          handle_alias: 'Collector13135757',
+        });
+        expect(typedRow.metadata).not.toHaveProperty(
+          'name_before_handle_backfill',
+        );
         const gapRow = row(gap.id);
         expect(gapRow.first_name).toMatch(STANDARD);
         expect(gapRow.first_name).not.toBe('Collector5151');
