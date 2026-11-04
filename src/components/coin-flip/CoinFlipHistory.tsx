@@ -2,13 +2,12 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Clock } from 'lucide-react';
 import { getCoinFlipFeed, getCoinFlipHistory } from '@/lib/actions/coin-flip';
 import type {
   CoinFlipFeedRound,
   CoinFlipHistory as History,
-  CoinFlipHistoryFilter,
   CoinFlipRound,
 } from '@/lib/coin-flip';
 import {
@@ -28,18 +27,13 @@ import { TicketCount } from './TicketCount';
 
 /**
  * The customer's own flips, in the pack page's Recent Pulls language
- * (PullHistory.tsx): tiles for how the coin landed, a segmented won/lost filter
- * that refetches, and rows of the same shape. The coin they called sits where a pack row has its avatar,
+ * (PullHistory.tsx): tiles for how the coin landed, a strip of how the
+ * rows shown landed, and rows of the same shape. The coin they called sits where a pack row has its avatar,
  * and the cards they put in sit where it has the slab.
  *
  * Color obeys the Signal Rule: chrome is neutral and only a win takes green. A
  * loss stays hairline-neutral with its cards dimmed, because they are gone.
  */
-const FILTERS: readonly { id: CoinFlipHistoryFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'won', label: 'Won' },
-  { id: 'lost', label: 'Lost' },
-];
 const VIEWS = [
   { id: 'everyone', label: 'Everyone' },
   { id: 'mine', label: 'Mine' },
@@ -57,6 +51,116 @@ const segment = (on: boolean) =>
     'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
     on ? 'bg-neutral-50 text-neutral-950' : 'text-neutral-400 hover:text-white',
   );
+
+// Latest results (owner 2026-11-04, a plain take on a baccarat bead plate): how
+// each flip in the list below landed, in one row with the newest at the right.
+// The newest ripples so it reads as the latest. Head and Tail are not outcomes,
+// so neither takes green: Head is a solid bead, Tail an outlined one.
+function Bead({
+  side,
+  small = false,
+  newest = false,
+}: {
+  side: CoinSide;
+  small?: boolean;
+  newest?: boolean;
+}) {
+  const bead = (
+    <span
+      aria-hidden
+      className={cn(
+        'relative flex shrink-0 items-center justify-center rounded-full font-bold leading-none',
+        small ? 'size-4 text-[9px]' : 'size-7 text-[11px]',
+        side === 'head'
+          ? 'bg-neutral-100 text-neutral-950'
+          : 'bg-neutral-900 text-white ring-1 ring-white/45 ring-inset',
+      )}
+    >
+      {side === 'head' ? 'H' : 'T'}
+    </span>
+  );
+  if (!newest) return bead;
+  // A ripple behind the bead; with Reduce Motion, a still outline instead.
+  return (
+    <span className="relative flex shrink-0 rounded-full motion-reduce:outline-2 motion-reduce:outline-offset-2 motion-reduce:outline-white/60">
+      <span
+        aria-hidden
+        className="absolute inset-1 animate-ping rounded-full bg-white/50 motion-reduce:hidden"
+      />
+      {bead}
+    </span>
+  );
+}
+
+function LatestResults({
+  rounds,
+  dim,
+}: {
+  rounds: Shown['rounds'];
+  dim: boolean;
+}) {
+  // Rows come newest first; the strip reads oldest to newest.
+  const sides = rounds.flatMap((round) => round.landed_side ?? []).reverse();
+  const row = useRef<HTMLDivElement>(null);
+  // Fade the left edge only while older beads are cut off there, never over a
+  // row that fits.
+  useEffect(() => {
+    const el = row.current;
+    if (!el) return;
+    const check = () => {
+      const first = el.firstElementChild;
+      el.dataset.clipped = String(
+        !!first &&
+          first.getBoundingClientRect().left <
+            el.getBoundingClientRect().left - 0.5,
+      );
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [sides.length]);
+  if (sides.length === 0) return null;
+  return (
+    <div
+      className={cn(
+        'rounded-2xl border border-white/10 bg-neutral-900 p-3 transition-opacity duration-300',
+        dim && 'opacity-50',
+      )}
+    >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        <p className="text-sm font-semibold text-white">
+          Latest results{' '}
+          <span className="text-[12px] font-normal text-neutral-400">
+            · newest on the right
+          </span>
+        </p>
+        <p className="flex items-center gap-3 text-[12px] text-neutral-400">
+          <span className="flex items-center gap-1.5">
+            <Bead side="head" small />
+            Head
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Bead side="tail" small />
+            Tail
+          </span>
+        </p>
+      </div>
+      <div
+        ref={row}
+        role="img"
+        aria-label={`Latest results, oldest to newest: ${sides.map(coinSideLabel).join(', ')}`}
+        // One row, packed to the right. On a phone the oldest beads run off the
+        // left edge, faded; the list below holds every flip. The padding,
+        // cancelled by the margin, leaves the ripple room inside the clip.
+        className="-my-2 flex items-center justify-end gap-1.5 overflow-hidden py-2 pr-2 data-[clipped=true]:[mask-image:linear-gradient(to_left,black_80%,transparent)] @3xl:justify-start"
+      >
+        {sides.map((side, i) => (
+          <Bead key={i} side={side} newest={i === sides.length - 1} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function OutcomeBadge({ won }: { won: boolean }) {
   return (
@@ -309,27 +413,26 @@ export function CoinFlipHistory({
   everyone?: boolean;
 }) {
   const [view, setView] = useState<View>(everyone ? 'everyone' : 'mine');
-  const [filter, setFilter] = useState<CoinFlipHistoryFilter>('all');
   const [page, setPage] = useState(1);
   const [history, setHistory] = useState<Shown | null>(null);
-  // Which filter and page the rows on screen belong to. The list re-enters once,
+  // Which view and page the rows on screen belong to. The list re-enters once,
   // when the new rows land, and dims while they are on their way.
   const [shownScope, setShownScope] = useState('');
   const [error, setError] = useState('');
   // Bumped every 10s while Everyone is on screen, so it refetches in place.
   const [tick, setTick] = useState(0);
-  const scope = `${view}:${filter}:${page}`;
+  const scope = `${view}:${page}`;
   useEffect(() => {
     if (paused) return;
     let active = true;
     const load: Promise<({ ok: true } & Shown) | { ok: false }> =
       view === 'everyone'
-        ? getCoinFlipFeed(filter).then((result) =>
+        ? getCoinFlipFeed().then((result) =>
             result.ok
               ? { ...result, count: result.rounds.length, totals: null }
               : result,
           )
-        : getCoinFlipHistory(page, filter);
+        : getCoinFlipHistory(page);
     load
       .then((result) => {
         if (!active) return;
@@ -345,7 +448,7 @@ export function CoinFlipHistory({
     return () => {
       active = false;
     };
-  }, [view, page, filter, scope, refresh, paused, tick]);
+  }, [view, page, scope, refresh, paused, tick]);
   useEffect(() => {
     if (view !== 'everyone' || paused) return;
     const id = setInterval(() => {
@@ -354,7 +457,7 @@ export function CoinFlipHistory({
     return () => clearInterval(id);
   }, [view, paused]);
   const pending = shownScope !== scope;
-  const [shownView, shownFilter] = shownScope.split(':');
+  const [shownView, shownPage] = shownScope.split(':');
   return (
     <section
       aria-label="Coin flip history"
@@ -380,7 +483,6 @@ export function CoinFlipHistory({
               disabled={paused}
               onClick={() => {
                 setView(id);
-                setFilter('all');
                 setPage(1);
               }}
               className={segment(view === id)}
@@ -398,36 +500,11 @@ export function CoinFlipHistory({
             <LandedTile side="tail" count={history.totals.tail} />
           </div>
         )}
-      <div
-        role="group"
-        aria-label="Filter flips by result"
-        className="grid grid-cols-3 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 @2xl:max-w-lg"
-      >
-        {FILTERS.map(({ id, label }) => (
-          <button
-            key={id}
-            type="button"
-            aria-pressed={filter === id}
-            disabled={paused}
-            onClick={() => {
-              setFilter(id);
-              setPage(1);
-            }}
-            className={segment(filter === id)}
-          >
-            {id !== 'all' && (
-              <span
-                aria-hidden
-                className={cn(
-                  'h-1.5 w-1.5 shrink-0 rounded-full',
-                  id === 'won' ? 'bg-buyback-fg' : 'bg-neutral-500',
-                )}
-              />
-            )}
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Not over an error: the rows it describes are gone from view. Page one
+          only: later pages are not the latest. Dims with the rows in transit. */}
+      {history && !error && shownPage === '1' && (
+        <LatestResults rounds={history.rounds} dim={pending} />
+      )}
       {error ? (
         <p role="alert" className="text-sm text-red-300">
           {error}
@@ -446,13 +523,9 @@ export function CoinFlipHistory({
         >
           {history.rounds.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
-              {shownFilter === 'won'
-                ? 'No won flips yet.'
-                : shownFilter === 'lost'
-                  ? 'No lost flips yet.'
-                  : shownView === 'everyone'
-                    ? 'No flips yet.'
-                    : 'Your completed flips will appear here.'}
+              {shownView === 'everyone'
+                ? 'No flips yet.'
+                : 'Your completed flips will appear here.'}
             </div>
           ) : (
             // Rows keep their keys, so a new flip drops in alone and the rest

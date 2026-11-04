@@ -8,8 +8,8 @@ export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse):
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const { limit, offset } = parsePaginationParams(req.query, { defaultLimit: 20, maxLimit: 100 });
   const customerId = req.auth_context.actor_id;
-  const only = req.query.status;
-  const status = only === 'won' || only === 'lost' ? [only] : ['won', 'lost'];
+  // Settled rounds only. The won/lost filter left with its storefront tabs.
+  const status = ['won', 'lost'];
   const [rounds, count] = await packs.listAndCountCoinFlipRounds({ customer_id: customerId, status },
     { take: limit, skip: offset, order: { settled_at: 'DESC', id: 'DESC' } });
   const totals = await packs.coinFlipLandedCounts(customerId);

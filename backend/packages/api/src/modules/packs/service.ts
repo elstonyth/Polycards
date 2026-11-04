@@ -10883,10 +10883,11 @@ class PacksModuleService extends MedusaService({
       `metadata:${input.customerId}`,
     ]);
     const rows = await em.execute<
-      { metadata: Record<string, unknown> | null }[]
-    >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
-      input.customerId,
-    ]);
+      { metadata: Record<string, unknown> | null; first_name: string | null }[]
+    >(
+      'SELECT metadata, first_name FROM customer WHERE id = ? AND deleted_at IS NULL',
+      [input.customerId],
+    );
     if (rows.length === 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
@@ -10903,8 +10904,15 @@ class PacksModuleService extends MedusaService({
       return current.handle;
     }
 
-    const desired = USERNAME_RE.test(input.desired.trim())
-      ? input.desired.trim()
+    // The name as it is NOW, read under the lock, wins over the caller's
+    // copy: the caller read it earlier, and a rename or a backfill may have
+    // changed it since. Freezing a stale name would split name from link.
+    const currentName = (rows[0].first_name ?? '').trim();
+    const named = USERNAME_RE.test(currentName)
+      ? currentName
+      : input.desired.trim();
+    const desired = USERNAME_RE.test(named)
+      ? named
       : generatedUsername(input.customerId);
     // Another player's display name counts as taken too: they may not have
     // a handle yet (it is frozen from that name on their first login), and
