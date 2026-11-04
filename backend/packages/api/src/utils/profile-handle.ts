@@ -84,23 +84,47 @@ export function sanitizeUsername(raw: string | null | undefined): string | null 
 /**
  * An anonymous but stable username for a customer with no usable name, shaped
  * like the rest of the pool ("Collector4809") rather than announcing itself as
- * a fallback.
+ * a fallback. `digits` widens the number once the 4-digit pool is crowded; see
+ * `suffixedUsername`.
  */
-export function generatedUsername(seed: string): string {
-  return `Collector${String(seedOf(seed) % 10_000).padStart(4, '0')}`;
+export function generatedUsername(seed: string, digits = 4): string {
+  return `Collector${String(seedOf(seed) % 10 ** digits).padStart(digits, '0')}`;
 }
+
+/** A generated name's shape, at any width. */
+const GENERATED_RE = /^Collector\d{4,}$/;
+
+/** Tries a generated name gets at each width before it takes one more digit. */
+const REROLLS_PER_WIDTH = 8;
+
+/**
+ * Candidates the claim loops try after the first: 8 at 4 digits, 8 at 5, 8 at
+ * 6 for a generated name, so the loop cannot run dry as the pool fills.
+ */
+export const MAX_NAME_ATTEMPTS = 3 * REROLLS_PER_WIDTH;
 
 /**
  * The next candidate when `base` is taken: a deterministic 4-digit suffix, and
  * on further collisions a different one. Truncates `base` so the result always
  * fits USERNAME_MAX — appending blindly would produce a candidate the write
  * gate then rejects, turning a collision into a 500.
+ *
+ * A GENERATED base picks a new number instead. Appending to it gave
+ * "Collector6340" + "8743" = "Collector63408743" (2,209 prod handles by
+ * 2026-11-04, when the 10,000 four-digit numbers were half used). It keeps 4
+ * digits while any of its 4-digit tries is free, then moves to 5.
  */
 export function suffixedUsername(
   base: string,
   seed: string,
   attempt: number,
 ): string {
+  if (GENERATED_RE.test(base)) {
+    return generatedUsername(
+      `${seed}#${attempt}`,
+      4 + Math.floor(attempt / REROLLS_PER_WIDTH),
+    );
+  }
   const digits = String(seedOf(`${seed}#${attempt}`) % 10_000).padStart(4, '0');
   const room = USERNAME_MAX - digits.length;
   const stem = base.slice(0, room).replace(/[_-]+$/g, '') || 'Collector';

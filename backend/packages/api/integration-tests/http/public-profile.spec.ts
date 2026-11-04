@@ -2,7 +2,7 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
-import { USERNAME_RE } from '../../src/utils/profile-handle';
+import { USERNAME_RE, generatedUsername } from '../../src/utils/profile-handle';
 import { clearProfileCache } from '../../src/api/store/profiles/[handle]/route';
 import { clearLeaderboardCache } from '../../src/api/store/leaderboard/route';
 import { myrDisplay as MYR, postStoreCustomer, unwrapResponse } from './utils';
@@ -733,6 +733,71 @@ medusaIntegrationTestRunner({
         for (const name of names) {
           expect(name).toMatch(/^[A-Za-z0-9_-]{3,30}$/);
           expect((await getProfile(name)).status).toBe(200);
+        }
+      });
+
+      // The reported case (2026-11-04). A nameless signup gets a generated
+      // name. When that name was free as a NAME but was still another
+      // player's HANDLE (they had renamed away), the account got the name
+      // Collector6340 and the handle Collector63408743. When the name itself
+      // was taken, both came out with 8 digits. Now the number is re-rolled
+      // until it is free in both places, so name and handle match.
+      it('a taken generated name re-rolls its number, and name and handle match', async () => {
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        const signUpNameless = async (email: string) => {
+          const reg = await api.post('/auth/customer/emailpass/register', {
+            email,
+            password: PASSWORD,
+          });
+          const created = await unwrapResponse(
+            postStoreCustomer(
+              api,
+              getContainer(),
+              { email },
+              {
+                headers: {
+                  ...storeHeaders,
+                  authorization: `Bearer ${reg.data.token}`,
+                },
+              },
+            ),
+          );
+          const login = await api.post('/auth/customer/emailpass', {
+            email,
+            password: PASSWORD,
+          });
+          return {
+            id: created.data.customer.id as string,
+            token: login.data.token as string,
+          };
+        };
+
+        const handleTaken = await signUpNameless('pp-gen-handle@test.dev');
+        const nameTaken = await signUpNameless('pp-gen-name@test.dev');
+        await customerModule.createCustomers([
+          {
+            email: 'pp-gen-squat-a@test.dev',
+            first_name: 'Renamed_Away',
+            metadata: { handle: generatedUsername(handleTaken.id) },
+          },
+          {
+            email: 'pp-gen-squat-b@test.dev',
+            first_name: generatedUsername(nameTaken.id),
+            metadata: { handle: generatedUsername(nameTaken.id) },
+          },
+        ]);
+
+        for (const { id, token } of [handleTaken, nameTaken]) {
+          const me = await unwrapResponse(
+            api.get('/store/profiles/me', {
+              headers: { ...storeHeaders, authorization: `Bearer ${token}` },
+            }),
+          );
+          expect(me.status).toBe(200);
+          expect(me.data.handle).toMatch(/^Collector\d{4}$/);
+          expect(me.data.handle).not.toBe(generatedUsername(id));
+          const customer = await customerModule.retrieveCustomer(id);
+          expect(customer.first_name).toBe(me.data.handle);
         }
       });
 

@@ -72,6 +72,7 @@ import {
 } from './withdrawal-controls';
 import { isGraded, isPsa10, type PoolComposition } from './card-view';
 import {
+  MAX_NAME_ATTEMPTS,
   USERNAME_RE,
   generatedUsername,
   suffixedUsername,
@@ -10905,7 +10906,7 @@ class PacksModuleService extends MedusaService({
     let chosen: string | null = (await free(desired)) ? desired : null;
     for (
       let attempt = 0;
-      !chosen && attempt < (input.maxAttempts ?? 8);
+      !chosen && attempt < (input.maxAttempts ?? MAX_NAME_ATTEMPTS);
       attempt++
     ) {
       const candidate = suffixedUsername(desired, input.customerId, attempt);
@@ -10943,6 +10944,13 @@ class PacksModuleService extends MedusaService({
    * naming at signup), where there is nobody to show a message to, so it takes
    * the next free suffixed variant. A name the user typed is refused by the
    * username guard long before it reaches this method.
+   *
+   * A candidate must also be free as a HANDLE. The handle is frozen from this
+   * name on the first login (ensure-profile-handle), so a name that is some
+   * other player's handle gives the account a name and a link that differ.
+   * That happened to 330 prod accounts by 2026-11-04: Collector6340 renamed
+   * away, the next Collector6340 took the freed name, and its handle came out
+   * as Collector63408743.
    */
   @InjectTransactionManager()
   async claimUsername(
@@ -10962,8 +10970,8 @@ class PacksModuleService extends MedusaService({
     // save) reads as free instead of colliding with yourself.
     const free = async (candidate: string): Promise<boolean> => {
       const [row] = await em.execute<{ n: string }[]>(
-        'SELECT COUNT(*)::int AS n FROM customer WHERE lower(first_name) = lower(?) AND deleted_at IS NULL AND id <> ?',
-        [candidate, input.customerId],
+        "SELECT COUNT(*)::int AS n FROM customer WHERE (lower(first_name) = lower(?) OR lower(metadata->>'handle') = lower(?)) AND deleted_at IS NULL AND id <> ?",
+        [candidate, candidate, input.customerId],
       );
       return Number(row?.n ?? 0) === 0;
     };
@@ -10972,7 +10980,11 @@ class PacksModuleService extends MedusaService({
     if (await free(input.desired)) {
       chosen = input.desired;
     } else {
-      for (let attempt = 0; attempt < (input.maxAttempts ?? 8); attempt++) {
+      for (
+        let attempt = 0;
+        attempt < (input.maxAttempts ?? MAX_NAME_ATTEMPTS);
+        attempt++
+      ) {
         const candidate = suffixedUsername(
           input.desired,
           input.customerId,
@@ -10985,8 +10997,8 @@ class PacksModuleService extends MedusaService({
       }
     }
     if (!chosen) {
-      // Eight deterministic 4-digit variants of one stem all taken —
-      // unreachable short of an adversary squatting that stem.
+      // Every deterministic variant of one stem taken — unreachable short of
+      // an adversary squatting that stem.
       throw new MedusaError(
         MedusaError.Types.CONFLICT,
         'Could not assign a display name',

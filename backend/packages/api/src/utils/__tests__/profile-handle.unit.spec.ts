@@ -1,4 +1,5 @@
 import {
+  MAX_NAME_ATTEMPTS,
   USERNAME_MAX,
   USERNAME_RE,
   generatedUsername,
@@ -88,6 +89,39 @@ describe("generatedUsername", () => {
     );
     expect(generatedUsername("cus_01ABCDEF")).toMatch(USERNAME_RE);
     expect(generatedUsername("cus_01ABCDEF")).toMatch(/^Collector\d{4}$/);
+  });
+
+  it("takes a wider number when asked", () => {
+    expect(generatedUsername("cus_01ABCDEF", 5)).toMatch(/^Collector\d{5}$/);
+  });
+});
+
+// The reported case (2026-11-04): Collector6340 was taken, so the next
+// account got Collector6340 + 8743 = "Collector63408743". 2,209 prod handles
+// had that shape. A generated name picks a NEW number instead, and only grows
+// to 5 digits once the 4-digit tries are spent.
+describe("suffixedUsername on a generated name", () => {
+  it("re-rolls the number instead of appending a second one", () => {
+    const tries = Array.from({ length: 8 }, (_, i) =>
+      suffixedUsername("Collector6340", "cus_1", i),
+    );
+    for (const t of tries) expect(t).toMatch(/^Collector\d{4}$/);
+    expect(new Set(tries).size).toBeGreaterThan(1);
+  });
+
+  it("grows to 5 digits once the 4-digit tries are spent", () => {
+    expect(suffixedUsername("Collector6340", "cus_1", 8)).toMatch(
+      /^Collector\d{5}$/,
+    );
+  });
+
+  it("never produces the old 8-digit shape, at any attempt", () => {
+    expect(MAX_NAME_ATTEMPTS).toBeGreaterThan(8);
+    for (let i = 0; i < MAX_NAME_ATTEMPTS; i++) {
+      const out = suffixedUsername("Collector6340", "cus_1", i);
+      expect(out).toMatch(USERNAME_RE);
+      expect(out).not.toMatch(/^Collector\d{8}$/);
+    }
   });
 });
 
