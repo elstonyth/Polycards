@@ -220,12 +220,14 @@ export function assertCoinFlipEligible(wallet: {
   isFrozen: boolean;
   hasTopup: boolean;
   playthrough: { remaining: number };
-}, withdrawalsBlocked = false): void {
+}, group: { withdrawals_blocked: boolean } | null = null): void {
   if (wallet.isFrozen) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Coin flips are unavailable while your account is under review.');
-  // The top-up and playthrough gates guard cash-out. A withdrawal-blocked group
-  // can never cash out (blockGroupWithdrawals), so its members flip without them.
-  if (withdrawalsBlocked) return;
-  if (!wallet.hasTopup) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
+  // `group` is the effective player group's policy, null for DEFAULT or no group.
+  // A withdrawal-blocked group can never cash out (blockGroupWithdrawals), so its
+  // members skip both cash-out gates. Any other real group skips only the top-up
+  // (owner 2026-11-04, the Lucky Draw's rule): only DEFAULT must have topped up.
+  if (group?.withdrawals_blocked) return;
+  if (!group && !wallet.hasTopup) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
   if (!Number.isFinite(wallet.playthrough.remaining) || wallet.playthrough.remaining > 0) {
     throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Complete your deposit playthrough before flipping a card.');
   }

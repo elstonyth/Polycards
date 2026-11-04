@@ -28,7 +28,7 @@ async function eligible(service: PacksModuleService, customerId: string, context
   if (await service.isAccountDisabled(customerId, context)) refuse('This account is unavailable.');
   const [group] = await coinFlipManager(context).execute<{ name: string | null; metadata: Record<string, unknown> | null }[]>(
     `SELECT cg.name, cg.metadata FROM (${EFFECTIVE_GROUP_SQL}) g JOIN customer_group cg ON cg.id = g.group_id WHERE g.customer_id = ?`, [customerId]);
-  assertCoinFlipEligible(await service.walletSummary(customerId, undefined, context), group ? groupPolicyOf(group).withdrawals_blocked : false);
+  assertCoinFlipEligible(await service.walletSummary(customerId, undefined, context), group ? groupPolicyOf(group) : null);
 }
 
 async function cardForFlip(service: PacksModuleService, customerId: string, pullId: string, context: Context) {

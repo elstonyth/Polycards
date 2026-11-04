@@ -57,6 +57,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ]);
       return { customerId, pullId: pull.id };
     };
+    // A card holder who never topped up.
+    const noTopup = async () => {
+      const customerId = `coin_${randomUUID()}`;
+      const [card] = await service.createCards([{ handle: customerId, name: 'Pikachu', set: 'Base',
+        grader: 'PSA', grade: '10', market_value: 20, market_multiplier: 1.25, image: '/pikachu.png' }]);
+      const [pull] = await service.createPulls([{ customer_id: customerId, card_id: card.handle,
+        pack_id: 'coin-test', rolled_at: new Date(), source: 'pack', bonus_bp: 0,
+        stock_earmarked: true, flip_eligible_at: new Date() }]);
+      return { customerId, pullId: pull.id };
+    };
     beforeEach(async () => {
       const em = MikroOrmWrapper.forkManager();
       await em.execute('CREATE TABLE IF NOT EXISTS customer_group (id text primary key, name text, metadata jsonb, created_at timestamptz default now(), deleted_at timestamptz)');
@@ -318,15 +328,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await em.execute("INSERT INTO customer_group (id, name, metadata) VALUES ('blocked', 'Partner', '{\"partner_rate_bp\":100,\"withdrawals_blocked\":true}')");
       const join = (customerId: string) =>
         em.execute("INSERT INTO customer_group_customer (customer_id, customer_group_id) VALUES (?, 'blocked')", [customerId]);
-      const noTopup = async () => {
-        const customerId = `coin_${randomUUID()}`;
-        const [card] = await service.createCards([{ handle: customerId, name: 'Pikachu', set: 'Base',
-          grader: 'PSA', grade: '10', market_value: 20, market_multiplier: 1.25, image: '/pikachu.png' }]);
-        const [pull] = await service.createPulls([{ customer_id: customerId, card_id: card.handle,
-          pack_id: 'coin-test', rolled_at: new Date(), source: 'pack', bonus_bp: 0,
-          stock_earmarked: true, flip_eligible_at: new Date() }]);
-        return { customerId, pullId: pull.id };
-      };
       // Outside such a group both gates still hold.
       const fresh = await noTopup();
       await expect(service.quoteCoinFlip(fresh)).rejects.toThrow(/top up/i);
@@ -346,6 +347,38 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await join(frozen.customerId);
       await service.createCustomerAccountStates([{ customer_id: frozen.customerId, frozen: true }]);
       await expect(service.quoteCoinFlip(frozen)).rejects.toThrow(/review/i);
+    });
+
+    it('asks only DEFAULT to top up: any other group flips without one but keeps its playthrough', async () => {
+      const em = MikroOrmWrapper.forkManager();
+      await em.execute(`INSERT INTO customer_group (id, name, metadata) VALUES
+        ('default', 'DEFAULT', '{}'),
+        ('plain', 'Influencers', '{"odds_set":2}'),
+        ('rebate', 'Rebate', '{"partner_rate_bp":300,"withdrawals_blocked":false}')`);
+      const join = (customerId: string, group: string) =>
+        em.execute('INSERT INTO customer_group_customer (customer_id, customer_group_id) VALUES (?, ?)', [customerId, group]);
+      // No group and DEFAULT read the same: still refused until a top-up.
+      const ungrouped = await noTopup();
+      await expect(service.quoteCoinFlip(ungrouped)).rejects.toThrow(/top up/i);
+      const inDefault = await noTopup();
+      await join(inDefault.customerId, 'default');
+      await expect(service.quoteCoinFlip(inDefault)).rejects.toThrow(/top up/i);
+      // A plain group and a partner group that may withdraw both skip the top-up.
+      for (const group of ['plain', 'rebate']) {
+        const input = await noTopup();
+        await join(input.customerId, group);
+        const q = await service.quoteCoinFlip(input);
+        expect((await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })).status).toBe('won');
+        expect(await wins(input.customerId)).toHaveLength(1);
+      }
+      // DEFAULT plus a real group follows the real group.
+      await join(inDefault.customerId, 'plain');
+      expect((await service.quoteCoinFlip(inDefault)).status).toBe('quoted');
+      // Where withdrawals are allowed, an unfinished playthrough still stops a flip.
+      const unplayed = await seed();
+      await service.createCreditTransactions([{ customer_id: unplayed.customerId, amount: 10, reason: 'topup', external_funded_cents: 1000 }]);
+      await join(unplayed.customerId, 'rebate');
+      await expect(service.quoteCoinFlip(unplayed)).rejects.toThrow(/playthrough/i);
     });
 
     it('can sell after a win, preserving the gift buyback cash rule', async () => {
