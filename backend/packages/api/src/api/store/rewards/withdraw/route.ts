@@ -2,7 +2,7 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { resolveFxRateStrict } from '../../../../modules/packs/pricing';
@@ -114,6 +114,17 @@ export async function POST(
   const optional = (v: unknown): string | undefined =>
     typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
 
+  // Same fallback as request-delivery: an address saved without a phone left
+  // the prize order with none, so staff could not reach the player
+  // (2026-11-04). Use the profile phone instead.
+  let phone = optional(addr?.phone);
+  if (!phone) {
+    const [customer] = await req.scope
+      .resolve(Modules.CUSTOMER)
+      .listCustomers({ id: customerId }, { take: 1 });
+    phone = optional(customer?.phone);
+  }
+
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   // Resolved before the transaction, as the paid path does: it values the
   // prize for its mandatory insurance. STRICT — a real wallet debit is never
@@ -133,7 +144,7 @@ export async function POST(
     }),
     address_2: optional(addr?.address2),
     province: optional(addr?.province),
-    phone: optional(addr?.phone),
+    phone,
     },
     fx,
   );
