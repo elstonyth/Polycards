@@ -3,6 +3,7 @@
 import { store, type Failure } from '@/lib/store';
 import { friendlyFailure, type ErrorRule } from '@/lib/errors';
 import {
+  CoinFlipFeedSchema,
   CoinFlipHistorySchema,
   CoinFlipReceiptSchema,
   CoinFlipSettingsSchema,
@@ -98,6 +99,17 @@ export async function acceptCoinFlip(id: string) {
         result,
         'Could not confirm the flip. Check its status before trying again.',
       );
+}
+export async function getCoinFlipFeed(filter: CoinFlipHistoryFilter = 'all') {
+  const status =
+    filter === 'won' || filter === 'lost' ? `?status=${filter}` : '';
+  const result = await store.get(
+    `/store/coin-flips/recent${status}`,
+    CoinFlipFeedSchema,
+  );
+  return result.ok
+    ? { ok: true as const, ...result.data }
+    : failure(result, 'Could not load flips. Try again.');
 }
 export async function getCoinFlipRound(id: string) {
   const result = await store.get(

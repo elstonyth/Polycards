@@ -4,8 +4,9 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Clock } from 'lucide-react';
-import { getCoinFlipHistory } from '@/lib/actions/coin-flip';
+import { getCoinFlipFeed, getCoinFlipHistory } from '@/lib/actions/coin-flip';
 import type {
+  CoinFlipFeedRound,
   CoinFlipHistory as History,
   CoinFlipHistoryFilter,
   CoinFlipRound,
@@ -18,7 +19,9 @@ import {
 import { num, pullTime, rm } from '@/lib/format';
 import { isOptimizableImage } from '@/lib/optimizable-image';
 import { cn } from '@/lib/utils';
+import { FramedAvatar } from '@/components/FramedAvatar';
 import { TicketArt } from '@/components/TicketArt';
+import { avatarForSeed } from '@/lib/avatar-seed';
 import { Pill } from '@/components/ui/pill';
 import { StaticCoin } from './StaticCoin';
 import { TicketCount } from './TicketCount';
@@ -37,6 +40,23 @@ const FILTERS: readonly { id: CoinFlipHistoryFilter; label: string }[] = [
   { id: 'won', label: 'Won' },
   { id: 'lost', label: 'Lost' },
 ];
+const VIEWS = [
+  { id: 'everyone', label: 'Everyone' },
+  { id: 'mine', label: 'Mine' },
+] as const;
+type View = (typeof VIEWS)[number]['id'];
+// The Everyone view has no count or tally, and shows its latest rows unpaged.
+type Shown = {
+  rounds: (CoinFlipRound | CoinFlipFeedRound)[];
+  count: number;
+  totals: History['totals'] | null;
+};
+const segment = (on: boolean) =>
+  cn(
+    'flex min-h-10 items-center justify-center gap-1 rounded-full px-1 text-[12px] font-semibold transition-colors disabled:opacity-50',
+    'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+    on ? 'bg-neutral-50 text-neutral-950' : 'text-neutral-400 hover:text-white',
+  );
 
 function OutcomeBadge({ won }: { won: boolean }) {
   return (
@@ -132,10 +152,12 @@ function Row({
   paused,
   onOpen,
 }: {
-  round: CoinFlipRound;
+  round: CoinFlipRound | CoinFlipFeedRound;
   paused: boolean;
   onOpen?: (id: string) => void;
 }) {
+  // Set on the Everyone view: another player's flip, whose receipt is private.
+  const player = 'who' in round ? round : null;
   const won = round.status === 'won';
   const called = coinSideLabel(round.chosen_side);
   const when = round.settled_at ? pullTime(round.settled_at) : '';
@@ -159,57 +181,44 @@ function Row({
       : []),
     when,
   ].join(', ');
-  return (
-    <Link
-      href={`/vault/coin-flip?round=${encodeURIComponent(round.id)}`}
-      aria-label={label}
-      aria-disabled={paused || undefined}
-      tabIndex={paused ? -1 : undefined}
-      onClick={(event) => {
-        if (paused) event.preventDefault();
-        else if (
-          onOpen &&
-          !event.metaKey &&
-          !event.ctrlKey &&
-          !event.shiftKey &&
-          !event.altKey
-        ) {
-          event.preventDefault();
-          onOpen(round.id);
-        }
-      }}
-      className={cn(
-        'flex w-full items-center gap-2 rounded-xl border bg-neutral-900 px-3 py-2.5 @sm:gap-3',
-        // A row cannot open while a toss is in the air: its result comes first.
-        paused && 'pointer-events-none',
-        'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-        'transition-[background-color,transform] hover:bg-neutral-800 active:scale-[0.99]',
-        'motion-reduce:transition-none motion-reduce:active:scale-100',
-        won
-          ? 'border-buyback-fg/45 shadow-[0_0_24px_-10px_rgba(47,191,110,0.55)]'
-          : 'border-white/10',
+  const shell = cn(
+    'flex w-full items-center gap-2 rounded-xl border bg-neutral-900 px-3 py-2.5 @sm:gap-3',
+    won
+      ? 'border-buyback-fg/45 shadow-[0_0_24px_-10px_rgba(47,191,110,0.55)]'
+      : 'border-white/10',
+  );
+  const content = (
+    <>
+      {player ? (
+        <FramedAvatar
+          src={
+            player.avatar_url ??
+            (player.seed != null ? avatarForSeed(player.seed) : null)
+          }
+          initial={player.who.charAt(0).toUpperCase() || '?'}
+          frameSrc={player.frame_url}
+          size={36}
+        />
+      ) : (
+        <StaticCoin
+          side={round.chosen_side}
+          className="size-8 shrink-0 @sm:size-10"
+        />
       )}
-    >
-      <StaticCoin
-        side={round.chosen_side}
-        className="size-8 shrink-0 @sm:size-10"
-      />
       {/* Wraps rather than truncates, as a pack row does: a clipped call or time
           reads as broken, two short lines don't. */}
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-          <span className="text-sm font-semibold text-white">
-            Called {called}
+          <span className="text-sm font-semibold text-white [overflow-wrap:anywhere]">
+            {player ? player.who : `Called ${called}`}
           </span>
           <OutcomeBadge won={won} />
         </span>
         {round.settled_at && (
-          <time
-            dateTime={round.settled_at}
-            className="mt-0.5 block text-[12px] text-neutral-400 tabular-nums"
-          >
-            {when}
-          </time>
+          <span className="mt-0.5 block text-[12px] text-neutral-400 tabular-nums">
+            {player && `Called ${called} · `}
+            <time dateTime={round.settled_at}>{when}</time>
+          </span>
         )}
       </span>
       {hasCards ? (
@@ -250,6 +259,38 @@ function Row({
           </span>
         )}
       </span>
+    </>
+  );
+  if (player) return <div className={shell}>{content}</div>;
+  return (
+    <Link
+      href={`/vault/coin-flip?round=${encodeURIComponent(round.id)}`}
+      aria-label={label}
+      aria-disabled={paused || undefined}
+      tabIndex={paused ? -1 : undefined}
+      onClick={(event) => {
+        if (paused) event.preventDefault();
+        else if (
+          onOpen &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          !event.altKey
+        ) {
+          event.preventDefault();
+          onOpen(round.id);
+        }
+      }}
+      className={cn(
+        shell,
+        // A row cannot open while a toss is in the air: its result comes first.
+        paused && 'pointer-events-none',
+        'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+        'transition-[background-color,transform] hover:bg-neutral-800 active:scale-[0.99]',
+        'motion-reduce:transition-none motion-reduce:active:scale-100',
+      )}
+    >
+      {content}
     </Link>
   );
 }
@@ -258,24 +299,38 @@ export function CoinFlipHistory({
   refresh = 0,
   paused = false,
   onOpen,
+  everyone = false,
 }: {
   refresh?: number;
   paused?: boolean;
   /** Opens a row without leaving the page. Without it, a row is a plain link. */
   onOpen?: (id: string) => void;
+  /** Adds every player's latest flips, shown first (owner 2026-11-04). */
+  everyone?: boolean;
 }) {
+  const [view, setView] = useState<View>(everyone ? 'everyone' : 'mine');
   const [filter, setFilter] = useState<CoinFlipHistoryFilter>('all');
   const [page, setPage] = useState(1);
-  const [history, setHistory] = useState<History | null>(null);
+  const [history, setHistory] = useState<Shown | null>(null);
   // Which filter and page the rows on screen belong to. The list re-enters once,
   // when the new rows land, and dims while they are on their way.
   const [shownScope, setShownScope] = useState('');
   const [error, setError] = useState('');
-  const scope = `${filter}:${page}`;
+  // Bumped every 10s while Everyone is on screen, so it refetches in place.
+  const [tick, setTick] = useState(0);
+  const scope = `${view}:${filter}:${page}`;
   useEffect(() => {
     if (paused) return;
     let active = true;
-    getCoinFlipHistory(page, filter)
+    const load: Promise<({ ok: true } & Shown) | { ok: false }> =
+      view === 'everyone'
+        ? getCoinFlipFeed(filter).then((result) =>
+            result.ok
+              ? { ...result, count: result.rounds.length, totals: null }
+              : result,
+          )
+        : getCoinFlipHistory(page, filter);
+    load
       .then((result) => {
         if (!active) return;
         if (result.ok) {
@@ -290,8 +345,16 @@ export function CoinFlipHistory({
     return () => {
       active = false;
     };
-  }, [page, filter, scope, refresh, paused]);
+  }, [view, page, filter, scope, refresh, paused, tick]);
+  useEffect(() => {
+    if (view !== 'everyone' || paused) return;
+    const id = setInterval(() => {
+      if (!document.hidden) setTick((n) => n + 1);
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [view, paused]);
   const pending = shownScope !== scope;
+  const [shownView, shownFilter] = shownScope.split(':');
   return (
     <section
       aria-label="Coin flip history"
@@ -303,12 +366,38 @@ export function CoinFlipHistory({
           Coin flip history
         </h2>
       </div>
-      {history && history.totals.head + history.totals.tail > 0 && (
-        <div className="grid grid-cols-2 gap-3">
-          <LandedTile side="head" count={history.totals.head} />
-          <LandedTile side="tail" count={history.totals.tail} />
+      {everyone && (
+        <div
+          role="group"
+          aria-label="Whose flips"
+          className="grid grid-cols-2 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 @2xl:max-w-xs"
+        >
+          {VIEWS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={view === id}
+              disabled={paused}
+              onClick={() => {
+                setView(id);
+                setFilter('all');
+                setPage(1);
+              }}
+              className={segment(view === id)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       )}
+      {view === 'mine' &&
+        history?.totals &&
+        history.totals.head + history.totals.tail > 0 && (
+          <div className="grid grid-cols-2 gap-3">
+            <LandedTile side="head" count={history.totals.head} />
+            <LandedTile side="tail" count={history.totals.tail} />
+          </div>
+        )}
       <div
         role="group"
         aria-label="Filter flips by result"
@@ -324,13 +413,7 @@ export function CoinFlipHistory({
               setFilter(id);
               setPage(1);
             }}
-            className={cn(
-              'flex min-h-10 items-center justify-center gap-1 rounded-full px-1 text-[12px] font-semibold transition-colors disabled:opacity-50',
-              'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-              filter === id
-                ? 'bg-neutral-50 text-neutral-950'
-                : 'text-neutral-400 hover:text-white',
-            )}
+            className={segment(filter === id)}
           >
             {id !== 'all' && (
               <span
@@ -363,11 +446,13 @@ export function CoinFlipHistory({
         >
           {history.rounds.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
-              {shownScope.startsWith('won')
+              {shownFilter === 'won'
                 ? 'No won flips yet.'
-                : shownScope.startsWith('lost')
+                : shownFilter === 'lost'
                   ? 'No lost flips yet.'
-                  : 'Your completed flips will appear here.'}
+                  : shownView === 'everyone'
+                    ? 'No flips yet.'
+                    : 'Your completed flips will appear here.'}
             </div>
           ) : (
             // Rows keep their keys, so a new flip drops in alone and the rest
@@ -390,27 +475,30 @@ export function CoinFlipHistory({
           )}
         </div>
       )}
-      {history && history.count > 10 && (
-        <div className="flex items-center justify-between gap-3">
-          <Pill
-            variant="secondary"
-            disabled={paused || pending || page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Previous
-          </Pill>
-          <span className="text-sm text-neutral-400">
-            {page} / {Math.ceil(history.count / 10)}
-          </span>
-          <Pill
-            variant="secondary"
-            disabled={paused || pending || page * 10 >= history.count}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </Pill>
-        </div>
-      )}
+      {history &&
+        view === 'mine' &&
+        shownView === 'mine' &&
+        history.count > 10 && (
+          <div className="flex items-center justify-between gap-3">
+            <Pill
+              variant="secondary"
+              disabled={paused || pending || page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              Previous
+            </Pill>
+            <span className="text-sm text-neutral-400">
+              {page} / {Math.ceil(history.count / 10)}
+            </span>
+            <Pill
+              variant="secondary"
+              disabled={paused || pending || page * 10 >= history.count}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </Pill>
+          </div>
+        )}
     </section>
   );
 }

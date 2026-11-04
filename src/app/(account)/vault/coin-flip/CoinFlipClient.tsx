@@ -1198,6 +1198,7 @@ export function CoinFlipClient({
         </p>
       </details>
       <CoinFlipHistory
+        everyone
         refresh={receiptVisible ? historyRevision : 0}
         paused={phase === 'submitting' || phase === 'animating'}
         onOpen={openRound}

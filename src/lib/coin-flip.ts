@@ -82,6 +82,20 @@ export const CoinFlipHistorySchema = z.object({
     tail: z.number().int().nonnegative(),
   }),
 });
+// Every player's latest settled flips (the page's Everyone view), each with
+// the player's public display fields, as the Just Pulled feed shows them.
+export const CoinFlipFeedSchema = z.object({
+  rounds: z.array(
+    CoinFlipRoundSchema.and(
+      z.object({
+        who: z.string(),
+        seed: z.number().nullable(),
+        avatar_url: z.string().nullable(),
+        frame_url: z.string().nullable(),
+      }),
+    ),
+  ),
+});
 export const CoinFlipSettingsSchema = z.object({
   enabled: z.boolean(),
   eligible: z.boolean(),
@@ -91,6 +105,9 @@ export const CoinFlipSettingsSchema = z.object({
 export type CoinFlipRound = z.infer<typeof CoinFlipRoundSchema>;
 export type CoinFlipSettings = z.infer<typeof CoinFlipSettingsSchema>;
 export type CoinFlipHistory = z.infer<typeof CoinFlipHistorySchema>;
+export type CoinFlipFeedRound = z.infer<
+  typeof CoinFlipFeedSchema
+>['rounds'][number];
 export type CoinFlipHistoryFilter = 'all' | 'won' | 'lost';
 export type CoinFlipFailure = {
   ok: false;
