@@ -10,7 +10,7 @@ export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse):
   const [config, wallet, group] = await Promise.all([packs.coinFlipSettings(), packs.walletSummary(req.auth_context.actor_id), resolveGroupPolicyForCustomer(req.scope, req.auth_context.actor_id)]);
   let reason: string | null = config.enabled ? null : 'Coin flip is currently paused.';
   if (config.enabled) {
-    try { assertCoinFlipEligible(wallet, group?.policy.withdrawals_blocked === true); }
+    try { assertCoinFlipEligible(wallet, group?.policy ?? null); }
     catch (error) {
       if (!(error instanceof MedusaError)) throw error;
       reason = error.message;

@@ -87,6 +87,21 @@ it('shows published settings while keeping admin odds out of the storefront', as
   expect(res.json).toHaveBeenCalledWith({ enabled: true, published_win_percent: 50, eligible: true, reason: null });
 });
 
+it.each([
+  ['no group', [], false],
+  ['DEFAULT', [{ id: 'd', name: 'DEFAULT', metadata: {} }], false],
+  ['a plain group', [{ id: 'g', name: 'Influencers', metadata: {} }], true],
+  ['a partner group that may withdraw', [{ id: 'r', name: 'Rebate', metadata: { partner_rate_bp: 300 } }], true],
+])('settings: a player in %s who never topped up is eligible=%s', async (_label, groups, eligible) => {
+  const service = {
+    coinFlipSettings: jest.fn().mockResolvedValue({ enabled: true, published_win_percent: 50 }),
+    walletSummary: jest.fn().mockResolvedValue({ hasTopup: false, isFrozen: false, playthrough: { remaining: 0 } }),
+  };
+  const res = { json: jest.fn() };
+  await settings({ auth_context: { actor_id: 'owner' }, scope: { resolve: (key: string) => key === 'customer' ? { listCustomerGroups: async () => groups } : service } } as never, res as never);
+  expect(res.json.mock.calls[0][0]).toMatchObject({ eligible, reason: eligible ? null : expect.stringMatching(/top up/i) });
+});
+
 describe('everyone feed', () => {
   beforeEach(() => clearRecentCoinFlipsCache());
   const feed = (rounds: unknown[], disabled: string[] = []) => {
