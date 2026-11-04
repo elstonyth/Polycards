@@ -2,7 +2,7 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
-import { USERNAME_RE } from '../../src/utils/profile-handle';
+import { USERNAME_RE, generatedUsername } from '../../src/utils/profile-handle';
 import { clearProfileCache } from '../../src/api/store/profiles/[handle]/route';
 import { clearLeaderboardCache } from '../../src/api/store/leaderboard/route';
 import { myrDisplay as MYR, postStoreCustomer, unwrapResponse } from './utils';
@@ -734,6 +734,191 @@ medusaIntegrationTestRunner({
           expect(name).toMatch(/^[A-Za-z0-9_-]{3,30}$/);
           expect((await getProfile(name)).status).toBe(200);
         }
+      });
+
+      // The reported case (2026-11-04). A nameless signup gets a generated
+      // name. When that name was free as a NAME but was still another
+      // player's HANDLE (they had renamed away), the account got the name
+      // Collector6340 and the handle Collector63408743. When the name itself
+      // was taken, both came out with 8 digits. Now the number is re-rolled
+      // until it is free in both places, so name and handle match.
+      it('a taken generated name re-rolls its number, and name and handle match', async () => {
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        const signUpNameless = async (email: string) => {
+          const reg = await api.post('/auth/customer/emailpass/register', {
+            email,
+            password: PASSWORD,
+          });
+          const created = await unwrapResponse(
+            postStoreCustomer(
+              api,
+              getContainer(),
+              { email },
+              {
+                headers: {
+                  ...storeHeaders,
+                  authorization: `Bearer ${reg.data.token}`,
+                },
+              },
+            ),
+          );
+          const login = await api.post('/auth/customer/emailpass', {
+            email,
+            password: PASSWORD,
+          });
+          return {
+            id: created.data.customer.id as string,
+            token: login.data.token as string,
+          };
+        };
+
+        const handleTaken = await signUpNameless('pp-gen-handle@test.dev');
+        const nameTaken = await signUpNameless('pp-gen-name@test.dev');
+        await customerModule.createCustomers([
+          {
+            email: 'pp-gen-squat-a@test.dev',
+            first_name: 'Renamed_Away',
+            metadata: { handle: generatedUsername(handleTaken.id) },
+          },
+          {
+            email: 'pp-gen-squat-b@test.dev',
+            first_name: generatedUsername(nameTaken.id),
+            metadata: { handle: 'Squatter_B_Own' },
+          },
+        ]);
+
+        for (const { id, token } of [handleTaken, nameTaken]) {
+          const me = await unwrapResponse(
+            api.get('/store/profiles/me', {
+              headers: { ...storeHeaders, authorization: `Bearer ${token}` },
+            }),
+          );
+          expect(me.status).toBe(200);
+          expect(me.data.handle).toMatch(/^Collector\d{4}$/);
+          expect(me.data.handle).not.toBe(generatedUsername(id));
+          const customer = await customerModule.retrieveCustomer(id);
+          expect(customer.first_name).toBe(me.data.handle);
+        }
+      });
+
+      // The race a review found: the first-login step reads the name, a
+      // backfill or rename changes it, then the handle is claimed with the
+      // stale copy. The name read under the lock wins.
+      it('freezes the name the account has now, not the caller copy', async () => {
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [renamed] = await customerModule.createCustomers([
+          { email: 'pp-stale@test.dev', first_name: 'Current_Name' },
+        ]);
+        expect(
+          await packs.claimHandle({
+            customerId: renamed.id,
+            desired: 'Collector12345678',
+          }),
+        ).toBe('Current_Name');
+      });
+
+      // A handle frozen later must not land on a name someone else holds:
+      // that player may have no handle yet, and would then get a different one.
+      it("a handle never takes another player's display name", async () => {
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [owner, other] = await customerModule.createCustomers([
+          { email: 'pp-hn-owner@test.dev', first_name: 'Name_Only_Owner' },
+          { email: 'pp-hn-other@test.dev' },
+        ]);
+        const theirs = await packs.claimHandle({
+          customerId: other.id,
+          desired: 'Name_Only_Owner',
+        });
+        expect(theirs).toMatch(/^Name_Only_Owner\d{4}$/);
+        // The name's owner still gets the matching handle on first login.
+        expect(
+          await packs.claimHandle({
+            customerId: owner.id,
+            desired: 'Name_Only_Owner',
+          }),
+        ).toBe('Name_Only_Owner');
+      });
+
+      // metadata.handle_alias: an old handle kept after a one-off move. The old
+      // link must still find the player (and answer with the current handle,
+      // which the storefront redirects to), and nobody else may take it as a
+      // handle or a name. Its owner may take it back as a name.
+      it('an old handle kept as an alias still resolves and stays reserved', async () => {
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [moved] = await customerModule.createCustomers([
+          {
+            email: 'pp-alias-owner@test.dev',
+            first_name: 'Moved_Handle',
+            metadata: { handle: 'Moved_Handle', handle_alias: 'Old_Alias_77' },
+          },
+        ]);
+
+        const old = await getProfile('old_alias_77');
+        expect(old.status).toBe(200);
+        expect(old.data.handle).toBe('Moved_Handle');
+        expect((await getProfile('Moved_Handle')).data.handle).toBe(
+          'Moved_Handle',
+        );
+
+        const token = await registerCustomer('pp-alias-taker@test.dev');
+        const rename = (first_name: string, bearer: string) =>
+          unwrapResponse(
+            api.post(
+              '/store/customers/me',
+              { first_name },
+              {
+                headers: { ...storeHeaders, authorization: `Bearer ${bearer}` },
+              },
+            ),
+          );
+        const taken = await rename('Old_Alias_77', token);
+        expect(taken.status).toBe(422);
+        expect(taken.data.message).toMatch(/already taken/i);
+
+        const [other] = await customerModule.createCustomers([
+          { email: 'pp-alias-other@test.dev' },
+        ]);
+        expect(
+          (
+            await packs.claimHandle({
+              customerId: other.id,
+              desired: 'Old_Alias_77',
+            })
+          ).toLowerCase(),
+        ).not.toBe('old_alias_77');
+        expect(
+          (
+            await packs.claimUsername({
+              customerId: other.id,
+              desired: 'Old_Alias_77',
+            })
+          ).toLowerCase(),
+        ).not.toBe('old_alias_77');
+
+        // The owner taking their old name back is not a claim on anyone's.
+        expect(await packs.findCustomerIdByUsername('Old_Alias_77')).toBe(
+          moved.id,
+        );
+
+        // A row edited by hand so one value is a handle AND another row's
+        // alias: the real handle wins, so the lookup is never ambiguous.
+        const [holder, aliased] = await customerModule.createCustomers([
+          {
+            email: 'pp-alias-holder@test.dev',
+            first_name: 'Alias_Holder',
+            metadata: { handle: 'Both_Ways' },
+          },
+          {
+            email: 'pp-alias-aliased@test.dev',
+            first_name: 'Alias_Aliased',
+            metadata: { handle: 'Aliased_Now', handle_alias: 'Both_Ways' },
+          },
+        ]);
+        expect(aliased.id).not.toBe(holder.id);
+        expect(await packs.findCustomerIdByHandle('both_ways')).toBe(holder.id);
       });
 
       // The username guard must NOT reach /store/customers/me/addresses. An

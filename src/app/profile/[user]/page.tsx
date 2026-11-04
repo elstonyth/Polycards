@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { getPublicProfile } from '@/lib/data/profiles';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { getLeaderboard } from '@/lib/data/leaderboard';
@@ -58,9 +58,12 @@ export default async function ProfilePage({
   searchParams,
 }: {
   params: Promise<{ user: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string | string[] }>;
 }) {
-  const [{ user: handle }, { tab }] = await Promise.all([params, searchParams]);
+  const [{ user: handle }, query] = await Promise.all([params, searchParams]);
+  // A repeated key (?tab=a&tab=b) arrives as an array; take the first, or
+  // tabFromParam's toLowerCase throws and the page 500s.
+  const tab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
   // The weekly board is the same memoised read /leaderboard renders, so the
   // profile's rank is that board's row, not a second computation of it.
   // Started alongside, awaited only once there is a profile to rank
@@ -95,6 +98,14 @@ export default async function ProfilePage({
         </div>
       </div>
     );
+  }
+  // An old handle kept as an alias (the 2026-11-04 backfill of 8-digit
+  // "Collector########" handles) answers with the account's current one: send
+  // the visitor to that URL. Case-only differences render as typed, like
+  // before. Temporary (307), not 308, so a browser never caches the move.
+  if (result.profile.handle.toLowerCase() !== handle.toLowerCase()) {
+    const query = tab ? `?tab=${encodeURIComponent(tab)}` : '';
+    redirect(`/profile/${encodeURIComponent(result.profile.handle)}${query}`);
   }
   const view = toProfileView(
     result.profile,

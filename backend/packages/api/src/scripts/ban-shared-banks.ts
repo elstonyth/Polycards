@@ -85,14 +85,16 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
   for (const row of list) {
     const key = payoutAccountKey(row.number, false);
     keys.push({ key, bank: row.bank ?? null });
-    const found: { id: string; handle: string | null }[] = (
+    // An old handle kept as metadata.handle_alias (the 2026-11-04 8-digit
+    // backfill) is still that player: a list written before it names them by it.
+    const found: { id: string; handle: string | null; alias: string | null }[] = (
       await knex.raw(
-        `SELECT c.id, c.metadata->>'handle' AS handle FROM customer c
+        `SELECT c.id, c.metadata->>'handle' AS handle, c.metadata->>'handle_alias' AS alias FROM customer c
            CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array'
              THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a
           WHERE c.deleted_at IS NULL AND ltrim(regexp_replace(a->>'accountNumber', '[^0-9]', '', 'g'), '0') = ?
          UNION
-         SELECT c.id, c.metadata->>'handle' AS handle FROM gateway_withdrawal w
+         SELECT c.id, c.metadata->>'handle' AS handle, c.metadata->>'handle_alias' AS alias FROM gateway_withdrawal w
            JOIN customer c ON c.id = w.customer_id AND c.deleted_at IS NULL
           WHERE w.deleted_at IS NULL AND w.status IN ('pending', 'held', 'settled')
             AND ltrim(regexp_replace(w.account_number, '[^0-9]', '', 'g'), '0') = ?`,
@@ -102,14 +104,17 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
     const listed = new Set(row.handles);
     const handleOf = (f: { handle: string | null }) =>
       (f.handle ?? '').toLowerCase();
-    const notListed = found.filter(
-      (f) => !f.handle || !listed.has(handleOf(f)),
+    const isListed = (f: { handle: string | null; alias: string | null }) =>
+      (!!f.handle && listed.has(handleOf(f))) ||
+      (!!f.alias && listed.has(f.alias.toLowerCase()));
+    const notListed = found.filter((f) => !isListed(f));
+    const foundHandles = new Set(
+      found.flatMap((f) => [handleOf(f), (f.alias ?? '').toLowerCase()]),
     );
-    const foundHandles = new Set(found.map(handleOf));
     const notFound = row.handles.filter((h) => !foundHandles.has(h));
     for (const f of found) {
       onNumbers.add(f.id);
-      if (f.handle && listed.has(handleOf(f))) toBan.set(f.id, f.handle);
+      if (isListed(f)) toBan.set(f.id, f.handle ?? f.alias ?? f.id);
     }
     log(
       `…${key.slice(-4)}: owner ${row.expected ?? row.handles.length}, found ${found.length}` +
@@ -125,17 +130,21 @@ export default async function banSharedBanks({ container, args }: ExecArgs) {
   // A listed handle no longer on its number (its saved list changed) is still
   // the owner's ban: resolve it by handle, and say so.
   const allListed = [...new Set(list.flatMap((r) => r.handles))];
-  const byHandle: { id: string; handle: string }[] = (
+  const byHandle: { id: string; handle: string; alias: string | null }[] = (
     await knex.raw(
-      `SELECT id, metadata->>'handle' AS handle FROM customer
-        WHERE deleted_at IS NULL AND lower(metadata->>'handle') = ANY(string_to_array(?, ','))`,
-      [allListed.join(',')],
+      `SELECT id, metadata->>'handle' AS handle, metadata->>'handle_alias' AS alias FROM customer
+        WHERE deleted_at IS NULL AND (lower(metadata->>'handle') = ANY(string_to_array(?, ','))
+          OR lower(metadata->>'handle_alias') = ANY(string_to_array(?, ',')))`,
+      [allListed.join(','), allListed.join(',')],
     )
   ).rows;
   const handleOnly = byHandle.filter((c) => !onNumbers.has(c.id));
   for (const c of byHandle) toBan.set(c.id, c.handle);
   const missing = allListed.filter(
-    (h) => !byHandle.some((c) => c.handle.toLowerCase() === h),
+    (h) =>
+      !byHandle.some(
+        (c) => c.handle.toLowerCase() === h || c.alias?.toLowerCase() === h,
+      ),
   );
   if (handleOnly.length) {
     log(

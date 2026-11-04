@@ -86,7 +86,8 @@ export const partnerCredentialOf = (
  * groups. No event also means no free-welcome-pack stamp, which is right for
  * an operator-minted account.
  *
- * `displayName` null = auto ("Collector####" from the new id). A typed name
+ * `displayName` null = auto ("Collector" + 4 digits from the new id, 5 or 6
+ * once the 4-digit numbers are crowded; see suffixedUsername). A typed name
  * goes through claimUsername like every other write, so a second account in
  * the same batch gets a numbered variant instead of a unique-index error.
  *
