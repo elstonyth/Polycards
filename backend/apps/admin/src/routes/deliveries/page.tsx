@@ -985,7 +985,7 @@ const DeliveriesPage = () => {
                         <div key={url} className="relative">
                           {/* Tap to see it full size (staff 2026-11-04). */}
                           <a
-                            href={resolveImageUrl(url)}
+                            href={resolveImageUrl(url) || undefined}
                             target="_blank"
                             rel="noopener noreferrer"
                             aria-label="Open delivery photo full size"
