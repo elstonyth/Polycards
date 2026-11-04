@@ -291,7 +291,7 @@ it('says so when there are no flips, and hides the tally and road before any', a
   expect(host.querySelector('[role=img]')).toBeNull();
 });
 
-it('shows how each shown flip landed in one row, newest last and biggest', async () => {
+it('shows how each shown flip landed in one row, the newest last and rippling', async () => {
   const landed = (id: string, side: 'head' | 'tail') => ({
     ...flip('won', []),
     id,
@@ -321,8 +321,10 @@ it('shows how each shown flip landed in one row, newest last and biggest', async
     'Latest results, oldest to newest: Head, Head, Tail',
   );
   expect(road.className).not.toContain('flex-wrap');
-  expect(road.lastElementChild!.className).toContain('size-10');
-  expect(road.firstElementChild!.className).toContain('size-7');
+  // Same size beads; only the newest ripples.
+  expect(road.querySelectorAll('.size-7')).toHaveLength(3);
+  expect(road.querySelectorAll('.animate-ping')).toHaveLength(1);
+  expect(road.lastElementChild!.querySelector('.animate-ping')).not.toBeNull();
   expect(host.textContent).toContain('Latest results');
 });
 

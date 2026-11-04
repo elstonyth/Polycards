@@ -53,30 +53,41 @@ const segment = (on: boolean) =>
   );
 
 // Latest results (owner 2026-11-04, a plain take on a baccarat bead plate): how
-// each flip in the list below landed, in one row with the newest at the right,
-// drawn bigger so it reads as the latest. Head and Tail are not outcomes, so
-// neither takes green: Head is a solid bead, Tail an outlined one.
+// each flip in the list below landed, in one row with the newest at the right.
+// The newest ripples so it reads as the latest. Head and Tail are not outcomes,
+// so neither takes green: Head is a solid bead, Tail an outlined one.
 function Bead({
   side,
-  size = 'md',
+  small = false,
+  newest = false,
 }: {
   side: CoinSide;
-  size?: 'sm' | 'md' | 'lg';
+  small?: boolean;
+  newest?: boolean;
 }) {
-  return (
+  const bead = (
     <span
       aria-hidden
       className={cn(
-        'flex shrink-0 items-center justify-center rounded-full font-bold leading-none',
-        size === 'sm' && 'size-4 text-[9px]',
-        size === 'md' && 'size-7 text-[11px]',
-        size === 'lg' && 'size-10 text-sm',
+        'relative flex shrink-0 items-center justify-center rounded-full font-bold leading-none',
+        small ? 'size-4 text-[9px]' : 'size-7 text-[11px]',
         side === 'head'
           ? 'bg-neutral-100 text-neutral-950'
-          : 'text-white ring-1 ring-white/45 ring-inset',
+          : 'bg-neutral-900 text-white ring-1 ring-white/45 ring-inset',
       )}
     >
       {side === 'head' ? 'H' : 'T'}
+    </span>
+  );
+  if (!newest) return bead;
+  // A ripple behind the bead; with Reduce Motion, a still outline instead.
+  return (
+    <span className="relative flex shrink-0 rounded-full motion-reduce:outline-2 motion-reduce:outline-offset-2 motion-reduce:outline-white/60">
+      <span
+        aria-hidden
+        className="absolute inset-1 animate-ping rounded-full bg-white/50 motion-reduce:hidden"
+      />
+      {bead}
     </span>
   );
 }
@@ -96,11 +107,11 @@ function LatestResults({ rounds }: { rounds: Shown['rounds'] }) {
         </p>
         <p className="flex items-center gap-3 text-[12px] text-neutral-400">
           <span className="flex items-center gap-1.5">
-            <Bead side="head" size="sm" />
+            <Bead side="head" small />
             Head
           </span>
           <span className="flex items-center gap-1.5">
-            <Bead side="tail" size="sm" />
+            <Bead side="tail" small />
             Tail
           </span>
         </p>
@@ -109,15 +120,12 @@ function LatestResults({ rounds }: { rounds: Shown['rounds'] }) {
         role="img"
         aria-label={`Latest results, oldest to newest: ${sides.map(coinSideLabel).join(', ')}`}
         // One row, packed to the right. On a phone the oldest beads run off the
-        // left edge and fade; the list below holds every flip.
-        className="flex items-center justify-end gap-1.5 overflow-hidden [mask-image:linear-gradient(to_left,black_80%,transparent)] @3xl:justify-start @3xl:[mask-image:none]"
+        // left edge and fade; the list below holds every flip. The padding,
+        // cancelled by the margin, leaves the ripple room inside the clip.
+        className="-my-2 flex items-center justify-end gap-1.5 overflow-hidden py-2 pr-2 [mask-image:linear-gradient(to_left,black_80%,transparent)] @3xl:justify-start @3xl:[mask-image:none]"
       >
         {sides.map((side, i) => (
-          <Bead
-            key={i}
-            side={side}
-            size={i === sides.length - 1 ? 'lg' : 'md'}
-          />
+          <Bead key={i} side={side} newest={i === sides.length - 1} />
         ))}
       </div>
     </div>
