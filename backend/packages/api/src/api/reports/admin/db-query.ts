@@ -133,7 +133,9 @@ export function sqlRefusal(sql: unknown): string | null {
   if (REAL_NAMES.test(sql))
     return 'Customers’ real names stay hidden from the desk bots.';
   if (COIN_FLIP_ODDS.test(sql)) {
-    return "Coin flip's actual odds, rolls and odds sets stay hidden from the desk bots: say so, and do not work around this. Flip outcomes and the published chance are on ledger_entry rows of type CF; a flip on tickets alone is a lucky_draw_ticket row with reason coin_flip. For who changed the settings, filter admin_action_audit on entity_type LIKE 'coin%'.";
+    // The results stay open: without that said, a bot asked for one group's
+    // flips gave up rather than join ledger_entry to the groups.
+    return "Coin flip's actual odds, rolls and odds sets stay hidden from the desk bots: say so if asked for them, and do not try to read them another way. Flip results stay open, per player or per group: each settled card flip is a ledger_entry row of type CF (customer_id, occurred_at, wallet_delta = credit paid on a win, vault_delta = minus the vault value forfeited on a loss, payload->>'outcome' won or lost, payload->'cards' each card's value, payload->>'published_win_percent' the chance shown); a flip on tickets alone is a lucky_draw_ticket row with reason coin_flip (delta signed). Split them by group through customer_id, as for any player table. For who changed the settings, filter admin_action_audit on entity_type LIKE 'coin%'.";
   }
   if (BEHIND_THE_MASK.test(sql)) {
     return "Coin flip's actual odds and odds sets stay hidden from the desk bots: read admin_action_audit and customer_group by their bare names, with no schema and no comment after a dot.";
