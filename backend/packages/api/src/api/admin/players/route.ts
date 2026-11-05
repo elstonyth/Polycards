@@ -244,7 +244,10 @@ export async function GET(
             { select: ['id'], order, take: all.length },
           )
         ).map((c) => c.id);
-    const ids = [id, ...ordered.filter((x) => x !== id)].slice(
+    // Pin only a player the ordering still found: one deleted since the
+    // handle lookup would leave an empty slot on page 1.
+    const rest = ordered.filter((x) => x !== id);
+    const ids = (rest.length < ordered.length ? [id, ...rest] : rest).slice(
       offset,
       offset + limit,
     );
