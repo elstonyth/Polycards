@@ -1892,6 +1892,9 @@ export interface PlayerRow {
   id: string;
   email: string;
   name: string | null;
+  /** The permanent profile handle (metadata.handle); null until the first
+   *  login freezes it. The display name can differ from it. */
+  handle: string | null;
   phone: string | null;
   /** Customer-group names — the odds-set membership the operator sees. */
   groups: string[];

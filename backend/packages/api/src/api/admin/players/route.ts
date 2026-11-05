@@ -205,14 +205,61 @@ export async function GET(
   }
   // Before the page: the vault sort orders by the value shown at this rate.
   const fx = await resolveFxRate(packs);
-  const [page, total] = PLAYER_SORTS.has(sortKey)
-    ? await sqlSortedPage()
-    : await customers.listAndCountCustomers(customerFilters, {
-        skip: offset,
-        take: limit,
-        order,
-        relations: ['groups'],
-      });
+  // The exact handle match (when the group kept it) is the player support was
+  // sent: it leads the list on every sort, the other text matches follow.
+  // Without it, a search for Collector0043 could list Collector00439 above it.
+  const pinned =
+    byHandle && Array.isArray(filters.id) && filters.id.includes(byHandle)
+      ? byHandle
+      : null;
+  const [page, total] = pinned
+    ? await pinnedPage(pinned, filters.id as string[])
+    : PLAYER_SORTS.has(sortKey)
+      ? await sqlSortedPage()
+      : await customers.listAndCountCustomers(customerFilters, {
+          skip: offset,
+          take: limit,
+          order,
+          relations: ['groups'],
+        });
+
+  // A handle search is an explicit id list of at most 1001 players: order it
+  // whole, put the pinned player first, then cut the page.
+  async function pinnedPage(id: string, all: string[]) {
+    const ordered = PLAYER_SORTS.has(sortKey)
+      ? (
+          await packs.playerIdsSorted({
+            key: sortKey as PlayerSort,
+            dir: sortDir,
+            ids: all,
+            window,
+            fx,
+            limit: all.length,
+            offset: 0,
+          })
+        ).ids
+      : (
+          await customers.listCustomers(
+            { id: all },
+            { select: ['id'], order, take: all.length },
+          )
+        ).map((c) => c.id);
+    // Pin only a player the ordering still found: one deleted since the
+    // handle lookup would leave an empty slot on page 1.
+    const rest = ordered.filter((x) => x !== id);
+    const ids = (rest.length < ordered.length ? [id, ...rest] : rest).slice(
+      offset,
+      offset + limit,
+    );
+    const rows = ids.length
+      ? await customers.listCustomers(
+          { id: ids },
+          { take: ids.length, relations: ['groups'] },
+        )
+      : [];
+    const byId = new Map(rows.map((c) => [c.id, c]));
+    return [ids.flatMap((x) => byId.get(x) ?? []), ordered.length] as const;
+  }
 
   // The same filters, ordered in SQL: the sorted ids come from SQL, then the
   // customers are loaded and put back in that order.
@@ -281,6 +328,10 @@ export async function GET(
         id: c.id,
         email: c.email,
         name,
+        // The permanent profile handle, so a search can be read at a glance:
+        // the display name can differ from it.
+        handle:
+          typeof c.metadata?.handle === 'string' ? c.metadata.handle : null,
         phone: c.phone ?? null,
         groups: (c.groups ?? []).map((g) => g.name),
         // The EFFECTIVE player group (the odds engine's rule), null = the
