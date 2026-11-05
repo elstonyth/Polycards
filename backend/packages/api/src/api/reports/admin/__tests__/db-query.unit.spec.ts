@@ -8,6 +8,7 @@ import {
   sqlRefusal,
   wrapQuery,
 } from '../db-query';
+import { EFFECTIVE_GROUP_SQL } from '../../sql';
 
 describe('sqlRefusal', () => {
   it.each([
@@ -34,6 +35,9 @@ describe('sqlRefusal', () => {
     // Outcomes and the public chance stay readable; only the actual odds hide.
     "SELECT metadata->>'published_win_percent' FROM ledger_entry WHERE type = 'CF'",
     "SELECT * FROM admin_action_audit WHERE action = 'edit_odds_set'",
+    // One group's flip results, as the db_query tool and the refusal teach.
+    `SELECT payload->>'outcome' AS outcome, count(*) AS flips, sum(wallet_delta) AS paid, sum(vault_delta) AS forfeited FROM ledger_entry WHERE type = 'CF' AND deleted_at IS NULL AND customer_id NOT IN (SELECT customer_id FROM (${EFFECTIVE_GROUP_SQL}) eff) GROUP BY 1`,
+    "SELECT sum(delta) AS tickets FROM lucky_draw_ticket WHERE reason = 'coin_flip' AND deleted_at IS NULL",
   ])('runs %p', (sql) => {
     expect(sqlRefusal(sql)).toBeNull();
   });
@@ -368,13 +372,13 @@ describe('sqlForLog', () => {
     ).toBe("SELECT * FROM customer WHERE email = '…'");
     expect(
       sqlForLog(
-        'SELECT 1 AS "o\'brien" /* don\'t */ WHERE note = E\'it\\\'s\' AND email = \'ace@example.com\'',
+        "SELECT 1 AS \"o'brien\" /* don't */ WHERE note = E'it\\'s' AND email = 'ace@example.com'",
       ),
-    ).toBe('SELECT 1 AS "…" WHERE note = E\'…\' AND email = \'…\'');
+    ).toBe("SELECT 1 AS \"…\" WHERE note = E'…' AND email = '…'");
     // An unpaired quote still never shows an email or a number.
-    expect(sqlForLog("WHERE a = 'x AND email = ace@example.com AND n = 5550001234")).toBe(
-      "WHERE a = 'x AND email = …@… AND n = #",
-    );
+    expect(
+      sqlForLog("WHERE a = 'x AND email = ace@example.com AND n = 5550001234"),
+    ).toBe("WHERE a = 'x AND email = …@… AND n = #");
   });
 
   it('keeps a log line short', () => {
