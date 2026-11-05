@@ -8,6 +8,7 @@ import {
   sqlRefusal,
   wrapQuery,
 } from '../db-query';
+import { EFFECTIVE_GROUP_SQL } from '../../sql';
 
 describe('sqlRefusal', () => {
   it.each([
@@ -35,7 +36,7 @@ describe('sqlRefusal', () => {
     "SELECT metadata->>'published_win_percent' FROM ledger_entry WHERE type = 'CF'",
     "SELECT * FROM admin_action_audit WHERE action = 'edit_odds_set'",
     // One group's flip results, as the db_query tool and the refusal teach.
-    "SELECT payload->>'outcome' AS outcome, count(*) AS flips, sum(wallet_delta) AS paid, sum(vault_delta) AS forfeited FROM ledger_entry WHERE type = 'CF' AND deleted_at IS NULL AND customer_id NOT IN (SELECT cgc.customer_id FROM customer_group_customer cgc JOIN customer_group cg ON cg.id = cgc.customer_group_id AND cg.deleted_at IS NULL WHERE cgc.deleted_at IS NULL AND cg.name IS DISTINCT FROM 'DEFAULT' AND cg.metadata->'is_default' IS DISTINCT FROM 'true'::jsonb) GROUP BY 1",
+    `SELECT payload->>'outcome' AS outcome, count(*) AS flips, sum(wallet_delta) AS paid, sum(vault_delta) AS forfeited FROM ledger_entry WHERE type = 'CF' AND deleted_at IS NULL AND customer_id NOT IN (SELECT customer_id FROM (${EFFECTIVE_GROUP_SQL}) eff) GROUP BY 1`,
     "SELECT sum(delta) AS tickets FROM lucky_draw_ticket WHERE reason = 'coin_flip' AND deleted_at IS NULL",
   ])('runs %p', (sql) => {
     expect(sqlRefusal(sql)).toBeNull();
