@@ -404,6 +404,39 @@ medusaIntegrationTestRunner({
         );
       });
 
+      // Support types the handle a player sent: that player leads the list on
+      // every sort, both directions, and the other text matches follow. Before,
+      // "Collector0043" could list Collector00439 above the exact match.
+      it('?q= equal to one handle lists that player first on every sort, and pages', async () => {
+        for (const sort of [
+          'created_at:asc',
+          'created_at:desc',
+          'email:desc',
+          'name:asc',
+          'spend:desc',
+          'spend:asc',
+        ]) {
+          const res = await list(`?q=${B_HANDLE}&sort=${sort}`);
+          expect(res.status).toBe(200);
+          expect(res.data.total).toBe(2);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          expect(res.data.players.map((p: any) => p.id)).toEqual([bId, aId]);
+        }
+        const first = await list(`?q=${B_HANDLE}&limit=1`);
+        const second = await list(`?q=${B_HANDLE}&limit=1&offset=1`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect(first.data.players.map((p: any) => p.id)).toEqual([bId]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect(second.data.players.map((p: any) => p.id)).toEqual([aId]);
+        expect(second.data.total).toBe(2);
+      });
+
+      it('each row carries the profile handle', async () => {
+        const res = await list();
+        expect(rowFor(res, aId).handle).toBe(A_HANDLE);
+        expect(rowFor(res, bId).handle).toBe(B_HANDLE);
+      });
+
       it('pages with limit/offset and rejects limit > 200', async () => {
         const first = await list('?limit=1&offset=0');
         expect(first.status).toBe(200);

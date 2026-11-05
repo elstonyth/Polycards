@@ -452,7 +452,7 @@ const PlayersPage = () => {
                               size="xsmall"
                               className="text-ui-fg-subtle block truncate"
                             >
-                              {p.email}
+                              {p.handle ? `@${p.handle} · ${p.email}` : p.email}
                             </Text>
                           </span>
                         </div>
