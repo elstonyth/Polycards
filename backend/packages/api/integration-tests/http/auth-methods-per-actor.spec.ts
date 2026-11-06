@@ -7,6 +7,14 @@ jest.setTimeout(240 * 1000);
 // (security audit 2026-11-07). Without an allowlist Medusa lets every
 // registered provider serve every actor, the admin login included.
 // medusa-config's http.authMethodsPerActor is the allowlist.
+//
+// Google is registered here as in prod (medusa-config needs all three), so the
+// customer case proves a sign-in really starts. Starting one only builds the
+// Google URL: nothing is sent to Google.
+process.env.GOOGLE_CLIENT_ID = 'test-client.apps.googleusercontent.com';
+process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
+process.env.GOOGLE_CALLBACK_URL = 'http://localhost:4000/auth/google/callback';
+
 const NOT_ALLOWED = /not allowed to use the auth provider google/;
 
 medusaIntegrationTestRunner({
@@ -38,9 +46,12 @@ medusaIntegrationTestRunner({
         expect(String(res.data?.message)).not.toMatch(/not allowed/);
       });
 
-      it('still lets customers start a Google sign-in', async () => {
+      it('still starts a Google sign-in for customers', async () => {
         const res = await unwrapResponse(api.post('/auth/customer/google', {}));
-        expect(String(res.data?.message)).not.toMatch(NOT_ALLOWED);
+        expect(res.status).toBe(200);
+        expect(res.data.location).toMatch(
+          /^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/,
+        );
       });
     });
   },

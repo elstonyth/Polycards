@@ -218,6 +218,8 @@ describe('maskedViewSql', () => {
     const audit = maskedViewSql('admin_action_audit', ['before', 'after']);
     expect(audit).toMatch(/real_\?name/);
     expect(audit).toMatch(/password/);
+    // Each matched value is replaced whole, not echoed back.
+    expect(audit).toContain(`'"\\1": "[hidden]"', 'gi')::jsonb AS "after"`);
   });
 
   it('refuses to build a view that would pass a renamed column unmasked', () => {
