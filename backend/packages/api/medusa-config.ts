@@ -245,6 +245,14 @@ module.exports = defineConfig({
       vendorCors: process.env.VENDOR_CORS!,
       jwtSecret: secretFromEnv('JWT_SECRET'),
       cookieSecret: secretFromEnv('COOKIE_SECRET'),
+      // Staff and sellers sign in with a password only; customers also with
+      // Google (security audit 2026-11-07). Without this allowlist Medusa lets
+      // every registered provider serve every actor, the admin login included.
+      authMethodsPerActor: {
+        user: ['emailpass'],
+        member: ['emailpass'],
+        customer: ['emailpass', 'google'],
+      },
     },
   },
   featureFlags: {

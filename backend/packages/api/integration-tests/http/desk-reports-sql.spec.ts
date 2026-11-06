@@ -19,6 +19,15 @@ process.env.DESK_SQL_TIMEOUT_MS = '1500';
 
 const PASSWORD = 'Sup3r-secret-pw';
 const REAL_NAME = 'Tan Ah Kow bin Ali';
+// Shorter than the value mask's 6-character floor.
+const SHORT_NAME = 'Ooi';
+// Only the audit's key mask stands between this and a reader: it is no
+// partner login, so the value scrub does not know it.
+const AUDIT_PASSWORD = 'Audit-pw-9Q';
+// A query can hand back a secret in a shape no value mask recognizes and
+// undo it at home (security audit 2026-11-07): these undo the two shapes.
+const reversed = (s: string) => [...s].reverse().join('');
+const fromBase64 = (s: string) => Buffer.from(s, 'base64').toString('utf8');
 const SLOW =
   'SELECT count(*) FROM generate_series(1, 100000) a, generate_series(1, 100000) b';
 
@@ -156,6 +165,21 @@ medusaIntegrationTestRunner({
           expect(res.status).toBe(200);
           expect(JSON.stringify(res.data)).not.toContain(PASSWORD);
         }
+        for (const [sql, undo] of [
+          [
+            `SELECT reverse(metadata::text) AS m FROM customer ${where}`,
+            reversed,
+          ],
+          [`SELECT reverse(c::text) AS m FROM customer c ${where}`, reversed],
+          [
+            `SELECT encode(convert_to(metadata::text, 'UTF8'), 'base64') AS m FROM customer ${where}`,
+            fromBase64,
+          ],
+        ] as const) {
+          const res = await query(sql);
+          expect(res.status).toBe(200);
+          expect(undo(String(res.data.rows[0].m))).not.toContain(PASSWORD);
+        }
         const whole = await query(`SELECT metadata FROM customer ${where}`);
         expect(whole.data.rows[0].metadata).toEqual({
           handle: 'partner-ace',
@@ -175,16 +199,49 @@ medusaIntegrationTestRunner({
       });
 
       it('never lets a real name out either, even in a whole row cast to text', async () => {
-        const customer = await customers().createCustomers({
-          email: 'named@test.dev',
-        });
+        const [customer, short] = await customers().createCustomers([
+          { email: 'named@test.dev' },
+          { email: 'short-name@test.dev' },
+        ]);
         const packs = getContainer().resolve(PACKS_MODULE) as unknown as {
           createCustomerAccountStates(
             data: { customer_id: string; real_name: string }[],
           ): Promise<unknown>;
+          createAdminActionAudits(
+            data: {
+              admin_id: string;
+              entity_type: 'customer';
+              entity_id: string;
+              action: 'set_real_name' | 'edit';
+              before: Record<string, unknown>;
+              after: Record<string, unknown>;
+              reason: string;
+            }[],
+          ): Promise<unknown>;
         };
         await packs.createCustomerAccountStates([
           { customer_id: customer.id, real_name: REAL_NAME },
+          { customer_id: short.id, real_name: SHORT_NAME },
+        ]);
+        await packs.createAdminActionAudits([
+          {
+            admin_id: 'desk-sql-test',
+            entity_type: 'customer',
+            entity_id: customer.id,
+            action: 'set_real_name',
+            before: { real_name: null },
+            after: { real_name: REAL_NAME },
+            reason: 'real name check',
+          },
+          {
+            admin_id: 'desk-sql-test',
+            entity_type: 'customer',
+            entity_id: short.id,
+            action: 'edit',
+            before: { note: 'kept' },
+            after: { note: 'kept', login: { password: AUDIT_PASSWORD } },
+            reason: 'password key check',
+          },
         ]);
         const where = `WHERE s.customer_id = '${customer.id}'`;
         for (const sql of [
@@ -196,6 +253,43 @@ medusaIntegrationTestRunner({
           expect(res.status).toBe(200);
           expect(JSON.stringify(res.data)).not.toContain(REAL_NAME);
         }
+        for (const [sql, undo] of [
+          [
+            `SELECT reverse(s::text) AS m FROM customer_account_state s ${where}`,
+            reversed,
+          ],
+          [
+            `SELECT encode(convert_to(s::text, 'UTF8'), 'base64') AS m FROM customer_account_state s ${where}`,
+            fromBase64,
+          ],
+          [
+            `SELECT reverse(a.after::text) AS m FROM admin_action_audit a WHERE a.entity_id = '${customer.id}'`,
+            reversed,
+          ],
+        ] as const) {
+          const res = await query(sql);
+          expect(res.status).toBe(200);
+          expect(undo(String(res.data.rows[0].m))).not.toContain(REAL_NAME);
+        }
+        const shortRow = await query(
+          `SELECT s::text AS row FROM customer_account_state s WHERE s.customer_id = '${short.id}'`,
+        );
+        expect(shortRow.data.rows[0].row).not.toContain(SHORT_NAME);
+        // A key built from pieces passes the name check; the view still hides
+        // the value, and keeps whether one is set.
+        const built = await query(
+          `SELECT to_jsonb(s) ->> ('real_' || 'name') AS n FROM customer_account_state s WHERE s.customer_id = '${short.id}'`,
+        );
+        expect(built.data.rows).toEqual([{ n: '[hidden]' }]);
+        // A password key in the audit is hidden at the source too, and the
+        // masked JSON stays valid.
+        const audit = await query(
+          `SELECT reverse(a.after::text) AS m FROM admin_action_audit a WHERE a.entity_id = '${short.id}'`,
+        );
+        expect(audit.status).toBe(200);
+        const after = JSON.parse(reversed(String(audit.data.rows[0].m)));
+        expect(after).toEqual({ note: 'kept', login: { password: '[hidden]' } });
+        expect(JSON.stringify(audit.data)).not.toContain(reversed(AUDIT_PASSWORD));
         expect(
           (await query(`SELECT real_name AS n FROM customer_account_state`))
             .data.message,
@@ -495,11 +589,16 @@ medusaIntegrationTestRunner({
         expect(res.data.message).toMatch(/odds sets stay hidden/);
       });
 
-      it('masks both tables for every query, even one naming neither', async () => {
+      it('masks every masked table for every query, even one naming none', async () => {
         const views = await query(
-          'SELECT count(*)::int AS n FROM pg_class WHERE relnamespace = pg_my_temp_schema()',
+          'SELECT relname FROM pg_class WHERE relnamespace = pg_my_temp_schema() ORDER BY relname',
         );
-        expect(views.data.rows).toEqual([{ n: 2 }]);
+        expect(views.data.rows).toEqual([
+          { relname: 'admin_action_audit' },
+          { relname: 'customer' },
+          { relname: 'customer_account_state' },
+          { relname: 'customer_group' },
+        ]);
         // It is the view a named table resolves to, however it is spelled.
         const res = await query(
           `SELECT c.relkind FROM pg_class c WHERE c.oid = 'CUSTOMER_GROUP'::regclass`,
