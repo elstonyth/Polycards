@@ -17714,11 +17714,19 @@ class PacksModuleService extends MedusaService({
     // them (above); this catches a ranking frozen by an earlier tick. Read once
     // for the whole ranking, outside the per-winner transactions.
     const deleted = await this.deletedCustomerIds(ranking, sharedContext);
+    // Re-read right before paying: a ranking frozen by an earlier tick still
+    // holds anyone disabled since, and a fresh one is a moment old. Their slot
+    // is skipped, not re-numbered, so a frozen ranking's ranks stay put.
+    const disabledNow = await this.disabledCustomerIds(
+      ranking,
+      sharedContext,
+    );
 
     const winners: SettledWinner[] = [];
     for (const [i, customerId] of ranking.entries()) {
       if (settledCustomers.has(customerId)) continue; // paid on a prior tick
       if (deleted.has(customerId)) continue; // account deleted; nobody to pay
+      if (disabledNow.has(customerId)) continue; // disabled; not paid
       const payout = byRank.get(i + 1);
       if (!payout || (payout.credits <= 0 && payout.cardIds.length === 0)) {
         continue; // rank pays nothing this week

@@ -560,8 +560,14 @@ describe('settleChallengeWeek — deleted winners', () => {
       expect.anything(),
     );
     expect(svc.settleChallengeWinner).toHaveBeenCalledTimes(1);
+    // The rank-1 PRIZE too, not just the label: rank 1 with the rank-2 payout
+    // would still match on customerId and rank alone.
     expect(svc.settleChallengeWinner).toHaveBeenCalledWith(
-      expect.objectContaining({ customerId: 'cus_next', rank: 1 }),
+      expect.objectContaining({
+        customerId: 'cus_next',
+        rank: 1,
+        payout: expect.objectContaining({ rank: 1, credits: 100 }),
+      }),
     );
     // Over-fetched, so dropping players cannot shorten the paid top 10.
     expect(svc.challengeWeekTop).toHaveBeenCalledWith(
@@ -571,8 +577,9 @@ describe('settleChallengeWeek — deleted winners', () => {
   });
 
   // A ranking frozen by an earlier tick is replayed as is: re-filtering it
-  // would shift ranks between ticks of the same week.
-  it('replays a frozen ranking without re-filtering it', async () => {
+  // would shift ranks between ticks of the same week. A player disabled since
+  // that tick is skipped, and nobody below them moves up.
+  it('replays a frozen ranking, skipping a player disabled since', async () => {
     const svc = mkSettle([], ['cus_off'], []);
     svc.listChallengePayouts = jest.fn().mockResolvedValue([
       {
@@ -591,8 +598,13 @@ describe('settleChallengeWeek — deleted winners', () => {
     ]);
     await svc.settleChallengeWeek({}, CTX);
     expect(svc.challengeWeekTop).not.toHaveBeenCalled();
+    expect(svc.settleChallengeWinner).toHaveBeenCalledTimes(1);
     expect(svc.settleChallengeWinner).toHaveBeenCalledWith(
-      expect.objectContaining({ customerId: 'cus_next', rank: 3 }),
+      expect.objectContaining({
+        customerId: 'cus_next',
+        rank: 3,
+        payout: expect.objectContaining({ rank: 3, credits: 25 }),
+      }),
     );
   });
 });
