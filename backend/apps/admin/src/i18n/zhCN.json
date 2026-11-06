@@ -375,6 +375,7 @@
       "unban_account": "解封",
       "unban_bank_number": "解封银行账号",
       "bank_save_check": "查银行账号为何加不进",
+      "account_links": "可能同一人的账号",
       "free_bank_number": "释放银行账号",
       "clear_name_clash": "清除同名",
       "economy": "经济总览",
