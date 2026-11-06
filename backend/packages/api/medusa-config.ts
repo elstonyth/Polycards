@@ -245,6 +245,17 @@ module.exports = defineConfig({
       vendorCors: process.env.VENDOR_CORS!,
       jwtSecret: secretFromEnv('JWT_SECRET'),
       cookieSecret: secretFromEnv('COOKIE_SECRET'),
+      // Staff and sellers sign in with a password only (security audit
+      // 2026-11-07). With no allowlist every registered provider serves every
+      // actor, so Google, there for customers, also served the admin login:
+      // POST /auth/google/user created an admin from any Google account, or
+      // signed a staff member in through their email's Google account without
+      // the admin password. An actor listed here gets only these providers.
+      authMethodsPerActor: {
+        user: ['emailpass'],
+        member: ['emailpass'],
+        customer: ['emailpass', 'google'],
+      },
     },
   },
   featureFlags: {

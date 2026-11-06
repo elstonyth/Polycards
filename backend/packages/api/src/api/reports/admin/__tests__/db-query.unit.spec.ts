@@ -173,6 +173,9 @@ describe('the tables behind the odds mask', () => {
     'SELECT * FROM public./* /* nested */ */customer_group',
     'SELECT * FROM public.-- x\ncustomer_group',
     'SELECT NULL::public.customer_group',
+    'SELECT reverse(c::text) FROM public.customer c',
+    'SELECT * FROM "public"."customer"',
+    'SELECT * FROM public.customer_account_state',
   ])('refuses %p', (sql) => {
     expect(sqlRefusal(sql)).toMatch(/stay hidden/);
   });
@@ -183,6 +186,8 @@ describe('the tables behind the odds mask', () => {
     'SELECT g.name, m.customer_id FROM customer_group g JOIN public.customer_group_customer m ON m.customer_group_id = g.id',
     'SELECT cg.* /* all */ FROM customer_group cg',
     "SELECT a.after->>'published_win_percent' FROM admin_action_audit a",
+    'SELECT c.email, s.customer_id FROM customer c JOIN customer_account_state s ON s.customer_id = c.id',
+    'SELECT reverse(metadata::text) FROM customer',
   ])('leaves %p to the views', (sql) => {
     expect(sqlRefusal(sql)).toBeNull();
   });
@@ -196,6 +201,21 @@ describe('maskedViewSql', () => {
     );
     expect(sql).toMatch(
       /::jsonb AS "metadata" FROM public\."customer_group" t$/,
+    );
+  });
+
+  it('hides partner passwords and real names but keeps whether one is set', () => {
+    expect(maskedViewSql('customer', ['id', 'email', 'metadata'])).toBe(
+      `CREATE TEMP VIEW "customer" AS SELECT t."id", t."email", CASE WHEN t."metadata" ? 'partner_credential' THEN jsonb_set(t."metadata", '{partner_credential}', '"[hidden]"') ELSE t."metadata" END AS "metadata" FROM public."customer" t`,
+    );
+    expect(
+      maskedViewSql('customer_account_state', ['id', 'real_name', 'frozen']),
+    ).toBe(
+      `CREATE TEMP VIEW "customer_account_state" AS SELECT t."id", CASE WHEN t."real_name" IS NULL THEN NULL ELSE '[hidden]' END AS "real_name", t."frozen" FROM public."customer_account_state" t`,
+    );
+    // The audit's before/after: real names hide by key, like the odds.
+    expect(maskedViewSql('admin_action_audit', ['before', 'after'])).toMatch(
+      /real_\?name/,
     );
   });
 
