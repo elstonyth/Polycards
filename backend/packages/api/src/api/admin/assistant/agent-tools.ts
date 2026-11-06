@@ -2,7 +2,7 @@ import type {
   ICustomerModuleService,
   MedusaContainer,
 } from '@medusajs/framework/types';
-import { Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
@@ -36,6 +36,7 @@ import {
 } from '../../../modules/packs/saved-accounts';
 import { MY_BANKS, SG_BANKS, findBank } from '../../../modules/packs/banks';
 import { withdrawalDetailsError } from '../../../modules/packs/gateway-withdrawal';
+import { accountLinks, VISITOR_NEED, type LinksDb } from './account-links';
 import { namedIn, namedPlayer } from './named';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 
@@ -834,6 +835,48 @@ export const AGENT_TOOLS: AgentTool[] = [
         fixes,
         unchecked,
         can_save: fixes.length > 0 ? false : unchecked.length > 0 ? null : true,
+      });
+    },
+  },
+  {
+    name: 'account_links',
+    label: 'Accounts that may be one person',
+    description:
+      "Other accounts that may belong to the same person, by what is not a bank (owner, 2026-11-06): the same browser or network (IP) seen on both, a saved delivery address that matches, and real names that are one name or where one starts the other. Use it together with ban_reason whenever staff ask whether accounts are related, linked or one person (有关系, 同一个人, same person): ban_reason sees bank numbers and holder names only. Give the player by shown name or profile handle ('@name' means the handle); for two accounts, call it for one and look for the other in its list. These are review signals, never proof and never a ban reason. Say what matched in plain words (the same browser, a network only these two used, the same delivery address, near-identical real names); never repeat an address, IP or real name. If nothing matched, say no signal was found, never that the accounts are unrelated or independent; if checked.browser_and_network is false, say browser and network were not checked.",
+    parameters: {
+      type: 'object',
+      properties: { username: PLAYER_ARG },
+      required: ['username'],
+      additionalProperties: false,
+    },
+    // Address and real name are on the admin player page; browser and network
+    // are fenced like bank details, so that part is checked when it runs.
+    needs: [{ resource: 'customer', operation: 'read' }],
+    run: async (args, ctx) => {
+      const packs = packsOf(ctx);
+      const customerId = await namedPlayer(
+        packs,
+        str(args.username),
+        staffText(ctx),
+        'Ask staff for the player again.',
+        { readOnly: true },
+      );
+      const visitors =
+        ctx.access.superAdmin ||
+        ((await ctx.access.can?.(VISITOR_NEED)) ?? false);
+      const [me] = await whoAre(ctx, [customerId]);
+      return JSON.stringify({
+        player: me.label,
+        ...(await accountLinks({
+          db: ctx.container.resolve<LinksDb>(
+            ContainerRegistrationKeys.PG_CONNECTION,
+          ),
+          packs,
+          customerId,
+          adminId: ctx.access.userId,
+          visitors,
+          label: (ids) => whoAre(ctx, ids),
+        })),
       });
     },
   },
