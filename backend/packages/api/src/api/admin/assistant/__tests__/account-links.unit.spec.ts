@@ -91,7 +91,8 @@ beforeEach(() => {
     ],
     device_total: 1,
     ip: [
-      { ip: IP_PAIR, accounts: 2, customer_ids: ['cus_b'] },
+      // As visitorSignalMatches counts it: the OTHER accounts on the network.
+      { ip: IP_PAIR, accounts: 1, customer_ids: ['cus_b'] },
       {
         ip: IP_CROWD,
         accounts: 40,
@@ -120,6 +121,9 @@ describe('addressKey', () => {
     );
     expect(addressKey(['Blk 5', 'Ang Mo Kio Avenue 3'], '560005')).toBe(
       addressKey(['Block 5 Ang Mo Kio Ave 3'], '560005'),
+    );
+    expect(addressKey(['No. 12, Jalan Contoh'], '93450')).toBe(
+      addressKey(['12 Jalan Contoh'], '93450'),
     );
   });
 
@@ -173,7 +177,21 @@ describe('accountLinks', () => {
     });
     // A crowded network lists only some of its accounts: left out, counted.
     expect(out.accounts.map((a) => a.account)).toEqual(['cus_b shown, open']);
-    expect(out.crowded_networks_left_out).toBe(1);
+    expect(out.networks_left_out).toBe(1);
+  });
+
+  it('says browser and network were not checked when no visit is recorded', async () => {
+    packs.visitorSignalMatches.mockResolvedValue({
+      recorded: false,
+      unsigned: false,
+      device: [],
+      device_total: 0,
+      ip: [],
+      ip_total: 0,
+    });
+    const out = await find(true);
+    expect(out.checked.browser_and_network).toBe(false);
+    expect(out.browser_and_network_note).toMatch(/no visit/i);
   });
 
   it('never hands an IP, address or real name to the model', async () => {

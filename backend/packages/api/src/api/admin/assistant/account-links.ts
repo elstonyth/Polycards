@@ -25,6 +25,8 @@ const MAX_NETWORK_ACCOUNTS = 10;
 const MAX_ACCOUNTS = 20;
 
 const SHORT_FORMS: [RegExp, string][] = [
+  // "No. 12" and "12" are one house number.
+  [/\bno\b/g, ''],
   [/\bjalan\b/g, 'jln'],
   [/\blorong\b/g, 'lrg'],
   [/\btaman\b/g, 'tmn'],
@@ -121,15 +123,19 @@ export async function accountLinks(input: {
     return s;
   };
 
-  let crowded = 0;
+  let leftOut = 0;
+  let recorded = false;
   if (input.visitors) {
     const v = await packs.visitorSignalMatches(customerId);
+    recorded = v.recorded;
     for (const d of v.device) of(d.customer_id).same_browser = true;
     for (const n of v.ip) {
+      // `accounts` counts the OTHER accounts on it: this player makes one more.
       if (n.accounts > MAX_NETWORK_ACCOUNTS) continue;
-      for (const id of n.customer_ids) of(id).shared_networks.push(n.accounts);
+      for (const id of n.customer_ids)
+        of(id).shared_networks.push(n.accounts + 1);
     }
-    crowded =
+    leftOut =
       v.ip_total -
       v.ip.filter((n) => n.accounts <= MAX_NETWORK_ACCOUNTS).length;
     if (v.device_total > 0 || v.ip_total > 0) {
@@ -230,25 +236,30 @@ export async function accountLinks(input: {
   }));
   return {
     checked: {
-      browser_and_network: input.visitors,
+      browser_and_network: input.visitors && recorded,
       delivery_address: keys.size > 0,
       real_name: words.length >= 2,
     },
     accounts,
     accounts_total: links.size,
-    crowded_networks_left_out: crowded,
+    networks_left_out: leftOut,
     ...(accounts.length === 0
       ? {
           summary:
             'No browser, network, delivery address or real name match was found among what was checked. This is not proof the accounts are unrelated: say no signal was found.',
         }
       : {}),
-    ...(input.visitors
-      ? {}
-      : {
+    ...(!input.visitors
+      ? {
           browser_and_network_note:
             'Not checked: the asker’s admin role cannot see browser and network matches (they are fenced like bank details). Say so.',
-        }),
-    note: 'Review signals for support (ADR 0016), never proof and never a ban reason on their own: a person can switch browsers or networks, mobile networks put many strangers on one IP, and a family shares an address. same_browser: the same browser was signed in to both accounts. shared_networks: one number per network (IP) both used, the accounts that used it in all; 2 means only these two. Networks used by more than 10 accounts are left out (crowded_networks_left_out). same_delivery_address: a saved delivery address that matches once spelling is evened out (Jalan/Jln, spaces, commas). real_name: same = one name; part = the shorter name starts the longer. checked says what was looked at: delivery_address false means this player has no usable saved address, real_name false no real name of two words or more. Bank and holder-name links are in ban_reason. Say what matched in plain words; never repeat an address, IP or real name, and never call accounts unrelated or independent.',
+        }
+      : !recorded
+        ? {
+            browser_and_network_note:
+              'Not checked: no visit by this player is recorded (visits are kept from 2026-11-03, for 180 days). Say so.',
+          }
+        : {}),
+    note: 'Review signals for support (ADR 0016), never proof and never a ban reason on their own: a person can switch browsers or networks, mobile networks put many strangers on one IP, and a family shares an address. same_browser: the same browser was signed in to both accounts. shared_networks: one number per network (IP) both used, the accounts that used it in all, this player included; 2 means only these two. networks_left_out: shared networks not looked at, those used by more than 10 other accounts and any past the 10 smallest. same_delivery_address: a saved delivery address that matches once spelling is evened out (Jalan/Jln, spaces, commas). real_name: same = one name; part = the shorter name starts the longer. checked says what was looked at: delivery_address false means this player has no usable saved address, real_name false no real name of two words or more. Bank and holder-name links are in ban_reason. Say what matched in plain words; never repeat an address, IP or real name, and never call accounts unrelated or independent.',
   };
 }
