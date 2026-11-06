@@ -349,7 +349,7 @@ export const TOOLS: AssistantTool[] = [
     name: 'challenge',
     label: 'Weekly challenge',
     description:
-      "The Weekly Pulled Value Challenge. week current (default): the running week exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes with the official card image link, the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). Until the week ends, the top player is the current leader, not the winner. If hidden_players_above_cut is above 0, prizes are paid by original rank, so do not pair displayed ranks with prizes. week next: the next challenge waiting in the admin queue. Amounts in RM (MYR).",
+      "The Weekly Pulled Value Challenge. week current (default): the running week exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes with the official card image link, the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). Until the week ends, the top player is the current leader, not the winner. hidden_players_above_cut counts disabled players left off the board; they are not paid while disabled, and the ranks shown are the ranks paid. week next: the next challenge waiting in the admin queue. Amounts in RM (MYR).",
     parameters: object(weekProp('the running week')),
     needs: [read('challenge')],
     run: report('growth', 'challenge', (a) => ({ week: s(a.week) })),

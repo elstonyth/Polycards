@@ -468,7 +468,11 @@ describe('settleChallengeWeek — deleted winners', () => {
   type SettleSvc = Record<string, jest.Mock> & {
     settleChallengeWeek: PacksModuleService['settleChallengeWeek'];
   };
-  const mkSettle = (deleted: string[]) => {
+  const mkSettle = (
+    deleted: string[],
+    disabledIds: string[] = [],
+    ranked: string[] = ['cus_gone'],
+  ) => {
     const svc = Object.create(
       PacksModuleService.prototype,
     ) as unknown as SettleSvc;
@@ -488,13 +492,23 @@ describe('settleChallengeWeek — deleted winners', () => {
       {
         stage_number: 1,
         threshold_myr: 0,
-        rank_rewards: [{ rank: 1, credits: 100, card_id: null }],
+        rank_rewards: [
+          { rank: 1, credits: 100, card_id: null },
+          { rank: 2, credits: 50, card_id: null },
+        ],
       },
     ]);
     svc.challengeWeekPool = jest.fn().mockResolvedValue(9_999);
     svc.challengeWeekTop = jest
       .fn()
-      .mockResolvedValue([{ customer_id: 'cus_gone' }]);
+      .mockResolvedValue(ranked.map((customer_id) => ({ customer_id })));
+    // Same rule as deletedCustomerIds below: answer the ids actually passed.
+    const off = new Set(disabledIds);
+    svc.disabledCustomerIds = jest
+      .fn()
+      .mockImplementation(
+        async (ids: string[]) => new Set(ids.filter((id) => off.has(id))),
+      );
     svc.listCards = jest.fn().mockResolvedValue([]);
     // Answers the ids it is ACTUALLY given, never a canned Set: a
     // mockResolvedValue here cannot see its own argument, so narrowing the
@@ -533,5 +547,64 @@ describe('settleChallengeWeek — deleted winners', () => {
     const svc = mkSettle([]);
     await svc.settleChallengeWeek({}, CTX);
     expect(svc.settleChallengeWinner).toHaveBeenCalled();
+  });
+
+  // The public board hides a disabled player and re-numbers the rest, so the
+  // player SHOWN at #1 must be PAID rank 1 — not the #2 prize behind a hidden
+  // leader (owner, 2026-11-06).
+  it('drops a disabled leader and pays the next player rank 1', async () => {
+    const svc = mkSettle([], ['cus_off'], ['cus_off', 'cus_next']);
+    await svc.settleChallengeWeek({}, CTX);
+    expect(svc.disabledCustomerIds).toHaveBeenCalledWith(
+      ['cus_off', 'cus_next'],
+      expect.anything(),
+    );
+    expect(svc.settleChallengeWinner).toHaveBeenCalledTimes(1);
+    // The rank-1 PRIZE too, not just the label: rank 1 with the rank-2 payout
+    // would still match on customerId and rank alone.
+    expect(svc.settleChallengeWinner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: 'cus_next',
+        rank: 1,
+        payout: expect.objectContaining({ rank: 1, credits: 100 }),
+      }),
+    );
+    // Over-fetched, so dropping players cannot shorten the paid top 10.
+    expect(svc.challengeWeekTop).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 20 }),
+      expect.anything(),
+    );
+  });
+
+  // A ranking frozen by an earlier tick is replayed as is: re-filtering it
+  // would shift ranks between ticks of the same week. A player disabled since
+  // that tick is skipped, and nobody below them moves up.
+  it('replays a frozen ranking, skipping a player disabled since', async () => {
+    const svc = mkSettle([], ['cus_off'], []);
+    svc.listChallengePayouts = jest.fn().mockResolvedValue([
+      {
+        customer_id: 'cus_paid',
+        snapshot: {
+          pool_myr: 9_999,
+          unlocked_stages: [1],
+          ranking: ['cus_paid', 'cus_off', 'cus_next'],
+          by_rank: {
+            '1': { rank: 1, credits: 100, cardIds: [] },
+            '2': { rank: 2, credits: 50, cardIds: [] },
+            '3': { rank: 3, credits: 25, cardIds: [] },
+          },
+        },
+      },
+    ]);
+    await svc.settleChallengeWeek({}, CTX);
+    expect(svc.challengeWeekTop).not.toHaveBeenCalled();
+    expect(svc.settleChallengeWinner).toHaveBeenCalledTimes(1);
+    expect(svc.settleChallengeWinner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: 'cus_next',
+        rank: 3,
+        payout: expect.objectContaining({ rank: 3, credits: 25 }),
+      }),
+    );
   });
 });
