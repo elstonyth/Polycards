@@ -245,12 +245,9 @@ module.exports = defineConfig({
       vendorCors: process.env.VENDOR_CORS!,
       jwtSecret: secretFromEnv('JWT_SECRET'),
       cookieSecret: secretFromEnv('COOKIE_SECRET'),
-      // Staff and sellers sign in with a password only (security audit
-      // 2026-11-07). With no allowlist every registered provider serves every
-      // actor, so Google, there for customers, also served the admin login:
-      // POST /auth/google/user created an admin from any Google account, or
-      // signed a staff member in through their email's Google account without
-      // the admin password. An actor listed here gets only these providers.
+      // Staff and sellers sign in with a password only; customers also with
+      // Google (security audit 2026-11-07). Without this allowlist Medusa lets
+      // every registered provider serve every actor, the admin login included.
       authMethodsPerActor: {
         user: ['emailpass'],
         member: ['emailpass'],

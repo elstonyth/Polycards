@@ -213,10 +213,11 @@ describe('maskedViewSql', () => {
     ).toBe(
       `CREATE TEMP VIEW "customer_account_state" AS SELECT t."id", CASE WHEN t."real_name" IS NULL THEN NULL ELSE '[hidden]' END AS "real_name", t."frozen" FROM public."customer_account_state" t`,
     );
-    // The audit's before/after: real names hide by key, like the odds.
-    expect(maskedViewSql('admin_action_audit', ['before', 'after'])).toMatch(
-      /real_\?name/,
-    );
+    // The audit's before/after: real names and passwords hide by key, like
+    // the odds.
+    const audit = maskedViewSql('admin_action_audit', ['before', 'after']);
+    expect(audit).toMatch(/real_\?name/);
+    expect(audit).toMatch(/password/);
   });
 
   it('refuses to build a view that would pass a renamed column unmasked', () => {

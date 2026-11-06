@@ -3,12 +3,10 @@ import { unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-// Staff sign in with a password only (security audit 2026-11-07). With no
-// allowlist Medusa lets every registered provider serve every actor, so
-// Google, there for customers, also served the admin and seller logins: POST
-// /auth/google/user then created an admin from any Google account, or signed
-// a staff member in through the Google account of their email, without the
-// admin password. medusa-config's http.authMethodsPerActor is the allowlist.
+// Staff and sellers sign in with a password only; customers also with Google
+// (security audit 2026-11-07). Without an allowlist Medusa lets every
+// registered provider serve every actor, the admin login included.
+// medusa-config's http.authMethodsPerActor is the allowlist.
 const NOT_ALLOWED = /not allowed to use the auth provider google/;
 
 medusaIntegrationTestRunner({

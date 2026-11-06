@@ -180,7 +180,7 @@ const SECRET_VALUES_SQL =
 
 // jsonb::text always writes a key whole and in double quotes, so this finds it
 // at any depth. A value of another shape breaks the cast, which fails closed.
-const KEYS_IN_JSON = String.raw`"((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set|real_?name\w*)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|[^,}\]\s]+)`;
+const KEYS_IN_JSON = String.raw`"((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set|real_?name\w*|\w*password\w*)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|[^,}\]\s]+)`;
 const hideKeys = (column: string) =>
   `regexp_replace(t."${column}"::text, '${KEYS_IN_JSON}', '"\\1": "[hidden]"', 'gi')::jsonb`;
 
