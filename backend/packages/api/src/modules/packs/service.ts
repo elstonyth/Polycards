@@ -17282,7 +17282,8 @@ class PacksModuleService extends MedusaService({
   // Accounts on the admin Automation Accounts list rank (and are paid) here
   // like every other account (owner, 2026-10-26; #827 had kept them off). The
   // public board, /task, the posters, live rank checks AND settleChallengeWeek
-  // all read this query, so the ranks shown are the ranks paid.
+  // all read this query, and the board and settlement both drop disabled
+  // accounts from it, so the ranks shown are the ranks paid.
   @InjectManager()
   async challengeWeekTop(
     opts: ChallengeWeekAnchor & { limit: number },
@@ -17655,11 +17656,20 @@ class PacksModuleService extends MedusaService({
     }
 
     // Rank is frozen with everything else — index + 1 in this list IS the rank.
-    const ranking: string[] = prior?.ranking?.length
-      ? prior.ranking
-      : (
-          await this.challengeWeekTop({ ...week, limit: 10 }, sharedContext)
-        ).map((t) => t.customer_id);
+    // A fresh ranking drops disabled accounts (deleted ones too: the purge
+    // writes a disabled tombstone) and closes the gap, the same filter the
+    // public board applies, so the rank a player is shown is the rank they
+    // are paid (owner, 2026-11-06). Over-fetched so the filter cannot shorten
+    // the top 10. Whoever is disabled when the week is first settled is not
+    // paid; re-enabling them before that tick puts them back.
+    let ranking: string[] = prior?.ranking ?? [];
+    if (ranking.length === 0) {
+      const top = (
+        await this.challengeWeekTop({ ...week, limit: 20 }, sharedContext)
+      ).map((t) => t.customer_id);
+      const disabled = await this.disabledCustomerIds(top, sharedContext);
+      ranking = top.filter((id) => !disabled.has(id)).slice(0, 10);
+    }
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
@@ -17700,8 +17710,9 @@ class PacksModuleService extends MedusaService({
     };
     // A deleted customer keeps their `pull` rows — the books are retained on
     // purpose — so they stay ranked, and settlement would mint real balance and
-    // a real card to an account with no owner. Read once for the whole ranking,
-    // outside the per-winner transactions.
+    // a real card to an account with no owner. A fresh ranking already drops
+    // them (above); this catches a ranking frozen by an earlier tick. Read once
+    // for the whole ranking, outside the per-winner transactions.
     const deleted = await this.deletedCustomerIds(ranking, sharedContext);
 
     const winners: SettledWinner[] = [];
