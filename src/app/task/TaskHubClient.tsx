@@ -518,13 +518,15 @@ export function TaskHubClient({
       });
     // A repeat tap sets the same text, so nothing on screen changed and players
     // read it as a dead button (support chat, 2026-11-06). Flash it on every
-    // notice. Fade and colour only, no movement, so reduced motion needs no
-    // branch; the animation leaves the DOM alone, which keeps it safe under
-    // Chrome page translation.
-    el.animate(
-      [{ opacity: 0.35, backgroundColor: 'rgb(255 255 255 / 0.14)' }],
-      { duration: 450, easing: 'ease-out' },
-    );
+    // notice. The animation leaves the DOM alone, which keeps it safe under
+    // Chrome page translation. Element.animate skips the globals.css
+    // reduced-motion backstop, so reduced motion is checked here: the site
+    // keeps still for those players, fades included.
+    if (!reducedMotion)
+      el.animate(
+        [{ opacity: 0.35, backgroundColor: 'rgb(255 255 255 / 0.14)' }],
+        { duration: 450, easing: 'ease-out' },
+      );
   }, [notice, reducedMotion]);
   const { claim, pendingId } = useClaimTask(setNotice);
   const tabs = useMemo(
