@@ -129,6 +129,51 @@ export type Enrollment = {
   otpauthUrl: string;
 };
 
+// The setup in progress, kept for this tab: a phone's browser often reloads
+// the page after a switch to the authenticator app, and a reload must show
+// the same QR code and key, not a new one (Yuan, 2026-11-07). Cleared once
+// confirmed. Storage can be missing (private mode): then a reload starts over.
+const ENROLLMENT_KEY = 'pc.twoStep.enrollment';
+type KeyStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+/** This tab's storage for the setup in progress, or null where there is none. */
+export const tabStore = (): KeyStore | null => {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
+
+/** The setup this tab started and has not confirmed yet. */
+export function keptEnrollment(store: KeyStore | null): Enrollment | null {
+  try {
+    const raw = store?.getItem(ENROLLMENT_KEY);
+    if (!raw) return null;
+    const e = JSON.parse(raw) as Partial<Enrollment>;
+    return typeof e.factorId === 'string' &&
+      typeof e.secret === 'string' &&
+      typeof e.otpauthUrl === 'string'
+      ? { factorId: e.factorId, secret: e.secret, otpauthUrl: e.otpauthUrl }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps (or, with null, forgets) the setup in progress. */
+export function keepEnrollment(
+  store: KeyStore | null,
+  enrollment: Enrollment | null,
+): void {
+  try {
+    if (enrollment) store?.setItem(ENROLLMENT_KEY, JSON.stringify(enrollment));
+    else store?.removeItem(ENROLLMENT_KEY);
+  } catch {
+    // No storage: a reload starts a new setup, which the server allows.
+  }
+}
+
 /** Setup, step one: a new authenticator for this login, not yet in use. */
 export async function startAuthenticator(): Promise<Enrollment> {
   const data = await call<{

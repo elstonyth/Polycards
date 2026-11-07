@@ -231,6 +231,40 @@ medusaIntegrationTestRunner({
         ).not.toBe(200);
       });
 
+      it('lets a new setup replace an unfinished one (a reload mid-setup)', async () => {
+        await staffWithoutAuthenticator();
+        const token = (await signIn()).data.token as string;
+        const start = () =>
+          call('post', '/auth/mfa/factors', token, { provider: 'totp' });
+        const first = await start();
+        expect(first.status).toBe(200);
+        // Medusa alone refuses this while the first is pending (Yuan,
+        // 2026-11-07); the guard clears the unfinished one instead.
+        const second = await start();
+        expect(second.status).toBe(200);
+        expect(second.data.secret).not.toBe(first.data.secret);
+        const stale = await call(
+          'post',
+          `/auth/mfa/factors/${first.data.mfa_factor.id}/verify`,
+          token,
+          { code: totpCode(first.data.secret) },
+        );
+        expect(stale.status).toBe(404);
+        const confirmed = await call(
+          'post',
+          `/auth/mfa/factors/${second.data.mfa_factor.id}/verify`,
+          token,
+          { code: totpCode(second.data.secret) },
+        );
+        expect(confirmed.status).toBe(200);
+        // Clearing an unfinished setup is no reset: the same sign-in still
+        // makes its backup codes, and a third start meets the confirmed one.
+        expect(
+          (await call('post', '/auth/mfa/recovery-codes', token)).status,
+        ).toBe(200);
+        expect((await start()).status).toBe(409);
+      });
+
       it('gives up on a challenge after five wrong codes', async () => {
         await staffWithoutAuthenticator();
         const { secret } = await setUp((await signIn()).data.token);

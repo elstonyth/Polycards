@@ -523,6 +523,8 @@
     "copyKey": "复制密钥",
     "copied": "已复制",
     "enterCode": "2. 输入应用显示的 6 位验证码。",
+    "startOver": "重新开始（新二维码）",
+    "setupRestarted": "之前的设置已失效。请扫描这个新二维码。",
     "turnOn": "开启",
     "backupTitle": "保存备用码",
     "backupIntro": "手机丢失时，每个备用码可登录一次。只显示这一次。",
