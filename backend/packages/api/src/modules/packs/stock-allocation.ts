@@ -24,6 +24,9 @@ export type AllocHeld = Map<string, Map<string, number>>;
 
 // 'packing' is the pre-rename token for 'processed' (delivery.ts ALLOWED).
 const OPEN = new Set(['requested', 'processed', 'packing']);
+// Orders that already hold their cards: ready_to_ship, and pending_ship
+// (packed, waiting for the courier) whose cards are sealed in its box.
+export const HOLDING = new Set(['ready_to_ship', 'pending_ship']);
 
 const countUnits = (handles: string[]): Map<string, number> => {
   const need = new Map<string, number>();
@@ -51,7 +54,7 @@ export function allocateUnits(
   const held: AllocHeld = new Map();
 
   for (const o of orders) {
-    if (o.status !== 'ready_to_ship') continue;
+    if (!HOLDING.has(o.status)) continue;
     const need = countUnits(o.handles);
     for (const [h, n] of need) take(h, n);
     held.set(o.id, need);

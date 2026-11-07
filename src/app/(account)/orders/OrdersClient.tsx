@@ -33,6 +33,7 @@ const STATUS_TONE: Record<DeliveryOrderView['status'], Tone> = {
   packing: 'amber',
   processed: 'amber',
   ready_to_ship: 'amber',
+  pending_ship: 'amber',
   shipped: 'sky',
   delivered: 'green',
   completed: 'green',
@@ -49,6 +50,8 @@ const STATUS_LABEL: Record<DeliveryOrderView['status'], string> = {
   packing: 'Processed',
   processed: 'Processed',
   ready_to_ship: 'Ready to ship',
+  // Packed and waiting for the courier: the same step to the customer.
+  pending_ship: 'Ready to ship',
   shipped: 'Shipped',
   delivered: 'Delivered',
   completed: 'Delivered',

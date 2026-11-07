@@ -4,6 +4,7 @@ import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import { loadInventoryRows, type InventoryRow } from './inventory-view';
 import { stockAutoAllocationEnabled } from './stock-allocation-run';
+import { HOLDING } from './stock-allocation';
 import { displayMarketPrice, resolveFxRate } from './pricing';
 import { toOptionalMoney } from './money';
 import { isGraded, slabGrade, stockImage } from './card-view';
@@ -105,7 +106,7 @@ export async function loadToBuyRows(
   const orders = await packs.openDeliveryOrdersForAllocation();
   const oldest = new Map<string, Date>();
   for (const o of orders) {
-    if (o.status === 'ready_to_ship') continue; // already holds its cards
+    if (HOLDING.has(o.status)) continue; // already holds its cards
     for (const h of o.handles) {
       const seen = oldest.get(h);
       if (!seen || o.created_at < seen) oldest.set(h, o.created_at);

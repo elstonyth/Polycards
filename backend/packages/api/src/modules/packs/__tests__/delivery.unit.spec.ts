@@ -197,6 +197,32 @@ describe("validateDeliveryStatusTransition", () => {
     ).toBe("invalid_transition");
   });
 
+  it("parks a packed order in pending_ship and ships it from there", () => {
+    expect(
+      validateDeliveryStatusTransition("ready_to_ship", "pending_ship", false),
+    ).toBe("ok");
+    expect(
+      validateDeliveryStatusTransition("pending_ship", "shipped", true),
+    ).toBe("ok");
+    expect(
+      validateDeliveryStatusTransition("pending_ship", "shipped", false),
+    ).toBe("tracking_required");
+    expect(
+      validateDeliveryStatusTransition("pending_ship", "ready_to_ship", false),
+    ).toBe("ok");
+    expect(
+      validateDeliveryStatusTransition("pending_ship", "canceled", false),
+    ).toBe("ok");
+    // Packed cards are on hand: no step back to processed, and no skipping
+    // ready_to_ship on the way in.
+    expect(
+      validateDeliveryStatusTransition("pending_ship", "processed", false),
+    ).toBe("invalid_transition");
+    expect(
+      validateDeliveryStatusTransition("processed", "pending_ship", false),
+    ).toBe("invalid_transition");
+  });
+
   it("rejects illegal transitions", () => {
     expect(validateDeliveryStatusTransition("shipped", "canceled", false)).toBe(
       "invalid_transition",

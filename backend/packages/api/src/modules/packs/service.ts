@@ -18827,7 +18827,8 @@ class PacksModuleService extends MedusaService({
   // Every open delivery order with one handle per pull — the input
   // allocateStock (stock-allocation.ts) works on. Open = still waiting for
   // cards (requested / processed / legacy 'packing') or holding them
-  // (ready_to_ship). Oldest first, id as the tie-break, like the allocation.
+  // (ready_to_ship, or pending_ship: packed, waiting for the courier). Oldest
+  // first, id as the tie-break, like the allocation.
   @InjectManager()
   async openDeliveryOrdersForAllocation(
     @MedusaContext() sharedContext: Context = {},
@@ -18857,7 +18858,7 @@ class PacksModuleService extends MedusaService({
            ON doi.delivery_order_id = dord.id AND doi.deleted_at IS NULL
          JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
         WHERE dord.deleted_at IS NULL
-          AND dord.status IN ('requested','processed','packing','ready_to_ship')
+          AND dord.status IN ('requested','processed','packing','ready_to_ship','pending_ship')
         ORDER BY dord.created_at, dord.id`,
     );
     const byId = new Map<
@@ -19357,8 +19358,10 @@ class PacksModuleService extends MedusaService({
               COUNT(DISTINCT p.id) FILTER (
                 WHERE dord.status IN ('requested','processed','packing')
               )::bigint AS requested,
+              -- pending_ship (packed, not posted) is still on the shelf and
+              -- still held: it counts here, never as shipped.
               COUNT(DISTINCT p.id) FILTER (
-                WHERE dord.status = 'ready_to_ship'
+                WHERE dord.status IN ('ready_to_ship','pending_ship')
               )::bigint AS rts,
               COUNT(DISTINCT p.id) FILTER (
                 WHERE dord.status IN ('shipped','completed','delivered')
