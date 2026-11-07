@@ -57,6 +57,10 @@ export const ADMIN_AUDIT_ENTITY_TYPES = [
   // an edit of an open note (2026-11-03) is 'edit'.
   // See Migration20261028150000.
   'goods_receive_note',
+  // An admin (staff) login, entity_id a user id: a Super Admin resetting its
+  // two-step sign-in is 'reset_mfa' (owner, 2026-11-07). See
+  // Migration20261107120000.
+  'admin_user',
 ] as const;
 
 export const ADMIN_AUDIT_ACTIONS = [
@@ -131,6 +135,9 @@ export const ADMIN_AUDIT_ACTIONS = [
   // prize's seed hash — see Migration20261024130000. Cancelling a prize
   // audits as 'disable', like a lossless-schedule window.
   'publish',
+  // A Super Admin resetting another admin's two-step sign-in (entity
+  // 'admin_user') — see Migration20261107120000.
+  'reset_mfa',
 ] as const;
 
 // admin_action_audit — append-only record of every admin money mutation

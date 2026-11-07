@@ -128,6 +128,14 @@ export const CORE_PREFIX_WRITES: {
     resource: CORE_READ_PREFIXES['customer-groups'],
     operation: 'update' as const,
   })),
+  // A Super Admin resetting another admin's two-step sign-in (owner,
+  // 2026-11-07): core's own write on users. The route also demands Super Admin.
+  {
+    matcher: '/admin/users/*/mfa/reset',
+    method: 'POST',
+    resource: 'user',
+    operation: 'update',
+  },
   {
     matcher: '/admin/products/from-pricecharting',
     method: 'POST',

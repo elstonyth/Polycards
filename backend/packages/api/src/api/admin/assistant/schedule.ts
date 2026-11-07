@@ -5,6 +5,7 @@ import {
 } from '@medusajs/framework/utils';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
+import { authIdentityOfUser } from '../../utils/admin-mfa-guard';
 
 // Scheduled assistant tasks (owner, 2026-10-29). A job ticks every minute
 // (jobs/assistant-schedules.ts, on the worker), picks the due tasks and asks
@@ -221,7 +222,9 @@ async function runOne(
     {
       actor_id: task.user_id,
       actor_type: 'user',
-      auth_identity_id: '',
+      // Their own login: /admin answers it only while it has an authenticator
+      // (two-step sign-in, utils/admin-mfa-guard.ts).
+      auth_identity_id: (await authIdentityOfUser(container, task.user_id)) ?? '',
       app_metadata: { user_id: task.user_id, roles },
     },
     {

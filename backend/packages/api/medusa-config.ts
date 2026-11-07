@@ -6,6 +6,7 @@ import { warnLegacyGatewayEnv } from './src/modules/packs/gateway-env';
 import { isResendConfigured } from './src/modules/resend/options';
 import { resolvePhoneGateState } from './src/utils/phone-verification';
 import { productionDatabaseDriverOptions } from './src/utils/db-driver-options';
+import { ADMIN_MFA_ISSUER, adminMfaEncryptionKey } from './src/utils/admin-mfa';
 loadEnv(process.env.NODE_ENV || 'development', process.cwd());
 
 // Boot-guard (security audit 2026-06-30, Batch A): refuse to start a production
@@ -300,6 +301,19 @@ module.exports = defineConfig({
     {
       resolve: '@medusajs/medusa/auth',
       options: {
+        // Admin two-step sign-in (owner, 2026-11-07): authenticator apps, 6
+        // digits every 30 s; src/utils/admin-mfa.ts has the key, and
+        // src/api/utils/admin-mfa-guard.ts makes every admin login use it.
+        // 'challenge': removing one's own authenticator needs a current code;
+        // a Super Admin's reset (admin/users/[id]/mfa/reset) is the way past.
+        // The dev default mirrors the framework's own JWT secret fallback.
+        mfa: {
+          encryption_key: adminMfaEncryptionKey(
+            process.env.JWT_SECRET || 'supersecret',
+          ),
+          disable_policy: 'challenge',
+          providers: [{ id: 'totp', options: { issuer: ADMIN_MFA_ISSUER } }],
+        },
         providers: [
           {
             resolve: '@medusajs/medusa/auth-emailpass',

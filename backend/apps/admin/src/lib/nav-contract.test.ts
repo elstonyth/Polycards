@@ -241,7 +241,11 @@ describe('sidebar contract (Vault spec §6)', () => {
     // isn't a plain non-negative integer; a page this parser misses would
     // drop out of every assertion above while still showing in the sidebar.
     for (const file of pageFiles(ROUTES)) {
-      if (!/\bconst config\b/.test(readFileSync(file, 'utf8'))) continue;
+      const text = readFileSync(file, 'utf8');
+      if (!/\bconst config\b/.test(text)) continue;
+      // A public page (sign-in, two-step setup) has no label: it is never in
+      // the sidebar.
+      if (/\bpublic:\s*true\b/.test(text)) continue;
       expect(readConfig(file), routePath(file)).not.toBeNull();
       const rank = configBody(file)
         ?.match(/\brank:\s*([^,\n]+)/)?.[1]

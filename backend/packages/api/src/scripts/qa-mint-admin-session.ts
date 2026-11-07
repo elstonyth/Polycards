@@ -15,6 +15,8 @@ import { chmodSync, writeFileSync } from 'node:fs';
 // permission checks read — which cannot be imported here (the package's
 // exports map hides that path from the CJS loader). The token never goes to
 // stdout — point QA_JWT_OUT OUTSIDE the repo so it can never be committed.
+// Since two-step sign-in (2026-11-07) /admin answers only a login with an
+// authenticator app: set one up once for the QA admin at /dashboard/sign-in.
 // Run (from backend/packages/api):
 //   QA_JWT_OUT=/path/to/qa-admin.jwt [QA_ADMIN_EMAIL=...] \
 //     ./node_modules/.bin/medusa exec ./src/scripts/qa-mint-admin-session.ts

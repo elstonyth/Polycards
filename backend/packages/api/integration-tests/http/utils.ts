@@ -1,6 +1,8 @@
+import { createHmac, randomUUID } from "node:crypto";
 import Redis from "ioredis";
 import { Modules } from "@medusajs/framework/utils";
 import type {
+  IAuthModuleService,
   ICustomerModuleService,
   MedusaContainer,
 } from "@medusajs/framework/types";
@@ -78,8 +80,114 @@ export async function mintSuperAdmin(
     id: authIdentity.id,
     app_metadata: { user_id: (users as { id: string }[])[0].id },
   });
+  // Every admin login uses an authenticator app since 2026-11-07, so the
+  // token comes from the full sign-in: password, then the 6-digit code.
+  const secret = await enrollAuthenticator(container, authIdentity.id);
+  return signInWithCode(api, email, password, secret);
+}
+
+const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const base32Decode = (text: string): Buffer => {
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const ch of text.replace(/=+$/, "").toUpperCase()) {
+    const index = BASE32.indexOf(ch);
+    if (index < 0) throw new Error(`not base32: ${ch}`);
+    value = (value << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(out);
+};
+
+/**
+ * The 6-digit code an authenticator app shows for `secret`: RFC 6238 TOTP,
+ * SHA-1, 30-second steps. Written out here rather than taken from Medusa, so
+ * the specs prove the codes a phone app computes are the ones accepted.
+ */
+export function totpCode(secret: string, now: number = Date.now()): string {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(now / 30_000)));
+  const hmac = createHmac("sha1", base32Decode(secret)).update(counter).digest();
+  const offset = hmac[hmac.length - 1] & 0xf;
+  const value =
+    ((hmac[offset] & 0x7f) << 24) |
+    (hmac[offset + 1] << 16) |
+    (hmac[offset + 2] << 8) |
+    hmac[offset + 3];
+  return String(value % 1_000_000).padStart(6, "0");
+}
+
+/** Sets up an authenticator app on this login and returns its secret, as the
+ *  admin's setup screen does (start, then confirm with a code). */
+export async function enrollAuthenticator(
+  container: MedusaContainer,
+  authIdentityId: string,
+): Promise<string> {
+  const auth = container.resolve(Modules.AUTH);
+  const { mfa, secret } = await auth.startAuthMfa({
+    auth_identity_id: authIdentityId,
+    provider: "totp",
+  });
+  if (!secret) throw new Error("the totp provider returned no secret");
+  await auth.verifyAuthMfa({
+    id: mfa.id,
+    auth_identity_id: authIdentityId,
+    code: totpCode(secret),
+  });
+  return secret;
+}
+
+/** The auth identity behind an emailpass login. */
+export async function authIdentityIdOf(
+  container: MedusaContainer,
+  email: string,
+): Promise<string> {
+  const [identity] = await container
+    .resolve(Modules.AUTH)
+    .listProviderIdentities({ entity_id: email, provider: "emailpass" });
+  if (!identity) throw new Error(`no emailpass login for ${email}`);
+  return identity.auth_identity_id as string;
+}
+
+/** A staff login with an authenticator set up, for specs that mint their own
+ *  admin tokens: /admin answers a staff token only when its login has one. */
+export async function staffIdentityWithAuthenticator(
+  container: MedusaContainer,
+): Promise<string> {
+  const { authIdentity } = await container
+    .resolve(Modules.AUTH)
+    .register("emailpass", {
+      body: { email: `staff-${randomUUID()}@test.dev`, password: "staff-pw-1" },
+    } as Parameters<IAuthModuleService["register"]>[1]);
+  if (!authIdentity) throw new Error("emailpass register returned no identity");
+  await enrollAuthenticator(container, authIdentity.id);
+  return authIdentity.id;
+}
+
+/** The admin sign-in once a login has an authenticator: the password answers
+ *  with a code challenge, and the code returns the admin token. */
+export async function signInWithCode(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  api: any,
+  email: string,
+  password: string,
+  secret: string,
+): Promise<string> {
   const login = await api.post("/auth/user/emailpass", { email, password });
-  return login.data.token as string;
+  if (!login.data.mfa_required) {
+    throw new Error(`expected ${email}'s sign-in to ask for the code`);
+  }
+  const verified = await api.post(
+    `/auth/mfa/challenges/${login.data.mfa_challenge.id}/verify`,
+    { method: "totp", code: totpCode(secret) },
+    { headers: { authorization: `Bearer ${login.data.token}` } },
+  );
+  return verified.data.token as string;
 }
 
 /**

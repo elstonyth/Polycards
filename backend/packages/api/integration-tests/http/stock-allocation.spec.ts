@@ -9,7 +9,11 @@ import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { runStockAllocation } from '../../src/modules/packs/stock-allocation-run';
 import { runMidnightCutoff } from '../../src/jobs/stock-allocation';
-import { mintSuperAdmin, unwrapResponse } from './utils';
+import {
+  mintSuperAdmin,
+  staffIdentityWithAuthenticator,
+  unwrapResponse,
+} from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -310,7 +314,9 @@ medusaIntegrationTestRunner({
           {
             actor_id: 'alloc-reader',
             actor_type: 'user',
-            auth_identity_id: 'alloc-reader',
+            // A login with an authenticator set up: /admin answers no
+            // staff token without.
+            auth_identity_id: await staffIdentityWithAuthenticator(container),
             app_metadata: { user_id: 'alloc-reader', roles: [role.id] },
             user_metadata: {},
           },

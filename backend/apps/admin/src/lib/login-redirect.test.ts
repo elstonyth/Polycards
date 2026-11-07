@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import { isSignedOutResponse } from './login-redirect';
+import {
+  isSetupRequiredResponse,
+  isSignedOutResponse,
+  signInInstead,
+} from './login-redirect';
 
 const BACKEND = 'https://admin.polycards.gg';
 const deliveries = {
@@ -67,5 +71,61 @@ describe('isSignedOutResponse', () => {
     expect(
       isSignedOutResponse(`${BACKEND}/store/credits`, 401, BACKEND, deliveries),
     ).toBe(false);
+  });
+});
+
+describe('isSetupRequiredResponse', () => {
+  const setup = {
+    href: 'https://admin.polycards.gg/dashboard/two-step-setup',
+    pathname: '/dashboard/two-step-setup',
+  };
+
+  test('sends a login with no authenticator to its setup', () => {
+    expect(
+      isSetupRequiredResponse(
+        `${BACKEND}/admin/users/me`,
+        403,
+        'mfa_setup_required',
+        BACKEND,
+        deliveries,
+      ),
+    ).toBe(true);
+  });
+
+  test('leaves a missing permission, and the setup page itself, alone', () => {
+    expect(
+      isSetupRequiredResponse(
+        `${BACKEND}/admin/players`,
+        403,
+        'not_allowed',
+        BACKEND,
+        deliveries,
+      ),
+    ).toBe(false);
+    expect(
+      isSetupRequiredResponse(
+        `${BACKEND}/admin/users/me`,
+        403,
+        'mfa_setup_required',
+        BACKEND,
+        setup,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('signInInstead', () => {
+  test("replaces the dashboard's login page, keeping the query", () => {
+    expect(signInInstead('/dashboard/login', '?reason=Unauthorized', '/dashboard/')).toBe(
+      '/dashboard/sign-in?reason=Unauthorized',
+    );
+    expect(signInInstead('/dashboard/login/', '', '/dashboard')).toBe(
+      '/dashboard/sign-in',
+    );
+  });
+
+  test('leaves every other page', () => {
+    expect(signInInstead('/dashboard/sign-in', '', '/dashboard')).toBeNull();
+    expect(signInInstead('/dashboard/players/login', '', '/dashboard')).toBeNull();
   });
 });
