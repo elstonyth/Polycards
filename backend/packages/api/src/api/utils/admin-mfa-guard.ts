@@ -62,7 +62,9 @@ const signedInAt = (auth: AuthContext | undefined): number | null =>
 const KEEP_MS = 60_000;
 const kept = new Map<string, { since: number; until: number }>();
 
-/** When this login's authenticator was added (ms), or null without one. */
+/** When this login's authenticator was confirmed (ms), or null without one.
+ *  updated_at: the factor is created pending at the start of setup and
+ *  changes once more, to enabled, when its first code is confirmed. */
 export async function authenticatorSince(
   scope: MedusaContainer,
   authIdentityId: string | undefined,
@@ -73,7 +75,7 @@ export async function authenticatorSince(
   if (hit && hit.until > now) return hit.since;
   // The auth module's own table: its DTO does not carry created_at.
   const { rows } = await dbOf(scope).raw(
-    "SELECT min(created_at) AS since FROM auth_mfa_factor WHERE auth_identity_id = ? AND provider = 'totp' AND status = 'enabled' AND deleted_at IS NULL",
+    "SELECT min(updated_at) AS since FROM auth_mfa_factor WHERE auth_identity_id = ? AND provider = 'totp' AND status = 'enabled' AND deleted_at IS NULL",
     [authIdentityId],
   );
   if (!rows[0]?.since) {
@@ -217,36 +219,92 @@ export async function allowOneAuthenticator(
     const user = await req.scope
       .resolve(Modules.USER)
       .retrieveUser(auth.actor_id!, { select: ['email'] });
-    (req.body as Record<string, unknown>).label = user.email;
+    // Which sign-in started this setup: only it may make the first backup
+    // codes (allowFirstBackupCodes), as it is the one holding the secret.
+    const metadata = { started_by_iat: auth.iat ?? null };
+    const body = req.body as Record<string, unknown>;
+    body.label = user.email;
+    body.metadata = metadata;
     const validated = (
       req as unknown as { validatedBody?: Record<string, unknown> }
     ).validatedBody;
-    if (validated) validated.label = user.email;
+    if (validated) {
+      validated.label = user.email;
+      validated.metadata = metadata;
+    }
     return next();
   } catch (err) {
     return next(err);
   }
 }
 
-/** POST /auth/mfa/recovery-codes: once, at setup. New ones later would let a
- *  borrowed session mint a way back in; a lost set goes through a reset. */
+/** POST /auth/mfa/recovery-codes: once, at setup, by the sign-in that set
+ *  the authenticator up (or one made since it was confirmed). New ones later
+ *  would let a borrowed session mint a way back in; a lost set goes through a
+ *  reset. */
 export async function allowFirstBackupCodes(
   req: MedusaRequest,
   res: MedusaResponse,
   next: MedusaNextFunction,
 ): Promise<void> {
+  const auth = authOf(req);
+  const refuse = (message: string): void => {
+    res.status(409).json({ type: 'conflict', message });
+  };
   try {
-    const { rows } = await dbOf(req.scope).raw(
+    const db = dbOf(req.scope);
+    const [factor] = (
+      await db.raw(
+        "SELECT metadata->>'started_by_iat' AS started_by, updated_at FROM auth_mfa_factor WHERE auth_identity_id = ? AND provider = 'totp' AND status = 'enabled' AND deleted_at IS NULL ORDER BY updated_at LIMIT 1",
+        [auth?.auth_identity_id ?? ''],
+      )
+    ).rows;
+    if (!factor) return refuse('Set up the authenticator app first.');
+    const at = signedInAt(auth);
+    const sameSignIn =
+      typeof auth?.iat === 'number' &&
+      factor.started_by === String(auth.iat);
+    const since = new Date(factor.updated_at as string).getTime();
+    if (!sameSignIn && (at === null || at < since - CLOCK_SLACK_MS)) {
+      return refuse(
+        'Backup codes come with the setup. For new ones, ask a Super Admin to reset two-step sign-in.',
+      );
+    }
+    const { rows } = await db.raw(
       'SELECT count(*)::int AS n FROM auth_mfa_recovery_code WHERE deleted_at IS NULL AND auth_identity_id = ?',
-      [authOf(req)?.auth_identity_id ?? ''],
+      [auth?.auth_identity_id ?? ''],
     );
     if (Number(rows[0]?.n ?? 0) === 0) return next();
   } catch (err) {
     return next(err);
   }
-  res.status(409).json({
-    type: 'conflict',
-    message:
-      'Backup codes were already made for this login. For new ones, ask a Super Admin to reset two-step sign-in.',
+  refuse(
+    'Backup codes were already made for this login. For new ones, ask a Super Admin to reset two-step sign-in.',
+  );
+}
+
+/** POST /auth/token/refresh: a staff token from before its login's
+ *  authenticator would otherwise come back with a fresh issue time and pass
+ *  for a sign-in that answered the code. Other tokens go on to core. */
+export async function refuseStaleStaffRefresh(
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction,
+): Promise<void> {
+  const auth = authOf(req);
+  if (auth?.actor_type !== 'user' || !auth.actor_id) return next();
+  let since: number | null;
+  try {
+    since = await authenticatorSince(req.scope, auth.auth_identity_id);
+  } catch (err) {
+    return next(err);
+  }
+  const at = signedInAt(auth);
+  if (since === null || (at !== null && at >= since - CLOCK_SLACK_MS)) {
+    return next();
+  }
+  res.status(401).json({
+    type: MFA_SIGN_IN_REQUIRED,
+    message: 'Sign in again with your authenticator code.',
   });
 }

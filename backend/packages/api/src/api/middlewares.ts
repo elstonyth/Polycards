@@ -56,6 +56,7 @@ import { capAdminSessionAge } from './utils/admin-session-cap';
 import {
   allowFirstBackupCodes,
   allowOneAuthenticator,
+  refuseStaleStaffRefresh,
   requireAdminAuthenticator,
   requireSignedInAdmin,
 } from './utils/admin-mfa-guard';
@@ -354,6 +355,16 @@ export default defineMiddlewares({
     // in. The code check takes the token a password alone returns; every
     // change needs a finished sign-in, one authenticator per login, and
     // backup codes are made once.
+    {
+      // A staff token from before its authenticator may not be refreshed into
+      // one that passes for a code sign-in. Any actor here: customers go on.
+      matcher: '/auth/token/refresh',
+      method: 'POST',
+      middlewares: [
+        authenticate('*', ['session', 'bearer'], { allowUnregistered: true }),
+        refuseStaleStaffRefresh,
+      ],
+    },
     {
       matcher: '/auth/mfa/challenges/*',
       method: 'POST',

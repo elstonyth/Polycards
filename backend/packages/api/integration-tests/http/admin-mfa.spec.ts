@@ -131,6 +131,14 @@ medusaIntegrationTestRunner({
         const stale = await call('get', '/admin/users/me', first.data.token);
         expect(stale.status).toBe(401);
         expect(stale.data.type).toBe('mfa_sign_in_required');
+        // Nor can it be refreshed into a token that would pass.
+        const refreshedStale = await call(
+          'post',
+          '/auth/token/refresh',
+          first.data.token,
+        );
+        expect(refreshedStale.status).toBe(401);
+        expect(refreshedStale.data.type).toBe('mfa_sign_in_required');
 
         // One authenticator per login.
         const second = await call(
