@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   isSetupRequiredResponse,
+  isInviteVisit,
   isSignedOutResponse,
   signInInstead,
 } from './login-redirect';
@@ -127,5 +128,18 @@ describe('signInInstead', () => {
   test('leaves every other page', () => {
     expect(signInInstead('/dashboard/sign-in', '', '/dashboard')).toBeNull();
     expect(signInInstead('/dashboard/players/login', '', '/dashboard')).toBeNull();
+  });
+});
+
+describe('isInviteVisit', () => {
+  test('is an invite link: the page signs the browser out first', () => {
+    expect(isInviteVisit('/dashboard/invite', '?token=abc', '/dashboard/')).toBe(true);
+    expect(isInviteVisit('/dashboard/invite/', '?token=abc', '/dashboard')).toBe(true);
+  });
+
+  test('is not any other page, nor the invite page without a token', () => {
+    expect(isInviteVisit('/dashboard/invite', '', '/dashboard')).toBe(false);
+    expect(isInviteVisit('/dashboard/players', '?token=abc', '/dashboard')).toBe(false);
+    expect(isInviteVisit('/dashboard/settings/invite', '?token=abc', '/dashboard')).toBe(false);
   });
 });
