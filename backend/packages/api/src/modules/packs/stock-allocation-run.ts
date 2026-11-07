@@ -48,15 +48,16 @@ async function loadAllocationInputs(packs: PacksModuleService) {
   return { orders, onHand };
 }
 
-// Which of one order's cards the stock covers right now, oldest order first —
-// the same split the next run would make. Live, read-only, moves nothing.
-export async function orderStockCover(
+// Which of each asked order's cards the stock covers right now, oldest order
+// first — the same split the next run would make. Live, read-only, moves
+// nothing.
+export async function ordersStockCover(
   container: MedusaContainer,
-  orderId: string,
-): Promise<CardCover[] | null> {
+  orderIds: string[],
+): Promise<Record<string, CardCover[] | null>> {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const { orders, onHand } = await loadAllocationInputs(packs);
-  return stockCoverFor(orderId, onHand, orders);
+  return stockCoverFor(orderIds, onHand, orders);
 }
 
 // Moves delivery orders by themselves (spec 2026-10-28):

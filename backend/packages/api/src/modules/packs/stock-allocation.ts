@@ -97,21 +97,29 @@ export type CardCover = {
   on_hand: number;
 };
 
-/** Per card of one order, first-seen order; null when the order is not
- *  waiting on or holding stock (shipped, completed, canceled, unknown). */
+/** Per asked order, its cards in first-seen order; null when the order is
+ *  not waiting on or holding stock (shipped, completed, canceled, unknown).
+ *  One allocation pass however many orders are asked. */
 export function stockCoverFor(
-  orderId: string,
+  orderIds: string[],
   onHand: Map<string, number>,
   orders: AllocOrder[],
-): CardCover[] | null {
-  const order = orders.find((o) => o.id === orderId);
-  if (!order || !(OPEN.has(order.status) || order.status === 'ready_to_ship'))
-    return null;
-  const held = allocateUnits(onHand, orders).held.get(orderId);
-  return [...countUnits(order.handles)].map(([handle, need]) => ({
-    handle,
-    need,
-    have: held?.get(handle) ?? 0,
-    on_hand: Math.max(0, onHand.get(handle) ?? 0),
-  }));
+): Record<string, CardCover[] | null> {
+  const { held } = allocateUnits(onHand, orders);
+  const byId = new Map(orders.map((o) => [o.id, o]));
+  const out: Record<string, CardCover[] | null> = {};
+  for (const id of orderIds) {
+    const order = byId.get(id);
+    const got = held.get(id);
+    out[id] =
+      order && got
+        ? [...countUnits(order.handles)].map(([handle, need]) => ({
+            handle,
+            need,
+            have: got.get(handle) ?? 0,
+            on_hand: Math.max(0, onHand.get(handle) ?? 0),
+          }))
+        : null;
+  }
+  return out;
 }

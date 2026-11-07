@@ -46,7 +46,7 @@ import {
   revokePackGift,
   type PackGift,
   getDeliveryOrder,
-  getDeliveryOrderStock,
+  getDeliveryOrdersStock,
   getProfitReport,
   type CustomerScope,
   type ProfitRange,
@@ -581,16 +581,15 @@ export const useDeliveryOrder = (
     enabled: !!id,
   });
 
-// In stock / missing per card for the Manage modal. Only for an order still
-// waiting on cards (`enabled`); computed per open modal, never per list row.
-export const useDeliveryOrderStock = (
-  id: string,
-  enabled: boolean,
-): UseQueryResult<DeliveryOrderCardCover[] | null> =>
+// In stock / missing per card for the orders on one page of the Orders list
+// (and their Manage modal): one request per page, one allocation server-side.
+export const useDeliveryOrdersStock = (
+  ids: string[],
+): UseQueryResult<Record<string, DeliveryOrderCardCover[] | null>> =>
   useQuery({
-    queryKey: qk.deliveryOrderStock(id),
-    queryFn: () => getDeliveryOrderStock(id),
-    enabled: enabled && !!id,
+    queryKey: qk.deliveryOrdersStock(ids),
+    queryFn: () => getDeliveryOrdersStock(ids),
+    enabled: ids.length > 0,
   });
 
 export const useFxRate = (): UseQueryResult<FxRateState> =>
