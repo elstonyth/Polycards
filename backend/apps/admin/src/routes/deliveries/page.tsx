@@ -388,7 +388,8 @@ const DeliveriesPage = () => {
   const uploadImg = useUploadImage();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
   // In stock / missing per item (operator, 2026-11-07), only while the open
-  // order still waits on cards: ready_to_ship already holds every card.
+  // order still waits on cards. ready_to_ship gets no marks: it moved because
+  // its cards were in, and a later drop in stock shows on the To buy list.
   const waitingOnStock =
     detail?.status === 'requested' || detail?.status === 'processed';
   const stock = useDeliveryOrderStock(detail?.id ?? '', waitingOnStock);
