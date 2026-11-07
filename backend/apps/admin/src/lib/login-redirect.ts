@@ -52,6 +52,10 @@ export function isSignedOutResponse(
 export const INVITE_SIGN_OUT_PROMPT =
   'You are signed in to the admin. Sign out to accept this invite?\n\n你已登录后台。要登出以接受此邀请吗？';
 
+export const INVITE_SIGN_OUT_FAILED =
+  'Could not sign you out. Sign out of the admin, then open this invite link again.' +
+  ' / 无法登出。请先登出后台，再重新打开此邀请链接。';
+
 const loginUrl = () => adminUrl(`${SIGN_IN_PATH}?reason=Unauthorized`);
 
 /** True for a backend /admin/* answer that this login must set up an
@@ -166,10 +170,12 @@ if (typeof window !== 'undefined') {
       }).catch(() => null);
       if (!me || (me.status !== 200 && me.status !== 403)) return;
       if (!window.confirm(INVITE_SIGN_OUT_PROMPT)) return;
-      await fetchOriginal(`${__BACKEND_URL__}/auth/session`, {
+      const out = await fetchOriginal(`${__BACKEND_URL__}/auth/session`, {
         method: 'DELETE',
         credentials: 'include',
-      }).catch(() => undefined);
+      }).catch(() => null);
+      // Still signed in, the invite would fail after making the login.
+      if (!out?.ok) window.alert(INVITE_SIGN_OUT_FAILED);
     })();
   }
 }
