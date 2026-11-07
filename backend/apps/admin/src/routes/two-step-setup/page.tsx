@@ -17,6 +17,7 @@ import {
   adminUrl,
   confirmAuthenticator,
   digitsOnly,
+  endSession,
   groupKey,
   makeBackupCodes,
   startAuthenticator,
@@ -135,11 +136,16 @@ export default function TwoStepSetupPage() {
               />
               <Label htmlFor="two-step-saved">{t('pcTwoStep.saved')}</Label>
             </div>
+            {/* The sign-in that set it up never answered a code, so the admin
+                refuses it now (api/utils/admin-mfa-guard.ts): sign in anew. */}
             <Button
               disabled={!saved}
-              onClick={() => window.location.assign(adminUrl('/'))}
+              onClick={async () => {
+                await endSession().catch(() => undefined);
+                window.location.assign(adminUrl(SIGN_IN_PATH));
+              }}
             >
-              {t('pcTwoStep.toAdmin')}
+              {t('pcTwoStep.signInWithCode')}
             </Button>
           </>
         ) : (

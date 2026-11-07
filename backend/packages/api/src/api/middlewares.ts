@@ -54,6 +54,7 @@ import {
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { capAdminSessionAge } from './utils/admin-session-cap';
 import {
+  allowFirstBackupCodes,
   allowOneAuthenticator,
   requireAdminAuthenticator,
   requireSignedInAdmin,
@@ -351,7 +352,8 @@ export default defineMiddlewares({
     // Admin two-step sign-in (utils/admin-mfa-guard.ts). Staff only, with
     // their own authenticate first, whatever order the framework runs its own
     // in. The code check takes the token a password alone returns; every
-    // change needs a finished sign-in, and one authenticator per login.
+    // change needs a finished sign-in, one authenticator per login, and
+    // backup codes are made once.
     {
       matcher: '/auth/mfa/challenges/*',
       method: 'POST',
@@ -380,7 +382,12 @@ export default defineMiddlewares({
     {
       matcher: '/auth/mfa/recovery-codes',
       method: 'POST',
-      middlewares: [authRateLimit, adminMfaAuth, requireSignedInAdmin],
+      middlewares: [
+        authRateLimit,
+        adminMfaAuth,
+        requireSignedInAdmin,
+        allowFirstBackupCodes,
+      ],
     },
     {
       // Gateway server-notify callbacks (src/api/hooks/tgpay/*). These routes

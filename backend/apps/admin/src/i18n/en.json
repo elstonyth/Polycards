@@ -2307,6 +2307,7 @@
     "copyAll": "Copy all",
     "download": "Download",
     "saved": "I have saved these codes",
+    "signInWithCode": "Sign in with your new code",
     "toAdmin": "Go to the admin",
     "alreadySetUp": "This login already has an authenticator app.",
     "signInFirst": "Sign in first.",

@@ -2,6 +2,7 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
+import { CLOCK_SLACK_MS } from '../../src/api/utils/admin-mfa-guard';
 import { mintSuperAdmin, totpCode, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -13,6 +14,10 @@ jest.setTimeout(240 * 1000);
 const EMAIL = 'staff-2fa@test.dev';
 const PASSWORD = 'staff-2fa-pw-1';
 const STEP_MS = 30_000;
+// Past the guard's clock allowance, so a sign-in reads as older than what
+// follows it.
+const pastSlack = () =>
+  new Promise((r) => setTimeout(r, CLOCK_SLACK_MS + 1_000));
 
 medusaIntegrationTestRunner({
   inApp: true,
@@ -104,6 +109,7 @@ medusaIntegrationTestRunner({
         expect(before.status).toBe(403);
         expect(before.data.type).toBe('mfa_setup_required');
 
+        await pastSlack();
         const { secret, otpauthUrl, backupCodes } = await setUp(
           first.data.token,
         );
@@ -120,9 +126,11 @@ medusaIntegrationTestRunner({
         expect(url.searchParams.get('digits') ?? '6').toBe('6');
         expect(url.searchParams.get('period') ?? '30').toBe('30');
         expect(backupCodes).toHaveLength(10);
-        expect(
-          (await call('get', '/admin/users/me', first.data.token)).status,
-        ).toBe(200);
+        // The sign-in that set it up never answered a code: it must sign in
+        // again, with one.
+        const stale = await call('get', '/admin/users/me', first.data.token);
+        expect(stale.status).toBe(401);
+        expect(stale.data.type).toBe('mfa_sign_in_required');
 
         // One authenticator per login.
         const second = await call(
@@ -159,6 +167,11 @@ medusaIntegrationTestRunner({
         expect(
           (await call('get', '/admin/users/me', passed.data.token)).status,
         ).toBe(200);
+        // Backup codes are made once, at setup.
+        expect(
+          (await call('post', '/auth/mfa/recovery-codes', passed.data.token))
+            .status,
+        ).toBe(409);
 
         // A code from the step before or after still counts (clock drift);
         // one from two minutes ago does not.
@@ -258,7 +271,7 @@ medusaIntegrationTestRunner({
         const userId = await staffWithoutAuthenticator();
         const token = (await signIn()).data.token as string;
         await setUp(token);
-        expect((await call('get', '/admin/users/me', token)).status).toBe(200);
+        await pastSlack();
 
         const owner = await mintSuperAdmin(
           getContainer(),
@@ -282,7 +295,20 @@ medusaIntegrationTestRunner({
         expect((await call('get', '/admin/users/me', token)).data.type).toBe(
           'mfa_setup_required',
         );
-        expect((await signIn()).data.mfa_required).toBeUndefined();
+        // Only a sign-in made since the reset sets up the new authenticator.
+        expect(
+          (await call('post', '/auth/mfa/factors', token, { provider: 'totp' }))
+            .status,
+        ).toBe(401);
+        const fresh = await signIn();
+        expect(fresh.data.mfa_required).toBeUndefined();
+        expect(
+          (
+            await call('post', '/auth/mfa/factors', fresh.data.token, {
+              provider: 'totp',
+            })
+          ).status,
+        ).toBe(200);
 
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         const [row] = await packs.listAdminActionAudits({

@@ -131,6 +131,10 @@ describe('runDueSchedules', () => {
       };
       return chain;
     };
+    // The owner's login, for the token's auth_identity_id (two-step sign-in).
+    const pgWithRaw = Object.assign(pg, {
+      raw: async () => ({ rows: [{ id: 'authid_1' }] }),
+    });
     let done!: () => void;
     const finished = new Promise<void>((r) => (done = r));
     const logger = {
@@ -158,7 +162,7 @@ describe('runDueSchedules', () => {
           throw new Error('AssistantSchedule with id: aisch_1 was not found');
         }),
       },
-      [ContainerRegistrationKeys.PG_CONNECTION]: pg,
+      [ContainerRegistrationKeys.PG_CONNECTION]: pgWithRaw,
       [ContainerRegistrationKeys.LOGGER]: logger,
       [ContainerRegistrationKeys.QUERY]: { graph },
       [ContainerRegistrationKeys.CONFIG_MODULE]: {

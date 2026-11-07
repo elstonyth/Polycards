@@ -529,6 +529,7 @@
     "copyAll": "全部复制",
     "download": "下载",
     "saved": "我已保存这些备用码",
+    "signInWithCode": "用新验证码登录",
     "toAdmin": "进入后台",
     "alreadySetUp": "此账号已设置身份验证器应用。",
     "signInFirst": "请先登录。",

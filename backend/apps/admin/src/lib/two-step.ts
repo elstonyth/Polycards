@@ -53,10 +53,10 @@ export class TwoStepError extends Error {
 
 async function call<T>(
   path: string,
-  init: { body?: unknown; token?: string } = {},
+  init: { body?: unknown; token?: string; method?: 'POST' | 'DELETE' } = {},
 ): Promise<T> {
   const res = await fetch(`${__BACKEND_URL__}${path}`, {
-    method: 'POST',
+    method: init.method ?? 'POST',
     credentials: 'include',
     headers: {
       'content-type': 'application/json',
@@ -111,6 +111,11 @@ export async function answerCode(
     { body: { method, code }, token: step.token },
   );
   return data.token;
+}
+
+/** Signs this browser out (ends the cookie session). */
+export async function endSession(): Promise<void> {
+  await call('/auth/session', { method: 'DELETE' });
 }
 
 /** Turns a finished sign-in into the admin's cookie session. */
