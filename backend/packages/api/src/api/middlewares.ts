@@ -53,6 +53,11 @@ import {
 } from './utils/cache-headers';
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { capAdminSessionAge } from './utils/admin-session-cap';
+import {
+  allowOneAuthenticator,
+  requireAdminAuthenticator,
+  requireSignedInAdmin,
+} from './utils/admin-mfa-guard';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { recordVisitorSignal, requireVouchedVisitor } from './utils/visitor-ip';
@@ -100,6 +105,11 @@ import { adminRbacRoutes } from './admin-rbac';
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = rateLimit('store-read');
 const authRateLimit = rateLimit('auth');
+// Staff only on /auth/mfa/*; the token a password alone returns is allowed
+// (allowUnregistered), so requireSignedInAdmin says which routes need more.
+const adminMfaAuth = authenticate('user', ['session', 'bearer'], {
+  allowUnregistered: true,
+});
 // The per-identifier (per-email) credential tier. ONE instance shared by every
 // credential matcher below: they are one budget per account across login,
 // register and reset, and one instance also means one Redis connection fronting
@@ -337,6 +347,40 @@ export default defineMiddlewares({
       matcher: '/auth/*/emailpass/*',
       method: 'POST',
       middlewares: [authIdentifierRateLimit, authRateLimit],
+    },
+    // Admin two-step sign-in (utils/admin-mfa-guard.ts). Staff only, with
+    // their own authenticate first, whatever order the framework runs its own
+    // in. The code check takes the token a password alone returns; every
+    // change needs a finished sign-in, and one authenticator per login.
+    {
+      matcher: '/auth/mfa/challenges/*',
+      method: 'POST',
+      middlewares: [authRateLimit, adminMfaAuth],
+    },
+    {
+      matcher: '/auth/mfa/factors',
+      method: 'GET',
+      middlewares: [adminMfaAuth, requireSignedInAdmin],
+    },
+    {
+      matcher: '/auth/mfa/factors',
+      method: 'POST',
+      middlewares: [
+        authRateLimit,
+        adminMfaAuth,
+        requireSignedInAdmin,
+        allowOneAuthenticator,
+      ],
+    },
+    {
+      matcher: '/auth/mfa/factors/*',
+      method: ['POST', 'DELETE'],
+      middlewares: [authRateLimit, adminMfaAuth, requireSignedInAdmin],
+    },
+    {
+      matcher: '/auth/mfa/recovery-codes',
+      method: 'POST',
+      middlewares: [authRateLimit, adminMfaAuth, requireSignedInAdmin],
     },
     {
       // Gateway server-notify callbacks (src/api/hooks/tgpay/*). These routes
@@ -1263,6 +1307,12 @@ export default defineMiddlewares({
       matcher: '/admin/*',
       middlewares: [capAdminSessionAge],
     },
+    // Every admin login uses an authenticator app (owner, 2026-11-07):
+    // without one, only its setup (utils/admin-mfa-guard.ts).
+    {
+      matcher: '/admin/*',
+      middlewares: [requireAdminAuthenticator],
+    },
     // RBAC for every custom admin route (admin-rbac.ts): a policy per custom
     // prefix and method, plus the write policy for custom writes under a core
     // prefix. Policy-only entries — the framework adds the no-op handler and
@@ -1337,6 +1387,11 @@ export default defineMiddlewares({
     },
     {
       matcher: '/admin/customers/*/disable',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/users/*/mfa/reset',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

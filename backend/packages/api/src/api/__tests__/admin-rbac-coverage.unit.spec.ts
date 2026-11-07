@@ -85,8 +85,19 @@ describe('admin RBAC coverage', () => {
     const custom = new Set(Object.keys(CUSTOM_ADMIN_RESOURCES));
     const core = new Set(Object.keys(CORE_READ_PREFIXES));
     for (const prefix of custom) expect(core.has(prefix)).toBe(false);
+    // A core prefix holding only custom writes listed in CORE_PREFIX_WRITES
+    // (users: the two-step reset) needs no read table: core's own entries
+    // police its routes, and a custom GET there fails the test above.
+    const writesOnly = (p: string) =>
+      routes
+        .filter((r) => prefixOf(r.url) === p)
+        .every((r) =>
+          CORE_PREFIX_WRITES.some(
+            (w) => w.method === r.method && matcherToRegExp(w.matcher).test(r.url),
+          ),
+        );
     const unknown = [...new Set(routes.map((r) => prefixOf(r.url)))].filter(
-      (p) => !custom.has(p) && !core.has(p),
+      (p) => !custom.has(p) && !core.has(p) && !writesOnly(p),
     );
     expect(unknown).toEqual([]);
   });

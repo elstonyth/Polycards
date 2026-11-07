@@ -12,7 +12,13 @@ import {
   deskBotRoleId,
 } from '../../src/api/reports/admin/proxy';
 import { createAutomationOperator } from '../../src/scripts/create-automation-operator';
-import { mintSuperAdmin, unwrapResponse } from './utils';
+import {
+  authIdentityIdOf,
+  enrollAuthenticator,
+  mintSuperAdmin,
+  signInWithCode,
+  unwrapResponse,
+} from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -155,11 +161,11 @@ medusaIntegrationTestRunner({
         const email = 'operator@test.dev';
         const password = 'operator-pw-1';
         await createAutomationOperator(getContainer(), email, password);
-        const login = await api.post('/auth/user/emailpass', {
-          email,
-          password,
-        });
-        const token = login.data.token as string;
+        const secret = await enrollAuthenticator(
+          getContainer(),
+          await authIdentityIdOf(getContainer(), email),
+        );
+        const token = await signInWithCode(api, email, password, secret);
 
         const permissions = await call(
           'get',

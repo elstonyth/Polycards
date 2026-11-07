@@ -5,7 +5,16 @@
 // delivery photos, 2026-10-30). Imported first in main.tsx, this wraps
 // window.fetch once so every caller gets Mercur's behaviour.
 //
-// 401 only: a missing permission is a 403 and must stay on the page.
+// 401 only: a missing permission is a 403 and must stay on the page. The one
+// 403 that moves is a login with no authenticator yet (two-step sign-in,
+// 2026-11-07), which goes to its setup; and Mercur's own login page, which has
+// no code step, is never shown: every visit to it goes to ours (lib/two-step).
+import {
+  MFA_SETUP_REQUIRED,
+  SETUP_PATH,
+  SIGN_IN_PATH,
+  adminUrl,
+} from './two-step';
 
 declare const __BACKEND_URL__: string;
 declare const __BASE__: string;
@@ -20,7 +29,11 @@ export function isSignedOutResponse(
   location: { href: string; pathname: string },
 ): boolean {
   if (status !== 401) return false;
-  if (/\/(login|reset-password|invite)(\/|$)/.test(location.pathname)) {
+  if (
+    /\/(login|sign-in|two-step-setup|reset-password|invite)(\/|$)/.test(
+      location.pathname,
+    )
+  ) {
     return false;
   }
   const backend = new URL(backendUrl || location.href, location.href);
@@ -35,8 +48,34 @@ export function isSignedOutResponse(
   );
 }
 
-const loginUrl = () =>
-  `${(typeof __BASE__ !== 'undefined' ? __BASE__ : '/').replace(/\/+$/, '')}/login?reason=Unauthorized`;
+const loginUrl = () => adminUrl(`${SIGN_IN_PATH}?reason=Unauthorized`);
+
+/** True for a backend /admin/* answer that this login must set up an
+ *  authenticator first, unless the setup page is already open. */
+export function isSetupRequiredResponse(
+  requestUrl: string,
+  status: number,
+  type: unknown,
+  backendUrl: string,
+  location: { href: string; pathname: string },
+): boolean {
+  if (status !== 403 || type !== MFA_SETUP_REQUIRED) return false;
+  if (location.pathname.endsWith(SETUP_PATH)) return false;
+  const backend = new URL(backendUrl || location.href, location.href);
+  const url = new URL(requestUrl, backend);
+  return url.origin === backend.origin && url.pathname.startsWith('/admin/');
+}
+
+/** Our sign-in page for a visit to Mercur's login page, else null. */
+export function signInInstead(
+  pathname: string,
+  search: string,
+  basePath: string,
+): string | null {
+  const root = basePath.replace(/\/+$/, '');
+  if (pathname.replace(/\/+$/, '') !== `${root}/login`) return null;
+  return `${root}${SIGN_IN_PATH}${search}`;
+}
 
 if (typeof window !== 'undefined') {
   const fetchOriginal = window.fetch.bind(window);
@@ -52,7 +91,42 @@ if (typeof window !== 'undefined') {
       isSignedOutResponse(url, res.status, __BACKEND_URL__, window.location)
     ) {
       window.location.href = loginUrl();
+    } else if (res.status === 403) {
+      const type = await res
+        .clone()
+        .json()
+        .then((body: { type?: unknown }) => body?.type)
+        .catch(() => undefined);
+      if (
+        isSetupRequiredResponse(
+          url,
+          res.status,
+          type,
+          __BACKEND_URL__,
+          window.location,
+        )
+      ) {
+        window.location.href = adminUrl(SETUP_PATH);
+      }
     }
     return res;
   };
+
+  const leaveLogin = () => {
+    const to = signInInstead(
+      window.location.pathname,
+      window.location.search,
+      typeof __BASE__ !== 'undefined' ? __BASE__ : '/',
+    );
+    if (to) window.location.replace(to);
+  };
+  for (const method of ['pushState', 'replaceState'] as const) {
+    const original = window.history[method].bind(window.history);
+    window.history[method] = (...args: Parameters<History['pushState']>) => {
+      original(...args);
+      leaveLogin();
+    };
+  }
+  window.addEventListener('popstate', leaveLogin);
+  leaveLogin();
 }

@@ -16,7 +16,7 @@ import type AssistantModuleService from '../../src/modules/assistant/service';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { runDueSchedules } from '../../src/api/admin/assistant/schedule';
-import { mintSuperAdmin } from './utils';
+import { mintSuperAdmin, staffIdentityWithAuthenticator } from './utils';
 
 jest.setTimeout(240 * 1000);
 // Several chats a test from the same people: lift the per-person chat limit
@@ -211,7 +211,12 @@ async function roleWith(
   return role.id;
 }
 
-function tokenFor(container: MedusaContainer, userId: string, roles: string[]) {
+// A login with an authenticator set up: /admin answers no staff token without.
+async function tokenFor(
+  container: MedusaContainer,
+  userId: string,
+  roles: string[],
+) {
   const { http: cfg } = container.resolve(
     ContainerRegistrationKeys.CONFIG_MODULE,
   ).projectConfig;
@@ -219,7 +224,7 @@ function tokenFor(container: MedusaContainer, userId: string, roles: string[]) {
     {
       actor_id: userId,
       actor_type: 'user',
-      auth_identity_id: '',
+      auth_identity_id: await staffIdentityWithAuthenticator(container),
       app_metadata: { user_id: userId, roles },
     },
     { secret: cfg.jwtSecret, expiresIn: 600, jwtOptions: cfg.jwtOptions },
@@ -272,7 +277,7 @@ medusaIntegrationTestRunner({
         const ansonRole = await roleWith(container, 'Anson test', ANSON);
         anson = {
           headers: {
-            authorization: `Bearer ${tokenFor(container, 'user_anson_test', [ansonRole])}`,
+            authorization: `Bearer ${await tokenFor(container, 'user_anson_test', [ansonRole])}`,
           },
         };
       });
@@ -352,7 +357,7 @@ medusaIntegrationTestRunner({
         ]);
         const reviewer = {
           headers: {
-            authorization: `Bearer ${tokenFor(container, 'user_reviewer_test', [reviewerRole])}`,
+            authorization: `Bearer ${await tokenFor(container, 'user_reviewer_test', [reviewerRole])}`,
           },
         };
         for (const path of [
@@ -616,7 +621,7 @@ medusaIntegrationTestRunner({
           { message: 'hi' },
           {
             headers: {
-              authorization: `Bearer ${tokenFor(container, 'user_plain', [plain])}`,
+              authorization: `Bearer ${await tokenFor(container, 'user_plain', [plain])}`,
             },
             validateStatus: () => true,
           },

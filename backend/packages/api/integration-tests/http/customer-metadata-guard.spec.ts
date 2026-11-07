@@ -5,7 +5,12 @@ import {
   Modules,
 } from '@medusajs/framework/utils';
 import { supportViewerRoleId } from '../../src/scripts/create-support-viewer';
-import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
+import {
+  mintSuperAdmin,
+  postStoreCustomer,
+  staffIdentityWithAuthenticator,
+  unwrapResponse,
+} from './utils';
 
 jest.setTimeout(240 * 1000);
 
@@ -158,12 +163,15 @@ medusaIntegrationTestRunner({
         const { http } = container.resolve(
           ContainerRegistrationKeys.CONFIG_MODULE,
         ).projectConfig;
+        // A login with an authenticator set up: /admin answers no staff
+        // token without.
+        const staffIdentity = await staffIdentityWithAuthenticator(container);
         const tokenFor = (name: string, roleId: string) =>
           generateJwtToken(
             {
               actor_id: name,
               actor_type: 'user',
-              auth_identity_id: '',
+              auth_identity_id: staffIdentity,
               app_metadata: { user_id: name, roles: [roleId] },
             },
             {
