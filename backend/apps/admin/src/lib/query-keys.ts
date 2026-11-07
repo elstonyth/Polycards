@@ -146,6 +146,10 @@ export const qk = {
     ] as const,
   // 2-segment prefix — invalidates ALL delivery-order pages/filters in one call
   deliveryOrdersKey: ['admin', 'delivery-orders'] as const,
+  // Under deliveryOrdersKey, so a GRN / invoice save or a status move
+  // refetches it with the list.
+  deliveryOrdersStock: (ids: string[]) =>
+    ['admin', 'delivery-orders', 'stock', ids.join(',')] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
   // Every cached order detail — the stock allocation moves orders to
   // processed / ready_to_ship server-side after a GRN or invoice save.

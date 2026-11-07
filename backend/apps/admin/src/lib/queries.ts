@@ -46,6 +46,7 @@ import {
   revokePackGift,
   type PackGift,
   getDeliveryOrder,
+  getDeliveryOrdersStock,
   getProfitReport,
   type CustomerScope,
   type ProfitRange,
@@ -113,6 +114,7 @@ import {
   updateDeliveryOrder,
   uploadImage,
   type AdminDeliveryOrder,
+  type DeliveryOrderCardCover,
   type AvatarFramesView,
   type ChallengeSettingsDTO,
   type ChallengeStageDTO,
@@ -577,6 +579,17 @@ export const useDeliveryOrder = (
     queryKey: qk.deliveryOrder(id),
     queryFn: () => getDeliveryOrder(id),
     enabled: !!id,
+  });
+
+// In stock / missing per card for the orders on one page of the Orders list
+// (and their Manage modal): one request per page, one allocation server-side.
+export const useDeliveryOrdersStock = (
+  ids: string[],
+): UseQueryResult<Record<string, DeliveryOrderCardCover[] | null>> =>
+  useQuery({
+    queryKey: qk.deliveryOrdersStock(ids),
+    queryFn: () => getDeliveryOrdersStock(ids),
+    enabled: ids.length > 0,
   });
 
 export const useFxRate = (): UseQueryResult<FxRateState> =>
