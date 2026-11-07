@@ -66,6 +66,23 @@ export function isSetupRequiredResponse(
   return url.origin === backend.origin && url.pathname.startsWith('/admin/');
 }
 
+/** True for a visit to an invite link. Medusa refuses to accept an invite
+ *  from a browser signed in to the admin ("already authenticated"), and the
+ *  page shows that as "invalid or expired" after it has already made the new
+ *  login, which then blocks every retry (elston@, 2026-11-07). So the visit
+ *  signs this browser out first. */
+export function isInviteVisit(
+  pathname: string,
+  search: string,
+  basePath: string,
+): boolean {
+  const root = basePath.replace(/\/+$/, '');
+  return (
+    pathname.replace(/\/+$/, '') === `${root}/invite` &&
+    new URLSearchParams(search).has('token')
+  );
+}
+
 /** Our sign-in page for a visit to Mercur's login page, else null. */
 export function signInInstead(
   pathname: string,
@@ -129,4 +146,17 @@ if (typeof window !== 'undefined') {
   }
   window.addEventListener('popstate', leaveLogin);
   leaveLogin();
+
+  if (
+    isInviteVisit(
+      window.location.pathname,
+      window.location.search,
+      typeof __BASE__ !== 'undefined' ? __BASE__ : '/',
+    )
+  ) {
+    void fetchOriginal(`${__BACKEND_URL__}/auth/session`, {
+      method: 'DELETE',
+      credentials: 'include',
+    }).catch(() => undefined);
+  }
 }
