@@ -1,4 +1,10 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -19,8 +25,11 @@ import {
   digitsOnly,
   endSession,
   groupKey,
+  keepEnrollment,
+  keptEnrollment,
   makeBackupCodes,
   startAuthenticator,
+  tabStore,
 } from '../../lib/two-step';
 
 // Two-step sign-in setup (owner, 2026-11-07): a login without an authenticator
@@ -39,27 +48,41 @@ export default function TwoStepSetupPage() {
   const [copied, setCopied] = useState<'key' | 'codes' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // StrictMode runs effects twice in dev: one new authenticator per visit.
+  // StrictMode runs effects twice in dev: one start per visit.
   const started = useRef(false);
 
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    startAuthenticator()
-      .then(async (next) => {
+  // The setup this tab already showed, unless asked for a fresh one: a reload
+  // keeps the QR code the phone may already hold (lib/two-step, tabStore).
+  const begin = useCallback(
+    async (fresh: boolean) => {
+      let next = fresh ? null : keptEnrollment(tabStore());
+      try {
+        if (!next) {
+          next = await startAuthenticator();
+          keepEnrollment(tabStore(), next);
+        }
         setEnrollment(next);
+        setCode('');
         setQr(await toDataURL(next.otpauthUrl, { margin: 1, width: 220 }));
-      })
-      .catch((err: unknown) => {
+      } catch (err) {
         if (err instanceof TwoStepError && err.status === 401) {
           window.location.assign(adminUrl(SIGN_IN_PATH));
         } else if (err instanceof TwoStepError && err.status === 409) {
+          keepEnrollment(tabStore(), null);
           setError(t('pcTwoStep.alreadySetUp'));
         } else {
           setError((err as Error).message);
         }
-      });
-  }, [t]);
+      }
+    },
+    [t],
+  );
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void begin(false);
+  }, [begin]);
 
   const copy = async (what: 'key' | 'codes', text: string) => {
     await navigator.clipboard.writeText(text);
@@ -85,10 +108,17 @@ export default function TwoStepSetupPage() {
     setError(null);
     try {
       await confirmAuthenticator(enrollment.factorId, code);
+      keepEnrollment(tabStore(), null);
       setCodes(await makeBackupCodes());
-    } catch {
-      setError(t('pcTwoStep.wrongCode'));
+    } catch (err) {
       setCode('');
+      if (err instanceof TwoStepError && err.status === 404) {
+        // Replaced by a setup in another tab, or reset: show a new one.
+        await begin(true);
+        setError(t('pcTwoStep.setupRestarted'));
+      } else {
+        setError(t('pcTwoStep.wrongCode'));
+      }
     } finally {
       setBusy(false);
     }
@@ -208,6 +238,19 @@ export default function TwoStepSetupPage() {
                   disabled={code.length !== 6}
                 >
                   {t('pcTwoStep.turnOn')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="transparent"
+                  size="small"
+                  className="self-start"
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null);
+                    void begin(true);
+                  }}
+                >
+                  {t('pcTwoStep.startOver')}
                 </Button>
               </form>
             ) : error ? (

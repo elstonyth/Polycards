@@ -2301,6 +2301,8 @@
     "copyKey": "Copy key",
     "copied": "Copied",
     "enterCode": "2. Enter the 6-digit code the app shows.",
+    "startOver": "Start over with a new QR code",
+    "setupRestarted": "That setup was replaced. Scan this new QR code.",
     "turnOn": "Turn on",
     "backupTitle": "Save your backup codes",
     "backupIntro": "If you lose your phone, each code signs you in once. They are shown only now.",

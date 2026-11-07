@@ -199,7 +199,9 @@ export async function allowOneAuthenticator(
       return;
     }
     const { rows } = await dbOf(req.scope).raw(
-      'SELECT max(deleted_at) AS reset_at FROM auth_mfa_factor WHERE auth_identity_id = ?',
+      // A reset removes a confirmed authenticator; an unfinished setup this
+      // route clears (below) is no reset.
+      "SELECT max(deleted_at) AS reset_at FROM auth_mfa_factor WHERE auth_identity_id = ? AND status = 'enabled'",
       [auth.auth_identity_id],
     );
     const resetAt = rows[0]?.reset_at
@@ -214,6 +216,14 @@ export async function allowOneAuthenticator(
       });
       return;
     }
+    // An unfinished setup (a reload, or the phone's browser reloading after a
+    // switch to the authenticator app) would block a new one: Medusa refuses
+    // to start while one is pending (Yuan, 2026-11-07). Its QR code was never
+    // confirmed, so this setup replaces it.
+    await dbOf(req.scope).raw(
+      "UPDATE auth_mfa_factor SET deleted_at = now(), updated_at = now() WHERE auth_identity_id = ? AND provider = 'totp' AND status = 'pending' AND deleted_at IS NULL",
+      [auth.auth_identity_id],
+    );
     // The phone app names the account "Polycards Admin: <their email>",
     // whatever the page sent. Set on both, whichever the framework read.
     const user = await req.scope
