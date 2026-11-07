@@ -69,6 +69,7 @@ const STATUSES: DeliveryStatus[] = [
   'requested',
   'processed',
   'ready_to_ship',
+  'pending_ship',
   'shipped',
   'completed',
   'canceled',

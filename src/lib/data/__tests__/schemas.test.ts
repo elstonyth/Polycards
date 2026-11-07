@@ -531,4 +531,13 @@ describe('DeliveryOrderSchema — the shipping snapshot', () => {
       }),
     ).toBeNull();
   });
+
+  // A status the schema does not list DROPS the row: the order would vanish
+  // from the customer's /orders.
+  it('keeps a pending_ship (packed, not posted) order', () => {
+    expect(
+      parseOne(DeliveryOrderSchema, { ...minimal, status: 'pending_ship' })
+        ?.status,
+    ).toBe('pending_ship');
+  });
 });

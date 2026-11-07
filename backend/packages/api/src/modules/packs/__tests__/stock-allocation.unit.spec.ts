@@ -57,6 +57,20 @@ describe('allocateStock (strict oldest-first, spec 2026-10-28)', () => {
     expect(r).toEqual({ ready: [], short: ['waiting'] });
   });
 
+  it('lets pending_ship (packed, not posted) orders keep their units first', () => {
+    const orders = [
+      order('waiting', 1, ['a']),
+      order('packed', 9, ['a'], 'pending_ship'),
+    ];
+    expect(allocateStock(stock({ a: 1 }), orders)).toEqual({
+      ready: [],
+      short: ['waiting'],
+    });
+    expect(stockCoverFor(['packed'], stock({ a: 1 }), orders)).toEqual({
+      packed: [{ handle: 'a', need: 1, have: 1, on_hand: 1 }],
+    });
+  });
+
   it('ignores canceled, shipped and completed orders', () => {
     const r = allocateStock(stock({ a: 1 }), [
       order('gone', 0, ['a'], 'canceled'),

@@ -1211,6 +1211,8 @@ export const DeliveryOrderSchema = z.looseObject({
     'packing',
     'processed',
     'ready_to_ship',
+    // Packed, waiting for the courier (2026-11-07); reads "Ready to ship".
+    'pending_ship',
     'shipped',
     'delivered',
     'completed',

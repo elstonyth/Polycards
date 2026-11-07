@@ -4,6 +4,10 @@ export const DELIVERY_STATUSES = [
   'requested',
   'processed',
   'ready_to_ship',
+  // Packed but not posted yet (operator, 2026-11-07): off the Ready to ship
+  // tab, so the next packing-slip print skips it. Holds its cards like
+  // ready_to_ship; the customer still reads "ready to ship".
+  'pending_ship',
   'shipped',
   'completed',
   'canceled',
@@ -30,6 +34,7 @@ const CANONICAL_CUSTOMER_WORD: Record<DeliveryStatus, string> = {
   requested: 'requested',
   processed: 'processed',
   ready_to_ship: 'ready to ship',
+  pending_ship: 'ready to ship',
   shipped: 'shipped',
   completed: 'delivered',
   canceled: 'canceled',
@@ -155,7 +160,10 @@ export type TransitionVerdict =
 const CANONICAL_ALLOWED: Record<DeliveryStatus, DeliveryStatus[]> = {
   requested: ['processed', 'canceled'],
   processed: ['ready_to_ship', 'canceled'],
-  ready_to_ship: ['shipped', 'processed', 'canceled'],
+  ready_to_ship: ['shipped', 'pending_ship', 'processed', 'canceled'],
+  // Back to ready_to_ship undoes a mis-click; the cards are packed, so no
+  // step back to processed from here.
+  pending_ship: ['shipped', 'ready_to_ship', 'canceled'],
   shipped: ['completed'],
   completed: [],
   canceled: [],
