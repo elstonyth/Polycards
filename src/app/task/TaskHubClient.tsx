@@ -509,11 +509,24 @@ export function TaskHubClient({
   // A notice with a step to take sits at the top: bring it to a player who
   // tapped Claim further down the list.
   useEffect(() => {
-    if (notice?.link)
-      noticeRef.current?.scrollIntoView({
+    const el = noticeRef.current;
+    if (!notice || !el) return;
+    if (notice.link)
+      el.scrollIntoView({
         block: 'nearest',
         behavior: reducedMotion ? 'auto' : 'smooth',
       });
+    // A repeat tap sets the same text, so nothing on screen changed and players
+    // read it as a dead button (support chat, 2026-11-06). Flash it on every
+    // notice. The animation leaves the DOM alone, which keeps it safe under
+    // Chrome page translation. Element.animate skips the globals.css
+    // reduced-motion backstop, so reduced motion is checked here: the site
+    // keeps still for those players, fades included.
+    if (!reducedMotion)
+      el.animate(
+        [{ opacity: 0.35, backgroundColor: 'rgb(255 255 255 / 0.14)' }],
+        { duration: 450, easing: 'ease-out' },
+      );
   }, [notice, reducedMotion]);
   const { claim, pendingId } = useClaimTask(setNotice);
   const tabs = useMemo(
