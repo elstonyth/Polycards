@@ -22,6 +22,7 @@ import {
   useBulkUpdateDeliveryOrders,
   useCheckDeliveryTracking,
   useDeliveryOrders,
+  useDeliveryOrderStock,
   useGatewayDeposits,
   usePulls,
   useUpdateDeliveryOrder,
@@ -48,6 +49,7 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { TrackingLine } from '../../components/DeliveryTracking';
 import { depositStatusBadge } from '../../components/PaymentStatusBadge';
+import { coverItems } from './stock-cover';
 
 export const config: RouteConfig = {
   label: 'pcNav.orders',
@@ -385,6 +387,16 @@ const DeliveriesPage = () => {
   const track = useCheckDeliveryTracking();
   const uploadImg = useUploadImage();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
+  // In stock / missing per item (operator, 2026-11-07), only while the open
+  // order still waits on cards: ready_to_ship already holds every card.
+  const waitingOnStock =
+    detail?.status === 'requested' || detail?.status === 'processed';
+  const stock = useDeliveryOrderStock(detail?.id ?? '', waitingOnStock);
+  // A failed or pending check shows no marks: never "missing" on a guess.
+  const cover =
+    waitingOnStock && detail && stock.data
+      ? coverItems(detail.items, stock.data)
+      : null;
   const [nextStatus, setNextStatus] = useState<DeliveryStatus>('processed');
   const [tracking, setTracking] = useState('');
   const [proofImages, setProofImages] = useState<string[]>([]);
@@ -1022,6 +1034,31 @@ const DeliveriesPage = () => {
                   <Text size="small" weight="plus">
                     Items ({detail.items.length})
                   </Text>
+                  {/* Live stock, oldest order first: the split the 12am run
+                      and the Stock page's Refresh make. An order can be all
+                      in stock and still Processed until one of them runs. */}
+                  {waitingOnStock && stock.isPending && (
+                    <Text size="small" className="text-ui-fg-subtle">
+                      Checking stock…
+                    </Text>
+                  )}
+                  {waitingOnStock && stock.isError && (
+                    <Text size="small" className="text-ui-fg-subtle">
+                      Could not check stock.
+                    </Text>
+                  )}
+                  {cover &&
+                    (cover.missing === 0 ? (
+                      <Text size="small" className="text-ui-fg-subtle">
+                        All cards in stock. Moves to Ready to ship at the 12am
+                        run or a Stock page Refresh.
+                      </Text>
+                    ) : (
+                      <Text size="small" className="text-ui-fg-subtle">
+                        {cover.inStock} in stock, {cover.missing} missing
+                        (oldest orders get stock first).
+                      </Text>
+                    ))}
                   <ul className="flex flex-col gap-3">
                     {detail.items.map((it) => (
                       <li key={it.pull_id} className="flex items-center gap-3">
@@ -1050,7 +1087,26 @@ const DeliveriesPage = () => {
                           <span className="text-ui-fg-subtle break-words font-mono text-xs">
                             {it.card?.handle ?? it.pull_id}
                           </span>
+                          {cover?.byPull.get(it.pull_id)?.keptForOthers && (
+                            <span className="text-ui-fg-subtle text-xs">
+                              On the shelf, kept for other orders
+                            </span>
+                          )}
                         </div>
+                        {cover?.byPull.has(it.pull_id) && (
+                          <StatusBadge
+                            className="ml-auto shrink-0"
+                            color={
+                              cover.byPull.get(it.pull_id)?.inStock
+                                ? 'green'
+                                : 'red'
+                            }
+                          >
+                            {cover.byPull.get(it.pull_id)?.inStock
+                              ? 'In stock'
+                              : 'Missing'}
+                          </StatusBadge>
+                        )}
                       </li>
                     ))}
                   </ul>

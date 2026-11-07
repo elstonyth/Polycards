@@ -1,4 +1,8 @@
-import { allocateStock, type AllocOrder } from '../stock-allocation';
+import {
+  allocateStock,
+  stockCoverFor,
+  type AllocOrder,
+} from '../stock-allocation';
 
 const at = (minute: number) => new Date(Date.UTC(2026, 9, 28, 0, minute));
 const order = (
@@ -85,5 +89,74 @@ describe('allocateStock (strict oldest-first, spec 2026-10-28)', () => {
       order('a-order', 1, ['a']),
     ]);
     expect(r).toEqual({ ready: ['a-order'], short: ['b-order'] });
+  });
+});
+
+describe('stockCoverFor (Orders page: which cards are in, which are missing)', () => {
+  it('shows an old order holding the unit it got and missing the rest', () => {
+    const orders = [order('old', 1, ['a', 'b'], 'processed')];
+    expect(stockCoverFor('old', stock({ a: 1 }), orders)).toEqual([
+      { handle: 'a', need: 1, have: 1, on_hand: 1 },
+      { handle: 'b', need: 1, have: 0, on_hand: 0 },
+    ]);
+  });
+
+  it('counts the same card twice: one unit in, one missing', () => {
+    const orders = [order('o', 1, ['a', 'a'], 'processed')];
+    expect(stockCoverFor('o', stock({ a: 1 }), orders)).toEqual([
+      { handle: 'a', need: 2, have: 1, on_hand: 1 },
+    ]);
+  });
+
+  it('shows a newer order missing a card that is on the shelf for an older one', () => {
+    const orders = [
+      order('old', 1, ['a']),
+      order('new', 2, ['a'], 'processed'),
+    ];
+    expect(stockCoverFor('new', stock({ a: 1 }), orders)).toEqual([
+      { handle: 'a', need: 1, have: 0, on_hand: 1 },
+    ]);
+    expect(stockCoverFor('old', stock({ a: 1 }), orders)).toEqual([
+      { handle: 'a', need: 1, have: 1, on_hand: 1 },
+    ]);
+  });
+
+  it('gives a ready_to_ship order every unit, ahead of older open orders', () => {
+    const orders = [
+      order('waiting', 1, ['a']),
+      order('held', 9, ['a'], 'ready_to_ship'),
+    ];
+    expect(stockCoverFor('held', stock({ a: 1 }), orders)).toEqual([
+      { handle: 'a', need: 1, have: 1, on_hand: 1 },
+    ]);
+    expect(stockCoverFor('waiting', stock({ a: 1 }), orders)).toEqual([
+      { handle: 'a', need: 1, have: 0, on_hand: 1 },
+    ]);
+  });
+
+  it('reports negative on hand as 0', () => {
+    expect(
+      stockCoverFor('o', stock({ a: -2 }), [order('o', 1, ['a'])]),
+    ).toEqual([{ handle: 'a', need: 1, have: 0, on_hand: 0 }]);
+  });
+
+  it('returns null for an order that is not waiting on stock', () => {
+    const orders = [order('sent', 1, ['a'], 'shipped')];
+    expect(stockCoverFor('sent', stock({ a: 1 }), orders)).toBeNull();
+    expect(stockCoverFor('nope', stock({ a: 1 }), orders)).toBeNull();
+  });
+
+  it('agrees with allocateStock: a ready order has every unit, a short one does not', () => {
+    const onHand = stock({ a: 2, b: 1 });
+    const orders = [
+      order('o1', 1, ['a', 'b']),
+      order('o2', 2, ['a', 'b'], 'processed'),
+      order('o3', 3, ['a']),
+    ];
+    const { ready, short } = allocateStock(onHand, orders);
+    const full = (id: string) =>
+      stockCoverFor(id, onHand, orders)!.every((c) => c.have === c.need);
+    expect(ready.every(full)).toBe(true);
+    expect(short.some(full)).toBe(false);
   });
 });

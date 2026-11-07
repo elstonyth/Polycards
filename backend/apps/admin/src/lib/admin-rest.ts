@@ -1314,6 +1314,26 @@ export const allocateDeliveryOrders = () =>
     {},
   );
 
+// Which of one order's cards the stock covers, oldest order first (live).
+// Per card: need = units the order wants, have = units covered for it,
+// on_hand = the card's whole on hand (more than have = kept for other orders).
+// null = the order is not waiting on stock.
+export type DeliveryOrderCardCover = {
+  handle: string;
+  need: number;
+  have: number;
+  on_hand: number;
+};
+
+export async function getDeliveryOrderStock(
+  id: string,
+): Promise<DeliveryOrderCardCover[] | null> {
+  const data = await getJson<{ cards: DeliveryOrderCardCover[] | null }>(
+    `/admin/delivery-orders/${encodeURIComponent(id)}/stock`,
+  );
+  return data.cards;
+}
+
 export async function getDeliveryOrder(
   id: string,
 ): Promise<AdminDeliveryOrder> {
