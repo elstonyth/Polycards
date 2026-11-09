@@ -14,6 +14,7 @@ import {
 } from '../../../../utils/phone-verification';
 import { consumeOtpSendBudget } from '../../../utils/rate-limit';
 import {
+  dropPendingCode,
   holdStart,
   outranks,
   pendingCode,
@@ -200,8 +201,8 @@ export async function POST(
         return;
       }
     }
-    // A start that stalled past its hold may have been overtaken: it sends
-    // nothing, and (below) records nothing.
+    // A start that stalled may be overtaken: it sends nothing, and (below)
+    // records nothing. Within the send deadline its hold outlives the send.
     if (!(await hold.held())) {
       res.json(response);
       return;
@@ -231,7 +232,10 @@ export async function POST(
       // sent, so the code works for no flow; the other start's owner asks
       // again.
       logger.warn('[phone-otp] start overtaken; cancelling the code it sent');
-      if (sid) await cancelPhoneOtp(process.env, logger, sid);
+      const cancelled =
+        !!sid && (await cancelPhoneOtp(process.env, logger, sid));
+      // Not confirmed: no flow may accept the code until a new start.
+      if (!cancelled) await dropPendingCode(phone).catch(() => undefined);
     }
     res.json(response);
   } finally {

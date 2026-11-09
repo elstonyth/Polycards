@@ -31,11 +31,14 @@ const RANK: Record<PhoneOtpPurpose, number> = {
 export const outranks = (pending: PhoneOtpPurpose, purpose: PhoneOtpPurpose) =>
   RANK[pending] > RANK[purpose];
 
-// Long enough for a cancel and a send (Twilio's 10 s timeout each).
-const START_HOLD_MS = 30_000;
+// A start sends only within SEND_BY_MS of taking its hold, and a send gives
+// up after Twilio's 10 s, so the hold outlives every send: no other start,
+// and no record write, can land between a start's check and its send.
+export const START_HOLD_MS = 120_000;
+export const SEND_BY_MS = 60_000;
 
 export type StartHold = {
-  /** Still this start's: a start that stalled past the hold must not send. */
+  /** Still this start's, and young enough to send: one that stalled must not. */
   held(): Promise<boolean>;
   /** Records the code's flow and verification, only while still held. */
   note(purpose: PhoneOtpPurpose, sid?: string): Promise<boolean>;
@@ -50,8 +53,10 @@ export async function holdStart(phone: string): Promise<StartHold | null> {
   const key = `otp-start:${phone}`;
   const owner = randomUUID();
   if (!(await claims.claim(key, START_HOLD_MS, owner))) return null;
+  const takenAt = Date.now();
   return {
-    held: async () => (await claims.get(key)) === owner,
+    held: async () =>
+      Date.now() - takenAt < SEND_BY_MS && (await claims.get(key)) === owner,
     note: (purpose, sid) =>
       claims.putIfHeld(
         key,
@@ -91,6 +96,12 @@ export async function notePurposeSent(
     serialize({ purpose, sid }),
     OTP_PURPOSE_TTL_MS,
   );
+}
+
+/** No flow accepts the number's pending code until a new start: for a code
+ *  whose cancel could not be confirmed. */
+export async function dropPendingCode(phone: string): Promise<void> {
+  await warmSignupProofClaims().release(recordKey(phone));
 }
 
 /** After a code is used: the next flow starts clean. Only the record this

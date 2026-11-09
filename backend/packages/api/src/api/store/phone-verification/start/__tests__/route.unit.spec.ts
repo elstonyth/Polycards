@@ -27,12 +27,14 @@ jest.mock('../../../../utils/otp-purpose', () => ({
   notePurposeSent: jest.fn(async () => undefined),
   pendingCode: jest.fn(async () => null),
   holdStart: jest.fn(),
+  dropPendingCode: jest.fn(async () => undefined),
 }));
 
 const sendPhoneOtp = phoneUtils.sendPhoneOtp as jest.Mock;
 const notePurposeSent = otpPurpose.notePurposeSent as jest.Mock;
 const pendingCode = otpPurpose.pendingCode as jest.Mock;
 const holdStart = otpPurpose.holdStart as jest.Mock;
+const dropPendingCode = otpPurpose.dropPendingCode as jest.Mock;
 // The start's hold: the record goes through it (note), so it is what the
 // flow assertions read.
 const note = jest.fn(async (_purpose: string, _sid?: string) => true);
@@ -544,6 +546,21 @@ describe('POST /store/phone-verification/start — flow of the pending code', ()
     expect(cancelPhoneOtp).toHaveBeenCalledWith(expect.anything(), expect.anything(), SID);
     expect(out.body).toEqual({ ok: true, channel: 'sms' });
   });
+
+  it.each([
+    ['the cancel fails', SID, false],
+    ['the send returned no verification', undefined, true],
+  ])(
+    'leaves no flow accepting the code when an overtaken start cannot confirm its cancel (%s)',
+    async (_case, sid, cancelled) => {
+      sendPhoneOtp.mockResolvedValueOnce(sid);
+      note.mockResolvedValueOnce(false);
+      cancelPhoneOtp.mockResolvedValueOnce(cancelled);
+      dropPendingCode.mockClear();
+      await startVerification(mkReq(MY, 'signup'), mkRes().res);
+      expect(dropPendingCode).toHaveBeenCalledWith(MY);
+    },
+  );
 
   it('sends nothing once its hold has run out and another start took it', async () => {
     heldNow.mockResolvedValueOnce(false);
