@@ -4,6 +4,7 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
+  accountNumberForms,
   findBank,
   sandboxOnlyBank,
   savedAccountSlot,
@@ -300,13 +301,14 @@ export async function POST(
     );
   }
   const packs = resolvePacks<CustomerWallet>(req.scope);
-  if (
-    await packs.payoutAccountBanned(
-      accountNumber,
-      bank.wallet !== undefined,
-      customerId,
-    )
-  ) {
+  // A PayNow mobile is one number with or without its 65 (accountNumberForms).
+  const numbers = accountNumberForms(bankCode, accountNumber);
+  const banned = await Promise.all(
+    numbers.map((n) =>
+      packs.payoutAccountBanned(n, bank.wallet !== undefined, customerId),
+    ),
+  );
+  if (banned.some(Boolean)) {
     req.scope
       .resolve('logger')
       .warn(
@@ -317,12 +319,11 @@ export async function POST(
       BANNED_PAYOUT_ACCOUNT_MESSAGE,
     );
   }
+  // Compared by its letters (holderNameKey, on both sides in the query), so
+  // a name dressed up with digits, accents or small capitals is the plain one.
   const nameLinked = async () =>
     !bank.wallet &&
-    (await packs.holderNameHeldByAnother(
-      customerId,
-      account.accountHolderName,
-    ));
+    (await packs.holderNameHeldByAnother(customerId, account.accountHolderName));
   const refuseLinkedName = (): never => {
     // Logged like a shared number, so a run of probes shows up. No name: PII.
     req.scope
@@ -340,22 +341,40 @@ export async function POST(
   // Looked up before the lock (it reads OTHER customers, which this
   // customer's metadata lock does not cover) but applied inside it, where
   // "already on my list" is decided from the locked read. Two strangers saving
-  // one number in the same instant can both get through, and are both held at
-  // payout, which sees the other's saved entry.
+  // one number in the same instant both pass it, so it is asked again once the
+  // save is visible (below).
   //
   // Any holder blocks, under any name: one ring typed ten holder names onto one
   // number, which the old same-name rule let straight through. A stranger who
   // saves someone's number first locks the owner out until support acts; support
   // is the answer to that (ADR 0015). Support's verification lifts a payout hold
   // on a number already saved; it never lets a new one in.
-  const shared = blocksNewSave(
-    await packs.otherPayoutAccountHolders(
-      customerId,
-      accountNumber,
-      bank.wallet !== undefined,
-    ),
-    bankCode,
-  );
+  const numberHeld = async () =>
+    blocksNewSave(
+      (
+        await Promise.all(
+          numbers.map((n) =>
+            packs.otherPayoutAccountHolders(
+              customerId,
+              n,
+              bank.wallet !== undefined,
+            ),
+          ),
+        )
+      ).flat(),
+      bankCode,
+    );
+  const refuseShared = (): never => {
+    // The refusal tells the customer the number is linked elsewhere; log it so
+    // repeated probing for linked numbers shows up. Last 4 only.
+    req.scope
+      .resolve('logger')
+      .warn(
+        `[saved-accounts] refused a shared payout account for ${customerId} (${bankCode} …${accountNumber.slice(-4)})`,
+      );
+    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, SHARED_SAVE_MESSAGE);
+  };
+  const shared = await numberHeld();
 
   // The cap is checked against the list read INSIDE the lock, not against one
   // this handler read earlier — otherwise two concurrent saves could both see
@@ -387,28 +406,23 @@ export async function POST(
         HOLDER_NAME_DIFFERENT_MESSAGE,
       );
     }
-    if (shared) {
-      // The refusal tells the customer the number is linked elsewhere; log
-      // it so repeated probing for linked numbers shows up. Last 4 only.
-      req.scope
-        .resolve('logger')
-        .warn(
-          `[saved-accounts] refused a shared payout account for ${customerId} (${bankCode} …${accountNumber.slice(-4)})`,
-        );
-      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, SHARED_SAVE_MESSAGE);
-    }
+    if (shared) refuseShared();
     added = true;
     return [...accounts, account];
   });
-  // The name lookup reads other customers, which this customer's lock does not
-  // cover, so two accounts saving one name at once both pass it. Look again now
-  // the save is visible: a racer takes its entry back off. Both racers may, and
-  // the next try is serial.
-  if (added && (await nameLinked())) {
-    await mutateAccounts(req, customerId, (accounts) =>
-      accounts.filter((a) => a.id !== account.id),
-    );
-    refuseLinkedName();
+  // The name and number lookups read other customers, which this customer's
+  // lock does not cover, so two accounts saving one name or one number at once
+  // both pass them. Look again now the save is visible: a racer takes its entry
+  // back off. Both racers may, and the next try is serial.
+  if (added) {
+    const linked = await nameLinked();
+    if (linked || (await numberHeld())) {
+      await mutateAccounts(req, customerId, (accounts) =>
+        accounts.filter((a) => a.id !== account.id),
+      );
+      if (linked) refuseLinkedName();
+      refuseShared();
+    }
   }
 
   // A NEW payout destination is the event worth telling the account owner

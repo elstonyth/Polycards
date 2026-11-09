@@ -7,6 +7,7 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import {
   MY_BANKS,
   SG_BANKS,
+  accountNumberForms,
   findBank,
 } from '../../../../../modules/packs/banks';
 import {
@@ -35,15 +36,22 @@ export async function GET(
   const accounts = parseSavedBankAccounts(metadata.bank_accounts);
   const verified = verifiedBankAccounts(metadata);
 
+  // A PayNow mobile is one number with or without its 65 (accountNumberForms).
   const holders = await Promise.all(
     accounts.map(async (account) =>
       (
-        await packs.otherPayoutAccountHolders(
-          customerId,
-          account.accountNumber,
-          findBank(account.bankCode)?.wallet !== undefined,
+        await Promise.all(
+          accountNumberForms(account.bankCode, account.accountNumber).map((n) =>
+            packs.otherPayoutAccountHolders(
+              customerId,
+              n,
+              findBank(account.bankCode)?.wallet !== undefined,
+            ),
+          ),
         )
-      ).filter((h) => heldByAnother([h], account.bankCode)),
+      )
+        .flat()
+        .filter((h) => heldByAnother([h], account.bankCode)),
     ),
   );
   const cleared = Object.values(clearedHolderNames(metadata));

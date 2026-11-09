@@ -4,7 +4,10 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
-import { findBank } from '../../../../../../modules/packs/banks';
+import {
+  accountNumberForms,
+  findBank,
+} from '../../../../../../modules/packs/banks';
 import {
   heldByAnother,
   parseSavedBankAccounts,
@@ -62,13 +65,20 @@ export async function POST(
         'That bank account is no longer on this player.',
       );
     }
+    // A PayNow mobile is one number with or without its 65.
     const holders = (
-      await packs.otherPayoutAccountHolders(
-        customerId,
-        account.accountNumber,
-        findBank(account.bankCode)?.wallet !== undefined,
+      await Promise.all(
+        accountNumberForms(account.bankCode, account.accountNumber).map((n) =>
+          packs.otherPayoutAccountHolders(
+            customerId,
+            n,
+            findBank(account.bankCode)?.wallet !== undefined,
+          ),
+        ),
       )
-    ).filter((h) => heldByAnother([h], account.bankCode));
+    )
+      .flat()
+      .filter((h) => heldByAnother([h], account.bankCode));
     const others = [...new Set(holders.map((h) => h.customer_id))];
     if (others.length === 0) {
       throw new MedusaError(

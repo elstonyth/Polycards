@@ -26,6 +26,19 @@ describe('normalizeRealName', () => {
     expect(normalizeRealName(input)).toBeNull();
   });
 
+  // A repeat with an invisible character or styled letters stores as the
+  // plain name, so the repeated-name lookup finds the account that has it.
+  it.each([
+    ['TAN AH KO͏W'],
+    ['TAN​ AH KOW'],
+    ['TAN AH KOW️'],
+    ['TAN ㅤAH KOW'],
+    ['ＴＡＮ ＡＨ ＫＯＷ'],
+    ['𝐓𝐀𝐍 𝐀𝐇 𝐊𝐎𝐖'],
+  ])('stores %j as the plain name', (input) => {
+    expect(normalizeRealName(input)).toBe('TAN AH KOW');
+  });
+
   it('refuses a non-string', () => {
     expect(normalizeRealName(null)).toBeNull();
     expect(normalizeRealName(42)).toBeNull();

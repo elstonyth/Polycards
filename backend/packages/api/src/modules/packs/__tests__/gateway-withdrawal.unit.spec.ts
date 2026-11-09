@@ -550,6 +550,25 @@ describe('startWithdrawal — money ordering', () => {
     });
   });
 
+  it('refuses a PayNow mobile banned under its other spelling, before any row or debit', async () => {
+    const paynow = {
+      ...SAVED_ACCOUNT,
+      id: savedBankAccountId('PAYNOWSG', '91234567'),
+      bankCode: 'PAYNOWSG',
+      bankName: 'PayNow (mobile number)',
+      accountNumber: '91234567',
+    };
+    const h = harness([paynow]);
+    h.packs.payoutAccountBanned.mockImplementation(
+      async (n: string) => n === '6591234567',
+    );
+    await expect(
+      start(h, { gateway: 'tgpay', amount: 56, accountId: paynow.id }),
+    ).rejects.toThrow('This bank account cannot be used on Polycards.');
+    expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+  });
+
   it('holds a destination to its own payout floor before any row or debit', async () => {
     const actual = jest.requireActual('../banks').bankPayoutMinRm;
     jest.mocked(bankPayoutMinRm).mockImplementation(() => 100);
@@ -1845,6 +1864,36 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         const out = await h.approve().catch((e: Error) => e);
         expect(String((out as Error).message)).not.toMatch(/linked to another/);
         expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalled();
+      });
+
+      // A PayNow mobile is one number with or without its 65.
+      const paynowRow = {
+        ...heldRow,
+        bank_code: 'PAYNOWSG',
+        account_number: '91234567',
+      };
+
+      it('refuses a PayNow mobile banned under its other spelling', async () => {
+        const h = approveHarness();
+        h.packs.listGatewayWithdrawals.mockResolvedValue([paynowRow]);
+        h.packs.payoutAccountBanned.mockImplementation(
+          async (n: string) => n === '6591234567',
+        );
+        await expect(h.approve()).rejects.toThrow(/banned on Polycards/);
+        expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
+      });
+
+      it('refuses a PayNow mobile another account holds under its other spelling', async () => {
+        const h = approveHarness();
+        h.packs.listGatewayWithdrawals.mockResolvedValue([paynowRow]);
+        h.packs.otherPayoutAccountHolders.mockImplementation(
+          async (_id: string, n: string) =>
+            n === '6591234567' ? [{ ...elsewhere, bank_code: 'PAYNOWSG' }] : [],
+        );
+        await expect(h.approve()).rejects.toThrow(
+          /linked to another Polycards account/,
+        );
+        expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
       });
     });
 

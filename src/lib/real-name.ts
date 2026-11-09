@@ -21,10 +21,16 @@ export const REAL_NAME_INVALID =
 export const REAL_NAME_TAKEN =
   'This name is already linked to another Polycards account. Enter your full name as on your IC, or contact support if this is your full name.';
 
-/** Trim, collapse inner whitespace, and validate. The stored form, or null. */
+/** Trim, collapse inner whitespace, and validate. The stored form, or null.
+ *  Invisible characters are dropped and the rest is NFKC, as the backend does
+ *  (backend/packages/api/src/utils/real-name.ts). */
 export function normalizeRealName(input: unknown): string | null {
   if (typeof input !== 'string') return null;
-  const name = input.normalize('NFC').trim().replace(/\s+/g, ' ');
+  const name = input
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, ' ');
   if (name.length < REAL_NAME_MIN || name.length > REAL_NAME_MAX) return null;
   return REAL_NAME_RE.test(name) ? name : null;
 }
