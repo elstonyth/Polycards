@@ -3,6 +3,7 @@
 // Usage: node scripts/qa-admin-ux-pass.mjs [outDir]
 // Creds come from the gitignored scripts/.dev-logins (never printed).
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -28,6 +29,7 @@ const creds = existsSync(CREDS_FILE)
   : {};
 const ADMIN_EMAIL = creds.ADMIN_EMAIL || process.env.ADMIN_EMAIL;
 const ADMIN_PW = creds.ADMIN_PW || process.env.ADMIN_PW;
+requireAdminTotp(ADMIN_EMAIL);
 // Preflight: empty credentials just bounce off the login form 30s later.
 if (!ADMIN_EMAIL || !ADMIN_PW) {
   throw new Error(
@@ -58,17 +60,9 @@ page.on('console', (m) => {
   if (m.type() === 'error') errors.push(`console: ${m.text().slice(0, 200)}`);
 });
 
-await page.goto(`${BASE}/dashboard/login`, { waitUntil: 'domcontentloaded' });
-await page.fill('input[name="email"]', ADMIN_EMAIL);
-await page.fill('input[name="password"]', ADMIN_PW);
-await page.click('button[type="submit"]');
-// Throw rather than warn: a swallowed failure screenshots every route logged
-// OUT and still exits 0, which reads as a clean sweep of broken pages.
-await page
-  .waitForURL((u) => !/login/.test(u.pathname), { timeout: 30000 })
-  .catch(() => {
-    throw new Error('login did not complete — still on /login after submit');
-  });
+// The helper throws on failure: a swallowed one would screenshot every route
+// logged OUT and still exit 0, which reads as a clean sweep of broken pages.
+await adminUiLogin(page, `${BASE}/dashboard`, ADMIN_EMAIL, ADMIN_PW);
 await page.waitForTimeout(2500);
 await page.screenshot({ path: path.join(OUT, 'home.png'), fullPage: true });
 

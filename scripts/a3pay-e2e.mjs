@@ -14,6 +14,7 @@
 //                                         customer whose deposits are played through
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { adminToken, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 const API = 'http://127.0.0.1:9000';
 const MOCK = 'http://127.0.0.1:4455';
@@ -25,6 +26,7 @@ const logins = Object.fromEntries(
     .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
 );
 const ADMIN_EMAIL = logins.ADMIN_EMAIL || 'admin@pokenic.app';
+requireAdminTotp(ADMIN_EMAIL);
 const CUST_EMAIL = logins.CUST_EMAIL || 'test@pokenic.app';
 
 const PG_USER = execFileSync('docker', [
@@ -131,7 +133,7 @@ async function setFx(admin, percent, reason) {
 }
 
 async function main() {
-  const admin = await login('user', ADMIN_EMAIL, logins.ADMIN_PW);
+  const admin = await adminToken(API, ADMIN_EMAIL, logins.ADMIN_PW);
   const cust = await login('customer', CUST_EMAIL, logins.CUST_PW);
 
   // ---- 1. Admin sets the SGD rate + fee (audited)

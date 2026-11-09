@@ -1,12 +1,14 @@
 // Step 2 verification: drive the real admin UI reorder arrows and confirm the
 // new order flows through to the storefront, then restore.
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 // Admin credentials come from env (repo rule: no hardcoded secrets) — the
 // same dev login the e2e suite uses. e.g.:
 //   QA_ADMIN_EMAIL=... QA_ADMIN_PASSWORD=... node scripts/<this>.mjs
 const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.QA_ADMIN_PASSWORD;
+requireAdminTotp(ADMIN_EMAIL);
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
   console.error('Set QA_ADMIN_EMAIL and QA_ADMIN_PASSWORD (dev admin login).');
   process.exit(1);
@@ -45,27 +47,12 @@ const waitFor = async (fn, want, label, tries = 30) => {
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
-// Login — the SPA redirects to /login only after its JS boots, so wait for
-// whichever renders first: the packs table (already authed) or the login form.
+// A fresh browser has no session: password, then the authenticator code.
+await adminUiLogin(page, ADMIN, ADMIN_EMAIL, ADMIN_PASSWORD);
 await page.goto(`${ADMIN}/packs`, {
   waitUntil: 'domcontentloaded',
   timeout: 20000,
 });
-await page.waitForSelector('table tbody tr, input[name="email"]', {
-  timeout: 25000,
-});
-if (await page.locator('input[name="email"]').count()) {
-  await page.fill('input[name="email"]', ADMIN_EMAIL);
-  await page.fill('input[name="password"]', ADMIN_PASSWORD);
-  await page.keyboard.press('Enter');
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 15000,
-  });
-  await page.goto(`${ADMIN}/packs`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 20000,
-  });
-}
 
 await page.waitForSelector('table tbody tr', { timeout: 20000 });
 const mythicRow = page.locator('table tbody tr', { hasText: 'Mythic Pack' });

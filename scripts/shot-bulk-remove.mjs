@@ -1,6 +1,7 @@
 // Screenshot the new bulk "Remove from pack" flow in the admin pack editor.
 // Run from repo root: node <path>/shot-bulk-remove.mjs
 import { chromium } from '@playwright/test';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { readFileSync } from 'node:fs';
 
 const OUT = process.env.OUT_DIR ?? '.';
@@ -18,19 +19,14 @@ const env = Object.fromEntries(
 );
 const EMAIL = env.ADMIN_EMAIL ?? 'admin@pokenic.app';
 const PW = env.ADMIN_PW ?? '';
+requireAdminTotp(EMAIL);
 if (!PW) throw new Error('ADMIN_PW missing in scripts/.dev-logins');
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 
 // login
-await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-const email = page.locator('input[name="email"]');
-await email.waitFor({ state: 'visible', timeout: 30000 });
-await email.fill(EMAIL);
-await page.fill('input[name="password"]', PW);
-await page.keyboard.press('Enter');
-await page.waitForURL((u) => !u.pathname.includes('login'), { timeout: 20000 });
+await adminUiLogin(page, ADMIN, EMAIL, PW);
 console.log('admin logged in');
 
 // pack list -> first pack editor

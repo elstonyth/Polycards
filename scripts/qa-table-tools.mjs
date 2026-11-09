@@ -2,6 +2,7 @@
 // Requires backend :9000 + admin :7000 up, and ADMIN_PW in env or scripts/.dev-logins.
 // Screenshots land in docs/research/qa-table-tools-*.png.
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 
 function devLogin(key, fallback) {
@@ -16,6 +17,7 @@ function devLogin(key, fallback) {
 const BASE = process.env.ADMIN_BASE || 'http://localhost:7000/dashboard';
 const EMAIL = devLogin('ADMIN_EMAIL', 'admin@pokenic.app');
 const PW = devLogin('ADMIN_PW', '');
+requireAdminTotp(EMAIL);
 if (!PW) {
   console.error('No ADMIN_PW found (env or scripts/.dev-logins)');
   process.exit(1);
@@ -36,16 +38,7 @@ try {
   const page = await ctx.newPage();
 
   // login
-  await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('input[name=email], input[type=email]', {
-    timeout: 15000,
-  });
-  await page.fill('input[name=email], input[type=email]', EMAIL);
-  await page.fill('input[name=password], input[type=password]', PW);
-  await page.click('button[type=submit]');
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 20000,
-  });
+  await adminUiLogin(page, BASE, EMAIL, PW);
   console.log('logged in');
 
   // ── 1. Gacha Cards list: shift-select ─────────────────────────────────────

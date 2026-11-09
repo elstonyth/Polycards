@@ -8,9 +8,11 @@
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 const { chromium } = createRequire(import.meta.url)('playwright');
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 const EMAIL = process.env.QA_ADMIN_EMAIL;
 const PW = process.env.QA_ADMIN_PASSWORD;
+requireAdminTotp(EMAIL);
 if (!EMAIL || !PW) {
   console.error('Set QA_ADMIN_EMAIL and QA_ADMIN_PASSWORD.');
   process.exit(1);
@@ -71,17 +73,7 @@ try {
   });
 
   // --- login ---
-  await page.goto(`${BASE}/login`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 30000,
-  });
-  await page.waitForSelector('input[name="email"]', { timeout: 45000 });
-  await page.fill('input[name="email"]', EMAIL);
-  await page.fill('input[name="password"]', PW);
-  await page.keyboard.press('Enter');
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 30000,
-  });
+  await adminUiLogin(page, BASE, EMAIL, PW);
   console.log('PASS: admin login');
 
   // derive one pack-detail and one customer-detail route from list pages

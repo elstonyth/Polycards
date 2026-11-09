@@ -8,6 +8,7 @@
 // :4000 (npm run build && pwsh scripts/serve-standalone.ps1 -Port 4000) and
 // the admin on :7000. Logins from gitignored scripts/.dev-logins.
 import { chromium } from '@playwright/test';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { readFileSync } from 'node:fs';
 
 const STORE = 'http://127.0.0.1:4000';
@@ -25,6 +26,8 @@ const logins = Object.fromEntries(
     .filter((l) => /^[A-Z_]+=/.test(l))
     .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
 );
+const ADMIN_EMAIL = logins.ADMIN_EMAIL || 'admin@pokenic.app';
+requireAdminTotp(ADMIN_EMAIL);
 
 let failures = 0;
 const check = (name, cond, detail = '') => {
@@ -44,16 +47,7 @@ const browser = await chromium.launch();
     viewport: { width: 1440, height: 1000 },
   });
   const page = await ctx.newPage();
-  await page.goto(`${ADMIN}/login`);
-  await page.fill(
-    'input[name="email"]',
-    logins.ADMIN_EMAIL || 'admin@pokenic.app',
-  );
-  await page.fill('input[name="password"]', logins.ADMIN_PW);
-  await page.keyboard.press('Enter');
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 30000,
-  });
+  await adminUiLogin(page, ADMIN, ADMIN_EMAIL, logins.ADMIN_PW);
   await page.goto(`${ADMIN}/settlement?currency=SGD`);
   const card = page.getByTestId('fx-card-SGD');
   await card.waitFor({ timeout: 30000 });
