@@ -3,6 +3,7 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
+  cancelPhoneOtp,
   isAllowedSmsDestination,
   isCallFirstNetwork,
   isDevOrTest,
@@ -12,6 +13,7 @@ import {
   unresolvableSmsCountries,
 } from '../../../../utils/phone-verification';
 import { consumeOtpSendBudget } from '../../../utils/rate-limit';
+import { notePurposeSent, pendingCode } from '../../../utils/otp-purpose';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 
 // Public: sends (or dev-logs) an OTP for one of the three phone flows. The
@@ -153,11 +155,38 @@ export async function POST(
 
   // purpose is validated above; it selects the Verify template so the SMS
   // names the flow the code is for.
+  // A code pending for another flow dies first (utils/otp-purpose.ts): Twilio
+  // would resend that same code under this flow's wording. Not cancelled, the
+  // record stays on the old flow, which refuses this flow's check: the safe
+  // way round, at the cost of a retry once the old code expires.
+  let moveRecord = true;
   try {
-    await sendPhoneOtp(process.env, logger, phone, purpose, via);
+    const pending = await pendingCode(phone);
+    if (pending && pending.purpose !== purpose) {
+      moveRecord =
+        !!pending.sid && (await cancelPhoneOtp(process.env, logger, pending.sid));
+    }
+  } catch {
+    moveRecord = false;
+    logger.warn('[phone-otp] could not read the code purpose');
+  }
+  let sid: string | undefined;
+  try {
+    sid = await sendPhoneOtp(process.env, logger, phone, purpose, via);
   } catch (error) {
     if (purpose !== 'password-reset') throw error;
     // Provider errors must not reveal whether a reset account exists.
+    res.json(response);
+    return;
+  }
+  // Unrecorded, a password reset's check is refused, so a store blip costs
+  // only that.
+  if (moveRecord) {
+    try {
+      await notePurposeSent(phone, purpose, sid);
+    } catch {
+      logger.warn('[phone-otp] could not record the code purpose');
+    }
   }
   res.json(response);
 }

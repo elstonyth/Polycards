@@ -3,6 +3,7 @@ import type {
   ICustomerModuleService,
   MedusaContainer,
 } from '@medusajs/framework/types';
+import type { ProofClaimStore } from './rate-limit';
 
 /**
  * One phone number = one account.
@@ -66,12 +67,15 @@ import type {
  * a has_account: true-scoped report or index stops covering the whole
  * phone-holding population with no error to say so.
  *
- * NOT atomic — check-then-write, no lock or unique index. At SIGNUP the proof
- * is single-use (requireSignupPhoneProof claims it in Redis after this check),
- * so one proof cannot back two concurrent creates. The claim is keyed on the
- * proof, not the number, so two proofs for one number (two OTPs, bounded by
- * the per-number send limits) are not serialized by it, and their concurrent
- * reads can both see zero claimants. The backstop is a partial unique index
+ * A read, so not atomic on its own. Both writers hold the number while they
+ * check and write (holdPhone below, one SET NX per number in Redis): signup
+ * from its check until the create has answered, phone-change around its
+ * write and the second look it takes after it (putting the old number back
+ * on a clash). So two signups, two changes, or a signup and a change cannot
+ * both land one number, whichever proofs they carry. Not covered: the admin
+ * move (POST /admin/customers/:id/phone) takes no hold, and a create still
+ * running when the hold expires lets the next one in. The backstop is a
+ * partial unique index
  * on customer(phone) WHERE deleted_at IS NULL, and the release-on-delete
  * behaviour above means it carries no soft-delete hazard. Core Medusa's email
  * precedent (IDX_customer_email_has_account_unique) is actually COMPOSITE —
@@ -95,6 +99,48 @@ import type {
 type CustomerFilters = Parameters<ICustomerModuleService['listCustomers']>[0];
 
 export const PHONE_IN_USE_MESSAGE = 'This phone number is already in use.';
+
+// shortcut: a create or change still running after this lets the next one in
+// (and its late release drops that one's hold); raise it if writes get slower.
+const PHONE_HOLD_MS = 60_000;
+
+/**
+ * Holds `phone` for one signup or phone change, so a concurrent one for the
+ * same number cannot pass assertPhoneUnclaimed before this one's row lands.
+ * Refuses a held number exactly like a claimed one, and fails CLOSED with the
+ * proof claims' retryable refusal when the store errors (same store, same
+ * reason: see warmSignupProofClaims). Returns the release.
+ */
+export const holdPhone = async (
+  scope: MedusaContainer,
+  claims: ProofClaimStore,
+  phone: string,
+): Promise<() => Promise<void>> => {
+  const key = `phone-claim:${phone}`;
+  const logger = scope.resolve('logger') as { warn: (msg: string) => void };
+  let held: boolean;
+  try {
+    held = await claims.claim(key, PHONE_HOLD_MS);
+  } catch (e) {
+    logger.warn(
+      `[phone-otp] phone claim failed (${e instanceof Error ? e.message : String(e)})`,
+    );
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Could not verify your phone right now. Try again shortly.',
+    );
+  }
+  if (!held)
+    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, PHONE_IN_USE_MESSAGE);
+  return () =>
+    claims
+      .release(key)
+      .catch((e) =>
+        logger.warn(
+          `[phone-otp] phone claim release failed (${e instanceof Error ? e.message : String(e)})`,
+        ),
+      );
+};
 
 export const assertPhoneUnclaimed = async (
   scope: MedusaContainer,

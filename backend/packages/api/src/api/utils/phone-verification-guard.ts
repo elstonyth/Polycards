@@ -6,7 +6,7 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { createHash } from 'node:crypto';
-import { assertPhoneUnclaimed } from './phone-claim';
+import { assertPhoneUnclaimed, holdPhone } from './phone-claim';
 import { warmSignupProofClaims } from './rate-limit';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
@@ -102,8 +102,9 @@ export const requireSignupPhoneProof = async (
   if (proof) {
     // One proof, one account. assertPhoneUnclaimed above is a read, so
     // concurrent signups replaying one proof would all see the number free;
-    // the atomic claim lets exactly one through. Taken LAST, so a request
-    // refused above never spends the proof. Keyed on a hash — the store never
+    // the atomic claim lets exactly one through. Taken after the checks, so a
+    // request refused above never spends the proof (one refused by the phone
+    // hold below gets it back on finish). Keyed on a hash — the store never
     // holds a live proof — and kept for the proof's remaining lifetime
     // (at least 1 ms: Redis rejects a zero expiry).
     const claims = warmSignupProofClaims();
@@ -146,6 +147,19 @@ export const requireSignupPhoneProof = async (
         );
     });
   }
+
+  // One phone, one account across concurrent signups: the read above sees
+  // neither racer's row, and two proofs for one number are two claims. Held
+  // until the create has answered (its row is then visible to the next
+  // check), whether or not enforcement is on, and taken after the proof
+  // claim so a replay still reads as a spent proof. A refusal here answers
+  // 4xx, so the release above gives this request's proof back.
+  const releasePhone = await holdPhone(
+    req.scope,
+    warmSignupProofClaims(),
+    phone,
+  );
+  res.on('finish', () => void releasePhone());
   next();
 };
 

@@ -444,12 +444,12 @@ export async function sendPhoneOtp(
   phone: string,
   purpose: PhoneOtpPurpose,
   channel: PhoneOtpChannel = 'sms',
-): Promise<void> {
+): Promise<string | undefined> {
   if (isDevOrTest(env)) {
     logger.warn(
       `[phone-otp] dev transport — ${purpose} code for ${phone} via ${channel} is ${devCode(env)}`,
     );
-    return;
+    return undefined;
   }
   if (!isTwilioVerifyConfigured(env)) {
     throw new MedusaError(
@@ -495,6 +495,45 @@ export async function sendPhoneOtp(
         ? 'SMS delivery is temporarily blocked. Wait 30 seconds, then choose a phone call instead.'
         : 'Could not send the verification code. Try again shortly.',
     );
+  }
+  // The verification's SID, so a later start for another flow can cancel it.
+  try {
+    const { sid } = (await res.json()) as { sid?: unknown };
+    return typeof sid === 'string' && VERIFICATION_SID_RE.test(sid)
+      ? sid
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const VERIFICATION_SID_RE = /^VE[0-9a-f]{32}$/i;
+
+/** Cancels a pending verification by its SID, so its code stops working and
+ *  the next start makes a new one. True when it is gone (cancelled, or already
+ *  expired or used: 404). Never throws. */
+export async function cancelPhoneOtp(
+  env: PhoneVerificationEnv,
+  logger: Logger,
+  sid: string,
+): Promise<boolean> {
+  if (isDevOrTest(env)) return true;
+  if (!VERIFICATION_SID_RE.test(sid) || !isTwilioVerifyConfigured(env)) {
+    return false;
+  }
+  try {
+    const res = await fetch(`${twilioBase(env)}/Verifications/${sid}`, {
+      method: 'POST',
+      headers: twilioHeaders(env),
+      body: new URLSearchParams({ Status: 'canceled' }).toString(),
+      signal: AbortSignal.timeout(TWILIO_TIMEOUT_MS),
+    });
+    if (res.ok || res.status === 404) return true;
+    logger.warn(`[phone-otp] twilio cancel failed with ${res.status}`);
+    return false;
+  } catch {
+    logger.warn('[phone-otp] twilio cancel request failed (network/timeout)');
+    return false;
   }
 }
 

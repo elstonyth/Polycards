@@ -12,7 +12,7 @@ import {
   verifyPhoneProof,
 } from '../../../../utils/phone-verification';
 import { createHash } from 'node:crypto';
-import { assertPhoneUnclaimed } from '../../../utils/phone-claim';
+import { assertPhoneUnclaimed, holdPhone } from '../../../utils/phone-claim';
 import { warmSignupProofClaims } from '../../../utils/rate-limit';
 import { linkedEmailpassLogin } from '../../../utils/linked-login';
 import { PACKS_MODULE } from '../../../../modules/packs';
@@ -239,12 +239,27 @@ export async function POST(
       'Phone verification required.',
     );
 
+  let releasePhone: (() => Promise<void>) | undefined;
   try {
+    // Held across the check, the write and the second look, so a signup or
+    // another change for this number waits its turn (holdPhone).
+    releasePhone = await holdPhone(req.scope, claims, phone);
     // One phone = one account — shared with the two signup sites (see
     // api/utils/phone-claim.ts for why it is a check and not a constraint).
     await assertPhoneUnclaimed(req.scope, phone, customerId);
 
     await customerService.updateCustomers(customerId, { phone });
+    // The check above is a read, so two accounts landing one number at once
+    // both pass it. Look again now the write is visible: a racer puts its old
+    // number back and is refused. Both racers may; the retry is serial.
+    try {
+      await assertPhoneUnclaimed(req.scope, phone, customerId);
+    } catch (e) {
+      await customerService.updateCustomers(customerId, {
+        phone: current.phone ?? null,
+      });
+      throw e;
+    }
     // Persist the FACT of verification — the proof token above expires in 10
     // minutes, so the topup/delivery gates (requirePhoneVerified) need a
     // stored stamp. After the write: a stamp on an account whose phone never
@@ -258,6 +273,8 @@ export async function POST(
     // as long as the proof, and an expired proof is refused before any claim.
     await claims.release(claimKey).catch(() => undefined);
     throw e;
+  } finally {
+    await releasePhone?.();
   }
 
   // No change notice: with the phone lock (spec 2026-10-06) this route only

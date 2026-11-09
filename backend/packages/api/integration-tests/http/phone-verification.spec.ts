@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { PACKS_MODULE } from "../../src/modules/packs";
 import type PacksModuleService from "../../src/modules/packs/service";
 import { signPhoneProof } from "../../src/utils/phone-verification";
+import { notePurposeSent } from "../../src/api/utils/otp-purpose";
 import { postStoreCustomer, unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
@@ -694,9 +695,33 @@ medusaIntegrationTestRunner({
           });
         });
 
+        it("refuses a code sent for another flow as a reset code", async () => {
+          const phone = "+60107667891";
+          await registerCustomerWithPhone("pw-reset-flow@test.dev", phone);
+          // A sign-up code, then a reset start: Twilio would resend the same
+          // code. With no verification to cancel (the dev transport has none),
+          // the sign-up flow holds and the reset check is refused; with one,
+          // the start cancels it first (see the start route's unit spec).
+          await start({ phone, purpose: "signup" });
+          await start({ phone, purpose: "password-reset" });
+          const asReset = await check({
+            phone,
+            purpose: "password-reset",
+            code: "000000",
+          });
+          expect(asReset.status).toBe(400);
+          expect(asReset.data).toMatchObject({
+            message: "Invalid or expired code.",
+          });
+        });
+
         it("404s a phone matching zero customers", async () => {
           const phone = "+60107667802";
           await start({ phone, purpose: "password-reset" });
+          // /start sends no code to a number with no account, so none could
+          // pass /check; recorded by hand, as a send would, to reach the
+          // reset route's own answer.
+          await notePurposeSent(phone, "password-reset");
           const checked = await check({
             phone,
             purpose: "password-reset",
@@ -731,6 +756,8 @@ medusaIntegrationTestRunner({
             });
 
           await start({ phone, purpose: "password-reset" });
+          // Two matches send no code either (see the zero-match case).
+          await notePurposeSent(phone, "password-reset");
           const checked = await check({
             phone,
             purpose: "password-reset",
