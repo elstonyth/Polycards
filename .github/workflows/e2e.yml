@@ -157,7 +157,7 @@ jobs:
           # once as totp_secret=. That line stays out of the job log and is
           # masked below. NEVER folded into deploy:init (prod path).
           corepack yarn seed:e2e 2>&1 | tee seed-e2e.log | grep -v 'totp_secret='
-          TOTP=$(grep -oE 'totp_secret=[A-Z2-7]+' seed-e2e.log | head -1 | cut -d= -f2 || true)
+          TOTP=$(grep -oE 'totp_secret=[A-Za-z2-7]+' seed-e2e.log | head -1 | cut -d= -f2 || true)
           if [ -z "$TOTP" ]; then
             echo '::error::No totp_secret in seed:e2e output — every admin sign-in would stop at the code step'
             exit 1
