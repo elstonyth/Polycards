@@ -19,6 +19,7 @@ import {
   PROD_CATALOG_CAPTURED_AT,
   PROD_CATALOG_SOURCE,
 } from './prod-catalog.data';
+import { totpCode } from '../utils/totp-code';
 
 // seed-e2e-fixtures — installs a LOCAL MIRROR OF THE PRODUCTION CATALOG so the
 // E2E suite exercises the real storefront: the real pack slugs (bronze-pack …
@@ -514,6 +515,45 @@ export default async function seedE2eFixtures({
       ]);
       logger.info(
         `[e2e] Seeded claimable voucher grant for '${REWARD_EMAIL}'.`,
+      );
+    }
+  }
+
+  // Every admin login answers an authenticator code since #996. Medusa's totp
+  // provider makes the secret itself, so set one up for the suite's operator
+  // here and print it: e2e.yml greps `totp_secret=`, masks it, and passes it
+  // on as PW_ADMIN_TOTP_SECRET. The localhost guard above keeps this to a
+  // throwaway database.
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@polycards.local';
+  const auth = container.resolve(Modules.AUTH);
+  const [adminLogin] = await auth.listProviderIdentities({
+    entity_id: adminEmail,
+    provider: 'emailpass',
+  });
+  if (!adminLogin) {
+    logger.warn(
+      `[e2e] No login for '${adminEmail}' (run deploy:migrate-user first) — no authenticator set up.`,
+    );
+  } else {
+    const authIdentityId = adminLogin.auth_identity_id as string;
+    try {
+      const { mfa, secret } = await auth.startAuthMfa({
+        auth_identity_id: authIdentityId,
+        provider: 'totp',
+      });
+      if (!secret) throw new Error('the totp provider returned no secret');
+      await auth.verifyAuthMfa({
+        id: mfa.id,
+        auth_identity_id: authIdentityId,
+        code: totpCode(secret),
+      });
+      logger.info(
+        `[e2e] Authenticator set up for '${adminEmail}': totp_secret=${secret}`,
+      );
+    } catch (err) {
+      // A re-run: the login keeps the authenticator (and secret) it already has.
+      logger.warn(
+        `[e2e] No new authenticator for '${adminEmail}': ${(err as Error).message}`,
       );
     }
   }
