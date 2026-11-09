@@ -25,8 +25,11 @@ jobs:
   # and integration-http's contexts are per-shard ("integration-http (N)").
   # Instead the always-run `backend-gate` job (bottom of this file) aggregates
   # their results — success or skipped passes, failure or cancelled fails —
-  # and THAT single context is the required check (round 15, 2026-09-10; the
-  # round-14 belief that the jobs were already required was wrong).
+  # and THAT single context is meant to be the required check (round 15,
+  # 2026-09-10). As of 2026-11-09 it is NOT: master protection requires only
+  # quality, gitleaks and dependency-review, so a red backend still merges
+  # (#964: every http shard red, all three required checks green). Add
+  # `backend-gate` to the required checks; until then this gate is advisory.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -155,8 +158,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Cache yarn (berry global cache)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore yarn (berry global cache)
+        id: yarn-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.yarn/berry/cache
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
@@ -171,8 +175,9 @@ jobs:
       # eviction ran continuously and kept clearing the `bnm2-*` node_modules
       # entry — which is what made backend installs cold. The os-only restore-key
       # is retained so a lockfile change still seeds from the previous entry.
-      - name: Cache turbo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore turbo
+        id: turbo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
@@ -189,10 +194,12 @@ jobs:
       # Exact key, NO restore-keys on purpose: a partial restore that mismatched
       # the lockfile would make `yarn install --immutable` FAIL (it refuses to
       # mutate node_modules). On a lockfile change the key misses -> full
-      # install -> a fresh cache is saved. (Key is v2: actions/cache never
+      # install -> backend-quality saves a fresh entry, on master pushes only
+      # (see the Save steps there). (Key is v2: actions/cache never
       # overwrites an existing key, so adding install-state needs a new key.)
-      - name: Cache backend node_modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore backend node_modules
+        id: bnm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             backend/node_modules
@@ -204,6 +211,34 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: corepack yarn install --immutable
+
+      # The four backend jobs only RESTORE their caches; this job alone saves
+      # them, and only on pushes to master. Measured 2026-11-09: 27 entries,
+      # 10.77 GB against the 10 GB cap — eviction again, this time from PRs. A
+      # PR that changes backend/yarn.lock (every dependabot bump) used to save
+      # ~1.9 GB (turbo 1.06 + yarn 0.56 + bnm2 0.30) scoped to that PR's ref,
+      # which no other branch can read, and that pushed master's entries out.
+      # PRs still restore master's entries; a lockfile PR now pays a cold
+      # node_modules link (~30-45s measured with the yarn restore-key hit) on
+      # each push instead. paths here MUST match the restore steps exactly: the
+      # cache version is a hash of the path list.
+      - name: Save backend node_modules
+        if: github.ref == 'refs/heads/master' && steps.bnm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            backend/node_modules
+            backend/apps/*/node_modules
+            backend/packages/*/node_modules
+            backend/.yarn/install-state.gz
+          key: ${{ steps.bnm-cache.outputs.cache-primary-key }}
+
+      - name: Save yarn (berry global cache)
+        if: github.ref == 'refs/heads/master' && steps.yarn-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.yarn/berry/cache
+          key: ${{ steps.yarn-cache.outputs.cache-primary-key }}
 
       - name: Lint
         working-directory: backend
@@ -217,10 +252,27 @@ jobs:
         working-directory: backend
         run: corepack yarn build
 
+      # After the full build, so the entry holds every package's outputs —
+      # including the @acme/api deps the other three jobs build. Success only
+      # (the implicit if), like the old post-step: the key is per-lockfile and
+      # never overwritten, so an entry saved after a red lint skipped the build
+      # would stay buildless until the next lockfile change.
+      - name: Save turbo
+        if: github.ref == 'refs/heads/master' && steps.turbo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: backend/.turbo
+          key: ${{ steps.turbo-cache.outputs.cache-primary-key }}
+
   # Backend unit gate. The jest unit suites (TEST_TYPE=unit) and the turbo `test`
   # task (admin vitest + odds-math/pokemon jest) were defined but run by no
   # workflow — including the money specs. No DB: the unit tier and the package
   # vitest/jest suites need none.
+  #
+  # Two jest shards, each still --runInBand. Unsharded, the jest step was
+  # 6-7 min (344 files in one process) — as long as the slowest http shard, so
+  # it shared the critical path — and its heap had to grow 6 GB -> 10 GB
+  # (#953, 2026-11-03) on a 16 GB runner. Each shard holds half the heap.
   backend-unit:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
@@ -228,6 +280,10 @@ jobs:
     # 25, not 15: see backend-quality — a cold install alone spent 15m47s here
     # and the job was killed before a single test ran.
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -242,8 +298,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Cache yarn (berry global cache)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore yarn (berry global cache)
+        id: yarn-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.yarn/berry/cache
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
@@ -258,8 +315,9 @@ jobs:
       # eviction ran continuously and kept clearing the `bnm2-*` node_modules
       # entry — which is what made backend installs cold. The os-only restore-key
       # is retained so a lockfile change still seeds from the previous entry.
-      - name: Cache turbo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore turbo
+        id: turbo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
@@ -276,10 +334,12 @@ jobs:
       # Exact key, NO restore-keys on purpose: a partial restore that mismatched
       # the lockfile would make `yarn install --immutable` FAIL (it refuses to
       # mutate node_modules). On a lockfile change the key misses -> full
-      # install -> a fresh cache is saved. (Key is v2: actions/cache never
+      # install -> backend-quality saves a fresh entry, on master pushes only
+      # (see the Save steps there). (Key is v2: actions/cache never
       # overwrites an existing key, so adding install-state needs a new key.)
-      - name: Cache backend node_modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore backend node_modules
+        id: bnm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             backend/node_modules
@@ -298,11 +358,13 @@ jobs:
         working-directory: backend
         run: corepack yarn build --filter="@acme/api^..."
 
-      - name: Unit tests (jest)
+      - name: Unit tests (jest shard ${{ matrix.shard }}/2)
         working-directory: backend/packages/api
-        run: corepack yarn test:unit
+        run: corepack yarn test:unit --shard=${{ matrix.shard }}/2
 
+      # Not sharded — ~35s, so it runs once, on shard 1.
       - name: Package unit tests (admin vitest + odds-math/pokemon jest)
+        if: matrix.shard == 1
         working-directory: backend
         run: corepack yarn turbo run test
 
@@ -313,14 +375,17 @@ jobs:
   #
   # jest shards natively at the file level (--shard=N/M). In CI each shard gets
   # its OWN job + postgres, so wall-clock = per-shard overhead + slowest shard's
-  # tests, and adding shards divides the ~20 test-minutes across more runners.
-  # 105 suites over 8 shards ≈ 13-14/shard (as of 2026-09-10). The per-shard overhead floor is now
-  # ~1m25s (container init + node setup + the node_modules-cached ~50s install),
-  # so wall ≈ 1m25s + 20min/N; past ~8 shards the fixed floor dominates and more
-  # shards stop paying off. postgres data is on tmpfs (below) so the per-suite
-  # migration DDL isn't fsync-bound; backend/node_modules is cached (above).
+  # tests, and adding shards divides the test-minutes across more runners.
+  # 161 suites over 10 shards ≈ 16/shard (2026-11-09; was 105 over 8). Measured
+  # then: ~50 test-minutes in all, and a per-shard floor of ~70s (container init
+  # ~26s + checkout/caches ~35s + a cache-hit install ~4s), so wall ≈ 70s +
+  # 50min/N. jest shards by path hash, not duration, so one shard's tests ran
+  # 294s while another's ran 561s in the same run — the slowest shard sets the
+  # wall time. postgres data is on tmpfs (below) so the per-suite migration DDL
+  # isn't fsync-bound; backend/node_modules is cached (above).
   #
-  # NOTE: matrix length and the /N divisor in the run step MUST match.
+  # NOTE: matrix length, the /N divisor in the run step, and SHARDS in
+  # integration-tests/run-http-shards.mjs MUST match.
   integration-http:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
@@ -332,7 +397,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     services:
       postgres:
         image: postgres:16
@@ -390,8 +455,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Cache yarn (berry global cache)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore yarn (berry global cache)
+        id: yarn-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.yarn/berry/cache
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
@@ -407,10 +473,12 @@ jobs:
       # Exact key, NO restore-keys on purpose: a partial restore that mismatched
       # the lockfile would make `yarn install --immutable` FAIL (it refuses to
       # mutate node_modules). On a lockfile change the key misses -> full
-      # install -> a fresh cache is saved. (Key is v2: actions/cache never
+      # install -> backend-quality saves a fresh entry, on master pushes only
+      # (see the Save steps there). (Key is v2: actions/cache never
       # overwrites an existing key, so adding install-state needs a new key.)
-      - name: Cache backend node_modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore backend node_modules
+        id: bnm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             backend/node_modules
@@ -428,8 +496,9 @@ jobs:
       # eviction ran continuously and kept clearing the `bnm2-*` node_modules
       # entry — which is what made backend installs cold. The os-only restore-key
       # is retained so a lockfile change still seeds from the previous entry.
-      - name: Cache turbo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore turbo
+        id: turbo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
@@ -448,12 +517,12 @@ jobs:
         run: corepack yarn build --filter="@acme/api^..."
 
       # The wrapper forwards extra args to jest, so --shard reaches jest
-      # directly and this job runs exactly one of the eight heap-bounded shards.
-      - name: HTTP integration tests (shard ${{ matrix.shard }}/8)
+      # directly and this job runs exactly one of the ten heap-bounded shards.
+      - name: HTTP integration tests (shard ${{ matrix.shard }}/10)
         working-directory: backend/packages/api
         run: |
           set -o pipefail
-          corepack yarn test:integration:http --shard=${{ matrix.shard }}/8 2>&1 | tee http-tests.log
+          corepack yarn test:integration:http --shard=${{ matrix.shard }}/10 2>&1 | tee http-tests.log
 
       - name: Upload test log on failure
         if: failure()
@@ -521,8 +590,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Cache yarn (berry global cache)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore yarn (berry global cache)
+        id: yarn-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.yarn/berry/cache
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
@@ -537,8 +607,9 @@ jobs:
       # eviction ran continuously and kept clearing the `bnm2-*` node_modules
       # entry — which is what made backend installs cold. The os-only restore-key
       # is retained so a lockfile change still seeds from the previous entry.
-      - name: Cache turbo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore turbo
+        id: turbo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
@@ -555,10 +626,12 @@ jobs:
       # Exact key, NO restore-keys on purpose: a partial restore that mismatched
       # the lockfile would make `yarn install --immutable` FAIL (it refuses to
       # mutate node_modules). On a lockfile change the key misses -> full
-      # install -> a fresh cache is saved. (Key is v2: actions/cache never
+      # install -> backend-quality saves a fresh entry, on master pushes only
+      # (see the Save steps there). (Key is v2: actions/cache never
       # overwrites an existing key, so adding install-state needs a new key.)
-      - name: Cache backend node_modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore backend node_modules
+        id: bnm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             backend/node_modules

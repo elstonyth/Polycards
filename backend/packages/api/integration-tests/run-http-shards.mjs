@@ -19,11 +19,11 @@
 // in-memory under TEST_TYPE (medusa-config), not those suites' probes.
 import { spawnSync } from 'node:child_process';
 
-// 8 shards ≈ 13 suites/process at the current 105 suites (as of 2026-09-10) — matches CI's
-// integration-http matrix (ci.yml passes --shard=N/8 explicitly; keep the two
+// 10 shards ≈ 16 suites/process at the current 161 suites (as of 2026-11-09) — matches CI's
+// integration-http matrix (ci.yml passes --shard=N/10 explicitly; keep the two
 // in sync). Even at ~11 suites a shard's cumulative heap can clear node's
 // default old-space, so CI's heap bump is mirrored into NODE_OPTIONS below.
-const SHARDS = 8;
+const SHARDS = 10;
 
 const jestArgs = ['--silent=false', '--runInBand', '--forceExit'];
 const env = {
