@@ -13,6 +13,11 @@ import {
   moveClick,
   sleep,
 } from './lib.mjs';
+import {
+  adminToken,
+  adminUiLogin,
+  requireAdminTotp,
+} from '../lib/admin-sign-in.mjs';
 
 const ADMIN = 'http://localhost:7000';
 const BE = 'http://localhost:9000';
@@ -25,14 +30,6 @@ const PACK_SLUG = 'showcase-demo-pack';
 const PACK_TITLE = 'Showcase Demo Pack';
 
 // ── admin API helpers (seed + cleanup) ──────────────────────────────────────
-async function token() {
-  const r = await fetch(`${BE}/auth/user/emailpass`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-  });
-  return (await r.json()).token;
-}
 async function api(t, method, path, body) {
   const r = await fetch(`${BE}${path}`, {
     method,
@@ -93,7 +90,8 @@ function typer(page) {
   };
 }
 
-const t = await token();
+requireAdminTotp(EMAIL);
+const t = await adminToken(BE, EMAIL, PASSWORD);
 await seed(t);
 
 const s = await startSession();
@@ -103,15 +101,9 @@ const typeInto = typer(page);
 page.on('dialog', (d) => d.accept().catch(() => {}));
 
 try {
-  // login
-  await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
+  // login: password, then the authenticator code (#996)
+  await adminUiLogin(page, ADMIN, EMAIL, PASSWORD);
   await caption(page, 'Operator dashboard — product lifecycle');
-  await typeInto('input[name="email"]', EMAIL);
-  await typeInto('input[name="password"]', PASSWORD);
-  await page.keyboard.press('Enter');
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 20000,
-  });
   await sleep(page, 1200);
 
   // 1) PRODUCTS — the catalog
