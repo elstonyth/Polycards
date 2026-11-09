@@ -2,6 +2,9 @@
 // odds, opens). The storefront's "Open Pack" button is just a server action over
 // POST /store/packs/{slug}/open, so opening via this client exercises the exact
 // same code path the UI does — just without the slow reveal animation.
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { freshAdminCode } from './totp';
 import {
   BACKEND,
   PK,
@@ -51,17 +54,62 @@ export async function api<T>(
   throw new Error(`${opts.method ?? 'GET'} ${path} -> still rate-limited`);
 }
 
+// Written by auth.setup.ts, so every spec reuses one admin token instead of
+// signing in again (each sign-in spends an authenticator code).
+export const ADMIN_TOKEN_FILE = 'tests/e2e/.auth/admin-token';
+let cachedAdminToken = '';
+
 export async function adminToken(): Promise<string> {
+  if (!cachedAdminToken) {
+    const saved = await readFile(ADMIN_TOKEN_FILE, 'utf8').catch(() => '');
+    cachedAdminToken = saved.trim() || (await signInAdmin());
+  }
+  return cachedAdminToken;
+}
+
+export async function saveAdminToken(token: string): Promise<void> {
+  await mkdir(dirname(ADMIN_TOKEN_FILE), { recursive: true });
+  await writeFile(ADMIN_TOKEN_FILE, token);
+}
+
+// The two-step admin sign-in (#996): the password answers with a code
+// challenge, and the authenticator code answers that with the admin token.
+export async function signInAdmin(): Promise<string> {
   if (!ADMIN_PASSWORD) {
     throw new Error(
       "PW_ADMIN_PASSWORD is not set — export it to match your stack's seeded admin (see tests/e2e/README.md).",
     );
   }
-  const r = await api<{ token: string }>('/auth/user/emailpass', {
-    method: 'POST',
-    body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-  });
-  return r.token;
+  for (let attempt = 0; ; attempt++) {
+    const login = await api<{
+      token: string;
+      mfa_required?: boolean;
+      mfa_challenge?: { id: string };
+    }>('/auth/user/emailpass', {
+      method: 'POST',
+      body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+    });
+    if (!login.mfa_required || !login.mfa_challenge) {
+      throw new Error(
+        `${ADMIN_EMAIL} has no authenticator set up — seed:e2e sets one up and prints totp_secret=… (see tests/e2e/README.md).`,
+      );
+    }
+    try {
+      const verified = await api<{ token: string }>(
+        `/auth/mfa/challenges/${login.mfa_challenge.id}/verify`,
+        {
+          method: 'POST',
+          token: login.token,
+          body: { method: 'totp', code: await freshAdminCode() },
+        },
+      );
+      return verified.token;
+    } catch (err) {
+      // Another process signed in with this step's code; the next one works.
+      if (attempt < 2 && /just used/i.test(String(err))) continue;
+      throw err;
+    }
+  }
 }
 
 export interface CustomerCreds {

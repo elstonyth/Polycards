@@ -1,8 +1,10 @@
-// Logs the operator in ONCE and saves the session, so the rest of the suite
-// reuses it via storageState instead of re-authenticating (admin /auth is
-// rate-limited — repeated logins trip "Too many sign-in attempts").
+// Logs the operator in ONCE and saves the session (and an API token), so the
+// rest of the suite reuses them instead of re-authenticating (admin /auth is
+// rate-limited — repeated logins trip "Too many sign-in attempts" — and each
+// sign-in spends an authenticator code).
 import { test as setup } from '@playwright/test';
 import { adminLogin, ADMIN_STORAGE } from './helpers/admin';
+import { saveAdminToken, signInAdmin } from './helpers/api';
 import { assertSeedPacks } from './helpers/seed-guard';
 
 // Every e2e spec depends on this 'setup' project, so it's the one central hook
@@ -14,6 +16,10 @@ setup('seed packs present', async () => {
 });
 
 setup('authenticate admin', async ({ page }) => {
+  // One API token for every spec's adminToken(), then the dashboard session.
+  // Each sign-in spends an authenticator code, so the second waits for the
+  // next 30-second step.
+  await saveAdminToken(await signInAdmin());
   await adminLogin(page);
   await page.context().storageState({ path: ADMIN_STORAGE });
 });

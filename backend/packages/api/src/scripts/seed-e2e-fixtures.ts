@@ -19,6 +19,7 @@ import {
   PROD_CATALOG_CAPTURED_AT,
   PROD_CATALOG_SOURCE,
 } from './prod-catalog.data';
+import { totpCode } from '../utils/totp-code';
 
 // seed-e2e-fixtures — installs a LOCAL MIRROR OF THE PRODUCTION CATALOG so the
 // E2E suite exercises the real storefront: the real pack slugs (bronze-pack …
@@ -514,6 +515,62 @@ export default async function seedE2eFixtures({
       ]);
       logger.info(
         `[e2e] Seeded claimable voucher grant for '${REWARD_EMAIL}'.`,
+      );
+    }
+  }
+
+  // Every admin login answers an authenticator code since #996. Medusa's totp
+  // provider makes the secret itself, so set one up for the suite's operator
+  // here and print it: e2e.yml greps `totp_secret=`, masks it, and passes it
+  // on as PW_ADMIN_TOTP_SECRET. The localhost guard above keeps this to a
+  // throwaway database.
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@polycards.local';
+  const auth = container.resolve(Modules.AUTH);
+  const [adminLogin] = await auth.listProviderIdentities({
+    entity_id: adminEmail,
+    provider: 'emailpass',
+  });
+  if (!adminLogin) {
+    logger.warn(
+      `[e2e] No login for '${adminEmail}' (run deploy:migrate-user first) — no authenticator set up.`,
+    );
+  } else {
+    const authIdentityId = adminLogin.auth_identity_id as string;
+    const db = container.resolve(ContainerRegistrationKeys.PG_CONNECTION);
+    const { rows: enabled } = await db.raw(
+      "SELECT 1 FROM auth_mfa_factor WHERE auth_identity_id = ? AND provider = 'totp' AND status = 'enabled' AND deleted_at IS NULL",
+      [authIdentityId],
+    );
+    if (enabled.length > 0) {
+      // A re-run (CI's database is new every job, so only a local one): the
+      // stored secret can't be read back, and it may be a developer's phone,
+      // so it is kept rather than replaced.
+      logger.warn(
+        `[e2e] '${adminEmail}' already has an authenticator, so no new totp_secret: ` +
+          'reuse the one printed when it was set up, or reset its two-step sign-in.',
+      );
+    } else {
+      // An unfinished setup blocks a new one (Medusa refuses to start while
+      // one is pending) and was never confirmed, so it is replaced, as the
+      // admin's own setup route does (api/utils/admin-mfa-guard.ts).
+      await db.raw(
+        "UPDATE auth_mfa_factor SET deleted_at = now(), updated_at = now() WHERE auth_identity_id = ? AND provider = 'totp' AND status = 'pending' AND deleted_at IS NULL",
+        [authIdentityId],
+      );
+      // Any failure from here fails the seed: a run that sets up no working
+      // authenticator leaves the suite unable to sign in.
+      const { mfa, secret } = await auth.startAuthMfa({
+        auth_identity_id: authIdentityId,
+        provider: 'totp',
+      });
+      if (!secret) throw new Error('the totp provider returned no secret');
+      await auth.verifyAuthMfa({
+        id: mfa.id,
+        auth_identity_id: authIdentityId,
+        code: totpCode(secret),
+      });
+      logger.info(
+        `[e2e] Authenticator set up for '${adminEmail}': totp_secret=${secret}`,
       );
     }
   }

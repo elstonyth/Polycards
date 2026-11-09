@@ -18,12 +18,16 @@
 //   npm run build
 //   pwsh scripts/serve-standalone.ps1 -Port 4100     # background
 //   corepack yarn dev                                # backend/packages/api, :9000
-//   QA_ADMIN_EMAIL=... QA_ADMIN_PASSWORD=... node scripts/qa-free-pack.mjs
+//   QA_ADMIN_EMAIL=... QA_ADMIN_PASSWORD=... QA_ADMIN_TOTP_SECRET=... //     node scripts/qa-free-pack.mjs
 //
 // Admin credentials come from env (repo rule: no hardcoded secrets) — the same
-// convention as scripts/qa-locked-wins.mjs. Any local super-admin works, e.g.
-// one made with `corepack yarn medusa user -e ... -p ...`.
+// convention as scripts/qa-locked-wins.mjs. Any local super-admin with an
+// authenticator app works (every admin sign-in asks for its code since #996):
+// QA_ADMIN_TOTP_SECRET is that app's secret, e.g. the totp_secret=… seed:e2e
+// prints when it sets one up.
 import { chromium } from 'playwright';
+// Node strips the types (Node 24); the backend's own code math, no dependency.
+import { totpCode } from '../backend/packages/api/src/utils/totp-code.ts';
 
 const BASE = process.env.PW_BASE ?? 'http://localhost:4100';
 const API = process.env.QA_API ?? 'http://localhost:9000';
@@ -34,8 +38,11 @@ const PAID_SLUG = process.env.QA_PAID_PACK ?? 'bronze-pack';
 const PASSWORD = 'QaFreePack123!';
 const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.QA_ADMIN_PASSWORD;
-if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
-  console.error('Set QA_ADMIN_EMAIL and QA_ADMIN_PASSWORD (dev admin login).');
+const ADMIN_TOTP_SECRET = process.env.QA_ADMIN_TOTP_SECRET;
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !ADMIN_TOTP_SECRET) {
+  console.error(
+    'Set QA_ADMIN_EMAIL, QA_ADMIN_PASSWORD and QA_ADMIN_TOTP_SECRET (dev admin login + its authenticator secret).',
+  );
   process.exit(1);
 }
 
@@ -152,15 +159,50 @@ const json = async (res) => {
 };
 
 // ── Setup: an active free_welcome pack + a brand-new customer ───────────────
-const admin = await fetch(`${API}/auth/user/emailpass`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
-}).then(json);
-if (!admin.token) throw new Error('admin auth failed — check QA_ADMIN_*');
+// Two-step sign-in (#996): the password answers with a code challenge, the
+// authenticator code with the admin token. A code works once per login, so
+// one the Playwright suite just used is retried with the next step's.
+const adminSignIn = async () => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const login = await fetch(`${API}/auth/user/emailpass`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+    }).then(json);
+    if (!login.mfa_required || !login.mfa_challenge?.id) {
+      throw new Error(
+        `admin auth failed — ${login.message ?? 'no code challenge'} (check QA_ADMIN_*)`,
+      );
+    }
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 30_000 - (Date.now() % 30_000)));
+    }
+    const verified = await fetch(
+      `${API}/auth/mfa/challenges/${login.mfa_challenge.id}/verify`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${login.token}`,
+        },
+        body: JSON.stringify({
+          method: 'totp',
+          code: totpCode(ADMIN_TOTP_SECRET),
+        }),
+      },
+    ).then(json);
+    if (verified.token) return verified.token;
+    if (!/just used/i.test(verified.message ?? '')) {
+      throw new Error(
+        `admin code refused — ${verified.message ?? 'no token'} (check QA_ADMIN_TOTP_SECRET)`,
+      );
+    }
+  }
+  throw new Error('admin code refused twice as just used');
+};
 const AH = {
   'Content-Type': 'application/json',
-  Authorization: `Bearer ${admin.token}`,
+  Authorization: `Bearer ${await adminSignIn()}`,
 };
 
 const keys = await fetch(`${API}/admin/api-keys?type=publishable`, {

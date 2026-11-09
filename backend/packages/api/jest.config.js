@@ -26,6 +26,8 @@ module.exports = {
   // Runs in the real jest process: fontconfig reads the real environment,
   // which a test file's process.env (a jest copy) never reaches.
   globalSetup: './integration-tests/global-setup-fonts.ts',
+  // CI's --shard=N/M splits by recorded duration, not jest's path hash.
+  testSequencer: './integration-tests/duration-sequencer.js',
 };
 
 if (process.env.TEST_TYPE === 'integration:http') {

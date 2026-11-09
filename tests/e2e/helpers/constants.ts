@@ -14,6 +14,9 @@ export const PK =
 export const ADMIN_EMAIL =
   process.env.PW_ADMIN_EMAIL ?? 'admin@polycards.local';
 export const ADMIN_PASSWORD = process.env.PW_ADMIN_PASSWORD ?? '';
+// The operator's authenticator-app secret (the admin sign-in asks for its code
+// since #996). seed:e2e sets one up and prints it as totp_secret=….
+export const ADMIN_TOTP_SECRET = process.env.PW_ADMIN_TOTP_SECRET ?? '';
 
 // Unique-per-run id so reruns never collide on email/slug.
 export const stamp = (): string => `${Date.now()}`;
