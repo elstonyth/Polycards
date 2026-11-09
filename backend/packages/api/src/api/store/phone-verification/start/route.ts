@@ -15,10 +15,10 @@ import {
 import { consumeOtpSendBudget } from '../../../utils/rate-limit';
 import {
   holdStart,
-  notePurposeSent,
   outranks,
   pendingCode,
   type PendingCode,
+  type StartHold,
 } from '../../../utils/otp-purpose';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 
@@ -164,14 +164,14 @@ export async function POST(
   // One start per number at a time (utils/otp-purpose.ts holdStart). Every
   // way this start does not send answers like a sent one, so none of them
   // says anything about the number.
-  let release: (() => Promise<void>) | null;
+  let hold: StartHold | null;
   try {
-    release = await holdStart(phone);
+    hold = await holdStart(phone);
   } catch {
     logger.warn('[phone-otp] could not hold the number for a start');
-    release = null;
+    hold = null;
   }
-  if (!release) {
+  if (!hold) {
     res.json(response);
     return;
   }
@@ -200,6 +200,12 @@ export async function POST(
         return;
       }
     }
+    // A start that stalled past its hold may have been overtaken: it sends
+    // nothing, and (below) records nothing.
+    if (!(await hold.held())) {
+      res.json(response);
+      return;
+    }
     let sid: string | undefined;
     try {
       sid = await sendPhoneOtp(process.env, logger, phone, purpose, via);
@@ -209,14 +215,17 @@ export async function POST(
       res.json(response);
       return;
     }
+    // Recorded only while still held, in one step with that check.
     // Unrecorded, the check is refused, so a store blip costs a retry.
     try {
-      await notePurposeSent(phone, purpose, sid);
+      if (!(await hold.note(purpose, sid))) {
+        logger.warn('[phone-otp] start overtaken; its code is not recorded');
+      }
     } catch {
       logger.warn('[phone-otp] could not record the code purpose');
     }
     res.json(response);
   } finally {
-    await release();
+    await hold.release();
   }
 }

@@ -2,7 +2,11 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from '@medusajs/framework/utils';
 import type {
   IAuthModuleService,
   ICustomerModuleService,
@@ -255,17 +259,16 @@ export async function POST(
     try {
       await assertPhoneUnclaimed(req.scope, phone, customerId);
     } catch (e) {
-      // Put the old number back only while ours is still on the row: support
-      // may have moved it meanwhile.
-      const [now] = await customerService.listCustomers(
-        { id: customerId },
-        { select: ['phone'], take: 1 },
-      );
-      if (now?.phone === phone) {
-        await customerService.updateCustomers(customerId, {
-          phone: current.phone ?? null,
-        });
-      }
+      // Put the old number back only while ours is still on the row, in the
+      // write itself: support may move it at any moment.
+      await req.scope
+        .resolve<{
+          raw(sql: string, values: unknown[]): Promise<unknown>;
+        }>(ContainerRegistrationKeys.PG_CONNECTION)
+        .raw(
+          'UPDATE customer SET phone = ?, updated_at = now() WHERE id = ? AND phone = ? AND deleted_at IS NULL',
+          [current.phone ?? null, customerId, phone],
+        );
       throw e;
     }
     // Persist the FACT of verification — the proof token above expires in 10

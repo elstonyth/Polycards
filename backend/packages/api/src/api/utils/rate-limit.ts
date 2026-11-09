@@ -1459,6 +1459,15 @@ export interface ProofClaimStore {
   releaseIf(key: string, owner: string): Promise<void>;
   /** A short-lived value under a key (otp-purpose), or null. */
   get(key: string): Promise<string | null>;
+  /** put(), done only while `holdKey` is still `owner`'s, in one step.
+   *  True when it wrote. */
+  putIfHeld(
+    holdKey: string,
+    owner: string,
+    key: string,
+    value: string,
+    ttlMs: number,
+  ): Promise<boolean>;
   put(key: string, value: string, ttlMs: number): Promise<void>;
   release(key: string): Promise<void>;
 }
@@ -1468,6 +1477,9 @@ let signupProofClaims: ProofClaimStore | null = null;
 // Compare-and-delete in one round trip, so no other holder can slip between.
 const RELEASE_IF_OWNER =
   "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+// A write under a hold, in one round trip: nothing if the hold moved on.
+const PUT_IF_HELD =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then redis.call('set', KEYS[2], ARGV[2], 'PX', ARGV[3]) return 1 else return 0 end";
 
 /**
  * The store that makes a signup proof single-use, opened at boot by
@@ -1494,6 +1506,9 @@ export function warmSignupProofClaims(): ProofClaimStore {
         await client.eval(RELEASE_IF_OWNER, 1, key, owner);
       },
       get: async (key) => client.get(key),
+      putIfHeld: async (holdKey, owner, key, value, ttlMs) =>
+        (await client.eval(PUT_IF_HELD, 2, holdKey, key, owner, value, ttlMs)) ===
+        1,
       put: async (key, value, ttlMs) => {
         await client.set(key, value, 'PX', ttlMs);
       },
@@ -1508,6 +1523,9 @@ export function warmSignupProofClaims(): ProofClaimStore {
       },
       releaseIf: async () => undefined,
       get: async () => {
+        throw new Error('REDIS_URL is not set');
+      },
+      putIfHeld: async () => {
         throw new Error('REDIS_URL is not set');
       },
       put: async () => {
@@ -1535,6 +1553,14 @@ export function warmSignupProofClaims(): ProofClaimStore {
       },
       get: async (key) =>
         (expiries.get(key) ?? 0) > Date.now() ? (values.get(key) ?? null) : null,
+      putIfHeld: async (holdKey, owner, key, value, ttlMs) => {
+        const now = Date.now();
+        if ((expiries.get(holdKey) ?? 0) <= now || values.get(holdKey) !== owner)
+          return false;
+        expiries.set(key, now + ttlMs);
+        values.set(key, value);
+        return true;
+      },
       put: async (key, value, ttlMs) => {
         expiries.set(key, Date.now() + ttlMs);
         values.set(key, value);

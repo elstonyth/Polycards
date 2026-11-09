@@ -34,17 +34,34 @@ export const outranks = (pending: PhoneOtpPurpose, purpose: PhoneOtpPurpose) =>
 // Long enough for a cancel and a send (Twilio's 10 s timeout each).
 const START_HOLD_MS = 30_000;
 
+export type StartHold = {
+  /** Still this start's: a start that stalled past the hold must not send. */
+  held(): Promise<boolean>;
+  /** Records the code's flow and verification, only while still held. */
+  note(purpose: PhoneOtpPurpose, sid?: string): Promise<boolean>;
+  release(): Promise<void>;
+};
+
 /** One start at a time per number, across replicas: the pending read, the
  *  cancel, the send and the record must not interleave with another start.
- *  The release, or null when another start holds the number. */
-export async function holdStart(
-  phone: string,
-): Promise<(() => Promise<void>) | null> {
+ *  The hold, or null when another start holds the number. */
+export async function holdStart(phone: string): Promise<StartHold | null> {
   const claims = warmSignupProofClaims();
   const key = `otp-start:${phone}`;
   const owner = randomUUID();
   if (!(await claims.claim(key, START_HOLD_MS, owner))) return null;
-  return () => claims.releaseIf(key, owner).catch(() => undefined);
+  return {
+    held: async () => (await claims.get(key)) === owner,
+    note: (purpose, sid) =>
+      claims.putIfHeld(
+        key,
+        owner,
+        recordKey(phone),
+        serialize({ purpose, sid }),
+        OTP_PURPOSE_TTL_MS,
+      ),
+    release: () => claims.releaseIf(key, owner).catch(() => undefined),
+  };
 }
 
 /** The flow (and Twilio verification) of the number's pending code, or null. */

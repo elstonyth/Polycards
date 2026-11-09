@@ -1,4 +1,8 @@
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from '@medusajs/framework/utils';
 import { POST } from '../route';
 import { signPhoneProof } from '../../../../../utils/phone-verification';
 import { PACKS_MODULE } from '../../../../../modules/packs';
@@ -101,6 +105,8 @@ const createNotifications = jest.fn(
   async (_payload: Record<string, unknown>) => [],
 );
 const warn = jest.fn();
+// The rollback's one conditional UPDATE.
+const raw = jest.fn(async (_sql: string, _values: unknown[]) => undefined);
 
 const scope = {
   resolve: (key: string) => {
@@ -112,6 +118,7 @@ const scope = {
     if (key === PACKS_MODULE) return { markPhoneVerified, isPhoneVerified };
     if (key === Modules.NOTIFICATION) return { createNotifications };
     if (key === 'logger') return { warn };
+    if (key === ContainerRegistrationKeys.PG_CONNECTION) return { raw };
     throw new Error(`unit scope: unexpected resolve('${key}')`);
   },
 };
@@ -496,12 +503,10 @@ describe('POST /store/phone-verification/change — one proof, one account', () 
 
   it('puts the old number back when another account lands the same number at the same moment', async () => {
     customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: null };
-    // Free on the first look; on the second the racer's row is there too;
-    // then our number is still on the row, so the old one goes back.
+    // Free on the first look; on the second the racer's row is there too.
     listCustomers
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: CUSTOMER_ID }, { id: 'cus_other' }])
-      .mockResolvedValueOnce([{ id: CUSTOMER_ID, phone: NEW_PHONE }] as never);
+      .mockResolvedValueOnce([{ id: CUSTOMER_ID }, { id: 'cus_other' }]);
     const token = newPhoneProof();
     const err = await rejection(
       POST(
@@ -512,7 +517,10 @@ describe('POST /store/phone-verification/change — one proof, one account', () 
     expect(err.message).toMatch(/already in use/i);
     expect(updateCustomers.mock.calls).toEqual([
       [CUSTOMER_ID, { phone: NEW_PHONE }],
-      [CUSTOMER_ID, { phone: null }],
+    ]);
+    // The old number goes back in one write, only while ours is still there.
+    expect(raw.mock.calls).toEqual([
+      [expect.stringMatching(/WHERE id = \? AND phone = \?/), [null, CUSTOMER_ID, NEW_PHONE]],
     ]);
     expect(markPhoneVerified.mock.calls.length).toBe(0);
     // The proof was given back: the retry, once the number is free, needs no new code.
@@ -521,24 +529,6 @@ describe('POST /store/phone-verification/change — one proof, one account', () 
       mkRes() as never,
     );
     expect(markPhoneVerified.mock.calls.length).toBe(1);
-  });
-
-  it('leaves the row alone when support moved the number meanwhile', async () => {
-    customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: null };
-    listCustomers
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: CUSTOMER_ID }, { id: 'cus_other' }])
-      .mockResolvedValueOnce([{ id: CUSTOMER_ID, phone: '+60100000000' }] as never);
-    const err = await rejection(
-      POST(
-        mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
-        mkRes() as never,
-      ),
-    );
-    expect(err.message).toMatch(/already in use/i);
-    expect(updateCustomers.mock.calls).toEqual([
-      [CUSTOMER_ID, { phone: NEW_PHONE }],
-    ]);
   });
 
   it('fails closed when the claim store is unreachable', async () => {
