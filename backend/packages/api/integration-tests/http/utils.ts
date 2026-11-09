@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import Redis from "ioredis";
 import { Modules } from "@medusajs/framework/utils";
 import type {
@@ -13,6 +13,7 @@ import {
 import { PACKS_MODULE } from "../../src/modules/packs";
 import type PacksModuleService from "../../src/modules/packs/service";
 import { isPhoneVerificationRequired } from "../../src/utils/phone-verification";
+import { totpCode } from "../../src/utils/totp-code";
 
 // Shared harness policy for the HTTP suites — the two idioms every suite was
 // copy-pasting. Not a spec file (jest's http testMatch only picks *.spec.ts).
@@ -86,41 +87,8 @@ export async function mintSuperAdmin(
   return signInWithCode(api, email, password, secret);
 }
 
-const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-const base32Decode = (text: string): Buffer => {
-  let bits = 0;
-  let value = 0;
-  const out: number[] = [];
-  for (const ch of text.replace(/=+$/, "").toUpperCase()) {
-    const index = BASE32.indexOf(ch);
-    if (index < 0) throw new Error(`not base32: ${ch}`);
-    value = (value << 5) | index;
-    bits += 5;
-    if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return Buffer.from(out);
-};
-
-/**
- * The 6-digit code an authenticator app shows for `secret`: RFC 6238 TOTP,
- * SHA-1, 30-second steps. Written out here rather than taken from Medusa, so
- * the specs prove the codes a phone app computes are the ones accepted.
- */
-export function totpCode(secret: string, now: number = Date.now()): string {
-  const counter = Buffer.alloc(8);
-  counter.writeBigUInt64BE(BigInt(Math.floor(now / 30_000)));
-  const hmac = createHmac("sha1", base32Decode(secret)).update(counter).digest();
-  const offset = hmac[hmac.length - 1] & 0xf;
-  const value =
-    ((hmac[offset] & 0x7f) << 24) |
-    (hmac[offset + 1] << 16) |
-    (hmac[offset + 2] << 8) |
-    hmac[offset + 3];
-  return String(value % 1_000_000).padStart(6, "0");
-}
+// The code math lives in src/utils so seed:e2e and the Playwright suite share it.
+export { totpCode };
 
 /** Sets up an authenticator app on this login and returns its secret, as the
  *  admin's setup screen does (start, then confirm with a code). */

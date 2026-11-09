@@ -151,10 +151,19 @@ jobs:
           corepack yarn deploy:init 2>&1 | tee seed.log
           corepack yarn deploy:migrate-user
           # E2E-only fixture: the prod seed (deploy:init) ships packs as empty
-          # DRAFTS, so nothing is openable on a fresh DB. seed:e2e recreates the
-          # two ACTIVE, populated packs the specs hardcode (pokemon-rookie/-elite)
-          # — cards + weighted odds. NEVER folded into deploy:init (prod path).
-          corepack yarn seed:e2e
+          # DRAFTS, so nothing is openable on a fresh DB. seed:e2e fills the
+          # real pack slugs with prod's pool, and sets up the admin's
+          # authenticator app (two-step sign-in, #996), printing its secret
+          # once as totp_secret=. That line stays out of the job log and is
+          # masked below. NEVER folded into deploy:init (prod path).
+          corepack yarn seed:e2e 2>&1 | tee seed-e2e.log | grep -v 'totp_secret='
+          TOTP=$(grep -oE 'totp_secret=[A-Za-z2-7]+' seed-e2e.log | head -1 | cut -d= -f2 || true)
+          if [ -z "$TOTP" ]; then
+            echo '::error::No totp_secret in seed:e2e output — every admin sign-in would stop at the code step'
+            exit 1
+          fi
+          echo "::add-mask::$TOTP"
+          echo "PW_ADMIN_TOTP_SECRET=$TOTP" >> "$GITHUB_ENV"
           PK=$(grep -oE 'token=pk_[A-Za-z0-9]+' seed.log | head -1 | cut -d= -f2 || true)
           if [ -z "$PK" ]; then
             echo '::error::No publishable key in deploy:init output — /store calls would 401'
@@ -240,7 +249,8 @@ jobs:
       # (that default is for the local worktree recipe, which serves on 4100
       # to avoid clashing with a main-tree :4000). QA_ADMIN_* has no fallback
       # to ADMIN_EMAIL/ADMIN_PASSWORD inside the script, so alias the same
-      # seeded CI admin explicitly. `always()` for the same reason as above.
+      # seeded CI admin explicitly, with the authenticator secret seed:e2e
+      # set up. `always()` for the same reason as above.
       - name: Run free-pack QA gate
         id: qafp
         if: always()
@@ -248,6 +258,7 @@ jobs:
           PW_BASE: http://localhost:4000
           QA_ADMIN_EMAIL: admin@polycards.local
           QA_ADMIN_PASSWORD: ${{ secrets.PW_ADMIN_PASSWORD || 'polycards-ci-e2e-2026' }}
+          QA_ADMIN_TOTP_SECRET: ${{ env.PW_ADMIN_TOTP_SECRET }}
         run: npm run qa:free-pack
 
       # Catalog-groups QA gate (#443): screenshots the /slots Graded/Raw

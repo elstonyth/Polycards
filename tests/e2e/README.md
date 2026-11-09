@@ -83,6 +83,17 @@ Seeded admin: email `admin@polycards.local`, created by `create-admin.ts` via
 fallback and fails fast without it (`helpers/constants.ts`). Set `PW_ADMIN_EMAIL`
 too if your seed used a different email. Test customers are created fresh per run.
 
+Every admin sign-in asks for an authenticator code (#996). `seed:e2e` sets up
+an authenticator app on that admin and prints its secret once, as
+`totp_secret=…`; export it as `PW_ADMIN_TOTP_SECRET` (CI greps and masks it).
+The suite computes the codes itself (`helpers/totp.ts`, the backend's
+`src/utils/totp-code.ts`). `auth.setup.ts` signs in twice — an API token saved
+to `tests/e2e/.auth/admin-token` and the dashboard session — and a code works
+once per login, so the second waits for the next 30-second step. A re-run of
+`seed:e2e` keeps the authenticator it already set up: reuse the secret it
+printed then, or reset the admin's two-step sign-in. There is no switch that
+turns the code step off, by design.
+
 ## Run
 
 ```powershell
@@ -98,7 +109,8 @@ npx playwright show-report tests/e2e/.report
 > breaks them, update the selectors in the same PR; do not re-`fixme` them.
 
 Endpoints/creds are overridable via `PW_BASE`, `PW_ADMIN`, `PW_BACKEND`, `PW_PK`,
-`PW_ADMIN_EMAIL`, `PW_ADMIN_PASSWORD` (see `helpers/constants.ts`).
+`PW_ADMIN_EMAIL`, `PW_ADMIN_PASSWORD`, `PW_ADMIN_TOTP_SECRET` (see
+`helpers/constants.ts`).
 
 ## Targeting a staging env
 

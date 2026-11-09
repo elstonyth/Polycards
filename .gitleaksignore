@@ -20,3 +20,7 @@ f586b9d906de8fbd2da64a9ed127c70b055a8f31:backend/packages/api/integration-tests/
 # gitleaks:allow, these cover the commits that predate the marker.
 6db79e43dc6d2a360c20a95ab67baac36f3e3f2d:backend/packages/api/src/modules/assistant/__tests__/key-vault.unit.spec.ts:generic-api-key:4
 4b932467f71f15fb59f50af1b5365bc0c28e27f8:backend/packages/api/integration-tests/http/assistant.spec.ts:generic-api-key:20
+# totp-code.unit.spec.ts RFC_SECRET is the published RFC 6238 test key
+# ("12345678901234567890" in base32), not a credential. The current tree
+# carries an inline gitleaks:allow; this covers the commit that introduced it.
+f5d42ffe8213bea12a94ff09e78812e094031842:backend/packages/api/src/utils/__tests__/totp-code.unit.spec.ts:generic-api-key:5

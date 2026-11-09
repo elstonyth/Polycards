@@ -1,11 +1,22 @@
 // Admin management workflow through the dashboard UI:
 //   login → cards catalog → packs catalog → create a pack → manage its pool
 //   → adjust a customer's credits (support) → economy report.
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { ADMIN, stamp } from './helpers/constants';
 import { adminToken, api, createCustomer, openPack } from './helpers/api';
 import { fundFor, primaryPack } from './helpers/catalog';
 import { ensureAdmin, createPack } from './helpers/admin';
+
+// Support's search: a result row opens the customer's player page.
+async function openPlayerFromSupport(page: Page, email: string): Promise<void> {
+  await page.goto(`${ADMIN}/support`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#support-q').fill(email);
+  await page.getByRole('button', { name: /^search$/i }).click();
+  const result = page.getByText(email).first();
+  await result.waitFor({ timeout: 15_000 });
+  await result.click();
+  await page.waitForURL(/\/customers\/[^/]+/, { timeout: 15_000 });
+}
 
 test.describe('admin workflow', () => {
   test.beforeEach(async ({ page }) => {
@@ -25,13 +36,16 @@ test.describe('admin workflow', () => {
     await expect(page.locator('table tbody tr').first()).toBeVisible({
       timeout: 20_000,
     });
-    // Management actions present on each pack row.
+    // Management actions on each pack row, behind its menu since #927.
+    await page
+      .getByRole('button', { name: /^Actions for / })
+      .first()
+      .click();
     await expect(
-      page.getByRole('button', { name: 'Pool & odds' }).first(),
+      page.getByRole('menuitem', { name: 'Pool & odds' }),
     ).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: 'Edit' }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Edit' })).toBeVisible();
+    await page.keyboard.press('Escape');
   });
 
   test('create a pack and manage its prize pool', async ({ page }) => {
@@ -71,13 +85,12 @@ test.describe('admin workflow', () => {
     });
     expect(await page.locator('tbody tr').count()).toBeGreaterThanOrEqual(1);
 
-    // Delete the throwaway pack through the UI (row Delete → confirm prompt).
+    // Delete the throwaway pack through the UI (row menu → Delete → confirm).
     await page.goto(`${ADMIN}/packs`, { waitUntil: 'domcontentloaded' });
-    const row = page.locator('tbody tr', { hasText: title });
-    await row
-      .first()
-      .getByRole('button', { name: 'Delete', exact: true })
+    await page
+      .getByRole('button', { name: `Actions for ${title}`, exact: true })
       .click();
+    await page.getByRole('menuitem', { name: 'Delete' }).click();
     await page.getByRole('button', { name: 'Delete pack' }).click();
     await expect(page.getByText('Pack deleted.')).toBeVisible({
       timeout: 15_000,
@@ -105,63 +118,50 @@ test.describe('admin workflow', () => {
     // epic 2, spec D6, commit 87c7e148): the ledger relocated into the Customer
     // 360 detail's "Pulls" tab (routes/customers/[id]/page.tsx → PullsTable) —
     // there is no cross-customer ledger view left to navigate to directly.
-    // Reach it the way an operator does: find the customer via Support, open
-    // their 360, then the Pulls tab (same search flow the "adjust a customer
-    // credit balance" test below already exercises).
-    await page.goto(`${ADMIN}/support`, { waitUntil: 'domcontentloaded' });
-    await page.locator('#support-q').fill(cust.email);
-    await page.getByRole('button', { name: /^search$/i }).click();
-    const result = page.getByText(cust.email).first();
-    await result.waitFor({ timeout: 15_000 });
-    await result.click();
-    await page.getByRole('button', { name: 'View 360' }).click();
-    await page.getByRole('tab', { name: 'Pulls' }).click();
+    // Reach it the way an operator does: find the customer via Support (a
+    // result opens their player page since #923), then the Pulls tab.
+    await openPlayerFromSupport(page, cust.email);
+    await page.getByRole('tab', { name: 'Pulls', exact: true }).click();
 
     await expect(page.locator('table tbody tr').first()).toBeVisible({
       timeout: 20_000,
     });
     expect(await page.locator('table tbody tr').count()).toBeGreaterThan(0);
-    // Status badges: "In vault" and/or "Bought back" appear in the ledger.
+    // Status badges: "In vault" and/or "Sold back" appear in the ledger.
     await expect(
-      page.getByText(/in vault|bought.?back/i).first(),
+      page.getByText(/in vault|sold back|bought.?back/i).first(),
     ).toBeVisible();
   });
 
   test('adjust a customer credit balance from support', async ({ page }) => {
     // Fresh customer so the assertion is deterministic regardless of history.
     const cust = await createCustomer(20);
+    const balance = async (): Promise<number> => {
+      const r = await api<{ balance: number }>('/store/credits', {
+        token: cust.token,
+      });
+      return Math.round(r.balance * 100);
+    };
+    const before = await balance();
 
-    await page.goto(`${ADMIN}/support`, { waitUntil: 'domcontentloaded' });
-    await page.locator('#support-q').fill(cust.email);
-    await page.getByRole('button', { name: /^search$/i }).click();
-    const result = page.getByText(cust.email).first();
-    await result.waitFor({ timeout: 15_000 });
-    await result.click();
-
-    await expect(page.getByText(/credit balance/i)).toBeVisible({
+    await openPlayerFromSupport(page, cust.email);
+    await page
+      .getByRole('button', { name: 'Adjust withdrawable credit' })
+      .click();
+    await page.locator('#c360-amount').fill('5');
+    await page.locator('#c360-note').fill('PW E2E adjustment');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(page.getByText('Credits adjusted')).toBeVisible({
       timeout: 15_000,
     });
-    const balText =
-      (await page.locator('h1.tabular-nums').first().textContent()) ?? '';
-    const before = Number(balText.replace(/[^0-9.]/g, ''));
 
-    await page.getByLabel(/amount/i).fill('5');
-    await page.getByLabel(/note/i).fill('PW E2E adjustment');
-    await page.getByRole('button', { name: /apply adjustment/i }).click();
-    await page.getByRole('button', { name: /^apply$/i }).click();
-
-    await expect
-      .poll(
-        async () => {
-          const t =
-            (await page.locator('h1.tabular-nums').first().textContent()) ?? '';
-          return Math.round(Number(t.replace(/[^0-9.]/g, '')) * 100);
-        },
-        { timeout: 15_000 },
-      )
-      .toBe(Math.round((before + 5) * 100));
-
-    await expect(page.getByText('PW E2E adjustment')).toBeVisible();
+    // The customer's own balance is the ground truth…
+    await expect.poll(balance, { timeout: 15_000 }).toBe(before + 500);
+    // …and the note is on the wallet history.
+    await page.getByRole('tab', { name: 'Wallet', exact: true }).click();
+    await expect(page.getByText('PW E2E adjustment').first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test('economy report renders lifetime stats and RTP', async ({ page }) => {
