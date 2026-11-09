@@ -87,6 +87,10 @@ export function blockedReason(path: string): string | null {
 // out of its JSON: the SQL route masks the partner passwords and real names
 // themselves (db-query.ts).
 const HIDDEN = /password|secret|token|credential|api_?key|real_?name/i;
+// A shared-name clearing (customer.metadata) and its audit rows carry the
+// holder name, often the real name. Exact keys: a bank screen's
+// accountHolderName stays open with the bank number.
+const HOLDER_NAME = /^holder_name(?:_cleared)?$/i;
 
 // Coin flip's actual odds and each group's odds set (the owner, 2026-10-30): the
 // audit rows and group metadata carrying them stay open, so they are hidden by
@@ -108,7 +112,9 @@ export function redact(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, v]) => [
       key,
-      HIDDEN.test(key) || ODDS_KEY.test(key) ? '[hidden]' : redact(v),
+      HIDDEN.test(key) || ODDS_KEY.test(key) || HOLDER_NAME.test(key)
+        ? '[hidden]'
+        : redact(v),
     ]),
   );
 }

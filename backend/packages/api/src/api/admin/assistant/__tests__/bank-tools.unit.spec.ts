@@ -10,7 +10,7 @@ import {
   UNBAN_NEED,
   type Proposal,
 } from '../confirm';
-import { namedIn } from '../named';
+import { namedIn, namedPlayer } from '../named';
 
 // The bank tools (owner, 2026-11-04: staff do in the chat what support did by
 // hand): bank_save_check reads why a save is refused, free_bank_number and
@@ -28,6 +28,8 @@ const PEOPLE: Record<string, { first_name: string; handle: string }> = {
 let banned: string[] = [];
 let realName: string | null = 'Tan Ah Kow';
 let metadata: Record<string, unknown> = {};
+// admin_action_audit rows written after a card was made.
+let audits: { after: Record<string, unknown> }[] = [];
 
 const packs = {
   findCustomerIdByUsername: jest.fn(),
@@ -54,6 +56,7 @@ const packs = {
   holderNameHolders: jest.fn(),
   freePayoutAccount: jest.fn(),
   setHolderNameCleared: jest.fn(),
+  listAdminActionAudits: jest.fn(async () => audits),
 };
 const customers = {
   listCustomers: jest.fn(async (filter: { id: string | string[] }) =>
@@ -98,6 +101,7 @@ beforeEach(() => {
   banned = ['cus_y1'];
   realName = 'Tan Ah Kow';
   metadata = {};
+  audits = [];
   packs.findCustomerIdByUsername.mockImplementation(async (n: string) =>
     n.toLowerCase() === 'test player' ? 'cus_x' : null,
   );
@@ -124,10 +128,64 @@ describe('namedIn', () => {
   });
 });
 
+describe('namedPlayer: a change names one player only', () => {
+  // Shown names can be ordinary words of the request.
+  const players: Record<string, string> = {
+    maybank: 'cus_m',
+    collector123: 'cus_c',
+    unban: 'cus_u',
+  };
+  const lookups = {
+    findCustomerIdByUsername: jest.fn(
+      async (n: string) => players[n.toLowerCase()] ?? null,
+    ),
+    findCustomerIdByHandle: jest.fn(async (n: string) =>
+      n.toLowerCase() === 'c123' ? 'cus_c' : null,
+    ),
+  };
+  const text = 'unban Maybank 2135 for Collector123';
+
+  it('refuses any player when another word of the message is a different one', async () => {
+    for (const name of ['Maybank', 'unban', 'Collector123']) {
+      await expect(
+        namedPlayer(lookups, name, text, 'Nothing was changed.'),
+      ).rejects.toThrow(/another player too.*@handle\. Nothing was changed\./);
+    }
+  });
+
+  it('acts when the other words are no one or the same player, or staff wrote @handle', async () => {
+    await expect(
+      namedPlayer(
+        lookups,
+        'Collector123',
+        'free 2135 for Collector123, @c123',
+        'x',
+      ),
+    ).resolves.toBe('cus_c');
+    await expect(
+      namedPlayer(lookups, 'c123', `${text} @c123`, 'x'),
+    ).resolves.toBe('cus_c');
+  });
+
+  it('a read may still name anyone; a message too long to check asks for the handle', async () => {
+    await expect(
+      namedPlayer(lookups, 'Maybank', text, 'x', { readOnly: true }),
+    ).resolves.toBe('cus_m');
+    const long = `free for Collector123 ${Array.from({ length: 41 }, (_, i) => `word${i}`).join(' ')}`;
+    await expect(
+      namedPlayer(lookups, 'Collector123', long, 'x'),
+    ).rejects.toThrow(/too long.*@handle/);
+  });
+});
+
 describe('who the person named', () => {
   it("unban_account takes the banned one when a shown name is another player's handle", async () => {
-    packs.findCustomerIdByUsername.mockResolvedValue('cus_y2');
-    packs.findCustomerIdByHandle.mockResolvedValue('cus_y1');
+    packs.findCustomerIdByUsername.mockImplementation(async (n: string) =>
+      n.toLowerCase() === 'ringone' ? 'cus_y2' : null,
+    );
+    packs.findCustomerIdByHandle.mockImplementation(async (n: string) =>
+      n.toLowerCase() === 'ringone' ? 'cus_y1' : null,
+    );
     const { propose, done } = run(
       'unban_account',
       { username: 'RingOne' },
@@ -219,6 +277,30 @@ describe('bank_save_check', () => {
     expect(fixes).toMatch(
       /Freeing the number may free it too.*clear_name_clash/,
     );
+  });
+
+  it('asks for a PayNow mobile with and without its 65, as a save does', async () => {
+    packs.payoutAccountsOf.mockResolvedValue([
+      { account_key: '91234567', bank_code: 'PAYNOWSG', wallet: false },
+    ]);
+    packs.payoutAccountBanned.mockImplementation(
+      async (n: string) => n === '6591234567',
+    );
+    packs.payoutAccountHoldersAt.mockImplementation(
+      async (_id: string, n: string) => (n === '6591234567' ? ['cus_y1'] : []),
+    );
+    const out = JSON.parse(
+      await run(
+        'bank_save_check',
+        { username: 'Test Player', last4: '4567' },
+        'why can Test Player not add PayNow 4567',
+      ).done,
+    );
+    expect(out.number).toMatchObject({
+      banned_for_this_player: true,
+      other_accounts: ['RingOne, banned'],
+      blocks_save: true,
+    });
   });
 
   it('says can_save when nothing blocks, and null when a part is unchecked', async () => {
@@ -555,6 +637,7 @@ describe('saveProposal: free_number and name_clash', () => {
     number_mark: numberMark(KEY, container),
     from: ['cus_y1'],
     reason: 'owner approved',
+    proposed_at: '2026-11-09T10:00:00.000Z',
   };
   const NAME: Proposal = {
     kind: 'name_clash',
@@ -563,6 +646,7 @@ describe('saveProposal: free_number and name_clash', () => {
     holder_name: 'Tan Ah Kow',
     with: ['cus_y1', 'cus_y2'],
     reason: 'different people',
+    proposed_at: '2026-11-09T10:00:00.000Z',
   };
 
   it('frees exactly the number the card was made for, as the person who tapped', async () => {
@@ -611,6 +695,29 @@ describe('saveProposal: free_number and name_clash', () => {
     );
     expect(packs.freePayoutAccount).not.toHaveBeenCalled();
     expect(packs.setHolderNameCleared).not.toHaveBeenCalled();
+  });
+
+  // Security audit 2026-11-09: a take-back leaves no stamp, so an old button
+  // would clear the name again; the audit since the card was made tells.
+  it('an old button is refused once its own change was audited since', async () => {
+    await saveProposal(NAME, admin, container);
+    // A colleague took the clearing back (the name keyed as saves key it).
+    audits = [{ after: { holder_name: 'TAN AH KOW', cleared: false, with: [] } }];
+    await expect(saveProposal(NAME, admin, container)).rejects.toThrow(
+      /since it was proposed/,
+    );
+    expect(packs.setHolderNameCleared).toHaveBeenCalledTimes(1);
+    // Another name's clearing leaves the number card alone; its own free
+    // refuses it.
+    audits = [{ after: { holder_name: 'Someone Else', cleared: true } }];
+    await saveProposal(FREE, admin, container);
+    audits = [
+      { after: { bank_code: 'MBBEMYKL', account_last4: '0001', held_by: [] } },
+    ];
+    await expect(saveProposal(FREE, admin, container)).rejects.toThrow(
+      /since it was proposed/,
+    );
+    expect(packs.freePayoutAccount).toHaveBeenCalledTimes(1);
   });
 
   it('a changed account, a payout on its way or a second tap reads as refused', async () => {

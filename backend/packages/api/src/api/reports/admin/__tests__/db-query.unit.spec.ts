@@ -154,6 +154,23 @@ describe('sqlRefusal', () => {
     ],
     ["SELECT snapshot->>'actual_win_units' FROM x", /actual odds/],
     ["SELECT metadata->>'odds_set' AS n FROM customer_group", /actual odds/],
+    // Every session's SQL text, SQL run from a string, and values built as
+    // big as asked (security audit 2026-11-09).
+    [
+      'SELECT query FROM pg_stat_statements',
+      /pg_stat_statements is not available/,
+    ],
+    [
+      "SELECT * FROM crosstab('select 1, 2, 3') AS t(a int, b int)",
+      /crosstab is not available/,
+    ],
+    [
+      "SELECT * FROM connectby('t', 'id', 'parent', '1', 0)",
+      /connectby is not available/,
+    ],
+    ["SELECT length(repeat('x', 1000000))", /repeat is not available/],
+    ["SELECT LPAD('x', 1000000000)", /LPAD is not available/],
+    ["SELECT rpad('x', 1000000000)", /rpad is not available/],
     ['SELECT U&"\\0070g_sleep"(1)', /Unicode-escaped/],
     ['SELECT * FROM pull WHERE customer_id = $2', /Placeholders like \$1/],
   ])('refuses %p', (sql, why) => {
@@ -176,6 +193,8 @@ describe('the tables behind the odds mask', () => {
     'SELECT reverse(c::text) FROM public.customer c',
     'SELECT * FROM "public"."customer"',
     'SELECT * FROM public.customer_account_state',
+    'SELECT chunk_data FROM pg_toast.pg_toast_16384',
+    'SELECT * FROM "pg_toast"."pg_toast_16384"',
   ])('refuses %p', (sql) => {
     expect(sqlRefusal(sql)).toMatch(/stay hidden/);
   });
@@ -205,8 +224,10 @@ describe('maskedViewSql', () => {
   });
 
   it('hides partner passwords and real names but keeps whether one is set', () => {
+    const credential = `CASE WHEN t."metadata" ? 'partner_credential' THEN jsonb_set(t."metadata", '{partner_credential}', '"[hidden]"') ELSE t."metadata" END`;
+    // A shared-name clearing is keyed by the holder name: hidden whole.
     expect(maskedViewSql('customer', ['id', 'email', 'metadata'])).toBe(
-      `CREATE TEMP VIEW "customer" AS SELECT t."id", t."email", CASE WHEN t."metadata" ? 'partner_credential' THEN jsonb_set(t."metadata", '{partner_credential}', '"[hidden]"') ELSE t."metadata" END AS "metadata" FROM public."customer" t`,
+      `CREATE TEMP VIEW "customer" AS SELECT t."id", t."email", CASE WHEN ${credential} ? 'holder_name_cleared' THEN jsonb_set(${credential}, '{holder_name_cleared}', '"[hidden]"') ELSE ${credential} END AS "metadata" FROM public."customer" t`,
     );
     expect(
       maskedViewSql('customer_account_state', ['id', 'real_name', 'frozen']),
@@ -218,6 +239,7 @@ describe('maskedViewSql', () => {
     const audit = maskedViewSql('admin_action_audit', ['before', 'after']);
     expect(audit).toMatch(/real_\?name/);
     expect(audit).toMatch(/password/);
+    expect(audit).toMatch(/\|holder_name\)"/);
     // Each matched value is replaced whole, not echoed back.
     expect(audit).toContain(`'"\\1": "[hidden]"', 'gi')::jsonb AS "after"`);
   });

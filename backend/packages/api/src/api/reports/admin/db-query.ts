@@ -25,10 +25,10 @@ import { redact } from './proxy';
 //     the answer and in any error message, however the query reshaped it
 //     (a jsonb column cast to text, say), and any password, token or key
 //     field is hidden by name, inside JSON text too.
-//   - Bounded: 20 s, 500 rows, 16 KB a row and 1 MB in all, built as JSON by
-//     Postgres so the web process never holds more than that; one query at a
-//     time per server, at most two waiting. The site's own connection pool is
-//     never touched.
+//   - Bounded: 20 s, 8 MB per sort or hash, 500 rows, 16 KB a row and 1 MB
+//     in all, built as JSON by Postgres so the web process never holds more
+//     than that; one query at a time per server, at most two waiting. The
+//     site's own connection pool is never touched.
 
 export const MAX_ROWS = 500;
 const MAX_SQL = 8_000;
@@ -66,16 +66,22 @@ const REFUSED_FUNCTIONS = new RegExp(
     'pg_log_\\w+',
     'pg_import_\\w+',
     // Column statistics hold sample values of every column, the refused
-    // tables' included.
+    // tables' included. Statement statistics hold every session's SQL text.
     'pg_stats\\w*',
     'pg_statistic\\w*',
+    'pg_stat_statements\\w*',
     'set_config',
     // These run SQL given as a string, which these checks cannot see.
     '\\w+_to_xml\\w*',
     'ts_stat',
     'ts_rewrite',
     'dblink\\w*',
+    'crosstab\\w*',
+    'connectby',
     'lo_\\w+',
+    // One call builds a value as big as asked, in the database's memory.
+    'repeat',
+    '[lr]pad',
   ].join('|')})\\b`,
   'i',
 );
@@ -99,9 +105,10 @@ const COIN_FLIP_ODDS =
   /\b(coin_flip_config|coin_flip_round|(?:actual_)?win_(?:units|percent)(?:_\d)?|odds_set)\b/i;
 // The real tables behind those masked views. A schema name is the only way past
 // a temp view, so these are refused after a dot. So is a comment after any
-// dot: comments nest, and a regex cannot follow one through to the name.
+// dot: comments nest, and a regex cannot follow one through to the name. The
+// toast schema holds those tables' long values as stored, so it goes whole.
 const BEHIND_THE_MASK =
-  /\.\s*(?:\/\*|--|"?(?:admin_action_audit|customer(?:_group|_account_state)?)\b)/i;
+  /\bpg_toast|\.\s*(?:\/\*|--|"?(?:admin_action_audit|customer(?:_group|_account_state)?)\b)/i;
 // U&"..." spells a name in escapes the checks above would not recognize.
 const UNICODE_ESCAPES = /\bu&['"]/i;
 // The statements carry their own bound values ($1 to $3): a placeholder in
@@ -180,9 +187,13 @@ const SECRET_VALUES_SQL =
 
 // jsonb::text always writes a key whole and in double quotes, so this finds it
 // at any depth. A value of another shape breaks the cast, which fails closed.
-const KEYS_IN_JSON = String.raw`"((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set|real_?name\w*|\w*password\w*)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|[^,}\]\s]+)`;
+// holder_name (the audit of a shared-name clearing) is often a real name.
+const KEYS_IN_JSON = String.raw`"((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set|real_?name\w*|\w*password\w*|holder_name)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|[^,}\]\s]+)`;
 const hideKeys = (column: string) =>
   `regexp_replace(t."${column}"::text, '${KEYS_IN_JSON}', '"\\1": "[hidden]"', 'gi')::jsonb`;
+// The key's whole value shown as [hidden]; whether it is set stays answerable.
+const hideValue = (json: string, key: string) =>
+  `CASE WHEN ${json} ? '${key}' THEN jsonb_set(${json}, '{${key}}', '"[hidden]"') ELSE ${json} END`;
 
 // Coin flip's actual odds, each group's odds set, the partner logins'
 // passwords and customers' real names sit in tables the bots keep reading. No
@@ -196,9 +207,13 @@ const hideKeys = (column: string) =>
 const MASKED_COLUMNS: Record<string, Record<string, string>> = {
   admin_action_audit: { before: hideKeys('before'), after: hideKeys('after') },
   customer_group: { metadata: hideKeys('metadata') },
-  // Shown as [hidden], as the key redaction showed it before.
+  // Shown as [hidden], as the key redaction showed it before. A shared-name
+  // clearing is keyed by the holder name itself, so it goes whole too.
   customer: {
-    metadata: `CASE WHEN t."metadata" ? 'partner_credential' THEN jsonb_set(t."metadata", '{partner_credential}', '"[hidden]"') ELSE t."metadata" END`,
+    metadata: hideValue(
+      hideValue('t."metadata"', 'partner_credential'),
+      'holder_name_cleared',
+    ),
   },
   // Whether a name is set stays answerable.
   customer_account_state: {
@@ -370,6 +385,10 @@ async function runNow(
         'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ; ' +
           `SET LOCAL statement_timeout = ${Math.trunc(timeoutMs)}; ` +
           'SET LOCAL lock_timeout = 2000; ' +
+          // Each sort or hash spills to disk past this rather than taking the
+          // database's memory: Postgres's own default, so it can only lower a
+          // raised one. (temp_file_limit needs a superuser.)
+          "SET LOCAL work_mem = '4MB'; " +
           // Ends the transaction if this server vanishes mid-query.
           'SET LOCAL idle_in_transaction_session_timeout = 30000; ' +
           // The mask's backslashes must reach the regex as written.

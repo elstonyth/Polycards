@@ -11,7 +11,10 @@ import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { LASTING_WRITES, type Need } from './access';
 import { findBank } from '../../../modules/packs/banks';
-import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
+import {
+  holderNameKey,
+  PERMANENT_BAN_REASON_PREFIX,
+} from '../../../modules/packs/saved-accounts';
 
 // What lasts waits for a tap (security review 2026-10-29). A note or a
 // scheduled task would stay in front of the model in every later chat or run,
@@ -51,6 +54,8 @@ export type Proposal =
       bank_code: string;
       last4: string;
       reason: string;
+      /** Set from the token's seal (openProposal). */
+      proposed_at?: string;
     }
   // Freeing a bank number from the other accounts on it, so this player saves
   // it themselves (owner, 2026-11-04): the accounts the person was shown, by
@@ -65,6 +70,8 @@ export type Proposal =
       number_mark: string;
       from: string[];
       reason: string;
+      /** Set from the token's seal (openProposal). */
+      proposed_at?: string;
     }
   // One name, different people (owner, 2026-11-04: any number of other
   // accounts, each listed on the card): this player's saves stop counting them.
@@ -75,6 +82,8 @@ export type Proposal =
       holder_name: string;
       with: string[];
       reason: string;
+      /** Set from the token's seal (openProposal). */
+      proposed_at?: string;
     };
 
 /** What an unban needs, checked again when the person taps it: its own policy
@@ -185,10 +194,47 @@ export function openProposal(
     if (u !== userId || typeof exp !== 'number' || exp < now || !p) {
       return null;
     }
-    return p;
+    // When it was made comes from the seal, never from the proposal.
+    return p.kind === 'unban_number' ||
+      p.kind === 'free_number' ||
+      p.kind === 'name_clash'
+      ? { ...p, proposed_at: new Date(exp - TTL_MS).toISOString() }
+      : p;
   } catch {
     return null;
   }
+}
+
+const DONE_SINCE =
+  'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.';
+
+/** Whether the change a card makes was audited on the player after the card
+ *  was made (security audit 2026-11-09): its own first tap, or a colleague
+ *  doing or undoing it. The lift and clearing stamps leave no trace once
+ *  undone, so a re-ban looks like never lifted; only the audit tells. */
+async function doneSince(
+  packs: PacksModuleService,
+  customerId: string,
+  since: string | undefined,
+  same: (after: Record<string, unknown>) => boolean,
+): Promise<boolean> {
+  // A card from before this check carries no time: asked again.
+  if (!since) return true;
+  const rows = await packs.listAdminActionAudits(
+    {
+      entity_type: 'customer',
+      entity_id: customerId,
+      action: 'edit',
+      created_at: { $gt: new Date(since) },
+    },
+    { select: ['after'] },
+  );
+  return rows.some(
+    (r) =>
+      typeof r.after === 'object' &&
+      r.after !== null &&
+      same(r.after as Record<string, unknown>),
+  );
 }
 
 /** Saves what the person confirmed, checked again as things stand now. A
@@ -243,19 +289,32 @@ export async function saveProposal(
     if (!(await access.can?.(UNBAN_NEED))) {
       throw new ConfirmRefused('Your role cannot unban bank numbers.');
     }
+    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    const { last4 } = proposal;
+    // Lifted, or banned again, since this card was made.
+    if (
+      await doneSince(
+        packs,
+        proposal.customer_id,
+        proposal.proposed_at,
+        (a) =>
+          'lifted_for_player' in a &&
+          (a.banned_number as { last4?: unknown } | undefined)?.last4 === last4,
+      )
+    ) {
+      throw new ConfirmRefused(DONE_SINCE);
+    }
     try {
-      await container
-        .resolve<PacksModuleService>(PACKS_MODULE)
-        .setPayoutBanLifted({
-          customerId: proposal.customer_id,
-          adminId: access.userId,
-          last4: proposal.last4,
-          bankCode: proposal.bank_code || null,
-          lifted: true,
-          reason: proposal.reason,
-          fromBanList:
-            access.superAdmin || ((await access.can?.(BAN_LIST_NEED)) ?? false),
-        });
+      await packs.setPayoutBanLifted({
+        customerId: proposal.customer_id,
+        adminId: access.userId,
+        last4: proposal.last4,
+        bankCode: proposal.bank_code || null,
+        lifted: true,
+        reason: proposal.reason,
+        fromBanList:
+          access.superAdmin || ((await access.can?.(BAN_LIST_NEED)) ?? false),
+      });
     } catch (err) {
       // The ban is gone, or now matches more than one number.
       if (
@@ -290,6 +349,23 @@ export async function saveProposal(
       throw new ConfirmRefused(
         'This player is still banned: tap Unban first, then this.',
       );
+    }
+    // This name cleared or taken back, or this number freed, since the card.
+    const nameKey =
+      proposal.kind === 'name_clash'
+        ? holderNameKey(proposal.holder_name)
+        : null;
+    const last4 = proposal.kind === 'free_number' ? proposal.last4 : null;
+    if (
+      await doneSince(packs, proposal.customer_id, proposal.proposed_at, (a) =>
+        nameKey !== null
+          ? 'cleared' in a &&
+            typeof a.holder_name === 'string' &&
+            holderNameKey(a.holder_name) === nameKey
+          : 'held_by' in a && a.account_last4 === last4,
+      )
+    ) {
+      throw new ConfirmRefused(DONE_SINCE);
     }
     try {
       if (proposal.kind === 'name_clash') {

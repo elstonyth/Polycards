@@ -179,6 +179,36 @@ describe('redact', () => {
     });
   });
 
+  it('hides the holder name a shared-name clearing carries, and keeps bank holder names', () => {
+    expect(
+      redact({
+        metadata: {
+          holder_name_cleared: {
+            'tan ah kow': { name: 'Tan Ah Kow', at: 'x', with: ['cus_2'] },
+          },
+          bank_accounts: [{ accountHolderName: 'Tan Ah Kow' }],
+        },
+        actions: [
+          {
+            before: { holder_name: 'Tan Ah Kow' },
+            after: { holder_name: 'Tan Ah Kow', cleared: true },
+          },
+        ],
+      }),
+    ).toEqual({
+      metadata: {
+        holder_name_cleared: '[hidden]',
+        bank_accounts: [{ accountHolderName: 'Tan Ah Kow' }],
+      },
+      actions: [
+        {
+          before: { holder_name: '[hidden]' },
+          after: { holder_name: '[hidden]', cleared: true },
+        },
+      ],
+    });
+  });
+
   // Owner, 2026-10-30: coin flip's actual odds and each group's odds set stay
   // off the desks; the audit rows and group metadata carrying them stay open.
   it('hides coin flip odds and odds sets, and keeps the published chance', () => {
