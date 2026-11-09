@@ -22,8 +22,24 @@ describe('normalizeRealName', () => {
     ['Tan 😀'],
     ['https://x.y'],
     ['a'.repeat(101)],
+    // A zero-width non-joiner or joiner spells another name once dropped.
+    ['Tan\u200C Ah Kow'],
+    ['Tan Ah\u200D Kow'],
   ])('refuses %j', (input) => {
     expect(normalizeRealName(input)).toBeNull();
+  });
+
+  // A repeat with an invisible character or styled letters stores as the
+  // plain name, so the repeated-name lookup finds the account that has it.
+  it.each([
+    ['TAN AH KO͏W'],
+    ['TAN​ AH KOW'],
+    ['TAN AH KOW️'],
+    ['TAN ㅤAH KOW'],
+    ['ＴＡＮ ＡＨ ＫＯＷ'],
+    ['𝐓𝐀𝐍 𝐀𝐇 𝐊𝐎𝐖'],
+  ])('stores %j as the plain name', (input) => {
+    expect(normalizeRealName(input)).toBe('TAN AH KOW');
   });
 
   it('refuses a non-string', () => {

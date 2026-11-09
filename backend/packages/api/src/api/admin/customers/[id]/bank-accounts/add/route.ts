@@ -5,6 +5,7 @@ import type {
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import {
+  accountNumberForms,
   findBank,
   sandboxOnlyBank,
 } from '../../../../../../modules/packs/banks';
@@ -85,13 +86,17 @@ export async function POST(
 
   const customerId = req.params.id;
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // A PayNow mobile is one number with or without its 65 (accountNumberForms).
+  const numbers = accountNumberForms(account.bankCode, account.accountNumber);
   // A banned number stays banned, support's add included (owner, 2026-11-03).
   if (
-    await packs.payoutAccountBanned(
-      account.accountNumber,
-      bank.wallet !== undefined,
-      customerId,
-    )
+    (
+      await Promise.all(
+        numbers.map((n) =>
+          packs.payoutAccountBanned(n, bank.wallet !== undefined, customerId),
+        ),
+      )
+    ).some(Boolean)
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
@@ -99,12 +104,18 @@ export async function POST(
     );
   }
   const holders = (
-    await packs.otherPayoutAccountHolders(
-      customerId,
-      account.accountNumber,
-      bank.wallet !== undefined,
+    await Promise.all(
+      numbers.map((n) =>
+        packs.otherPayoutAccountHolders(
+          customerId,
+          n,
+          bank.wallet !== undefined,
+        ),
+      ),
     )
-  ).filter((h) => heldByAnother([h], account.bankCode));
+  )
+    .flat()
+    .filter((h) => heldByAnother([h], account.bankCode));
   const others = [...new Set(holders.map((h) => h.customer_id))];
   if (others.length > 0) {
     const customers = req.scope.resolve(Modules.CUSTOMER);

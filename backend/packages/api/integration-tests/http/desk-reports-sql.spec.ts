@@ -382,7 +382,7 @@ medusaIntegrationTestRunner({
       });
 
       it('cuts a huge error message instead of sending it all', async () => {
-        const res = await query("SELECT repeat('x', 100000)::int AS n");
+        const res = await query("SELECT (SELECT string_agg('x', '') FROM generate_series(1, 100000))::int AS n");
         expect(res.status).toBe(400);
         expect(res.data.message).toMatch(/invalid input syntax/);
         expect(res.data.message.length).toBeLessThan(2_200);
@@ -403,11 +403,11 @@ medusaIntegrationTestRunner({
       });
 
       it('never holds a big answer: rows and totals are capped in bytes', async () => {
-        const wide = await query("SELECT repeat('x', 20000) AS big");
+        const wide = await query("SELECT (SELECT string_agg('x', '') FROM generate_series(1, 20000)) AS big");
         expect(wide.status).toBe(400);
         expect(wide.data.message).toMatch(/over 16 KB each/);
         const total = await query(
-          "SELECT repeat('x', 3000) AS s FROM generate_series(1, 400)",
+          "SELECT (SELECT string_agg('x', '') FROM generate_series(1, 3000)) AS s FROM generate_series(1, 400)",
         );
         expect(total.status).toBe(400);
         expect(total.data.message).toMatch(/MB, too big to send/);
@@ -415,7 +415,7 @@ medusaIntegrationTestRunner({
 
       it('cuts a long answer at whole rows and says so', async () => {
         const res = await query(
-          "SELECT g, repeat('y', 200) AS s FROM generate_series(1, 400) AS g",
+          "SELECT g, (SELECT string_agg('y', '') FROM generate_series(1, 200)) AS s FROM generate_series(1, 400) AS g",
         );
         expect(res.status).toBe(200);
         expect(res.data.row_count).toBe(400);

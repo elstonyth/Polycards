@@ -1184,7 +1184,7 @@ describe('POST accounts — holder names compare as one person reads them', () =
     ).toBe('Tan Ah Kow');
   });
 
-  it.each([['Таn Ah Kow'], ['--'], ['Tan Ah Kow 😀']])(
+  it.each([['Таn Ah Kow'], ['--'], ['Tan Ah Kow 😀'], ['Tan Ah Ŋow']])(
     'refuses %j: Latin letters, digits and name punctuation only',
     async (name) => {
       await expect(
@@ -1193,6 +1193,51 @@ describe('POST accounts — holder names compare as one person reads them', () =
       expect(updateCustomers).not.toHaveBeenCalled();
     },
   );
+
+  it.each([['TAN AH KOW&'], ['TAN AH KOW (1)'], ['TAN AH KÓW'], ['ᴛᴀɴ ᴀʜ ᴋᴏᴡ'], ['Tan ɑh Kow']])(
+    'refuses %j when the plain name is on another account (the query compares letters)',
+    async (name) => {
+      holderNameHeldByAnother.mockResolvedValue(true);
+      await expect(
+        POST(mkReq({ ...VALID_BODY, account_holder_name: name }), mkRes()),
+      ).rejects.toThrow(/name is already linked/);
+      // Asked once, as typed: the service keys both sides by their letters
+      // (holder-name-key-sql.integration.spec).
+      expect(holderNameHeldByAnother).toHaveBeenCalledTimes(1);
+      expect(updateCustomers).not.toHaveBeenCalled();
+    },
+  );
+
+  it('takes a save back off when another account saved the number at the same moment', async () => {
+    otherPayoutAccountHolders
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'Lim Mei Ling' },
+      ]);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      SHARED_SAVE_MESSAGE,
+    );
+    expect(mutateCustomerMetadata).toHaveBeenCalledTimes(2);
+    expect(updateCustomers.mock.calls[1][1].metadata.bank_accounts).toEqual([]);
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it('a PayNow mobile held elsewhere with its 65 is the same number', async () => {
+    otherPayoutAccountHolders.mockImplementation(async (_id: string, n: string) =>
+      n === '6591234567'
+        ? [{ customer_id: 'cus_2', bank_code: 'PAYNOWSG', holder_name: 'Lim Mei Ling' }]
+        : [],
+    );
+    await expect(
+      POST(
+        mkReq({ ...VALID_BODY, bank_code: 'PAYNOWSG', account_number: '91234567' }),
+        mkRes(),
+      ),
+    ).rejects.toThrow(SHARED_SAVE_MESSAGE);
+    // The ban list is asked for both spellings too.
+    expect(payoutAccountBanned).toHaveBeenCalledWith('6591234567', false, 'cus_1');
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
 
   it('takes a save back off when another account saved the name at the same moment', async () => {
     holderNameHeldByAnother

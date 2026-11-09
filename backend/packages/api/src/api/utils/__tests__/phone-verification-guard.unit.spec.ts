@@ -7,6 +7,7 @@ import {
 } from '../phone-verification-guard';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { signPhoneProof } from '../../../utils/phone-verification';
+import { PHONE_IN_USE_MESSAGE } from '../phone-claim';
 import * as fs from 'fs';
 import {
   MIDDLEWARES_PATH,
@@ -105,7 +106,9 @@ describe('requireSignupPhoneProof', () => {
 
   it('passes untouched when enforcement is off', async () => {
     delete process.env.PHONE_VERIFICATION_REQUIRED;
-    expect(await run(makeReq({ phone: PHONE }))).toBeUndefined();
+    const { res, finish } = makeRes();
+    expect(await run(makeReq({ phone: PHONE }), res)).toBeUndefined();
+    finish(200); // gives the number back for the cases below
   });
 
   // One phone = one account. Checked OUTSIDE the enforcement flag on purpose:
@@ -263,10 +266,13 @@ describe('requireSignupPhoneProof', () => {
       expect(await run(signupReq(proof))).toBeUndefined();
     });
 
-    it('claims nothing while enforcement is off', async () => {
+    // A 200 keeps a proof claim, so the second pass shows none was taken.
+    it('spends no proof while enforcement is off', async () => {
       delete process.env.PHONE_VERIFICATION_REQUIRED;
       const proof = freshProof();
-      expect(await run(signupReq(proof))).toBeUndefined();
+      const first = makeRes();
+      expect(await run(signupReq(proof), first.res)).toBeUndefined();
+      first.finish(200);
       expect(await run(signupReq(proof))).toBeUndefined();
     });
 
@@ -281,11 +287,76 @@ describe('requireSignupPhoneProof', () => {
     });
   });
 
+  // Two proofs for one number are two proof claims, and neither racer's row
+  // exists when the other checks (listCustomers answers [] for both): only
+  // the hold on the number decides.
+  describe('one signup per number at a time', () => {
+    beforeEach(() => {
+      process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+    });
+    afterEach(() => {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+    });
+    const twoProofs = () => {
+      const a = freshProof();
+      const b = {
+        phone: a.phone,
+        token: signPhoneProof(SECRET, a.phone, 'signup', Date.now() - 1000),
+      };
+      expect(b.token).not.toBe(a.token);
+      return [a, b];
+    };
+
+    it('lets one of two concurrent signups for one number through, on two proofs', async () => {
+      const [a, b] = twoProofs();
+      const results = await Promise.all([run(signupReq(a)), run(signupReq(b))]);
+      expect(results.filter((r) => r === undefined)).toHaveLength(1);
+      const loser = results.find((r) => r !== undefined) as MedusaError;
+      expect(loser.type).toBe(MedusaError.Types.NOT_ALLOWED);
+      expect(loser.message).toBe(PHONE_IN_USE_MESSAGE);
+    });
+
+    it('holds the number with enforcement off too', async () => {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+      const { phone } = freshProof();
+      const results = await Promise.all([
+        run(makeReq({ phone })),
+        run(makeReq({ phone })),
+      ]);
+      expect(results.filter((r) => r === undefined)).toHaveLength(1);
+      expect((results.find((r) => r !== undefined) as Error).message).toBe(
+        PHONE_IN_USE_MESSAGE,
+      );
+    });
+
+    it('gives the number back once the create has answered, and the loser its proof', async () => {
+      const [a, b] = twoProofs();
+      const winner = makeRes();
+      expect(await run(signupReq(a), winner.res)).toBeUndefined();
+      const loser = makeRes();
+      expect(((await run(signupReq(b), loser.res)) as Error).message).toBe(
+        PHONE_IN_USE_MESSAGE,
+      );
+      loser.finish(400); // the error handler answering the refusal
+      // Still held while the winner's create runs.
+      const retry = makeRes();
+      expect(((await run(signupReq(b), retry.res)) as Error).message).toBe(
+        PHONE_IN_USE_MESSAGE,
+      );
+      retry.finish(400);
+      winner.finish(200);
+      // Released on success too (the row then answers the read instead), and
+      // b's proof was not spent by its refusal.
+      expect(await run(signupReq(b))).toBeUndefined();
+    });
+  });
+
   describe('single-use proofs on Redis', () => {
     // Honours SET key value PX ms NX the way Redis does. `down` makes every
     // command fail the way ioredis does with the connection gone.
     class FakeRedis {
       static held = new Map<string, number>();
+      static owners = new Map<string, unknown>();
       static sets: unknown[][] = [];
       static dels: string[] = [];
       static down = false;
@@ -299,7 +370,15 @@ describe('requireSignupPhoneProof', () => {
         const ttl = args[2] as number; // value, 'PX', ttl, 'NX'
         if ((FakeRedis.held.get(key) ?? 0) > Date.now()) return null;
         FakeRedis.held.set(key, Date.now() + ttl);
+        FakeRedis.owners.set(key, args[0]);
         return 'OK';
+      }
+      // releaseIf's compare-and-delete script: deletes only for its owner.
+      async eval(_script: string, _keys: number, key: string, owner: string) {
+        if (FakeRedis.down) throw new Error('Connection is closed.');
+        if (FakeRedis.owners.get(key) !== owner) return 0;
+        FakeRedis.owners.delete(key);
+        return this.del(key);
       }
       async del(key: string) {
         if (FakeRedis.down) throw new Error('Connection is closed.');
@@ -323,6 +402,7 @@ describe('requireSignupPhoneProof', () => {
       process.env.PHONE_VERIFICATION_REQUIRED = 'true';
       process.env.REDIS_URL = 'redis://fake';
       FakeRedis.held.clear();
+      FakeRedis.owners.clear();
       FakeRedis.sets = [];
       FakeRedis.dels = [];
       FakeRedis.down = false;
@@ -335,12 +415,20 @@ describe('requireSignupPhoneProof', () => {
       else process.env.NODE_ENV = ORIGINAL_NODE_ENV;
     });
 
-    it('claims a hash of the proof, never the proof, for its remaining lifetime', async () => {
+    it('claims a hash of the proof, never the proof, for its remaining lifetime, then the number for a minute', async () => {
       const guard = load();
       const proof = freshProof(Date.now() - 4 * 60_000); // 6 minutes left
       expect(await runWith(guard, signupReq(proof))).toBeUndefined();
 
-      expect(FakeRedis.sets).toHaveLength(1);
+      expect(FakeRedis.sets).toHaveLength(2);
+      // Held under this request's own mark, so only it can let go.
+      expect(FakeRedis.sets[1]).toEqual([
+        `phone-claim:${proof.phone}`,
+        expect.stringMatching(/^[0-9a-f-]{36}$/),
+        'PX',
+        60_000,
+        'NX',
+      ]);
       const [key, value, px, ttl, nx] = FakeRedis.sets[0];
       expect(key).toMatch(/^phone-proof:signup:[0-9a-f]{64}$/);
       expect(value).not.toBe(proof.token);
@@ -360,7 +448,10 @@ describe('requireSignupPhoneProof', () => {
 
       first.finish(500);
       await new Promise((r) => setImmediate(r));
-      expect(FakeRedis.dels).toEqual([FakeRedis.sets[0][0]]);
+      expect(FakeRedis.dels).toEqual([
+        FakeRedis.sets[0][0],
+        `phone-claim:${proof.phone}`,
+      ]);
       expect(await runWith(guard, signupReq(proof))).toBeUndefined();
     });
 
@@ -389,6 +480,25 @@ describe('requireSignupPhoneProof', () => {
       expect(await runWith(guard, signupReq(freshProof()))).toMatchObject(
         RETRYABLE,
       );
+    });
+
+    it('holds the number on Redis with enforcement off, and fails closed there too', async () => {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+      const guard = load();
+      const { phone } = freshProof();
+      const first = makeRes();
+      expect(
+        await runWith(guard, makeReq({ phone }), first.res),
+      ).toBeUndefined();
+      expect(FakeRedis.sets.map(([key]) => key)).toEqual([
+        `phone-claim:${phone}`,
+      ]);
+      first.finish(200);
+      await new Promise((r) => setImmediate(r));
+      expect(FakeRedis.dels).toEqual([`phone-claim:${phone}`]);
+
+      FakeRedis.down = true;
+      expect(await runWith(guard, makeReq({ phone }))).toMatchObject(RETRYABLE);
     });
 
     it('refuses in production when no Redis is configured', async () => {

@@ -243,4 +243,29 @@ export const adminRbacRoutes: MiddlewareRoute[] = [
     methods: ['GET' as const],
     policies: [{ resource: s.resource, operation: 'read' as const }],
   })),
+  // Core routes that ask too little (audit 2026-11-09). Search has no policy
+  // and lists every customer's email (staff are open to staff by the owner's
+  // choice, so customer:read alone keeps a support viewer's Cmd+K); a workflow
+  // run asked only a read policy;
+  // an inventory delete asks only read.
+  {
+    matcher: '/admin/search',
+    methods: ['GET'],
+    policies: [{ resource: 'customer', operation: 'read' }],
+  },
+  ...[
+    '/admin/workflows-executions/*/run',
+    '/admin/workflows-executions/*/steps/*',
+  ].map((matcher) => ({
+    matcher,
+    methods: ['POST' as const],
+    policies: [
+      { resource: 'workflow_execution', operation: 'update' as const },
+    ],
+  })),
+  {
+    matcher: '/admin/inventory-items/*',
+    methods: ['DELETE'],
+    policies: [{ resource: 'inventory_item', operation: 'delete' }],
+  },
 ];

@@ -9,7 +9,7 @@ import {
   type MedusaResponse,
   type MedusaNextFunction,
 } from '@medusajs/framework/http';
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import express from 'express';
 import multer from 'multer';
 import {
@@ -56,6 +56,7 @@ import { capAdminSessionAge } from './utils/admin-session-cap';
 import {
   allowFirstBackupCodes,
   allowOneAuthenticator,
+  refuseReusedCode,
   refuseStaleStaffRefresh,
   requireAdminAuthenticator,
   requireSignedInAdmin,
@@ -112,6 +113,8 @@ const authRateLimit = rateLimit('auth');
 const adminMfaAuth = authenticate('user', ['session', 'bearer'], {
   allowUnregistered: true,
 });
+// One budget per login for every code answer (challenge and removal).
+const adminMfaCodeRateLimit = rateLimit('admin-mfa-code');
 // The per-identifier (per-email) credential tier. ONE instance shared by every
 // credential matcher below: they are one budget per account across login,
 // register and reset, and one instance also means one Redis connection fronting
@@ -169,7 +172,15 @@ const deskReportsRateLimit = rateLimit('desk-reports');
 // name "files" matches the FormData the admin client sends.
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
+  // Text fields are held in memory too, and busboy's default is unlimited
+  // fields of 1 MB each; the routes read one short `kind` field at most.
+  limits: {
+    fileSize: 20 * 1024 * 1024,
+    files: 1,
+    fields: 4,
+    fieldSize: 1024,
+    parts: 5,
+  },
 });
 
 // multer returns an Express RequestHandler whose generics don't line up with
@@ -234,6 +245,62 @@ const blockUnusedSurface = (
   // Medusa's error handler (see mediaUploadMiddleware above and
   // utils/reset-token-guard.ts), rather than throwing.
   next(new MedusaError(MedusaError.Types.NOT_FOUND, 'Not found'));
+};
+
+// POST /auth/user/emailpass/register: only for an email holding a live staff
+// invite (the invite page signs the invitee up here, then accepts). Open, the
+// route minted a staff login for any email. The invite's email exactly as
+// sent: emailpass stores it verbatim and sign-in trims, so a padded or recased
+// one would mint a login nobody can sign in to.
+const requireLiveStaffInvite = async (
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): Promise<void> => {
+  const email = (req.body as { email?: unknown } | undefined)?.email;
+  if (typeof email === 'string' && email && email === email.trim()) {
+    try {
+      const invites = await req.scope
+        .resolve(Modules.USER)
+        .listInvites(
+          { email },
+          { select: ['expires_at', 'accepted'], take: 5 },
+        );
+      const now = Date.now();
+      if (
+        invites.some(
+          (i) => !i.accepted && new Date(i.expires_at).getTime() > now,
+        )
+      ) {
+        return next();
+      }
+    } catch (err) {
+      return next(err as Error);
+    }
+  }
+  next(new MedusaError(MedusaError.Types.NOT_FOUND, 'Not found'));
+};
+
+// POST /admin/uploads (core): memory-buffered with no size limit. The admin's
+// own image uploads go through /admin/media; this keeps core's route to the
+// same 20 MB, and refuses a body that will not say its size.
+const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const capCoreUploadSize = (
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void => {
+  if (req.method !== 'POST') return next();
+  const size = Number(req.headers['content-length']);
+  if (!Number.isFinite(size) || size <= 0 || size > UPLOAD_MAX_BYTES) {
+    return next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Upload must state its size and be at most 20 MB.',
+      ),
+    );
+  }
+  next();
 };
 
 // Root landing (GET /). This is a headless Medusa/Mercur server with no page at
@@ -310,6 +377,18 @@ export default defineMiddlewares({
       middlewares: [blockUnusedSurface],
     },
     {
+      // Staff sign-up only for an invited email (see requireLiveStaffInvite).
+      matcher: '/auth/user/emailpass/register',
+      method: 'POST',
+      middlewares: [requireLiveStaffInvite],
+    },
+    {
+      // Wildcard and no method pin (POST is checked inside), so it sorts ahead
+      // of core's own multer, which buffers the body; pinned, it ran after.
+      matcher: '/admin/uploads*',
+      middlewares: [capCoreUploadSize],
+    },
+    {
       // Validated admin image upload (POST /admin/media). /admin/* is already
       // auth-protected; multer parses the multipart body into req.files.
       // Deliberately NOT on adminActionRateLimit: multi-image upload flows
@@ -368,7 +447,12 @@ export default defineMiddlewares({
     {
       matcher: '/auth/mfa/challenges/*',
       method: 'POST',
-      middlewares: [authRateLimit, adminMfaAuth],
+      middlewares: [
+        authRateLimit,
+        adminMfaAuth,
+        adminMfaCodeRateLimit,
+        refuseReusedCode,
+      ],
     },
     {
       matcher: '/auth/mfa/factors',
@@ -386,9 +470,23 @@ export default defineMiddlewares({
       ],
     },
     {
+      // The setup's first code: not guarded for reuse, so the sign-in right
+      // after setup can use the same code.
       matcher: '/auth/mfa/factors/*',
-      method: ['POST', 'DELETE'],
+      method: 'POST',
       middlewares: [authRateLimit, adminMfaAuth, requireSignedInAdmin],
+    },
+    {
+      // Removing an authenticator answers a code.
+      matcher: '/auth/mfa/factors/*',
+      method: 'DELETE',
+      middlewares: [
+        authRateLimit,
+        adminMfaAuth,
+        requireSignedInAdmin,
+        adminMfaCodeRateLimit,
+        refuseReusedCode,
+      ],
     },
     {
       matcher: '/auth/mfa/recovery-codes',
@@ -2003,6 +2101,16 @@ export default defineMiddlewares({
       matcher: '/store/returns*',
       middlewares: [blockUnusedSurface],
     },
+    // Core's and Mercur's order, payment and review routes: nothing here calls
+    // them, some ask for no login, and reviews reach the reviewer's customer
+    // record through `fields`. Closed so a later Medusa order cannot open them.
+    ...[
+      '/store/orders*',
+      '/store/order-groups*',
+      '/store/offers*',
+      '/store/reviews*',
+      '/store/payment-collections*',
+    ].map((matcher) => ({ matcher, middlewares: [blockUnusedSurface] })),
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a

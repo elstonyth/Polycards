@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
 import {
+  accountNumberForms,
   bankPayoutMinRm,
   findBank,
   gatewayBankCode,
@@ -8,10 +9,10 @@ import {
   savedAccountSlot,
   type Bank,
 } from './banks';
-import { realNameKey } from '../../utils/real-name';
 // Type-only: a value import of gateway.ts from here would cycle through the
 // module index into the service, which imports this file.
 import type { PaymentGateway } from './gateway';
+import { realNameKey } from '../../utils/real-name';
 
 // The customer's saved payout destinations — the shape, the deterministic id,
 // the defensive parse, and the cooling-off rule that decides whether one may
@@ -43,22 +44,25 @@ export function savedSlotFull(
 }
 
 /** One name on every bank (owner, 2026-11-03): a new bank, Touch 'n Go or
- *  another country's bank must carry a holder name already saved, compared as
- *  real names are (saved names normalized first: older lists predate it).
- *  Wallets have no holder. Any saved name will do, since support's add, the way
- *  past this for a name two banks spell differently, may leave two on the
- *  list. Shared with the admin assistant's bank_save_check. */
+ *  another country's bank must carry a holder name already saved, compared by
+ *  holderNameKey. Wallets have no holder. Any saved name will do, since
+ *  support's add, the way past this for a name two banks spell differently,
+ *  may leave two on the list. Shared with the admin assistant's
+ *  bank_save_check. */
 export function holderUnlikeSaved(
   accounts: SavedBankAccount[],
   bankCode: string,
   holderName: string,
 ): boolean {
   if (findBank(bankCode)?.wallet) return false;
+  // A name saved before this key with no English letters keys empty; it keeps
+  // its old key, so its owner is still held to it rather than let off.
+  const key = (n: string) => holderNameKey(n) || realNameKey(n);
   const savedNames = accounts
     .filter((a) => !findBank(a.bankCode)?.wallet)
-    .map((a) => realNameKey(normalizeHolderName(a.accountHolderName ?? '')))
+    .map((a) => key(a.accountHolderName ?? ''))
     .filter(Boolean);
-  return savedNames.length > 0 && !savedNames.includes(realNameKey(holderName));
+  return savedNames.length > 0 && !savedNames.includes(key(holderName));
 }
 
 export const ONE_BANK_ACCOUNT_MESSAGE =
@@ -108,6 +112,36 @@ export function normalizeHolderName(raw: string): string {
     .trim();
 }
 
+// Latin small capitals have no compatibility decomposition, so NFKD leaves
+// them; they fold by hand. No small capital X is encoded.
+export const SMALL_CAPS = 'ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘꞯʀꜱᴛᴜᴠᴡʏᴢ';
+export const SMALL_CAP_LETTERS = 'abcdefghijklmnopqrstuvwyz';
+const SMALL_CAP_RE = new RegExp(`[${SMALL_CAPS}]`, 'gu');
+
+// Letters NFKD does not break down, written as the English letters they
+// read as (a name typed with Đ or ß is the same person's), and the look-alikes
+// ı and ɑ. Kept in step with the SQL key in service.ts (holderNameKeySql).
+export const LETTER_FOLDS: Readonly<Record<string, string>> = {
+  đ: 'd', Đ: 'D', ð: 'd', Ð: 'D', ł: 'l', Ł: 'L', ø: 'o', Ø: 'O',
+  ħ: 'h', Ħ: 'H', ŧ: 't', Ŧ: 'T', ı: 'i', ɑ: 'a',
+  ß: 'ss', ẞ: 'SS', æ: 'ae', Æ: 'AE', œ: 'oe', Œ: 'OE', þ: 'th', Þ: 'TH',
+};
+const LETTER_FOLD_RE = new RegExp(`[${Object.keys(LETTER_FOLDS).join('')}]`, 'gu');
+
+/** A name's letters as they read: NFKD, marks dropped, small capitals and the
+ *  letters above folded. */
+const foldLatin = (name: string): string =>
+  name
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(SMALL_CAP_RE, (c) => SMALL_CAP_LETTERS[SMALL_CAPS.indexOf(c)])
+    .replace(LETTER_FOLD_RE, (c) => LETTER_FOLDS[c]);
+
+/** The key holder names compare by: its letters only, lower case. Digits,
+ *  punctuation, accents and small capitals do not make another name. */
+export const holderNameKey = (name: string): string =>
+  foldLatin(name).toLowerCase().replace(/[^a-z]/g, '');
+
 // Latin letters (accents included), digits and the punctuation bank names
 // carry. Other scripts are refused: a Cyrillic look-alike would read as the
 // same name to staff and as a new one to the check.
@@ -115,9 +149,15 @@ const HOLDER_NAME_RE =
   /^[\p{Script=Latin}0-9][\p{Script=Latin}0-9 .'@/,&()-]*$/u;
 
 /** Is this normalized holder name refused? It must hold at least one letter, or
- *  its comparison key (separators stripped) would be empty and match nothing. */
+ *  its comparison key would be empty and match nothing, and every letter must
+ *  read as an English one once folded: one that does not would key apart from
+ *  the name it copies. */
 export function holderNameInvalid(name: string): boolean {
-  return !HOLDER_NAME_RE.test(name) || !/\p{Script=Latin}/u.test(name);
+  return (
+    !HOLDER_NAME_RE.test(name) ||
+    !/\p{Script=Latin}/u.test(name) ||
+    /(?![A-Za-z])\p{L}/u.test(foldLatin(name))
+  );
 }
 
 /** A customer types a bank's holder name twice, and the two must match (owner,
@@ -531,11 +571,17 @@ export async function anySavedAccountShared(
       .filter((a) => !verified[a.id])
       .map(async (a) =>
         heldByAnother(
-          await packs.otherPayoutAccountHolders(
-            customerId,
-            a.accountNumber,
-            findBank(a.bankCode)?.wallet !== undefined,
-          ),
+          (
+            await Promise.all(
+              accountNumberForms(a.bankCode, a.accountNumber).map((n) =>
+                packs.otherPayoutAccountHolders(
+                  customerId,
+                  n,
+                  findBank(a.bankCode)?.wallet !== undefined,
+                ),
+              ),
+            )
+          ).flat(),
           a.bankCode,
         ),
       ),
@@ -564,7 +610,7 @@ export function verifiedBankAccounts(
  *  person with the same name holds it on another account, so this account's
  *  own saves stop counting THOSE accounts' use of it. `with` is who held it
  *  when support checked; an account that uses the name later still counts.
- *  Keyed by realNameKey; only support writes it (setHolderNameCleared). */
+ *  Keyed by holderNameKey; only support writes it (setHolderNameCleared). */
 export const HOLDER_NAME_CLEARED_KEY = 'holder_name_cleared';
 
 export type ClearedHolderName = { name: string; at: string; with: string[] };
@@ -576,22 +622,27 @@ export function clearedHolderNames(
   // No prototype: a name keyed 'constructor' must not find Object's.
   const out = Object.create(null) as Record<string, ClearedHolderName>;
   if (typeof stamps !== 'object' || stamps === null) return out;
-  return Object.assign(out, Object.fromEntries(
-    Object.entries(stamps).filter(
-      ([, v]) =>
-        typeof v === 'object' &&
-        v !== null &&
-        typeof (v as ClearedHolderName).name === 'string' &&
-        typeof (v as ClearedHolderName).at === 'string' &&
-        Array.isArray((v as ClearedHolderName).with),
-    ),
-  ));
+  // Keyed afresh from each stamp's own name, so one written under an older key
+  // still matches what a save checks; two that now share a key share accounts.
+  for (const v of Object.values(stamps)) {
+    if (
+      typeof v !== 'object' ||
+      v === null ||
+      typeof (v as ClearedHolderName).name !== 'string' ||
+      typeof (v as ClearedHolderName).at !== 'string' ||
+      !Array.isArray((v as ClearedHolderName).with)
+    ) {
+      continue;
+    }
+    const stamp = v as ClearedHolderName;
+    const key = holderNameKey(stamp.name);
+    const prev = out[key];
+    out[key] = prev
+      ? { ...stamp, with: [...new Set([...prev.with, ...stamp.with])] }
+      : stamp;
+  }
+  return out;
 }
-
-/** The key a holder name is cleared under: stored form, then compared as real
- *  names are, so the stamp matches what a save checks. */
-export const holderNameKey = (name: string): string =>
-  realNameKey(normalizeHolderName(name));
 
 /** The blob with one name cleared, or the clearing removed by a null. */
 export function withClearedHolderName(
@@ -673,7 +724,9 @@ export function verifiedElsewhere(
   const key = (a: SavedBankAccount) =>
     findBank(a.bankCode)?.wallet
       ? a.accountNumber
-      : a.accountNumber.replace(/\D/g, '').replace(/^0+/, '');
+      : accountNumberForms(a.bankCode, a.accountNumber)[0]
+          .replace(/\D/g, '')
+          .replace(/^0+/, '');
   const stamps = verifiedBankAccounts(metadata);
   return parseSavedBankAccounts(metadata.bank_accounts).some(
     (a) =>

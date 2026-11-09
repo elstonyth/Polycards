@@ -165,8 +165,10 @@ medusaIntegrationTestRunner({
           const res = await call('post', path, half, body);
           expect({ path, status: res.status }).toEqual({ path, status: 401 });
         }
+        // Nor refreshed: it answers the challenge it was given, and no other.
         const refreshed = await call('post', '/auth/token/refresh', half);
-        expect(refreshed.data.mfa_required ?? false).toBe(true);
+        expect(refreshed.status).toBe(401);
+        expect(refreshed.data.type).toBe('mfa_sign_in_required');
         expect(
           (await answer(challenge, half, 'totp', '000000')).status,
         ).not.toBe(200);
@@ -182,7 +184,8 @@ medusaIntegrationTestRunner({
         ).toBe(409);
 
         // A code from the step before or after still counts (clock drift);
-        // one from two minutes ago does not.
+        // one from two minutes ago does not. The next step's, since the step
+        // before may be the code already used above (each works once).
         const late = await signIn();
         expect(
           (
@@ -201,7 +204,7 @@ medusaIntegrationTestRunner({
               drift.data.mfa_challenge.id,
               drift.data.token,
               'totp',
-              totpCode(secret, Date.now() - STEP_MS),
+              totpCode(secret, Date.now() + STEP_MS),
             )
           ).status,
         ).toBe(200);
@@ -284,6 +287,68 @@ medusaIntegrationTestRunner({
           totpCode(secret),
         );
         expect(right.status).not.toBe(200);
+      });
+
+      it('takes each app code once per login', async () => {
+        await staffWithoutAuthenticator();
+        const { secret } = await setUp((await signIn()).data.token);
+        const code = totpCode(secret, Date.now() + STEP_MS);
+        const one = await signIn();
+        const two = await signIn();
+        expect(
+          (
+            await answer(
+              one.data.mfa_challenge.id,
+              one.data.token,
+              'totp',
+              code,
+            )
+          ).status,
+        ).toBe(200);
+        const reused = await answer(
+          two.data.mfa_challenge.id,
+          two.data.token,
+          'totp',
+          code,
+        );
+        expect(reused.status).toBe(401);
+        expect(reused.data.message).toMatch(/just used/);
+        // A refused answer gives its code back: the same code, refused on a
+        // challenge that does not exist, still signs in on a real one.
+        const three = await signIn();
+        const prev = () => totpCode(secret, Date.now() - STEP_MS);
+        expect(
+          (await answer('mfachal_missing', three.data.token, 'totp', prev()))
+            .status,
+        ).not.toBe(200);
+        expect(
+          (
+            await answer(
+              three.data.mfa_challenge.id,
+              three.data.token,
+              'totp',
+              prev(),
+            )
+          ).status,
+        ).toBe(200);
+      });
+
+      it('caps code answers per login, whatever the challenge', async () => {
+        await staffWithoutAuthenticator();
+        await setUp((await signIn()).data.token);
+        const login = await signIn();
+        const statuses: number[] = [];
+        for (let i = 0; i < 11; i += 1) {
+          const res = await answer(
+            login.data.mfa_challenge.id,
+            login.data.token,
+            'totp',
+            String(100000 + i),
+          );
+          statuses.push(res.status);
+        }
+        expect(statuses.slice(0, 10)).not.toContain(429);
+        expect(statuses[10]).toBe(429);
       });
 
       it('keeps customers off two-step setup', async () => {

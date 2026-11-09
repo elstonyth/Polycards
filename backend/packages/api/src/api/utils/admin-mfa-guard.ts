@@ -6,6 +6,7 @@ import type {
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { DESK_BOT_ACTOR } from '../reports/admin/proxy';
+import { throttledWarn, warmSignupProofClaims } from './rate-limit';
 
 // Every admin login needs an authenticator app (owner, 2026-11-07). Medusa asks
 // for the 6-digit code at sign-in only once a login has one set up, and never
@@ -295,14 +296,16 @@ export async function allowFirstBackupCodes(
 
 /** POST /auth/token/refresh: a staff token from before its login's
  *  authenticator would otherwise come back with a fresh issue time and pass
- *  for a sign-in that answered the code. Other tokens go on to core. */
+ *  for a sign-in that answered the code. The token a password alone returns
+ *  while the code is due is refused too: it answers the challenge it was
+ *  given, and no other. Other tokens go on to core. */
 export async function refuseStaleStaffRefresh(
   req: MedusaRequest,
   res: MedusaResponse,
   next: MedusaNextFunction,
 ): Promise<void> {
   const auth = authOf(req);
-  if (auth?.actor_type !== 'user' || !auth.actor_id) return next();
+  if (auth?.actor_type !== 'user') return next();
   let since: number | null;
   try {
     since = await authenticatorSince(req.scope, auth.auth_identity_id);
@@ -310,11 +313,63 @@ export async function refuseStaleStaffRefresh(
     return next(err);
   }
   const at = signedInAt(auth);
-  if (since === null || (at !== null && at >= since - CLOCK_SLACK_MS)) {
+  // No authenticator yet (an invite's sign-up) goes on as before.
+  if (
+    since === null ||
+    (auth.actor_id && at !== null && at >= since - CLOCK_SLACK_MS)
+  ) {
     return next();
   }
   res.status(401).json({
     type: MFA_SIGN_IN_REQUIRED,
     message: 'Sign in again with your authenticator code.',
   });
+}
+
+// Core accepts an app code for its 30-second step and the one each side.
+export const CODE_REUSE_MS = 120_000;
+const warnReuseStore = throttledWarn(60_000);
+
+/** POST /auth/mfa/challenges/:id/verify, DELETE /auth/mfa/factors/:id: an
+ *  app code works once per login. Core checks codes without state, so one
+ *  seen over a shoulder would pass any challenge for about a minute. A
+ *  refused answer gives its code back, so a retry after a slip still works.
+ *  Backup codes are deleted on use already. */
+export async function refuseReusedCode(
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction,
+): Promise<void> {
+  const body = req.body as { method?: unknown; code?: unknown } | undefined;
+  const identity = authOf(req)?.auth_identity_id;
+  if (
+    body?.method === 'recovery_code' ||
+    typeof body?.code !== 'string' ||
+    !identity
+  ) {
+    return next();
+  }
+  const claims = warmSignupProofClaims();
+  const key = `mfa-code:${identity}:${body.code}`;
+  let took: boolean;
+  try {
+    took = await claims.claim(key, CODE_REUSE_MS);
+  } catch (err) {
+    // Fails open: a store outage must not lock every admin out. The per-login
+    // code budget still holds.
+    warnReuseStore('[admin-mfa] code reuse check unavailable', err);
+    return next();
+  }
+  if (!took) {
+    res.status(401).json({
+      type: 'unauthorized',
+      message:
+        'That code was just used. Wait for the next one from your authenticator app.',
+    });
+    return;
+  }
+  res.on('finish', () => {
+    if (res.statusCode >= 400) claims.release(key).catch(() => undefined);
+  });
+  next();
 }

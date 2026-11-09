@@ -868,6 +868,26 @@ export const RATE_LIMITS = {
   },
 
   /**
+   * Admin two-step codes, PER LOGIN (auth identity): runs after the staff
+   * authenticate on /auth/mfa/*. The `auth` tier is keyed on the address,
+   * which bounds no single login; this one does. A person answers once or
+   * twice per sign-in. Env-tunable:
+   * ADMIN_MFA_CODE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 10/60s)
+   * ADMIN_MFA_CODE_RATE_LIMIT / _WINDOW_MS (default 30/1h)
+   */
+  'admin-mfa-code': {
+    message: 'Too many code attempts. Wait a while, then sign in again.',
+    keyOf: (req) =>
+      (req as AuthenticatedMedusaRequest).auth_context?.auth_identity_id,
+    defaults: {
+      burstLimit: 10,
+      burstWindowMs: 60_000,
+      limit: 30,
+      windowMs: 3_600_000,
+    },
+  },
+
+  /**
    * The public-profile read limiter (GET /store/profiles/:handle). The route is
    * PUBLIC — no auth_context — so the middleware keys on the request IP (its
    * designed fallback). NOTE: the storefront fetches profiles SERVER-side, so
@@ -1427,14 +1447,39 @@ export async function consumeOtpSendBudget(
 
 /** One-time claims on phone proofs: signup (requireSignupPhoneProof) and,
  *  since 2026-10-07, phone-change (store/phone-verification/change), under
- *  their own key prefixes. */
+ *  their own key prefixes; since 2026-11-09 also admin app codes
+ *  (`mfa-code:`), which flow a phone code was sent for (`otp-purpose:`) and
+ *  a number mid-signup or mid-change (`phone-claim:`). */
 export interface ProofClaimStore {
-  /** True iff this call took the claim; false when it is already held. */
-  claim(key: string, ttlMs: number): Promise<boolean>;
+  /** True iff this call took the claim; false when it is already held.
+   *  `owner` is stored with it, for releaseIf. */
+  claim(key: string, ttlMs: number, owner?: string): Promise<boolean>;
+  /** Drops the claim only while `owner` still holds it, in one step: a late
+   *  release must not drop the next holder's claim. */
+  releaseIf(key: string, owner: string): Promise<void>;
+  /** A short-lived value under a key (otp-purpose), or null. */
+  get(key: string): Promise<string | null>;
+  /** put(), done only while `holdKey` is still `owner`'s, in one step.
+   *  True when it wrote. */
+  putIfHeld(
+    holdKey: string,
+    owner: string,
+    key: string,
+    value: string,
+    ttlMs: number,
+  ): Promise<boolean>;
+  put(key: string, value: string, ttlMs: number): Promise<void>;
   release(key: string): Promise<void>;
 }
 
 let signupProofClaims: ProofClaimStore | null = null;
+
+// Compare-and-delete in one round trip, so no other holder can slip between.
+const RELEASE_IF_OWNER =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+// A write under a hold, in one round trip: nothing if the hold moved on.
+const PUT_IF_HELD =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then redis.call('set', KEYS[2], ARGV[2], 'PX', ARGV[3]) return 1 else return 0 end";
 
 /**
  * The store that makes a signup proof single-use, opened at boot by
@@ -1455,8 +1500,18 @@ export function warmSignupProofClaims(): ProofClaimStore {
   const client = connectRedis('signup-proof-claim', throttledWarn(60_000));
   if (client) {
     signupProofClaims = {
-      claim: async (key, ttlMs) =>
-        (await client.set(key, '1', 'PX', ttlMs, 'NX')) === 'OK',
+      claim: async (key, ttlMs, owner = '1') =>
+        (await client.set(key, owner, 'PX', ttlMs, 'NX')) === 'OK',
+      releaseIf: async (key, owner) => {
+        await client.eval(RELEASE_IF_OWNER, 1, key, owner);
+      },
+      get: async (key) => client.get(key),
+      putIfHeld: async (holdKey, owner, key, value, ttlMs) =>
+        (await client.eval(PUT_IF_HELD, 2, holdKey, key, owner, value, ttlMs)) ===
+        1,
+      put: async (key, value, ttlMs) => {
+        await client.set(key, value, 'PX', ttlMs);
+      },
       release: async (key) => {
         await client.del(key);
       },
@@ -1466,21 +1521,53 @@ export function warmSignupProofClaims(): ProofClaimStore {
       claim: async () => {
         throw new Error('REDIS_URL is not set');
       },
+      releaseIf: async () => undefined,
+      get: async () => {
+        throw new Error('REDIS_URL is not set');
+      },
+      putIfHeld: async () => {
+        throw new Error('REDIS_URL is not set');
+      },
+      put: async () => {
+        throw new Error('REDIS_URL is not set');
+      },
       release: async () => undefined,
     };
   } else {
     // ponytail: unbounded, an expired key stays until claimed again; fine for
     // one local process, and production never builds this branch.
     const expiries = new Map<string, number>();
+    const values = new Map<string, string>();
     signupProofClaims = {
-      claim: async (key, ttlMs) => {
+      claim: async (key, ttlMs, owner = '1') => {
         const now = Date.now();
         if ((expiries.get(key) ?? 0) > now) return false;
         expiries.set(key, now + ttlMs);
+        values.set(key, owner);
         return true;
+      },
+      releaseIf: async (key, owner) => {
+        if (values.get(key) !== owner) return;
+        expiries.delete(key);
+        values.delete(key);
+      },
+      get: async (key) =>
+        (expiries.get(key) ?? 0) > Date.now() ? (values.get(key) ?? null) : null,
+      putIfHeld: async (holdKey, owner, key, value, ttlMs) => {
+        const now = Date.now();
+        if ((expiries.get(holdKey) ?? 0) <= now || values.get(holdKey) !== owner)
+          return false;
+        expiries.set(key, now + ttlMs);
+        values.set(key, value);
+        return true;
+      },
+      put: async (key, value, ttlMs) => {
+        expiries.set(key, Date.now() + ttlMs);
+        values.set(key, value);
       },
       release: async (key) => {
         expiries.delete(key);
+        values.delete(key);
       },
     };
   }
