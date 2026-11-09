@@ -1,20 +1,18 @@
 // Behaviour check for /dashboard/challenge: keyboard disclosure, edits surviving
 // a collapse (dense model, not the DOM), summary math, validation still firing.
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 const BASE = 'http://localhost:7001';
+const ADMIN_EMAIL = 'admin@pokenic.app';
+requireAdminTotp(ADMIN_EMAIL);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const out = [];
 const ok = (name, cond, extra = '') =>
   out.push(`${cond ? 'PASS' : 'FAIL'} ${name}${extra ? ' — ' + extra : ''}`);
 
-await page.goto(`${BASE}/dashboard/login`, { waitUntil: 'domcontentloaded' });
-await page.fill('input[name="email"]', 'admin@pokenic.app');
-await page.fill('input[name="password"]', 'PreviewOnly2026!');
-await page.click('button[type="submit"]');
-await page.waitForURL(/dashboard/, { timeout: 30000 });
-await page.waitForTimeout(2000);
+await adminUiLogin(page, `${BASE}/dashboard`, ADMIN_EMAIL, 'PreviewOnly2026!');
 await page.goto(`${BASE}/dashboard/challenge`, {
   waitUntil: 'domcontentloaded',
 });

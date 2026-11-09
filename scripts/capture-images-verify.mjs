@@ -2,6 +2,7 @@
 // Shoots the admin /cards list + a storefront pack page's Top Hits.
 // Usage: node scripts/capture-images-verify.mjs
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 
 mkdirSync('docs/research', { recursive: true });
@@ -17,6 +18,7 @@ function devLogin(key, fallback) {
 }
 const EMAIL = devLogin('ADMIN_EMAIL', 'admin@pokenic.app');
 const PW = devLogin('ADMIN_PW', '');
+if (PW) requireAdminTotp(EMAIL);
 
 const browser = await chromium.launch();
 try {
@@ -37,16 +39,7 @@ try {
 
   // admin cards list
   if (PW) {
-    await go('http://localhost:7000/dashboard/login');
-    await page.waitForSelector('input[name=email], input[type=email]', {
-      timeout: 15000,
-    });
-    await page.fill('input[name=email], input[type=email]', EMAIL);
-    await page.fill('input[name=password], input[type=password]', PW);
-    await page.click('button[type=submit]');
-    await page.waitForURL((u) => !u.pathname.includes('login'), {
-      timeout: 20000,
-    });
+    await adminUiLogin(page, 'http://localhost:7000/dashboard', EMAIL, PW);
     await go('http://localhost:7000/dashboard/cards');
     await page.waitForSelector('table tbody tr', { timeout: 20000 });
     await page.waitForTimeout(2500);

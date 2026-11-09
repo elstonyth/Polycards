@@ -4,9 +4,19 @@
 // editor, then drives the real interaction: lock the top card, set 40%, Save.
 // Confirms the save persisted via the admin API, then restores the seed odds.
 // Screenshots -> docs/research/phase6.
+// Run: QA_ADMIN_TOTP_SECRET=… node scripts/verify-admin-odds-ui.mjs
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import {
+  adminToken,
+  adminUiLogin,
+  requireAdminTotp,
+} from './lib/admin-sign-in.mjs';
+
+const ADMIN_EMAIL = 'admin@polycards.local';
+const ADMIN_PASSWORD = 'polycardsadmin2026';
+requireAdminTotp(ADMIN_EMAIL);
 
 // Admin vite serves under base '/dashboard/' (see apps/admin/vite.config.ts).
 const ADMIN = process.env.ADMIN_BASE || 'http://localhost:7000/dashboard';
@@ -25,27 +35,9 @@ const ctx = await browser.newContext({
 });
 const page = await ctx.newPage();
 
-// --- login ---
-await page
-  .goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' })
-  .catch(() => {});
-await page.waitForSelector('input[type="email"], input[name="email"]', {
-  timeout: 15000,
-});
-await page.fill(
-  'input[type="email"], input[name="email"]',
-  'admin@polycards.local',
-);
-await page.fill(
-  'input[type="password"], input[name="password"]',
-  'polycardsadmin2026',
-);
-await page.click('button[type="submit"]');
-// login redirects away from /login once auth succeeds
-await page
-  .waitForFunction(() => !/\/login/.test(location.pathname), { timeout: 15000 })
-  .catch(() => {});
-ok('logged_in', !/\/login/.test(page.url()), `url ${page.url()}`);
+// --- login (two-step: password, then the authenticator code) ---
+await adminUiLogin(page, ADMIN, ADMIN_EMAIL, ADMIN_PASSWORD);
+ok('logged_in', !/\/(login|sign-in)/.test(page.url()), `url ${page.url()}`);
 
 // --- list page ---
 await page.goto(`${ADMIN}/packs`, { waitUntil: 'domcontentloaded' });
@@ -128,18 +120,7 @@ await page.screenshot({
 await browser.close();
 
 // --- confirm persistence via admin API, then restore seed odds ---
-const token = (
-  await (
-    await fetch(`${API}/auth/user/emailpass`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: 'admin@polycards.local',
-        password: 'polycardsadmin2026',
-      }),
-    })
-  ).json()
-).token;
+const token = await adminToken(API, ADMIN_EMAIL, ADMIN_PASSWORD);
 const after = await (
   await fetch(`${API}/admin/packs/${SLUG}/odds`, {
     headers: { Authorization: `Bearer ${token}` },

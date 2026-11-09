@@ -5,9 +5,15 @@
 // Reads admin creds from the gitignored scripts/.dev-logins (never printed) and
 // the publishable key from .env.local. Env: QA_OUT (screenshot dir),
 // QA_BACKEND (:9000), QA_ADMIN (:7000/dashboard), QA_STOREFRONT (:4100).
+// QA_ADMIN_TOTP_SECRET (required): that admin's authenticator secret.
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  adminToken,
+  adminUiLogin,
+  requireAdminTotp,
+} from './lib/admin-sign-in.mjs';
 
 const ROOT = process.cwd();
 const OUT = process.env.QA_OUT ?? path.join(ROOT, 'docs/research');
@@ -34,6 +40,7 @@ const kv = (file) =>
       }),
   );
 const creds = kv(LOGINS);
+requireAdminTotp(creds.ADMIN_EMAIL);
 const env = kv(path.join(ROOT, '.env.local'));
 const PK = env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
 if (!PK)
@@ -69,13 +76,9 @@ async function api(p, { method = 'GET', body, token, headers = {} } = {}) {
 
 // ── Seed ───────────────────────────────────────────────────────────────────
 const stamp = Date.now().toString(36);
-const adminTok = (
-  await api('/auth/user/emailpass', {
-    method: 'POST',
-    body: { email: creds.ADMIN_EMAIL, password: creds.ADMIN_PW },
-  })
-).token;
-const A = { token: adminTok };
+const A = {
+  token: await adminToken(BACKEND, creds.ADMIN_EMAIL, creds.ADMIN_PW),
+};
 
 const name = `qa-partner-${stamp}`;
 const email = `${name}@polycards.local`;
@@ -178,21 +181,8 @@ const shot = async (n, opts = {}) => {
   console.log('shot', file);
 };
 
-// Admin login (rate-limited endpoint — retry through the window).
-for (let attempt = 0; attempt < 4; attempt++) {
-  await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-  await page.fill('input[name="email"]', creds.ADMIN_EMAIL);
-  await page.fill('input[name="password"]', creds.ADMIN_PW);
-  await page.press('input[name="password"]', 'Enter');
-  try {
-    await page.waitForURL((u) => !u.pathname.endsWith('/login'), {
-      timeout: 15000,
-    });
-    break;
-  } catch {
-    await sleep(8000);
-  }
-}
+// Admin login (rate-limited; the helper retries through the window).
+await adminUiLogin(page, ADMIN, creds.ADMIN_EMAIL, creds.ADMIN_PW);
 
 // 1. Player Groups page — the seeded row with its partner policy.
 await page.goto(`${ADMIN}/odds-sets`, { waitUntil: 'domcontentloaded' });

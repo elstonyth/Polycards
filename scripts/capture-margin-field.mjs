@@ -3,6 +3,7 @@
 // highlights the "Markup %" field (Card.market_multiplier), screenshots it.
 // Usage: node scripts/capture-margin-field.mjs   (backend :9000 + admin :7000 up)
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 
 const BASE = process.env.ADMIN_BASE || 'http://localhost:7000/dashboard';
@@ -20,6 +21,7 @@ function devLogin(key, fallback) {
 }
 const EMAIL = devLogin('ADMIN_EMAIL', 'admin@pokenic.app');
 const PW = devLogin('ADMIN_PW', '');
+requireAdminTotp(EMAIL);
 if (!PW) {
   console.error('No ADMIN_PW found (env or scripts/.dev-logins)');
   process.exit(1);
@@ -33,16 +35,7 @@ try {
   const go = (url) =>
     page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
 
-  await go(`${BASE}/login`);
-  await page.waitForSelector('input[name=email], input[type=email]', {
-    timeout: 15000,
-  });
-  await page.fill('input[name=email], input[type=email]', EMAIL);
-  await page.fill('input[name=password], input[type=password]', PW);
-  await page.click('button[type=submit]');
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 20000,
-  });
+  await adminUiLogin(page, BASE, EMAIL, PW);
   console.log('logged in');
 
   await go(`${BASE}/cards`);

@@ -2,6 +2,7 @@
 // Usage: node scripts/qa-admin-frames.mjs <path-to-frame.png>
 // Admin creds: PW_ADMIN_EMAIL / PW_ADMIN_PASSWORD (defaults = local dev admin).
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 const FRAME = process.argv[2];
 if (!FRAME)
@@ -11,6 +12,7 @@ const API_BASE = process.env.API_BASE ?? 'http://localhost:9000';
 const EMAIL = process.env.PW_ADMIN_EMAIL ?? 'admin@polycards.local';
 const PASSWORD = process.env.PW_ADMIN_PASSWORD ?? 'polycardsadmin2026';
 const SHOTS = 'docs-local-qa';
+requireAdminTotp(EMAIL);
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
@@ -18,33 +20,8 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 const go = (url) =>
   page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
 
-await go(BASE);
-// Login form (skips if a session cookie already exists).
-const emailBox = page
-  .locator('input[name="email"], input[type="email"]')
-  .first();
-// waitFor (not isVisible — that returns immediately, no waiting) so the
-// Vite-dev SPA has time to render the form after domcontentloaded.
-const hasLoginForm = await emailBox
-  .waitFor({ state: 'visible', timeout: 15_000 })
-  .then(() => true)
-  .catch(() => false);
-if (hasLoginForm) {
-  await emailBox.fill(EMAIL);
-  await page
-    .locator('input[name="password"], input[type="password"]')
-    .first()
-    .fill(PASSWORD);
-  await page
-    .getByRole('button', { name: /continue|log ?in|sign ?in/i })
-    .first()
-    .click();
-  // Login lands on /orders once the session is live — wait for the URL flip,
-  // not a fixed delay (goto too early races the auth cookie/SPA bootstrap).
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 20_000,
-  });
-}
+// A fresh browser has no session: password, then the authenticator code.
+await adminUiLogin(page, BASE, EMAIL, PASSWORD);
 await page.waitForTimeout(4000);
 
 await go(`${BASE}/daily-rewards`);

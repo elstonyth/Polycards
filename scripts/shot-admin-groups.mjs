@@ -2,12 +2,14 @@
 // Odds Sets page (group -> odds set, create-with-odds-set).
 // Run: QA_ADMIN_EMAIL=... QA_ADMIN_PW=... node scripts/shot-admin-groups.mjs
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { mkdirSync } from 'node:fs';
 
 const OUT = process.env.OUT || 'docs/research';
 const ADMIN = 'http://localhost:7000/dashboard';
 const EMAIL = process.env.QA_ADMIN_EMAIL;
 const PW = process.env.QA_ADMIN_PW;
+requireAdminTotp(EMAIL);
 
 mkdirSync(OUT, { recursive: true });
 
@@ -15,14 +17,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
 
-await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-const emailInput = page.locator('input[name="email"]');
-await emailInput.waitFor({ state: 'visible', timeout: 30000 });
-await emailInput.fill(EMAIL);
-await page.fill('input[name="password"]', PW);
-await page.press('input[name="password"]', 'Enter');
-await page.waitForURL((u) => !String(u).includes('/login'), { timeout: 30000 });
-await page.waitForTimeout(3000);
+await adminUiLogin(page, ADMIN, EMAIL, PW);
 
 // 1 — Odds Sets: group -> odds set, player counts, create-with-odds-set
 await page.goto(`${ADMIN}/odds-sets`, { waitUntil: 'domcontentloaded' });
