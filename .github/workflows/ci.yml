@@ -173,16 +173,16 @@ jobs:
       # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
       # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
       # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-      # entry — which is what made backend installs cold. The os-only restore-key
-      # is retained so a lockfile change still seeds from the previous entry.
+      # entry — which is what made backend installs cold. No restore-keys: turbo
+      # never prunes its local cache, so seeding each lockfile's entry from the
+      # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
+      # lockfile change now starts turbo cold and saves just that build.
       - name: Restore turbo
         id: turbo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-          restore-keys: |
-            turbo-${{ runner.os }}-
 
       # The ~71s install is pure node_modules materialization (unpack + link a
       # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
@@ -313,16 +313,16 @@ jobs:
       # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
       # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
       # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-      # entry — which is what made backend installs cold. The os-only restore-key
-      # is retained so a lockfile change still seeds from the previous entry.
+      # entry — which is what made backend installs cold. No restore-keys: turbo
+      # never prunes its local cache, so seeding each lockfile's entry from the
+      # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
+      # lockfile change now starts turbo cold and saves just that build.
       - name: Restore turbo
         id: turbo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-          restore-keys: |
-            turbo-${{ runner.os }}-
 
       # The ~71s install is pure node_modules materialization (unpack + link a
       # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
@@ -380,11 +380,13 @@ jobs:
   # on the first 10-shard run (42559940231): ~42 test-minutes in all, and a
   # per-shard floor of ~90s (job time minus the test step: 87-99s — container
   # init ~26s, checkout + three cache restores ~35s, a cache-hit install ~4s,
-  # plus runner setup), so wall ≈ 90s + 42min/N. jest shards by path hash, not
-  # duration, so shard tests ran 181-347s (mean 254s) in that run — the slowest
-  # shard sets the wall time, and a duration-balanced split would buy more than
-  # another shard. postgres data is on tmpfs (below) so the per-suite migration
-  # DDL isn't fsync-bound; backend/node_modules is cached (above).
+  # plus runner setup), so wall ≈ 90s + 42min/N. jest's default split is by
+  # path hash, which spread shard tests 181-347s (mean 254s) in that run, and
+  # the slowest shard sets the wall time. jest.config.js now uses
+  # integration-tests/duration-sequencer.js to split by recorded duration
+  # (projected 249-258s per shard from the same timings). postgres data is on
+  # tmpfs (below) so the per-suite migration DDL isn't fsync-bound;
+  # backend/node_modules is cached (above).
   #
   # NOTE: matrix length, the /N divisor in the run step, and SHARDS in
   # integration-tests/run-http-shards.mjs MUST match.
@@ -496,16 +498,16 @@ jobs:
       # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
       # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
       # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-      # entry — which is what made backend installs cold. The os-only restore-key
-      # is retained so a lockfile change still seeds from the previous entry.
+      # entry — which is what made backend installs cold. No restore-keys: turbo
+      # never prunes its local cache, so seeding each lockfile's entry from the
+      # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
+      # lockfile change now starts turbo cold and saves just that build.
       - name: Restore turbo
         id: turbo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-          restore-keys: |
-            turbo-${{ runner.os }}-
 
       - name: Install backend dependencies
         working-directory: backend
@@ -607,16 +609,16 @@ jobs:
       # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
       # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
       # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-      # entry — which is what made backend installs cold. The os-only restore-key
-      # is retained so a lockfile change still seeds from the previous entry.
+      # entry — which is what made backend installs cold. No restore-keys: turbo
+      # never prunes its local cache, so seeding each lockfile's entry from the
+      # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
+      # lockfile change now starts turbo cold and saves just that build.
       - name: Restore turbo
         id: turbo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-          restore-keys: |
-            turbo-${{ runner.os }}-
 
       # The ~71s install is pure node_modules materialization (unpack + link a
       # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
