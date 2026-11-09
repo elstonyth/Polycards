@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   isPhoneOtpPurpose,
   type PhoneOtpPurpose,
@@ -15,6 +16,36 @@ export const OTP_PURPOSE_TTL_MS = 10 * 60_000;
 const recordKey = (phone: string) => `otp-purpose:${phone}`;
 
 export type PendingCode = { purpose: PhoneOtpPurpose; sid?: string };
+
+const serialize = ({ purpose, sid }: PendingCode): string =>
+  JSON.stringify({ purpose, ...(sid ? { sid } : {}) });
+
+// A start never ends a pending code of a flow that outranks its own: a
+// password reset is the account holder's, a phone change a signed-in
+// player's, and a signup start needs no sign-in at all.
+const RANK: Record<PhoneOtpPurpose, number> = {
+  signup: 0,
+  'phone-change': 1,
+  'password-reset': 2,
+};
+export const outranks = (pending: PhoneOtpPurpose, purpose: PhoneOtpPurpose) =>
+  RANK[pending] > RANK[purpose];
+
+// Long enough for a cancel and a send (Twilio's 10 s timeout each).
+const START_HOLD_MS = 30_000;
+
+/** One start at a time per number, across replicas: the pending read, the
+ *  cancel, the send and the record must not interleave with another start.
+ *  The release, or null when another start holds the number. */
+export async function holdStart(
+  phone: string,
+): Promise<(() => Promise<void>) | null> {
+  const claims = warmSignupProofClaims();
+  const key = `otp-start:${phone}`;
+  const owner = randomUUID();
+  if (!(await claims.claim(key, START_HOLD_MS, owner))) return null;
+  return () => claims.releaseIf(key, owner).catch(() => undefined);
+}
 
 /** The flow (and Twilio verification) of the number's pending code, or null. */
 export async function pendingCode(phone: string): Promise<PendingCode | null> {
@@ -40,12 +71,16 @@ export async function notePurposeSent(
 ): Promise<void> {
   await warmSignupProofClaims().put(
     recordKey(phone),
-    JSON.stringify({ purpose, ...(sid ? { sid } : {}) }),
+    serialize({ purpose, sid }),
     OTP_PURPOSE_TTL_MS,
   );
 }
 
-/** After a code is used: the next flow starts clean. */
-export async function forgetPurpose(phone: string): Promise<void> {
-  await warmSignupProofClaims().release(recordKey(phone));
+/** After a code is used: the next flow starts clean. Only the record this
+ *  check read: one a newer start wrote meanwhile stays. */
+export async function forgetPurpose(
+  phone: string,
+  read: PendingCode,
+): Promise<void> {
+  await warmSignupProofClaims().releaseIf(recordKey(phone), serialize(read));
 }

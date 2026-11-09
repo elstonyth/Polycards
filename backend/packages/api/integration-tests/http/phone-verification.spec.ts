@@ -698,12 +698,8 @@ medusaIntegrationTestRunner({
         it("refuses a code sent for another flow as a reset code", async () => {
           const phone = "+60107667891";
           await registerCustomerWithPhone("pw-reset-flow@test.dev", phone);
-          // A sign-up code, then a reset start: Twilio would resend the same
-          // code. With no verification to cancel (the dev transport has none),
-          // the sign-up flow holds and the reset check is refused; with one,
-          // the start cancels it first (see the start route's unit spec).
+          // A sign-up code checked as a reset: refused.
           await start({ phone, purpose: "signup" });
-          await start({ phone, purpose: "password-reset" });
           const asReset = await check({
             phone,
             purpose: "password-reset",
@@ -713,6 +709,26 @@ medusaIntegrationTestRunner({
           expect(asReset.data).toMatchObject({
             message: "Invalid or expired code.",
           });
+        });
+
+        it("keeps a pending reset from a sign-up start for the same number", async () => {
+          const phone = "+60107667892";
+          await registerCustomerWithPhone("pw-reset-keep@test.dev", phone);
+          await start({ phone, purpose: "password-reset" });
+          // A start that needs no sign-in may not take the reset over.
+          await start({ phone, purpose: "signup" });
+          const asSignup = await check({
+            phone,
+            purpose: "signup",
+            code: "000000",
+          });
+          expect(asSignup.status).toBe(400);
+          const asReset = await check({
+            phone,
+            purpose: "password-reset",
+            code: "000000",
+          });
+          expect(asReset.status).toBe(200);
         });
 
         it("404s a phone matching zero customers", async () => {

@@ -32,12 +32,12 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid or expired code.');
   // A code works only for the flow it was sent for (utils/otp-purpose.ts).
   // Asked after Twilio, so every answer takes the same time and the code is
-  // spent either way. No record refuses a password reset alone. Same answer
-  // as a wrong code, so this says nothing about the number.
+  // spent either way. No record, or one that cannot be read, is refused like
+  // a wrong code, so this says nothing about the number.
   const pending = await pendingCode(phone).catch(() => null);
-  if (pending ? pending.purpose !== purpose : purpose === 'password-reset')
+  if (!pending || pending.purpose !== purpose)
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid or expired code.');
-  await forgetPurpose(phone).catch(() => undefined);
+  await forgetPurpose(phone, pending).catch(() => undefined);
 
   // One phone = one account. Refused HERE, and not at `start`, because this is
   // the first point the caller has PROVEN they hold the number — an earlier

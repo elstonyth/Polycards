@@ -160,6 +160,9 @@ export const requireSignupPhoneProof = async (
     phone,
   );
   res.on('finish', () => void releasePhone());
+  // Again under the hold: a signup that checked before another's row landed
+  // could otherwise take the hold once that one let it go.
+  await assertPhoneUnclaimed(req.scope, phone);
   next();
 };
 

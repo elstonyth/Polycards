@@ -13,7 +13,13 @@ import {
   unresolvableSmsCountries,
 } from '../../../../utils/phone-verification';
 import { consumeOtpSendBudget } from '../../../utils/rate-limit';
-import { notePurposeSent, pendingCode } from '../../../utils/otp-purpose';
+import {
+  holdStart,
+  notePurposeSent,
+  outranks,
+  pendingCode,
+  type PendingCode,
+} from '../../../utils/otp-purpose';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 
 // Public: sends (or dev-logs) an OTP for one of the three phone flows. The
@@ -155,38 +161,62 @@ export async function POST(
 
   // purpose is validated above; it selects the Verify template so the SMS
   // names the flow the code is for.
-  // A code pending for another flow dies first (utils/otp-purpose.ts): Twilio
-  // would resend that same code under this flow's wording. Not cancelled, the
-  // record stays on the old flow, which refuses this flow's check: the safe
-  // way round, at the cost of a retry once the old code expires.
-  let moveRecord = true;
+  // One start per number at a time (utils/otp-purpose.ts holdStart). Every
+  // way this start does not send answers like a sent one, so none of them
+  // says anything about the number.
+  let release: (() => Promise<void>) | null;
   try {
-    const pending = await pendingCode(phone);
-    if (pending && pending.purpose !== purpose) {
-      moveRecord =
-        !!pending.sid && (await cancelPhoneOtp(process.env, logger, pending.sid));
-    }
+    release = await holdStart(phone);
   } catch {
-    moveRecord = false;
-    logger.warn('[phone-otp] could not read the code purpose');
+    logger.warn('[phone-otp] could not hold the number for a start');
+    release = null;
   }
-  let sid: string | undefined;
-  try {
-    sid = await sendPhoneOtp(process.env, logger, phone, purpose, via);
-  } catch (error) {
-    if (purpose !== 'password-reset') throw error;
-    // Provider errors must not reveal whether a reset account exists.
+  if (!release) {
     res.json(response);
     return;
   }
-  // Unrecorded, a password reset's check is refused, so a store blip costs
-  // only that.
-  if (moveRecord) {
+  try {
+    // A code pending for another flow dies first: Twilio would resend that
+    // same code under this flow's wording. One that outranks this flow is
+    // left alone, and so is everything when it cannot be read or cancelled:
+    // then nothing is sent.
+    let pending: PendingCode | null;
+    try {
+      pending = await pendingCode(phone);
+    } catch {
+      logger.warn('[phone-otp] could not read the code purpose');
+      res.json(response);
+      return;
+    }
+    if (pending && pending.purpose !== purpose) {
+      const cancelled =
+        !outranks(pending.purpose, purpose) &&
+        (pending.sid
+          ? await cancelPhoneOtp(process.env, logger, pending.sid)
+          : // The dev transport has no verification to cancel; its code is fixed.
+            isDevOrTest(process.env));
+      if (!cancelled) {
+        res.json(response);
+        return;
+      }
+    }
+    let sid: string | undefined;
+    try {
+      sid = await sendPhoneOtp(process.env, logger, phone, purpose, via);
+    } catch (error) {
+      if (purpose !== 'password-reset') throw error;
+      // Provider errors must not reveal whether a reset account exists.
+      res.json(response);
+      return;
+    }
+    // Unrecorded, the check is refused, so a store blip costs a retry.
     try {
       await notePurposeSent(phone, purpose, sid);
     } catch {
       logger.warn('[phone-otp] could not record the code purpose');
     }
+    res.json(response);
+  } finally {
+    await release();
   }
-  res.json(response);
 }

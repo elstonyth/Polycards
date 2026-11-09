@@ -23,13 +23,16 @@ jest.mock('../../../../utils/rate-limit', () => ({
 }));
 
 jest.mock('../../../../utils/otp-purpose', () => ({
+  ...jest.requireActual('../../../../utils/otp-purpose'),
   notePurposeSent: jest.fn(async () => undefined),
   pendingCode: jest.fn(async () => null),
+  holdStart: jest.fn(async () => async () => undefined),
 }));
 
 const sendPhoneOtp = phoneUtils.sendPhoneOtp as jest.Mock;
 const notePurposeSent = otpPurpose.notePurposeSent as jest.Mock;
 const pendingCode = otpPurpose.pendingCode as jest.Mock;
+const holdStart = otpPurpose.holdStart as jest.Mock;
 const cancelPhoneOtp = phoneUtils.cancelPhoneOtp as jest.Mock;
 const isCallFirstNetwork = phoneUtils.isCallFirstNetwork as jest.Mock;
 const consumeOtpSendBudget = rateLimit.consumeOtpSendBudget as jest.Mock;
@@ -77,6 +80,8 @@ beforeEach(() => {
   notePurposeSent.mockClear();
   pendingCode.mockReset();
   pendingCode.mockResolvedValue(null);
+  holdStart.mockReset();
+  holdStart.mockResolvedValue(async () => undefined);
   cancelPhoneOtp.mockReset();
   cancelPhoneOtp.mockResolvedValue(true);
   isCallFirstNetwork.mockReset();
@@ -441,7 +446,7 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
 
 // A code is tied to the flow it was sent for (utils/otp-purpose.ts). A start
 // for another flow cancels the pending code first, since Twilio would resend
-// that same code under the new wording.
+// that same code under the new wording, unless that flow outranks its own.
 describe('POST /store/phone-verification/start — flow of the pending code', () => {
   const SID = 'VE' + 'a'.repeat(32);
   const NEW_SID = 'VE' + 'b'.repeat(32);
@@ -465,24 +470,59 @@ describe('POST /store/phone-verification/start — flow of the pending code', ()
     expect(notePurposeSent).toHaveBeenCalledWith(MY, 'password-reset', NEW_SID);
   });
 
+  // Every way a start does not send answers like a sent one.
+  it('sends nothing when the cancel fails', async () => {
+    pendingCode.mockResolvedValueOnce({ purpose: 'signup', sid: SID });
+    cancelPhoneOtp.mockResolvedValueOnce(false);
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'password-reset', [{ id: 'cus_1' }]), res);
+    expect(sendCount()).toBe(0);
+    expect(notePurposeSent).not.toHaveBeenCalled();
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
+  });
+
   it.each([
-    ['the cancel fails', { purpose: 'signup', sid: SID }, false],
-    ['the pending code has no verification', { purpose: 'signup' }, true],
-  ])('keeps the old flow when %s', async (_case, pending, cancelled) => {
-    pendingCode.mockResolvedValueOnce(pending);
-    cancelPhoneOtp.mockResolvedValueOnce(cancelled);
-    await startVerification(
-      mkReq(MY, 'password-reset', [{ id: 'cus_1' }]),
-      mkRes().res,
-    );
+    ['a sign-up', 'signup', 'password-reset'],
+    ['a phone change', 'phone-change', 'password-reset'],
+    ['a sign-up', 'signup', 'phone-change'],
+  ] as const)(
+    'never lets %s start end a pending %s code',
+    async (_name, purpose, pendingPurpose) => {
+      pendingCode.mockResolvedValueOnce({ purpose: pendingPurpose, sid: SID });
+      const { res, out } = mkRes();
+      await startVerification(mkReq(MY, purpose), res);
+      expect(cancelPhoneOtp).not.toHaveBeenCalled();
+      expect(sendCount()).toBe(0);
+      expect(notePurposeSent).not.toHaveBeenCalled();
+      expect(out.body).toEqual({ ok: true, channel: 'sms' });
+    },
+  );
+
+  it('sends nothing when the record cannot be read', async () => {
+    pendingCode.mockRejectedValueOnce(new Error('store down'));
+    await startVerification(mkReq(MY, 'signup'), mkRes().res);
+    expect(sendCount()).toBe(0);
     expect(notePurposeSent).not.toHaveBeenCalled();
   });
 
-  it('keeps the old flow when the record cannot be read', async () => {
-    pendingCode.mockRejectedValueOnce(new Error('store down'));
+  it('sends nothing while another start holds the number', async () => {
+    holdStart.mockResolvedValueOnce(null);
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'signup'), res);
+    expect(pendingCode).not.toHaveBeenCalled();
+    expect(sendCount()).toBe(0);
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
+  });
+
+  it('lets the hold go after the send, and after a failed send', async () => {
+    const release = jest.fn(async () => undefined);
+    holdStart.mockResolvedValue(release);
     await startVerification(mkReq(MY, 'signup'), mkRes().res);
-    expect(sendCount()).toBe(1);
-    expect(notePurposeSent).not.toHaveBeenCalled();
+    sendPhoneOtp.mockRejectedValueOnce(new Error('twilio down'));
+    await expect(
+      startVerification(mkReq(MY, 'signup'), mkRes().res),
+    ).rejects.toThrow('twilio down');
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it('a resend for the same flow cancels nothing', async () => {

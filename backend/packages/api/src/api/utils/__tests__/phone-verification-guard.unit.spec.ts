@@ -356,6 +356,7 @@ describe('requireSignupPhoneProof', () => {
     // command fail the way ioredis does with the connection gone.
     class FakeRedis {
       static held = new Map<string, number>();
+      static owners = new Map<string, unknown>();
       static sets: unknown[][] = [];
       static dels: string[] = [];
       static down = false;
@@ -369,7 +370,15 @@ describe('requireSignupPhoneProof', () => {
         const ttl = args[2] as number; // value, 'PX', ttl, 'NX'
         if ((FakeRedis.held.get(key) ?? 0) > Date.now()) return null;
         FakeRedis.held.set(key, Date.now() + ttl);
+        FakeRedis.owners.set(key, args[0]);
         return 'OK';
+      }
+      // releaseIf's compare-and-delete script: deletes only for its owner.
+      async eval(_script: string, _keys: number, key: string, owner: string) {
+        if (FakeRedis.down) throw new Error('Connection is closed.');
+        if (FakeRedis.owners.get(key) !== owner) return 0;
+        FakeRedis.owners.delete(key);
+        return this.del(key);
       }
       async del(key: string) {
         if (FakeRedis.down) throw new Error('Connection is closed.');
@@ -393,6 +402,7 @@ describe('requireSignupPhoneProof', () => {
       process.env.PHONE_VERIFICATION_REQUIRED = 'true';
       process.env.REDIS_URL = 'redis://fake';
       FakeRedis.held.clear();
+      FakeRedis.owners.clear();
       FakeRedis.sets = [];
       FakeRedis.dels = [];
       FakeRedis.down = false;
@@ -411,9 +421,10 @@ describe('requireSignupPhoneProof', () => {
       expect(await runWith(guard, signupReq(proof))).toBeUndefined();
 
       expect(FakeRedis.sets).toHaveLength(2);
+      // Held under this request's own mark, so only it can let go.
       expect(FakeRedis.sets[1]).toEqual([
         `phone-claim:${proof.phone}`,
-        '1',
+        expect.stringMatching(/^[0-9a-f-]{36}$/),
         'PX',
         60_000,
         'NX',

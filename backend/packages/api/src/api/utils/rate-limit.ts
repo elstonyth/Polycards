@@ -1451,8 +1451,12 @@ export async function consumeOtpSendBudget(
  *  (`mfa-code:`), which flow a phone code was sent for (`otp-purpose:`) and
  *  a number mid-signup or mid-change (`phone-claim:`). */
 export interface ProofClaimStore {
-  /** True iff this call took the claim; false when it is already held. */
-  claim(key: string, ttlMs: number): Promise<boolean>;
+  /** True iff this call took the claim; false when it is already held.
+   *  `owner` is stored with it, for releaseIf. */
+  claim(key: string, ttlMs: number, owner?: string): Promise<boolean>;
+  /** Drops the claim only while `owner` still holds it, in one step: a late
+   *  release must not drop the next holder's claim. */
+  releaseIf(key: string, owner: string): Promise<void>;
   /** A short-lived value under a key (otp-purpose), or null. */
   get(key: string): Promise<string | null>;
   put(key: string, value: string, ttlMs: number): Promise<void>;
@@ -1460,6 +1464,10 @@ export interface ProofClaimStore {
 }
 
 let signupProofClaims: ProofClaimStore | null = null;
+
+// Compare-and-delete in one round trip, so no other holder can slip between.
+const RELEASE_IF_OWNER =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 
 /**
  * The store that makes a signup proof single-use, opened at boot by
@@ -1480,8 +1488,11 @@ export function warmSignupProofClaims(): ProofClaimStore {
   const client = connectRedis('signup-proof-claim', throttledWarn(60_000));
   if (client) {
     signupProofClaims = {
-      claim: async (key, ttlMs) =>
-        (await client.set(key, '1', 'PX', ttlMs, 'NX')) === 'OK',
+      claim: async (key, ttlMs, owner = '1') =>
+        (await client.set(key, owner, 'PX', ttlMs, 'NX')) === 'OK',
+      releaseIf: async (key, owner) => {
+        await client.eval(RELEASE_IF_OWNER, 1, key, owner);
+      },
       get: async (key) => client.get(key),
       put: async (key, value, ttlMs) => {
         await client.set(key, value, 'PX', ttlMs);
@@ -1495,6 +1506,7 @@ export function warmSignupProofClaims(): ProofClaimStore {
       claim: async () => {
         throw new Error('REDIS_URL is not set');
       },
+      releaseIf: async () => undefined,
       get: async () => {
         throw new Error('REDIS_URL is not set');
       },
@@ -1509,11 +1521,17 @@ export function warmSignupProofClaims(): ProofClaimStore {
     const expiries = new Map<string, number>();
     const values = new Map<string, string>();
     signupProofClaims = {
-      claim: async (key, ttlMs) => {
+      claim: async (key, ttlMs, owner = '1') => {
         const now = Date.now();
         if ((expiries.get(key) ?? 0) > now) return false;
         expiries.set(key, now + ttlMs);
+        values.set(key, owner);
         return true;
+      },
+      releaseIf: async (key, owner) => {
+        if (values.get(key) !== owner) return;
+        expiries.delete(key);
+        values.delete(key);
       },
       get: async (key) =>
         (expiries.get(key) ?? 0) > Date.now() ? (values.get(key) ?? null) : null,

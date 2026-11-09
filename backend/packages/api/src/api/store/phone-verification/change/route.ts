@@ -255,9 +255,17 @@ export async function POST(
     try {
       await assertPhoneUnclaimed(req.scope, phone, customerId);
     } catch (e) {
-      await customerService.updateCustomers(customerId, {
-        phone: current.phone ?? null,
-      });
+      // Put the old number back only while ours is still on the row: support
+      // may have moved it meanwhile.
+      const [now] = await customerService.listCustomers(
+        { id: customerId },
+        { select: ['phone'], take: 1 },
+      );
+      if (now?.phone === phone) {
+        await customerService.updateCustomers(customerId, {
+          phone: current.phone ?? null,
+        });
+      }
       throw e;
     }
     // Persist the FACT of verification — the proof token above expires in 10

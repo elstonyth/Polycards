@@ -1,4 +1,5 @@
 import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { randomUUID } from 'node:crypto';
 import type {
   ICustomerModuleService,
   MedusaContainer,
@@ -100,8 +101,8 @@ type CustomerFilters = Parameters<ICustomerModuleService['listCustomers']>[0];
 
 export const PHONE_IN_USE_MESSAGE = 'This phone number is already in use.';
 
-// shortcut: a create or change still running after this lets the next one in
-// (and its late release drops that one's hold); raise it if writes get slower.
+// shortcut: a create or change still running after this lets the next one
+// in; raise it if writes get slower.
 const PHONE_HOLD_MS = 60_000;
 
 /**
@@ -117,10 +118,12 @@ export const holdPhone = async (
   phone: string,
 ): Promise<() => Promise<void>> => {
   const key = `phone-claim:${phone}`;
+  // This request's own mark: a late release drops only its own hold.
+  const owner = randomUUID();
   const logger = scope.resolve('logger') as { warn: (msg: string) => void };
   let held: boolean;
   try {
-    held = await claims.claim(key, PHONE_HOLD_MS);
+    held = await claims.claim(key, PHONE_HOLD_MS, owner);
   } catch (e) {
     logger.warn(
       `[phone-otp] phone claim failed (${e instanceof Error ? e.message : String(e)})`,
@@ -134,7 +137,7 @@ export const holdPhone = async (
     throw new MedusaError(MedusaError.Types.NOT_ALLOWED, PHONE_IN_USE_MESSAGE);
   return () =>
     claims
-      .release(key)
+      .releaseIf(key, owner)
       .catch((e) =>
         logger.warn(
           `[phone-otp] phone claim release failed (${e instanceof Error ? e.message : String(e)})`,
