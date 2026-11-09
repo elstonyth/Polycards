@@ -868,6 +868,26 @@ export const RATE_LIMITS = {
   },
 
   /**
+   * Admin two-step codes, PER LOGIN (auth identity): runs after the staff
+   * authenticate on /auth/mfa/*. The `auth` tier is keyed on the address,
+   * which bounds no single login; this one does. A person answers once or
+   * twice per sign-in. Env-tunable:
+   * ADMIN_MFA_CODE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 10/60s)
+   * ADMIN_MFA_CODE_RATE_LIMIT / _WINDOW_MS (default 30/1h)
+   */
+  'admin-mfa-code': {
+    message: 'Too many code attempts. Wait a while, then sign in again.',
+    keyOf: (req) =>
+      (req as AuthenticatedMedusaRequest).auth_context?.auth_identity_id,
+    defaults: {
+      burstLimit: 10,
+      burstWindowMs: 60_000,
+      limit: 30,
+      windowMs: 3_600_000,
+    },
+  },
+
+  /**
    * The public-profile read limiter (GET /store/profiles/:handle). The route is
    * PUBLIC — no auth_context — so the middleware keys on the request IP (its
    * designed fallback). NOTE: the storefront fetches profiles SERVER-side, so
@@ -1427,10 +1447,15 @@ export async function consumeOtpSendBudget(
 
 /** One-time claims on phone proofs: signup (requireSignupPhoneProof) and,
  *  since 2026-10-07, phone-change (store/phone-verification/change), under
- *  their own key prefixes. */
+ *  their own key prefixes; since 2026-11-09 also admin app codes
+ *  (`mfa-code:`), which flow a phone code was sent for (`otp-purpose:`) and
+ *  a number mid-signup or mid-change (`phone-claim:`). */
 export interface ProofClaimStore {
   /** True iff this call took the claim; false when it is already held. */
   claim(key: string, ttlMs: number): Promise<boolean>;
+  /** A short-lived value under a key (otp-purpose), or null. */
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, ttlMs: number): Promise<void>;
   release(key: string): Promise<void>;
 }
 
@@ -1457,6 +1482,10 @@ export function warmSignupProofClaims(): ProofClaimStore {
     signupProofClaims = {
       claim: async (key, ttlMs) =>
         (await client.set(key, '1', 'PX', ttlMs, 'NX')) === 'OK',
+      get: async (key) => client.get(key),
+      put: async (key, value, ttlMs) => {
+        await client.set(key, value, 'PX', ttlMs);
+      },
       release: async (key) => {
         await client.del(key);
       },
@@ -1466,12 +1495,19 @@ export function warmSignupProofClaims(): ProofClaimStore {
       claim: async () => {
         throw new Error('REDIS_URL is not set');
       },
+      get: async () => {
+        throw new Error('REDIS_URL is not set');
+      },
+      put: async () => {
+        throw new Error('REDIS_URL is not set');
+      },
       release: async () => undefined,
     };
   } else {
     // ponytail: unbounded, an expired key stays until claimed again; fine for
     // one local process, and production never builds this branch.
     const expiries = new Map<string, number>();
+    const values = new Map<string, string>();
     signupProofClaims = {
       claim: async (key, ttlMs) => {
         const now = Date.now();
@@ -1479,8 +1515,15 @@ export function warmSignupProofClaims(): ProofClaimStore {
         expiries.set(key, now + ttlMs);
         return true;
       },
+      get: async (key) =>
+        (expiries.get(key) ?? 0) > Date.now() ? (values.get(key) ?? null) : null,
+      put: async (key, value, ttlMs) => {
+        expiries.set(key, Date.now() + ttlMs);
+        values.set(key, value);
+      },
       release: async (key) => {
         expiries.delete(key);
+        values.delete(key);
       },
     };
   }
