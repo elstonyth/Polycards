@@ -22,6 +22,9 @@ describe('normalizeRealName', () => {
     ['Tan 😀'],
     ['https://x.y'],
     ['a'.repeat(101)],
+    // A zero-width non-joiner or joiner spells another name once dropped.
+    ['Tan\u200C Ah Kow'],
+    ['Tan Ah\u200D Kow'],
   ])('refuses %j', (input) => {
     expect(normalizeRealName(input)).toBeNull();
   });

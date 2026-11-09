@@ -9,7 +9,10 @@ import {
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 import { takeCardStock } from '../../../../../../modules/packs/card-stock';
-import { rollOne } from '../../../../../../workflows/steps/roll-pack';
+import {
+  rollOne,
+  type RolledCard,
+} from '../../../../../../workflows/steps/roll-pack';
 import { resolveOddsSetForCustomer } from '../../../../../../modules/packs/odds-sets';
 import { toMoney } from '../../../../../../modules/packs/money';
 import {
@@ -68,22 +71,33 @@ export async function POST(
     type?: string;
     pack_id?: string;
   };
-  const preRolled =
+  // A roll that fails (say, the pack was switched off) is thrown from inside
+  // the callback, so a claim another request spun since the peek still
+  // answers already_redeemed.
+  let preRolled: RolledCard | null = null;
+  let rollError: unknown = null;
+  if (
     !peek?.claim_ref &&
     snapshot.type === 'pack' &&
     typeof snapshot.pack_id === 'string'
-      ? // Same odds-set resolution as a paid open — a free rip is still THIS
-        // customer's rip, on this customer's odds.
-        await rollOne(
-          packs,
-          snapshot.pack_id,
-          await resolveOddsSetForCustomer(req.scope, customerId),
-        )
-      : null;
+  ) {
+    try {
+      // Same odds-set resolution as a paid open — a free rip is still THIS
+      // customer's rip, on this customer's odds.
+      preRolled = await rollOne(
+        packs,
+        snapshot.pack_id,
+        await resolveOddsSetForCustomer(req.scope, customerId),
+      );
+    } catch (err) {
+      rollError = err;
+    }
+  }
   const result = await packs.redeemTaskPackClaim({
     customerId,
     claimId: req.params.claimId,
     rollPack: async (packId) => {
+      if (rollError !== null) throw rollError;
       if (!preRolled || packId !== snapshot.pack_id) {
         throw new MedusaError(
           MedusaError.Types.UNEXPECTED_STATE,

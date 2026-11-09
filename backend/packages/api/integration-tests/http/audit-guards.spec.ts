@@ -37,6 +37,10 @@ medusaIntegrationTestRunner({
         await getContainer()
           .resolve(Modules.USER)
           .createInvites([{ email: 'invited@test.dev' }]);
+        // Exactly the invite's email: a padded one would be a login that
+        // sign-in, which trims, never finds.
+        const padded = await register(' invited@test.dev ');
+        expect(padded.status).toBe(404);
         const invited = await register('invited@test.dev');
         expect(invited.status).toBe(200);
         expect(typeof invited.data.token).toBe('string');

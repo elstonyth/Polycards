@@ -950,7 +950,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await service.claimTask({
             customerId: 'cus_ach_now',
             taskId: id,
-            now: new Date(retiredAt.getTime() + 60_000),
+            // The retire instant itself: a minute later can be the next MYT week.
+            now: retiredAt,
           })
         ).claimed,
       ).toBe(true);

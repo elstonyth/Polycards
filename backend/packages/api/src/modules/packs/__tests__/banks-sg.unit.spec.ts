@@ -50,6 +50,15 @@ describe('Singapore banks (A3Pay) beside the Malaysian registry', () => {
       '91234567',
       '6591234567',
     ]);
+    // Typed with spaces, a dash or a plus, it is the same number.
+    expect(accountNumberForms('PAYNOWSG', '65 9123-4567')).toEqual([
+      '91234567',
+      '6591234567',
+    ]);
+    expect(accountNumberForms('PAYNOWSG', '+65 9123 4567')).toEqual([
+      '91234567',
+      '6591234567',
+    ]);
     // A foreign mobile carries its own country code: no 65 to add or strip.
     expect(accountNumberForms('PAYNOWSG', '60123456789')).toEqual([
       '60123456789',

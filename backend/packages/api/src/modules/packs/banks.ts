@@ -331,7 +331,11 @@ export function accountNumberForms(
   accountNumber: string,
 ): string[] {
   if (findBank(bankCode)?.id !== 'PAYNOWSG') return [accountNumber];
-  const local = accountNumber.replace(/^65(?=\d{8}$)/, '');
+  // Digits as the keys read them, so '65 9123-4567' is the same number.
+  const local = accountNumber
+    .replace(/\D/g, '')
+    .replace(/^0+/, '')
+    .replace(/^65(?=\d{8}$)/, '');
   return /^\d{8}$/.test(local) ? [local, `65${local}`] : [accountNumber];
 }
 

@@ -65,7 +65,7 @@ import {
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
-import { findBank, savedAccountSlot } from './banks';
+import { accountNumberForms, findBank, savedAccountSlot } from './banks';
 import { challengePackId } from './challenge-prize';
 import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
@@ -10690,12 +10690,17 @@ class PacksModuleService extends MedusaService({
       [customerId],
     );
     const lifted = liftedPayoutBans(me?.metadata ?? {});
+    const own = await this.payoutAccountsOf(customerId, sharedContext);
     const byKey = new Map<string, string>(
-      (await this.payoutAccountsOf(customerId, sharedContext)).map((n) => [
-        n.account_key,
-        n.bank_code,
-      ]),
+      own.map((n) => [n.account_key, n.bank_code]),
     );
+    // A PayNow mobile is banned with or without its 65, as the withdrawal
+    // check reads it (accountNumberForms), so the list asks for both.
+    for (const n of own) {
+      for (const form of accountNumberForms(n.bank_code, n.account_key)) {
+        if (!byKey.has(form)) byKey.set(form, n.bank_code);
+      }
+    }
     if (byKey.size === 0) return [];
     const banned = await em.execute<{ account_key: string }[]>(
       "SELECT account_key FROM banned_payout_account WHERE account_key = ANY(string_to_array(?, ','))",

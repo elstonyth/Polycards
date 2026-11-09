@@ -385,10 +385,11 @@ async function runNow(
         'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ; ' +
           `SET LOCAL statement_timeout = ${Math.trunc(timeoutMs)}; ` +
           'SET LOCAL lock_timeout = 2000; ' +
-          // Each sort or hash spills to disk past this rather than taking the
-          // database's memory: Postgres's own default, so it can only lower a
-          // raised one. (temp_file_limit needs a superuser.)
-          "SET LOCAL work_mem = '4MB'; " +
+          // Each sort or hash spills to disk past 4 MB (Postgres's own
+          // default) rather than taking the database's memory: the smaller of
+          // that and the inherited value, so it only ever lowers.
+          // (temp_file_limit needs a superuser.)
+          "SELECT set_config('work_mem', (LEAST(pg_size_bytes(current_setting('work_mem')), 4194304) / 1024)::text || 'kB', true); " +
           // Ends the transaction if this server vanishes mid-query.
           'SET LOCAL idle_in_transaction_session_timeout = 30000; ' +
           // The mask's backslashes must reach the regex as written.

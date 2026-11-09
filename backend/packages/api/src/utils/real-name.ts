@@ -37,13 +37,17 @@ export const realNameKey = (name: string): string =>
 /**
  * Trim, collapse inner whitespace, and validate. Returns the stored form, or
  * null when the input is not an acceptable real name. Invisible characters
- * (U+034F, zero-width, variation selectors, fillers) are dropped and the rest
+ * (U+034F, zero-width spaces, variation selectors, fillers) are dropped, a
+ * zero-width non-joiner or joiner refuses the name, and the rest
  * is NFKC, so a name repeated with one hidden inside, or in fullwidth or styled
  * letters, stores and keys (realNameKeySql) as the plain name. The key itself
  * stays as it is: Migration20261103190000 indexes it.
  */
 export function normalizeRealName(input: unknown): string | null {
   if (typeof input !== 'string') return null;
+  // A zero-width non-joiner or joiner changes how some scripts spell a name,
+  // so dropping it would store another name: refused instead.
+  if (/[\u200C\u200D]/.test(input)) return null;
   const name = input
     .replace(/\p{Default_Ignorable_Code_Point}/gu, '')
     .normalize('NFKC')

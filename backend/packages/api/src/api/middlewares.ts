@@ -249,19 +249,21 @@ const blockUnusedSurface = (
 
 // POST /auth/user/emailpass/register: only for an email holding a live staff
 // invite (the invite page signs the invitee up here, then accepts). Open, the
-// route minted a staff login for any email.
+// route minted a staff login for any email. The invite's email exactly as
+// sent: emailpass stores it verbatim and sign-in trims, so a padded or recased
+// one would mint a login nobody can sign in to.
 const requireLiveStaffInvite = async (
   req: MedusaRequest,
   _res: MedusaResponse,
   next: MedusaNextFunction,
 ): Promise<void> => {
   const email = (req.body as { email?: unknown } | undefined)?.email;
-  if (typeof email === 'string' && email.trim()) {
+  if (typeof email === 'string' && email && email === email.trim()) {
     try {
       const invites = await req.scope
         .resolve(Modules.USER)
         .listInvites(
-          { email: [...new Set([email.trim(), email.trim().toLowerCase()])] },
+          { email },
           { select: ['expires_at', 'accepted'], take: 5 },
         );
       const now = Date.now();
