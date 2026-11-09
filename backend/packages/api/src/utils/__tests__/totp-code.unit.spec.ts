@@ -2,7 +2,7 @@ import { totpCode } from '../totp-code';
 
 // RFC 6238 appendix B, SHA-1 key "12345678901234567890" (base32 below). The
 // RFC lists 8 digits; an authenticator app shows the last 6.
-const RFC_SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+const RFC_SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'; // gitleaks:allow
 
 describe('totpCode', () => {
   it.each([
