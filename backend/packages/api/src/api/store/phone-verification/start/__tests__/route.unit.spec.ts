@@ -533,6 +533,18 @@ describe('POST /store/phone-verification/start — flow of the pending code', ()
     expect(releaseHold).toHaveBeenCalledTimes(2);
   });
 
+  it('cancels what it sent when it was overtaken between the hold check and the send', async () => {
+    // A sign-up start passes its hold check, stalls, and a reset start
+    // records its code meanwhile; Twilio's resend of that code must die.
+    sendPhoneOtp.mockResolvedValueOnce(SID);
+    note.mockResolvedValueOnce(false);
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'signup'), res);
+    expect(sendCount()).toBe(1);
+    expect(cancelPhoneOtp).toHaveBeenCalledWith(expect.anything(), expect.anything(), SID);
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
+  });
+
   it('sends nothing once its hold has run out and another start took it', async () => {
     heldNow.mockResolvedValueOnce(false);
     const { res, out } = mkRes();

@@ -217,12 +217,21 @@ export async function POST(
     }
     // Recorded only while still held, in one step with that check.
     // Unrecorded, the check is refused, so a store blip costs a retry.
+    let recorded: boolean | null;
     try {
-      if (!(await hold.note(purpose, sid))) {
-        logger.warn('[phone-otp] start overtaken; its code is not recorded');
-      }
+      recorded = await hold.note(purpose, sid);
     } catch {
       logger.warn('[phone-otp] could not record the code purpose');
+      recorded = null;
+    }
+    if (recorded === false) {
+      // Overtaken between the hold check and the send: another start for
+      // this number has since recorded its own code, and Twilio may have
+      // resent that same code under this flow's wording. Cancel what was
+      // sent, so the code works for no flow; the other start's owner asks
+      // again.
+      logger.warn('[phone-otp] start overtaken; cancelling the code it sent');
+      if (sid) await cancelPhoneOtp(process.env, logger, sid);
     }
     res.json(response);
   } finally {
