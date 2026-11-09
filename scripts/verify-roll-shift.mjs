@@ -8,9 +8,13 @@
 // Cleans up after itself: restores pokemon-mythic's seed odds and deletes the
 // simulation's Pull rows (by the throwaway customer's id) so the demo ledger
 // stays clean.
+// Run: QA_ADMIN_TOTP_SECRET=… node scripts/verify-roll-shift.mjs
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { adminToken, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
+const ADMIN_EMAIL = 'admin@polycards.local';
+requireAdminTotp(ADMIN_EMAIL);
 const API = 'http://localhost:9000';
 const SLUG = 'pokemon-mythic';
 const N = 150;
@@ -27,20 +31,8 @@ const j = async (res) => ({
 });
 
 // --- admin: lock the top card at 40% ---
-const adminTok = (
-  await (
-    await fetch(`${API}/auth/user/emailpass`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: 'admin@polycards.local',
-        password: 'polycardsadmin2026',
-      }),
-    })
-  ).json()
-).token;
 const AH = {
-  Authorization: `Bearer ${adminTok}`,
+  Authorization: `Bearer ${await adminToken(API, ADMIN_EMAIL, 'polycardsadmin2026')}`,
   'Content-Type': 'application/json',
 };
 

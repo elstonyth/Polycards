@@ -3,23 +3,19 @@
 //   login -> pick a card -> POST /admin/uploads (slab-only file) ->
 //   POST /admin/cards/:handle {image} -> verify admin GET + URL serves +
 //   store surface returns the new URL -> restore the original image.
+// Run: QA_ADMIN_TOTP_SECRET=… node scripts/verify-admin-card-upload.mjs
 import fs from 'node:fs';
 import path from 'node:path';
+import { adminToken, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 const API = process.env.API_URL ?? 'http://localhost:9000';
 const results = [];
 const pass = (n, ok, note) => results.push({ name: n, ok: !!ok, note });
 
-// 1. admin login
-const tokRes = await fetch(`${API}/auth/user/emailpass`, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({
-    email: 'admin@polycards.local',
-    password: 'polycardsadmin2026',
-  }),
-});
-const { token } = await tokRes.json();
+// 1. admin login (two-step: password, then the authenticator code)
+const ADMIN_EMAIL = 'admin@polycards.local';
+requireAdminTotp(ADMIN_EMAIL);
+const token = await adminToken(API, ADMIN_EMAIL, 'polycardsadmin2026');
 pass('admin login', !!token);
 const H = { authorization: `Bearer ${token}` };
 const HJ = { ...H, 'content-type': 'application/json' };

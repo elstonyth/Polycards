@@ -10,9 +10,13 @@
 //   5. validation rejects: Σlocked > 100 -> 400; all-locked but Σ ≠ 100 -> 400
 // Finally restores pokemon-mythic to its seed (rarity-weighted) odds via SQL so
 // the demo data stays pristine.
+// Run: QA_ADMIN_TOTP_SECRET=… node scripts/verify-win-rate-editor.mjs
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { adminToken, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
+const ADMIN_EMAIL = 'admin@polycards.local';
+requireAdminTotp(ADMIN_EMAIL);
 const API = 'http://localhost:9000';
 const SLUG = 'pokemon-mythic';
 const PK = readFileSync('.env.local', 'utf8')
@@ -27,19 +31,7 @@ const ok = (name, cond, detail) => {
   r.checks[name] = cond ? 'PASS' : `FAIL${detail ? ' — ' + detail : ''}`;
 };
 
-async function adminToken() {
-  const res = await fetch(`${API}/auth/user/emailpass`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email: 'admin@polycards.local',
-      password: 'polycardsadmin2026',
-    }),
-  });
-  return (await res.json()).token;
-}
-
-const TOKEN = await adminToken();
+const TOKEN = await adminToken(API, ADMIN_EMAIL, 'polycardsadmin2026');
 const AH = {
   Authorization: `Bearer ${TOKEN}`,
   'Content-Type': 'application/json',

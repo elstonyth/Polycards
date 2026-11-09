@@ -5,9 +5,12 @@
 // now shows MYR. The custom credit economy (Card.market_value / Pack / ledger in
 // sen) is NOT touched — this only relabels the Medusa product/region/store layer.
 // Run: node scripts/localize-myr.mjs
+import { adminToken, requireAdminTotp } from './lib/admin-sign-in.mjs';
+
 const BASE = process.env.MEDUSA_URL || 'http://localhost:9000';
 // Credentials come from the environment — never hardcode a secret in source.
-// ADMIN_PASSWORD is required; ADMIN_EMAIL defaults to the standing dev admin id.
+// ADMIN_PASSWORD and QA_ADMIN_TOTP_SECRET (its authenticator) are required;
+// ADMIN_EMAIL defaults to the standing dev admin id.
 const ADMIN = {
   email: process.env.ADMIN_EMAIL || 'admin@pokenic.app',
   password: process.env.ADMIN_PASSWORD,
@@ -19,18 +22,8 @@ async function main() {
       'Set ADMIN_PASSWORD before running, e.g.  ADMIN_PASSWORD=… node scripts/localize-myr.mjs',
     );
   }
-  const authRes = await fetch(`${BASE}/auth/user/emailpass`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(ADMIN),
-  });
-  if (!authRes.ok) {
-    throw new Error(
-      `admin auth failed: ${authRes.status} ${await authRes.text()}`,
-    );
-  }
-  const { token } = await authRes.json();
-  if (!token) throw new Error('admin auth returned no token');
+  requireAdminTotp(ADMIN.email);
+  const token = await adminToken(BASE, ADMIN.email, ADMIN.password);
   const H = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',

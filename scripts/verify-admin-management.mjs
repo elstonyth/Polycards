@@ -4,7 +4,12 @@
 // -> register card -> edit -> unregister -> delete product), public endpoints
 // (leaderboard, profile, recent pulls), and the PriceCharting proxy fallback.
 // Everything is created with qa-mgmt-* names and removed in `finally`.
-// Run: node scripts/verify-admin-management.mjs
+// Run: QA_ADMIN_TOTP_SECRET=… node scripts/verify-admin-management.mjs
+import {
+  adminToken as signIn,
+  requireAdminTotp,
+} from './lib/admin-sign-in.mjs';
+
 const BACKEND = 'http://localhost:9000';
 const PK =
   'pk_a23d4482ee6673a760097f3d013aab59679ceaebab54f987638cbeeb0132863c';
@@ -19,13 +24,8 @@ const fail = (m) => {
 };
 const ok = (m) => console.log(`✓ ${m}`);
 
-const { token: adminToken } = await (
-  await fetch(`${BACKEND}/auth/user/emailpass`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
-  })
-).json();
+requireAdminTotp(ADMIN_EMAIL);
+const adminToken = await signIn(BACKEND, ADMIN_EMAIL, ADMIN_PASSWORD);
 
 const req = async (path, opts = {}, expect = 200) => {
   const res = await fetch(`${BACKEND}${path}`, {
