@@ -570,7 +570,13 @@ try {
         els.map((el) => {
           const r = el.getBoundingClientRect();
           return r.width || r.height
-            ? { x: r.x, y: r.y, width: r.width, height: r.height }
+            ? {
+                x: r.x,
+                y: r.y,
+                width: r.width,
+                height: r.height,
+                href: el.getAttribute('href'),
+              }
             : null;
         }),
       );
@@ -669,8 +675,22 @@ try {
       fail(`${label}: no catalog tile parked under the badge`);
       continue;
     }
-    const target = tiles.nth(nearest.i);
-    const href = await target.getAttribute('href');
+    // Tap the scanned tile by its href, not its index: after a re-render
+    // nth(i) can be another tile, which would pass without ever having sat
+    // under the badge. Recheck the overlap right before the tap.
+    const href = nearest.box.href;
+    const target = page
+      .locator(`a[href=${JSON.stringify(href)}]`)
+      .filter({ visible: true })
+      .first();
+    const tileNow = await target
+      .boundingBox({ timeout: 5000 })
+      .catch(() => null);
+    const badgeNow = await floating.boundingBox();
+    if (!tileNow || !badgeNow || !hits(tileNow, badgeNow)) {
+      fail(`${label}: tile ${href} was no longer under the badge at tap time`);
+      continue;
+    }
     try {
       await target.click({ timeout: 5000 });
       await page.waitForURL(
