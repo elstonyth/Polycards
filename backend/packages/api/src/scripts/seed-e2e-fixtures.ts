@@ -536,7 +536,29 @@ export default async function seedE2eFixtures({
     );
   } else {
     const authIdentityId = adminLogin.auth_identity_id as string;
-    try {
+    const db = container.resolve(ContainerRegistrationKeys.PG_CONNECTION);
+    const { rows: enabled } = await db.raw(
+      "SELECT 1 FROM auth_mfa_factor WHERE auth_identity_id = ? AND provider = 'totp' AND status = 'enabled' AND deleted_at IS NULL",
+      [authIdentityId],
+    );
+    if (enabled.length > 0) {
+      // A re-run (CI's database is new every job, so only a local one): the
+      // stored secret can't be read back, and it may be a developer's phone,
+      // so it is kept rather than replaced.
+      logger.warn(
+        `[e2e] '${adminEmail}' already has an authenticator, so no new totp_secret: ` +
+          'reuse the one printed when it was set up, or reset its two-step sign-in.',
+      );
+    } else {
+      // An unfinished setup blocks a new one (Medusa refuses to start while
+      // one is pending) and was never confirmed, so it is replaced, as the
+      // admin's own setup route does (api/utils/admin-mfa-guard.ts).
+      await db.raw(
+        "UPDATE auth_mfa_factor SET deleted_at = now(), updated_at = now() WHERE auth_identity_id = ? AND provider = 'totp' AND status = 'pending' AND deleted_at IS NULL",
+        [authIdentityId],
+      );
+      // Any failure from here fails the seed: a run that sets up no working
+      // authenticator leaves the suite unable to sign in.
       const { mfa, secret } = await auth.startAuthMfa({
         auth_identity_id: authIdentityId,
         provider: 'totp',
@@ -549,11 +571,6 @@ export default async function seedE2eFixtures({
       });
       logger.info(
         `[e2e] Authenticator set up for '${adminEmail}': totp_secret=${secret}`,
-      );
-    } catch (err) {
-      // A re-run: the login keeps the authenticator (and secret) it already has.
-      logger.warn(
-        `[e2e] No new authenticator for '${adminEmail}': ${(err as Error).message}`,
       );
     }
   }
