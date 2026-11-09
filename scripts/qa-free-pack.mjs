@@ -560,20 +560,30 @@ try {
       a.y < b.y + b.height &&
       b.y < a.y + a.height;
     // On-screen tiles + whether each intersects the badge, at the current scroll.
+    // One evaluateAll, not count() then nth(i).boundingBox() per tile: the
+    // list can re-render mid-loop while the page settles, and boundingBox()
+    // on an nth(i) that vanished waits its full 30s (master nightly 11-09).
+    // A hidden tile (the other breakpoint's copy) measures 0x0 → skipped.
     const scan = async () => {
       const badgeBox = await floating.boundingBox();
+      const boxes = await tiles.evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width || r.height
+            ? { x: r.x, y: r.y, width: r.width, height: r.height }
+            : null;
+        }),
+      );
       const rows = [];
-      for (let i = 0; i < (await tiles.count()); i++) {
-        const box = await tiles.nth(i).boundingBox();
-        if (!box) continue;
+      boxes.forEach((box, i) => {
+        if (!box) return;
         const onScreen =
           box.y + box.height > 0 &&
           box.y < h &&
           box.x + box.width > 0 &&
           box.x < w;
-        if (!onScreen) continue;
-        rows.push({ i, box, overlap: hits(box, badgeBox) });
-      }
+        if (onScreen) rows.push({ i, box, overlap: hits(box, badgeBox) });
+      });
       return rows;
     };
 
