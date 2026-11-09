@@ -55,21 +55,68 @@ export async function POST(
   }
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
+  // Roll BEFORE the claim's lock. The roll reads odds and the customer's group
+  // on connections of their own, which must not be taken while the lock and
+  // its connection are held. A roll has no side effects, so one a spent claim never uses is
+  // dropped. The service still decides, under the lock. A spun claim is not
+  // rolled at all: its retry must get its pull back even if the pack is off.
+  const [peek] = await packs.listTaskClaims(
+    { id: req.params.claimId, customer_id: customerId },
+    { take: 1 },
+  );
+  const snapshot = (peek?.reward_snapshot ?? {}) as {
+    type?: string;
+    pack_id?: string;
+  };
+  const preRolled =
+    !peek?.claim_ref &&
+    snapshot.type === 'pack' &&
+    typeof snapshot.pack_id === 'string'
+      ? // Same odds-set resolution as a paid open — a free rip is still THIS
+        // customer's rip, on this customer's odds.
+        await rollOne(
+          packs,
+          snapshot.pack_id,
+          await resolveOddsSetForCustomer(req.scope, customerId),
+        )
+      : null;
   const result = await packs.redeemTaskPackClaim({
     customerId,
     claimId: req.params.claimId,
-    decrementStock: takeCardStock(req.scope),
     rollPack: async (packId) => {
-      // Same odds-set resolution as a paid open — a free rip is still THIS
-      // customer's rip, on this customer's odds.
-      const set = await resolveOddsSetForCustomer(req.scope, customerId);
-      return rollOne(packs, packId, set);
+      if (!preRolled || packId !== snapshot.pack_id) {
+        throw new MedusaError(
+          MedusaError.Types.UNEXPECTED_STATE,
+          'This free rip changed while spinning. Try again.',
+        );
+      }
+      return preRolled;
     },
   });
 
   if (!result.redeemed) {
     res.json(result);
     return;
+  }
+
+  // The stock take runs AFTER the redeem committed, as the task claim route
+  // does: the inventory module writes on its own connection. A counter, never
+  // a gate: a failed take leaves it reading high, and the card is vaulted.
+  let taken = false;
+  try {
+    taken = await takeCardStock(req.scope)(result.card.handle, 1);
+    // Earmarked, so a later sell-back puts the unit back.
+    if (taken) {
+      await packs.updatePulls([{ id: result.pullId, stock_earmarked: true }]);
+    }
+  } catch (error) {
+    req.scope
+      .resolve(ContainerRegistrationKeys.LOGGER)
+      .warn(
+        `[task-spin] ${taken ? 'earmark' : 'stock take'} for '${result.card.handle}' failed AFTER claim '${req.params.claimId}' redeemed — ${taken ? 'a sell-back will not restore its unit' : 'counter reads high'}, card already vaulted: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
   }
 
   // ⚠ POST-COMMIT from here down. The pull exists and the entitlement is spent;
