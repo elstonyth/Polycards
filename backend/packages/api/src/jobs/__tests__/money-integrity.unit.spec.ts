@@ -10,8 +10,9 @@ jest.mock('../../modules/packs/ops-alert', () => ({
 }));
 
 const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+const packs = { refundUnfinishedOpen: jest.fn() };
 const container = {
-  resolve: (key: string) => (key === 'logger' ? logger : {}),
+  resolve: (key: string) => (key === 'logger' ? logger : packs),
 } as never;
 const findings = jest.mocked(moneyIntegrityFindings);
 const alert = jest.mocked(alertOps);
@@ -45,5 +46,54 @@ describe('money-integrity job', () => {
       expect.stringContaining('pull_1'),
       { muteMs: 24 * 60 * 60 * 1000 },
     );
+    expect(packs.refundUnfinishedOpen).not.toHaveBeenCalled();
+  });
+
+  describe('an open charged with no prize', () => {
+    const lost = {
+      kind: 'open_without_prize' as const,
+      id: 'ct_1',
+      customer_id: 'cus_1',
+      amount: 45,
+      at: '2026-11-01T00:00:00Z',
+    };
+
+    it('is refunded, and the alert says so', async () => {
+      findings.mockResolvedValue([lost]);
+      packs.refundUnfinishedOpen.mockResolvedValue('refunded');
+      await moneyIntegrityJob(container);
+      expect(packs.refundUnfinishedOpen).toHaveBeenCalledWith('ct_1');
+      expect(alert).toHaveBeenCalledWith(
+        container,
+        'money-integrity:ct_1',
+        expect.stringContaining('refunded automatically'),
+        { muteMs: 24 * 60 * 60 * 1000 },
+      );
+    });
+
+    it.each(['has_prize', 'already', 'not_found'])(
+      'stays quiet when the refund answers %s',
+      async (outcome) => {
+        findings.mockResolvedValue([lost]);
+        packs.refundUnfinishedOpen.mockResolvedValue(outcome);
+        await moneyIntegrityJob(container);
+        expect(alert).not.toHaveBeenCalled();
+      },
+    );
+
+    it('still alerts when the refund fails', async () => {
+      findings.mockResolvedValue([lost]);
+      packs.refundUnfinishedOpen.mockRejectedValue(new Error('db down'));
+      await moneyIntegrityJob(container);
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('db down'),
+      );
+      expect(alert).toHaveBeenCalledWith(
+        container,
+        'money-integrity:ct_1',
+        expect.stringContaining('See Settlement'),
+        { muteMs: 24 * 60 * 60 * 1000 },
+      );
+    });
   });
 });

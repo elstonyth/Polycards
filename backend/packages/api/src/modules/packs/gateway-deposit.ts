@@ -28,7 +28,7 @@ import { topUpAmountError, topupIdempotencyReference } from './topup';
 import { sendTopupReceipt } from './topup-receipt';
 import { notifyFeed } from './notify-feed';
 import { topupFeedKey } from './feed-events';
-import type { DEPOSIT_STATUSES } from './models/gateway-deposit';
+import { DEPOSIT_STATUSES } from './models/gateway-deposit';
 import { gatewayEnv } from './gateway-env';
 import { alertOps } from './ops-alert';
 import { PAYIN_STATUS } from './a3pay';
@@ -91,6 +91,7 @@ export function isPayinVerifyFail(
 
 /** The gateway_deposit.status domain, from the model. */
 type DepositStatus = (typeof DEPOSIT_STATUSES)[number];
+const UNSETTLED = DEPOSIT_STATUSES.filter((s) => s !== 'settled');
 
 // The submit half of the gateway deposit loop: record intent, ask the
 // gateway for a cashier page, hand the customer the URL. NO credit is issued
@@ -797,14 +798,15 @@ export async function applyDepositOutcome(
     paymentMethodCode: deposit.payment_method_code,
   });
 
-  // Claimed FROM the status the caller read, not from a literal 'pending':
-  // the callback's recovery branch and the sweep's second scan tier both
-  // arrive with a written-off row, and a hardcoded 'pending' would match
-  // nothing — leaving the credit committed while the row still said we had
-  // given up on it.
+  // Claimed FROM every status but settled, not only the one the caller read:
+  // the credit above has committed, so the row must say settled whatever it
+  // moved to meanwhile (a late close between the read and here, or the
+  // written-off row the callback's recovery branch and the sweep's second
+  // tier arrive with). Left 'failed', it would hold a live credit that no
+  // sweep re-reads. A row already settled loses the claim: the replay answer.
   await packs.claimDepositStatus({
     id: deposit.id,
-    from: [deposit.status],
+    from: UNSETTLED,
     to: 'settled',
     set: {
       settled_at: outcome.settledAt,

@@ -261,5 +261,93 @@ moduleIntegrationTestRunner<PacksModuleService>({
         );
       });
     });
+
+    describe('refundUnfinishedOpen', () => {
+      const pullsFor = (open: string) =>
+        service.listPulls({ open_id: open }, { take: 5 });
+      const record = (open: string, customer: string) =>
+        service.recordPullsWithLedger({
+          pulls: [
+            {
+              customer_id: customer,
+              pack_id: 'p',
+              card_id: 'c',
+              order_id: null,
+              rolled_at: new Date(),
+              source: 'pack',
+              open_id: open,
+            },
+          ],
+          ledger: {
+            customerId: customer,
+            openId: open,
+            price: 45,
+            packId: 'p',
+            channel: 'single',
+            fx: 4.5,
+          },
+        });
+
+      it('refunds a charge with no card or spin, once', async () => {
+        const id = await charge('open_refund', 'cus_refund');
+        await expect(service.refundUnfinishedOpen(id)).resolves.toBe(
+          'refunded',
+        );
+        await expect(service.creditBalance('cus_refund')).resolves.toBe(0);
+        await expect(moneyIntegrityFindings(service)).resolves.toEqual([]);
+        await expect(service.refundUnfinishedOpen(id)).resolves.toBe('already');
+        await expect(service.creditBalance('cus_refund')).resolves.toBe(0);
+      });
+
+      it('leaves a charge whose card or spin landed', async () => {
+        const card = await charge('open_kept', 'cus_kept');
+        await pull('cus_kept', { open_id: 'open_kept' });
+        const spin = await charge('open_kept_spin', 'cus_kept');
+        await service.createTicketSpins([
+          {
+            customer_id: 'cus_kept',
+            pack_id: 'lucky',
+            tickets: 1,
+            source: 'pack',
+            open_id: 'open_kept_spin',
+            rolled_at: ago(DAY),
+          },
+        ]);
+        await expect(service.refundUnfinishedOpen(card)).resolves.toBe(
+          'has_prize',
+        );
+        await expect(service.refundUnfinishedOpen(spin)).resolves.toBe(
+          'has_prize',
+        );
+        await expect(service.creditBalance('cus_kept')).resolves.toBe(-90);
+      });
+
+      it('refunds nothing but an open charge', async () => {
+        const topup = await credit({
+          customer: 'cus_other',
+          amount: 45,
+          reason: 'topup',
+        });
+        await expect(service.refundUnfinishedOpen(topup)).resolves.toBe(
+          'not_found',
+        );
+        await expect(service.creditBalance('cus_other')).resolves.toBe(45);
+      });
+
+      it('refuses a card for an open already refunded, and records nothing', async () => {
+        const id = await charge('open_late', 'cus_late');
+        await service.refundUnfinishedOpen(id);
+        await expect(record('open_late', 'cus_late')).rejects.toThrow(
+          /refunded/i,
+        );
+        await expect(pullsFor('open_late')).resolves.toHaveLength(0);
+      });
+
+      it('records a card for an open still charged, as before', async () => {
+        await charge('open_live', 'cus_live');
+        await record('open_live', 'cus_live');
+        await expect(pullsFor('open_live')).resolves.toHaveLength(1);
+      });
+    });
   },
 });

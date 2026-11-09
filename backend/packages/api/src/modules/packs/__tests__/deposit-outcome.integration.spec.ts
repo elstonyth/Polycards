@@ -385,6 +385,31 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(result).toEqual({ applied: true, replayed: false });
         expect((await reread(row.id)).status).toBe('settled');
       });
+
+      it('settles the row even when it moved after the caller read it', async () => {
+        // A close (a late failed callback, say) lands between the read and the
+        // claim. The credit has committed by then, so the row must still end
+        // up settled: a 'failed' row with a live credit is never looked at again.
+        const row = await seed('5b');
+        await service.updateGatewayDeposits({
+          id: row.id,
+          status: 'failed' as const,
+        });
+
+        // `row` still carries the stale 'pending' the caller read.
+        const result = await applyDepositOutcome(scope, row, settled());
+
+        expect(result).toEqual({ applied: true, replayed: false });
+        const after = await reread(row.id);
+        expect(after.status).toBe('settled');
+        expect(Number(after.amount_settled)).toBe(50);
+        expect(
+          await service.listCreditTransactions(
+            { customer_id: row.customer_id },
+            { take: 10 },
+          ),
+        ).toHaveLength(1);
+      });
     });
 
     describe('the failed / expired outcome', () => {
