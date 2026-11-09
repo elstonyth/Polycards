@@ -1,4 +1,4 @@
-import ResendNotificationProviderService from '../service';
+import ResendNotificationProviderService, { SEND_TIMEOUT_MS } from '../service';
 import {
   BANK_ACCOUNT_ADDED_TEMPLATE,
   BANK_ACCOUNT_REMOVED_TEMPLATE,
@@ -106,6 +106,23 @@ describe('ResendNotificationProviderService.send', () => {
     await service.send(notification());
 
     expect(send.mock.calls[0][0].replyTo).toBe('support@polycards.gg');
+  });
+
+  it('gives up on a stalled send after the deadline and records a failure', async () => {
+    jest.useFakeTimers();
+    try {
+      send.mockReturnValue(new Promise(() => undefined)); // never answers
+      const { service, logger } = buildService();
+      const sent = service.send(notification());
+      const outcome = expect(sent).rejects.toThrow(/timed out after/);
+      await jest.advanceTimersByTimeAsync(SEND_TIMEOUT_MS);
+      await outcome;
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringMatching(/timed out after/),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('returns empty and skips the send for an unknown template', async () => {

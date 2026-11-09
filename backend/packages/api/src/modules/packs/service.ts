@@ -58,11 +58,14 @@ import {
   liftedPayoutBans,
   withLiftedPayoutBan,
   holderNameKey,
+  LETTER_FOLDS,
+  SMALL_CAPS,
+  SMALL_CAP_LETTERS,
   withClearedHolderName,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
-import { findBank, savedAccountSlot } from './banks';
+import { accountNumberForms, findBank, savedAccountSlot } from './banks';
 import { challengePackId } from './challenge-prize';
 import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
@@ -77,7 +80,11 @@ import {
   generatedUsername,
   suffixedUsername,
 } from '../../utils/profile-handle';
-import { REAL_NAME_TAKEN, realNameKeySql } from '../../utils/real-name';
+import {
+  REAL_NAME_TAKEN,
+  realNameKey,
+  realNameKeySql,
+} from '../../utils/real-name';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -313,6 +320,21 @@ import {
 } from './real-customers';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
+// The ledger columns the reversals read by raw SQL on their own transaction
+// (an ORM list would take a second pool connection; see mutateCreditAtomic).
+type LedgerReversalRow = {
+  id: string;
+  customer_id: string;
+  amount: string;
+  reason: InferTypeOf<typeof CreditTransaction>['reason'];
+  reference: string | null;
+  external_funded_cents: number | null;
+  bonus_cents: number | null;
+  source_transaction_id: string | null;
+};
+const LEDGER_REVERSAL_COLS =
+  'id, customer_id, amount, reason, reference, external_funded_cents, bonus_cents, source_transaction_id';
+
 // plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
 // amount, plus the held part of a card sale (sellbackHoldBp: the bonus-paid
 // share or a welcome card's sale, operator rule 2026-10-09; gift and reward
@@ -368,6 +390,24 @@ function insufficientCreditsMessage(
     `you have ${rm(haveCents)} — top up at least ${rm(costCents - haveCents)}.`
   );
 }
+
+// holderNameKey in SQL, for holder names already stored: NFKD, the small
+// capitals and LETTER_FOLDS folded, lower case, a-z only (the combining marks
+// go with that strip). The parity spec runs it against holderNameKey.
+const HOLDER_FOLDS = Object.entries(LETTER_FOLDS);
+const HOLDER_FOLD_ONE = HOLDER_FOLDS.filter(([, to]) => to.length === 1);
+const HOLDER_FOLD_FROM = `${SMALL_CAPS}${HOLDER_FOLD_ONE.map(([c]) => c).join('')}`;
+const HOLDER_FOLD_TO = `${SMALL_CAP_LETTERS}${HOLDER_FOLD_ONE.map(([, to]) => to).join('')}`;
+const HOLDER_FOLD_MANY = HOLDER_FOLDS.filter(([, to]) => to.length > 1);
+export const holderNameKeySql = (expr: string): string => {
+  const folded = HOLDER_FOLD_MANY.reduce(
+    (sql, [c, to]) => `replace(${sql}, '${c}', '${to}')`,
+    `translate(normalize(${expr}, NFKD), '${HOLDER_FOLD_FROM}', '${HOLDER_FOLD_TO}')`,
+  );
+  // ASCII has nothing to fold (one byte a character): skipping the folds
+  // keeps the scan as cheap as before.
+  return `regexp_replace(lower(CASE WHEN octet_length(${expr}) = length(${expr}) THEN ${expr} ELSE ${folded} END), '[^a-z]', '', 'g')`;
+};
 
 // Auto-generates CRUD for each model: list/retrieve/create/update/delete<Model>s
 // (e.g. listPacks, listCards, listPackOdds, createPulls,
@@ -3858,8 +3898,11 @@ class PacksModuleService extends MedusaService({
     // check-ins are free, an open-ended retired daily task paid out every day
     // to anyone who kept its id (security review 2026-10-06). retired_at null
     // on an inactive row = retired before the column existed = long ago.
-    // Achievements keep the old rule: once ever, so retiring strands nobody.
-    if (!def.active && kind !== 'achievement') {
+    // An achievement is honoured through the week it was retired in, as a
+    // weekly task is: open-ended, anyone who kept its id (a fresh account
+    // included) could claim it long after the off switch (audit 2026-11-09).
+    // The hub hides retired tasks, so the week is the grace for finishers.
+    if (!def.active) {
       const periodStart = kind === 'daily' ? day.startUtc : week.startUtc;
       const retiredAt = def.retired_at ? new Date(def.retired_at) : null;
       if (!retiredAt || retiredAt.getTime() < periodStart.getTime())
@@ -4766,12 +4809,16 @@ class PacksModuleService extends MedusaService({
       // insert is only atomic within one customer; customer_id also makes the
       // lookup index-assisted (IDX_credit_transaction_customer_id_created_at)
       // instead of a full ledger scan.
-      const [existing] = await this.listCreditTransactions(
-        {
-          customer_id: input.customerId,
-          source_transaction_id: input.idempotencyReference,
-        },
-        { take: 1 },
+      // Raw, on the locked transaction: an ORM list here takes a second pool
+      // connection while this one holds the lock, and callers waiting on the
+      // lock each hold one too.
+      const [existing] = await em.execute<
+        { id: string; amount: string; reference: string | null }[]
+      >(
+        `SELECT id, amount, reference FROM credit_transaction
+           WHERE customer_id = ? AND source_transaction_id = ? AND deleted_at IS NULL
+           LIMIT 1`,
+        [input.customerId, input.idempotencyReference],
       );
       if (existing) {
         const balRows = await em.execute<{ balance_cents: string | null }[]>(
@@ -5651,16 +5698,17 @@ class PacksModuleService extends MedusaService({
     transactionId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string }> {
-    const [original] = await this.listCreditTransactions(
-      { id: transactionId },
-      { take: 1 },
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const [original] = await em.execute<LedgerReversalRow[]>(
+      `SELECT ${LEDGER_REVERSAL_COLS} FROM credit_transaction
+         WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
+      [transactionId],
     );
     if (!original) {
       // Already gone / never written — nothing to reverse (compensation is a
       // best-effort undo; a missing charge means the forward step never ran).
       return { id: transactionId };
     }
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `credit:${original.customer_id}`,
     ]);
@@ -5669,9 +5717,9 @@ class PacksModuleService extends MedusaService({
     // must NOT append a second refund. Under the lock, if a reversal row for this
     // charge already exists, return it as a no-op. `reversal:${id}` is the
     // per-charge reversal key.
-    const [existingReversal] = await this.listCreditTransactions(
-      { reference: `reversal:${transactionId}` },
-      { take: 1 },
+    const [existingReversal] = await em.execute<{ id: string }[]>(
+      'SELECT id FROM credit_transaction WHERE reference = ? AND deleted_at IS NULL LIMIT 1',
+      [`reversal:${transactionId}`],
     );
     if (existingReversal) {
       return { id: existingReversal.id };
@@ -5737,16 +5785,16 @@ class PacksModuleService extends MedusaService({
     //    the debit reversal also carries reason 'pack_open', so filter on the
     //    reference prefix, not reason alone.
     const PAGE = 1000;
-    let all = await this.listCreditTransactions(
-      { source_transaction_id: sourceTransactionId },
-      { skip: 0, take: PAGE, order: { created_at: 'ASC', id: 'ASC' } },
-    );
-    for (let skip = PAGE; all.length === skip; skip += PAGE) {
-      const next = await this.listCreditTransactions(
-        { source_transaction_id: sourceTransactionId },
-        { skip, take: PAGE, order: { created_at: 'ASC', id: 'ASC' } },
+    const page = (skip: number) =>
+      em.execute<LedgerReversalRow[]>(
+        `SELECT ${LEDGER_REVERSAL_COLS} FROM credit_transaction
+           WHERE source_transaction_id = ? AND deleted_at IS NULL
+           ORDER BY created_at ASC, id ASC LIMIT ? OFFSET ?`,
+        [sourceTransactionId, PAGE, skip],
       );
-      all = all.concat(next);
+    let all = await page(0);
+    for (let skip = PAGE; all.length === skip; skip += PAGE) {
+      all = all.concat(await page(skip));
     }
     const originals = all.filter((r) => {
       const ref = String((r as { reference?: string | null }).reference ?? '');
@@ -5783,9 +5831,9 @@ class PacksModuleService extends MedusaService({
     let reversed = 0;
     const deltaMap = new Map<string, number>(); // per-customer reversal delta in cents
     for (const original of originals) {
-      const [existing] = await this.listCreditTransactions(
-        { reference: `reversal:${original.id}` },
-        { take: 1 },
+      const [existing] = await em.execute<{ id: string }[]>(
+        'SELECT id FROM credit_transaction WHERE reference = ? AND deleted_at IS NULL LIMIT 1',
+        [`reversal:${original.id}`],
       );
       if (existing) continue; // already reversed — no-op
       const originalExt = Number(
@@ -10642,12 +10690,17 @@ class PacksModuleService extends MedusaService({
       [customerId],
     );
     const lifted = liftedPayoutBans(me?.metadata ?? {});
+    const own = await this.payoutAccountsOf(customerId, sharedContext);
     const byKey = new Map<string, string>(
-      (await this.payoutAccountsOf(customerId, sharedContext)).map((n) => [
-        n.account_key,
-        n.bank_code,
-      ]),
+      own.map((n) => [n.account_key, n.bank_code]),
     );
+    // A PayNow mobile is banned with or without its 65, as the withdrawal
+    // check reads it (accountNumberForms), so the list asks for both.
+    for (const n of own) {
+      for (const form of accountNumberForms(n.bank_code, n.account_key)) {
+        if (!byKey.has(form)) byKey.set(form, n.bank_code);
+      }
+    }
     if (byKey.size === 0) return [];
     const banned = await em.execute<{ account_key: string }[]>(
       "SELECT account_key FROM banned_payout_account WHERE account_key = ANY(string_to_array(?, ','))",
@@ -10845,10 +10898,12 @@ class PacksModuleService extends MedusaService({
 
   // Another account already used this holder name on a bank, saved or paid
   // (owner, 2026-11-03: a different bank under the same name is refused too).
-  // Names compare as setRealName compares them. A wallet entry carries its
-  // network's name, which no person's name equals. The accounts support
-  // checked as another person with this name (setHolderNameCleared) do not
-  // count, for this customer only; any other account still does.
+  // Names compare by holderNameKey, the stored ones in SQL (holderNameKeySql),
+  // so a variant saved with accents or symbols still finds the plain name. A
+  // wallet entry carries its network's name, which no person's name equals.
+  // The accounts support checked as another person with this name
+  // (setHolderNameCleared) do not count, for this customer only; any other
+  // account still does.
   @InjectManager()
   async holderNameHeldByAnother(
     customerId: string,
@@ -10882,18 +10937,25 @@ class PacksModuleService extends MedusaService({
     holderName: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<string[]> {
+    // A name with no English letter (saved before such names were refused)
+    // keys empty by its letters; it is compared by its old key instead, so
+    // its holders are still found. Empty both ways names no one.
+    const letters = holderNameKey(holderName);
+    const key = letters || realNameKey(holderName);
+    if (!key) return [];
+    const keySql = letters ? holderNameKeySql : realNameKeySql;
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ customer_id: string }[]>(
       'SELECT c.id AS customer_id FROM customer c ' +
         "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
         "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${realNameKeySql("a->>'accountHolderName'")} = ${realNameKeySql('?::text')} AND ${realNameKeySql("a->>'accountHolderName'")} <> '' ` +
+        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${keySql("a->>'accountHolderName'")} = ? ` +
         'UNION ' +
         'SELECT customer_id FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
-        `AND ${realNameKeySql('account_holder_name')} = ${realNameKeySql('?::text')} AND ${realNameKeySql('account_holder_name')} <> '' ` +
+        `AND ${keySql('account_holder_name')} = ? ` +
         "AND status IN ('pending', 'held', 'settled')",
-      [customerId, holderName, customerId, holderName],
+      [customerId, key, customerId, key],
     );
     return rows.map((r) => r.customer_id);
   }

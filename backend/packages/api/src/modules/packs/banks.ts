@@ -322,6 +322,23 @@ export function findBank(alias: string | null | undefined): Bank | null {
   return byAlias.get(alias.trim().toUpperCase()) ?? null;
 }
 
+/** Every spelling of one destination, the canonical one first: a Singapore
+ *  PayNow mobile with or without its 65 is one number. Saved rows keep what was
+ *  typed and old rows hold either, so the holder and ban lookups, which match
+ *  digits exactly, ask for each. */
+export function accountNumberForms(
+  bankCode: string,
+  accountNumber: string,
+): string[] {
+  if (findBank(bankCode)?.id !== 'PAYNOWSG') return [accountNumber];
+  // Digits as the keys read them, so '65 9123-4567' is the same number.
+  const local = accountNumber
+    .replace(/\D/g, '')
+    .replace(/^0+/, '')
+    .replace(/^65(?=\d{8}$)/, '');
+  return /^\d{8}$/.test(local) ? [local, `65${local}`] : [accountNumber];
+}
+
 /** The bank's own payout floor (RM), or null when only the gateway's applies. */
 export function bankPayoutMinRm(alias: string | null | undefined): number | null {
   return findBank(alias)?.payoutMinRm ?? null;

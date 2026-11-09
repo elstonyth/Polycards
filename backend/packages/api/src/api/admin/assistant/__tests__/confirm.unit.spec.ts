@@ -84,6 +84,23 @@ describe('sealProposal / openProposal', () => {
     expect(openProposal(token, 'user_1', 'x'.repeat(32), now)).toBeNull();
   });
 
+  it('stamps a bank card with when it was sealed, never what it says itself', () => {
+    const card: Proposal = {
+      kind: 'name_clash',
+      customer_id: 'cus_1',
+      username: 'TestPlayer',
+      holder_name: 'Tan Ah Kow',
+      with: ['cus_2'],
+      reason: 'different people',
+      proposed_at: '2099-01-01T00:00:00.000Z',
+    };
+    const token = sealProposal(card, 'user_1', SECRET, now);
+    expect(openProposal(token, 'user_1', SECRET, now)).toEqual({
+      ...card,
+      proposed_at: '2026-10-29T15:00:00.000Z',
+    });
+  });
+
   it('refuses anything changed or malformed', () => {
     const token = sealProposal(NOTE, 'user_1', SECRET, now);
     const [body, mac] = token.split('.');

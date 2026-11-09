@@ -1,4 +1,5 @@
 import {
+  cancelPhoneOtp,
   E164_RE,
   isAllowedSmsDestination,
   isPhoneOtpChannel,
@@ -326,6 +327,36 @@ describe('twilio transport', () => {
       'Basic ' + Buffer.from('AC1:tok').toString('base64'),
     );
     expect(String(init?.body)).toContain('Channel=sms');
+  });
+
+  // The verification's SID comes back, so a start for another flow can
+  // cancel this code (api/utils/otp-purpose.ts).
+  it('send returns the verification SID, and only a real one', async () => {
+    const sid = 'VE' + '0123456789abcdef'.repeat(2);
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sid }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sid: 'x' }), { status: 201 }));
+    await expect(sendPhoneOtp(env, noopLogger, PHONE, 'signup')).resolves.toBe(sid);
+    await expect(sendPhoneOtp(env, noopLogger, PHONE, 'signup')).resolves.toBeUndefined();
+  });
+
+  it('cancel posts Status=canceled to that verification; gone counts as done', async () => {
+    const sid = 'VE' + 'f'.repeat(32);
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 500 }));
+    await expect(cancelPhoneOtp(env, noopLogger, sid)).resolves.toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe(`https://verify.twilio.com/v2/Services/VA1/Verifications/${sid}`);
+    expect(String(init?.body)).toBe('Status=canceled');
+    await expect(cancelPhoneOtp(env, noopLogger, sid)).resolves.toBe(true);
+    await expect(cancelPhoneOtp(env, noopLogger, sid)).resolves.toBe(false);
+    // Never a path built from anything but a verification SID.
+    await expect(cancelPhoneOtp(env, noopLogger, '../x')).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   // Voice fallback: Channel is a plain pass-through to Verify, and TemplateSid

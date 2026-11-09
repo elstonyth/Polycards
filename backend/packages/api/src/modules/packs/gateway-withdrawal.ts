@@ -10,7 +10,7 @@ import {
   resolveWithdrawalDestination,
   savedBankAccountId,
 } from './saved-accounts';
-import { findBank, walletAddressValid } from './banks';
+import { accountNumberForms, findBank, walletAddressValid } from './banks';
 import {
   channelStatus,
   destinationMinRm,
@@ -754,13 +754,22 @@ export async function startWithdrawal(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, detailsInvalid);
   }
   // A banned number never pays, even one saved before it was banned (owner,
-  // 2026-11-03).
+  // 2026-11-03). A PayNow mobile is one number with or without its 65.
   if (
-    await packs.payoutAccountBanned(
-      precheckDestination.accountNumber,
-      findBank(precheckDestination.bankCode)?.wallet !== undefined,
-      input.customerId,
-    )
+    (
+      await Promise.all(
+        accountNumberForms(
+          precheckDestination.bankCode,
+          precheckDestination.accountNumber,
+        ).map((n) =>
+          packs.payoutAccountBanned(
+            n,
+            findBank(precheckDestination.bankCode)?.wallet !== undefined,
+            input.customerId,
+          ),
+        ),
+      )
+    ).some(Boolean)
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
@@ -2007,13 +2016,21 @@ export async function submitHeldWithdrawal(
   // pay on a click. Judged on the row's own number, not the saved list, which
   // support may already have changed. The row stays held.
   const rowBank = findBank(row.bank_code);
+  // Every spelling of the number: a PayNow mobile with or without its 65.
+  const rowNumbers = accountNumberForms(row.bank_code, row.account_number);
   // A banned number never pays on a click either (owner, 2026-11-03).
   if (
-    await packs.payoutAccountBanned(
-      row.account_number,
-      rowBank?.wallet !== undefined,
-      row.customer_id,
-    )
+    (
+      await Promise.all(
+        rowNumbers.map((n) =>
+          packs.payoutAccountBanned(
+            n,
+            rowBank?.wallet !== undefined,
+            row.customer_id,
+          ),
+        ),
+      )
+    ).some(Boolean)
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
@@ -2027,11 +2044,17 @@ export async function submitHeldWithdrawal(
   if (
     !(await packs.bankShareVerifiedFor(row.customer_id))[rowAccountId] &&
     heldByAnother(
-      await packs.otherPayoutAccountHolders(
-        row.customer_id,
-        row.account_number,
-        rowBank?.wallet !== undefined,
-      ),
+      (
+        await Promise.all(
+          rowNumbers.map((n) =>
+            packs.otherPayoutAccountHolders(
+              row.customer_id,
+              n,
+              rowBank?.wallet !== undefined,
+            ),
+          ),
+        )
+      ).flat(),
       row.bank_code,
     )
   ) {

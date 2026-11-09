@@ -34,7 +34,12 @@ import {
   PERMANENT_BAN_REASON_PREFIX,
   savedSlotFull,
 } from '../../../modules/packs/saved-accounts';
-import { MY_BANKS, SG_BANKS, findBank } from '../../../modules/packs/banks';
+import {
+  MY_BANKS,
+  SG_BANKS,
+  accountNumberForms,
+  findBank,
+} from '../../../modules/packs/banks';
 import { withdrawalDetailsError } from '../../../modules/packs/gateway-withdrawal';
 import { accountLinks, VISITOR_NEED, type LinksDb } from './account-links';
 import { namedIn, namedPlayer } from './named';
@@ -712,14 +717,20 @@ export const AGENT_TOOLS: AgentTool[] = [
       let numberHolders: string[] = [];
       if (number) {
         const bank = number.bankCode ? findBank(number.bankCode) : undefined;
-        const bannedForPlayer = await packs.payoutAccountBanned(
-          number.key,
-          false,
-          customerId,
-        );
+        // Asked as a save asks: a PayNow mobile with or without its 65.
+        const forms = accountNumberForms(number.bankCode ?? '', number.key);
+        const bannedForPlayer = (
+          await Promise.all(
+            forms.map((n) => packs.payoutAccountBanned(n, false, customerId)),
+          )
+        ).some(Boolean);
         const banned =
           bannedForPlayer ||
-          (await packs.payoutAccountBanned(number.key, false));
+          (
+            await Promise.all(
+              forms.map((n) => packs.payoutAccountBanned(n, false)),
+            )
+          ).some(Boolean);
         if (
           bank &&
           saved.some(
@@ -753,11 +764,17 @@ export const AGENT_TOOLS: AgentTool[] = [
             'who else holds the number, and the slot: ask staff which bank, then check again',
           );
         } else {
-          numberHolders = await packs.payoutAccountHoldersAt(
-            customerId,
-            number.key,
-            bank.id,
-          );
+          numberHolders = [
+            ...new Set(
+              (
+                await Promise.all(
+                  forms.map((n) =>
+                    packs.payoutAccountHoldersAt(customerId, n, bank.id),
+                  ),
+                )
+              ).flat(),
+            ),
+          ];
           const others = await whoAre(ctx, numberHolders);
           out.number = {
             bank: bank.name,
