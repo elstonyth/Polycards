@@ -19,7 +19,6 @@ const packs = {
   findCustomerIdByHandle: jest.fn(),
   resolveBannedPayoutAccount: jest.fn(),
   setPayoutBanLifted: jest.fn(),
-  listAdminActionAudits: jest.fn(),
 };
 const customers = {
   listCustomers: jest.fn(async () => [
@@ -43,7 +42,6 @@ beforeEach(() => {
   jest.clearAllMocks();
   packs.findCustomerIdByUsername.mockResolvedValue('cus_1');
   packs.findCustomerIdByHandle.mockResolvedValue(null);
-  packs.listAdminActionAudits.mockResolvedValue([]);
   packs.resolveBannedPayoutAccount.mockResolvedValue({
     account_key: '512345670001',
     bank_code: 'MBBEMYKL',
@@ -160,48 +158,26 @@ describe('saveProposal unban_number', () => {
       lifted: true,
       reason: 'owner approved',
       fromBanList: true,
+      since: '2026-11-09T10:00:00.000Z',
     });
   });
 
   // Security audit 2026-11-09: a re-ban leaves no stamp, so an old button
-  // would lift it again; the audit since the card was made tells.
+  // would lift it again. The service checks the audit since the card's time,
+  // in its own transaction (#1009; the SQL in card-checks.integration.spec).
   it('an old button cannot lift it again once it was lifted or banned again since', async () => {
     const can = jest.fn().mockResolvedValue(true);
-    await saveProposal(NUMBER, { ...admin, can }, container);
-    expect(packs.listAdminActionAudits).toHaveBeenCalledWith(
-      {
-        entity_type: 'customer',
-        entity_id: 'cus_1',
-        action: 'edit',
-        created_at: { $gt: new Date('2026-11-09T10:00:00.000Z') },
-      },
-      { select: ['after'] },
+    packs.setPayoutBanLifted.mockRejectedValue(
+      new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.',
+      ),
     );
-    const row = (last4: string, lifted: boolean) => ({
-      after: {
-        banned_number: { bank_code: 'MBBEMYKL', last4 },
-        lifted_for_player: lifted,
-      },
-    });
-    // The first tap's own row, then a colleague's re-ban.
-    packs.listAdminActionAudits.mockResolvedValue([
-      row('0001', true),
-      row('0001', false),
-    ]);
-    packs.setPayoutBanLifted.mockClear();
     await expect(
       saveProposal(NUMBER, { ...admin, can }, container),
     ).rejects.toThrow(/since it was proposed/);
-    expect(packs.setPayoutBanLifted).not.toHaveBeenCalled();
-    // Another number's lift or another edit leaves this card alone.
-    packs.listAdminActionAudits.mockResolvedValue([
-      row('0002', true),
-      { after: { saved_bank_accounts: [] } },
-    ]);
-    await expect(
-      saveProposal(NUMBER, { ...admin, can }, container),
-    ).resolves.toEqual({ id: 'cus_1' });
-    // A card sealed before this check carries no time.
+    packs.setPayoutBanLifted.mockClear();
+    // A card sealed before cards carried their time: refused, never applied.
     await expect(
       saveProposal(
         { ...NUMBER, proposed_at: undefined } as Proposal,
@@ -209,6 +185,7 @@ describe('saveProposal unban_number', () => {
         container,
       ),
     ).rejects.toBeInstanceOf(ConfirmRefused);
+    expect(packs.setPayoutBanLifted).not.toHaveBeenCalled();
   });
 
   it('a Support viewer (no customer:update) gets no ban-list fallback on tap', async () => {
