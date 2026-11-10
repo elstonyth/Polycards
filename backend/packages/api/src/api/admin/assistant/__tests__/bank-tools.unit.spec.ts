@@ -411,6 +411,27 @@ describe('free_bank_number', () => {
     expect(packs.freePayoutAccount).not.toHaveBeenCalled();
   });
 
+  it('finds the holders of a PayNow mobile with and without its 65 (#1008)', async () => {
+    packs.payoutAccountsOf.mockResolvedValue([
+      { account_key: '91234567', bank_code: 'PAYNOWSG', wallet: false },
+    ]);
+    packs.payoutAccountHoldersAt.mockImplementation(
+      async (_id: string, n: string) => (n === '6591234567' ? ['cus_y1'] : []),
+    );
+    const { propose, done } = run(
+      'free_bank_number',
+      { username: 'Test Player', last4: '4567', reason: 'owner approved' },
+      'free PayNow 4567 for Test Player, owner approved',
+    );
+    await done;
+    expect(propose.mock.calls[0][0]).toMatchObject({
+      bank_code: 'PAYNOWSG',
+      last4: '4567',
+      number_mark: numberMark('91234567', container),
+      from: ['cus_y1'],
+    });
+  });
+
   it('refuses what the person did not name', async () => {
     await expect(
       run(
@@ -666,6 +687,27 @@ describe('saveProposal: free_number and name_clash', () => {
       fromIds: ['cus_y1'],
       reason: 'owner approved',
     });
+  });
+
+  it('finds the number under its other PayNow spelling (#1008)', async () => {
+    const PAYNOW: Proposal = {
+      kind: 'free_number',
+      customer_id: 'cus_x',
+      username: 'Test Player',
+      bank_code: 'PAYNOWSG',
+      last4: '4567',
+      number_mark: numberMark('91234567', container),
+      from: ['cus_y1'],
+      reason: 'owner approved',
+      proposed_at: '2026-11-09T10:00:00.000Z',
+    };
+    packs.payoutAccountsOf.mockResolvedValue([
+      { account_key: '6591234567', bank_code: 'PAYNOWSG', wallet: false },
+    ]);
+    await saveProposal(PAYNOW, admin, container);
+    expect(packs.freePayoutAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ accountKey: '6591234567', bankCode: 'PAYNOWSG' }),
+    );
   });
 
   it('clears the name against only the accounts the card listed', async () => {

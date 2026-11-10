@@ -10543,13 +10543,23 @@ class PacksModuleService extends MedusaService({
         'Not a bank account number at a known bank.',
       );
     }
-    const holders = () =>
-      this.payoutAccountHoldersAt(
-        input.customerId,
-        key,
-        bank.id,
-        sharedContext,
-      );
+    // A PayNow mobile is one number with or without its 65, as bank_save_check
+    // and the ban list read it: holders, payouts and saved entries under both.
+    const forms = accountNumberForms(bank.id, key);
+    const holders = async () => {
+      const ids = new Set<string>();
+      for (const form of forms) {
+        for (const id of await this.payoutAccountHoldersAt(
+          input.customerId,
+          form,
+          bank.id,
+          sharedContext,
+        )) {
+          ids.add(id);
+        }
+      }
+      return [...ids];
+    };
     const before = await holders();
     if (before.length === 0) {
       throw new MedusaError(
@@ -10569,8 +10579,8 @@ class PacksModuleService extends MedusaService({
       rows.filter((r) => findBank(r.bank_code)?.id === bank.id).map((r) => r.id);
     const onTheWay = atBank(
       await em.execute<{ id: string; bank_code: string }[]>(
-        `SELECT id, bank_code FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id = ANY(string_to_array(?, ',')) AND status IN ('pending', 'held') AND ${DIGITS} = ?`,
-        [before.join(','), key],
+        `SELECT id, bank_code FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id = ANY(string_to_array(?, ',')) AND status IN ('pending', 'held') AND ${DIGITS} = ANY(string_to_array(?, ','))`,
+        [before.join(','), forms.join(',')],
       ),
     );
     if (onTheWay.length > 0) {
@@ -10598,7 +10608,7 @@ class PacksModuleService extends MedusaService({
               const gone = accounts.filter(
                 (a) =>
                   findBank(a.bankCode)?.id === bank.id &&
-                  payoutAccountKey(a.accountNumber, false) === key,
+                  forms.includes(payoutAccountKey(a.accountNumber, false)),
               );
               if (gone.length === 0) return null;
               saved = gone.length;
@@ -10615,8 +10625,8 @@ class PacksModuleService extends MedusaService({
       }
       const ids = atBank(
         await em.execute<{ id: string; bank_code: string }[]>(
-          `SELECT id, bank_code FROM gateway_withdrawal WHERE customer_id = ? AND deleted_at IS NULL AND status IN ('settled', 'failed') AND ${DIGITS} = ? AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4`,
-          [id, key],
+          `SELECT id, bank_code FROM gateway_withdrawal WHERE customer_id = ? AND deleted_at IS NULL AND status IN ('settled', 'failed') AND ${DIGITS} = ANY(string_to_array(?, ',')) AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4`,
+          [id, forms.join(',')],
         ),
       );
       if (ids.length > 0) {

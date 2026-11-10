@@ -930,7 +930,17 @@ export const AGENT_TOOLS: AgentTool[] = [
           `Which bank is …${n.last4} at? Ask staff to name the bank. Nothing was changed.`,
         );
       }
-      const ids = await packs.payoutAccountHoldersAt(customerId, n.key, bank.id);
+      // Asked as bank_save_check asks: a PayNow mobile with or without its 65.
+      const forms = accountNumberForms(bank.id, n.key);
+      const ids = [
+        ...new Set(
+          (
+            await Promise.all(
+              forms.map((k) => packs.payoutAccountHoldersAt(customerId, k, bank.id)),
+            )
+          ).flat(),
+        ),
+      ];
       if (ids.length === 0) {
         throw new Error(
           `No other account holds ${bank.name} …${n.last4}, so there is nothing to free. Run bank_save_check for what blocks the save. Nothing was changed.`,
@@ -954,7 +964,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           from: ids,
           reason,
         },
-        `${me.banned ? 'Tap Unban first: this works once the player is unbanned. ' : ''}Free ${bank.name} …${n.last4} for ${me.name}: it comes off ${others.length} other account${others.length === 1 ? '' : 's'}: ${others.map((o) => o.label).join('; ')}. They lose their saved entry of it, and their payouts to it keep the last 4 only, with no name. This cannot be undone. The player then saves it themselves${(await packs.payoutAccountBanned(n.key, false, customerId)) ? ', once it is also unbanned for them' : ''}. Reason: ${reason}`,
+        `${me.banned ? 'Tap Unban first: this works once the player is unbanned. ' : ''}Free ${bank.name} …${n.last4} for ${me.name}: it comes off ${others.length} other account${others.length === 1 ? '' : 's'}: ${others.map((o) => o.label).join('; ')}. They lose their saved entry of it, and their payouts to it keep the last 4 only, with no name. This cannot be undone. The player then saves it themselves${(await Promise.all(forms.map((k) => packs.payoutAccountBanned(k, false, customerId)))).some(Boolean) ? ', once it is also unbanned for them' : ''}. Reason: ${reason}`,
       );
       return JSON.stringify({
         freed: false,
