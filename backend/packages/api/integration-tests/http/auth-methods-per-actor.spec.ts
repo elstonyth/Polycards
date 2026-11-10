@@ -3,8 +3,9 @@ import { unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-// Staff and sellers sign in with a password only; customers also with Google
-// (security audit 2026-11-07). Without an allowlist Medusa lets every
+// Staff sign in with a password only; customers also with Google (security
+// audit 2026-11-07). Sellers do not sign in at all since 2026-11-10: every
+// /auth/member route is closed (vendor-selfreg-block.spec). Without an allowlist Medusa lets every
 // registered provider serve every actor, the admin login included.
 // medusa-config's http.authMethodsPerActor is the allowlist.
 //
@@ -21,19 +22,23 @@ medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api }) => {
     describe('sign-in methods per actor', () => {
-      it.each(['user', 'member'])(
-        'refuses Google for the %s login, at the start and the callback',
-        async (actor) => {
-          for (const path of [
-            `/auth/${actor}/google`,
-            `/auth/${actor}/google/callback`,
-          ]) {
-            const res = await unwrapResponse(api.post(path, {}));
-            expect(res.status).toBe(400);
-            expect(res.data.message).toMatch(NOT_ALLOWED);
-          }
-        },
-      );
+      it('refuses Google for the staff login, at the start and the callback', async () => {
+        for (const path of ['/auth/user/google', '/auth/user/google/callback']) {
+          const res = await unwrapResponse(api.post(path, {}));
+          expect(res.status).toBe(400);
+          expect(res.data.message).toMatch(NOT_ALLOWED);
+        }
+      });
+
+      it('answers the seller Google routes as not found: seller sign-in is closed', async () => {
+        for (const path of [
+          '/auth/member/google',
+          '/auth/member/google/callback',
+        ]) {
+          const res = await unwrapResponse(api.post(path, {}));
+          expect({ path, status: res.status }).toEqual({ path, status: 404 });
+        }
+      });
 
       it('keeps the password login for staff', async () => {
         const res = await unwrapResponse(

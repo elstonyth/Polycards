@@ -9,8 +9,9 @@ jest.setTimeout(180 * 1000);
 // POST /auth/member/emailpass/register → POST /vendor/sellers to create a real
 // seller+store+membership in production. A repo middleware
 // (src/api/middlewares.ts → blockUnusedSurface) hard-404s the two
-// registration entrypoints. These tests assert the surface is closed WITHOUT
-// over-blocking member LOGIN (the seeded house seller's /seller dashboard) or
+// registration entrypoints. Since 2026-11-10 seller sign-in is closed as well
+// (owner; security audit 2026-11-09 #11: no two-step code, no seller ever
+// signed in). These tests assert the surface is closed WITHOUT over-blocking
 // customer registration (the storefront).
 
 const PASSWORD = 'vendor-block-pw-1';
@@ -60,17 +61,29 @@ medusaIntegrationTestRunner({
         expect(res.data.token).toEqual(expect.any(String));
       });
 
-      it('POST /auth/member/emailpass (LOGIN, not register) → not 404 (member login NOT over-blocked)', async () => {
-        // Bad creds → 401 from the auth handler. The point is that it REACHES the
-        // handler (not our 404 block), proving login stays open for the seeded
-        // house seller's /seller vendor dashboard.
+      it('seller sign-in is closed: login, password reset and Google → 404', async () => {
+        for (const [path, body] of [
+          [
+            '/auth/member/emailpass',
+            { email: 'nobody-member@example.com', password: 'wrong-password' },
+          ],
+          ['/auth/member/emailpass/reset-password', { identifier: 'a@b.c' }],
+          ['/auth/member/google', {}],
+        ] as const) {
+          const res = await unwrapResponse(api.post(path, body));
+          expect({ path, status: res.status }).toEqual({ path, status: 404 });
+        }
+        const google = await unwrapResponse(api.get('/auth/member/google'));
+        expect(google.status).toBe(404);
+      });
+
+      it('POST /auth/user/emailpass (staff login) is untouched by the seller block', async () => {
         const res = await unwrapResponse(
-          api.post('/auth/member/emailpass', {
-            email: 'nobody-member@example.com',
+          api.post('/auth/user/emailpass', {
+            email: 'nobody-staff@example.com',
             password: 'wrong-password',
           }),
         );
-        expect(res.status).not.toBe(404);
         expect([400, 401]).toContain(res.status);
       });
     });
