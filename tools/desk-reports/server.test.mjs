@@ -67,7 +67,6 @@ test('stdio round trip: every desk gets every read-only tool, the key on the wir
         'order',
         'account',
         'admin_read',
-        'db_query',
         'code_files',
         'code_search',
         'code_read',

@@ -227,15 +227,14 @@ const mediaUploadMiddleware = (
 // middleware hard-404s the two registration entrypoints so the surface is
 // genuinely closed (app middleware applies to plugin routes here, same as the
 // /auth/*/emailpass rate-limit entries below). The house seller is seeded
-// server-side (not via this HTTP route) and logs in via POST /auth/member/
-// emailpass (authenticate, NOT /register), so neither is affected.
+// server-side (not via this HTTP route).
 //
-// NOTE: blocking /auth/member/emailpass/register also gates seller-STAFF
-// onboarding — invite-accept (POST /vendor/members/invites/accept) needs an
-// invitee to first mint a member auth identity via /register. That flow is
-// dormant here (single house seller, no staff invites) and intentionally
-// closed. When P2P/staff onboarding is built, re-open /register behind the
-// invite-gating rather than removing this block wholesale.
+// Seller sign-in is closed too (owner, 2026-11-10; security audit 2026-11-09
+// #11): a seller login had no two-step code, and no seller had ever signed in,
+// so every /auth/member route (login, register, reset, Google) 404s instead of
+// growing one. That also closes seller-staff onboarding (invite-accept needs a
+// member identity from /register). Before reopening any of it, give seller
+// logins the admin's two-step sign-in (utils/admin-mfa-guard.ts).
 const blockUnusedSurface = (
   _req: MedusaRequest,
   _res: MedusaResponse,
@@ -368,12 +367,9 @@ export default defineMiddlewares({
       middlewares: [blockUnusedSurface],
     },
     {
-      // Defense-in-depth: refuse new `member`-actor self-registration too, so no
-      // anonymous member auth identity can be minted. Member LOGIN (POST
-      // /auth/member/emailpass, no /register) is deliberately NOT matched — the
-      // seeded house seller needs it for the /seller vendor dashboard.
-      matcher: '/auth/member/emailpass/register',
-      method: 'POST',
+      // See blockUnusedSurface above: no seller signs in, and no member auth
+      // identity is minted, by any provider or method.
+      matcher: '/auth/member/*',
       middlewares: [blockUnusedSurface],
     },
     {
