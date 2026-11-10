@@ -96,7 +96,7 @@ medusaIntegrationTestRunner({
         const { id } = await registerCustomer(email);
         await api.post(
           `/admin/customers/${id}/credits`,
-          { amount: 5, note: 'seed for admin-ledger-route spec' },
+          { amount: 5, note: 'seed for admin-ledger-route spec', idempotency_key: `seed-${id}` },
           { headers: adminHeaders() },
         );
         return id;

@@ -5,7 +5,10 @@ import { assertMockTopupSafe } from './src/modules/packs/topup';
 import { warnLegacyGatewayEnv } from './src/modules/packs/gateway-env';
 import { isResendConfigured } from './src/modules/resend/options';
 import { resolvePhoneGateState } from './src/utils/phone-verification';
-import { productionDatabaseDriverOptions } from './src/utils/db-driver-options';
+import {
+  productionDatabaseDriverOptions,
+  runtimeDatabaseUrl,
+} from './src/utils/db-driver-options';
 import { ADMIN_MFA_ISSUER, adminMfaEncryptionKey } from './src/utils/admin-mfa';
 loadEnv(process.env.NODE_ENV || 'development', process.cwd());
 
@@ -175,7 +178,11 @@ module.exports = defineConfig({
   // admin loader requiring a bundled index.html at `medusa start`.
   admin: { disable: true },
   projectConfig: {
-    databaseUrl: process.env.DATABASE_URL,
+    // statement_timeout for the web + worker processes only (`medusa start`),
+    // never the migrate job: see runtimeDatabaseUrl.
+    databaseUrl: isProduction
+      ? runtimeDatabaseUrl(process.env.DATABASE_URL, process.env)
+      : process.env.DATABASE_URL,
     // TLS for DO's self-signed CA, the per-process connection cap (an uncapped
     // pool overruns the 25-connection cluster during a deploy), and the
     // idle-in-transaction timeout. Every value, and why the keys sit where they

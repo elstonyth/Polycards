@@ -1054,6 +1054,28 @@ export default defineMiddlewares({
       middlewares: [storeReadRateLimit],
     },
     {
+      // The public boards and card pages (GET /store/leaderboard,
+      // /store/challenge, /store/cards/:handle). Whole-history aggregates or
+      // several uncached reads per hit on a host Cloudflare does not front
+      // (admin.polycards.gg is DNS-only for gateway callbacks), so a flood
+      // reached them unthrottled (audit 2026-11-11). Same read budget as the
+      // announcement popup above: the storefront signs its visitor and caches
+      // these server-side, so real traffic sits far under it.
+      matcher: '/store/leaderboard',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
+      matcher: '/store/challenge',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
+      matcher: '/store/cards/*',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
       // The /task Tasks tab payload (GET /store/tasks).
       matcher: '/store/tasks',
       method: 'GET',

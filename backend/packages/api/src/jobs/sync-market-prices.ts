@@ -26,7 +26,31 @@ type PcProductRaw = { status: string; 'error-message'?: string } & Record<
 const pcFetchRaw = (path: string, params: Record<string, string>) =>
   pcFetch<PcProductRaw>(path, params);
 
+// All scheduled jobs share ONE BullMQ slot (concurrency 1), and a full sweep
+// takes ~1.1 s per linked card. Awaiting it here held up deposit-reconcile
+// (the only path crediting TGPay top-ups) for the whole sweep (audit
+// 2026-11-11), so the job starts the sweep and returns. A tick is handed to
+// one worker only; `running` just stops a second sweep in the same process.
+let running: Promise<void> | null = null;
+
 export default async function syncMarketPricesJob(
+  container: MedusaContainer,
+): Promise<void> {
+  const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
+  if (running) {
+    logger.warn('[sync-market-prices] skipped: the previous sweep is still running');
+    return;
+  }
+  running = runMarketPriceSync(container)
+    .catch((e) =>
+      logger.error(`[sync-market-prices] sweep failed: ${(e as Error).message}`),
+    )
+    .finally(() => {
+      running = null;
+    });
+}
+
+export async function runMarketPriceSync(
   container: MedusaContainer,
 ): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);

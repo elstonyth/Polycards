@@ -37,20 +37,22 @@ const FETCH_N = TOP_N * 2;
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
 const boardCache = new Map<string, { expires: number; body: unknown }>();
+// Single-flight per period: misses during an expiry window share ONE compute
+// instead of each running the whole-history aggregate (the #835 stampede
+// shape; audit 2026-11-11).
+const inFlight = new Map<string, Promise<unknown>>();
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
  *  one process, so test A's cached board would be served to test B. */
 export function clearLeaderboardCache(): void {
   boardCache.clear();
+  inFlight.clear();
 }
 
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  const customerService = req.scope.resolve(Modules.CUSTOMER);
-
   const period = req.query.period === 'alltime' ? 'alltime' : 'weekly';
 
   const cached = boardCache.get(period);
@@ -58,6 +60,26 @@ export async function GET(
     res.json(cached.body);
     return;
   }
+  let compute = inFlight.get(period);
+  if (!compute) {
+    compute = computeBoard(req, period)
+      .then((body) => {
+        boardCache.set(period, { expires: Date.now() + CACHE_TTL_MS, body });
+        return body;
+      })
+      .finally(() => inFlight.delete(period));
+    inFlight.set(period, compute);
+  }
+  // A rejected compute rejects every waiter alike, minus the duplicate work.
+  res.json(await compute);
+}
+
+async function computeBoard(
+  req: MedusaRequest,
+  period: 'alltime' | 'weekly',
+): Promise<unknown> {
+  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  const customerService = req.scope.resolve(Modules.CUSTOMER);
   // Ranked top-N is aggregated in the DB (GROUP BY + ORDER BY + LIMIT) so it's
   // correct at any pull volume. weekly = pulled value over the challenge week;
   // alltime = lifetime pulled value. Weekly rows mirror `volume` into `points` only because the
@@ -119,10 +141,7 @@ export async function GET(
     .filter((r) => !disabled.has(r.customer_id))
     .slice(0, TOP_N);
   if (ranked.length === 0) {
-    const body = { period, entries: [] };
-    boardCache.set(period, { expires: Date.now() + CACHE_TTL_MS, body });
-    res.json(body);
-    return;
+    return { period, entries: [] };
   }
 
   // PII-safe display fields (name / handle / avatar) come from the shared
@@ -158,7 +177,5 @@ export async function GET(
     };
   });
 
-  const body = { period, entries };
-  boardCache.set(period, { expires: Date.now() + CACHE_TTL_MS, body });
-  res.json(body);
+  return { period, entries };
 }

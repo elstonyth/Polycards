@@ -1,7 +1,7 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import { pcFetch } from '../../api/admin/pricecharting/client';
-import syncMarketPricesJob from '../sync-market-prices';
+import syncMarketPricesJob, { runMarketPriceSync } from '../sync-market-prices';
 
 jest.mock('../../api/admin/pricecharting/client', () => ({
   pcFetch: jest.fn(),
@@ -39,7 +39,7 @@ it('persists a safe error and clears pending after an unexpected failure, then c
     .mocked(pcFetch)
     .mockRejectedValueOnce(new Error('internal URL with secret'))
     .mockResolvedValueOnce({ kind: 'ok', data: quote });
-  const running = syncMarketPricesJob({
+  const running = runMarketPriceSync({
     resolve: (key: string) => (key === PACKS_MODULE ? packs : logger),
   } as unknown as MedusaContainer);
   await jest.runAllTimersAsync();
@@ -80,7 +80,7 @@ it('reads the current card before fetching so edits made during the catalog swee
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const quote = { status: 'success', id: '9999', 'manual-only-price': 4750 };
   jest.mocked(pcFetch).mockResolvedValueOnce({ kind: 'ok', data: quote });
-  const running = syncMarketPricesJob({
+  const running = runMarketPriceSync({
     resolve: (key: string) => (key === PACKS_MODULE ? packs : logger),
   } as unknown as MedusaContainer);
   await jest.runAllTimersAsync();
@@ -94,4 +94,31 @@ it('reads the current card before fetching so edits made during the catalog swee
       pc_pending_price: null,
     }),
   );
+});
+
+it('returns before the sweep ends (frees the shared job slot) and skips a second sweep while one runs', async () => {
+  jest.useFakeTimers();
+  const cards = [{ id: 'c', handle: 'c', pc_product_id: '1', pc_grade: 'PSA 10', market_value: 1 }];
+  const packs = {
+    listCards: jest.fn(async () => cards),
+    listFxRates: jest.fn(async () => [{ id: 'fx' }]),
+    updateFxRates: jest.fn(),
+    applyCardPriceSync: jest.fn().mockResolvedValue(true),
+    listCardPriceHistories: jest.fn(async () => [{ value: 1 }]),
+  };
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  const quote = { status: 'success', id: '1', 'manual-only-price': 100 };
+  jest.mocked(pcFetch).mockResolvedValue({ kind: 'ok', data: quote });
+  const container = {
+    resolve: (key: string) => (key === PACKS_MODULE ? packs : logger),
+  } as unknown as MedusaContainer;
+
+  await syncMarketPricesJob(container); // resolves while the 1.1 s per-card wait is still pending
+  expect(logger.info).not.toHaveBeenCalledWith(expect.stringMatching(/done:/));
+  await syncMarketPricesJob(container);
+  expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/still running/));
+
+  await jest.runAllTimersAsync();
+  expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/done: /));
+  expect(pcFetch).toHaveBeenCalledTimes(1); // the skipped call started no second sweep
 });

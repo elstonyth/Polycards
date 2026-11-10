@@ -658,6 +658,12 @@ services:
     # outage the pool cap was written to prevent. Raise the cluster first, or
     # lower DB_POOL_MAX in step, before going past 2.
     instance_count: 2
+    # Shallow on purpose (decided 2026-11-11, backend audit): Medusa's /health
+    # answers 200 without touching the DB. App Platform pulls and restarts an
+    # instance on a failed check, and a pool check fails on BOTH instances at
+    # once in any DB incident, turning a slow backend into a full outage
+    # (gateway callbacks included). statement_timeout (runtimeDatabaseUrl in
+    # src/utils/db-driver-options.ts) is what frees a stuck connection instead.
     health_check:
       http_path: /health
     alerts:

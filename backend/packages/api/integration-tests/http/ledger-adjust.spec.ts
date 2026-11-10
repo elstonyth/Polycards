@@ -86,7 +86,7 @@ medusaIntegrationTestRunner({
         const { id } = await registerCustomer('ledger-test-3@test.dev');
         await api.post(
           `/admin/customers/${id}/credits`,
-          { amount: 15, note: 'goodwill credit' },
+          { amount: 15, note: 'goodwill credit', idempotency_key: 'la-goodwill' },
           { headers: adminHeaders() },
         );
         const rows = await ledgerEntryRowsFor(id, 'AD');
@@ -99,12 +99,12 @@ medusaIntegrationTestRunner({
         const { id } = await registerCustomer('ledger-test-4@test.dev');
         await api.post(
           `/admin/customers/${id}/credits`,
-          { amount: 30, note: 'seed' },
+          { amount: 30, note: 'seed', idempotency_key: 'la-seed' },
           { headers: adminHeaders() },
         );
         await api.post(
           `/admin/customers/${id}/credits`,
-          { amount: -10, note: 'correction' },
+          { amount: -10, note: 'correction', idempotency_key: 'la-correction' },
           { headers: adminHeaders() },
         );
         const rows = await ledgerEntryRowsFor(id, 'AD');
