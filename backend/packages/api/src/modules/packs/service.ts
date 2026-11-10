@@ -5771,7 +5771,8 @@ class PacksModuleService extends MedusaService({
     // charge already exists, return it as a no-op. `reversal:${id}` is the
     // per-charge reversal key.
     const [existingReversal] = await em.execute<{ id: string }[]>(
-      'SELECT id FROM credit_transaction WHERE reference = ? AND deleted_at IS NULL LIMIT 1',
+      // LIKE: lets the planner use IDX_credit_transaction_reversal_reference.
+      "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
       [`reversal:${transactionId}`],
     );
     if (existingReversal) {
@@ -5885,7 +5886,9 @@ class PacksModuleService extends MedusaService({
     const deltaMap = new Map<string, number>(); // per-customer reversal delta in cents
     for (const original of originals) {
       const [existing] = await em.execute<{ id: string }[]>(
-        'SELECT id FROM credit_transaction WHERE reference = ? AND deleted_at IS NULL LIMIT 1',
+        // The LIKE repeats IDX_credit_transaction_reversal_reference's
+        // predicate so the planner can use it; equality alone can't prove it.
+        "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
         [`reversal:${original.id}`],
       );
       if (existing) continue; // already reversed — no-op

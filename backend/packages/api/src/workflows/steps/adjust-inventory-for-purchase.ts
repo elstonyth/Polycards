@@ -1,6 +1,9 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
-import { findCardInventoryTarget } from '../../modules/packs/card-stock';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
+import {
+  adjustCardStock,
+  findCardInventoryTarget,
+} from '../../modules/packs/card-stock';
 
 export type AdjustInventoryForPurchaseInput = {
   lines: { card_handle: string; qty: number }[];
@@ -20,11 +23,13 @@ export const adjustInventoryForPurchaseStep = createStep(
   'adjust-inventory-for-purchase',
   async (input: AdjustInventoryForPurchaseInput, { container }) => {
     const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
-    const inventoryModule = container.resolve(Modules.INVENTORY);
     const done: Adjustment[] = [];
     for (const line of input.lines) {
       try {
-        const target = await findCardInventoryTarget(container, line.card_handle);
+        const target = await findCardInventoryTarget(
+          container,
+          line.card_handle,
+        );
         if (!target) {
           // Non-fatal: the product exists (the route's existence gate already
           // rejected anything that doesn't) but carries no tracked inventory
@@ -35,7 +40,8 @@ export const adjustInventoryForPurchaseStep = createStep(
           );
           continue;
         }
-        await inventoryModule.adjustInventory(
+        await adjustCardStock(
+          container,
           target.inventoryItemId,
           target.locationId,
           line.qty,
@@ -56,13 +62,8 @@ export const adjustInventoryForPurchaseStep = createStep(
     return new StepResponse(done, done satisfies CompensateData);
   },
   async (data: CompensateData, { container }) => {
-    const inventoryModule = container.resolve(Modules.INVENTORY);
     for (const a of data ?? []) {
-      await inventoryModule.adjustInventory(
-        a.inventoryItemId,
-        a.locationId,
-        -a.qty,
-      );
+      await adjustCardStock(container, a.inventoryItemId, a.locationId, -a.qty);
     }
   },
 );

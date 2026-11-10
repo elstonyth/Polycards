@@ -2,11 +2,13 @@ import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import {
   ContainerRegistrationKeys,
   MedusaError,
-  Modules,
 } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import { findCardInventoryTarget } from '../../modules/packs/card-stock';
+import {
+  adjustCardStock,
+  findCardInventoryTarget,
+} from '../../modules/packs/card-stock';
 import type { BuybackRateType } from '../../modules/packs/buyback-rate';
 import { insertOrMapDuplicate } from './duplicate-race';
 
@@ -65,8 +67,8 @@ export const buybackPullStep = createStep(
       if (pull.stock_earmarked) {
         const target = await findCardInventoryTarget(container, pull.card_id);
         if (target) {
-          const inventoryModule = container.resolve(Modules.INVENTORY);
-          await inventoryModule.adjustInventory(
+          await adjustCardStock(
+            container,
             target.inventoryItemId,
             target.locationId,
             1,
@@ -123,8 +125,8 @@ export const buybackPullStep = createStep(
     const undone = await packs.undoBuybackAtomic({ pullId: data.pullId, creditTransactionId: data.creditTransactionId, restoreEarmark: Boolean(data.stockTarget) });
     if (!undone) return;
     if (data.stockTarget) {
-      const inventoryModule = container.resolve(Modules.INVENTORY);
-      await inventoryModule.adjustInventory(
+      await adjustCardStock(
+        container,
         data.stockTarget.inventoryItemId,
         data.stockTarget.locationId,
         -1,

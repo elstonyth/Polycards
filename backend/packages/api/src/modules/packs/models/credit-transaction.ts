@@ -75,6 +75,20 @@ export const CreditTransaction = model
       on: ['customer_id', 'created_at'],
       where: 'deleted_at IS NULL',
     },
+    // One row per idempotency key for the money-in reasons (Migration20261111120000).
+    {
+      name: 'UQ_credit_txn_keyed_once',
+      on: ['customer_id', 'source_transaction_id'],
+      unique: true,
+      where:
+        "reason IN ('topup', 'cashout', 'reward_credit', 'adjustment', 'bonus_grant') AND source_transaction_id IS NOT NULL AND deleted_at IS NULL",
+    },
+    // reverseOpen reads an open's rows by this alone (Migration20261111120000).
+    {
+      name: 'IDX_credit_transaction_source_transaction_id',
+      on: ['source_transaction_id'],
+      where: 'source_transaction_id IS NOT NULL AND deleted_at IS NULL',
+    },
   ]);
 
 export default CreditTransaction;
