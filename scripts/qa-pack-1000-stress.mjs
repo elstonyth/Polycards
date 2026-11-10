@@ -189,7 +189,11 @@ try {
   await fetch(`${BASE}/admin/customers/${me.customer.id}/credits`, {
     method: 'POST',
     headers: AH,
-    body: JSON.stringify({ amount: 100, note: 'qa-stress', idempotency_key: crypto.randomUUID() }),
+    body: JSON.stringify({
+      amount: 100,
+      note: 'qa-stress',
+      idempotency_key: crypto.randomUUID(),
+    }),
   });
   const smoke = await fetch(`${BASE}/store/packs/${PACK}/open`, {
     method: 'POST',
