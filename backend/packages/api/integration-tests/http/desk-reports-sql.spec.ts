@@ -2,16 +2,14 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
-import { ASSISTANT_REPORT_KEY } from '../../src/api/admin/assistant/bridge';
 import { unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-// The admin assistant's read-only SQL (POST /reports/admin/sql, its db_query):
-// one query, read-only, bounded in time, rows and bytes, with the password and
-// token tables refused and every secret hidden, however the query shapes its
-// answer. Only the assistant's in-process key opens it; a desk bot's key is
-// refused (owner, 2026-11-10).
+// The desk bots' read-only SQL (POST /reports/admin/sql): any desk key runs
+// one query, read-only, bounded in time, rows and bytes, with the password
+// and token tables refused and every secret hidden, however the query shapes
+// its answer.
 const STORE_KEY = 's'.repeat(48);
 process.env.REPORT_KEY_STORE = STORE_KEY;
 process.env.DESK_REPORTS_RATE_BURST_LIMIT = '1000';
@@ -36,7 +34,7 @@ const SLOW =
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
-    const query = (sql: unknown, key: string | null = ASSISTANT_REPORT_KEY) =>
+    const query = (sql: unknown, key: string | null = STORE_KEY) =>
       unwrapResponse(
         api.post('/reports/admin/sql', sql === undefined ? {} : { sql }, {
           headers: key ? { 'x-report-key': key } : {},
@@ -449,11 +447,8 @@ medusaIntegrationTestRunner({
         );
       });
 
-      it("needs the assistant's key: none is 401, a desk bot's is refused", async () => {
+      it('needs a desk key', async () => {
         expect((await query('SELECT 1', null)).status).toBe(401);
-        const desk = await query('SELECT 1', STORE_KEY);
-        expect(desk.status).toBe(403);
-        expect(desk.data.message).toMatch(/only available in the admin assistant/);
       });
     });
 

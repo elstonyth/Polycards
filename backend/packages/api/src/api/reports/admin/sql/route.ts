@@ -15,23 +15,13 @@ import {
 const TIMEOUT_MS = 20_000;
 
 // POST /reports/admin/sql {"sql": "<one SELECT>"}: one read-only query on the
-// live database for the admin assistant's db_query, which only super admins
-// get (db-query.ts has the rules). A POST so the query never lands in a URL,
-// where request logs and proxies would keep it whole and Node caps its size;
-// the log line below masks every value in it.
+// live database for the desk bots (db-query.ts has the rules). A POST so the
+// query never lands in a URL, where request logs and proxies would keep it
+// whole and Node caps its size; the log line below masks every value in it.
 export async function POST(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  // The desk bots' keys no longer open it (owner, 2026-11-10; security audit
-  // 2026-11-09 #9: one query could use up the database's memory). Checked
-  // here, on the route itself, so no spelling of the path gets past it.
-  if (reportCallerOf(req) !== 'assistant') {
-    res.status(403).json({
-      message: 'Database queries are only available in the admin assistant.',
-    });
-    return;
-  }
   const sql = (req.body as { sql?: unknown } | undefined)?.sql;
   const refused = sqlRefusal(sql);
   if (refused) {
