@@ -85,6 +85,7 @@ import {
   realNameKey,
   realNameKeySql,
 } from '../../utils/real-name';
+import { numberMarkWith } from '../../utils/number-mark';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -1479,6 +1480,23 @@ type MirrorLine = {
 };
 const rmKey = (v: unknown) => (Math.round(Number(v) * 100) / 100).toFixed(2);
 
+// A bank number's fingerprint on the audit rows (#1007), under the same secret
+// as the assistant's cards (the framework's own dev default when it is unset).
+const numberMarkOf = (accountKey: string): string =>
+  numberMarkWith(process.env.JWT_SECRET || 'supersecret', accountKey);
+
+/** Whether an audit row's number is one of `keys` (one number's spellings):
+ *  by its fingerprint, or by the last 4 on a row written before rows carried
+ *  one. */
+const auditNamesNumber = (
+  after: Record<string, unknown>,
+  last4: unknown,
+  keys: string[],
+): boolean =>
+  typeof after.number_mark === 'string'
+    ? keys.some((k) => numberMarkOf(k) === after.number_mark)
+    : last4 === keys[0].slice(-4);
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -1744,6 +1762,41 @@ class PacksModuleService extends MedusaService({
     sharedContext: Context,
   ): Promise<void> {
     await this.createAdminActionAudits([row], sharedContext);
+  }
+
+  // An assistant card's change audited on this player since the card was made
+  // (`since`): its own first tap, or a colleague doing or undoing it (security
+  // audit 2026-11-09). Asked inside the write's transaction under the player's
+  // metadata lock (#1009), so a colleague's change still in flight is waited
+  // for and then seen. No `since` (not a card): nothing to check.
+  protected async refuseIfAuditedSince(
+    customerId: string,
+    since: string | undefined,
+    same: (after: Record<string, unknown>) => boolean,
+    sharedContext: Context,
+  ): Promise<void> {
+    if (since === undefined) return;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${customerId}`,
+    ]);
+    const rows = await em.execute<{ after: unknown }[]>(
+      "SELECT after FROM admin_action_audit WHERE entity_type = 'customer' AND entity_id = ? AND action = 'edit' AND created_at > ? AND deleted_at IS NULL",
+      [customerId, since],
+    );
+    if (
+      rows.some(
+        (r) =>
+          typeof r.after === 'object' &&
+          r.after !== null &&
+          same(r.after as Record<string, unknown>),
+      )
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.',
+      );
+    }
   }
 
   // Apply a pack-membership diff (add rows + delete rows + renormalize
@@ -10215,10 +10268,21 @@ class PacksModuleService extends MedusaService({
        *  every one (owner, 2026-11-04: "allow, list them all"). Given, any
        *  number of them may be cleared, but only those; without it, one. */
       onlyWith?: string[];
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const key = holderNameKey(input.holderName);
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) =>
+        'cleared' in a &&
+        typeof a.holder_name === 'string' &&
+        holderNameKey(a.holder_name) === key,
+      sharedContext,
+    );
     const holders = input.cleared
       ? await this.holderNameHolders(
           input.customerId,
@@ -10530,6 +10594,8 @@ class PacksModuleService extends MedusaService({
       bankCode: string;
       fromIds: string[];
       reason: string;
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ from: { customer_id: string; saved: number; payouts: number }[] }> {
@@ -10546,6 +10612,12 @@ class PacksModuleService extends MedusaService({
     // A PayNow mobile is one number with or without its 65, as bank_save_check
     // and the ban list read it: holders, payouts and saved entries under both.
     const forms = accountNumberForms(bank.id, key);
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) => 'held_by' in a && auditNamesNumber(a, a.account_last4, forms),
+      sharedContext,
+    );
     const holders = async () => {
       const ids = new Set<string>();
       for (const form of forms) {
@@ -10669,7 +10741,12 @@ class PacksModuleService extends MedusaService({
         entity_id: input.customerId,
         action: 'edit',
         before: { bank_code: bank.id, account_last4: last4, held_by: before },
-        after: { bank_code: bank.id, account_last4: last4, held_by: [] },
+        after: {
+          bank_code: bank.id,
+          account_last4: last4,
+          number_mark: numberMarkOf(key),
+          held_by: [],
+        },
         reason: `Freed bank number …${last4} from ${before.length} other account${before.length === 1 ? '' : 's'} so this player can save it: ${input.reason}`,
       },
       sharedContext,
@@ -10817,6 +10894,10 @@ class PacksModuleService extends MedusaService({
       reason: string;
       /** Admins only: see resolveBannedPayoutAccount. */
       fromBanList?: boolean;
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
+      /** The card's fingerprint of the number it was made for (#1007). */
+      numberMark?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ bank_code: string; last4: string; lifted: boolean; changed: boolean }> {
@@ -10825,6 +10906,30 @@ class PacksModuleService extends MedusaService({
       input.last4,
       input.bankCode,
       input.fromBanList === true,
+      sharedContext,
+    );
+    // These last 4 can mean another number by the time of the tap (the player
+    // dropped theirs and the ban-list fallback finds one elsewhere): the card
+    // lifts only the number the person was shown.
+    if (
+      input.numberMark !== undefined &&
+      numberMarkOf(hit.account_key) !== input.numberMark
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `The banned number ending ${hit.last4} is not the one this was proposed for any more. Ask again.`,
+      );
+    }
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) =>
+        'lifted_for_player' in a &&
+        auditNamesNumber(
+          a,
+          (a.banned_number as { last4?: unknown } | undefined)?.last4,
+          [hit.account_key],
+        ),
       sharedContext,
     );
     let changed = false;
@@ -10865,6 +10970,7 @@ class PacksModuleService extends MedusaService({
             banned_number: { bank_code: hit.bank_code, last4: hit.last4 },
             lifted_for_player: input.lifted,
             found_on: hit.found_on,
+            number_mark: numberMarkOf(hit.account_key),
           },
           reason: `${input.lifted ? 'Unbanned' : 'Banned again'} bank number …${hit.last4} for this player: ${input.reason}`,
         },

@@ -28,8 +28,6 @@ const PEOPLE: Record<string, { first_name: string; handle: string }> = {
 let banned: string[] = [];
 let realName: string | null = 'Tan Ah Kow';
 let metadata: Record<string, unknown> = {};
-// admin_action_audit rows written after a card was made.
-let audits: { after: Record<string, unknown> }[] = [];
 
 const packs = {
   findCustomerIdByUsername: jest.fn(),
@@ -56,7 +54,6 @@ const packs = {
   holderNameHolders: jest.fn(),
   freePayoutAccount: jest.fn(),
   setHolderNameCleared: jest.fn(),
-  listAdminActionAudits: jest.fn(async () => audits),
 };
 const customers = {
   listCustomers: jest.fn(async (filter: { id: string | string[] }) =>
@@ -101,7 +98,6 @@ beforeEach(() => {
   banned = ['cus_y1'];
   realName = 'Tan Ah Kow';
   metadata = {};
-  audits = [];
   packs.findCustomerIdByUsername.mockImplementation(async (n: string) =>
     n.toLowerCase() === 'test player' ? 'cus_x' : null,
   );
@@ -686,6 +682,7 @@ describe('saveProposal: free_number and name_clash', () => {
       bankCode: 'MBBEMYKL',
       fromIds: ['cus_y1'],
       reason: 'owner approved',
+      since: '2026-11-09T10:00:00.000Z',
     });
   });
 
@@ -719,6 +716,7 @@ describe('saveProposal: free_number and name_clash', () => {
       cleared: true,
       reason: 'different people',
       onlyWith: ['cus_y1', 'cus_y2'],
+      since: '2026-11-09T10:00:00.000Z',
     });
   });
 
@@ -740,26 +738,33 @@ describe('saveProposal: free_number and name_clash', () => {
   });
 
   // Security audit 2026-11-09: a take-back leaves no stamp, so an old button
-  // would clear the name again; the audit since the card was made tells.
+  // would clear the name again. The service checks the audit since the card's
+  // time in its own transaction (#1009; the SQL in card-checks.integration.spec).
   it('an old button is refused once its own change was audited since', async () => {
-    await saveProposal(NAME, admin, container);
-    // A colleague took the clearing back (the name keyed as saves key it).
-    audits = [{ after: { holder_name: 'TAN AH KOW', cleared: false, with: [] } }];
+    const since = new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.',
+    );
+    packs.setHolderNameCleared.mockRejectedValueOnce(since);
     await expect(saveProposal(NAME, admin, container)).rejects.toThrow(
       /since it was proposed/,
     );
-    expect(packs.setHolderNameCleared).toHaveBeenCalledTimes(1);
-    // Another name's clearing leaves the number card alone; its own free
-    // refuses it.
-    audits = [{ after: { holder_name: 'Someone Else', cleared: true } }];
-    await saveProposal(FREE, admin, container);
-    audits = [
-      { after: { bank_code: 'MBBEMYKL', account_last4: '0001', held_by: [] } },
-    ];
+    packs.payoutAccountsOf.mockResolvedValue([
+      { account_key: KEY, bank_code: 'MBBEMYKL', wallet: false },
+    ]);
+    packs.freePayoutAccount.mockRejectedValueOnce(since);
     await expect(saveProposal(FREE, admin, container)).rejects.toThrow(
       /since it was proposed/,
     );
-    expect(packs.freePayoutAccount).toHaveBeenCalledTimes(1);
+    // A card sealed before cards carried their time: refused, never applied.
+    jest.clearAllMocks();
+    for (const card of [NAME, FREE]) {
+      await expect(
+        saveProposal({ ...card, proposed_at: undefined } as Proposal, admin, container),
+      ).rejects.toBeInstanceOf(ConfirmRefused);
+    }
+    expect(packs.setHolderNameCleared).not.toHaveBeenCalled();
+    expect(packs.freePayoutAccount).not.toHaveBeenCalled();
   });
 
   it('a changed account, a payout on its way or a second tap reads as refused', async () => {
