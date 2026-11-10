@@ -136,9 +136,9 @@ describe('tgpay deposit callback — settlement', () => {
     expect(h.packs.claimDepositStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'gpd_1',
-        // Claimed FROM the status the route read, not a literal 'pending' —
-        // the recovery branch below arrives with a written-off row.
-        from: ['pending'],
+        // Claimed FROM every unsettled status: the credit has committed, so
+        // the row settles whatever it moved to since the route read it.
+        from: ['pending', 'failed', 'expired'],
         to: 'settled',
         set: expect.objectContaining({ gateway_transaction_id: 'tx-1' }),
         money: expect.objectContaining({ amount_settled: 50 }),

@@ -5,8 +5,9 @@ import { deniedWithoutRefund } from './gateway-withdrawal';
 // card, sell-back credit then flip, Deny's close then refund. A process dying in
 // between leaves one half. Nothing else revisits these, so this names them.
 //
-// Detection only, on purpose. Reversing a charge or flipping a card here could
-// race the workflow it thinks is dead, and these are rare enough for a person.
+// Detection only. The money-integrity job refunds the first kind
+// (refundUnfinishedOpen, under the per-open lock the card write takes, so the
+// two never both land). The other two are rare enough for a person.
 
 /** Long enough that a workflow still running has finished. */
 const SETTLE_MS = 15 * 60 * 1000;

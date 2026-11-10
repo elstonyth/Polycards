@@ -11961,6 +11961,31 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Awaited<ReturnType<PacksModuleService['createPulls']>>> {
+    // First, before any write: the lock refundUnfinishedOpen takes too, so a
+    // refund of this open and its card can never both commit.
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `open:${input.ledger.openId}`,
+    ]);
+    // Runs on every open, so both lookups are index conditions: the charge on
+    // its unique open_id index (at most one row), its reversal on the
+    // reversal-reference index, whose predicate the literal LIKE matches.
+    const [refunded] = await em.execute<{ id: string }[]>(
+      `SELECT id FROM credit_transaction
+        WHERE reference = (SELECT 'reversal:' || id FROM credit_transaction
+                            WHERE source_transaction_id = ? AND reason = 'pack_open'
+                              AND amount < 0 AND deleted_at IS NULL)
+          AND reference LIKE 'reversal:%' AND deleted_at IS NULL
+        LIMIT 1`,
+      [input.ledger.openId],
+    );
+    if (refunded) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This open was refunded, so its card was not recorded.',
+      );
+    }
+
     const pulls = await this.createPulls(input.pulls.map(pull => ({ ...pull, flip_eligible_at: null })), sharedContext);
 
     const vaultDelta =
@@ -13599,6 +13624,9 @@ class PacksModuleService extends MedusaService({
     const from = since.toISOString();
     const to = until.toISOString();
     // The pull's rolled_at comes a moment before its charge, hence the margin.
+    // The money-integrity job REFUNDS every open_without_prize row
+    // (refundUnfinishedOpen), so a new debit booked as 'pack_open' must record
+    // a pull or ticket_spin on its open_id, or it is paid back an hour later.
     const rolledFrom = new Date(since.getTime() - 60 * 60 * 1000).toISOString();
     return em.execute(
       `SELECT 'open_without_prize' AS kind, ct.id, ct.customer_id, -ct.amount AS amount, ct.created_at AS at
@@ -13631,6 +13659,42 @@ class PacksModuleService extends MedusaService({
         LIMIT 100`,
       [from, to, rolledFrom, from, to],
     );
+  }
+
+  /**
+   * The repair for an open_without_prize row: refund an open that was charged
+   * with nothing recorded for it (the process died between the charge and the
+   * card). Under the per-open lock recordPullsWithLedger takes first, so a
+   * card landing at the same moment either commits before this looks, and
+   * nothing is refunded, or finds the refund and is refused.
+   */
+  @InjectTransactionManager()
+  async refundUnfinishedOpen(
+    chargeId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<'refunded' | 'already' | 'has_prize' | 'not_found'> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const [charge] = await em.execute<{ open_id: string }[]>(
+      `SELECT source_transaction_id AS open_id FROM credit_transaction
+        WHERE id = ? AND reason = 'pack_open' AND amount < 0
+          AND source_transaction_id IS NOT NULL AND deleted_at IS NULL
+          AND (reference IS NULL OR reference NOT LIKE 'reversal:%')`,
+      [chargeId],
+    );
+    if (!charge) return 'not_found';
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `open:${charge.open_id}`,
+    ]);
+    const [prize] = await em.execute<{ x: number }[]>(
+      `SELECT 1 AS x FROM pull WHERE open_id = ? AND deleted_at IS NULL
+       UNION ALL
+       SELECT 1 FROM ticket_spin WHERE open_id = ? AND deleted_at IS NULL
+       LIMIT 1`,
+      [charge.open_id, charge.open_id],
+    );
+    if (prize) return 'has_prize';
+    const { reversed } = await this.reverseOpen(charge.open_id, sharedContext);
+    return reversed > 0 ? 'refunded' : 'already';
   }
 
   @InjectManager()

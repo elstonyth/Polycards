@@ -112,7 +112,7 @@ describe('deposit sweep — settling from a requery', () => {
     expect(h.packs.claimDepositStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'gpd_1',
-        from: ['pending'],
+        from: ['pending', 'failed', 'expired'],
         to: 'settled',
         money: expect.objectContaining({
           amount_settled: 50,
@@ -144,7 +144,7 @@ describe('deposit sweep — settling from a requery', () => {
     );
     expect(h.packs.claimDepositStatus).toHaveBeenCalledWith(
       expect.objectContaining({
-        from: ['pending'],
+        from: ['pending', 'failed', 'expired'],
         to: 'settled',
         money: expect.objectContaining({ amount_settled: 60 }),
       }),
