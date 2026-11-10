@@ -10896,6 +10896,8 @@ class PacksModuleService extends MedusaService({
       fromBanList?: boolean;
       /** An assistant card's time: refuseIfAuditedSince. */
       since?: string;
+      /** The card's fingerprint of the number it was made for (#1007). */
+      numberMark?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ bank_code: string; last4: string; lifted: boolean; changed: boolean }> {
@@ -10906,6 +10908,18 @@ class PacksModuleService extends MedusaService({
       input.fromBanList === true,
       sharedContext,
     );
+    // These last 4 can mean another number by the time of the tap (the player
+    // dropped theirs and the ban-list fallback finds one elsewhere): the card
+    // lifts only the number the person was shown.
+    if (
+      input.numberMark !== undefined &&
+      numberMarkOf(hit.account_key) !== input.numberMark
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `The banned number ending ${hit.last4} is not the one this was proposed for any more. Ask again.`,
+      );
+    }
     await this.refuseIfAuditedSince(
       input.customerId,
       input.since,

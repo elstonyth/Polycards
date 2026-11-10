@@ -51,6 +51,9 @@ export type Proposal =
       username: string;
       bank_code: string;
       last4: string;
+      /** numberMark of the number the card was made for (#1007): the tap
+       *  lifts only that one. None on a card sealed before cards carried it. */
+      number_mark?: string;
       reason: string;
       /** Set from the token's seal (openProposal). */
       proposed_at?: string;
@@ -278,6 +281,7 @@ export async function saveProposal(
           access.superAdmin || ((await access.can?.(BAN_LIST_NEED)) ?? false),
         // Lifted, or banned again, since this card was made: refused.
         since,
+        numberMark: proposal.number_mark,
       });
     } catch (err) {
       // The ban is gone, or now matches more than one number.

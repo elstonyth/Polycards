@@ -2,6 +2,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { AGENT_TOOLS } from '../agent-tools';
 import {
   ConfirmRefused,
+  numberMark,
   saveProposal,
   scheduledRunAllows,
   UNBAN_NEED,
@@ -25,8 +26,10 @@ const customers = {
     { first_name: 'TestPlayer', metadata: { handle: 'Test_Handle' } },
   ]),
 };
+const config = { projectConfig: { http: { jwtSecret: 'test-secret' } } };
 const container = {
-  resolve: (k: string) => (k === 'customer' ? customers : packs),
+  resolve: (k: string) =>
+    k === 'customer' ? customers : k === 'configModule' ? config : packs,
 } as never;
 const admin = { userId: 'user_1', superAdmin: true };
 const tool = AGENT_TOOLS.find((t) => t.name === 'unban_bank_number')!;
@@ -79,6 +82,8 @@ describe('unban_bank_number', () => {
         username: 'TestPlayer',
         bank_code: 'MBBEMYKL',
         last4: '0001',
+        // The number it resolved, fingerprinted: never the number itself.
+        number_mark: numberMark('512345670001', container),
         reason: 'owner approved',
       },
       expect.stringMatching(
@@ -140,6 +145,7 @@ describe('saveProposal unban_number', () => {
     username: 'TestPlayer',
     bank_code: 'MBBEMYKL',
     last4: '0001',
+    number_mark: 'mark-of-0001',
     reason: 'owner approved',
     proposed_at: '2026-11-09T10:00:00.000Z',
   };
@@ -159,6 +165,7 @@ describe('saveProposal unban_number', () => {
       reason: 'owner approved',
       fromBanList: true,
       since: '2026-11-09T10:00:00.000Z',
+      numberMark: 'mark-of-0001',
     });
   });
 

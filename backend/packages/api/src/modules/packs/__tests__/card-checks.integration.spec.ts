@@ -134,6 +134,30 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(JSON.stringify(rows)).not.toMatch(/5123456|8877665/);
     });
 
+    it('an unban card lifts only the number it was made for (#1007)', async () => {
+      const mark = (key: string) =>
+        numberMarkWith(process.env.JWT_SECRET || 'supersecret', key);
+      const card = (bankCode: string, numberMark: string) =>
+        service.setPayoutBanLifted({
+          customerId: 'cus_player',
+          adminId: 'user_1',
+          last4: '1234',
+          bankCode,
+          lifted: true,
+          reason: 'owner approved',
+          since,
+          numberMark,
+        });
+      // The last 4 and bank now resolve to a number the card was not made for.
+      await expect(card('MBBEMYKL', mark(PUBLIC_BANK))).rejects.toThrow(
+        /not the one this was proposed for/,
+      );
+      expect(liftedPayoutBans(await metadataOf('cus_player'))).toEqual({});
+      await expect(card('MBBEMYKL', mark(MAYBANK))).resolves.toMatchObject({
+        changed: true,
+      });
+    });
+
     it('a free card is not refused by a free of another number with the same last 4; a replay is (#1007)', async () => {
       await expect(free(MAYBANK, 'cus_twin')).resolves.toBeTruthy();
       await expect(free(OTHER_MAYBANK, 'cus_other')).resolves.toBeTruthy();
