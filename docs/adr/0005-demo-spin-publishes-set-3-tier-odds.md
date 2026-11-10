@@ -1,5 +1,9 @@
 # The guest demo spin publishes odds set 3's tier split
 
+> **SUPERSEDED 2026-11-11 (owner): only published odds may reach the storefront or any
+> customer.** `demo_odds` is now always `null` and `demoTierSplit` is deleted; the demo spin
+> rolls `published_odds`. Kept for the history of why the field exists.
+
 The logged-out demo spin (`/slots/:slug/spin?demo=1`) draws client-side. It used
 to sample the pack's admin-authored `published_odds` — marketing copy, not a
 distribution anyone plays — so the pre-signup taste was theater over theater.
