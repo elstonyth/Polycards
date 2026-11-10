@@ -294,5 +294,82 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect((await metadataOf('cus_twin')).bank_accounts).toHaveLength(2);
       expect(await service.listAdminActionAudits({})).toEqual([]);
     });
+
+    // Issue #1008: a PayNow mobile is one number with or without its 65, as
+    // bank_save_check and the ban list read it (accountNumberForms).
+    describe('a PayNow mobile, with or without its 65', () => {
+      const LOCAL = '91234567';
+      const FULL = `65${LOCAL}`;
+      const holds = async (id: string, accountNumber: string) => {
+        await em().execute(
+          'insert into "customer" ("id", "metadata") values (?, ?::jsonb)',
+          [
+            id,
+            JSON.stringify({
+              bank_accounts: [
+                {
+                  ...saved(accountNumber),
+                  id: savedBankAccountId('PAYNOWSG', accountNumber),
+                  bankCode: 'PAYNOWSG',
+                  bankName: 'PayNow',
+                },
+              ],
+            }),
+          ],
+        );
+        await service.createGatewayWithdrawals([
+          {
+            merchant_transaction_id: `PW-FREE-${id}`,
+            customer_id: id,
+            amount: 100,
+            bank_code: 'PAYNOWSG',
+            account_number: accountNumber,
+            account_holder_name: NAME,
+            gateway: 'fake',
+            status: 'settled',
+          },
+        ]);
+      };
+      const free = (accountKey: string, fromIds: string[]) =>
+        service.freePayoutAccount({
+          customerId: 'cus_player',
+          adminId: 'user_1',
+          accountKey,
+          bankCode: 'PAYNOWSG',
+          fromIds,
+          reason: 'owner approved',
+        });
+
+      it.each([
+        [LOCAL, FULL],
+        [FULL, LOCAL],
+      ])('a request for %s frees a holder of %s', async (asked, stored) => {
+        await holds('cus_paynow', stored);
+        await expect(free(asked, ['cus_paynow'])).resolves.toEqual({
+          from: [{ customer_id: 'cus_paynow', saved: 1, payouts: 1 }],
+        });
+        expect((await metadataOf('cus_paynow')).bank_accounts).toEqual([]);
+        const [row] = await em().execute<{ account_number: string }[]>(
+          "select account_number from gateway_withdrawal where customer_id = 'cus_paynow'",
+        );
+        expect(row.account_number).toBe('4567');
+        for (const k of [LOCAL, FULL]) {
+          expect(
+            await service.payoutAccountHoldersAt('cus_player', k, 'PAYNOWSG'),
+          ).toEqual([]);
+        }
+      });
+
+      it('still refuses a holder of the other spelling the card did not list', async () => {
+        await holds('cus_local', LOCAL);
+        await holds('cus_full', FULL);
+        await expect(free(LOCAL, ['cus_local'])).rejects.toThrow(
+          /now holds PayNow \(mobile number\) …4567 too/,
+        );
+        expect((await metadataOf('cus_local')).bank_accounts).toHaveLength(1);
+        expect((await metadataOf('cus_full')).bank_accounts).toHaveLength(1);
+        expect(await service.listAdminActionAudits({})).toEqual([]);
+      });
+    });
   },
 });

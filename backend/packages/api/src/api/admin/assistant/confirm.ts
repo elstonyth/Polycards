@@ -10,7 +10,7 @@ import { MAX_SCHEDULES, nextRun } from './schedule';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { LASTING_WRITES, type Need } from './access';
-import { findBank } from '../../../modules/packs/banks';
+import { accountNumberForms, findBank } from '../../../modules/packs/banks';
 import {
   holderNameKey,
   PERMANENT_BAN_REASON_PREFIX,
@@ -389,7 +389,10 @@ export async function saveProposal(
         .find(
           (k) =>
             k.slice(-4) === proposal.last4 &&
-            numberMark(k, container) === proposal.number_mark,
+            // The card may carry the other PayNow spelling (with or without 65).
+            accountNumberForms(proposal.bank_code, k).some(
+              (f) => numberMark(f, container) === proposal.number_mark,
+            ),
         );
       if (!key) {
         throw new ConfirmRefused(
