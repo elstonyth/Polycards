@@ -11175,6 +11175,14 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<string> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // Lock-free read first: every /store/referral view calls this, and a code
+    // never changes once set, so only a customer WITHOUT one needs the global
+    // lock below (audit 2026-11-11: all views queued on one lock).
+    const [existing] = await em.execute<{ code: string | null }[]>(
+      "SELECT metadata->>'referral_code' AS code FROM customer WHERE id = ? AND deleted_at IS NULL",
+      [input.customerId],
+    );
+    if (typeof existing?.code === 'string') return existing.code;
     // Global first, then the per-customer lock mutateCustomerMetadata takes —
     // always in this order, so the two can never deadlock.
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [

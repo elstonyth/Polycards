@@ -673,7 +673,7 @@ medusaIntegrationTestRunner({
       const res = await unwrapResponse(
         api.post(
           `/admin/customers/${customerId}/credits`,
-          { amount: 5, note: 'x', kind: 'gold' },
+          { amount: 5, note: 'x', kind: 'gold', idempotency_key: 'bad-kind' },
           { headers: admin() },
         ),
       );

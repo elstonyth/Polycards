@@ -28,11 +28,15 @@ import { buildChallengeView } from './build';
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
 let challengeCache: { expires: number; body: unknown } | null = null;
+// Single-flight: misses during an expiry window share ONE build (audit
+// 2026-11-11; the build alone takes three pool connections).
+let inFlight: Promise<unknown> | null = null;
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
  *  one process, so test A's cached challenge would be served to test B. */
 export function clearChallengeCache(): void {
   challengeCache = null;
+  inFlight = null;
 }
 
 export async function GET(
@@ -44,7 +48,13 @@ export async function GET(
     return;
   }
 
-  const { body } = await buildChallengeView(req.scope);
-  challengeCache = { expires: Date.now() + CACHE_TTL_MS, body };
-  res.json(body);
+  inFlight ??= buildChallengeView(req.scope)
+    .then(({ body }) => {
+      challengeCache = { expires: Date.now() + CACHE_TTL_MS, body };
+      return body;
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+  res.json(await inFlight);
 }

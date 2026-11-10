@@ -30,6 +30,7 @@ import {
 import { timeAgo } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { GiftAndBonusPanels } from './gift-and-bonus';
+import { attemptKey, settleAttempt } from './grant-attempts';
 import { LuckyDrawTicketsPanel } from './lucky-draw-tickets';
 import { MoneySummary, PeriodsCard, PlayCard } from './MoneyCards';
 import { HistoryTab } from './HistoryTab';
@@ -211,11 +212,29 @@ const Customer360Page = () => {
       toast.error(t('support.adjustInvalid'));
       return;
     }
-    if (!creditNote.trim()) return;
+    const note = creditNote.trim();
+    if (!note) return;
     closeModal();
+    // Same retry-safe key as the bonus panel: a re-press after a lost
+    // response replays the key instead of crediting twice.
+    const slot = `adjust:${customerId}`;
     adjustCredits.mutate(
-      { id: customerId, amount, note: creditNote },
-      { onSuccess: () => toast.success('Credits adjusted') },
+      {
+        id: customerId,
+        amount,
+        note,
+        idempotencyKey: attemptKey(
+          slot,
+          JSON.stringify([customerId, amount, note]),
+        ),
+      },
+      {
+        onSuccess: () => {
+          settleAttempt(slot);
+          toast.success('Credits adjusted');
+        },
+        onError: (e) => settleAttempt(slot, e),
+      },
     );
   }
 

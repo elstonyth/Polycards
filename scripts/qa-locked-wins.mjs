@@ -120,7 +120,7 @@ const custId = me.customer?.id;
 const credit = await fetch(`${BASE}/admin/customers/${custId}/credits`, {
   method: 'POST',
   headers: AH,
-  body: JSON.stringify({ amount: 20, note: 'QA locked-wins verification' }),
+  body: JSON.stringify({ amount: 20, note: 'QA locked-wins verification', idempotency_key: crypto.randomUUID() }),
 });
 console.log('credit top-up:', credit.status);
 
