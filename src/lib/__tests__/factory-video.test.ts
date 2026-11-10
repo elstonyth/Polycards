@@ -17,6 +17,7 @@ describe('factoryVideo', () => {
       'chaos',
       'kanto',
       'lucky',
+      'delta',
       'capsulebronze',
       'capsulesilver',
       'capsulegold',
