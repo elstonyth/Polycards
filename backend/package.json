@@ -10,14 +10,14 @@
     "test": "turbo run test"
   },
   "dependencies": {
-    "@hookform/resolvers": "5.9.1",
+    "@hookform/resolvers": "7.0.3",
     "@medusajs/icons": "2.19.0",
     "@medusajs/ui": "4.2.1",
     "@mercurjs/client": "2.3.3",
     "@mercurjs/dashboard-sdk": "2.3.3",
     "@mercurjs/dashboard-shared": "2.3.3",
-    "@tanstack/react-query": "5.105.0",
-    "i18next": "26.5.11",
+    "@tanstack/react-query": "5.107.1",
+    "i18next": "26.7.2",
     "jsonwebtoken": "9.0.3",
     "lodash": "^4.18.1",
     "react": "^18.3.1",
@@ -25,7 +25,7 @@
     "react-hook-form": "7.91.0",
     "react-i18next": "13.5.0",
     "react-jwt": "^2.0.0",
-    "react-router-dom": "7.18.4",
+    "react-router-dom": "7.18.5",
     "zod": "4.6.7"
   },
   "resolutions": {
@@ -46,7 +46,7 @@
     "minimatch@npm:^10.0.1": "^11.0.5",
     "minimatch@npm:^10.2.2": "^11.0.5",
     "minimatch@npm:^10.2.4": "^11.0.5",
-    "minimatch@npm:^10.2.5": "^11.0.5",
+    "minimatch@npm:^10.2.6": "^11.0.5",
     "glob@npm:^10.4.1": "^14.0.4",
     "glob@npm:13.0.6": "^14.0.4",
     "glob@npm:^13.0.6": "^14.0.4",
@@ -61,8 +61,8 @@
     "@medusajs/admin-shared@2.18.0": "2.19.0",
     "@medusajs/icons@2.18.0": "2.19.0",
     "@medusajs/ui@4.1.19": "4.2.1",
-    "react-router": "7.18.4",
-    "react-router-dom": "7.18.4"
+    "react-router": "7.18.5",
+    "react-router-dom": "7.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -72,15 +72,15 @@
     "@types/react": "^18.3.2",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.2.1",
-    "eslint": "^10.13.0",
+    "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.7",
-    "globals": "^17.13.0",
+    "globals": "^17.14.0",
     "prettier": "^3.9.10",
     "ts-node": "^10.9.2",
     "turbo": "^2.11.10",
     "typescript": "5.9.3",
-    "typescript-eslint": "^8.72.0",
+    "typescript-eslint": "^8.72.1",
     "vite": "^7.3.7"
   },
   "engines": {
