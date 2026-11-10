@@ -28,6 +28,9 @@ vi.mock('../DrawDotProvider', () => ({
 }));
 
 const TabBar = (await import('../TabBar')).default;
+// Loaded here, not in its test: under full-suite load this import alone can
+// outlast the 5 s test timeout, and the late render then lands in the next test.
+const { GamesSheetBody } = await import('../GamesSheetBody');
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -111,7 +114,6 @@ describe('Games tab', () => {
   });
 
   test('Coin Flip is open: the tile goes to the game', async () => {
-    const { GamesSheetBody } = await import('../GamesSheetBody');
     await act(async () =>
       root.render(createElement(GamesSheetBody, { openedOn: '/' })),
     );
