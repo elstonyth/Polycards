@@ -83,8 +83,8 @@ describe('GlobalFreePackBadge', () => {
     expect(container.textContent).toBe('');
   });
 
-  test('/vault, /leaderboard, /slots/<slug> → no fetch, no render', async () => {
-    for (const p of ['/vault', '/leaderboard', '/slots/some-pack']) {
+  test('/ (home hero owns it), /vault, /leaderboard, /slots/<slug> → no fetch, no render', async () => {
+    for (const p of ['/', '/vault', '/leaderboard', '/slots/some-pack']) {
       pathname = p;
       fetchMock.mockReset();
       // A claim answer, so a stray fetch would visibly render the badge —
@@ -102,7 +102,7 @@ describe('GlobalFreePackBadge', () => {
   });
 
   test('malformed fetch payload fails to hidden', async () => {
-    pathname = '/';
+    pathname = '/task';
     // mode:'claim' with no slug — not a valid claim, not a signup either.
     fetchMock.mockResolvedValue(okJson({ mode: 'claim' }));
 
@@ -115,7 +115,7 @@ describe('GlobalFreePackBadge', () => {
   });
 
   test('second navigation within 30s, same identity → one fetch; identity change refetches', async () => {
-    pathname = '/';
+    pathname = '/task';
     fetchMock.mockResolvedValue(okJson({ mode: 'signup' }));
     await mount();
     expect(fetchMock).toHaveBeenCalledTimes(1);

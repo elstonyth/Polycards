@@ -44,19 +44,14 @@ try {
     await ticket.waitFor({ state: 'visible' });
     await page.getByTestId('free-pack-badge').waitFor({ state: 'visible' });
     const bounds = await ticket.boundingBox();
-    assert(bounds && bounds.width >= 160 && bounds.width <= 241);
+    // A 44px matte chip since 2026-11-11 (the neon ticket image is gone).
+    assert(bounds && Math.round(bounds.height) === 44);
     assert(bounds.x >= 0 && bounds.x + bounds.width <= width);
     assert(bounds.y >= 0 && bounds.y + bounds.height <= height);
     assert.equal(
       await ticket.locator('a').getAttribute('href'),
       'https://t.me/polycardsgg',
     );
-    await page.waitForFunction(() => {
-      const img = document.querySelector('[data-telegram-banner] img');
-      return (
-        img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0
-      );
-    });
     const pack = await page.getByTestId('free-pack-badge').boundingBox();
     assert(pack.y + pack.height <= bounds.y - 8, 'Badges overlap');
     if (width < 1024) {
@@ -100,6 +95,13 @@ try {
       await ticket.count(),
       1,
       'Telegram link does not dismiss banner',
+    );
+    // Home shows no floating rail: the footer carries the Telegram link.
+    await page.goto(`${base}/`, { waitUntil: 'networkidle' });
+    assert.equal(await ticket.count(), 0, 'Telegram chip must stay off home');
+    assert.equal(
+      await page.locator('footer a[href="https://t.me/polycardsgg"]').count(),
+      1,
     );
     console.log(
       `${width}x${height}: sizing, navigation clearance, stacking, focus, link passed`,

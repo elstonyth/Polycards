@@ -457,9 +457,17 @@ try {
         await shot(gp, 'guest-badge-auth-modal');
       }
     }
-    // Site-wide mount: the same guest also sees the badge OFF /slots (layout's
-    // GlobalFreePackBadge). Home is the representative "any other page".
+    // Home carries the offer inline in its hero, not as the floating badge.
     await gp.goto(`${BASE}/`, { waitUntil: 'load' });
+    if (await gp.getByTestId('hero-free-pack').isVisible()) {
+      ok('guest sees the free-pack row in the home hero');
+    } else fail('guest free-pack row missing from the home hero');
+    if (await gp.getByTestId('free-pack-badge').count()) {
+      fail('floating badge must stay off / (the hero owns the offer)');
+    }
+    // Site-wide mount: the same guest also sees the badge OFF /slots (layout's
+    // GlobalFreePackBadge). /about is the representative "any other page".
+    await gp.goto(`${BASE}/about`, { waitUntil: 'load' });
     let homeBadgeVisible = true;
     try {
       await gp
@@ -469,8 +477,8 @@ try {
     } catch {
       homeBadgeVisible = false;
     }
-    if (homeBadgeVisible) ok('guest badge visible on / (global mount)');
-    else fail('guest badge missing on / — global mount broken');
+    if (homeBadgeVisible) ok('guest badge visible on /about (global mount)');
+    else fail('guest badge missing on /about — global mount broken');
     await shot(gp, 'guest-badge-home');
     await guest.close();
   }
@@ -510,7 +518,7 @@ try {
   } else {
     fail(`claim badge href is ${badgeHref}, want /slots/${SLUG}/spin`);
   }
-  await page.goto(`${BASE}/`, { waitUntil: 'load' });
+  await page.goto(`${BASE}/about`, { waitUntil: 'load' });
   let memberHomeBadge = true;
   try {
     await page
@@ -520,8 +528,8 @@ try {
   } catch {
     memberHomeBadge = false;
   }
-  if (memberHomeBadge) ok('member badge visible on / (global mount)');
-  else fail('member badge missing on / — global mount broken');
+  if (memberHomeBadge) ok('member badge visible on /about (global mount)');
+  else fail('member badge missing on /about — global mount broken');
   await shot(page, 'member-badge-home');
   await visitCatalogWithBadge(page);
 

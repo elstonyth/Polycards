@@ -1,16 +1,20 @@
 import Link from 'next/link';
-import { ArrowRight, ArrowUpRight, Layers2, Truck } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Truck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import { HeroSlabs } from './HeroSlabs';
+import { HeroFreePack } from './HeroFreePack';
 import { type Pack, type PackCard } from '@/lib/packs-data';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 /** Brand artwork stays visible even when the live catalog is unavailable. */
 export default function HeroBoard({
   hits,
+  freePackPromo,
 }: {
   hits: { card: PackCard; pack: Pack }[];
+  /** Is a free welcome pack on offer to a new visitor (getFreePackPromo). */
+  freePackPromo: boolean;
 }) {
   return (
     <section
@@ -18,10 +22,6 @@ export default function HeroBoard({
       className="px-fluid relative grid w-full gap-x-8 pt-6 pb-6 lg:min-h-[680px] lg:grid-cols-[1fr_1.05fr] lg:content-center lg:pt-14 lg:pb-10 xl:gap-x-16"
     >
       <div className="relative z-10 text-center lg:col-start-1 lg:row-start-1 lg:self-end lg:pl-[3vw] lg:text-left">
-        <p className="rise-in mb-4 flex items-center justify-center gap-2 text-[11px] font-semibold tracking-[0.18em] text-neutral-400 uppercase lg:justify-start">
-          <Layers2 className="h-4 w-4" aria-hidden />
-          The collector’s next great find
-        </p>
         <h1
           id="hero-heading"
           className="rise-in font-heading text-[clamp(2.75rem,6.1vw,6.5rem)] leading-[0.98] tracking-[-0.04em] text-white [--i:1]"
@@ -71,6 +71,7 @@ export default function HeroBoard({
           <span className="h-3 border-l border-white/15" aria-hidden />
           <span>{BUYBACK_RATE_LABEL} vault buyback</span>
         </p>
+        <HeroFreePack promo={freePackPromo} />
       </div>
 
       <ol

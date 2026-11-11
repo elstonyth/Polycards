@@ -57,7 +57,7 @@ const QUICK_ANSWERS = [
     num: '03',
     title: 'PULL ODDS & VERIFICATION',
     copy: 'Review pack odds before opening. Independent per-pull verification is not available yet.',
-    href: '/fairness',
+    href: '/how-it-works#faq',
   },
 ] as const;
 

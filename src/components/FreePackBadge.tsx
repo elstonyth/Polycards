@@ -7,12 +7,16 @@ import { usePathname } from 'next/navigation';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import type { FreePackState } from '@/lib/data/free-pack';
-import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import { useConsent } from '@/lib/use-consent';
-import { cn } from '@/lib/utils';
 
 /**
- * The free welcome pack's ONLY entry point — a floating badge.
+ * The free welcome pack's entry point everywhere but home — a floating chip.
+ * Home carries the offer inline in its hero instead (home/HeroFreePack.tsx),
+ * so the global mount skips "/" (isSkippedRoute).
+ *
+ * Matte house chip since 2026-11-11 (home critique): the old comic-burst art
+ * with a red NEW sticker, drop shadow and idle bob was the cheap-gacha look
+ * PRODUCT.md rules out, and it sat over the pack ladder's prices.
  *
  * Two variants sharing one visual:
  *  - `claim`  — an eligible customer; links straight to the (uncataloged)
@@ -39,7 +43,6 @@ export default function FreePackBadge({
 }: {
   state: Exclude<FreePackState, { mode: 'hidden' }>;
 }) {
-  const reduced = usePrefersReducedMotion();
   // While cookie consent is undecided the banner (z-50) docks on exactly this
   // rail and swallows the badge's taps — the same collision the vault action bar
   // hits (see VaultClient). Hold the badge until the visitor answers;
@@ -47,46 +50,23 @@ export default function FreePackBadge({
   const consent = useConsent();
   if (consent === null) return null;
 
+  // One matte chip, ink glass like the tab bar it floats above: hairline,
+  // no shadow, no motion. The pack mark is the free pack's own emblem.
   const shellCls =
-    'fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-30 block transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white lg:bottom-6';
+    'glass-chrome fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-30 flex h-11 items-center gap-2 rounded-full border border-white/15 pr-4 pl-1.5 text-sm font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 lg:bottom-[calc(1.5rem+env(safe-area-inset-bottom))]';
   const art = (
-    <span
-      className={cn(
-        'relative block',
-        // Gentle idle bob — reuses globals.css's `slabFloat` (±8px) rather
-        // than minting a second identical keyframe. No fill-mode (repo rule:
-        // never `both`), and `infinite`, so settle-then-read QA must filter it
-        // out. Doubly reduced-motion safe: the `motion-safe:` variant drops it
-        // in CSS and `reduced` drops it in JS. On the wrapper so the NEW tag
-        // rides with the art.
-        !reduced && 'motion-safe:animate-[slabFloat_3s_ease-in-out_infinite]',
-      )}
-    >
-      <Image
-        src="/images/polycards/free-pack-badge.webp"
-        alt="Free welcome pack"
-        width={112}
-        height={146}
-        // Decorative-adjacent chrome, but it IS the control's only visible
-        // content, so it keeps a real alt; priority is deliberately off (it must
-        // never compete with the catalog art for bandwidth).
-        // Fluid, capped at the art's natural 112px. A fixed 112px is ~30% of
-        // a 375px viewport, which reads as an overlay rather than a badge;
-        // 18vw holds it at a constant ~18% of the screen and reaches the
-        // 7rem cap at 622px, so tablet/desktop are unchanged. The 4rem floor
-        // (64px, still well over a 44px tap target) catches 320px screens.
-        className="h-auto w-[clamp(4rem,18vw,7rem)] drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
-      />
-      {/* shortcut: always on while the badge shows, delete when the pack stops
-          being new, along with "new" in both aria-labels below. Those labels
-          are what screen readers hear, so the tag itself is hidden from them. */}
-      <span
-        aria-hidden="true"
-        className="absolute -left-2 top-1 -rotate-12 rounded-full border-2 border-neutral-950 bg-red-600 px-2 py-0.5 font-heading text-[11px] leading-none tracking-wide text-white lg:text-sm"
-      >
-        NEW
+    <>
+      <span className="flex size-8 items-center justify-center rounded-full bg-white/[0.06]">
+        <Image
+          src="/branding/polycards-mark.png"
+          alt=""
+          width={57}
+          height={81}
+          className="h-4 w-auto"
+        />
       </span>
-    </span>
+      Free pack
+    </>
   );
 
   if (state.mode === 'signup') {
@@ -95,7 +75,7 @@ export default function FreePackBadge({
         type="button"
         onClick={() => openAuth('signup')}
         data-testid="free-pack-badge"
-        aria-label="Sign up to claim your new free welcome pack"
+        aria-label="Free pack: sign up to claim your welcome pack"
         className={shellCls}
       >
         {art}
@@ -106,7 +86,7 @@ export default function FreePackBadge({
     <Link
       href={`/slots/${encodeURIComponent(state.slug)}/spin`}
       data-testid="free-pack-badge"
-      aria-label="Claim your new free welcome pack"
+      aria-label="Free pack: claim your welcome pack"
       className={shellCls}
     >
       {art}
@@ -121,10 +101,9 @@ export default function FreePackBadge({
 // so it needs the same guard even more than that one does.
 const REFETCH_TTL_MS = 30_000;
 
-// Module-level, not component state: GlobalFreePackBadge is a layout
-// singleton for the whole session (one mount), so one shared counter is
-// enough, and it lets the answer survive across the pathname changes that
-// retrigger the effect below.
+// Module-level, not component state: shared by every useFreePackState caller
+// (the layout's badge singleton and home's hero row), and it lets the answer
+// survive across the pathname changes that retrigger the effect.
 let lastFetch: { key: string; at: number; state: FreePackState } | null = null;
 
 /** Test seam: module state outlives a test's fixtures. */
@@ -132,7 +111,8 @@ export function clearFreePackBadgeThrottle(): void {
   lastFetch = null;
 }
 
-/** Routes that own a z-40 bottom-rail control the badge would collide with:
+/** Routes the floating badge stays off. Mostly ones that own a z-40
+ *  bottom-rail control the badge would collide with:
  *  every pack detail page's mobile buy dock ("Open Pack"/"Log in" —
  *  PackDetailClient.tsx), the vault's Sell action bar, the leaderboard's
  *  sheet trigger — plus the catalog itself, which renders FreePackBadge from
@@ -142,6 +122,9 @@ export function clearFreePackBadgeThrottle(): void {
  *  claim badge would sit on for a member. */
 function isSkippedRoute(pathname: string): boolean {
   return (
+    // Home renders the offer inline in its hero (home/HeroFreePack.tsx), which
+    // reads the same answer through useFreePackState.
+    pathname === '/' ||
     pathname === '/slots' ||
     pathname.startsWith('/slots/') ||
     pathname === '/vault' ||
@@ -171,25 +154,26 @@ export function isOwnFreePackPath(pathname: string, slug: string): boolean {
 }
 
 /**
- * Site-wide mount (layout.tsx): re-reads /api/free-pack on route or auth
- * change (throttled — see REFETCH_TTL_MS above), so the badge follows the
- * visitor everywhere and disappears within one throttle window after the
- * claim is spent. Skips every route that owns a colliding dock
- * (isSkippedRoute) and the free pack's own detail/spin pages
- * (isOwnFreePackPath).
+ * The visitor's free-pack answer from /api/free-pack, or `null` while there is
+ * none yet for the current identity (auth still hydrating, the read in flight,
+ * or `enabled` false). Re-reads on route or auth change, throttled per
+ * identity (REFETCH_TTL_MS) through the module-level `lastFetch`, so the
+ * floating badge and home's hero row share one read and one throttle.
  */
-export function GlobalFreePackBadge() {
+export function useFreePackState(enabled: boolean): FreePackState | null {
   const pathname = usePathname();
   const { customer, isLoading } = useAuth();
   const customerId = customer?.id ?? null;
-  const [state, setState] = useState<FreePackState>({ mode: 'hidden' });
+  const [answer, setAnswer] = useState<{
+    key: string;
+    state: FreePackState;
+  } | null>(null);
 
   useEffect(() => {
     // Hold until the auth hydrate settles so a logged-in visitor never sees
-    // the guest promo answer flash before the per-customer one. Skips every
-    // route this badge must not appear on too — those pages already paid for
-    // their own layout without this fetch.
-    if (isLoading || isSkippedRoute(pathname)) return;
+    // the guest promo answer flash before the per-customer one. A disabled
+    // caller (a route the badge skips) pays for no fetch at all.
+    if (isLoading || !enabled) return;
     const key = customerId ?? 'guest';
     // Identity change (login/logout) busts the throttle immediately — the key
     // mismatch below skips the reuse branch and always refetches.
@@ -204,7 +188,7 @@ export function GlobalFreePackBadge() {
       // (see its comment) — the setState has to sit lexically inside a
       // callback.
       const cached = lastFetch.state;
-      void Promise.resolve().then(() => setState(cached));
+      void Promise.resolve().then(() => setAnswer({ key, state: cached }));
       return;
     }
     let cancelled = false;
@@ -230,16 +214,31 @@ export function GlobalFreePackBadge() {
               ? { mode: 'signup' }
               : { mode: 'hidden' };
         lastFetch = { key, at: firedAt, state: resolved };
-        setState(resolved);
+        setAnswer({ key, state: resolved });
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [pathname, customerId, isLoading]);
+  }, [enabled, pathname, customerId, isLoading]);
 
-  if (state.mode === 'hidden') return null;
-  if (isSkippedRoute(pathname)) return null;
+  return !isLoading && answer?.key === (customerId ?? 'guest')
+    ? answer.state
+    : null;
+}
+
+/**
+ * Site-wide mount (layout.tsx): follows the visitor everywhere and disappears
+ * within one throttle window after the claim is spent. Skips every route in
+ * isSkippedRoute and the free pack's own detail/spin pages
+ * (isOwnFreePackPath).
+ */
+export function GlobalFreePackBadge() {
+  const pathname = usePathname();
+  const skipped = isSkippedRoute(pathname);
+  const state = useFreePackState(!skipped);
+
+  if (!state || state.mode === 'hidden' || skipped) return null;
   if (state.mode === 'claim' && isOwnFreePackPath(pathname, state.slug)) {
     return null;
   }
