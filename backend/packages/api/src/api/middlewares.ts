@@ -65,6 +65,7 @@ import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { recordVisitorSignal, requireVouchedVisitor } from './utils/visitor-ip';
 import { adminRbacRoutes } from './admin-rbac';
+import { requestErrorLog } from '../utils/request-error-log';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -227,15 +228,14 @@ const mediaUploadMiddleware = (
 // middleware hard-404s the two registration entrypoints so the surface is
 // genuinely closed (app middleware applies to plugin routes here, same as the
 // /auth/*/emailpass rate-limit entries below). The house seller is seeded
-// server-side (not via this HTTP route) and logs in via POST /auth/member/
-// emailpass (authenticate, NOT /register), so neither is affected.
+// server-side (not via this HTTP route).
 //
-// NOTE: blocking /auth/member/emailpass/register also gates seller-STAFF
-// onboarding — invite-accept (POST /vendor/members/invites/accept) needs an
-// invitee to first mint a member auth identity via /register. That flow is
-// dormant here (single house seller, no staff invites) and intentionally
-// closed. When P2P/staff onboarding is built, re-open /register behind the
-// invite-gating rather than removing this block wholesale.
+// Seller sign-in is closed too (owner, 2026-11-10; security audit 2026-11-09
+// #11): a seller login had no two-step code, and no seller had ever signed in,
+// so every /auth/member route (login, register, reset, Google) 404s instead of
+// growing one. That also closes seller-staff onboarding (invite-accept needs a
+// member identity from /register). Before reopening any of it, give seller
+// logins the admin's two-step sign-in (utils/admin-mfa-guard.ts).
 const blockUnusedSurface = (
   _req: MedusaRequest,
   _res: MedusaResponse,
@@ -351,6 +351,8 @@ const redirectRootToDashboard = (
 };
 
 export default defineMiddlewares({
+  // Stock handler plus a request-id line for every 5xx (utils/request-error-log.ts).
+  errorHandler: requestErrorLog,
   routes: [
     {
       // Root landing → admin dashboard (see redirectRootToDashboard above).
@@ -368,12 +370,9 @@ export default defineMiddlewares({
       middlewares: [blockUnusedSurface],
     },
     {
-      // Defense-in-depth: refuse new `member`-actor self-registration too, so no
-      // anonymous member auth identity can be minted. Member LOGIN (POST
-      // /auth/member/emailpass, no /register) is deliberately NOT matched — the
-      // seeded house seller needs it for the /seller vendor dashboard.
-      matcher: '/auth/member/emailpass/register',
-      method: 'POST',
+      // See blockUnusedSurface above: no seller signs in, and no member auth
+      // identity is minted, by any provider or method.
+      matcher: '/auth/member/*',
       middlewares: [blockUnusedSurface],
     },
     {
@@ -1054,6 +1053,28 @@ export default defineMiddlewares({
       // caller address; the storefront's 60s server-side cache means real
       // traffic is about one call a minute per Next instance.
       matcher: '/store/announcements',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
+      // The public boards and card pages (GET /store/leaderboard,
+      // /store/challenge, /store/cards/:handle). Whole-history aggregates or
+      // several uncached reads per hit on a host Cloudflare does not front
+      // (admin.polycards.gg is DNS-only for gateway callbacks), so a flood
+      // reached them unthrottled (audit 2026-11-11). Same read budget as the
+      // announcement popup above: the storefront signs its visitor and caches
+      // these server-side, so real traffic sits far under it.
+      matcher: '/store/leaderboard',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
+      matcher: '/store/challenge',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
+      matcher: '/store/cards/*',
       method: 'GET',
       middlewares: [storeReadRateLimit],
     },
@@ -2004,6 +2025,12 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Edit — ":id" is one path segment, the same matcher as the GRN edit's.
+      matcher: '/admin/purchase-invoices/:id',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Goods receive notes (spec 2026-10-28) — raise the same stock counters
       // as an invoice, and their reversal lowers them; same admin budget.
       matcher: '/admin/goods-receive-notes',
@@ -2111,6 +2138,15 @@ export default defineMiddlewares({
       '/store/reviews*',
       '/store/payment-collections*',
     ].map((matcher) => ({ matcher, middlewares: [blockUnusedSurface] })),
+    // Mercur's /hooks/payout and core's /hooks/payment/:provider: no payment
+    // provider is configured and our gateways call /hooks/<gateway>/* instead,
+    // but each anonymous POST queued an event (body, raw body, headers; 3
+    // attempts) on the single event worker that VIP, Telegram and welcome
+    // events wait behind (audit 2026-11-11).
+    ...['/hooks/payout*', '/hooks/payment*'].map((matcher) => ({
+      matcher,
+      middlewares: [blockUnusedSurface],
+    })),
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a

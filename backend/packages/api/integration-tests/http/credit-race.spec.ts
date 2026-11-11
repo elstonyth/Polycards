@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../src/modules/packs";
@@ -158,7 +159,7 @@ medusaIntegrationTestRunner({
         unwrapResponse(
           api.post(
             `/admin/customers/${id}/credits`,
-            { amount, note },
+            { amount, note, idempotency_key: randomUUID() },
             { headers: adminHeaders() },
           ),
         );

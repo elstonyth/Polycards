@@ -1,4 +1,7 @@
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+} from '@medusajs/framework/utils';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // Physical-stock helpers for gacha cards (Card.handle === Product.handle).
@@ -189,8 +192,46 @@ export function planCardStockTake(
   return plan;
 }
 
+// Move one inventory level's counter by `delta` in ONE statement. Medusa's
+// adjustInventory reads the level, then writes an absolute value, so two
+// same-card adjustments at once (two wins, a win racing a sell-back restore)
+// lost one for good (audit 2026-11-11). Here Postgres adds in place, and the
+// raw twin Medusa reads back is built from the same old value, so the two
+// always agree. Autocommit on the shared connection, like adjustInventory:
+// every caller sits outside the packs transaction on purpose.
+export async function adjustCardStock(
+  container: MedusaContainer,
+  inventoryItemId: string,
+  locationId: string,
+  delta: number,
+): Promise<void> {
+  if (!Number.isSafeInteger(delta)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Stock adjustment must be a whole number, got ${delta}.`,
+    );
+  }
+  const pg = container.resolve(ContainerRegistrationKeys.PG_CONNECTION) as {
+    raw: (sql: string, bindings: unknown[]) => Promise<{ rowCount?: number }>;
+  };
+  const result = await pg.raw(
+    `UPDATE inventory_level
+        SET stocked_quantity = stocked_quantity + ?,
+            raw_stocked_quantity = jsonb_build_object('value', (stocked_quantity + ?)::text, 'precision', 20),
+            updated_at = now()
+      WHERE inventory_item_id = ? AND location_id = ? AND deleted_at IS NULL`,
+    [delta, delta, inventoryItemId, locationId],
+  );
+  if (!result.rowCount) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Inventory level for item ${inventoryItemId} and location ${locationId} not found`,
+    );
+  }
+}
+
 // Thrown by takeCardStock when a multi-level plan fails partway through.
-// adjustInventory commits per call on the inventory module's own connection —
+// adjustCardStock commits per call on the shared connection —
 // there is no transaction here to roll the already-applied calls back — so a
 // mid-plan throw leaves the counter LOW by exactly `applied`'s units, not
 // unchanged. `plan` vs `applied` is what lets a catch tell "nothing moved"
@@ -220,12 +261,12 @@ export const takeCardStock =
   async (handle: string, qty: number): Promise<boolean> => {
     const levels = await cardInventoryLevels(container, handle);
     if (levels.length === 0) return false;
-    const inventory = container.resolve(Modules.INVENTORY);
     const plan = planCardStockTake(levels, qty);
     const applied: CardStockTake[] = [];
     try {
       for (const take of plan) {
-        await inventory.adjustInventory(
+        await adjustCardStock(
+          container,
           take.inventoryItemId,
           take.locationId,
           -take.qty,

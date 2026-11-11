@@ -1,42 +1,60 @@
+import Link from 'next/link';
+import { Send } from 'lucide-react';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
+import { TELEGRAM_URL } from '@/lib/site';
 
-// Quiet site footer — now just the legal/positioning line.
+// Quiet site footer: the visitor's route to the trust pages, then the
+// legal/positioning line.
 //
-// It used to carry a nav row (how-it-works, fairness, leaderboard, about,
-// contact). Removed 2026-07-31: /me rendered its own card of the same four
-// trust links directly above this band, so that page showed them twice in one
-// scroll, and Leaderboard already has a permanent home in the tab bar ("Ranks").
-// Both copies went — operator call.
+// The link row came back 2026-11-11 (home critique, owner call). It was
+// removed 2026-07-31 because /me showed the same trust links twice in one
+// scroll; /me has since kept only its Support tile, and without this row a
+// logged-out visitor had no path to /about or /contact at all. Telegram sits
+// here because home shows no floating Telegram chip (it sat on the pack
+// ladder's prices). There is no /fairness link: the owner removed that page
+// 2026-11-11, so don't add one back.
 //
-// CONSEQUENCE, on purpose. All four trust routes stay public and stay in ROUTES
-// (lib/site.ts), so they stay in the sitemap and are reachable by URL and from
-// search. What they lost is navigation. The FULL inbound-link map in src/ as of
-// this change — verified by grep, keep it honest if you touch these pages:
-//
-//   /how-it-works  home page (components/home/TheGame.tsx), /about, /contact
-//   /fairness      /contact ONLY
-//   /contact       the "Support" tile on /me ONLY — and (account)/layout.tsx
-//                  redirects logged-out visitors, so that link is behind login
-//   /about         NOTHING
-//
-// Read the second and third rows together: /fairness is navigable only as
-// log in → /me → /contact → /fairness. A logged-out visitor has no path to the
-// fairness disclosure, to support, or to /about at all.
-//
-// Do NOT prune these as orphans without checking here first — /about in
-// particular has the exact signature (zero inbound links) that this repo's
-// dead-route sweeps prune on, and it is live, not suspended.
+// /about has no other inbound link in src/ — it has the exact signature
+// (zero inbound links) that this repo's dead-route sweeps prune on, and it is
+// live, not suspended.
 //
 // Kept to one hairline-bordered band so app surfaces (slots spin, vault) don't
 // gain heavy chrome. Bottom padding clears the fixed TabBar on phones, same
 // contract as <main> in layout.tsx.
+const LINKS = [
+  { href: '/how-it-works', label: 'How it works' },
+  { href: '/about', label: 'About' },
+  { href: '/contact', label: 'Contact' },
+  { href: '/privacy', label: 'Privacy' },
+] as const;
+
+const LINK =
+  'inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-[13px] text-neutral-400 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none motion-reduce:transition-none';
+
 export default function SiteFooter() {
   return (
     <footer
       data-site-chrome
-      className="border-t border-white/10 px-fluid pb-28 pt-6 lg:pb-8"
+      className="border-t border-white/10 px-fluid pb-28 pt-3 lg:pb-8"
     >
-      <p className="text-[12px] text-white/55">
+      <nav aria-label="Footer">
+        <ul className="-mx-2 flex flex-wrap items-center">
+          {LINKS.map(({ href, label }) => (
+            <li key={href}>
+              <Link href={href} className={LINK}>
+                {label}
+              </Link>
+            </li>
+          ))}
+          <li>
+            <a href={TELEGRAM_URL} className={LINK}>
+              <Send className="size-3.5" aria-hidden="true" />
+              Telegram
+            </a>
+          </li>
+        </ul>
+      </nav>
+      <p className="mt-2 text-[12px] text-white/55">
         © {new Date().getFullYear()} Polycards — rip packs, pull graded cards.
         Vault buyback at {BUYBACK_RATE_LABEL}. Instant rates apply during the
         reveal countdown.

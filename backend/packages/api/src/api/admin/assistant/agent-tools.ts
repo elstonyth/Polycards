@@ -629,6 +629,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           username,
           bank_code: hit.bank_code,
           last4,
+          number_mark: numberMark(hit.account_key, ctx.container),
           reason,
         },
         `Unban ${bankName} …${last4} for ${shown}${handle && handle !== shown ? ` (@${handle})` : ''} only: they may save it and be paid to it; it stays banned for every other account. If another account holds it, it also needs freeing from them (an admin). Reason: ${reason}`,

@@ -184,6 +184,9 @@ describe('getPackBySlug — the unlisted (uncataloged) pack', () => {
 
 // Inspect composition props, without replacing the ordering logic itself.
 vi.mock('@/lib/data/leaderboard', () => ({ getLeaderboard: async () => [] }));
+vi.mock('@/lib/data/free-pack', () => ({
+  getFreePackPromo: async () => false,
+}));
 vi.mock('@/components/home/HeroBoard', () => ({ default: () => null }));
 vi.mock('@/components/home/PullsMarquee', () => ({ default: () => null }));
 vi.mock('@/components/RecentPullsSection', () => ({ default: () => null }));

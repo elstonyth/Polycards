@@ -14,8 +14,9 @@ import {
 // The 12am cutoff (spec 2026-10-28; owner 2026-10-28): at 00:00 Malaysia time,
 // orders whose cards are all on hand become ready_to_ship (oldest first) and
 // the rest of the requested ones become processed — they are on that night's
-// to-buy list. Then the to-buy list is frozen for the day
-// (GET /admin/procurement/to-buy). Staff can do the ready_to_ship half earlier
+// to-buy list. Then the snapshot records that list: orders placed after it
+// wait for the next 12am, while stock received during the day still comes off
+// at once (GET /admin/procurement/to-buy). Staff can do the ready_to_ship half earlier
 // with the Stock page's Refresh (admin/delivery-orders/allocate), or by hand.
 //
 // Once per day: the day is done once its snapshot exists, so a redelivered or
@@ -28,7 +29,9 @@ export async function runMidnightCutoff(
 ): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   if (!stockAutoAllocationEnabled()) {
-    logger.info('[stock-allocation] skipped: STOCK_AUTO_ALLOCATION is not true');
+    logger.info(
+      '[stock-allocation] skipped: STOCK_AUTO_ALLOCATION is not true',
+    );
     return;
   }
   const [done] = await container

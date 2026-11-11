@@ -1,4 +1,5 @@
 import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
+import { numberMarkWith } from '../../../utils/number-mark';
 import type { MedusaContainer } from '@medusajs/framework/types';
 import {
   ContainerRegistrationKeys,
@@ -11,10 +12,7 @@ import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { LASTING_WRITES, type Need } from './access';
 import { accountNumberForms, findBank } from '../../../modules/packs/banks';
-import {
-  holderNameKey,
-  PERMANENT_BAN_REASON_PREFIX,
-} from '../../../modules/packs/saved-accounts';
+import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
 
 // What lasts waits for a tap (security review 2026-10-29). A note or a
 // scheduled task would stay in front of the model in every later chat or run,
@@ -53,6 +51,9 @@ export type Proposal =
       username: string;
       bank_code: string;
       last4: string;
+      /** numberMark of the number the card was made for (#1007): the tap
+       *  lifts only that one. None on a card sealed before cards carried it. */
+      number_mark?: string;
       reason: string;
       /** Set from the token's seal (openProposal). */
       proposed_at?: string;
@@ -102,17 +103,12 @@ export const BAN_LIST_NEED: Need = {
   operation: 'update',
 };
 
-/** A keyed fingerprint of a full bank number (security review 2026-11-04):
- *  the token carries this, never the number, and the tap frees only the
- *  number it matches. Keyed by the JWT secret, so last 4 + a fingerprint
- *  cannot be guessed back into the number. */
+/** The card's fingerprint of a full bank number (utils/number-mark): the tap
+ *  frees only the number it matches. */
 export function numberMark(accountKey: string, container: MedusaContainer): string {
   const secret = container.resolve(ContainerRegistrationKeys.CONFIG_MODULE)
     .projectConfig.http.jwtSecret as string;
-  const key = Buffer.from(
-    hkdfSync('sha256', secret, 'polycards-assistant', 'number-mark-v1', 32),
-  );
-  return createHmac('sha256', key).update(accountKey).digest('base64url');
+  return numberMarkWith(secret, accountKey);
 }
 
 /** The one bank number these last 4 (and bank, for a tie) mean among `keys`;
@@ -205,36 +201,18 @@ export function openProposal(
   }
 }
 
-const DONE_SINCE =
-  'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.';
-
-/** Whether the change a card makes was audited on the player after the card
- *  was made (security audit 2026-11-09): its own first tap, or a colleague
- *  doing or undoing it. The lift and clearing stamps leave no trace once
- *  undone, so a re-ban looks like never lifted; only the audit tells. */
-async function doneSince(
-  packs: PacksModuleService,
-  customerId: string,
-  since: string | undefined,
-  same: (after: Record<string, unknown>) => boolean,
-): Promise<boolean> {
-  // A card from before this check carries no time: asked again.
-  if (!since) return true;
-  const rows = await packs.listAdminActionAudits(
-    {
-      entity_type: 'customer',
-      entity_id: customerId,
-      action: 'edit',
-      created_at: { $gt: new Date(since) },
-    },
-    { select: ['after'] },
-  );
-  return rows.some(
-    (r) =>
-      typeof r.after === 'object' &&
-      r.after !== null &&
-      same(r.after as Record<string, unknown>),
-  );
+/** When the card was made, for the service's check that nobody did or undid
+ *  its change since (refuseIfAuditedSince, in the write's own transaction).
+ *  The lift and clearing stamps leave no trace once undone, so a re-ban looks
+ *  like never lifted; only the audit tells. A card from before cards carried
+ *  their time is asked again. */
+function cardTime(proposal: { proposed_at?: string }): string {
+  if (!proposal.proposed_at) {
+    throw new ConfirmRefused(
+      'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.',
+    );
+  }
+  return proposal.proposed_at;
 }
 
 /** Saves what the person confirmed, checked again as things stand now. A
@@ -290,20 +268,7 @@ export async function saveProposal(
       throw new ConfirmRefused('Your role cannot unban bank numbers.');
     }
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    const { last4 } = proposal;
-    // Lifted, or banned again, since this card was made.
-    if (
-      await doneSince(
-        packs,
-        proposal.customer_id,
-        proposal.proposed_at,
-        (a) =>
-          'lifted_for_player' in a &&
-          (a.banned_number as { last4?: unknown } | undefined)?.last4 === last4,
-      )
-    ) {
-      throw new ConfirmRefused(DONE_SINCE);
-    }
+    const since = cardTime(proposal);
     try {
       await packs.setPayoutBanLifted({
         customerId: proposal.customer_id,
@@ -314,6 +279,9 @@ export async function saveProposal(
         reason: proposal.reason,
         fromBanList:
           access.superAdmin || ((await access.can?.(BAN_LIST_NEED)) ?? false),
+        // Lifted, or banned again, since this card was made: refused.
+        since,
+        numberMark: proposal.number_mark,
       });
     } catch (err) {
       // The ban is gone, or now matches more than one number.
@@ -350,23 +318,9 @@ export async function saveProposal(
         'This player is still banned: tap Unban first, then this.',
       );
     }
-    // This name cleared or taken back, or this number freed, since the card.
-    const nameKey =
-      proposal.kind === 'name_clash'
-        ? holderNameKey(proposal.holder_name)
-        : null;
-    const last4 = proposal.kind === 'free_number' ? proposal.last4 : null;
-    if (
-      await doneSince(packs, proposal.customer_id, proposal.proposed_at, (a) =>
-        nameKey !== null
-          ? 'cleared' in a &&
-            typeof a.holder_name === 'string' &&
-            holderNameKey(a.holder_name) === nameKey
-          : 'held_by' in a && a.account_last4 === last4,
-      )
-    ) {
-      throw new ConfirmRefused(DONE_SINCE);
-    }
+    // This name cleared or taken back, or this number freed, since the card:
+    // refused by the service.
+    const since = cardTime(proposal);
     try {
       if (proposal.kind === 'name_clash') {
         await packs.setHolderNameCleared({
@@ -376,6 +330,7 @@ export async function saveProposal(
           cleared: true,
           reason: proposal.reason,
           onlyWith: proposal.with,
+          since,
         });
         return { id: proposal.customer_id };
       }
@@ -406,6 +361,7 @@ export async function saveProposal(
         bankCode: proposal.bank_code,
         fromIds: proposal.from,
         reason: proposal.reason,
+        since,
       });
     } catch (err) {
       // Already done, changed since, or a payout still on its way.

@@ -1,8 +1,11 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import { findCardInventoryTarget } from '../../modules/packs/card-stock';
+import {
+  adjustCardStock,
+  findCardInventoryTarget,
+} from '../../modules/packs/card-stock';
 
 export type DecrementCardStockInput = {
   card_id: string; // = Card.handle (=== Product.handle)
@@ -12,9 +15,9 @@ export type DecrementCardStockInput = {
 };
 
 // What was adjusted, so compensation can put the unit back.
-type CompensateData =
-  | { inventoryItemId: string; locationId: string }
-  | undefined;
+// null, not undefined: with undefined compensate data Medusa hands the
+// compensator the step's OUTPUT instead (#968, audit 2026-11-11).
+type CompensateData = { inventoryItemId: string; locationId: string } | null;
 
 // decrement-card-stock — earmark one physical unit for the pull that just won
 // this card. STOCK IS A COUNTER, NOT A GATE: pulls must NEVER fail because of
@@ -30,7 +33,7 @@ export const decrementCardStockStep = createStep(
   'decrement-card-stock',
   async (input: DecrementCardStockInput, { container }) => {
     const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
-    let compensate: CompensateData;
+    let compensate: CompensateData = null;
     let adjusted = false;
 
     try {
@@ -38,8 +41,8 @@ export const decrementCardStockStep = createStep(
       // Untracked (null) — nothing to count; the pull is fulfilled via
       // buyback if the customer wants no/own physical card.
       if (target) {
-        const inventoryModule = container.resolve(Modules.INVENTORY);
-        await inventoryModule.adjustInventory(
+        await adjustCardStock(
+          container,
           target.inventoryItemId,
           target.locationId,
           -1,
@@ -69,12 +72,7 @@ export const decrementCardStockStep = createStep(
   },
   async (data: CompensateData, { container }) => {
     if (!data) return;
-    const inventoryModule = container.resolve(Modules.INVENTORY);
-    await inventoryModule.adjustInventory(
-      data.inventoryItemId,
-      data.locationId,
-      1,
-    );
+    await adjustCardStock(container, data.inventoryItemId, data.locationId, 1);
   },
 );
 

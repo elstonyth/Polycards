@@ -141,14 +141,3 @@ export async function resolveFxRateStrict(packs: FxRateSource): Promise<number> 
   }
   return rate;
 }
-
-export async function fetchUsdMyr(
-  url: string = FX_USD_MYR_URL,
-): Promise<number> {
-  const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-  const data = (await resp.json()) as { rates?: { MYR?: number } };
-  const rate = data?.rates?.MYR;
-  if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0)
-    throw new Error('FX feed: no usable USD->MYR');
-  return rate;
-}

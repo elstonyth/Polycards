@@ -315,17 +315,13 @@ medusaIntegrationTestRunner({
         expect(JSON.stringify(detail.data)).not.toContain('"weight');
       });
 
-      // Case 5b — the ONE deliberate exception to case 5: `demo_odds`, the
-      // per-rarity split of SET 3, which the logged-out demo spin samples on
-      // (storefront ?demo=1). Aggregated per tier, never per card, so case 5
-      // still holds — but the exposure is intentional and pinned here so it
-      // reads as a decision rather than a leak.
-      //
-      // A third card makes the sets DISTINGUISHABLE: the fixture's alpha/beta
-      // are both Rare, so every set would otherwise flatten to { Rare: 100 }.
-      // gamma is Common and carries a set-3-ONLY weight, so set 1 ⇒ Rare 100,
-      // set 2 ⇒ Rare 100, and only set 3 ⇒ an even Rare/Common split.
-      it('publishes the SET 3 tier split for the guest demo spin', async () => {
+      // Case 5b — no real odds at ANY grain (owner, 2026-11-11: only published
+      // odds may reach a customer). `demo_odds` used to carry SET 3's real tier
+      // split for the guest demo spin (ADR 0005, superseded); it is now always
+      // null, so the demo rolls the published odds. The fixture makes set 3
+      // DISTINGUISHABLE from set 1 (gamma is Common with a set-3-ONLY weight), so
+      // the old code would have answered { Rare: 50, Common: 50 } here.
+      it('never publishes a real tier split, even when set 3 differs from set 1', async () => {
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         await packs.createCards([
           {
@@ -356,11 +352,9 @@ medusaIntegrationTestRunner({
           api.get(`/store/packs/${PACK_SLUG}`, { headers: storeHeaders }),
         );
         expect(detail.status).toBe(200);
-        // beta inherits its set-2 10000 into set 3 (weight_3 NULL, 3→2→1);
-        // alpha inherits 0; gamma contributes its explicit 10000.
-        expect(detail.data.demo_odds).toEqual({
-          tiers: { Rare: 50, Common: 50 },
-        });
+        expect(detail.data.odds).toHaveLength(3);
+        expect(detail.data.demo_odds).toBeNull();
+        expect(JSON.stringify(detail.data)).not.toContain('"weight');
       });
 
       // Case 6 — MULTI-GROUP determinism. A customer can belong to several

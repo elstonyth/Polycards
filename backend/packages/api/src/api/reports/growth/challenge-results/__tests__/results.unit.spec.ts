@@ -1,4 +1,10 @@
-import { byValue, groupPayouts, prizeValue } from '../results';
+import {
+  MISSING_PRIZE_CARD,
+  byValue,
+  groupPayouts,
+  posterPrize,
+  prizeValue,
+} from '../results';
 
 const snap = { pool_myr: 938302.54, unlocked_stages: [1, 2] };
 
@@ -113,5 +119,29 @@ describe('prizeValue and byValue', () => {
       'Cheap',
       'Gone',
     ]);
+  });
+});
+
+describe('posterPrize', () => {
+  const cards = new Map([
+    ['pika', { name: 'Pikachu · PSA 10', title: 'Pikachu', image: '/p.png', valueMyr: 100 }],
+    ['gengar', { name: 'Gengar · PSA 10', title: 'Gengar', image: '/g.png', valueMyr: 250 }],
+  ]);
+
+  it('draws a card awarded twice twice, most valuable first, and prices the whole', () => {
+    const prize = posterPrize({ credits: 50, cardIds: ['pika', 'gengar', 'pika'] }, cards);
+    expect(prize.hand.map((c) => c.title)).toEqual(['Gengar', 'Pikachu', 'Pikachu']);
+    expect(prize.prizeMyr).toBe(500); // 50 + 250 + 2 x 100
+    expect(prize.credits).toBe(50);
+  });
+
+  it('shows a deleted prize card without valuing it', () => {
+    const prize = posterPrize({ credits: 0, cardIds: ['gone'] }, cards);
+    expect(prize.hand).toEqual([{ ...MISSING_PRIZE_CARD, qty: 1 }]);
+    expect(prize.prizeMyr).toBe(0);
+  });
+
+  it('is an empty prize when the rank has no payout', () => {
+    expect(posterPrize(undefined, cards)).toEqual({ credits: 0, prizeMyr: 0, hand: [] });
   });
 });

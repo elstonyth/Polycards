@@ -25,6 +25,7 @@ import {
   NOW,
   type LedgerSqlManager,
 } from './claim';
+import { updateCreditTransactionsById } from './batch-update';
 import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
@@ -85,6 +86,7 @@ import {
   realNameKey,
   realNameKeySql,
 } from '../../utils/real-name';
+import { numberMarkWith } from '../../utils/number-mark';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -1479,6 +1481,23 @@ type MirrorLine = {
 };
 const rmKey = (v: unknown) => (Math.round(Number(v) * 100) / 100).toFixed(2);
 
+// A bank number's fingerprint on the audit rows (#1007), under the same secret
+// as the assistant's cards (the framework's own dev default when it is unset).
+const numberMarkOf = (accountKey: string): string =>
+  numberMarkWith(process.env.JWT_SECRET || 'supersecret', accountKey);
+
+/** Whether an audit row's number is one of `keys` (one number's spellings):
+ *  by its fingerprint, or by the last 4 on a row written before rows carried
+ *  one. */
+const auditNamesNumber = (
+  after: Record<string, unknown>,
+  last4: unknown,
+  keys: string[],
+): boolean =>
+  typeof after.number_mark === 'string'
+    ? keys.some((k) => numberMarkOf(k) === after.number_mark)
+    : last4 === keys[0].slice(-4);
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -1744,6 +1763,41 @@ class PacksModuleService extends MedusaService({
     sharedContext: Context,
   ): Promise<void> {
     await this.createAdminActionAudits([row], sharedContext);
+  }
+
+  // An assistant card's change audited on this player since the card was made
+  // (`since`): its own first tap, or a colleague doing or undoing it (security
+  // audit 2026-11-09). Asked inside the write's transaction under the player's
+  // metadata lock (#1009), so a colleague's change still in flight is waited
+  // for and then seen. No `since` (not a card): nothing to check.
+  protected async refuseIfAuditedSince(
+    customerId: string,
+    since: string | undefined,
+    same: (after: Record<string, unknown>) => boolean,
+    sharedContext: Context,
+  ): Promise<void> {
+    if (since === undefined) return;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${customerId}`,
+    ]);
+    const rows = await em.execute<{ after: unknown }[]>(
+      "SELECT after FROM admin_action_audit WHERE entity_type = 'customer' AND entity_id = ? AND action = 'edit' AND created_at > ? AND deleted_at IS NULL",
+      [customerId, since],
+    );
+    if (
+      rows.some(
+        (r) =>
+          typeof r.after === 'object' &&
+          r.after !== null &&
+          same(r.after as Record<string, unknown>),
+      )
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.',
+      );
+    }
   }
 
   // Apply a pack-membership diff (add rows + delete rows + renormalize
@@ -5718,7 +5772,8 @@ class PacksModuleService extends MedusaService({
     // charge already exists, return it as a no-op. `reversal:${id}` is the
     // per-charge reversal key.
     const [existingReversal] = await em.execute<{ id: string }[]>(
-      'SELECT id FROM credit_transaction WHERE reference = ? AND deleted_at IS NULL LIMIT 1',
+      // LIKE: lets the planner use IDX_credit_transaction_reversal_reference.
+      "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
       [`reversal:${transactionId}`],
     );
     if (existingReversal) {
@@ -5832,7 +5887,9 @@ class PacksModuleService extends MedusaService({
     const deltaMap = new Map<string, number>(); // per-customer reversal delta in cents
     for (const original of originals) {
       const [existing] = await em.execute<{ id: string }[]>(
-        'SELECT id FROM credit_transaction WHERE reference = ? AND deleted_at IS NULL LIMIT 1',
+        // The LIKE repeats IDX_credit_transaction_reversal_reference's
+        // predicate so the planner can use it; equality alone can't prove it.
+        "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
         [`reversal:${original.id}`],
       );
       if (existing) continue; // already reversed — no-op
@@ -10215,10 +10272,21 @@ class PacksModuleService extends MedusaService({
        *  every one (owner, 2026-11-04: "allow, list them all"). Given, any
        *  number of them may be cleared, but only those; without it, one. */
       onlyWith?: string[];
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const key = holderNameKey(input.holderName);
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) =>
+        'cleared' in a &&
+        typeof a.holder_name === 'string' &&
+        holderNameKey(a.holder_name) === key,
+      sharedContext,
+    );
     const holders = input.cleared
       ? await this.holderNameHolders(
           input.customerId,
@@ -10530,6 +10598,8 @@ class PacksModuleService extends MedusaService({
       bankCode: string;
       fromIds: string[];
       reason: string;
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ from: { customer_id: string; saved: number; payouts: number }[] }> {
@@ -10546,6 +10616,12 @@ class PacksModuleService extends MedusaService({
     // A PayNow mobile is one number with or without its 65, as bank_save_check
     // and the ban list read it: holders, payouts and saved entries under both.
     const forms = accountNumberForms(bank.id, key);
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) => 'held_by' in a && auditNamesNumber(a, a.account_last4, forms),
+      sharedContext,
+    );
     const holders = async () => {
       const ids = new Set<string>();
       for (const form of forms) {
@@ -10669,7 +10745,12 @@ class PacksModuleService extends MedusaService({
         entity_id: input.customerId,
         action: 'edit',
         before: { bank_code: bank.id, account_last4: last4, held_by: before },
-        after: { bank_code: bank.id, account_last4: last4, held_by: [] },
+        after: {
+          bank_code: bank.id,
+          account_last4: last4,
+          number_mark: numberMarkOf(key),
+          held_by: [],
+        },
         reason: `Freed bank number …${last4} from ${before.length} other account${before.length === 1 ? '' : 's'} so this player can save it: ${input.reason}`,
       },
       sharedContext,
@@ -10817,6 +10898,10 @@ class PacksModuleService extends MedusaService({
       reason: string;
       /** Admins only: see resolveBannedPayoutAccount. */
       fromBanList?: boolean;
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
+      /** The card's fingerprint of the number it was made for (#1007). */
+      numberMark?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ bank_code: string; last4: string; lifted: boolean; changed: boolean }> {
@@ -10825,6 +10910,30 @@ class PacksModuleService extends MedusaService({
       input.last4,
       input.bankCode,
       input.fromBanList === true,
+      sharedContext,
+    );
+    // These last 4 can mean another number by the time of the tap (the player
+    // dropped theirs and the ban-list fallback finds one elsewhere): the card
+    // lifts only the number the person was shown.
+    if (
+      input.numberMark !== undefined &&
+      numberMarkOf(hit.account_key) !== input.numberMark
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `The banned number ending ${hit.last4} is not the one this was proposed for any more. Ask again.`,
+      );
+    }
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) =>
+        'lifted_for_player' in a &&
+        auditNamesNumber(
+          a,
+          (a.banned_number as { last4?: unknown } | undefined)?.last4,
+          [hit.account_key],
+        ),
       sharedContext,
     );
     let changed = false;
@@ -10865,6 +10974,7 @@ class PacksModuleService extends MedusaService({
             banned_number: { bank_code: hit.bank_code, last4: hit.last4 },
             lifted_for_player: input.lifted,
             found_on: hit.found_on,
+            number_mark: numberMarkOf(hit.account_key),
           },
           reason: `${input.lifted ? 'Unbanned' : 'Banned again'} bank number …${hit.last4} for this player: ${input.reason}`,
         },
@@ -11069,6 +11179,14 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<string> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // Lock-free read first: every /store/referral view calls this, and a code
+    // never changes once set, so only a customer WITHOUT one needs the global
+    // lock below (audit 2026-11-11: all views queued on one lock).
+    const [existing] = await em.execute<{ code: string | null }[]>(
+      "SELECT metadata->>'referral_code' AS code FROM customer WHERE id = ? AND deleted_at IS NULL",
+      [input.customerId],
+    );
+    if (typeof existing?.code === 'string') return existing.code;
     // Global first, then the per-customer lock mutateCustomerMetadata takes —
     // always in this order, so the two can never deadlock.
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
@@ -16269,12 +16387,9 @@ class PacksModuleService extends MedusaService({
         reference: r.reference,
       })),
     );
-    for (const [id, ext] of diff) {
-      await em.execute(
-        'UPDATE credit_transaction SET external_funded_cents = ?, updated_at = now() WHERE id = ?',
-        [ext, id],
-      );
-    }
+    await updateCreditTransactionsById(em, 'external_funded_cents = v.val', [
+      ...diff,
+    ]);
     return { rowsUpdated: diff.size };
   }
 
@@ -16374,12 +16489,11 @@ class PacksModuleService extends MedusaService({
     const releasedSen = release.reduce((t, r) => t + r.releaseSen, 0);
 
     if (input.apply && stamped.length > 0) {
-      for (const r of release) {
-        await em.execute(
-          'UPDATE credit_transaction SET external_funded_cents = external_funded_cents - ?, updated_at = now() WHERE id = ?',
-          [r.releaseSen, r.id],
-        );
-      }
+      await updateCreditTransactionsById(
+        em,
+        'external_funded_cents = t.external_funded_cents - v.val',
+        release.map((r) => [r.id, r.releaseSen] as const),
+      );
       await this.audit(
         {
           admin_id: input.actor,
@@ -18694,7 +18808,9 @@ class PacksModuleService extends MedusaService({
     // soft-deleted rows. A future void/delete route that soft-deletes a
     // reversing invoice would silently hand its headroom back. Unreachable
     // today — nothing deletes an invoice except the compensation cascade,
-    // which hard-deletes an invoice that never became visible.
+    // which hard-deletes an invoice that never became visible, and an edit
+    // (updatePurchaseInvoiceWithLines) soft-deletes lines only of an invoice
+    // no reversal points at, under this same lock.
     const priorReversals = await pageAll((opts) =>
       this.listPurchaseInvoices(
         { reverses_invoice_id: target.id },
@@ -18924,10 +19040,218 @@ class PacksModuleService extends MedusaService({
     return { ...invoice, lines };
   }
 
+  // Edits a purchase invoice in place (user 2026-11-11: a typo no longer
+  // needs a reversal plus a new invoice), the twin of
+  // updateGoodsReceiveNoteWithLines. Takes the invoice's reversal lock first,
+  // so an edit and a reversal (assertReversalCovered) cannot both pass their
+  // checks. Refused: a reversal, an invoice someone already reversed (its
+  // reversal was matched against these lines), and a save over someone else's
+  // (expected_updated_at). An invoice transferred from a goods receive note
+  // keeps every card, qty and FMV of that note, so only its date, supplier
+  // and unit costs change, and it moves no stock. A direct purchase moves
+  // stock_movement and the Medusa counter by the per-card difference only.
+  @InjectTransactionManager()
+  async updatePurchaseInvoiceWithLines(
+    invoiceId: string,
+    input: {
+      date: string;
+      supplier: string;
+      agent_user_id: string;
+      expected_updated_at?: string;
+      lines: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: number;
+        qty: number;
+        unit_cost: number;
+      }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    // The route validator already refuses these; repeated here because the
+    // method is public and a negative line would silently lower stock.
+    if (input.lines.length === 0 || input.lines.some((l) => !(l.qty > 0))) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Purchase invoice lines need a quantity above 0; to take every card off, reverse the invoice.',
+      );
+    }
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `purchase-invoice-reversal:${invoiceId}`,
+    ]);
+    const [invoice] = await this.listPurchaseInvoices(
+      { id: invoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!invoice) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Purchase invoice '${invoiceId}' not found.`,
+      );
+    }
+    if (invoice.reverses_invoice_id) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} is itself a reversal and cannot be edited.`,
+      );
+    }
+    const [reversal] = await this.listPurchaseInvoices(
+      { reverses_invoice_id: invoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (reversal) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} was reversed by ${reversal.display_no} and can no longer be edited.`,
+      );
+    }
+    if (
+      input.expected_updated_at !== undefined &&
+      new Date(invoice.updated_at).getTime() !==
+        new Date(input.expected_updated_at).getTime()
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} was changed by someone else after you opened it. Reload it and make your edit again.`,
+      );
+    }
+    const before = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines(
+        { invoice_id: invoiceId },
+        opts,
+        sharedContext,
+      ),
+    );
+    if (invoice.from_grn_id) {
+      const mismatch = this.grnLineMismatch(
+        before.map((l) => ({
+          card_handle: l.card_handle,
+          card_name: l.card_name,
+          qty: Number(l.qty),
+          fmv_snapshot: l.fmv_snapshot,
+        })),
+        input.lines,
+        // The card's name too: a transferred line stays as received.
+        (l) =>
+          `${l.card_handle} (${(l as { card_name?: string }).card_name}) x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
+        `invoice ${invoice.display_no}`,
+      );
+      if (mismatch) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `${invoice.display_no} was transferred from a goods receive note, so only its date, supplier and unit costs can change: ${mismatch}`,
+        );
+      }
+    }
+
+    const [updated] = await this.updatePurchaseInvoices(
+      [{ id: invoice.id, date: new Date(input.date), supplier: input.supplier }],
+      sharedContext,
+    );
+    // The ORM skips an update whose date and supplier did not change, so the
+    // version moves here, in the same transaction, for every edit.
+    // RETURNING, so the response carries the version a next edit must send.
+    const [{ updated_at }] = await em.execute<{ updated_at: Date }[]>(
+      'UPDATE purchase_invoice SET updated_at = clock_timestamp() WHERE id = ? RETURNING updated_at',
+      [invoice.id],
+    );
+    updated.updated_at = updated_at;
+    // Lines left as they were keep their rows (and ids).
+    const lineKey = (l: {
+      card_handle: string;
+      card_name: string;
+      fmv_snapshot: unknown;
+      qty: number;
+      unit_cost: unknown;
+    }) =>
+      `${l.card_handle}|${l.card_name}|${rmKey(l.fmv_snapshot)}|${Number(l.qty)}|${rmKey(l.unit_cost)}`;
+    const sameLines =
+      before.map(lineKey).sort().join('\n') ===
+      input.lines.map(lineKey).sort().join('\n');
+    let lines = before;
+    if (!sameLines) {
+      await this.softDeletePurchaseInvoiceLines(
+        before.map((l) => l.id),
+        {},
+        sharedContext,
+      );
+      lines = await this.createPurchaseInvoiceLines(
+        input.lines.map((l) => ({
+          invoice_id: invoice.id,
+          card_handle: l.card_handle,
+          card_name: l.card_name,
+          fmv_snapshot: l.fmv_snapshot,
+          qty: l.qty,
+          unit_cost: l.unit_cost,
+          // Raw product, as on create: see the line_total CHECK note above.
+          line_total: l.qty * l.unit_cost,
+        })),
+        sharedContext,
+      );
+    }
+    // grnQtyDelta is the per-card difference of any {id, card_handle, qty}
+    // lines. A transferred invoice moves no stock: its GRN already did.
+    const delta = invoice.from_grn_id
+      ? []
+      : grnQtyDelta(
+          before.map((l) => ({ ...l, qty: Number(l.qty) })),
+          lines.map((l) => ({ ...l, qty: Number(l.qty) })),
+        );
+    if (delta.length) {
+      await this.createStockMovements(
+        delta.map((d) => ({
+          card_handle: d.card_handle,
+          kind: 'purchase' as const,
+          qty: d.qty,
+          ref_id: d.ref_id,
+        })),
+        sharedContext,
+      );
+    }
+
+    const snapshot = (
+      inv: { date: Date; supplier: string },
+      ls: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: unknown;
+        qty: number;
+        unit_cost: unknown;
+      }[],
+    ) => ({
+      date: new Date(inv.date).toISOString(),
+      supplier: inv.supplier,
+      lines: ls.map((l) => ({
+        card_handle: l.card_handle,
+        card_name: l.card_name,
+        fmv_snapshot: Number(l.fmv_snapshot),
+        qty: Number(l.qty),
+        unit_cost: Number(l.unit_cost),
+      })),
+    });
+    await this.audit(
+      {
+        admin_id: input.agent_user_id,
+        entity_type: 'purchase_invoice',
+        entity_id: invoice.id,
+        action: 'edit',
+        before: snapshot(invoice, before),
+        after: snapshot(updated, lines),
+        reason: 'purchase invoice edited',
+      },
+      sharedContext,
+    );
+    return { ...updated, lines, delta };
+  }
+
   // Compensation-only hard delete — fires ONLY from the create-purchase-invoice
   // workflow's rollback path (the inventory-adjust step failing after this
   // invoice already committed). Never reachable from a route a caller sees
-  // succeed; invoices stay immutable from the operator's perspective.
+  // succeed; an invoice the operator saw is only ever edited
+  // (updatePurchaseInvoiceWithLines) or reversed, never deleted.
   @InjectTransactionManager()
   async deletePurchaseInvoiceCascade(
     invoiceId: string,

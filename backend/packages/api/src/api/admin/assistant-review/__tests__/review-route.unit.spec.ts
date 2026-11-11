@@ -118,6 +118,16 @@ describe('GET /admin/assistant-review', () => {
     expect(body.conversations[0].user_email).toBeUndefined();
   });
 
+  it('binds a search that looks like SQL as data, never as query text', async () => {
+    const { raw, call, run } = setup();
+    const evil = "' OR 1=1 --";
+    await run({ q: evil });
+    for (const [sql] of raw.mock.calls) expect(sql).not.toContain(evil);
+    const pattern = `%${evil}%`;
+    expect(call('as n from').bindings).toEqual(['u1', pattern, pattern]);
+    expect(call('order by').bindings).toEqual(['u1', pattern, pattern, 50, 0]);
+  });
+
   it('ignores a one-letter search', async () => {
     const { raw, run } = setup();
     await run({ q: ' a ' });

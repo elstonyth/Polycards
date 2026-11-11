@@ -3,9 +3,9 @@ import { currentToBuyList } from '../../../../modules/packs/procurement-view';
 
 // GET /admin/procurement/to-buy — the purchasing department's list (spec
 // 2026-10-28): every card with Qty to be procured >= 1, the card whose
-// longest-waiting order is oldest first. While STOCK_AUTO_ALLOCATION is on it
-// is the list the 12am stock run froze (`taken_at`); otherwise live
-// (`taken_at: null`) — procurement-view.ts. Plain JSON on purpose: the
+// longest-waiting order is oldest first. Stock is live; while
+// STOCK_AUTO_ALLOCATION is on, orders count as of the 12am run (`taken_at`),
+// otherwise all open orders (`taken_at: null`) — procurement-view.ts. Plain JSON on purpose: the
 // admin's Procurement page reads it today, an in-admin chatbot can read it
 // later.
 export async function GET(

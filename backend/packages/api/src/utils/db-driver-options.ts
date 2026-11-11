@@ -100,3 +100,43 @@ export const productionDatabaseDriverOptions = (
   pool: { min: 0, max: resolveDbPoolMax(env) },
   idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
 });
+
+/** Ceiling on one statement in the long-running processes, when
+ * DB_STATEMENT_TIMEOUT_MS is unset or unusable. Generous on purpose: it is the
+ * backstop for a query stuck behind a lock or scanning a growing table while
+ * holding one of the 5 pool connections, not a performance budget. */
+export const DEFAULT_STATEMENT_TIMEOUT_MS = 60_000;
+
+/**
+ * DATABASE_URL with `statement_timeout` added for `medusa start` only.
+ *
+ * statement_timeout can't go in databaseDriverOptions (see above) and must not
+ * bind the PRE_DEPLOY migrate job (`db:migrate` + `medusa exec` seeds), whose
+ * non-CONCURRENT index builds would be killed mid-deploy, nor one-off
+ * `medusa exec` scripts. So it rides the URL's `options` startup parameter
+ * (node-postgres sends it as-is), set here in code rather than in the prod
+ * secret, and only when the command is `start`: the web and worker processes.
+ * DB_STATEMENT_TIMEOUT_MS overrides the value; "0" turns it off. A timeout the
+ * URL already carries wins. lock_timeout is deliberately NOT set: it also cuts
+ * pg_advisory_xact_lock waits, which the money paths rely on queueing.
+ */
+export const runtimeDatabaseUrl = (
+  url: string | undefined,
+  env: NodeJS.ProcessEnv,
+  argv: string[] = process.argv,
+): string | undefined => {
+  if (!url || argv[2] !== 'start') return url;
+  const raw = (env.DB_STATEMENT_TIMEOUT_MS ?? '').trim();
+  const ms = /^\d+$/.test(raw) && Number.isSafeInteger(Number(raw))
+    ? Number(raw)
+    : DEFAULT_STATEMENT_TIMEOUT_MS;
+  if (ms === 0) return url;
+  const parsed = new URL(url);
+  const options = parsed.searchParams.get('options') ?? '';
+  if (/statement_timeout/.test(options)) return url;
+  parsed.searchParams.set(
+    'options',
+    `${options} -c statement_timeout=${ms}`.trim(),
+  );
+  return parsed.toString();
+};
