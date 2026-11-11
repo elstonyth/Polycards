@@ -23,9 +23,9 @@ const ACTOR = 'system:stock-allocation';
 // Off until the operator turns it on (decision 2026-10-28): the boss checks the
 // new Stock numbers against the shelf before orders start moving by
 // themselves. STOCK_AUTO_ALLOCATION=true enables the 12am run and the Stock
-// page's Refresh move, and freezes the to-buy list the 12am run leaves behind
-// (procurement-snapshot.ts); runStockAllocation itself and the live to-buy /
-// to-ship lists work either way.
+// page's Refresh move, and fixes which orders are on the day's to-buy list at
+// the 12am run (procurement-snapshot.ts); runStockAllocation itself and the
+// to-buy / to-ship lists work either way.
 export const stockAutoAllocationEnabled = (
   env: NodeJS.ProcessEnv = process.env,
 ): boolean => env.STOCK_AUTO_ALLOCATION?.trim().toLowerCase() === 'true';
