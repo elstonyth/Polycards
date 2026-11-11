@@ -7,11 +7,18 @@ import { MedusaError } from '@medusajs/framework/utils';
  * Shared so the paged routes can't drift apart — admin audit/commissions plus
  * the store notifications/credits feeds. See plans/008.
  */
+/**
+ * Deepest offset a storefront feed accepts (audit 2026-11-11). A deep OFFSET
+ * is a linear scan, and no storefront list pages anywhere near this: it is
+ * 500 "load more" taps at 20 a page. Admin lists stay uncapped.
+ */
+export const STORE_MAX_OFFSET = 10_000;
+
 export function parsePaginationParams(
   query: { limit?: unknown; offset?: unknown },
-  opts: { defaultLimit?: number; maxLimit?: number } = {},
+  opts: { defaultLimit?: number; maxLimit?: number; maxOffset?: number } = {},
 ): { limit: number; offset: number } {
-  const { defaultLimit = 50, maxLimit = 200 } = opts;
+  const { defaultLimit = 50, maxLimit = 200, maxOffset } = opts;
   const limit = Number(query.limit ?? defaultLimit);
   const offset = Number(query.offset ?? 0);
   if (!Number.isInteger(limit) || limit < 1 || limit > maxLimit) {
@@ -24,6 +31,12 @@ export function parsePaginationParams(
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'offset must be an integer >= 0.',
+    );
+  }
+  if (maxOffset !== undefined && offset > maxOffset) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `offset must be at most ${maxOffset}.`,
     );
   }
   return { limit, offset };

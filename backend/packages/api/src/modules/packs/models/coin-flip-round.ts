@@ -19,6 +19,9 @@ export const CoinFlipRound = model.define('coin_flip_round', {
   { name: 'IDX_coin_flip_round_customer_created', on: ['customer_id', 'created_at'], where: 'deleted_at IS NULL' },
   { name: 'IDX_coin_flip_round_pull', on: ['pull_id'], where: 'deleted_at IS NULL' },
   { name: 'IDX_coin_flip_round_status_created', on: ['status', 'created_at'], where: 'deleted_at IS NULL' },
+  // The public recent-flips feed orders every settled round by settled_at
+  // (Migration20261111180000).
+  { name: 'IDX_coin_flip_round_settled', on: ['settled_at', 'id'], where: "status IN ('won', 'lost') AND deleted_at IS NULL" },
 ]);
 
 export default CoinFlipRound;

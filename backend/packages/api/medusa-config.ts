@@ -5,6 +5,7 @@ import { assertMockTopupSafe } from './src/modules/packs/topup';
 import { warnLegacyGatewayEnv } from './src/modules/packs/gateway-env';
 import { isResendConfigured } from './src/modules/resend/options';
 import { resolvePhoneGateState } from './src/utils/phone-verification';
+import { S3_ADDITIONAL_CLIENT_CONFIG } from './src/utils/s3-client-config';
 import {
   productionDatabaseDriverOptions,
   runtimeDatabaseUrl,
@@ -89,8 +90,8 @@ const fileModule = s3Configured
                 region: process.env.S3_REGION,
                 bucket: process.env.S3_BUCKET,
                 endpoint: process.env.S3_ENDPOINT,
-                // Cloudflare R2 (and most S3-compatibles) need path-style URLs.
-                additional_client_config: { forcePathStyle: true },
+                // Path-style URLs plus connect/request timeouts; see the file.
+                additional_client_config: S3_ADDITIONAL_CLIENT_CONFIG,
               },
             },
           ],

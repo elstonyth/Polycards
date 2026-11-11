@@ -1,4 +1,8 @@
-import { parseSortParam } from '../pagination';
+import {
+  parsePaginationParams,
+  parseSortParam,
+  STORE_MAX_OFFSET,
+} from '../pagination';
 
 // The allowlist is a security boundary: every caller feeds the returned key
 // into a query builder's order option, and the ledger route feeds it (via its
@@ -66,5 +70,31 @@ describe('parseSortParam', () => {
       'DESC',
     );
     expect(parseSortParam('amount', SORTABLE, 'created_at').dir).toBe('DESC');
+  });
+});
+
+// Audit 2026-11-11: the store feeds accepted any offset, and a deep OFFSET is
+// a linear scan. The cap is opt-in, so admin lists keep paging freely.
+describe('parsePaginationParams maxOffset', () => {
+  it('accepts an offset up to the cap', () => {
+    expect(
+      parsePaginationParams(
+        { offset: String(STORE_MAX_OFFSET) },
+        { maxOffset: STORE_MAX_OFFSET },
+      ),
+    ).toEqual({ limit: 50, offset: STORE_MAX_OFFSET });
+  });
+
+  it('refuses an offset past the cap', () => {
+    expect(() =>
+      parsePaginationParams(
+        { offset: String(STORE_MAX_OFFSET + 1) },
+        { maxOffset: STORE_MAX_OFFSET },
+      ),
+    ).toThrow(/offset must be at most 10000/);
+  });
+
+  it('leaves the offset uncapped when no cap is given', () => {
+    expect(parsePaginationParams({ offset: '1000000' }).offset).toBe(1_000_000);
   });
 });

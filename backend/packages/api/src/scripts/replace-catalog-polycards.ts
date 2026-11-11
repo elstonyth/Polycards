@@ -27,8 +27,15 @@ import { PACKS_MODULE } from '../modules/packs';
 // touching ANYTHING — a re-run after the operator has populated/activated the
 // new packs must not wipe their odds/pulls/state. Delete the polycards packs
 // manually first if you truly want to re-run the cutover.
-// Run: corepack yarn medusa exec ./src/scripts/replace-catalog-polycards.ts
+//
+// CONFIRM REQUIRED (audit 2026-11-11): the slug check above is the only other
+// guard, and it passes whenever none of the 5 slugs is live (renamed, deleted,
+// never seeded), at which point a run deletes every vault. So the script also
+// refuses to start unless the operator names the wipe:
+// Run: CONFIRM_CATALOG_WIPE=wipe-all-pulls corepack yarn medusa exec ./src/scripts/replace-catalog-polycards.ts
 // ---------------------------------------------------------------------------
+
+export const CONFIRM_CATALOG_WIPE = 'wipe-all-pulls';
 
 const POLYCARDS_PACKS = [
   { slug: 'bronze-pack', title: 'Bronze Pack', price: 50, rank: 0 },
@@ -53,6 +60,13 @@ export default async function replaceCatalogPolycards({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs: PacksModuleService = container.resolve(PACKS_MODULE);
   const productModule = container.resolve(Modules.PRODUCT);
+
+  // Before any read: a mistyped run must not even look like it might proceed.
+  if (process.env.CONFIRM_CATALOG_WIPE !== CONFIRM_CATALOG_WIPE) {
+    throw new Error(
+      `replace-catalog-polycards deletes EVERY pull, delivery order, pack and card. Set CONFIRM_CATALOG_WIPE=${CONFIRM_CATALOG_WIPE} to run it.`,
+    );
+  }
 
   // One-shot guard: a prior run means the new catalog (and possibly operator
   // work on it — cards, odds, active status) is live. Never wipe that.

@@ -83,12 +83,19 @@ export const Pull = model
     // A count=N batch open shares ONE open_id across its N pulls (one charge
     // row paid them all). NULL on reward pulls (no charge; reward_draw carries
     // their provenance) and on pre-migration rows (forward-only, never
-    // back-filled). ponytail: no index — audit/dispute reads are rare; add one
-    // if a hot path ever filters on it.
+    // back-filled). Indexed (IDX_pull_open_id): the hourly unfinished-open
+    // sweep, refundUnfinishedOpen and the lapsed-gift check all filter on it.
     open_id: model.text().nullable(),
   })
   .indexes([
     // vault + public profile + admin gacha: filter customer_id, order rolled_at.
+    // open_id readers: the hourly unfinishedMoneyRows anti-join,
+    // refundUnfinishedOpen and UNOPENED_GIFT_SQL (Migration20261111180000).
+    {
+      name: 'IDX_pull_open_id',
+      on: ['open_id'],
+      where: 'open_id IS NOT NULL AND deleted_at IS NULL',
+    },
     {
       name: 'IDX_pull_customer_id_rolled_at',
       on: ['customer_id', 'rolled_at'],

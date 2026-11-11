@@ -1,7 +1,10 @@
 import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 
-// One settled win per round. Alone in its transaction: the build blocks writes to
-// credit_transaction while it scans the table, so that must end with the build.
+// One settled win per round. The build blocks writes to credit_transaction while
+// it scans the table. NOT alone in its transaction, whatever this said before:
+// the migrator runs every pending migration in one transaction (see
+// Migration20261103100400), so the lock is held until the whole deploy's
+// migrations commit.
 export class Migration20261103100300 extends Migration {
   override async up(): Promise<void> {
     this.addSql(`set local lock_timeout = '5s';`);

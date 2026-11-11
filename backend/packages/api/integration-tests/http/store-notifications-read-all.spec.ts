@@ -201,6 +201,38 @@ medusaIntegrationTestRunner({
         }
       });
 
+      // Audit 2026-11-11: the badge counts the whole feed, but read-all used
+      // to mark only the newest 50, so a long backlog kept a badge nobody
+      // could clear. 250 rows crosses a page boundary of the paged loop too.
+      it('(backlog) clears a feed longer than one page, so unread_count reaches 0', async () => {
+        const notif = getContainer().resolve(Modules.NOTIFICATION);
+        await notif.createNotifications(
+          Array.from({ length: 250 }, () => ({
+            to: customerIdA,
+            receiver_id: customerIdA,
+            channel: CUSTOMER_FEED_CHANNEL,
+            template: 'delivery_status',
+            data: {},
+          })),
+        );
+        const before = await unwrapResponse(
+          api.get('/store/notifications', { headers: authed(tokenA) }),
+        );
+        expect(before.data.unread_count).toBe(253);
+
+        const res = await unwrapResponse(
+          api.post('/store/notifications/read-all', {}, { headers: authed(tokenA) }),
+        );
+        expect(res.status).toBe(200);
+        expect(res.data.marked).toBe(253);
+        expect(res.data.has_more).toBe(false);
+
+        const after = await unwrapResponse(
+          api.get('/store/notifications', { headers: authed(tokenA) }),
+        );
+        expect(after.data.unread_count).toBe(0);
+      });
+
       it("(IDOR) A's read-all never touches B's rows", async () => {
         await unwrapResponse(
           api.post('/store/notifications/read-all', {}, { headers: authed(tokenA) }),

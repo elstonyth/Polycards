@@ -121,7 +121,7 @@ Run from `backend/packages/api` unless noted.
 | 6 | **Update `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` in BOTH places** | the storefront DO app spec **and** the `ARG` default at root `Dockerfile:58` |
 | 7 | **Rebuild the storefront** (not restart — `NEXT_PUBLIC_*` is inlined at build) | DO deploy |
 | 8 | Create the admin user | `medusa exec ./src/scripts/create-admin.ts` — `seed.ts` does NOT create one |
-| 9 | Catalog art, if the reseeded catalog needs it | `replace-catalog-polycards.ts`, `bake-slab-images.ts` |
+| 9 | Catalog art, if the reseeded catalog needs it | `replace-catalog-polycards.ts` (wipes every pull; refuses unless `CONFIRM_CATALOG_WIPE=wipe-all-pulls`), `bake-slab-images.ts` |
 | 10 | Verify an FxRate row exists | else money display silently uses the `DEFAULT_USD_MYR = 4.7` fallback |
 | 11 | Configure real challenge stages | admin → Weekly Challenge → Milestone Stages (§1.2) |
 | 12 | **Write the `referral_settings` row** | admin → **Referrals** → settings (`POST /admin/referrals/settings`). There is NO seeder — see the note below, "no row" is a live rate |
