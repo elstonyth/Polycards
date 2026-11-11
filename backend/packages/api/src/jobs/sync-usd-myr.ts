@@ -4,7 +4,6 @@ import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
 import { FX_USD_MYR_URL } from '../modules/packs/pricing';
 import { PAYMENT_FX_MAX_AGE_MS } from '../modules/packs/payment-fx';
-import { alertOps } from '../modules/packs/ops-alert';
 import { fetchPaymentFx, PAYMENT_FX_MAX_JUMP } from './sync-payment-fx';
 
 // USD->MYR, the rate behind every card price: sell-backs, opens, deliveries,
@@ -12,20 +11,20 @@ import { fetchPaymentFx, PAYMENT_FX_MAX_JUMP } from './sync-payment-fx';
 // PriceCharting sweep, from one feed, with no sanity band and only a warn line
 // on failure (audit 2026-11-11). Now it runs hourly on its own: ECB (frankfurter)
 // first, as before, then Coinbase when ECB fails. Each answer is banded and
-// jump-guarded the way sync-payment-fx guards SGD, and staff are alerted.
+// jump-guarded the way sync-payment-fx guards SGD. Problems are logged only:
+// no Telegram alert (owner 2026-11-11).
 //
 // During an outage, sell-backs keep pricing on the last good rate by design:
 // the same rate prices opens, deliveries and coin flip, so refusing on a stale
-// rate would stop all of them. The alert is the fence, not a refusal.
+// rate would stop all of them.
 
 /** RM per US$1 a feed may answer. Outside it, the feed is broken. */
 export const USD_MYR_BAND = { min: 3, max: 6 };
 export const USD_MYR_FALLBACK_URL =
   process.env.FX_USD_MYR_FALLBACK_URL ??
   'https://api.coinbase.com/v2/exchange-rates?currency=USD';
-/** A pin this far from the market gets an alert: sell-backs pay off-market. */
+/** A pin this far from the market is logged: sell-backs pay off-market. */
 export const USD_MYR_PIN_DRIFT_MAX = 0.01;
-const ALERT_MUTE_MS = 6 * 60 * 60 * 1000;
 const WHERE = 'Admin → Storefront → Pricing — exchange rate (USD → MYR)';
 
 export default async function syncUsdMyrJob(
@@ -33,10 +32,6 @@ export default async function syncUsdMyrJob(
 ): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-  const alert = (tag: string, note: string) =>
-    void alertOps(container, `fx-usd-myr:${tag}`, note, {
-      muteMs: ALERT_MUTE_MS,
-    });
 
   let got: Awaited<ReturnType<typeof fetchPaymentFx>> | null = null;
   for (const url of [FX_USD_MYR_URL, USD_MYR_FALLBACK_URL]) {
@@ -57,7 +52,6 @@ export default async function syncUsdMyrJob(
   if (!got) {
     const note = `USD->MYR: every feed failed, card prices and sell-backs keep the last-known rate. Check the feeds, or pin a manual rate in ${WHERE}.`;
     logger.warn(`[sync-usd-myr] ${note}`);
-    alert('feed-down', note);
     return;
   }
 
@@ -76,7 +70,6 @@ export default async function syncUsdMyrJob(
     ) {
       const note = `USD->MYR feed (${source}) says ${rate}, ${((rate / previous - 1) * 100).toFixed(1)}% from the stored ${previous}. NOT applied, the last rate stays. If the move is real, pin a manual rate near it in ${WHERE}.`;
       logger.error(`[sync-usd-myr] ${note}`);
-      alert('jump', note);
       return;
     }
     if (
@@ -86,7 +79,6 @@ export default async function syncUsdMyrJob(
     ) {
       const note = `USD->MYR is pinned at ${pinned} but the feed (${source}) says ${rate}, ${((rate / pinned - 1) * 100).toFixed(2)}% away, so card prices and sell-backs are off-market. Update or remove the pin in ${WHERE}.`;
       logger.error(`[sync-usd-myr] ${note}`);
-      alert('pin-drift', note);
     }
     if (row)
       await packs.updateFxRates([

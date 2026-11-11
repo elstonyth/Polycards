@@ -1,13 +1,9 @@
-jest.mock('../../modules/packs/ops-alert', () => ({
-  alertOps: jest.fn().mockResolvedValue(undefined),
-}));
-
 import syncUsdMyrJob, { config } from '../sync-usd-myr';
 import { config as paymentFxConfig } from '../sync-payment-fx';
-import { alertOps } from '../../modules/packs/ops-alert';
 
 // USD->MYR prices every card and every sell-back: hourly, ECB first, Coinbase
-// when ECB fails, never a broken feed's number, and staff hear about outages.
+// when ECB fails, never a broken feed's number, and every problem is in the
+// log (no Telegram alert, owner 2026-11-11).
 
 // Dated yesterday, so the test never ages past the staleness guard.
 const YESTERDAY = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
@@ -44,14 +40,17 @@ function container(stored: number | null, pinned: number | null = null) {
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   return {
     packs,
+    logger,
     c: { resolve: (k: string) => (k === 'logger' ? logger : packs) } as never,
   };
 }
 
-const alertTags = () =>
-  (alertOps as jest.Mock).mock.calls.map((call) => call[1]);
-
-beforeEach(() => (alertOps as jest.Mock).mockClear());
+// The log lines that flag a problem (warn for a failed feed, error for a
+// refused jump or a drifted pin), by marker.
+const flagged = (logger: { warn: jest.Mock; error: jest.Mock }) =>
+  [...logger.warn.mock.calls, ...logger.error.mock.calls]
+    .map(([m]) => String(m))
+    .filter((m) => /every feed failed|NOT applied|is pinned at/.test(m));
 
 describe('sync-usd-myr', () => {
   it('runs hourly, on its own minute', () => {
@@ -61,7 +60,7 @@ describe('sync-usd-myr', () => {
 
   it("stores ECB's rate, aged from ECB's own date", async () => {
     feeds({ 'api.frankfurter.app': ECB(4.21) });
-    const { c, packs } = container(4.2);
+    const { c, packs, logger } = container(4.2);
     await syncUsdMyrJob(c);
     expect(packs.updateFxRates).toHaveBeenCalledWith([
       {
@@ -71,7 +70,7 @@ describe('sync-usd-myr', () => {
         fetched_at: new Date(`${YESTERDAY}T00:00:00Z`),
       },
     ]);
-    expect(alertOps).not.toHaveBeenCalled();
+    expect(flagged(logger)).toEqual([]);
   });
 
   it('falls back to Coinbase when ECB is down', async () => {
@@ -96,35 +95,41 @@ describe('sync-usd-myr', () => {
     expect(packs.updateFxRates.mock.calls[0][0][0].source).toBe('coinbase');
   });
 
-  it('keeps the last rate and alerts staff when every feed fails', async () => {
+  it('keeps the last rate and logs it when every feed fails, with no Telegram call', async () => {
     feeds({});
-    const { c, packs } = container(4.2);
+    const { c, packs, logger } = container(4.2);
     await syncUsdMyrJob(c);
     expect(packs.updateFxRates).not.toHaveBeenCalled();
-    expect(alertTags()).toEqual(['fx-usd-myr:feed-down']);
+    expect(flagged(logger)).toEqual([
+      expect.stringContaining('every feed failed'),
+    ]);
+    const hosts = (global.fetch as jest.Mock).mock.calls.map(
+      ([url]) => new URL(url).hostname,
+    );
+    expect(hosts).not.toContain('api.telegram.org');
   });
 
-  it('refuses a jump past 5% and alerts', async () => {
+  it('refuses a jump past 5% and logs it', async () => {
     feeds({ 'api.frankfurter.app': ECB(4.5) });
-    const { c, packs } = container(4.2);
+    const { c, packs, logger } = container(4.2);
     await syncUsdMyrJob(c);
     expect(packs.updateFxRates).not.toHaveBeenCalled();
-    expect(alertTags()).toEqual(['fx-usd-myr:jump']);
+    expect(flagged(logger)).toEqual([expect.stringContaining('NOT applied')]);
   });
 
-  it('alerts when a pin has drifted off the market, and still records the feed', async () => {
+  it('logs a pin that has drifted off the market, and still records the feed', async () => {
     feeds({ 'api.frankfurter.app': ECB(4.3) });
-    const { c, packs } = container(4.2, 4.2);
+    const { c, packs, logger } = container(4.2, 4.2);
     await syncUsdMyrJob(c);
-    expect(alertTags()).toEqual(['fx-usd-myr:pin-drift']);
+    expect(flagged(logger)).toEqual([expect.stringContaining('is pinned at')]);
     expect(packs.updateFxRates.mock.calls[0][0][0].rate).toBe(4.3);
   });
 
   it('stays quiet for a pin within 1% of the market', async () => {
     feeds({ 'api.frankfurter.app': ECB(4.22) });
-    const { c } = container(4.2, 4.2);
+    const { c, logger } = container(4.2, 4.2);
     await syncUsdMyrJob(c);
-    expect(alertOps).not.toHaveBeenCalled();
+    expect(flagged(logger)).toEqual([]);
   });
 
   it('creates the row on an empty table', async () => {
