@@ -78,7 +78,8 @@ def main():
             capture_output=True, text=True, timeout=600)
         print(r.stdout[-2000:], r.stderr[-2000:])
         res = Image.open(os.path.join(WORK, "out", "h-020.png")).convert("RGB")
-        assert res.size == im.size, f"size changed: {res.size}"
+        if res.size != im.size:  # checked before SRC is overwritten; must survive python -O
+            raise SystemExit(f"size changed: {res.size} != {im.size}")
         merged = res.copy()
         merged.putalpha(im.getchannel("A"))
         if not os.path.exists(f"{OUT}/h-020.orig.webp"):
