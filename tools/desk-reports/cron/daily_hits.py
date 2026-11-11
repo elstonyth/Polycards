@@ -17,6 +17,7 @@ Excel, so they never reach the AI model. Python standard library only.
 """
 
 import datetime
+import io
 import json
 import os
 import sys
@@ -106,6 +107,8 @@ def _get(path, params, key, tries=3):
             if attempt == tries:
                 raise
         time.sleep(5 * attempt)
+    # Only reachable with tries < 1: never hand json.loads a None.
+    raise ValueError(f"{path}: no attempt made (tries={tries})")
 
 
 def _save(folder, name, data):
@@ -198,6 +201,9 @@ def excel_main():
     print(excel_message(day, path))
 
 
+# Asserts appear only in _self_test, run by --self-test and never by the cron,
+# where a failed check should stop loudly.
+# ruff: noqa: S101
 def _self_test():
     utc = datetime.timezone.utc
     assert day_label("2026-10-03") == "3 Oct 2026"
@@ -222,7 +228,8 @@ def _self_test():
 if __name__ == "__main__":
     # Hermes reads a cron script's stdout as UTF-8 on Windows, whatever the
     # console's code page; without this "·" arrives as a replacement mark.
-    sys.stdout.reconfigure(encoding="utf-8")
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     if "--self-test" in sys.argv:
         _self_test()
     else:

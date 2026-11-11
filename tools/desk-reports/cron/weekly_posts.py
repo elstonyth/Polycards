@@ -18,6 +18,7 @@ standard library only.
 """
 
 import datetime
+import io
 import json
 import sys
 import urllib.error
@@ -169,6 +170,9 @@ def main():
         print(f"MEDIA:{path}")
 
 
+# Asserts appear only in _self_test, run by --self-test and never by the cron,
+# where a failed check should stop loudly.
+# ruff: noqa: S101
 def _self_test():
     assert week_words("2026-10-04T16:00:00.000Z", "2026-10-11T16:00:00.000Z") == "5 – 11 Oct 2026"
     assert week_words("2026-09-27T16:00:00.000Z", "2026-10-04T16:00:00.000Z") == "28 Sep – 4 Oct 2026"
@@ -200,7 +204,8 @@ def _self_test():
 if __name__ == "__main__":
     # Hermes reads a cron script's stdout as UTF-8 on Windows, whatever the
     # console's code page; without this "·" arrives as a replacement mark.
-    sys.stdout.reconfigure(encoding="utf-8")
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     if "--self-test" in sys.argv:
         _self_test()
     else:
