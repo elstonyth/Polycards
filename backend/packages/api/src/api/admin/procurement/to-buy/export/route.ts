@@ -160,8 +160,8 @@ export async function toBuyWorkbook(
 
 // GET /admin/procurement/to-buy/export — the To buy list as a .xlsx with each
 // card's picture in its row, laid out like the sheet the buyers already keep.
-// currentToBuyList, so the rows are the ones on screen: while the list is
-// frozen, the frozen list. No dot in the path on purpose (see
+// currentToBuyList, so the rows are the ones on screen: orders as of 12am,
+// stock live. No dot in the path on purpose (see
 // players/export/route.ts); procurement:read comes with the /admin/procurement
 // prefix, and the assistant proxy refuses `/export` paths.
 export async function GET(

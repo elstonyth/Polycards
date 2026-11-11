@@ -2025,6 +2025,12 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Edit — ":id" is one path segment, the same matcher as the GRN edit's.
+      matcher: '/admin/purchase-invoices/:id',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Goods receive notes (spec 2026-10-28) — raise the same stock counters
       // as an invoice, and their reversal lowers them; same admin budget.
       matcher: '/admin/goods-receive-notes',

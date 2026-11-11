@@ -1372,6 +1372,22 @@
       }
     }
   },
+  "pi": {
+    "edit": "Edit",
+    "editTitle": "Edit {{no}}",
+    "editSubtitle": "Change the date, supplier, cards, FMV, quantities or unit costs. Saving keeps the invoice number, moves On Hand by the difference only and updates the average cost.",
+    "editSubtitleTransfer": "This invoice was transferred from {{grn}}, so its cards, FMV and quantities stay as received. You can change the date, supplier and unit costs.",
+    "save": "Save changes",
+    "cancel": "Cancel",
+    "edited": "Purchase invoice updated",
+    "reversedBy": "Reversed by {{no}}",
+    "notFound": "Purchase invoice not found.",
+    "loadError": "Failed to load this purchase invoice.",
+    "notEditableReversal": "{{no}} is a reversal and cannot be edited.",
+    "notEditableReversed": "{{no}} was reversed by {{by}} and can no longer be edited.",
+    "lowerTitle": "Save {{no}} with fewer cards?",
+    "lowerDescription": "Some cards on this invoice now have a lower quantity, so On Hand goes down. Orders already moved to ready to ship stay there: check the To ship list and move any short ones back to Processed."
+  },
   "grn": {
     "title": "Goods receive notes",
     "subtitle": "Cards that arrived before the supplier's invoice. Saving one raises On Hand; transfer it into a purchase invoice when the invoice comes.",
@@ -1455,8 +1471,8 @@
     "toBuy": "To buy",
     "toShip": "To ship",
     "toBuyEmpty": "Nothing to buy — every waiting order is covered.",
-    "frozenAt": "As of {{time}} MYT — updates daily at 12am MYT, after order statuses update.",
-    "live": "Live — today's 12am list isn't frozen (the 12am update is off or hasn't run yet).",
+    "frozenAt": "Orders as of {{time}} MYT — new orders join at 12am MYT. Stock is live: a saved goods receive note takes its cards off at once.",
+    "live": "Live — every open order counts, since today's 12am update is off or hasn't run yet.",
     "toShipEmpty": "No orders are ready to ship.",
     "loadError": "Could not load this list.",
     "col": {

@@ -602,15 +602,13 @@ medusaIntegrationTestRunner({
         expect(new Date(after.date).toISOString()).toBe(
           '2026-10-29T16:00:00.000Z',
         );
-        expect(after.lines.map((l: { id: string }) => l.id)).toEqual(
-          idsBefore,
-        );
+        expect(after.lines.map((l: { id: string }) => l.id)).toEqual(idsBefore);
         // No stock moved (the inventory page is gone with the product).
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         expect(
-          (await packs.listStockMovements({ card_handle: 'grn-edit-gone' })).map(
-            (m) => Number(m.qty),
-          ),
+          (
+            await packs.listStockMovements({ card_handle: 'grn-edit-gone' })
+          ).map((m) => Number(m.qty)),
         ).toEqual([2]);
 
         // ...but a deleted card cannot be added to another note.
@@ -679,6 +677,188 @@ medusaIntegrationTestRunner({
           'goods_receive:-1',
           'goods_receive:2',
         ]);
+      });
+
+      // ---- Purchase invoice edit (user 2026-11-11) ----
+
+      const piLine = (handle: string, qty: number, unit_cost: number) => ({
+        card_handle: handle,
+        card_name: handle,
+        fmv_snapshot: 100,
+        qty,
+        unit_cost,
+      });
+      const editInvoice = (id: string, body: Record<string, unknown>) =>
+        unwrapResponse(
+          api.post(
+            `/admin/purchase-invoices/${id}`,
+            {
+              date: '2026-10-29T00:00:00.000Z',
+              supplier: 'Early Supplier',
+              ...body,
+            },
+            headers(),
+          ),
+        );
+      const invoiceDetail = async (id: string) =>
+        (
+          await unwrapResponse(
+            api.get(`/admin/purchase-invoices/${id}`, headers()),
+          )
+        ).data.invoice;
+
+      it('invoice edit: keeps its number, moves stock by the difference and re-averages the cost', async () => {
+        await makeProduct('pi-edit-a', true);
+        await makeProduct('pi-edit-b', true);
+        const bought = (await invoice({ lines: [piLine('pi-edit-a', 3, 10)] }))
+          .data.invoice;
+        expect(await stockOf('pi-edit-a')).toMatchObject({
+          on_hand: 3,
+          counter: 3,
+          cost: 10,
+        });
+
+        const loaded = await invoiceDetail(bought.id);
+        expect(loaded.reversed_by).toBeNull();
+        const res = await editInvoice(bought.id, {
+          supplier: 'Typo Fixed',
+          expected_updated_at: loaded.updated_at,
+          lines: [piLine('pi-edit-a', 1, 12), piLine('pi-edit-b', 2, 5)],
+        });
+        expect(res.status).toBe(200);
+        expect(res.data.invoice.display_no).toBe(bought.display_no);
+        expect(res.data.invoice.supplier).toBe('Typo Fixed');
+        expect(res.data.invoice).not.toHaveProperty('delta');
+        expect(await stockOf('pi-edit-a')).toMatchObject({
+          on_hand: 1,
+          counter: 1,
+          cost: 12,
+        });
+        expect(await stockOf('pi-edit-b')).toMatchObject({
+          on_hand: 2,
+          counter: 2,
+          cost: 5,
+        });
+        // Append-only history: the purchase, then the edit's difference.
+        expect(await movements('pi-edit-a')).toEqual([
+          'purchase:-2',
+          'purchase:3',
+        ]);
+        expect(await movements('pi-edit-b')).toEqual(['purchase:2']);
+        const shown = await invoiceDetail(bought.id);
+        expect(
+          shown.lines.map(
+            (l: { card_handle: string; qty: number; unit_cost: unknown }) =>
+              `${l.card_handle} x ${l.qty} @ ${Number(l.unit_cost)}`,
+          ),
+        ).toEqual(
+          expect.arrayContaining(['pi-edit-a x 1 @ 12', 'pi-edit-b x 2 @ 5']),
+        );
+        expect(shown.lines).toHaveLength(2);
+
+        const [audit] = await getContainer()
+          .resolve<PacksModuleService>(PACKS_MODULE)
+          .listAdminActionAudits(
+            {
+              entity_type: 'purchase_invoice',
+              entity_id: bought.id,
+              action: 'edit',
+            },
+            { take: 1 },
+          );
+        expect(audit).toMatchObject({
+          reason: 'purchase invoice edited',
+          before: {
+            supplier: 'Early Supplier',
+            lines: [{ card_handle: 'pi-edit-a', qty: 3, unit_cost: 10 }],
+          },
+        });
+
+        // The form loaded before that save is now stale: refused, unchanged.
+        const stale = await editInvoice(bought.id, {
+          expected_updated_at: loaded.updated_at,
+          lines: [piLine('pi-edit-a', 9, 1)],
+        });
+        expect(stale.status).toBe(400);
+        expect(stale.data.message).toMatch(/changed by someone else/);
+        expect(await stockOf('pi-edit-a')).toMatchObject({ on_hand: 1 });
+
+        // A reversal undoes the invoice as edited; then it can't be edited.
+        const undo = await invoice({
+          reverses_invoice_id: bought.id,
+          lines: [piLine('pi-edit-a', -1, 12)],
+        });
+        expect(undo.status).toBe(201);
+        const reversed = await invoiceDetail(bought.id);
+        expect(reversed.reversed_by).toEqual({
+          id: undo.data.invoice.id,
+          display_no: undo.data.invoice.display_no,
+        });
+        const afterReverse = await editInvoice(bought.id, {
+          lines: [piLine('pi-edit-a', 5, 12), piLine('pi-edit-b', 2, 5)],
+        });
+        expect(afterReverse.status).toBe(400);
+        expect(afterReverse.data.message).toMatch(/was reversed by PI-\d{5}/);
+        const ofReversal = await editInvoice(undo.data.invoice.id, {
+          lines: [piLine('pi-edit-a', 1, 12)],
+        });
+        expect(ofReversal.status).toBe(400);
+        expect(ofReversal.data.message).toMatch(/is itself a reversal/);
+        expect(await stockOf('pi-edit-a')).toMatchObject({ on_hand: 0 });
+      });
+
+      it('invoice edit: one from a GRN changes its cost only and moves no stock', async () => {
+        await makeProduct('pi-edit-grn', true);
+        const received = (await grn('pi-edit-grn', 2)).data.goods_receive_note;
+        const pi = (
+          await invoice({
+            from_grn_id: received.id,
+            lines: [piLine('pi-edit-grn', 2, 40)],
+          })
+        ).data.invoice;
+
+        const cost = await editInvoice(pi.id, {
+          lines: [piLine('pi-edit-grn', 2, 45)],
+        });
+        expect(cost.status).toBe(200);
+        expect(await stockOf('pi-edit-grn')).toMatchObject({
+          on_hand: 2,
+          counter: 2,
+          cost: 45,
+        });
+        expect(await movements('pi-edit-grn')).toEqual(['goods_receive:2']);
+
+        // The response's version is the stored one: a chained edit passes.
+        const chained = await editInvoice(pi.id, {
+          supplier: 'Renamed Supplier',
+          expected_updated_at: cost.data.invoice.updated_at,
+          lines: [piLine('pi-edit-grn', 2, 45)],
+        });
+        expect(chained.status).toBe(200);
+        expect(chained.data.invoice.supplier).toBe('Renamed Supplier');
+
+        for (const lines of [
+          [piLine('pi-edit-grn', 3, 45)],
+          [{ ...piLine('pi-edit-grn', 2, 45), fmv_snapshot: 999 }],
+          [{ ...piLine('pi-edit-grn', 2, 45), card_name: 'Wrong Card' }],
+        ]) {
+          const refused = await editInvoice(pi.id, { lines });
+          expect(refused.status).toBe(400);
+          expect(refused.data.message).toMatch(
+            /only its date, supplier and unit costs can change/,
+          );
+        }
+        expect(await stockOf('pi-edit-grn')).toMatchObject({
+          on_hand: 2,
+          cost: 45,
+        });
+        // An edit can't turn an invoice into a reversal or a transfer.
+        const sneaky = await editInvoice(pi.id, {
+          from_grn_id: received.id,
+          lines: [piLine('pi-edit-grn', 2, 45)],
+        });
+        expect(sneaky.status).toBe(400);
+        expect((await detail(received.id)).status).toBe('transferred');
       });
     });
   },
