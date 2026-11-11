@@ -943,6 +943,36 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
       });
 
+      it('cancel refunds nothing to a disabled entrant, and the page leaves it out', async () => {
+        const prize = await livePrize();
+        await fund('cus_live', 50);
+        await fund('cus_shut', 50);
+        await service.enterLuckyDraw({
+          customerId: 'cus_live',
+          prizeId: prize.id,
+          tickets: 4,
+        });
+        await service.enterLuckyDraw({
+          customerId: 'cus_shut',
+          prizeId: prize.id,
+          tickets: 30,
+        });
+        await service.createCustomerAccountStates([
+          { customer_id: 'cus_shut', disabled: true },
+        ]);
+
+        const [shown] = (await service.luckyDrawPage()).prizes;
+        expect([shown.total_tickets, shown.entrant_count, shown.top]).toEqual([
+          4,
+          1,
+          [{ customer_id: 'cus_live', tickets: 4 }],
+        ]);
+
+        expect(await cancel(prize.id)).toEqual({ refunded: 1 });
+        expect(await service.luckyDrawBalance('cus_live')).toBe(50);
+        expect(await service.luckyDrawBalance('cus_shut')).toBe(20);
+      });
+
       it('cancelling a prize with no entries refunds nobody; an unknown prize is NOT_FOUND', async () => {
         const prize = await livePrize();
         expect(await cancel(prize.id)).toEqual({ refunded: 0 });
@@ -2035,7 +2065,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(grantedOf.get(empty.id)).toBe(true);
       });
 
-      it('disabled entrants are excluded and refunded; all-disabled → null winner', async () => {
+      it('disabled entrants are excluded and get no refund; all-disabled → null winner', async () => {
         const prize = await committedPrize();
         await fund('cus_x1', 100);
         await fund('cus_x2', 100);
@@ -2063,7 +2093,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
         expect(res.entries).toEqual([{ customer_id: 'cus_x2', tickets: 15 }]);
         expect(res.excluded).toEqual(['cus_x1']);
-        expect(await service.luckyDrawBalance('cus_x1')).toBe(100);
+        expect(await service.luckyDrawBalance('cus_x1')).toBe(70);
         expect(await rewardCredits('cus_x2')).toHaveLength(1);
 
         const none = await resultOf(lonely.id);
@@ -2075,20 +2105,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
         expect(none.entries).toEqual([]);
         expect(none.excluded).toEqual(['cus_x3']);
-        expect(await service.luckyDrawBalance('cus_x3')).toBe(100);
+        expect(await service.luckyDrawBalance('cus_x3')).toBe(60);
         expect(await rewardCredits('cus_x3')).toHaveLength(0);
 
-        // Same ref as a cancel refund: a prize is either drawn or cancelled.
-        const refunds = await service.listLuckyDrawTickets({
-          reason: 'refund',
-        });
-        expect(refunds.map((t) => [t.ref, t.delta])).toHaveLength(2);
-        expect(refunds.map((t) => [t.ref, t.delta])).toEqual(
-          expect.arrayContaining([
-            [`${lonely.id}:cus_x3`, 40],
-            [`${prize.id}:cus_x1`, 30],
-          ]),
-        );
+        // A disabled account receives nothing, not even its tickets back.
+        expect(
+          await service.listLuckyDrawTickets({ reason: 'refund' }),
+        ).toEqual([]);
       });
 
       it('a prize not yet due, cancelled, or on a draft or cancelled event is not drawn', async () => {

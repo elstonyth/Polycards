@@ -1194,6 +1194,14 @@ type LuckyDrawCard = {
 
 /** The player page's top-entrants length. */
 const LUCKY_DRAW_TOP_ENTRANTS = 10;
+// Disabled (and purged) accounts are left out of every count and list built from
+// lucky_draw_entry, so the totals and the top 10 are the ones the draw will use
+// (owner 2026-11-12: a disabled account shows nowhere). Appended after the
+// entry table's own WHERE; it must stay unaliased in those queries.
+const LUCKY_DRAW_LIVE_ENTRY_SQL =
+  'AND NOT EXISTS (SELECT 1 FROM customer_account_state s ' +
+  'WHERE s.customer_id = lucky_draw_entry.customer_id ' +
+  'AND s.disabled = true AND s.deleted_at IS NULL) ';
 /** A finished event stays on the page this long. */
 const LUCKY_DRAW_LINGER_MS = 7 * 24 * 60 * 60 * 1000;
 /** A draw time must be at least this far ahead when it is set or published:
@@ -7950,8 +7958,8 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // Admin: withdraw a prize before its draw and give every entrant their
-  // tickets back. Takes the EXCLUSIVE prize lock first — the same key an entry
+  // Admin: withdraw a prize before its draw and give every entrant that is not
+  // disabled their tickets back. Takes the EXCLUSIVE prize lock first — the same key an entry
   // holds shared — so it waits for in-flight entries and an entry arriving
   // afterwards is refused; the result is then re-checked under the lock, so a
   // cancel racing the draw can never both pay a winner and refund. On a published
@@ -8035,11 +8043,17 @@ class PacksModuleService extends MedusaService({
     // Read through the ORM, before this transaction writes anything: raw SQL
     // would not see rows the unit of work has not flushed yet. Paged — a
     // truncated read here is a missed refund.
-    const entrants = aggregateEntries(
+    const entered = aggregateEntries(
       await pageAll((opts) =>
         this.listLuckyDrawEntries({ prize_id: prize.id }, opts, sharedContext),
       ),
     );
+    // A disabled account gets no refund (owner 2026-11-12).
+    const shut = await this.disabledCustomerIds(
+      entered.map((e) => e.customer_id),
+      sharedContext,
+    );
+    const entrants = entered.filter((e) => !shut.has(e.customer_id));
     const cancelledAt = new Date();
     await this.updateLuckyDrawPrizes(
       { selector: { id: prize.id }, data: { cancelled_at: cancelledAt } },
@@ -8075,13 +8089,14 @@ class PacksModuleService extends MedusaService({
     return { refunded: entrants.length };
   }
 
-  // Admin: stop a one_winner event and give every entrant their tickets back,
+  // Admin: stop a one_winner event and give every entrant that is not disabled
+  // their tickets back,
   // allowed until it has a result. Takes the EXCLUSIVE event lock, so it waits for
   // in-flight entries and refunds them, an entry arriving afterwards sees the
   // cancelled status, and a withdraw racing the draw can never both pay and refund
   // (the result is re-checked under the lock, and the status stops a later draw).
-  // The refund ref '<eventId>:<customerId>' is unique, as is the draw's for an
-  // excluded account: an event is either drawn or withdrawn.
+  // The refund ref '<eventId>:<customerId>' is unique: an event is either drawn
+  // or withdrawn, and the draw itself refunds nobody.
   @InjectTransactionManager()
   async withdrawLuckyDrawEvent(
     input: { id: string; adminId: string; reason: string },
@@ -8123,11 +8138,17 @@ class PacksModuleService extends MedusaService({
       );
     }
     // Paged: a truncated read here is a missed refund.
-    const entrants = aggregateEntries(
+    const entered = aggregateEntries(
       await pageAll((opts) =>
         this.listLuckyDrawEntries({ event_id: event.id }, opts, sharedContext),
       ),
     );
+    // A disabled account gets no refund (owner 2026-11-12).
+    const shut = await this.disabledCustomerIds(
+      entered.map((e) => e.customer_id),
+      sharedContext,
+    );
+    const entrants = entered.filter((e) => !shut.has(e.customer_id));
     const prizes = (
       await pageAll((opts) =>
         this.listLuckyDrawPrizes({ event_id: event.id }, opts, sharedContext),
@@ -8313,7 +8334,9 @@ class PacksModuleService extends MedusaService({
         this.listLuckyDrawEntries({ prize_id: prize.id }, opts, sharedContext),
       ),
     );
-    // Disabled (and deleted) accounts are left out of the draw and refunded.
+    // Disabled (and deleted) accounts are left out of the draw and get nothing
+    // back: a disabled account receives no tickets (owner 2026-11-12). Who was
+    // left out stays on the result row, so an enable can be made good by hand.
     const disabled = await this.disabledCustomerIds(
       all.map((e) => e.customer_id),
       sharedContext,
@@ -8335,18 +8358,6 @@ class PacksModuleService extends MedusaService({
           )
         : [];
 
-    if (excluded.length > 0) {
-      // Same ref as a cancel refund: a prize is either drawn or cancelled.
-      await this.createLuckyDrawTickets(
-        excluded.map((e) => ({
-          customer_id: e.customer_id,
-          delta: e.tickets,
-          reason: 'refund' as const,
-          ref: `${prize.id}:${e.customer_id}`,
-        })),
-        sharedContext,
-      );
-    }
     const { creditTransactionId, pullId } = winnerId
       ? await this.payLuckyDrawPrize(
           prize,
@@ -8601,7 +8612,9 @@ class PacksModuleService extends MedusaService({
         this.listLuckyDrawEntries({ event_id: event.id }, opts, sharedContext),
       ),
     );
-    // Disabled (and deleted) accounts are left out of the draw and refunded.
+    // Disabled (and deleted) accounts are left out of the draw and get nothing
+    // back: a disabled account receives no tickets (owner 2026-11-12). Who was
+    // left out stays on the result row, so an enable can be made good by hand.
     const disabled = await this.disabledCustomerIds(
       all.map((e) => e.customer_id),
       sharedContext,
@@ -8620,17 +8633,6 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    if (excluded.length > 0) {
-      await this.createLuckyDrawTickets(
-        excluded.map((e) => ({
-          customer_id: e.customer_id,
-          delta: e.tickets,
-          reason: 'refund' as const,
-          ref: `${event.id}:${e.customer_id}`,
-        })),
-        sharedContext,
-      );
-    }
     const drawnAt = new Date();
     const facts = {
       winner_customer_id: winnerId,
@@ -8994,7 +8996,7 @@ class PacksModuleService extends MedusaService({
       `SELECT ${column} AS target, COALESCE(SUM(tickets), 0) AS total, ` +
         'COUNT(DISTINCT customer_id) AS entrants FROM lucky_draw_entry ' +
         `WHERE ${column} IN (${ids.map(() => '?').join(', ')}) ` +
-        `AND deleted_at IS NULL GROUP BY ${column}`,
+        `AND deleted_at IS NULL ${LUCKY_DRAW_LIVE_ENTRY_SQL}GROUP BY ${column}`,
       ids,
     );
     return new Map(
@@ -9130,7 +9132,9 @@ class PacksModuleService extends MedusaService({
         'ORDER BY SUM(tickets) DESC, customer_id ASC) AS rn ' +
         'FROM lucky_draw_entry ' +
         `WHERE event_id IN (${ids.map(() => '?').join(', ')}) ` +
-        'AND deleted_at IS NULL GROUP BY event_id, customer_id' +
+        'AND deleted_at IS NULL ' +
+        LUCKY_DRAW_LIVE_ENTRY_SQL +
+        'GROUP BY event_id, customer_id' +
         ') ranked WHERE rn <= ? ORDER BY event_id, rn',
       [...ids, LUCKY_DRAW_TOP_ENTRANTS],
     );
@@ -9269,7 +9273,9 @@ class PacksModuleService extends MedusaService({
             'ORDER BY SUM(tickets) DESC, customer_id ASC) AS rn ' +
             'FROM lucky_draw_entry ' +
             `WHERE prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
-            'AND deleted_at IS NULL GROUP BY prize_id, customer_id' +
+            'AND deleted_at IS NULL ' +
+            LUCKY_DRAW_LIVE_ENTRY_SQL +
+            'GROUP BY prize_id, customer_id' +
             ') ranked WHERE rn <= ? ORDER BY prize_id, rn',
           [...prizeIds, LUCKY_DRAW_TOP_ENTRANTS],
         )
@@ -9324,7 +9330,9 @@ class PacksModuleService extends MedusaService({
       top = (
         await em.execute<{ customer_id: string; tickets: string | number }[]>(
           'SELECT customer_id, SUM(tickets) AS tickets FROM lucky_draw_entry ' +
-            'WHERE event_id = ? AND deleted_at IS NULL GROUP BY customer_id ' +
+            'WHERE event_id = ? AND deleted_at IS NULL ' +
+            LUCKY_DRAW_LIVE_ENTRY_SQL +
+            'GROUP BY customer_id ' +
             'ORDER BY SUM(tickets) DESC, customer_id ASC LIMIT ?',
           [event.id, LUCKY_DRAW_TOP_ENTRANTS],
         )
