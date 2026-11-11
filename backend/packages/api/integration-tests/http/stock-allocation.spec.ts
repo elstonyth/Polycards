@@ -462,8 +462,8 @@ medusaIntegrationTestRunner({
         ];
         expect((await look()).rows).toEqual(expected);
 
-        // The frozen 12am list carries them too: it fixes WHAT to buy, while
-        // the picture and the price are read when the page loads.
+        // After the 12am run too: the picture and the price are read when the
+        // page loads.
         await midnight();
         const frozen = await look();
         expect(frozen.taken_at).not.toBeNull();
@@ -531,7 +531,7 @@ medusaIntegrationTestRunner({
         await Promise.all([midnight(), midnight()]);
       });
 
-      it('to-buy is the list the 12am run froze, by oldest waiting order; to-ship lists ready orders oldest first', async () => {
+      it('to-buy: orders as of the 12am run, stock live, by oldest waiting order; to-ship lists ready orders oldest first', async () => {
         await makeProduct('buy-late');
         await makeProduct('buy-early');
         await makeProduct('ship-card');
@@ -553,20 +553,32 @@ medusaIntegrationTestRunner({
           ['buy-early', 1],
           ['buy-late', 2],
         ]);
-        // A card arriving during the day changes neither the list nor the
-        // order: both wait for the next 12am run.
+        // A card arriving during the day comes off the list at once (user
+        // 2026-11-11: staff bought duplicates waiting for 12am); the order
+        // still waits for the next 12am run.
         await receive('buy-early', 1);
-        expect(await getToBuy()).toEqual(frozen);
+        const afterGrn = await getToBuy();
+        expect(afterGrn.taken_at).toBe(frozen.taken_at);
+        expect(afterGrn.rows.map((r) => [r.handle, r.to_procure])).toEqual([
+          ['buy-late', 2],
+        ]);
         expect(await statusOf(first)).toBe('processed');
 
-        // The next 12am run picks the new card up: the order ships and the
-        // newest list replaces the old one.
+        // An order placed after the 12am run can still be canceled today, so
+        // it joins the list only at the next 12am.
+        await requestOrder('cus_p5', ['buy-late']);
+        expect(
+          (await getToBuy()).rows.map((r) => [r.handle, r.to_procure]),
+        ).toEqual([['buy-late', 2]]);
+
+        // The next 12am run picks both up: the order ships, the new order
+        // joins, and the newest run's time replaces the old one.
         await midnight(nextNight());
         expect(await statusOf(first)).toBe('ready_to_ship');
         const next = await getToBuy();
         expect(next.taken_at! > frozen.taken_at!).toBe(true);
         expect(next.rows.map((r) => [r.handle, r.to_procure])).toEqual([
-          ['buy-late', 2],
+          ['buy-late', 3],
         ]);
 
         const toShip = (
