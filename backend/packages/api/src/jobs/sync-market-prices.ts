@@ -61,6 +61,12 @@ export async function runMarketPriceSync(
   const cards: CardRow[] = (
     await pageAll<CardRow>((opts) => packs.listCards({}, opts))
   ).filter((c: CardRow) => c.pc_product_id);
+  // Least recently synced first (never-synced, failed and pending cards lead):
+  // a deploy restarts the worker and ends the sweep early, and a fixed order
+  // left the same tail unsynced on consecutive days until it went stale.
+  const syncedAt = (c: CardRow) =>
+    (c.pc_synced_at ? new Date(c.pc_synced_at).getTime() : 0) || 0;
+  cards.sort((a, b) => syncedAt(a) - syncedAt(b));
   let changed = 0;
   let skipped = 0;
   let failed = 0;
