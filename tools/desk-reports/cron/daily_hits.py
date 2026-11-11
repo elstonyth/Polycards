@@ -17,6 +17,7 @@ Excel, so they never reach the AI model. Python standard library only.
 """
 
 import datetime
+import io
 import json
 import os
 import sys
@@ -224,7 +225,8 @@ def _self_test():
 if __name__ == "__main__":
     # Hermes reads a cron script's stdout as UTF-8 on Windows, whatever the
     # console's code page; without this "·" arrives as a replacement mark.
-    sys.stdout.reconfigure(encoding="utf-8")
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     if "--self-test" in sys.argv:
         _self_test()
     else:
