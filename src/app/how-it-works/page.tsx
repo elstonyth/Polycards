@@ -4,7 +4,6 @@ import Link from 'next/link';
 import {
   Vault,
   ShieldCheck,
-  Thermometer,
   Truck,
   Layers,
   Trophy,
@@ -25,23 +24,18 @@ type VaultCard = { icon: LucideIcon; title: string; body: string };
 const VAULT_CARDS: VaultCard[] = [
   {
     icon: Vault,
-    title: 'Choose Your Vault',
-    body: 'Cards stored at PSA, Alt, or Fanatics facilities',
+    title: 'Our Own Stock',
+    body: 'Cards are held by Polycards until you ship or sell them',
   },
   {
     icon: ShieldCheck,
-    title: 'Fully Insured',
-    body: 'Complete coverage on every card from day one',
-  },
-  {
-    icon: Thermometer,
-    title: 'Climate Controlled',
-    body: 'Optimal conditions for long-term preservation',
+    title: 'Sell Back Anytime',
+    body: `Sell eligible vault cards back to us at ${BUYBACK_RATE_LABEL}, no waiting on a buyer`,
   },
   {
     icon: Truck,
     title: 'Ship Anytime',
-    body: 'Redeem your cards with worldwide tracked delivery',
+    body: 'Redeem your cards with tracked delivery in Malaysia and Singapore',
   },
 ];
 
@@ -52,7 +46,7 @@ const CAPABILITIES: Capability[] = [
   {
     icon: Layers,
     title: 'Open Packs',
-    body: 'Hundreds of Pokémon packs. New drops every week.',
+    body: 'Pokémon, One Piece and Poly packs.',
   },
   {
     icon: Trophy,
@@ -64,11 +58,11 @@ const CAPABILITIES: Capability[] = [
 const FAQS: FaqItem[] = [
   {
     q: 'Are these real physical cards?',
-    a: 'Yes. Every card on Polycards is a real, professionally graded physical card stored in secure vault facilities. When you open a pack, you receive ownership of a specific physical slab that exists in a PSA, Fanatics, or Alt vault. You can ship it to your door at any time.',
+    a: 'Yes. Every card on Polycards is a real, professionally graded physical card held in our own stock. When you open a pack, you own a specific physical slab, and you can have it delivered to your door in Malaysia or Singapore.',
   },
   {
     q: 'How does shipping work?',
-    a: 'When you request a shipment, your card is pulled from the vault, carefully packaged, and shipped via fully tracked and insured delivery. We ship worldwide, and most domestic orders arrive within 5-7 business days. International shipping typically takes 10-14 days.',
+    a: 'When you request a delivery, your card is carefully packed and sent by tracked courier. We deliver within Malaysia and Singapore only, and each delivery pays its zone fee. Follow it from your orders page.',
   },
   {
     q: "What if I don't like my pull?",
@@ -80,7 +74,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: 'Where are my cards stored?',
-    a: 'Cards are stored in climate-controlled, fully insured vault facilities operated by PSA, Fanatics, and Alt. These are the same facilities used by major auction houses and institutional collectors. Your cards are protected around the clock.',
+    a: 'Your cards are held in Polycards’ own stock until you ship or sell them.',
   },
   {
     q: 'Can I sell my cards?',
@@ -244,7 +238,7 @@ export default function HowItWorksPage() {
         <Reveal>
           <SectionHeading
             title="Vault & Security"
-            sub="Every card is stored in insured, climate-controlled facilities managed by industry leaders."
+            sub="Every card is held in our own stock until you ship or sell it."
           />
         </Reveal>
         {/* One grouped guarantee panel (hairline-divided cells), deliberately
@@ -252,9 +246,9 @@ export default function HowItWorksPage() {
             sections must not read as the same component twice. A gap-px grid
             over a hairline-tinted container paints the dividers without the
             divide-x/-y-on-grid stray-border gotcha; the panel reveals as one
-            unit rather than four staggered cards. */}
+            unit rather than staggered cards. */}
         <Reveal>
-          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-3">
             {VAULT_CARDS.map((c) => {
               const Icon = c.icon;
               return (

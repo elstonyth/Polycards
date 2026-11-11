@@ -36,7 +36,7 @@ const QUICK_ANSWERS = [
   {
     num: '01',
     title: 'SHIPPING',
-    copy: 'Your vault ships worldwide the moment you ask it to.',
+    copy: 'Your vault ships within Malaysia and Singapore whenever you ask.',
     href: '/how-it-works',
   },
   {
