@@ -2010,6 +2010,18 @@ export async function submitHeldWithdrawal(
       'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
     );
   }
+  // A disabled account is paid nothing (owner rule 2026-11-12). Deny still
+  // works: it only puts the person's own money back in the shut wallet.
+  const [disabled] = await packs.listCustomerAccountStates(
+    { customer_id: row.customer_id, disabled: true },
+    { take: 1 },
+  );
+  if (disabled) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This customer’s account is disabled, so it cannot be paid out. Enable it before approving, or deny the withdrawal.',
+    );
+  }
 
   // One bank account, one Polycards account, here too (ADR 0015): a row held
   // before the rule shipped, or on a number since unverified or removed, must not

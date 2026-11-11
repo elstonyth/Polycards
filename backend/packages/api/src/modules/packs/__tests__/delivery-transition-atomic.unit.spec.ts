@@ -119,6 +119,7 @@ const fakeService = (order: OrderRow, hasDebit = true) => {
     listPulls,
     recordLedgerEntry,
     mutateCreditAtomic,
+    isAccountDisabled: jest.fn(async () => false),
   });
   const ctx = { transactionManager: em } as never;
   return {
@@ -149,6 +150,28 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
     const locks = f.em.execute.mock.calls.filter(([sql]) => sql.includes('pg_advisory_xact_lock'));
     expect(locks.map(([, params]) => params)).toEqual([['credit:customer_1'], ['delivery:do_1']]);
     expect(f.ops.indexOf('sql')).toBeLessThan(f.ops.indexOf('read'));
+  });
+
+  it('a disabled account: no move toward the courier, but cancel still works', async () => {
+    for (const to of ['ready_to_ship', 'pending_ship', 'shipped'] as const) {
+      const f = fakeService({ id: 'do_1', status: 'processed' });
+      Object.assign(f.svc, { isAccountDisabled: jest.fn(async () => true) });
+      await expect(
+        f.svc.transitionDeliveryOrderStatus(
+          { orderId: 'do_1', to, trackingNumber: 'TRK1', pullIds: [] },
+          f.ctx,
+        ),
+      ).rejects.toMatchObject({
+        type: MedusaError.Types.NOT_ALLOWED,
+        message: expect.stringMatching(/disabled/),
+      });
+      expect(f.updateDeliveryOrders).not.toHaveBeenCalled();
+    }
+    const f = fakeService({ id: 'do_1', status: 'requested' });
+    Object.assign(f.svc, { isAccountDisabled: jest.fn(async () => true) });
+    await expect(
+      f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx),
+    ).resolves.toMatchObject({ status: 'canceled' });
   });
 
   it('losing double-cancel: fresh read shows canceled → clean NOT_ALLOWED, NOTHING written', async () => {

@@ -1194,6 +1194,12 @@ type LuckyDrawCard = {
 
 /** The player page's top-entrants length. */
 const LUCKY_DRAW_TOP_ENTRANTS = 10;
+// The delivery statuses that move an order toward the courier.
+const DELIVERY_TOWARD_COURIER: ReadonlySet<string> = new Set([
+  'ready_to_ship',
+  'pending_ship',
+  'shipped',
+]);
 // Disabled (and purged) accounts are left out of every count and list built from
 // lucky_draw_entry, so the totals and the top 10 are the ones the draw will use
 // (owner 2026-11-12: a disabled account shows nowhere). Appended after the
@@ -3096,10 +3102,12 @@ class PacksModuleService extends MedusaService({
       { take: 100_000 },
       sharedContext,
     );
-    const skip = await this.deletedCustomerIds(
-      [...new Set(pending.map((l) => l.customer_id))],
-      sharedContext,
-    );
+    const payees = [...new Set(pending.map((l) => l.customer_id))];
+    const deleted = await this.deletedCustomerIds(payees, sharedContext);
+    // A disabled account is paid nothing either (owner rule 2026-11-12). Its
+    // line is voided like a deleted one, so the run still closes and the
+    // reason shows in review; re-enabling does not bring the line back.
+    const disabled = await this.disabledCustomerIds(payees, sharedContext);
 
     // Every line flip below is ONE conditional claim (see claim.ts), never the
     // generated selector-update: that one is a find-then-write with no row
@@ -3115,12 +3123,17 @@ class PacksModuleService extends MedusaService({
     let skipped = 0;
     const paidCustomerIds: string[] = [];
     for (const line of pending) {
-      if (skip.has(line.customer_id)) {
+      if (deleted.has(line.customer_id) || disabled.has(line.customer_id)) {
         const voided = await claimRows(em, {
           table: 'weekly_settlement_line',
           ids: [line.id],
           where: { status: 'pending' },
-          set: { status: 'voided', void_reason: 'account_deleted' },
+          set: {
+            status: 'voided',
+            void_reason: deleted.has(line.customer_id)
+              ? 'account_deleted'
+              : 'account_disabled',
+          },
         });
         // An admin void got there first — and already took its deduction.
         if (voided.length !== 1) continue;
@@ -8919,6 +8932,7 @@ class PacksModuleService extends MedusaService({
       );
     }
     const { customerId } = input;
+    if (tickets > 0) await this.assertMayReceive(customerId, sharedContext);
     const ref = `admin:${customerId}:${key ?? crypto.randomUUID()}`;
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
@@ -9899,6 +9913,21 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return Boolean(state);
+  }
+
+  // Owner rule 2026-11-12: a disabled account receives nothing (no grant, gift,
+  // ticket, prize or payout). Taking value OFF it, a clawback, stays open.
+  // NOT_ALLOWED, never CONFLICT: the error handler rewrites CONFLICT messages.
+  async assertMayReceive(
+    customerId: string,
+    sharedContext: Context = {},
+  ): Promise<void> {
+    if (await this.isAccountDisabled(customerId, sharedContext)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is disabled, so it cannot receive anything. Enable it first.',
+      );
+    }
   }
 
   // Batch form of isAccountDisabled, for the PUBLIC boards: they rank by
@@ -14920,6 +14949,18 @@ class PacksModuleService extends MedusaService({
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const [owner] = await em.execute<{ customer_id: string }[]>('SELECT customer_id FROM delivery_order WHERE id = ? AND deleted_at IS NULL', [input.orderId]);
     if (!owner) throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Delivery order not found.');
+    // A disabled account receives no prize (owner rule 2026-11-12): its order
+    // never moves toward the courier. Cancel stays open, and so does marking
+    // delivered, which only records what already happened.
+    if (
+      DELIVERY_TOWARD_COURIER.has(input.to) &&
+      (await this.isAccountDisabled(owner.customer_id, sharedContext))
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This customer’s account is disabled, so the order cannot be shipped. Cancel it, or enable the account first.',
+      );
+    }
     await lockCoinFlipCustomer(owner.customer_id, sharedContext);
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `delivery:${input.orderId}`,
@@ -15167,6 +15208,9 @@ class PacksModuleService extends MedusaService({
     replayed?: boolean;
   }> {
     const reason = input.bonus ? 'bonus_grant' : 'adjustment';
+    if (input.amount > 0) {
+      await this.assertMayReceive(input.customerId, sharedContext);
+    }
     // Serialize retries BEFORE the mint-window and customer locks. Replays
     // must still succeed after a grant exhausts today's mint allowance.
     const requestReference = input.idempotencyKey
@@ -15380,6 +15424,7 @@ class PacksModuleService extends MedusaService({
     if (invalid) throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
     const quantity = input.quantity as number;
     const note = (input.note as string).trim();
+    await this.assertMayReceive(input.customerId, sharedContext);
 
     const [pack] = await this.listPacks(
       { slug: input.packSlug },
@@ -18385,13 +18430,19 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     const handleById = new Map(cards.map((c) => [c.id, c.handle]));
+    // A disabled account receives no card (owner rule 2026-11-12): its row
+    // stays skipped, so enabling the account and re-running still hands it over.
+    const shut = await this.disabledCustomerIds(
+      [...new Set(rows.map((r) => r.customer_id))],
+      sharedContext,
+    );
 
     let granted = 0;
     let pulls = 0;
     const stillSkipped: string[] = [];
     for (const row of rows) {
       const handle = handleById.get(row.card_id);
-      if (!handle) {
+      if (!handle || shut.has(row.customer_id)) {
         stillSkipped.push(row.id);
         continue;
       }
@@ -19327,6 +19378,13 @@ class PacksModuleService extends MedusaService({
          JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
         WHERE dord.deleted_at IS NULL
           AND dord.status IN ('requested','processed','packing','ready_to_ship','pending_ship')
+          -- A disabled account's WAITING order takes no stock and is not
+          -- bought for (owner rule 2026-11-12). A packed one keeps its cards
+          -- held until staff cancel it, so they are not handed out twice.
+          AND NOT (dord.status IN ('requested','processed','packing')
+            AND EXISTS (SELECT 1 FROM customer_account_state s
+                         WHERE s.customer_id = dord.customer_id
+                           AND s.disabled = true AND s.deleted_at IS NULL))
         ORDER BY dord.created_at, dord.id`,
     );
     const byId = new Map<
