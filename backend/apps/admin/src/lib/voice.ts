@@ -134,9 +134,14 @@ export function createVad(
   const verdict = (): VadState => {
     // A short reply ("yes") ends on the same pause as a long one, rather
     // than waiting out the no-speech timeout.
-    if (((spoke || heard) && silent >= silenceMs) || elapsed >= maxMs)
-      return (result = 'ended');
-    if (!spoke && !heard && elapsed >= noSpeechMs) return (result = 'timeout');
+    if (((spoke || heard) && silent >= silenceMs) || elapsed >= maxMs) {
+      result = 'ended';
+      return result;
+    }
+    if (!spoke && !heard && elapsed >= noSpeechMs) {
+      result = 'timeout';
+      return result;
+    }
     return spoke ? 'speaking' : 'waiting';
   };
   return {
