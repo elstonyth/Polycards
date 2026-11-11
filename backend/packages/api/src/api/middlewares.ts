@@ -65,6 +65,7 @@ import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { recordVisitorSignal, requireVouchedVisitor } from './utils/visitor-ip';
 import { adminRbacRoutes } from './admin-rbac';
+import { requestErrorLog } from '../utils/request-error-log';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -350,6 +351,8 @@ const redirectRootToDashboard = (
 };
 
 export default defineMiddlewares({
+  // Stock handler plus a request-id line for every 5xx (utils/request-error-log.ts).
+  errorHandler: requestErrorLog,
   routes: [
     {
       // Root landing → admin dashboard (see redirectRootToDashboard above).
@@ -2129,6 +2132,15 @@ export default defineMiddlewares({
       '/store/reviews*',
       '/store/payment-collections*',
     ].map((matcher) => ({ matcher, middlewares: [blockUnusedSurface] })),
+    // Mercur's /hooks/payout and core's /hooks/payment/:provider: no payment
+    // provider is configured and our gateways call /hooks/<gateway>/* instead,
+    // but each anonymous POST queued an event (body, raw body, headers; 3
+    // attempts) on the single event worker that VIP, Telegram and welcome
+    // events wait behind (audit 2026-11-11).
+    ...['/hooks/payout*', '/hooks/payment*'].map((matcher) => ({
+      matcher,
+      middlewares: [blockUnusedSurface],
+    })),
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a

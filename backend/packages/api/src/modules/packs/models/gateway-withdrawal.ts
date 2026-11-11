@@ -143,6 +143,20 @@ export const GatewayWithdrawal = model
     { on: ['merchant_transaction_id'] },
     // Reconciliation sweep: outstanding payouts, oldest first.
     { on: ['status', 'created_at'] },
+    // Per-customer history and the gateway-reference lookup. Both were created
+    // only by hand migrations (Migration20260722170000, renamed with the
+    // table), so db:generate would have emitted a DROP for them (audit
+    // 2026-11-11). Names and predicates match what prod has.
+    {
+      name: 'IDX_gateway_withdrawal_customer_id',
+      on: ['customer_id'],
+      where: 'deleted_at IS NULL',
+    },
+    {
+      name: 'IDX_gateway_withdrawal_gateway_transaction_id',
+      on: ['gateway_transaction_id'],
+      where: 'deleted_at IS NULL',
+    },
     // The real guarantee behind the Idempotency-Key replay: the read in
     // startWithdrawal only turns the second request into a clean replay
     // instead of a 23505. Declared HERE and not only in

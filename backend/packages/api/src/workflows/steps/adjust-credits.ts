@@ -103,10 +103,12 @@ export const adjustCreditsStep = createStep(
     };
     return new StepResponse(
       result,
-      replayed ? undefined : { creditTransactionId: id },
+      // null on a replay: undefined would hand the compensator this step's
+      // output, and a replay wrote nothing to undo (#968).
+      replayed ? null : { creditTransactionId: id },
     );
   },
-  async (data: { creditTransactionId: string } | undefined, { container }) => {
+  async (data: { creditTransactionId: string } | null, { container }) => {
     if (!data) return;
     // adjustment rows are never commission-backed, so the guarded path is safe
     // and removes the last caller of the raw base-delete (Task 11 seals it).
