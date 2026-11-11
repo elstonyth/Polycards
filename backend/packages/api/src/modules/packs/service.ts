@@ -25,6 +25,7 @@ import {
   NOW,
   type LedgerSqlManager,
 } from './claim';
+import { updateCreditTransactionsById } from './batch-update';
 import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
@@ -16386,12 +16387,9 @@ class PacksModuleService extends MedusaService({
         reference: r.reference,
       })),
     );
-    for (const [id, ext] of diff) {
-      await em.execute(
-        'UPDATE credit_transaction SET external_funded_cents = ?, updated_at = now() WHERE id = ?',
-        [ext, id],
-      );
-    }
+    await updateCreditTransactionsById(em, 'external_funded_cents = v.val', [
+      ...diff,
+    ]);
     return { rowsUpdated: diff.size };
   }
 
@@ -16491,12 +16489,11 @@ class PacksModuleService extends MedusaService({
     const releasedSen = release.reduce((t, r) => t + r.releaseSen, 0);
 
     if (input.apply && stamped.length > 0) {
-      for (const r of release) {
-        await em.execute(
-          'UPDATE credit_transaction SET external_funded_cents = external_funded_cents - ?, updated_at = now() WHERE id = ?',
-          [r.releaseSen, r.id],
-        );
-      }
+      await updateCreditTransactionsById(
+        em,
+        'external_funded_cents = t.external_funded_cents - v.val',
+        release.map((r) => [r.id, r.releaseSen] as const),
+      );
       await this.audit(
         {
           admin_id: input.actor,
