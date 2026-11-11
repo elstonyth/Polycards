@@ -19129,11 +19129,14 @@ class PacksModuleService extends MedusaService({
       const mismatch = this.grnLineMismatch(
         before.map((l) => ({
           card_handle: l.card_handle,
+          card_name: l.card_name,
           qty: Number(l.qty),
           fmv_snapshot: l.fmv_snapshot,
         })),
         input.lines,
-        (l) => `${l.card_handle} x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
+        // The card's name too: a transferred line stays as received.
+        (l) =>
+          `${l.card_handle} (${(l as { card_name?: string }).card_name}) x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
         `invoice ${invoice.display_no}`,
       );
       if (mismatch) {
@@ -19150,10 +19153,12 @@ class PacksModuleService extends MedusaService({
     );
     // The ORM skips an update whose date and supplier did not change, so the
     // version moves here, in the same transaction, for every edit.
-    await em.execute(
-      'UPDATE purchase_invoice SET updated_at = clock_timestamp() WHERE id = ?',
+    // RETURNING, so the response carries the version a next edit must send.
+    const [{ updated_at }] = await em.execute<{ updated_at: Date }[]>(
+      'UPDATE purchase_invoice SET updated_at = clock_timestamp() WHERE id = ? RETURNING updated_at',
       [invoice.id],
     );
+    updated.updated_at = updated_at;
     // Lines left as they were keep their rows (and ids).
     const lineKey = (l: {
       card_handle: string;

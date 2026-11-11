@@ -828,9 +828,19 @@ medusaIntegrationTestRunner({
         });
         expect(await movements('pi-edit-grn')).toEqual(['goods_receive:2']);
 
+        // The response's version is the stored one: a chained edit passes.
+        const chained = await editInvoice(pi.id, {
+          supplier: 'Renamed Supplier',
+          expected_updated_at: cost.data.invoice.updated_at,
+          lines: [piLine('pi-edit-grn', 2, 45)],
+        });
+        expect(chained.status).toBe(200);
+        expect(chained.data.invoice.supplier).toBe('Renamed Supplier');
+
         for (const lines of [
           [piLine('pi-edit-grn', 3, 45)],
           [{ ...piLine('pi-edit-grn', 2, 45), fmv_snapshot: 999 }],
+          [{ ...piLine('pi-edit-grn', 2, 45), card_name: 'Wrong Card' }],
         ]) {
           const refused = await editInvoice(pi.id, { lines });
           expect(refused.status).toBe(400);
