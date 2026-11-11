@@ -20,6 +20,9 @@ vi.mock('@/lib/data/leaderboard', () => ({
   getLeaderboard: vi.fn(async () => []),
 }));
 // The page only references these; it never renders them in this test.
+vi.mock('@/lib/data/free-pack', () => ({
+  getFreePackPromo: async () => false,
+}));
 vi.mock('@/components/home/HeroBoard', () => ({ default: () => null }));
 vi.mock('@/components/home/PullsMarquee', () => ({ default: () => null }));
 vi.mock('@/components/home/TierShelf', () => ({ default: () => null }));

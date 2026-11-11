@@ -35,26 +35,6 @@ try {
     expect((await response.body()).length).toBeGreaterThan(100);
   });
 
-  await page.goto(`${base}/fairness`, { waitUntil: 'domcontentloaded' });
-  await check('fairness states current proof availability', async () => {
-    await expect(page.locator('main')).toContainText(
-      'Independent per-pull verification is not available yet',
-    );
-    await expect(page.locator('main')).toContainText(
-      'Signing in does not unlock proofs',
-    );
-    await expect(
-      page.getByRole('link', { name: /Browse packs/ }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('link', { name: /Browse packs/ }).locator('..'),
-    ).toHaveCSS('opacity', '1');
-  });
-  await page.screenshot({
-    path: path.join(out, 'fairness.png'),
-    fullPage: true,
-  });
-
   for (const slug of [
     'bronze-pack',
     'silver-pack',

@@ -64,7 +64,6 @@ const PUBLIC = [
   '/auth/google/failed',
   '/contact',
   '/download',
-  '/fairness',
   '/how-it-works',
   '/leaderboard',
   '/reset-password',

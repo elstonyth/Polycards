@@ -70,7 +70,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: 'How are pulls determined? Is it fair?',
-    a: 'Cards are selected on the server using a cryptographically secure random draw and the applicable pack odds. Review the odds before opening. Independent per-pull verification is not available yet: we do not currently publish the proof data needed to reproduce an individual result yourself. See the fairness page for the current availability notice.',
+    a: 'Cards are selected on the server using a cryptographically secure random draw and the applicable pack odds. Review the odds before opening. Independent per-pull verification is not available yet: we do not currently publish the proof data needed to reproduce an individual result yourself.',
   },
   {
     q: 'Where are my cards stored?',
