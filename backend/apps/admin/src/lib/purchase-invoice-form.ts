@@ -183,6 +183,26 @@ export function grnDraftLines(
   }));
 }
 
+/** The saved lines of a purchase invoice as the edit form starts from them. */
+export function invoiceDraftLines(
+  lines: {
+    card_handle: string;
+    card_name: string;
+    fmv_snapshot: number | string;
+    qty: number;
+    unit_cost: number | string;
+  }[],
+): DraftLine[] {
+  return lines.map((l) => ({
+    card_handle: l.card_handle,
+    card_name: l.card_name,
+    // bigNumber columns: may arrive as numeric strings.
+    fmv_snapshot: Number(l.fmv_snapshot).toFixed(2),
+    qty: String(l.qty),
+    unit_cost: Number(l.unit_cost).toFixed(2),
+  }));
+}
+
 /** True when an edit leaves any card with fewer units on the note than it had
  *  saved, counted per card across lines — On Hand then goes down, so the form
  *  warns before it saves. */

@@ -18808,7 +18808,9 @@ class PacksModuleService extends MedusaService({
     // soft-deleted rows. A future void/delete route that soft-deletes a
     // reversing invoice would silently hand its headroom back. Unreachable
     // today — nothing deletes an invoice except the compensation cascade,
-    // which hard-deletes an invoice that never became visible.
+    // which hard-deletes an invoice that never became visible, and an edit
+    // (updatePurchaseInvoiceWithLines) soft-deletes lines only of an invoice
+    // no reversal points at, under this same lock.
     const priorReversals = await pageAll((opts) =>
       this.listPurchaseInvoices(
         { reverses_invoice_id: target.id },
@@ -19038,10 +19040,213 @@ class PacksModuleService extends MedusaService({
     return { ...invoice, lines };
   }
 
+  // Edits a purchase invoice in place (user 2026-11-11: a typo no longer
+  // needs a reversal plus a new invoice), the twin of
+  // updateGoodsReceiveNoteWithLines. Takes the invoice's reversal lock first,
+  // so an edit and a reversal (assertReversalCovered) cannot both pass their
+  // checks. Refused: a reversal, an invoice someone already reversed (its
+  // reversal was matched against these lines), and a save over someone else's
+  // (expected_updated_at). An invoice transferred from a goods receive note
+  // keeps every card, qty and FMV of that note, so only its date, supplier
+  // and unit costs change, and it moves no stock. A direct purchase moves
+  // stock_movement and the Medusa counter by the per-card difference only.
+  @InjectTransactionManager()
+  async updatePurchaseInvoiceWithLines(
+    invoiceId: string,
+    input: {
+      date: string;
+      supplier: string;
+      agent_user_id: string;
+      expected_updated_at?: string;
+      lines: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: number;
+        qty: number;
+        unit_cost: number;
+      }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    // The route validator already refuses these; repeated here because the
+    // method is public and a negative line would silently lower stock.
+    if (input.lines.length === 0 || input.lines.some((l) => !(l.qty > 0))) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Purchase invoice lines need a quantity above 0; to take every card off, reverse the invoice.',
+      );
+    }
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `purchase-invoice-reversal:${invoiceId}`,
+    ]);
+    const [invoice] = await this.listPurchaseInvoices(
+      { id: invoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!invoice) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Purchase invoice '${invoiceId}' not found.`,
+      );
+    }
+    if (invoice.reverses_invoice_id) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} is itself a reversal and cannot be edited.`,
+      );
+    }
+    const [reversal] = await this.listPurchaseInvoices(
+      { reverses_invoice_id: invoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (reversal) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} was reversed by ${reversal.display_no} and can no longer be edited.`,
+      );
+    }
+    if (
+      input.expected_updated_at !== undefined &&
+      new Date(invoice.updated_at).getTime() !==
+        new Date(input.expected_updated_at).getTime()
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} was changed by someone else after you opened it. Reload it and make your edit again.`,
+      );
+    }
+    const before = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines(
+        { invoice_id: invoiceId },
+        opts,
+        sharedContext,
+      ),
+    );
+    if (invoice.from_grn_id) {
+      const mismatch = this.grnLineMismatch(
+        before.map((l) => ({
+          card_handle: l.card_handle,
+          qty: Number(l.qty),
+          fmv_snapshot: l.fmv_snapshot,
+        })),
+        input.lines,
+        (l) => `${l.card_handle} x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
+        `invoice ${invoice.display_no}`,
+      );
+      if (mismatch) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `${invoice.display_no} was transferred from a goods receive note, so only its date, supplier and unit costs can change: ${mismatch}`,
+        );
+      }
+    }
+
+    const [updated] = await this.updatePurchaseInvoices(
+      [{ id: invoice.id, date: new Date(input.date), supplier: input.supplier }],
+      sharedContext,
+    );
+    // The ORM skips an update whose date and supplier did not change, so the
+    // version moves here, in the same transaction, for every edit.
+    await em.execute(
+      'UPDATE purchase_invoice SET updated_at = clock_timestamp() WHERE id = ?',
+      [invoice.id],
+    );
+    // Lines left as they were keep their rows (and ids).
+    const lineKey = (l: {
+      card_handle: string;
+      card_name: string;
+      fmv_snapshot: unknown;
+      qty: number;
+      unit_cost: unknown;
+    }) =>
+      `${l.card_handle}|${l.card_name}|${rmKey(l.fmv_snapshot)}|${Number(l.qty)}|${rmKey(l.unit_cost)}`;
+    const sameLines =
+      before.map(lineKey).sort().join('\n') ===
+      input.lines.map(lineKey).sort().join('\n');
+    let lines = before;
+    if (!sameLines) {
+      await this.softDeletePurchaseInvoiceLines(
+        before.map((l) => l.id),
+        {},
+        sharedContext,
+      );
+      lines = await this.createPurchaseInvoiceLines(
+        input.lines.map((l) => ({
+          invoice_id: invoice.id,
+          card_handle: l.card_handle,
+          card_name: l.card_name,
+          fmv_snapshot: l.fmv_snapshot,
+          qty: l.qty,
+          unit_cost: l.unit_cost,
+          // Raw product, as on create: see the line_total CHECK note above.
+          line_total: l.qty * l.unit_cost,
+        })),
+        sharedContext,
+      );
+    }
+    // grnQtyDelta is the per-card difference of any {id, card_handle, qty}
+    // lines. A transferred invoice moves no stock: its GRN already did.
+    const delta = invoice.from_grn_id
+      ? []
+      : grnQtyDelta(
+          before.map((l) => ({ ...l, qty: Number(l.qty) })),
+          lines.map((l) => ({ ...l, qty: Number(l.qty) })),
+        );
+    if (delta.length) {
+      await this.createStockMovements(
+        delta.map((d) => ({
+          card_handle: d.card_handle,
+          kind: 'purchase' as const,
+          qty: d.qty,
+          ref_id: d.ref_id,
+        })),
+        sharedContext,
+      );
+    }
+
+    const snapshot = (
+      inv: { date: Date; supplier: string },
+      ls: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: unknown;
+        qty: number;
+        unit_cost: unknown;
+      }[],
+    ) => ({
+      date: new Date(inv.date).toISOString(),
+      supplier: inv.supplier,
+      lines: ls.map((l) => ({
+        card_handle: l.card_handle,
+        card_name: l.card_name,
+        fmv_snapshot: Number(l.fmv_snapshot),
+        qty: Number(l.qty),
+        unit_cost: Number(l.unit_cost),
+      })),
+    });
+    await this.audit(
+      {
+        admin_id: input.agent_user_id,
+        entity_type: 'purchase_invoice',
+        entity_id: invoice.id,
+        action: 'edit',
+        before: snapshot(invoice, before),
+        after: snapshot(updated, lines),
+        reason: 'purchase invoice edited',
+      },
+      sharedContext,
+    );
+    return { ...updated, lines, delta };
+  }
+
   // Compensation-only hard delete — fires ONLY from the create-purchase-invoice
   // workflow's rollback path (the inventory-adjust step failing after this
   // invoice already committed). Never reachable from a route a caller sees
-  // succeed; invoices stay immutable from the operator's perspective.
+  // succeed; an invoice the operator saw is only ever edited
+  // (updatePurchaseInvoiceWithLines) or reversed, never deleted.
   @InjectTransactionManager()
   async deletePurchaseInvoiceCascade(
     invoiceId: string,

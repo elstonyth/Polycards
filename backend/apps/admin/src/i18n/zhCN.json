@@ -170,6 +170,22 @@
     "export": "导出 Excel",
     "sku": "SKU"
   },
+  "pi": {
+    "edit": "编辑",
+    "editTitle": "编辑 {{no}}",
+    "editSubtitle": "可修改日期、供应商、卡片、FMV、数量或单价。保存后发票编号不变，现有库存只按差额变动，平均成本随之更新。",
+    "editSubtitleTransfer": "此发票由 {{grn}} 转入，卡片、FMV 和数量保持收货时的记录。可修改日期、供应商和单价。",
+    "save": "保存修改",
+    "cancel": "取消",
+    "edited": "采购发票已更新",
+    "reversedBy": "已被 {{no}} 冲销",
+    "notFound": "找不到该采购发票。",
+    "loadError": "无法加载该采购发票。",
+    "notEditableReversal": "{{no}} 是冲销发票，无法编辑。",
+    "notEditableReversed": "{{no}} 已被 {{by}} 冲销，无法再编辑。",
+    "lowerTitle": "以较少的卡片数量保存 {{no}}？",
+    "lowerDescription": "此发票上部分卡片的数量变少，现有库存会减少。已移到待发货的订单会留在原状态：请查看待发货清单，把缺货的订单移回处理中。"
+  },
   "grn": {
     "title": "收货单",
     "subtitle": "供应商发票到达之前先到货的卡牌。保存后计入现有库存；发票到达后转入采购发票。",
