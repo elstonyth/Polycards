@@ -170,6 +170,9 @@ def main():
         print(f"MEDIA:{path}")
 
 
+# Asserts appear only in _self_test, run by --self-test and never by the cron,
+# where a failed check should stop loudly.
+# ruff: noqa: S101
 def _self_test():
     assert week_words("2026-10-04T16:00:00.000Z", "2026-10-11T16:00:00.000Z") == "5 – 11 Oct 2026"
     assert week_words("2026-09-27T16:00:00.000Z", "2026-10-04T16:00:00.000Z") == "28 Sep – 4 Oct 2026"

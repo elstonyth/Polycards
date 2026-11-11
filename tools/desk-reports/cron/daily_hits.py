@@ -201,6 +201,9 @@ def excel_main():
     print(excel_message(day, path))
 
 
+# Asserts appear only in _self_test, run by --self-test and never by the cron,
+# where a failed check should stop loudly.
+# ruff: noqa: S101
 def _self_test():
     utc = datetime.timezone.utc
     assert day_label("2026-10-03") == "3 Oct 2026"
