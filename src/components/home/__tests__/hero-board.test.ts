@@ -12,7 +12,9 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/' }));
 const { default: HeroBoard } = await import('../HeroBoard');
 
 it('keeps Polycards card backs without inventing hits when the catalog is unavailable', () => {
-  const html = renderToStaticMarkup(createElement(HeroBoard, { hits: [], freePackPromo: false }));
+  const html = renderToStaticMarkup(
+    createElement(HeroBoard, { hits: [], freePackPromo: false }),
+  );
   expect(html).toContain('Open packs.');
   expect(html).toContain('Pull real cards.');
   expect(html).toContain(
@@ -38,7 +40,9 @@ it('renders all three supplied slabs with the highest-value hit in front', () =>
       spriteImage: null,
     },
   }));
-  const html = renderToStaticMarkup(createElement(HeroBoard, { hits, freePackPromo: false }));
+  const html = renderToStaticMarkup(
+    createElement(HeroBoard, { hits, freePackPromo: false }),
+  );
   expect(html.match(/data-hero-hit=/g)).toHaveLength(3);
   for (const hit of hits) expect(html).toContain(hit.card.name);
   expect(html).toContain('1,234.56');
