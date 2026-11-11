@@ -93,6 +93,47 @@ it('reads the current card before fetching so edits made during the catalog swee
   );
 });
 
+it('syncs the least recently synced cards first, so a sweep cut short leaves different cards behind next time', async () => {
+  jest.useFakeTimers();
+  const card = (id: string, pc_synced_at: string | null) => ({
+    id,
+    handle: id,
+    pc_product_id: id,
+    pc_grade: 'PSA 10',
+    market_value: 1,
+    pc_synced_at,
+  });
+  const cards = [
+    card('fresh', '2026-11-11T03:10:00Z'),
+    card('never', null),
+    card('cut-twice', '2026-11-09T03:30:00Z'),
+    card('cut-once', '2026-11-10T03:30:00Z'),
+  ];
+  const packs = {
+    listCards: jest.fn(async (filter: { id?: string }) =>
+      filter.id ? cards.filter((c) => c.id === filter.id) : cards,
+    ),
+    applyCardPriceSync: jest.fn().mockResolvedValue(true),
+    listCardPriceHistories: jest.fn(async () => [{ value: 1 }]),
+  };
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  jest.mocked(pcFetch).mockImplementation(async (_path, params) => ({
+    kind: 'ok',
+    data: { status: 'success', id: params.id, 'manual-only-price': 100 },
+  }));
+  const running = runMarketPriceSync({
+    resolve: (key: string) => (key === PACKS_MODULE ? packs : logger),
+  } as unknown as MedusaContainer);
+  await jest.runAllTimersAsync();
+  await running;
+  expect(jest.mocked(pcFetch).mock.calls.map(([, p]) => p.id)).toEqual([
+    'never',
+    'cut-twice',
+    'cut-once',
+    'fresh',
+  ]);
+});
+
 it('returns before the sweep ends (frees the shared job slot) and skips a second sweep while one runs', async () => {
   jest.useFakeTimers();
   const cards = [{ id: 'c', handle: 'c', pc_product_id: '1', pc_grade: 'PSA 10', market_value: 1 }];

@@ -50,6 +50,7 @@ export type CardRow = {
   market_value: number;
   pc_pending_price?: Record<string, unknown> | null;
   pc_sync_error?: string | null;
+  pc_synced_at?: Date | string | null;
 };
 
 // Stored observations are JSON; reject stale links/baselines and malformed data.
