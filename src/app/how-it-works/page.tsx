@@ -17,7 +17,7 @@ import { BUYBACK_EXPLANATION, BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 export const metadata: Metadata = {
   title: 'How It Works',
-  description: `Open packs of real graded cards, own them instantly, and ship to your door or sell from your vault at ${BUYBACK_RATE_LABEL} of card value.`,
+  description: `Open packs of real cards, own them instantly, and ship to your door or sell from your vault at ${BUYBACK_RATE_LABEL} of card value.`,
 };
 
 type VaultCard = { icon: LucideIcon; title: string; body: string };
@@ -58,7 +58,7 @@ const CAPABILITIES: Capability[] = [
 const FAQS: FaqItem[] = [
   {
     q: 'Are these real physical cards?',
-    a: 'Yes. Every card on Polycards is a real, professionally graded physical card held in our own stock. When you open a pack, you own a specific physical slab, and you can have it delivered to your door in Malaysia or Singapore.',
+    a: 'Yes. Every card on Polycards is a real physical card held in our own stock. When you open a pack, you own that specific card, and you can have it delivered to your door in Malaysia or Singapore.',
   },
   {
     q: 'How does shipping work?',
@@ -138,7 +138,7 @@ export default function HowItWorksPage() {
               delay={0}
               className="mb-3 text-[11px] font-medium uppercase tracking-widest text-white/60 lg:text-[13px]"
             >
-              Built for collectors, backed by graded-card buyback
+              Built for collectors, backed by real buyback
             </Reveal>
             <Reveal
               as="h1"
@@ -153,8 +153,8 @@ export default function HowItWorksPage() {
               delay={180}
               className="mt-4 max-w-lg text-sm leading-relaxed text-white/65 sm:text-base 2xl:text-lg"
             >
-              Open packs of real graded cards, own them instantly, and ship to
-              your door or sell from your vault at {BUYBACK_RATE_LABEL} of card
+              Open packs of real cards, own them instantly, and ship to your
+              door or sell from your vault at {BUYBACK_RATE_LABEL} of card
               value.
             </Reveal>
             <Reveal delay={270} className="mt-6 flex flex-wrap gap-3">
@@ -329,8 +329,7 @@ export default function HowItWorksPage() {
           Ready to start collecting?
         </h2>
         <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-white/60">
-          Join the collectors opening packs and pulling real graded cards every
-          day.
+          Join the collectors opening packs and pulling real cards every day.
         </p>
         <Link
           href="/slots"

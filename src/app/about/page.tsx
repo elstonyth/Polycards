@@ -108,7 +108,7 @@ export default function AboutPage() {
           as="p"
           className="text-[11px] font-semibold uppercase tracking-[0.3em] text-neutral-400"
         >
-          Graded cards · Real buyback
+          Real cards · Real buyback
         </Reveal>
         <Reveal delay={60}>
           <h1
@@ -276,7 +276,7 @@ export default function AboutPage() {
             <ArrowRight className="h-4 w-4" aria-hidden />
           </Link>
           <p className="mt-4 text-[13px] text-neutral-400">
-            Real graded slabs · {BUYBACK_RATE_LABEL} vault buyback ·{' '}
+            Real cards · {BUYBACK_RATE_LABEL} vault buyback ·{' '}
             {/* Persistent underline, not hover:underline — this link sits in a
                 run of text and only 1.74:1 separates it from the neutral-400
                 around it, so colour alone can't distinguish it

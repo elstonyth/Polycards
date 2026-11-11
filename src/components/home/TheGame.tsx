@@ -5,7 +5,9 @@ import { RankGlyph } from '@/components/RankGlyph';
 import type { LeaderboardEntry } from '@/lib/data/leaderboard';
 
 /**
- * Board 05 — THE FLOOR PAYS OUT. Renders the top-3 weekly rippers; the whole
+ * Board 05 — TOP COLLECTORS THIS WEEK. Renders the top-3 weekly rippers by
+ * pulled value (renamed 2026-11-11 from "THE FLOOR PAYS OUT", which read as
+ * casino payouts over an unlabelled figure); the whole
  * section hides when the ledger is empty (the VIP loop teaser that used to
  * fill that gap was removed on operator request, 2026-08-02).
  * The stat trio (paid out / packs ripped / collectors) arrives with the Phase 3
@@ -23,7 +25,7 @@ export default function TheGame({
   return (
     <section aria-labelledby="game-heading" className="px-fluid mt-14 w-full">
       <h2 id="game-heading" className="font-heading text-2xl text-white">
-        THE FLOOR PAYS OUT
+        TOP COLLECTORS THIS WEEK
       </h2>
 
       <div className="mt-4 flex flex-col gap-3 lg:flex-row">
@@ -31,7 +33,7 @@ export default function TheGame({
           <div className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
             <div className="flex items-baseline justify-between">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                Top rippers this week
+                Pulled value
               </p>
               <Link
                 href="/leaderboard"

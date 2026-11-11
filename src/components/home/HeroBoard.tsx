@@ -63,12 +63,17 @@ export default function HeroBoard({
             How it works <ArrowUpRight className="h-4 w-4" aria-hidden />
           </Link>
         </div>
-        <p className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[11px] text-neutral-400 lg:justify-start lg:text-xs">
+        {/* Below 360px the two facts stack: side by side they either wrap and
+            leave the divider dangling, or run together without it. */}
+        <p className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[11px] text-neutral-400 max-[359px]:flex-col lg:justify-start lg:text-xs">
           <span className="flex items-center gap-1.5">
             <Truck className="h-3.5 w-3.5" aria-hidden />
-            Physical delivery
+            Ships to Malaysia &amp; Singapore
           </span>
-          <span className="h-3 border-l border-white/15" aria-hidden />
+          <span
+            className="h-3 border-l border-white/15 max-[359px]:hidden"
+            aria-hidden
+          />
           <span>{BUYBACK_RATE_LABEL} vault buyback</span>
         </p>
         <HeroFreePack promo={freePackPromo} />

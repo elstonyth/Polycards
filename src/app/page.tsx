@@ -13,6 +13,7 @@ import { ShelfCategoryProvider } from '@/components/home/ShelfCategory';
 import TierShelf from '@/components/home/TierShelf';
 import RecentPullsSection from '@/components/RecentPullsSection';
 import TheGame from '@/components/home/TheGame';
+import TrustBoard from '@/components/home/TrustBoard';
 import FinalCta from '@/components/home/FinalCta';
 
 // The home page is the only public route whose whole tree is visitor-agnostic:
@@ -113,6 +114,9 @@ export default async function HomePage() {
 
       {/* 04 — podium + loop teaser */}
       <TheGame topRippers={topRippers} />
+
+      {/* trust — what a visitor checks before a first top-up */}
+      <TrustBoard />
 
       {/* 05 — closer */}
       <FinalCta />
