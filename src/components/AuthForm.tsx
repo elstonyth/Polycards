@@ -748,7 +748,7 @@ export default function AuthForm({
       </h2>
       <p className="mt-1.5 text-sm text-white/50">
         {isSignup
-          ? 'Start ripping packs and collecting graded cards.'
+          ? 'Start ripping packs and collecting real cards.'
           : 'Log in to your Polycards account.'}
       </p>
 

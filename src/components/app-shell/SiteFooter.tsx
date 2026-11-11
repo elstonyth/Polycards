@@ -55,7 +55,7 @@ export default function SiteFooter() {
         </ul>
       </nav>
       <p className="mt-2 text-[12px] text-white/55">
-        © {new Date().getFullYear()} Polycards — rip packs, pull graded cards.
+        © {new Date().getFullYear()} Polycards — rip packs, pull real cards.
         Vault buyback at {BUYBACK_RATE_LABEL}. Instant rates apply during the
         reveal countdown.
       </p>
