@@ -81,10 +81,12 @@ export const resolveDbPoolMax = (env: NodeJS.ProcessEnv): number => {
  *
  * statement_timeout and lock_timeout CANNOT be set here at all —
  * create-pg-connection builds the knex `connection` as an object literal with a
- * fixed key set, so both are silently discarded. They belong on the runtime
- * DATABASE_URL (`?options=-c%20statement_timeout%3D60000%20-c%20lock_timeout%3D5000`),
- * never as a role-level setting: that would also bind the migrate job, whose
- * non-CONCURRENT CREATE INDEX would then be killed mid-deploy.
+ * fixed key set, so both are silently discarded. statement_timeout is added to
+ * the URL's `options` startup parameter by `runtimeDatabaseUrl` below, for
+ * `medusa start` only. Never put it in the DATABASE_URL secret or on the role:
+ * the PRE_DEPLOY migrate job inherits both, and its non-CONCURRENT CREATE INDEX
+ * would then be killed mid-deploy. No lock_timeout either (it would cut
+ * advisory-lock waits).
  *
  * `ssl.rejectUnauthorized: false` is required because DO Managed Postgres
  * presents a self-signed CA that node-postgres otherwise rejects with

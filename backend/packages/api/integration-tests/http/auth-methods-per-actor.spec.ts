@@ -51,6 +51,34 @@ medusaIntegrationTestRunner({
         expect(String(res.data?.message)).not.toMatch(/not allowed/);
       });
 
+      // Audit 2026-11-11 #1: Express decodes route params, so an escaped
+      // segment reached the handler while missing every literal-path guard.
+      // Unescaped, the first two answer 401 and the seller one 404s anyway, so
+      // a 404 on each proves the encoded-path guard answered.
+      it.each([
+        '/auth/customer/%65mailpass',
+        '/auth/user/%65mailpass',
+        '/auth/%6Dember/emailpass',
+      ])('404s the percent-encoded sign-in path %s', async (path) => {
+        const res = await unwrapResponse(
+          api.post(path, {
+            email: 'nobody@test.dev',
+            password: 'wrong-password-1',
+          }),
+        );
+        expect(res.status).toBe(404);
+      });
+
+      it('still answers the plain customer password login', async () => {
+        const res = await unwrapResponse(
+          api.post('/auth/customer/emailpass', {
+            email: 'nobody@test.dev',
+            password: 'wrong-password-1',
+          }),
+        );
+        expect(res.status).toBe(401);
+      });
+
       it('still starts a Google sign-in for customers', async () => {
         const res = await unwrapResponse(api.post('/auth/customer/google', {}));
         expect(res.status).toBe(200);

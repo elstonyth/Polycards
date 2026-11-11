@@ -2,11 +2,18 @@ import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/frame
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { publicCoinFlipRound, type CoinFlipRoundRecord } from '../../../modules/packs/coin-flip';
-import { parsePaginationParams } from '../../../utils/pagination';
+import {
+  parsePaginationParams,
+  STORE_MAX_OFFSET,
+} from '../../../utils/pagination';
 
 export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const { limit, offset } = parsePaginationParams(req.query, { defaultLimit: 20, maxLimit: 100 });
+  const { limit, offset } = parsePaginationParams(req.query, {
+    defaultLimit: 20,
+    maxLimit: 100,
+    maxOffset: STORE_MAX_OFFSET,
+  });
   const customerId = req.auth_context.actor_id;
   // Settled rounds only. The won/lost filter left with its storefront tabs.
   const status = ['won', 'lost'];

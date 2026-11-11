@@ -8,7 +8,10 @@ import {
 } from '../../../modules/packs/facets';
 import { forPacksCents } from '../../../modules/packs/credit-summary';
 import { pullPackTitle } from '../../../modules/packs/pull-history';
-import { parsePaginationParams } from '../../../utils/pagination';
+import {
+  parsePaginationParams,
+  STORE_MAX_OFFSET,
+} from '../../../utils/pagination';
 import { pageAll } from '../../utils/page-all';
 
 // GET /store/credits — the authenticated customer's site-credit balance
@@ -28,6 +31,7 @@ export async function GET(
   const { limit, offset } = parsePaginationParams(req.query, {
     defaultLimit: PAGE_SIZE,
     maxLimit: 50,
+    maxOffset: STORE_MAX_OFFSET,
   });
 
   // creditSummary already scans the full ledger; thread its scalars into

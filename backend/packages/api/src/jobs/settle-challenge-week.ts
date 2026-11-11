@@ -33,6 +33,9 @@ export default async function settleChallengeWeekJob(
     }
   };
 
+  // Throws when any winner failed, but only after paying the rest (see
+  // settleChallengeWeek). Letting it throw is what skips the promotion below
+  // for this hour, so a half-paid week is never re-priced by a new edition.
   await packs.settleChallengeWeek({
     // Settlement RESERVES; it never reads stock as a gate.
     decrementStock: takeCardStock(container),

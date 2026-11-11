@@ -18029,6 +18029,13 @@ class PacksModuleService extends MedusaService({
     );
 
     const winners: SettledWinner[] = [];
+    // One winner's failed transaction must not cost winners below it their
+    // payout this tick (audit 2026-11-11). Each failure is logged and the loop
+    // goes on; the per-winner gate makes the next tick retry exactly the ones
+    // that failed. The run still throws at the end, so the job skips that
+    // hour's schedule promotion: a week is paid on the stages it ran on, and
+    // with no winner paid yet nothing has frozen them.
+    const failures: { customerId: string; rank: number; error: string }[] = [];
     for (const [i, customerId] of ranking.entries()) {
       if (settledCustomers.has(customerId)) continue; // paid on a prior tick
       if (deleted.has(customerId)) continue; // account deleted; nobody to pay
@@ -18040,15 +18047,27 @@ class PacksModuleService extends MedusaService({
       // One SHORT transaction per winner — deliberately NO sharedContext
       // forwarding (the ledger invariant: one credit: advisory-lock chain per
       // transaction, never accumulated across winners).
-      const settled = await this.settleChallengeWinner({
-        weekStart: startUtc,
-        weekEnd: endUtc,
-        customerId,
-        rank: i + 1,
-        payout,
-        handleById,
-        snapshot,
-      });
+      let settled: SettledWinner | null;
+      try {
+        settled = await this.settleChallengeWinner({
+          weekStart: startUtc,
+          weekEnd: endUtc,
+          customerId,
+          rank: i + 1,
+          payout,
+          handleById,
+          snapshot,
+        });
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        failures.push({ customerId, rank: i + 1, error });
+        // eslint-disable-next-line no-console
+        console.error(
+          '[settleChallengeWeek] winner settlement failed, retried next tick',
+          { customer_id: customerId, rank: i + 1, week_start: weekStartIso, error },
+        );
+        continue;
+      }
       if (!settled) continue;
       winners.push(settled);
       // Committed above; the units are taken now, outside that transaction.
@@ -18072,6 +18091,13 @@ class PacksModuleService extends MedusaService({
           },
         );
       }
+    }
+    if (failures.length > 0) {
+      throw new Error(
+        `[settleChallengeWeek] ${failures.length} winner(s) failed for week ${weekStartIso} (${winners.length} paid): ${failures
+          .map((f) => `rank ${f.rank} ${f.customerId}: ${f.error}`)
+          .join('; ')}`,
+      );
     }
     return { weekStartIso, settled: winners.length > 0, winners };
   }

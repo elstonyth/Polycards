@@ -6,7 +6,10 @@ import { Modules } from '@medusajs/framework/utils';
 import type { INotificationModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import { parsePaginationParams } from '../../../utils/pagination';
+import {
+  parsePaginationParams,
+  STORE_MAX_OFFSET,
+} from '../../../utils/pagination';
 import { CUSTOMER_FEED_CHANNEL } from '../../../modules/packs/notify-feed';
 
 // GET /store/notifications — the authenticated customer's own in-app feed.
@@ -38,6 +41,7 @@ export async function GET(
   const { limit, offset } = parsePaginationParams(req.query, {
     defaultLimit: PAGE_SIZE,
     maxLimit: 50,
+    maxOffset: STORE_MAX_OFFSET,
   });
 
   const notif = req.scope.resolve<INotificationModuleService>(

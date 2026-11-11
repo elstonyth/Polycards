@@ -94,8 +94,10 @@ export default async function payReferralWeekJob(container: MedusaContainer) {
         }
       }
     } catch (e: unknown) {
-      // Pay is idempotent per line, so the next hourly tick retries this run
-      // from wherever it stopped. Logged loudly because a run that keeps
+      // payWeeklySettlement commits the whole run as ONE transaction, so a
+      // throw on any line rolls back every line of this run, and the next
+      // hourly tick retries the run from its first line (idempotent per line,
+      // so nobody is paid twice). Logged loudly because a run that keeps
       // failing is money nobody is receiving.
       failed++;
       say(

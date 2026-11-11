@@ -52,6 +52,7 @@ import {
   noStoreForAuthenticatedStore,
 } from './utils/cache-headers';
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
+import { refuseEncodedAuthPath } from './utils/encoded-auth-path';
 import { capAdminSessionAge } from './utils/admin-session-cap';
 import {
   allowFirstBackupCodes,
@@ -368,6 +369,13 @@ export default defineMiddlewares({
       matcher: '/vendor/sellers',
       method: 'POST',
       middlewares: [blockUnusedSurface],
+    },
+    {
+      // A percent-escape in an /auth path would skip every literal-path guard
+      // below (limiters, seller block, invite gate, reset single-use). See
+      // utils/encoded-auth-path.ts.
+      matcher: '/auth/*',
+      middlewares: [refuseEncodedAuthPath],
     },
     {
       // See blockUnusedSurface above: no seller signs in, and no member auth

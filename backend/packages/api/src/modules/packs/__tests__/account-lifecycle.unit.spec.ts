@@ -607,4 +607,37 @@ describe('settleChallengeWeek — deleted winners', () => {
       }),
     );
   });
+
+  // Audit 2026-11-11: one winner's failed transaction used to stop every
+  // winner below it for that tick. Now the rest are paid, and the run still
+  // throws so the job holds back that hour's schedule promotion.
+  it('pays the winners below a failed one, then throws naming the failure', async () => {
+    const svc = mkSettle([], [], ['cus_a', 'cus_b']);
+    svc.settleChallengeWinner = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('deadlock detected'))
+      .mockResolvedValueOnce({
+        customerId: 'cus_b',
+        rank: 2,
+        credits: 50,
+        cardCount: 0,
+        skippedCardIds: [],
+      });
+    const onSettled = jest.fn().mockResolvedValue(undefined);
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(
+        svc.settleChallengeWeek({ onSettled }, CTX),
+      ).rejects.toThrow(/1 winner\(s\) failed .*1 paid.*rank 1 cus_a: deadlock detected/);
+    } finally {
+      errorSpy.mockRestore();
+    }
+    expect(svc.settleChallengeWinner).toHaveBeenCalledTimes(2);
+    expect(svc.settleChallengeWinner).toHaveBeenLastCalledWith(
+      expect.objectContaining({ customerId: 'cus_b', rank: 2 }),
+    );
+    // The paid winner is still notified, before the run throws.
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(svc.reserveSettledStock).toHaveBeenCalledTimes(1);
+  });
 });

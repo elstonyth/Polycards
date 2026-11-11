@@ -22,7 +22,10 @@ import {
   paidPerOpen,
   pullPackTitle,
 } from '../../../../modules/packs/pull-history';
-import { parsePaginationParams } from '../../../../utils/pagination';
+import {
+  parsePaginationParams,
+  STORE_MAX_OFFSET,
+} from '../../../../utils/pagination';
 import { pageAll } from '../../../utils/page-all';
 
 // GET /store/pulls/history — every card the customer ever pulled, whatever
@@ -49,6 +52,7 @@ export async function GET(
   const { limit, offset } = parsePaginationParams(req.query, {
     defaultLimit: PAGE_SIZE,
     maxLimit: 50,
+    maxOffset: STORE_MAX_OFFSET,
   });
 
   const [rows, fx] = await Promise.all([

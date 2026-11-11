@@ -28,36 +28,28 @@ import { CUSTOMER_FEED_CHANNEL } from '../../../../modules/packs/notify-feed';
 //
 // Auth + rate-limit middleware is registered in src/api/middlewares.ts.
 //
-// Page size mirrors RECENT_NOTIFICATIONS in the sibling list route: the feed UI
-// only ever shows that page, so "mark all read" means "mark all the customer
-// can actually see".
-const RECENT_NOTIFICATIONS = 50;
+// The whole feed, newest first, a page at a time. It used to mark only the
+// newest 50 while the badge counts every unread row, so a customer with more
+// than 50 unread kept a badge "mark all read" could never clear (audit
+// 2026-11-11). Reads live in a side table, so marking never reorders the feed
+// and offset paging is stable; a row arriving mid-loop only shifts the window
+// down by one, which re-reads a row, never skips one.
+//
+// MAX_ROWS bounds one request. A feed longer than that keeps the remainder
+// unread; the response says so (`has_more`) and a second tap marks the rest.
+const PAGE_SIZE = 200;
+const MAX_ROWS = 5_000;
 
-export async function POST(
+type Packs = PacksModuleService;
+
+/** Mark this page's still-unread ids read. Returns how many rows it wrote. */
+async function markPage(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
-): Promise<void> {
-  const customerId = req.auth_context?.actor_id;
-  if (!customerId) {
-    throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
-  }
-
-  const notif = req.scope.resolve<INotificationModuleService>(
-    Modules.NOTIFICATION,
-  );
-  const notifications = await notif.listNotifications(
-    { receiver_id: customerId, channel: CUSTOMER_FEED_CHANNEL },
-    { take: RECENT_NOTIFICATIONS, order: { created_at: 'DESC' } },
-  );
-
-  const now = new Date();
-  if (notifications.length === 0) {
-    res.json({ marked: 0, read_at: now.toISOString() });
-    return;
-  }
-
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const ids = notifications.map((n) => n.id);
+  packs: Packs,
+  customerId: string,
+  ids: string[],
+  now: Date,
+): Promise<number> {
   const existing = await packs.listNotificationReads(
     { customer_id: customerId, notification_id: ids },
     { take: ids.length },
@@ -73,16 +65,11 @@ export async function POST(
       customer_id: customerId,
       read_at: now,
     }));
-
-  if (toCreate.length === 0) {
-    res.json({ marked: 0, read_at: now.toISOString() });
-    return;
-  }
+  if (toCreate.length === 0) return 0;
 
   try {
     await packs.createNotificationReads(toCreate);
-    res.json({ marked: toCreate.length, read_at: now.toISOString() });
-    return;
+    return toCreate.length;
   } catch (err) {
     // Log every failure — not just the documented race — so operators can
     // diagnose real infra errors (DB timeout, connection drop, unrelated
@@ -99,8 +86,8 @@ export async function POST(
     // — true whether or not the underlying batch is transactionally atomic —
     // so ids that never collided can be left unpersisted too. Re-derive what
     // is actually still missing from a fresh read and insert those
-    // individually. Capped at RECENT_NOTIFICATIONS rows, so the worst case
-    // is bounded, and this path only runs on a real race.
+    // individually. Capped at one page, so the worst case is bounded, and
+    // this path only runs on a real race.
     const after = await packs.listNotificationReads(
       { customer_id: customerId, notification_id: ids },
       { take: ids.length },
@@ -133,7 +120,55 @@ export async function POST(
         }
       }
     }
-
-    res.json({ marked: persisted, read_at: now.toISOString() });
+    return persisted;
   }
+}
+
+export async function POST(
+  req: AuthenticatedMedusaRequest,
+  res: MedusaResponse,
+): Promise<void> {
+  const customerId = req.auth_context?.actor_id;
+  if (!customerId) {
+    throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
+  }
+
+  const notif = req.scope.resolve<INotificationModuleService>(
+    Modules.NOTIFICATION,
+  );
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const now = new Date();
+
+  let marked = 0;
+  let offset = 0;
+  let hasMore = false;
+  for (;;) {
+    const page = await notif.listNotifications(
+      { receiver_id: customerId, channel: CUSTOMER_FEED_CHANNEL },
+      {
+        take: PAGE_SIZE,
+        skip: offset,
+        // id tiebreaker: batch creates share a created_at, and created_at
+        // alone gives no stable order across offset pages.
+        order: { created_at: 'DESC', id: 'DESC' },
+      },
+    );
+    if (page.length > 0) {
+      marked += await markPage(
+        req,
+        packs,
+        customerId,
+        page.map((n) => n.id),
+        now,
+      );
+    }
+    offset += page.length;
+    if (page.length < PAGE_SIZE) break;
+    if (offset >= MAX_ROWS) {
+      hasMore = true;
+      break;
+    }
+  }
+
+  res.json({ marked, read_at: now.toISOString(), has_more: hasMore });
 }

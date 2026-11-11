@@ -21,6 +21,12 @@ import { storedHandle } from './profile-handle';
 // be visible immediately (the vault showcase toggle) can evict the entry
 // without importing a route file.
 const CACHE_TTL_MS = 30_000;
+// Entries used to leave only when the same handle was read again after expiry,
+// so a scraper walking every handle left one body (up to 20k showcase cards)
+// per account in each web process for good (audit 2026-11-11). Expired entries
+// are swept once the Map reaches this size, and the oldest goes if it is
+// still full: a 30s cache needs no more than the handles hot in 30s.
+const MAX_ENTRIES = 500;
 const profileCache = new Map<string, { expires: number; body: unknown }>();
 
 /** The cached body for a handle, or undefined when absent/expired. */
@@ -35,7 +41,24 @@ export function getCachedProfile(handle: string): unknown | undefined {
 }
 
 export function setCachedProfile(handle: string, body: unknown): void {
-  profileCache.set(handle, { expires: Date.now() + CACHE_TTL_MS, body });
+  const now = Date.now();
+  // Re-set: delete first so the key moves to the back of insertion order.
+  profileCache.delete(handle);
+  if (profileCache.size >= MAX_ENTRIES) {
+    for (const [key, hit] of profileCache) {
+      if (hit.expires <= now) profileCache.delete(key);
+    }
+  }
+  if (profileCache.size >= MAX_ENTRIES) {
+    // Insertion order: the first key is the oldest.
+    profileCache.delete(profileCache.keys().next().value as string);
+  }
+  profileCache.set(handle, { expires: now + CACHE_TTL_MS, body });
+}
+
+/** Test seam: how many bodies this process holds. */
+export function profileCacheSize(): number {
+  return profileCache.size;
 }
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
