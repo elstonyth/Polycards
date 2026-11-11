@@ -9,8 +9,10 @@ import { alertOps } from '../../modules/packs/ops-alert';
 // USD->MYR prices every card and every sell-back: hourly, ECB first, Coinbase
 // when ECB fails, never a broken feed's number, and staff hear about outages.
 
-const ECB = (myr: unknown, base = 'USD') =>
-  JSON.stringify({ amount: 1, base, date: '2026-11-10', rates: { MYR: myr } });
+// Dated yesterday, so the test never ages past the staleness guard.
+const YESTERDAY = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+const ECB = (myr: unknown, base = 'USD', date = YESTERDAY) =>
+  JSON.stringify({ amount: 1, base, date, rates: { MYR: myr } });
 const COINBASE = (myr: string) =>
   JSON.stringify({ data: { currency: 'USD', rates: { MYR: myr } } });
 
@@ -66,7 +68,7 @@ describe('sync-usd-myr', () => {
         id: 'fx_usd',
         rate: 4.21,
         source: 'frankfurter',
-        fetched_at: new Date('2026-11-10T00:00:00Z'),
+        fetched_at: new Date(`${YESTERDAY}T00:00:00Z`),
       },
     ]);
     expect(alertOps).not.toHaveBeenCalled();
@@ -86,6 +88,7 @@ describe('sync-usd-myr', () => {
     ['out of band', ECB(42.1)],
     ['for the wrong currency', ECB(4.21, 'SGD')],
     ['not a number', ECB(true)],
+    ['dated over a week ago', ECB(4.21, 'USD', '2020-01-02')],
   ])('refuses an ECB answer %s and uses Coinbase', async (_why, body) => {
     feeds({ 'api.frankfurter.app': body, 'api.coinbase.com': COINBASE('4.2') });
     const { c, packs } = container(4.2);

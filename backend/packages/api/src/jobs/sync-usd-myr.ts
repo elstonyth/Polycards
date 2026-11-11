@@ -3,6 +3,7 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
 import { FX_USD_MYR_URL } from '../modules/packs/pricing';
+import { PAYMENT_FX_MAX_AGE_MS } from '../modules/packs/payment-fx';
 import { alertOps } from '../modules/packs/ops-alert';
 import { fetchPaymentFx, PAYMENT_FX_MAX_JUMP } from './sync-payment-fx';
 
@@ -13,9 +14,9 @@ import { fetchPaymentFx, PAYMENT_FX_MAX_JUMP } from './sync-payment-fx';
 // first, as before, then Coinbase when ECB fails. Each answer is banded and
 // jump-guarded the way sync-payment-fx guards SGD, and staff are alerted.
 //
-// During an outage, sell-backs keep pricing on the last good rate on purpose
-// (owner 2026-11-11: sell-backs must keep working). The alert is the fence,
-// not a refusal.
+// During an outage, sell-backs keep pricing on the last good rate by design:
+// the same rate prices opens, deliveries and coin flip, so refusing on a stale
+// rate would stop all of them. The alert is the fence, not a refusal.
 
 /** RM per US$1 a feed may answer. Outside it, the feed is broken. */
 export const USD_MYR_BAND = { min: 3, max: 6 };
@@ -40,7 +41,12 @@ export default async function syncUsdMyrJob(
   let got: Awaited<ReturnType<typeof fetchPaymentFx>> | null = null;
   for (const url of [FX_USD_MYR_URL, USD_MYR_FALLBACK_URL]) {
     try {
-      got = await fetchPaymentFx('USD', { url, ...USD_MYR_BAND });
+      const answer = await fetchPaymentFx('USD', { url, ...USD_MYR_BAND });
+      // A feed still serving an old day (ECB stuck) is a failed feed too:
+      // ECB's longest holiday gap is ~5.6 days, so a week is broken.
+      if (Date.now() - answer.asOf.getTime() > PAYMENT_FX_MAX_AGE_MS)
+        throw new Error(`stale, dated ${answer.asOf.toISOString().slice(0, 10)}`);
+      got = answer;
       break;
     } catch (e) {
       logger.warn(
