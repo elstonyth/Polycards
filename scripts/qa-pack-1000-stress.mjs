@@ -16,13 +16,14 @@
 // `qa-stress-*`, so `--cleanup` removes them with one predicate even if a prior
 // run crashed. Run `--cleanup` alone to wipe leftovers. Scale via STRESS_N.
 //
-//   QA_ADMIN_EMAIL=… QA_ADMIN_PASSWORD=… [STRESS_N=5000] node scripts/qa-pack-1000-stress.mjs [--cleanup]
+//   QA_ADMIN_EMAIL=… QA_ADMIN_PASSWORD=… QA_ADMIN_TOTP_SECRET=… [STRESS_N=5000] node scripts/qa-pack-1000-stress.mjs [--cleanup]
 //
 // DB writes: synthetic Card rows are inserted straight into `card` (the admin
 // POST only registers existing Medusa products; seeding 1001 products is
 // infeasible). Cards need no Product for gacha open/roll/buyback (Phase 5a —
 // Card carries its own display fields). Everything is tagged for teardown.
 import { spawnSync } from 'node:child_process';
+import { adminToken, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 const BASE = 'http://localhost:9000';
 const N = Number(process.env.STRESS_N ?? 2001);
@@ -80,18 +81,10 @@ if (CLEANUP_ONLY) {
   process.exit(0);
 }
 
-const admin = await fetch(`${BASE}/auth/user/emailpass`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email: process.env.QA_ADMIN_EMAIL,
-    password: process.env.QA_ADMIN_PASSWORD,
-  }),
-}).then((r) => r.json());
-if (!admin.token) throw new Error('admin auth failed — check QA_ADMIN_* env');
+requireAdminTotp(process.env.QA_ADMIN_EMAIL);
 const AH = {
   'Content-Type': 'application/json',
-  Authorization: `Bearer ${admin.token}`,
+  Authorization: `Bearer ${await adminToken(BASE, process.env.QA_ADMIN_EMAIL, process.env.QA_ADMIN_PASSWORD)}`,
 };
 const keys = await fetch(`${BASE}/admin/api-keys?type=publishable`, {
   headers: AH,
@@ -196,7 +189,11 @@ try {
   await fetch(`${BASE}/admin/customers/${me.customer.id}/credits`, {
     method: 'POST',
     headers: AH,
-    body: JSON.stringify({ amount: 100, note: 'qa-stress' }),
+    body: JSON.stringify({
+      amount: 100,
+      note: 'qa-stress',
+      idempotency_key: crypto.randomUUID(),
+    }),
   });
   const smoke = await fetch(`${BASE}/store/packs/${PACK}/open`, {
     method: 'POST',

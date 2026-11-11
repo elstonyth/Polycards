@@ -128,6 +128,14 @@ export const CORE_PREFIX_WRITES: {
     resource: CORE_READ_PREFIXES['customer-groups'],
     operation: 'update' as const,
   })),
+  // A Super Admin resetting another admin's two-step sign-in (owner,
+  // 2026-11-07): core's own write on users. The route also demands Super Admin.
+  {
+    matcher: '/admin/users/*/mfa/reset',
+    method: 'POST',
+    resource: 'user',
+    operation: 'update',
+  },
   {
     matcher: '/admin/products/from-pricecharting',
     method: 'POST',
@@ -235,4 +243,29 @@ export const adminRbacRoutes: MiddlewareRoute[] = [
     methods: ['GET' as const],
     policies: [{ resource: s.resource, operation: 'read' as const }],
   })),
+  // Core routes that ask too little (audit 2026-11-09). Search has no policy
+  // and lists every customer's email (staff are open to staff by the owner's
+  // choice, so customer:read alone keeps a support viewer's Cmd+K); a workflow
+  // run asked only a read policy;
+  // an inventory delete asks only read.
+  {
+    matcher: '/admin/search',
+    methods: ['GET'],
+    policies: [{ resource: 'customer', operation: 'read' }],
+  },
+  ...[
+    '/admin/workflows-executions/*/run',
+    '/admin/workflows-executions/*/steps/*',
+  ].map((matcher) => ({
+    matcher,
+    methods: ['POST' as const],
+    policies: [
+      { resource: 'workflow_execution', operation: 'update' as const },
+    ],
+  })),
+  {
+    matcher: '/admin/inventory-items/*',
+    methods: ['DELETE'],
+    policies: [{ resource: 'inventory_item', operation: 'delete' }],
+  },
 ];

@@ -128,6 +128,6 @@ export async function GET(
       pulled_value_myr: t.volumeMyr,
     })),
     hidden_players_above_cut: hiddenAboveCut,
-    note: 'The same board as the public Ranks page. Pulled value is each draw value at the live exchange rate, so it can move without new pulls. Until the week ends, the top player is the current leader, not the winner. If hidden_players_above_cut is above 0, prizes are paid by original rank, so do not pair displayed ranks with prizes.',
+    note: 'The same board as the public Ranks page. Pulled value is each draw value at the live exchange rate, so it can move without new pulls. Until the week ends, the top player is the current leader, not the winner. hidden_players_above_cut counts disabled players left off the board; they are not paid while disabled, and the ranks shown are the ranks paid.',
   });
 }

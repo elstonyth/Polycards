@@ -25,10 +25,10 @@ import { redact } from './proxy';
 //     the answer and in any error message, however the query reshaped it
 //     (a jsonb column cast to text, say), and any password, token or key
 //     field is hidden by name, inside JSON text too.
-//   - Bounded: 20 s, 500 rows, 16 KB a row and 1 MB in all, built as JSON by
-//     Postgres so the web process never holds more than that; one query at a
-//     time per server, at most two waiting. The site's own connection pool is
-//     never touched.
+//   - Bounded: 20 s, 8 MB per sort or hash, 500 rows, 16 KB a row and 1 MB
+//     in all, built as JSON by Postgres so the web process never holds more
+//     than that; one query at a time per server, at most two waiting. The
+//     site's own connection pool is never touched.
 
 export const MAX_ROWS = 500;
 const MAX_SQL = 8_000;
@@ -66,16 +66,22 @@ const REFUSED_FUNCTIONS = new RegExp(
     'pg_log_\\w+',
     'pg_import_\\w+',
     // Column statistics hold sample values of every column, the refused
-    // tables' included.
+    // tables' included. Statement statistics hold every session's SQL text.
     'pg_stats\\w*',
     'pg_statistic\\w*',
+    'pg_stat_statements\\w*',
     'set_config',
     // These run SQL given as a string, which these checks cannot see.
     '\\w+_to_xml\\w*',
     'ts_stat',
     'ts_rewrite',
     'dblink\\w*',
+    'crosstab\\w*',
+    'connectby',
     'lo_\\w+',
+    // One call builds a value as big as asked, in the database's memory.
+    'repeat',
+    '[lr]pad',
   ].join('|')})\\b`,
   'i',
 );
@@ -89,7 +95,7 @@ const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
 // Real names (spec 2026-10-06): refused by NAME in the query, not only
 // redacted by key in the result — an alias (`real_name AS n`) would walk
 // straight past the key-based redaction. A query that never names the column
-// (a whole row cast to text) is met by the value mask (SECRET_VALUES_SQL).
+// (a whole row cast to text) reads it through a masked view (MASKED_COLUMNS).
 const REAL_NAMES = /\breal_name\w*\b/i;
 // Coin flip's actual odds, rolls and each group's odds set (the owner,
 // 2026-10-30), refused by name for the same reason. Its two tables go whole: a
@@ -98,10 +104,11 @@ const REAL_NAMES = /\breal_name\w*\b/i;
 const COIN_FLIP_ODDS =
   /\b(coin_flip_config|coin_flip_round|(?:actual_)?win_(?:units|percent)(?:_\d)?|odds_set)\b/i;
 // The real tables behind those masked views. A schema name is the only way past
-// a temp view, so these two are refused after a dot. So is a comment after any
-// dot: comments nest, and a regex cannot follow one through to the name.
+// a temp view, so these are refused after a dot. So is a comment after any
+// dot: comments nest, and a regex cannot follow one through to the name. The
+// toast schema holds those tables' long values as stored, so it goes whole.
 const BEHIND_THE_MASK =
-  /\.\s*(?:\/\*|--|"?(?:admin_action_audit|customer_group)\b)/i;
+  /\bpg_toast|\.\s*(?:\/\*|--|"?(?:admin_action_audit|customer(?:_group|_account_state)?)\b)/i;
 // U&"..." spells a name in escapes the checks above would not recognize.
 const UNICODE_ESCAPES = /\bu&['"]/i;
 // The statements carry their own bound values ($1 to $3): a placeholder in
@@ -138,7 +145,7 @@ export function sqlRefusal(sql: unknown): string | null {
     return "Coin flip's actual odds, rolls and odds sets stay hidden from the desk bots: say so if asked for them, and do not try to read them another way. Flip results stay open, per player or per group: each settled card flip is a ledger_entry row of type CF (customer_id, occurred_at, wallet_delta = credit paid on a win, vault_delta = minus the vault liability forfeited on a loss, where reward cards count 0, payload->>'outcome' won or lost, payload->'cards' each card's value, payload->>'published_win_percent' the chance shown, ref_id = the round id); tickets staked in a flip, alone or beside cards, are a lucky_draw_ticket row with reason coin_flip and ref = the round id (delta signed), so a flip with both has one row in each. Split them by group through customer_id, as for any player table. For who changed the settings, filter admin_action_audit on entity_type LIKE 'coin%'.";
   }
   if (BEHIND_THE_MASK.test(sql)) {
-    return "Coin flip's actual odds and odds sets stay hidden from the desk bots: read admin_action_audit and customer_group by their bare names, with no schema and no comment after a dot.";
+    return "Partner passwords, real names, coin flip's actual odds and odds sets stay hidden from the desk bots: read admin_action_audit, customer_group, customer and customer_account_state by their bare names, with no schema and no comment after a dot.";
   }
   if (UNICODE_ESCAPES.test(sql)) {
     return 'Unicode-escaped names (U&"...") are not accepted: write names plainly.';
@@ -172,24 +179,47 @@ export const dataQuery = (sql: string): string =>
 // can read. Fetched in the query's own REPEATABLE READ transaction: the same
 // snapshot the query sees, so one saved in between cannot slip past the mask.
 // A name under 6 characters is left to the name and key checks: masking "Tan"
-// would mangle every "Tanjung".
+// would mangle every "Tanjung". The real tables, by schema: the bare names are
+// the masked views by now. A second layer behind those views.
 const SECRET_VALUES_SQL =
-  "SELECT metadata->'partner_credential'->>'password' AS s FROM customer WHERE metadata ? 'partner_credential' " +
-  'UNION SELECT real_name FROM customer_account_state WHERE real_name IS NOT NULL';
+  "SELECT metadata->'partner_credential'->>'password' AS s FROM public.customer WHERE metadata ? 'partner_credential' " +
+  'UNION SELECT real_name FROM public.customer_account_state WHERE real_name IS NOT NULL';
 
-// Coin flip's actual odds and each group's odds set sit in JSON columns of two
-// tables the bots keep reading. No check on a query's text can guard them: a
-// walk (jsonb_each) hands a key back as a value, a key can be built from pieces,
-// and a WHERE can ask about a value without showing it. So the query never sees
-// them: in its own transaction it finds temp views of the same names, which
-// Postgres looks up before any other schema, with these columns masked.
-const MASKED_COLUMNS: Record<string, readonly string[]> = {
-  admin_action_audit: ['before', 'after'],
-  customer_group: ['metadata'],
-};
 // jsonb::text always writes a key whole and in double quotes, so this finds it
 // at any depth. A value of another shape breaks the cast, which fails closed.
-const ODDS_IN_JSON = String.raw`"((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|[^,}\]\s]+)`;
+// holder_name (the audit of a shared-name clearing) is often a real name.
+const KEYS_IN_JSON = String.raw`"((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set|real_?name\w*|\w*password\w*|holder_name)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|[^,}\]\s]+)`;
+const hideKeys = (column: string) =>
+  `regexp_replace(t."${column}"::text, '${KEYS_IN_JSON}', '"\\1": "[hidden]"', 'gi')::jsonb`;
+// The key's whole value shown as [hidden]; whether it is set stays answerable.
+const hideValue = (json: string, key: string) =>
+  `CASE WHEN ${json} ? '${key}' THEN jsonb_set(${json}, '{${key}}', '"[hidden]"') ELSE ${json} END`;
+
+// Coin flip's actual odds, each group's odds set, the partner logins'
+// passwords and customers' real names sit in tables the bots keep reading. No
+// check on a query's text can guard them: a walk (jsonb_each) hands a key back
+// as a value, a key can be built from pieces, a WHERE can ask about a value
+// without showing it, and a value handed back reversed or in base64 is no
+// longer the text a value mask looks for (security audit 2026-11-07). So the
+// query never sees them: in its own transaction it finds temp views of the
+// same names, which Postgres looks up before any other schema, with these
+// columns read through these expressions.
+const MASKED_COLUMNS: Record<string, Record<string, string>> = {
+  admin_action_audit: { before: hideKeys('before'), after: hideKeys('after') },
+  customer_group: { metadata: hideKeys('metadata') },
+  // Shown as [hidden], as the key redaction showed it before. A shared-name
+  // clearing is keyed by the holder name itself, so it goes whole too.
+  customer: {
+    metadata: hideValue(
+      hideValue('t."metadata"', 'partner_credential'),
+      'holder_name_cleared',
+    ),
+  },
+  // Whether a name is set stays answerable.
+  customer_account_state: {
+    real_name: `CASE WHEN t."real_name" IS NULL THEN NULL ELSE '[hidden]' END`,
+  },
+};
 const MASKED_TABLE_COLUMNS_SQL =
   "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' " +
   'AND table_name = ANY($1) ORDER BY ordinal_position';
@@ -200,16 +230,14 @@ export function maskedViewSql(
   table: string,
   columns: readonly string[],
 ): string {
-  const masked = MASKED_COLUMNS[table] ?? [];
-  const missing = masked.find((c) => !columns.includes(c));
+  const masked = MASKED_COLUMNS[table] ?? {};
+  const missing = Object.keys(masked).find((c) => !columns.includes(c));
   // A renamed column would otherwise come through unmasked.
   if (missing) {
     throw new Error(`${table}.${missing} is gone: fix MASKED_COLUMNS.`);
   }
   const list = columns.map((c) =>
-    masked.includes(c)
-      ? `regexp_replace(t."${c}"::text, '${ODDS_IN_JSON}', '"\\1": "[hidden]"', 'gi')::jsonb AS "${c}"`
-      : `t."${c}"`,
+    masked[c] ? `${masked[c]} AS "${c}"` : `t."${c}"`,
   );
   return `CREATE TEMP VIEW "${table}" AS SELECT ${list.join(', ')} FROM public."${table}" t`;
 }
@@ -357,6 +385,11 @@ async function runNow(
         'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ; ' +
           `SET LOCAL statement_timeout = ${Math.trunc(timeoutMs)}; ` +
           'SET LOCAL lock_timeout = 2000; ' +
+          // Each sort or hash spills to disk past 4 MB (Postgres's own
+          // default) rather than taking the database's memory: the smaller of
+          // that and the inherited value, so it only ever lowers.
+          // (temp_file_limit needs a superuser.)
+          "SELECT set_config('work_mem', (LEAST(pg_size_bytes(current_setting('work_mem')), 4194304) / 1024)::text || 'kB', true); " +
           // Ends the transaction if this server vanishes mid-query.
           'SET LOCAL idle_in_transaction_session_timeout = 30000; ' +
           // The mask's backslashes must reach the regex as written.
@@ -366,8 +399,8 @@ async function runNow(
       // Writable for these views alone: no caller text has run yet, and closing
       // the connection drops them. Read-only from here on, which cannot be undone.
       // Made for every query, whatever it names: skipping one on the query's text
-      // would hang the mask on that text again. The cost is a read lock on both
-      // tables for the query's life, which a migration on them may have to wait
+      // would hang the mask on that text again. The cost is a read lock on each
+      // masked table for the query's life, which a migration on them may have to wait
       // out or retry; a retried deploy beats a silent leak.
       const catalog = (
         await step(MASKED_TABLE_COLUMNS_SQL, [Object.keys(MASKED_COLUMNS)])

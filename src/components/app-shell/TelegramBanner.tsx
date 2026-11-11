@@ -1,15 +1,24 @@
 'use client';
 
-import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { Send, X } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useConsent } from '@/lib/use-consent';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { TELEGRAM_URL } from '@/lib/site';
 
 const DISMISSED_KEY = 'polycards.telegram-banner-session-dismissed';
+// The stored value names who dismissed: a customer id, or this for a guest.
+const GUEST = 'guest';
 
-/** Community link shares the floating rail with the welcome-pack badge. */
+/**
+ * Community link shares the floating rail with the welcome-pack badge.
+ *
+ * A matte chip since 2026-11-11 (home critique): the neon ticket art read as
+ * the cheap-gacha look PRODUCT.md rules out, and guests could not close it.
+ * Everyone can now dismiss it for the visit. Home shows no floating rail at
+ * all (it would sit on the pack ladder's prices); the footer carries the link.
+ */
 export function TelegramBanner() {
   const pathname = usePathname();
   const consent = useConsent();
@@ -25,10 +34,14 @@ export function TelegramBanner() {
     const sync = () => {
       let dismissed = false;
       try {
-        // An observed logout ends the dismissal, including on routes where
-        // this banner is hidden. Reloads within the same login retain it.
-        if (!customerId) sessionStorage.removeItem(DISMISSED_KEY);
-        else dismissed = sessionStorage.getItem(DISMISSED_KEY) === customerId;
+        const stored = sessionStorage.getItem(DISMISSED_KEY);
+        // An observed logout ends a customer's dismissal, including on routes
+        // where this banner is hidden. Reloads within the same login retain it.
+        if (!customerId && stored !== null && stored !== GUEST) {
+          sessionStorage.removeItem(DISMISSED_KEY);
+        } else {
+          dismissed = stored === (customerId ?? GUEST);
+        }
       } catch {
         // Storage may be unavailable; in-memory dismissal still works.
       }
@@ -38,23 +51,24 @@ export function TelegramBanner() {
   }, [customerId, isLoading]);
 
   const dismiss = () => {
-    if (!customerId) return;
     setSession({ customerId, dismissed: true });
     try {
-      sessionStorage.setItem(DISMISSED_KEY, customerId);
+      sessionStorage.setItem(DISMISSED_KEY, customerId ?? GUEST);
     } catch {
       // Still dismiss for this visit when browser storage is unavailable.
     }
   };
 
-  // These routes own purchase, reveal, sell, or challenge controls. Cookie
-  // consent also owns this rail until the visitor has made a choice.
+  // These routes own purchase, reveal, sell, or challenge controls, and home
+  // owns its price column. Cookie consent also owns this rail until the
+  // visitor has made a choice.
   if (
     isLoading ||
     !session ||
     session.customerId !== customerId ||
-    (customerId !== null && session.dismissed) ||
+    session.dismissed ||
     consent === null ||
+    pathname === '/' ||
     pathname.startsWith('/slots/') ||
     pathname === '/vault' ||
     pathname.startsWith('/vault/') ||
@@ -67,34 +81,24 @@ export function TelegramBanner() {
   return (
     <div
       data-telegram-banner
-      className="fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 w-[clamp(10rem,40vw,15rem)] lg:bottom-[calc(1.5rem+env(safe-area-inset-bottom))]"
+      className="glass-chrome fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 flex h-11 items-center rounded-full border border-white/15 lg:bottom-[calc(1.5rem+env(safe-area-inset-bottom))]"
     >
       <a
-        href="https://t.me/polycardsgg"
+        href={TELEGRAM_URL}
         aria-label="Join our Telegram community"
-        className="block rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+        className="flex h-full items-center gap-2 rounded-full pr-1 pl-4 text-sm font-semibold text-white focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none"
       >
-        <Image
-          src="/images/polycards/telegram-community-ticket.webp"
-          alt="Join our Telegram community — Join now"
-          width={864}
-          height={393}
-          sizes="(max-width: 400px) 160px, (max-width: 600px) 40vw, 240px"
-          className="block h-auto w-full [mask-image:url('/images/polycards/telegram-ticket-mask.svg')] [mask-size:100%_100%]"
-        />
+        <Send className="size-4" aria-hidden="true" />
+        Telegram
       </a>
-      {customerId && (
-        <button
-          type="button"
-          aria-label="Dismiss Telegram banner"
-          onClick={dismiss}
-          className="absolute -top-6 -right-2 flex size-11 items-center justify-center rounded-full text-white focus-visible:outline-2 focus-visible:outline-white"
-        >
-          <span className="flex size-6 items-center justify-center rounded-full border border-white/30 bg-neutral-900">
-            <X size={14} aria-hidden="true" />
-          </span>
-        </button>
-      )}
+      <button
+        type="button"
+        aria-label="Dismiss Telegram banner"
+        onClick={dismiss}
+        className="flex size-11 items-center justify-center rounded-full text-neutral-400 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none motion-reduce:transition-none"
+      >
+        <X size={16} aria-hidden="true" />
+      </button>
     </div>
   );
 }

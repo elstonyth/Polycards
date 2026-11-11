@@ -607,7 +607,13 @@ export async function getProfitReport(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
+  | 'today'
+  | 'yesterday'
+  | '7d'
+  | '30d'
+  | 'month'
+  | 'last_month'
+  | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -920,7 +926,8 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    Partial<GatewayPreflightRefusal> | undefined;
+    | Partial<GatewayPreflightRefusal>
+    | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1195,6 +1202,7 @@ export type DeliveryStatus =
   | 'requested'
   | 'processed'
   | 'ready_to_ship'
+  | 'pending_ship'
   | 'shipped'
   | 'completed'
   | 'canceled';
@@ -1313,6 +1321,28 @@ export const allocateDeliveryOrders = () =>
     '/admin/delivery-orders/allocate',
     {},
   );
+
+// Which of each order's cards the stock covers, oldest order first (live).
+// Per card: need = units the order wants, have = units covered for it,
+// on_hand = the card's whole on hand (more than have = kept for other orders).
+// null = the order is not waiting on stock.
+export type DeliveryOrderCardCover = {
+  handle: string;
+  need: number;
+  have: number;
+  on_hand: number;
+};
+
+export async function getDeliveryOrdersStock(
+  ids: string[],
+): Promise<Record<string, DeliveryOrderCardCover[] | null>> {
+  const data = await getJson<{
+    orders: Record<string, DeliveryOrderCardCover[] | null>;
+  }>(
+    `/admin/delivery-orders/stock?ids=${ids.map(encodeURIComponent).join(',')}`,
+  );
+  return data.orders;
+}
 
 export async function getDeliveryOrder(
   id: string,
@@ -1664,7 +1694,11 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // pending two sweeps later with a gateway id, i.e. possibly a payment that
 // landed at the gateway without ever being credited here.
 export type GatewayDepositView =
-  'pending' | 'settled' | 'failed' | 'expired' | 'all';
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'expired'
+  | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1740,7 +1774,11 @@ export function getGatewayDeposits(
 // always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GatewayWithdrawalView =
-  'held' | 'pending' | 'settled' | 'failed' | 'all';
+  | 'held'
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'all';
 
 export interface GatewayWithdrawal {
   id: string;
@@ -2128,7 +2166,12 @@ export const unbanBankNumber = (
     reason: string;
   },
 ) =>
-  postJson<{ bank_code: string; last4: string; lifted: boolean; changed: boolean }>(
+  postJson<{
+    bank_code: string;
+    last4: string;
+    lifted: boolean;
+    changed: boolean;
+  }>(
     `/admin/customers/${encodeURIComponent(id)}/bank-accounts/unban-number`,
     details,
   );
@@ -2346,7 +2389,15 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 
 /** The ledger event types (POLYCARD-BACK §5.1). */
 export type LedgerType =
-  'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF' | 'CF';
+  | 'TP'
+  | 'SP'
+  | 'SE'
+  | 'OD'
+  | 'AD'
+  | 'WP'
+  | 'WD'
+  | 'RF'
+  | 'CF';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw
@@ -2450,6 +2501,11 @@ export interface AdminPurchaseInvoiceDetail extends Omit<
   AdminPurchaseInvoice,
   'total_qty' | 'subtotal' | 'total_fmv'
 > {
+  /** The edit form sends it back as expected_updated_at: a save over someone
+   *  else's newer edit is refused. */
+  updated_at: string;
+  /** The reversal that undid this invoice, if any: then it can't be edited. */
+  reversed_by: { id: string; display_no: string } | null;
   lines: AdminPurchaseInvoiceLine[];
 }
 
@@ -2502,6 +2558,22 @@ export interface CreatePurchaseInvoiceBody {
 export const createPurchaseInvoice = (body: CreatePurchaseInvoiceBody) =>
   postJson<{ invoice: AdminPurchaseInvoiceDetail }>(
     '/admin/purchase-invoices',
+    body,
+  );
+
+/** POST /admin/purchase-invoices/:id — an edit: a purchase's body (never a
+ *  reversal or transfer pick) plus the updated_at the form was loaded at. */
+export type UpdatePurchaseInvoiceBody = Omit<
+  CreatePurchaseInvoiceBody,
+  'reverses_invoice_id' | 'from_grn_id'
+> & { expected_updated_at: string };
+
+export const updatePurchaseInvoice = (
+  id: string,
+  body: UpdatePurchaseInvoiceBody,
+) =>
+  postJson<{ invoice: AdminPurchaseInvoiceDetail }>(
+    `/admin/purchase-invoices/${encodeURIComponent(id)}`,
     body,
   );
 

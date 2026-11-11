@@ -87,6 +87,10 @@ export function blockedReason(path: string): string | null {
 // out of its JSON: the SQL route masks the partner passwords and real names
 // themselves (db-query.ts).
 const HIDDEN = /password|secret|token|credential|api_?key|real_?name/i;
+// A shared-name clearing (customer.metadata) and its audit rows carry the
+// holder name, often the real name. Exact keys: a bank screen's
+// accountHolderName stays open with the bank number.
+const HOLDER_NAME = /^holder_name(?:_cleared)?$/i;
 
 // Coin flip's actual odds and each group's odds set (the owner, 2026-10-30): the
 // audit rows and group metadata carrying them stay open, so they are hidden by
@@ -101,6 +105,39 @@ const ODDS_IN_TEXT =
   /\b((?:actual_)?win_(?:units|percent)(?:_\d)?|odds_?set)((?:\\*")*\s*:\s*)[^\s,}]+/gi;
 const maskOdds = (text: string) => text.replace(ODDS_IN_TEXT, '$1$2[hidden]');
 
+// The holder-name keys in text that is not whole JSON (an admin note quoting a
+// fragment, a cut cast), whatever quoting the casts stack: the name after
+// holder_name, the whole object after holder_name_cleared, to where it closes
+// or the text was cut. \b keeps account_holder_name open, as HOLDER_NAME does.
+const HOLDER_KEY_IN_TEXT = /\bholder_name(?:_cleared)?(?:\\*")*\s*:\s*/gi;
+function maskHolderNames(text: string): string {
+  let out = '';
+  let from = 0;
+  for (const m of text.matchAll(HOLDER_KEY_IN_TEXT)) {
+    if (m.index < from) continue; // a key inside a value already hidden
+    let at = m.index + m[0].length;
+    if (text[at] === '{') {
+      out += text.slice(from, at);
+      for (let depth = 0; at < text.length; ) {
+        const c = text[at];
+        at += 1;
+        if (c === '{') depth += 1;
+        else if (c === '}' && (depth -= 1) === 0) break;
+      }
+    } else {
+      const quotes = /^(?:\\*")+/.exec(text.slice(at))?.[0];
+      if (!quotes) continue; // null or a number: no name
+      at += quotes.length;
+      out += text.slice(from, at);
+      while (at < text.length && text[at] !== '"' && text[at] !== '\\') at += 1;
+    }
+    out += '[hidden]';
+    from = at;
+  }
+  return out + text.slice(from);
+}
+const maskText = (text: string) => maskHolderNames(maskOdds(text));
+
 export function redact(value: unknown): unknown {
   if (typeof value === 'string') return redactJsonText(value);
   if (Array.isArray(value)) return value.map(redact);
@@ -108,20 +145,22 @@ export function redact(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, v]) => [
       key,
-      HIDDEN.test(key) || ODDS_KEY.test(key) ? '[hidden]' : redact(v),
+      HIDDEN.test(key) || ODDS_KEY.test(key) || HOLDER_NAME.test(key)
+        ? '[hidden]'
+        : redact(v),
     ]),
   );
 }
 
 function redactJsonText(text: string): string {
-  if (!/^\s*[[{]/.test(text)) return maskOdds(text);
+  if (!/^\s*[[{]/.test(text)) return maskText(text);
   try {
     const parsed: unknown = JSON.parse(text);
     return parsed !== null && typeof parsed === 'object'
       ? JSON.stringify(redact(parsed))
       : text;
   } catch {
-    return maskOdds(text);
+    return maskText(text);
   }
 }
 

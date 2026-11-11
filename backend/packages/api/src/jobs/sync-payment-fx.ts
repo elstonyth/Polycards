@@ -6,9 +6,8 @@ import { PAYMENT_FX_FEEDS, paymentFxPair } from '../modules/packs/payment-fx';
 import { alertOps } from '../modules/packs/ops-alert';
 
 // The mid rates behind regional-gateway conversions (payment-fx.ts), one per
-// currency in PAYMENT_FX_FEEDS that has a feed URL (SGD today). Separate from
-// the daily sync-market-prices run (USD_MYR) so a slow PriceCharting pass can
-// never hold a payment rate back.
+// currency in PAYMENT_FX_FEEDS that has a feed URL (SGD today). USD_MYR, the
+// card-price rate, has its own hourly job (sync-usd-myr.ts) on the same fetch.
 //
 // HOURLY (operator decision, 2026-10-13): the primary feed is Coinbase's
 // public fiat rates, which move through the day; ECB via frankfurter

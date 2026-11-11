@@ -61,12 +61,11 @@ const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
 ];
 
 // The "About & help" card (How it works / Fairness / About / Contact) was
-// removed 2026-07-31: the site footer sits ~150px below it on this same page
-// and carried the identical four links, so /me showed them twice in one scroll.
-// The footer's copy of them went in the same change — the trust routes are now
-// reached by URL and from search (they stay in ROUTES/sitemap in lib/site.ts),
-// plus the in-content links on the home page, /about and /contact. `Support` in
-// QUICK_ACCESS above still covers /contact.
+// removed 2026-07-31 because the site footer carried the same links on this
+// page. The footer lost its copy too, then got a link row back 2026-11-11
+// (How it works / About / Contact / Privacy; /fairness was deleted that day),
+// so don't re-add the card here: it would show those links twice in one
+// scroll. `Support` in QUICK_ACCESS above still covers /contact.
 
 export default async function MePage() {
   // NOT guaranteed by the account layout's auth gate, despite how it reads:

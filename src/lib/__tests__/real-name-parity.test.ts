@@ -43,6 +43,11 @@ describe('real-name validator parity (storefront ↔ backend)', () => {
     'Tan 😀',
     'https://x.y',
     'a'.repeat(101),
+    'Tan A\u034Fh Kow',
+    'Ｔａｎ Ａｈ Ｋｏｗ',
+    'Tan\u200B Ah Kow',
+    'Tan\u200C Ah Kow',
+    'Tan Ah\u200D Kow',
   ])('normalizes %j identically', (input) => {
     expect(normalizeRealName(input)).toBe(backendNormalizeRealName(input));
   });

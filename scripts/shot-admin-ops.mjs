@@ -9,6 +9,7 @@
 // gitignored scripts/.dev-logins); the email is a non-secret default.
 // Env: ADMIN_BASE, ADMIN_EMAIL, ADMIN_PW, SHOT_CUSTOMER (ungrouped player id)
 import { chromium } from '@playwright/test';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { mkdirSync } from 'node:fs';
 
 const ADMIN = process.env.ADMIN_BASE ?? 'http://localhost:7000/dashboard';
@@ -16,35 +17,22 @@ const OP = {
   email: process.env.ADMIN_EMAIL ?? 'admin@pokenic.app',
   password: process.env.ADMIN_PW ?? '',
 };
+requireAdminTotp(OP.email);
 const CUSTOMER = process.env.SHOT_CUSTOMER ?? '';
 const OUT = 'docs/research/shots';
 mkdirSync(OUT, { recursive: true });
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
-// Same retry-the-whole-flow shape as login-stack.mjs: a bare fill before the
-// form has hydrated throws uncaught and kills the run.
+// Password, then the authenticator code (#996); the helper retries the flow.
 async function adminLogin(page) {
-  for (let i = 0; i < 4; i++) {
-    try {
-      await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-      const email = page.locator('input[name="email"]');
-      await email.waitFor({ state: 'visible', timeout: 30000 });
-      await email.fill(OP.email);
-      await page.fill('input[name="password"]', OP.password);
-      await page.keyboard.press('Enter');
-      await page.waitForURL((u) => !u.pathname.includes('login'), {
-        timeout: 20000,
-      });
-      return true;
-    } catch (e) {
-      log(
-        `login attempt ${i + 1} failed (${String(e.message).split('\n')[0]}), retrying…`,
-      );
-      await page.waitForTimeout(3000);
-    }
+  try {
+    await adminUiLogin(page, ADMIN, OP.email, OP.password);
+    return true;
+  } catch (e) {
+    log(`login failed (${String(e.message).split('\n')[0]})`);
+    return false;
   }
-  return false;
 }
 
 const shots = [];

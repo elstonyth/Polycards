@@ -1,18 +1,16 @@
 // Functional check for the shared admin UX layer: dirty state, save gating,
 // keyboard reachability of the row-actions menu.
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import assert from 'node:assert/strict';
 
 const BASE = 'http://localhost:7001';
+const ADMIN_EMAIL = 'admin@pokenic.app';
+requireAdminTotp(ADMIN_EMAIL);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 
-await page.goto(`${BASE}/dashboard/login`, { waitUntil: 'domcontentloaded' });
-await page.fill('input[name="email"]', 'admin@pokenic.app');
-await page.fill('input[name="password"]', 'PreviewOnly2026!');
-await page.click('button[type="submit"]');
-await page.waitForURL(/dashboard/, { timeout: 30000 });
-await page.waitForTimeout(2000);
+await adminUiLogin(page, `${BASE}/dashboard`, ADMIN_EMAIL, 'PreviewOnly2026!');
 
 await page.goto(`${BASE}/dashboard/daily-rewards`, {
   waitUntil: 'domcontentloaded',

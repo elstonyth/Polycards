@@ -4,6 +4,7 @@
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 const { chromium } = createRequire(import.meta.url)('playwright'); // ponytail: global playwright via NODE_PATH
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 // Credentials come from the environment — never hardcode secrets in source.
 // ADMIN_PASSWORD + CUSTOMER_PASSWORD are required; emails default to the standing
@@ -19,6 +20,7 @@ const CUST = {
   pw: process.env.CUSTOMER_PASSWORD,
 };
 
+requireAdminTotp(ADMIN.email);
 if (!ADMIN.pw || !CUST.pw) {
   throw new Error(
     'Set ADMIN_PASSWORD and CUSTOMER_PASSWORD before running, e.g.\n' +
@@ -38,16 +40,7 @@ const context = await browser.newContext({
 
 // --- admin (tab 1) ---
 const admin = await context.newPage();
-await admin.goto(`${ADMIN.url}/dashboard/login`, {
-  waitUntil: 'domcontentloaded',
-});
-await admin.waitForSelector('input[name="email"]', { timeout: 20000 });
-await admin.fill('input[name="email"]', ADMIN.email);
-await admin.fill('input[name="password"]', ADMIN.pw);
-await admin.keyboard.press('Enter');
-await admin.waitForURL((u) => !u.pathname.includes('login'), {
-  timeout: 20000,
-});
+await adminUiLogin(admin, `${ADMIN.url}/dashboard`, ADMIN.email, ADMIN.pw);
 await admin.screenshot({ path: 'docs/research/login-admin.png' });
 console.log('✓ admin logged in →', admin.url());
 

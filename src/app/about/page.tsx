@@ -24,7 +24,7 @@ const STEPS = [
   {
     num: '01',
     title: 'BUY A PACK',
-    body: 'Purchase digitally with your card. Real physical cards from our inventory.',
+    body: 'Real physical cards from our inventory.',
   },
   {
     num: '02',
@@ -34,22 +34,16 @@ const STEPS = [
   {
     num: '03',
     title: 'SECURELY VAULTED',
-    body: 'Cards stored in top-tier insured US facilities.',
+    body: 'Your cards are held in our own stock until you ship or sell them.',
   },
   {
     num: '04',
     title: 'SHIP OR SELL',
-    body: `Request worldwide shipping, or sell from your vault at ${BUYBACK_RATE_LABEL}. The pack's instant rate applies during the reveal countdown.`,
+    body: `Request delivery within Malaysia or Singapore, or sell from your vault at ${BUYBACK_RATE_LABEL}. The pack's instant rate applies during the reveal countdown.`,
   },
 ] as const;
 
 const FEATURES = [
-  {
-    stat: '100%',
-    statClass: 'text-white',
-    label: 'Graded cards vaulted',
-    body: 'Every digital card is backed by a real graded card in the vault. Best of both worlds combined.',
-  },
   {
     stat: BUYBACK_RATE_LABEL,
     // Money-in signal (DESIGN.md Signal Rule) — the one colored stat.
@@ -61,22 +55,18 @@ const FEATURES = [
     stat: '24/7',
     statClass: 'text-white',
     label: 'Always open',
-    body: 'Open around the clock, worldwide. Rip a pack or sell a card back any hour, no waiting on a buyer.',
+    body: 'Open around the clock. Rip a pack or sell a card back any hour, no waiting on a buyer.',
   },
 ] as const;
 
 const VAULT_ROWS = [
   {
-    title: 'CHOOSE YOUR VAULT',
-    body: 'PSA, Alt, or Fanatics facilities',
+    title: 'OUR OWN STOCK',
+    body: 'Every card is held by Polycards until you ship or sell it',
   },
   {
-    title: 'FULLY INSURED',
-    body: 'Complete coverage for all items',
-  },
-  {
-    title: 'CLIMATE CONTROLLED',
-    body: 'Optimal storage conditions',
+    title: 'TRACKED DELIVERY',
+    body: 'Malaysia and Singapore, tracked to your door',
   },
 ] as const;
 
@@ -195,7 +185,7 @@ export default function AboutPage() {
       {/* 03 — platform stats */}
       <section aria-labelledby="platform-heading" className="mt-14 w-full">
         <BoardHead id="platform-heading" title="THE PLATFORM" />
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {FEATURES.map((f, i) => (
             <Reveal key={f.label} delay={i * 90} className="h-full">
               <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-neutral-900 p-5">
@@ -235,8 +225,7 @@ export default function AboutPage() {
                 </p>
                 <p className="mt-1 max-w-md text-[13px] leading-relaxed text-neutral-400">
                   Power your brand with our complete infrastructure. Custom
-                  branding, payment processing, vault storage, and worldwide
-                  fulfillment.
+                  branding, payment processing, vault storage, and fulfillment.
                 </p>
               </div>
               <a
@@ -246,20 +235,6 @@ export default function AboutPage() {
                 Talk to us
                 <ArrowRight className="h-3.5 w-3.5" aria-hidden />
               </a>
-            </div>
-          </Reveal>
-          <Reveal delay={90} className="flex-1">
-            <div className="flex h-full flex-col justify-center rounded-2xl border border-white/10 bg-neutral-900 p-5">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                Featured partner
-              </p>
-              <p className="font-heading mt-2 text-lg leading-snug text-white">
-                ZARDO CARDS
-              </p>
-              <p className="mt-1 text-[13px] leading-relaxed text-neutral-400">
-                One of the largest online Pokemon stores, now offering digital
-                pack breaks powered by Polycards.
-              </p>
             </div>
           </Reveal>
         </div>

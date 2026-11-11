@@ -1,8 +1,10 @@
 import { ModulesSdkUtils } from '@medusajs/framework/utils';
+import { parse } from 'pg-connection-string';
 import {
   DEFAULT_DB_POOL_MAX,
   productionDatabaseDriverOptions,
   resolveDbPoolMax,
+  runtimeDatabaseUrl,
 } from '../db-driver-options';
 
 describe('resolveDbPoolMax', () => {
@@ -96,5 +98,49 @@ describe('productionDatabaseDriverOptions', () => {
     } finally {
       await knex.destroy();
     }
+  });
+});
+
+describe('runtimeDatabaseUrl (statement_timeout for long-running processes)', () => {
+  const base = 'postgresql://u:p@db.example:25060/polycards';
+  const optionsOf = (url: string | undefined) =>
+    new URL(url as string).searchParams.get('options');
+
+  it('adds a 60 s statement_timeout for `medusa start`', () => {
+    const url = runtimeDatabaseUrl(base, {}, ['node', 'medusa', 'start']);
+    expect(optionsOf(url)).toBe('-c statement_timeout=60000');
+    // pg reads the same parameter it will send as the startup `options`.
+    expect(parse(url as string).options).toBe('-c statement_timeout=60000');
+  });
+
+  it('leaves migrate, exec and every other command alone', () => {
+    for (const cmd of ['db:migrate', 'exec', 'develop', 'user']) {
+      expect(runtimeDatabaseUrl(base, {}, ['node', 'medusa', cmd])).toBe(base);
+    }
+  });
+
+  it('keeps existing options and never doubles a timeout already on the URL', () => {
+    const withOpts = `${base}?options=${encodeURIComponent('-c search_path=public')}`;
+    expect(optionsOf(runtimeDatabaseUrl(withOpts, {}, ['x', 'medusa', 'start']))).toBe(
+      '-c search_path=public -c statement_timeout=60000',
+    );
+    const already = `${base}?options=${encodeURIComponent('-c statement_timeout=5000')}`;
+    expect(runtimeDatabaseUrl(already, {}, ['x', 'medusa', 'start'])).toBe(already);
+  });
+
+  it('honours DB_STATEMENT_TIMEOUT_MS, and 0 turns it off', () => {
+    const argv = ['x', 'medusa', 'start'];
+    expect(optionsOf(runtimeDatabaseUrl(base, { DB_STATEMENT_TIMEOUT_MS: '90000' }, argv))).toBe(
+      '-c statement_timeout=90000',
+    );
+    expect(runtimeDatabaseUrl(base, { DB_STATEMENT_TIMEOUT_MS: '0' }, argv)).toBe(base);
+    // Junk falls back to the default rather than disabling the guard.
+    expect(optionsOf(runtimeDatabaseUrl(base, { DB_STATEMENT_TIMEOUT_MS: '1e3' }, argv))).toBe(
+      '-c statement_timeout=60000',
+    );
+  });
+
+  it('passes an unset URL through', () => {
+    expect(runtimeDatabaseUrl(undefined, {}, ['x', 'medusa', 'start'])).toBeUndefined();
   });
 });

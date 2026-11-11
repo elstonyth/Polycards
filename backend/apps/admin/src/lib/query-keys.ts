@@ -146,6 +146,10 @@ export const qk = {
     ] as const,
   // 2-segment prefix — invalidates ALL delivery-order pages/filters in one call
   deliveryOrdersKey: ['admin', 'delivery-orders'] as const,
+  // Under deliveryOrdersKey, so a GRN / invoice save or a status move
+  // refetches it with the list.
+  deliveryOrdersStock: (ids: string[]) =>
+    ['admin', 'delivery-orders', 'stock', ids.join(',')] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
   // Every cached order detail — the stock allocation moves orders to
   // processed / ready_to_ship server-side after a GRN or invoice save.
@@ -260,10 +264,10 @@ export const qk = {
   purchaseInvoicesKey: ['admin', 'purchase-invoices'] as const,
   // SINGULAR namespace, so the detail cache is a SIBLING of the list, not a
   // descendant (same shape as deliveryOrder vs deliveryOrders, pack vs packs).
-  // An invoice is immutable — there is no PUT/DELETE route — so a detail entry
-  // never needs invalidating, and nesting it under purchaseInvoicesKey would
-  // only make every create refetch details nothing changed about.
+  // Since the edit route (2026-11-11) an edit changes a detail, and a reversal
+  // sets its target's reversed_by: both invalidate purchaseInvoiceKey.
   purchaseInvoice: (id: string) => ['admin', 'purchase-invoice', id] as const,
+  purchaseInvoiceKey: ['admin', 'purchase-invoice'] as const,
   // The Inventory list is UNPAGED (the route returns every catalog row), so `q`
   // is the only variable. It ALWAYS renders, defaulting to '' — same
   // always-rendered-segment rule as qk.players/qk.purchaseInvoices: appended

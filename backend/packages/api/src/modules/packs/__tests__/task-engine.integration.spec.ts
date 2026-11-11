@@ -900,6 +900,70 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ).toBe(true);
     });
 
+    // A retired achievement is honoured through the week it was retired in,
+    // like a weekly task: open-ended, anyone who kept its id, a fresh account
+    // included, could claim it long after the off switch (audit 2026-11-09).
+    it('a retired achievement honours its retirement week only', async () => {
+      const base = {
+        kind: 'achievement' as const,
+        title: 'Vault a card, ever',
+        requirement: { type: 'vault_count', count: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        sort: 0,
+        adminId: 'admin_1',
+      };
+      const { id } = await service.saveTaskDefinition({
+        ...base,
+        active: true,
+        reason: 'seed',
+      });
+      await service.saveTaskDefinition({
+        ...base,
+        id,
+        active: false,
+        reason: 'retire',
+      });
+      const [row] = await service.listTaskDefinitions({ id });
+      const retiredAt = new Date(row.retired_at!);
+      const weekLater = new Date(retiredAt.getTime() + 8 * 24 * 3600 * 1000);
+      await service.createCards([
+        {
+          handle: 'ach-card',
+          name: 'ACH',
+          set: 'S',
+          grader: 'PSA',
+          grade: '9',
+          market_value: 10,
+          image: 'x.png',
+        },
+      ]);
+      await service.createPulls(
+        ['cus_ach_now', 'cus_ach_late'].map((customer_id) => ({
+          customer_id,
+          pack_id: 'p',
+          card_id: 'ach-card',
+          rolled_at: retiredAt,
+        })),
+      );
+      expect(
+        (
+          await service.claimTask({
+            customerId: 'cus_ach_now',
+            taskId: id,
+            // The retire instant itself: a minute later can be the next MYT week.
+            now: retiredAt,
+          })
+        ).claimed,
+      ).toBe(true);
+      expect(
+        await service.claimTask({
+          customerId: 'cus_ach_late',
+          taskId: id,
+          now: weekLater,
+        }),
+      ).toEqual({ claimed: false, reason: 'window_closed' });
+    });
+
     // The period FILTERs run on real Postgres: today's paid rips and pixel
     // pulls count for a daily task, the week's for a weekly one, and a
     // reward pull counts for neither (it would let a prize feed a task).

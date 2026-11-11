@@ -48,10 +48,12 @@ export const adjustCreditsStep = createStep(
     }
     const amount = input.amount as number;
     const note = (input.note as string).trim();
+    // Required: without a key, a re-press after a lost response mints a
+    // second credit (audit 2026-11-11). Every admin caller sends one.
     if (
-      input.idempotency_key !== undefined &&
-      (typeof input.idempotency_key !== 'string' ||
-        !input.idempotency_key.trim() || input.idempotency_key.length > 200)
+      typeof input.idempotency_key !== 'string' ||
+      !input.idempotency_key.trim() ||
+      input.idempotency_key.length > 200
     ) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
@@ -99,9 +101,14 @@ export const adjustCreditsStep = createStep(
       credit_transaction_id: id,
       replayed: replayed === true,
     };
-    return new StepResponse(result, replayed ? undefined : { creditTransactionId: id });
+    return new StepResponse(
+      result,
+      // null on a replay: undefined would hand the compensator this step's
+      // output, and a replay wrote nothing to undo (#968).
+      replayed ? null : { creditTransactionId: id },
+    );
   },
-  async (data: { creditTransactionId: string } | undefined, { container }) => {
+  async (data: { creditTransactionId: string } | null, { container }) => {
     if (!data) return;
     // adjustment rows are never commission-backed, so the guarded path is safe
     // and removes the last caller of the raw base-delete (Task 11 seals it).

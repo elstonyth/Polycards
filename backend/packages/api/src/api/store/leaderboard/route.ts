@@ -37,20 +37,22 @@ const FETCH_N = TOP_N * 2;
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
 const boardCache = new Map<string, { expires: number; body: unknown }>();
+// Single-flight per period: misses during an expiry window share ONE compute
+// instead of each running the whole-history aggregate (the #835 stampede
+// shape; audit 2026-11-11).
+const inFlight = new Map<string, Promise<unknown>>();
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
  *  one process, so test A's cached board would be served to test B. */
 export function clearLeaderboardCache(): void {
   boardCache.clear();
+  inFlight.clear();
 }
 
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  const customerService = req.scope.resolve(Modules.CUSTOMER);
-
   const period = req.query.period === 'alltime' ? 'alltime' : 'weekly';
 
   const cached = boardCache.get(period);
@@ -58,6 +60,26 @@ export async function GET(
     res.json(cached.body);
     return;
   }
+  let compute = inFlight.get(period);
+  if (!compute) {
+    compute = computeBoard(req, period)
+      .then((body) => {
+        boardCache.set(period, { expires: Date.now() + CACHE_TTL_MS, body });
+        return body;
+      })
+      .finally(() => inFlight.delete(period));
+    inFlight.set(period, compute);
+  }
+  // A rejected compute rejects every waiter alike, minus the duplicate work.
+  res.json(await compute);
+}
+
+async function computeBoard(
+  req: MedusaRequest,
+  period: 'alltime' | 'weekly',
+): Promise<unknown> {
+  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  const customerService = req.scope.resolve(Modules.CUSTOMER);
   // Ranked top-N is aggregated in the DB (GROUP BY + ORDER BY + LIMIT) so it's
   // correct at any pull volume. weekly = pulled value over the challenge week;
   // alltime = lifetime pulled value. Weekly rows mirror `volume` into `points` only because the
@@ -88,10 +110,8 @@ export async function GET(
   // An administratively disabled player is hidden from every public surface —
   // disabling an account from the dashboard must not leave it on display here.
   //
-  // Display-only, and deliberately so: their `pull` rows stay in the aggregate,
-  // and settleChallengeWeek still ranks and pays a DISABLED player. A disable
-  // is REVERSIBLE (unlike a delete, where nobody is left to pay), so hiding the
-  // row must not also confiscate the week's winnings.
+  // Their `pull` rows stay in the aggregate (and in the weekly pool); only the
+  // ranking drops them.
   //
   // Ranks are re-numbered over the survivors (1..N, no gaps): a gap would
   // publish the fact that someone was removed, which is the opposite of hiding.
@@ -99,18 +119,11 @@ export async function GET(
   // DELETED players are dropped here too — the purge writes the same disabled
   // tombstone (see disabledCustomerIds), so one filter catches both.
   //
-  // KNOW WHAT THE RE-NUMBERING COSTS, because it is not the hidden player who
-  // pays it. settleChallengeWeek pays `rank = i + 1` over the ORIGINAL ranking
-  // and merely `continue`s past a skipped customer (service.ts, the winner
-  // loop) — it never re-numbers. So every survivor BELOW a hidden player is
-  // displayed one rank higher than the rank they are paid at, and
-  // /leaderboard's prize table is keyed by rank, so the gap is visible to them:
-  // hide the week's #1 and the player shown at #1 is paid the #2 prize. True
-  // for a deleted #1 as much as a disabled one — the deleted player is not paid
-  // at all, but the survivors below are still paid at their original ranks.
-  // Accepted for now, and the fix if it ever produces a support ticket is to
-  // re-number SETTLEMENT over the same filtered set, never to un-hide the
-  // board.
+  // settleChallengeWeek applies the SAME filter and re-numbers the same way
+  // (owner, 2026-11-06), so the rank shown here is the rank paid: a player
+  // still disabled when the week is first settled is not paid, and everyone
+  // below moves up. This used to be display-only, which paid the player shown
+  // at #1 the #2 prize whenever the real #1 was hidden.
   //
   // NOT filtered, and known: GET /store/pulls/recent, the live pull feed on the
   // home, pack-detail and spin pages. It builds its own display name and shows
@@ -128,10 +141,7 @@ export async function GET(
     .filter((r) => !disabled.has(r.customer_id))
     .slice(0, TOP_N);
   if (ranked.length === 0) {
-    const body = { period, entries: [] };
-    boardCache.set(period, { expires: Date.now() + CACHE_TTL_MS, body });
-    res.json(body);
-    return;
+    return { period, entries: [] };
   }
 
   // PII-safe display fields (name / handle / avatar) come from the shared
@@ -167,7 +177,5 @@ export async function GET(
     };
   });
 
-  const body = { period, entries };
-  boardCache.set(period, { expires: Date.now() + CACHE_TTL_MS, body });
-  res.json(body);
+  return { period, entries };
 }

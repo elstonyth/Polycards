@@ -11,6 +11,22 @@ import type PacksModuleService from '../../src/modules/packs/service';
 import { referralWeekFor } from '../../src/modules/packs/referral';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
+// The app runs both referral jobs at :00 every hour. This suite closes,
+// approves and pays a week itself, so a run that crossed the hour got a
+// second settlement from the close job (#1023's CI, 15:00:00), and a pay tick
+// between the approve and pay calls would pay the line first. Keep the
+// schedule, drop the work.
+jest.mock('../../src/jobs/close-referral-week', () => ({
+  __esModule: true,
+  default: jest.fn(async () => undefined),
+  config: jest.requireActual('../../src/jobs/close-referral-week').config,
+}));
+jest.mock('../../src/jobs/pay-referral-week', () => ({
+  __esModule: true,
+  default: jest.fn(async () => undefined),
+  config: jest.requireActual('../../src/jobs/pay-referral-week').config,
+}));
+
 jest.setTimeout(300 * 1000);
 
 const PASSWORD = 'referral-http-test-pw-1';

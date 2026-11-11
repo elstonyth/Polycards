@@ -1,39 +1,55 @@
 // Admin dashboard (:7000/dashboard) page-object helpers.
 import { type Page, expect } from '@playwright/test';
 import { ADMIN, ADMIN_EMAIL, ADMIN_PASSWORD } from './constants';
+import { freshAdminCode } from './totp';
 
 // Saved operator session — written by auth.setup.ts, reused by every e2e test.
 export const ADMIN_STORAGE = 'tests/e2e/.auth/admin.json';
 
+// The pages a signed-out operator lands on (Mercur's /login redirects to
+// /sign-in; a login without an authenticator is sent to /two-step-setup).
+const SIGN_IN_PAGES = /\/(login|sign-in|two-step-setup)(\/|$)/;
+
+// The two-step sign-in (#996): password, then the authenticator code.
 export async function adminLogin(page: Page): Promise<void> {
   if (!ADMIN_PASSWORD) {
     throw new Error(
       "PW_ADMIN_PASSWORD is not set — export it to match your stack's seeded admin (see tests/e2e/README.md).",
     );
   }
-  // /auth/user/emailpass rate-limits sign-ins; retry through the short window.
+  // Sign-ins are rate-limited and a code works once per login, so a failed
+  // try waits and goes again with the next step's code.
   for (let attempt = 0; attempt < 4; attempt++) {
-    await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-    await page.fill('input[name="email"]', ADMIN_EMAIL);
-    await page.fill('input[name="password"]', ADMIN_PASSWORD);
+    await page.goto(`${ADMIN}/sign-in`, { waitUntil: 'domcontentloaded' });
+    await page.locator('#sign-in-email').fill(ADMIN_EMAIL);
+    await page.locator('#sign-in-password').fill(ADMIN_PASSWORD);
     await page.keyboard.press('Enter');
     try {
-      await page.waitForURL((u) => !u.pathname.includes('login'), {
+      const code = page.locator('#two-step-code');
+      await code.waitFor({ timeout: 12_000 });
+      await code.fill(await freshAdminCode());
+      await page.keyboard.press('Enter');
+      await page.waitForURL((u) => !SIGN_IN_PAGES.test(u.pathname), {
         timeout: 12_000,
       });
       return;
     } catch {
+      if (page.url().includes('two-step-setup')) {
+        throw new Error(
+          `${ADMIN_EMAIL} has no authenticator set up — seed:e2e sets one up and prints totp_secret=… (see tests/e2e/README.md).`,
+        );
+      }
       await page.waitForTimeout(8_000);
     }
   }
-  throw new Error('admin login never left the login page (rate-limited?)');
+  throw new Error('admin sign-in never got past the code step (rate-limited?)');
 }
 
 // Navigate into the dashboard, logging in only if the saved session didn't carry
 // (keeps admin auth calls to ~one for the whole suite).
 export async function ensureAdmin(page: Page, path = ''): Promise<void> {
   await page.goto(`${ADMIN}${path}`, { waitUntil: 'domcontentloaded' });
-  if (page.url().includes('/login')) await adminLogin(page);
+  if (SIGN_IN_PAGES.test(new URL(page.url()).pathname)) await adminLogin(page);
 }
 
 // Scope a create/edit modal field by its <Label> text (Medusa Labels carry no
@@ -92,7 +108,7 @@ export async function registerCardFromInventory(
 }
 
 // Edit a card's gacha facts via the cards-list edit modal (locate the row by
-// name). Adjusts FMV and the marketplace-listing toggle, then saves.
+// name, then its actions menu). Adjusts FMV and the marketplace-listing toggle, then saves.
 export async function editCard(
   page: Page,
   cardName: string,
@@ -101,7 +117,12 @@ export async function editCard(
   await page.goto(`${ADMIN}/cards`, { waitUntil: 'domcontentloaded' });
   const row = page.locator('tbody tr', { hasText: cardName });
   await row.first().waitFor({ timeout: 20_000 });
-  await row.first().getByRole('button', { name: 'Edit' }).click();
+  // Row actions sit behind the row's menu since #927.
+  await row
+    .first()
+    .getByRole('button', { name: /^Actions for / })
+    .click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
   if (patch.marketValue !== undefined) {
     await fieldByLabel(page, 'Fair-market value (RM)')
       .getByRole('spinbutton')

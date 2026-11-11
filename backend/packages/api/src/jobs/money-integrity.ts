@@ -18,13 +18,26 @@ const WORDS: Record<IntegrityFinding['kind'], string> = {
 
 /**
  * Hourly look for money left half-moved by a crash (modules/packs/money-integrity).
- * Never moves money. Settlement and the Dashboard show the same list.
+ * Refunds an open charged with no prize; the rest only alert. Settlement and
+ * the Dashboard show the same list.
  */
 export default async function moneyIntegrityJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   for (const f of await moneyIntegrityFindings(packs)) {
-    const text = `${WORDS[f.kind]}: ${f.id}, RM ${f.amount}. See Settlement.`;
+    let text = `${WORDS[f.kind]}: ${f.id}, RM ${f.amount}. See Settlement.`;
+    if (f.kind === 'open_without_prize') {
+      try {
+        const outcome = await packs.refundUnfinishedOpen(f.id);
+        // Its card landed after all, or someone refunded it first.
+        if (outcome !== 'refunded') continue;
+        text = `${WORDS[f.kind]}, refunded automatically: ${f.id}, RM ${f.amount}.`;
+      } catch (e) {
+        logger.error(
+          `[money-integrity] refund of ${f.id} failed: ${(e as Error).message}`,
+        );
+      }
+    }
     logger.error(`[money-integrity] ${text}`);
     await alertOps(container, `money-integrity:${f.id}`, text, {
       muteMs: ALERT_EVERY_MS,

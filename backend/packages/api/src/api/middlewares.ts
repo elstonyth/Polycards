@@ -9,7 +9,7 @@ import {
   type MedusaResponse,
   type MedusaNextFunction,
 } from '@medusajs/framework/http';
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import express from 'express';
 import multer from 'multer';
 import {
@@ -53,10 +53,19 @@ import {
 } from './utils/cache-headers';
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { capAdminSessionAge } from './utils/admin-session-cap';
+import {
+  allowFirstBackupCodes,
+  allowOneAuthenticator,
+  refuseReusedCode,
+  refuseStaleStaffRefresh,
+  requireAdminAuthenticator,
+  requireSignedInAdmin,
+} from './utils/admin-mfa-guard';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { recordVisitorSignal, requireVouchedVisitor } from './utils/visitor-ip';
 import { adminRbacRoutes } from './admin-rbac';
+import { requestErrorLog } from '../utils/request-error-log';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -100,6 +109,13 @@ import { adminRbacRoutes } from './admin-rbac';
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = rateLimit('store-read');
 const authRateLimit = rateLimit('auth');
+// Staff only on /auth/mfa/*; the token a password alone returns is allowed
+// (allowUnregistered), so requireSignedInAdmin says which routes need more.
+const adminMfaAuth = authenticate('user', ['session', 'bearer'], {
+  allowUnregistered: true,
+});
+// One budget per login for every code answer (challenge and removal).
+const adminMfaCodeRateLimit = rateLimit('admin-mfa-code');
 // The per-identifier (per-email) credential tier. ONE instance shared by every
 // credential matcher below: they are one budget per account across login,
 // register and reset, and one instance also means one Redis connection fronting
@@ -157,7 +173,15 @@ const deskReportsRateLimit = rateLimit('desk-reports');
 // name "files" matches the FormData the admin client sends.
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
+  // Text fields are held in memory too, and busboy's default is unlimited
+  // fields of 1 MB each; the routes read one short `kind` field at most.
+  limits: {
+    fileSize: 20 * 1024 * 1024,
+    files: 1,
+    fields: 4,
+    fieldSize: 1024,
+    parts: 5,
+  },
 });
 
 // multer returns an Express RequestHandler whose generics don't line up with
@@ -204,15 +228,14 @@ const mediaUploadMiddleware = (
 // middleware hard-404s the two registration entrypoints so the surface is
 // genuinely closed (app middleware applies to plugin routes here, same as the
 // /auth/*/emailpass rate-limit entries below). The house seller is seeded
-// server-side (not via this HTTP route) and logs in via POST /auth/member/
-// emailpass (authenticate, NOT /register), so neither is affected.
+// server-side (not via this HTTP route).
 //
-// NOTE: blocking /auth/member/emailpass/register also gates seller-STAFF
-// onboarding — invite-accept (POST /vendor/members/invites/accept) needs an
-// invitee to first mint a member auth identity via /register. That flow is
-// dormant here (single house seller, no staff invites) and intentionally
-// closed. When P2P/staff onboarding is built, re-open /register behind the
-// invite-gating rather than removing this block wholesale.
+// Seller sign-in is closed too (owner, 2026-11-10; security audit 2026-11-09
+// #11): a seller login had no two-step code, and no seller had ever signed in,
+// so every /auth/member route (login, register, reset, Google) 404s instead of
+// growing one. That also closes seller-staff onboarding (invite-accept needs a
+// member identity from /register). Before reopening any of it, give seller
+// logins the admin's two-step sign-in (utils/admin-mfa-guard.ts).
 const blockUnusedSurface = (
   _req: MedusaRequest,
   _res: MedusaResponse,
@@ -222,6 +245,62 @@ const blockUnusedSurface = (
   // Medusa's error handler (see mediaUploadMiddleware above and
   // utils/reset-token-guard.ts), rather than throwing.
   next(new MedusaError(MedusaError.Types.NOT_FOUND, 'Not found'));
+};
+
+// POST /auth/user/emailpass/register: only for an email holding a live staff
+// invite (the invite page signs the invitee up here, then accepts). Open, the
+// route minted a staff login for any email. The invite's email exactly as
+// sent: emailpass stores it verbatim and sign-in trims, so a padded or recased
+// one would mint a login nobody can sign in to.
+const requireLiveStaffInvite = async (
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): Promise<void> => {
+  const email = (req.body as { email?: unknown } | undefined)?.email;
+  if (typeof email === 'string' && email && email === email.trim()) {
+    try {
+      const invites = await req.scope
+        .resolve(Modules.USER)
+        .listInvites(
+          { email },
+          { select: ['expires_at', 'accepted'], take: 5 },
+        );
+      const now = Date.now();
+      if (
+        invites.some(
+          (i) => !i.accepted && new Date(i.expires_at).getTime() > now,
+        )
+      ) {
+        return next();
+      }
+    } catch (err) {
+      return next(err as Error);
+    }
+  }
+  next(new MedusaError(MedusaError.Types.NOT_FOUND, 'Not found'));
+};
+
+// POST /admin/uploads (core): memory-buffered with no size limit. The admin's
+// own image uploads go through /admin/media; this keeps core's route to the
+// same 20 MB, and refuses a body that will not say its size.
+const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const capCoreUploadSize = (
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void => {
+  if (req.method !== 'POST') return next();
+  const size = Number(req.headers['content-length']);
+  if (!Number.isFinite(size) || size <= 0 || size > UPLOAD_MAX_BYTES) {
+    return next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Upload must state its size and be at most 20 MB.',
+      ),
+    );
+  }
+  next();
 };
 
 // Root landing (GET /). This is a headless Medusa/Mercur server with no page at
@@ -272,6 +351,8 @@ const redirectRootToDashboard = (
 };
 
 export default defineMiddlewares({
+  // Stock handler plus a request-id line for every 5xx (utils/request-error-log.ts).
+  errorHandler: requestErrorLog,
   routes: [
     {
       // Root landing → admin dashboard (see redirectRootToDashboard above).
@@ -289,13 +370,22 @@ export default defineMiddlewares({
       middlewares: [blockUnusedSurface],
     },
     {
-      // Defense-in-depth: refuse new `member`-actor self-registration too, so no
-      // anonymous member auth identity can be minted. Member LOGIN (POST
-      // /auth/member/emailpass, no /register) is deliberately NOT matched — the
-      // seeded house seller needs it for the /seller vendor dashboard.
-      matcher: '/auth/member/emailpass/register',
-      method: 'POST',
+      // See blockUnusedSurface above: no seller signs in, and no member auth
+      // identity is minted, by any provider or method.
+      matcher: '/auth/member/*',
       middlewares: [blockUnusedSurface],
+    },
+    {
+      // Staff sign-up only for an invited email (see requireLiveStaffInvite).
+      matcher: '/auth/user/emailpass/register',
+      method: 'POST',
+      middlewares: [requireLiveStaffInvite],
+    },
+    {
+      // Wildcard and no method pin (POST is checked inside), so it sorts ahead
+      // of core's own multer, which buffers the body; pinned, it ran after.
+      matcher: '/admin/uploads*',
+      middlewares: [capCoreUploadSize],
     },
     {
       // Validated admin image upload (POST /admin/media). /admin/* is already
@@ -337,6 +427,75 @@ export default defineMiddlewares({
       matcher: '/auth/*/emailpass/*',
       method: 'POST',
       middlewares: [authIdentifierRateLimit, authRateLimit],
+    },
+    // Admin two-step sign-in (utils/admin-mfa-guard.ts). Staff only, with
+    // their own authenticate first, whatever order the framework runs its own
+    // in. The code check takes the token a password alone returns; every
+    // change needs a finished sign-in, one authenticator per login, and
+    // backup codes are made once.
+    {
+      // A staff token from before its authenticator may not be refreshed into
+      // one that passes for a code sign-in. Any actor here: customers go on.
+      matcher: '/auth/token/refresh',
+      method: 'POST',
+      middlewares: [
+        authenticate('*', ['session', 'bearer'], { allowUnregistered: true }),
+        refuseStaleStaffRefresh,
+      ],
+    },
+    {
+      matcher: '/auth/mfa/challenges/*',
+      method: 'POST',
+      middlewares: [
+        authRateLimit,
+        adminMfaAuth,
+        adminMfaCodeRateLimit,
+        refuseReusedCode,
+      ],
+    },
+    {
+      matcher: '/auth/mfa/factors',
+      method: 'GET',
+      middlewares: [adminMfaAuth, requireSignedInAdmin],
+    },
+    {
+      matcher: '/auth/mfa/factors',
+      method: 'POST',
+      middlewares: [
+        authRateLimit,
+        adminMfaAuth,
+        requireSignedInAdmin,
+        allowOneAuthenticator,
+      ],
+    },
+    {
+      // The setup's first code: not guarded for reuse, so the sign-in right
+      // after setup can use the same code.
+      matcher: '/auth/mfa/factors/*',
+      method: 'POST',
+      middlewares: [authRateLimit, adminMfaAuth, requireSignedInAdmin],
+    },
+    {
+      // Removing an authenticator answers a code.
+      matcher: '/auth/mfa/factors/*',
+      method: 'DELETE',
+      middlewares: [
+        authRateLimit,
+        adminMfaAuth,
+        requireSignedInAdmin,
+        adminMfaCodeRateLimit,
+        refuseReusedCode,
+      ],
+    },
+    {
+      matcher: '/auth/mfa/recovery-codes',
+      method: 'POST',
+      middlewares: [
+        authRateLimit,
+        adminMfaAuth,
+        requireSignedInAdmin,
+        allowFirstBackupCodes,
+      ],
     },
     {
       // Gateway server-notify callbacks (src/api/hooks/tgpay/*). These routes
@@ -898,6 +1057,28 @@ export default defineMiddlewares({
       middlewares: [storeReadRateLimit],
     },
     {
+      // The public boards and card pages (GET /store/leaderboard,
+      // /store/challenge, /store/cards/:handle). Whole-history aggregates or
+      // several uncached reads per hit on a host Cloudflare does not front
+      // (admin.polycards.gg is DNS-only for gateway callbacks), so a flood
+      // reached them unthrottled (audit 2026-11-11). Same read budget as the
+      // announcement popup above: the storefront signs its visitor and caches
+      // these server-side, so real traffic sits far under it.
+      matcher: '/store/leaderboard',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
+      matcher: '/store/challenge',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
+      matcher: '/store/cards/*',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
       // The /task Tasks tab payload (GET /store/tasks).
       matcher: '/store/tasks',
       method: 'GET',
@@ -1263,6 +1444,12 @@ export default defineMiddlewares({
       matcher: '/admin/*',
       middlewares: [capAdminSessionAge],
     },
+    // Every admin login uses an authenticator app (owner, 2026-11-07):
+    // without one, only its setup (utils/admin-mfa-guard.ts).
+    {
+      matcher: '/admin/*',
+      middlewares: [requireAdminAuthenticator],
+    },
     // RBAC for every custom admin route (admin-rbac.ts): a policy per custom
     // prefix and method, plus the write policy for custom writes under a core
     // prefix. Policy-only entries — the framework adds the no-op handler and
@@ -1337,6 +1524,11 @@ export default defineMiddlewares({
     },
     {
       matcher: '/admin/customers/*/disable',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/users/*/mfa/reset',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },
@@ -1833,6 +2025,12 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Edit — ":id" is one path segment, the same matcher as the GRN edit's.
+      matcher: '/admin/purchase-invoices/:id',
+      method: ['POST'],
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Goods receive notes (spec 2026-10-28) — raise the same stock counters
       // as an invoice, and their reversal lowers them; same admin budget.
       matcher: '/admin/goods-receive-notes',
@@ -1930,6 +2128,25 @@ export default defineMiddlewares({
       matcher: '/store/returns*',
       middlewares: [blockUnusedSurface],
     },
+    // Core's and Mercur's order, payment and review routes: nothing here calls
+    // them, some ask for no login, and reviews reach the reviewer's customer
+    // record through `fields`. Closed so a later Medusa order cannot open them.
+    ...[
+      '/store/orders*',
+      '/store/order-groups*',
+      '/store/offers*',
+      '/store/reviews*',
+      '/store/payment-collections*',
+    ].map((matcher) => ({ matcher, middlewares: [blockUnusedSurface] })),
+    // Mercur's /hooks/payout and core's /hooks/payment/:provider: no payment
+    // provider is configured and our gateways call /hooks/<gateway>/* instead,
+    // but each anonymous POST queued an event (body, raw body, headers; 3
+    // attempts) on the single event worker that VIP, Telegram and welcome
+    // events wait behind (audit 2026-11-11).
+    ...['/hooks/payout*', '/hooks/payment*'].map((matcher) => ({
+      matcher,
+      middlewares: [blockUnusedSurface],
+    })),
     // POLYCARD-BACK §4.2 session block — LAST entry on purpose. Blocking login
     // alone would leave every already-minted bearer (including a Google-minted
     // one, whose callback this does not touch) working until it expired, so a

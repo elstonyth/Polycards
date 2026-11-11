@@ -1,8 +1,11 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import { findCardInventoryTarget } from '../../modules/packs/card-stock';
+import {
+  adjustCardStock,
+  findCardInventoryTarget,
+} from '../../modules/packs/card-stock';
 
 export type DecrementCardStockBatchInput = {
   items: {
@@ -41,8 +44,8 @@ export const decrementCardStockBatchStep = createStep<
         // Untracked (null) — nothing to count; the pull is fulfilled via
         // buyback if the customer wants no/own physical card.
         if (target) {
-          const inventoryModule = container.resolve(Modules.INVENTORY);
-          await inventoryModule.adjustInventory(
+          await adjustCardStock(
+            container,
             target.inventoryItemId,
             target.locationId,
             -1,
@@ -75,10 +78,10 @@ export const decrementCardStockBatchStep = createStep<
   async (data: CompensateData, { container }) => {
     if (!data?.length) return;
     const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
-    const inventoryModule = container.resolve(Modules.INVENTORY);
     for (const item of data) {
       try {
-        await inventoryModule.adjustInventory(
+        await adjustCardStock(
+          container,
           item.inventoryItemId,
           item.locationId,
           1,

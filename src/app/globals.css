@@ -1015,18 +1015,15 @@ select {
   font-size: max(16px, 1em);
 }
 
-/* Stack welcome pack above the responsive Telegram ticket only when present.
-   Height follows its 864 × 393 image; 40px clears close control and pack bob. */
+/* Stack the welcome-pack chip above the Telegram chip only when both show:
+   one 44px chip (h-11) plus an 8px gap. */
 body:has([data-telegram-banner]) [data-testid='free-pack-badge'] {
-  bottom: calc(
-    4.5rem + env(safe-area-inset-bottom) + clamp(10rem, 40vw, 15rem) * 393 /
-      864 + 2.5rem
-  );
+  bottom: calc(4.5rem + env(safe-area-inset-bottom) + 2.75rem + 0.5rem);
 }
 
 @media (min-width: 1024px) {
   body:has([data-telegram-banner]) [data-testid='free-pack-badge'] {
-    bottom: calc(1.5rem + env(safe-area-inset-bottom) + 6.823rem + 2.5rem);
+    bottom: calc(1.5rem + env(safe-area-inset-bottom) + 2.75rem + 0.5rem);
   }
 }
 

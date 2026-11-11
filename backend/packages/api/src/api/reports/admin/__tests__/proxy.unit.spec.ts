@@ -179,6 +179,70 @@ describe('redact', () => {
     });
   });
 
+  it('hides the holder name a shared-name clearing carries, and keeps bank holder names', () => {
+    expect(
+      redact({
+        metadata: {
+          holder_name_cleared: {
+            'tan ah kow': { name: 'Tan Ah Kow', at: 'x', with: ['cus_2'] },
+          },
+          bank_accounts: [{ accountHolderName: 'Tan Ah Kow' }],
+        },
+        actions: [
+          {
+            before: { holder_name: 'Tan Ah Kow' },
+            after: { holder_name: 'Tan Ah Kow', cleared: true },
+          },
+        ],
+      }),
+    ).toEqual({
+      metadata: {
+        holder_name_cleared: '[hidden]',
+        bank_accounts: [{ accountHolderName: 'Tan Ah Kow' }],
+      },
+      actions: [
+        {
+          before: { holder_name: '[hidden]' },
+          after: { holder_name: '[hidden]', cleared: true },
+        },
+      ],
+    });
+  });
+
+  it.each([
+    // An admin note quoting a fragment.
+    [
+      'Updated {"holder_name":"Tan Ah Kow"}',
+      'Updated {"holder_name":"[hidden]"}',
+    ],
+    // A whole row cast to text: Postgres doubles the quotes.
+    [
+      '(c1,"{""holder_name"": ""Tan Ah Kow"", ""cleared"": true}")',
+      '(c1,"{""holder_name"": ""[hidden]"", ""cleared"": true}")',
+    ],
+    // array_agg(before)::text: the quotes are backslash-escaped.
+    [
+      '{"{\\"holder_name\\": \\"Tan Ah Kow\\"}"}',
+      '{"{\\"holder_name\\": \\"[hidden]\\"}"}',
+    ],
+    // The clearing's whole object, nested, and one cut short.
+    [
+      'cleared {"holder_name_cleared": {"tan ah kow": {"name": "Tan Ah Kow", "with": ["cus_2"]}}} by staff',
+      'cleared {"holder_name_cleared": [hidden]} by staff',
+    ],
+    [
+      '{"holder_name_cleared": {"tan ah kow": {"name": "Tan Ah',
+      '{"holder_name_cleared": [hidden]',
+    ],
+    // Other holder names stay open, as a bank screen's do.
+    [
+      'Saved {"account_holder_name":"Tan Ah Kow"}',
+      'Saved {"account_holder_name":"Tan Ah Kow"}',
+    ],
+  ])('hides holder names in text %p', (text, hidden) => {
+    expect(redact({ text })).toEqual({ text: hidden });
+  });
+
   // Owner, 2026-10-30: coin flip's actual odds and each group's odds set stay
   // off the desks; the audit rows and group metadata carrying them stay open.
   it('hides coin flip odds and odds sets, and keeps the published chance', () => {

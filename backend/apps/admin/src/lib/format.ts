@@ -13,6 +13,9 @@ export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
   requested: 'Requested',
   processed: 'Processed',
   ready_to_ship: 'Ready to ship',
+  // Packed, waiting for the courier (operator, 2026-11-07). The customer
+  // still reads "Ready to ship".
+  pending_ship: 'Pending to ship',
   shipped: 'Shipped',
   completed: 'Completed',
   canceled: 'Canceled',
@@ -20,11 +23,12 @@ export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
 
 export const DELIVERY_TONE: Record<
   DeliveryStatus,
-  'orange' | 'blue' | 'green' | 'grey'
+  'orange' | 'purple' | 'blue' | 'green' | 'grey'
 > = {
   requested: 'orange',
   processed: 'orange',
   ready_to_ship: 'orange',
+  pending_ship: 'purple',
   shipped: 'blue',
   completed: 'green',
   canceled: 'grey',

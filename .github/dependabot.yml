@@ -157,6 +157,54 @@ updates:
       - dependency-name: 'express'
         update-types:
           - version-update:semver-major
+      # #964 bumped http-proxy-middleware 3.0.7 -> 4.2.1 in backend/packages/api.
+      # v4 is ESM-only, and @mercurjs/core's dashboard code require()s it, so
+      # Medusa failed to boot on every integration-http shard ("Must use import
+      # to load ES Module"). Our code never imports it; the declaration exists
+      # for mercur. It moves with the @mercurjs/* family.
+      - dependency-name: 'http-proxy-middleware'
+        update-types:
+          - version-update:semver-major
+      # #967 bumped react-is 18.3.1 -> 19.3.1 in apps/admin. react-is is the
+      # recharts peer and must match the React major: react-is 19 only matches
+      # Symbol.for('react.transitional.element'), while React 18 creates
+      # 'react.element', so recharts' isFragment(child) turns false for every
+      # child and fragment-wrapped chart parts drop out. CI stays green on it.
+      # Moves with react/react-dom to 19, in the same deliberate PR.
+      - dependency-name: 'react-is'
+        update-types:
+          - version-update:semver-major
+      # The React 18 type packages follow react/react-dom (React 19 types on a
+      # React 18 runtime describe APIs that don't exist). Same deliberate PR.
+      - dependency-name: '@types/react'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: '@types/react-dom'
+        update-types:
+          - version-update:semver-major
+      # The backend runs Node 22 (backend/Dockerfile NODE_VERSION, CI
+      # node-version 22). @types/node majors follow the runtime, not npm latest.
+      - dependency-name: '@types/node'
+        update-types:
+          - version-update:semver-major
+      # @noble/hashes 2 is ESM-only and only exports `.js` subpaths, so the
+      # CommonJS Medusa build can't load `@noble/hashes/sha3` (banks.ts) — the
+      # same failure as http-proxy-middleware 4 above.
+      - dependency-name: '@noble/hashes'
+        update-types:
+          - version-update:semver-major
+      # @mercurjs/dashboard-sdk dedupes i18next onto our copy, so an i18next
+      # major runs the whole Medusa/Mercur dashboard on it. 27 changes the
+      # fallbackLng and returnEmptyString defaults the dashboard relies on.
+      # Moves with react-i18next (ignored above) and the dashboard stack.
+      - dependency-name: 'i18next'
+        update-types:
+          - version-update:semver-major
+      # vite majors move with @vitejs/plugin-react (ignored above): plugin-react
+      # 4 supports vite up to 7. One deliberate PR for the pair.
+      - dependency-name: 'vite'
+        update-types:
+          - version-update:semver-major
 
   # NOTE: there is deliberately NO updater for /backend/apps/admin. The yarn
   # workspace lockfile lives at /backend, so an updater rooted at the admin app

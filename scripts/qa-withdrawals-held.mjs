@@ -4,6 +4,7 @@
 // Creds come from the gitignored scripts/.dev-logins (KEY=VALUE), same file
 // login-stack.mjs uses. Screenshots -> docs/research/.
 import { chromium } from '@playwright/test';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { mkdirSync, readFileSync } from 'node:fs';
 
 const env = {};
@@ -17,6 +18,7 @@ for (const line of readFileSync('scripts/.dev-logins', 'utf8').split(/\r?\n/)) {
 const ADMIN = 'http://localhost:7000/dashboard';
 const EMAIL = env.ADMIN_EMAIL ?? 'admin@pokenic.app';
 const PW = env.ADMIN_PW ?? '';
+requireAdminTotp(EMAIL);
 if (!PW) throw new Error('ADMIN_PW missing from scripts/.dev-logins');
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -28,27 +30,9 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 
 log('logging in…');
-// Retried whole-flow, same as login-stack.mjs — the vite dev server can
-// reload mid-login when it re-optimizes deps.
-let loggedIn = false;
-for (let i = 0; i < 4 && !loggedIn; i++) {
-  try {
-    await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-    const email = page.locator('input[name="email"]');
-    await email.waitFor({ state: 'visible', timeout: 30000 });
-    await email.fill(EMAIL);
-    await page.fill('input[name="password"]', PW);
-    await page.keyboard.press('Enter');
-    await page.waitForURL((u) => !u.pathname.endsWith('/login'), {
-      timeout: 30000,
-    });
-    loggedIn = true;
-  } catch (e) {
-    log(`login attempt ${i + 1} failed (${String(e.message).split('\n')[0]})`);
-    await page.waitForTimeout(4000);
-  }
-}
-if (!loggedIn) throw new Error('admin login failed after 4 attempts');
+// The helper retries the whole flow — the vite dev server can reload
+// mid-login when it re-optimizes deps.
+await adminUiLogin(page, ADMIN, EMAIL, PW);
 log('logged in');
 
 await page.goto(`${ADMIN}/withdrawals`, { waitUntil: 'domcontentloaded' });

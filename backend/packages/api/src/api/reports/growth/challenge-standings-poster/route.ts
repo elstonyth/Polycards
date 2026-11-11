@@ -150,7 +150,7 @@ export async function GET(
         : 'Every stage is unlocked.',
       `The week ends after ${ends}.`,
       hiddenAboveCut > 0
-        ? `${hiddenAboveCut} disabled player${hiddenAboveCut === 1 ? ' is' : 's are'} hidden above the cut; prizes are paid by original rank, so the prizes shown may shift.`
+        ? `${hiddenAboveCut} disabled player${hiddenAboveCut === 1 ? ' is' : 's are'} hidden above the cut and will not be paid while disabled; the ranks shown are the ranks paid.`
         : '',
     ]
       .filter(Boolean)

@@ -4,6 +4,7 @@ import {
   getRecentPulls,
 } from '@/lib/data/packs';
 import { getLeaderboard } from '@/lib/data/leaderboard';
+import { getFreePackPromo } from '@/lib/data/free-pack';
 import { cached } from '@/lib/ttl-cache';
 import { packTabs, type PackCard } from '@/lib/packs-data';
 import HeroBoard from '@/components/home/HeroBoard';
@@ -47,11 +48,14 @@ const CHASE_LOOKUPS = 16;
 const FEED_TTL_MS = 5_000;
 
 export default async function HomePage() {
-  const [categories, feed, topRippers] = await Promise.all([
+  const [categories, feed, topRippers, freePackPromo] = await Promise.all([
     getPackCategories(),
     cached('home:recent-pulls', FEED_TTL_MS, () => getRecentPulls()),
     // [] on any backend failure — TheGame hides the podium then.
     getLeaderboard('weekly'),
+    // Visitor-agnostic (no cookie read), memoised like the feed for the same
+    // per-request renders. false on failure — the hero then shows no offer.
+    cached('home:free-pack-promo', FEED_TTL_MS, getFreePackPromo),
   ]);
   const pulls = feed.pulls;
   const packs = categories.flatMap((c) => c.packs);
@@ -94,7 +98,7 @@ export default async function HomePage() {
     // gutters; the marquee is the one true edge-to-edge band.
     <div className="w-full">
       {/* Brand introduction remains visible with an empty or offline catalog. */}
-      <HeroBoard hits={topHits} />
+      <HeroBoard hits={topHits} freePackPromo={freePackPromo} />
 
       {/* seam — live pulls marquee (absent when no pulls) */}
       <PullsMarquee pulls={pulls} />

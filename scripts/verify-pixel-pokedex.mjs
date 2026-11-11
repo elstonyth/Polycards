@@ -1,7 +1,13 @@
 // Admin Pixel Pokédex UI verification (Playwright against :7000).
 // Logs into the admin SPA, opens the new Pixel Pokédex page, screenshots it,
 // and confirms it rendered the live library from GET /admin/pixel-pokemon.
+// Run: QA_ADMIN_TOTP_SECRET=… node scripts/verify-pixel-pokedex.mjs
 import { chromium } from 'playwright';
+import {
+  adminToken,
+  adminUiLogin,
+  requireAdminTotp,
+} from './lib/admin-sign-in.mjs';
 
 const ADMIN = process.env.ADMIN_BASE || 'http://localhost:7000/dashboard';
 const API = 'http://localhost:9000';
@@ -9,20 +15,13 @@ const CREDS = {
   email: process.env.PW_ADMIN_EMAIL || 'admin@polycards.local',
   password: process.env.PW_ADMIN_PASSWORD || 'polycardsadmin2026',
 };
+requireAdminTotp(CREDS.email);
 const r = { checks: {} };
 const ok = (k, c, d) =>
   (r.checks[k] = c ? 'PASS' : `FAIL${d ? ' — ' + d : ''}`);
 
 // Ground truth from the API.
-const token = (
-  await (
-    await fetch(`${API}/auth/user/emailpass`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(CREDS),
-    })
-  ).json()
-).token;
+const token = await adminToken(API, CREDS.email, CREDS.password);
 const api = await (
   await fetch(`${API}/admin/pixel-pokemon?limit=60`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -41,18 +40,7 @@ try {
     (m) => m.type() === 'error' && consoleErrors.push(m.text().slice(0, 140)),
   );
 
-  await page
-    .goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' })
-    .catch(() => {});
-  await page.waitForSelector('input[name="email"]', { timeout: 15000 });
-  await page.fill('input[name="email"]', CREDS.email);
-  await page.fill('input[name="password"]', CREDS.password);
-  await page.click('button[type="submit"]');
-  await page
-    .waitForFunction(() => !/\/login/.test(location.pathname), {
-      timeout: 15000,
-    })
-    .catch(() => {});
+  await adminUiLogin(page, ADMIN, CREDS.email, CREDS.password);
 
   // Nav item must appear in the sidebar (RouteConfig registration), not just be
   // reachable by direct URL — that's what "I don't see it" means.

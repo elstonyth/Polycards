@@ -23,6 +23,7 @@
 //   C360_CUSTOMER_ID   (no default — script exits with a clear error if absent)
 
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 
 const ADMIN = process.env.ADMIN_BASE || 'http://localhost:7000/dashboard';
 const EMAIL = process.env.QA_EMAIL || 'admin@polycards.local';
@@ -36,6 +37,7 @@ const fail = (m) => {
 const ok = (m) => console.log(`✓ ${m}`);
 
 // Guard required env vars before launching a browser.
+requireAdminTotp(EMAIL);
 if (!PASSWORD) {
   fail('QA_PASSWORD env var is required (set the admin password)');
   process.exit(1);
@@ -57,17 +59,15 @@ try {
   });
 
   // ── Login ──────────────────────────────────────────────────────────────────
-  await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-  await page.fill('input[name="email"]', EMAIL);
-  await page.fill('input[name="password"]', PASSWORD);
-  await page.keyboard.press('Enter');
-  const loginOk = await page
-    .waitForURL((u) => !u.pathname.includes('login'), { timeout: 20000 })
+  const loginOk = await adminUiLogin(page, ADMIN, EMAIL, PASSWORD)
     .then(() => true)
-    .catch(() => false);
+    .catch((e) => {
+      console.error(e.message);
+      return false;
+    });
   if (!loginOk) {
     fail(
-      `admin login failed for ${EMAIL} — check QA_EMAIL/QA_PASSWORD and that the backend is reachable at ${ADMIN}`,
+      `admin login failed for ${EMAIL} — check QA_EMAIL/QA_PASSWORD/QA_ADMIN_TOTP_SECRET and that the backend is reachable at ${ADMIN}`,
     );
     process.exit(1);
   }

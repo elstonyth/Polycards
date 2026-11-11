@@ -59,6 +59,20 @@ medusaIntegrationTestRunner({
         );
 
       // One object, so a failure names the request that got through.
+      // Routes closed outright (blockUnusedSurface): refused before fields
+      // are even read.
+      const expectClosed = async (
+        method: 'get' | 'post' | 'delete',
+        path: string,
+        headers: Record<string, string>,
+        body?: unknown,
+      ) => {
+        const res = await send(method, path, headers, body);
+        expect({ path, status: res.status, message: res.data?.message }).toEqual(
+          { path, status: 404, message: 'Not found' },
+        );
+      };
+
       const expectRefused = async (
         method: 'get' | 'post' | 'delete',
         path: string,
@@ -261,15 +275,15 @@ medusaIntegrationTestRunner({
         await expectRefused('delete', `${one}?fields=groups.metadata`, authed);
       });
 
-      it('refuses the order and payment collection routes', async () => {
+      it('closes the order and payment collection routes, whatever fields are asked', async () => {
         for (const fields of [
           'customer.groups.metadata',
           '%2Bcustomer.groups.metadata',
           '*customer.groups',
         ]) {
-          await expectRefused('get', `/store/orders?fields=${fields}`, authed);
+          await expectClosed('get', `/store/orders?fields=${fields}`, authed);
           // No auth on this one: an order id is all it takes.
-          await expectRefused(
+          await expectClosed(
             'get',
             `/store/orders/${orderId}?fields=${fields}`,
             anon,
@@ -279,7 +293,7 @@ medusaIntegrationTestRunner({
           '%2Bcart.customer.groups.metadata',
           '*cart.customer.groups',
         ]) {
-          await expectRefused(
+          await expectClosed(
             'post',
             `/store/payment-collections?fields=${fields}`,
             authed,
@@ -291,8 +305,8 @@ medusaIntegrationTestRunner({
       // The anonymous one matters most: an order id is all it takes.
       it('refuses seller fields wherever they are reachable', async () => {
         for (const fields of ['seller.*', '*seller', 'id,seller.email', 'SELLER.*']) {
-          await expectRefused('get', `/store/orders/${orderId}?fields=${fields}`, anon);
-          await expectRefused('get', `/store/orders?fields=${fields}`, authed);
+          await expectClosed('get', `/store/orders/${orderId}?fields=${fields}`, anon);
+          await expectClosed('get', `/store/orders?fields=${fields}`, authed);
           await expectRefused('get', `/store/products?fields=${fields}`, anon);
         }
         await expectRefused('get', '/store/customers/me?fields=sellers.*', authed);
@@ -348,20 +362,44 @@ medusaIntegrationTestRunner({
         }
       });
 
+      // Nothing here calls them; some ask for no login, and reviews reach the
+      // reviewing customer through fields (audit 2026-11-09).
+      it('closes the order, offer, review and payment-collection routes', async () => {
+        for (const [method, path, headers] of [
+          ['get', '/store/orders', authed],
+          ['get', '/store/orders/order_x', anon],
+          ['post', '/store/orders/order_x/transfer/accept', anon],
+          ['get', '/store/order-groups', authed],
+          ['get', '/store/offers', anon],
+          ['get', '/store/reviews', anon],
+          ['get', '/store/reviews/rev_x?fields=*customer', anon],
+          ['post', '/store/payment-collections', anon],
+        ] as const) {
+          const res = await send(method, path, headers, {});
+          expect({ path, status: res.status, message: res.data?.message }).toEqual(
+            { path, status: 404, message: 'Not found' },
+          );
+        }
+      });
+
       // These pass without the fix. They pin why the guard can match on the
       // word: a core upgrade that lets a wildcard cross into relations, or a
       // loosened validator, must fail here rather than reopen the leak quietly.
       it('leaves no way round through wildcards or other keys', async () => {
+        for (const [path, headers] of [
+          ['/store/orders?fields=*customer', authed],
+          [`/store/orders/${orderId}?fields=customer.*`, anon],
+          [`/store/orders/${orderId}`, anon],
+          [`/store/orders/${orderId}?fields=*`, anon],
+        ] as const) {
+          await expectClosed('get', path, headers);
+        }
         for (const [path, headers] of [
           ['/store/customers/me?fields=*', authed],
           ['/store/customers/me?fields=*.*', authed],
           ['/store/customers/me?fields=**', authed],
           ['/store/customers/me/addresses?fields=*customer', authed],
           ['/store/customers/me/addresses?fields=customer.*', authed],
-          ['/store/orders?fields=*customer', authed],
-          [`/store/orders/${orderId}?fields=customer.*`, anon],
-          [`/store/orders/${orderId}`, anon],
-          [`/store/orders/${orderId}?fields=*`, anon],
         ] as const) {
           const res = await send('get', path, headers);
           const seen = JSON.stringify(res.data);

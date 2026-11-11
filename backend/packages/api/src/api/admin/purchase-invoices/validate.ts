@@ -169,4 +169,28 @@ export function coerceCreatePurchaseInvoiceBody(
   };
 }
 
+// An edit's body is a purchase's: date, supplier and positive lines, plus
+// the invoice's updated_at as the form loaded it (optional, so a script can
+// still edit). An edit never turns an invoice into a reversal or a transfer.
+export function coerceEditPurchaseInvoiceBody(raw: unknown): Omit<
+  CreatePurchaseInvoiceBody,
+  'reverses_invoice_id' | 'from_grn_id'
+> & {
+  expected_updated_at?: string;
+} {
+  const { reverses_invoice_id, from_grn_id, ...body } =
+    coerceCreatePurchaseInvoiceBody(raw);
+  if (reverses_invoice_id !== null || from_grn_id !== null) {
+    bad(
+      "An edit cannot set 'reverses_invoice_id' or 'from_grn_id'; an invoice keeps what it was.",
+    );
+  }
+  const expected = (raw as Record<string, unknown>).expected_updated_at;
+  if (expected === undefined) return body;
+  if (typeof expected !== 'string' || Number.isNaN(Date.parse(expected))) {
+    bad("'expected_updated_at' must be a valid date string.");
+  }
+  return { ...body, expected_updated_at: expected as string };
+}
+
 export default coerceCreatePurchaseInvoiceBody;

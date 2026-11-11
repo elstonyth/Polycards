@@ -3,11 +3,13 @@
 // status, page JS exceptions, console errors, and 5xx network responses.
 // Screenshots land in docs/research/sweep/.
 //
-//   QA_ADMIN_EMAIL=… QA_ADMIN_PASSWORD=… QA_CUSTOMER_EMAIL=… QA_CUSTOMER_PASSWORD=… \
-//   node scripts/qa-full-route-sweep.mjs
+//   QA_ADMIN_EMAIL=… QA_ADMIN_PASSWORD=… QA_ADMIN_TOTP_SECRET=… \
+//   QA_CUSTOMER_EMAIL=… QA_CUSTOMER_PASSWORD=… node scripts/qa-full-route-sweep.mjs
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
+import { adminToken, requireAdminTotp } from './lib/admin-sign-in.mjs';
 const { chromium } = createRequire(import.meta.url)('playwright');
+requireAdminTotp(process.env.QA_ADMIN_EMAIL);
 
 const FRONT = 'http://localhost:4000';
 const API = 'http://localhost:9000';
@@ -29,17 +31,13 @@ async function call(url, init) {
 }
 
 // --- auth: admin (for publishable key) + customer token ---
-const adm = await call(`${API}/auth/user/emailpass`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email: process.env.QA_ADMIN_EMAIL,
-    password: process.env.QA_ADMIN_PASSWORD,
-  }),
-}).then((r) => r.json());
-if (!adm.token) throw new Error('admin auth failed');
+const admToken = await adminToken(
+  API,
+  process.env.QA_ADMIN_EMAIL,
+  process.env.QA_ADMIN_PASSWORD,
+);
 const keys = await call(`${API}/admin/api-keys?type=publishable`, {
-  headers: { Authorization: `Bearer ${adm.token}` },
+  headers: { Authorization: `Bearer ${admToken}` },
 }).then((r) => r.json());
 const PUB = keys.api_keys?.[0]?.token;
 if (!PUB) throw new Error('no publishable key');
@@ -66,7 +64,6 @@ const PUBLIC = [
   '/auth/google/failed',
   '/contact',
   '/download',
-  '/fairness',
   '/how-it-works',
   '/leaderboard',
   '/reset-password',

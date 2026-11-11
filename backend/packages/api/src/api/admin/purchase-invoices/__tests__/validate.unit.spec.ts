@@ -1,4 +1,7 @@
-import { coerceCreatePurchaseInvoiceBody } from '../validate';
+import {
+  coerceCreatePurchaseInvoiceBody,
+  coerceEditPurchaseInvoiceBody,
+} from '../validate';
 
 const okBody = () => ({
   date: '2026-07-28T00:00:00.000Z',
@@ -138,5 +141,39 @@ describe('coerceCreatePurchaseInvoiceBody', () => {
     ],
   ])('rejects the out-of-range line %j', (body) => {
     expect(() => coerceCreatePurchaseInvoiceBody(body)).toThrow(/too large/i);
+  });
+});
+
+// User 2026-11-11: an edit is a purchase's body plus the version it was
+// loaded at; it never turns an invoice into a reversal or a transfer.
+describe('coerceEditPurchaseInvoiceBody', () => {
+  it('accepts a purchase body with a new supplier and its loaded version', () => {
+    const b = coerceEditPurchaseInvoiceBody({
+      ...okBody(),
+      supplier: '  Right Supplier  ',
+      expected_updated_at: '2026-11-11T03:00:00.000Z',
+    });
+    expect(b.supplier).toBe('Right Supplier');
+    expect(b.expected_updated_at).toBe('2026-11-11T03:00:00.000Z');
+    expect(b).not.toHaveProperty('reverses_invoice_id');
+    expect(b).not.toHaveProperty('from_grn_id');
+  });
+
+  it.each([
+    { reverses_invoice_id: 'pinv_x' },
+    { from_grn_id: 'grn_x' },
+  ])('refuses %j', (extra) => {
+    expect(() =>
+      coerceEditPurchaseInvoiceBody({ ...okBody(), ...extra }),
+    ).toThrow();
+  });
+
+  it('refuses a bad expected_updated_at and a negative line', () => {
+    expect(() =>
+      coerceEditPurchaseInvoiceBody({ ...okBody(), expected_updated_at: 'x' }),
+    ).toThrow(/expected_updated_at/);
+    const negative = okBody();
+    negative.lines[0].qty = -1;
+    expect(() => coerceEditPurchaseInvoiceBody(negative)).toThrow();
   });
 });

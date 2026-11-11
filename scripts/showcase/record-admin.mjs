@@ -8,12 +8,14 @@ import {
   moveClick,
   sleep,
 } from './lib.mjs';
+import { adminUiLogin, requireAdminTotp } from '../lib/admin-sign-in.mjs';
 
 const ADMIN = 'http://localhost:7000';
 const EMAIL = 'qa-admin@polycards.local';
 const PASSWORD = 'QaAdmin2026!';
 const SEARCH = 'stocktest';
 
+requireAdminTotp(EMAIL);
 const s = await startSession();
 const { page } = s;
 
@@ -33,15 +35,9 @@ async function showScroll() {
 }
 
 try {
-  await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-  await caption(page, 'Operator dashboard — sign in');
-  await sleep(page, 1000);
-  await typeInto('input[name="email"]', EMAIL);
-  await typeInto('input[name="password"]', PASSWORD);
-  await page.keyboard.press('Enter');
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 20000,
-  });
+  // Password, then the authenticator code (#996).
+  await adminUiLogin(page, ADMIN, EMAIL, PASSWORD);
+  await caption(page, 'Operator dashboard — signed in');
   await sleep(page, 1400);
 
   await caption(page, 'Economy — revenue, payouts & per-pack RTP');

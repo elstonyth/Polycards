@@ -113,7 +113,8 @@ describe('assistant access', () => {
   it('gives yu (Support viewer) one-customer tools only: no lists, no SQL', async () => {
     // ban_reason and the two unbans too (owner, 2026-11-03 and 11-04), and the
     // bank save check, but not freeing a number or clearing a name: admins
-    // only (owner, 2026-11-04).
+    // only (owner, 2026-11-04). account_links too (2026-11-06); its browser
+    // and network part asks for the bank-details permission when it runs.
     expect(await toolsOf(['support_viewer', 'assistant_user'])).toEqual([
       'player',
       'account',
@@ -122,6 +123,7 @@ describe('assistant access', () => {
       'unban_account',
       'unban_bank_number',
       'bank_save_check',
+      'account_links',
       'remember',
       'recall',
       'forget',

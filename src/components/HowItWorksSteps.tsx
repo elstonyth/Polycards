@@ -66,7 +66,7 @@ const STEPS: Step[] = [
   {
     num: '2',
     title: 'Reveal your card',
-    body: 'Tap to reveal what you pulled. Every card is real, vaulted by PSA, Fanatics, and Alt, and fully insured from the moment you own it.',
+    body: 'Tap to reveal what you pulled. Every card is real and held in our own stock from the moment you own it.',
     pill: 'Instant buyback during reveal',
     pillSub: `Pack rate during the countdown · ${BUYBACK_RATE_LABEL} in your vault`,
     pillVariant: 'buyback',
@@ -83,8 +83,8 @@ const STEPS: Step[] = [
     num: '3',
     title: 'Keep, ship, or sell back',
     body: `Keep your card in the vault, sell it for ${BUYBACK_RATE_LABEL} of card value, or request delivery. The pack's instant buyback rate ends when you leave the reveal or its countdown expires.`,
-    pill: 'Ships worldwide',
-    pillSub: 'Fully tracked and insured to your door',
+    pill: 'Ships to MY & SG',
+    pillSub: 'Tracked to your door',
     pillVariant: 'ships',
     media: (
       <div className="relative flex h-[88%] items-center justify-center gap-4">

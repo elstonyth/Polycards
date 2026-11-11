@@ -1,6 +1,7 @@
 import { POST as startVerification } from '../route';
 import * as phoneUtils from '../../../../../utils/phone-verification';
 import * as rateLimit from '../../../../utils/rate-limit';
+import * as otpPurpose from '../../../../utils/otp-purpose';
 
 // Only the transport is mocked. `isAllowedSmsDestination` stays REAL — it is the
 // thing under test here, and stubbing it is exactly the red-green probe (see the
@@ -8,6 +9,7 @@ import * as rateLimit from '../../../../utils/rate-limit';
 jest.mock('../../../../../utils/phone-verification', () => ({
   ...jest.requireActual('../../../../../utils/phone-verification'),
   sendPhoneOtp: jest.fn(async () => undefined),
+  cancelPhoneOtp: jest.fn(async () => true),
   isCallFirstNetwork: jest.fn(async () => false),
 }));
 
@@ -20,7 +22,26 @@ jest.mock('../../../../utils/rate-limit', () => ({
   })),
 }));
 
+jest.mock('../../../../utils/otp-purpose', () => ({
+  ...jest.requireActual('../../../../utils/otp-purpose'),
+  notePurposeSent: jest.fn(async () => undefined),
+  pendingCode: jest.fn(async () => null),
+  holdStart: jest.fn(),
+  dropPendingCode: jest.fn(async () => undefined),
+}));
+
 const sendPhoneOtp = phoneUtils.sendPhoneOtp as jest.Mock;
+const notePurposeSent = otpPurpose.notePurposeSent as jest.Mock;
+const pendingCode = otpPurpose.pendingCode as jest.Mock;
+const holdStart = otpPurpose.holdStart as jest.Mock;
+const dropPendingCode = otpPurpose.dropPendingCode as jest.Mock;
+// The start's hold: the record goes through it (note), so it is what the
+// flow assertions read.
+const note = jest.fn(async (_purpose: string, _sid?: string) => true);
+const heldNow = jest.fn(async () => true);
+const releaseHold = jest.fn(async () => undefined);
+const aHold = () => ({ held: heldNow, note, release: releaseHold });
+const cancelPhoneOtp = phoneUtils.cancelPhoneOtp as jest.Mock;
 const isCallFirstNetwork = phoneUtils.isCallFirstNetwork as jest.Mock;
 const consumeOtpSendBudget = rateLimit.consumeOtpSendBudget as jest.Mock;
 
@@ -64,6 +85,17 @@ beforeEach(() => {
   error.mockReset();
   sendPhoneOtp.mockClear();
   consumeOtpSendBudget.mockClear();
+  notePurposeSent.mockClear();
+  pendingCode.mockReset();
+  pendingCode.mockResolvedValue(null);
+  holdStart.mockReset();
+  note.mockClear();
+  heldNow.mockReset();
+  heldNow.mockResolvedValue(true);
+  releaseHold.mockClear();
+  holdStart.mockImplementation(async () => aHold());
+  cancelPhoneOtp.mockReset();
+  cancelPhoneOtp.mockResolvedValue(true);
   isCallFirstNetwork.mockReset();
   isCallFirstNetwork.mockResolvedValue(false);
 });
@@ -180,6 +212,8 @@ describe('POST /store/phone-verification/start — duplicate-phone diagnosabilit
     expect(sendCount()).toBe(1);
     expect(out.body).toEqual({ ok: true, channel: 'sms' });
     expect(warn).not.toHaveBeenCalled();
+    // The code is tied to the flow it was sent for.
+    expect(note).toHaveBeenCalledWith('password-reset', undefined);
   });
 
   // The PII rule, asserted across EVERY warn call rather than calls[0] — an
@@ -419,5 +453,129 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
       clock.mockRestore();
       if (redisUrl !== undefined) process.env.REDIS_URL = redisUrl;
     }
+  });
+});
+
+// A code is tied to the flow it was sent for (utils/otp-purpose.ts). A start
+// for another flow cancels the pending code first, since Twilio would resend
+// that same code under the new wording, unless that flow outranks its own.
+describe('POST /store/phone-verification/start — flow of the pending code', () => {
+  const SID = 'VE' + 'a'.repeat(32);
+  const NEW_SID = 'VE' + 'b'.repeat(32);
+
+  it('records the flow and the verification of the code it sends', async () => {
+    sendPhoneOtp.mockResolvedValueOnce(NEW_SID);
+    await startVerification(mkReq(MY, 'signup'), mkRes().res);
+    expect(note).toHaveBeenCalledWith('signup', NEW_SID);
+    expect(cancelPhoneOtp).not.toHaveBeenCalled();
+  });
+
+  it('cancels a code pending for another flow, then moves the record', async () => {
+    pendingCode.mockResolvedValueOnce({ purpose: 'signup', sid: SID });
+    sendPhoneOtp.mockResolvedValueOnce(NEW_SID);
+    await startVerification(
+      mkReq(MY, 'password-reset', [{ id: 'cus_1' }]),
+      mkRes().res,
+    );
+    expect(cancelPhoneOtp).toHaveBeenCalledWith(expect.anything(), expect.anything(), SID);
+    expect(sendCount()).toBe(1);
+    expect(note).toHaveBeenCalledWith('password-reset', NEW_SID);
+  });
+
+  // Every way a start does not send answers like a sent one.
+  it('sends nothing when the cancel fails', async () => {
+    pendingCode.mockResolvedValueOnce({ purpose: 'signup', sid: SID });
+    cancelPhoneOtp.mockResolvedValueOnce(false);
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'password-reset', [{ id: 'cus_1' }]), res);
+    expect(sendCount()).toBe(0);
+    expect(note).not.toHaveBeenCalled();
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
+  });
+
+  it.each([
+    ['a sign-up', 'signup', 'password-reset'],
+    ['a phone change', 'phone-change', 'password-reset'],
+    ['a sign-up', 'signup', 'phone-change'],
+  ] as const)(
+    'never lets %s start end a pending %s code',
+    async (_name, purpose, pendingPurpose) => {
+      pendingCode.mockResolvedValueOnce({ purpose: pendingPurpose, sid: SID });
+      const { res, out } = mkRes();
+      await startVerification(mkReq(MY, purpose), res);
+      expect(cancelPhoneOtp).not.toHaveBeenCalled();
+      expect(sendCount()).toBe(0);
+      expect(note).not.toHaveBeenCalled();
+      expect(out.body).toEqual({ ok: true, channel: 'sms' });
+    },
+  );
+
+  it('sends nothing when the record cannot be read', async () => {
+    pendingCode.mockRejectedValueOnce(new Error('store down'));
+    await startVerification(mkReq(MY, 'signup'), mkRes().res);
+    expect(sendCount()).toBe(0);
+    expect(note).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing while another start holds the number', async () => {
+    holdStart.mockResolvedValueOnce(null);
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'signup'), res);
+    expect(pendingCode).not.toHaveBeenCalled();
+    expect(sendCount()).toBe(0);
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
+  });
+
+  it('lets the hold go after the send, and after a failed send', async () => {
+    await startVerification(mkReq(MY, 'signup'), mkRes().res);
+    sendPhoneOtp.mockRejectedValueOnce(new Error('twilio down'));
+    await expect(
+      startVerification(mkReq(MY, 'signup'), mkRes().res),
+    ).rejects.toThrow('twilio down');
+    expect(releaseHold).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels what it sent when it was overtaken between the hold check and the send', async () => {
+    // A sign-up start passes its hold check, stalls, and a reset start
+    // records its code meanwhile; Twilio's resend of that code must die.
+    sendPhoneOtp.mockResolvedValueOnce(SID);
+    note.mockResolvedValueOnce(false);
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'signup'), res);
+    expect(sendCount()).toBe(1);
+    expect(cancelPhoneOtp).toHaveBeenCalledWith(expect.anything(), expect.anything(), SID);
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
+  });
+
+  it.each([
+    ['the cancel fails', SID, false],
+    ['the send returned no verification', undefined, true],
+  ])(
+    'leaves no flow accepting the code when an overtaken start cannot confirm its cancel (%s)',
+    async (_case, sid, cancelled) => {
+      sendPhoneOtp.mockResolvedValueOnce(sid);
+      note.mockResolvedValueOnce(false);
+      cancelPhoneOtp.mockResolvedValueOnce(cancelled);
+      dropPendingCode.mockClear();
+      await startVerification(mkReq(MY, 'signup'), mkRes().res);
+      expect(dropPendingCode).toHaveBeenCalledWith(MY);
+    },
+  );
+
+  it('sends nothing once its hold has run out and another start took it', async () => {
+    heldNow.mockResolvedValueOnce(false);
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY, 'signup'), res);
+    expect(sendCount()).toBe(0);
+    expect(note).not.toHaveBeenCalled();
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
+  });
+
+  it('a resend for the same flow cancels nothing', async () => {
+    pendingCode.mockResolvedValueOnce({ purpose: 'signup', sid: SID });
+    sendPhoneOtp.mockResolvedValueOnce(SID);
+    await startVerification(mkReq(MY, 'signup'), mkRes().res);
+    expect(cancelPhoneOtp).not.toHaveBeenCalled();
+    expect(note).toHaveBeenCalledWith('signup', SID);
   });
 });

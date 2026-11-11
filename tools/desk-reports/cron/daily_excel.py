@@ -11,13 +11,15 @@ bank details may be attached (on 2026-10-04 one chose not to). The fetching
 lives in daily_hits.py, beside it in scripts/.
 """
 
+import io
 import sys
 import urllib.error
 
 from daily_hits import excel_main
 
 if __name__ == "__main__":
-    sys.stdout.reconfigure(encoding="utf-8")
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     try:
         excel_main()
     except (urllib.error.URLError, OSError, ValueError, KeyError) as err:

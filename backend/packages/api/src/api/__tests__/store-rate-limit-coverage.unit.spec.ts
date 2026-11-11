@@ -83,11 +83,6 @@ const GET_EXEMPT: { path: string; reason: string }[] = [
       'cached per-process 5s (CACHE_TTL_MS, pulls/recent/route.ts); a miss costs one indexed read.',
   },
   {
-    path: '/store/leaderboard',
-    reason:
-      'cached per-process 30s (CACHE_TTL_MS, leaderboard/route.ts); a miss costs a whole-board aggregate.',
-  },
-  {
     path: '/store/packs',
     reason:
       'cached per-process 30s (CACHE_TTL_MS, packs/route.ts); a miss costs one indexed read.',
@@ -96,11 +91,6 @@ const GET_EXEMPT: { path: string; reason: string }[] = [
     path: '/store/packs/*',
     reason:
       'cached per-process 30s, keyed by slug (CACHE_TTL_MS, packs/[slug]/route.ts); a miss costs one indexed read.',
-  },
-  {
-    path: '/store/challenge',
-    reason:
-      'cached per-process 30s (CACHE_TTL_MS, challenge/route.ts); a miss costs two whole-table scans.',
   },
 ];
 
@@ -136,8 +126,10 @@ const GET_EXEMPT: { path: string; reason: string }[] = [
 // The test is a plain `it`, never an expected-to-fail wrapper: such a wrapper
 // reports a body that fails for a BRAND-NEW reason as a pass, which is exactly
 // the silent regression being guarded against.
+// 2026-11-11 (backend audit): /store/leaderboard and /store/challenge left
+// GET_EXEMPT and /store/cards/* left this list — all three now carry the
+// store-read limiter (admin.polycards.gg is not fronted by Cloudflare).
 const KNOWN_UNPROTECTED_GETS = [
-  '/store/cards/*',
   '/store/pricing/fx',
   '/store/avatar-frames',
 ];
@@ -178,8 +170,6 @@ describe('store routes are rate-limited (plan 136 coverage guard)', () => {
     const keys = GET_EXEMPT.map((e) => e.path).sort();
     expect(keys).toEqual(
       [
-        '/store/challenge',
-        '/store/leaderboard',
         '/store/packs',
         '/store/packs/*',
         '/store/pulls/recent',
@@ -187,9 +177,9 @@ describe('store routes are rate-limited (plan 136 coverage guard)', () => {
     );
   });
 
-  it('KNOWN_UNPROTECTED_GETS is exactly the three finding routes — no silent growth', () => {
+  it('KNOWN_UNPROTECTED_GETS is exactly the remaining finding routes — no silent growth', () => {
     expect([...KNOWN_UNPROTECTED_GETS].sort()).toEqual(
-      ['/store/avatar-frames', '/store/cards/*', '/store/pricing/fx'].sort(),
+      ['/store/avatar-frames', '/store/pricing/fx'].sort(),
     );
   });
 

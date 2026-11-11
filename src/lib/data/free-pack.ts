@@ -106,3 +106,18 @@ export async function getFreePackState(): Promise<FreePackState> {
   // `hidden`, and the page renders exactly as it does today.
   return mapFreePackState(Boolean(token), r.ok ? r.data : null);
 }
+
+/**
+ * Visitor-agnostic: is a free welcome pack on offer to a new visitor? For the
+ * route-cached home page, which must never read the cookie jar, so this asks
+ * for `auth: 'none'` + `cache: 'auto'` (see store.ts) and reads only the guest
+ * `promo` fact. The hero swaps to the per-customer answer on the client
+ * (home/HeroFreePack.tsx). Any failure is false: no offer shown.
+ */
+export async function getFreePackPromo(): Promise<boolean> {
+  const r = await store.get('/store/free-pack', FreePackSchema, {
+    auth: 'none',
+    cache: 'auto',
+  });
+  return r.ok && r.data.promo === true;
+}

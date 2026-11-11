@@ -19,6 +19,18 @@ const ACCOUNT = {
   savedAt: '2026-10-24T00:00:00.000Z',
 };
 const STAMP = '2026-11-03T00:00:00.000Z';
+// Saved without its 65; another account holds it with it.
+const PAYNOW = {
+  ...ACCOUNT,
+  id: savedBankAccountId('PAYNOWSG', '91234567'),
+  bankCode: 'PAYNOWSG',
+  bankName: 'PayNow (mobile number)',
+  accountNumber: '91234567',
+};
+const heldWith65 = async (_id: string, n: string) =>
+  n === '6591234567'
+    ? [{ customer_id: 'cus_2', bank_code: 'PAYNOWSG', holder_name: null }]
+    : [];
 
 const packs = {
   otherPayoutAccountHolders: jest.fn(),
@@ -101,6 +113,18 @@ describe('GET bank-accounts', () => {
         // cus_3 holds the same digits at another bank: a different account.
         linked: [{ customer_id: 'cus_2', handle: 'Collector2' }],
       }),
+    ]);
+  });
+
+  it('links a PayNow mobile another account holds with its 65', async () => {
+    customers.retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [PAYNOW] },
+    });
+    packs.otherPayoutAccountHolders.mockImplementation(heldWith65);
+    const res = mkRes();
+    await GET(mkReq(), res as never);
+    expect(res.json.mock.calls[0][0].accounts[0].linked).toEqual([
+      { customer_id: 'cus_2', handle: null },
     ]);
   });
 
@@ -254,6 +278,17 @@ describe('POST bank-accounts/verify', () => {
     expect(packs.setBankShareVerified).toHaveBeenCalledTimes(1);
   });
 
+  it('verifies a PayNow mobile another account holds with its 65', async () => {
+    customers.retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [PAYNOW] },
+    });
+    packs.otherPayoutAccountHolders.mockImplementation(heldWith65);
+    await VERIFY(verify({ account_id: PAYNOW.id }), mkRes() as never);
+    expect(packs.setBankShareVerified).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: PAYNOW.id, verified: true }),
+    );
+  });
+
   it('verifies with the admin from the token, for this account', async () => {
     packs.otherPayoutAccountHolders.mockResolvedValue([holderOn('cus_2')]);
     const res = mkRes();
@@ -318,6 +353,33 @@ describe('POST bank-accounts/add', () => {
     expect(res.json).toHaveBeenCalledWith({ added: true });
     const sent = JSON.stringify(notifications.createNotifications.mock.calls);
     expect(sent).not.toContain('512345678901');
+  });
+
+  it('refuses a PayNow mobile banned under its other spelling', async () => {
+    packs.payoutAccountBanned.mockImplementation(
+      async (n: string) => n === '6591234567',
+    );
+    await expect(
+      ADD(
+        mkReq(body({ bank_code: 'PAYNOWSG', account_number: '91234567' })),
+        mkRes() as never,
+      ),
+    ).rejects.toThrow(/cannot be used on Polycards/);
+    expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
+  });
+
+  it('vouches for a PayNow mobile another account holds with its 65', async () => {
+    packs.otherPayoutAccountHolders.mockImplementation(heldWith65);
+    customers.listCustomers.mockResolvedValue([
+      { id: 'cus_2', metadata: { bank_accounts: [] } },
+    ]);
+    await ADD(
+      mkReq(body({ bank_code: 'PAYNOWSG', account_number: '91234567' })),
+      mkRes() as never,
+    );
+    expect(packs.addSavedBankAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ verify: true }),
+    );
   });
 
   it('vouches for a shared number by adding it', async () => {

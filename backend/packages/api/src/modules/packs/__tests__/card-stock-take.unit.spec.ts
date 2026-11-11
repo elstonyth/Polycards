@@ -1,6 +1,10 @@
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import type { MedusaContainer } from '@medusajs/framework/types';
-import { takeCardStock, CardStockTakeError } from '../card-stock';
+import {
+  adjustCardStock,
+  takeCardStock,
+  CardStockTakeError,
+} from '../card-stock';
 
 /**
  * takeCardStock — the production wiring around planCardStockTake (#430/#468
@@ -9,12 +13,12 @@ import { takeCardStock, CardStockTakeError } from '../card-stock';
  * revert of its loop back to the old single-location body
  * (`adjustInventory(levels[0].…, -qty)`) left every existing spec green. This
  * file drives the REAL cardInventoryLevels -> planCardStockTake ->
- * adjustInventory chain through a fake container, so that revert fails here.
+ * adjustCardStock chain through a fake container, so that revert fails here.
  *
  * The container fake resolves BY KEY, same shape as
  * gateway-deposit.unit.spec.ts's harness() — cardInventoryLevels resolves
  * ContainerRegistrationKeys.QUERY and calls query.graph(), and takeCardStock
- * itself resolves Modules.INVENTORY for adjustInventory. The row shape fed
+ * adjustCardStock resolves PG_CONNECTION for its one UPDATE. The row shape fed
  * through query.graph() is the nested product/variant/inventory_item/
  * location_levels tree cardInventoryLevels walks — this keeps the real
  * aggregation under test instead of stubbing it away.
@@ -45,15 +49,23 @@ const productRow = (itemId: string, levels: FakeLevel[]) => ({
 
 function harness(rows: ReturnType<typeof productRow>[]) {
   const query = { graph: jest.fn().mockResolvedValue({ data: rows }) };
-  const inventory = { adjustInventory: jest.fn().mockResolvedValue(undefined) };
+  // (item, location, delta) per UPDATE, read off the bindings adjustCardStock
+  // sends: [delta, delta (raw twin), item, location].
+  const adjust = jest.fn().mockResolvedValue(undefined);
+  const pg = {
+    raw: jest.fn(async (_sql: string, b: unknown[]) => {
+      await adjust(b[2], b[3], b[0]);
+      return { rowCount: 1 };
+    }),
+  };
   const container = {
     resolve: (key: unknown) => {
       if (key === ContainerRegistrationKeys.QUERY) return query;
-      if (key === Modules.INVENTORY) return inventory;
+      if (key === ContainerRegistrationKeys.PG_CONNECTION) return pg;
       throw new Error(`harness: unexpected resolve(${String(key)})`);
     },
   } as unknown as MedusaContainer;
-  return { query, inventory, container };
+  return { query, adjust, pg, container };
 }
 
 describe('takeCardStock', () => {
@@ -68,16 +80,16 @@ describe('takeCardStock', () => {
     const result = await takeCardStock(h.container)('handle', 4);
 
     expect(result).toBe(true);
-    // The bug this pins: the old body called adjustInventory ONCE, for the
+    // The bug this pins: the old body adjusted ONCE, for the
     // whole qty, at whichever location happened to resolve first.
-    expect(h.inventory.adjustInventory).toHaveBeenCalledTimes(2);
-    expect(h.inventory.adjustInventory).toHaveBeenNthCalledWith(
+    expect(h.adjust).toHaveBeenCalledTimes(2);
+    expect(h.adjust).toHaveBeenNthCalledWith(
       1,
       'A',
       'loc1',
       -3,
     );
-    expect(h.inventory.adjustInventory).toHaveBeenNthCalledWith(
+    expect(h.adjust).toHaveBeenNthCalledWith(
       2,
       'A',
       'loc2',
@@ -91,7 +103,7 @@ describe('takeCardStock', () => {
     const result = await takeCardStock(h.container)('handle', 4);
 
     expect(result).toBe(false);
-    expect(h.inventory.adjustInventory).not.toHaveBeenCalled();
+    expect(h.adjust).not.toHaveBeenCalled();
   });
 
   it('lets the shortfall land on the last level instead of clamping', async () => {
@@ -102,8 +114,8 @@ describe('takeCardStock', () => {
     expect(result).toBe(true);
     // The full 5 lands on the only level, not a clamp to the 2 available —
     // the negative counter IS the "units owed" signal (see card-stock.ts).
-    expect(h.inventory.adjustInventory).toHaveBeenCalledTimes(1);
-    expect(h.inventory.adjustInventory).toHaveBeenCalledWith('A', 'loc1', -5);
+    expect(h.adjust).toHaveBeenCalledTimes(1);
+    expect(h.adjust).toHaveBeenCalledWith('A', 'loc1', -5);
   });
 
   it('reports what was actually applied when a mid-plan adjust throws', async () => {
@@ -113,7 +125,7 @@ describe('takeCardStock', () => {
         { locationId: 'loc2', stocked: 2 },
       ]),
     ]);
-    h.inventory.adjustInventory
+    h.adjust
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('adjust failed'));
 
@@ -134,5 +146,43 @@ describe('takeCardStock', () => {
       { inventoryItemId: 'A', locationId: 'loc1', qty: 3 },
     ]);
     expect(err.plan).toHaveLength(2);
+  });
+});
+
+describe('adjustCardStock', () => {
+  const containerWith = (rowCount: number) => {
+    const raw = jest.fn().mockResolvedValue({ rowCount });
+    const container = {
+      resolve: (key: unknown) => {
+        if (key === ContainerRegistrationKeys.PG_CONNECTION) return { raw };
+        throw new Error(`unexpected resolve(${String(key)})`);
+      },
+    } as unknown as MedusaContainer;
+    return { raw, container };
+  };
+
+  it('adds the delta in the database, raw twin included', async () => {
+    const { raw, container } = containerWith(1);
+    await adjustCardStock(container, 'iitem_1', 'sloc_1', -1);
+    const [sql, bindings] = raw.mock.calls[0];
+    // In place, not a value read earlier: that read is what lost updates.
+    expect(sql).toMatch(/stocked_quantity = stocked_quantity \+ \?/);
+    expect(sql).toMatch(/raw_stocked_quantity = jsonb_build_object/);
+    expect(bindings).toEqual([-1, -1, 'iitem_1', 'sloc_1']);
+  });
+
+  it('throws NOT_FOUND when no level matches, like adjustInventory', async () => {
+    const { container } = containerWith(0);
+    await expect(
+      adjustCardStock(container, 'iitem_x', 'sloc_x', 1),
+    ).rejects.toThrow(/not found/);
+  });
+
+  it('refuses a fractional delta before touching the database', async () => {
+    const { raw, container } = containerWith(1);
+    await expect(
+      adjustCardStock(container, 'iitem_1', 'sloc_1', 0.5),
+    ).rejects.toThrow(/whole number/);
+    expect(raw).not.toHaveBeenCalled();
   });
 });

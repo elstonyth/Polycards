@@ -19,7 +19,7 @@ const banner = () => container.querySelector('[data-telegram-banner]');
 const close = () => act(() => container.querySelector('button')!.click());
 
 beforeEach(() => {
-  pathname = '/';
+  pathname = '/task';
   auth.customer = null;
   auth.isLoading = false;
   sessionStorage.clear();
@@ -33,11 +33,29 @@ afterEach(() => {
   container.remove();
 });
 
-test('guests always see banner without close, ignoring old permanent dismissal', () => {
+test('guests see the banner, ignoring the old permanent dismissal, and can close it for the visit', () => {
   localStorage.setItem('polycards.telegram-banner-dismissed', 'true');
   render();
   expect(banner()).not.toBeNull();
-  expect(container.querySelector('button')).toBeNull();
+  close();
+  expect(banner()).toBeNull();
+  pathname = '/about';
+  render();
+  expect(banner()).toBeNull();
+});
+
+test('a guest dismissal does not carry into a login', () => {
+  render();
+  close();
+  auth.customer = { id: 'customer-1' };
+  render();
+  expect(banner()).not.toBeNull();
+});
+
+test('home owns no floating rail: the footer carries the link', () => {
+  pathname = '/';
+  render();
+  expect(banner()).toBeNull();
 });
 
 test('dismissal survives navigation, auth refresh, and remount in same login', () => {
@@ -61,7 +79,7 @@ test('logout on hidden route resets dismissal before same customer logs in again
   pathname = '/vault';
   auth.customer = null;
   render();
-  pathname = '/';
+  pathname = '/task';
   auth.customer = { id: 'customer-1' };
   render();
   expect(banner()).not.toBeNull();

@@ -18,12 +18,16 @@
 //   npm run build
 //   pwsh scripts/serve-standalone.ps1 -Port 4100     # background
 //   corepack yarn dev                                # backend/packages/api, :9000
-//   QA_ADMIN_EMAIL=... QA_ADMIN_PASSWORD=... node scripts/qa-free-pack.mjs
+//   QA_ADMIN_EMAIL=... QA_ADMIN_PASSWORD=... QA_ADMIN_TOTP_SECRET=... //     node scripts/qa-free-pack.mjs
 //
 // Admin credentials come from env (repo rule: no hardcoded secrets) — the same
-// convention as scripts/qa-locked-wins.mjs. Any local super-admin works, e.g.
-// one made with `corepack yarn medusa user -e ... -p ...`.
+// convention as scripts/qa-locked-wins.mjs. Any local super-admin with an
+// authenticator app works (every admin sign-in asks for its code since #996):
+// QA_ADMIN_TOTP_SECRET is that app's secret, e.g. the totp_secret=… seed:e2e
+// prints when it sets one up.
 import { chromium } from 'playwright';
+// Node strips the types (Node 24); the backend's own code math, no dependency.
+import { totpCode } from '../backend/packages/api/src/utils/totp-code.ts';
 
 const BASE = process.env.PW_BASE ?? 'http://localhost:4100';
 const API = process.env.QA_API ?? 'http://localhost:9000';
@@ -34,8 +38,11 @@ const PAID_SLUG = process.env.QA_PAID_PACK ?? 'bronze-pack';
 const PASSWORD = 'QaFreePack123!';
 const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.QA_ADMIN_PASSWORD;
-if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
-  console.error('Set QA_ADMIN_EMAIL and QA_ADMIN_PASSWORD (dev admin login).');
+const ADMIN_TOTP_SECRET = process.env.QA_ADMIN_TOTP_SECRET;
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !ADMIN_TOTP_SECRET) {
+  console.error(
+    'Set QA_ADMIN_EMAIL, QA_ADMIN_PASSWORD and QA_ADMIN_TOTP_SECRET (dev admin login + its authenticator secret).',
+  );
   process.exit(1);
 }
 
@@ -152,15 +159,50 @@ const json = async (res) => {
 };
 
 // ── Setup: an active free_welcome pack + a brand-new customer ───────────────
-const admin = await fetch(`${API}/auth/user/emailpass`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
-}).then(json);
-if (!admin.token) throw new Error('admin auth failed — check QA_ADMIN_*');
+// Two-step sign-in (#996): the password answers with a code challenge, the
+// authenticator code with the admin token. A code works once per login, so
+// one the Playwright suite just used is retried with the next step's.
+const adminSignIn = async () => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const login = await fetch(`${API}/auth/user/emailpass`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+    }).then(json);
+    if (!login.mfa_required || !login.mfa_challenge?.id) {
+      throw new Error(
+        `admin auth failed — ${login.message ?? 'no code challenge'} (check QA_ADMIN_*)`,
+      );
+    }
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 30_000 - (Date.now() % 30_000)));
+    }
+    const verified = await fetch(
+      `${API}/auth/mfa/challenges/${login.mfa_challenge.id}/verify`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${login.token}`,
+        },
+        body: JSON.stringify({
+          method: 'totp',
+          code: totpCode(ADMIN_TOTP_SECRET),
+        }),
+      },
+    ).then(json);
+    if (verified.token) return verified.token;
+    if (!/just used/i.test(verified.message ?? '')) {
+      throw new Error(
+        `admin code refused — ${verified.message ?? 'no token'} (check QA_ADMIN_TOTP_SECRET)`,
+      );
+    }
+  }
+  throw new Error('admin code refused twice as just used');
+};
 const AH = {
   'Content-Type': 'application/json',
-  Authorization: `Bearer ${admin.token}`,
+  Authorization: `Bearer ${await adminSignIn()}`,
 };
 
 const keys = await fetch(`${API}/admin/api-keys?type=publishable`, {
@@ -415,9 +457,17 @@ try {
         await shot(gp, 'guest-badge-auth-modal');
       }
     }
-    // Site-wide mount: the same guest also sees the badge OFF /slots (layout's
-    // GlobalFreePackBadge). Home is the representative "any other page".
+    // Home carries the offer inline in its hero, not as the floating badge.
     await gp.goto(`${BASE}/`, { waitUntil: 'load' });
+    if (await gp.getByTestId('hero-free-pack').isVisible()) {
+      ok('guest sees the free-pack row in the home hero');
+    } else fail('guest free-pack row missing from the home hero');
+    if (await gp.getByTestId('free-pack-badge').count()) {
+      fail('floating badge must stay off / (the hero owns the offer)');
+    }
+    // Site-wide mount: the same guest also sees the badge OFF /slots (layout's
+    // GlobalFreePackBadge). /about is the representative "any other page".
+    await gp.goto(`${BASE}/about`, { waitUntil: 'load' });
     let homeBadgeVisible = true;
     try {
       await gp
@@ -427,8 +477,8 @@ try {
     } catch {
       homeBadgeVisible = false;
     }
-    if (homeBadgeVisible) ok('guest badge visible on / (global mount)');
-    else fail('guest badge missing on / — global mount broken');
+    if (homeBadgeVisible) ok('guest badge visible on /about (global mount)');
+    else fail('guest badge missing on /about — global mount broken');
     await shot(gp, 'guest-badge-home');
     await guest.close();
   }
@@ -468,7 +518,7 @@ try {
   } else {
     fail(`claim badge href is ${badgeHref}, want /slots/${SLUG}/spin`);
   }
-  await page.goto(`${BASE}/`, { waitUntil: 'load' });
+  await page.goto(`${BASE}/about`, { waitUntil: 'load' });
   let memberHomeBadge = true;
   try {
     await page
@@ -478,8 +528,8 @@ try {
   } catch {
     memberHomeBadge = false;
   }
-  if (memberHomeBadge) ok('member badge visible on / (global mount)');
-  else fail('member badge missing on / — global mount broken');
+  if (memberHomeBadge) ok('member badge visible on /about (global mount)');
+  else fail('member badge missing on /about — global mount broken');
   await shot(page, 'member-badge-home');
   await visitCatalogWithBadge(page);
 
@@ -518,20 +568,36 @@ try {
       a.y < b.y + b.height &&
       b.y < a.y + a.height;
     // On-screen tiles + whether each intersects the badge, at the current scroll.
+    // One evaluateAll, not count() then nth(i).boundingBox() per tile: the
+    // list can re-render mid-loop while the page settles, and boundingBox()
+    // on an nth(i) that vanished waits its full 30s (master nightly 11-09).
+    // A hidden tile (the other breakpoint's copy) measures 0x0 → skipped.
     const scan = async () => {
       const badgeBox = await floating.boundingBox();
+      const boxes = await tiles.evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width || r.height
+            ? {
+                x: r.x,
+                y: r.y,
+                width: r.width,
+                height: r.height,
+                href: el.getAttribute('href'),
+              }
+            : null;
+        }),
+      );
       const rows = [];
-      for (let i = 0; i < (await tiles.count()); i++) {
-        const box = await tiles.nth(i).boundingBox();
-        if (!box) continue;
+      boxes.forEach((box, i) => {
+        if (!box) return;
         const onScreen =
           box.y + box.height > 0 &&
           box.y < h &&
           box.x + box.width > 0 &&
           box.x < w;
-        if (!onScreen) continue;
-        rows.push({ i, box, overlap: hits(box, badgeBox) });
-      }
+        if (onScreen) rows.push({ i, box, overlap: hits(box, badgeBox) });
+      });
       return rows;
     };
 
@@ -617,8 +683,22 @@ try {
       fail(`${label}: no catalog tile parked under the badge`);
       continue;
     }
-    const target = tiles.nth(nearest.i);
-    const href = await target.getAttribute('href');
+    // Tap the scanned tile by its href, not its index: after a re-render
+    // nth(i) can be another tile, which would pass without ever having sat
+    // under the badge. Recheck the overlap right before the tap.
+    const href = nearest.box.href;
+    const target = page
+      .locator(`a[href=${JSON.stringify(href)}]`)
+      .filter({ visible: true })
+      .first();
+    const tileNow = await target
+      .boundingBox({ timeout: 5000 })
+      .catch(() => null);
+    const badgeNow = await floating.boundingBox();
+    if (!tileNow || !badgeNow || !hits(tileNow, badgeNow)) {
+      fail(`${label}: tile ${href} was no longer under the badge at tap time`);
+      continue;
+    }
     try {
       await target.click({ timeout: 5000 });
       await page.waitForURL(

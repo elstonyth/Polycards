@@ -3,6 +3,7 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
+  cancelPhoneOtp,
   isAllowedSmsDestination,
   isCallFirstNetwork,
   isDevOrTest,
@@ -12,6 +13,14 @@ import {
   unresolvableSmsCountries,
 } from '../../../../utils/phone-verification';
 import { consumeOtpSendBudget } from '../../../utils/rate-limit';
+import {
+  dropPendingCode,
+  holdStart,
+  outranks,
+  pendingCode,
+  type PendingCode,
+  type StartHold,
+} from '../../../utils/otp-purpose';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 
 // Public: sends (or dev-logs) an OTP for one of the three phone flows. The
@@ -153,11 +162,83 @@ export async function POST(
 
   // purpose is validated above; it selects the Verify template so the SMS
   // names the flow the code is for.
+  // One start per number at a time (utils/otp-purpose.ts holdStart). Every
+  // way this start does not send answers like a sent one, so none of them
+  // says anything about the number.
+  let hold: StartHold | null;
   try {
-    await sendPhoneOtp(process.env, logger, phone, purpose, via);
-  } catch (error) {
-    if (purpose !== 'password-reset') throw error;
-    // Provider errors must not reveal whether a reset account exists.
+    hold = await holdStart(phone);
+  } catch {
+    logger.warn('[phone-otp] could not hold the number for a start');
+    hold = null;
   }
-  res.json(response);
+  if (!hold) {
+    res.json(response);
+    return;
+  }
+  try {
+    // A code pending for another flow dies first: Twilio would resend that
+    // same code under this flow's wording. One that outranks this flow is
+    // left alone, and so is everything when it cannot be read or cancelled:
+    // then nothing is sent.
+    let pending: PendingCode | null;
+    try {
+      pending = await pendingCode(phone);
+    } catch {
+      logger.warn('[phone-otp] could not read the code purpose');
+      res.json(response);
+      return;
+    }
+    if (pending && pending.purpose !== purpose) {
+      const cancelled =
+        !outranks(pending.purpose, purpose) &&
+        (pending.sid
+          ? await cancelPhoneOtp(process.env, logger, pending.sid)
+          : // The dev transport has no verification to cancel; its code is fixed.
+            isDevOrTest(process.env));
+      if (!cancelled) {
+        res.json(response);
+        return;
+      }
+    }
+    // A start that stalled may be overtaken: it sends nothing, and (below)
+    // records nothing. Within the send deadline its hold outlives the send.
+    if (!(await hold.held())) {
+      res.json(response);
+      return;
+    }
+    let sid: string | undefined;
+    try {
+      sid = await sendPhoneOtp(process.env, logger, phone, purpose, via);
+    } catch (error) {
+      if (purpose !== 'password-reset') throw error;
+      // Provider errors must not reveal whether a reset account exists.
+      res.json(response);
+      return;
+    }
+    // Recorded only while still held, in one step with that check.
+    // Unrecorded, the check is refused, so a store blip costs a retry.
+    let recorded: boolean | null;
+    try {
+      recorded = await hold.note(purpose, sid);
+    } catch {
+      logger.warn('[phone-otp] could not record the code purpose');
+      recorded = null;
+    }
+    if (recorded === false) {
+      // Overtaken between the hold check and the send: another start for
+      // this number has since recorded its own code, and Twilio may have
+      // resent that same code under this flow's wording. Cancel what was
+      // sent, so the code works for no flow; the other start's owner asks
+      // again.
+      logger.warn('[phone-otp] start overtaken; cancelling the code it sent');
+      const cancelled =
+        !!sid && (await cancelPhoneOtp(process.env, logger, sid));
+      // Not confirmed: no flow may accept the code until a new start.
+      if (!cancelled) await dropPendingCode(phone).catch(() => undefined);
+    }
+    res.json(response);
+  } finally {
+    await hold.release();
+  }
 }

@@ -2,6 +2,7 @@ import {
   MY_BANKS,
   SG_BANKS,
   TGPAY_SANDBOX_BANK,
+  accountNumberForms,
   banksFor,
   findBank,
   gatewayBankCode,
@@ -38,6 +39,33 @@ describe('Singapore banks (A3Pay) beside the Malaysian registry', () => {
     expect(findBank('UOVBSGSG')?.name).toBe('UOB (SG)');
     expect(findBank('UOVBMYKL')?.id).toBe('UOVBMYKL');
     expect(findBank('MYOCBC')?.id).toBe('OCBCMYKL');
+  });
+
+  it('a PayNow mobile with or without its 65 is one number; other banks keep theirs', () => {
+    expect(accountNumberForms('PAYNOWSG', '91234567')).toEqual([
+      '91234567',
+      '6591234567',
+    ]);
+    expect(accountNumberForms('PAYNOWSG', '6591234567')).toEqual([
+      '91234567',
+      '6591234567',
+    ]);
+    // Typed with spaces, a dash or a plus, it is the same number.
+    expect(accountNumberForms('PAYNOWSG', '65 9123-4567')).toEqual([
+      '91234567',
+      '6591234567',
+    ]);
+    expect(accountNumberForms('PAYNOWSG', '+65 9123 4567')).toEqual([
+      '91234567',
+      '6591234567',
+    ]);
+    // A foreign mobile carries its own country code: no 65 to add or strip.
+    expect(accountNumberForms('PAYNOWSG', '60123456789')).toEqual([
+      '60123456789',
+    ]);
+    expect(accountNumberForms('PBBEMYKL', '6591234567')).toEqual([
+      '6591234567',
+    ]);
   });
 
   it('A3Pay pays only Singapore banks; TGPay only Malaysian ones', () => {

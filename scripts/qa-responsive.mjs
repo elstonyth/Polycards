@@ -44,7 +44,6 @@ const PUBLIC = [
   '/leaderboard',
   '/task',
   '/how-it-works',
-  '/fairness',
   '/about',
   '/contact',
   '/download',

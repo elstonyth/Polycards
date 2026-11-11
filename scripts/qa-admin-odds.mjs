@@ -3,6 +3,7 @@
 //   node scripts/qa-admin-odds.mjs
 // Reads admin creds from the gitignored scripts/.dev-logins (never printed).
 import { chromium } from '@playwright/test';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -24,22 +25,15 @@ const creds = Object.fromEntries(
       return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
     }),
 );
+const ADMIN_EMAIL = creds.ADMIN_EMAIL ?? 'admin@pokenic.app';
+requireAdminTotp(ADMIN_EMAIL);
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
 const shot = (name) =>
   page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: false });
 
-await page.goto(`${ADMIN}/login`, { waitUntil: 'domcontentloaded' });
-await page.fill(
-  'input[name="email"]',
-  creds.ADMIN_EMAIL ?? 'admin@pokenic.app',
-);
-await page.fill('input[name="password"]', creds.ADMIN_PW ?? '');
-await page.press('input[name="password"]', 'Enter');
-await page.waitForURL((u) => !u.pathname.endsWith('/login'), {
-  timeout: 60000,
-});
+await adminUiLogin(page, ADMIN, ADMIN_EMAIL, creds.ADMIN_PW ?? '');
 
 const table = page.getByRole('region', { name: 'Pack odds table' });
 const rows = table.locator('tbody tr');

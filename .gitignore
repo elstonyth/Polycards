@@ -119,9 +119,25 @@ GEMINI.md
 .claude/
 # Codex CLI config + hooks (AI tooling, mirrors .claude/) — local only
 .codex/
-# Docs are tracked (plans, specs, handoffs) EXCEPT the research capture corpus
-# (reference-site screenshots/JSON — deliberately local-only, see CLAUDE.md).
+# Internal working docs stay LOCAL (the repo is public): the research capture
+# corpus (see CLAUDE.md), fix/hardening plans, design specs and plans, review/QA
+# findings and audits. Tracked docs are the ones code and agents rely on:
+# docs/adr, docs/agents, docs/ops, the docs/payments setup notes, CONTEXT.md,
+# DESIGN.md. Code comments may still cite the local-only ones by path.
 /docs/research/
+/plans/
+/docs/superpowers/
+/docs/reviews/
+/docs/qa/
+/docs/plans/
+/docs/payments/*-audit-*.md
+/slot-machine-redesign.md
+# Business records and working notes — never commit: P&L, customer cases,
+# payment audits, data exports and ops kits (reports/), research notes, and
+# throwaway scripts.
+/reports/
+/research_notes/
+/scripts/_tmp-*
 # Local-only test harnesses (demo videos, prod smoke). tests/e2e IS committed —
 # the nightly E2E workflow (.github/workflows/e2e.yml) checks it out in CI; its
 # runtime artifacts stay ignored via the explicit rules above.

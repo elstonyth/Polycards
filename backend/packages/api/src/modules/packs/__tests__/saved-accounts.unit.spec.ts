@@ -1,5 +1,11 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import {
+  HOLDER_NAME_CLEARED_KEY,
+  anySavedAccountShared,
+  clearedHolderNames,
+  holderNameInvalid,
+  holderNameKey,
+  holderUnlikeSaved,
   payoutDestinationCooldownHours,
   resolveWithdrawalDestination,
   savedBankAccountId,
@@ -241,5 +247,105 @@ describe('bankSupportedBy / savedBankAccountViews — the same account across ga
       bankName: 'Maybank',
     };
     expect(savedBankAccountViews([maybank], 'tgpay', 0)[0].supported).toBe(true);
+  });
+});
+
+// One person, one name: a holder name dressed up with digits, brackets, an
+// ampersand, accents or small capitals is still the plain name.
+describe('holder names compare by their letters', () => {
+  it.each([
+    ['TAN AH KOW&'],
+    ['TAN AH KOW (1)'],
+    ['TAN AH KÓW'],
+    ['ᴛᴀɴ ᴀʜ ᴋᴏᴡ'],
+    ['Tan Ah-Kow 2'],
+  ])('%j keys as "Tan Ah Kow"', (name) => {
+    expect(holderNameKey(name)).toBe(holderNameKey('Tan Ah Kow'));
+    expect(holderNameInvalid(name)).toBe(false);
+  });
+
+  it('keeps different names apart', () => {
+    expect(holderNameKey('Tan Ah Kow')).not.toBe(holderNameKey('Lim Mei Ling'));
+  });
+
+  it.each([['TAN ɑH KOW'], ['TAN AH KıW'], ['TAN AH KØW']])(
+    '%j folds to the plain name: a look-alike is not a new name',
+    (name) => {
+      expect(holderNameInvalid(name)).toBe(false);
+      expect(holderNameKey(name)).toBe(holderNameKey(name.replace(/[ɑıØ]/u, (c) => ({ ɑ: 'A', ı: 'I', Ø: 'O' })[c]!)));
+    },
+  );
+
+  it('reads letters NFKD keeps, as a Vietnamese or German name spells them', () => {
+    expect(holderNameKey('Nguyễn Văn Đức')).toBe(holderNameKey('NGUYEN VAN DUC'));
+    expect(holderNameKey('Strauß')).toBe('strauss');
+    expect(holderNameInvalid('Nguyễn Văn Đức')).toBe(false);
+  });
+
+  it('refuses a letter it cannot read as an English one', () => {
+    expect(holderNameInvalid('TAN AH ŊOW')).toBe(true);
+  });
+
+  it('holds a name saved with no English letters to its old key', () => {
+    const saved = [
+      {
+        id: 'old',
+        bankCode: 'MBBEMYKL',
+        accountNumber: '123456789012',
+        accountHolderName: '陈亚高',
+      },
+    ] as Parameters<typeof holderUnlikeSaved>[0];
+    expect(holderUnlikeSaved(saved, 'MBBEMYKL', 'TAN AH KOW')).toBe(true);
+  });
+
+  it('one name on every bank: a variant of the saved name is that name', () => {
+    const saved = [
+      {
+        id: 'x',
+        bankCode: 'MBBEMYKL',
+        bankName: 'Maybank',
+        accountNumber: '123456789012',
+        accountHolderName: 'Tan Ah Kow',
+      },
+    ];
+    expect(holderUnlikeSaved(saved, 'TNGMY', 'TAN AH KÓW (1)')).toBe(false);
+    expect(holderUnlikeSaved(saved, 'TNGMY', 'Lim Mei Ling')).toBe(true);
+  });
+
+  it('a clearing stamped under an older key still matches, merged with its twin', () => {
+    const cleared = clearedHolderNames({
+      [HOLDER_NAME_CLEARED_KEY]: {
+        'tanahkow&': { name: 'TAN AH KOW&', at: 'a', with: ['cus_2'] },
+        tanahkow: { name: 'Tan Ah Kow', at: 'b', with: ['cus_3'] },
+      },
+    });
+    expect(Object.keys(cleared)).toEqual(['tanahkow']);
+    expect(cleared[holderNameKey('TAN AH KOW&')]?.with.sort()).toEqual([
+      'cus_2',
+      'cus_3',
+    ]);
+  });
+});
+
+describe('anySavedAccountShared — a PayNow mobile with or without its 65', () => {
+  it('asks for both spellings, so an old row in the other one still holds it', async () => {
+    const otherPayoutAccountHolders = jest.fn(
+      async (_customerId: string, accountNumber: string) =>
+        accountNumber === '6591234567' ? [{ bank_code: 'PAYNOWSG' }] : [],
+    );
+    const paynow: SavedBankAccount = {
+      id: savedBankAccountId('PAYNOWSG', '91234567'),
+      bankCode: 'PAYNOWSG',
+      bankName: 'PayNow (mobile number)',
+      accountNumber: '91234567',
+      accountHolderName: 'Tan Ah Kow',
+    };
+    await expect(
+      anySavedAccountShared({ otherPayoutAccountHolders }, 'cus_1', [paynow], {}),
+    ).resolves.toBe(true);
+    expect(otherPayoutAccountHolders.mock.calls.map((c) => c[1])).toEqual([
+      '91234567',
+      '6591234567',
+    ]);
   });
 });

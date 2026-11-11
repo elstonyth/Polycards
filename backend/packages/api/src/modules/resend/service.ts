@@ -10,6 +10,8 @@ import type {
 import { Resend } from 'resend';
 import { renderTemplate } from './templates';
 
+export const SEND_TIMEOUT_MS = 10_000;
+
 export type ResendOptions = {
   api_key: string;
   from: string;
@@ -69,14 +71,31 @@ class ResendNotificationProviderService extends AbstractNotificationProviderServ
       return {};
     }
 
-    const { data, error } = await this.resendClient.emails.send({
-      from: this.options.from,
-      to: [notification.to],
-      subject: rendered.subject,
-      html: rendered.html,
-      text: rendered.text,
-      ...(this.options.reply_to ? { replyTo: this.options.reply_to } : {}),
-    });
+    // A deadline: the SDK passes no signal, so a stalled Resend held every
+    // caller for Node's 300 s default, and deposit settling awaits its
+    // receipt. A timed-out send may still be delivered late; it is recorded
+    // as failed either way.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const { data, error } = await Promise.race([
+      this.resendClient.emails.send({
+        from: this.options.from,
+        to: [notification.to],
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        ...(this.options.reply_to ? { replyTo: this.options.reply_to } : {}),
+      }),
+      new Promise<{ data: null; error: { message: string } }>((resolve) => {
+        timer = setTimeout(
+          () =>
+            resolve({
+              data: null,
+              error: { message: `timed out after ${SEND_TIMEOUT_MS} ms` },
+            }),
+          SEND_TIMEOUT_MS,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
 
     if (error || !data) {
       // SECURITY (CWE-532, same invariant as subscribers/password-reset.ts): the

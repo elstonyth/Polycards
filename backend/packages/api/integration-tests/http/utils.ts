@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import Redis from "ioredis";
 import { Modules } from "@medusajs/framework/utils";
 import type {
+  IAuthModuleService,
   ICustomerModuleService,
   MedusaContainer,
 } from "@medusajs/framework/types";
@@ -11,6 +13,7 @@ import {
 import { PACKS_MODULE } from "../../src/modules/packs";
 import type PacksModuleService from "../../src/modules/packs/service";
 import { isPhoneVerificationRequired } from "../../src/utils/phone-verification";
+import { totpCode } from "../../src/utils/totp-code";
 
 // Shared harness policy for the HTTP suites — the two idioms every suite was
 // copy-pasting. Not a spec file (jest's http testMatch only picks *.spec.ts).
@@ -78,8 +81,81 @@ export async function mintSuperAdmin(
     id: authIdentity.id,
     app_metadata: { user_id: (users as { id: string }[])[0].id },
   });
+  // Every admin login uses an authenticator app since 2026-11-07, so the
+  // token comes from the full sign-in: password, then the 6-digit code.
+  const secret = await enrollAuthenticator(container, authIdentity.id);
+  return signInWithCode(api, email, password, secret);
+}
+
+// The code math lives in src/utils so seed:e2e and the Playwright suite share it.
+export { totpCode };
+
+/** Sets up an authenticator app on this login and returns its secret, as the
+ *  admin's setup screen does (start, then confirm with a code). */
+export async function enrollAuthenticator(
+  container: MedusaContainer,
+  authIdentityId: string,
+): Promise<string> {
+  const auth = container.resolve(Modules.AUTH);
+  const { mfa, secret } = await auth.startAuthMfa({
+    auth_identity_id: authIdentityId,
+    provider: "totp",
+  });
+  if (!secret) throw new Error("the totp provider returned no secret");
+  await auth.verifyAuthMfa({
+    id: mfa.id,
+    auth_identity_id: authIdentityId,
+    code: totpCode(secret),
+  });
+  return secret;
+}
+
+/** The auth identity behind an emailpass login. */
+export async function authIdentityIdOf(
+  container: MedusaContainer,
+  email: string,
+): Promise<string> {
+  const [identity] = await container
+    .resolve(Modules.AUTH)
+    .listProviderIdentities({ entity_id: email, provider: "emailpass" });
+  if (!identity) throw new Error(`no emailpass login for ${email}`);
+  return identity.auth_identity_id as string;
+}
+
+/** A staff login with an authenticator set up, for specs that mint their own
+ *  admin tokens: /admin answers a staff token only when its login has one. */
+export async function staffIdentityWithAuthenticator(
+  container: MedusaContainer,
+): Promise<string> {
+  const { authIdentity } = await container
+    .resolve(Modules.AUTH)
+    .register("emailpass", {
+      body: { email: `staff-${randomUUID()}@test.dev`, password: "staff-pw-1" },
+    } as Parameters<IAuthModuleService["register"]>[1]);
+  if (!authIdentity) throw new Error("emailpass register returned no identity");
+  await enrollAuthenticator(container, authIdentity.id);
+  return authIdentity.id;
+}
+
+/** The admin sign-in once a login has an authenticator: the password answers
+ *  with a code challenge, and the code returns the admin token. */
+export async function signInWithCode(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  api: any,
+  email: string,
+  password: string,
+  secret: string,
+): Promise<string> {
   const login = await api.post("/auth/user/emailpass", { email, password });
-  return login.data.token as string;
+  if (!login.data.mfa_required) {
+    throw new Error(`expected ${email}'s sign-in to ask for the code`);
+  }
+  const verified = await api.post(
+    `/auth/mfa/challenges/${login.data.mfa_challenge.id}/verify`,
+    { method: "totp", code: totpCode(secret) },
+    { headers: { authorization: `Bearer ${login.data.token}` } },
+  );
+  return verified.data.token as string;
 }
 
 /**

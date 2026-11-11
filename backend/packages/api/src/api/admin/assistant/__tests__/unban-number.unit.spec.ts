@@ -2,6 +2,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { AGENT_TOOLS } from '../agent-tools';
 import {
   ConfirmRefused,
+  numberMark,
   saveProposal,
   scheduledRunAllows,
   UNBAN_NEED,
@@ -25,8 +26,10 @@ const customers = {
     { first_name: 'TestPlayer', metadata: { handle: 'Test_Handle' } },
   ]),
 };
+const config = { projectConfig: { http: { jwtSecret: 'test-secret' } } };
 const container = {
-  resolve: (k: string) => (k === 'customer' ? customers : packs),
+  resolve: (k: string) =>
+    k === 'customer' ? customers : k === 'configModule' ? config : packs,
 } as never;
 const admin = { userId: 'user_1', superAdmin: true };
 const tool = AGENT_TOOLS.find((t) => t.name === 'unban_bank_number')!;
@@ -79,6 +82,8 @@ describe('unban_bank_number', () => {
         username: 'TestPlayer',
         bank_code: 'MBBEMYKL',
         last4: '0001',
+        // The number it resolved, fingerprinted: never the number itself.
+        number_mark: numberMark('512345670001', container),
         reason: 'owner approved',
       },
       expect.stringMatching(
@@ -140,7 +145,9 @@ describe('saveProposal unban_number', () => {
     username: 'TestPlayer',
     bank_code: 'MBBEMYKL',
     last4: '0001',
+    number_mark: 'mark-of-0001',
     reason: 'owner approved',
+    proposed_at: '2026-11-09T10:00:00.000Z',
   };
 
   it('unbans it for the player as the person who tapped, when their role still may', async () => {
@@ -157,7 +164,35 @@ describe('saveProposal unban_number', () => {
       lifted: true,
       reason: 'owner approved',
       fromBanList: true,
+      since: '2026-11-09T10:00:00.000Z',
+      numberMark: 'mark-of-0001',
     });
+  });
+
+  // Security audit 2026-11-09: a re-ban leaves no stamp, so an old button
+  // would lift it again. The service checks the audit since the card's time,
+  // in its own transaction (#1009; the SQL in card-checks.integration.spec).
+  it('an old button cannot lift it again once it was lifted or banned again since', async () => {
+    const can = jest.fn().mockResolvedValue(true);
+    packs.setPayoutBanLifted.mockRejectedValue(
+      new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.',
+      ),
+    );
+    await expect(
+      saveProposal(NUMBER, { ...admin, can }, container),
+    ).rejects.toThrow(/since it was proposed/);
+    packs.setPayoutBanLifted.mockClear();
+    // A card sealed before cards carried their time: refused, never applied.
+    await expect(
+      saveProposal(
+        { ...NUMBER, proposed_at: undefined } as Proposal,
+        { ...admin, can },
+        container,
+      ),
+    ).rejects.toBeInstanceOf(ConfirmRefused);
+    expect(packs.setPayoutBanLifted).not.toHaveBeenCalled();
   });
 
   it('a Support viewer (no customer:update) gets no ban-list fallback on tap', async () => {

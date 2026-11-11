@@ -46,6 +46,7 @@ import {
   revokePackGift,
   type PackGift,
   getDeliveryOrder,
+  getDeliveryOrdersStock,
   getProfitReport,
   type CustomerScope,
   type ProfitRange,
@@ -113,6 +114,7 @@ import {
   updateDeliveryOrder,
   uploadImage,
   type AdminDeliveryOrder,
+  type DeliveryOrderCardCover,
   type AvatarFramesView,
   type ChallengeSettingsDTO,
   type ChallengeStageDTO,
@@ -577,6 +579,17 @@ export const useDeliveryOrder = (
     queryKey: qk.deliveryOrder(id),
     queryFn: () => getDeliveryOrder(id),
     enabled: !!id,
+  });
+
+// In stock / missing per card for the orders on one page of the Orders list
+// (and their Manage modal): one request per page, one allocation server-side.
+export const useDeliveryOrdersStock = (
+  ids: string[],
+): UseQueryResult<Record<string, DeliveryOrderCardCover[] | null>> =>
+  useQuery({
+    queryKey: qk.deliveryOrdersStock(ids),
+    queryFn: () => getDeliveryOrdersStock(ids),
+    enabled: ids.length > 0,
   });
 
 export const useFxRate = (): UseQueryResult<FxRateState> =>
@@ -1578,10 +1591,17 @@ export const useUnbanBankNumber = (id: string) => {
 export const useSetHolderNameCleared = (id: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { holderName: string; cleared: boolean; reason: string }) =>
-      setHolderNameCleared(id, vars.holderName, vars.cleared, vars.reason),
+    mutationFn: (vars: {
+      holderName: string;
+      cleared: boolean;
+      reason: string;
+    }) => setHolderNameCleared(id, vars.holderName, vars.cleared, vars.reason),
     onSuccess: (_data, vars) => {
-      toast.success(vars.cleared ? 'Name cleared for this player' : 'Shared name taken back');
+      toast.success(
+        vars.cleared
+          ? 'Name cleared for this player'
+          : 'Shared name taken back',
+      );
       invalidateBankAccountCards(qc);
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(id) });
     },
@@ -1788,9 +1808,11 @@ import {
   createPurchaseInvoice,
   getPurchaseInvoice,
   listPurchaseInvoices,
+  updatePurchaseInvoice,
   type AdminPurchaseInvoiceDetail,
   type CreatePurchaseInvoiceBody,
   type PurchaseInvoicesPage,
+  type UpdatePurchaseInvoiceBody,
 } from './admin-rest';
 
 export type {
@@ -1800,6 +1822,7 @@ export type {
   CreatePurchaseInvoiceBody,
   CreatePurchaseInvoiceLineBody,
   PurchaseInvoicesPage,
+  UpdatePurchaseInvoiceBody,
 } from './admin-rest';
 
 // Paged + searchable + sortable, not id-scoped, so plain keepPreviousData is
@@ -1824,21 +1847,18 @@ export const usePurchaseInvoice = (
     enabled: !!id,
   });
 
-// Three caches move here and one deliberately does not. The purchase-invoice
-// LIST gains a row, so it goes. The purchase-invoice DETAIL does not: an invoice
-// is immutable once written (no PUT/DELETE route exists), so no cached invoice
-// detail can have gone stale — which is why qk.purchaseInvoice is a sibling
-// namespace the list prefix cannot reach. That reasoning covers ONLY the invoice
-// detail. The INVENTORY caches, list and item detail both, are a separate
-// question and the answer is the opposite one: an invoice is not merely a
-// document, it raises the Medusa stock counter and writes a `purchase` stock
-// movement, so on_hand and the weighted-average cost change on the list and the
-// movement history changes on the item detail. Without invalidating them the
-// dashboard's 90 s staleTime (with refetchOnWindowFocus off) shows On Hand 0 and
-// "No purchase history recorded" for stock the operator just bought. Since spec
-// 2026-10-28 a save also re-runs the stock allocation (orders move to
-// ready_to_ship) and can close a GRN by transfer — useInvalidateStock covers
-// those caches along with both inventory roots.
+// The purchase-invoice LIST gains a row, so it goes. The DETAILS go too: a
+// reversal sets its target's reversed_by, which hides that invoice's Edit
+// button (an invoice was immutable before 2026-11-11, so this was once
+// skipped). The INVENTORY caches, list and item detail both: an invoice is not
+// merely a document, it raises the Medusa stock counter and writes a `purchase`
+// stock movement, so on_hand and the weighted-average cost change on the list
+// and the movement history changes on the item detail. Without invalidating
+// them the dashboard's 90 s staleTime (with refetchOnWindowFocus off) shows On
+// Hand 0 and "No purchase history recorded" for stock the operator just
+// bought. Since spec 2026-10-28 a save also re-runs the stock allocation
+// (orders move to ready_to_ship) and can close a GRN by transfer —
+// useInvalidateStock covers those caches along with both inventory roots.
 export const useCreatePurchaseInvoice = () => {
   const qc = useQueryClient();
   const invalidateStock = useInvalidateStock();
@@ -1848,6 +1868,7 @@ export const useCreatePurchaseInvoice = () => {
     onSuccess: () => {
       toast.success('Purchase invoice created');
       qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey });
+      qc.invalidateQueries({ queryKey: qk.purchaseInvoiceKey });
       invalidateStock();
     },
     // A refusal is often "that GRN is no longer open": refresh it so the form
@@ -1855,6 +1876,38 @@ export const useCreatePurchaseInvoice = () => {
     onError: (e) => {
       toast.error(e instanceof Error ? e.message : String(e));
       invalidateStock();
+    },
+  });
+};
+
+// An edit changes this invoice's own detail as well as everything a save
+// moves. Awaited before mutateAsync resolves, so the detail page the form
+// navigates to never shows the old lines (and a reversal started from it
+// never mirrors old costs). A refused save (reversed meanwhile, or saved by
+// someone else) re-reads the invoice, so the edit page catches up.
+export const useUpdatePurchaseInvoice = () => {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const invalidateStock = useInvalidateStock();
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: UpdatePurchaseInvoiceBody;
+    }) => updatePurchaseInvoice(id, body),
+    onSuccess: () => {
+      toast.success(t('pi.edited'));
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: qk.purchaseInvoicesKey }),
+        qc.invalidateQueries({ queryKey: qk.purchaseInvoiceKey }),
+        invalidateStock(),
+      ]);
+    },
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+      void qc.invalidateQueries({ queryKey: qk.purchaseInvoiceKey });
     },
   });
 };

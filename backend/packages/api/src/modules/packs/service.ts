@@ -25,6 +25,7 @@ import {
   NOW,
   type LedgerSqlManager,
 } from './claim';
+import { updateCreditTransactionsById } from './batch-update';
 import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
@@ -58,11 +59,14 @@ import {
   liftedPayoutBans,
   withLiftedPayoutBan,
   holderNameKey,
+  LETTER_FOLDS,
+  SMALL_CAPS,
+  SMALL_CAP_LETTERS,
   withClearedHolderName,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
-import { findBank, savedAccountSlot } from './banks';
+import { accountNumberForms, findBank, savedAccountSlot } from './banks';
 import { challengePackId } from './challenge-prize';
 import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
@@ -77,7 +81,12 @@ import {
   generatedUsername,
   suffixedUsername,
 } from '../../utils/profile-handle';
-import { REAL_NAME_TAKEN, realNameKeySql } from '../../utils/real-name';
+import {
+  REAL_NAME_TAKEN,
+  realNameKey,
+  realNameKeySql,
+} from '../../utils/real-name';
+import { numberMarkWith } from '../../utils/number-mark';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -313,6 +322,21 @@ import {
 } from './real-customers';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
+// The ledger columns the reversals read by raw SQL on their own transaction
+// (an ORM list would take a second pool connection; see mutateCreditAtomic).
+type LedgerReversalRow = {
+  id: string;
+  customer_id: string;
+  amount: string;
+  reason: InferTypeOf<typeof CreditTransaction>['reason'];
+  reference: string | null;
+  external_funded_cents: number | null;
+  bonus_cents: number | null;
+  source_transaction_id: string | null;
+};
+const LEDGER_REVERSAL_COLS =
+  'id, customer_id, amount, reason, reference, external_funded_cents, bonus_cents, source_transaction_id';
+
 // plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
 // amount, plus the held part of a card sale (sellbackHoldBp: the bonus-paid
 // share or a welcome card's sale, operator rule 2026-10-09; gift and reward
@@ -368,6 +392,24 @@ function insufficientCreditsMessage(
     `you have ${rm(haveCents)} — top up at least ${rm(costCents - haveCents)}.`
   );
 }
+
+// holderNameKey in SQL, for holder names already stored: NFKD, the small
+// capitals and LETTER_FOLDS folded, lower case, a-z only (the combining marks
+// go with that strip). The parity spec runs it against holderNameKey.
+const HOLDER_FOLDS = Object.entries(LETTER_FOLDS);
+const HOLDER_FOLD_ONE = HOLDER_FOLDS.filter(([, to]) => to.length === 1);
+const HOLDER_FOLD_FROM = `${SMALL_CAPS}${HOLDER_FOLD_ONE.map(([c]) => c).join('')}`;
+const HOLDER_FOLD_TO = `${SMALL_CAP_LETTERS}${HOLDER_FOLD_ONE.map(([, to]) => to).join('')}`;
+const HOLDER_FOLD_MANY = HOLDER_FOLDS.filter(([, to]) => to.length > 1);
+export const holderNameKeySql = (expr: string): string => {
+  const folded = HOLDER_FOLD_MANY.reduce(
+    (sql, [c, to]) => `replace(${sql}, '${c}', '${to}')`,
+    `translate(normalize(${expr}, NFKD), '${HOLDER_FOLD_FROM}', '${HOLDER_FOLD_TO}')`,
+  );
+  // ASCII has nothing to fold (one byte a character): skipping the folds
+  // keeps the scan as cheap as before.
+  return `regexp_replace(lower(CASE WHEN octet_length(${expr}) = length(${expr}) THEN ${expr} ELSE ${folded} END), '[^a-z]', '', 'g')`;
+};
 
 // Auto-generates CRUD for each model: list/retrieve/create/update/delete<Model>s
 // (e.g. listPacks, listCards, listPackOdds, createPulls,
@@ -1439,6 +1481,23 @@ type MirrorLine = {
 };
 const rmKey = (v: unknown) => (Math.round(Number(v) * 100) / 100).toFixed(2);
 
+// A bank number's fingerprint on the audit rows (#1007), under the same secret
+// as the assistant's cards (the framework's own dev default when it is unset).
+const numberMarkOf = (accountKey: string): string =>
+  numberMarkWith(process.env.JWT_SECRET || 'supersecret', accountKey);
+
+/** Whether an audit row's number is one of `keys` (one number's spellings):
+ *  by its fingerprint, or by the last 4 on a row written before rows carried
+ *  one. */
+const auditNamesNumber = (
+  after: Record<string, unknown>,
+  last4: unknown,
+  keys: string[],
+): boolean =>
+  typeof after.number_mark === 'string'
+    ? keys.some((k) => numberMarkOf(k) === after.number_mark)
+    : last4 === keys[0].slice(-4);
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -1704,6 +1763,41 @@ class PacksModuleService extends MedusaService({
     sharedContext: Context,
   ): Promise<void> {
     await this.createAdminActionAudits([row], sharedContext);
+  }
+
+  // An assistant card's change audited on this player since the card was made
+  // (`since`): its own first tap, or a colleague doing or undoing it (security
+  // audit 2026-11-09). Asked inside the write's transaction under the player's
+  // metadata lock (#1009), so a colleague's change still in flight is waited
+  // for and then seen. No `since` (not a card): nothing to check.
+  protected async refuseIfAuditedSince(
+    customerId: string,
+    since: string | undefined,
+    same: (after: Record<string, unknown>) => boolean,
+    sharedContext: Context,
+  ): Promise<void> {
+    if (since === undefined) return;
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${customerId}`,
+    ]);
+    const rows = await em.execute<{ after: unknown }[]>(
+      "SELECT after FROM admin_action_audit WHERE entity_type = 'customer' AND entity_id = ? AND action = 'edit' AND created_at > ? AND deleted_at IS NULL",
+      [customerId, since],
+    );
+    if (
+      rows.some(
+        (r) =>
+          typeof r.after === 'object' &&
+          r.after !== null &&
+          same(r.after as Record<string, unknown>),
+      )
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This was done, or changed by someone, since it was proposed. Ask again if it is still needed.',
+      );
+    }
   }
 
   // Apply a pack-membership diff (add rows + delete rows + renormalize
@@ -3858,8 +3952,11 @@ class PacksModuleService extends MedusaService({
     // check-ins are free, an open-ended retired daily task paid out every day
     // to anyone who kept its id (security review 2026-10-06). retired_at null
     // on an inactive row = retired before the column existed = long ago.
-    // Achievements keep the old rule: once ever, so retiring strands nobody.
-    if (!def.active && kind !== 'achievement') {
+    // An achievement is honoured through the week it was retired in, as a
+    // weekly task is: open-ended, anyone who kept its id (a fresh account
+    // included) could claim it long after the off switch (audit 2026-11-09).
+    // The hub hides retired tasks, so the week is the grace for finishers.
+    if (!def.active) {
       const periodStart = kind === 'daily' ? day.startUtc : week.startUtc;
       const retiredAt = def.retired_at ? new Date(def.retired_at) : null;
       if (!retiredAt || retiredAt.getTime() < periodStart.getTime())
@@ -4766,12 +4863,16 @@ class PacksModuleService extends MedusaService({
       // insert is only atomic within one customer; customer_id also makes the
       // lookup index-assisted (IDX_credit_transaction_customer_id_created_at)
       // instead of a full ledger scan.
-      const [existing] = await this.listCreditTransactions(
-        {
-          customer_id: input.customerId,
-          source_transaction_id: input.idempotencyReference,
-        },
-        { take: 1 },
+      // Raw, on the locked transaction: an ORM list here takes a second pool
+      // connection while this one holds the lock, and callers waiting on the
+      // lock each hold one too.
+      const [existing] = await em.execute<
+        { id: string; amount: string; reference: string | null }[]
+      >(
+        `SELECT id, amount, reference FROM credit_transaction
+           WHERE customer_id = ? AND source_transaction_id = ? AND deleted_at IS NULL
+           LIMIT 1`,
+        [input.customerId, input.idempotencyReference],
       );
       if (existing) {
         const balRows = await em.execute<{ balance_cents: string | null }[]>(
@@ -5651,16 +5752,17 @@ class PacksModuleService extends MedusaService({
     transactionId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ id: string }> {
-    const [original] = await this.listCreditTransactions(
-      { id: transactionId },
-      { take: 1 },
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const [original] = await em.execute<LedgerReversalRow[]>(
+      `SELECT ${LEDGER_REVERSAL_COLS} FROM credit_transaction
+         WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
+      [transactionId],
     );
     if (!original) {
       // Already gone / never written — nothing to reverse (compensation is a
       // best-effort undo; a missing charge means the forward step never ran).
       return { id: transactionId };
     }
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `credit:${original.customer_id}`,
     ]);
@@ -5669,9 +5771,10 @@ class PacksModuleService extends MedusaService({
     // must NOT append a second refund. Under the lock, if a reversal row for this
     // charge already exists, return it as a no-op. `reversal:${id}` is the
     // per-charge reversal key.
-    const [existingReversal] = await this.listCreditTransactions(
-      { reference: `reversal:${transactionId}` },
-      { take: 1 },
+    const [existingReversal] = await em.execute<{ id: string }[]>(
+      // LIKE: lets the planner use IDX_credit_transaction_reversal_reference.
+      "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
+      [`reversal:${transactionId}`],
     );
     if (existingReversal) {
       return { id: existingReversal.id };
@@ -5737,16 +5840,16 @@ class PacksModuleService extends MedusaService({
     //    the debit reversal also carries reason 'pack_open', so filter on the
     //    reference prefix, not reason alone.
     const PAGE = 1000;
-    let all = await this.listCreditTransactions(
-      { source_transaction_id: sourceTransactionId },
-      { skip: 0, take: PAGE, order: { created_at: 'ASC', id: 'ASC' } },
-    );
-    for (let skip = PAGE; all.length === skip; skip += PAGE) {
-      const next = await this.listCreditTransactions(
-        { source_transaction_id: sourceTransactionId },
-        { skip, take: PAGE, order: { created_at: 'ASC', id: 'ASC' } },
+    const page = (skip: number) =>
+      em.execute<LedgerReversalRow[]>(
+        `SELECT ${LEDGER_REVERSAL_COLS} FROM credit_transaction
+           WHERE source_transaction_id = ? AND deleted_at IS NULL
+           ORDER BY created_at ASC, id ASC LIMIT ? OFFSET ?`,
+        [sourceTransactionId, PAGE, skip],
       );
-      all = all.concat(next);
+    let all = await page(0);
+    for (let skip = PAGE; all.length === skip; skip += PAGE) {
+      all = all.concat(await page(skip));
     }
     const originals = all.filter((r) => {
       const ref = String((r as { reference?: string | null }).reference ?? '');
@@ -5783,9 +5886,11 @@ class PacksModuleService extends MedusaService({
     let reversed = 0;
     const deltaMap = new Map<string, number>(); // per-customer reversal delta in cents
     for (const original of originals) {
-      const [existing] = await this.listCreditTransactions(
-        { reference: `reversal:${original.id}` },
-        { take: 1 },
+      const [existing] = await em.execute<{ id: string }[]>(
+        // The LIKE repeats IDX_credit_transaction_reversal_reference's
+        // predicate so the planner can use it; equality alone can't prove it.
+        "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
+        [`reversal:${original.id}`],
       );
       if (existing) continue; // already reversed — no-op
       const originalExt = Number(
@@ -10167,10 +10272,21 @@ class PacksModuleService extends MedusaService({
        *  every one (owner, 2026-11-04: "allow, list them all"). Given, any
        *  number of them may be cleared, but only those; without it, one. */
       onlyWith?: string[];
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const key = holderNameKey(input.holderName);
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) =>
+        'cleared' in a &&
+        typeof a.holder_name === 'string' &&
+        holderNameKey(a.holder_name) === key,
+      sharedContext,
+    );
     const holders = input.cleared
       ? await this.holderNameHolders(
           input.customerId,
@@ -10482,6 +10598,8 @@ class PacksModuleService extends MedusaService({
       bankCode: string;
       fromIds: string[];
       reason: string;
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ from: { customer_id: string; saved: number; payouts: number }[] }> {
@@ -10495,13 +10613,29 @@ class PacksModuleService extends MedusaService({
         'Not a bank account number at a known bank.',
       );
     }
-    const holders = () =>
-      this.payoutAccountHoldersAt(
-        input.customerId,
-        key,
-        bank.id,
-        sharedContext,
-      );
+    // A PayNow mobile is one number with or without its 65, as bank_save_check
+    // and the ban list read it: holders, payouts and saved entries under both.
+    const forms = accountNumberForms(bank.id, key);
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) => 'held_by' in a && auditNamesNumber(a, a.account_last4, forms),
+      sharedContext,
+    );
+    const holders = async () => {
+      const ids = new Set<string>();
+      for (const form of forms) {
+        for (const id of await this.payoutAccountHoldersAt(
+          input.customerId,
+          form,
+          bank.id,
+          sharedContext,
+        )) {
+          ids.add(id);
+        }
+      }
+      return [...ids];
+    };
     const before = await holders();
     if (before.length === 0) {
       throw new MedusaError(
@@ -10521,8 +10655,8 @@ class PacksModuleService extends MedusaService({
       rows.filter((r) => findBank(r.bank_code)?.id === bank.id).map((r) => r.id);
     const onTheWay = atBank(
       await em.execute<{ id: string; bank_code: string }[]>(
-        `SELECT id, bank_code FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id = ANY(string_to_array(?, ',')) AND status IN ('pending', 'held') AND ${DIGITS} = ?`,
-        [before.join(','), key],
+        `SELECT id, bank_code FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id = ANY(string_to_array(?, ',')) AND status IN ('pending', 'held') AND ${DIGITS} = ANY(string_to_array(?, ','))`,
+        [before.join(','), forms.join(',')],
       ),
     );
     if (onTheWay.length > 0) {
@@ -10550,7 +10684,7 @@ class PacksModuleService extends MedusaService({
               const gone = accounts.filter(
                 (a) =>
                   findBank(a.bankCode)?.id === bank.id &&
-                  payoutAccountKey(a.accountNumber, false) === key,
+                  forms.includes(payoutAccountKey(a.accountNumber, false)),
               );
               if (gone.length === 0) return null;
               saved = gone.length;
@@ -10567,8 +10701,8 @@ class PacksModuleService extends MedusaService({
       }
       const ids = atBank(
         await em.execute<{ id: string; bank_code: string }[]>(
-          `SELECT id, bank_code FROM gateway_withdrawal WHERE customer_id = ? AND deleted_at IS NULL AND status IN ('settled', 'failed') AND ${DIGITS} = ? AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4`,
-          [id, key],
+          `SELECT id, bank_code FROM gateway_withdrawal WHERE customer_id = ? AND deleted_at IS NULL AND status IN ('settled', 'failed') AND ${DIGITS} = ANY(string_to_array(?, ',')) AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4`,
+          [id, forms.join(',')],
         ),
       );
       if (ids.length > 0) {
@@ -10611,7 +10745,12 @@ class PacksModuleService extends MedusaService({
         entity_id: input.customerId,
         action: 'edit',
         before: { bank_code: bank.id, account_last4: last4, held_by: before },
-        after: { bank_code: bank.id, account_last4: last4, held_by: [] },
+        after: {
+          bank_code: bank.id,
+          account_last4: last4,
+          number_mark: numberMarkOf(key),
+          held_by: [],
+        },
         reason: `Freed bank number …${last4} from ${before.length} other account${before.length === 1 ? '' : 's'} so this player can save it: ${input.reason}`,
       },
       sharedContext,
@@ -10642,12 +10781,17 @@ class PacksModuleService extends MedusaService({
       [customerId],
     );
     const lifted = liftedPayoutBans(me?.metadata ?? {});
+    const own = await this.payoutAccountsOf(customerId, sharedContext);
     const byKey = new Map<string, string>(
-      (await this.payoutAccountsOf(customerId, sharedContext)).map((n) => [
-        n.account_key,
-        n.bank_code,
-      ]),
+      own.map((n) => [n.account_key, n.bank_code]),
     );
+    // A PayNow mobile is banned with or without its 65, as the withdrawal
+    // check reads it (accountNumberForms), so the list asks for both.
+    for (const n of own) {
+      for (const form of accountNumberForms(n.bank_code, n.account_key)) {
+        if (!byKey.has(form)) byKey.set(form, n.bank_code);
+      }
+    }
     if (byKey.size === 0) return [];
     const banned = await em.execute<{ account_key: string }[]>(
       "SELECT account_key FROM banned_payout_account WHERE account_key = ANY(string_to_array(?, ','))",
@@ -10754,6 +10898,10 @@ class PacksModuleService extends MedusaService({
       reason: string;
       /** Admins only: see resolveBannedPayoutAccount. */
       fromBanList?: boolean;
+      /** An assistant card's time: refuseIfAuditedSince. */
+      since?: string;
+      /** The card's fingerprint of the number it was made for (#1007). */
+      numberMark?: string;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ bank_code: string; last4: string; lifted: boolean; changed: boolean }> {
@@ -10762,6 +10910,30 @@ class PacksModuleService extends MedusaService({
       input.last4,
       input.bankCode,
       input.fromBanList === true,
+      sharedContext,
+    );
+    // These last 4 can mean another number by the time of the tap (the player
+    // dropped theirs and the ban-list fallback finds one elsewhere): the card
+    // lifts only the number the person was shown.
+    if (
+      input.numberMark !== undefined &&
+      numberMarkOf(hit.account_key) !== input.numberMark
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `The banned number ending ${hit.last4} is not the one this was proposed for any more. Ask again.`,
+      );
+    }
+    await this.refuseIfAuditedSince(
+      input.customerId,
+      input.since,
+      (a) =>
+        'lifted_for_player' in a &&
+        auditNamesNumber(
+          a,
+          (a.banned_number as { last4?: unknown } | undefined)?.last4,
+          [hit.account_key],
+        ),
       sharedContext,
     );
     let changed = false;
@@ -10802,6 +10974,7 @@ class PacksModuleService extends MedusaService({
             banned_number: { bank_code: hit.bank_code, last4: hit.last4 },
             lifted_for_player: input.lifted,
             found_on: hit.found_on,
+            number_mark: numberMarkOf(hit.account_key),
           },
           reason: `${input.lifted ? 'Unbanned' : 'Banned again'} bank number …${hit.last4} for this player: ${input.reason}`,
         },
@@ -10845,10 +11018,12 @@ class PacksModuleService extends MedusaService({
 
   // Another account already used this holder name on a bank, saved or paid
   // (owner, 2026-11-03: a different bank under the same name is refused too).
-  // Names compare as setRealName compares them. A wallet entry carries its
-  // network's name, which no person's name equals. The accounts support
-  // checked as another person with this name (setHolderNameCleared) do not
-  // count, for this customer only; any other account still does.
+  // Names compare by holderNameKey, the stored ones in SQL (holderNameKeySql),
+  // so a variant saved with accents or symbols still finds the plain name. A
+  // wallet entry carries its network's name, which no person's name equals.
+  // The accounts support checked as another person with this name
+  // (setHolderNameCleared) do not count, for this customer only; any other
+  // account still does.
   @InjectManager()
   async holderNameHeldByAnother(
     customerId: string,
@@ -10882,18 +11057,25 @@ class PacksModuleService extends MedusaService({
     holderName: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<string[]> {
+    // A name with no English letter (saved before such names were refused)
+    // keys empty by its letters; it is compared by its old key instead, so
+    // its holders are still found. Empty both ways names no one.
+    const letters = holderNameKey(holderName);
+    const key = letters || realNameKey(holderName);
+    if (!key) return [];
+    const keySql = letters ? holderNameKeySql : realNameKeySql;
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ customer_id: string }[]>(
       'SELECT c.id AS customer_id FROM customer c ' +
         "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
         "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${realNameKeySql("a->>'accountHolderName'")} = ${realNameKeySql('?::text')} AND ${realNameKeySql("a->>'accountHolderName'")} <> '' ` +
+        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${keySql("a->>'accountHolderName'")} = ? ` +
         'UNION ' +
         'SELECT customer_id FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
-        `AND ${realNameKeySql('account_holder_name')} = ${realNameKeySql('?::text')} AND ${realNameKeySql('account_holder_name')} <> '' ` +
+        `AND ${keySql('account_holder_name')} = ? ` +
         "AND status IN ('pending', 'held', 'settled')",
-      [customerId, holderName, customerId, holderName],
+      [customerId, key, customerId, key],
     );
     return rows.map((r) => r.customer_id);
   }
@@ -10997,6 +11179,14 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<string> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // Lock-free read first: every /store/referral view calls this, and a code
+    // never changes once set, so only a customer WITHOUT one needs the global
+    // lock below (audit 2026-11-11: all views queued on one lock).
+    const [existing] = await em.execute<{ code: string | null }[]>(
+      "SELECT metadata->>'referral_code' AS code FROM customer WHERE id = ? AND deleted_at IS NULL",
+      [input.customerId],
+    );
+    if (typeof existing?.code === 'string') return existing.code;
     // Global first, then the per-customer lock mutateCustomerMetadata takes —
     // always in this order, so the two can never deadlock.
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
@@ -11899,6 +12089,31 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Awaited<ReturnType<PacksModuleService['createPulls']>>> {
+    // First, before any write: the lock refundUnfinishedOpen takes too, so a
+    // refund of this open and its card can never both commit.
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `open:${input.ledger.openId}`,
+    ]);
+    // Runs on every open, so both lookups are index conditions: the charge on
+    // its unique open_id index (at most one row), its reversal on the
+    // reversal-reference index, whose predicate the literal LIKE matches.
+    const [refunded] = await em.execute<{ id: string }[]>(
+      `SELECT id FROM credit_transaction
+        WHERE reference = (SELECT 'reversal:' || id FROM credit_transaction
+                            WHERE source_transaction_id = ? AND reason = 'pack_open'
+                              AND amount < 0 AND deleted_at IS NULL)
+          AND reference LIKE 'reversal:%' AND deleted_at IS NULL
+        LIMIT 1`,
+      [input.ledger.openId],
+    );
+    if (refunded) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This open was refunded, so its card was not recorded.',
+      );
+    }
+
     const pulls = await this.createPulls(input.pulls.map(pull => ({ ...pull, flip_eligible_at: null })), sharedContext);
 
     const vaultDelta =
@@ -13537,6 +13752,9 @@ class PacksModuleService extends MedusaService({
     const from = since.toISOString();
     const to = until.toISOString();
     // The pull's rolled_at comes a moment before its charge, hence the margin.
+    // The money-integrity job REFUNDS every open_without_prize row
+    // (refundUnfinishedOpen), so a new debit booked as 'pack_open' must record
+    // a pull or ticket_spin on its open_id, or it is paid back an hour later.
     const rolledFrom = new Date(since.getTime() - 60 * 60 * 1000).toISOString();
     return em.execute(
       `SELECT 'open_without_prize' AS kind, ct.id, ct.customer_id, -ct.amount AS amount, ct.created_at AS at
@@ -13569,6 +13787,42 @@ class PacksModuleService extends MedusaService({
         LIMIT 100`,
       [from, to, rolledFrom, from, to],
     );
+  }
+
+  /**
+   * The repair for an open_without_prize row: refund an open that was charged
+   * with nothing recorded for it (the process died between the charge and the
+   * card). Under the per-open lock recordPullsWithLedger takes first, so a
+   * card landing at the same moment either commits before this looks, and
+   * nothing is refunded, or finds the refund and is refused.
+   */
+  @InjectTransactionManager()
+  async refundUnfinishedOpen(
+    chargeId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<'refunded' | 'already' | 'has_prize' | 'not_found'> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const [charge] = await em.execute<{ open_id: string }[]>(
+      `SELECT source_transaction_id AS open_id FROM credit_transaction
+        WHERE id = ? AND reason = 'pack_open' AND amount < 0
+          AND source_transaction_id IS NOT NULL AND deleted_at IS NULL
+          AND (reference IS NULL OR reference NOT LIKE 'reversal:%')`,
+      [chargeId],
+    );
+    if (!charge) return 'not_found';
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `open:${charge.open_id}`,
+    ]);
+    const [prize] = await em.execute<{ x: number }[]>(
+      `SELECT 1 AS x FROM pull WHERE open_id = ? AND deleted_at IS NULL
+       UNION ALL
+       SELECT 1 FROM ticket_spin WHERE open_id = ? AND deleted_at IS NULL
+       LIMIT 1`,
+      [charge.open_id, charge.open_id],
+    );
+    if (prize) return 'has_prize';
+    const { reversed } = await this.reverseOpen(charge.open_id, sharedContext);
+    return reversed > 0 ? 'refunded' : 'already';
   }
 
   @InjectManager()
@@ -16133,12 +16387,9 @@ class PacksModuleService extends MedusaService({
         reference: r.reference,
       })),
     );
-    for (const [id, ext] of diff) {
-      await em.execute(
-        'UPDATE credit_transaction SET external_funded_cents = ?, updated_at = now() WHERE id = ?',
-        [ext, id],
-      );
-    }
+    await updateCreditTransactionsById(em, 'external_funded_cents = v.val', [
+      ...diff,
+    ]);
     return { rowsUpdated: diff.size };
   }
 
@@ -16238,12 +16489,11 @@ class PacksModuleService extends MedusaService({
     const releasedSen = release.reduce((t, r) => t + r.releaseSen, 0);
 
     if (input.apply && stamped.length > 0) {
-      for (const r of release) {
-        await em.execute(
-          'UPDATE credit_transaction SET external_funded_cents = external_funded_cents - ?, updated_at = now() WHERE id = ?',
-          [r.releaseSen, r.id],
-        );
-      }
+      await updateCreditTransactionsById(
+        em,
+        'external_funded_cents = t.external_funded_cents - v.val',
+        release.map((r) => [r.id, r.releaseSen] as const),
+      );
       await this.audit(
         {
           admin_id: input.actor,
@@ -17282,7 +17532,8 @@ class PacksModuleService extends MedusaService({
   // Accounts on the admin Automation Accounts list rank (and are paid) here
   // like every other account (owner, 2026-10-26; #827 had kept them off). The
   // public board, /task, the posters, live rank checks AND settleChallengeWeek
-  // all read this query, so the ranks shown are the ranks paid.
+  // all read this query, and the board and settlement both drop disabled
+  // accounts from it, so the ranks shown are the ranks paid.
   @InjectManager()
   async challengeWeekTop(
     opts: ChallengeWeekAnchor & { limit: number },
@@ -17655,11 +17906,20 @@ class PacksModuleService extends MedusaService({
     }
 
     // Rank is frozen with everything else — index + 1 in this list IS the rank.
-    const ranking: string[] = prior?.ranking?.length
-      ? prior.ranking
-      : (
-          await this.challengeWeekTop({ ...week, limit: 10 }, sharedContext)
-        ).map((t) => t.customer_id);
+    // A fresh ranking drops disabled accounts (deleted ones too: the purge
+    // writes a disabled tombstone) and closes the gap, the same filter the
+    // public board applies, so the rank a player is shown is the rank they
+    // are paid (owner, 2026-11-06). Over-fetched so the filter cannot shorten
+    // the top 10. Whoever is disabled when the week is first settled is not
+    // paid; re-enabling them before that tick puts them back.
+    let ranking: string[] = prior?.ranking ?? [];
+    if (ranking.length === 0) {
+      const top = (
+        await this.challengeWeekTop({ ...week, limit: 20 }, sharedContext)
+      ).map((t) => t.customer_id);
+      const disabled = await this.disabledCustomerIds(top, sharedContext);
+      ranking = top.filter((id) => !disabled.has(id)).slice(0, 10);
+    }
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
     }
@@ -17700,14 +17960,23 @@ class PacksModuleService extends MedusaService({
     };
     // A deleted customer keeps their `pull` rows — the books are retained on
     // purpose — so they stay ranked, and settlement would mint real balance and
-    // a real card to an account with no owner. Read once for the whole ranking,
-    // outside the per-winner transactions.
+    // a real card to an account with no owner. A fresh ranking already drops
+    // them (above); this catches a ranking frozen by an earlier tick. Read once
+    // for the whole ranking, outside the per-winner transactions.
     const deleted = await this.deletedCustomerIds(ranking, sharedContext);
+    // Re-read right before paying: a ranking frozen by an earlier tick still
+    // holds anyone disabled since, and a fresh one is a moment old. Their slot
+    // is skipped, not re-numbered, so a frozen ranking's ranks stay put.
+    const disabledNow = await this.disabledCustomerIds(
+      ranking,
+      sharedContext,
+    );
 
     const winners: SettledWinner[] = [];
     for (const [i, customerId] of ranking.entries()) {
       if (settledCustomers.has(customerId)) continue; // paid on a prior tick
       if (deleted.has(customerId)) continue; // account deleted; nobody to pay
+      if (disabledNow.has(customerId)) continue; // disabled; not paid
       const payout = byRank.get(i + 1);
       if (!payout || (payout.credits <= 0 && payout.cardIds.length === 0)) {
         continue; // rank pays nothing this week
@@ -18539,7 +18808,9 @@ class PacksModuleService extends MedusaService({
     // soft-deleted rows. A future void/delete route that soft-deletes a
     // reversing invoice would silently hand its headroom back. Unreachable
     // today — nothing deletes an invoice except the compensation cascade,
-    // which hard-deletes an invoice that never became visible.
+    // which hard-deletes an invoice that never became visible, and an edit
+    // (updatePurchaseInvoiceWithLines) soft-deletes lines only of an invoice
+    // no reversal points at, under this same lock.
     const priorReversals = await pageAll((opts) =>
       this.listPurchaseInvoices(
         { reverses_invoice_id: target.id },
@@ -18769,10 +19040,218 @@ class PacksModuleService extends MedusaService({
     return { ...invoice, lines };
   }
 
+  // Edits a purchase invoice in place (user 2026-11-11: a typo no longer
+  // needs a reversal plus a new invoice), the twin of
+  // updateGoodsReceiveNoteWithLines. Takes the invoice's reversal lock first,
+  // so an edit and a reversal (assertReversalCovered) cannot both pass their
+  // checks. Refused: a reversal, an invoice someone already reversed (its
+  // reversal was matched against these lines), and a save over someone else's
+  // (expected_updated_at). An invoice transferred from a goods receive note
+  // keeps every card, qty and FMV of that note, so only its date, supplier
+  // and unit costs change, and it moves no stock. A direct purchase moves
+  // stock_movement and the Medusa counter by the per-card difference only.
+  @InjectTransactionManager()
+  async updatePurchaseInvoiceWithLines(
+    invoiceId: string,
+    input: {
+      date: string;
+      supplier: string;
+      agent_user_id: string;
+      expected_updated_at?: string;
+      lines: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: number;
+        qty: number;
+        unit_cost: number;
+      }[];
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ) {
+    // The route validator already refuses these; repeated here because the
+    // method is public and a negative line would silently lower stock.
+    if (input.lines.length === 0 || input.lines.some((l) => !(l.qty > 0))) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Purchase invoice lines need a quantity above 0; to take every card off, reverse the invoice.',
+      );
+    }
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `purchase-invoice-reversal:${invoiceId}`,
+    ]);
+    const [invoice] = await this.listPurchaseInvoices(
+      { id: invoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!invoice) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Purchase invoice '${invoiceId}' not found.`,
+      );
+    }
+    if (invoice.reverses_invoice_id) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} is itself a reversal and cannot be edited.`,
+      );
+    }
+    const [reversal] = await this.listPurchaseInvoices(
+      { reverses_invoice_id: invoiceId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (reversal) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} was reversed by ${reversal.display_no} and can no longer be edited.`,
+      );
+    }
+    if (
+      input.expected_updated_at !== undefined &&
+      new Date(invoice.updated_at).getTime() !==
+        new Date(input.expected_updated_at).getTime()
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${invoice.display_no} was changed by someone else after you opened it. Reload it and make your edit again.`,
+      );
+    }
+    const before = await pageAll((opts) =>
+      this.listPurchaseInvoiceLines(
+        { invoice_id: invoiceId },
+        opts,
+        sharedContext,
+      ),
+    );
+    if (invoice.from_grn_id) {
+      const mismatch = this.grnLineMismatch(
+        before.map((l) => ({
+          card_handle: l.card_handle,
+          card_name: l.card_name,
+          qty: Number(l.qty),
+          fmv_snapshot: l.fmv_snapshot,
+        })),
+        input.lines,
+        // The card's name too: a transferred line stays as received.
+        (l) =>
+          `${l.card_handle} (${(l as { card_name?: string }).card_name}) x ${l.qty} @ FMV ${rmKey(l.fmv_snapshot)}`,
+        `invoice ${invoice.display_no}`,
+      );
+      if (mismatch) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `${invoice.display_no} was transferred from a goods receive note, so only its date, supplier and unit costs can change: ${mismatch}`,
+        );
+      }
+    }
+
+    const [updated] = await this.updatePurchaseInvoices(
+      [{ id: invoice.id, date: new Date(input.date), supplier: input.supplier }],
+      sharedContext,
+    );
+    // The ORM skips an update whose date and supplier did not change, so the
+    // version moves here, in the same transaction, for every edit.
+    // RETURNING, so the response carries the version a next edit must send.
+    const [{ updated_at }] = await em.execute<{ updated_at: Date }[]>(
+      'UPDATE purchase_invoice SET updated_at = clock_timestamp() WHERE id = ? RETURNING updated_at',
+      [invoice.id],
+    );
+    updated.updated_at = updated_at;
+    // Lines left as they were keep their rows (and ids).
+    const lineKey = (l: {
+      card_handle: string;
+      card_name: string;
+      fmv_snapshot: unknown;
+      qty: number;
+      unit_cost: unknown;
+    }) =>
+      `${l.card_handle}|${l.card_name}|${rmKey(l.fmv_snapshot)}|${Number(l.qty)}|${rmKey(l.unit_cost)}`;
+    const sameLines =
+      before.map(lineKey).sort().join('\n') ===
+      input.lines.map(lineKey).sort().join('\n');
+    let lines = before;
+    if (!sameLines) {
+      await this.softDeletePurchaseInvoiceLines(
+        before.map((l) => l.id),
+        {},
+        sharedContext,
+      );
+      lines = await this.createPurchaseInvoiceLines(
+        input.lines.map((l) => ({
+          invoice_id: invoice.id,
+          card_handle: l.card_handle,
+          card_name: l.card_name,
+          fmv_snapshot: l.fmv_snapshot,
+          qty: l.qty,
+          unit_cost: l.unit_cost,
+          // Raw product, as on create: see the line_total CHECK note above.
+          line_total: l.qty * l.unit_cost,
+        })),
+        sharedContext,
+      );
+    }
+    // grnQtyDelta is the per-card difference of any {id, card_handle, qty}
+    // lines. A transferred invoice moves no stock: its GRN already did.
+    const delta = invoice.from_grn_id
+      ? []
+      : grnQtyDelta(
+          before.map((l) => ({ ...l, qty: Number(l.qty) })),
+          lines.map((l) => ({ ...l, qty: Number(l.qty) })),
+        );
+    if (delta.length) {
+      await this.createStockMovements(
+        delta.map((d) => ({
+          card_handle: d.card_handle,
+          kind: 'purchase' as const,
+          qty: d.qty,
+          ref_id: d.ref_id,
+        })),
+        sharedContext,
+      );
+    }
+
+    const snapshot = (
+      inv: { date: Date; supplier: string },
+      ls: {
+        card_handle: string;
+        card_name: string;
+        fmv_snapshot: unknown;
+        qty: number;
+        unit_cost: unknown;
+      }[],
+    ) => ({
+      date: new Date(inv.date).toISOString(),
+      supplier: inv.supplier,
+      lines: ls.map((l) => ({
+        card_handle: l.card_handle,
+        card_name: l.card_name,
+        fmv_snapshot: Number(l.fmv_snapshot),
+        qty: Number(l.qty),
+        unit_cost: Number(l.unit_cost),
+      })),
+    });
+    await this.audit(
+      {
+        admin_id: input.agent_user_id,
+        entity_type: 'purchase_invoice',
+        entity_id: invoice.id,
+        action: 'edit',
+        before: snapshot(invoice, before),
+        after: snapshot(updated, lines),
+        reason: 'purchase invoice edited',
+      },
+      sharedContext,
+    );
+    return { ...updated, lines, delta };
+  }
+
   // Compensation-only hard delete — fires ONLY from the create-purchase-invoice
   // workflow's rollback path (the inventory-adjust step failing after this
   // invoice already committed). Never reachable from a route a caller sees
-  // succeed; invoices stay immutable from the operator's perspective.
+  // succeed; an invoice the operator saw is only ever edited
+  // (updatePurchaseInvoiceWithLines) or reversed, never deleted.
   @InjectTransactionManager()
   async deletePurchaseInvoiceCascade(
     invoiceId: string,
@@ -18808,7 +19287,8 @@ class PacksModuleService extends MedusaService({
   // Every open delivery order with one handle per pull — the input
   // allocateStock (stock-allocation.ts) works on. Open = still waiting for
   // cards (requested / processed / legacy 'packing') or holding them
-  // (ready_to_ship). Oldest first, id as the tie-break, like the allocation.
+  // (ready_to_ship, or pending_ship: packed, waiting for the courier). Oldest
+  // first, id as the tie-break, like the allocation.
   @InjectManager()
   async openDeliveryOrdersForAllocation(
     @MedusaContext() sharedContext: Context = {},
@@ -18838,7 +19318,7 @@ class PacksModuleService extends MedusaService({
            ON doi.delivery_order_id = dord.id AND doi.deleted_at IS NULL
          JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
         WHERE dord.deleted_at IS NULL
-          AND dord.status IN ('requested','processed','packing','ready_to_ship')
+          AND dord.status IN ('requested','processed','packing','ready_to_ship','pending_ship')
         ORDER BY dord.created_at, dord.id`,
     );
     const byId = new Map<
@@ -19338,8 +19818,10 @@ class PacksModuleService extends MedusaService({
               COUNT(DISTINCT p.id) FILTER (
                 WHERE dord.status IN ('requested','processed','packing')
               )::bigint AS requested,
+              -- pending_ship (packed, not posted) is still on the shelf and
+              -- still held: it counts here, never as shipped.
               COUNT(DISTINCT p.id) FILTER (
-                WHERE dord.status = 'ready_to_ship'
+                WHERE dord.status IN ('ready_to_ship','pending_ship')
               )::bigint AS rts,
               COUNT(DISTINCT p.id) FILTER (
                 WHERE dord.status IN ('shipped','completed','delivered')

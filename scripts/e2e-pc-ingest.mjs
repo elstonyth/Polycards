@@ -2,8 +2,14 @@
 // search PriceCharting, pick a tier, paste the PC GCS image URL, submit —
 // then assert via the admin API that the created product's image is OUR
 // stored copy (media pipeline), not a hotlink to storage.googleapis.com.
+// Run: QA_ADMIN_TOTP_SECRET=… node scripts/e2e-pc-ingest.mjs
 import { chromium } from 'playwright';
 import { readFileSync } from 'fs';
+import {
+  adminToken,
+  adminUiLogin,
+  requireAdminTotp,
+} from './lib/admin-sign-in.mjs';
 
 const ADMIN_BASE = 'http://localhost:7000/dashboard';
 const PC_IMG =
@@ -19,22 +25,13 @@ const logins = Object.fromEntries(
     ]),
 );
 
+const ADMIN_EMAIL = logins.ADMIN_EMAIL ?? 'admin@pokenic.app';
+requireAdminTotp(ADMIN_EMAIL);
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
-await page.goto(`${ADMIN_BASE}/login`, {
-  waitUntil: 'domcontentloaded',
-  timeout: 20000,
-});
-await page.fill(
-  'input[name="email"]',
-  logins.ADMIN_EMAIL ?? 'admin@pokenic.app',
-);
-await page.fill('input[name="password"]', logins.ADMIN_PW);
-await page.keyboard.press('Enter');
-await page.waitForURL((u) => !u.pathname.includes('/login'), {
-  timeout: 20000,
-});
+await adminUiLogin(page, ADMIN_BASE, ADMIN_EMAIL, logins.ADMIN_PW);
 
 await page.goto(`${ADMIN_BASE}/products/from-pricecharting`, {
   waitUntil: 'domcontentloaded',
@@ -92,20 +89,12 @@ await page.screenshot({
 // Verify through the backend: thumbnail must NOT be the GCS hotlink.
 const res = await page.request.get(
   `http://localhost:9000/admin/products?handle=${encodeURIComponent(handle)}&fields=id,handle,thumbnail,+metadata`,
-  { headers: { authorization: `Bearer ${await getToken()}` } },
-);
-async function getToken() {
-  const r = await page.request.post(
-    'http://localhost:9000/auth/user/emailpass',
-    {
-      data: {
-        email: logins.ADMIN_EMAIL ?? 'admin@pokenic.app',
-        password: logins.ADMIN_PW,
-      },
+  {
+    headers: {
+      authorization: `Bearer ${await adminToken('http://localhost:9000', ADMIN_EMAIL, logins.ADMIN_PW)}`,
     },
-  );
-  return (await r.json()).token;
-}
+  },
+);
 const body = await res.json();
 const prod = body.products?.[0];
 console.log('thumbnail:', prod?.thumbnail);

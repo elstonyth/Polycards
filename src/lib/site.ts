@@ -1,3 +1,6 @@
+// The community channel: the footer link and the floating Telegram chip.
+export const TELEGRAM_URL = 'https://t.me/polycardsgg';
+
 // Canonical public origin. Falls back to localhost for dev so metadataBase and
 // the sitemap still resolve; set NEXT_PUBLIC_SITE_URL in the deploy env.
 export const SITE_URL = (
@@ -11,7 +14,6 @@ export const ROUTES: string[] = [
   '/slots',
   '/leaderboard',
   '/how-it-works',
-  '/fairness',
   '/about',
   '/contact',
   '/privacy',

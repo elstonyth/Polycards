@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import {
   ContainerRegistrationKeys,
@@ -80,7 +81,13 @@ medusaIntegrationTestRunner({
         headers: Record<string, string>,
       ) =>
         unwrapResponse(
-          api.post(`/admin/customers/${customerId}/credits`, body, { headers }),
+          api.post(
+            `/admin/customers/${customerId}/credits`,
+            // Every caller must send a key; default one so tests about other
+            // rules don't each repeat it. A test that passes its own wins.
+            { idempotency_key: randomUUID(), ...body },
+            { headers },
+          ),
         );
 
       const ledgerRows = async () => {
@@ -185,6 +192,20 @@ medusaIntegrationTestRunner({
         expect(conflict.status).toBe(400);
         expect(conflict.data.message).toMatch(/different adjustment/);
         expect(await ledgerRows()).toHaveLength(1);
+      });
+
+      it("refuses an adjustment with no request ID (400, no row)", async () => {
+        const { id } = await registerCustomer("adjust-customer-nokey@test.dev");
+        const res = await unwrapResponse(
+          api.post(
+            `/admin/customers/${id}/credits`,
+            { amount: 5, note: "grant" },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/Request ID/);
+        expect(await ledgerRows()).toHaveLength(0);
       });
 
       it("rejects invalid amounts and missing notes with 400 and writes nothing", async () => {

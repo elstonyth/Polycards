@@ -2,7 +2,7 @@ import type {
   ICustomerModuleService,
   MedusaContainer,
 } from '@medusajs/framework/types';
-import { Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../modules/assistant';
 import type AssistantModuleService from '../../../modules/assistant/service';
@@ -34,8 +34,14 @@ import {
   PERMANENT_BAN_REASON_PREFIX,
   savedSlotFull,
 } from '../../../modules/packs/saved-accounts';
-import { MY_BANKS, SG_BANKS, findBank } from '../../../modules/packs/banks';
+import {
+  MY_BANKS,
+  SG_BANKS,
+  accountNumberForms,
+  findBank,
+} from '../../../modules/packs/banks';
 import { withdrawalDetailsError } from '../../../modules/packs/gateway-withdrawal';
+import { accountLinks, VISITOR_NEED, type LinksDb } from './account-links';
 import { namedIn, namedPlayer } from './named';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 
@@ -623,6 +629,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           username,
           bank_code: hit.bank_code,
           last4,
+          number_mark: numberMark(hit.account_key, ctx.container),
           reason,
         },
         `Unban ${bankName} …${last4} for ${shown}${handle && handle !== shown ? ` (@${handle})` : ''} only: they may save it and be paid to it; it stays banned for every other account. If another account holds it, it also needs freeing from them (an admin). Reason: ${reason}`,
@@ -711,14 +718,20 @@ export const AGENT_TOOLS: AgentTool[] = [
       let numberHolders: string[] = [];
       if (number) {
         const bank = number.bankCode ? findBank(number.bankCode) : undefined;
-        const bannedForPlayer = await packs.payoutAccountBanned(
-          number.key,
-          false,
-          customerId,
-        );
+        // Asked as a save asks: a PayNow mobile with or without its 65.
+        const forms = accountNumberForms(number.bankCode ?? '', number.key);
+        const bannedForPlayer = (
+          await Promise.all(
+            forms.map((n) => packs.payoutAccountBanned(n, false, customerId)),
+          )
+        ).some(Boolean);
         const banned =
           bannedForPlayer ||
-          (await packs.payoutAccountBanned(number.key, false));
+          (
+            await Promise.all(
+              forms.map((n) => packs.payoutAccountBanned(n, false)),
+            )
+          ).some(Boolean);
         if (
           bank &&
           saved.some(
@@ -752,11 +765,17 @@ export const AGENT_TOOLS: AgentTool[] = [
             'who else holds the number, and the slot: ask staff which bank, then check again',
           );
         } else {
-          numberHolders = await packs.payoutAccountHoldersAt(
-            customerId,
-            number.key,
-            bank.id,
-          );
+          numberHolders = [
+            ...new Set(
+              (
+                await Promise.all(
+                  forms.map((n) =>
+                    packs.payoutAccountHoldersAt(customerId, n, bank.id),
+                  ),
+                )
+              ).flat(),
+            ),
+          ];
           const others = await whoAre(ctx, numberHolders);
           out.number = {
             bank: bank.name,
@@ -838,6 +857,48 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
   },
   {
+    name: 'account_links',
+    label: 'Accounts that may be one person',
+    description:
+      "Other accounts that may belong to the same person, by what is not a bank (owner, 2026-11-06): the same browser or network (IP) seen on both, a saved delivery address that matches, and real names that are one name or where one starts the other. Use it together with ban_reason whenever staff ask whether accounts are related, linked or one person (有关系, 同一个人, same person): ban_reason sees bank numbers and holder names only. Give the player by shown name or profile handle ('@name' means the handle); for two accounts, call it for one and look for the other in its list. These are review signals, never proof and never a ban reason. Say what matched in plain words (the same browser, a network only these two used, the same delivery address, near-identical real names); never repeat an address, IP or real name. If nothing matched, say no signal was found, never that the accounts are unrelated or independent; if checked.browser_and_network is false, say browser and network were not checked.",
+    parameters: {
+      type: 'object',
+      properties: { username: PLAYER_ARG },
+      required: ['username'],
+      additionalProperties: false,
+    },
+    // Address and real name are on the admin player page; browser and network
+    // are fenced like bank details, so that part is checked when it runs.
+    needs: [{ resource: 'customer', operation: 'read' }],
+    run: async (args, ctx) => {
+      const packs = packsOf(ctx);
+      const customerId = await namedPlayer(
+        packs,
+        str(args.username),
+        staffText(ctx),
+        'Ask staff for the player again.',
+        { readOnly: true },
+      );
+      const visitors =
+        ctx.access.superAdmin ||
+        ((await ctx.access.can?.(VISITOR_NEED)) ?? false);
+      const [me] = await whoAre(ctx, [customerId]);
+      return JSON.stringify({
+        player: me.label,
+        ...(await accountLinks({
+          db: ctx.container.resolve<LinksDb>(
+            ContainerRegistrationKeys.PG_CONNECTION,
+          ),
+          packs,
+          customerId,
+          adminId: ctx.access.userId,
+          visitors,
+          label: (ids) => whoAre(ctx, ids),
+        })),
+      });
+    },
+  },
+  {
     name: 'free_bank_number',
     label: 'Free bank number',
     description:
@@ -870,7 +931,17 @@ export const AGENT_TOOLS: AgentTool[] = [
           `Which bank is …${n.last4} at? Ask staff to name the bank. Nothing was changed.`,
         );
       }
-      const ids = await packs.payoutAccountHoldersAt(customerId, n.key, bank.id);
+      // Asked as bank_save_check asks: a PayNow mobile with or without its 65.
+      const forms = accountNumberForms(bank.id, n.key);
+      const ids = [
+        ...new Set(
+          (
+            await Promise.all(
+              forms.map((k) => packs.payoutAccountHoldersAt(customerId, k, bank.id)),
+            )
+          ).flat(),
+        ),
+      ];
       if (ids.length === 0) {
         throw new Error(
           `No other account holds ${bank.name} …${n.last4}, so there is nothing to free. Run bank_save_check for what blocks the save. Nothing was changed.`,
@@ -894,7 +965,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           from: ids,
           reason,
         },
-        `${me.banned ? 'Tap Unban first: this works once the player is unbanned. ' : ''}Free ${bank.name} …${n.last4} for ${me.name}: it comes off ${others.length} other account${others.length === 1 ? '' : 's'}: ${others.map((o) => o.label).join('; ')}. They lose their saved entry of it, and their payouts to it keep the last 4 only, with no name. This cannot be undone. The player then saves it themselves${(await packs.payoutAccountBanned(n.key, false, customerId)) ? ', once it is also unbanned for them' : ''}. Reason: ${reason}`,
+        `${me.banned ? 'Tap Unban first: this works once the player is unbanned. ' : ''}Free ${bank.name} …${n.last4} for ${me.name}: it comes off ${others.length} other account${others.length === 1 ? '' : 's'}: ${others.map((o) => o.label).join('; ')}. They lose their saved entry of it, and their payouts to it keep the last 4 only, with no name. This cannot be undone. The player then saves it themselves${(await Promise.all(forms.map((k) => packs.payoutAccountBanned(k, false, customerId)))).some(Boolean) ? ', once it is also unbanned for them' : ''}. Reason: ${reason}`,
       );
       return JSON.stringify({
         freed: false,

@@ -100,7 +100,7 @@ describe('creditDepositByAdmin', () => {
       }),
     );
     expect(h.packs.claimDepositStatus).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'gpd_1', from: ['failed'], to: 'settled' }),
+      expect.objectContaining({ id: 'gpd_1', from: ['pending', 'failed', 'expired'], to: 'settled' }),
     );
   });
 
@@ -148,7 +148,7 @@ describe('creditDepositByAdmin', () => {
     const h = harness({ ...failedRow, status });
     await h.credit();
     expect(h.packs.claimDepositStatus).toHaveBeenCalledWith(
-      expect.objectContaining({ from: [status], to: 'settled' }),
+      expect.objectContaining({ from: ['pending', 'failed', 'expired'], to: 'settled' }),
     );
   });
 

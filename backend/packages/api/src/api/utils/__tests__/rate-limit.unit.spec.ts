@@ -1034,6 +1034,7 @@ describe('RATE_LIMITS', () => {
       'real-name-write|5|60000|10|3600000|Too many attempts.||',
       'auth|50|10000|300|60000|Too many sign-in attempts.||',
       'auth-identifier|5|60000|20|3600000|Too many sign-in attempts for this account.|emailBodyKeyOf|true',
+      'admin-mfa-code|10|60000|30|3600000|Too many code attempts. Wait a while, then sign in again.|<function>|',
       'profile-read|60|10000|600|60000|Too many requests.||',
       'store-read|120|10000|480|60000|Too many requests.||',
       'profile-appearance|15|10000|60|60000|Too many appearance changes.||',

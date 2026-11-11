@@ -5,7 +5,11 @@ import { assertMockTopupSafe } from './src/modules/packs/topup';
 import { warnLegacyGatewayEnv } from './src/modules/packs/gateway-env';
 import { isResendConfigured } from './src/modules/resend/options';
 import { resolvePhoneGateState } from './src/utils/phone-verification';
-import { productionDatabaseDriverOptions } from './src/utils/db-driver-options';
+import {
+  productionDatabaseDriverOptions,
+  runtimeDatabaseUrl,
+} from './src/utils/db-driver-options';
+import { ADMIN_MFA_ISSUER, adminMfaEncryptionKey } from './src/utils/admin-mfa';
 loadEnv(process.env.NODE_ENV || 'development', process.cwd());
 
 // Boot-guard (security audit 2026-06-30, Batch A): refuse to start a production
@@ -174,7 +178,11 @@ module.exports = defineConfig({
   // admin loader requiring a bundled index.html at `medusa start`.
   admin: { disable: true },
   projectConfig: {
-    databaseUrl: process.env.DATABASE_URL,
+    // statement_timeout for the web + worker processes only (`medusa start`),
+    // never the migrate job: see runtimeDatabaseUrl.
+    databaseUrl: isProduction
+      ? runtimeDatabaseUrl(process.env.DATABASE_URL, process.env)
+      : process.env.DATABASE_URL,
     // TLS for DO's self-signed CA, the per-process connection cap (an uncapped
     // pool overruns the 25-connection cluster during a deploy), and the
     // idle-in-transaction timeout. Every value, and why the keys sit where they
@@ -245,6 +253,14 @@ module.exports = defineConfig({
       vendorCors: process.env.VENDOR_CORS!,
       jwtSecret: secretFromEnv('JWT_SECRET'),
       cookieSecret: secretFromEnv('COOKIE_SECRET'),
+      // Staff and sellers sign in with a password only; customers also with
+      // Google (security audit 2026-11-07). Without this allowlist Medusa lets
+      // every registered provider serve every actor, the admin login included.
+      authMethodsPerActor: {
+        user: ['emailpass'],
+        member: ['emailpass'],
+        customer: ['emailpass', 'google'],
+      },
     },
   },
   featureFlags: {
@@ -292,6 +308,19 @@ module.exports = defineConfig({
     {
       resolve: '@medusajs/medusa/auth',
       options: {
+        // Admin two-step sign-in (owner, 2026-11-07): authenticator apps, 6
+        // digits every 30 s; src/utils/admin-mfa.ts has the key, and
+        // src/api/utils/admin-mfa-guard.ts makes every admin login use it.
+        // 'challenge': removing one's own authenticator needs a current code;
+        // a Super Admin's reset (admin/users/[id]/mfa/reset) is the way past.
+        // The dev default mirrors the framework's own JWT secret fallback.
+        mfa: {
+          encryption_key: adminMfaEncryptionKey(
+            process.env.JWT_SECRET || 'supersecret',
+          ),
+          disable_policy: 'challenge',
+          providers: [{ id: 'totp', options: { issuer: ADMIN_MFA_ISSUER } }],
+        },
         providers: [
           {
             resolve: '@medusajs/medusa/auth-emailpass',

@@ -2,6 +2,7 @@
 // Usage: node scripts/audit-admin-capture.mjs
 // Requires backend :9000 + admin :7000 up, and ADMIN_PW in env or scripts/.dev-logins.
 import { chromium } from 'playwright';
+import { adminUiLogin, requireAdminTotp } from './lib/admin-sign-in.mjs';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
@@ -20,6 +21,7 @@ function devLogin(key, fallback) {
 }
 const EMAIL = devLogin('ADMIN_EMAIL', 'admin@pokenic.app');
 const PW = devLogin('ADMIN_PW', '');
+requireAdminTotp(EMAIL);
 if (!PW) {
   console.error('No ADMIN_PW found (env or scripts/.dev-logins)');
   process.exit(1);
@@ -71,20 +73,13 @@ try {
 
   // login
   current = 'login';
-  await gotoBounded(page, `${BASE}/login`);
-  await page.waitForSelector('input[name=email], input[type=email]', {
-    timeout: 15000,
-  });
+  await gotoBounded(page, `${BASE}/sign-in`);
+  await page.waitForSelector('#sign-in-email', { timeout: 15000 });
   await page.screenshot({
     path: path.join(OUT, 'login-1440.png'),
     fullPage: true,
   });
-  await page.fill('input[name=email], input[type=email]', EMAIL);
-  await page.fill('input[name=password], input[type=password]', PW);
-  await page.click('button[type=submit]');
-  await page.waitForURL((u) => !u.pathname.includes('login'), {
-    timeout: 20000,
-  });
+  await adminUiLogin(page, BASE, EMAIL, PW);
   console.log('logged in');
 
   for (const [name, route] of PAGES) {

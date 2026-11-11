@@ -19,9 +19,9 @@ const FETCH_N = TOP_N * 2;
 
 /**
  * The running challenge week's view. hiddenAboveCut counts administratively
- * disabled players dropped from the displayed top 10. Settlement still ranks
- * and pays them, so while it is above 0 a displayed rank is not the rank that
- * gets paid. `week` is the anchor the queries used, for challengeWeekBounds.
+ * disabled players dropped from the displayed top 10. Settlement drops them
+ * too and re-numbers the same way, so a displayed rank is the rank paid.
+ * `week` is the anchor the queries used, for challengeWeekBounds.
  */
 export async function buildChallengeView(scope: MedusaContainer) {
   const packs: PacksModuleService = scope.resolve(PACKS_MODULE);
@@ -111,9 +111,9 @@ export async function buildChallengeView(scope: MedusaContainer) {
   }
 
   // An administratively disabled player is hidden from every public surface —
-  // see the sibling leaderboard route for why this is display-only (a disable
-  // is reversible, so settlement still ranks and pays them) and why the
-  // survivors are re-numbered without gaps.
+  // see the sibling leaderboard route for why the survivors are re-numbered
+  // without gaps (settlement applies the same filter, so they are paid at the
+  // rank shown).
   const disabledIds = await packs.disabledCustomerIds(
     rankedAll.map((r) => r.customer_id),
   );

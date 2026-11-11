@@ -75,7 +75,7 @@ medusaIntegrationTestRunner({
         const res = await unwrapResponse(
           api.post(
             `/admin/customers/${cid}/credits`,
-            { amount: 5, note },
+            { amount: 5, note, idempotency_key: 'audit-grant' },
             { headers: adminHeaders() },
           ),
         );
@@ -119,7 +119,7 @@ medusaIntegrationTestRunner({
           api.post(
             `/admin/customers/${cid}/credits`,
             // Attempt to inject a fake admin_id via the body — must be ignored
-            { amount: 3, note, admin_id: 'evil_fake_id' },
+            { amount: 3, note, admin_id: 'evil_fake_id', idempotency_key: 'audit-inject' },
             { headers: adminHeaders() },
           ),
         );

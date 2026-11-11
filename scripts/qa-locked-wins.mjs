@@ -4,30 +4,24 @@
 
 // Admin credentials come from env (repo rule: no hardcoded secrets) — the
 // same dev login the e2e suite uses. e.g.:
-//   QA_ADMIN_EMAIL=... QA_ADMIN_PASSWORD=... node scripts/<this>.mjs
+//   QA_ADMIN_EMAIL=... QA_ADMIN_PASSWORD=... QA_ADMIN_TOTP_SECRET=... node scripts/<this>.mjs
+import { adminToken, requireAdminTotp } from './lib/admin-sign-in.mjs';
+
 const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.QA_ADMIN_PASSWORD;
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
   console.error('Set QA_ADMIN_EMAIL and QA_ADMIN_PASSWORD (dev admin login).');
   process.exit(1);
 }
+requireAdminTotp(ADMIN_EMAIL);
 const BASE = 'http://localhost:9000';
 const SLUG = 'qa-lockcheck';
 const OPENS = 10;
 const LOCK_PCT = 95;
 
-const admin = await fetch(`${BASE}/auth/user/emailpass`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email: ADMIN_EMAIL,
-    password: ADMIN_PASSWORD,
-  }),
-}).then((r) => r.json());
-if (!admin.token) throw new Error('admin auth failed — check QA_ADMIN_* env');
 const AH = {
   'Content-Type': 'application/json',
-  Authorization: `Bearer ${admin.token}`,
+  Authorization: `Bearer ${await adminToken(BASE, ADMIN_EMAIL, ADMIN_PASSWORD)}`,
 };
 
 // Publishable key for store routes.
@@ -126,7 +120,11 @@ const custId = me.customer?.id;
 const credit = await fetch(`${BASE}/admin/customers/${custId}/credits`, {
   method: 'POST',
   headers: AH,
-  body: JSON.stringify({ amount: 20, note: 'QA locked-wins verification' }),
+  body: JSON.stringify({
+    amount: 20,
+    note: 'QA locked-wins verification',
+    idempotency_key: crypto.randomUUID(),
+  }),
 });
 console.log('credit top-up:', credit.status);
 

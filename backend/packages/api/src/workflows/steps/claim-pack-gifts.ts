@@ -12,7 +12,9 @@ export type ClaimPackGiftsInput = {
 
 export type ClaimPackGiftsResult = { gift_ids: string[] };
 
-type CompensateData = { open_id: string } | undefined;
+// null, not undefined: with undefined compensate data Medusa hands the
+// compensator the step's OUTPUT instead (#968, audit 2026-11-11).
+type CompensateData = { open_id: string } | null;
 
 // claim-pack-gifts — spend the customer's gifted packs (spec 2026-10-07 §5)
 // BEFORE the charge, so the batch charges only the rows the gifts do not
@@ -28,7 +30,7 @@ export const claimPackGiftsStep = createStep<
   'claim-pack-gifts',
   async (input, { container }) => {
     if (input.gifts <= 0) {
-      return new StepResponse({ gift_ids: [] }, undefined as CompensateData);
+      return new StepResponse({ gift_ids: [] }, null as CompensateData);
     }
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     const gift_ids = await packs.claimPackGifts({

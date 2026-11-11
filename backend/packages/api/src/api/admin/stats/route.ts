@@ -45,15 +45,15 @@ export async function GET(
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const figures = ({ from, to }: StatsWindow) =>
-    Promise.all([
-      packs.signupTopupStats(from, to, scope),
-      packs.withdrawalStats(from, to, scope),
-    ]).then(([inflow, outflow]) => ({ ...inflow, ...outflow }));
-  const [current, previous] = await Promise.all([
-    figures(windows.current),
-    figures(windows.previous),
-  ]);
+  // One query at a time, like profit-report: this page polls every 30 s and
+  // four parallel scans took 4 of the 5 pool connections pack opens use
+  // (audit 2026-11-11).
+  const figures = async ({ from, to }: StatsWindow) => ({
+    ...(await packs.signupTopupStats(from, to, scope)),
+    ...(await packs.withdrawalStats(from, to, scope)),
+  });
+  const current = await figures(windows.current);
+  const previous = await figures(windows.previous);
   // Dates serialize to ISO strings.
   res.json({
     as_of: now,
