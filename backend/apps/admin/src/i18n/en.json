@@ -1455,8 +1455,8 @@
     "toBuy": "To buy",
     "toShip": "To ship",
     "toBuyEmpty": "Nothing to buy — every waiting order is covered.",
-    "frozenAt": "As of {{time}} MYT — updates daily at 12am MYT, after order statuses update.",
-    "live": "Live — today's 12am list isn't frozen (the 12am update is off or hasn't run yet).",
+    "frozenAt": "Orders as of {{time}} MYT — new orders join at 12am MYT. Stock is live: a saved goods receive note takes its cards off at once.",
+    "live": "Live — every open order counts, since today's 12am update is off or hasn't run yet.",
     "toShipEmpty": "No orders are ready to ship.",
     "loadError": "Could not load this list.",
     "col": {
