@@ -8932,7 +8932,6 @@ class PacksModuleService extends MedusaService({
       );
     }
     const { customerId } = input;
-    if (tickets > 0) await this.assertMayReceive(customerId, sharedContext);
     const ref = `admin:${customerId}:${key ?? crypto.randomUUID()}`;
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
@@ -8954,6 +8953,8 @@ class PacksModuleService extends MedusaService({
       }
       return { tickets, balance: before, replayed: true };
     }
+    // After the replay: a grant that committed before the disable still answers.
+    if (tickets > 0) await this.assertMayReceive(customerId, sharedContext);
     if (before + tickets < 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -15208,9 +15209,6 @@ class PacksModuleService extends MedusaService({
     replayed?: boolean;
   }> {
     const reason = input.bonus ? 'bonus_grant' : 'adjustment';
-    if (input.amount > 0) {
-      await this.assertMayReceive(input.customerId, sharedContext);
-    }
     // Serialize retries BEFORE the mint-window and customer locks. Replays
     // must still succeed after a grant exhausts today's mint allowance.
     const requestReference = input.idempotencyKey
@@ -15266,6 +15264,10 @@ class PacksModuleService extends MedusaService({
           replayed: true,
         };
       }
+    }
+    // After the replay: a grant that committed before the disable still answers.
+    if (input.amount > 0) {
+      await this.assertMayReceive(input.customerId, sharedContext);
     }
     // Rolling-24h GLOBAL mint ceiling (ADJUST_DAILY_MINT_MAX_RM), enforced HERE
     // — inside this transaction, under a global lock — because an unlocked
@@ -15424,7 +15426,6 @@ class PacksModuleService extends MedusaService({
     if (invalid) throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
     const quantity = input.quantity as number;
     const note = (input.note as string).trim();
-    await this.assertMayReceive(input.customerId, sharedContext);
 
     const [pack] = await this.listPacks(
       { slug: input.packSlug },
@@ -15475,6 +15476,8 @@ class PacksModuleService extends MedusaService({
         packTitle: pack!.title,
       };
     }
+    // After the replay: a gift that committed before the disable still answers.
+    await this.assertMayReceive(input.customerId, sharedContext);
 
     // Gifts' OWN global ceiling (GIFT_DAILY_MINT_MAX_RM, split from the credit
     // pool 2026-10-17), under the same lock as a credit grant (taken FIRST —
