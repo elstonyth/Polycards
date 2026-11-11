@@ -6,9 +6,6 @@ import syncMarketPricesJob, { runMarketPriceSync } from '../sync-market-prices';
 jest.mock('../../api/admin/pricecharting/client', () => ({
   pcFetch: jest.fn(),
 }));
-jest.mock('../../modules/packs/pricing', () => ({
-  fetchUsdMyr: jest.fn(async () => 4.1),
-}));
 
 afterEach(() => {
   jest.useRealTimers();

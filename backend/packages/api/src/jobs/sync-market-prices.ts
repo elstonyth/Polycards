@@ -3,7 +3,6 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
 import { pcFetch } from '../api/admin/pricecharting/client';
-import { fetchUsdMyr } from '../modules/packs/pricing';
 import {
   recordPriceHistory,
   refreshCardPrice,
@@ -55,25 +54,7 @@ export async function runMarketPriceSync(
 ): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-  const now = new Date();
-
-  try {
-    const rate = await fetchUsdMyr();
-    const [row] = await packs.listFxRates({ pair: 'USD_MYR' }, { take: 1 });
-    if (row)
-      await packs.updateFxRates([
-        { id: row.id, rate, source: 'frankfurter', fetched_at: now },
-      ]);
-    else
-      await packs.createFxRates([
-        { pair: 'USD_MYR', rate, source: 'frankfurter', fetched_at: now },
-      ]);
-    logger.info(`[sync-market-prices] FX USD->MYR = ${rate}`);
-  } catch (e) {
-    logger.warn(
-      `[sync-market-prices] FX failed, keeping last-known: ${(e as Error).message}`,
-    );
-  }
+  // USD->MYR is refreshed hourly by sync-usd-myr, not here (audit 2026-11-11).
 
   // Paginate past linked cards beyond a single page — a `take: N` cap would
   // silently stop syncing cards past N as the catalog grows.
