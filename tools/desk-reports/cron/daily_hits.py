@@ -106,6 +106,8 @@ def _get(path, params, key, tries=3):
             if attempt == tries:
                 raise
         time.sleep(5 * attempt)
+    # Only reachable with tries < 1: never hand json.loads a None.
+    raise ValueError(f"{path}: no attempt made (tries={tries})")
 
 
 def _save(folder, name, data):
