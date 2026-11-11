@@ -53,6 +53,7 @@ const fakeService = (windowCents = 0) => {
     })),
     createAdminActionAudits: jest.fn(async () => []),
     recordLedgerEntry: jest.fn(async () => undefined),
+    isAccountDisabled: jest.fn(async () => false),
   };
   Object.assign(svc, writes);
   // BOTH keys: adminAdjustCredit is @InjectTransactionManager (reuses
@@ -78,6 +79,37 @@ const grant = (amount: number) => ({
   amount,
   note: 'test',
   adminId: 'adm_1',
+});
+
+describe('PacksModuleService.adminAdjustCredit — disabled account', () => {
+  it('refuses a positive grant before any lock or write; a clawback still runs', async () => {
+    const f = fakeService();
+    Object.assign(f.svc, { isAccountDisabled: jest.fn(async () => true) });
+    await expect(f.svc.adminAdjustCredit(grant(5), f.ctx)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/disabled/),
+    });
+    expect(f.ops).toEqual([]);
+    expect(f.writes.mutateCreditAtomic).not.toHaveBeenCalled();
+
+    await f.svc.adminAdjustCredit(grant(-5), f.ctx);
+    expect(f.writes.mutateCreditAtomic).toHaveBeenCalledTimes(1);
+  });
+
+  it('a grant that committed before the disable still replays', async () => {
+    const f = fakeService();
+    Object.assign(f.svc, {
+      isAccountDisabled: jest.fn(async () => true),
+      listCreditTransactions: jest.fn(async () => [
+        { id: 'ctx_existing', amount: 5, reference: 'test', reason: 'adjustment' },
+      ]),
+      creditSummary: jest.fn(async () => ({ balance: 12 })),
+    });
+    await expect(
+      f.svc.adminAdjustCredit({ ...grant(5), idempotencyKey: 'k1' }, f.ctx),
+    ).resolves.toMatchObject({ id: 'ctx_existing', replayed: true });
+    expect(f.writes.mutateCreditAtomic).not.toHaveBeenCalled();
+  });
 });
 
 describe('PacksModuleService.adminAdjustCredit — mint-window lock', () => {

@@ -1808,6 +1808,18 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       return { packs, approve };
     }
 
+    it('a disabled account is not paid out, and the row stays held', async () => {
+      const h = approveHarness();
+      h.packs.listCustomerAccountStates.mockImplementation(
+        async (filter: { disabled?: boolean }) =>
+          filter.disabled ? [{ customer_id: heldRow.customer_id }] : [],
+      );
+      await expect(h.approve()).rejects.toThrow(/disabled/);
+      expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+    });
+
     // One bank account, one Polycards account, on the row's own number: a row
     // held before the rule shipped, or a number since removed, stays held.
     describe('a shared bank account', () => {

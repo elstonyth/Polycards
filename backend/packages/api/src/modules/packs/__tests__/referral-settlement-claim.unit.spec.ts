@@ -59,6 +59,7 @@ function fake(returned: Row[] | (() => Row[])) {
       .mockResolvedValueOnce([LINE])
       .mockResolvedValue([]),
     deletedCustomerIds: jest.fn(async () => new Set<string>()),
+    disabledCustomerIds: jest.fn(async () => new Set<string>()),
     recordLedgerEntry: jest.fn(async () => {
       ops.push('ledger');
       return { id: 'led_1', display_id: 'RF26Q3A0001', replayed: false };
@@ -178,6 +179,27 @@ describe('payWeeklySettlement claims a line before it moves money', () => {
     );
     expect(r2.skipped).toBe(0);
     expect(lost.deductRunTotal).not.toHaveBeenCalled();
+  });
+});
+
+describe('payWeeklySettlement pays a disabled account nothing', () => {
+  it('voids its line as account_disabled through the same claim', async () => {
+    const f = fake([{ id: 'wsl_1' }]);
+    f.disabledCustomerIds.mockResolvedValue(new Set(['cus_r']));
+    const res = await f.svc.payWeeklySettlement(
+      { settlementId: 'ws_1' },
+      f.ctx,
+    );
+    expect(res).toEqual({ paid: 0, skipped: 1, paid_customer_ids: [] });
+    expect(f.em.execute.mock.calls[0][1]).toEqual([
+      'voided',
+      'account_disabled',
+      'wsl_1',
+      'pending',
+    ]);
+    expect(f.deductRunTotal).toHaveBeenCalledTimes(1);
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
+    expect(f.createCreditTransactions).not.toHaveBeenCalled();
   });
 });
 

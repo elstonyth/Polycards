@@ -764,7 +764,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         }
       });
 
-      it('a disabled entrant is refunded and excluded; all disabled means no winner', async () => {
+      it('a disabled entrant is excluded and gets no refund; all disabled means no winner', async () => {
         const event = await liveEvent();
         await fund('cus_off', 100);
         await fund('cus_on', 100);
@@ -788,17 +788,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
           entries: [{ customer_id: 'cus_on', tickets: 1 }],
           excluded: ['cus_off'],
         });
-        expect(await service.luckyDrawBalance('cus_off')).toBe(100);
+        expect(await service.luckyDrawBalance('cus_off')).toBe(5);
         expect(await service.luckyDrawBalance('cus_on')).toBe(99);
-        const refunds = await service.listLuckyDrawTickets({
-          reason: 'refund',
-        });
-        expect(refunds).toHaveLength(1);
-        expect(refunds[0]).toMatchObject({
-          customer_id: 'cus_off',
-          delta: 95,
-          ref: `${event.id}:cus_off`,
-        });
+        expect(
+          await service.listLuckyDrawTickets({ reason: 'refund' }),
+        ).toEqual([]);
 
         const lone = await liveEvent({
           startsAt: afterEnd(event),
@@ -1168,6 +1162,35 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(
           (await service.luckyDrawPage()).events.map((g) => g.id),
         ).toEqual([stays.id]);
+      });
+
+      it('a disabled entrant drops out of the gate totals and top list, and a withdraw refunds only the rest', async () => {
+        const gate = await liveEvent({ tier: 'economy' });
+        await fund('cus_live', 50);
+        await fund('cus_shut', 50);
+        await enterOk('cus_live', gate.id, 4);
+        await enterOk('cus_shut', gate.id, 30);
+        await service.createCustomerAccountStates([
+          { customer_id: 'cus_shut', disabled: true },
+        ]);
+
+        const page = await service.luckyDrawPage();
+        const shown = [
+          { customer_id: 'cus_live', tickets: 4 },
+        ];
+        expect(
+          page.events.map((g) => [g.total_tickets, g.entrant_count, g.top]),
+        ).toEqual([[4, 1, shown]]);
+        expect(page.event).toMatchObject({
+          id: gate.id,
+          total_tickets: 4,
+          entrant_count: 1,
+          top: shown,
+        });
+
+        expect(await withdraw(gate.id)).toEqual({ refunded: 1 });
+        expect(await service.luckyDrawBalance('cus_live')).toBe(50);
+        expect(await service.luckyDrawBalance('cus_shut')).toBe(20);
       });
 
       it('entries into two gates at once never overspend', async () => {

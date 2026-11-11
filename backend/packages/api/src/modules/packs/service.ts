@@ -1194,6 +1194,20 @@ type LuckyDrawCard = {
 
 /** The player page's top-entrants length. */
 const LUCKY_DRAW_TOP_ENTRANTS = 10;
+// The delivery statuses that move an order toward the courier.
+const DELIVERY_TOWARD_COURIER: ReadonlySet<string> = new Set([
+  'ready_to_ship',
+  'pending_ship',
+  'shipped',
+]);
+// Disabled (and purged) accounts are left out of every count and list built from
+// lucky_draw_entry, so the totals and the top 10 are the ones the draw will use
+// (owner 2026-11-12: a disabled account shows nowhere). Appended after the
+// entry table's own WHERE; it must stay unaliased in those queries.
+const LUCKY_DRAW_LIVE_ENTRY_SQL =
+  'AND NOT EXISTS (SELECT 1 FROM customer_account_state s ' +
+  'WHERE s.customer_id = lucky_draw_entry.customer_id ' +
+  'AND s.disabled = true AND s.deleted_at IS NULL) ';
 /** A finished event stays on the page this long. */
 const LUCKY_DRAW_LINGER_MS = 7 * 24 * 60 * 60 * 1000;
 /** A draw time must be at least this far ahead when it is set or published:
@@ -3088,10 +3102,12 @@ class PacksModuleService extends MedusaService({
       { take: 100_000 },
       sharedContext,
     );
-    const skip = await this.deletedCustomerIds(
-      [...new Set(pending.map((l) => l.customer_id))],
-      sharedContext,
-    );
+    const payees = [...new Set(pending.map((l) => l.customer_id))];
+    const deleted = await this.deletedCustomerIds(payees, sharedContext);
+    // A disabled account is paid nothing either (owner rule 2026-11-12). Its
+    // line is voided like a deleted one, so the run still closes and the
+    // reason shows in review; re-enabling does not bring the line back.
+    const disabled = await this.disabledCustomerIds(payees, sharedContext);
 
     // Every line flip below is ONE conditional claim (see claim.ts), never the
     // generated selector-update: that one is a find-then-write with no row
@@ -3107,12 +3123,17 @@ class PacksModuleService extends MedusaService({
     let skipped = 0;
     const paidCustomerIds: string[] = [];
     for (const line of pending) {
-      if (skip.has(line.customer_id)) {
+      if (deleted.has(line.customer_id) || disabled.has(line.customer_id)) {
         const voided = await claimRows(em, {
           table: 'weekly_settlement_line',
           ids: [line.id],
           where: { status: 'pending' },
-          set: { status: 'voided', void_reason: 'account_deleted' },
+          set: {
+            status: 'voided',
+            void_reason: deleted.has(line.customer_id)
+              ? 'account_deleted'
+              : 'account_disabled',
+          },
         });
         // An admin void got there first — and already took its deduction.
         if (voided.length !== 1) continue;
@@ -7950,8 +7971,8 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // Admin: withdraw a prize before its draw and give every entrant their
-  // tickets back. Takes the EXCLUSIVE prize lock first — the same key an entry
+  // Admin: withdraw a prize before its draw and give every entrant that is not
+  // disabled their tickets back. Takes the EXCLUSIVE prize lock first — the same key an entry
   // holds shared — so it waits for in-flight entries and an entry arriving
   // afterwards is refused; the result is then re-checked under the lock, so a
   // cancel racing the draw can never both pay a winner and refund. On a published
@@ -8035,11 +8056,17 @@ class PacksModuleService extends MedusaService({
     // Read through the ORM, before this transaction writes anything: raw SQL
     // would not see rows the unit of work has not flushed yet. Paged — a
     // truncated read here is a missed refund.
-    const entrants = aggregateEntries(
+    const entered = aggregateEntries(
       await pageAll((opts) =>
         this.listLuckyDrawEntries({ prize_id: prize.id }, opts, sharedContext),
       ),
     );
+    // A disabled account gets no refund (owner 2026-11-12).
+    const shut = await this.disabledCustomerIds(
+      entered.map((e) => e.customer_id),
+      sharedContext,
+    );
+    const entrants = entered.filter((e) => !shut.has(e.customer_id));
     const cancelledAt = new Date();
     await this.updateLuckyDrawPrizes(
       { selector: { id: prize.id }, data: { cancelled_at: cancelledAt } },
@@ -8075,13 +8102,14 @@ class PacksModuleService extends MedusaService({
     return { refunded: entrants.length };
   }
 
-  // Admin: stop a one_winner event and give every entrant their tickets back,
+  // Admin: stop a one_winner event and give every entrant that is not disabled
+  // their tickets back,
   // allowed until it has a result. Takes the EXCLUSIVE event lock, so it waits for
   // in-flight entries and refunds them, an entry arriving afterwards sees the
   // cancelled status, and a withdraw racing the draw can never both pay and refund
   // (the result is re-checked under the lock, and the status stops a later draw).
-  // The refund ref '<eventId>:<customerId>' is unique, as is the draw's for an
-  // excluded account: an event is either drawn or withdrawn.
+  // The refund ref '<eventId>:<customerId>' is unique: an event is either drawn
+  // or withdrawn, and the draw itself refunds nobody.
   @InjectTransactionManager()
   async withdrawLuckyDrawEvent(
     input: { id: string; adminId: string; reason: string },
@@ -8123,11 +8151,17 @@ class PacksModuleService extends MedusaService({
       );
     }
     // Paged: a truncated read here is a missed refund.
-    const entrants = aggregateEntries(
+    const entered = aggregateEntries(
       await pageAll((opts) =>
         this.listLuckyDrawEntries({ event_id: event.id }, opts, sharedContext),
       ),
     );
+    // A disabled account gets no refund (owner 2026-11-12).
+    const shut = await this.disabledCustomerIds(
+      entered.map((e) => e.customer_id),
+      sharedContext,
+    );
+    const entrants = entered.filter((e) => !shut.has(e.customer_id));
     const prizes = (
       await pageAll((opts) =>
         this.listLuckyDrawPrizes({ event_id: event.id }, opts, sharedContext),
@@ -8313,7 +8347,9 @@ class PacksModuleService extends MedusaService({
         this.listLuckyDrawEntries({ prize_id: prize.id }, opts, sharedContext),
       ),
     );
-    // Disabled (and deleted) accounts are left out of the draw and refunded.
+    // Disabled (and deleted) accounts are left out of the draw and get nothing
+    // back: a disabled account receives no tickets (owner 2026-11-12). Who was
+    // left out stays on the result row, so an enable can be made good by hand.
     const disabled = await this.disabledCustomerIds(
       all.map((e) => e.customer_id),
       sharedContext,
@@ -8335,18 +8371,6 @@ class PacksModuleService extends MedusaService({
           )
         : [];
 
-    if (excluded.length > 0) {
-      // Same ref as a cancel refund: a prize is either drawn or cancelled.
-      await this.createLuckyDrawTickets(
-        excluded.map((e) => ({
-          customer_id: e.customer_id,
-          delta: e.tickets,
-          reason: 'refund' as const,
-          ref: `${prize.id}:${e.customer_id}`,
-        })),
-        sharedContext,
-      );
-    }
     const { creditTransactionId, pullId } = winnerId
       ? await this.payLuckyDrawPrize(
           prize,
@@ -8601,7 +8625,9 @@ class PacksModuleService extends MedusaService({
         this.listLuckyDrawEntries({ event_id: event.id }, opts, sharedContext),
       ),
     );
-    // Disabled (and deleted) accounts are left out of the draw and refunded.
+    // Disabled (and deleted) accounts are left out of the draw and get nothing
+    // back: a disabled account receives no tickets (owner 2026-11-12). Who was
+    // left out stays on the result row, so an enable can be made good by hand.
     const disabled = await this.disabledCustomerIds(
       all.map((e) => e.customer_id),
       sharedContext,
@@ -8620,17 +8646,6 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    if (excluded.length > 0) {
-      await this.createLuckyDrawTickets(
-        excluded.map((e) => ({
-          customer_id: e.customer_id,
-          delta: e.tickets,
-          reason: 'refund' as const,
-          ref: `${event.id}:${e.customer_id}`,
-        })),
-        sharedContext,
-      );
-    }
     const drawnAt = new Date();
     const facts = {
       winner_customer_id: winnerId,
@@ -8938,6 +8953,8 @@ class PacksModuleService extends MedusaService({
       }
       return { tickets, balance: before, replayed: true };
     }
+    // After the replay: a grant that committed before the disable still answers.
+    if (tickets > 0) await this.assertMayReceive(customerId, sharedContext);
     if (before + tickets < 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -8994,7 +9011,7 @@ class PacksModuleService extends MedusaService({
       `SELECT ${column} AS target, COALESCE(SUM(tickets), 0) AS total, ` +
         'COUNT(DISTINCT customer_id) AS entrants FROM lucky_draw_entry ' +
         `WHERE ${column} IN (${ids.map(() => '?').join(', ')}) ` +
-        `AND deleted_at IS NULL GROUP BY ${column}`,
+        `AND deleted_at IS NULL ${LUCKY_DRAW_LIVE_ENTRY_SQL}GROUP BY ${column}`,
       ids,
     );
     return new Map(
@@ -9130,7 +9147,9 @@ class PacksModuleService extends MedusaService({
         'ORDER BY SUM(tickets) DESC, customer_id ASC) AS rn ' +
         'FROM lucky_draw_entry ' +
         `WHERE event_id IN (${ids.map(() => '?').join(', ')}) ` +
-        'AND deleted_at IS NULL GROUP BY event_id, customer_id' +
+        'AND deleted_at IS NULL ' +
+        LUCKY_DRAW_LIVE_ENTRY_SQL +
+        'GROUP BY event_id, customer_id' +
         ') ranked WHERE rn <= ? ORDER BY event_id, rn',
       [...ids, LUCKY_DRAW_TOP_ENTRANTS],
     );
@@ -9269,7 +9288,9 @@ class PacksModuleService extends MedusaService({
             'ORDER BY SUM(tickets) DESC, customer_id ASC) AS rn ' +
             'FROM lucky_draw_entry ' +
             `WHERE prize_id IN (${prizeIds.map(() => '?').join(', ')}) ` +
-            'AND deleted_at IS NULL GROUP BY prize_id, customer_id' +
+            'AND deleted_at IS NULL ' +
+            LUCKY_DRAW_LIVE_ENTRY_SQL +
+            'GROUP BY prize_id, customer_id' +
             ') ranked WHERE rn <= ? ORDER BY prize_id, rn',
           [...prizeIds, LUCKY_DRAW_TOP_ENTRANTS],
         )
@@ -9324,7 +9345,9 @@ class PacksModuleService extends MedusaService({
       top = (
         await em.execute<{ customer_id: string; tickets: string | number }[]>(
           'SELECT customer_id, SUM(tickets) AS tickets FROM lucky_draw_entry ' +
-            'WHERE event_id = ? AND deleted_at IS NULL GROUP BY customer_id ' +
+            'WHERE event_id = ? AND deleted_at IS NULL ' +
+            LUCKY_DRAW_LIVE_ENTRY_SQL +
+            'GROUP BY customer_id ' +
             'ORDER BY SUM(tickets) DESC, customer_id ASC LIMIT ?',
           [event.id, LUCKY_DRAW_TOP_ENTRANTS],
         )
@@ -9891,6 +9914,21 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return Boolean(state);
+  }
+
+  // Owner rule 2026-11-12: a disabled account receives nothing (no grant, gift,
+  // ticket, prize or payout). Taking value OFF it, a clawback, stays open.
+  // NOT_ALLOWED, never CONFLICT: the error handler rewrites CONFLICT messages.
+  async assertMayReceive(
+    customerId: string,
+    sharedContext: Context = {},
+  ): Promise<void> {
+    if (await this.isAccountDisabled(customerId, sharedContext)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is disabled, so it cannot receive anything. Enable it first.',
+      );
+    }
   }
 
   // Batch form of isAccountDisabled, for the PUBLIC boards: they rank by
@@ -14912,6 +14950,18 @@ class PacksModuleService extends MedusaService({
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const [owner] = await em.execute<{ customer_id: string }[]>('SELECT customer_id FROM delivery_order WHERE id = ? AND deleted_at IS NULL', [input.orderId]);
     if (!owner) throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Delivery order not found.');
+    // A disabled account receives no prize (owner rule 2026-11-12): its order
+    // never moves toward the courier. Cancel stays open, and so does marking
+    // delivered, which only records what already happened.
+    if (
+      DELIVERY_TOWARD_COURIER.has(input.to) &&
+      (await this.isAccountDisabled(owner.customer_id, sharedContext))
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This customer’s account is disabled, so the order cannot be shipped. Cancel it, or enable the account first.',
+      );
+    }
     await lockCoinFlipCustomer(owner.customer_id, sharedContext);
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `delivery:${input.orderId}`,
@@ -15215,6 +15265,10 @@ class PacksModuleService extends MedusaService({
         };
       }
     }
+    // After the replay: a grant that committed before the disable still answers.
+    if (input.amount > 0) {
+      await this.assertMayReceive(input.customerId, sharedContext);
+    }
     // Rolling-24h GLOBAL mint ceiling (ADJUST_DAILY_MINT_MAX_RM), enforced HERE
     // — inside this transaction, under a global lock — because an unlocked
     // pre-check outside it was only enforcement-at-margin: 50 parallel
@@ -15422,6 +15476,8 @@ class PacksModuleService extends MedusaService({
         packTitle: pack!.title,
       };
     }
+    // After the replay: a gift that committed before the disable still answers.
+    await this.assertMayReceive(input.customerId, sharedContext);
 
     // Gifts' OWN global ceiling (GIFT_DAILY_MINT_MAX_RM, split from the credit
     // pool 2026-10-17), under the same lock as a credit grant (taken FIRST —
@@ -18377,13 +18433,19 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     const handleById = new Map(cards.map((c) => [c.id, c.handle]));
+    // A disabled account receives no card (owner rule 2026-11-12): its row
+    // stays skipped, so enabling the account and re-running still hands it over.
+    const shut = await this.disabledCustomerIds(
+      [...new Set(rows.map((r) => r.customer_id))],
+      sharedContext,
+    );
 
     let granted = 0;
     let pulls = 0;
     const stillSkipped: string[] = [];
     for (const row of rows) {
       const handle = handleById.get(row.card_id);
-      if (!handle) {
+      if (!handle || shut.has(row.customer_id)) {
         stillSkipped.push(row.id);
         continue;
       }
@@ -19319,6 +19381,13 @@ class PacksModuleService extends MedusaService({
          JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL
         WHERE dord.deleted_at IS NULL
           AND dord.status IN ('requested','processed','packing','ready_to_ship','pending_ship')
+          -- A disabled account's WAITING order takes no stock and is not
+          -- bought for (owner rule 2026-11-12). A packed one keeps its cards
+          -- held until staff cancel it, so they are not handed out twice.
+          AND NOT (dord.status IN ('requested','processed','packing')
+            AND EXISTS (SELECT 1 FROM customer_account_state s
+                         WHERE s.customer_id = dord.customer_id
+                           AND s.disabled = true AND s.deleted_at IS NULL))
         ORDER BY dord.created_at, dord.id`,
     );
     const byId = new Map<
