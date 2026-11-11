@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { StockLineItem } from '../../../components/StockItemSearch';
-import { Badge, Container, Heading, Table, Text } from '@medusajs/ui';
+import { Badge, Button, Container, Heading, Table, Text } from '@medusajs/ui';
 import { ArrowLeft } from '@medusajs/icons';
 import { usePurchaseInvoice } from '../../../lib/queries';
 import { httpStatus } from '../../../lib/admin-rest';
@@ -66,19 +66,43 @@ const PurchaseInvoiceDetailPage = () => {
             <LoadingSkeleton />
           ) : (
             <>
-              <div className="flex items-center gap-2">
-                <Heading level="h2">{inv.display_no}</Heading>
-                {inv.reverses_invoice_id ? (
-                  <Badge size="2xsmall" color="orange">
-                    Reversal
-                  </Badge>
-                ) : null}
-                {inv.from_grn_id && inv.from_grn_display_no ? (
-                  <Link to={`/goods-receive-notes/${inv.from_grn_id}`}>
-                    <Badge size="2xsmall" color="blue">
-                      {t('grn.fromBadge', { no: inv.from_grn_display_no })}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Heading level="h2">{inv.display_no}</Heading>
+                  {inv.reverses_invoice_id ? (
+                    <Badge size="2xsmall" color="orange">
+                      Reversal
                     </Badge>
-                  </Link>
+                  ) : null}
+                  {inv.from_grn_id && inv.from_grn_display_no ? (
+                    <Link to={`/goods-receive-notes/${inv.from_grn_id}`}>
+                      <Badge size="2xsmall" color="blue">
+                        {t('grn.fromBadge', { no: inv.from_grn_display_no })}
+                      </Badge>
+                    </Link>
+                  ) : null}
+                  {inv.reversed_by ? (
+                    <Link to={`/purchase-invoices/${inv.reversed_by.id}`}>
+                      <Badge size="2xsmall" color="orange">
+                        {t('pi.reversedBy', { no: inv.reversed_by.display_no })}
+                      </Badge>
+                    </Link>
+                  ) : null}
+                </div>
+                {/* Same rule as the server: a reversal, or an invoice already
+                    reversed, keeps its lines. */}
+                {!inv.reverses_invoice_id && !inv.reversed_by ? (
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() =>
+                      navigate(
+                        `/purchase-invoices/${encodeURIComponent(inv.id)}/edit`,
+                      )
+                    }
+                  >
+                    {t('pi.edit')}
+                  </Button>
                 ) : null}
               </div>
               {inv.reverses_invoice_id ? (
@@ -143,7 +167,10 @@ const PurchaseInvoiceDetailPage = () => {
                   {inv.lines.map((l) => (
                     <Table.Row key={l.id}>
                       <Table.Cell>
-                        <StockLineItem handle={l.card_handle} name={l.card_name} />
+                        <StockLineItem
+                          handle={l.card_handle}
+                          name={l.card_name}
+                        />
                       </Table.Cell>
                       <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                         {rm(Number(l.fmv_snapshot))}
