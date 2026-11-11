@@ -28,6 +28,12 @@ vi.mock('@/lib/use-liquid-glass', () => ({
 }));
 vi.mock('@/lib/navigation', () => ({ leaveFor: vi.fn() }));
 
+// TopUpSheet reads the provider when it loads, so it is set before the import.
+vi.stubEnv('NEXT_PUBLIC_PAYMENTS_PROVIDER', 'tgpay');
+// Loaded once here, not in each test: under full-suite load the first test's
+// import alone can outlast the 5 s test timeout (as games-tab did, #1013).
+const { default: TopUpSheet } = await import('../TopUpSheet');
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -35,7 +41,6 @@ beforeAll(() => {
   (
     globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.stubEnv('NEXT_PUBLIC_PAYMENTS_PROVIDER', 'tgpay');
 });
 beforeEach(() => {
   vi.clearAllMocks();
@@ -60,7 +65,6 @@ afterEach(() => {
 });
 
 async function mount() {
-  const { default: TopUpSheet } = await import('../TopUpSheet');
   await act(async () => {
     root.render(
       createElement(TopUpSheet, {
