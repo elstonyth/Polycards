@@ -7,7 +7,7 @@
 //   node snapgen.mjs gpt-image "prompt" [--mode low|medium|high] [--resolution 1K|2K|4K|8K|10K|12K] [--aspect_ratio 1:1] [--files ref.png]
 //   node snapgen.mjs grok-image "prompt" [--mode SPEED|QUALITY] [--orientation landscape|portrait|square] [--num_result 1-8] [--files ref.png] [--ref_history <uuid>]
 //   node snapgen.mjs meta-image "prompt" [--orientation landscape|portrait|square] [--num_result 1-4] [--files ref.png] [--ref_history <uuid>]
-//   node snapgen.mjs video <veo|sora|grok|seedance|kling|meta> "prompt" --model <model> [--duration 8] [--resolution 720p] [--aspect_ratio 16:9] [--mode standard] [--ref_images a.png,https://…] ...
+//   node snapgen.mjs video <veo|sora|grok|seedance|kling|meta|minimax> "prompt" --model <model> [--duration 8] [--resolution 720p] [--aspect_ratio 16:9] [--mode standard] [--ref_images a.png,https://…] ...
 //   node snapgen.mjs extend <veo|grok|seedance|kling> "prompt" --ref_history <uuid> [--mode fast] [--duration N]
 //   node snapgen.mjs storyboard '[{"prompt":"scene 1","duration":6,"mode":"custom"},...]' [--aspect_ratio landscape|portrait|square] [--resolution 480p|720p] [--files ...]
 //     (scenes = JSON array, 2-10 scenes, <=45s total; scene N's last frame chains into scene N+1)
@@ -55,6 +55,7 @@ const VIDEO_PATHS = {
   grok: 'video-gen/grok',
   seedance: 'video-gen/seedance',
   kling: 'video-gen/kling',
+  minimax: 'video-gen/minimax',
   meta: 'video-gen/meta',
 };
 
@@ -230,6 +231,18 @@ const isRemoteRef = (v) =>
   /^https?:\/\//i.test(v) ||
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
+const MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+};
+
 async function buildForm(prompt, extra) {
   const form = new FormData();
   if (prompt) form.set('prompt', prompt);
@@ -238,7 +251,8 @@ async function buildForm(prompt, extra) {
       for (const f of v.split(',')) {
         const t = f.trim();
         if (isRemoteRef(t)) form.append(k, t);
-        else form.append(k, await openAsBlob(t), basename(t));
+        // the API rejects untyped blobs (application/octet-stream) for video/audio refs
+        else form.append(k, await openAsBlob(t, { type: MIME[extname(t).toLowerCase()] ?? '' }), basename(t));
       }
     else if (k === 'file_urls')
       for (const u of v.split(',')) form.append(k, u.trim());
