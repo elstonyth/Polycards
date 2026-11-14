@@ -14,17 +14,15 @@ export const PC_TOKEN_MISSING =
 
 // `cause` marks an error that is about the feed, not the card or query asked
 // for: "auth" = the token is expired/revoked (every request will fail until it
-// is renewed), "unavailable" = timeout, outage or rate limit. No cause = the
-// answer was about this request (e.g. unknown product id).
+// is renewed), "unavailable" = timeout, outage, rate limit or any error reply we
+// do not recognise (unknown errors default to feed-level). No cause = card-level,
+// only for a 404 or a "no such product" / "not found" reply about this request.
 export type PcErrorCause = 'auth' | 'unavailable';
 
 export type PcResult<T> =
   | { kind: 'ok'; data: T }
   | { kind: 'no-token' }
   | { kind: 'error'; message: string; cause?: PcErrorCause };
-
-// 410 is what PriceCharting sends for "Access token has expired" (2026-10-19).
-const AUTH_STATUSES = new Set([401, 403, 410]);
 
 export async function pcFetch<
   T extends { status: string; 'error-message'?: string },
@@ -56,9 +54,22 @@ export async function pcFetch<
   }
   const upstreamMessage = data?.['error-message'];
 
+  if (resp.status >= 500 || resp.status === 429) {
+    return {
+      kind: 'error',
+      message: upstreamMessage ?? `PriceCharting error (HTTP ${resp.status}).`,
+      cause: 'unavailable',
+    };
+  }
+  // 410 is what PriceCharting sent for "Access token has expired" (2026-10-19);
+  // a bare 401/403 may be an edge/WAF block, so it needs a token message too.
+  const tokenMessage = /\btoken\b/i.test(upstreamMessage ?? '');
   if (
-    AUTH_STATUSES.has(resp.status) ||
-    (data?.status !== 'success' && /\btoken\b/i.test(upstreamMessage ?? ''))
+    resp.status === 410 ||
+    (tokenMessage &&
+      (resp.status === 401 ||
+        resp.status === 403 ||
+        data?.status !== 'success'))
   ) {
     return {
       kind: 'error',
@@ -79,9 +90,10 @@ export async function pcFetch<
     return {
       kind: 'error',
       message: upstreamMessage ?? `PriceCharting error (HTTP ${resp.status}).`,
-      ...(resp.status >= 500 || resp.status === 429
-        ? { cause: 'unavailable' as const }
-        : {}),
+      ...(resp.status === 404 ||
+      /no such product|not found/i.test(upstreamMessage ?? '')
+        ? {}
+        : { cause: 'unavailable' as const }),
     };
   }
   return { kind: 'ok', data };

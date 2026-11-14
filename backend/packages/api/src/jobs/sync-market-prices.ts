@@ -39,7 +39,10 @@ async function saveFeed(
       selector: { id: row.id },
       data: { pricecharting_feed: feed },
     });
-  else await packs.createSiteSettings([{ id: 'global', pricecharting_feed: feed }]);
+  else
+    await packs.createSiteSettings([
+      { id: 'global', pricecharting_feed: feed },
+    ]);
 }
 
 // All scheduled jobs share ONE BullMQ slot (concurrency 1), and a full sweep
@@ -54,12 +57,16 @@ export default async function syncMarketPricesJob(
 ): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   if (running) {
-    logger.warn('[sync-market-prices] skipped: the previous sweep is still running');
+    logger.warn(
+      '[sync-market-prices] skipped: the previous sweep is still running',
+    );
     return;
   }
   running = runMarketPriceSync(container)
     .catch((e) =>
-      logger.error(`[sync-market-prices] sweep failed: ${(e as Error).message}`),
+      logger.error(
+        `[sync-market-prices] sweep failed: ${(e as Error).message}`,
+      ),
     )
     .finally(() => {
       running = null;
@@ -84,15 +91,22 @@ export async function runMarketPriceSync(
   const syncedAt = (c: CardRow) =>
     (c.pc_synced_at ? new Date(c.pc_synced_at).getTime() : 0) || 0;
   cards.sort((a, b) => syncedAt(a) - syncedAt(b));
-  // A stored outage clears on the first answer that proves the token works,
-  // not at the end of the sweep: deploys cut sweeps short.
-  const [settings] = await packs.listSiteSettings({}, { take: 1 });
-  let feedFlagged = Boolean(settings?.pricecharting_feed);
+  // A stored outage clears on the first ok reply (the only answer that proves
+  // the token works), not at the end of the sweep: deploys cut sweeps short.
+  // Unreadable settings count as flagged: worst case one harmless null write.
+  let feedFlagged = true;
+  try {
+    const [settings] = await packs.listSiteSettings({}, { take: 1 });
+    feedFlagged = Boolean(settings?.pricecharting_feed);
+  } catch (e) {
+    logger.error(
+      `[sync-market-prices] could not read the feed alert: ${(e as Error).message}`,
+    );
+  }
   let feedAnswered = false;
   const fetchProduct: typeof pcFetchRaw = async (path, params) => {
     const res = await pcFetchRaw(path, params);
-    if (res.kind === 'ok' || (res.kind === 'error' && !res.cause))
-      feedAnswered = true;
+    if (res.kind === 'ok') feedAnswered = true;
     return res;
   };
   let outage: PricechartingFeed | undefined;
@@ -152,21 +166,29 @@ export async function runMarketPriceSync(
       await sleep(1100);
     }
     if (feedFlagged && feedAnswered) {
-      feedFlagged = false;
-      await saveFeed(packs, null).catch((e) =>
+      try {
+        await saveFeed(packs, null);
+        feedFlagged = false; // a failed clear stays flagged: the next card retries
+      } catch (e) {
         logger.error(
           `[sync-market-prices] could not clear the feed alert: ${(e as Error).message}`,
-        ),
-      );
+        );
+      }
     }
   }
   if (outage) {
     logger.error(
-      `[sync-market-prices] stopped after ${changed} updates: PriceCharting ${
+      `[sync-market-prices] stopped after ${changed} updates, ${skipped} skipped, ${failed} failed: PriceCharting ${
         outage.status === 'no_token' ? 'token is not set' : 'token rejected'
       } (${outage.message}); renew it and update PRICECHARTING_API_TOKEN`,
     );
-    await saveFeed(packs, outage);
+    try {
+      await saveFeed(packs, outage);
+    } catch (e) {
+      logger.error(
+        `[sync-market-prices] feed outage NOT recorded — admin alert lost: ${(e as Error).message}`,
+      );
+    }
     return;
   }
   const summary = `[sync-market-prices] done: ${changed}/${cards.length} updated, ${skipped} skipped, ${failed} failed`;

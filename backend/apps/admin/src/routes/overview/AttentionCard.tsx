@@ -117,10 +117,17 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   if (twice) counts.doublePay = twice.count;
   if (integrity.data) counts.integrity = integrity.data.findings.length;
   // A feed outage (token expired) is one problem, not one per card: while it
-  // lasts every card goes stale, so the per-card count would read N again.
+  // lasts stale, never-synced and sync-error cards are its symptoms and fold
+  // into that one alert; any other card problem still counts on its own.
   const feed = pricing.data?.feed;
+  const issues = pricing.data?.cards.issues ?? [];
+  const otherIssues = feed
+    ? issues.filter(
+        (i) => !['stale', 'never_synced', 'sync_error'].includes(i.reason),
+      )
+    : issues;
   if (pricing.data && !pricing.isError)
-    counts.pricing = feed ? 1 : pricing.data.cards.issues.length;
+    counts.pricing = (feed ? 1 : 0) + otherIssues.length;
   const { soundOn, setSound } = useAttentionAlert(counts);
 
   // A query this role may not read is left out; any other failure shows.
@@ -182,24 +189,28 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   }
   if (feed) {
     items.push({
-      id: 'pricing',
+      id: 'pricing-feed',
       icon: <ExclamationCircle />,
       title: t(
         feed.status === 'no_token'
           ? 'dashboard.pricingNoToken'
           : 'dashboard.pricingTokenExpired',
       ),
-      detail: t('dashboard.pricingFeedDetail', { age: timeAgo(feed.at) }),
+      detail: t('dashboard.pricingFeedDetail', {
+        message: feed.message,
+        age: timeAgo(feed.at),
+      }),
       to: '/cards?pricing=attention',
       action: t('dashboard.check'),
       urgent: true,
     });
-  } else if (pricing.data && pricing.data.cards.issues.length > 0) {
+  }
+  if (pricing.data && otherIssues.length > 0) {
     items.push({
       id: 'pricing',
       icon: <ExclamationCircle />,
       title: t('dashboard.pricingAttention', {
-        count: pricing.data.cards.issues.length,
+        count: otherIssues.length,
       }),
       detail: t('dashboard.pricingDetail', {
         count: pricing.data.cards.pending_confirmation,

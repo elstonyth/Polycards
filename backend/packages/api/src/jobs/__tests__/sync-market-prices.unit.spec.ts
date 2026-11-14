@@ -139,7 +139,15 @@ it('syncs the least recently synced cards first, so a sweep cut short leaves dif
 
 it('returns before the sweep ends (frees the shared job slot) and skips a second sweep while one runs', async () => {
   jest.useFakeTimers();
-  const cards = [{ id: 'c', handle: 'c', pc_product_id: '1', pc_grade: 'PSA 10', market_value: 1 }];
+  const cards = [
+    {
+      id: 'c',
+      handle: 'c',
+      pc_product_id: '1',
+      pc_grade: 'PSA 10',
+      market_value: 1,
+    },
+  ];
   const packs = {
     listCards: jest.fn(async () => cards),
     listFxRates: jest.fn(async () => [{ id: 'fx' }]),
@@ -158,7 +166,9 @@ it('returns before the sweep ends (frees the shared job slot) and skips a second
   await syncMarketPricesJob(container); // resolves while the 1.1 s per-card wait is still pending
   expect(logger.info).not.toHaveBeenCalledWith(expect.stringMatching(/done:/));
   await syncMarketPricesJob(container);
-  expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/still running/));
+  expect(logger.warn).toHaveBeenCalledWith(
+    expect.stringMatching(/still running/),
+  );
 
   await jest.runAllTimersAsync();
   expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/done: /));
@@ -211,7 +221,9 @@ describe('PriceCharting feed outage', () => {
     expect(logger.warn).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error).toHaveBeenCalledWith(
-      expect.stringMatching(/Access token has expired.*PRICECHARTING_API_TOKEN/),
+      expect.stringMatching(
+        /Access token has expired.*PRICECHARTING_API_TOKEN/,
+      ),
     );
     expect(packs.updateSiteSettings).toHaveBeenCalledWith({
       selector: { id: 'global' },
@@ -240,7 +252,11 @@ describe('PriceCharting feed outage', () => {
   });
 
   it('clears a stored outage once, on the first reply that proves the token works', async () => {
-    const { packs, run } = setup({ status: 'token_expired', message: 'x', at: 'y' });
+    const { packs, run } = setup({
+      status: 'token_expired',
+      message: 'x',
+      at: 'y',
+    });
     jest
       .mocked(pcFetch)
       .mockResolvedValueOnce({
@@ -259,7 +275,108 @@ describe('PriceCharting feed outage', () => {
       selector: { id: 'global' },
       data: { pricecharting_feed: null },
     });
+    // Cleared right after the first ok (call 2), before the next card's fetch.
+    const fetchOrder = jest.mocked(pcFetch).mock.invocationCallOrder;
+    const clearAt = packs.updateSiteSettings.mock.invocationCallOrder[0];
+    expect(clearAt).toBeGreaterThan(fetchOrder[1]);
+    expect(clearAt).toBeLessThan(fetchOrder[2]);
     // The timed-out card was written (error kept visible), the rest synced.
     expect(packs.applyCardPriceSync).toHaveBeenCalledTimes(3);
+  });
+
+  const storedOutage = { status: 'token_expired', message: 'x', at: 'y' };
+  const cleared = {
+    selector: { id: 'global' },
+    data: { pricecharting_feed: null },
+  };
+  const okReplies = () =>
+    jest.mocked(pcFetch).mockImplementation(async (_path, params) => ({
+      kind: 'ok',
+      data: { status: 'success', id: params.id, 'manual-only-price': 100 },
+    }));
+
+  it('keeps a stored outage while every reply is a timeout', async () => {
+    const { packs, run } = setup(storedOutage);
+    jest.mocked(pcFetch).mockResolvedValue({
+      kind: 'error',
+      message: 'PriceCharting did not respond — try again.',
+      cause: 'unavailable',
+    });
+    await run();
+    expect(pcFetch).toHaveBeenCalledTimes(3);
+    expect(packs.updateSiteSettings).not.toHaveBeenCalledWith(cleared);
+  });
+
+  it('keeps a stored outage while the token is still rejected, refreshing it once', async () => {
+    const { packs, run } = setup(storedOutage);
+    jest.mocked(pcFetch).mockResolvedValue({
+      kind: 'error',
+      message: 'Access token has expired',
+      cause: 'auth',
+    });
+    await run();
+    expect(packs.updateSiteSettings).toHaveBeenCalledTimes(1);
+    expect(packs.updateSiteSettings).toHaveBeenCalledWith({
+      selector: { id: 'global' },
+      data: {
+        pricecharting_feed: expect.objectContaining({
+          status: 'token_expired',
+        }),
+      },
+    });
+    expect(packs.updateSiteSettings).not.toHaveBeenCalledWith(cleared);
+  });
+
+  it('does not take a card-level error as proof the token works', async () => {
+    const { packs, run } = setup(storedOutage);
+    okReplies().mockResolvedValueOnce({
+      kind: 'error',
+      message: 'No such product',
+    });
+    await run();
+    expect(packs.updateSiteSettings).toHaveBeenCalledWith(cleared);
+    const fetchOrder = jest.mocked(pcFetch).mock.invocationCallOrder;
+    const clearAt = packs.updateSiteSettings.mock.invocationCallOrder[0];
+    expect(clearAt).toBeGreaterThan(fetchOrder[1]);
+    expect(clearAt).toBeLessThan(fetchOrder[2]);
+  });
+
+  it('retries a failed clear on the next card without failing the card', async () => {
+    const { packs, logger, run } = setup(storedOutage);
+    okReplies();
+    packs.updateSiteSettings.mockRejectedValueOnce(new Error('db down'));
+    await run();
+    expect(packs.applyCardPriceSync).toHaveBeenCalledTimes(3);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(/could not clear the feed alert/),
+    );
+    expect(packs.updateSiteSettings).toHaveBeenCalledTimes(2);
+    expect(packs.updateSiteSettings).toHaveBeenNthCalledWith(2, cleared);
+  });
+
+  it('still sweeps when the stored alert cannot be read, clearing on the first ok', async () => {
+    const { packs, logger, run } = setup();
+    packs.listSiteSettings.mockRejectedValueOnce(new Error('db down'));
+    okReplies();
+    await run();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(/could not read the feed alert/),
+    );
+    expect(pcFetch).toHaveBeenCalledTimes(3);
+    expect(packs.updateSiteSettings).toHaveBeenCalledWith(cleared);
+  });
+
+  it('logs a lost outage alert and still finishes when it cannot be saved', async () => {
+    const { packs, logger, run } = setup();
+    jest.mocked(pcFetch).mockResolvedValue({
+      kind: 'error',
+      message: 'Access token has expired',
+      cause: 'auth',
+    });
+    packs.updateSiteSettings.mockRejectedValue(new Error('db down'));
+    await expect(run()).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(/NOT recorded/),
+    );
   });
 });

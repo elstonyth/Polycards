@@ -21,8 +21,11 @@ it.each([
     { status: 'error', 'error-message': 'Access token has expired' },
     'Access token has expired',
   ],
-  [401, 'Unauthorized', 'PriceCharting rejected the API token (HTTP 401).'],
-  [403, '', 'PriceCharting rejected the API token (HTTP 403).'],
+  [
+    401,
+    { status: 'error', 'error-message': 'Invalid access token' },
+    'Invalid access token',
+  ],
   [
     200,
     { status: 'error', 'error-message': 'Invalid access token' },
@@ -45,6 +48,12 @@ it.each([
   [502, { status: 'error', 'error-message': 'Bad gateway' }],
   [429, { status: 'error', 'error-message': 'Too many requests' }],
   [200, '<html>challenge</html>'],
+  [401, 'Unauthorized'],
+  [403, ''],
+  [403, '<html>challenge</html>'],
+  [503, { status: 'error', 'error-message': 'token service down' }],
+  [429, { status: 'error', 'error-message': 'Too many token requests' }],
+  [400, { status: 'error', 'error-message': 'Invalid API key' }],
 ])('HTTP %s %j is the feed being unavailable', async (status, body) => {
   reply(status, body);
   expect(await pcFetch('/api/product', { id: '1' })).toMatchObject({
@@ -62,13 +71,16 @@ it('a timeout is the feed being unavailable', async () => {
   });
 });
 
-it('a card-level error carries no cause', async () => {
-  reply(404, { status: 'error', 'error-message': 'No such product' });
-  expect(await pcFetch('/api/product', { id: '1' })).toEqual({
-    kind: 'error',
-    message: 'No such product',
-  });
-});
+it.each([404, 200])(
+  'a card-level error (HTTP %s "No such product") carries no cause',
+  async (status) => {
+    reply(status, { status: 'error', 'error-message': 'No such product' });
+    expect(await pcFetch('/api/product', { id: '1' })).toEqual({
+      kind: 'error',
+      message: 'No such product',
+    });
+  },
+);
 
 it('no token never calls upstream', async () => {
   delete process.env.PRICECHARTING_API_TOKEN;

@@ -1,4 +1,5 @@
 import { priceFieldForGrade } from './pricecharting-grades';
+import type { PcErrorCause } from '../../api/admin/pricecharting/client';
 
 // Money guardrails (audit 2026-07-07 #3). market_value feeds real-credit
 // buyback, so a glitched upstream value must never land silently:
@@ -25,12 +26,13 @@ export type PendingCardPrice = {
 type PcRes =
   | { kind: 'ok'; data: Record<string, unknown> }
   | { kind: 'no-token' }
-  | { kind: 'error'; message: string; cause?: 'auth' | 'unavailable' };
+  | { kind: 'error'; message: string; cause?: PcErrorCause };
 
 // Feed-level outage (site_settings.pricecharting_feed): every card would fail
 // the same way, so the sweep stops and admin shows ONE alert instead of one
 // issue per card. Messages are fixed copy or PriceCharting's error text, never
 // an exception (the request URL carries the token).
+// Token outages only: transient unavailability (timeouts, 5xx, 429) stays per-card.
 export type PricechartingFeed = {
   status: 'token_expired' | 'no_token';
   message: string;

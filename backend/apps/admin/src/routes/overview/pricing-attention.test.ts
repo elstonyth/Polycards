@@ -171,15 +171,48 @@ describe('PriceCharting feed outage in dashboard attention', () => {
     const html = render();
     expect(html).toContain('dashboard.pricingTokenExpired');
     expect(html).toContain('dashboard.pricingFeedDetail');
+    expect(html).toContain('Access token has expired');
     expect(html).not.toContain('dashboard.pricingAttention');
     expect(html).not.toContain('dashboard.allClear');
     expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('pricing', 1);
   });
 
+  it('keeps card problems the outage did not cause beside the token alert', () => {
+    const issue = health.cards.issues[0];
+    state.pricing.data = {
+      ...health,
+      feed: {
+        status: 'token_expired',
+        message: 'Access token has expired',
+        at: '2026-10-19T03:00:00Z',
+      },
+      cards: {
+        ...health.cards,
+        issues: [
+          ...Array.from({ length: 877 }, (_, i) => ({
+            ...issue,
+            handle: `card-${i}`,
+            reason: 'stale' as const,
+          })),
+          { ...issue, handle: 'gone', reason: 'missing_product' as const },
+        ],
+      },
+    };
+    const html = render();
+    expect(html).toContain('dashboard.pricingTokenExpired');
+    expect(html).toContain('dashboard.pricingAttention {&quot;count&quot;:1}');
+    expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('pricing', 2);
+  });
+
   it('says the token is not set when it is missing', () => {
     state.pricing.data = {
       ...health,
-      feed: { status: 'no_token', message: 'not set', at: '2026-10-19T03:00:00Z' },
+      feed: {
+        status: 'no_token',
+        message: 'not set',
+        at: '2026-10-19T03:00:00Z',
+      },
+      cards: { ...health.cards, issues: [] },
     };
     const html = render();
     expect(html).toContain('dashboard.pricingNoToken');

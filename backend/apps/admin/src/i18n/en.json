@@ -1530,7 +1530,7 @@
     "pricingDetail": "{{count}} awaiting confirmation · Review stale prices and missing sources",
     "pricingTokenExpired": "PriceCharting token expired: renew it and update PRICECHARTING_API_TOKEN",
     "pricingNoToken": "PriceCharting is not configured: set PRICECHARTING_API_TOKEN",
-    "pricingFeedDetail": "Last failed {{age}} · Card prices keep their last values · Clears after the next daily sync (03:00 UTC)",
+    "pricingFeedDetail": "{{message}} · Last failed {{age}} · Card prices keep their last values · Clears after the next daily sync (03:00 UTC)",
     "title": "Dashboard",
     "subtitle": "How Polycards is doing, in Malaysia time · {{window}}",
     "netCash": "Net cash in",
