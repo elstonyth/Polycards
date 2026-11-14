@@ -56,7 +56,8 @@ describe('event-bus-watchdog', () => {
     expect(fresh).toBeInstanceOf(FakeWorker);
     expect(fresh.name).toBe('events-queue');
     expect(fresh.processor).toBe(processor);
-    expect(fresh.opts).toBe(opts);
+    // A copy with autorun forced off; event-bus-redis already builds it that way.
+    expect(fresh.opts).toEqual(opts);
     expect(fresh.run).toHaveBeenCalledTimes(1);
     // A stopped bullmq Worker rejects run() forever: its RedisConnection keeps
     // the rejected connect promise. Calling it again would look like a revive.
@@ -177,8 +178,12 @@ describe('event-bus-watchdog', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(bus.bullWorker_.run).toHaveBeenCalledTimes(1);
+    // The restart worked, so the log must not say it failed.
     expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining('close failed'),
+      '[event-bus-watchdog] replaced the consumer, but could not close the stopped one: close failed',
+    );
+    expect(logger.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('could not restart'),
     );
   });
 

@@ -102,7 +102,7 @@ describe('reviveWorkflowWorkers', () => {
     expect(opsLines).toHaveLength(3);
     expect(opsLines).toContainEqual(
       expect.stringContaining(
-        '[ops-alert] workflow-worker-stopped:jobWorker: The workflow engine\'s jobWorker had stopped, so no scheduled job was running',
+        "[ops-alert] workflow-worker-stopped:jobWorker: The workflow engine's jobWorker had stopped, so no scheduled job was running",
       ),
     );
     real.resetOpsAlerts();
@@ -246,8 +246,13 @@ describe('reviveWorkflowWorkers', () => {
     await flush();
 
     expect(storage.jobWorker!.run).toHaveBeenCalledTimes(1);
+    // The restart worked, so the log must not say it failed: the ops checks
+    // count "could not restart" as a fault.
     expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining('close failed'),
+      '[workflow-worker-watchdog] replaced the jobWorker, but could not close the stopped one: close failed',
+    );
+    expect(logger.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('could not restart'),
     );
   });
 });
@@ -284,20 +289,45 @@ describe('instrumentation register()', () => {
   const load = () =>
     require('../../../instrumentation') as typeof import('../../../instrumentation');
 
-  it('starts the watchdog', () => {
+  const savedMode = process.env.MEDUSA_WORKER_MODE;
+  afterEach(() => {
+    if (savedMode === undefined) delete process.env.MEDUSA_WORKER_MODE;
+    else process.env.MEDUSA_WORKER_MODE = savedMode;
+  });
+
+  it.each(['worker', 'shared', undefined])(
+    'starts the watchdog in mode %s',
+    (mode) => {
+      if (mode === undefined) delete process.env.MEDUSA_WORKER_MODE;
+      else process.env.MEDUSA_WORKER_MODE = mode;
+      jest.isolateModules(() => {
+        const start = jest.fn();
+        jest.doMock('../workflow-worker-watchdog', () => ({
+          startWorkflowWorkerWatchdog: start,
+        }));
+        load().register();
+        expect(start).toHaveBeenCalledTimes(1);
+      });
+    },
+  );
+
+  // The web service has no workflow workers to watch.
+  it('does not start on the web service', () => {
+    process.env.MEDUSA_WORKER_MODE = 'server';
     jest.isolateModules(() => {
       const start = jest.fn();
       jest.doMock('../workflow-worker-watchdog', () => ({
         startWorkflowWorkerWatchdog: start,
       }));
       load().register();
-      expect(start).toHaveBeenCalledTimes(1);
+      expect(start).not.toHaveBeenCalled();
     });
   });
 
   // Medusa calls register() outside its boot error handling: a throw here
   // would stop the web service and the worker from starting at all.
   it('lets boot go on when the watchdog fails to load', () => {
+    process.env.MEDUSA_WORKER_MODE = 'worker';
     jest.isolateModules(() => {
       jest.doMock('../workflow-worker-watchdog', () => {
         throw new Error('load failed');

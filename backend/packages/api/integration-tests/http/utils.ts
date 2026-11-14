@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import Redis from "ioredis";
 import { Modules } from "@medusajs/framework/utils";
 import type {
   IAuthModuleService,
@@ -168,42 +167,8 @@ export async function signInWithCode(
 export const myrDisplay = (usd: number): number =>
   Math.round(usd * DEFAULT_MARKET_MULTIPLIER * DEFAULT_USD_MYR * 100) / 100;
 
-/**
- * One redis for the whole HTTP harness: CI exports REDIS_URL; locally the
- * pokenic-redis container answers on the default. Suites that assert on the
- * app-under-test's rl:* keys must ALSO put this into their runner env — the
- * limiter reads process.env.REDIS_URL at boot and silently falls back to its
- * in-memory store when unset, leaving this probe inspecting an empty redis.
- */
-export const TEST_REDIS_URL =
-  process.env.REDIS_URL ?? "redis://localhost:6379";
-
-/**
- * Connects to the test Redis or THROWS — deliberately no skip: the rate
- * limiter silently fails over to its in-memory store, so a suite that skipped
- * this probe would stay green even with the Redis path broken. `purpose` says
- * what the suite needs Redis for, verbatim, in the failure message.
- */
-export async function connectTestRedisOrFail(purpose: string): Promise<Redis> {
-  const url = TEST_REDIS_URL;
-  const redis = new Redis(url, {
-    lazyConnect: true,
-    connectTimeout: 2_000,
-    maxRetriesPerRequest: 1,
-    enableOfflineQueue: false,
-  });
-  redis.on("error", () => {
-    /* assertions surface failures; avoid unhandled 'error' events */
-  });
-  try {
-    await redis.connect();
-  } catch (err) {
-    throw new Error(
-      `Redis unreachable at ${url} — ${purpose}. Start it: docker start pokenic-redis. (${err})`,
-    );
-  }
-  return redis;
-}
+// Moved to test-redis.ts, which loads without the packs module.
+export { TEST_REDIS_URL, connectTestRedisOrFail } from "./test-redis";
 
 /**
  * POST /store/customers, then WAIT for the customer.created subscribers to land

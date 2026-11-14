@@ -3,6 +3,9 @@
 // the scheduled-job worker it watches. Medusa logs "OTEL registered" just
 // before calling it; that line means this file ran, not that OpenTelemetry is on.
 export function register() {
+  // The web service builds no workflow workers (medusa-config reads the same
+  // variable), so there is nothing to watch there.
+  if (process.env.MEDUSA_WORKER_MODE === 'server') return;
   // Loaded here, not imported at the top: Medusa runs this outside its boot
   // error handling, so a throw while loading the watchdog must not stop the
   // web service or the worker from starting.

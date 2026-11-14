@@ -15,7 +15,7 @@ import * as net from 'net';
 import Redis from 'ioredis';
 import { RedisDistributedTransactionStorage } from '@medusajs/workflow-engine-redis/dist/utils';
 import { reviveWorkflowWorkers } from '../../src/utils/workflow-worker-watchdog';
-import { connectTestRedisOrFail, TEST_REDIS_URL } from './utils';
+import { connectTestRedisOrFail, TEST_REDIS_URL } from './test-redis';
 
 jest.setTimeout(60 * 1000);
 
@@ -209,17 +209,21 @@ it('leaves healthy workers alone, with no second loop', async () => {
   const { storage, fired } = await bootStorage('healthy', { redisDown: false });
   await until(() => FIELDS.every((f) => storage[f].isRunning()));
   const live = Object.fromEntries(FIELDS.map((f) => [f, storage[f]]));
+  // A spy on bullmq's shared prototype: restored even if an assertion fails, so
+  // it cannot leak into later suites in the same CI shard.
   const run = jest.spyOn(Object.getPrototypeOf(storage.jobWorker), 'run');
+  try {
+    reviveWorkflowWorkers(storage, logger);
+    reviveWorkflowWorkers(storage, logger);
 
-  reviveWorkflowWorkers(storage, logger);
-  reviveWorkflowWorkers(storage, logger);
-
-  for (const field of FIELDS) expect(storage[field]).toBe(live[field]);
-  expect(run).not.toHaveBeenCalled();
-  expect(logger.error).not.toHaveBeenCalled();
-  expect(await storage.jobQueue.getWorkers()).toHaveLength(1);
+    for (const field of FIELDS) expect(storage[field]).toBe(live[field]);
+    expect(run).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(await storage.jobQueue.getWorkers()).toHaveLength(1);
+  } finally {
+    run.mockRestore();
+  }
 
   await storage.schedule('probe-job', { interval: 300 });
   await until(() => fired.mock.calls.length > 0);
-  run.mockRestore();
 });
