@@ -72,10 +72,60 @@ describe('reviveWorkflowWorkers', () => {
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('[workflow-worker-watchdog]'),
     );
+    for (const field of FIELDS) {
+      expect(alertOps).toHaveBeenCalledWith(
+        expect.anything(),
+        `workflow-worker-stopped:${field}`,
+        expect.stringContaining(field),
+        { muteMs: 30 * 60 * 1000 },
+      );
+    }
+  });
+
+  // Through the real alertOps and its mute window: all three die together, and
+  // the scheduled-job alert must not be swallowed by the first one.
+  it('alerts for every stopped worker, the scheduled-job one included', () => {
+    const real = jest.requireActual<
+      typeof import('../../modules/packs/ops-alert')
+    >('../../modules/packs/ops-alert');
+    real.resetOpsAlerts();
+    jest.mocked(alertOps).mockImplementation(real.alertOps);
+    const storage = storageWith(
+      (f) => new FakeWorker(`q-${f}`, processor, opts),
+    );
+
+    reviveWorkflowWorkers(storage, logger);
+
+    const opsLines = logger.error.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.startsWith('[ops-alert]'));
+    expect(opsLines).toHaveLength(3);
+    expect(opsLines).toContainEqual(
+      expect.stringContaining(
+        '[ops-alert] workflow-worker-stopped:jobWorker: The workflow engine\'s jobWorker had stopped, so no scheduled job was running',
+      ),
+    );
+    real.resetOpsAlerts();
+  });
+
+  // ioredis 'end': closed for good, so a new Worker on it could never connect.
+  it('does not churn workers on a shared connection that has ended', () => {
+    const ended = { ...opts, connection: { status: 'end' } };
+    const dead = new FakeWorker('q-jobs', processor, ended);
+    const storage: Storage = { jobWorker: dead };
+
+    reviveWorkflowWorkers(storage, logger);
+    reviveWorkflowWorkers(storage, logger);
+
+    expect(storage.jobWorker).toBe(dead);
+    expect(dead.close).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('restart the worker component'),
+    );
     expect(alertOps).toHaveBeenCalledWith(
       expect.anything(),
-      'workflow-worker-stopped',
-      expect.stringContaining('jobWorker'),
+      'workflow-worker-stopped:jobWorker',
+      expect.stringContaining('restart the worker component'),
       { muteMs: 30 * 60 * 1000 },
     );
   });
@@ -227,6 +277,43 @@ describe('startWorkflowWorkerWatchdog', () => {
     } finally {
       scheduler.storage = saved;
     }
+  });
+});
+
+describe('instrumentation register()', () => {
+  const load = () =>
+    require('../../../instrumentation') as typeof import('../../../instrumentation');
+
+  it('starts the watchdog', () => {
+    jest.isolateModules(() => {
+      const start = jest.fn();
+      jest.doMock('../workflow-worker-watchdog', () => ({
+        startWorkflowWorkerWatchdog: start,
+      }));
+      load().register();
+      expect(start).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Medusa calls register() outside its boot error handling: a throw here
+  // would stop the web service and the worker from starting at all.
+  it('lets boot go on when the watchdog fails to load', () => {
+    jest.isolateModules(() => {
+      jest.doMock('../workflow-worker-watchdog', () => {
+        throw new Error('load failed');
+      });
+      const error = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      try {
+        expect(() => load().register()).not.toThrow();
+        expect(error).toHaveBeenCalledWith(
+          '[workflow-worker-watchdog] not started: load failed',
+        );
+      } finally {
+        error.mockRestore();
+      }
+    });
   });
 });
 

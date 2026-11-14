@@ -60,22 +60,32 @@ export function reviveWorkflowWorkers(storage: unknown, logger: Logger): void {
       // shutdown stopped it on purpose. Running: there must never be a second loop.
       if (!dead || dead.isRunning() || dead.closing) continue;
 
+      // The engine's shared connection closed for good: every new Worker would
+      // fail on it, so replacing would only churn. Restarting the process fixes it.
+      const ended =
+        (dead.opts.connection as { status?: string } | undefined)?.status ===
+        'end';
       const note = `The workflow engine's ${field} had stopped, so ${
         field === 'jobWorker'
           ? 'no scheduled job was running (deposit and withdrawal sweeps included)'
           : field === 'worker'
             ? 'workflow retries and timeouts were not running'
             : 'old workflow executions were not being cleared'
-      }. Starting a new one. Repeats mean Redis is still unreachable.`;
+      }. ${
+        ended
+          ? 'Its Redis connection is closed for good, so it cannot be replaced in place: restart the worker component.'
+          : 'Starting a new one. Repeats mean Redis is still unreachable.'
+      }`;
       logger.error(`[workflow-worker-watchdog] ${note}`);
+      // One tag per worker: they die together, and one shared mute window would
+      // let the first worker's alert swallow the scheduled-job one.
       void alertOps(
         { resolve: <T>() => logger as T },
-        'workflow-worker-stopped',
+        `workflow-worker-stopped:${field}`,
         note,
-        {
-          muteMs: ALERT_MUTE_MS,
-        },
+        { muteMs: ALERT_MUTE_MS },
       );
+      if (ended) continue;
 
       // dead.constructor is bullmq's Worker, the exact version the engine loads.
       const Worker = dead.constructor as new (
@@ -91,8 +101,10 @@ export function reviveWorkflowWorkers(storage: unknown, logger: Logger): void {
       });
       // Installed first, so the engine's shutdown hook closes this one.
       workers[field] = fresh;
-      // force: skip waiting on jobs the dead worker never took. Closing releases
-      // its reconnecting Redis client and stops its timers.
+      // force: the dead worker never took a job. isRunning() only goes false when
+      // run() throws before its fetch loop starts; inside the loop bullmq retries
+      // every fetch and process call instead of throwing. Closing releases its
+      // reconnecting Redis client and stops its timers.
       void dead.close(true).catch(logFailure);
       void fresh.run().catch(logFailure);
     } catch (error) {
