@@ -5974,6 +5974,15 @@
           "nullable": true,
           "mappedType": "json"
         },
+        "pricecharting_feed": {
+          "name": "pricecharting_feed",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamptz",

@@ -25,7 +25,17 @@ export type PendingCardPrice = {
 type PcRes =
   | { kind: 'ok'; data: Record<string, unknown> }
   | { kind: 'no-token' }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; cause?: 'auth' | 'unavailable' };
+
+// Feed-level outage (site_settings.pricecharting_feed): every card would fail
+// the same way, so the sweep stops and admin shows ONE alert instead of one
+// issue per card. Messages are fixed copy or PriceCharting's error text, never
+// an exception (the request URL carries the token).
+export type PricechartingFeed = {
+  status: 'token_expired' | 'no_token';
+  message: string;
+  at: string;
+};
 
 export type CardPriceUpdate = {
   id: string;
@@ -85,6 +95,8 @@ export type RefreshResult = {
   newValue: number;
   changed: boolean;
   skippedReason?: string;
+  // Set when the feed itself is down: nothing was written to the card.
+  outage?: PricechartingFeed;
 };
 
 // Append the FMV history trail for one sync result by comparing the LATEST
@@ -140,9 +152,18 @@ export async function refreshCardPrice(
     ...base,
     skippedReason: 'card changed during price check',
   };
-  const skip = async (reason: string): Promise<RefreshResult> => {
+  // keepPending: the failure was the feed's (timeout/outage), not the card's,
+  // so an in-flight 24h large-move confirmation survives it.
+  const skip = async (
+    reason: string,
+    keepPending = false,
+  ): Promise<RefreshResult> => {
     const applied = await deps.updateCards([
-      { id: card.id, pc_pending_price: null, pc_sync_error: reason },
+      {
+        id: card.id,
+        pc_pending_price: keepPending ? pendingPriceFor(card) : null,
+        pc_sync_error: reason,
+      },
     ]);
     return applied ? { ...base, skippedReason: reason } : superseded;
   };
@@ -152,8 +173,25 @@ export async function refreshCardPrice(
   if (!Number.isFinite(oldValue) || oldValue < 0)
     return skip('invalid stored market value');
   const res = await deps.pcFetch('/api/product', { id: card.pc_product_id });
-  if (res.kind !== 'ok')
-    return skip(res.kind === 'no-token' ? 'no token' : res.message);
+  if (res.kind === 'error' && res.cause !== 'auth')
+    return skip(res.message, res.cause === 'unavailable');
+  if (res.kind !== 'ok') {
+    // No token / expired token: not this card's fault, so leave its row alone
+    // and let the job stop the sweep.
+    const outage: PricechartingFeed =
+      res.kind === 'no-token'
+        ? {
+            status: 'no_token',
+            message: 'PRICECHARTING_API_TOKEN is not set',
+            at: deps.now.toISOString(),
+          }
+        : {
+            status: 'token_expired',
+            message: res.message,
+            at: deps.now.toISOString(),
+          };
+    return { ...base, skippedReason: outage.message, outage };
+  }
   if (String(res.data.id) !== card.pc_product_id)
     return skip('PriceCharting product identity mismatch');
   const pennies = res.data[field];

@@ -25,6 +25,7 @@ const card = (handle: string, changes: Record<string, unknown> = {}) => ({
 const run = async (
   cards: ReturnType<typeof card>[],
   missingProducts: string[] = [],
+  siteSettings: Array<Record<string, unknown>> = [],
 ) => {
   const packs = {
     listCards: jest.fn(async (_filter, opts: { skip: number; take: number }) =>
@@ -33,6 +34,7 @@ const run = async (
     listFxRates: jest.fn(async () => [
       { rate: 4.1, source: 'test', manual_override: false, fetched_at: NOW },
     ]),
+    listSiteSettings: jest.fn(async () => siteSettings),
   };
   const products = {
     listProducts: jest.fn(async () =>
@@ -50,6 +52,7 @@ const run = async (
   );
   return json.mock.calls[0][0] as {
     fx: { rate: number };
+    feed: { status: string; message: string; at: string } | null;
     cards: {
       linked: number;
       pending_confirmation: number;
@@ -133,4 +136,26 @@ it('counts cards beyond the first page and ignores pending quotes for obsolete b
       proposed_value: null,
     }),
   ]);
+});
+
+it('reports a PriceCharting feed outage as one feed status, beside the card issues', async () => {
+  const feed = {
+    status: 'token_expired',
+    message: 'Access token has expired',
+    at: '2026-10-17T03:00:00Z',
+  };
+  const stale = Array.from({ length: 3 }, (_, i) =>
+    card(`stale-${i}`, { pc_synced_at: new Date('2026-10-01') }),
+  );
+  const result = await run(stale, [], [{ id: 'global', pricecharting_feed: feed }]);
+  expect(result.feed).toEqual(feed);
+  // Card rows are kept for the Cards page; the dashboard shows the feed alone.
+  expect(result.cards.issues).toHaveLength(3);
+});
+
+it('reports no feed status when the settings row is missing or clear', async () => {
+  expect((await run([card('healthy')])).feed).toBeNull();
+  expect(
+    (await run([card('healthy')], [], [{ id: 'global', pricecharting_feed: null }])).feed,
+  ).toBeNull();
 });

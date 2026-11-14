@@ -3,7 +3,10 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { pageAll } from '../../../utils/page-all';
-import { pendingPriceFor } from '../../../../modules/packs/sync-market-prices';
+import {
+  pendingPriceFor,
+  type PricechartingFeed,
+} from '../../../../modules/packs/sync-market-prices';
 import { priceFieldForGrade } from '../../../../modules/packs/pricecharting-grades';
 
 // GET /admin/pricing/health — staleness dashboard for the two money feeds
@@ -19,6 +22,11 @@ export async function GET(
   const now = Date.now();
 
   const [fxRow] = await packs.listFxRates({ pair: 'USD_MYR' }, { take: 1 });
+  // Feed-level outage from the daily sync (token expired / not set). While it
+  // is set, card issues below are its symptoms, not separate problems.
+  const [site] = await packs.listSiteSettings({}, { take: 1 });
+  const feed =
+    (site?.pricecharting_feed as PricechartingFeed | null | undefined) ?? null;
   const fetchedAt = fxRow?.fetched_at ? new Date(fxRow.fetched_at) : null;
 
   // Paged to exhaustion like /admin/economy's card load and the sync job — a
@@ -107,6 +115,7 @@ export async function GET(
             : null,
         }
       : null,
+    feed,
     cards: {
       linked: linkedCards.length,
       never_synced: neverSynced,

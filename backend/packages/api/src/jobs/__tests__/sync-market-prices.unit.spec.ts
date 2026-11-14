@@ -28,6 +28,7 @@ it('persists a safe error and clears pending after an unexpected failure, then c
     listFxRates: jest.fn(async () => [{ id: 'fx' }]),
     updateFxRates: jest.fn(),
     applyCardPriceSync: jest.fn().mockResolvedValue(true),
+    listSiteSettings: jest.fn(async () => []),
     listCardPriceHistories: jest.fn(async () => [{ value: 100 }]),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -72,6 +73,7 @@ it('reads the current card before fetching so edits made during the catalog swee
     listFxRates: jest.fn(async () => [{ id: 'fx' }]),
     updateFxRates: jest.fn(),
     applyCardPriceSync: jest.fn().mockResolvedValue(true),
+    listSiteSettings: jest.fn(async () => []),
     listCardPriceHistories: jest.fn(async () => [{ value: 47.5 }]),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -114,6 +116,7 @@ it('syncs the least recently synced cards first, so a sweep cut short leaves dif
       filter.id ? cards.filter((c) => c.id === filter.id) : cards,
     ),
     applyCardPriceSync: jest.fn().mockResolvedValue(true),
+    listSiteSettings: jest.fn(async () => []),
     listCardPriceHistories: jest.fn(async () => [{ value: 1 }]),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -142,6 +145,7 @@ it('returns before the sweep ends (frees the shared job slot) and skips a second
     listFxRates: jest.fn(async () => [{ id: 'fx' }]),
     updateFxRates: jest.fn(),
     applyCardPriceSync: jest.fn().mockResolvedValue(true),
+    listSiteSettings: jest.fn(async () => []),
     listCardPriceHistories: jest.fn(async () => [{ value: 1 }]),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -159,4 +163,103 @@ it('returns before the sweep ends (frees the shared job slot) and skips a second
   await jest.runAllTimersAsync();
   expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/done: /));
   expect(pcFetch).toHaveBeenCalledTimes(1); // the skipped call started no second sweep
+});
+
+describe('PriceCharting feed outage', () => {
+  const setup = (stored: unknown = null) => {
+    const cards = ['a', 'b', 'c'].map((id) => ({
+      id,
+      handle: id,
+      pc_product_id: id,
+      pc_grade: 'PSA 10',
+      market_value: 1,
+    }));
+    const packs = {
+      listCards: jest.fn(async (filter: { id?: string }) =>
+        filter.id ? cards.filter((c) => c.id === filter.id) : cards,
+      ),
+      applyCardPriceSync: jest.fn().mockResolvedValue(true),
+      listCardPriceHistories: jest.fn(async () => [{ value: 1 }]),
+      listSiteSettings: jest.fn(async () => [
+        { id: 'global', pricecharting_feed: stored },
+      ]),
+      updateSiteSettings: jest.fn(),
+      createSiteSettings: jest.fn(),
+    };
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const run = async () => {
+      jest.useFakeTimers();
+      const running = runMarketPriceSync({
+        resolve: (key: string) => (key === PACKS_MODULE ? packs : logger),
+      } as unknown as MedusaContainer);
+      await jest.runAllTimersAsync();
+      await running;
+    };
+    return { packs, logger, run };
+  };
+
+  it('stops the sweep on the first expired-token reply: one request, one error, no card stamped', async () => {
+    const { packs, logger, run } = setup();
+    jest.mocked(pcFetch).mockResolvedValue({
+      kind: 'error',
+      message: 'Access token has expired',
+      cause: 'auth',
+    });
+    await run();
+    expect(pcFetch).toHaveBeenCalledTimes(1);
+    expect(packs.applyCardPriceSync).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(/Access token has expired.*PRICECHARTING_API_TOKEN/),
+    );
+    expect(packs.updateSiteSettings).toHaveBeenCalledWith({
+      selector: { id: 'global' },
+      data: {
+        pricecharting_feed: {
+          status: 'token_expired',
+          message: 'Access token has expired',
+          at: expect.any(String),
+        },
+      },
+    });
+  });
+
+  it('records a missing token the same way, creating the settings row if absent', async () => {
+    const { packs, run } = setup();
+    packs.listSiteSettings.mockResolvedValue([]);
+    jest.mocked(pcFetch).mockResolvedValue({ kind: 'no-token' });
+    await run();
+    expect(pcFetch).toHaveBeenCalledTimes(1);
+    expect(packs.createSiteSettings).toHaveBeenCalledWith([
+      {
+        id: 'global',
+        pricecharting_feed: expect.objectContaining({ status: 'no_token' }),
+      },
+    ]);
+  });
+
+  it('clears a stored outage once, on the first reply that proves the token works', async () => {
+    const { packs, run } = setup({ status: 'token_expired', message: 'x', at: 'y' });
+    jest
+      .mocked(pcFetch)
+      .mockResolvedValueOnce({
+        kind: 'error',
+        message: 'PriceCharting did not respond — try again.',
+        cause: 'unavailable',
+      })
+      .mockImplementation(async (_path, params) => ({
+        kind: 'ok',
+        data: { status: 'success', id: params.id, 'manual-only-price': 100 },
+      }));
+    await run();
+    expect(pcFetch).toHaveBeenCalledTimes(3);
+    expect(packs.updateSiteSettings).toHaveBeenCalledTimes(1);
+    expect(packs.updateSiteSettings).toHaveBeenCalledWith({
+      selector: { id: 'global' },
+      data: { pricecharting_feed: null },
+    });
+    // The timed-out card was written (error kept visible), the rest synced.
+    expect(packs.applyCardPriceSync).toHaveBeenCalledTimes(3);
+  });
 });
