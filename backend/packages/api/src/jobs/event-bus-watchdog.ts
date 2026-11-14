@@ -39,8 +39,8 @@ type RedisEventBus = {
  * component.
  *
  * It can only watch this one worker. The job itself is run by a bull worker inside
- * workflow-engine-redis, built the same way: if that one dies at boot, no scheduled
- * job runs, this one included.
+ * workflow-engine-redis, built the same way; that one is watched by a timer started
+ * from instrumentation.ts (src/utils/workflow-worker-watchdog.ts), not by a job.
  */
 export default async function eventBusWatchdogJob(
   container: MedusaContainer,

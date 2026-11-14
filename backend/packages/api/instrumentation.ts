@@ -1,4 +1,14 @@
-// Uncomment this file to enable instrumentation and observability using OpenTelemetry
+import { startWorkflowWorkerWatchdog } from './src/utils/workflow-worker-watchdog';
+
+// `medusa start` calls register() once in every process (web and worker),
+// before the app loads, so this is the one boot seam that does not depend on
+// the scheduled-job worker it watches. Medusa logs "OTEL registered" just
+// before calling it; that line means this file ran, not that OpenTelemetry is on.
+export function register() {
+  startWorkflowWorkerWatchdog();
+}
+
+// To enable OpenTelemetry, add registerOtel to register() above.
 // Refer to the docs for installation instructions: https://docs.medusajs.com/learn/debugging-and-testing/instrumentation
 
 // import { registerOtel } from "@medusajs/medusa"
@@ -10,7 +20,6 @@
 //   serviceName: 'my-medusa-project',
 // })
 
-// export function register() {
 //   registerOtel({
 //     serviceName: 'medusajs',
 //     // pass exporter
@@ -21,4 +30,3 @@
 //       query: true
 //     },
 //   })
-// }
