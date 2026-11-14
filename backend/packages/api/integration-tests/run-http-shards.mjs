@@ -14,7 +14,7 @@
 //   corepack yarn test:integration:http economy.spec …  -> filtered single run (no sharding)
 //
 // Redis: the rate-limit and password-reset suites probe a real redis
-// (TEST_REDIS_URL in http/utils.ts — REDIS_URL or redis://localhost:6379;
+// (TEST_REDIS_URL in http/test-redis.ts — REDIS_URL or redis://localhost:6379;
 // `docker start pokenic-redis`). Only the Medusa redis MODULES are forced
 // in-memory under TEST_TYPE (medusa-config), not those suites' probes.
 import { spawnSync } from 'node:child_process';
