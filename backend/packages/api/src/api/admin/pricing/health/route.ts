@@ -22,8 +22,8 @@ export async function GET(
   const now = Date.now();
 
   const [fxRow] = await packs.listFxRates({ pair: 'USD_MYR' }, { take: 1 });
-  // Feed-level outage from the daily sync (token expired / not set). While it
-  // is set, card issues below are its symptoms, not separate problems.
+  // Daily-sync token outage: writes nothing to cards. The dashboard folds only
+  // stale / never-synced cards and the outage's own error rows into its alert.
   const [site] = await packs.listSiteSettings({}, { take: 1 });
   const feed =
     (site?.pricecharting_feed as PricechartingFeed | null | undefined) ?? null;

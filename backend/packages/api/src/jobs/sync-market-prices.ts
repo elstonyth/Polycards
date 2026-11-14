@@ -110,6 +110,7 @@ export async function runMarketPriceSync(
     return res;
   };
   let outage: PricechartingFeed | undefined;
+  let stoppedAt = '';
   let changed = 0;
   let skipped = 0;
   let failed = 0;
@@ -131,6 +132,7 @@ export async function runMarketPriceSync(
       // Every remaining card would fail the same way: stop, alert once.
       if (r.outage) {
         outage = r.outage;
+        stoppedAt = `${current.handle} (PriceCharting id ${current.pc_product_id})`;
         break;
       }
       if (r.changed) {
@@ -178,9 +180,11 @@ export async function runMarketPriceSync(
   }
   if (outage) {
     logger.error(
-      `[sync-market-prices] stopped after ${changed} updates, ${skipped} skipped, ${failed} failed: PriceCharting ${
-        outage.status === 'no_token' ? 'token is not set' : 'token rejected'
-      } (${outage.message}); renew it and update PRICECHARTING_API_TOKEN`,
+      `[sync-market-prices] stopped at ${stoppedAt} after ${changed} updates, ${skipped} skipped, ${failed} failed: PriceCharting ${
+        outage.status === 'no_token'
+          ? `token is not set (${outage.message}); set PRICECHARTING_API_TOKEN`
+          : `token rejected (${outage.message}); renew it and update PRICECHARTING_API_TOKEN`
+      }`,
     );
     try {
       await saveFeed(packs, outage);

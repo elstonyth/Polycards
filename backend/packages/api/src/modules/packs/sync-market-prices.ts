@@ -1,5 +1,5 @@
 import { priceFieldForGrade } from './pricecharting-grades';
-import type { PcErrorCause } from '../../api/admin/pricecharting/client';
+import type { PcResult } from '../../api/admin/pricecharting/client';
 
 // Money guardrails (audit 2026-07-07 #3). market_value feeds real-credit
 // buyback, so a glitched upstream value must never land silently:
@@ -23,10 +23,7 @@ export type PendingCardPrice = {
 // so this stays unit-testable with mocks. Never writes a null/zero/NaN
 // market_value: any unusable upstream result skips and keeps the last-known
 // value (guardrail — this is money-adjacent).
-type PcRes =
-  | { kind: 'ok'; data: Record<string, unknown> }
-  | { kind: 'no-token' }
-  | { kind: 'error'; message: string; cause?: PcErrorCause };
+type PcRes = PcResult<Record<string, unknown>>;
 
 // Feed-level outage (site_settings.pricecharting_feed): every card would fail
 // the same way, so the sweep stops and admin shows ONE alert instead of one

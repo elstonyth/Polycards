@@ -327,6 +327,41 @@ describe('PriceCharting feed outage', () => {
     expect(packs.updateSiteSettings).not.toHaveBeenCalledWith(cleared);
   });
 
+  it('records a token that expires mid-sweep after clearing the old alert, naming the card it stopped at', async () => {
+    const { packs, logger, run } = setup(storedOutage);
+    jest
+      .mocked(pcFetch)
+      .mockImplementationOnce(async (_path, params) => ({
+        kind: 'ok',
+        data: { status: 'success', id: params.id, 'manual-only-price': 100 },
+      }))
+      .mockResolvedValue({
+        kind: 'error',
+        message: 'Access token has expired',
+        cause: 'auth',
+      });
+    await run();
+    expect(pcFetch).toHaveBeenCalledTimes(2);
+    expect(packs.applyCardPriceSync).toHaveBeenCalledTimes(1);
+    expect(packs.updateSiteSettings).toHaveBeenCalledTimes(2);
+    expect(packs.updateSiteSettings).toHaveBeenNthCalledWith(1, cleared);
+    expect(packs.updateSiteSettings).toHaveBeenNthCalledWith(2, {
+      selector: { id: 'global' },
+      data: {
+        pricecharting_feed: expect.objectContaining({
+          status: 'token_expired',
+        }),
+      },
+    });
+    // The outage write lands after the fetch that saw the expired token.
+    expect(
+      packs.updateSiteSettings.mock.invocationCallOrder[1],
+    ).toBeGreaterThan(jest.mocked(pcFetch).mock.invocationCallOrder[1]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('stopped at b'),
+    );
+  });
+
   it('does not take a card-level error as proof the token works', async () => {
     const { packs, run } = setup(storedOutage);
     okReplies().mockResolvedValueOnce({

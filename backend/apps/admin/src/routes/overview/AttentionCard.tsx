@@ -18,6 +18,7 @@ import {
   useReferralSettlements,
   usePricingHealth,
 } from '../../lib/queries';
+import type { PricingIssue } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
 import {
   attentionWithdrawals,
@@ -116,18 +117,33 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   if (drafts) counts.referrals = drafts.length;
   if (twice) counts.doublePay = twice.count;
   if (integrity.data) counts.integrity = integrity.data.findings.length;
-  // A feed outage (token expired) is one problem, not one per card: while it
-  // lasts stale, never-synced and sync-error cards are its symptoms and fold
-  // into that one alert; any other card problem still counts on its own.
+  // A feed outage (token expired) is one alert, not one per card. The outage
+  // writes nothing to cards, so its only symptoms are staleness and the error
+  // rows the old sync left with its own token message; those fold into the
+  // alert. A missing product is never folded, and every other problem counts.
   const feed = pricing.data?.feed;
   const issues = pricing.data?.cards.issues ?? [];
+  const missing = new Set(pricing.data?.cards.missing_product ?? []);
+  const outageReasons: PricingIssue['reason'][] = ['stale', 'never_synced'];
   const otherIssues = feed
     ? issues.filter(
-        (i) => !['stale', 'never_synced', 'sync_error'].includes(i.reason),
+        (i) =>
+          missing.has(i.handle) ||
+          !(
+            outageReasons.includes(i.reason) ||
+            (i.reason === 'sync_error' &&
+              (i.message === feed.message ||
+                /\btoken\b/i.test(i.message ?? '') ||
+                i.message === 'no token'))
+          ),
       )
     : issues;
-  if (pricing.data && !pricing.isError)
-    counts.pricing = (feed ? 1 : 0) + otherIssues.length;
+  // pricingFeed exists at 0 before an outage: the alert only fires for a
+  // queue that already had a reading.
+  if (pricing.data && !pricing.isError) {
+    counts.pricingFeed = feed ? 1 : 0;
+    counts.pricing = otherIssues.length;
+  }
   const { soundOn, setSound } = useAttentionAlert(counts);
 
   // A query this role may not read is left out; any other failure shows.

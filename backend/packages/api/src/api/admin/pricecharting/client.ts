@@ -62,10 +62,11 @@ export async function pcFetch<
     };
   }
   // 410 is what PriceCharting sent for "Access token has expired" (2026-10-19);
-  // a bare 401/403 may be an edge/WAF block, so it needs a token message too.
+  // a 410 with another message may be a removed product, and a bare 401/403
+  // may be an edge/WAF block, so those need a token message.
   const tokenMessage = /\btoken\b/i.test(upstreamMessage ?? '');
   if (
-    resp.status === 410 ||
+    (resp.status === 410 && (tokenMessage || !upstreamMessage)) ||
     (tokenMessage &&
       (resp.status === 401 ||
         resp.status === 403 ||
@@ -79,10 +80,16 @@ export async function pcFetch<
       cause: 'auth',
     };
   }
+  if (resp.status === 404) {
+    return {
+      kind: 'error',
+      message: upstreamMessage ?? 'PriceCharting error (HTTP 404).',
+    };
+  }
   if (!data) {
     return {
       kind: 'error',
-      message: 'PriceCharting returned an unreadable response.',
+      message: `PriceCharting returned an unreadable response (HTTP ${resp.status}).`,
       cause: 'unavailable',
     };
   }
@@ -90,8 +97,7 @@ export async function pcFetch<
     return {
       kind: 'error',
       message: upstreamMessage ?? `PriceCharting error (HTTP ${resp.status}).`,
-      ...(resp.status === 404 ||
-      /no such product|not found/i.test(upstreamMessage ?? '')
+      ...(/no such product|not found/i.test(upstreamMessage ?? '')
         ? {}
         : { cause: 'unavailable' as const }),
     };
