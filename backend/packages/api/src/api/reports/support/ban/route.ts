@@ -1,6 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { accountNumberForms, findBank } from '../../../../modules/packs/banks';
+import { findBank } from '../../../../modules/packs/banks';
+import { spellings } from '../../../../modules/packs/payout-destination';
 import {
   clearedHolderNames,
   liftedPayoutBans,
@@ -68,7 +69,7 @@ const bankId = (code: string | null) => findBank(code)?.id ?? '';
 /** A stored number as the save and withdrawal checks compare it: its bank, and
  *  its first spelling (a PayNow mobile without its 65) as the key. */
 function numberAtBank(bankCode: string, accountNumber: string) {
-  const forms = accountNumberForms(
+  const forms = spellings(
     bankCode,
     payoutAccountKey(accountNumber, false),
   );
@@ -83,7 +84,7 @@ const sameNumber =
   (key: string, bank?: string) =>
   (row: AtNumber): boolean =>
     (bank === undefined || bankId(row.bank_code) === bank) &&
-    accountNumberForms(row.bank_code, row.digits).includes(key);
+    spellings(row.bank_code, row.digits).includes(key);
 
 /** Settled payouts per customer to one number. */
 async function payoutsTo(
@@ -367,7 +368,7 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
  *  is at any bank), with no player's lift: a 65 number at CIMB is not asked
  *  without its 65. */
 async function numberView(db: ReportDb, key: string) {
-  const forms = accountNumberForms('PAYNOWSG', key);
+  const forms = spellings('PAYNOWSG', key);
   const match = sameNumber(key);
   const accounts = await accountsOn(db, forms, match);
   const payouts = await payoutsTo(db, forms, match);
@@ -376,7 +377,7 @@ async function numberView(db: ReportDb, key: string) {
     ...new Set([
       key,
       ...accounts.flatMap((a) =>
-        a.banks.flatMap((b) => accountNumberForms(b, key)),
+        a.banks.flatMap((b) => spellings(b, key)),
       ),
     ]),
   ];

@@ -2,7 +2,7 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
-import { accountNumberForms, findBank } from '../../src/modules/packs/banks';
+import { findBank } from '../../src/modules/packs/banks';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { unwrapResponse } from './utils';
 
@@ -481,25 +481,14 @@ medusaIntegrationTestRunner({
         );
 
         // What the save and withdrawal checks answer for the number at a bank.
-        const bannedFor = async (id: string | null, bank: string) =>
-          (
-            await Promise.all(
-              accountNumberForms(bank, LOCAL).map((n) =>
-                packs().payoutAccountBanned(n, false, id),
-              ),
-            )
-          ).some(Boolean);
-        const othersAt = async (id: string, bank: string) => [
-          ...new Set(
-            (
-              await Promise.all(
-                accountNumberForms(bank, LOCAL).map((n) =>
-                  packs().payoutAccountHoldersAt(id, n, bank),
-                ),
-              )
-            ).flat(),
-          ),
-        ];
+        const standing = (id: string | null, bank: string, n: string) =>
+          packs().payoutNumberStanding(id ?? '', { bankCode: bank, accountNumber: n });
+        const bannedFor = async (id: string | null, bank: string) => {
+          const s = await standing(id, bank, LOCAL);
+          return id ? s.bannedForPlayer : s.banned;
+        };
+        const othersAt = async (id: string, bank: string) =>
+          (await standing(id, bank, LOCAL)).holders.map((h) => h.customerId);
         const bodies: unknown[] = [];
         const view = async (path: string) => {
           const res = await report(path);
@@ -579,13 +568,7 @@ medusaIntegrationTestRunner({
           ['12345678', PAYNOW],
         );
         const cimbBanned = async (bank: string) =>
-          (
-            await Promise.all(
-              accountNumberForms(bank, CIMB_NUMBER).map((n) =>
-                packs().payoutAccountBanned(n, false),
-              ),
-            )
-          ).some(Boolean);
+          (await standing(null, bank, CIMB_NUMBER)).banned;
         expect(await cimbBanned(PAYNOW)).toBe(true);
         expect(await cimbBanned('CIBBMYKL')).toBe(false);
         expect(
