@@ -48,9 +48,11 @@ import {
   getDeliveryOrder,
   getDeliveryOrdersStock,
   getProfitReport,
+  getPnlReport,
   type CustomerScope,
   type ProfitRange,
   type ProfitReport,
+  type PnlReport,
   getStatsReport,
   getOnlineNow,
   getLeaders,
@@ -300,6 +302,26 @@ export const useProfitReport = (
       scope,
     ),
     queryFn: () => getProfitReport(range, from, to, scope),
+    placeholderData: keepPreviousData,
+    enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
+    refetchOnWindowFocus: true,
+  });
+
+// P&L report: the Profit report's query contract and loading behaviour.
+export const usePnlReport = (
+  range: ProfitRange,
+  from: string,
+  to: string,
+  scope: CustomerScope,
+): UseQueryResult<PnlReport> =>
+  useQuery({
+    queryKey: qk.pnlReport(
+      range,
+      range === 'custom' ? from : '',
+      range === 'custom' ? to : '',
+      scope,
+    ),
+    queryFn: () => getPnlReport(range, from, to, scope),
     placeholderData: keepPreviousData,
     enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
     refetchOnWindowFocus: true,

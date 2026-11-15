@@ -612,6 +612,84 @@ export async function getProfitReport(
   return getJson<ProfitReport>(`/admin/profit-report?${qs.toString()}`);
 }
 
+// ── P&L report (GET /admin/profit-report/pnl) ──────────────────────────────
+// Amounts are integer sen; previous_sen is null for range=all.
+
+export type PnlPair = { current_sen: number; previous_sen: number | null };
+
+export type PnlFreeSource =
+  'adjustment' | 'checkin' | 'task' | 'welcome' | 'other';
+
+export type PnlPackFigures = {
+  opens: number;
+  paid_sen: number;
+  bonus_sen: number;
+  free_qty: Record<PnlFreeSource, number>;
+  free_sen: number;
+  total_sen: number;
+};
+
+export type PnlPackTree<F> = {
+  category: string | null;
+  total: PnlPair;
+  types: {
+    pack_type: string | null;
+    total: PnlPair;
+    packs: {
+      slug: string;
+      title: string;
+      price_sen: number;
+      current: F;
+      previous: F | null;
+    }[];
+  }[];
+}[];
+
+export type PnlCogsFigures = {
+  pulls: number;
+  pulled_sen: number;
+  buyback_sen: number;
+  shipped_cards: number;
+  shipped_cost_sen: number;
+  estimated_cards: number;
+  total_sen: number;
+};
+
+export type PnlReport = {
+  as_of: string;
+  scope: CustomerScope;
+  range: ProfitRange;
+  window: { from: string; to: string } | null;
+  previous: { from: string; to: string } | null;
+  pack_sales: {
+    total: PnlPair;
+    unattributed: PnlPair;
+    franchises: PnlPackTree<PnlPackFigures>;
+  };
+  cogs: {
+    total: PnlPair;
+    pulled: PnlPair;
+    purchase: PnlPair;
+    estimated_cards: number;
+    franchises: PnlPackTree<PnlCogsFigures>;
+  };
+};
+
+// Same query contract as getProfitReport.
+export async function getPnlReport(
+  range: ProfitRange,
+  from: string,
+  to: string,
+  scope: CustomerScope,
+): Promise<PnlReport> {
+  const qs = new URLSearchParams({ range, scope });
+  if (range === 'custom') {
+    qs.set('from', from);
+    qs.set('to', to);
+  }
+  return getJson<PnlReport>(`/admin/profit-report/pnl?${qs.toString()}`);
+}
+
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =

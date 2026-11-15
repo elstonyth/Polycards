@@ -83,6 +83,7 @@ const GROUPS: Group[] = [
       { path: '/ledger', label: 'pcNav.transactions' },
       { path: '/settlement', label: 'pcNav.reconciliation' },
       { path: '/economy', label: 'pcNav.profitReport' },
+      { path: '/pnl', label: 'pcNav.pnl' },
     ],
   },
   {

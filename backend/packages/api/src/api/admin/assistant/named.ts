@@ -53,7 +53,7 @@ async function noOtherPlayerIn(
   );
   const words = [
     ...new Set(
-      (rest.match(/[a-z0-9_-]+/g) ?? []).filter(
+      (rest.match(/[a-z0-9_-]+/g) ?? ([] as string[])).filter(
         (w) => w.length >= 3 && w.length <= 30,
       ),
     ),
