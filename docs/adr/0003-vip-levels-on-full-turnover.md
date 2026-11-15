@@ -86,3 +86,23 @@ the next pass has somewhere to land:
 
 Net effect: a refund never lowers lifetime turnover, and a clawback-then-respend
 neither re-earns a grant nor is blocked from opening.
+
+## Commission basis superseded (added 2026-11-15)
+
+Everything above about commission — the "three consumers" rationale, the
+fan-out at `service.ts:2449`, and "(commission size, withdrawal gate)" in the
+first Consequences bullet — describes the per-purchase programme that ADR 0007
+removed on 2026-08-24. Its successor (#490, 2026-08-25) is turnover-tiered by
+design (ADR 0007 §Successor): `closeReferralWeek` sizes a line's `basis_cents`
+from `packTurnoverCentsByCustomer`, the normal (non-bonus) part of every
+`pack_open` in the settlement week, with no external-funded filter.
+
+So today:
+
+- External-funded spend (`externalFundedSpendTotal`) drives only the withdrawal
+  gate, as the playthrough's "used" figure in `walletSummary`.
+- VIP level and referral commission both read normal pack-open turnover,
+  through separate queries (the lifetime counter vs the weekly window).
+- The two-counter rule in Consequences still holds: the turnover counter and
+  the external-funded basis stay separate, because the withdrawal gate depends
+  on the latter.

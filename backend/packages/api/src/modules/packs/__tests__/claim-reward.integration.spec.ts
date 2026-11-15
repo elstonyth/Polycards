@@ -10,7 +10,8 @@
  * Asserted contracts:
  *  - A granted VOUCHER claim raises the balance by amount_myr, flips the grant to
  *    'fulfilled', writes exactly one `voucher_claim` row with external_funded_cents=0,
- *    and leaves the VIP basis (externalFundedSpendTotal) UNCHANGED (basis-neutral).
+ *    and leaves the external-funded spend (externalFundedSpendTotal, the
+ *    withdrawal playthrough basis) UNCHANGED (basis-neutral).
  *  - A second claim of the same grant returns {claimed:false}, balance unchanged,
  *    still exactly one voucher_claim row (idempotent).
  *  - A granted FRAME claim flips status='fulfilled' with NO credit row.
