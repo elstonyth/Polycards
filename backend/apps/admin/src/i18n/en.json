@@ -1610,6 +1610,16 @@
   },
   "pnl": {
     "title": "P&L",
+    "export": "Export to Excel",
+    "exportFailed": "The Excel export failed. Try again.",
+    "keptSince": "Figures worked out {{time}}. A finished period is kept 6 hours, so late supplier costs and price changes show up after that.",
+    "loading": "Working out this period. The first load of a period takes about 20 seconds; after that it opens at once (for 5 minutes if it includes today, 6 hours if it has finished).",
+    "view": {
+      "sections": "Sections",
+      "columns": "Columns",
+      "collapse": "Hide the rows under {{name}}",
+      "expand": "Show the rows under {{name}}"
+    },
     "subtitle": "Revenue, cost and what is still owed, Malaysia time · {{window}}",
     "subtitleAll": "Revenue, cost and what is still owed, Malaysia time · all time",
     "packSales": {

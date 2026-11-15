@@ -1,73 +1,77 @@
-import { cached, MAX_ENTRIES } from '../cache';
+import {
+  cached,
+  CACHE_S,
+  CLOSED_CACHE_S,
+  type ReportCache,
+} from '../cache';
+
+/** The cache module's get/set, in memory; `ttls` records what set was given. */
+const fakeStore = () => {
+  const data = new Map<string, unknown>();
+  const ttls: number[] = [];
+  const store = {
+    get: async (k: string) => (data.has(k) ? data.get(k) : null),
+    set: async (k: string, v: unknown, ttl?: number) => {
+      data.set(k, v);
+      ttls.push(ttl ?? -1);
+    },
+  } as unknown as ReportCache;
+  return { store, data, ttls };
+};
 
 describe('P&L report cache', () => {
   it('shares one run between concurrent requests for the same query', async () => {
+    const { store } = fakeStore();
     let runs = 0;
-    const build = async () => {
-      runs++;
-      return { n: runs };
-    };
+    const build = async () => ({ n: ++runs });
     const [a, b] = await Promise.all([
-      cached('k1', build, 1_000),
-      cached('k1', build, 1_001),
+      cached(store, 'k1', build),
+      cached(store, 'k1', build),
     ]);
     expect(runs).toBe(1);
     expect(a).toBe(b);
   });
 
-  it('keeps a result 5 minutes, then runs again', async () => {
+  it('serves a settled result from the shared store for 5 minutes', async () => {
+    const { store, ttls } = fakeStore();
     let runs = 0;
     const build = async () => ++runs;
-    await cached('k2', build, 0);
-    await cached('k2', build, 5 * 60_000);
+    await cached(store, 'k2', build);
+    // A later request, or the other backend instance, reads the store.
+    await expect(cached(store, 'k2', build)).resolves.toBe(1);
     expect(runs).toBe(1);
-    await cached('k2', build, 5 * 60_000 + 1);
-    expect(runs).toBe(2);
+    expect(ttls).toEqual([CACHE_S]);
+    expect(CACHE_S).toBe(300);
+  });
+
+  it('keeps a closed period as long as it is told', async () => {
+    const { store, ttls } = fakeStore();
+    await cached(store, 'k5', async () => 1, CLOSED_CACHE_S);
+    expect(ttls).toEqual([6 * 60 * 60]);
   });
 
   it('does not keep a failed run', async () => {
+    const { store, data } = fakeStore();
     await expect(
-      cached(
-        'k3',
-        async () => {
-          throw new Error('db down');
-        },
-        0,
-      ),
+      cached(store, 'k3', async () => {
+        throw new Error('db down');
+      }),
     ).rejects.toThrow('db down');
-    await expect(cached('k3', async () => 'ok', 1)).resolves.toBe('ok');
+    expect(data.size).toBe(0);
+    await expect(cached(store, 'k3', async () => 'ok')).resolves.toBe('ok');
   });
 
-  it('never sweeps a run still going, so a later request waits on it', async () => {
-    let runs = 0;
-    let finish: (v: unknown) => void = () => {};
-    const build = () => {
-      runs++;
-      return new Promise((r) => {
-        finish = r;
-      });
-    };
-    const first = cached('k4', build, 0);
-    const later = cached('k4', build, 10 * 60_000);
-    expect(later).toBe(first);
-    expect(runs).toBe(1);
-    finish('done');
-    await expect(later).resolves.toBe('done');
-  });
-
-  it(`keeps at most ${MAX_ENTRIES} results, dropping the oldest settled first`, async () => {
-    for (let i = 0; i < MAX_ENTRIES; i++)
-      await cached(`b${i}`, async () => i, 1);
-    await cached('b-new', async () => 'new', 2);
-    let rebuilt = false;
-    await cached(
-      'b0',
-      async () => {
-        rebuilt = true;
-        return 0;
+  it('computes anyway when the cache itself is down', async () => {
+    const down = {
+      get: async () => {
+        throw new Error('valkey timeout');
       },
-      3,
+      set: async () => {
+        throw new Error('valkey timeout');
+      },
+    } as unknown as ReportCache;
+    await expect(cached(down, 'k4', async () => 'fresh')).resolves.toBe(
+      'fresh',
     );
-    expect(rebuilt).toBe(true);
   });
 });
