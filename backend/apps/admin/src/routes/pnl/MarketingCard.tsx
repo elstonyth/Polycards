@@ -1,14 +1,42 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Container, Heading, Table, Text } from '@medusajs/ui';
-import type { PnlPair } from '../../lib/admin-rest';
+import type {
+  PnlCardSource,
+  PnlCashRewardSource,
+  PnlCreditSource,
+  PnlMarketing,
+  PnlPair,
+} from '../../lib/admin-rest';
 import { Hint } from '../../components/Hint';
 import { sen, vs } from './pnl-format';
-import {
-  PNL_CARD_SOURCES,
-  PNL_CREDIT_SOURCES,
-  type PnlMarketing,
-} from './pnl-marketing-types';
+
+// Display order (key order). The type-only seam carries no values, so the
+// lists live here as records keyed by the backend's unions: a source added or
+// dropped there fails this typecheck.
+const CREDIT_ORDER: Record<PnlCreditSource, true> = {
+  adjustment: true,
+  checkin: true,
+  task: true,
+  weekly_challenge: true,
+  returned: true,
+  lucky_draw: true,
+  other: true,
+};
+const CARD_ORDER: Record<PnlCardSource, true> = {
+  checkin: true,
+  task: true,
+  weekly_challenge: true,
+};
+const CASH_ORDER: Record<PnlCashRewardSource, true> = {
+  checkin: true,
+  task: true,
+  weekly_challenge: true,
+  other: true,
+};
+const PNL_CREDIT_SOURCES = Object.keys(CREDIT_ORDER) as PnlCreditSource[];
+const PNL_CARD_SOURCES = Object.keys(CARD_ORDER) as PnlCardSource[];
+const PNL_CASH_SOURCES = Object.keys(CASH_ORDER) as PnlCashRewardSource[];
 
 const shows = (p: PnlPair) =>
   p.current_sen !== 0 || (p.previous_sen ?? 0) !== 0;
@@ -125,14 +153,14 @@ export const MarketingCard = ({ data }: { data: PnlMarketing }) => {
             pair: data.cash_rewards.total,
             kind: 'group' as const,
           },
-          ...(['checkin', 'task', 'weekly_challenge', 'other'] as const)
-            .filter((s) => shows(data.cash_rewards.by_source[s]))
-            .map((s) => ({
-              key: `cash-${s}`,
-              label: t(`pnl.marketing.cashSource.${s}`),
-              pair: data.cash_rewards.by_source[s],
-              kind: 'item' as const,
-            })),
+          ...PNL_CASH_SOURCES.filter((s) =>
+            shows(data.cash_rewards.by_source[s]),
+          ).map((s) => ({
+            key: `cash-${s}`,
+            label: t(`pnl.marketing.cashSource.${s}`),
+            pair: data.cash_rewards.by_source[s],
+            kind: 'item' as const,
+          })),
         ]
       : []),
     {

@@ -1,6 +1,6 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import { pnlSheets } from '../sheets';
-import type { PnlReportBody } from '../report';
+import type { PnlReport } from '../types';
 
 const P = (current_sen: number, previous_sen: number | null = null) => ({
   current_sen,
@@ -162,7 +162,7 @@ const report = {
     },
     total_sen: 0,
   },
-} as unknown as PnlReportBody;
+} as unknown as PnlReport;
 
 type CellObj = { value?: unknown; format?: string } | null | undefined;
 const valueOf = (c: unknown) =>

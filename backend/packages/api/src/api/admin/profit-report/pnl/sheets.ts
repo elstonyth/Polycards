@@ -12,7 +12,7 @@ import {
   CREDIT_SOURCES,
 } from '../../../../modules/packs/pnl-marketing';
 import { BONUS_SOURCES } from '../../../../modules/packs/pnl-balance';
-import type { PnlReportBody } from './report';
+import type { PnlReport } from './types';
 
 export type PnlSheet = {
   sheet: string;
@@ -154,7 +154,7 @@ const footer = (gap: number, label: string, p: Pair, bold = false): Row => [
 /** The whole P&L report as workbook sheets, in the page's order. Every figure
  *  the page puts in a tooltip (bonus share, free packs by source, estimated
  *  cards) is a column here. */
-export function pnlSheets(r: PnlReportBody): PnlSheet[] {
+export function pnlSheets(r: PnlReport): PnlSheet[] {
   const sheets: PnlSheet[] = [];
 
   const t = r.totals;
