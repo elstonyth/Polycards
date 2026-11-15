@@ -78,3 +78,25 @@ test('the credit: lock key is spelled only in modules/packs/credit-posting.ts', 
   }
   expect(offenders.map((o) => o.file)).toEqual(['modules/packs/credit-posting.ts']);
 });
+
+// Every credit row is posted by mutateCreditAtomic (planPosting decides the
+// row; credit-posting.ts): the lock, the bonus split, the replay check and the
+// paired ledger row live there. So the ONE raw .createCreditTransactions( call
+// in src/ is its insert — a second writer would pair rows by hand again.
+test('the only .createCreditTransactions( call in src/ is mutateCreditAtomic\'s insert', () => {
+  const found: RawDeleteOccurrence[] = [];
+  for (const file of collectTsFiles(SRC_ROOT)) {
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    lines.forEach((text, i) => {
+      if (!text.includes('.createCreditTransactions(')) return;
+      let method = i;
+      while (method > 0 && !/^\s{2}(?:protected |private )?async \w+\(/.test(lines[method])) method--;
+      found.push({
+        file: path.relative(SRC_ROOT, file).replace(/\\/g, '/'),
+        line: i + 1,
+        text: (lines[method].match(/async (\w+)\(/) ?? [])[1] ?? text.trim(),
+      });
+    });
+  }
+  expect(found.map((o) => `${o.file} ${o.text}`)).toEqual(['modules/packs/service.ts mutateCreditAtomic']);
+});
