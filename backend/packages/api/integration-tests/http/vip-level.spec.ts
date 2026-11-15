@@ -40,6 +40,7 @@ medusaIntegrationTestRunner({
           customerId: cust,
           amount: -3000,
           reason: 'pack_open',
+          sourceTransactionId: 'open_vip_1',
           floor: 0,
         });
         const summary = await packs.creditSummary(cust);
@@ -59,6 +60,7 @@ medusaIntegrationTestRunner({
           customerId: cust,
           amount: -500,
           reason: 'pack_open',
+          sourceTransactionId: 'open_vip_2',
           floor: 0,
         });
         const after = await packs.creditSummary(cust);

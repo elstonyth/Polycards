@@ -17,7 +17,7 @@ medusaIntegrationTestRunner({
           customerId: cust, amount: 100, reason: "topup", reference: "mock_comp",
         });
         const { id: chargeId } = await packs.mutateCreditAtomic({
-          customerId: cust, amount: -30, reason: "pack_open", floor: 0,
+          customerId: cust, amount: -30, reason: "pack_open", sourceTransactionId: `open_${cust}`, floor: 0,
         });
         const mid = await packs.creditSummary(cust);
         expect(mid.balance).toBe(70);
@@ -51,7 +51,7 @@ medusaIntegrationTestRunner({
           customerId: cust, amount: 100, reason: "topup", reference: "mock_comp_idem",
         });
         const { id: chargeId } = await packs.mutateCreditAtomic({
-          customerId: cust, amount: -30, reason: "pack_open", floor: 0,
+          customerId: cust, amount: -30, reason: "pack_open", sourceTransactionId: `open_${cust}`, floor: 0,
         });
 
         // Compensate twice for the SAME charge (a saga that double-compensates).

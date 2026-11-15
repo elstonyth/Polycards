@@ -4795,6 +4795,15 @@ class PacksModuleService extends MedusaService({
     ledger?: { id: string; display_id: string };
   }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // An open's id is its idempotency key (open_id). Reject an empty one at
+    // the boundary so a bad caller can't write rows that escape the
+    // partial-unique index (Sourcery review).
+    if (input.reason === 'pack_open' && !input.sourceTransactionId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'settleOpen requires a non-empty sourceTransactionId (the open_id).',
+      );
+    }
 
     // 1) Serialize all credit mutations for THIS customer on the locked txn.
     await lockCredit(sharedContext, input.customerId);
@@ -4840,6 +4849,34 @@ class PacksModuleService extends MedusaService({
       }
     }
 
+    // 1b) An open: never from a frozen account — checked inside the lock so a
+    //     concurrent unfreeze can't race past it — and one debit per open id.
+    //     The duplicate pre-check is raw SQL, so it fires HERE, under the
+    //     lock: MikroORM buffers the insert until flush, so a 23505 from the
+    //     debit's partial-unique index would fire at commit, after this
+    //     method returns, where dbErrorMapper intercepts it.
+    if (input.reason === 'pack_open') {
+      if (await this.isFrozen(input.customerId, sharedContext)) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          'This account is frozen.',
+        );
+      }
+      const [settled] = await em.execute<{ id: string }[]>(
+        `SELECT id FROM credit_transaction
+           WHERE source_transaction_id = ? AND reason = 'pack_open' AND amount < 0
+             AND deleted_at IS NULL
+           LIMIT 1`,
+        [input.sourceTransactionId],
+      );
+      if (settled) {
+        throw new MedusaError(
+          MedusaError.Types.DUPLICATE_ERROR,
+          `Open '${input.sourceTransactionId}' has already been settled.`,
+        );
+      }
+    }
+
     // 2) Re-read the balance AND the external-funded balance in cents inside the
     //    lock, in ONE scan (exact; soft-delete aware). external_funded_cents is
     //    only consumed by pack_open, but folding it into the existing balance
@@ -4867,7 +4904,23 @@ class PacksModuleService extends MedusaService({
 
     // 4) Insert the ledger row IN THE SAME TRANSACTION (thread sharedContext so
     //    the write enrolls in the locked txn — not a separate connection).
-    const [txn] = await this.createCreditTransactions([plan.row], sharedContext);
+    let txn: Awaited<ReturnType<typeof this.createCreditTransactions>>[0];
+    try {
+      [txn] = await this.createCreditTransactions([plan.row], sharedContext);
+    } catch (e) {
+      // A 23505 on an open means its open_id already settled (the debit
+      // index). It already aborted THIS txn (25P02); re-raise as
+      // DUPLICATE_ERROR so @InjectTransactionManager rolls the whole open
+      // back, debit included. No SAVEPOINT — that would let the duplicate
+      // debit commit.
+      if (input.reason === 'pack_open' && isUniqueViolation(e)) {
+        throw new MedusaError(
+          MedusaError.Types.DUPLICATE_ERROR,
+          `Open '${input.sourceTransactionId}' has already been settled.`,
+        );
+      }
+      throw e;
+    }
 
     // 5) Its ledger row, same transaction.
     const ledger = input.ledger
@@ -11442,7 +11495,6 @@ class PacksModuleService extends MedusaService({
     input: SettleOpenInput,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<SettleOpenResult> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const deltaCents = Math.round(input.amount * 100);
     if (deltaCents >= 0) {
       throw new MedusaError(
@@ -11450,122 +11502,21 @@ class PacksModuleService extends MedusaService({
         'settleOpen amount must be less than 0 (an open is a debit).',
       );
     }
-    // sourceTransactionId is the open-settlement idempotency key (open_id).
-    // Reject an empty/missing one at the boundary so a bad caller can't write
-    // rows that escape the partial-unique index (Sourcery review).
-    if (!input.sourceTransactionId) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'settleOpen requires a non-empty sourceTransactionId (the open_id).',
-      );
-    }
-
-    // 1) Serialize all credit mutations for THIS customer on the locked txn.
-    await lockCredit(sharedContext, input.customerId);
-
-    // 1a) Freeze gate — must run inside the lock so a concurrent unfreeze can't
-    //     race past this check before the debit lands.
-    if (await this.isFrozen(input.customerId, sharedContext)) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This account is frozen.',
-      );
-    }
-
-    // 2) Locked balance + external + bonus read (one scan), exact +
-    //    soft-delete aware.
-    const rows = await em.execute<
+    // The open id, the lock, the freeze gate, the duplicate check, the bonus
+    // split and the floor are the posting's own (mutateCreditAtomic).
+    const posted = await this.mutateCreditAtomic(
       {
-        balance_cents: string | null;
-        ext_cents: string | null;
-        bonus_cents: string | null;
-      }[]
-    >(
-      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
-        'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
-        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-      [input.customerId],
+        customerId: input.customerId,
+        amount: input.amount,
+        reason: 'pack_open',
+        sourceTransactionId: input.sourceTransactionId,
+      },
+      sharedContext,
     );
-    const beforeCents = Number(rows[0]?.balance_cents ?? 0);
-    const externalBalanceSen = Number(rows[0]?.ext_cents ?? 0);
-    // Bonus credit is spent FIRST (spec 2026-10-07 §4.1); only the rest draws
-    // on deposit money, so bonus-funded play banks no playthrough.
-    const bonusUsedSen = consumeBonusSen(
-      -deltaCents,
-      Math.max(0, Number(rows[0]?.bonus_cents ?? 0)),
-    );
-    const externalFundedCents = -consumeExternalSen(
-      -deltaCents - bonusUsedSen,
-      externalBalanceSen,
-    );
-
-    // 3) Floor check against the balance. There is no raw-balance opt-out (Codex
-    //    review removed the unused floorMode:'raw' bypass).
-    const availableCents = beforeCents;
-    if (availableCents + deltaCents < 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        insufficientCreditsMessage(-deltaCents, availableCents),
-      );
-    }
-
-    // 4) Idempotency pre-check + debit insert (Phase 3b).
-    // MikroORM's Unit of Work buffers ORM inserts until flush (transaction end), so
-    // a 23505 from the debit row's partial-unique index fires at commit time — AFTER
-    // settleOpen returns — where dbErrorMapper would intercept it before our catch.
-    // Instead we do an explicit pre-check (raw SQL, fires immediately inside the
-    // advisory lock) so a replayed no-sponsor open_id is caught here with a clear
-    // DUPLICATE_ERROR. The lock held since step 1 makes this read-then-write safe.
-    const [existing] = await em.execute<{ id: string }[]>(
-      `SELECT id FROM credit_transaction
-         WHERE source_transaction_id = ? AND reason = 'pack_open' AND amount < 0
-           AND deleted_at IS NULL
-         LIMIT 1`,
-      [input.sourceTransactionId],
-    );
-    if (existing) {
-      throw new MedusaError(
-        MedusaError.Types.DUPLICATE_ERROR,
-        `Open '${input.sourceTransactionId}' has already been settled.`,
-      );
-    }
-
-    let txn: Awaited<ReturnType<typeof this.createCreditTransactions>>[0];
-    try {
-      [txn] = await this.createCreditTransactions(
-        [
-          {
-            customer_id: input.customerId,
-            amount: deltaCents / 100,
-            reason: 'pack_open',
-            pull_id: null,
-            reference: null,
-            external_funded_cents: externalFundedCents,
-            bonus_cents: 0 - bonusUsedSen,
-            source_transaction_id: input.sourceTransactionId,
-          },
-        ],
-        sharedContext,
-      );
-    } catch (e) {
-      // A 23505 means this open_id already settled (the debit index).
-      // The 23505 already aborted THIS txn (25P02); re-raise as DUPLICATE_ERROR so
-      // @InjectTransactionManager rolls the whole settleOpen back, DEBIT included.
-      // No SAVEPOINT — that would let the duplicate debit commit.
-      if (isUniqueViolation(e)) {
-        throw new MedusaError(
-          MedusaError.Types.DUPLICATE_ERROR,
-          `Open '${input.sourceTransactionId}' has already been settled.`,
-        );
-      }
-      throw e;
-    }
-
     return {
-      id: txn.id,
-      balance: (beforeCents + deltaCents) / 100,
-      bonusCents: bonusUsedSen,
+      id: posted.id,
+      balance: posted.balance,
+      bonusCents: 0 - (posted.rowBonusCents ?? 0),
     };
   }
 

@@ -1,7 +1,7 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import type { Context } from '@medusajs/framework/types';
 import type { LedgerSqlManager } from './claim';
-import { BONUS_NOT_SPENDABLE_MESSAGE, bonusShareSen } from './bonus-credit';
+import { BONUS_NOT_SPENDABLE_MESSAGE, bonusShareSen, consumeBonusSen } from './bonus-credit';
 import { consumeExternalSen } from './external-funded';
 import type { LedgerPayload, LedgerType } from './ledger';
 
@@ -83,7 +83,7 @@ type PostingFields = {
    * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
    * the row's amount in sen. A 'reward_credit' row (task / challenge prize) or
    * a 'voucher_claim' row (VIP voucher) is stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
-   * opens compute theirs in settleOpen. A 'delivery_fee' charge takes its
+   * opens take theirs bonus first (planPosting). A 'delivery_fee' charge takes its
    * bonus share itself (bonus first, ADR 0014); a 'delivery_fee' refund passes
    * the share its charge took, 0..amount, so it goes back as bonus.
    */
@@ -95,7 +95,13 @@ type PostingFields = {
 /** A posting for a general reason: top-up, cashout, adjustment, bonus grant,
  *  reward credit, voucher, delivery fee, pack open. */
 export type GeneralPosting = PostingFields & {
-  reason: Exclude<CreditMutationReason, 'buyback' | 'coin_flip_win'>;
+  reason: Exclude<CreditMutationReason, 'buyback' | 'coin_flip_win' | 'pack_open'>;
+};
+
+/** An open's debit: once per open id (open_id), bonus credit first. */
+export type PackOpenPosting = PostingFields & {
+  reason: 'pack_open';
+  sourceTransactionId: string;
 };
 
 /** A sell-back credit: the pull it came from, and the bonus share of it
@@ -116,7 +122,7 @@ export type CoinFlipPosting = PostingFields & {
 };
 
 /** Every credit posting, keyed on reason. */
-export type CreditPosting = GeneralPosting | BuybackPosting | CoinFlipPosting;
+export type CreditPosting = GeneralPosting | PackOpenPosting | BuybackPosting | CoinFlipPosting;
 export type CreditMutationInput = CreditPosting;
 
 /** The locked Σ read a posting is planned against, in integer sen. */
@@ -261,20 +267,25 @@ export function planPosting(input: CreditPosting, totals: PostingTotals): Postin
       );
     }
     bonusDeltaCents = deltaCents;
+  } else if (input.reason === 'pack_open') {
+    // Bonus credit is spent FIRST (spec 2026-10-07 §4.1); only the rest draws
+    // on deposit money, so bonus-funded play banks no playthrough.
+    bonusDeltaCents = 0 - consumeBonusSen(-deltaCents, bonusBeforeCents);
   }
 
   // 2b) External-funded snapshot (Phase 1b) — uses the external balance from
   // the SAME locked read above, so the consume is race-safe against concurrent
   // top-ups/opens. A top-up adds its full amount as external money in; a
-  // pack_open consumes min(price, external balance) and snapshots the NEGATIVE
-  // consumed sen; buyback / adjustment never touch the external counter (0).
+  // pack_open consumes min(the price its bonus did not cover, external
+  // balance) and snapshots the NEGATIVE consumed sen; adjustment never touches
+  // the external counter (0).
   let externalFundedCents = 0;
   if (input.reason === 'topup' && deltaCents > 0) {
     externalFundedCents = deltaCents;
   } else if (input.reason === 'pack_open' && deltaCents < 0) {
     const externalBalanceSen = totals.externalCents;
     externalFundedCents = -consumeExternalSen(
-      -deltaCents,
+      -deltaCents + bonusDeltaCents,
       externalBalanceSen,
     );
   }
