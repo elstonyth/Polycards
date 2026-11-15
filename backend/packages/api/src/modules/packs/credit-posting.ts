@@ -58,7 +58,8 @@ export type CreditMutationReason =
   | 'daily_reward'
   | 'delivery_fee'
   | 'bonus_grant'
-  | 'coin_flip_win';
+  | 'coin_flip_win'
+  | 'referral_commission';
 
 type PostingFields = {
   customerId: string;
@@ -96,7 +97,7 @@ type PostingFields = {
 /** A posting for a general reason: top-up, cashout, adjustment, bonus grant,
  *  reward credit, voucher, delivery fee, pack open. */
 export type GeneralPosting = PostingFields & {
-  reason: Exclude<CreditMutationReason, 'buyback' | 'coin_flip_win' | 'pack_open'>;
+  reason: Exclude<CreditMutationReason, 'buyback' | 'coin_flip_win' | 'pack_open' | 'referral_commission'>;
 };
 
 /** An open's debit: once per open id (open_id), bonus credit first. */
@@ -120,6 +121,18 @@ export type CoinFlipPosting = PostingFields & {
   reason: 'coin_flip_win';
   roundId: string;
   ledger: LedgerPart & { type: 'CF' };
+};
+
+/** A weekly referral commission, keyed on its settlement line (the RF
+ *  ref_id). The RF row is written FIRST and its replay is the double-pay
+ *  guard: no credit row carries an anchor (D9). `unlocked` (D1, owner
+ *  decision): a pay run posts every line in one transaction, and a credit
+ *  lock per line would hold N locks in line order until commit, which can
+ *  deadlock against reverseOpen's sorted locks. */
+export type CommissionPosting = PostingFields & {
+  reason: 'referral_commission';
+  ledger: LedgerPart & { type: 'RF'; refId: string };
+  unlocked?: true;
 };
 
 // The ledger columns a reversal reads by raw SQL on its own transaction (an
@@ -149,6 +162,7 @@ export type CreditPosting =
   | PackOpenPosting
   | BuybackPosting
   | CoinFlipPosting
+  | CommissionPosting
   | ReversalPosting;
 export type CreditMutationInput = CreditPosting;
 
@@ -393,19 +407,30 @@ export function planPosting(input: CreditPosting, totals: PostingTotals): Postin
       // A sell-back's bonus share is held for packs: stamped as external money
       // in, like a deposit, so opens consume it and the playthrough gate
       // counts it (DEPOSITED_PT_SEN_SQL). Rounded up, toward the locked side.
+      // A commission row stamps neither (NULL, D9).
       external_funded_cents:
         input.reason === 'buyback'
           ? bonusShareSen(deltaCents, input.holdBp) || null
-          : externalFundedCents,
-      bonus_cents: input.reason === 'buyback' ? null : bonusDeltaCents,
+          : input.reason === 'referral_commission'
+            ? null
+            : externalFundedCents,
+      bonus_cents:
+        input.reason === 'buyback' || input.reason === 'referral_commission'
+          ? null
+          : bonusDeltaCents,
       source_transaction_id:
         input.reason === 'coin_flip_win'
           ? `coin-flip:${input.roundId}`
           : (input.idempotencyReference ?? input.sourceTransactionId ?? null),
     },
-    // A sell-back lifts an AUTO freeze after commit (buyback-pull.ts); a
-    // frozen account cannot flip (coin-flip.ts), so a win never lifts one.
-    unfreeze: deltaCents > 0 && input.reason !== 'buyback' && input.reason !== 'coin_flip_win',
+    // A sell-back and a commission lift an AUTO freeze after commit
+    // (buyback-pull.ts, the pay route and job); a frozen account cannot flip
+    // (coin-flip.ts), so a win never lifts one.
+    unfreeze:
+      deltaCents > 0 &&
+      input.reason !== 'buyback' &&
+      input.reason !== 'coin_flip_win' &&
+      input.reason !== 'referral_commission',
     balanceAfterCents: beforeCents + deltaCents,
     bonusAfterCents: bonusBeforeCents + bonusDeltaCents,
   };

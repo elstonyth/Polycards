@@ -88,5 +88,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((await service.listCustomerAccountStates({ customer_id: c }))[0].frozen).toBe(cause === 'manual');
       }
     });
+
+    it('a commission replay with the same RF ref writes nothing (RF first, unlocked)', async () => {
+      const c = 'cus_entry_rf';
+      const post = () => service.mutateCreditAtomic({
+        customerId: c, amount: 5, reason: 'referral_commission', unlocked: true,
+        ledger: { type: 'RF', refId: 'wsl_1', walletDelta: 5, vaultDelta: null,
+          payload: { type: 'RF', week_start: '2026-11-09', basis_cents: 100000, rate_bp: 50 } },
+      });
+      const first = await post();
+      const again = await post();
+      expect(first).toMatchObject({ replayed: false, rowBonusCents: null });
+      expect(again).toMatchObject({ replayed: true, id: '', ledger: first.ledger });
+      const [row] = await credits(c);
+      expect(await credits(c)).toHaveLength(1);
+      expect(await ledger(c)).toHaveLength(1);
+      expect([row.external_funded_cents, row.bonus_cents, row.source_transaction_id]).toEqual([null, null, null]);
+    });
   },
 });

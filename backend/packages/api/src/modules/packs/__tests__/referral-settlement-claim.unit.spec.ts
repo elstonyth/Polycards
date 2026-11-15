@@ -47,7 +47,12 @@ function fake(returned: Row[] | (() => Row[])) {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const ops: string[] = [];
   const em = {
-    execute: jest.fn(async (_q: string, _p?: unknown[]) => {
+    execute: jest.fn(async (q: string, _p?: unknown[]) => {
+      // The commission posting reads the balance; everything else is a claim.
+      if (q.includes('SUM(')) {
+        ops.push('sum');
+        return [];
+      }
       ops.push('claim');
       return typeof returned === 'function' ? returned() : returned;
     }),
@@ -86,7 +91,7 @@ function fake(returned: Row[] | (() => Row[])) {
 }
 
 describe('payWeeklySettlement claims a line before it moves money', () => {
-  it('claims with ONE conditional UPDATE … RETURNING, then ledger, then credit', async () => {
+  it('claims with ONE conditional UPDATE … RETURNING, then RF, then credit', async () => {
     const f = fake([{ id: 'wsl_1' }]);
     const res = await f.svc.payWeeklySettlement(
       { settlementId: 'ws_1' },
@@ -110,7 +115,10 @@ describe('payWeeklySettlement claims a line before it moves money', () => {
         'RETURNING id',
     );
     expect(params).toEqual(['paid', 'wsl_1', 'pending']);
-    expect(f.ops).toEqual(['claim', 'ledger', 'credit']);
+    // RF before the credit (its replay is the double-pay guard), and no
+    // credit lock: the run posts unlocked (D1), so no advisory statement.
+    expect(f.ops).toEqual(['claim', 'ledger', 'sum', 'credit']);
+    expect(f.em.execute.mock.calls.some(([q]) => q.includes('advisory'))).toBe(false);
     // The stamp needs no status guard any more — the row is ours.
     expect(f.updateWeeklySettlementLines).toHaveBeenCalledWith(
       { selector: { id: 'wsl_1' }, data: { paid_transaction_id: 'ct_1' } },

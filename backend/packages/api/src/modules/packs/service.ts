@@ -3076,52 +3076,46 @@ class PacksModuleService extends MedusaService({
       // Voided since the list above (or claimed by a concurrent pay) — no
       // money for this line from this run.
       if (claimed.length !== 1) continue;
-      // Ledger next, and its `replayed` flag is load-bearing: an RF row
-      // already carrying this line's ref_id means the money moved on an
-      // earlier run whose line update was lost. Minting the credit before
-      // this check would pay that customer twice — recordLedgerEntry returns
-      // the existing row instead of throwing (security review 2026-08-25).
-      const entry = await this.recordLedgerEntry(
+      // RF next, then the credit: the posting writes the RF row first and its
+      // replay is load-bearing — an RF row already carrying this line's ref_id
+      // means the money moved on an earlier run whose line update was lost
+      // (see CommissionPosting).
+      const posted = await this.mutateCreditAtomic(
         {
-          type: 'RF',
           customerId: line.customer_id,
-          refId: line.id,
-          walletDelta: line.amount_cents / 100,
-          vaultDelta: null,
-          payload: {
+          amount: line.amount_cents / 100,
+          reason: 'referral_commission',
+          unlocked: true,
+          ledger: {
             type: 'RF',
-            week_start: weekStartIso,
-            basis_cents: line.basis_cents,
-            rate_bp: line.rate_bp,
+            refId: line.id,
+            walletDelta: line.amount_cents / 100,
+            vaultDelta: null,
+            payload: {
+              type: 'RF',
+              week_start: weekStartIso,
+              basis_cents: line.basis_cents,
+              rate_bp: line.rate_bp,
+            },
           },
         },
         sharedContext,
       );
       // Already paid: the claim above repaired the line's status; move on.
-      if (entry.replayed) continue;
-      const [txn] = await this.createCreditTransactions(
-        [
-          {
-            customer_id: line.customer_id,
-            amount: line.amount_cents / 100,
-            reason: 'referral_commission',
-          },
-        ],
-        sharedContext,
-      );
+      if (posted.replayed) continue;
       // The row is ours (claimed above, lock held), so the stamp needs no
       // guard — the ledger row is still the authority on whether money moved.
       await this.updateWeeklySettlementLines(
-        { selector: { id: line.id }, data: { paid_transaction_id: txn.id } },
+        { selector: { id: line.id }, data: { paid_transaction_id: posted.id } },
         sharedContext,
       );
       paid++;
-      // This credit was written outside mutateCreditAtomic, so it skipped the
-      // inline auto-unfreeze — a referrer sitting on an AUTO freeze whose debt
-      // this repays stays frozen. The caller lifts it, POST-commit and bare.
-      // Not here: this method is one transaction, so an in-loop unfreeze would
-      // hold a `credit:<id>` advisory lock per customer until the whole run
-      // commits, racing every concurrent top-up.
+      // The commission posts unlocked, so it skips the inline auto-unfreeze —
+      // a referrer sitting on an AUTO freeze whose debt this repays stays
+      // frozen. The caller lifts it, POST-commit and bare. Not here: this
+      // method is one transaction, so an in-loop unfreeze would hold a
+      // `credit:<id>` advisory lock per customer until the whole run commits,
+      // racing every concurrent top-up.
       paidCustomerIds.push(line.customer_id);
     }
 
@@ -4787,6 +4781,8 @@ class PacksModuleService extends MedusaService({
     const customerId =
       'reversalOf' in input ? input.reversalOf.customer_id : input.customerId;
     const open = !('reversalOf' in input) && input.reason === 'pack_open' ? input : null;
+    const commission =
+      !('reversalOf' in input) && input.reason === 'referral_commission' ? input : null;
     // An open's id is its idempotency key (open_id). Reject an empty one at
     // the boundary so a bad caller can't write rows that escape the
     // partial-unique index (Sourcery review).
@@ -4797,8 +4793,9 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    // 1) Serialize all credit mutations for THIS customer on the locked txn.
-    await lockCredit(sharedContext, customerId);
+    // 1) Serialize all credit mutations for THIS customer on the locked txn
+    //    (a commission run posts unlocked, D1: see CommissionPosting).
+    if (!commission?.unlocked) await lockCredit(sharedContext, customerId);
 
     // 1a) Idempotent replay: under the lock, if a row already carries this
     // posting's key the request already applied — return it as a no-op rather
@@ -4820,6 +4817,43 @@ class PacksModuleService extends MedusaService({
     // Raw, on the locked transaction: an ORM list here takes a second pool
     // connection while this one holds the lock, and callers waiting on the
     // lock each hold one too.
+    // A commission's key is its RF row, written FIRST: one already carrying
+    // this line's ref_id means the money moved on an earlier run whose line
+    // update was lost, and minting the credit anyway would pay that customer
+    // twice — recordLedgerEntry returns the existing row instead of throwing
+    // (security review 2026-08-25). Its credit row has no anchor (D9), so a
+    // replay has no credit id to return: id is ''.
+    const rf = commission
+      ? await this.recordLedgerEntry(
+          {
+            type: 'RF',
+            customerId,
+            refId: commission.ledger.refId,
+            walletDelta:
+              commission.ledger.walletDelta === undefined
+                ? Math.round(commission.amount * 100) / 100
+                : commission.ledger.walletDelta,
+            vaultDelta: commission.ledger.vaultDelta ?? null,
+            payload: commission.ledger.payload,
+          },
+          sharedContext,
+        )
+      : undefined;
+    if (commission && rf?.replayed) {
+      const [bal] = await em.execute<{ balance_cents: string | null }[]>(
+        'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
+          'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+        [customerId],
+      );
+      return {
+        id: '',
+        balance: Number(bal?.balance_cents ?? 0) / 100,
+        amount: Math.round(commission.amount * 100) / 100,
+        replayed: true,
+        reference: null,
+        ledger: { id: rf.id, display_id: rf.display_id },
+      };
+    }
     type Replayed = { id: string; amount: string; reference: string | null };
     const [existing] =
       'reversalOf' in input
@@ -4924,8 +4958,8 @@ class PacksModuleService extends MedusaService({
     }
 
     // 5) Its ledger row, same transaction.
-    const part = 'reversalOf' in input ? undefined : input.ledger;
-    const ledger = part
+    const part = 'reversalOf' in input || commission ? undefined : input.ledger;
+    const ledger = rf ?? (part
       ? await this.recordLedgerEntry(
           {
             type: part.type,
@@ -4938,7 +4972,7 @@ class PacksModuleService extends MedusaService({
           },
           sharedContext,
         )
-      : undefined;
+      : undefined);
 
     // Auto-clear an AUTO freeze if this inflow repays the debt. The projected
     // balance is the locked snapshot + this delta — never re-read after the
