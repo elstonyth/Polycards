@@ -8,16 +8,9 @@ import {
   type PaymentGateway,
 } from './gateway';
 import { classifyRequeryError } from './gateway-reconcile';
-// A function-only cycle with gateway-withdrawal.ts (its two callers live
-// there): nothing on either side runs at module load.
-import {
-  floatCannotPayAnything,
-  formatGatewayFailureReason,
-  refundWithdrawal,
-  tripPayoutFloatBreaker,
-} from './gateway-withdrawal';
 import { alertPayoutDisabled, alertPayoutFloatEmpty } from './ops-alert';
 import type { RowFx } from './payment-fx';
+import { refundWithdrawal } from './withdrawal-refund';
 
 // Withdrawal Submit: the one submit -> judge -> refund-or-wait path shared by
 // a new Withdrawal (startWithdrawal, after its debit) and an admin-approved
@@ -356,4 +349,128 @@ function warnOps(
       refunded: verdict.refund,
     });
   }
+}
+
+/**
+ * After TGPay refuses a payout because OUR payout wallet is short
+ * (TGPAY_PAYOUT_FLOAT_EMPTY), every payout fails until ops tops it up. For
+ * this long, new withdrawals are turned away before anything is written,
+ * instead of each tap costing a row, a debit, a doomed submit and a refund
+ * (2026-09-29: 19 refused attempts in two hours, 9–10 per customer).
+ */
+export const PAYOUT_FLOAT_COOLDOWN_MS = 5 * 60_000;
+// ponytail: per process, and the web service runs 2 instances, so each can
+// still let one refused submit through per window. A shared Valkey key with a
+// TTL is the upgrade if that ever matters. Keyed by gateway: TGPay's empty
+// wallet must not hold back The 7 Pay, the gateway an operator switches to
+// precisely because TGPay's wallet is empty.
+const payoutFloatEmptyUntil = new Map<PaymentGateway, number>();
+
+/** Test seam: module state outlives a test (one jest process, one module). */
+export function resetPayoutFloatBreaker(): void {
+  payoutFloatEmptyUntil.clear();
+}
+
+/** Is `gateway` closed to new payouts right now? */
+export function payoutFloatEmpty(gateway: PaymentGateway): boolean {
+  return Date.now() < (payoutFloatEmptyUntil.get(gateway) ?? 0);
+}
+
+/** Close `gateway` to new payouts for PAYOUT_FLOAT_COOLDOWN_MS. */
+export function tripPayoutFloatBreaker(gateway: PaymentGateway): void {
+  payoutFloatEmptyUntil.set(gateway, Date.now() + PAYOUT_FLOAT_COOLDOWN_MS);
+}
+
+/**
+ * Trip the gateway-wide breaker only when the float cannot pay ANY payout
+ * (below the gateway's own minimum). One request larger than the float is
+ * refused on its own; it must not close withdrawals for every customer.
+ */
+export function floatCannotPayAnything(
+  gateway: PaymentGateway,
+  short: { available: number },
+): boolean {
+  return (
+    short.available < (GATEWAYS[gateway].currencyLimits?.withdrawalMin ?? 0)
+  );
+}
+
+/**
+ * The one place a gateway refusal is turned into a `failure_reason` string
+ * (plan 095). Two callers build this — the store submit path below and the
+ * admin approve route — and they must not drift, because the redaction here is
+ * a control, not formatting.
+ *
+ * WHY REDACT AT ALL, when the log line beside each call site prints the same
+ * message unredacted and the row already stores the account number: because
+ * the two surfaces are not equivalent. The admin Withdrawals LIST masks
+ * `account_number` to `••••1234` and serves the full value only from the
+ * separate ./[id]/account route, so an unredacted provider message that echoed
+ * a submitted account number would put it back on the list page — undoing the
+ * mask through a column nobody thinks of as PII. Logs are a different audience
+ * with different access; the database column is the one that renders.
+ *
+ * `msg` is the gateway's own text and the only field we do not compose, so it
+ * is the only one that can carry anything we did not choose. Three rules run
+ * over it, and the caller must pass the destination so the last two can:
+ *
+ *   1. digit sequences of 6+, SEPARATOR-TOLERANT — `1234-5678-9012` and
+ *      `1234 5678 9012` are the same account number as `123456789012`, and a
+ *      contiguous-only rule (the first version of this) passed the formatted
+ *      forms straight through;
+ *   2. the exact account number we submitted, for the short accounts rule 1
+ *      cannot reach;
+ *   3. the holder name we submitted, which carries no digits at all and so was
+ *      wholly invisible to a digit rule — `AHMAD BIN ALI` is PII in a way
+ *      `PMT10021` is not.
+ *
+ * The words around the redactions — where the diagnosis lives — survive.
+ */
+export function formatGatewayFailureReason(input: {
+  prefix: string;
+  codes: readonly string[];
+  httpStatus: number;
+  bankCode: string;
+  message: string;
+  /** The destination we submitted, so its own value can be redacted out of
+   *  their echo of it. Both callers hold it at the point they build this. */
+  accountNumber: string;
+  accountHolderName: string;
+}): string {
+  const redacted = redactPayoutText(
+    input.message,
+    input.accountNumber,
+    input.accountHolderName,
+  );
+  return (
+    `${input.prefix}: codes=${input.codes.join(',') || 'none'} ` +
+    `httpStatus=${input.httpStatus} bankCode=${input.bankCode} ` +
+    `msg=${redacted}`
+  ).slice(0, 400);
+}
+
+/**
+ * The three redaction rules above, for any gateway free text bound for
+ * `failure_reason`: formatGatewayFailureReason's refusal message, and the
+ * Remark an A3Pay operator types when they fail a payout by hand.
+ */
+export function redactPayoutText(
+  message: string,
+  accountNumber: string,
+  accountHolderName: string,
+): string {
+  const escape = (raw: string) => raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let redacted = message
+    // A digit, then 5+ more digits with an optional single space or hyphen
+    // between each — covers grouped, hyphenated and plain account numbers.
+    .replace(/\d(?:[\s-]?\d){5,}/g, '[redacted]');
+  const account = accountNumber.trim();
+  if (account.length >= 4) {
+    redacted = redacted.replaceAll(account, '[redacted]');
+  }
+  const holder = accountHolderName.trim();
+  if (holder.length >= 3) {
+    redacted = redacted.replace(new RegExp(escape(holder), 'gi'), '[redacted]');
+  }
+  return redacted;
 }
