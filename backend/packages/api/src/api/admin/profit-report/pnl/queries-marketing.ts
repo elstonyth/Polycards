@@ -6,6 +6,8 @@ import type {
   MarketingWindowRows,
 } from '../../../../modules/packs/pnl-marketing';
 import { DEFAULT_MARKET_MULTIPLIER } from '../../../../modules/packs/pricing';
+import { bonusSourceSql } from '../../../../modules/packs/money-figures';
+import { mytDaySql } from '../../../../modules/packs/myt-window';
 import { and, windowFilter, type ReportDb } from '../../../reports/sql';
 import type { ReportWindow } from '../../../reports/params';
 
@@ -13,19 +15,9 @@ import type { ReportWindow } from '../../../reports/params';
 // time; the fold is modules/packs/pnl-marketing.ts. Free packs come from
 // packWindowRows (queries.ts), which the route already runs.
 
-// Each bonus row's source (decision 21). Check-in = a task whose requirement
-// type is checkin_days; Lucky Draw credit prizes are `luckydraw:<prize>`.
-const CREDIT_SOURCE_SQL =
-  "CASE WHEN ct.reason = 'bonus_grant' THEN 'adjustment' " +
-  "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'challenge:%' THEN 'weekly_challenge' " +
-  "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'luckydraw:%' THEN 'lucky_draw' " +
-  "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'task:%' THEN " +
-  "CASE WHEN td.requirement->>'type' = 'checkin_days' THEN 'checkin' ELSE 'task' END " +
-  // Bonus coming back by an undo (an open reversed, a fee refunded, a
-  // bonus-bought card sold back) is 'returned'; any other grant (voucher,
-  // daily reward, a future promo) is 'other' and stays a marketing cost.
-  "WHEN ct.reason IN ('pack_open', 'delivery_fee', 'buyback') THEN 'returned' " +
-  "ELSE 'other' END";
+// Each bonus row's source (decision 21). 'other' (voucher, daily reward, a
+// future promo) stays a marketing cost.
+const CREDIT_SOURCE_SQL = bonusSourceSql('ct.');
 
 /** One window's marketing rows: free credit used/given by source, reward
  *  cards given, referral commission. Statements run one after another. */
@@ -97,7 +89,7 @@ export async function marketingWindowRows(
   }>(
     "SELECT CASE WHEN p.pack_id LIKE 'challenge-%' THEN 'weekly_challenge' " +
       "WHEN td.requirement->>'type' = 'checkin_days' THEN 'checkin' ELSE 'task' END AS source, " +
-      "to_char((p.rolled_at AT TIME ZONE 'Asia/Kuala_Lumpur')::date, 'YYYY-MM-DD') AS day, " +
+      `${mytDaySql('p.rolled_at')} AS day, ` +
       'COUNT(*)::bigint AS n, COUNT(p.buyback_amount)::bigint AS sold, ' +
       'COALESCE(SUM(ROUND(p.buyback_amount * 100)), 0)::bigint AS sold_sen, ' +
       'COALESCE(SUM(c.market_value * COALESCE(c.market_multiplier, ?)) ' +

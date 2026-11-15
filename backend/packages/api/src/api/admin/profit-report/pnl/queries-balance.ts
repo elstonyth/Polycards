@@ -1,6 +1,10 @@
 import type { CustomerScope } from '../../../../modules/packs/real-customers';
 import { filterSql } from '../../../../modules/packs/real-customers';
 import {
+  bonusSourceSql,
+  depositedPtSenSql,
+} from '../../../../modules/packs/money-figures';
+import {
   BONUS_SOURCES,
   type BonusSource,
   type CardsLine,
@@ -61,12 +65,6 @@ export async function stockRows(db: ReportDb): Promise<StockRow[]> {
   }));
 }
 
-// shortcut: a copy of service.ts's DEPOSITED_PT_SEN_SQL (not exported), the
-// playthrough basis walletSummary gates on; export it there to drop the copy.
-const DEPOSITED_PT_SEN_SQL =
-  "CASE WHEN ct.reason = 'topup' AND ct.amount > 0 AND ct.external_funded_cents IS NOT NULL THEN ROUND(ct.amount * 100) " +
-  "WHEN ct.reason = 'buyback' THEN COALESCE(ct.external_funded_cents, 0) ELSE 0 END";
-
 /** walletSummary's inputs for every scoped customer holding credit, in one
  *  scan: balance, bonus, playthrough deposited / used, any top-up, frozen. */
 export async function walletRows(
@@ -91,7 +89,8 @@ export async function walletRows(
       'FROM (SELECT ct.customer_id, ' +
       'COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS balance_sen, ' +
       'COALESCE(SUM(COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen, ' +
-      `COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_sen, ` +
+      // The playthrough basis walletSummary gates on.
+      `COALESCE(SUM(${depositedPtSenSql('ct.')}), 0)::bigint AS deposited_sen, ` +
       "COALESCE(SUM(-ct.external_funded_cents) FILTER (WHERE ct.reason = 'pack_open'), 0)::bigint AS used_sen, " +
       "COALESCE(bool_or(ct.reason = 'topup' AND ct.amount > 0), false) AS has_topup " +
       'FROM credit_transaction ct WHERE ct.deleted_at IS NULL GROUP BY ct.customer_id) w ' +
@@ -121,14 +120,7 @@ export async function freeCreditUnused(
   const f = filterSql(scope, 'ct.customer_id');
   const { rows } = await db.raw<{ source: BonusSource; sen: string }>(
     'WITH b AS (SELECT ct.id, ct.customer_id, ct.created_at, ct.bonus_cents, ' +
-      'CASE WHEN ct.bonus_cents < 0 THEN NULL ' +
-      "WHEN ct.reason = 'bonus_grant' THEN 'adjustment' " +
-      "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'challenge:%' THEN 'weekly_challenge' " +
-      "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'luckydraw:%' THEN 'lucky_draw' " +
-      "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'task:%' THEN " +
-      "CASE WHEN td.requirement->>'type' = 'checkin_days' THEN 'checkin' ELSE 'task' END " +
-      "WHEN ct.reason IN ('pack_open', 'delivery_fee', 'buyback') THEN 'returned' " +
-      "ELSE 'other' END AS source " +
+      `${bonusSourceSql('ct.', { nullForSpends: true })} AS source ` +
       'FROM credit_transaction ct ' +
       "LEFT JOIN task_definition td ON ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'task:%' " +
       "AND td.id = split_part(ct.source_transaction_id, ':', 2) " +

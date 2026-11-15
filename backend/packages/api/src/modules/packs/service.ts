@@ -320,6 +320,7 @@ import {
   type CustomerScope,
   type MoneyFilter,
 } from './real-customers';
+import { depositedPtSenSql } from './money-figures';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // The ledger columns the reversals read by raw SQL on their own transaction
@@ -344,9 +345,7 @@ const LEDGER_REVERSAL_COLS =
 // external_funded_cents — it pays NORMAL credit that must be played through
 // once, like a deposit. Shared between creditSummary and walletSummary (and
 // mirrored by credit-summary.ts's fold) so the scans can't drift.
-const DEPOSITED_PT_SEN_SQL =
-  "CASE WHEN reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL THEN ROUND(amount * 100) " +
-  "WHEN reason = 'buyback' THEN COALESCE(external_funded_cents, 0) ELSE 0 END";
+const DEPOSITED_PT_SEN_SQL = depositedPtSenSql();
 
 // The VIP basis: a credit_transaction row counts only if it is newer than the
 // customer's operator VIP reset (vip_member_state.vip_reset_at, resetVipLevel).
