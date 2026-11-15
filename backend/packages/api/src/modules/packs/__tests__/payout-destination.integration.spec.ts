@@ -270,12 +270,30 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect((await standing('cus_player', 'USDTTRC20', TRON)).key).toBe(TRON);
     });
 
-    it('an unknown bank checks no holders', async () => {
-      await put('cus_saver', { bank_accounts: [entry('MBBEMYKL', NUMBER)] });
-      expect(await standing('cus_player', null, NUMBER)).toMatchObject({
-        bankId: null,
-        holders: [],
+    it('an unknown bank code matches holders under another unknown code, as before', async () => {
+      // A retired code no alias maps can stay on an old saved list or row.
+      await put('cus_old_saved', {
+        bank_accounts: [entry('OLDBANKX', NUMBER)],
       });
+      await payout('cus_old_paid', 'OLDBANKY', `0${NUMBER}`);
+      await put('cus_known', { bank_accounts: [entry('MBBEMYKL', NUMBER)] });
+      const s = await standing('cus_player', 'OLDBANKZ', NUMBER);
+      expect(s.bankId).toBeNull();
+      expect(s.holders.map((h) => `${h.customerId}:${h.paid}`).sort()).toEqual([
+        'cus_old_paid:true',
+        'cus_old_saved:false',
+      ]);
+      // A known bank does not see them, nor they it.
+      expect(await ids('cus_player', 'MBBEMYKL', NUMBER)).toEqual(['cus_known']);
+      // Verified under an unknown code: verified, as verifiedElsewhere read it.
+      const old = entry('OLDBANKX', '998877665544');
+      await put('cus_old_verified', {
+        bank_accounts: [old],
+        bank_share_verified: { [old.id]: '2026-11-03T00:00:00.000Z' },
+      });
+      expect(
+        (await standing('cus_player', 'OLDBANKZ', '998877665544')).holders,
+      ).toEqual([{ customerId: 'cus_old_verified', paid: false, verified: true }]);
     });
 
     it('a wallet address matches whole, never by its digits', async () => {

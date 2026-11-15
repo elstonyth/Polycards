@@ -33,8 +33,8 @@ export type PayoutNumber = { bankCode: string | null; accountNumber: string };
 export type Holder = { customerId: string; paid: boolean; verified: boolean };
 
 export type NumberStanding = {
-  /** The canonical bank id; null for an unknown bank, whose holders are not
-   *  checked. */
+  /** The canonical bank id; null for a code the bank registry does not know,
+   *  whose holders are those under another unknown code (the old rule). */
   bankId: string | null;
   /** payoutAccountKey of the canonical spelling. */
   key: string;
@@ -141,6 +141,8 @@ const destinationKey = (
  *  any bank, however it is padded; for this player, unless support lifted that
  *  same key for them (setPayoutBanLifted). Holders: every spelling, at this
  *  bank only (the same digits at another bank are someone else's account); a
+ *  code the registry does not know (a retired one an old saved list may keep)
+ *  matches holders under another unknown code, as heldByAnother did; a
  *  wallet address compared whole. A caller that lists or frees bank numbers
  *  only checks bank.wallet itself. A deleted account's lifts count for no one. */
 export async function numberStanding(
@@ -170,58 +172,54 @@ export async function numberStanding(
     const lifted = liftedPayoutBans(me?.metadata ?? {});
     bannedForPlayer = bannedKeys.some((k) => !lifted[k]);
   }
-  const holders: Holder[] = [];
-  if (bank) {
-    const paid = new Map<string, boolean>();
-    for (const form of forms) {
-      const rows = await em.execute<
-        { customer_id: string; bank_code: string; holder_name: string | null }[]
-      >(wallet ? HOLDERS_EXACT_SQL : HOLDERS_DIGITS_SQL, [
-        customerId,
-        form,
-        customerId,
-        form,
-      ]);
-      for (const r of rows) {
-        if (findBank(r.bank_code)?.id !== bank.id) continue;
-        paid.set(
-          r.customer_id,
-          (paid.get(r.customer_id) ?? false) || r.holder_name == null,
-        );
-      }
-    }
-    // One person, one account: which of them support verified on this
-    // number, read only when someone holds it.
-    const verified = new Set<string>();
-    if (paid.size > 0) {
-      const mine = destinationKey(bank.id, n.accountNumber);
-      for (const c of await em.execute<
-        { id: string; metadata: Record<string, unknown> | null }[]
-      >(
-        "SELECT id, metadata FROM customer WHERE id = ANY(string_to_array(?, ',')) AND deleted_at IS NULL",
-        [[...paid.keys()].join(',')],
-      )) {
-        const stamps = verifiedBankAccounts(c.metadata ?? {});
-        if (
-          parseSavedBankAccounts(c.metadata?.bank_accounts).some(
-            (a) =>
-              Boolean(stamps[a.id]) &&
-              findBank(a.bankCode)?.id === bank.id &&
-              destinationKey(a.bankCode, a.accountNumber) === mine,
-          )
-        ) {
-          verified.add(c.id);
-        }
-      }
-    }
-    for (const [customerId, isPaid] of paid) {
-      holders.push({
-        customerId,
-        paid: isPaid,
-        verified: verified.has(customerId),
-      });
+  const paid = new Map<string, boolean>();
+  for (const form of forms) {
+    const rows = await em.execute<
+      { customer_id: string; bank_code: string; holder_name: string | null }[]
+    >(wallet ? HOLDERS_EXACT_SQL : HOLDERS_DIGITS_SQL, [
+      customerId,
+      form,
+      customerId,
+      form,
+    ]);
+    for (const r of rows) {
+      // Canonical ids; undefined on both sides for codes nobody maps.
+      if (findBank(r.bank_code)?.id !== bank?.id) continue;
+      paid.set(
+        r.customer_id,
+        (paid.get(r.customer_id) ?? false) || r.holder_name == null,
+      );
     }
   }
+  // One person, one account: which of them support verified on this
+  // number, read only when someone holds it.
+  const verified = new Set<string>();
+  if (paid.size > 0) {
+    const mine = destinationKey(n.bankCode, n.accountNumber);
+    for (const c of await em.execute<
+      { id: string; metadata: Record<string, unknown> | null }[]
+    >(
+      "SELECT id, metadata FROM customer WHERE id = ANY(string_to_array(?, ',')) AND deleted_at IS NULL",
+      [[...paid.keys()].join(',')],
+    )) {
+      const stamps = verifiedBankAccounts(c.metadata ?? {});
+      if (
+        parseSavedBankAccounts(c.metadata?.bank_accounts).some(
+          (a) =>
+            Boolean(stamps[a.id]) &&
+            findBank(a.bankCode)?.id === bank?.id &&
+            destinationKey(a.bankCode, a.accountNumber) === mine,
+        )
+      ) {
+        verified.add(c.id);
+      }
+    }
+  }
+  const holders: Holder[] = [...paid].map(([holderId, isPaid]) => ({
+    customerId: holderId,
+    paid: isPaid,
+    verified: verified.has(holderId),
+  }));
   return {
     bankId: bank?.id ?? null,
     key: destinationKey(n.bankCode, n.accountNumber),
