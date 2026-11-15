@@ -17788,6 +17788,7 @@ class PacksModuleService extends MedusaService({
 
     // 3a) Credits — one ledger mutation for the summed amount.
     let creditTxnId: string | null = null;
+    let creditsReplayed = false;
     if (payout.credits > 0) {
       const { id, replayed } = await this.mutateCreditAtomic(
         {
@@ -17799,6 +17800,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
       creditTxnId = id;
+      creditsReplayed = replayed;
       rows.push({
         week_start: weekStart,
         customer_id: customerId,
@@ -17891,15 +17893,16 @@ class PacksModuleService extends MedusaService({
     if (rows.length === 0) return null;
 
     // 3c) WP ledger row (POLYCARD-BACK §5, Plan 060) — one row per settled
-    // winner, not per card. Same ref_id as the 3a credit mutation so a retry
-    // dedupes on recordLedgerEntry's own (type, ref_id) idempotency.
+    // winner, not per card, keyed on the 3a credit's anchor. A replayed
+    // credit moved no money and wrote nothing, so neither does its WP (D5,
+    // the rule every posting follows); a cards-only payout still writes it.
     // vaultDelta stays null (WP is a straight reward credit like TP, not a
     // vault-liability move). `stage` has no single source — RankPayout is
     // already a union of every unlocked stage's rewards (challenge-settle.ts
     // payoutByRank) — so this reports the highest stage unlocked that week,
     // the frontier the payout reflects; SettleSnapshot carries no per-card
     // FMV, so `value` stays 0 rather than threading new data through the job.
-    await this.recordLedgerEntry(
+    if (!creditsReplayed) await this.recordLedgerEntry(
       {
         type: 'WP',
         customerId,
