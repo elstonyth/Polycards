@@ -12,9 +12,9 @@ import {
   TOPUPS_LEDGER,
   bonusSourceSql,
   cardValueSen,
-  ledgerTotalsRowsSql,
-  inActiveOrderSql,
-  inShippedOrderSql,
+  exceptNonPositiveTopupsSql,
+  inActiveDeliverySql,
+  inShippedDeliverySql,
   playthroughBasisSenSql,
   fromCustomerScope,
   fromGroupScope,
@@ -94,7 +94,7 @@ describe('ledger figures', () => {
     // Positive rows only (owner decision 2026-11-16), and the Economy
     // totals drop exactly the other topup rows.
     expect(TOPUPS_LEDGER.where('')).toBe("reason = 'topup' AND amount > 0");
-    expect(ledgerTotalsRowsSql('ct.')).toBe("NOT (ct.reason = 'topup' AND ct.amount <= 0)");
+    expect(exceptNonPositiveTopupsSql('ct.')).toBe("NOT (ct.reason = 'topup' AND ct.amount <= 0)");
   });
 
   it('every figure says what it counts', () => {
@@ -175,13 +175,13 @@ describe('gateway figures', () => {
 });
 
 describe('cards in delivery', () => {
-  it("inActiveOrderSql is the P&L balance's processing test", () => {
-    expect(inActiveOrderSql('p.')).toBe(
+  it("inActiveDeliverySql is the P&L balance's processing test", () => {
+    expect(inActiveDeliverySql('p.')).toBe(
       'EXISTS (SELECT 1 FROM delivery_order_item i ' +
         'JOIN delivery_order o ON o.id = i.delivery_order_id AND o.deleted_at IS NULL ' +
         "WHERE i.pull_id = p.id AND i.deleted_at IS NULL AND (o.status IN ('requested', 'processed', 'packing') OR o.status IN ('ready_to_ship', 'pending_ship')))",
     );
-    expect(inShippedOrderSql('p.')).toContain(
+    expect(inShippedDeliverySql('p.')).toContain(
       "(o.status IN ('shipped', 'completed', 'delivered'))",
     );
   });

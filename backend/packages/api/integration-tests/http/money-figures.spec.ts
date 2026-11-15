@@ -540,7 +540,7 @@ medusaIntegrationTestRunner({
           { handle: 'mf-card', name: 'MF Card', set: 'QA', grader: 'PSA', grade: '9', market_value: 10, image: '/qa.png' },
         ]);
         const pulls = await packs().createPulls(
-          (['vaulted', 'delivering', 'delivering', 'delivered'] as const).map((status) => ({
+          (['vaulted', 'delivering', 'delivering', 'delivered', 'delivering'] as const).map((status) => ({
             customer_id: p.id,
             pack_id: 'mf-pack',
             card_id: 'mf-card',
@@ -589,8 +589,9 @@ medusaIntegrationTestRunner({
         });
         // Profit, owner decision 2026-11-16 (G3), P&L decision 15: owed is the
         // vaulted card and the one in a requested order; the card in a shipped
-        // order left as goods. Before: owed 3 cards, shipped 1.
-        expect(await valued('vault', 'delivering')).toBe(2 * vaultSen);
+        // order left as goods; the delivering card in no delivery at all
+        // counts as neither (as in the P&L). Before: owed 4 cards, shipped 1.
+        expect(await valued('vault', 'delivering')).toBe(3 * vaultSen);
         const owed = await packs().profitOwed('all', fx);
         expect([owed.cardCount, owed.cardSellbackCents]).toEqual([2, 2 * vaultSen]);
         expect(owed.deliveringCount).toBe(1);

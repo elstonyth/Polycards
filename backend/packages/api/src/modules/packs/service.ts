@@ -324,9 +324,9 @@ import {
   GATEWAY,
   LIVE_VALUE_USD_SQL,
   cardValueSen,
-  inActiveOrderSql,
-  ledgerTotalsRowsSql,
-  inShippedOrderSql,
+  exceptNonPositiveTopupsSql,
+  inActiveDeliverySql,
+  inShippedDeliverySql,
   playthroughBasisSenSql,
   populationSql,
 } from './money-figures';
@@ -12852,7 +12852,7 @@ class PacksModuleService extends MedusaService({
   // Two optional narrowings, both in SQL so they apply BEFORE the LIMIT (a
   // Legendary pull ranked below the top N by value must still be found):
   // `tiers` keeps pulls whose card sits at one of those tiers in the pack it
-  // came from (PULL_TIER_SQL's pack-level join), and `defaultGroupOnly` keeps
+  // came from (PULL_TIER_SQL's pack-level join), and `realCustomersOnly` keeps
   // real customers (the reports' ?group=default).
   @InjectManager()
   async topPullsInWindow(
@@ -12861,7 +12861,7 @@ class PacksModuleService extends MedusaService({
       to: Date;
       limit: number;
       tiers?: readonly Rarity[];
-      defaultGroupOnly?: boolean;
+      realCustomersOnly?: boolean;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
@@ -12883,7 +12883,7 @@ class PacksModuleService extends MedusaService({
         '   AND o.card_id = pu.card_id AND o.deleted_at IS NULL ' +
         `   AND o.rarity IN (${tiers.map(() => '?').join(', ')}))`
       : '';
-    const groupSql = opts.defaultGroupOnly
+    const groupSql = opts.realCustomersOnly
       ? populationSql({ kind: 'real' }, 'pu.customer_id').sql
       : '';
     const rows = await em.execute<
@@ -13302,7 +13302,7 @@ class PacksModuleService extends MedusaService({
       // (and paid back on sells before 2026-10-09) is not cash; bonus_grant is
       // its own bucket.
       `SELECT reason, COALESCE(SUM(${reasonCashSenSql()}), 0)::bigint AS cents ` +
-      `FROM credit_transaction WHERE deleted_at IS NULL AND ${ledgerTotalsRowsSql()}`;
+      `FROM credit_transaction WHERE deleted_at IS NULL AND ${exceptNonPositiveTopupsSql()}`;
     if (from) {
       sql += ' AND created_at >= ?::timestamptz';
       params.push(from);
@@ -14238,8 +14238,9 @@ class PacksModuleService extends MedusaService({
       // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
       `WITH t AS (
          SELECT p.status,
-                p.status = 'vaulted' OR (p.status = 'delivering' AND ${inActiveOrderSql('p.')}) AS owed,
-                p.status = 'delivered' OR (p.status = 'delivering' AND ${inShippedOrderSql('p.')}) AS gone,
+                p.status = 'vaulted' OR (p.status = 'delivering' AND ${inActiveDeliverySql('p.')}) AS owed,
+                p.status = 'delivered' OR (p.status = 'delivering' AND NOT ${inActiveDeliverySql('p.')}
+                  AND ${inShippedDeliverySql('p.')}) AS gone,
                 ${cardValueSen('vault')} AS cents,
                 EXISTS (
                   SELECT 1 FROM credit_transaction ct

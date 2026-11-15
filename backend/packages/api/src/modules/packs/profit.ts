@@ -121,7 +121,7 @@ export function profitOwed(owed: OwedCents, allTime: CashCents) {
  *  pack sales (P&L decision 3). */
 export function profitActivity(
   rows: { reason: string; amount: number }[],
-  capsuleSen = 0,
+  capsuleSen: number,
 ) {
   const cents = (reason: string) =>
     Math.round((rows.find((r) => r.reason === reason)?.amount ?? 0) * 100);

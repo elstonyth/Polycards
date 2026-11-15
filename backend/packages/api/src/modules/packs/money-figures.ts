@@ -102,6 +102,15 @@ export const CAPSULE_SALES_CASH: Figure = {
   sen: (t) => PACK_SALES_CASH.sen(t),
 };
 
+/** Profit's "Pack sales": PACK_SALES_CASH without the capsule opens, which
+ *  are Lucky Draw revenue (P&L decision 3). Profit folds it as
+ *  PACK_SALES_CASH − CAPSULE_SALES_CASH. */
+export const PACK_SALES_CASH_NO_CAPSULES: Figure = {
+  note: 'Pack sales, cash only: the normal-credit part of each charge, net of reversals. Bonus credit spent is not revenue. Capsule opens are left out: they are capsule_sales (Lucky Draw revenue, P&L decision 3).',
+  where: (t) => `${PACK_SALES_CASH.where(t)} AND NOT ${capsuleOpenSql(t)}`,
+  sen: (t) => PACK_SALES_CASH.sen(t),
+};
+
 /** P&L buyback (decision 12); the P&L also leaves reward cards out
  *  (rewardCardSql). */
 export const BUYBACK_FULL: Figure = {
@@ -137,7 +146,7 @@ export const TOPUPS_LEDGER: Figure = {
 /** The rows the Economy ledger totals (ledgerReasonTotals, the Finance desk's
  *  economy and daily) read: all but a topup row that is not positive, so
  *  their topups bucket is TOPUPS_LEDGER. No other bucket reads topup rows. */
-export const ledgerTotalsRowsSql = (t = ''): string =>
+export const exceptNonPositiveTopupsSql = (t = ''): string =>
   `NOT (${t}reason = 'topup' AND ${t}amount <= 0)`;
 
 /** A pack_open charge whose open made capsule spins (P&L decision 3: Lucky
@@ -216,28 +225,28 @@ export const GATEWAY = {
 
 /** The delivery-order statuses by shelf bucket (inventoryLifecycleBuckets in
  *  service.ts; 'packing' = legacy 'processed'), as SQL lists. */
-export const ORDER_STATUSES = {
+export const DELIVERY_STATUSES = {
   requested: "('requested', 'processed', 'packing')",
   readyToShip: "('ready_to_ship', 'pending_ship')",
   shipped: "('shipped', 'completed', 'delivered')",
 } as const;
 
-const inOrderSql = (p: string, statuses: string): string =>
+const inDeliverySql = (p: string, statuses: string): string =>
   'EXISTS (SELECT 1 FROM delivery_order_item i ' +
   'JOIN delivery_order o ON o.id = i.delivery_order_id AND o.deleted_at IS NULL ' +
   `WHERE i.pull_id = ${p}id AND i.deleted_at IS NULL AND (${statuses}))`;
 
 /** A delivering pull still on our shelf: in an order requested to ready to
  *  ship (P&L decision 15). The P&L and Profit count it as owed. */
-export const inActiveOrderSql = (p: string): string =>
-  inOrderSql(
+export const inActiveDeliverySql = (p: string): string =>
+  inDeliverySql(
     p,
-    `o.status IN ${ORDER_STATUSES.requested} OR o.status IN ${ORDER_STATUSES.readyToShip}`,
+    `o.status IN ${DELIVERY_STATUSES.requested} OR o.status IN ${DELIVERY_STATUSES.readyToShip}`,
   );
 
 /** A delivering pull whose order has shipped: it left as goods (a cost). */
-export const inShippedOrderSql = (p: string): string =>
-  inOrderSql(p, `o.status IN ${ORDER_STATUSES.shipped}`);
+export const inShippedDeliverySql = (p: string): string =>
+  inDeliverySql(p, `o.status IN ${DELIVERY_STATUSES.shipped}`);
 
 // ── Card value ───────────────────────────────────────────────────────────────
 

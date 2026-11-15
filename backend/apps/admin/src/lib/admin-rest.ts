@@ -586,7 +586,7 @@ export interface ProfitReport {
   activity: {
     pack_sales: number;
     /** Lucky Draw capsule sales, cash only: left out of pack_sales (P&L
-     *  decision 3). 0 on the player page. */
+     *  decision 3). */
     capsule_sales: number;
     sellbacks: number;
     coin_flip_payouts: number;
@@ -2440,7 +2440,8 @@ export interface CustomerMoney {
   };
   cash: ProfitReport['cash'];
   owed: ProfitReport['owed'];
-  activity: ProfitReport['activity'];
+  /** Profit's lines; pack spend keeps capsule opens, so no capsule line. */
+  activity: Omit<ProfitReport['activity'], 'capsule_sales'>;
   play: {
     /** Cards real money won, at draw-time value × today's rate, each in its
      *  normal (non-bonus) share: the leaderboard's basis. */

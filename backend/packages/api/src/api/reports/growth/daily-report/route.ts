@@ -167,7 +167,7 @@ export async function GET(
   const [pulls, { rows: withdrawals }] = await Promise.all([
     loadTopPulls(req, packs, window, MAX_PULL_ROWS, {
       tiers: ['Immortal', 'Legendary', 'Mythical'],
-      defaultGroupOnly: true,
+      realCustomersOnly: true,
     }),
     db.raw<{
       customer_id: string;

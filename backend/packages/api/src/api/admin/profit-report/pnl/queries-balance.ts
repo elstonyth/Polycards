@@ -1,10 +1,10 @@
 import type { CustomerScope } from '../../../../modules/packs/real-customers';
 import { filterSql } from '../../../../modules/packs/real-customers';
 import {
-  ORDER_STATUSES,
+  DELIVERY_STATUSES,
   bonusSourceSql,
   cardValueSen,
-  inActiveOrderSql,
+  inActiveDeliverySql,
   playthroughBasisSenSql,
 } from '../../../../modules/packs/money-figures';
 import {
@@ -24,9 +24,6 @@ import type { ReportDb } from '../../../reports/sql';
 
 // The delivery-order statuses that still hold a card on the shelf
 // (inventoryLifecycleBuckets in service.ts; 'packing' = legacy 'processed').
-const REQUESTED = ORDER_STATUSES.requested;
-const READY_TO_SHIP = ORDER_STATUSES.readyToShip;
-const SHIPPED = ORDER_STATUSES.shipped;
 
 /** Every received card's shelf counts, the Stock page's (inventory-view.ts):
  *  on hand = GRN lines + invoice lines not transferred from a GRN − shipped;
@@ -49,9 +46,9 @@ export async function stockRows(db: ReportDb): Promise<StockRow[]> {
       'recv AS (SELECT handle, SUM(n) AS n FROM rec GROUP BY 1), ' +
       // COUNT(DISTINCT): one pull can sit on two item rows (inventoryLifecycleBuckets).
       'ord AS (SELECT p.card_id AS handle, ' +
-      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${REQUESTED}) AS requested, ` +
-      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${READY_TO_SHIP}) AS rts, ` +
-      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${SHIPPED}) AS shipped ` +
+      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${DELIVERY_STATUSES.requested}) AS requested, ` +
+      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${DELIVERY_STATUSES.readyToShip}) AS rts, ` +
+      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${DELIVERY_STATUSES.shipped}) AS shipped ` +
       'FROM delivery_order_item doi ' +
       'JOIN delivery_order dord ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL ' +
       'JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL ' +
@@ -165,7 +162,7 @@ export async function vaultCards(
   }>(
     'WITH t AS (SELECT CASE ' +
       "WHEN p.status = 'vaulted' THEN 'vault' " +
-      `WHEN p.status = 'delivering' AND ${inActiveOrderSql('p.')} ` +
+      `WHEN p.status = 'delivering' AND ${inActiveDeliverySql('p.')} ` +
       "THEN 'processing' END AS k, " +
       `${cardValueSen('vault')} AS sen ` +
       'FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +

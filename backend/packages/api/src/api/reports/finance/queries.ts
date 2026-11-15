@@ -4,9 +4,10 @@ import {
   type LedgerTotals,
 } from '../../../modules/packs/economy';
 import { reasonCashSenSql } from '../../../modules/packs/bonus-credit';
+import { realCustomerSql } from '../../../modules/packs/real-customers';
 import {
   PACK_SALES_CASH,
-  ledgerTotalsRowsSql,
+  exceptNonPositiveTopupsSql,
 } from '../../../modules/packs/money-figures';
 import { mytDaySql } from '../../../modules/packs/myt-window';
 import { EFFECTIVE_GROUP_SQL, type ReportDb, type SqlPart } from '../sql';
@@ -41,7 +42,7 @@ export async function ledgerTotalsWhere(
   const { rows } = await db.raw<ReasonCents>(
     // Normal part of each row: bonus credit (spec 2026-10-07) is not cash.
     `SELECT ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
-      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${ledgerTotalsRowsSql('ct.')}` +
+      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${exceptNonPositiveTopupsSql('ct.')}` +
       filter.sql +
       ' GROUP BY ct.reason',
     filter.params,
@@ -58,7 +59,7 @@ export async function ledgerTotalsByDay(
   const { rows } = await db.raw<ReasonCents & { day: string }>(
     `SELECT ${mytDaySql('ct.created_at')} AS day, ` +
       `ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
-      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${ledgerTotalsRowsSql('ct.')}` +
+      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${exceptNonPositiveTopupsSql('ct.')}` +
       filter.sql +
       ' GROUP BY 1, 2 ORDER BY 1',
     filter.params,
@@ -212,7 +213,7 @@ export async function groupSizes(
     'SELECT eff.group_id, COUNT(*)::bigint AS n FROM customer c ' +
       `LEFT JOIN (${EFFECTIVE_GROUP_SQL}) eff ON eff.customer_id = c.id ` +
       'WHERE c.deleted_at IS NULL ' +
-      "AND (eff.group_id IS NOT NULL OR c.metadata -> 'partner_credential' IS NULL) " +
+      `AND (eff.group_id IS NOT NULL OR ${realCustomerSql('c.id')}) ` +
       'GROUP BY eff.group_id',
   );
   let defaultPlayers = 0;

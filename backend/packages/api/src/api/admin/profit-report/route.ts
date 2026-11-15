@@ -14,6 +14,7 @@ import {
   BUYBACK_CASH,
   CAPSULE_SALES_CASH,
   COIN_FLIP_WINS,
+  PACK_SALES_CASH_NO_CAPSULES,
 } from '../../../modules/packs/money-figures';
 import { packRtpRows } from '../economy/pack-rtp';
 import { reportDb } from '../../reports/sql';
@@ -103,8 +104,7 @@ export async function GET(
     // What the activity lines count, for the desk bots and the assistant.
     basis: {
       activity: {
-        pack_sales:
-          'Pack sales, cash only: the normal-credit part of each charge, net of reversals. Bonus credit spent is not revenue. Capsule opens are left out: they are capsule_sales (Lucky Draw revenue, P&L decision 3).',
+        pack_sales: PACK_SALES_CASH_NO_CAPSULES.note,
         capsule_sales: CAPSULE_SALES_CASH.note,
         sellbacks: BUYBACK_CASH.note,
         coin_flip_payouts: COIN_FLIP_WINS.note,

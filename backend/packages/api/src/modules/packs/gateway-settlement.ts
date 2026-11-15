@@ -32,7 +32,7 @@
 //     charges the payout fee on top (docs/payments/tgpay-setup.md, verified
 //     2026-09-05: a RM 50 payout with a RM 1 fee drained the wallet by 51).
 // So the fee is |gross − net| per direction, still over the known-net subset
-// only. A payout's is summed as |net − paid| PER ROW (GATEWAY.payoutFeeSen,
+// only. A payout's fee is summed as |net − paid| PER ROW (GATEWAY.payoutFeeSen,
 // owner decision 2026-11-16, as Profit does): TGPay payouts settled before
 // 2026-09-10 stored net the other way round, and a signed sum let each one
 // cancel a real fee. `gross` stays the LEDGER ANCHOR in both directions — it is the figure
