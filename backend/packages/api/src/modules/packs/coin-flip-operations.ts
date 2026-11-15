@@ -6,9 +6,9 @@ import type { LedgerSqlManager } from './claim';
 import { coerceOddsSet, EFFECTIVE_GROUP_SQL } from './odds-sets';
 import { DEFAULT_MARKET_MULTIPLIER, displayMarketPrice, resolveFxRateStrict } from './pricing';
 import { FREE_PULL_LOCKED_MESSAGE } from './free-pack';
-import { groupPolicyOf } from './group-policy';
+import { COIN_FLIP_REFUSAL, mayPlay } from './eligibility';
 import {
-  assertCoinFlipEligible, COIN_FLIP_CONFIG_ID, COIN_FLIP_QUOTE_MS, COIN_FLIP_SCALE,
+  COIN_FLIP_CONFIG_ID, COIN_FLIP_QUOTE_MS, COIN_FLIP_SCALE,
   coinFlipSettingsView, coinFlipStakeCents, coinFlipWins, effectiveCoinWinUnits, coinFlipSelection, coinFlipStakes,
   coinFlipStakeSelection, publicCoinFlipRound, type CoinFlipConfigRecord, type CoinFlipPublicRound,
   type CoinFlipRoundRecord, type CoinFlipSnapshot, type CoinFlipStake, type CoinFlipQuoteInput,
@@ -25,10 +25,8 @@ export async function lockCoinFlipCustomer(customerId: string, context: Context)
 }
 
 async function eligible(service: PacksModuleService, customerId: string, context: Context): Promise<void> {
-  if (await service.isAccountDisabled(customerId, context)) refuse('This account is unavailable.');
-  const [group] = await coinFlipManager(context).execute<{ name: string | null; metadata: Record<string, unknown> | null }[]>(
-    `SELECT cg.name, cg.metadata FROM (${EFFECTIVE_GROUP_SQL}) g JOIN customer_group cg ON cg.id = g.group_id WHERE g.customer_id = ?`, [customerId]);
-  assertCoinFlipEligible(await service.walletSummary(customerId, undefined, context), group ? groupPolicyOf(group) : null);
+  const refusal = await mayPlay(service, customerId, 'coin_flip', context);
+  if (refusal) refuse(COIN_FLIP_REFUSAL[refusal]);
 }
 
 async function cardForFlip(service: PacksModuleService, customerId: string, pullId: string, context: Context) {
