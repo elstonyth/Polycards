@@ -11,6 +11,13 @@ import type {
 } from '../../../../modules/packs/pnl';
 import { costAsOf } from '../../../../modules/packs/pnl';
 import { DEFAULT_MARKET_MULTIPLIER } from '../../../../modules/packs/pricing';
+import {
+  BUYBACK_FULL,
+  CAPSULE_OPEN_SQL,
+  PACK_SALES_FULL,
+  REWARD_CARD_SQL,
+} from '../../../../modules/packs/money-figures';
+import { mytDaySql } from '../../../../modules/packs/myt-window';
 import { packOpens } from '../../../reports/finance/queries';
 import { and, windowFilter, type ReportDb } from '../../../reports/sql';
 import type { ReportWindow } from '../../../reports/params';
@@ -43,12 +50,11 @@ export async function packWindowRows(
     // took 20 s on prod (2026-11-15).
     'SELECT (SELECT p.pack_id FROM pull p WHERE p.open_id = ct.source_transaction_id ' +
       'AND p.deleted_at IS NULL LIMIT 1) AS pack_id, ' +
-      'COALESCE(SUM(-ROUND(ct.amount * 100)), 0)::bigint AS full_sen, ' +
+      `COALESCE(SUM(${PACK_SALES_FULL.sen('ct.')}), 0)::bigint AS full_sen, ` +
       'COALESCE(SUM(-COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen ' +
       'FROM credit_transaction ct ' +
-      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open' " +
-      'AND NOT EXISTS (SELECT 1 FROM ticket_spin s WHERE s.open_id = ct.source_transaction_id ' +
-      'AND s.deleted_at IS NULL)' +
+      `WHERE ct.deleted_at IS NULL AND ${PACK_SALES_FULL.where('ct.')} ` +
+      `AND NOT ${CAPSULE_OPEN_SQL('ct.')}` +
       ledger.sql +
       ' GROUP BY 1',
     ledger.params,
@@ -119,12 +125,7 @@ export async function packMeta(
 // Reward CARDS (task-reward, challenge-…, lucky-draw pulls: no pack row) are a
 // marketing cost when given, so their buybacks and shipping stay out of COGS.
 // Free-pack rips (reward pulls of a real pack) stay in (decision 12).
-const NOT_REWARD_CARD =
-  "NOT (p.source = 'reward' AND NOT EXISTS " +
-  '(SELECT 1 FROM pack pk WHERE pk.slug = p.pack_id))';
-
-const mytDay = (column: string) =>
-  `to_char((${column} AT TIME ZONE 'Asia/Kuala_Lumpur')::date, 'YYYY-MM-DD')`;
+const NOT_REWARD_CARD = `NOT ${REWARD_CARD_SQL('p.')}`;
 
 /** One window's COGS rows (spec §6): buyback paid, card value pulled, cards
  *  shipped, supplier purchases. */
@@ -138,9 +139,9 @@ export async function cogsWindowRows(
     filterSql(scope, 'ct.customer_id'),
   );
   const buyback = await db.raw<{ slug: string; sen: string }>(
-    'SELECT p.pack_id AS slug, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS sen ' +
+    `SELECT p.pack_id AS slug, COALESCE(SUM(${BUYBACK_FULL.sen('ct.')}), 0)::bigint AS sen ` +
       'FROM credit_transaction ct JOIN pull p ON p.id = ct.pull_id ' +
-      `WHERE ct.deleted_at IS NULL AND ct.reason = 'buyback' AND ${NOT_REWARD_CARD}` +
+      `WHERE ct.deleted_at IS NULL AND ${BUYBACK_FULL.where('ct.')} AND ${NOT_REWARD_CARD}` +
       ledger.sql +
       ' GROUP BY p.pack_id',
     ledger.params,
@@ -158,7 +159,7 @@ export async function cogsWindowRows(
     n: string;
     usd: number;
   }>(
-    `SELECT p.pack_id AS slug, ${mytDay('p.rolled_at')} AS day, COUNT(*)::bigint AS n, ` +
+    `SELECT p.pack_id AS slug, ${mytDaySql('p.rolled_at')} AS day, COUNT(*)::bigint AS n, ` +
       'COALESCE(SUM(COALESCE(p.recorded_value_usd, c.market_value * COALESCE(c.market_multiplier, ?))), 0)::float8 AS usd ' +
       'FROM pull p LEFT JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
       `WHERE p.deleted_at IS NULL AND ${NOT_REWARD_CARD}` +
@@ -180,7 +181,7 @@ export async function cogsWindowRows(
     n: string;
     market_usd: number | null;
   }>(
-    `SELECT x.slug, x.handle, ${mytDay('x.shipped_at')} AS day, ` +
+    `SELECT x.slug, x.handle, ${mytDaySql('x.shipped_at')} AS day, ` +
       'COUNT(*)::bigint AS n, MAX(c.market_value)::float8 AS market_usd ' +
       'FROM (SELECT DISTINCT ON (p.id) p.pack_id AS slug, p.card_id AS handle, ' +
       'p.customer_id, o.shipped_at FROM delivery_order o ' +
@@ -240,7 +241,7 @@ export async function cardCostLines(
     qty: number;
     unit_cost: string;
   }>(
-    `SELECT l.card_handle, ${mytDay('pi.date')} AS day, l.qty, l.unit_cost ` +
+    `SELECT l.card_handle, ${mytDaySql('pi.date')} AS day, l.qty, l.unit_cost ` +
       'FROM purchase_invoice_line l ' +
       'JOIN purchase_invoice pi ON pi.id = l.invoice_id AND pi.deleted_at IS NULL ' +
       `WHERE l.deleted_at IS NULL AND l.card_handle IN (${handles.map(() => '?').join(', ')})`,
