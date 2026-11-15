@@ -338,7 +338,12 @@ function warnOps(
   gateway: PaymentGateway,
   detail: { amount: number; ref: string; via: string },
 ): void {
-  if (verdict.trip) tripPayoutFloatBreaker(gateway);
+  if (verdict.trip) {
+    tripPayoutFloatBreaker(
+      gateway,
+      verdict.payoutDisabled ? 'payouts-off' : 'wallet-empty',
+    );
+  }
   const label = GATEWAYS[gateway].label;
   if (verdict.payoutDisabled) {
     void alertPayoutDisabled(scope, { ...detail, gateway: label });
@@ -364,21 +369,34 @@ export const PAYOUT_FLOAT_COOLDOWN_MS = 5 * 60_000;
 // TTL is the upgrade if that ever matters. Keyed by gateway: TGPay's empty
 // wallet must not hold back The 7 Pay, the gateway an operator switches to
 // precisely because TGPay's wallet is empty.
-const payoutFloatEmptyUntil = new Map<PaymentGateway, number>();
+const payoutFloatEmptyUntil = new Map<
+  PaymentGateway,
+  { until: number; why: BreakerReason }
+>();
+
+/** Why the breaker closed a gateway: the fix an admin needs differs. */
+export type BreakerReason = 'wallet-empty' | 'payouts-off';
 
 /** Test seam: module state outlives a test (one jest process, one module). */
 export function resetPayoutFloatBreaker(): void {
   payoutFloatEmptyUntil.clear();
 }
 
-/** Is `gateway` closed to new payouts right now? */
-export function payoutFloatEmpty(gateway: PaymentGateway): boolean {
-  return Date.now() < (payoutFloatEmptyUntil.get(gateway) ?? 0);
+/** Why `gateway` is closed to new payouts right now, or null if it is open. */
+export function payoutBreaker(gateway: PaymentGateway): BreakerReason | null {
+  const tripped = payoutFloatEmptyUntil.get(gateway);
+  return tripped && Date.now() < tripped.until ? tripped.why : null;
 }
 
 /** Close `gateway` to new payouts for PAYOUT_FLOAT_COOLDOWN_MS. */
-export function tripPayoutFloatBreaker(gateway: PaymentGateway): void {
-  payoutFloatEmptyUntil.set(gateway, Date.now() + PAYOUT_FLOAT_COOLDOWN_MS);
+export function tripPayoutFloatBreaker(
+  gateway: PaymentGateway,
+  why: BreakerReason,
+): void {
+  payoutFloatEmptyUntil.set(gateway, {
+    until: Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+    why,
+  });
 }
 
 /**

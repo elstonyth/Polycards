@@ -992,4 +992,18 @@ describe('an admin-approved Held Withdrawal', () => {
     expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
     expect(fakeGateway.calls.withdrawals).toHaveLength(1);
   });
+
+  it('while the breaker is tripped by payouts switched off', async () => {
+    fakeGateway.refuse('payouts-off', { codes: ['X1'] });
+    await newPath().start().catch(() => undefined);
+    fakeGateway.script({ submitWithdrawal: { transactionId: 'W-OK-2' } });
+    const h = heldPath();
+    // Q7b: the breaker records why it tripped, so the admin is told the
+    // right fix; the row stays held as for an empty wallet.
+    await expect(h.approve()).rejects.toThrow(
+      `Payouts are switched off on our ${LABEL} account right now, so this withdrawal stays held. Ask ${LABEL} to turn payouts back on, then approve it again.`,
+    );
+    expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
+  });
 });

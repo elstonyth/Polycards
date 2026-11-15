@@ -43,7 +43,7 @@ import { withdrawalFeedKey } from './feed-events';
 import { sendWithdrawalReceipt } from './withdrawal-receipt';
 import {
   floatCannotPayAnything,
-  payoutFloatEmpty,
+  payoutBreaker,
   redactPayoutText,
   resetPayoutFloatBreaker,
   tripPayoutFloatBreaker,
@@ -544,7 +544,7 @@ export async function startWithdrawal(
   // Our payout wallet was short moments ago (see PAYOUT_FLOAT_COOLDOWN_MS).
   // After the replay, so the retry of an in-flight withdrawal still reports
   // it; before any row or debit, so nothing is written for a certain refusal.
-  if (payoutFloatEmpty(gateway)) {
+  if (payoutBreaker(gateway)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Withdrawals are temporarily unavailable on our side — nothing was taken from your balance. Please try again in a few minutes.',
@@ -733,7 +733,7 @@ export async function startWithdrawal(
     const short = await regionalFloatShort(config, fx.gatewayAmount);
     if (short) {
       if (floatCannotPayAnything(gateway, short)) {
-        tripPayoutFloatBreaker(gateway);
+        tripPayoutFloatBreaker(gateway, 'wallet-empty');
       }
       void alertPayoutFloatEmpty(scope, {
         amount,
@@ -1340,13 +1340,17 @@ export async function submitHeldWithdrawal(
       'The payout channel is closed — a held withdrawal cannot be approved right now.',
     );
   }
-  // The wallet breaker (PAYOUT_FLOAT_COOLDOWN_MS) is tripped: a submit now
+  // The payout breaker (PAYOUT_FLOAT_COOLDOWN_MS) is tripped: a submit now
   // would be refused and refunded. Before the claim, so the row stays held
-  // for an approval after the top-up (owner, 2026-11-16).
-  if (payoutFloatEmpty(gatewayId)) {
+  // for an approval after the fix, which the words name (owner, 2026-11-16).
+  const breaker = payoutBreaker(gatewayId);
+  if (breaker) {
+    const label = GATEWAYS[gatewayId].label;
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      `Our ${GATEWAYS[gatewayId].label} payout wallet is empty right now, so this withdrawal stays held. Top up the payout wallet, then approve it again.`,
+      breaker === 'payouts-off'
+        ? `Payouts are switched off on our ${label} account right now, so this withdrawal stays held. Ask ${label} to turn payouts back on, then approve it again.`
+        : `Our ${label} payout wallet is empty right now, so this withdrawal stays held. Top up the payout wallet, then approve it again.`,
     );
   }
   const amount = Number(row.amount);
@@ -1453,7 +1457,7 @@ export async function submitHeldWithdrawal(
     const short = await regionalFloatShort(config, Number(row.gateway_amount));
     if (short) {
       if (floatCannotPayAnything(gatewayId, short)) {
-        tripPayoutFloatBreaker(gatewayId);
+        tripPayoutFloatBreaker(gatewayId, 'wallet-empty');
       }
       const label = GATEWAYS[gatewayId].label;
       void alertPayoutFloatEmpty(scope, {
