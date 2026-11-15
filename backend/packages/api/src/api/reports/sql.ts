@@ -27,8 +27,8 @@ export type { SqlPart };
 export { EFFECTIVE_GROUP_SQL };
 
 /** Restricts `column` (a non-null, table-qualified customer id column) to the
- *  scope's players. 'default' is the DEFAULT group, credential accounts
- *  included (money-figures.ts `default_group`). */
+ *  scope's players. 'default' is the real customers (money-figures.ts
+ *  `real`). */
 export const scopeFilter = (scope: GroupScope, column: string): SqlPart =>
   populationSql(fromGroupScope(scope), column);
 

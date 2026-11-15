@@ -26,13 +26,12 @@ import { filterSql, scopeSql } from '../real-customers';
 // adopting it changes no statement and no number.
 
 describe('population', () => {
-  it("names the two meanings of 'default' apart", () => {
+  it("both meanings of 'default' are the real customers", () => {
     expect(fromCustomerScope('default')).toEqual({ kind: 'real' });
     expect(fromCustomerScope('all')).toEqual({ kind: 'everyone' });
-    // The desk ?group=default has no credential test: never `real` (G1).
-    expect(fromGroupScope({ kind: 'default' })).toEqual({
-      kind: 'default_group',
-    });
+    // Owner decision 2026-11-16: the desk ?group=default was the DEFAULT
+    // group with credential accounts in; it is now `real`, as on Profit.
+    expect(fromGroupScope({ kind: 'default' })).toEqual({ kind: 'real' });
     expect(fromGroupScope({ kind: 'all' })).toEqual({ kind: 'everyone' });
     expect(fromGroupScope({ kind: 'group', id: 'g1', name: 'VIP' })).toEqual({
       kind: 'group',
@@ -55,16 +54,6 @@ describe('population', () => {
     expect(populationSql({ kind: 'customer', id: 'c1' }, 'ct.customer_id')).toEqual(
       filterSql({ customerId: 'c1' }, 'ct.customer_id'),
     );
-  });
-
-  it('default_group is NOT EXISTS over the effective-group rule', () => {
-    expect(populationSql({ kind: 'default_group' }, 'g.customer_id')).toEqual({
-      sql: ` AND NOT EXISTS (SELECT 1 FROM (${EFFECTIVE_GROUP_SQL}) eff WHERE eff.customer_id = g.customer_id)`,
-      params: [],
-    });
-    expect(() =>
-      populationSql({ kind: 'default_group' }, 'customer_id'),
-    ).toThrow('table-qualified');
   });
 
   it("a named group is scopeFilter's effective-group IN, unchanged", () => {

@@ -200,14 +200,17 @@ export async function packOpens(
   return new Map(rows.map((r) => [r.pack_id, Number(r.n)]));
 }
 
-/** Live players per effective group; players with no row are DEFAULT. */
+/** Live players per effective group; players with no row are DEFAULT, and
+ *  DEFAULT counts the real customers only, as ?group=default does. */
 export async function groupSizes(
   db: ReportDb,
 ): Promise<{ defaultPlayers: number; byGroup: Map<string, number> }> {
   const { rows } = await db.raw<{ group_id: string | null; n: string }>(
     'SELECT eff.group_id, COUNT(*)::bigint AS n FROM customer c ' +
       `LEFT JOIN (${EFFECTIVE_GROUP_SQL}) eff ON eff.customer_id = c.id ` +
-      'WHERE c.deleted_at IS NULL GROUP BY eff.group_id',
+      'WHERE c.deleted_at IS NULL ' +
+      "AND (eff.group_id IS NOT NULL OR c.metadata -> 'partner_credential' IS NULL) " +
+      'GROUP BY eff.group_id',
   );
   let defaultPlayers = 0;
   const byGroup = new Map<string, number>();

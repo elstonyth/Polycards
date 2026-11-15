@@ -22,7 +22,7 @@ const groupArg = {
     .string()
     .optional()
     .describe(
-      "Player group: 'all' (default), 'default' (the DEFAULT group: players in no other group), or a group name.",
+      "Player group: 'all' (default), 'default' (real customers, as the admin Profit page counts them: players in no group other than DEFAULT), or a group name.",
     ),
 };
 
@@ -86,7 +86,7 @@ export const TOOLS = {
     {
       name: 'groups',
       description:
-        'The player groups and how many players each holds now (by current group). default_players counts players in no group other than DEFAULT. Use these names as the group argument of the other tools.',
+        'The player groups and how many players each holds now (by current group). default_players counts the real customers, the same players as group default. Use these names as the group argument of the other tools.',
       inputSchema: {},
       request: () => ({ path: 'groups', params: {} }),
     },

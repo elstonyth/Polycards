@@ -12850,7 +12850,7 @@ class PacksModuleService extends MedusaService({
   // Legendary pull ranked below the top N by value must still be found):
   // `tiers` keeps pulls whose card sits at one of those tiers in the pack it
   // came from (PULL_TIER_SQL's pack-level join), and `defaultGroupOnly` keeps
-  // players whose effective player group is DEFAULT (the reports' rule).
+  // real customers (the reports' ?group=default).
   @InjectManager()
   async topPullsInWindow(
     opts: {
@@ -12881,7 +12881,7 @@ class PacksModuleService extends MedusaService({
         `   AND o.rarity IN (${tiers.map(() => '?').join(', ')}))`
       : '';
     const groupSql = opts.defaultGroupOnly
-      ? populationSql({ kind: 'default_group' }, 'pu.customer_id').sql
+      ? populationSql({ kind: 'real' }, 'pu.customer_id').sql
       : '';
     const rows = await em.execute<
       {

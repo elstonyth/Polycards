@@ -69,7 +69,7 @@ medusaIntegrationTestRunner({
       );
 
     describe('population parity', () => {
-      it('NOT IN, NOT EXISTS and the JS rule pick the same customers', async () => {
+      it('every population spelling picks the customers the JS rule picks', async () => {
         const c = customers();
         const group = (name: string, metadata?: Record<string, unknown>) =>
           c.createCustomerGroups({ name, metadata });
@@ -172,19 +172,21 @@ medusaIntegrationTestRunner({
         expect(defaultGroup).toEqual(
           ['credential', 'defonly', 'deadgroup', 'left', 'nogroup', 'renamed'].sort(),
         );
-        // ?group=default before C3 (NOT IN) and now (NOT EXISTS).
+        // The old desk ?group=default (NOT IN over EFFECTIVE_GROUP_SQL) is
+        // exactly the JS rule's DEFAULT group.
         expect(
           await picked(` AND c.id NOT IN (SELECT customer_id FROM (${EFFECTIVE_GROUP_SQL}) eff)`),
         ).toEqual(defaultGroup);
-        expect(await viaPop({ kind: 'default_group' })).toEqual(defaultGroup);
+
+        // Both 'default's are now the real customers: the DEFAULT group
+        // minus credential accounts (owner decision 2026-11-16, G1). The
+        // desk's default drops 'credential': 6 customers -> 5.
+        const real = js((id) => effective.get(id) === null && !credential.has(id));
+        expect(defaultGroup.filter((x) => !real.includes(x))).toEqual(['credential']);
+        expect(await viaPop({ kind: 'real' })).toEqual(real);
         const groups = await c.listCustomerGroups({}, { take: 100 });
         const desk = scopeFilter(resolveGroupScope('default', groups), 'c.id');
-        expect(await picked(desk.sql, desk.params)).toEqual(defaultGroup);
-
-        // CustomerScope 'default' = default group minus credential accounts.
-        expect(await viaPop({ kind: 'real' })).toEqual(
-          js((id) => effective.get(id) === null && !credential.has(id)),
-        );
+        expect(await picked(desk.sql, desk.params)).toEqual(real);
 
         // A named group is the EFFECTIVE group: twogroups counts in Older only.
         for (const g of [older, newer]) {

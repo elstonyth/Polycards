@@ -15,17 +15,15 @@ export type SqlPart = { sql: string; params: unknown[] };
 // ── Who a figure counts ──────────────────────────────────────────────────────
 
 /**
- * One name per population. The word 'default' means two things on the wire,
- * so neither is used here:
- *  - `real`: CustomerScope 'default' (Profit, P&L, Stats, Settlement): in no
- *    non-default group AND not an operator-generated credential account.
- *  - `default_group`: GroupScope 'default' (the desk reports' ?group=default):
- *    effective player group DEFAULT, with NO credential test.
+ * One name per population. The word 'default' is on the wire twice, and both
+ * mean `real` (owner decision 2026-11-16): CustomerScope 'default' (Profit,
+ * P&L, Stats, Settlement) and GroupScope 'default' (the desk reports'
+ * ?group=default). Real = in no non-default group AND not an
+ * operator-generated credential account.
  */
 export type Population =
   | { kind: 'everyone' }
   | { kind: 'real' }
-  | { kind: 'default_group' }
   | { kind: 'group'; id: string; name: string }
   | { kind: 'customer'; id: string };
 
@@ -40,25 +38,19 @@ type GroupScope =
   | { kind: 'default' }
   | { kind: 'group'; id: string; name: string };
 
-/** ?group= (GroupScope): 'default' is the DEFAULT group, credential accounts
- *  included. Reading it as `real` would change the desk numbers (an open owner
- *  decision). */
+/** ?group= (GroupScope): 'default' is the real customers, as on Profit. A
+ *  named group keeps its credential accounts (no test there). */
 export const fromGroupScope = (s: GroupScope): Population =>
   s.kind === 'all'
     ? { kind: 'everyone' }
     : s.kind === 'default'
-      ? { kind: 'default_group' }
+      ? { kind: 'real' }
       : { kind: 'group', id: s.id, name: s.name };
-
-const QUALIFIED = /^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$/i;
 
 /**
  * An `AND …` clause restricting `column` (a non-null customer id) to the
  * population, and what it binds. The group rule is EFFECTIVE_GROUP_SQL's
  * (odds-sets.ts), the real-customer rule realCustomerSql's: this only maps.
- * Exclusions are correlated NOT EXISTS: equal to NOT IN while both customer
- * id columns are NOT NULL (checked on prod 2026-11-15), and an anti-join
- * whatever work_mem allows.
  */
 export function populationSql(p: Population, column: string): SqlPart {
   switch (p.kind) {
@@ -66,18 +58,6 @@ export function populationSql(p: Population, column: string): SqlPart {
       return { sql: '', params: [] };
     case 'real':
       return { sql: ` AND ${realCustomerSql(column)}`, params: [] };
-    case 'default_group':
-      // Unqualified, the name binds to eff's own customer_id: always true,
-      // excluding everyone.
-      if (!QUALIFIED.test(column)) {
-        throw new Error(
-          `populationSql: column must be table-qualified, got '${column}'`,
-        );
-      }
-      return {
-        sql: ` AND NOT EXISTS (SELECT 1 FROM (${EFFECTIVE_GROUP_SQL}) eff WHERE eff.customer_id = ${column})`,
-        params: [],
-      };
     case 'group':
       // The EFFECTIVE group: a player in two groups counts in the older one.
       return {

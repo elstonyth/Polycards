@@ -1,6 +1,7 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { BRAND_LOGO_B64 } from '../../../modules/packs/pull-card-assets';
 import { EFFECTIVE_GROUP_SQL } from '../../../modules/packs/odds-sets';
+import { realCustomerSql } from '../../../modules/packs/real-customers';
 import { normalSenSql } from '../../../modules/packs/bonus-credit';
 import {
   BUYBACK_CASH,
@@ -101,7 +102,7 @@ const windowProps = {
 };
 const groupProp = {
   group: str(
-    "Player group: 'all' (default), 'default' (the DEFAULT group: players in no other group), or a group name. When staff say 'only default group' / '只算 default group', pass 'default'.",
+    "Player group: 'all' (default), 'default' (real customers, as the admin Profit page counts them: players in no group other than DEFAULT), or a group name. When staff say 'only default group' / '只算 default group', pass 'default'.",
   ),
 };
 const weekProp = (what: string) => ({
@@ -269,7 +270,7 @@ export const TOOLS: AssistantTool[] = [
     name: 'groups',
     label: 'Player groups',
     description:
-      'The player groups and how many players each holds now (by current group). default_players counts players in no group other than DEFAULT. Use these names as the group argument of the other tools.',
+      'The player groups and how many players each holds now (by current group). default_players counts the real customers, the same players as group default. Use these names as the group argument of the other tools.',
     parameters: object({}),
     needs: [read('economy')],
     run: report('finance', 'groups'),
@@ -495,9 +496,11 @@ export const TOOLS: AssistantTool[] = [
     name: 'db_query',
     label: 'Database query',
     description:
-      "Run one read-only SQL query (PostgreSQL 16) on the live Polycards database, for any question the reports and admin screens do not answer directly (profit and margins, cohorts, one player's full history, rankings like the top 10 single top-ups). SELECT or WITH only; it runs in a read-only transaction, stops after 20 seconds and returns at most 500 rows, so aggregate in SQL (COUNT, SUM, GROUP BY) and name every output column. Times are stored in UTC: created_at AT TIME ZONE 'Asia/Kuala_Lumpur' gives Malaysia time. Soft-deleted rows have deleted_at set: add deleted_at IS NULL. Before filtering on a status, reason, type or source column, list its values with SELECT DISTINCT. The DEFAULT group (what every report's group 'default' counts) = customer_id NOT IN (SELECT customer_id FROM (" +
+      "Run one read-only SQL query (PostgreSQL 16) on the live Polycards database, for any question the reports and admin screens do not answer directly (profit and margins, cohorts, one player's full history, rankings like the top 10 single top-ups). SELECT or WITH only; it runs in a read-only transaction, stops after 20 seconds and returns at most 500 rows, so aggregate in SQL (COUNT, SUM, GROUP BY) and name every output column. Times are stored in UTC: created_at AT TIME ZONE 'Asia/Kuala_Lumpur' gives Malaysia time. Soft-deleted rows have deleted_at set: add deleted_at IS NULL. Before filtering on a status, reason, type or source column, list its values with SELECT DISTINCT. Real customers (what every report's group 'default' counts) = " +
+      realCustomerSql('t.customer_id') +
+      ", with t your table's alias; one named group = customer_id IN (SELECT eff.customer_id FROM (" +
       EFFECTIVE_GROUP_SQL +
-      ") eff); one named group = customer_id IN (SELECT eff.customer_id FROM (that same query) eff JOIN customer_group g ON g.id = eff.group_id WHERE g.name = '<name>'), so a player in two groups counts once, as in the reports. Money: credit_transaction.amount includes spend-only bonus credit, so never SUM(amount) for cash: a row's cash in sen is " +
+      ") eff JOIN customer_group g ON g.id = eff.group_id WHERE g.name = '<name>'), so a player in two groups counts once, as in the reports. Money: credit_transaction.amount includes spend-only bonus credit, so never SUM(amount) for cash: a row's cash in sen is " +
       normalSenSql() +
       ". The Economy report's figures in SQL (money-figures.ts): revenue = SUM(" +
       PACK_SALES_CASH.sen('') +
