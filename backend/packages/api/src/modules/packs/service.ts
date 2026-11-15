@@ -165,8 +165,10 @@ import {
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
 import {
+  BOARD_FETCH_N,
   disabledAccountSql,
   mayPlay as mayPlayFor,
+  topShown,
   type Game,
   type PlayRefusal,
 } from './eligibility';
@@ -17976,10 +17978,13 @@ class PacksModuleService extends MedusaService({
     let ranking: string[] = prior?.ranking ?? [];
     if (ranking.length === 0) {
       const top = (
-        await this.challengeWeekTop({ ...week, limit: 20 }, sharedContext)
+        await this.challengeWeekTop(
+          { ...week, limit: BOARD_FETCH_N },
+          sharedContext,
+        )
       ).map((t) => t.customer_id);
       const disabled = await this.disabledCustomerIds(top, sharedContext);
-      ranking = top.filter((id) => !disabled.has(id)).slice(0, 10);
+      ranking = topShown(top, disabled, (id) => id).shown;
     }
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
