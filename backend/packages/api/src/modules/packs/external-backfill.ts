@@ -2,9 +2,9 @@
 // ledger — the backfill oracle for pre-1b rows (topups/opens written before
 // Migration20260621120000 added external_funded_cents, which the live paths
 // grandfather out as NULL). Re-derives every topup/pack_open stamp with the
-// SAME arithmetic the live paths use (mutateCreditAtomic stamps a topup as
-// +amount; settleOpen consumes via consumeExternalSen; reverseCreditTransaction
-// mirrors the original), so running it over an already-correct ledger yields an
+// SAME arithmetic the live paths use (planPosting stamps a topup as +amount
+// and an open consumes via consumeExternalSen; a reversal mirrors the
+// original), so running it over an already-correct ledger yields an
 // empty diff. DB-free, like credit-summary.ts / vip-lifetime.ts.
 import { consumeExternalSen } from './external-funded';
 

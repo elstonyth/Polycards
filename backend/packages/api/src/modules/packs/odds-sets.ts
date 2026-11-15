@@ -43,7 +43,9 @@ export const isDefaultPlayerGroup = (g: PlayerGroupLike): boolean =>
  * effectivePlayerGroup + isDefaultPlayerGroup below. The oldest live
  * membership (group created_at, then id) in a live group that is neither named
  * DEFAULT nor flagged is_default. A customer with no row here is in DEFAULT.
- * Same joins as PacksModuleService.partnerGroupOfCustomers.
+ * Same joins as PacksModuleService.partnerGroupOfCustomers. Ordered the way
+ * JS can: created_at to the millisecond (a JS Date holds no more), then id by
+ * code point (COLLATE "C"), never by the database's locale.
  */
 export const EFFECTIVE_GROUP_SQL =
   'SELECT DISTINCT ON (cgc.customer_id) cgc.customer_id, cg.id AS group_id ' +
@@ -52,7 +54,8 @@ export const EFFECTIVE_GROUP_SQL =
   'WHERE cgc.deleted_at IS NULL ' +
   `AND cg.name IS DISTINCT FROM '${DEFAULT_PLAYER_GROUP_NAME}' ` +
   `AND cg.metadata->'${DEFAULT_PLAYER_GROUP_FLAG}' IS DISTINCT FROM 'true'::jsonb ` +
-  'ORDER BY cgc.customer_id, cg.created_at ASC, cg.id ASC';
+  "ORDER BY cgc.customer_id, date_trunc('milliseconds', cg.created_at) ASC, " +
+  'cg.id COLLATE "C" ASC';
 
 /**
  * THE rule for "which of a customer's groups is their player group": the
@@ -68,13 +71,15 @@ export function effectivePlayerGroup<
   },
 >(groups: readonly T[]): T | null {
   const at = (g: T) => new Date(g.created_at ?? 0).getTime();
+  // By code point, as EFFECTIVE_GROUP_SQL's COLLATE "C" (ids are ASCII).
+  const byId = (a: T, b: T) => {
+    const x = String(a.id ?? '');
+    const y = String(b.id ?? '');
+    return x < y ? -1 : x > y ? 1 : 0;
+  };
   return (
     [...groups]
-      .sort(
-        (a, b) =>
-          at(a) - at(b) ||
-          String(a.id ?? '').localeCompare(String(b.id ?? '')),
-      )
+      .sort((a, b) => at(a) - at(b) || byId(a, b))
       .find((g) => !isDefaultPlayerGroup(g)) ?? null
   );
 }

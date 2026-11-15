@@ -1,6 +1,13 @@
 import type { CustomerScope } from '../../../../modules/packs/real-customers';
 import { filterSql } from '../../../../modules/packs/real-customers';
 import {
+  DELIVERY_STATUSES,
+  bonusSourceSql,
+  cardValueSen,
+  inActiveDeliverySql,
+  playthroughBasisSenSql,
+} from '../../../../modules/packs/money-figures';
+import {
   BONUS_SOURCES,
   type BonusSource,
   type CardsLine,
@@ -17,9 +24,6 @@ import type { ReportDb } from '../../../reports/sql';
 
 // The delivery-order statuses that still hold a card on the shelf
 // (inventoryLifecycleBuckets in service.ts; 'packing' = legacy 'processed').
-const REQUESTED = "('requested', 'processed', 'packing')";
-const READY_TO_SHIP = "('ready_to_ship', 'pending_ship')";
-const SHIPPED = "('shipped', 'completed', 'delivered')";
 
 /** Every received card's shelf counts, the Stock page's (inventory-view.ts):
  *  on hand = GRN lines + invoice lines not transferred from a GRN − shipped;
@@ -42,9 +46,9 @@ export async function stockRows(db: ReportDb): Promise<StockRow[]> {
       'recv AS (SELECT handle, SUM(n) AS n FROM rec GROUP BY 1), ' +
       // COUNT(DISTINCT): one pull can sit on two item rows (inventoryLifecycleBuckets).
       'ord AS (SELECT p.card_id AS handle, ' +
-      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${REQUESTED}) AS requested, ` +
-      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${READY_TO_SHIP}) AS rts, ` +
-      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${SHIPPED}) AS shipped ` +
+      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${DELIVERY_STATUSES.requested}) AS requested, ` +
+      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${DELIVERY_STATUSES.readyToShip}) AS rts, ` +
+      `COUNT(DISTINCT p.id) FILTER (WHERE dord.status IN ${DELIVERY_STATUSES.shipped}) AS shipped ` +
       'FROM delivery_order_item doi ' +
       'JOIN delivery_order dord ON dord.id = doi.delivery_order_id AND dord.deleted_at IS NULL ' +
       'JOIN pull p ON p.id = doi.pull_id AND p.deleted_at IS NULL ' +
@@ -60,12 +64,6 @@ export async function stockRows(db: ReportDb): Promise<StockRow[]> {
     ready_to_ship: Number(r.ready_to_ship),
   }));
 }
-
-// shortcut: a copy of service.ts's DEPOSITED_PT_SEN_SQL (not exported), the
-// playthrough basis walletSummary gates on; export it there to drop the copy.
-const DEPOSITED_PT_SEN_SQL =
-  "CASE WHEN ct.reason = 'topup' AND ct.amount > 0 AND ct.external_funded_cents IS NOT NULL THEN ROUND(ct.amount * 100) " +
-  "WHEN ct.reason = 'buyback' THEN COALESCE(ct.external_funded_cents, 0) ELSE 0 END";
 
 /** walletSummary's inputs for every scoped customer holding credit, in one
  *  scan: balance, bonus, playthrough deposited / used, any top-up, frozen. */
@@ -91,7 +89,8 @@ export async function walletRows(
       'FROM (SELECT ct.customer_id, ' +
       'COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS balance_sen, ' +
       'COALESCE(SUM(COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen, ' +
-      `COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_sen, ` +
+      // The playthrough basis walletSummary gates on.
+      `COALESCE(SUM(${playthroughBasisSenSql('ct.')}), 0)::bigint AS deposited_sen, ` +
       "COALESCE(SUM(-ct.external_funded_cents) FILTER (WHERE ct.reason = 'pack_open'), 0)::bigint AS used_sen, " +
       "COALESCE(bool_or(ct.reason = 'topup' AND ct.amount > 0), false) AS has_topup " +
       'FROM credit_transaction ct WHERE ct.deleted_at IS NULL GROUP BY ct.customer_id) w ' +
@@ -121,14 +120,7 @@ export async function freeCreditUnused(
   const f = filterSql(scope, 'ct.customer_id');
   const { rows } = await db.raw<{ source: BonusSource; sen: string }>(
     'WITH b AS (SELECT ct.id, ct.customer_id, ct.created_at, ct.bonus_cents, ' +
-      'CASE WHEN ct.bonus_cents < 0 THEN NULL ' +
-      "WHEN ct.reason = 'bonus_grant' THEN 'adjustment' " +
-      "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'challenge:%' THEN 'weekly_challenge' " +
-      "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'luckydraw:%' THEN 'lucky_draw' " +
-      "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'task:%' THEN " +
-      "CASE WHEN td.requirement->>'type' = 'checkin_days' THEN 'checkin' ELSE 'task' END " +
-      "WHEN ct.reason IN ('pack_open', 'delivery_fee', 'buyback') THEN 'returned' " +
-      "ELSE 'other' END AS source " +
+      `${bonusSourceSql('ct.', { nullForSpends: true })} AS source ` +
       'FROM credit_transaction ct ' +
       "LEFT JOIN task_definition td ON ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'task:%' " +
       "AND td.id = split_part(ct.source_transaction_id, ':', 2) " +
@@ -170,11 +162,9 @@ export async function vaultCards(
   }>(
     'WITH t AS (SELECT CASE ' +
       "WHEN p.status = 'vaulted' THEN 'vault' " +
-      "WHEN p.status = 'delivering' AND EXISTS (SELECT 1 FROM delivery_order_item i " +
-      'JOIN delivery_order o ON o.id = i.delivery_order_id AND o.deleted_at IS NULL ' +
-      `WHERE i.pull_id = p.id AND i.deleted_at IS NULL AND (o.status IN ${REQUESTED} OR o.status IN ${READY_TO_SHIP})) ` +
+      `WHEN p.status = 'delivering' AND ${inActiveDeliverySql('p.')} ` +
       "THEN 'processing' END AS k, " +
-      'ROUND(c.market_value * COALESCE(c.market_multiplier, ?) * ? * ?) AS sen ' +
+      `${cardValueSen('vault')} AS sen ` +
       'FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
       "WHERE p.deleted_at IS NULL AND p.status IN ('vaulted', 'delivering')" +
       f.sql +

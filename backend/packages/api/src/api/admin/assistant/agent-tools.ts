@@ -23,10 +23,8 @@ import {
   type Proposal,
 } from './confirm';
 import {
-  clearedHolderNames,
   HOLDER_NAME_INVALID_MESSAGE,
   holderNameInvalid,
-  holderNameKey,
   holderUnlikeSaved,
   normalizeHolderName,
   parseSavedBankAccounts,
@@ -37,7 +35,6 @@ import {
 import {
   MY_BANKS,
   SG_BANKS,
-  accountNumberForms,
   findBank,
 } from '../../../modules/packs/banks';
 import { withdrawalDetailsError } from '../../../modules/packs/gateway-withdrawal';
@@ -719,19 +716,16 @@ export const AGENT_TOOLS: AgentTool[] = [
       if (number) {
         const bank = number.bankCode ? findBank(number.bankCode) : undefined;
         // Asked as a save asks: a PayNow mobile with or without its 65.
-        const forms = accountNumberForms(number.bankCode ?? '', number.key);
-        const bannedForPlayer = (
-          await Promise.all(
-            forms.map((n) => packs.payoutAccountBanned(n, false, customerId)),
-          )
-        ).some(Boolean);
-        const banned =
-          bannedForPlayer ||
-          (
-            await Promise.all(
-              forms.map((n) => packs.payoutAccountBanned(n, false)),
-            )
-          ).some(Boolean);
+        const standing = await packs.payoutNumberStanding(customerId, {
+          bankCode: number.bankCode,
+          accountNumber: number.key,
+        });
+        const { banned, bannedForPlayer } = standing;
+        if (bannedForPlayer) {
+          fixes.push(
+            `…${number.last4} is banned for this player: unban_bank_number unbans it for them only.`,
+          );
+        }
         if (
           bank &&
           saved.some(
@@ -740,21 +734,18 @@ export const AGENT_TOOLS: AgentTool[] = [
               payoutAccountKey(a.accountNumber, false) === number?.key,
           )
         ) {
-          // A save of what is already theirs is a no-op that succeeds.
-          return JSON.stringify({
-            ...out,
-            number: { bank: bank.name, last4: number.last4, already_saved: true },
-            fixes: [],
-            unchecked: [],
-            can_save: true,
-          });
-        }
-        if (bannedForPlayer) {
-          fixes.push(
-            `…${number.last4} is banned for this player: unban_bank_number unbans it for them only.`,
-          );
-        }
-        if (!bank) {
+          // A save of what is already theirs is a no-op that succeeds, but only
+          // past the ban and the name check, which the save runs first (the
+          // slot, the one-name rule and other holders do not apply to it).
+          out.number = {
+            bank: bank.name,
+            last4: number.last4,
+            already_saved: true,
+            banned,
+            banned_for_this_player: bannedForPlayer,
+            blocks_save: bannedForPlayer,
+          };
+        } else if (!bank) {
           out.number = {
             last4: number.last4,
             banned,
@@ -765,17 +756,11 @@ export const AGENT_TOOLS: AgentTool[] = [
             'who else holds the number, and the slot: ask staff which bank, then check again',
           );
         } else {
-          numberHolders = [
-            ...new Set(
-              (
-                await Promise.all(
-                  forms.map((n) =>
-                    packs.payoutAccountHoldersAt(customerId, n, bank.id),
-                  ),
-                )
-              ).flat(),
-            ),
-          ];
+          // A wallet is not a bank number: nobody holds it here.
+          numberHolders =
+            bank.wallet !== undefined
+              ? []
+              : standing.holders.map((h) => h.customerId);
           const others = await whoAre(ctx, numberHolders);
           out.number = {
             bank: bank.name,
@@ -821,18 +806,15 @@ export const AGENT_TOOLS: AgentTool[] = [
           'the holder name: none is saved or on file that a bank takes; ask staff for the name the player saves under',
         );
       } else {
-        const holders = await packs.holderNameHolders(customerId, holder.name);
-        const cleared =
-          clearedHolderNames(me.metadata)[holderNameKey(holder.name)]?.with ??
-          [];
-        const others = await whoAre(ctx, holders);
-        const blocking = others.filter((o) => !cleared.includes(o.id));
+        const name = await packs.payoutNameStanding(customerId, holder.name);
+        const others = await whoAre(ctx, name.holders);
+        const blocking = others.filter((o) => name.blocking.includes(o.id));
         out.name = {
           checked: NAME_SOURCE[holder.source],
           format_ok: !holderNameInvalid(holder.name),
           other_accounts: others.map((o) => ({
             account: o.label,
-            cleared_for_this_player: cleared.includes(o.id),
+            cleared_for_this_player: !name.blocking.includes(o.id),
           })),
           blocks_save: blocking.length > 0,
         };
@@ -932,16 +914,11 @@ export const AGENT_TOOLS: AgentTool[] = [
         );
       }
       // Asked as bank_save_check asks: a PayNow mobile with or without its 65.
-      const forms = accountNumberForms(bank.id, n.key);
-      const ids = [
-        ...new Set(
-          (
-            await Promise.all(
-              forms.map((k) => packs.payoutAccountHoldersAt(customerId, k, bank.id)),
-            )
-          ).flat(),
-        ),
-      ];
+      const standing = await packs.payoutNumberStanding(customerId, {
+        bankCode: bank.id,
+        accountNumber: n.key,
+      });
+      const ids = standing.holders.map((h) => h.customerId);
       if (ids.length === 0) {
         throw new Error(
           `No other account holds ${bank.name} …${n.last4}, so there is nothing to free. Run bank_save_check for what blocks the save. Nothing was changed.`,
@@ -965,7 +942,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           from: ids,
           reason,
         },
-        `${me.banned ? 'Tap Unban first: this works once the player is unbanned. ' : ''}Free ${bank.name} …${n.last4} for ${me.name}: it comes off ${others.length} other account${others.length === 1 ? '' : 's'}: ${others.map((o) => o.label).join('; ')}. They lose their saved entry of it, and their payouts to it keep the last 4 only, with no name. This cannot be undone. The player then saves it themselves${(await Promise.all(forms.map((k) => packs.payoutAccountBanned(k, false, customerId)))).some(Boolean) ? ', once it is also unbanned for them' : ''}. Reason: ${reason}`,
+        `${me.banned ? 'Tap Unban first: this works once the player is unbanned. ' : ''}Free ${bank.name} …${n.last4} for ${me.name}: it comes off ${others.length} other account${others.length === 1 ? '' : 's'}: ${others.map((o) => o.label).join('; ')}. They lose their saved entry of it, and their payouts to it keep the last 4 only, with no name. This cannot be undone. The player then saves it themselves${standing.bannedForPlayer ? ', once it is also unbanned for them' : ''}. Reason: ${reason}`,
       );
       return JSON.stringify({
         freed: false,
@@ -1019,15 +996,16 @@ export const AGENT_TOOLS: AgentTool[] = [
       if (holderNameInvalid(holder.name)) {
         throw new Error(`${HOLDER_NAME_INVALID_MESSAGE} ${tail}`);
       }
-      const holders = await packs.holderNameHolders(customerId, holder.name);
-      const cleared =
-        clearedHolderNames(me.metadata)[holderNameKey(holder.name)]?.with ?? [];
+      const { holders, blocking } = await packs.payoutNameStanding(
+        customerId,
+        holder.name,
+      );
       if (holders.length === 0) {
         throw new Error(
           `No other account uses this name, so there is nothing to clear. ${tail}`,
         );
       }
-      if (holders.every((id) => cleared.includes(id))) {
+      if (blocking.length === 0) {
         throw new Error(
           `The name is already cleared for every account that uses it. ${tail}`,
         );

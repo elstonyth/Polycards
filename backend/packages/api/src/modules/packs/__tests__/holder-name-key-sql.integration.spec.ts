@@ -1,7 +1,7 @@
 /**
  * holderNameKeySql against a REAL Postgres — integration:modules
  *
- * holderNameHolders keys the stored holder names in SQL and the typed one in JS
+ * nameStanding keys the stored holder names in SQL and the typed one in JS
  * (holderNameKey). The two must agree, or a name saved with an accent, a symbol
  * or small capitals on one account stops matching the plain name on another.
  * This runs the SQL on every code point and on whole names, and checks that
@@ -136,20 +136,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await paid('cus_paid', 'settled');
       await paid('cus_failed', 'failed');
 
+      const holders = async (name: string) =>
+        (await service.payoutNameStanding('cus_player', name)).holders.sort();
+      expect(await holders('TAN AH KOW')).toEqual(['cus_paid', 'cus_saved']);
       expect(
-        (await service.holderNameHolders('cus_player', 'TAN AH KOW')).sort(),
-      ).toEqual(['cus_paid', 'cus_saved']);
-      expect(
-        await service.holderNameHeldByAnother('cus_player', 'Tan Ah Kow'),
-      ).toBe(true);
+        (await service.payoutNameStanding('cus_player', 'Tan Ah Kow')).blocking
+          .length,
+      ).toBe(2);
       // No English letter: compared by its old key, so a legacy holder of the
       // same name is still found, and not every blank or non-Latin row.
-      expect(await service.holderNameHolders('cus_player', '陈大文')).toEqual([
-        'cus_legacy',
-      ]);
-      expect(await service.holderNameHolders('cus_player', '李小龙')).toEqual(
-        [],
-      );
+      expect(await holders('陈大文')).toEqual(['cus_legacy']);
+      expect(await holders('李小龙')).toEqual([]);
     });
   },
 });

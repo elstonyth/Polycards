@@ -1610,6 +1610,16 @@
   },
   "pnl": {
     "title": "P&L",
+    "export": "Export to Excel",
+    "exportFailed": "The Excel export failed. Try again.",
+    "keptSince": "Figures worked out {{time}}. A finished period is kept 6 hours, so late supplier costs and price changes show up after that.",
+    "loading": "Working out this period. The first load of a period takes about 20 seconds; after that it opens at once (for 5 minutes if it includes today, 6 hours if it has finished).",
+    "view": {
+      "sections": "Sections",
+      "columns": "Columns",
+      "collapse": "Hide the rows under {{name}}",
+      "expand": "Show the rows under {{name}}"
+    },
     "subtitle": "Revenue, cost and what is still owed, Malaysia time · {{window}}",
     "subtitleAll": "Revenue, cost and what is still owed, Malaysia time · all time",
     "packSales": {
@@ -1828,6 +1838,7 @@
     "movedSubtitle": "Inside the site, this period. Paid credit only; promo has its own line.",
     "moved": {
       "pack_sales": "Pack sales",
+      "capsule_sales": "Lucky Draw capsules",
       "delivery_fees": "Delivery fees",
       "sellbacks": "Sell-backs paid",
       "coin_flip_payouts": "Coin flip payouts",
@@ -1853,6 +1864,7 @@
     "cardsNoTopupNote_one": "Not counted: {{count, number}} card ({{value}}) of players who never topped up",
     "cardsNoTopupNote_other": "Not counted: {{count, number}} cards ({{value}}) of players who never topped up",
     "movedHint": {
+      "capsule_sales": "Capsule opens are Lucky Draw sales, so they are not in Pack sales.",
       "coin_flip_payouts": "Credit paid on wins. Forfeited card value is recorded in coin flip history, not cash income.",
       "sellbacks": "Includes free welcome pulls and prize cards sold back: those have no matching sale or promo line.",
       "promo_given": "Credit promos only: bonus grants, rewards, vouchers and daily rewards. Free pulls and prize cards are not here."

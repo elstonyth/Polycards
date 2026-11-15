@@ -116,13 +116,19 @@ export function profitOwed(owed: OwedCents, allTime: CashCents) {
 
 /** ledgerReasonTotals rows (each reason's cash part, or the whole row for
  *  promo reasons) → the "where the money moved" lines. Spend is negative in
- *  the ledger and shown positive here. */
-export function profitActivity(rows: { reason: string; amount: number }[]) {
+ *  the ledger and shown positive here. `capsuleSen` (CAPSULE_SALES_CASH, the
+ *  capsule part of pack_open) moves to its own line: Lucky Draw revenue, not
+ *  pack sales (P&L decision 3). */
+export function profitActivity(
+  rows: { reason: string; amount: number }[],
+  capsuleSen: number,
+) {
   const cents = (reason: string) =>
     Math.round((rows.find((r) => r.reason === reason)?.amount ?? 0) * 100);
   return {
     // 0 − x, not −x: an empty period must read 0, never −0.
-    pack_sales: (0 - cents('pack_open')) / 100,
+    pack_sales: (0 - cents('pack_open') - capsuleSen) / 100,
+    capsule_sales: capsuleSen / 100,
     sellbacks: cents('buyback') / 100,
     coin_flip_payouts: cents('coin_flip_win') / 100,
     promo_given:

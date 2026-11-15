@@ -111,11 +111,10 @@ export const topUpCreditsStep = createStep(
     // A replay credited NOTHING (it returned the pre-existing row), so undoing
     // it would wrongly delete the ORIGINAL top-up. Only compensate a real write.
     if (data.replayed) return;
-    // Mirror buyback-pull: the ledger row is the only mutation, so undo is a
-    // single delete. (A real gateway adds a refund call here.)
+    // The credit and its TP row are the only mutations: undo both, in one
+    // locked transaction. (A real gateway adds a refund call here.)
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
-    await packs.deleteLedgerEntryByRef('TP', data.creditTransactionId);
+    await packs.undoCreditPosting({ creditTransactionId: data.creditTransactionId, ledgerType: 'TP' });
   },
 );
 

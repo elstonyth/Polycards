@@ -203,37 +203,36 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       { ids: ['pull_1', 'pull_2'], from: 'delivering', to: 'vaulted' },
       f.ctx,
     );
-    // Task 8's OD reversal rides the same transaction — exactly one row, and
-    // only because the debit lookup found the CREATE-time row keyed on the
-    // order id (this half of the discriminating pair below).
-    expect(f.recordLedgerEntry).toHaveBeenCalledTimes(1);
+    // Task 8's OD reversal rides the same transaction — found only because
+    // the debit lookup hit the CREATE-time row keyed on the order id (this
+    // half of the discriminating pair below).
     expect(f.em.execute).toHaveBeenCalledWith(
       expect.stringContaining('ledger_entry'),
       ['do_1'],
     );
-    // The reversal is the NEGATED STORED DEBIT, not a fresh valuation. The
-    // fake never supplies a card price or an fx rate, so a re-valuing cancel
-    // could not produce this number at all — which is the point: create and
-    // cancel must never price the same cards at two different instants.
-    expect(f.recordLedgerEntry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'OD',
-        refId: 'cancel:do_1',
-        walletDelta: -DEBIT_WALLET_DELTA,
-        vaultDelta: -DEBIT_VAULT_DELTA,
-      }),
-      f.ctx,
-    );
-    // …and the fee comes back to the wallet: the NEGATED STORED wallet_delta,
-    // through the same locked credit writer every money mutation uses.
+    // The fee comes back to the wallet with its OD reversal as ONE posting:
+    // the NEGATED STORED wallet_delta, through the same locked credit writer
+    // every money mutation uses. The reversal is the NEGATED STORED DEBIT,
+    // not a fresh valuation. The fake never supplies a card price or an fx
+    // rate, so a re-valuing cancel could not produce this number at all —
+    // which is the point: create and cancel must never price the same cards
+    // at two different instants.
+    expect(f.mutateCreditAtomic).toHaveBeenCalledTimes(1);
     expect(f.mutateCreditAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
         amount: -DEBIT_WALLET_DELTA,
         reason: 'delivery_fee',
         reference: 'refund:do_1',
+        ledger: expect.objectContaining({
+          type: 'OD',
+          refId: 'cancel:do_1',
+          walletDelta: -DEBIT_WALLET_DELTA,
+          vaultDelta: -DEBIT_VAULT_DELTA,
+        }),
       }),
       f.ctx,
     );
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
   });
 
   it('fails closed on a corrupt POSITIVE stored wallet_delta (no partial reversal)', async () => {

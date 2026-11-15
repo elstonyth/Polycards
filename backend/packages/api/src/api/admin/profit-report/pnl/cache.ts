@@ -1,43 +1,45 @@
+import type { ICacheService } from '@medusajs/framework/types';
+
 // One computation per query at a time, kept 5 minutes (the admin keeps a
-// period 5 minutes too). A load runs ~40 read-only statements, ~45 s on prod
-// under load; on 2026-11-15 reloads and range switches started new loads while
+// period 5 minutes too). A load runs ~44 read-only statements, ~20-26 s on
+// prod; on 2026-11-15 reloads and range switches started new loads while
 // abandoned ones kept running, so none finished. A reload or a second admin now
-// waits on the same run. A failed run is not kept.
-// shortcut: per process, so N backend instances compute a key up to N times.
-const CACHE_MS = 5 * 60_000;
-// Bound on kept results (oldest settled dropped first): every key is a real
-// window, but a reader could still walk many custom ranges.
-export const MAX_ENTRIES = 32;
+// waits on the same run.
+//
+// Results live in the cache module (Redis in prod, in-memory elsewhere), not
+// this process: prod runs two backend instances, and a per-process cache
+// missed on the other one (logs 2026-11-15: the same month computed cold on
+// both within a minute). A failed run is not kept.
+// shortcut: the in-flight share is per process, so two instances asked for the
+// same cold key in the same seconds both compute it; add a Redis lock if that
+// starts to matter.
+export const CACHE_S = 5 * 60;
+// A period that ended before now (last month, yesterday, a past custom range)
+// only moves by late supplier costs and today's card prices (prize and unsold
+// free cards), so it is kept 6 hours (owner 2026-11-15).
+export const CLOSED_CACHE_S = 6 * 60 * 60;
+const PREFIX = 'pnl-report:';
 
-type Entry = { at: number; body: Promise<unknown>; settled: boolean };
-const cache = new Map<string, Entry>();
+export type ReportCache = Pick<ICacheService, 'get' | 'set'>;
 
-export function cached(
+const inflight = new Map<string, Promise<unknown>>();
+
+export function cached<T>(
+  store: ReportCache,
   key: string,
-  build: () => Promise<unknown>,
-  now = Date.now(),
-): Promise<unknown> {
-  // A run still going is never swept, so a later request waits on it instead
-  // of starting another.
-  for (const [k, v] of cache) {
-    if (v.settled && now - v.at > CACHE_MS) cache.delete(k);
-  }
-  const hit = cache.get(key);
-  if (hit) return hit.body;
-  for (const [k, v] of cache) {
-    if (cache.size < MAX_ENTRIES) break;
-    if (v.settled) cache.delete(k);
-  }
-  const entry: Entry = { at: now, body: build(), settled: false };
-  cache.set(key, entry);
-  entry.body.then(
-    () => {
-      entry.settled = true;
-    },
-    // A failed run is not kept; only its own entry is removed.
-    () => {
-      if (cache.get(key) === entry) cache.delete(key);
-    },
-  );
-  return entry.body;
+  build: () => Promise<T>,
+  ttlS = CACHE_S,
+): Promise<T> {
+  const running = inflight.get(key);
+  if (running) return running as Promise<T>;
+  const run = (async () => {
+    // A cache outage (Valkey timeout) computes instead of failing the page.
+    const hit = await store.get<T>(PREFIX + key).catch(() => null);
+    if (hit !== null && hit !== undefined) return hit;
+    const body = await build();
+    await store.set(PREFIX + key, body, ttlS).catch(() => undefined);
+    return body;
+  })().finally(() => inflight.delete(key));
+  inflight.set(key, run);
+  return run;
 }

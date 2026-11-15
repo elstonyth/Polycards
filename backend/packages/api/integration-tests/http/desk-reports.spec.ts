@@ -194,6 +194,25 @@ medusaIntegrationTestRunner({
         });
       });
 
+      it('default is the real customers: a credential account is left out', async () => {
+        // Owner decision 2026-11-16 (G1): ?group=default counts what the
+        // Profit page's real-customer switch counts. Before, the same seed
+        // read default 627 (115 + the credential account's 512) and 6 players.
+        await seedGroups();
+        const [cred] = await customers().createCustomers([
+          {
+            email: 'dr-cred@test.dev',
+            metadata: { partner_credential: { password: 'x', issued_at: 'y' } },
+          },
+        ]);
+        await opens([[cred.id, 512]]);
+        const revenue = async (group: string) =>
+          (await report(`economy?group=${group}`)).data.totals.revenue as number;
+        expect(await revenue('all')).toBe(1023);
+        expect(await revenue('default')).toBe(115);
+        expect((await report('groups')).data.default_players).toBe(5);
+      });
+
       it('default plus every named group adds up to all (the partition invariant)', async () => {
         await seedGroups();
         const totals = async (group: string) =>

@@ -127,6 +127,7 @@ medusaIntegrationTestRunner({
           customerId,
           amount: -100,
           reason: "pack_open",
+          sourceTransactionId: "open_gacha_vip_miss",
           floor: 0,
         });
 

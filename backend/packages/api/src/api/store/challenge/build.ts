@@ -2,6 +2,7 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
+import { BOARD_FETCH_N, topShown } from '../../../modules/packs/eligibility';
 import { publicProfileFields, seedOf } from '../../../utils/profile-handle';
 import type { ChallengeRankReward } from '../../../modules/packs/challenge-validate';
 
@@ -12,10 +13,8 @@ import type { ChallengeRankReward } from '../../../modules/packs/challenge-valid
 //
 // 🔒 PII: public — names follow the leaderboard rules (first_name or an
 // anonymous "Collector ####", plus the stable avatar seed; never email/id).
-const TOP_N = 10;
-// Over-fetch so the disabled filter below cannot shorten the board — same
-// reasoning (and the same bound) as the sibling leaderboard route.
-const FETCH_N = TOP_N * 2;
+// Over-fetched to BOARD_FETCH_N so the disabled filter below cannot shorten the
+// board, the same bound as the leaderboard and settlement (eligibility.ts).
 
 /**
  * The running challenge week's view. hiddenAboveCut counts administratively
@@ -39,7 +38,7 @@ export async function buildChallengeView(scope: MedusaContainer) {
     packs.challengeWeekPool(week),
     // Weekly Pull Value ranking (pulled value, NOT spend) — the challenge's
     // own top-10, distinct from the spend-ranked main leaderboard.
-    packs.challengeWeekTop({ ...week, limit: FETCH_N }),
+    packs.challengeWeekTop({ ...week, limit: BOARD_FETCH_N }),
     packs.listChallengeStages(
       {},
       {
@@ -117,13 +116,11 @@ export async function buildChallengeView(scope: MedusaContainer) {
   const disabledIds = await packs.disabledCustomerIds(
     rankedAll.map((r) => r.customer_id),
   );
-  const ranked: typeof rankedAll = [];
-  let hiddenAboveCut = 0;
-  for (const r of rankedAll) {
-    if (ranked.length === TOP_N) break;
-    if (disabledIds.has(r.customer_id)) hiddenAboveCut++;
-    else ranked.push(r);
-  }
+  const { shown: ranked, hiddenAboveCut } = topShown(
+    rankedAll,
+    disabledIds,
+    (r) => r.customer_id,
+  );
 
   // PII-safe display fields for the ranked customers (shared with the store
   // leaderboard — never leaks email/id).

@@ -2,14 +2,18 @@ import type { CustomerScope } from '../../../../modules/packs/real-customers';
 import { filterSql } from '../../../../modules/packs/real-customers';
 import type { GamesWindowRows } from '../../../../modules/packs/pnl-games';
 import { DEFAULT_MARKET_MULTIPLIER } from '../../../../modules/packs/pricing';
+import {
+  capsuleOpenSql,
+  COIN_FLIP_WINS,
+  PACK_SALES_FULL,
+  LIVE_VALUE_USD_SQL,
+} from '../../../../modules/packs/money-figures';
+import { mytDaySql } from '../../../../modules/packs/myt-window';
 import { and, windowFilter, type ReportDb } from '../../../reports/sql';
 import type { ReportWindow } from '../../../reports/params';
 
 // The P&L report's Coin flip and Lucky Draw SQL (spec §3-4). Read-only, one
 // statement after another (small pool); the folding is modules/packs/pnl-games.ts.
-
-const mytDay = (column: string) =>
-  `to_char((${column} AT TIME ZONE 'Asia/Kuala_Lumpur')::date, 'YYYY-MM-DD')`;
 
 const n = (v: string | number | null | undefined) => Number(v ?? 0);
 
@@ -42,8 +46,8 @@ export async function gamesWindowRows(
     filterSql(scope, 'ct.customer_id'),
   );
   const wins = await db.raw<{ sen: string }>(
-    'SELECT COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS sen ' +
-      "FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ct.reason = 'coin_flip_win'" +
+    `SELECT COALESCE(SUM(${COIN_FLIP_WINS.sen('ct.')}), 0)::bigint AS sen ` +
+      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${COIN_FLIP_WINS.where('ct.')}` +
       ledger.sql,
     ledger.params,
   );
@@ -74,21 +78,23 @@ export async function gamesWindowRows(
   );
 
   // Capsule charges at full price (amount = cash + bonus share; bonus_cents the
-  // bonus share), linked through the open's spins — a batch shares one open_id.
+  // bonus share), linked through the open's spins — a batch shares one open_id
+  // and one pack. Per charge in the window, by IDX_ticket_spin_open, not a
+  // DISTINCT of every spin ever made.
   const capsules = await db.raw<{
     slug: string;
     full_sen: string;
     bonus_sen: string;
   }>(
-    'SELECT s.pack_id AS slug, ' +
-      'COALESCE(SUM(-ROUND(ct.amount * 100)), 0)::bigint AS full_sen, ' +
+    'SELECT (SELECT s.pack_id FROM ticket_spin s WHERE s.open_id = ct.source_transaction_id ' +
+      'AND s.deleted_at IS NULL LIMIT 1) AS slug, ' +
+      `COALESCE(SUM(${PACK_SALES_FULL.sen('ct.')}), 0)::bigint AS full_sen, ` +
       'COALESCE(SUM(-COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen ' +
       'FROM credit_transaction ct ' +
-      'JOIN (SELECT DISTINCT open_id, pack_id FROM ticket_spin ' +
-      'WHERE open_id IS NOT NULL AND deleted_at IS NULL) s ON s.open_id = ct.source_transaction_id ' +
-      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open'" +
+      `WHERE ct.deleted_at IS NULL AND ${PACK_SALES_FULL.where('ct.')} ` +
+      `AND ${capsuleOpenSql('ct.')}` +
       ledger.sql +
-      ' GROUP BY s.pack_id',
+      ' GROUP BY 1',
     ledger.params,
   );
 
@@ -118,9 +124,9 @@ export async function gamesWindowRows(
     credit_sen: string;
     card_usd: number;
   }>(
-    `SELECT pz.kind, ${mytDay('r.drawn_at')} AS day, COUNT(*)::bigint AS n, ` +
+    `SELECT pz.kind, ${mytDaySql('r.drawn_at')} AS day, COUNT(*)::bigint AS n, ` +
       'COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS credit_sen, ' +
-      'COALESCE(SUM(c.market_value * COALESCE(c.market_multiplier, ?)), 0)::float8 AS card_usd ' +
+      `COALESCE(SUM(${LIVE_VALUE_USD_SQL}), 0)::float8 AS card_usd ` +
       'FROM lucky_draw_result r ' +
       'JOIN lucky_draw_prize pz ON pz.id = r.prize_id ' +
       'LEFT JOIN credit_transaction ct ON ct.id = r.credit_transaction_id AND ct.deleted_at IS NULL ' +

@@ -318,3 +318,13 @@ test('runTool returns the report with its period, or the error as text', async (
   assert.equal(bad.isError, true);
   assert.match(bad.content[0].text, /from must be a date/);
 });
+
+test('economy states the net the report computes and points at basis', () => {
+  // economy.ts: net = (−opens − buybacks − coin flip wins); 2026-11-15 fix.
+  assert.match(
+    finance.economy.description,
+    /net = revenue - payouts - coinFlipPayouts/,
+  );
+  assert.match(finance.economy.description, /basis field/);
+  assert.doesNotMatch(finance.economy.description, /exactly like/);
+});

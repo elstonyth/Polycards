@@ -1,8 +1,9 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
-import { Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
+import { EFFECTIVE_GROUP_SQL, resolvePlayerGroup } from '../../src/modules/packs/odds-sets';
 import { WITHDRAWALS_BLOCKED_MESSAGE } from '../../src/api/utils/customer-group-guards';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
@@ -391,6 +392,37 @@ medusaIntegrationTestRunner({
           ),
         );
         expect(unblocked.data.message).not.toBe(WITHDRAWALS_BLOCKED_MESSAGE);
+      });
+
+      // resolvePlayerGroup reads through the Customer module's own filtering;
+      // the money paths read EFFECTIVE_GROUP_SQL. They must name one group.
+      it('resolvePlayerGroup and EFFECTIVE_GROUP_SQL pick the same group', async () => {
+        const container = getContainer();
+        const pg = container.resolve(ContainerRegistrationKeys.PG_CONNECTION);
+        const both = async () => [
+          (await resolvePlayerGroup(container, memberId))?.id ?? null,
+          (
+            await pg.raw(
+              `SELECT eff.group_id FROM (${EFFECTIVE_GROUP_SQL}) eff WHERE eff.customer_id = ?`,
+              [memberId],
+            )
+          ).rows[0]?.group_id ?? null,
+        ];
+        expect(await both()).toEqual([groupId, groupId]);
+
+        const newer = await customerModule().createCustomerGroups({ name: 'Policy Newer' });
+        const flagged = await customerModule().createCustomerGroups({
+          name: 'Policy Starter',
+          metadata: { is_default: true },
+        });
+        for (const g of [newer, flagged]) {
+          await customerModule().addCustomerToGroup({ customer_id: memberId, customer_group_id: g.id });
+        }
+        expect(await both()).toEqual([groupId, groupId]); // the oldest real group wins
+        await customerModule().softDeleteCustomerGroups([groupId]);
+        expect(await both()).toEqual([newer.id, newer.id]); // a deleted group drops out
+        await customerModule().removeCustomerFromGroup({ customer_id: memberId, customer_group_id: newer.id });
+        expect(await both()).toEqual([null, null]); // a flagged default is no real group
       });
     });
   },

@@ -585,6 +585,9 @@ export interface ProfitReport {
   };
   activity: {
     pack_sales: number;
+    /** Lucky Draw capsule sales, cash only: left out of pack_sales (P&L
+     *  decision 3). */
+    capsule_sales: number;
     sellbacks: number;
     coin_flip_payouts: number;
     promo_given: number;
@@ -623,7 +626,11 @@ import type {
 export type PnlPair = { current_sen: number; previous_sen: number | null };
 
 export type PnlFreeSource =
-  'adjustment' | 'checkin' | 'task' | 'welcome' | 'other';
+  | 'adjustment'
+  | 'checkin'
+  | 'task'
+  | 'welcome'
+  | 'other';
 
 export type PnlPackFigures = {
   opens: number;
@@ -661,7 +668,10 @@ export type PnlCogsFigures = {
 };
 
 export type PnlReport = {
+  /** When the period's figures were worked out (a closed period is kept 6 h). */
   as_of: string;
+  /** When the as-of-now sections (assets, floating money) were worked out. */
+  balance_as_of: string;
   scope: CustomerScope;
   range: ProfitRange;
   window: { from: string; to: string } | null;
@@ -757,6 +767,37 @@ export async function getPnlReport(
     qs.set('to', to);
   }
   return getJson<PnlReport>(`/admin/profit-report/pnl?${qs.toString()}`);
+}
+
+// GET /admin/profit-report/pnl/export — the same report as a .xlsx, one sheet
+// per section. Same blob-URL dance as exportInventoryXlsx, for the reasons
+// noted there.
+export async function exportPnlXlsx(
+  range: ProfitRange,
+  from: string,
+  to: string,
+  scope: CustomerScope,
+): Promise<void> {
+  const qs = new URLSearchParams({ range, scope });
+  if (range === 'custom') {
+    qs.set('from', from);
+    qs.set('to', to);
+  }
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/profit-report/pnl/export?${qs.toString()}`,
+    { credentials: 'include' },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `pnl-${range === 'custom' ? `${from}-to-${to}` : range}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
@@ -2399,7 +2440,8 @@ export interface CustomerMoney {
   };
   cash: ProfitReport['cash'];
   owed: ProfitReport['owed'];
-  activity: ProfitReport['activity'];
+  /** Profit's lines; pack spend keeps capsule opens, so no capsule line. */
+  activity: Omit<ProfitReport['activity'], 'capsule_sales'>;
   play: {
     /** Cards real money won, at draw-time value × today's rate, each in its
      *  normal (non-bonus) share: the leaderboard's basis. */

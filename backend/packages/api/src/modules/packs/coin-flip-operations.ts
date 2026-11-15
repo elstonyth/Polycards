@@ -6,9 +6,10 @@ import type { LedgerSqlManager } from './claim';
 import { coerceOddsSet, EFFECTIVE_GROUP_SQL } from './odds-sets';
 import { DEFAULT_MARKET_MULTIPLIER, displayMarketPrice, resolveFxRateStrict } from './pricing';
 import { FREE_PULL_LOCKED_MESSAGE } from './free-pack';
-import { groupPolicyOf } from './group-policy';
+import { COIN_FLIP_REFUSAL, mayPlay } from './eligibility';
+import { lockCredit, type LedgerPart } from './credit-posting';
 import {
-  assertCoinFlipEligible, COIN_FLIP_CONFIG_ID, COIN_FLIP_QUOTE_MS, COIN_FLIP_SCALE,
+  COIN_FLIP_CONFIG_ID, COIN_FLIP_QUOTE_MS, COIN_FLIP_SCALE,
   coinFlipSettingsView, coinFlipStakeCents, coinFlipWins, effectiveCoinWinUnits, coinFlipSelection, coinFlipStakes,
   coinFlipStakeSelection, publicCoinFlipRound, type CoinFlipConfigRecord, type CoinFlipPublicRound,
   type CoinFlipRoundRecord, type CoinFlipSnapshot, type CoinFlipStake, type CoinFlipQuoteInput,
@@ -20,15 +21,9 @@ const notFound = (): never => { throw new MedusaError(MedusaError.Types.NOT_FOUN
 export const coinFlipManager = (context: Context): LedgerSqlManager =>
   (context.transactionManager ?? context.manager) as unknown as LedgerSqlManager;
 
-export async function lockCoinFlipCustomer(customerId: string, context: Context): Promise<void> {
-  await coinFlipManager(context).execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [`credit:${customerId}`]);
-}
-
 async function eligible(service: PacksModuleService, customerId: string, context: Context): Promise<void> {
-  if (await service.isAccountDisabled(customerId, context)) refuse('This account is unavailable.');
-  const [group] = await coinFlipManager(context).execute<{ name: string | null; metadata: Record<string, unknown> | null }[]>(
-    `SELECT cg.name, cg.metadata FROM (${EFFECTIVE_GROUP_SQL}) g JOIN customer_group cg ON cg.id = g.group_id WHERE g.customer_id = ?`, [customerId]);
-  assertCoinFlipEligible(await service.walletSummary(customerId, undefined, context), group ? groupPolicyOf(group) : null);
+  const refusal = await mayPlay(service, customerId, 'coin_flip', context);
+  if (refusal) refuse(COIN_FLIP_REFUSAL[refusal]);
 }
 
 async function cardForFlip(service: PacksModuleService, customerId: string, pullId: string, context: Context) {
@@ -91,7 +86,7 @@ export async function quoteCoinFlipOperation(
   service: PacksModuleService, input: CoinFlipQuoteInput, context: Context,
 ): Promise<CoinFlipPublicRound> {
   const selection = coinFlipStakeSelection(input);
-  await lockCoinFlipCustomer(input.customerId, context);
+  await lockCredit(context, input.customerId);
   await eligible(service, input.customerId, context);
   const pulls: Awaited<ReturnType<typeof cardForFlip>>[] = [];
   for (const id of selection.pullIds) pulls.push(await cardForFlip(service, input.customerId, id, context));
@@ -142,7 +137,7 @@ export async function getCoinFlipRoundOperation(
 export async function acceptCoinFlipOperation(
   service: PacksModuleService, input: { customerId: string; roundId: string }, context: Context,
 ): Promise<CoinFlipPublicRound> {
-  await lockCoinFlipCustomer(input.customerId, context);
+  await lockCredit(context, input.customerId);
   const round = await getCoinFlipRoundOperation(input, context);
   if (round.status !== 'quoted') return publicCoinFlipRound(round);
   await eligible(service, input.customerId, context);
@@ -191,26 +186,23 @@ export async function acceptCoinFlipOperation(
       [status === 'won' ? 'vaulted' : 'forfeited', status, status, pull.id, input.customerId, stake.flip_version]);
     if (claimed.length !== 1) refuse('Your cards changed. Please select them again.');
   }
+  // Reward mints add no tracked vault liability; forfeiture cannot remove any.
+  const cf: (LedgerPart & { type: 'CF'; refId: string; walletDelta: number; vaultDelta: number }) | null = pulls.length ? { type: 'CF', refId: round.id,
+    walletDelta: status === 'won' ? amount : 0,
+    vaultDelta: status === 'lost' ? -pulls.reduce((sum, { pull, stake }) => sum + (pull.source === 'reward' ? 0 : stake.stake_cents), 0) / 100 : 0,
+    payload: { type: 'CF', round_id: round.id, pull_id: pulls[0].pull.id, card_handle: pulls[0].pull.card_id,
+      cards: pulls.map(({ pull, stake }) => ({ pull_id: pull.id, card_handle: pull.card_id, value: stake.stake_cents / 100 })),
+      chosen_side: selection.chosenSide,
+      landed_side: status === 'won' ? selection.chosenSide : selection.chosenSide === 'head' ? 'tail' : 'head',
+      outcome: status, value: amount, published_win_percent: round.snapshot.published_win_units / 10000 },
+  } : null;
   let creditId: string | null = null;
   if (status === 'won' && amount > 0) {
-    const [credit] = await service.createCreditTransactions([{
-      customer_id: input.customerId, amount, reason: 'coin_flip_win', pull_id: null,
-      source_transaction_id: `coin-flip:${round.id}`, reference: round.id,
-      bonus_cents: 0, external_funded_cents: 0,
-    }], context);
-    creditId = credit.id;
-  }
-  // Reward mints add no tracked vault liability; forfeiture cannot remove any.
-  if (pulls.length) {
-    await service.recordLedgerEntry({ type: 'CF', customerId: input.customerId, refId: round.id,
-      walletDelta: status === 'won' ? amount : 0,
-      vaultDelta: status === 'lost' ? -pulls.reduce((sum, { pull, stake }) => sum + (pull.source === 'reward' ? 0 : stake.stake_cents), 0) / 100 : 0,
-      payload: { type: 'CF', round_id: round.id, pull_id: pulls[0].pull.id, card_handle: pulls[0].pull.card_id,
-        cards: pulls.map(({ pull, stake }) => ({ pull_id: pull.id, card_handle: pull.card_id, value: stake.stake_cents / 100 })),
-        chosen_side: selection.chosenSide,
-        landed_side: status === 'won' ? selection.chosenSide : selection.chosenSide === 'head' ? 'tail' : 'head',
-        outcome: status, value: amount, published_win_percent: round.snapshot.published_win_units / 10000 },
-    }, context);
+    // A paid win always staked cards (amount is their stake), so cf is set.
+    creditId = (await service.mutateCreditAtomic({ customerId: input.customerId, amount,
+      reason: 'coin_flip_win', roundId: round.id, ledger: cf! }, context)).id;
+  } else if (cf) {
+    await service.recordLedgerEntry({ ...cf, customerId: input.customerId }, context);
   }
   // Tickets are not money, so no Credit and no CF ledger row for them: their own
   // ledger is the record, and (reason, ref) keeps it to one row per round.

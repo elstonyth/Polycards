@@ -281,8 +281,14 @@ describe('a regional payout', () => {
     return {
       listFxRates: jest.fn().mockResolvedValue([FX_ROW]),
       savedBankAccountsFor: jest.fn().mockResolvedValue([SG_ACCOUNT]),
-      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
-      payoutAccountBanned: jest.fn().mockResolvedValue(false),
+      payoutNumberStanding: jest.fn().mockResolvedValue({
+        bankId: null,
+        key: '',
+        forms: [],
+        banned: false,
+        bannedForPlayer: false,
+        holders: [],
+      }),
       bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
@@ -470,8 +476,14 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
     return {
       listFxRates: jest.fn().mockResolvedValue([FX_ROW]),
       savedBankAccountsFor: jest.fn().mockResolvedValue([SG_ACCOUNT]),
-      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
-      payoutAccountBanned: jest.fn().mockResolvedValue(false),
+      payoutNumberStanding: jest.fn().mockResolvedValue({
+        bankId: null,
+        key: '',
+        forms: [],
+        banned: false,
+        bannedForPlayer: false,
+        holders: [],
+      }),
       bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
@@ -636,8 +648,14 @@ describe('approving a held A3Pay payout', () => {
     return {
       listGatewayWithdrawals: jest.fn().mockResolvedValue([heldRow]),
       listCustomerAccountStates: jest.fn().mockResolvedValue([]),
-      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
-      payoutAccountBanned: jest.fn().mockResolvedValue(false),
+      payoutNumberStanding: jest.fn().mockResolvedValue({
+        bankId: null,
+        key: '',
+        forms: [],
+        banned: false,
+        bannedForPlayer: false,
+        holders: [],
+      }),
       bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       claimWithdrawalAgainstDebit: jest
         .fn()

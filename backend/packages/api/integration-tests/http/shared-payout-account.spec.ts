@@ -4,14 +4,14 @@ import type PacksModuleService from '../../src/modules/packs/service';
 
 jest.setTimeout(240 * 1000);
 
-// PacksModuleService.otherPayoutAccountHolders is raw SQL over two tables the
+// PacksModuleService.payoutNumberStanding is raw SQL over two tables the
 // route spec can only fake: customer.metadata.bank_accounts (JSONB, owned by
 // the customer module) and gateway_withdrawal. This pins it against the real
 // schema: who counts as "another holder", and who does not.
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ getContainer }) => {
-    describe('otherPayoutAccountHolders', () => {
+    describe('payoutNumberStanding holders', () => {
       const NUMBER = '123456789012';
 
       it('finds saved and paid holders, and skips self, failed payouts and deleted savers', async () => {
@@ -66,23 +66,28 @@ medusaIntegrationTestRunner({
           row(me.id, 'PC-shared-mine', 'settled'),
         ]);
 
-        const holders = await packs.otherPayoutAccountHolders(me.id, NUMBER);
-        const ids = holders.map((h) => h.customer_id).sort();
+        const { holders } = await packs.payoutNumberStanding(me.id, {
+          bankCode: 'MBBEMYKL',
+          accountNumber: NUMBER,
+        });
+        const ids = holders.map((h) => h.customerId).sort();
+        // The retired-gateway code (MYMB2U) is the same bank.
         expect(ids).toEqual(
           [legacySaver.id, padded.id, payee.id, saver.id, spaced.id].sort(),
         );
-        expect(
-          holders.find((h) => h.customer_id === legacySaver.id)?.bank_code,
-        ).toBe('MYMB2U');
-        expect(holders.find((h) => h.customer_id === saver.id)?.holder_name).toBe(
-          'TAN AH KOW',
-        );
-        expect(
-          holders.find((h) => h.customer_id === payee.id)?.holder_name,
-        ).toBeNull();
+        // A saver holds it unpaid; a payee was paid to it.
+        expect(holders.find((h) => h.customerId === saver.id)?.paid).toBe(false);
+        expect(holders.find((h) => h.customerId === payee.id)?.paid).toBe(true);
         expect(ids).not.toContain(odd.id);
 
-        expect(await packs.otherPayoutAccountHolders(me.id, '999')).toEqual([]);
+        expect(
+          (
+            await packs.payoutNumberStanding(me.id, {
+              bankCode: 'MBBEMYKL',
+              accountNumber: '999',
+            })
+          ).holders,
+        ).toEqual([]);
       });
     });
   },
