@@ -102,27 +102,40 @@ export const holderNameKeySql = (expr: string): string => {
 // without leading zeros, on both sides: padding with a 0, or an older entry
 // with spaces or dashes, does not slip past. A wallet address is compared
 // whole instead: its digits alone collide across unrelated Tron addresses.
-const HOLDERS_EXACT_SQL =
-  "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name " +
-  'FROM customer c ' +
+//
+// othersSql is that shape once: other live customers' saved entries (`a`)
+// matching `saved`, UNION their withdrawal rows matching `paid` that went out
+// or are on their way. Params: [customerId, value, customerId, value].
+const othersSql = (q: {
+  savedCols: string;
+  saved: string;
+  paidCols: string;
+  paid: string;
+}): string =>
+  `SELECT ${q.savedCols} FROM customer c ` +
   "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
   "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-  "WHERE c.deleted_at IS NULL AND c.id <> ? AND a->>'accountNumber' = ? " +
-  'UNION ' +
-  'SELECT customer_id, bank_code, NULL AS holder_name FROM gateway_withdrawal ' +
-  'WHERE deleted_at IS NULL AND customer_id <> ? AND account_number = ? ' +
+  `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${q.saved} ` +
+  `UNION SELECT ${q.paidCols} FROM gateway_withdrawal ` +
+  `WHERE deleted_at IS NULL AND customer_id <> ? AND ${q.paid} ` +
   "AND status IN ('pending', 'held', 'settled')";
-const HOLDERS_DIGITS_SQL =
-  "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name " +
-  'FROM customer c ' +
-  "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-  "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-  "WHERE c.deleted_at IS NULL AND c.id <> ? AND ltrim(regexp_replace(a->>'accountNumber', '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
-  'UNION ' +
-  'SELECT customer_id, bank_code, NULL AS holder_name FROM gateway_withdrawal ' +
-  "WHERE deleted_at IS NULL AND customer_id <> ? AND ltrim(regexp_replace(account_number, '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
-  "AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4 " +
-  "AND status IN ('pending', 'held', 'settled')";
+const HOLDER_COLS = {
+  savedCols:
+    "c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name",
+  paidCols: 'customer_id, bank_code, NULL AS holder_name',
+};
+const DIGITS = (col: string) =>
+  `ltrim(regexp_replace(${col}, '[^0-9]', '', 'g'), '0')`;
+const HOLDERS_EXACT_SQL = othersSql({
+  ...HOLDER_COLS,
+  saved: "a->>'accountNumber' = ?",
+  paid: 'account_number = ?',
+});
+const HOLDERS_DIGITS_SQL = othersSql({
+  ...HOLDER_COLS,
+  saved: `${DIGITS("a->>'accountNumber'")} = ${DIGITS('?')}`,
+  paid: `${DIGITS('account_number')} = ${DIGITS('?')} AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4`,
+});
 
 /** The number as one destination compares, banned and verified alike: digits
  *  of the canonical spelling without leading zeros, a wallet address whole
@@ -252,14 +265,12 @@ export async function nameStanding(
   const keySql = letters ? holderNameKeySql : realNameKeySql;
   const holders = (
     await em.execute<{ customer_id: string }[]>(
-      'SELECT c.id AS customer_id FROM customer c ' +
-        "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-        "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${keySql("a->>'accountHolderName'")} = ? ` +
-        'UNION ' +
-        'SELECT customer_id FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
-        `AND ${keySql('account_holder_name')} = ? ` +
-        "AND status IN ('pending', 'held', 'settled')",
+      othersSql({
+        savedCols: 'c.id AS customer_id',
+        paidCols: 'customer_id',
+        saved: `${keySql("a->>'accountHolderName'")} = ?`,
+        paid: `${keySql('account_holder_name')} = ?`,
+      }),
       [customerId, key, customerId, key],
     )
   ).map((r) => r.customer_id);
