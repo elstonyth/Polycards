@@ -1,7 +1,12 @@
 import { banksFor } from './banks';
 import type { GatewayAdapter } from './gateway';
 import { GatewayError } from './gateway-types';
-import { TGPAY_NOT_FOUND } from './tgpay-client';
+import {
+  TGPAY_NOT_FOUND,
+  TGPAY_PAYOUT_DISABLED,
+  TGPAY_PAYOUT_FLOAT_EMPTY,
+} from './tgpay-client';
+import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
 import type {
   DepositDetail,
   MerchantBalance,
@@ -179,6 +184,74 @@ const adapter: GatewayAdapter<FakeConfig> = {
   },
 };
 
+/** A definite payout refusal, named the way a real adapter reports it. */
+export type FakeRefusal =
+  | 'not-sent'
+  | 'payouts-off'
+  | 'wallet-empty'
+  | 'creates-nothing'
+  | 'refused';
+
+export type FakeRefusalOptions = {
+  /** The spec's own codes, carried through to `failure_reason`. */
+  codes?: string[];
+  message?: string;
+  httpStatus?: number;
+  /** 'wallet-empty' only: the adapter confirmed it by reading this balance
+   *  (A3Pay). Absent = the provider said so outright (TGPay). */
+  available?: number;
+  /** 'refused' only: an A3Pay balance hint its own balance read did NOT
+   *  confirm. */
+  unconfirmedHint?: boolean;
+};
+
+const REFUSAL_TEXT: Record<FakeRefusal, string> = {
+  'not-sent': 'Fake: cannot pay to bank (refused before sending)',
+  'payouts-off': 'fake payout failed (HTTP 501): Payout not available',
+  'wallet-empty': 'fake payout failed: Insufficient payout credit balance',
+  'creates-nothing':
+    'fake payout failed (HTTP 400): No payout provider is available for this order',
+  refused: 'fake payout failed: refused',
+};
+
+/**
+ * Script the next payout submit to be refused with `result`. Specs name the
+ * outcome; how it is signalled is this helper's business.
+ */
+function refuse(result: FakeRefusal, options: FakeRefusalOptions = {}): void {
+  const message = options.message ?? REFUSAL_TEXT[result];
+  const codes = [...(options.codes ?? [])];
+  let httpStatus = options.httpStatus ?? 400;
+  // shortcut: signalled the way today's pipeline reads it (provider codes and
+  // a balance read); becomes the named result once GatewayError carries one.
+  if (result === 'payouts-off') {
+    codes.push(TGPAY_PAYOUT_DISABLED);
+    httpStatus = options.httpStatus ?? 501;
+  }
+  if (result === 'wallet-empty' && options.available === undefined) {
+    codes.push(TGPAY_PAYOUT_FLOAT_EMPTY);
+  }
+  const hint =
+    (result === 'wallet-empty' && options.available !== undefined) ||
+    (result === 'refused' && options.unconfirmedHint);
+  if (hint) codes.push(A3PAY_PAYOUT_FLOAT_EMPTY);
+  script = {
+    ...script,
+    submitWithdrawal: new GatewayError(message, codes, httpStatus, true),
+    ...(hint
+      ? {
+          checkBalance: {
+            ...FAKE_BALANCE,
+            availableBalance:
+              result === 'wallet-empty'
+                ? (options.available as number)
+                : FAKE_BALANCE.availableBalance,
+          },
+        }
+      : {}),
+  };
+}
+
 /**
  * The scripting surface. `script()` MERGES, so setting one operation leaves
  * the others on their canonical behaviour; `reset()` (call it in a
@@ -187,6 +260,7 @@ const adapter: GatewayAdapter<FakeConfig> = {
  */
 export const fakeGateway: GatewayAdapter<FakeConfig> & {
   script: (next: FakeScript) => void;
+  refuse: typeof refuse;
   reset: () => void;
   calls: FakeCalls;
 } = {
@@ -194,6 +268,7 @@ export const fakeGateway: GatewayAdapter<FakeConfig> & {
   script(next) {
     script = { ...script, ...next };
   },
+  refuse,
   reset() {
     script = {};
     seq = 0;
