@@ -2,6 +2,7 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { resolveFxRate } from '../../../../modules/packs/pricing';
+import { LEDGER_TOTALS_BASIS } from '../../../../modules/packs/money-figures';
 import { describeScope, loadGroupScope, parseWindow } from '../../params';
 import { and, reportDb, scopeFilter, windowFilter } from '../../sql';
 import { ledgerTotalsWhere } from '../queries';
@@ -29,6 +30,7 @@ export async function GET(
     currency: 'MYR',
     window: { from: window.from ?? null, to: window.to ?? null },
     scope: describeScope(scope),
+    basis: { totals: LEDGER_TOTALS_BASIS },
     totals,
     liability_now_all_players: {
       vault_cards: vault.count,

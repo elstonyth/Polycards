@@ -76,7 +76,7 @@ test('month edges follow the Malaysia calendar', () => {
   );
 });
 
-test('rolling windows end now, like the dashboard Weekly and Monthly tabs', () => {
+test('rolling windows end now (not the dashboard 7d and 30d tabs, which start at Malaysia midnight)', () => {
   assert.deepEqual(range('last_7_days'), [
     '2026-09-23T02:00:00.000Z',
     '2026-09-30T02:00:00.000Z',

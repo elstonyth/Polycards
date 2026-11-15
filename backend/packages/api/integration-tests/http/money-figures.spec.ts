@@ -17,6 +17,7 @@ import {
   CAPSULE_OPEN_SQL,
   COIN_FLIP_WINS,
   GATEWAY,
+  LEDGER_TOTALS_BASIS,
   PACK_SALES_CASH,
   PACK_SALES_FULL,
   TOPUPS_LEDGER,
@@ -34,6 +35,9 @@ import { mintSuperAdmin, unwrapResponse } from './utils';
 import { vaultCards } from '../../src/api/admin/profit-report/pnl/queries-balance';
 
 jest.setTimeout(240 * 1000);
+
+const FINANCE_KEY = 'm'.repeat(48);
+process.env.REPORT_KEY_FINANCE = FINANCE_KEY;
 
 // The money figure catalog (modules/packs/money-figures.ts) against a real
 // Postgres: each drift-prone figure's SQL equals a plain JS fold over the same
@@ -193,6 +197,36 @@ medusaIntegrationTestRunner({
 
         expect(await viaPop({ kind: 'everyone' })).toEqual([...names].sort());
         expect(await viaPop({ kind: 'customer', id: ids.member })).toEqual(['member']);
+      });
+    });
+
+    describe('basis', () => {
+      it('the reports say what their money figures count', async () => {
+        const finance = (path: string) =>
+          unwrapResponse(
+            api.get(`/reports/finance/${path}`, {
+              headers: { 'x-report-key': FINANCE_KEY },
+            }),
+          );
+        const economy = await finance('economy');
+        expect(economy.status).toBe(200);
+        expect(economy.data.basis).toEqual({ totals: LEDGER_TOTALS_BASIS });
+        const sales = await finance('pack-sales');
+        expect(sales.data.basis).toEqual({ revenue: PACK_SALES_CASH.note });
+        const token = await mintSuperAdmin(getContainer(), api, 'mf-basis-admin@test.dev', 'mf-basis-test-password-1');
+        const profit = await unwrapResponse(
+          api.get('/admin/profit-report?range=all', {
+            headers: { authorization: `Bearer ${token}` },
+          }),
+        );
+        expect(profit.status).toBe(200);
+        expect(profit.data.basis).toEqual({
+          activity: {
+            pack_sales: PACK_SALES_CASH.note,
+            sellbacks: BUYBACK_CASH.note,
+            coin_flip_payouts: COIN_FLIP_WINS.note,
+          },
+        });
       });
     });
 

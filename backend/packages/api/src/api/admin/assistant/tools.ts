@@ -1,6 +1,14 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
 import { BRAND_LOGO_B64 } from '../../../modules/packs/pull-card-assets';
 import { EFFECTIVE_GROUP_SQL } from '../../../modules/packs/odds-sets';
+import { normalSenSql } from '../../../modules/packs/bonus-credit';
+import {
+  BUYBACK_CASH,
+  CAPSULE_OPEN_SQL,
+  COIN_FLIP_WINS,
+  PACK_SALES_CASH,
+  PACK_SALES_FULL,
+} from '../../../modules/packs/money-figures';
 import { capBody } from '../../reports/admin/proxy';
 import type { Access, Need } from './access';
 import type { Proposal } from './confirm';
@@ -86,7 +94,7 @@ const object = (
 const windowProps = {
   period: oneOf(
     PERIODS,
-    'Malaysia-time window. today, yesterday, this_week (Mon-Sun), last_week, this_month and last_month are calendar periods; last_7_days and last_30_days are rolling, like the dashboard Weekly and Monthly tabs; custom needs from (and optionally to).',
+    "Malaysia-time window. today, yesterday, this_week (Mon-Sun), last_week, this_month and last_month are calendar periods; last_7_days and last_30_days are rolling (exactly 7 or 30 days back from now), so they are not the dashboard 7d and 30d tabs, which start at Malaysia midnight 6 or 29 days back; custom needs from (and optionally to).",
   ),
   from: str('custom only: first day, YYYY-MM-DD.'),
   to: str('custom only: last day, YYYY-MM-DD, included. Defaults to from.'),
@@ -218,12 +226,13 @@ const poster =
 // --- the catalog -----------------------------------------------------------
 
 export const TOOLS: AssistantTool[] = [
-  // Finance (the admin Economy page's policy).
+  // Finance (the admin Economy page's policy). The text matches the desk
+  // bots' tools/desk-reports/tools.mjs (desk-tool-text.unit.spec.ts).
   {
     name: 'economy',
     label: 'Economy totals',
     description:
-      'Money totals exactly like the admin Economy page, for one Malaysia-time window and player group. revenue = credits spent on packs; payouts = buybacks paid; coinFlipPayouts = credit paid to coin flip winners; net = revenue - payouts - coinFlipPayouts (the gacha margin); topups = deposits credited; cashout = withdrawals taken from wallets, a signed ledger sum (negative = money withdrawn; report it as an amount withdrawn, never as paid out: it includes withdrawals still pending at the gateway, and the payments tool tells settled from pending); adjustments = admin credit changes (either sign); deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).',
+      "Ledger money totals (the Finance Economy report) for one Malaysia-time window and player group; the reply's basis field says what each figure counts, so repeat it when staff ask what a number includes. revenue = pack sales, cash only (bonus credit spent is not revenue; capsule packs included); payouts = card sell-backs, cash part; coinFlipPayouts = credit paid to coin flip winners; net = revenue - payouts - coinFlipPayouts (the gacha margin); topups = top-ups as the wallet ledger records them (the payments tool and the admin Profit page count the gateway's settled deposits, so they can differ); cashout = withdrawals taken from wallets, a signed ledger sum (negative = money withdrawn; report it as an amount withdrawn, never as paid out: it includes withdrawals still pending at the gateway, and the payments tool tells settled from pending); adjustments = admin credit changes (either sign); deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).",
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
     needs: [read('economy')],
     run: windowed('finance', 'economy'),
@@ -251,7 +260,7 @@ export const TOOLS: AssistantTool[] = [
     name: 'pack_sales',
     label: 'Sales per pack',
     description:
-      'Per-pack sales in the window: packs opened (paid with cash or bonus credit) and revenue (cash only, net of reversals), largest first. Bonus credit is not revenue, so a pack opened only with bonus credit shows its opens at RM 0: that is correct, not a fault. unattributed_revenue is pack spend from older rows that cannot be linked to a pack; total_revenue equals economy revenue. Amounts in RM (MYR).',
+      "Per-pack sales in the window: packs opened (paid with cash or bonus credit) and revenue (cash only, net of reversals; capsule packs included), largest first. Bonus credit is not revenue, so a pack opened only with bonus credit shows its opens at RM 0: that is correct, not a fault. unattributed_revenue is pack spend from older rows that cannot be linked to a pack; total_revenue equals economy revenue. The admin P&L counts pack sales at full price (cash plus bonus) and leaves capsule packs out, so its pack sales differ. Amounts in RM (MYR).",
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
     needs: [read('economy')],
     run: windowed('finance', 'pack-sales'),
@@ -488,7 +497,27 @@ export const TOOLS: AssistantTool[] = [
     description:
       "Run one read-only SQL query (PostgreSQL 16) on the live Polycards database, for any question the reports and admin screens do not answer directly (profit and margins, cohorts, one player's full history, rankings like the top 10 single top-ups). SELECT or WITH only; it runs in a read-only transaction, stops after 20 seconds and returns at most 500 rows, so aggregate in SQL (COUNT, SUM, GROUP BY) and name every output column. Times are stored in UTC: created_at AT TIME ZONE 'Asia/Kuala_Lumpur' gives Malaysia time. Soft-deleted rows have deleted_at set: add deleted_at IS NULL. Before filtering on a status, reason, type or source column, list its values with SELECT DISTINCT. The DEFAULT group (what every report's group 'default' counts) = customer_id NOT IN (SELECT customer_id FROM (" +
       EFFECTIVE_GROUP_SQL +
-      ") eff); one named group = customer_id IN (SELECT eff.customer_id FROM (that same query) eff JOIN customer_group g ON g.id = eff.group_id WHERE g.name = '<name>'), so a player in two groups counts once, as in the reports. Money: credit_transaction.amount includes spend-only bonus credit, so never SUM(amount) for cash: a row's cash in sen is ROUND(amount * 100) - COALESCE(bonus_cents, 0); revenue = minus its sum over reason 'pack_open' and payouts = its sum over 'buyback', as the Economy page counts; bonus_grant, reward_credit, voucher_claim, daily_reward and referral_commission are promo credit, never revenue. Paid pulls: pull.source IN ('pack', 'bonus'); a pull's cash share is (10000 - bonus_bp) / 10000.0. Joins: pull.pack_id holds the pack's slug, not its id, so JOIN pack ON pack.slug = pull.pack_id (joining on pack.id finds nothing; 'task-reward' and 'challenge-...' pulls have no pack row); a 'pack_open' charge links to its pulls by credit_transaction.source_transaction_id = pull.open_id. Coin flip results, for all players, one player or one group: each settled card flip is a ledger_entry row of type 'CF' (customer_id, occurred_at, wallet_delta = credit paid on a win, vault_delta = minus the vault liability forfeited on a loss, where reward cards count 0, payload->'cards' each card's value, payload->>'outcome' 'won' or 'lost', ref_id = the round id); tickets staked in a flip, alone or beside cards, are a lucky_draw_ticket row with reason 'coin_flip' and ref = the round id (delta signed), so count flips as CF rows plus ticket rows whose ref has no CF row. The win credit is credit_transaction reason 'coin_flip_win', a payout the Economy page already takes off net; a forfeited card only lowers the vault liability and is never cash revenue. coin_flip_round and coin_flip_config are closed (they hold the odds) and are never needed for results. Main tables: customer (players: email, phone, metadata->>'handle', has_account), customer_account_state, credit_transaction (the wallet in RM: amount, reason), ledger_entry (type, wallet_delta, vault_delta), gateway_deposit (status, amount_requested, amount_settled, payment_method_code, gateway), gateway_withdrawal (status, failure_reason), pull (customer_id, pack_id, card_id, source, status, buyback_amount in RM, recorded_value_usd), pack (slug, title, price in RM, buyback_percent, status), pack_odds, card (name, grade, market_value in USD; fx_rate converts), delivery_order and delivery_order_item, challenge_stage, challenge_schedule, challenge_payout, task_definition, task_claim, daily_checkin, vip_level, vip_member_state, referral_attribution, weekly_settlement(_line), player_payout_details, admin_action_audit, customer_group and customer_group_customer, purchase_invoice, goods_receive_note(_line: an edited note keeps its old lines soft-deleted), stock_movement. A table's columns: SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'pull'.",
+      ") eff); one named group = customer_id IN (SELECT eff.customer_id FROM (that same query) eff JOIN customer_group g ON g.id = eff.group_id WHERE g.name = '<name>'), so a player in two groups counts once, as in the reports. Money: credit_transaction.amount includes spend-only bonus credit, so never SUM(amount) for cash: a row's cash in sen is " +
+      normalSenSql() +
+      ". The Economy report's figures in SQL (money-figures.ts): revenue = SUM(" +
+      PACK_SALES_CASH.sen('') +
+      ') WHERE ' +
+      PACK_SALES_CASH.where('') +
+      '; payouts = SUM(' +
+      BUYBACK_CASH.sen('') +
+      ') WHERE ' +
+      BUYBACK_CASH.where('') +
+      '; coin flip payouts = SUM(' +
+      COIN_FLIP_WINS.sen('') +
+      ') WHERE ' +
+      COIN_FLIP_WINS.where('') +
+      "; net = revenue - payouts - coin flip payouts. The P&L's pack sales are at full price instead: SUM(" +
+      PACK_SALES_FULL.sen('') +
+      ') WHERE ' +
+      PACK_SALES_FULL.where('') +
+      ' AND NOT ' +
+      CAPSULE_OPEN_SQL('') +
+      " (capsule opens are Lucky Draw sales). bonus_grant, reward_credit, voucher_claim, daily_reward and referral_commission are promo credit, never revenue. Paid pulls: pull.source IN ('pack', 'bonus'); a pull's cash share is (10000 - bonus_bp) / 10000.0. Joins: pull.pack_id holds the pack's slug, not its id, so JOIN pack ON pack.slug = pull.pack_id (joining on pack.id finds nothing; 'task-reward' and 'challenge-...' pulls have no pack row); a 'pack_open' charge links to its pulls by credit_transaction.source_transaction_id = pull.open_id. Coin flip results, for all players, one player or one group: each settled card flip is a ledger_entry row of type 'CF' (customer_id, occurred_at, wallet_delta = credit paid on a win, vault_delta = minus the vault liability forfeited on a loss, where reward cards count 0, payload->'cards' each card's value, payload->>'outcome' 'won' or 'lost', ref_id = the round id); tickets staked in a flip, alone or beside cards, are a lucky_draw_ticket row with reason 'coin_flip' and ref = the round id (delta signed), so count flips as CF rows plus ticket rows whose ref has no CF row. The win credit is credit_transaction reason 'coin_flip_win', a payout the Economy report already takes off net; a forfeited card only lowers the vault liability and is never cash revenue. coin_flip_round and coin_flip_config are closed (they hold the odds) and are never needed for results. Main tables: customer (players: email, phone, metadata->>'handle', has_account), customer_account_state, credit_transaction (the wallet in RM: amount, reason), ledger_entry (type, wallet_delta, vault_delta), gateway_deposit (status, amount_requested, amount_settled, payment_method_code, gateway), gateway_withdrawal (status, failure_reason), pull (customer_id, pack_id, card_id, source, status, buyback_amount in RM, recorded_value_usd), pack (slug, title, price in RM, buyback_percent, status), pack_odds, card (name, grade, market_value in USD; fx_rate converts), delivery_order and delivery_order_item, challenge_stage, challenge_schedule, challenge_payout, task_definition, task_claim, daily_checkin, vip_level, vip_member_state, referral_attribution, weekly_settlement(_line), player_payout_details, admin_action_audit, customer_group and customer_group_customer, purchase_invoice, goods_receive_note(_line: an edited note keeps its old lines soft-deleted), stock_movement. A table's columns: SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'pull'.",
     parameters: object(
       {
         sql: str(

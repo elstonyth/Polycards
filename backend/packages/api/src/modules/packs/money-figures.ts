@@ -175,6 +175,16 @@ export const bonusSourceSql = (
   `WHEN ${t}reason IN ('pack_open', 'delivery_fee', 'buyback') THEN 'returned' ` +
   "ELSE 'other' END";
 
+/** What the Economy ledger totals count (the Finance economy / daily
+ *  reports' `basis`, read back by the desk bots and the assistant). */
+export const LEDGER_TOTALS_BASIS = {
+  revenue: PACK_SALES_CASH.note,
+  payouts: BUYBACK_CASH.note,
+  coinFlipPayouts: COIN_FLIP_WINS.note,
+  net: 'revenue - payouts - coinFlipPayouts.',
+  topups: TOPUPS_LEDGER.note,
+} as const;
+
 // ── Gateway figures (gateway_deposit / gateway_withdrawal) ───────────────────
 
 /** Per settled gateway row. No `?` and no `::` casts: knex named-binding

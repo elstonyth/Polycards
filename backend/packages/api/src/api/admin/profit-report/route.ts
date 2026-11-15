@@ -10,6 +10,11 @@ import {
   profitOwed,
 } from '../../../modules/packs/profit';
 import { resolveFxRate } from '../../../modules/packs/pricing';
+import {
+  BUYBACK_CASH,
+  COIN_FLIP_WINS,
+  PACK_SALES_CASH,
+} from '../../../modules/packs/money-figures';
 import { packRtpRows } from '../economy/pack-rtp';
 
 const RANGES = [...STATS_RANGES, 'all'] as const;
@@ -85,6 +90,14 @@ export async function GET(
     cash: profitCash(cash.current, cash.previous),
     owed: profitOwed(owed, cash.allTime),
     activity: profitActivity(reasons),
+    // What the activity lines count, for the desk bots and the assistant.
+    basis: {
+      activity: {
+        pack_sales: PACK_SALES_CASH.note,
+        sellbacks: BUYBACK_CASH.note,
+        coin_flip_payouts: COIN_FLIP_WINS.note,
+      },
+    },
     packs: rtp,
   });
 }
