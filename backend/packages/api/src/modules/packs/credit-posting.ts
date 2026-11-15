@@ -56,7 +56,8 @@ export type CreditMutationReason =
   | 'reward_credit'
   | 'daily_reward'
   | 'delivery_fee'
-  | 'bonus_grant';
+  | 'bonus_grant'
+  | 'coin_flip_win';
 
 type PostingFields = {
   customerId: string;
@@ -94,7 +95,7 @@ type PostingFields = {
 /** A posting for a general reason: top-up, cashout, adjustment, bonus grant,
  *  reward credit, voucher, delivery fee, pack open. */
 export type GeneralPosting = PostingFields & {
-  reason: Exclude<CreditMutationReason, 'buyback'>;
+  reason: Exclude<CreditMutationReason, 'buyback' | 'coin_flip_win'>;
 };
 
 /** A sell-back credit: the pull it came from, and the bonus share of it
@@ -106,8 +107,16 @@ export type BuybackPosting = PostingFields & {
   ledger: LedgerPart & { type: 'SE' };
 };
 
+/** A won coin flip's payout: anchored on its round (`coin-flip:<round>`),
+ *  with the round's CF row. */
+export type CoinFlipPosting = PostingFields & {
+  reason: 'coin_flip_win';
+  roundId: string;
+  ledger: LedgerPart & { type: 'CF' };
+};
+
 /** Every credit posting, keyed on reason. */
-export type CreditPosting = GeneralPosting | BuybackPosting;
+export type CreditPosting = GeneralPosting | BuybackPosting | CoinFlipPosting;
 export type CreditMutationInput = CreditPosting;
 
 /** The locked Σ read a posting is planned against, in integer sen. */
@@ -319,7 +328,7 @@ export function planPosting(input: CreditPosting, totals: PostingTotals): Postin
       // `reference` keeps the gateway/charge ref (or plain note) for
       // reconciliation; the idempotency anchor lives in source_transaction_id
       // (the replay check's target) so the two never clobber each other.
-      reference: input.reference ?? null,
+      reference: input.reason === 'coin_flip_win' ? input.roundId : (input.reference ?? null),
       // A sell-back's bonus share is held for packs: stamped as external money
       // in, like a deposit, so opens consume it and the playthrough gate
       // counts it (DEPOSITED_PT_SEN_SQL). Rounded up, toward the locked side.
@@ -329,10 +338,13 @@ export function planPosting(input: CreditPosting, totals: PostingTotals): Postin
           : externalFundedCents,
       bonus_cents: input.reason === 'buyback' ? null : bonusDeltaCents,
       source_transaction_id:
-        input.idempotencyReference ?? input.sourceTransactionId ?? null,
+        input.reason === 'coin_flip_win'
+          ? `coin-flip:${input.roundId}`
+          : (input.idempotencyReference ?? input.sourceTransactionId ?? null),
     },
-    // A sell-back lifts an AUTO freeze after commit (buyback-pull.ts).
-    unfreeze: deltaCents > 0 && input.reason !== 'buyback',
+    // A sell-back lifts an AUTO freeze after commit (buyback-pull.ts); a
+    // frozen account cannot flip (coin-flip.ts), so a win never lifts one.
+    unfreeze: deltaCents > 0 && input.reason !== 'buyback' && input.reason !== 'coin_flip_win',
     balanceAfterCents: beforeCents + deltaCents,
     bonusAfterCents: bonusBeforeCents + bonusDeltaCents,
   };

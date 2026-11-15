@@ -4904,7 +4904,7 @@ class PacksModuleService extends MedusaService({
       balance: plan.balanceAfterCents / 100,
       amount: plan.row.amount,
       replayed: false,
-      reference: input.reference ?? null,
+      reference: plan.row.reference,
       bonusBalance: plan.bonusAfterCents / 100,
       rowBonusCents: plan.row.bonus_cents,
       ...(ledger && { ledger: { id: ledger.id, display_id: ledger.display_id } }),
