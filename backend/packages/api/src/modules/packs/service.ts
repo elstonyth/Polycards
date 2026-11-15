@@ -67,6 +67,7 @@ import { findBank, savedAccountSlot } from './banks';
 import {
   nameStanding,
   numberStanding,
+  spellings,
   type NameStanding,
   type NumberStanding,
   type PayoutNumber,
@@ -10745,13 +10746,9 @@ class PacksModuleService extends MedusaService({
       own.map((n) => [n.account_key, n.bank_code]),
     );
     // A PayNow mobile is banned with or without its 65, as the withdrawal
-    // check reads it (the standing's spellings), so the list asks for both.
+    // check reads it (spellings), so the list asks for both.
     for (const n of own) {
-      const { forms } = await numberStanding(em, customerId, {
-        bankCode: n.bank_code,
-        accountNumber: n.account_key,
-      });
-      for (const form of forms) {
+      for (const form of spellings(n.bank_code, n.account_key)) {
         if (!byKey.has(form)) byKey.set(form, n.bank_code);
       }
     }
