@@ -387,6 +387,9 @@ describe('PriceCharting feed outage', () => {
     );
     expect(packs.updateSiteSettings).toHaveBeenCalledTimes(2);
     expect(packs.updateSiteSettings).toHaveBeenNthCalledWith(2, cleared);
+    expect(logger.error).not.toHaveBeenCalledWith(
+      expect.stringMatching(/feed alert NOT cleared/),
+    );
   });
 
   it('logs a clear that keeps failing once per sweep, still syncing every card', async () => {
@@ -399,6 +402,13 @@ describe('PriceCharting feed outage', () => {
       /could not clear the feed alert/.test(String(msg)),
     );
     expect(clearErrors).toHaveLength(1);
+    // The sweep ends saying the alert is still up, not just a clean summary.
+    const notCleared = logger.error.mock.calls.filter(([msg]) =>
+      /feed alert NOT cleared although PriceCharting answered: 3 failed attempts/.test(
+        String(msg),
+      ),
+    );
+    expect(notCleared).toHaveLength(1);
   });
 
   it('still sweeps when the stored alert cannot be read, clearing on the first ok', async () => {

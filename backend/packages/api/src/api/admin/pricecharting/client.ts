@@ -45,7 +45,8 @@ export async function pcFetch<
     };
   }
 
-  // Status first: an auth or outage reply may not carry a JSON body.
+  // Status first: an outage reply may not carry a JSON body; auth always needs
+  // a token message.
   let data: T | undefined;
   try {
     data = (await resp.json()) as T;
@@ -64,21 +65,15 @@ export async function pcFetch<
   // Every auth reply needs a token message: the 2026-10-19 expiry was a 410 with
   // "Access token has expired"; a 410 without one may be a removed product, and
   // a bare 401/403 may be an edge/WAF block.
-  const tokenMessage = /\btoken\b/i.test(upstreamMessage ?? '');
+  const tokenMessage =
+    typeof upstreamMessage === 'string' && /\btoken\b/i.test(upstreamMessage)
+      ? upstreamMessage
+      : null;
   if (
-    (resp.status === 410 && tokenMessage) ||
-    (tokenMessage &&
-      (resp.status === 401 ||
-        resp.status === 403 ||
-        data?.status !== 'success'))
+    tokenMessage &&
+    ([401, 403, 410].includes(resp.status) || data?.status !== 'success')
   ) {
-    return {
-      kind: 'error',
-      message:
-        upstreamMessage ??
-        `PriceCharting rejected the API token (HTTP ${resp.status}).`,
-      cause: 'auth',
-    };
+    return { kind: 'error', message: tokenMessage, cause: 'auth' };
   }
   // The token check runs first on purpose, so a 404 "Token not found" is auth.
   if (resp.status === 404 && data) {
@@ -90,7 +85,9 @@ export async function pcFetch<
   if (!data) {
     return {
       kind: 'error',
-      message: `PriceCharting returned an unreadable response (HTTP ${resp.status}).`,
+      message: [401, 403, 410].includes(resp.status)
+        ? `PriceCharting refused the request (HTTP ${resp.status}); check the API token`
+        : `PriceCharting returned an unreadable response (HTTP ${resp.status}).`,
       cause: 'unavailable',
     };
   }

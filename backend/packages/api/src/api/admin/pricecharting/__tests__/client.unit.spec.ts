@@ -69,12 +69,28 @@ it.each([
   });
 });
 
-it('an unreadable reply names its HTTP status', async () => {
+it('an unreadable 401/403/410 reply points at the API token', async () => {
   reply(403, '<html>challenge</html>');
   expect(await pcFetch('/api/product', { id: '1' })).toEqual({
     kind: 'error',
-    message: 'PriceCharting returned an unreadable response (HTTP 403).',
+    message:
+      'PriceCharting refused the request (HTTP 403); check the API token',
     cause: 'unavailable',
+  });
+  reply(410, '');
+  expect(await pcFetch('/api/product', { id: '1' })).toEqual({
+    kind: 'error',
+    message:
+      'PriceCharting refused the request (HTTP 410); check the API token',
+    cause: 'unavailable',
+  });
+});
+
+it('a JSON 404 without a message is a card-level error', async () => {
+  reply(404, { status: 'error' });
+  expect(await pcFetch('/api/product', { id: '1' })).toEqual({
+    kind: 'error',
+    message: 'PriceCharting error (HTTP 404).',
   });
 });
 

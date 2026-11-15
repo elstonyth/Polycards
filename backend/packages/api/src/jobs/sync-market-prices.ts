@@ -105,7 +105,8 @@ export async function runMarketPriceSync(
     );
   }
   let feedAnswered = false;
-  let clearErrorLogged = false;
+  let clearFailures = 0;
+  let lastClearError = '';
   const fetchProduct: typeof pcFetchRaw = async (path, params) => {
     const res = await pcFetchRaw(path, params);
     if (res.kind === 'ok') feedAnswered = true;
@@ -174,12 +175,13 @@ export async function runMarketPriceSync(
         await saveFeed(packs, null);
         feedFlagged = false; // a failed clear stays flagged: the next card retries
       } catch (e) {
-        // Logged once per sweep; the retry on every later card stays.
-        if (!clearErrorLogged)
+        // Logged once here, summed at the end; the retry on every later card stays.
+        clearFailures++;
+        lastClearError = (e as Error).message;
+        if (clearFailures === 1)
           logger.error(
-            `[sync-market-prices] could not clear the feed alert: ${(e as Error).message}`,
+            `[sync-market-prices] could not clear the feed alert: ${lastClearError}`,
           );
-        clearErrorLogged = true;
       }
     }
   }
@@ -200,7 +202,12 @@ export async function runMarketPriceSync(
     }
     return;
   }
-  const summary = `[sync-market-prices] done: ${changed}/${cards.length} updated, ${skipped} skipped, ${failed} failed`;
+  // Prod logs keep ~30 min: restate a clear that never landed next to the summary.
+  if (feedFlagged && feedAnswered)
+    logger.error(
+      `[sync-market-prices] feed alert NOT cleared although PriceCharting answered: ${clearFailures} failed attempts, last: ${lastClearError}; admin still shows the token alert`,
+    );
+  const summary =`[sync-market-prices] done: ${changed}/${cards.length} updated, ${skipped} skipped, ${failed} failed`;
   if (skipped > 0 || failed > 0) logger.warn(summary);
   else logger.info(summary);
 }
