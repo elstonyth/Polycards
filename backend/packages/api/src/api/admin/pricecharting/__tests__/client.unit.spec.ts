@@ -74,14 +74,33 @@ it('an unreadable 401/403/410 reply points at the API token', async () => {
   expect(await pcFetch('/api/product', { id: '1' })).toEqual({
     kind: 'error',
     message:
-      'PriceCharting refused the request (HTTP 403); check the API token',
+      'PriceCharting refused the request (HTTP 403); check PRICECHARTING_API_TOKEN',
     cause: 'unavailable',
   });
   reply(410, '');
   expect(await pcFetch('/api/product', { id: '1' })).toEqual({
     kind: 'error',
     message:
-      'PriceCharting refused the request (HTTP 410); check the API token',
+      'PriceCharting refused the request (HTTP 410); check PRICECHARTING_API_TOKEN',
+    cause: 'unavailable',
+  });
+});
+
+it('a readable 401/403/410 reply without a message points at the API token too', async () => {
+  reply(403, { status: 'error' });
+  expect(await pcFetch('/api/product', { id: '1' })).toEqual({
+    kind: 'error',
+    message:
+      'PriceCharting refused the request (HTTP 403); check PRICECHARTING_API_TOKEN',
+    cause: 'unavailable',
+  });
+});
+
+it('an empty upstream message falls back to the status text', async () => {
+  reply(503, { status: 'error', 'error-message': '' });
+  expect(await pcFetch('/api/product', { id: '1' })).toEqual({
+    kind: 'error',
+    message: 'PriceCharting error (HTTP 503).',
     cause: 'unavailable',
   });
 });

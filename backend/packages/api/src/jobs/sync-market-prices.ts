@@ -96,9 +96,11 @@ export async function runMarketPriceSync(
   // the token works), not at the end of the sweep: deploys cut sweeps short.
   // Unreadable settings count as flagged: worst case one harmless null write.
   let feedFlagged = true;
+  let feedKnown = false;
   try {
     const [settings] = await packs.listSiteSettings({}, { take: 1 });
     feedFlagged = Boolean(settings?.pricecharting_feed);
+    feedKnown = true;
   } catch (e) {
     logger.error(
       `[sync-market-prices] could not read the feed alert: ${(e as Error).message}`,
@@ -205,9 +207,9 @@ export async function runMarketPriceSync(
   // Prod logs keep ~30 min: restate a clear that never landed next to the summary.
   if (feedFlagged && feedAnswered)
     logger.error(
-      `[sync-market-prices] feed alert NOT cleared although PriceCharting answered: ${clearFailures} failed attempts, last: ${lastClearError}; admin still shows the token alert`,
+      `[sync-market-prices] feed alert NOT cleared although PriceCharting answered: ${clearFailures} failed attempts, last: ${lastClearError}; admin ${feedKnown ? 'still shows' : 'may still show'} the token alert`,
     );
-  const summary =`[sync-market-prices] done: ${changed}/${cards.length} updated, ${skipped} skipped, ${failed} failed`;
+  const summary = `[sync-market-prices] done: ${changed}/${cards.length} updated, ${skipped} skipped, ${failed} failed`;
   if (skipped > 0 || failed > 0) logger.warn(summary);
   else logger.info(summary);
 }

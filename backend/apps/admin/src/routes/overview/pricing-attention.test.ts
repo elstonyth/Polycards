@@ -242,6 +242,12 @@ describe('PriceCharting feed outage in dashboard attention', () => {
       message: 'above cap: 200000 > 100000',
       folded: false,
     },
+    {
+      reason: 'sync_error',
+      message:
+        'PriceCharting refused the request (HTTP 403); check PRICECHARTING_API_TOKEN',
+      folded: false,
+    },
     { reason: 'pending_confirmation', message: null, folded: false },
     { reason: 'unlinked', message: null, folded: false },
     { reason: 'missing_product', message: null, folded: false },

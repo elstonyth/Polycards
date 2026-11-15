@@ -7,6 +7,8 @@
 
 const BASE_URL = 'https://www.pricecharting.com';
 const TIMEOUT_MS = 10_000;
+// The statuses PriceCharting answers a bad token with.
+const TOKEN_STATUSES = [401, 403, 410];
 
 export const PC_TOKEN_MISSING =
   'PriceCharting is not configured: set PRICECHARTING_API_TOKEN in the backend .env ' +
@@ -53,7 +55,10 @@ export async function pcFetch<
   } catch {
     data = undefined;
   }
-  const upstreamMessage = data?.['error-message'];
+  const raw = data?.['error-message'];
+  const upstreamMessage = typeof raw === 'string' && raw ? raw : undefined;
+  // Must not trip the admin dashboard's /\btoken\b/ fold ("_TOKEN" does not match).
+  const tokenHint = `PriceCharting refused the request (HTTP ${resp.status}); check PRICECHARTING_API_TOKEN`;
 
   if (resp.status >= 500 || resp.status === 429) {
     return {
@@ -62,16 +67,17 @@ export async function pcFetch<
       cause: 'unavailable',
     };
   }
-  // Every auth reply needs a token message: the 2026-10-19 expiry was a 410 with
-  // "Access token has expired"; a 410 without one may be a removed product, and
-  // a bare 401/403 may be an edge/WAF block.
+  // A 401/403/410 is auth only with a token message (the 2026-10-19 expiry was a
+  // 410 "Access token has expired"); without one it may be an edge/WAF block or
+  // a removed product, so it stays 'unavailable' but its message points the
+  // operator at the token env var.
   const tokenMessage =
-    typeof upstreamMessage === 'string' && /\btoken\b/i.test(upstreamMessage)
+    upstreamMessage && /\btoken\b/i.test(upstreamMessage)
       ? upstreamMessage
       : null;
   if (
     tokenMessage &&
-    ([401, 403, 410].includes(resp.status) || data?.status !== 'success')
+    (TOKEN_STATUSES.includes(resp.status) || data?.status !== 'success')
   ) {
     return { kind: 'error', message: tokenMessage, cause: 'auth' };
   }
@@ -85,8 +91,8 @@ export async function pcFetch<
   if (!data) {
     return {
       kind: 'error',
-      message: [401, 403, 410].includes(resp.status)
-        ? `PriceCharting refused the request (HTTP ${resp.status}); check the API token`
+      message: TOKEN_STATUSES.includes(resp.status)
+        ? tokenHint
         : `PriceCharting returned an unreadable response (HTTP ${resp.status}).`,
       cause: 'unavailable',
     };
@@ -94,7 +100,11 @@ export async function pcFetch<
   if (!resp.ok || data.status !== 'success') {
     return {
       kind: 'error',
-      message: upstreamMessage ?? `PriceCharting error (HTTP ${resp.status}).`,
+      message:
+        upstreamMessage ??
+        (TOKEN_STATUSES.includes(resp.status)
+          ? tokenHint
+          : `PriceCharting error (HTTP ${resp.status}).`),
       ...(/no such product|not found/i.test(upstreamMessage ?? '')
         ? {}
         : { cause: 'unavailable' as const }),

@@ -409,6 +409,20 @@ describe('PriceCharting feed outage', () => {
       ),
     );
     expect(notCleared).toHaveLength(1);
+    expect(notCleared[0][0]).toContain('admin still shows the token alert');
+  });
+
+  it('says the alert may still show when the stored alert could not be read and every clear fails', async () => {
+    const { packs, logger, run } = setup();
+    packs.listSiteSettings.mockRejectedValueOnce(new Error('db down'));
+    okReplies();
+    packs.updateSiteSettings.mockRejectedValue(new Error('db down'));
+    await expect(run()).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /feed alert NOT cleared although PriceCharting answered: 3 failed attempts.*admin may still show the token alert/,
+      ),
+    );
   });
 
   it('still sweeps when the stored alert cannot be read, clearing on the first ok', async () => {
