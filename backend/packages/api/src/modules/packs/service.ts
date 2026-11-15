@@ -6503,12 +6503,11 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (prizes.length) {
-      // The prize daily cap, counted under the same credit: lock
-      // recordRewardWithdrawal holds (mutateCreditAtomic below re-takes it;
-      // a transaction-level advisory lock is re-entrant).
+      // The prize daily cap, counted under the credit: lock this method took
+      // first (the key recordRewardWithdrawal holds; mutateCreditAtomic below
+      // re-enters it).
       const em =
         sharedContext.transactionManager as unknown as LedgerSqlManager;
-      await lockCredit(sharedContext, input.customerId);
       const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
       const used = await this.rewardShipmentsToday(em, input.customerId);
       if (used + prizes.length > withdrawals_per_day) {
