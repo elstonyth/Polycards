@@ -1,8 +1,9 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { findBank } from '../../../../modules/packs/banks';
+import { accountNumberForms, findBank } from '../../../../modules/packs/banks';
 import {
   clearedHolderNames,
+  liftedPayoutBans,
   payoutAccountKey,
 } from '../../../../modules/packs/saved-accounts';
 import { PERMANENT_BAN_REASON_PREFIX } from '../../../utils/disabled-guard';
@@ -40,6 +41,8 @@ const DIGITS = (col: string) =>
   `ltrim(regexp_replace(${col}, '[^0-9]', '', 'g'), '0')`;
 const NAME = (col: string) => `NULLIF(${realNameKeySql(col)}, '')`;
 const LIVE_PAYOUT = `deleted_at IS NULL AND status IN ('pending', 'held', 'settled')`;
+const ANY_FORM = (col: string) =>
+  `${DIGITS(col)} = ANY(string_to_array(?, ','))`;
 
 type NumberRow = { bank_code: string; account_number: string };
 type AccountRow = {
@@ -51,6 +54,8 @@ type AccountRow = {
   reason: string | null;
   keys: string[] | null;
 };
+/** A stored row's bank and digits, as `sameNumber` reads them. */
+type AtNumber = { bank_code: string; digits: string };
 
 const banState = (disabled: boolean | null, reason: string | null) => ({
   banned:
@@ -58,51 +63,123 @@ const banState = (disabled: boolean | null, reason: string | null) => ({
   disabled: disabled === true,
 });
 
+const bankId = (code: string | null) => findBank(code)?.id ?? '';
+
+/** A stored number as the save and withdrawal checks compare it: its bank, and
+ *  its first spelling (a PayNow mobile without its 65) as the key. */
+function numberAtBank(bankCode: string, accountNumber: string) {
+  const forms = accountNumberForms(
+    bankCode,
+    payoutAccountKey(accountNumber, false),
+  );
+  const bank = bankId(bankCode);
+  return { bank, key: forms[0], forms, id: `${bank}:${forms[0]}` };
+}
+
+/** Is a stored row the number `key`, as the save and withdrawal checks read
+ *  it: under any spelling, and at `bank` when one is given (heldByAnother: the
+ *  same digits at another bank are someone else's account). */
+const sameNumber =
+  (key: string, bank?: string) =>
+  (row: AtNumber): boolean =>
+    (bank === undefined || bankId(row.bank_code) === bank) &&
+    accountNumberForms(row.bank_code, row.digits).includes(key);
+
 /** Settled payouts per customer to one number. */
-async function payoutsTo(db: ReportDb, key: string) {
+async function payoutsTo(
+  db: ReportDb,
+  forms: string[],
+  match: (row: AtNumber) => boolean,
+) {
   const rows = (
-    await db.raw<{ customer_id: string; n: number; rm: string }>(
-      `SELECT customer_id, count(*)::int AS n, coalesce(sum(amount), 0)::text AS rm FROM gateway_withdrawal
-        WHERE deleted_at IS NULL AND status = 'settled' AND ${DIGITS('account_number')} = ?
-        GROUP BY customer_id`,
-      [key],
+    await db.raw<AtNumber & { customer_id: string; n: number; rm: string }>(
+      `SELECT customer_id, bank_code, ${DIGITS('account_number')} AS digits,
+              count(*)::int AS n, coalesce(sum(amount), 0)::text AS rm FROM gateway_withdrawal
+        WHERE deleted_at IS NULL AND status = 'settled' AND ${ANY_FORM('account_number')}
+        GROUP BY 1, 2, 3`,
+      [forms.join(',')],
     )
-  ).rows;
+  ).rows.filter(match);
   return (customerId: string) => {
-    const p = rows.find((r) => r.customer_id === customerId);
-    return { count: p?.n ?? 0, rm: Number(p?.rm ?? 0) };
+    const mine = rows.filter((r) => r.customer_id === customerId);
+    return {
+      count: mine.reduce((n, r) => n + r.n, 0),
+      rm: Number(mine.reduce((rm, r) => rm + Number(r.rm), 0).toFixed(2)),
+    };
   };
 }
 
-const isBanned = async (db: ReportDb, key: string) =>
-  (
-    await db.raw(
-      'SELECT 1 FROM banned_payout_account WHERE account_key = ? LIMIT 1',
-      [key],
-    )
-  ).rows.length > 0;
-
-/** Every live account on one number (saved, or a payout that went out or is
- *  on its way), with the holder-name keys each used on it. */
-async function accountsOn(db: ReportDb, key: string): Promise<AccountRow[]> {
-  return (
-    await db.raw<AccountRow>(
-      `WITH h AS (
-         SELECT c.id AS customer_id, ${NAME("a->>'accountHolderName'")} AS k FROM customer c CROSS JOIN LATERAL ${SAVED}
-          WHERE c.deleted_at IS NULL AND ${DIGITS("a->>'accountNumber'")} = ?
-         UNION SELECT customer_id, ${NAME('account_holder_name')} FROM gateway_withdrawal
-          WHERE ${LIVE_PAYOUT} AND ${DIGITS('account_number')} = ?
-       )
-       SELECT h.customer_id, c.first_name AS username, c.metadata->>'handle' AS handle,
-              c.deleted_at IS NOT NULL AS deleted, s.disabled, s.disabled_reason AS reason,
-              array_agg(DISTINCT h.k) FILTER (WHERE h.k IS NOT NULL) AS keys
-         FROM h JOIN customer c ON c.id = h.customer_id
-         LEFT JOIN customer_account_state s ON s.customer_id = h.customer_id AND s.deleted_at IS NULL
-        GROUP BY h.customer_id, c.id, s.id
-        ORDER BY c.first_name`,
-      [key, key],
+/** Is a number banned, as payoutAccountBanned reads it: any of its spellings
+ *  on the list (at any bank), and for a player, not one support lifted for
+ *  them (setPayoutBanLifted keys the lift by the listed spelling). */
+async function banOf(
+  db: ReportDb,
+  forms: string[],
+  metadata?: Record<string, unknown> | null,
+) {
+  const listed = (
+    await db.raw<{ account_key: string }>(
+      "SELECT account_key FROM banned_payout_account WHERE account_key = ANY(string_to_array(?, ','))",
+      [forms.join(',')],
     )
   ).rows;
+  const lifted = liftedPayoutBans(metadata ?? {});
+  return {
+    banned: listed.some((b) => !lifted[b.account_key]),
+    lifted: listed.length > 0 && listed.every((b) => lifted[b.account_key]),
+  };
+}
+
+/** Every live account on one number (saved, or a payout that went out or is
+ *  on its way), with the holder-name keys each used on it and its banks. */
+async function accountsOn(
+  db: ReportDb,
+  forms: string[],
+  match: (row: AtNumber) => boolean,
+): Promise<(AccountRow & { keys: string[]; banks: string[] })[]> {
+  const rows = (
+    await db.raw<Omit<AccountRow, 'keys'> & AtNumber & { k: string | null }>(
+      `WITH h AS (
+         SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, ${DIGITS("a->>'accountNumber'")} AS digits,
+                ${NAME("a->>'accountHolderName'")} AS k
+           FROM customer c CROSS JOIN LATERAL ${SAVED}
+          WHERE c.deleted_at IS NULL AND ${ANY_FORM("a->>'accountNumber'")}
+         UNION SELECT customer_id, bank_code, ${DIGITS('account_number')}, ${NAME('account_holder_name')} FROM gateway_withdrawal
+          WHERE ${LIVE_PAYOUT} AND ${ANY_FORM('account_number')}
+       )
+       SELECT h.customer_id, h.bank_code, h.digits, h.k, c.first_name AS username,
+              c.metadata->>'handle' AS handle, c.deleted_at IS NOT NULL AS deleted,
+              s.disabled, s.disabled_reason AS reason
+         FROM h JOIN customer c ON c.id = h.customer_id
+         LEFT JOIN customer_account_state s ON s.customer_id = h.customer_id AND s.deleted_at IS NULL
+        ORDER BY c.first_name, h.customer_id`,
+      [forms.join(','), forms.join(',')],
+    )
+  ).rows.filter(match);
+  const byCustomer = new Map<
+    string,
+    { row: (typeof rows)[number]; keys: Set<string>; banks: Set<string> }
+  >();
+  for (const r of rows) {
+    const entry = byCustomer.get(r.customer_id) ?? {
+      row: r,
+      keys: new Set<string>(),
+      banks: new Set<string>(),
+    };
+    if (r.k) entry.keys.add(r.k);
+    if (r.bank_code) entry.banks.add(r.bank_code);
+    byCustomer.set(r.customer_id, entry);
+  }
+  return [...byCustomer.values()].map(({ row, keys, banks }) => ({
+    customer_id: row.customer_id,
+    username: row.username,
+    handle: row.handle,
+    deleted: row.deleted,
+    disabled: row.disabled,
+    reason: row.reason,
+    keys: [...keys].sort(),
+    banks: [...banks],
+  }));
 }
 
 /** One player's ban and every bank they saved or were paid to. */
@@ -118,8 +195,12 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
     )
   ).rows;
   const [who] = (
-    await db.raw<{ username: string | null; handle: string | null }>(
-      "SELECT first_name AS username, metadata->>'handle' AS handle FROM customer WHERE id = ?",
+    await db.raw<{
+      username: string | null;
+      handle: string | null;
+      metadata: Record<string, unknown> | null;
+    }>(
+      "SELECT first_name AS username, metadata->>'handle' AS handle, metadata FROM customer WHERE id = ?",
       [id],
     )
   ).rows;
@@ -136,32 +217,39 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
       [id, id],
     )
   ).rows;
-  // One entry per number, as the ban and the holder lookup match them: digits
-  // without leading zeros, at any bank. A wallet has no holder to share.
-  const byKey = new Map<string, NumberRow>();
+  // One entry per number, as the save and withdrawal checks match it: digits
+  // without leading zeros under every spelling (a PayNow mobile with or without
+  // its 65), at its own bank. A wallet has no holder to share.
+  const byKey = new Map<
+    string,
+    { row: NumberRow; at: ReturnType<typeof numberAtBank> }
+  >();
   for (const row of numbers) {
     // An entry from before the saved-list shape has no number to compare.
     if (!row.account_number || findBank(row.bank_code)?.wallet) continue;
-    const key = payoutAccountKey(row.account_number, false);
-    if (key.length > 4 && !byKey.has(key)) byKey.set(key, row);
+    const at = numberAtBank(row.bank_code, row.account_number);
+    if (at.key.length > 4 && !byKey.has(at.id)) byKey.set(at.id, { row, at });
   }
 
   const linked = new Set<string>();
   const myNames = new Set<string>();
   const banks: Record<string, unknown>[] = [];
-  for (const [key, row] of byKey) {
-    const accounts = await accountsOn(db, key);
+  for (const { row, at } of byKey.values()) {
+    const match = sameNumber(at.key, at.bank);
+    const accounts = await accountsOn(db, at.forms, match);
     const mine = new Set(
       accounts.find((a) => a.customer_id === id)?.keys ?? [],
     );
     for (const k of mine) myNames.add(k);
-    const payouts = await payoutsTo(db, key);
+    const payouts = await payoutsTo(db, at.forms, match);
     const others = accounts.filter((a) => a.customer_id !== id);
     for (const o of others) linked.add(o.customer_id);
+    const ban = await banOf(db, at.forms, who?.metadata);
     banks.push({
       bank: findBank(row.bank_code)?.name ?? row.bank_code,
-      last4: key.slice(-4),
-      banned_number: await isBanned(db, key),
+      last4: at.key.slice(-4),
+      banned_number: ban.banned,
+      lifted_for_player: ban.lifted,
       this_player_payouts: payouts(id),
       other_accounts: others.map((o) => ({
         username: o.username,
@@ -209,7 +297,7 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
   const stamps = twinIds.length
     ? (
         await db.raw<{ id: string; metadata: Record<string, unknown> | null }>(
-          'SELECT id, metadata FROM customer WHERE id = ANY(string_to_array(?, \',\'))',
+          "SELECT id, metadata FROM customer WHERE id = ANY(string_to_array(?, ','))",
           [[id, ...twinIds].join(',')],
         )
       ).rows
@@ -226,13 +314,13 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
   >();
   for (const r of sameName) {
     if (!r.account_number || findBank(r.bank_code)?.wallet) continue;
-    const key = payoutAccountKey(r.account_number, false);
+    const at = numberAtBank(r.bank_code, r.account_number);
     const entry = sameNameAccounts.get(r.customer_id) ?? {
       row: r,
       banks: new Map<string, string>(),
     };
-    if (key.length > 4) {
-      entry.banks.set(key, findBank(r.bank_code)?.name ?? r.bank_code);
+    if (at.key.length > 4) {
+      entry.banks.set(at.id, findBank(r.bank_code)?.name ?? r.bank_code);
     }
     sameNameAccounts.set(r.customer_id, entry);
   }
@@ -268,34 +356,40 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
       }),
     ),
     ...(lookupNote ? { lookup_note: lookupNote } : {}),
-    note: "A permanent ban (owner, 2026-11-03) is for one person with more than one account: the same bank account, or the same account holder name, on more than one Polycards account. bank_accounts are every bank this player saved or was paid to, by bank name and last 4 digits; other_accounts are the other accounts on that same number, with their settled payouts to it (RM). same_name_accounts used one of this player's holder names at a different bank; cleared_as_different_person true means support checked them as two different people with one name: not one person, not counted in linked_accounts_total, and no reason to ban. linked_accounts_total counts every linked account once, this player not included: the person holds linked_accounts_total + 1 accounts. It counts bank and holder-name links only: 0 is not proof the accounts are unrelated, and account_links checks browser, network, delivery address and real name. same_holder_name: true same name, false a different name, null no name to compare. banned = permanent ban; disabled = cannot log in (a ban, or staff); deleted = the account was deleted (its name and handle are gone, its payouts still count). disabled_at is UTC: say it in Malaysia time. Lifting the ban clears the saved banks and any name clearing; the player links a bank again. A banned number stays banned after an account unban: it is unbanned for one player with unban_bank_number. Why a player's own bank save is refused, and what fixes it: bank_save_check.",
+    note: "A permanent ban (owner, 2026-11-03) is for one person with more than one account: the same bank account, or the same account holder name, on more than one Polycards account. bank_accounts are every bank this player saved or was paid to, by bank name and last 4 digits (a PayNow mobile with or without its 65 is one number); banned_number is whether the number is banned for this player, as their bank save and withdrawal read it: lifted_for_player true means it is on the ban list but support unbanned it for this player only. other_accounts are the other accounts on that same number at that same bank (the same digits at another bank are someone else's account), with their settled payouts to it (RM). same_name_accounts used one of this player's holder names at a different bank; cleared_as_different_person true means support checked them as two different people with one name: not one person, not counted in linked_accounts_total, and no reason to ban. linked_accounts_total counts every linked account once, this player not included: the person holds linked_accounts_total + 1 accounts. It counts bank and holder-name links only: 0 is not proof the accounts are unrelated, and account_links checks browser, network, delivery address and real name. same_holder_name: true same name, false a different name, null no name to compare. banned = permanent ban; disabled = cannot log in (a ban, or staff); deleted = the account was deleted (its name and handle are gone, its payouts still count). disabled_at is UTC: say it in Malaysia time. Lifting the ban clears the saved banks and any name clearing; the player links a bank again. A banned number stays banned after an account unban: it is unbanned for one player with unban_bank_number. Why a player's own bank save is refused, and what fixes it: bank_save_check.",
   };
 }
 
-/** Every account on one bank number. */
+/** Every account on one bank number. Staff give no bank, so the number is
+ *  looked up under every spelling a PayNow save would ask: the other spelling
+ *  (with or without 65) matches PayNow rows only, any other bank needs the same
+ *  digits. Banned as a save of it at a bank it is at would read it (the list
+ *  is at any bank), with no player's lift: a 65 number at CIMB is not asked
+ *  without its 65. */
 async function numberView(db: ReportDb, key: string) {
-  const accounts = await accountsOn(db, key);
-  const payouts = await payoutsTo(db, key);
+  const forms = accountNumberForms('PAYNOWSG', key);
+  const match = sameNumber(key);
+  const accounts = await accountsOn(db, forms, match);
+  const payouts = await payoutsTo(db, forms, match);
   const groups = nameGroups(accounts);
-  // Every bank the number is at (the ban matches the digits at any bank).
-  const bankRows = (
-    await db.raw<{ bank_code: string }>(
-      `SELECT a->>'bankCode' AS bank_code FROM customer c CROSS JOIN LATERAL ${SAVED}
-        WHERE c.deleted_at IS NULL AND ${DIGITS("a->>'accountNumber'")} = ?
-       UNION SELECT bank_code FROM gateway_withdrawal WHERE ${LIVE_PAYOUT} AND ${DIGITS('account_number')} = ?
-       ORDER BY 1`,
-      [key, key],
-    )
-  ).rows;
+  const banForms = [
+    ...new Set([
+      key,
+      ...accounts.flatMap((a) =>
+        a.banks.flatMap((b) => accountNumberForms(b, key)),
+      ),
+    ]),
+  ];
   return {
     bank_account: {
+      // Every bank the number is at.
       banks: [
         ...new Set(
-          bankRows.map((b) => findBank(b.bank_code)?.name ?? b.bank_code),
+          accounts.flatMap((a) => a.banks.map((b) => findBank(b)?.name ?? b)),
         ),
-      ],
+      ].sort(),
       last4: key.slice(-4),
-      banned_number: await isBanned(db, key),
+      banned_number: (await banOf(db, banForms)).banned,
     },
     account_count: accounts.length,
     accounts: accounts.map((a) => ({
@@ -306,7 +400,7 @@ async function numberView(db: ReportDb, key: string) {
       holder_name_group: groups.get(a.customer_id) ?? null,
       payouts: payouts(a.customer_id),
     })),
-    note: 'Every account that saved this bank account or was paid to it (pending, held or settled), with its settled payouts to it in RM. Accounts with the same holder_name_group used the same account holder name; null = no name on file. One number on more than one account breaks one person, one account.',
+    note: 'Every account that saved this bank account or was paid to it (pending, held or settled), at any bank in banks, with its settled payouts to it in RM. A PayNow mobile is found with or without its 65; at any other bank only the same digits match. banned_number is the ban list, before any unban for one player (the username lookup shows that). Accounts with the same holder_name_group used the same account holder name; null = no name on file. One number on more than one account breaks one person, one account.',
   };
 }
 
@@ -336,13 +430,13 @@ async function nameView(db: ReportDb, name: string) {
   >();
   for (const r of rows) {
     if (!r.account_number || findBank(r.bank_code)?.wallet) continue;
-    const key = payoutAccountKey(r.account_number, false);
-    if (key.length <= 4) continue;
+    const at = numberAtBank(r.bank_code, r.account_number);
+    if (at.key.length <= 4) continue;
     const entry = byCustomer.get(r.customer_id) ?? {
       row: r,
       banks: new Map<string, string>(),
     };
-    entry.banks.set(key, findBank(r.bank_code)?.name ?? r.bank_code);
+    entry.banks.set(at.id, findBank(r.bank_code)?.name ?? r.bank_code);
     byCustomer.set(r.customer_id, entry);
   }
   return {

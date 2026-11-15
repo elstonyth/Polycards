@@ -2,6 +2,7 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
+import { accountNumberForms, findBank } from '../../src/modules/packs/banks';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { unwrapResponse } from './utils';
 
@@ -336,6 +337,7 @@ medusaIntegrationTestRunner({
             bank: 'Maybank',
             last4: '8955',
             banned_number: true,
+            lifted_for_player: false,
             this_player_payouts: { count: 1, rm: 40 },
             other_accounts: [
               {
@@ -400,6 +402,230 @@ medusaIntegrationTestRunner({
         ).toBe(400);
         expect((await report('ban?bank_account=1234')).status).toBe(400);
         expect((await report('ban?email=nobody%40test.dev')).status).toBe(404);
+      });
+
+      it('reads a number as the save and payout checks do: both PayNow spellings, its own bank, a lift', async () => {
+        const LOCAL = '91234567';
+        const PAYNOW = 'PAYNOWSG';
+        const make = async (
+          first_name: string,
+          saved: [bankCode: string, holder: string] | null,
+        ) => {
+          const [c] = await customers().createCustomers([
+            {
+              email: `${first_name.toLowerCase()}@test.dev`,
+              first_name,
+              metadata: {
+                handle: first_name,
+                bank_accounts: saved
+                  ? [
+                      {
+                        id: `${first_name}-bank`,
+                        bankCode: saved[0],
+                        bankName: findBank(saved[0])?.name,
+                        accountNumber: LOCAL,
+                        accountHolderName: saved[1],
+                      },
+                    ]
+                  : [],
+              },
+            },
+          ]);
+          return c.id;
+        };
+        // Saved without the 65, paid with it: one number.
+        const saver = await make('Pay_Saver', [PAYNOW, 'Pay Person']);
+        const ring = await make('Pay_Ring', null);
+        // The same digits at Maybank: someone else's account.
+        const twin = await make('Bank_Twin', ['MBBEMYKL', 'Other Person']);
+        const names: Record<string, string> = {
+          [saver]: 'Pay_Saver',
+          [ring]: 'Pay_Ring',
+          [twin]: 'Bank_Twin',
+        };
+        for (const [customer_id, account_number, holder, id] of [
+          [saver, '6591234567', 'Pay Person', 'sp-pn-1'],
+          [ring, '+65 9123 4567', 'Ring Person', 'sp-pn-2'],
+        ]) {
+          await packs().createGatewayWithdrawals([
+            {
+              merchant_transaction_id: id,
+              customer_id,
+              amount: 20,
+              amount_settled: 20,
+              bank_code: PAYNOW,
+              account_number,
+              account_holder_name: holder,
+              status: 'settled' as const,
+              settled_at: new Date(),
+            },
+          ]);
+        }
+        // The saver was paid under the other spelling too: one number's payouts.
+        await packs().createGatewayWithdrawals([
+          {
+            merchant_transaction_id: 'sp-pn-3',
+            customer_id: saver,
+            amount: 10.15,
+            amount_settled: 10.15,
+            bank_code: PAYNOW,
+            account_number: LOCAL,
+            account_holder_name: 'Pay Person',
+            status: 'settled' as const,
+            settled_at: new Date(),
+          },
+        ]);
+        await pg().raw(
+          'INSERT INTO banned_payout_account (account_key, bank_code) VALUES (?, ?)',
+          ['6591234567', PAYNOW],
+        );
+
+        // What the save and withdrawal checks answer for the number at a bank.
+        const bannedFor = async (id: string | null, bank: string) =>
+          (
+            await Promise.all(
+              accountNumberForms(bank, LOCAL).map((n) =>
+                packs().payoutAccountBanned(n, false, id),
+              ),
+            )
+          ).some(Boolean);
+        const othersAt = async (id: string, bank: string) => [
+          ...new Set(
+            (
+              await Promise.all(
+                accountNumberForms(bank, LOCAL).map((n) =>
+                  packs().payoutAccountHoldersAt(id, n, bank),
+                ),
+              )
+            ).flat(),
+          ),
+        ];
+        const bodies: unknown[] = [];
+        const view = async (path: string) => {
+          const res = await report(path);
+          expect(res.status).toBe(200);
+          bodies.push(res.data);
+          return res.data;
+        };
+        const usernames = (rows: { username: string }[]) =>
+          rows.map((r) => r.username).sort();
+
+        const saverView = await view('ban?username=pay_saver');
+        expect(saverView.bank_accounts).toHaveLength(1);
+        expect(saverView.bank_accounts[0]).toMatchObject({
+          bank: findBank(PAYNOW)?.name,
+          last4: '4567',
+          banned_number: true,
+          lifted_for_player: false,
+          this_player_payouts: { count: 2, rm: 30.15 },
+        });
+        expect(await bannedFor(saver, PAYNOW)).toBe(true);
+        expect(usernames(saverView.bank_accounts[0].other_accounts)).toEqual([
+          'Pay_Ring',
+        ]);
+        expect((await othersAt(saver, PAYNOW)).map((id) => names[id])).toEqual([
+          'Pay_Ring',
+        ]);
+        expect(saverView.linked_accounts_total).toBe(1);
+
+        const twinView = await view('ban?username=bank_twin');
+        expect(twinView.bank_accounts).toEqual([
+          expect.objectContaining({
+            bank: 'Maybank',
+            last4: '4567',
+            banned_number: false,
+            other_accounts: [],
+          }),
+        ]);
+        expect(await bannedFor(twin, 'MBBEMYKL')).toBe(false);
+        expect(await othersAt(twin, 'MBBEMYKL')).toEqual([]);
+        expect(twinView.linked_accounts_total).toBe(0);
+
+        // By the number alone: the 65 spelling finds PayNow rows only.
+        const local = await view(`ban?bank_account=${LOCAL}`);
+        expect(usernames(local.accounts)).toEqual([
+          'Bank_Twin',
+          'Pay_Ring',
+          'Pay_Saver',
+        ]);
+        const intl = await view(
+          `ban?bank_account=${encodeURIComponent('+65 9123 4567')}`,
+        );
+        expect(usernames(intl.accounts)).toEqual(['Pay_Ring', 'Pay_Saver']);
+        for (const n of [local, intl]) {
+          expect(n.bank_account).toMatchObject({
+            last4: '4567',
+            banned_number: await bannedFor(null, PAYNOW),
+          });
+        }
+        // A 65 number at a Malaysian bank is not a PayNow mobile: its digits
+        // without the 65 being banned does not ban it, as a save at CIMB reads it.
+        const CIMB_NUMBER = '6512345678';
+        await packs().createGatewayWithdrawals([
+          {
+            merchant_transaction_id: 'sp-cimb-1',
+            customer_id: twin,
+            amount: 10,
+            amount_settled: 10,
+            bank_code: 'CIBBMYKL',
+            account_number: CIMB_NUMBER,
+            account_holder_name: 'Other Person',
+            status: 'settled' as const,
+            settled_at: new Date(),
+          },
+        ]);
+        await pg().raw(
+          'INSERT INTO banned_payout_account (account_key, bank_code) VALUES (?, ?)',
+          ['12345678', PAYNOW],
+        );
+        const cimbBanned = async (bank: string) =>
+          (
+            await Promise.all(
+              accountNumberForms(bank, CIMB_NUMBER).map((n) =>
+                packs().payoutAccountBanned(n, false),
+              ),
+            )
+          ).some(Boolean);
+        expect(await cimbBanned(PAYNOW)).toBe(true);
+        expect(await cimbBanned('CIBBMYKL')).toBe(false);
+        expect(
+          (await view(`ban?bank_account=${CIMB_NUMBER}`)).bank_account,
+        ).toMatchObject({ banks: ['CIMB Bank'], banned_number: false });
+
+        // Unbanned for one player: banned for every other account still.
+        await packs().setPayoutBanLifted({
+          customerId: saver,
+          adminId: 'user_sp_admin',
+          last4: '4567',
+          bankCode: PAYNOW,
+          lifted: true,
+          reason: 'support checked the player',
+        });
+        expect(await bannedFor(saver, PAYNOW)).toBe(false);
+        expect(
+          (await view('ban?username=pay_saver')).bank_accounts[0],
+        ).toMatchObject({ banned_number: false, lifted_for_player: true });
+        expect(await bannedFor(ring, PAYNOW)).toBe(true);
+        expect(
+          (await view('ban?username=pay_ring')).bank_accounts[0],
+        ).toMatchObject({
+          banned_number: true,
+          lifted_for_player: false,
+          other_accounts: [expect.objectContaining({ username: 'Pay_Saver' })],
+        });
+
+        for (const body of bodies) {
+          expectNoSecrets(body);
+          for (const hidden of [
+            LOCAL,
+            '12345678',
+            'Pay Person',
+            'Ring Person',
+            'Other Person',
+          ]) {
+            expect(JSON.stringify(body)).not.toContain(hidden);
+          }
+        }
       });
 
       it('links by name at another bank, lists a shared phone, skips a guest twin', async () => {
