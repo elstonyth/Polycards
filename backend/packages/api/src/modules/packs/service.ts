@@ -7244,7 +7244,8 @@ class PacksModuleService extends MedusaService({
     ]);
   }
 
-  // At least one positive top-up ever (any era, any amount). Withdrawals and
+  // At least one positive top-up ever (any era), counted in rounded sen like
+  // walletSummary's topup sum, so a sub-sen row counts in neither. Withdrawals and
   // both delivery paths stay locked until then (2026-10-11): promo credit and
   // prizes must not leave an account that never deposited. Promo-funded
   // opens make hasPaidOpen true, so it cannot answer this.
@@ -7257,7 +7258,7 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ one: number }[]>(
       "SELECT 1 AS one FROM credit_transaction WHERE customer_id = ? AND reason = 'topup' " +
-        'AND amount > 0 AND deleted_at IS NULL LIMIT 1',
+        'AND amount > 0 AND ROUND(amount * 100) > 0 AND deleted_at IS NULL LIMIT 1',
       [customerId],
     );
     return rows.length > 0;

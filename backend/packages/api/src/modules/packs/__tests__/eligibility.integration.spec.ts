@@ -79,6 +79,7 @@ const CUSTOMERS = [
   'c_topup',
   'c_played',
   'c_negative',
+  'c_subsen',
 ];
 
 moduleIntegrationTestRunner<PacksModuleService>({
@@ -124,6 +125,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
         { customer_id: 'c_played', amount: 10, reason: 'topup', external_funded_cents: 1000 },
         { customer_id: 'c_played', amount: -10, reason: 'pack_open', external_funded_cents: -1000 },
         { customer_id: 'c_negative', amount: -5, reason: 'topup' },
+        // Under half a sen: rounds to 0 in the wallet's topup sum (D4).
+        { customer_id: 'c_subsen', amount: 0.004, reason: 'topup' },
       ]);
     };
 
@@ -251,6 +254,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         c_topup: ['playthrough', null],
         c_played: [null, null],
         c_negative: ['no_topup', 'no_topup'],
+        c_subsen: ['no_topup', 'no_topup'],
       });
     });
   },
