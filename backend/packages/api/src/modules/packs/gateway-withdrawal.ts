@@ -1647,6 +1647,15 @@ export async function submitHeldWithdrawal(
       'The payout channel is closed — a held withdrawal cannot be approved right now.',
     );
   }
+  // The wallet breaker (PAYOUT_FLOAT_COOLDOWN_MS) is tripped: a submit now
+  // would be refused and refunded. Before the claim, so the row stays held
+  // for an approval after the top-up (owner, 2026-11-16).
+  if (Date.now() < (payoutFloatEmptyUntil.get(gatewayId) ?? 0)) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `Our ${GATEWAYS[gatewayId].label} payout wallet is empty right now, so this withdrawal stays held. Top up the payout wallet, then approve it again.`,
+    );
+  }
   const amount = Number(row.amount);
 
   // TGPay needs the recipient email; looked up only on a gateway that asks
@@ -1911,6 +1920,14 @@ export async function submitHeldWithdrawal(
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         `${label} refused this payout because our ${label} payout wallet is short ("Insufficient payout credit balance"). The debit has been refunded and the withdrawal closed. Top up the payout wallet, then ask the customer to request the withdrawal again.`,
+      );
+    }
+    if (answer.reason === 'not-sent') {
+      // The adapter's message names the gateway first ("TGPay: cannot pay to
+      // bank X"); the label already does here.
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${label} cannot pay this bank (${error.message.replace(/^[^:]*:\s*/, '')}). Nothing was sent; the debit has been refunded and the withdrawal closed.`,
       );
     }
     throw new MedusaError(

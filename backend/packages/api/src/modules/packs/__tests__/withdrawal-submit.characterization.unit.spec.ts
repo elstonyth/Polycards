@@ -586,20 +586,18 @@ describe('a new Withdrawal', () => {
   it('refused before sending', async () => {
     const h = newPath();
     fakeGateway.refuse('not-sent', { codes: ['X1'] });
-    // Q4 will change this: asked, "not found" read as unproven, left pending.
-    await expect(h.start()).resolves.toMatchObject({ status: 'pending' });
-    expect(fakeGateway.calls.withdrawalDetails).toEqual([h.ref()]);
-    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    // Q4: a pre-send refusal refunds at once, without asking the gateway
+    // (was: asked, "not found" read as unproven, left pending for the sweep).
+    await expect(h.start()).rejects.toThrow(CUSTOMER.refused);
+    expect(fakeGateway.calls.withdrawalDetails).toEqual([]);
+    expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
+      [newRefund(h.ref())],
+    ]);
     expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
       [
-        {
-          selector: { id: 'gpw_1', status: 'pending' },
-          data: {
-            failure_reason: expect.stringMatching(
-              /^submit refused, not confirmed: left for the sweep: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=Fake: cannot pay to bank/,
-            ),
-          },
-        },
+        newClose(
+          /^submit refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=Fake: cannot pay to bank/,
+        ),
       ],
     ]);
     expect(channels(h.notify)).toEqual([]);
@@ -932,29 +930,24 @@ describe('an admin-approved Held Withdrawal', () => {
   it('refused before sending', async () => {
     const h = heldPath();
     fakeGateway.refuse('not-sent', { codes: ['X1'] });
-    // Q4 will change this: asked, "not found" read as unproven, row left
-    // pending, the admin told "approved".
-    await expect(h.approve()).resolves.toEqual({
-      id: 'gpw_h1',
-      status: 'pending',
-      transaction_id: null,
-      approved: true,
-    });
-    expect(fakeGateway.calls.withdrawalDetails).toEqual(['PW-HELD-1']);
-    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    // Q4: a pre-send refusal refunds at once, with an admin message saying
+    // why (was: asked, "not found" read as unproven, row left pending, the
+    // admin told "approved").
+    await expect(h.approve()).rejects.toThrow(
+      `${LABEL} cannot pay this bank (cannot pay to bank (refused before sending)). Nothing was sent; the debit has been refunded and the withdrawal closed.`,
+    );
+    expect(fakeGateway.calls.withdrawalDetails).toEqual([]);
+    expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
+      [heldRefund],
+    ]);
     expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
       [
-        {
-          selector: { id: 'gpw_h1', status: 'pending' },
-          data: {
-            failure_reason: expect.stringMatching(
-              /^approve refused, not confirmed: left for the sweep: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=Fake: cannot pay to bank/,
-            ),
-          },
-        },
+        heldClose(
+          /^approve refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=Fake: cannot pay to bank/,
+        ),
       ],
     ]);
-    expect(channels(h.notify)).toEqual([]);
+    expect(channels(h.notify)).toEqual(['email', 'customer_feed']);
     expect(alertPayoutFloatEmpty).not.toHaveBeenCalled();
   });
 
@@ -991,12 +984,12 @@ describe('an admin-approved Held Withdrawal', () => {
     await newPath().start().catch(() => undefined);
     fakeGateway.script({ submitWithdrawal: { transactionId: 'W-OK-2' } });
     const h = heldPath();
-    // Q7 will change this: claimed and submitted regardless of the breaker.
-    await expect(h.approve()).resolves.toMatchObject({
-      status: 'pending',
-      transaction_id: 'W-OK-2',
-    });
-    expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalledTimes(1);
-    expect(fakeGateway.calls.withdrawals).toHaveLength(2);
+    // Q7: approve reads the breaker and keeps the row held (was: claimed and
+    // submitted regardless of the breaker).
+    await expect(h.approve()).rejects.toThrow(
+      `Our ${LABEL} payout wallet is empty right now, so this withdrawal stays held. Top up the payout wallet, then approve it again.`,
+    );
+    expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
   });
 });

@@ -264,10 +264,11 @@ function heldRefusalFields(
  * waits for the sweep: an hour for the customer, where a wrong refund pays
  * them twice.
  *
- * Payouts switched off ('payouts-off') is the one refusal taken at its word:
- * The 7 Pay's exact path + 501 + text means nothing was created (#747).
- * Asking first left such a payout pending for good, since The 7 Pay's lookup
- * need not answer while its payouts are off.
+ * Two refusals are taken at their word. Payouts switched off ('payouts-off'):
+ * The 7 Pay's exact path + 501 + text means nothing was created (#747), and
+ * asking first left such a payout pending for good, since The 7 Pay's lookup
+ * need not answer while its payouts are off. And 'not-sent': the adapter
+ * refused before calling the provider at all.
  */
 async function judgeRefusal(
   error: GatewayError,
@@ -295,7 +296,11 @@ async function judgeRefusal(
           }))),
     unconfirmed: false,
   };
-  if (payoutDisabled) return { ...kind, refund: true, heldId: null };
+  // Taken at their word, without asking: payouts switched off, and a refusal
+  // raised before anything reached the provider (owner, 2026-11-16).
+  if (payoutDisabled || error.result === 'not-sent') {
+    return { ...kind, refund: true, heldId: null };
+  }
   try {
     const detail = await getWithdrawalDetail(
       input.merchantTransactionId,
