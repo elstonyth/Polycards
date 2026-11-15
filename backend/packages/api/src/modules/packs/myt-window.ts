@@ -98,7 +98,7 @@ export function statsWindows(
   const y = w.getUTCFullYear();
   const m = w.getUTCMonth();
   const today = mytMidnight(y, m, w.getUTCDate());
-  const monthStart = mytMidnight(y, m, 1);
+  const thisMonth = mytMidnight(y, m, 1);
 
   switch (range) {
     case 'today':
@@ -111,15 +111,15 @@ export function statsWindows(
       return byDays(today - 29 * DAY_MS, t, 30);
     case 'month':
       return {
-        current: win(monthStart, t),
+        current: win(thisMonth, t),
         previous: win(
           mytMidnight(y, m - 1, 1),
-          Math.min(shiftMonths(t, -1), monthStart),
+          Math.min(shiftMonths(t, -1), thisMonth),
         ),
       };
     case 'last_month':
       return {
-        current: win(mytMidnight(y, m - 1, 1), monthStart),
+        current: win(mytMidnight(y, m - 1, 1), thisMonth),
         previous: win(mytMidnight(y, m - 2, 1), mytMidnight(y, m - 1, 1)),
       };
     case 'custom': {
@@ -142,8 +142,6 @@ export function statsWindows(
 // same window for "today" or "last week". A period resolves to a half-open
 // [from, to) pair of ISO instants plus a label staff can check.
 
-const MYT_MS = MYT_OFFSET_MS;
-
 export const PERIODS = [
   'today',
   'yesterday',
@@ -165,23 +163,22 @@ export type ResolvedPeriod = {
 };
 
 const dayStart = (ms: number) =>
-  Math.floor((ms + MYT_MS) / DAY_MS) * DAY_MS - MYT_MS;
+  Math.floor((ms + MYT_OFFSET_MS) / DAY_MS) * DAY_MS - MYT_OFFSET_MS;
 
 const monthStart = (ms: number, offset = 0) => {
-  const d = new Date(ms + MYT_MS);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + offset, 1) - MYT_MS;
+  const d = new Date(ms + MYT_OFFSET_MS);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + offset, 1) - MYT_OFFSET_MS;
 };
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 function dateStart(value: unknown, name: string): number {
-  if (typeof value !== 'string' || !DATE_RE.test(value)) {
+  if (typeof value !== 'string' || !DATE_ONLY_RE.test(value)) {
     throw new Error(`${name} must be a date like 2026-09-29.`);
   }
   const ms = Date.parse(`${value}T00:00:00+08:00`);
   // V8 rolls 2026-02-30 over to March; round-tripping catches it.
   if (
     Number.isNaN(ms) ||
-    new Date(ms + MYT_MS).toISOString().slice(0, 10) !== value
+    new Date(ms + MYT_OFFSET_MS).toISOString().slice(0, 10) !== value
   ) {
     throw new Error(`${name} is not a real date.`);
   }
@@ -189,7 +186,7 @@ function dateStart(value: unknown, name: string): number {
 }
 
 const clock = (ms: number) =>
-  new Date(ms + MYT_MS).toISOString().slice(0, 16).replace('T', ' ');
+  new Date(ms + MYT_OFFSET_MS).toISOString().slice(0, 16).replace('T', ' ');
 
 export function resolvePeriod(
   period: string,
@@ -199,7 +196,7 @@ export function resolvePeriod(
   if (period === 'all_time') return { from: null, to: null, label: 'all time' };
   const today = dayStart(now);
   const weekStart =
-    today - ((new Date(today + MYT_MS).getUTCDay() + 6) % 7) * DAY_MS;
+    today - ((new Date(today + MYT_OFFSET_MS).getUTCDay() + 6) % 7) * DAY_MS;
   const ranges: Record<string, () => [number, number]> = {
     today: () => [today, today + DAY_MS],
     yesterday: () => [today - DAY_MS, today],
