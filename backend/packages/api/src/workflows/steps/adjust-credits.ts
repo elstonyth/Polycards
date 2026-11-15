@@ -111,10 +111,10 @@ export const adjustCreditsStep = createStep(
   async (data: { creditTransactionId: string } | null, { container }) => {
     if (!data) return;
     // adjustment rows are never commission-backed, so the guarded path is safe
-    // and removes the last caller of the raw base-delete (Task 11 seals it).
+    // (Task 11 seals the raw base-delete). The credit and its AD row go in one
+    // locked transaction.
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    await packs.deleteCreditTransactionsGuarded([data.creditTransactionId]);
-    await packs.deleteLedgerEntryByRef('AD', data.creditTransactionId);
+    await packs.undoCreditPosting({ creditTransactionId: data.creditTransactionId, ledgerType: 'AD' });
   },
 );
 

@@ -148,5 +148,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect((await service.listCustomerAccountStates({ customer_id: c }))[0]).toMatchObject({ frozen: false, unfreeze_cause: 'repaid' });
     });
+
+    it('a posting compensation removes its credit and ledger rows together (D4)', async () => {
+      const c = 'cus_entry_undo';
+      const { id } = await service.topUpCreditsWithLedger({ customerId: c, amount: 20, reason: 'topup', idempotencyReference: 'undo-1' });
+      expect(await ledger(c)).toHaveLength(1);
+      await service.undoCreditPosting({ creditTransactionId: id, ledgerType: 'TP' });
+      expect(await credits(c)).toHaveLength(0);
+      expect(await ledger(c)).toHaveLength(0);
+      // No auto-freeze from a compensation (owner decision).
+      expect(await service.listCustomerAccountStates({ customer_id: c })).toHaveLength(0);
+    });
   },
 });

@@ -1533,6 +1533,18 @@ class PacksModuleService extends MedusaService({
     }
   }
 
+  // A credit posting's compensation (top-up, adjustment): its credit row and
+  // its ledger row go in ONE transaction, under the customer's credit lock
+  // (D4), like undoBuybackAtomic. No auto-freeze if that leaves the balance
+  // negative (owner decision).
+  @InjectTransactionManager()
+  async undoCreditPosting(input: { creditTransactionId: string; ledgerType: LedgerType }, @MedusaContext() context: Context = {}): Promise<void> {
+    const [credit] = await this.listCreditTransactions({ id: input.creditTransactionId }, { take: 1 }, context);
+    if (credit) await lockCredit(context, credit.customer_id);
+    await this.deleteCreditTransactionsGuarded([input.creditTransactionId], context);
+    await this.deleteLedgerEntryByRef(input.ledgerType, input.creditTransactionId, context);
+  }
+
   @InjectTransactionManager()
   async buybackPullAtomic(input: { customerId: string; pullId: string }, @MedusaContext() context: Context = {}): Promise<BuybackSettlement> {
     return settleBuyback(this, input, context);
