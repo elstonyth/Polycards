@@ -164,8 +164,8 @@ _Avoid_: available (Available is the narrower spendable-now figure below)
 
 **External-Funded**:
 The portion of a balance or spend backed by real-money top-up, as opposed to
-buyback or promo credit. The basis for referral commission and the withdrawal
-gate — not VIP level, which counts full turnover (ADR 0003).
+buyback or promo credit. The basis for the withdrawal gate only: VIP Level and
+Referral Commission both count normal pack-open turnover instead (ADR 0003).
 _Avoid_: real money, deposited
 
 **Bonus Credit** (泥码):

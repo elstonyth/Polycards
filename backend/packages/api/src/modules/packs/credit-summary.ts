@@ -6,7 +6,9 @@
 // Phase 1b adds external-funded tracking: `externalFundedCents` is the signed
 // external-funded sen the row added (top-up, +) or consumed (pack_open, −).
 // `externalBalanceCents` = remaining unspent external funding (Σ of the column);
-// `externalFundedSpendCents` = external consumed by opens = the VIP basis.
+// `externalFundedSpendCents` = external consumed by opens = the withdrawal
+// playthrough's "used" figure. NOT the VIP basis: that is `vipSpendCents`
+// (full turnover since 2026-07-22, ADR 0003).
 //
 // service.ts's `creditSummary` no longer calls this fold at request time — it
 // runs the exact same arithmetic as ONE SQL aggregate (audit 2026-07-07 #5).
@@ -74,7 +76,7 @@ export function foldLedgerRow(
   const bonus = Math.round(row.bonusCents ?? 0);
   // A pack_open row stores the consumed external as NEGATIVE sen; a reversal
   // stores it back as POSITIVE. Count BOTH signs (flip), so a reversed open
-  // subtracts exactly what the open added — the VIP basis nets to zero. Other
+  // subtracts exactly what the open added — this basis nets to zero. Other
   // reasons never touch the basis.
   const externalConsumed = row.reason === "pack_open" ? -ext : 0;
   return {
