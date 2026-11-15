@@ -59,14 +59,19 @@ import {
   liftedPayoutBans,
   withLiftedPayoutBan,
   holderNameKey,
-  LETTER_FOLDS,
-  SMALL_CAPS,
-  SMALL_CAP_LETTERS,
   withClearedHolderName,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
 import { accountNumberForms, findBank, savedAccountSlot } from './banks';
+import {
+  holderNameKeySql,
+  nameStanding,
+  numberStanding,
+  type NameStanding,
+  type NumberStanding,
+  type PayoutNumber,
+} from './payout-destination';
 import { challengePackId } from './challenge-prize';
 import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
@@ -393,23 +398,9 @@ function insufficientCreditsMessage(
   );
 }
 
-// holderNameKey in SQL, for holder names already stored: NFKD, the small
-// capitals and LETTER_FOLDS folded, lower case, a-z only (the combining marks
-// go with that strip). The parity spec runs it against holderNameKey.
-const HOLDER_FOLDS = Object.entries(LETTER_FOLDS);
-const HOLDER_FOLD_ONE = HOLDER_FOLDS.filter(([, to]) => to.length === 1);
-const HOLDER_FOLD_FROM = `${SMALL_CAPS}${HOLDER_FOLD_ONE.map(([c]) => c).join('')}`;
-const HOLDER_FOLD_TO = `${SMALL_CAP_LETTERS}${HOLDER_FOLD_ONE.map(([, to]) => to).join('')}`;
-const HOLDER_FOLD_MANY = HOLDER_FOLDS.filter(([, to]) => to.length > 1);
-export const holderNameKeySql = (expr: string): string => {
-  const folded = HOLDER_FOLD_MANY.reduce(
-    (sql, [c, to]) => `replace(${sql}, '${c}', '${to}')`,
-    `translate(normalize(${expr}, NFKD), '${HOLDER_FOLD_FROM}', '${HOLDER_FOLD_TO}')`,
-  );
-  // ASCII has nothing to fold (one byte a character): skipping the folds
-  // keeps the scan as cheap as before.
-  return `regexp_replace(lower(CASE WHEN octet_length(${expr}) = length(${expr}) THEN ${expr} ELSE ${folded} END), '[^a-z]', '', 'g')`;
-};
+// holderNameKey in SQL: lives with the Payout Destination reads now; kept
+// exported here for older importers.
+export { holderNameKeySql };
 
 // Auto-generates CRUD for each model: list/retrieve/create/update/delete<Model>s
 // (e.g. listPacks, listCards, listPackOdds, createPulls,
@@ -11116,6 +11107,36 @@ class PacksModuleService extends MedusaService({
       [customerId, key, customerId, key],
     );
     return rows.map((r) => r.customer_id);
+  }
+
+  // Payout Destination identity (payout-destination.ts) on this service's
+  // manager: the caller's transaction when it hands one in.
+  @InjectManager()
+  async payoutNumberStanding(
+    customerId: string,
+    n: PayoutNumber,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<NumberStanding> {
+    return await numberStanding(
+      (sharedContext.transactionManager ??
+        sharedContext.manager) as unknown as LedgerSqlManager,
+      customerId,
+      n,
+    );
+  }
+
+  @InjectManager()
+  async payoutNameStanding(
+    customerId: string,
+    holderName: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<NameStanding> {
+    return await nameStanding(
+      (sharedContext.transactionManager ??
+        sharedContext.manager) as unknown as LedgerSqlManager,
+      customerId,
+      holderName,
+    );
   }
 
   // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob

@@ -44,6 +44,7 @@ export type GatewayWithdrawals = Pick<
   | 'listGatewayWithdrawals'
   | 'otherPayoutAccountHolders'
   | 'payoutAccountBanned'
+  | 'payoutNumberStanding'
   | 'savedBankAccountsFor'
   | 'updateGatewayWithdrawals'
   | 'walletSummary'
@@ -90,6 +91,8 @@ export type CustomerWallet = Pick<
   | 'otherPayoutAccountHolders'
   | 'payoutAccountBanned'
   | 'holderNameHeldByAnother'
+  | 'payoutNameStanding'
+  | 'payoutNumberStanding'
   | 'walletSummary'
   | 'withdrawalControls'
 >;
