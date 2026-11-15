@@ -4770,6 +4770,8 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     id: string;
+    /** Balance after, read under the lock. NaN for an unlocked commission,
+     *  which reads none (nothing it could read is serialized). */
     balance: number;
     amount: number;
     replayed: boolean;
@@ -4845,24 +4847,12 @@ class PacksModuleService extends MedusaService({
           sharedContext,
         )
       : undefined;
-    if (commission && rf?.replayed) {
-      const [bal] = await em.execute<{ balance_cents: string | null }[]>(
-        'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
-          'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-        [customerId],
-      );
-      return {
-        id: '',
-        balance: Number(bal?.balance_cents ?? 0) / 100,
-        amount: Math.round(commission.amount * 100) / 100,
-        replayed: true,
-        reference: null,
-        ledger: { id: rf.id, display_id: rf.display_id },
-      };
-    }
+    const unread = commission?.unlocked === true;
     type Replayed = { id: string; amount: string; reference: string | null };
     const [existing] =
-      'reversalOf' in input
+      commission && rf?.replayed
+        ? [{ id: '', amount: String(Math.round(commission.amount * 100) / 100), reference: null }]
+        : 'reversalOf' in input
         ? await em.execute<Replayed[]>(
             "SELECT id, amount, reference FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
             [`reversal:${input.reversalOf.id}`],
@@ -4876,17 +4866,20 @@ class PacksModuleService extends MedusaService({
             )
           : [];
     if (existing) {
-      const balRows = await em.execute<{ balance_cents: string | null }[]>(
-        'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
-          'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-        [customerId],
-      );
+      const balRows = unread
+        ? []
+        : await em.execute<{ balance_cents: string | null }[]>(
+            'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
+              'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+            [customerId],
+          );
       return {
         id: existing.id,
-        balance: Number(balRows[0]?.balance_cents ?? 0) / 100,
+        balance: unread ? Number.NaN : Number(balRows[0]?.balance_cents ?? 0) / 100,
         amount: Number(existing.amount),
         replayed: true,
         reference: existing.reference ?? null,
+        ...(rf && { ledger: { id: rf.id, display_id: rf.display_id } }),
       };
     }
 
@@ -4922,19 +4915,18 @@ class PacksModuleService extends MedusaService({
     //    lock, in ONE scan (exact; soft-delete aware). external_funded_cents is
     //    only consumed by pack_open, but folding it into the existing balance
     //    scan avoids a second O(n) pass over the customer's ledger per open.
-    const rows = await em.execute<
-      {
-        balance_cents: string | null;
-        ext_cents: string | null;
-        bonus_cents: string | null;
-      }[]
-    >(
-      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
-        'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
-        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-      [customerId],
-    );
+    //    An unlocked commission skips it: a credit with no floor, bonus or
+    //    inline unfreeze needs none, and a pay run posts every line.
+    type Totals = { balance_cents: string | null; ext_cents: string | null; bonus_cents: string | null };
+    const rows = unread
+      ? ([] as Totals[])
+      : await em.execute<Totals[]>(
+          'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
+            'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
+            'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
+            'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+          [customerId],
+        );
     // 3) The posting rules (credit-posting.ts planPosting): sign, bonus split,
     //    external snapshot and floor, against the locked Σ above.
     const plan = planPosting(input, {
@@ -4994,11 +4986,11 @@ class PacksModuleService extends MedusaService({
 
     return {
       id: txn.id,
-      balance: plan.balanceAfterCents / 100,
+      balance: unread ? Number.NaN : plan.balanceAfterCents / 100,
       amount: plan.row.amount,
       replayed: false,
       reference: plan.row.reference,
-      bonusBalance: plan.bonusAfterCents / 100,
+      bonusBalance: unread ? Number.NaN : plan.bonusAfterCents / 100,
       rowBonusCents: plan.row.bonus_cents,
       ...(ledger && { ledger: { id: ledger.id, display_id: ledger.display_id } }),
     };

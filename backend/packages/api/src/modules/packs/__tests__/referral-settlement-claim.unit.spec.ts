@@ -116,8 +116,8 @@ describe('payWeeklySettlement claims a line before it moves money', () => {
     );
     expect(params).toEqual(['paid', 'wsl_1', 'pending']);
     // RF before the credit (its replay is the double-pay guard), and no
-    // credit lock: the run posts unlocked (D1), so no advisory statement.
-    expect(f.ops).toEqual(['claim', 'ledger', 'sum', 'credit']);
+    // credit lock or balance read: the run posts unlocked.
+    expect(f.ops).toEqual(['claim', 'ledger', 'credit']);
     expect(f.em.execute.mock.calls.some(([q]) => q.includes('advisory'))).toBe(false);
     // The stamp needs no status guard any more — the row is ours.
     expect(f.updateWeeklySettlementLines).toHaveBeenCalledWith(
