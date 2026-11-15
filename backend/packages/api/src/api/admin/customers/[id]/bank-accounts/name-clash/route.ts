@@ -23,13 +23,8 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const { holder_name: raw, cleared, reason } = req.body ?? {};
+  // Its length, and a permanently banned player, setHolderNameCleared checks.
   const holderName = normalizeHolderName(typeof raw === 'string' ? raw : '');
-  if (holderName.length < 2 || holderName.length > 120) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      'Enter the holder name (2–120 characters).',
-    );
-  }
   if (holderNameInvalid(holderName)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,

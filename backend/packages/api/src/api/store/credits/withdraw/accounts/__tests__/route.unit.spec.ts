@@ -49,11 +49,23 @@ const mutateCustomerMetadata = jest.fn(
   },
 );
 
-// Other customers holding the same account number (none by default).
-const otherPayoutAccountHolders = jest.fn();
-// Banned numbers and names used elsewhere (owner, 2026-11-03); none by default.
-const payoutAccountBanned = jest.fn();
-const holderNameHeldByAnother = jest.fn();
+// The Payout Destination reads (payout-destination.ts; their SQL is pinned in
+// payout-destination.integration.spec): banned numbers, other holders and
+// names used elsewhere (owner, 2026-11-03). Clean by default.
+const payoutNumberStanding = jest.fn();
+const payoutNameStanding = jest.fn();
+const standing = (
+  holders: { customerId: string; paid?: boolean }[] = [],
+  over: Record<string, unknown> = {},
+) => ({
+  bankId: 'MBBEMYKL',
+  key: '123456789012',
+  forms: ['123456789012'],
+  banned: false,
+  bannedForPlayer: false,
+  holders: holders.map((h) => ({ paid: false, verified: false, ...h })),
+  ...over,
+});
 
 // The admin withdrawal controls; open by default.
 const withdrawalControls = jest.fn(async () => DEFAULT_WITHDRAWAL_CONTROLS);
@@ -66,9 +78,8 @@ const scope = {
     if (key === 'packs')
       return {
         mutateCustomerMetadata,
-        otherPayoutAccountHolders,
-        payoutAccountBanned,
-        holderNameHeldByAnother,
+        payoutNameStanding,
+        payoutNumberStanding,
         withdrawalControls,
       } satisfies FakeFacet<CustomerWallet>;
     if (key === 'notification') return { createNotifications };
@@ -76,6 +87,9 @@ const scope = {
     return { retrieveCustomer, updateCustomers };
   }),
 };
+
+/** A holder name another account used, not cleared for this customer. */
+const linkedName = { holders: ['cus_2'], blocking: ['cus_2'] };
 
 const mkRes = () => {
   const res = { json: jest.fn(), status: jest.fn(), setHeader: jest.fn() };
@@ -153,12 +167,14 @@ beforeEach(() => {
   updateCustomers.mockReset();
   mutateCustomerMetadata.mockClear();
   createNotifications.mockReset();
-  otherPayoutAccountHolders.mockReset();
-  otherPayoutAccountHolders.mockResolvedValue([]);
-  payoutAccountBanned.mockReset();
-  payoutAccountBanned.mockResolvedValue(false);
-  holderNameHeldByAnother.mockReset();
-  holderNameHeldByAnother.mockResolvedValue(false);
+  payoutNumberStanding.mockReset();
+  // At the bank asked about, as the real read reports it.
+  payoutNumberStanding.mockImplementation(
+    async (_id: string, n: { bankCode: string }) =>
+      standing([], { bankId: n.bankCode }),
+  );
+  payoutNameStanding.mockReset();
+  payoutNameStanding.mockResolvedValue({ holders: [], blocking: [] });
   logger.warn.mockReset();
   logger.error.mockReset();
   retrieveCustomer.mockResolvedValue({ metadata: {} });
@@ -739,17 +755,15 @@ describe('GET /store/credits/withdraw/accounts', () => {
 // refused; the existing clusters were deliberately left as they are.
 describe('POST accounts — one bank account, one Polycards account', () => {
   it('refuses a number another customer holds at the same bank, and writes nothing', async () => {
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'MBBEMYKL' },
-    ]);
+    payoutNumberStanding.mockResolvedValue(standing([{ customerId: 'cus_2' }]));
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       SHARED_SAVE_MESSAGE,
     );
-    expect(otherPayoutAccountHolders).toHaveBeenCalledWith(
-      'cus_1',
-      '123456789012',
-      false,
-    );
+    // Asked at this bank; every spelling and the bank scope are the module's.
+    expect(payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'MBBEMYKL',
+      accountNumber: '123456789012',
+    });
     expect(updateCustomers).not.toHaveBeenCalled();
     expect(createNotifications).not.toHaveBeenCalled();
     // Logged so repeated probing shows up, with the last 4 digits only.
@@ -760,20 +774,11 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     expect(line).not.toContain('123456789012');
   });
 
-  it("reads another customer's retired-gateway code as the same bank", async () => {
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'MYMB2U' },
-    ]);
-    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
-      SHARED_SAVE_MESSAGE,
-    );
-  });
-
   it('a number another customer only saved blocks under any holder name', async () => {
     // The ring in ADR 0015 typed ten holder names onto one number.
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'Someone Else' },
-    ]);
+    payoutNumberStanding.mockResolvedValue(
+      standing([{ customerId: 'cus_2', paid: false }]),
+    );
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       SHARED_SAVE_MESSAGE,
     );
@@ -786,52 +791,47 @@ describe('POST accounts — one bank account, one Polycards account', () => {
         bank_accounts: [savedShape({ accountNumber: '999999999999', id: 'x' })],
       },
     });
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'X' },
-    ]);
+    payoutNumberStanding.mockResolvedValue(standing([{ customerId: 'cus_2' }]));
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       /already has a bank account/i,
     );
   });
 
-  it('a USDT wallet is matched by its whole address, and only a paid-out one blocks', () => {
+  it('a USDT wallet another account only saved does not block; one paid out does', () => {
     const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
     const body = { bank_code: 'USDTTRC20', account_number: TRON };
+    const wallet = (paid: boolean) =>
+      standing([{ customerId: 'cus_2', paid }], {
+        bankId: 'USDTTRC20',
+        key: TRON,
+        forms: [TRON],
+      });
     return (async () => {
       // Someone else only SAVED it: wallets have no holder name to tell
       // owners apart, and the address is public, so this must not block.
-      otherPayoutAccountHolders.mockResolvedValue([
-        { customer_id: 'cus_2', bank_code: 'USDTTRC20', holder_name: 'USDT · TRC20 (Tron)' },
-      ]);
+      payoutNumberStanding.mockResolvedValue(wallet(false));
       await POST(mkReq(body), mkRes());
       expect(updateCustomers).toHaveBeenCalledTimes(1);
-      expect(otherPayoutAccountHolders).toHaveBeenCalledWith('cus_1', TRON, true);
+      expect(payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+        bankCode: 'USDTTRC20',
+        accountNumber: TRON,
+      });
 
       // Already paid out to another customer: refused.
-      otherPayoutAccountHolders.mockResolvedValue([
-        { customer_id: 'cus_2', bank_code: 'USDTTRC20', holder_name: null },
-      ]);
+      payoutNumberStanding.mockResolvedValue(wallet(true));
       await expect(POST(mkReq(body), mkRes())).rejects.toThrow(
         SHARED_SAVE_MESSAGE,
       );
     })();
   });
 
-  it('allows the same digits at a different bank', async () => {
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'PBBEMYKL' },
-    ]);
-    await POST(mkReq(VALID_BODY), mkRes());
-    expect(updateCustomers).toHaveBeenCalledTimes(1);
-  });
-
   it('verification never lets a new shared number in', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_share_verified: { [savedShape().id]: '2026-11-03T00:00:00.000Z' } },
     });
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: null },
-    ]);
+    payoutNumberStanding.mockResolvedValue(
+      standing([{ customerId: 'cus_2', paid: true }]),
+    );
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       SHARED_SAVE_MESSAGE,
     );
@@ -842,9 +842,7 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'MBBEMYKL' },
-    ]);
+    payoutNumberStanding.mockResolvedValue(standing([{ customerId: 'cus_2' }]));
     // Decided on the locked read: the account is already theirs, so nothing is
     // refused, and nothing changes either.
     await POST(mkReq(VALID_BODY), mkRes());
@@ -869,15 +867,13 @@ describe('POST accounts — a saved account changes through support', () => {
 });
 
 describe('GET accounts — a shared bank account is on hold', () => {
-  const held = [
-    { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: null },
-  ];
+  const held = standing([{ customerId: 'cus_2', paid: true }]);
 
   it('marks it unavailable, says what to do, and hides nothing', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
-    otherPayoutAccountHolders.mockResolvedValue(held);
+    payoutNumberStanding.mockResolvedValue(held);
     const res = mkRes();
     await GET(mkReq(), res);
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0]
@@ -894,8 +890,9 @@ describe('GET accounts — a shared bank account is on hold', () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape(), other] },
     });
-    otherPayoutAccountHolders.mockImplementation(async (_id, number) =>
-      number === '123456789012' ? held : [],
+    payoutNumberStanding.mockImplementation(
+      async (_id: string, n: { accountNumber: string }) =>
+        n.accountNumber === '123456789012' ? held : standing(),
     );
     const res = mkRes();
     await GET(mkReq(), res);
@@ -913,13 +910,13 @@ describe('GET accounts — a shared bank account is on hold', () => {
         bank_share_verified: { [savedShape().id]: '2026-11-03T00:00:00.000Z' },
       },
     });
-    otherPayoutAccountHolders.mockResolvedValue(held);
+    payoutNumberStanding.mockResolvedValue(held);
     const res = mkRes();
     await GET(mkReq(), res);
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0]
       .accounts;
     expect(account.supported).toBe(true);
-    expect(otherPayoutAccountHolders).not.toHaveBeenCalled();
+    expect(payoutNumberStanding).not.toHaveBeenCalled();
   });
 
   it('verifying one number does not lift a hold from another on the list', async () => {
@@ -930,7 +927,7 @@ describe('GET accounts — a shared bank account is on hold', () => {
         bank_share_verified: { [savedShape().id]: '2026-11-03T00:00:00.000Z' },
       },
     });
-    otherPayoutAccountHolders.mockResolvedValue(held);
+    payoutNumberStanding.mockResolvedValue(held);
     const res = mkRes();
     await GET(mkReq(), res);
     const { accounts } = (res as { json: jest.Mock }).json.mock.calls[0][0];
@@ -955,24 +952,29 @@ describe('GET accounts — a shared bank account is on hold', () => {
         ],
       },
     });
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'USDTTRC20', holder_name: 'USDT · TRC20 (Tron)' },
-    ]);
+    payoutNumberStanding.mockResolvedValue(
+      standing([{ customerId: 'cus_2', paid: false }], {
+        bankId: 'USDTTRC20',
+        key: TRON,
+        forms: [TRON],
+      }),
+    );
     const res = mkRes();
     await GET(mkReq(), res);
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0].accounts;
     expect(account.supported).toBe(false);
   });
 
-  it('does not hold the same digits at another bank', async () => {
+  it('asks about each saved number at its bank; nobody else on it, no hold', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'PBBEMYKL', holder_name: null },
-    ]);
     const res = mkRes();
     await GET(mkReq(), res);
+    expect(payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'MBBEMYKL',
+      accountNumber: '123456789012',
+    });
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0]
       .accounts;
     expect(account.supported).toBe(true);
@@ -1001,25 +1003,39 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
   });
 
   it('refuses a banned number and logs only its last 4', async () => {
-    payoutAccountBanned.mockResolvedValue(true);
+    payoutNumberStanding.mockResolvedValue(
+      standing([], { banned: true, bannedForPlayer: true }),
+    );
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       /cannot be used on Polycards/,
     );
-    // Asked for this customer: a number support unbanned for them passes.
-    expect(payoutAccountBanned).toHaveBeenCalledWith('123456789012', false, 'cus_1');
     expect(updateCustomers).not.toHaveBeenCalled();
     const line = logger.warn.mock.calls[0][0] as string;
     expect(line).toContain('9012');
     expect(line).not.toContain('123456789012');
   });
 
+  it('a number support unbanned for this customer saves', async () => {
+    payoutNumberStanding.mockResolvedValue(
+      standing([], { banned: true, bannedForPlayer: false }),
+    );
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses a holder name another account already used', async () => {
-    holderNameHeldByAnother.mockResolvedValue(true);
+    payoutNameStanding.mockResolvedValue(linkedName);
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       /name is already linked/,
     );
-    expect(holderNameHeldByAnother).toHaveBeenCalledWith('cus_1', 'Tan Ah Kow');
+    expect(payoutNameStanding).toHaveBeenCalledWith('cus_1', 'Tan Ah Kow');
     expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it('a name support cleared for this customer saves', async () => {
+    payoutNameStanding.mockResolvedValue({ holders: ['cus_2'], blocking: [] });
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
   });
 
   it('a wallet needs no second name and skips the name check', async () => {
@@ -1027,7 +1043,7 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
       mkReq({ bank_code: 'USDTTRC20', account_number: TRON }),
       mkRes(),
     );
-    expect(holderNameHeldByAnother).not.toHaveBeenCalled();
+    expect(payoutNameStanding).not.toHaveBeenCalled();
     expect(updateCustomers).toHaveBeenCalledTimes(1);
   });
 
@@ -1178,7 +1194,7 @@ describe('POST accounts — holder names compare as one person reads them', () =
       }),
       mkRes(),
     );
-    expect(holderNameHeldByAnother).toHaveBeenCalledWith('cus_1', 'Tan Ah Kow');
+    expect(payoutNameStanding).toHaveBeenCalledWith('cus_1', 'Tan Ah Kow');
     expect(
       updateCustomers.mock.calls[0][1].metadata.bank_accounts[0].accountHolderName,
     ).toBe('Tan Ah Kow');
@@ -1197,23 +1213,21 @@ describe('POST accounts — holder names compare as one person reads them', () =
   it.each([['TAN AH KOW&'], ['TAN AH KOW (1)'], ['TAN AH KÓW'], ['ᴛᴀɴ ᴀʜ ᴋᴏᴡ'], ['Tan ɑh Kow']])(
     'refuses %j when the plain name is on another account (the query compares letters)',
     async (name) => {
-      holderNameHeldByAnother.mockResolvedValue(true);
+      payoutNameStanding.mockResolvedValue(linkedName);
       await expect(
         POST(mkReq({ ...VALID_BODY, account_holder_name: name }), mkRes()),
       ).rejects.toThrow(/name is already linked/);
-      // Asked once, as typed: the service keys both sides by their letters
+      // Asked once, as typed: the read keys both sides by their letters
       // (holder-name-key-sql.integration.spec).
-      expect(holderNameHeldByAnother).toHaveBeenCalledTimes(1);
+      expect(payoutNameStanding).toHaveBeenCalledTimes(1);
       expect(updateCustomers).not.toHaveBeenCalled();
     },
   );
 
   it('takes a save back off when another account saved the number at the same moment', async () => {
-    otherPayoutAccountHolders
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'Lim Mei Ling' },
-      ]);
+    payoutNumberStanding
+      .mockResolvedValueOnce(standing())
+      .mockResolvedValueOnce(standing([{ customerId: 'cus_2' }]));
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       SHARED_SAVE_MESSAGE,
     );
@@ -1222,11 +1236,13 @@ describe('POST accounts — holder names compare as one person reads them', () =
     expect(createNotifications).not.toHaveBeenCalled();
   });
 
-  it('a PayNow mobile held elsewhere with its 65 is the same number', async () => {
-    otherPayoutAccountHolders.mockImplementation(async (_id: string, n: string) =>
-      n === '6591234567'
-        ? [{ customer_id: 'cus_2', bank_code: 'PAYNOWSG', holder_name: 'Lim Mei Ling' }]
-        : [],
+  it('a PayNow mobile is asked about as typed; its spellings are the module\'s', async () => {
+    payoutNumberStanding.mockResolvedValue(
+      standing([{ customerId: 'cus_2' }], {
+        bankId: 'PAYNOWSG',
+        key: '91234567',
+        forms: ['91234567', '6591234567'],
+      }),
     );
     await expect(
       POST(
@@ -1234,15 +1250,17 @@ describe('POST accounts — holder names compare as one person reads them', () =
         mkRes(),
       ),
     ).rejects.toThrow(SHARED_SAVE_MESSAGE);
-    // The ban list is asked for both spellings too.
-    expect(payoutAccountBanned).toHaveBeenCalledWith('6591234567', false, 'cus_1');
+    expect(payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'PAYNOWSG',
+      accountNumber: '91234567',
+    });
     expect(updateCustomers).not.toHaveBeenCalled();
   });
 
   it('takes a save back off when another account saved the name at the same moment', async () => {
-    holderNameHeldByAnother
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    payoutNameStanding
+      .mockResolvedValueOnce({ holders: [], blocking: [] })
+      .mockResolvedValueOnce(linkedName);
     await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
       /name is already linked/,
     );

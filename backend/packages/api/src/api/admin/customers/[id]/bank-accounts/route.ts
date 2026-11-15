@@ -7,12 +7,10 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import {
   MY_BANKS,
   SG_BANKS,
-  accountNumberForms,
   findBank,
 } from '../../../../../modules/packs/banks';
 import {
   clearedHolderNames,
-  heldByAnother,
   parseSavedBankAccounts,
   verifiedBankAccounts,
 } from '../../../../../modules/packs/saved-accounts';
@@ -36,30 +34,21 @@ export async function GET(
   const accounts = parseSavedBankAccounts(metadata.bank_accounts);
   const verified = verifiedBankAccounts(metadata);
 
-  // A PayNow mobile is one number with or without its 65 (accountNumberForms).
+  // Who else holds each number at its bank, once each, in every spelling (a
+  // PayNow mobile with or without its 65).
   const holders = await Promise.all(
     accounts.map(async (account) =>
       (
-        await Promise.all(
-          accountNumberForms(account.bankCode, account.accountNumber).map((n) =>
-            packs.otherPayoutAccountHolders(
-              customerId,
-              n,
-              findBank(account.bankCode)?.wallet !== undefined,
-            ),
-          ),
-        )
-      )
-        .flat()
-        .filter((h) => heldByAnother([h], account.bankCode)),
+        await packs.payoutNumberStanding(customerId, {
+          bankCode: account.bankCode,
+          accountNumber: account.accountNumber,
+        })
+      ).holders.map((h) => h.customerId),
     ),
   );
   const cleared = Object.values(clearedHolderNames(metadata));
   const linkedIds = [
-    ...new Set([
-      ...holders.flat().map((h) => h.customer_id),
-      ...cleared.flatMap((c) => c.with),
-    ]),
+    ...new Set([...holders.flat(), ...cleared.flatMap((c) => c.with)]),
   ];
   const handles = new Map(
     linkedIds.length === 0
@@ -128,9 +117,7 @@ export async function GET(
       account_holder_name: account.accountHolderName,
       saved_at: account.savedAt ?? null,
       verified_at: verified[account.id] ?? null,
-      linked: [
-        ...new Set(holders[i].map((h) => h.customer_id)),
-      ].map<LinkedCustomer>((id) => ({
+      linked: holders[i].map<LinkedCustomer>((id) => ({
         customer_id: id,
         handle: handles.get(id) ?? null,
       })),

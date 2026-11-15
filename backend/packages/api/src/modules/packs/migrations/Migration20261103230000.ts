@@ -4,7 +4,7 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // shared. Filled on production only, never from the repo, which is public.
 // `account_key` is payoutAccountKey's output (digits without leading zeros, or a
 // wallet address whole), so one row bans the number at every bank. Not a model:
-// raw SQL reads it (payoutAccountBanned), same as the expression index in
+// raw SQL reads it (numberStanding), same as the expression index in
 // Migration20261103190000.
 export class Migration20261103230000 extends Migration {
   override async up(): Promise<void> {

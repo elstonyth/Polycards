@@ -75,6 +75,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ).map(
         (r) => `${r.customer_id} ${r.account_number} ${r.account_holder_name}`,
       );
+    // Who holds the number at a bank, and whether the name still blocks the
+    // player: the Payout Destination standings (payout-destination.ts).
+    const holdersAt = async (bankCode: string, accountNumber: string) =>
+      (
+        await service.payoutNumberStanding('cus_player', {
+          bankCode,
+          accountNumber,
+        })
+      ).holders.map((h) => h.customerId);
+    const nameBlocks = async (name: string) =>
+      (await service.payoutNameStanding('cus_player', name)).blocking.length >
+      0;
     const metadataOf = async (id: string) =>
       (
         await em().execute<{ metadata: Record<string, unknown> }[]>(
@@ -87,6 +99,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // The saved list is raw SQL on the core customer table (ADR 0015).
       await em().execute(
         'create table if not exists "customer" ("id" text primary key, "metadata" jsonb, "updated_at" timestamptz null, "deleted_at" timestamptz null)',
+      );
+      // The ban list is raw SQL too (Migration20261103230000): the holder
+      // lookup's standing reads it.
+      await em().execute(
+        'create table if not exists "banned_payout_account" ("account_key" text not null primary key, "bank_code" text null, "reason" text null, "created_at" timestamptz not null default now())',
       );
       await em().execute('delete from "customer"');
       const put = (id: string, metadata: Record<string, unknown>) =>
@@ -119,9 +136,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(
         (await service.payoutAccountsOf('cus_twin')).map((k) => k.account_key),
       ).toEqual([NUMBER, '998877665544']);
-      expect(await service.holderNameHeldByAnother('cus_player', NAME)).toBe(
-        true,
-      );
+      expect(await nameBlocks(NAME)).toBe(true);
 
       await expect(
         service.freePayoutAccount({
@@ -147,13 +162,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
         bank_accounts: [saved('998877665544')],
         avatar_url: 'kept',
       });
-      expect(
-        await service.otherPayoutAccountHolders('cus_player', NUMBER),
-      ).toEqual([]);
+      expect(await holdersAt('MBBEMYKL', NUMBER)).toEqual([]);
       // The twin still holds the name on the bank it kept: clear_name_clash.
-      expect(await service.holderNameHolders('cus_player', NAME)).toEqual([
-        'cus_twin',
-      ]);
+      expect(
+        (await service.payoutNameStanding('cus_player', NAME)).holders,
+      ).toEqual(['cus_twin']);
       const audits = await service.listAdminActionAudits({});
       expect(audits.map((a) => a.entity_id).sort()).toEqual([
         'cus_player',
@@ -190,9 +203,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           status: 'settled',
         },
       ]);
-      expect(
-        await service.payoutAccountHoldersAt('cus_player', NUMBER, 'MBBEMYKL'),
-      ).toEqual(['cus_twin']);
+      expect(await holdersAt('MBBEMYKL', NUMBER)).toEqual(['cus_twin']);
       await service.freePayoutAccount({
         customerId: 'cus_player',
         adminId: 'user_1',
@@ -226,9 +237,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         fromIds: ['cus_twin'],
         reason: 'owner approved',
       });
-      expect(await service.holderNameHeldByAnother('cus_player', NAME)).toBe(
-        false,
-      );
+      expect(await nameBlocks(NAME)).toBe(false);
     });
 
     it('changes nothing when refused: an unlisted holder, a payout on its way', async () => {
@@ -263,21 +272,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const before = await rows();
       // On the class: the container hands out a wrapped service.
       const proto = PacksModuleService.prototype;
-      const real = proto.otherPayoutAccountHolders;
+      const real = proto.payoutNumberStanding;
       let calls = 0;
       const spy = jest
-        .spyOn(proto, 'otherPayoutAccountHolders')
-        .mockImplementation(function (this: PacksModuleService, ...args) {
+        .spyOn(proto, 'payoutNumberStanding')
+        .mockImplementation(async function (
+          this: PacksModuleService,
+          ...args
+        ) {
+          const standing = await real.apply(this, args);
           // The second look still sees a holder: a racer saved it meanwhile.
           return ++calls === 2
-            ? Promise.resolve([
-                {
-                  customer_id: 'cus_twin',
-                  bank_code: 'MBBEMYKL',
-                  holder_name: null,
-                },
-              ])
-            : real.apply(this, args);
+            ? {
+                ...standing,
+                holders: [
+                  { customerId: 'cus_twin', paid: true, verified: false },
+                ],
+              }
+            : standing;
         });
       await expect(
         service.freePayoutAccount({
@@ -296,7 +308,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     // Issue #1008: a PayNow mobile is one number with or without its 65, as
-    // bank_save_check and the ban list read it (accountNumberForms).
+    // bank_save_check and the ban list read it (spellings).
     describe('a PayNow mobile, with or without its 65', () => {
       const LOCAL = '91234567';
       const FULL = `65${LOCAL}`;
@@ -354,9 +366,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         );
         expect(row.account_number).toBe('4567');
         for (const k of [LOCAL, FULL]) {
-          expect(
-            await service.payoutAccountHoldersAt('cus_player', k, 'PAYNOWSG'),
-          ).toEqual([]);
+          expect(await holdersAt('PAYNOWSG', k)).toEqual([]);
         }
       });
 

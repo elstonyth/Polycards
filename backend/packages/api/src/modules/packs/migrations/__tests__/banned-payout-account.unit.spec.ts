@@ -1,6 +1,6 @@
 import { Migration20261103230000 } from '../Migration20261103230000';
 
-// payoutAccountBanned and the ban script read and write these exact columns, and
+// numberStanding (payout-destination.ts) and the ban script read and write these exact columns, and
 // the script's ON CONFLICT needs account_key to be the key.
 test('creates the banned-number table the lookup and the ban script use', async () => {
   const sql: string[] = [];
