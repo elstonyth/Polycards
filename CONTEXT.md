@@ -276,7 +276,8 @@ pinned to the JS readers by `eligibility.integration.spec.ts`.
 Automation-list accounts rank and get paid like any player (#875), and IP or
 device signals are a review clue, never a gate (ADR 0016).
 _Avoid_: eligible for cash-out (Withdrawals and Delivery Orders keep their
-own gates: the first top-up and the Withdrawable rule)
+own gates: the first top-up and the Withdrawable rule); the Flip
+eligibility stamp, which marks a Pull, not a player
 
 **Expired Deposit**:
 A top-up whose gateway status never resolved within `GATEWAY_STALE_AFTER_MS`
