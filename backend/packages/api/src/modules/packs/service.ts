@@ -325,6 +325,7 @@ import {
   LIVE_VALUE_USD_SQL,
   cardValueSen,
   inActiveOrderSql,
+  ledgerTotalsRowsSql,
   inShippedOrderSql,
   playthroughBasisSenSql,
   populationSql,
@@ -13301,7 +13302,7 @@ class PacksModuleService extends MedusaService({
       // (and paid back on sells before 2026-10-09) is not cash; bonus_grant is
       // its own bucket.
       `SELECT reason, COALESCE(SUM(${reasonCashSenSql()}), 0)::bigint AS cents ` +
-      'FROM credit_transaction WHERE deleted_at IS NULL';
+      `FROM credit_transaction WHERE deleted_at IS NULL AND ${ledgerTotalsRowsSql()}`;
     if (from) {
       sql += ' AND created_at >= ?::timestamptz';
       params.push(from);

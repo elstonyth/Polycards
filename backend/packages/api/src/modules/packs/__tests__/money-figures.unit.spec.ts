@@ -12,6 +12,7 @@ import {
   TOPUPS_LEDGER,
   bonusSourceSql,
   cardValueSen,
+  ledgerTotalsRowsSql,
   inActiveOrderSql,
   inShippedOrderSql,
   playthroughBasisSenSql,
@@ -90,7 +91,10 @@ describe('ledger figures', () => {
     expect(PACK_SALES_FULL.where('ct.')).toBe("ct.reason = 'pack_open'");
     expect(PACK_SALES_CASH.where('ct.')).toBe("ct.reason = 'pack_open'");
     expect(BUYBACK_FULL.where('ct.')).toBe("ct.reason = 'buyback'");
-    expect(TOPUPS_LEDGER.where('')).toBe("reason = 'topup'");
+    // Positive rows only (owner decision 2026-11-16), and the Economy
+    // totals drop exactly the other topup rows.
+    expect(TOPUPS_LEDGER.where('')).toBe("reason = 'topup' AND amount > 0");
+    expect(ledgerTotalsRowsSql('ct.')).toBe("NOT (ct.reason = 'topup' AND ct.amount <= 0)");
   });
 
   it('every figure says what it counts', () => {

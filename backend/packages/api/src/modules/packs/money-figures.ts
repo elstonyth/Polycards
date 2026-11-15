@@ -125,15 +125,20 @@ export const COIN_FLIP_WINS: Figure = {
   sen: (t) => `ROUND(${t}amount * 100)`,
 };
 
-/** Economy "topups": every topup row, a negative one included. The Players
- *  list and the player page count positive rows only (an open owner
- *  decision). The Dashboard and Profit count the gateway's settled deposits
- *  instead. */
+/** Economy "topups": positive topup rows only, as the Players list and the
+ *  player page count them (owner decision 2026-11-16). The Dashboard and
+ *  Profit count the gateway's settled deposits instead. */
 export const TOPUPS_LEDGER: Figure = {
-  note: 'Top-ups as the wallet ledger records them: every topup row (cash part), a negative correction included.',
-  where: (t) => `${t}reason = 'topup'`,
+  note: 'Top-ups as the wallet ledger records them: every positive topup row (cash part).',
+  where: (t) => `${t}reason = 'topup' AND ${t}amount > 0`,
   sen: (t) => reasonCashSenSql(t),
 };
+
+/** The rows the Economy ledger totals (ledgerReasonTotals, the Finance desk's
+ *  economy and daily) read: all but a topup row that is not positive, so
+ *  their topups bucket is TOPUPS_LEDGER. No other bucket reads topup rows. */
+export const ledgerTotalsRowsSql = (t = ''): string =>
+  `NOT (${t}reason = 'topup' AND ${t}amount <= 0)`;
 
 /** A pack_open charge whose open made capsule spins (P&L decision 3: Lucky
  *  Draw revenue, not pack sales). `ct` = the credit_transaction alias. */

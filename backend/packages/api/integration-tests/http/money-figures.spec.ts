@@ -371,18 +371,20 @@ medusaIntegrationTestRunner({
         expect(await figureSql(BUYBACK_CASH)).toBe(sum('buyback', cash));
         expect(await figureSql(BUYBACK_FULL)).toBe(sum('buyback', full));
         expect(await figureSql(COIN_FLIP_WINS)).toBe(sum('coin_flip_win', cash));
-        expect(await figureSql(TOPUPS_LEDGER)).toBe(sum('topup', cash));
+        expect(await figureSql(TOPUPS_LEDGER)).toBe(sum('topup', cash, (r) => n(r.amount) > 0));
 
         // The reports print the same: Economy (cash basis) and P&L (full price).
         const economy = ledgerTotals(await packs().ledgerReasonTotals());
         expect(economy.revenue).toBe(cashSales / 100);
         expect(economy.payouts).toBe(5);
         expect(economy.coinFlipPayouts).toBe(4);
-        expect(economy.topups).toBe(17);
+        // Positive rows only (owner decision 2026-11-16, G6): RM 20; the
+        // -3 correction made it RM 17 before.
+        expect(economy.topups).toBe(20);
         const pnl = await packWindowRows(db(), {}, 'all');
         expect([...pnl.paid.values()].reduce((s, v) => s + v.full_sen, 0)).toBe(fullSales);
         expect(pnl.paid.get(null)?.full_sen).toBe(200); // the unattributed charge
-        // The player page counts positive top-up rows only (owner G6).
+        // The player page counts positive top-up rows only, as Economy now does.
         expect((await packs().creditSummary(p.id)).topupTotal).toBe(20);
       });
 

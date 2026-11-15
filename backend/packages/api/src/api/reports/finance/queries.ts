@@ -4,7 +4,10 @@ import {
   type LedgerTotals,
 } from '../../../modules/packs/economy';
 import { reasonCashSenSql } from '../../../modules/packs/bonus-credit';
-import { PACK_SALES_CASH } from '../../../modules/packs/money-figures';
+import {
+  PACK_SALES_CASH,
+  ledgerTotalsRowsSql,
+} from '../../../modules/packs/money-figures';
 import { mytDaySql } from '../../../modules/packs/myt-window';
 import { EFFECTIVE_GROUP_SQL, type ReportDb, type SqlPart } from '../sql';
 
@@ -38,7 +41,7 @@ export async function ledgerTotalsWhere(
   const { rows } = await db.raw<ReasonCents>(
     // Normal part of each row: bonus credit (spec 2026-10-07) is not cash.
     `SELECT ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
-      'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
+      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${ledgerTotalsRowsSql('ct.')}` +
       filter.sql +
       ' GROUP BY ct.reason',
     filter.params,
@@ -55,7 +58,7 @@ export async function ledgerTotalsByDay(
   const { rows } = await db.raw<ReasonCents & { day: string }>(
     `SELECT ${mytDaySql('ct.created_at')} AS day, ` +
       `ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
-      'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
+      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${ledgerTotalsRowsSql('ct.')}` +
       filter.sql +
       ' GROUP BY 1, 2 ORDER BY 1',
     filter.params,
