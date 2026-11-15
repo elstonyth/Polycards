@@ -105,5 +105,36 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(await ledger(c)).toHaveLength(1);
       expect([row.external_funded_cents, row.bonus_cents, row.source_transaction_id]).toEqual([null, null, null]);
     });
+
+    // Folded from credit-idempotency.spec.ts (security audit 2026-06-23): the
+    // anchor's dedupe is scoped to the customer whose credit lock it holds.
+    it('the idempotency anchor is customer-scoped: two customers with one anchor are each credited', async () => {
+      const ref = 'topup-idem:SHARED-KEY';
+      const a = await service.mutateCreditAtomic({ customerId: 'cus_idem_A', amount: 10, reason: 'topup', idempotencyReference: ref });
+      const b = await service.mutateCreditAtomic({ customerId: 'cus_idem_B', amount: 10, reason: 'topup', idempotencyReference: ref });
+      expect(a.replayed).toBe(false);
+      expect(b).toMatchObject({ replayed: false, balance: 10 });
+      expect(b.id).not.toBe(a.id);
+      expect(await credits('cus_idem_A')).toHaveLength(1);
+      expect(await credits('cus_idem_B')).toHaveLength(1);
+    });
+
+    it('a same-customer replay returns the original row and amount', async () => {
+      const ref = 'topup-idem:cus_idem_C:k1';
+      const first = await service.mutateCreditAtomic({ customerId: 'cus_idem_C', amount: 25, reason: 'topup', idempotencyReference: ref });
+      const replay = await service.mutateCreditAtomic({ customerId: 'cus_idem_C', amount: 25, reason: 'topup', idempotencyReference: ref });
+      expect(replay).toMatchObject({ replayed: true, id: first.id, amount: 25 });
+      expect(await credits('cus_idem_C')).toHaveLength(1);
+    });
+
+    it('re-credits after the original row is deleted (the dedupe ignores deleted rows)', async () => {
+      const ref = 'topup-idem:cus_idem_D:k1';
+      const first = await service.mutateCreditAtomic({ customerId: 'cus_idem_D', amount: 40, reason: 'topup', idempotencyReference: ref });
+      await service.deleteCreditTransactionsGuarded([first.id]);
+      const after = await service.mutateCreditAtomic({ customerId: 'cus_idem_D', amount: 40, reason: 'topup', idempotencyReference: ref });
+      expect(after).toMatchObject({ replayed: false, balance: 40 });
+      expect(after.id).not.toBe(first.id);
+      expect(await credits('cus_idem_D')).toHaveLength(1);
+    });
   },
 });
