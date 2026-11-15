@@ -9,7 +9,7 @@ const windowArgs = {
   period: z
     .enum(PERIODS)
     .describe(
-      "Malaysia-time window. today, yesterday, this_week (Mon-Sun), last_week, this_month and last_month are calendar periods; last_7_days and last_30_days are the dashboard 7d and 30d tabs: from Malaysia midnight 6 or 29 days back until now; custom needs from (and optionally to).",
+      'Malaysia-time window. today, yesterday, this_week (Mon-Sun), last_week, this_month and last_month are calendar periods; last_7_days and last_30_days are the dashboard 7d and 30d tabs: from Malaysia midnight 6 or 29 days back until now; custom needs from (and optionally to).',
     ),
   from: z.string().optional().describe('custom only: first day, YYYY-MM-DD.'),
   to: z
@@ -63,7 +63,7 @@ export const TOOLS = {
     {
       name: 'pack_sales',
       description:
-        "Per-pack sales in the window: packs opened (paid with cash or bonus credit) and revenue (cash only, net of reversals; capsule packs included), largest first. Bonus credit is not revenue, so a pack opened only with bonus credit shows its opens at RM 0: that is correct, not a fault. unattributed_revenue is pack spend from older rows that cannot be linked to a pack; total_revenue equals economy revenue. The admin P&L counts pack sales at full price (cash plus bonus) and leaves capsule packs out, so its pack sales differ. Amounts in RM (MYR).",
+        'Per-pack sales in the window: packs opened (paid with cash or bonus credit) and revenue (cash only, net of reversals; capsule packs included), largest first. Bonus credit is not revenue, so a pack opened only with bonus credit shows its opens at RM 0: that is correct, not a fault. unattributed_revenue is pack spend from older rows that cannot be linked to a pack; total_revenue equals economy revenue. The admin P&L counts pack sales at full price (cash plus bonus) and leaves capsule packs out, so its pack sales differ. Amounts in RM (MYR).',
       inputSchema: { ...windowArgs, ...groupArg },
       request: windowed('pack-sales'),
     },
