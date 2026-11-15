@@ -55,13 +55,14 @@ describe('playRefusal', () => {
 });
 
 describe('COIN_FLIP_REFUSAL', () => {
-  it('keeps the texts coin flip has always thrown', () => {
+  it('words every refusal for Coin Flip, never with the delivery gate text', () => {
     expect(COIN_FLIP_REFUSAL).toEqual({
       unavailable: 'This account is unavailable.',
       frozen: 'Coin flips are unavailable while your account is under review.',
-      no_topup: NO_TOPUP_MESSAGE,
+      no_topup: 'Top up once to play Coin Flip.',
       playthrough: 'Complete your deposit playthrough before flipping a card.',
     });
+    expect(Object.values(COIN_FLIP_REFUSAL)).not.toContain(NO_TOPUP_MESSAGE);
   });
 });
 

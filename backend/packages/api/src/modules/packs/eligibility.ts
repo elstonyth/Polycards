@@ -7,7 +7,6 @@ import {
   EFFECTIVE_GROUP_SQL,
 } from './odds-sets';
 import { groupPolicyOf, type GroupPolicy } from './group-policy';
-import { NO_TOPUP_MESSAGE } from './withdrawable';
 
 /**
  * Player eligibility: who may show, receive or play (owner rules #1036, #993,
@@ -168,10 +167,11 @@ export async function mayPlay(
   });
 }
 
-/** Coin Flip's refusal texts, thrown as NOT_ALLOWED. */
+/** Coin Flip's refusal texts, thrown as NOT_ALLOWED. no_topup is Coin Flip's
+ *  own copy (owner, 2026-11-15), not the delivery gate's NO_TOPUP_MESSAGE. */
 export const COIN_FLIP_REFUSAL: Readonly<Record<PlayRefusal, string>> = {
   unavailable: 'This account is unavailable.',
   frozen: 'Coin flips are unavailable while your account is under review.',
-  no_topup: NO_TOPUP_MESSAGE,
+  no_topup: 'Top up once to play Coin Flip.',
   playthrough: 'Complete your deposit playthrough before flipping a card.',
 };

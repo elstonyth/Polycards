@@ -105,8 +105,15 @@ export const CoinFlipSettingsSchema = z.object({
   enabled: z.boolean(),
   eligible: z.boolean(),
   reason: z.string().nullable(),
+  // Optional: the backend deploys apart, and one from before the code sends none.
+  reason_code: z.string().nullish(),
   published_win_percent: percent.nullable(),
 });
+/** Coin Flip's words for a player who must top up first (owner, 2026-11-15). */
+export const COIN_FLIP_NO_TOPUP = 'Top up once to play Coin Flip.';
+/** Why this account cannot flip: Coin Flip copy for a code it knows, else the server's text. */
+export const coinFlipRefusal = (s: CoinFlipSettings): string | null =>
+  s.reason_code === 'no_topup' ? COIN_FLIP_NO_TOPUP : s.reason;
 export type CoinFlipRound = z.infer<typeof CoinFlipRoundSchema>;
 export type CoinFlipSettings = z.infer<typeof CoinFlipSettingsSchema>;
 export type CoinFlipHistory = z.infer<typeof CoinFlipHistorySchema>;

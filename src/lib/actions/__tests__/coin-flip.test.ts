@@ -115,6 +115,12 @@ describe('coin flip boundary', () => {
       'Pay for one pack yourself to unlock selling & delivery.',
       'Pay for one pack yourself before flipping this card.',
     ],
+    ['Top up once to play Coin Flip.', 'Top up once to play Coin Flip.'],
+    // An older backend's delivery wording still reads as Coin Flip copy.
+    [
+      'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.',
+      'Top up once to play Coin Flip.',
+    ],
   ])(
     'tells the customer why a quote was refused: %s',
     async (message, error) => {

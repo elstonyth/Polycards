@@ -50,7 +50,7 @@ medusaIntegrationTestRunner({
         { customer_id: owner.id, reason: 'pack_open', amount: -10, external_funded_cents: -1000 },
       ]);
       const publicSettings = await api.get('/store/coin-flips/settings', { headers: owner.headers });
-      expect(publicSettings.data).toEqual({ enabled: true, eligible: true, reason: null, published_win_percent: 50 });
+      expect(publicSettings.data).toEqual({ enabled: true, eligible: true, reason: null, reason_code: null, published_win_percent: 50 });
       const q = await api.post('/store/coin-flips/quotes', { pull_ids: [pull.id], chosen_side: 'tail' }, { headers: owner.headers });
       const roundId = q.data.round.id as string;
       expect((await unwrapResponse(api.get(`/store/coin-flips/${roundId}`, { headers: stranger.headers }))).status).toBe(404);

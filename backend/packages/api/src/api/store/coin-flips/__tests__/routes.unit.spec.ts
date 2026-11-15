@@ -91,17 +91,17 @@ it('shows published settings while keeping admin odds out of the storefront', as
   const { service, body } = await settingsFor(
     { enabled: true, published_win_percent: 50, win_percent: 35, win_percent_2: 20, revision: 7 }, null);
   expect(service.mayPlay).toHaveBeenCalledWith('owner', 'coin_flip');
-  expect(body).toEqual({ enabled: true, published_win_percent: 50, eligible: true, reason: null });
+  expect(body).toEqual({ enabled: true, published_win_percent: 50, eligible: true, reason: null, reason_code: null });
 });
 
 // The group/top-up matrix is playRefusal's (eligibility.unit.spec.ts); the route maps its refusal.
-it('settings: a refusal maps to its coin flip text, and a pause wins', async () => {
+it('settings: a refusal maps to its code and coin flip text, and a pause wins', async () => {
   expect((await settingsFor({ enabled: true, published_win_percent: 50 }, 'no_topup')).body)
-    .toMatchObject({ eligible: false, reason: expect.stringMatching(/top up/i) });
+    .toMatchObject({ eligible: false, reason_code: 'no_topup', reason: 'Top up once to play Coin Flip.' });
   expect((await settingsFor({ enabled: true, published_win_percent: 50 }, 'playthrough')).body)
-    .toMatchObject({ eligible: false, reason: 'Complete your deposit playthrough before flipping a card.' });
+    .toMatchObject({ eligible: false, reason_code: 'playthrough', reason: 'Complete your deposit playthrough before flipping a card.' });
   expect((await settingsFor({ enabled: false, published_win_percent: 50 }, 'no_topup')).body)
-    .toMatchObject({ eligible: false, reason: 'Coin flip is currently paused.' });
+    .toMatchObject({ eligible: false, reason_code: 'paused', reason: 'Coin flip is currently paused.' });
 });
 
 describe('everyone feed', () => {
