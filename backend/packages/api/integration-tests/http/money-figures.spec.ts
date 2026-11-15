@@ -423,7 +423,7 @@ medusaIntegrationTestRunner({
         ).toBe(feeSen);
       });
 
-      it('payout fee: ABS per row in Profit, signed in Settlement (owner G2)', async () => {
+      it('payout fee: ABS per row in Profit and in Settlement', async () => {
         const [p] = await customers().createCustomers([{ email: 'mf-fee@test.dev' }]);
         const now = new Date();
         const wd = (id: string, net_amount: number) => ({
@@ -450,7 +450,8 @@ medusaIntegrationTestRunner({
         expect(cash.allTime.withdrawals.feeCents).toBe(absSen);
         const s = await packs().settlementRows('month', new Date(now.getTime() - 86_400_000 * 40));
         const periods = mergeSettlementPeriods(s.deposits, s.withdrawals, s.ledger);
-        expect(periods.reduce((t, x) => t + x.withdrawals.fee, 0)).toBe(0);
+        // Owner decision 2026-11-16 (G2): Settlement was signed, RM 0 here.
+        expect(periods.reduce((t, x) => t + x.withdrawals.fee, 0)).toBe(absSen / 100);
       });
 
       it('FX earned: Profit rounds per row, the Settlement FX card once', async () => {

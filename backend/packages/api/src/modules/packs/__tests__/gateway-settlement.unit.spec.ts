@@ -10,7 +10,7 @@ const gw = (over: Partial<GatewayPeriodRow>): GatewayPeriodRow => ({
   count: 0,
   grossCents: 0,
   netCents: 0,
-  grossWithNetCents: 0,
+  feeCents: 0,
   missingNet: 0,
   missingGross: 0,
   ...over,
@@ -31,7 +31,7 @@ describe('mergeSettlementPeriods', () => {
           count: 3,
           grossCents: 15_000, // RM 150.00
           netCents: 14_550, // RM 145.50
-          grossWithNetCents: 15_000,
+          feeCents: 450,
           missingNet: 0,
         }),
       ],
@@ -57,7 +57,7 @@ describe('mergeSettlementPeriods', () => {
           count: 2,
           grossCents: 15_000,
           netCents: 9_700,
-          grossWithNetCents: 10_000, // only the known-net row's gross
+          feeCents: 300, // the SQL sums the known-net row only
           missingNet: 1,
         }),
       ],
@@ -92,8 +92,9 @@ describe('mergeSettlementPeriods', () => {
   // THE DIRECTION RULE (plan 133). `net_amount` is the money that moved
   // through our gateway wallet, which sits on opposite sides of gross per
   // direction: a deposit's net is what we RECEIVED (≤ gross), a payout's is
-  // what we PAID (≥ gross, because TGPay charges the payout fee on top). A
-  // single `gross − net` would report the payout fee as NEGATIVE.
+  // what we PAID (≥ gross, because TGPay charges the payout fee on top). The
+  // SQL (settlementRows) applies it per row, ABS on payouts; the fold carries
+  // the fee through. gateway-settlement.spec proves the SQL side.
   it('a payout’s fee is net − gross: the wallet paid MORE than the recipient got', () => {
     const [p] = mergeSettlementPeriods(
       [],
@@ -102,7 +103,7 @@ describe('mergeSettlementPeriods', () => {
           count: 1,
           grossCents: 5_000, // RM 50.00 instructed and debited
           netCents: 5_100, // RM 51.00 actually left the payout wallet
-          grossWithNetCents: 5_000,
+          feeCents: 100,
         }),
       ],
       [],
@@ -119,7 +120,7 @@ describe('mergeSettlementPeriods', () => {
           count: 1,
           grossCents: 5_000,
           netCents: 4_900,
-          grossWithNetCents: 5_000,
+          feeCents: 100,
         }),
       ],
       [],
@@ -138,7 +139,7 @@ describe('mergeSettlementPeriods', () => {
           count: 2,
           grossCents: 15_000,
           netCents: 5_100,
-          grossWithNetCents: 5_000, // only the known-net row's gross
+          feeCents: 100, // the SQL sums the known-net row only
           missingNet: 1,
         }),
       ],
@@ -160,7 +161,7 @@ describe('mergeSettlementPeriods', () => {
           count: 1,
           grossCents: 5_000,
           netCents: 5_100,
-          grossWithNetCents: 5_000,
+          feeCents: 100,
         }),
       ],
       [lg({ cashoutCents: 5_000 })],
@@ -225,7 +226,7 @@ describe('mergeSettlementPeriods', () => {
         gw({
           grossCents: 6_407,
           netCents: 1_407,
-          grossWithNetCents: 6_407,
+          feeCents: 5_000,
         }),
       ],
       [],

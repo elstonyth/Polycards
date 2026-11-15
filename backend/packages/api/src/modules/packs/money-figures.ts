@@ -185,9 +185,8 @@ export const GATEWAY = {
   /** Deposit fee in sen, signed: gross − net, like Settlement. */
   depositFeeSen: (t = ''): string =>
     `ROUND((${t}amount_settled - ${t}net_amount) * 100)`,
-  /** Payout fee in sen, ABS per row: TGPay payouts settled before 2026-09-10
-   *  stored net the other way round (Settlement still sums signed: an open
-   *  owner decision). */
+  /** Payout fee in sen, ABS per row (Profit and Settlement): TGPay payouts
+   *  settled before 2026-09-10 stored net the other way round. */
   payoutFeeSen: (t = ''): string =>
     `ROUND(ABS(${t}net_amount - COALESCE(${t}amount_settled, ${t}amount)) * 100)`,
   /** FX earned on a regional top-up, in RM, UNROUNDED: foreign paid × mid −

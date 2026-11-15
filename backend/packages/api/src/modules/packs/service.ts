@@ -13896,7 +13896,7 @@ class PacksModuleService extends MedusaService({
       n: string;
       gross_cents: string;
       net_cents: string;
-      gross_with_net_cents: string;
+      fee_cents: string;
       missing_net: string;
       missing_gross: string;
     };
@@ -13905,7 +13905,7 @@ class PacksModuleService extends MedusaService({
       count: Number(r.n),
       grossCents: Number(r.gross_cents),
       netCents: Number(r.net_cents),
-      grossWithNetCents: Number(r.gross_with_net_cents),
+      feeCents: Number(r.fee_cents),
       missingNet: Number(r.missing_net),
       missingGross: Number(r.missing_gross),
     });
@@ -13924,7 +13924,8 @@ class PacksModuleService extends MedusaService({
               COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
+              COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint
+                - COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS fee_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
               COUNT(*) FILTER (WHERE amount_settled IS NULL)::bigint AS missing_gross
          FROM gateway_deposit
@@ -13938,19 +13939,20 @@ class PacksModuleService extends MedusaService({
     // Withdrawal GROSS is `amount` (the debit basis — always present), not
     // amount_settled, which is NULL on every row settled before the
     // settlement mirror shipped; that keeps pre-mirror history in the report.
-    // The FEE basis is different: gross_with_net_cents pairs with net_cents to
-    // produce fee = gross − net, and their net is derived from what they
-    // ACTUALLY paid — so on a row where the settled amount disagrees with the
-    // instructed one (logged loudly by the callback, now durable on the row),
-    // pairing `amount` with their net would fold the whole disagreement into
-    // the fee. COALESCE to the settled amount when known; known-net rows are
-    // post-mirror rows, which always carry it (same update writes both).
+    // The FEE basis is different: a row's fee is |net − what was paid|, ABS
+    // per row (GATEWAY.payoutFeeSen, as Profit sums it), and their net is
+    // derived from what they ACTUALLY paid — so on a row where the settled
+    // amount disagrees with the instructed one (logged loudly by the callback,
+    // now durable on the row), pairing `amount` with their net would fold the
+    // whole disagreement into the fee. COALESCE to the settled amount when
+    // known; known-net rows are post-mirror rows, which always carry it (same
+    // update writes both).
     const withdrawalRows = await em.execute<RawGateway[]>(
       `SELECT ${bucket('settled_at')} AS period,
               COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COALESCE(SUM(ROUND(COALESCE(amount_settled, amount) * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
+              COALESCE(SUM(${GATEWAY.payoutFeeSen()}) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS fee_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
               0::bigint AS missing_gross  -- withdrawals gross on \`amount\`, never NULL
          FROM gateway_withdrawal
