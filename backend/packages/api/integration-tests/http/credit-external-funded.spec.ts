@@ -132,6 +132,7 @@ medusaIntegrationTestRunner({
           customerId: cust,
           amount: -150,
           reason: 'pack_open',
+          sourceTransactionId: 'open_ext_1',
           floor: 0,
         });
         const summary = await packs.creditSummary(cust);
@@ -141,6 +142,7 @@ medusaIntegrationTestRunner({
           customerId: cust,
           amount: -40,
           reason: 'pack_open',
+          sourceTransactionId: 'open_ext_2',
           floor: 0,
         });
         const after = await packs.creditSummary(cust);
@@ -188,6 +190,7 @@ medusaIntegrationTestRunner({
             customerId: 'cus_sign_open',
             amount: 5,
             reason: 'pack_open',
+            sourceTransactionId: 'open_ext_3',
             floor: 0,
           }),
         ).rejects.toThrow(/pack_open amount must be less than 0/);

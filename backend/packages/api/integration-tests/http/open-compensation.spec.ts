@@ -8,7 +8,7 @@ medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ getContainer }) => {
     describe("open compensation = append-only reversal, never delete", () => {
-      it("reverseCreditTransaction appends a mirror row and restores balance + basis", async () => {
+      it("reverseOpen appends a mirror row and restores balance + basis", async () => {
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         const cust = "cus_comp_revert";
 
@@ -17,14 +17,14 @@ medusaIntegrationTestRunner({
           customerId: cust, amount: 100, reason: "topup", reference: "mock_comp",
         });
         const { id: chargeId } = await packs.mutateCreditAtomic({
-          customerId: cust, amount: -30, reason: "pack_open", floor: 0,
+          customerId: cust, amount: -30, reason: "pack_open", sourceTransactionId: `open_${cust}`, floor: 0,
         });
         const mid = await packs.creditSummary(cust);
         expect(mid.balance).toBe(70);
         expect(mid.externalFundedSpendTotal).toBe(30);
 
         // Reverse — must NOT soft-delete; must append a mirror row.
-        await packs.reverseCreditTransaction(chargeId);
+        await packs.reverseOpen(`open_${cust}`);
 
         const original = await packs.listCreditTransactions({ id: chargeId }, { take: 1 });
         expect(original.length).toBe(1); // original still present (not deleted)
@@ -51,15 +51,16 @@ medusaIntegrationTestRunner({
           customerId: cust, amount: 100, reason: "topup", reference: "mock_comp_idem",
         });
         const { id: chargeId } = await packs.mutateCreditAtomic({
-          customerId: cust, amount: -30, reason: "pack_open", floor: 0,
+          customerId: cust, amount: -30, reason: "pack_open", sourceTransactionId: `open_${cust}`, floor: 0,
         });
 
         // Compensate twice for the SAME charge (a saga that double-compensates).
-        const first = await packs.reverseCreditTransaction(chargeId);
-        const second = await packs.reverseCreditTransaction(chargeId);
+        const first = await packs.reverseOpen(`open_${cust}`);
+        const second = await packs.reverseOpen(`open_${cust}`);
 
-        // Second call is a no-op returning the same reversal — no second refund.
-        expect(second.id).toBe(first.id);
+        // Second call is a no-op — no second refund.
+        expect(first).toEqual({ reversed: 1 });
+        expect(second).toEqual({ reversed: 0 });
 
         const reversals = await packs.listCreditTransactions(
           { reference: `reversal:${chargeId}` }, { take: 10 },
