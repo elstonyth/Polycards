@@ -26,7 +26,7 @@ const config = {
   desk: 'finance',
   key,
 };
-// A rolling window ends when the script starts, so a ledger write during the
+// A window that ends when the script starts, so a ledger write during the
 // run cannot land in one request and miss the next (today ends at midnight).
 const window = resolvePeriod(process.argv[2] ?? 'last_7_days');
 const totals = async (group) =>

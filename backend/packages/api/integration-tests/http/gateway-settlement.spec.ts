@@ -210,6 +210,36 @@ medusaIntegrationTestRunner({
         expect(next!.deposits.gross).toBe(30);
       });
 
+      // Owner decision 2026-11-16 (G2): a payout's fee is summed ABS per row,
+      // as Profit does. TGPay payouts settled before 2026-09-10 stored net the
+      // other way round (net below what was paid); a signed sum let each one
+      // cancel a real fee. Its own bucket (5 months back) keeps it exact.
+      it('a payout with the old net sign adds its fee instead of cancelling one', async () => {
+        const start = mytMonthStartPlus(-5);
+        const at = new Date(start.getTime() + 26 * HOUR_MS);
+        const wd = (id: string, net_amount: number) => ({
+          merchant_transaction_id: id,
+          customer_id: CUSTOMER_ID,
+          amount: 50,
+          amount_settled: 50,
+          net_amount,
+          bank_code: 'MBB',
+          account_number: '1234567890',
+          account_holder_name: 'SETTLEMENT SPEC',
+          status: 'settled' as const,
+          settled_at: at,
+        });
+        // Fee RM 1 on top (net 51), and an old row storing it as net 49.
+        await packs().createGatewayWithdrawals([
+          wd('PC-settle-sign-1', 51),
+          wd('PC-settle-sign-2', 49),
+        ]);
+        const data = await report('?granularity=month&periods=12');
+        const p = data.periods.find((x) => x.period === keyOf(start));
+        // Before: (51 + 49) − (50 + 50) = RM 0. After: 1 + 1 = RM 2.
+        expect(p!.withdrawals.fee).toBe(2);
+      });
+
       // The case the unit-tested fold can never reach: this proves the SQL
       // FILTER itself (missing_gross, service.ts settlementRows)
       // exists and casts correctly against a real Postgres, not just the pure

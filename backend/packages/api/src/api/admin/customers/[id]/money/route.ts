@@ -60,7 +60,9 @@ export async function GET(
   // (freeze, never topped up, bonus, deposits not yet played through).
   const wallet = await packs.walletSummary(id);
 
-  const activity = profitActivity(reasons);
+  // The player page keeps capsule opens in the player's pack spend, so it
+  // has no capsule line.
+  const { capsule_sales: _capsules, ...activity } = profitActivity(reasons, 0);
   const cardsWon = money.cardsWon.cents / 100;
   res.json({
     as_of: now,

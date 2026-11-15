@@ -114,7 +114,7 @@ export function describeScope(scope: GroupScope): {
   if (scope.kind === 'default') {
     return {
       group: 'DEFAULT',
-      note: 'Players whose current player group is DEFAULT, i.e. in no other group.',
+      note: 'Real customers: players whose current player group is DEFAULT (in no other group), as the admin Profit page counts them.',
     };
   }
   return {

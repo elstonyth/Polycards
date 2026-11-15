@@ -1,6 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
+import { PACK_SALES_CASH } from '../../../../modules/packs/money-figures';
 import { describeScope, loadGroupScope, parseWindow } from '../../params';
 import { and, reportDb, scopeFilter, windowFilter } from '../../sql';
 import { packSales } from '../queries';
@@ -49,6 +50,7 @@ export async function GET(
     currency: 'MYR',
     window: { from: window.from ?? null, to: window.to ?? null },
     scope: describeScope(scope),
+    basis: { revenue: PACK_SALES_CASH.note },
     packs: rows,
     unattributed_revenue: unattributedCents / 100,
     total_revenue: totalCents / 100,

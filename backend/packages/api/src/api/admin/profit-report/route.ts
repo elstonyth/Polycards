@@ -10,7 +10,15 @@ import {
   profitOwed,
 } from '../../../modules/packs/profit';
 import { resolveFxRate } from '../../../modules/packs/pricing';
+import {
+  BUYBACK_CASH,
+  CAPSULE_SALES_CASH,
+  COIN_FLIP_WINS,
+  PACK_SALES_CASH_NO_CAPSULES,
+} from '../../../modules/packs/money-figures';
 import { packRtpRows } from '../economy/pack-rtp';
+import { reportDb } from '../../reports/sql';
+import { capsuleSalesSen } from './capsule-sales';
 
 const RANGES = [...STATS_RANGES, 'all'] as const;
 
@@ -70,6 +78,14 @@ export async function GET(
     windows?.current.to.toISOString(),
     scope,
   );
+  const capsules = await capsuleSalesSen(
+    reportDb(req),
+    {
+      from: windows?.current.from.toISOString(),
+      to: windows?.current.to.toISOString(),
+    },
+    scope,
+  );
   const rtp = await packRtpRows(packs, fx);
 
   res.json({
@@ -84,7 +100,16 @@ export async function GET(
       : null,
     cash: profitCash(cash.current, cash.previous),
     owed: profitOwed(owed, cash.allTime),
-    activity: profitActivity(reasons),
+    activity: profitActivity(reasons, capsules),
+    // What the activity lines count, for the desk bots and the assistant.
+    basis: {
+      activity: {
+        pack_sales: PACK_SALES_CASH_NO_CAPSULES.note,
+        capsule_sales: CAPSULE_SALES_CASH.note,
+        sellbacks: BUYBACK_CASH.note,
+        coin_flip_payouts: COIN_FLIP_WINS.note,
+      },
+    },
     packs: rtp,
   });
 }

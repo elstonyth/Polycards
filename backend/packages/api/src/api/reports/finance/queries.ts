@@ -4,6 +4,12 @@ import {
   type LedgerTotals,
 } from '../../../modules/packs/economy';
 import { reasonCashSenSql } from '../../../modules/packs/bonus-credit';
+import { realCustomerSql } from '../../../modules/packs/real-customers';
+import {
+  PACK_SALES_CASH,
+  exceptNonPositiveTopupsSql,
+} from '../../../modules/packs/money-figures';
+import { mytDaySql } from '../../../modules/packs/myt-window';
 import { EFFECTIVE_GROUP_SQL, type ReportDb, type SqlPart } from '../sql';
 
 export type ReasonCents = { reason: string; cents: string };
@@ -36,7 +42,7 @@ export async function ledgerTotalsWhere(
   const { rows } = await db.raw<ReasonCents>(
     // Normal part of each row: bonus credit (spec 2026-10-07) is not cash.
     `SELECT ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
-      'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
+      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${exceptNonPositiveTopupsSql('ct.')}` +
       filter.sql +
       ' GROUP BY ct.reason',
     filter.params,
@@ -51,9 +57,9 @@ export async function ledgerTotalsByDay(
   filter: SqlPart,
 ): Promise<Array<{ day: string; totals: LedgerTotals }>> {
   const { rows } = await db.raw<ReasonCents & { day: string }>(
-    "SELECT to_char(ct.created_at AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD') AS day, " +
+    `SELECT ${mytDaySql('ct.created_at')} AS day, ` +
       `ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
-      'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
+      `FROM credit_transaction ct WHERE ct.deleted_at IS NULL AND ${exceptNonPositiveTopupsSql('ct.')}` +
       filter.sql +
       ' GROUP BY 1, 2 ORDER BY 1',
     filter.params,
@@ -127,8 +133,6 @@ export async function statusTotals(
  * Packs opened = paid pulls and spins (alias p, filtered by `pulls`). A charge
  * with neither (rows from before open_id, or an open that never produced pulls)
  * is unattributed, so every pack plus unattributed equals economy revenue.
- * ponytail: the UNION scans pull.open_id, which has no index; fine at
- * report frequency. Add an index on pull(open_id) if this reaches slow logs.
  */
 export async function packSales(
   db: ReportDb,
@@ -138,17 +142,19 @@ export async function packSales(
   bySlug: Map<string, { opened: number; cents: number }>;
   unattributedCents: number;
 }> {
+  // The pack via one IDX_pull_open_id lookup per charge in the window, else
+  // its spins' (IDX_ticket_spin_open): an open's pulls and spins share one
+  // pack (no open on the 11-02 prod copy has two). Joining a UNION of every
+  // pull and spin ever made is the shape that took 20 s in the P&L on prod.
   const revenue = await db.raw<{ pack_id: string | null; cents: string }>(
-    `SELECT op.pack_id, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
+    'SELECT COALESCE((SELECT p.pack_id FROM pull p WHERE p.open_id = ct.source_transaction_id ' +
+      'AND p.deleted_at IS NULL LIMIT 1), (SELECT s.pack_id FROM ticket_spin s ' +
+      'WHERE s.open_id = ct.source_transaction_id AND s.deleted_at IS NULL LIMIT 1)) AS pack_id, ' +
+      `COALESCE(SUM(${PACK_SALES_CASH.sen('ct.')}), 0)::bigint AS cents ` +
       'FROM credit_transaction ct ' +
-      'LEFT JOIN (SELECT open_id, pack_id FROM pull ' +
-      'WHERE open_id IS NOT NULL AND deleted_at IS NULL ' +
-      'UNION SELECT open_id, pack_id FROM ticket_spin ' +
-      'WHERE open_id IS NOT NULL AND deleted_at IS NULL) op ' +
-      'ON op.open_id = ct.source_transaction_id ' +
-      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open'" +
+      `WHERE ct.deleted_at IS NULL AND ${PACK_SALES_CASH.where('ct.')}` +
       ledger.sql +
-      ' GROUP BY op.pack_id',
+      ' GROUP BY 1',
     ledger.params,
   );
   // Every open that took money counts beside the money it took: a bonus
@@ -165,8 +171,8 @@ export async function packSales(
   const bySlug = new Map<string, { opened: number; cents: number }>();
   let unattributedCents = 0;
   for (const r of revenue.rows) {
-    // Ledger rows are negative for a charge; revenue reads positive.
-    const cents = -Number(r.cents);
+    // PACK_SALES_CASH reads a charge positive (the ledger row is negative).
+    const cents = Number(r.cents);
     if (r.pack_id === null) unattributedCents += cents;
     else bySlug.set(r.pack_id, { opened: 0, cents });
   }
@@ -198,14 +204,17 @@ export async function packOpens(
   return new Map(rows.map((r) => [r.pack_id, Number(r.n)]));
 }
 
-/** Live players per effective group; players with no row are DEFAULT. */
+/** Live players per effective group; players with no row are DEFAULT, and
+ *  DEFAULT counts the real customers only, as ?group=default does. */
 export async function groupSizes(
   db: ReportDb,
 ): Promise<{ defaultPlayers: number; byGroup: Map<string, number> }> {
   const { rows } = await db.raw<{ group_id: string | null; n: string }>(
     'SELECT eff.group_id, COUNT(*)::bigint AS n FROM customer c ' +
       `LEFT JOIN (${EFFECTIVE_GROUP_SQL}) eff ON eff.customer_id = c.id ` +
-      'WHERE c.deleted_at IS NULL GROUP BY eff.group_id',
+      'WHERE c.deleted_at IS NULL ' +
+      `AND (eff.group_id IS NOT NULL OR ${realCustomerSql('c.id')}) ` +
+      'GROUP BY eff.group_id',
   );
   let defaultPlayers = 0;
   const byGroup = new Map<string, number>();
