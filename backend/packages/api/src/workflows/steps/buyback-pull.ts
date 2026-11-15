@@ -91,20 +91,8 @@ export const buybackPullStep = createStep(
     // New balance = paged Σ ledger (append-only; exact at any ledger size).
     const balance = await packs.creditBalance(input.customer_id);
 
-    // F1: this buyback credit was written outside mutateCreditAtomic, so it
-    // skipped the inline auto-unfreeze. Lift an AUTO freeze whose debt this
-    // repays, under the same per-customer lock. Best-effort: the credit already
-    // committed, so a lingering freeze is no worse than before and clears on the
-    // next inflow — never fail a successful buyback on the unfreeze check.
-    try {
-      await packs.maybeAutoUnfreezeForCustomer(input.customer_id);
-    } catch (error) {
-      logger.warn(
-        `buyback-pull: auto-unfreeze check failed for '${input.customer_id}' — buyback continues. ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
+    // F1: the sale already lifted an AUTO freeze whose debt it repays, inline
+    // in its own transaction (the buyback posting, D2).
 
     const result: BuybackResult = {
       pull_id: pull.id,

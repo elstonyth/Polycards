@@ -423,14 +423,10 @@ export function planPosting(input: CreditPosting, totals: PostingTotals): Postin
           ? `coin-flip:${input.roundId}`
           : (input.idempotencyReference ?? input.sourceTransactionId ?? null),
     },
-    // A sell-back and a commission lift an AUTO freeze after commit
-    // (buyback-pull.ts, the pay route and job); a frozen account cannot flip
-    // (coin-flip.ts), so a win never lifts one.
-    unfreeze:
-      deltaCents > 0 &&
-      input.reason !== 'buyback' &&
-      input.reason !== 'coin_flip_win' &&
-      input.reason !== 'referral_commission',
+    // A commission posts unlocked, so the pay route and job lift an AUTO
+    // freeze after commit instead. (A frozen account cannot flip, so a coin
+    // flip win never finds one.)
+    unfreeze: deltaCents > 0 && input.reason !== 'referral_commission',
     balanceAfterCents: beforeCents + deltaCents,
     bonusAfterCents: bonusBeforeCents + bonusDeltaCents,
   };

@@ -5781,7 +5781,7 @@ class PacksModuleService extends MedusaService({
   // caller (mutateCreditAtomic) passes committed snapshot + just-inserted delta
   // (it can't re-read — MikroORM UoW buffers until flush, so a raw SQL read inside
   // the same txn would NOT see the new row); the out-of-band caller
-  // (maybeAutoUnfreezeForCustomer, used by buyback) passes a fresh post-commit
+  // (maybeAutoUnfreezeForCustomer, used by the commission pay) passes a fresh post-commit
   // re-read under the same lock. A MANUAL freeze is never auto-lifted. SYSTEM
   // event — recorded on the state row, NOT in admin_action_audit.
   private async maybeAutoUnfreeze(
@@ -5809,10 +5809,9 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // Auto-clear an AUTO freeze after a positive inflow written OUTSIDE
-  // mutateCreditAtomic (the buyback step inserts its credit directly, with a
-  // UNIQUE pull_id duplicate guard + clean error mapping that the generic
-  // mutate path would lose). Takes the SAME per-customer advisory lock and
+  // Auto-clear an AUTO freeze after a positive inflow posted without the
+  // inline unfreeze (the weekly commission run posts unlocked: the pay route
+  // and job call this post-commit). Takes the SAME per-customer advisory lock and
   // re-reads the committed balance, so it's race-safe against concurrent
   // mutations and idempotent — calling it after the credit has committed lifts
   // an AUTO freeze whose debt is now repaid, the same as mutateCreditAtomic's

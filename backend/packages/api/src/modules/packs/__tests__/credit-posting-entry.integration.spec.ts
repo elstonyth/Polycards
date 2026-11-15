@@ -136,5 +136,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(after.id).not.toBe(first.id);
       expect(await credits('cus_idem_D')).toHaveLength(1);
     });
+
+    it('a sell-back that repays the debt lifts an AUTO freeze inline, in its own transaction (D2)', async () => {
+      const c = 'cus_entry_bb_unfreeze';
+      await service.createCreditTransactions([{ customer_id: c, amount: -5, reason: 'pack_open' }]);
+      await service.createCustomerAccountStates([{ customer_id: c, frozen: true, cause: 'auto', frozen_at: new Date() }]);
+      await service.mutateCreditAtomic({
+        customerId: c, amount: 9, reason: 'buyback', pullId: 'pull_entry_bb', holdBp: 0,
+        ledger: { type: 'SE', walletDelta: 9, vaultDelta: -10,
+          payload: { type: 'SE', card_handle: 'h', sp_ref_id: null, price: 10, rate: 0.9 } },
+      });
+      expect((await service.listCustomerAccountStates({ customer_id: c }))[0]).toMatchObject({ frozen: false, unfreeze_cause: 'repaid' });
+    });
   },
 });
