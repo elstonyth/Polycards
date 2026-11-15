@@ -320,7 +320,14 @@ import {
   type CustomerScope,
   type MoneyFilter,
 } from './real-customers';
-import { depositedPtSenSql, populationSql } from './money-figures';
+import {
+  GATEWAY,
+  LIVE_VALUE_USD_SQL,
+  cardValueSen,
+  depositedPtSenSql,
+  populationSql,
+} from './money-figures';
+import { mytPeriodStartSql } from './myt-window';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // The ledger columns the reversals read by raw SQL on their own transaction
@@ -567,11 +574,9 @@ export type LedgerEntryRow = {
   payload: unknown;
 };
 
-// Live card value in USD: FMV × the card's multiplier (default when the row
-// carries none). Requires alias `card c`; binds ONE `?`
-// (DEFAULT_MARKET_MULTIPLIER). Shared by PULLED_VALUE_USD_SQL's fallback and
-// the backfill (which pins exactly this expression).
-const LIVE_VALUE_USD_SQL = 'c.market_value * COALESCE(c.market_multiplier, ?)';
+// Live card value in USD: LIVE_VALUE_USD_SQL (money-figures.ts). Shared by
+// PULLED_VALUE_USD_SQL's fallback and the backfill (which pins exactly this
+// expression).
 
 // Pulled value of one pull row in USD: the draw-time snapshot when stamped,
 // live fallback for pre-backfill rows. Shared by every pulled-value aggregate
@@ -13879,8 +13884,7 @@ class PacksModuleService extends MedusaService({
     }
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const bucket = (column: string) =>
-      `to_char(date_trunc('${granularity}', ${column} AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM-DD')`;
+    const bucket = (column: string) => mytPeriodStartSql(granularity, column);
     // One rail's currency (the Settlement page's tabs), or every row.
     // Real customers only (the Dashboard's switch), or every account. The
     // scope clause binds nothing, so the argument lists below are unchanged.
@@ -14040,7 +14044,7 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ n: string; cents: string }[]>(
       'SELECT COUNT(*)::bigint AS n, ' +
-        `       COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)), 0)::bigint AS cents ` +
+        `       COALESCE(SUM(${cardValueSen('display')}), 0)::bigint AS cents ` +
         '  FROM pull p ' +
         '  JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
         " WHERE p.status = 'vaulted' AND p.deleted_at IS NULL",
@@ -14121,12 +14125,12 @@ class PacksModuleService extends MedusaService({
          n: 'count(*) FILTER (WHERE {w})::int',
          gross:
            'COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE {w}), 0)::bigint',
-         fee: 'COALESCE(SUM(ROUND((amount_settled - net_amount) * 100)) FILTER (WHERE {w} AND net_amount IS NOT NULL AND amount_settled IS NOT NULL), 0)::bigint',
+         fee: `COALESCE(SUM(${GATEWAY.depositFeeSen()}) FILTER (WHERE {w} AND net_amount IS NOT NULL AND amount_settled IS NOT NULL), 0)::bigint`,
          missing:
            'count(*) FILTER (WHERE {w} AND (net_amount IS NULL OR amount_settled IS NULL))::int',
          missing_gross:
            'count(*) FILTER (WHERE {w} AND amount_settled IS NULL)::int',
-         fx: "COALESCE(SUM(ROUND((gateway_amount * COALESCE(amount_settled, amount_requested) / NULLIF(amount_requested, 0) * fx_mid - COALESCE(amount_settled, amount_requested)) * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint",
+         fx: `COALESCE(SUM(ROUND(${GATEWAY.depositFxRm()} * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint`,
        })}
          FROM r`,
       params,
@@ -14137,10 +14141,10 @@ class PacksModuleService extends MedusaService({
          n: 'count(*) FILTER (WHERE {w})::int',
          gross:
            'COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE {w}), 0)::bigint',
-         fee: 'COALESCE(SUM(ROUND(ABS(net_amount - COALESCE(amount_settled, amount)) * 100)) FILTER (WHERE {w} AND net_amount IS NOT NULL), 0)::bigint',
+         fee: `COALESCE(SUM(${GATEWAY.payoutFeeSen()}) FILTER (WHERE {w} AND net_amount IS NOT NULL), 0)::bigint`,
          missing: 'count(*) FILTER (WHERE {w} AND net_amount IS NULL)::int',
          missing_gross: '0',
-         fx: "COALESCE(SUM(ROUND((amount - gateway_amount * COALESCE(amount_settled, amount) / NULLIF(amount, 0) * fx_mid) * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint",
+         fx: `COALESCE(SUM(ROUND(${GATEWAY.payoutFxRm()} * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint`,
        })}
          FROM r`,
       params,
@@ -14232,7 +14236,7 @@ class PacksModuleService extends MedusaService({
       // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
       `WITH t AS (
          SELECT p.status,
-                ROUND(${LIVE_VALUE_USD_SQL} * ? * ?) AS cents,
+                ${cardValueSen('sellback')} AS cents,
                 EXISTS (
                   SELECT 1 FROM credit_transaction ct
                    WHERE ct.customer_id = p.customer_id AND ct.reason = 'topup'

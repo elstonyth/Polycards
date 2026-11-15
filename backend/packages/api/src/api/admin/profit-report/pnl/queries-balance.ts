@@ -2,6 +2,7 @@ import type { CustomerScope } from '../../../../modules/packs/real-customers';
 import { filterSql } from '../../../../modules/packs/real-customers';
 import {
   bonusSourceSql,
+  cardValueSen,
   depositedPtSenSql,
 } from '../../../../modules/packs/money-figures';
 import {
@@ -166,7 +167,7 @@ export async function vaultCards(
       'JOIN delivery_order o ON o.id = i.delivery_order_id AND o.deleted_at IS NULL ' +
       `WHERE i.pull_id = p.id AND i.deleted_at IS NULL AND (o.status IN ${REQUESTED} OR o.status IN ${READY_TO_SHIP})) ` +
       "THEN 'processing' END AS k, " +
-      'ROUND(c.market_value * COALESCE(c.market_multiplier, ?) * ? * ?) AS sen ' +
+      `${cardValueSen('sellback')} AS sen ` +
       'FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
       "WHERE p.deleted_at IS NULL AND p.status IN ('vaulted', 'delivering')" +
       f.sql +

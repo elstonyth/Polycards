@@ -30,6 +30,7 @@ import { FLAT_PERCENT } from '../../src/modules/packs/buyback-rate';
 import { scopeFilter, type ReportDb } from '../../src/api/reports/sql';
 import { resolveGroupScope } from '../../src/api/reports/params';
 import { packWindowRows } from '../../src/api/admin/profit-report/pnl/queries';
+import { mintSuperAdmin, unwrapResponse } from './utils';
 import { vaultCards } from '../../src/api/admin/profit-report/pnl/queries-balance';
 
 jest.setTimeout(240 * 1000);
@@ -43,7 +44,7 @@ const n = (v: unknown) => Number(v ?? 0);
 
 medusaIntegrationTestRunner({
   inApp: true,
-  testSuite: ({ getContainer }) => {
+  testSuite: ({ api, getContainer }) => {
     const packs = () =>
       getContainer().resolve<PacksModuleService>(PACKS_MODULE);
     const customers = () =>
@@ -344,6 +345,67 @@ medusaIntegrationTestRunner({
         const s = await packs().settlementRows('month', new Date(now.getTime() - 86_400_000 * 40));
         const periods = mergeSettlementPeriods(s.deposits, s.withdrawals, s.ledger);
         expect(periods.reduce((t, x) => t + x.withdrawals.fee, 0)).toBe(0);
+      });
+
+      it('FX earned: Profit rounds per row, the Settlement FX card once', async () => {
+        const [p] = await customers().createCustomers([{ email: 'mf-fx@test.dev' }]);
+        const now = new Date();
+        // Each top-up earns RM 0.004 (10 SGD x 3.2004 - RM 32), the payout
+        // RM 0.007 (RM 100 - 31.25 SGD x 3.199776).
+        await packs().createGatewayDeposits(
+          ['mf-fx1', 'mf-fx2'].map((id) => ({
+            merchant_transaction_id: id,
+            customer_id: p.id,
+            amount_requested: 32,
+            amount_settled: 32,
+            net_amount: 32,
+            payment_method_code: 'PAYNOW',
+            status: 'settled' as const,
+            settled_at: now,
+            gateway: 'a3pay',
+            currency: 'SGD',
+            gateway_amount: 10,
+            fx_mid: 3.2004,
+          })) as never,
+        );
+        await packs().createGatewayWithdrawals([
+          {
+            merchant_transaction_id: 'mf-fx3',
+            customer_id: p.id,
+            amount: 100,
+            amount_settled: 100,
+            bank_code: 'PAYNOW',
+            account_number: '91234567',
+            account_holder_name: 'MF Test',
+            status: 'settled' as const,
+            settled_at: now,
+            gateway: 'a3pay',
+            currency: 'SGD',
+            gateway_amount: 31.25,
+            fx_mid: 3.199776,
+          },
+        ] as never);
+        expect(
+          await one(`SELECT SUM(${GATEWAY.depositFxRm('d.')})::float8 FROM gateway_deposit d`),
+        ).toBeCloseTo(0.008, 9);
+        expect(
+          await one(`SELECT SUM(${GATEWAY.payoutFxRm('w.')})::float8 FROM gateway_withdrawal w`),
+        ).toBeCloseTo(0.007, 9);
+        // Profit: ROUND per row, so the two 0.4-sen top-ups earn 0.
+        expect((await packs().profitCashTotals(null, 'all')).allTime.fxCents).toBe(1);
+        // Settlement's FX card: summed, then rounded once.
+        const token = await mintSuperAdmin(getContainer(), api, 'mf-fx-admin@test.dev', 'mf-fx-test-password-1');
+        const r = await unwrapResponse(
+          api.get('/admin/payments/fx?currency=SGD', {
+            headers: { authorization: `Bearer ${token}` },
+          }),
+        );
+        expect(r.status).toBe(200);
+        expect(r.data.earnings).toEqual({
+          deposits: { count: 2, rm: 0.01 },
+          payouts: { count: 1, rm: 0.01 },
+          total_rm: 0.02,
+        });
       });
 
       it('card liability: vaulted, delivering in a requested or a shipped order, delivered', async () => {
