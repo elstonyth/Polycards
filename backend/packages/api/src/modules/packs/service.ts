@@ -644,7 +644,7 @@ function playerSortSql(
       return {
         join:
           'LEFT JOIN (SELECT p.customer_id, ' +
-          `SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)) AS cents ` +
+          `SUM(${cardValueSen('display')}) AS cents ` +
           'FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
           "WHERE p.status = 'vaulted' AND p.deleted_at IS NULL " +
           'GROUP BY p.customer_id) v ON v.customer_id = c.id',
@@ -14535,7 +14535,7 @@ class PacksModuleService extends MedusaService({
       { customer_id: string; n: string; cents: string }[]
     >(
       'SELECT p.customer_id, COUNT(*)::bigint AS n, ' +
-        `  COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)), 0)::bigint AS cents ` +
+        `  COALESCE(SUM(${cardValueSen('display')}), 0)::bigint AS cents ` +
         '  FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
         ` WHERE p.status = 'vaulted' AND p.deleted_at IS NULL AND p.customer_id IN (${ph}) GROUP BY p.customer_id`,
       [DEFAULT_MARKET_MULTIPLIER, fx, ...ids],

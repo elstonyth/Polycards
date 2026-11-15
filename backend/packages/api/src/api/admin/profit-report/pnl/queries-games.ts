@@ -6,6 +6,7 @@ import {
   capsuleOpenSql,
   COIN_FLIP_WINS,
   PACK_SALES_FULL,
+  LIVE_VALUE_USD_SQL,
 } from '../../../../modules/packs/money-figures';
 import { mytDaySql } from '../../../../modules/packs/myt-window';
 import { and, windowFilter, type ReportDb } from '../../../reports/sql';
@@ -125,7 +126,7 @@ export async function gamesWindowRows(
   }>(
     `SELECT pz.kind, ${mytDaySql('r.drawn_at')} AS day, COUNT(*)::bigint AS n, ` +
       'COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS credit_sen, ' +
-      'COALESCE(SUM(c.market_value * COALESCE(c.market_multiplier, ?)), 0)::float8 AS card_usd ' +
+      `COALESCE(SUM(${LIVE_VALUE_USD_SQL}), 0)::float8 AS card_usd ` +
       'FROM lucky_draw_result r ' +
       'JOIN lucky_draw_prize pz ON pz.id = r.prize_id ' +
       'LEFT JOIN credit_transaction ct ON ct.id = r.credit_transaction_id AND ct.deleted_at IS NULL ' +

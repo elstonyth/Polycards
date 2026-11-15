@@ -6,7 +6,10 @@ import type {
   MarketingWindowRows,
 } from '../../../../modules/packs/pnl-marketing';
 import { DEFAULT_MARKET_MULTIPLIER } from '../../../../modules/packs/pricing';
-import { bonusSourceSql } from '../../../../modules/packs/money-figures';
+import {
+  LIVE_VALUE_USD_SQL,
+  bonusSourceSql,
+} from '../../../../modules/packs/money-figures';
 import { mytDaySql } from '../../../../modules/packs/myt-window';
 import { and, windowFilter, type ReportDb } from '../../../reports/sql';
 import type { ReportWindow } from '../../../reports/params';
@@ -92,7 +95,7 @@ export async function marketingWindowRows(
       `${mytDaySql('p.rolled_at')} AS day, ` +
       'COUNT(*)::bigint AS n, COUNT(p.buyback_amount)::bigint AS sold, ' +
       'COALESCE(SUM(ROUND(p.buyback_amount * 100)), 0)::bigint AS sold_sen, ' +
-      'COALESCE(SUM(c.market_value * COALESCE(c.market_multiplier, ?)) ' +
+      `COALESCE(SUM(${LIVE_VALUE_USD_SQL}) ` +
       'FILTER (WHERE p.buyback_amount IS NULL), 0)::float8 AS unsold_usd ' +
       'FROM pull p LEFT JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
       'LEFT JOIN task_claim tc ON tc.claim_ref = p.id AND tc.deleted_at IS NULL ' +

@@ -16,6 +16,7 @@ import {
   capsuleOpenSql,
   PACK_SALES_FULL,
   rewardCardSql,
+  LIVE_VALUE_USD_SQL,
 } from '../../../../modules/packs/money-figures';
 import { mytDaySql } from '../../../../modules/packs/myt-window';
 import { packOpens } from '../../../reports/finance/queries';
@@ -160,7 +161,7 @@ export async function cogsWindowRows(
     usd: number;
   }>(
     `SELECT p.pack_id AS slug, ${mytDaySql('p.rolled_at')} AS day, COUNT(*)::bigint AS n, ` +
-      'COALESCE(SUM(COALESCE(p.recorded_value_usd, c.market_value * COALESCE(c.market_multiplier, ?))), 0)::float8 AS usd ' +
+      `COALESCE(SUM(COALESCE(p.recorded_value_usd, ${LIVE_VALUE_USD_SQL})), 0)::float8 AS usd ` +
       'FROM pull p LEFT JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
       `WHERE p.deleted_at IS NULL AND ${NOT_REWARD_CARD}` +
       pulls.sql +
