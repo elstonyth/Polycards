@@ -46,12 +46,12 @@ import {
   withdrawalGateError,
 } from './withdrawable';
 import {
-  MAX_SAVED_BANK_ACCOUNTS,
   loadSavedBankAccounts,
   parseSavedBankAccounts,
   payoutAccountKey,
   PERMANENT_BAN_REASON_PREFIX,
   resolveWithdrawalDestination,
+  savedSlotFull,
   verifiedBankAccounts,
   withBankShareStamp,
   clearedHolderNames,
@@ -10441,10 +10441,7 @@ class PacksModuleService extends MedusaService({
         mutate: (current) => {
           const accounts = parseSavedBankAccounts(current.bank_accounts);
           const slot = savedAccountSlot(input.account.bankCode);
-          if (
-            accounts.filter((a) => savedAccountSlot(a.bankCode) === slot)
-              .length >= MAX_SAVED_BANK_ACCOUNTS
-          ) {
+          if (savedSlotFull(accounts, input.account.bankCode)) {
             // Names the slot: an RM bank and a Touch 'n Go share a currency, so
             // "this currency" would not say which one to remove.
             const held = {
