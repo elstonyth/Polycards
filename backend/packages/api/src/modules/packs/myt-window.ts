@@ -3,7 +3,7 @@
 // Dashboard's statsWindows, the reports' resolvePeriod) and the SQL day
 // buckets. Note they differ on purpose today: the Dashboard's 7d starts at
 // MYT midnight six days back, the period last_7_days is a rolling 7 x 24 h
-// (aligning them is owner decision G4).
+// (aligning them is an open owner decision).
 
 /** The Malaysia calendar day of a timestamptz column, as 'YYYY-MM-DD'. */
 export const mytDaySql = (column: string): string =>

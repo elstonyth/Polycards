@@ -3,7 +3,7 @@ import { filterSql } from '../../../../modules/packs/real-customers';
 import {
   bonusSourceSql,
   cardValueSen,
-  depositedPtSenSql,
+  playthroughBasisSenSql,
 } from '../../../../modules/packs/money-figures';
 import {
   BONUS_SOURCES,
@@ -91,7 +91,7 @@ export async function walletRows(
       'COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS balance_sen, ' +
       'COALESCE(SUM(COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen, ' +
       // The playthrough basis walletSummary gates on.
-      `COALESCE(SUM(${depositedPtSenSql('ct.')}), 0)::bigint AS deposited_sen, ` +
+      `COALESCE(SUM(${playthroughBasisSenSql('ct.')}), 0)::bigint AS deposited_sen, ` +
       "COALESCE(SUM(-ct.external_funded_cents) FILTER (WHERE ct.reason = 'pack_open'), 0)::bigint AS used_sen, " +
       "COALESCE(bool_or(ct.reason = 'topup' AND ct.amount > 0), false) AS has_topup " +
       'FROM credit_transaction ct WHERE ct.deleted_at IS NULL GROUP BY ct.customer_id) w ' +
@@ -167,7 +167,7 @@ export async function vaultCards(
       'JOIN delivery_order o ON o.id = i.delivery_order_id AND o.deleted_at IS NULL ' +
       `WHERE i.pull_id = p.id AND i.deleted_at IS NULL AND (o.status IN ${REQUESTED} OR o.status IN ${READY_TO_SHIP})) ` +
       "THEN 'processing' END AS k, " +
-      `${cardValueSen('sellback')} AS sen ` +
+      `${cardValueSen('vault')} AS sen ` +
       'FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
       "WHERE p.deleted_at IS NULL AND p.status IN ('vaulted', 'delivering')" +
       f.sql +

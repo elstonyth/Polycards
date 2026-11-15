@@ -13,9 +13,9 @@ import { costAsOf } from '../../../../modules/packs/pnl';
 import { DEFAULT_MARKET_MULTIPLIER } from '../../../../modules/packs/pricing';
 import {
   BUYBACK_FULL,
-  CAPSULE_OPEN_SQL,
+  capsuleOpenSql,
   PACK_SALES_FULL,
-  REWARD_CARD_SQL,
+  rewardCardSql,
 } from '../../../../modules/packs/money-figures';
 import { mytDaySql } from '../../../../modules/packs/myt-window';
 import { packOpens } from '../../../reports/finance/queries';
@@ -54,7 +54,7 @@ export async function packWindowRows(
       'COALESCE(SUM(-COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen ' +
       'FROM credit_transaction ct ' +
       `WHERE ct.deleted_at IS NULL AND ${PACK_SALES_FULL.where('ct.')} ` +
-      `AND NOT ${CAPSULE_OPEN_SQL('ct.')}` +
+      `AND NOT ${capsuleOpenSql('ct.')}` +
       ledger.sql +
       ' GROUP BY 1',
     ledger.params,
@@ -125,7 +125,7 @@ export async function packMeta(
 // Reward CARDS (task-reward, challenge-…, lucky-draw pulls: no pack row) are a
 // marketing cost when given, so their buybacks and shipping stay out of COGS.
 // Free-pack rips (reward pulls of a real pack) stay in (decision 12).
-const NOT_REWARD_CARD = `NOT ${REWARD_CARD_SQL('p.')}`;
+const NOT_REWARD_CARD = `NOT ${rewardCardSql('p.')}`;
 
 /** One window's COGS rows (spec §6): buyback paid, card value pulled, cards
  *  shipped, supplier purchases. */
@@ -147,7 +147,7 @@ export async function cogsWindowRows(
     ledger.params,
   );
 
-  // Draw-time snapshot, else live (LIVE_VALUE_USD_SQL in service.ts); priced
+  // Draw-time snapshot, else live (LIVE_VALUE_USD_SQL in money-figures.ts); priced
   // per MYT day by the caller (fx_rate_day).
   const pulls = and(
     windowFilter(window, 'p.rolled_at'),

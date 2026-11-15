@@ -32,7 +32,8 @@ export const fromCustomerScope = (s: CustomerScope): Population =>
   s === 'all' ? { kind: 'everyone' } : { kind: 'real' };
 
 /** ?group= (GroupScope): 'default' is the DEFAULT group, credential accounts
- *  included. Reading it as `real` would change the desk numbers (owner G1). */
+ *  included. Reading it as `real` would change the desk numbers (an open owner
+ *  decision). */
 export const fromGroupScope = (s: GroupScope): Population =>
   s.kind === 'all'
     ? { kind: 'everyone' }
@@ -92,7 +93,7 @@ export type Figure = {
 
 /** P&L "Pack sales" (decision 11). */
 export const PACK_SALES_FULL: Figure = {
-  note: 'Pack sales at full price: the cash and bonus credit each charge took (P&L). Capsule opens are left out (they are Lucky Draw sales).',
+  note: 'Pack sales at full price: the cash and bonus credit each charge took (P&L). The P&L takes capsule opens out of pack sales and counts them as Lucky Draw sales.',
   where: (t) => `${t}reason = 'pack_open'`,
   sen: (t) => `-ROUND(${t}amount * 100)`,
 };
@@ -104,16 +105,17 @@ export const PACK_SALES_CASH: Figure = {
   sen: (t) => `-(${reasonCashSenSql(t)})`,
 };
 
-/** P&L buyback (decision 12); P&L also leaves reward cards out (REWARD_CARD_SQL). */
+/** P&L buyback (decision 12); the P&L also leaves reward cards out
+ *  (rewardCardSql). */
 export const BUYBACK_FULL: Figure = {
-  note: 'Card sell-backs at the full RM credited, bonus share included (P&L, which also leaves reward cards out).',
+  note: 'Buybacks at the full RM credited, bonus share included (P&L, which leaves reward cards out).',
   where: (t) => `${t}reason = 'buyback'`,
   sen: (t) => `ROUND(${t}amount * 100)`,
 };
 
 /** Economy "payouts" / Profit "sellbacks". */
 export const BUYBACK_CASH: Figure = {
-  note: 'Card sell-backs, cash part only. Differs from the full amount only on sell-backs before 2026-10-09. Reward cards are included.',
+  note: 'Buybacks, cash part only. Differs from the full amount only on buybacks before 2026-10-09. Reward cards are included.',
   where: (t) => `${t}reason = 'buyback'`,
   sen: (t) => reasonCashSenSql(t),
 };
@@ -127,8 +129,9 @@ export const COIN_FLIP_WINS: Figure = {
 };
 
 /** Economy "topups": every topup row, a negative one included. The Players
- *  list and the player page count positive rows only (owner G6). The
- *  Dashboard and Profit count the gateway's settled deposits instead. */
+ *  list and the player page count positive rows only (an open owner
+ *  decision). The Dashboard and Profit count the gateway's settled deposits
+ *  instead. */
 export const TOPUPS_LEDGER: Figure = {
   note: 'Top-ups as the wallet ledger records them: every topup row (cash part), a negative correction included.',
   where: (t) => `${t}reason = 'topup'`,
@@ -137,13 +140,13 @@ export const TOPUPS_LEDGER: Figure = {
 
 /** A pack_open charge whose open made capsule spins (P&L decision 3: Lucky
  *  Draw revenue, not pack sales). `ct` = the credit_transaction alias. */
-export const CAPSULE_OPEN_SQL = (ct: string): string =>
+export const capsuleOpenSql = (ct: string): string =>
   `EXISTS (SELECT 1 FROM ticket_spin s WHERE s.open_id = ${ct}source_transaction_id AND s.deleted_at IS NULL)`;
 
 /** A reward CARD pull (task-reward, challenge-…, lucky-draw: no pack row), a
  *  marketing cost when given. A free-pack rip (a reward pull of a real pack)
  *  is not one. `p` = the pull alias. */
-export const REWARD_CARD_SQL = (p: string): string =>
+export const rewardCardSql = (p: string): string =>
   `(${p}source = 'reward' AND NOT EXISTS (SELECT 1 FROM pack pk WHERE pk.slug = ${p}pack_id))`;
 
 /** plan-033 playthrough basis per ledger row, in sen: a post-1b deposit's
@@ -151,7 +154,7 @@ export const REWARD_CARD_SQL = (p: string): string =>
  *  buyback row stamps as external_funded_cents. Shared by creditSummary,
  *  walletSummary, the release check and the P&L balance (mirrored by
  *  credit-summary.ts's fold). */
-export const depositedPtSenSql = (t = ''): string =>
+export const playthroughBasisSenSql = (t = ''): string =>
   `CASE WHEN ${t}reason = 'topup' AND ${t}amount > 0 AND ${t}external_funded_cents IS NOT NULL THEN ROUND(${t}amount * 100) ` +
   `WHEN ${t}reason = 'buyback' THEN COALESCE(${t}external_funded_cents, 0) ELSE 0 END`;
 
@@ -175,8 +178,8 @@ export const bonusSourceSql = (
   `WHEN ${t}reason IN ('pack_open', 'delivery_fee', 'buyback') THEN 'returned' ` +
   "ELSE 'other' END";
 
-/** What the Economy ledger totals count (the Finance economy / daily
- *  reports' `basis`, read back by the desk bots and the assistant). */
+/** What the Economy ledger totals count (the Finance economy report's
+ *  `basis`, read back by the desk bots and the assistant). */
 export const LEDGER_TOTALS_BASIS = {
   revenue: PACK_SALES_CASH.note,
   payouts: BUYBACK_CASH.note,
@@ -194,7 +197,8 @@ export const GATEWAY = {
   depositFeeSen: (t = ''): string =>
     `ROUND((${t}amount_settled - ${t}net_amount) * 100)`,
   /** Payout fee in sen, ABS per row: TGPay payouts settled before 2026-09-10
-   *  stored net the other way round (Settlement still sums signed: owner G2). */
+   *  stored net the other way round (Settlement still sums signed: an open
+   *  owner decision). */
   payoutFeeSen: (t = ''): string =>
     `ROUND(ABS(${t}net_amount - COALESCE(${t}amount_settled, ${t}amount)) * 100)`,
   /** FX earned on a regional top-up, in RM, UNROUNDED: foreign paid × mid −
@@ -217,10 +221,10 @@ export const LIVE_VALUE_USD_SQL =
 /** One card's value in sen, rounded per card. Requires `card c`.
  *  - 'display': what buyback percents credit against (#263); binds
  *    [DEFAULT_MARKET_MULTIPLIER, fx].
- *  - 'sellback': what the vault pays back now; binds
+ *  - 'vault': what a buyback from the vault pays now (the Flat rate); binds
  *    [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT] (display MYR × percent =
  *    sen: × 100 ÷ 100 cancel). */
-export const cardValueSen = (basis: 'display' | 'sellback'): string =>
+export const cardValueSen = (basis: 'display' | 'vault'): string =>
   basis === 'display'
     ? `ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)`
     : `ROUND(${LIVE_VALUE_USD_SQL} * ? * ?)`;

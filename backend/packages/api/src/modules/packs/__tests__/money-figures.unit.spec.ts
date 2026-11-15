@@ -2,17 +2,17 @@ import { reasonCashSenSql } from '../bonus-credit';
 import {
   BUYBACK_CASH,
   BUYBACK_FULL,
-  CAPSULE_OPEN_SQL,
+  capsuleOpenSql,
   COIN_FLIP_WINS,
   GATEWAY,
   LIVE_VALUE_USD_SQL,
   PACK_SALES_CASH,
   PACK_SALES_FULL,
-  REWARD_CARD_SQL,
+  rewardCardSql,
   TOPUPS_LEDGER,
   bonusSourceSql,
   cardValueSen,
-  depositedPtSenSql,
+  playthroughBasisSenSql,
   fromCustomerScope,
   fromGroupScope,
   populationSql,
@@ -116,22 +116,22 @@ describe('ledger figures', () => {
   });
 
   it('capsule and reward-card tests are the P&L text', () => {
-    expect(`NOT ${CAPSULE_OPEN_SQL('ct.')}`).toBe(
+    expect(`NOT ${capsuleOpenSql('ct.')}`).toBe(
       'NOT EXISTS (SELECT 1 FROM ticket_spin s WHERE s.open_id = ct.source_transaction_id ' +
         'AND s.deleted_at IS NULL)',
     );
-    expect(`NOT ${REWARD_CARD_SQL('p.')}`).toBe(
+    expect(`NOT ${rewardCardSql('p.')}`).toBe(
       "NOT (p.source = 'reward' AND NOT EXISTS " +
         '(SELECT 1 FROM pack pk WHERE pk.slug = p.pack_id))',
     );
   });
 
   it("deposited playthrough basis is service.ts's and queries-balance's", () => {
-    expect(depositedPtSenSql()).toBe(
+    expect(playthroughBasisSenSql()).toBe(
       "CASE WHEN reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL THEN ROUND(amount * 100) " +
         "WHEN reason = 'buyback' THEN COALESCE(external_funded_cents, 0) ELSE 0 END",
     );
-    expect(depositedPtSenSql('ct.')).toBe(
+    expect(playthroughBasisSenSql('ct.')).toBe(
       "CASE WHEN ct.reason = 'topup' AND ct.amount > 0 AND ct.external_funded_cents IS NOT NULL THEN ROUND(ct.amount * 100) " +
         "WHEN ct.reason = 'buyback' THEN COALESCE(ct.external_funded_cents, 0) ELSE 0 END",
     );
@@ -187,7 +187,7 @@ describe('card value', () => {
     expect(cardValueSen('display')).toBe(
       'ROUND(c.market_value * COALESCE(c.market_multiplier, ?) * ? * 100)',
     );
-    expect(cardValueSen('sellback')).toBe(
+    expect(cardValueSen('vault')).toBe(
       'ROUND(c.market_value * COALESCE(c.market_multiplier, ?) * ? * ?)',
     );
   });
@@ -195,7 +195,7 @@ describe('card value', () => {
   it('binds multiplier + fx (display) or + percent (sellback)', () => {
     const binds = (s: string) => s.split('?').length - 1;
     expect(binds(cardValueSen('display'))).toBe(2);
-    expect(binds(cardValueSen('sellback'))).toBe(3);
+    expect(binds(cardValueSen('vault'))).toBe(3);
   });
 });
 

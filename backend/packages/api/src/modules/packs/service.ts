@@ -324,7 +324,7 @@ import {
   GATEWAY,
   LIVE_VALUE_USD_SQL,
   cardValueSen,
-  depositedPtSenSql,
+  playthroughBasisSenSql,
   populationSql,
 } from './money-figures';
 import { mytPeriodStartSql } from './myt-window';
@@ -352,7 +352,7 @@ const LEDGER_REVERSAL_COLS =
 // external_funded_cents — it pays NORMAL credit that must be played through
 // once, like a deposit. Shared between creditSummary and walletSummary (and
 // mirrored by credit-summary.ts's fold) so the scans can't drift.
-const DEPOSITED_PT_SEN_SQL = depositedPtSenSql();
+const DEPOSITED_PT_SEN_SQL = playthroughBasisSenSql();
 
 // The VIP basis: a credit_transaction row counts only if it is newer than the
 // customer's operator VIP reset (vip_member_state.vip_reset_at, resetVipLevel).
@@ -573,10 +573,6 @@ export type LedgerEntryRow = {
   vault_delta: string | null;
   payload: unknown;
 };
-
-// Live card value in USD: LIVE_VALUE_USD_SQL (money-figures.ts). Shared by
-// PULLED_VALUE_USD_SQL's fallback and the backfill (which pins exactly this
-// expression).
 
 // Pulled value of one pull row in USD: the draw-time snapshot when stamped,
 // live fallback for pre-backfill rows. Shared by every pulled-value aggregate
@@ -14236,7 +14232,7 @@ class PacksModuleService extends MedusaService({
       // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
       `WITH t AS (
          SELECT p.status,
-                ${cardValueSen('sellback')} AS cents,
+                ${cardValueSen('vault')} AS cents,
                 EXISTS (
                   SELECT 1 FROM credit_transaction ct
                    WHERE ct.customer_id = p.customer_id AND ct.reason = 'topup'

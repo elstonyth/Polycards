@@ -3,7 +3,7 @@ import { filterSql } from '../../../../modules/packs/real-customers';
 import type { GamesWindowRows } from '../../../../modules/packs/pnl-games';
 import { DEFAULT_MARKET_MULTIPLIER } from '../../../../modules/packs/pricing';
 import {
-  CAPSULE_OPEN_SQL,
+  capsuleOpenSql,
   COIN_FLIP_WINS,
   PACK_SALES_FULL,
 } from '../../../../modules/packs/money-figures';
@@ -91,7 +91,7 @@ export async function gamesWindowRows(
       'COALESCE(SUM(-COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen ' +
       'FROM credit_transaction ct ' +
       `WHERE ct.deleted_at IS NULL AND ${PACK_SALES_FULL.where('ct.')} ` +
-      `AND ${CAPSULE_OPEN_SQL('ct.')}` +
+      `AND ${capsuleOpenSql('ct.')}` +
       ledger.sql +
       ' GROUP BY 1',
     ledger.params,

@@ -14,7 +14,7 @@ import { resolveFxRate } from '../../src/modules/packs/pricing';
 import {
   BUYBACK_CASH,
   BUYBACK_FULL,
-  CAPSULE_OPEN_SQL,
+  capsuleOpenSql,
   COIN_FLIP_WINS,
   GATEWAY,
   LEDGER_TOTALS_BASIS,
@@ -337,7 +337,7 @@ medusaIntegrationTestRunner({
           bonus_cents: string | null;
           capsule: boolean;
         }>(
-          `SELECT ct.reason, ct.amount, ct.bonus_cents, ${CAPSULE_OPEN_SQL('ct.')} AS capsule ` +
+          `SELECT ct.reason, ct.amount, ct.bonus_cents, ${capsuleOpenSql('ct.')} AS capsule ` +
             'FROM credit_transaction ct WHERE ct.deleted_at IS NULL',
         );
         const sum = (reason: string, sen: (r: (typeof rows)[number]) => number, keep = (_: (typeof rows)[number]) => true) =>
@@ -350,7 +350,7 @@ medusaIntegrationTestRunner({
         expect([cashSales, fullSales]).toEqual([1455, 1655]);
         expect(await figureSql(PACK_SALES_CASH)).toBe(cashSales);
         expect(
-          await figureSql(PACK_SALES_FULL, ` AND NOT ${CAPSULE_OPEN_SQL('ct.')}`),
+          await figureSql(PACK_SALES_FULL, ` AND NOT ${capsuleOpenSql('ct.')}`),
         ).toBe(fullSales);
         expect(await figureSql(BUYBACK_CASH)).toBe(sum('buyback', cash));
         expect(await figureSql(BUYBACK_FULL)).toBe(sum('buyback', full));
@@ -551,8 +551,8 @@ medusaIntegrationTestRunner({
 
         const fx = await resolveFxRate(packs());
         const displaySen = Math.round(10 * DEFAULT_MARKET_MULTIPLIER * fx * 100);
-        const sellbackSen = Math.round(10 * DEFAULT_MARKET_MULTIPLIER * fx * FLAT_PERCENT);
-        const valued = (basis: 'display' | 'sellback', status: string) =>
+        const vaultSen = Math.round(10 * DEFAULT_MARKET_MULTIPLIER * fx * FLAT_PERCENT);
+        const valued = (basis: 'display' | 'vault', status: string) =>
           one(
             `SELECT COALESCE(SUM(${cardValueSen(basis)}), 0)::bigint FROM pull p ` +
               'JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
@@ -569,14 +569,14 @@ medusaIntegrationTestRunner({
           liability: displaySen / 100,
         });
         // Profit: vaulted and EVERY delivering pull at sell-back (owner G3).
-        expect(await valued('sellback', 'delivering')).toBe(2 * sellbackSen);
+        expect(await valued('vault', 'delivering')).toBe(2 * vaultSen);
         const owed = await packs().profitOwed('all', fx);
-        expect([owed.cardCount, owed.cardSellbackCents]).toEqual([3, 3 * sellbackSen]);
-        expect([owed.shippedCount, owed.shippedCents]).toEqual([1, sellbackSen]);
+        expect([owed.cardCount, owed.cardSellbackCents]).toEqual([3, 3 * vaultSen]);
+        expect([owed.shippedCount, owed.shippedCents]).toEqual([1, vaultSen]);
         // P&L: only the delivering pull in an active order.
         expect(await vaultCards(db(), 'all', fx)).toEqual({
-          vault: { cards: 1, sen: sellbackSen },
-          processing: { cards: 1, sen: sellbackSen },
+          vault: { cards: 1, sen: vaultSen },
+          processing: { cards: 1, sen: vaultSen },
         });
       });
     });
