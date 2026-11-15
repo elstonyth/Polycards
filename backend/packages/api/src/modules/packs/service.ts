@@ -4796,6 +4796,10 @@ class PacksModuleService extends MedusaService({
     /** Bonus balance after the write (MYR), read under the lock. Absent on a
      *  replay, which wrote nothing. */
     bonusBalance?: number;
+    /** The written row's signed bonus sen. Absent on a replay. */
+    rowBonusCents?: number;
+    /** The ledger row the posting's ledger part wrote. */
+    ledger?: { id: string; display_id: string };
   }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
@@ -4872,6 +4876,24 @@ class PacksModuleService extends MedusaService({
     //    the write enrolls in the locked txn — not a separate connection).
     const [txn] = await this.createCreditTransactions([plan.row], sharedContext);
 
+    // 5) Its ledger row, same transaction.
+    const ledger = input.ledger
+      ? await this.recordLedgerEntry(
+          {
+            type: input.ledger.type,
+            customerId: input.customerId,
+            refId: input.ledger.refId ?? txn.id,
+            walletDelta:
+              input.ledger.walletDelta === undefined
+                ? plan.row.amount
+                : input.ledger.walletDelta,
+            vaultDelta: input.ledger.vaultDelta ?? null,
+            payload: input.ledger.payload,
+          },
+          sharedContext,
+        )
+      : undefined;
+
     // Auto-clear an AUTO freeze if this inflow repays the debt. The projected
     // balance is the locked snapshot + this delta — never re-read after the
     // insert (MikroORM UoW buffers until flush, so a raw SELECT inside the
@@ -4891,6 +4913,8 @@ class PacksModuleService extends MedusaService({
       replayed: false,
       reference: input.reference ?? null,
       bonusBalance: plan.bonusAfterCents / 100,
+      rowBonusCents: plan.row.bonus_cents,
+      ...(ledger && { ledger: { id: ledger.id, display_id: ledger.display_id } }),
     };
   }
 
@@ -4906,34 +4930,30 @@ class PacksModuleService extends MedusaService({
   // single ledger row.
   @InjectTransactionManager()
   async topUpCreditsWithLedger(
-    input: CreditMutationInput & {
+    input: Omit<CreditMutationInput, 'ledger'> & {
       ledgerPaymentMethod?: string;
       ledgerGatewayRef?: string | null;
     },
     @MedusaContext() sharedContext: Context = {},
   ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
-    const result = await this.mutateCreditAtomic(input, sharedContext);
-    if (!result.replayed) {
-      await this.recordLedgerEntry(
-        {
+    const { ledgerPaymentMethod, ledgerGatewayRef, ...posting } = input;
+    return this.mutateCreditAtomic(
+      {
+        ...posting,
+        ledger: {
           type: 'TP',
-          customerId: input.customerId,
-          refId: result.id,
-          walletDelta: result.amount,
-          vaultDelta: null,
           payload: {
             type: 'TP',
-            payment_method: input.ledgerPaymentMethod ?? 'mock',
+            payment_method: ledgerPaymentMethod ?? 'mock',
             gateway_ref:
-              input.ledgerGatewayRef === undefined
-                ? result.reference
-                : input.ledgerGatewayRef,
+              ledgerGatewayRef === undefined
+                ? (posting.reference ?? null)
+                : ledgerGatewayRef,
           },
         },
-        sharedContext,
-      );
-    }
-    return result;
+      },
+      sharedContext,
+    );
   }
 
   // The withdrawal counterpart: every balance move on the payout path writes a
@@ -4947,7 +4967,7 @@ class PacksModuleService extends MedusaService({
   // and one ledger row.
   @InjectTransactionManager()
   async withdrawCreditsWithLedger(
-    input: CreditMutationInput & {
+    input: Omit<CreditMutationInput, 'ledger'> & {
       ledger: {
         outcome: 'requested' | 'refunded';
         bankCode: string | null;
@@ -4957,31 +4977,27 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
-    const result = await this.mutateCreditAtomic(input, sharedContext);
-    if (!result.replayed) {
-      await this.recordLedgerEntry(
-        {
+    const { ledger, ...posting } = input;
+    return this.mutateCreditAtomic(
+      {
+        ...posting,
+        ledger: {
           type: 'WD',
-          customerId: input.customerId,
-          refId: result.id,
-          walletDelta: result.amount,
-          vaultDelta: null,
           payload: {
             type: 'WD',
-            outcome: input.ledger.outcome,
-            bank_code: input.ledger.bankCode,
+            outcome: ledger.outcome,
+            bank_code: ledger.bankCode,
             // Last 4 only — the ledger is a customer- and operator-visible
             // surface; the full number stays on gateway_withdrawal.
-            account_last4: input.ledger.accountNumber
-              ? input.ledger.accountNumber.slice(-4)
+            account_last4: ledger.accountNumber
+              ? ledger.accountNumber.slice(-4)
               : null,
-            gateway_ref: input.ledger.gatewayRef,
+            gateway_ref: ledger.gatewayRef,
           },
         },
-        sharedContext,
-      );
-    }
-    return result;
+      },
+      sharedContext,
+    );
   }
 
   // The ONE writer of a cashout DEBIT: the destination lookup, the withdrawal

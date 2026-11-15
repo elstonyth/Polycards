@@ -3,6 +3,7 @@ import type { Context } from '@medusajs/framework/types';
 import type { LedgerSqlManager } from './claim';
 import { BONUS_NOT_SPENDABLE_MESSAGE } from './bonus-credit';
 import { consumeExternalSen } from './external-funded';
+import type { LedgerPayload, LedgerType } from './ledger';
 
 // Credit posting: the one home of the per-customer credit lock (design
 // plans/architecture-deepening/03-credit-posting-design.md). No service
@@ -30,6 +31,19 @@ export async function lockCredit(context: Context, ...customerIds: string[]): Pr
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [creditLockKey(id)]);
   }
 }
+
+/** The ledger row a posting writes with its credit, in the same transaction.
+ *  A replayed posting writes neither. */
+export type LedgerPart = {
+  type: LedgerType;
+  payload: LedgerPayload;
+  /** Default: the credit row's own id (the admin Wallet tab's join). */
+  refId?: string;
+  /** Default: the posted amount, cent-rounded as stored. */
+  walletDelta?: number | null;
+  /** Default: null. */
+  vaultDelta?: number | null;
+};
 
 /** A signed credit-ledger write reason (mirrors CreditTransaction.reason). */
 export type CreditMutationReason =
@@ -76,6 +90,8 @@ export type CreditMutationInput = {
    * the share its charge took, 0..amount, so it goes back as bonus.
    */
   bonusCents?: number;
+  /** The paired ledger row, written by the posting itself. */
+  ledger?: LedgerPart;
 };
 
 /** The locked Σ read a posting is planned against, in integer sen. */
