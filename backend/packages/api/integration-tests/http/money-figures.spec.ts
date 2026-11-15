@@ -15,6 +15,7 @@ import {
   BUYBACK_CASH,
   BUYBACK_FULL,
   capsuleOpenSql,
+  CAPSULE_SALES_CASH,
   COIN_FLIP_WINS,
   GATEWAY,
   LEDGER_TOTALS_BASIS,
@@ -226,7 +227,8 @@ medusaIntegrationTestRunner({
         expect(profit.status).toBe(200);
         expect(profit.data.basis).toEqual({
           activity: {
-            pack_sales: PACK_SALES_CASH.note,
+            pack_sales: expect.stringContaining('Capsule opens are left out'),
+            capsule_sales: CAPSULE_SALES_CASH.note,
             sellbacks: BUYBACK_CASH.note,
             coin_flip_payouts: COIN_FLIP_WINS.note,
           },
@@ -294,6 +296,18 @@ medusaIntegrationTestRunner({
           'mf-cap': { opened: 2, cents: 200 },
         });
         expect(sales.unattributedCents).toBe(200 + 100 + 50);
+
+        // Profit's pack sales leave the capsule out (owner decision
+        // 2026-11-16, G5, P&L decision 3): RM 15.50 of cash charges, RM 2 of
+        // them the capsule. Before: pack_sales 15.5, no capsule line.
+        const token = await mintSuperAdmin(getContainer(), api, 'mf-cap-admin@test.dev', 'mf-cap-test-password-1');
+        const profit = await unwrapResponse(
+          api.get('/admin/profit-report?range=all', {
+            headers: { authorization: `Bearer ${token}` },
+          }),
+        );
+        expect(profit.status).toBe(200);
+        expect([profit.data.activity.pack_sales, profit.data.activity.capsule_sales]).toEqual([13.5, 2]);
 
         const games = await gamesWindowRows(db(), {}, 'all');
         expect(games.capsules.filter((c) => c.slug === 'mf-cap')).toEqual([

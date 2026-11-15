@@ -300,6 +300,7 @@ medusaIntegrationTestRunner({
         });
         expect(realOnly.data.activity).toEqual({
           pack_sales: 80,
+          capsule_sales: 0,
           sellbacks: 30,
           coin_flip_payouts: 0,
           promo_given: 0,

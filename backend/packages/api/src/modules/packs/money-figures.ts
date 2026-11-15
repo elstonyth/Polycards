@@ -94,6 +94,14 @@ export const PACK_SALES_CASH: Figure = {
   sen: (t) => `-(${reasonCashSenSql(t)})`,
 };
 
+/** The capsule part of PACK_SALES_CASH: Lucky Draw revenue, not pack sales
+ *  (P&L decision 3). Profit shows it on its own line. */
+export const CAPSULE_SALES_CASH: Figure = {
+  note: 'Lucky Draw capsule sales, cash only: the normal-credit part of each capsule charge, net of reversals.',
+  where: (t) => `${PACK_SALES_CASH.where(t)} AND ${capsuleOpenSql(t)}`,
+  sen: (t) => PACK_SALES_CASH.sen(t),
+};
+
 /** P&L buyback (decision 12); the P&L also leaves reward cards out
  *  (rewardCardSql). */
 export const BUYBACK_FULL: Figure = {

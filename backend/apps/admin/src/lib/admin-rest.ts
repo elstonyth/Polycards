@@ -585,6 +585,9 @@ export interface ProfitReport {
   };
   activity: {
     pack_sales: number;
+    /** Lucky Draw capsule sales, cash only: left out of pack_sales (P&L
+     *  decision 3). 0 on the player page. */
+    capsule_sales: number;
     sellbacks: number;
     coin_flip_payouts: number;
     promo_given: number;
