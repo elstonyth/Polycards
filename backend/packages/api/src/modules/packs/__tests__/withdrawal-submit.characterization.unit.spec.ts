@@ -175,11 +175,15 @@ const newRefund = (ref: string, bankCode = 'MBBEMYKL') => ({
 
 /** The new path's close after a refund. */
 const newClose = (reason: RegExp) =>
-  // Q5 will change this: an unscoped close by id, today.
+  // Q5: closed through refundWithdrawal — scoped to 'pending', gateway_status
+  // carried, first writer wins (was an unscoped `{ id, status, failure_reason }`).
   ({
-    id: 'gpw_1',
-    status: 'failed',
-    failure_reason: expect.stringMatching(reason),
+    selector: { id: 'gpw_1', status: 'pending' },
+    data: {
+      status: 'failed',
+      gateway_status: null,
+      failure_reason: expect.stringMatching(reason),
+    },
   });
 
 const CUSTOMER = {

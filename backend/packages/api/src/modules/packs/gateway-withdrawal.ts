@@ -1068,37 +1068,33 @@ export async function startWithdrawal(
         : null;
     if (error instanceof GatewayError && verdict?.refund) {
       // The gateway PARSEABLY refused and, asked, holds no such payout.
-      // Refund the debit (idempotent) and close the row.
-      await packs.withdrawCreditsWithLedger({
-        customerId: input.customerId,
-        amount,
-        reason: 'cashout',
-        reference: merchantTransactionId,
-        idempotencyReference: withdrawalRefundReference(
-          input.customerId,
-          merchantTransactionId,
-        ),
-        ledger: {
-          outcome: 'refunded',
-          bankCode: bankCode,
-          accountNumber: accountNumber,
-          gatewayRef: merchantTransactionId,
+      // Refund the debit (idempotent) and close the row, through the same
+      // refundWithdrawal as every other close. The ledger names the
+      // destination locked at debit, as the submit did; the customer is on
+      // screen, so no receipt and no feed row.
+      await refundWithdrawal(
+        scope,
+        {
+          id: row.id,
+          customer_id: input.customerId,
+          merchant_transaction_id: merchantTransactionId,
+          gateway_transaction_id: null,
+          amount,
+          bank_code: bankCode,
+          account_number: accountNumber,
+          failure_reason: null,
         },
-      });
-      // The reason rides along with the close, on the SAME write: a second
-      // round-trip could fail on its own and leave the row closed with nothing
-      // said. `failure_reason` is the durable half of the log line below —
-      // DigitalOcean run logs only cover the current deployment, so on
-      // 2026-08-11 the codes for eight failed production payouts were gone by
-      // the next morning while the rows themselves survived, saying only
-      // 'failed'. Their codes, the HTTP status and the destination BANK CODE,
-      // plus their message with digit runs redacted — see
-      // formatGatewayFailureReason for why this column redacts where the log
-      // beside it does not.
-      await packs.updateGatewayWithdrawals({
-        id: row.id,
-        status: 'failed',
-        failure_reason: formatGatewayFailureReason({
+        null,
+        'pending',
+        // The reason rides along with the close, on the SAME write: a second
+        // round-trip could fail on its own and leave the row closed with
+        // nothing said. `failure_reason` is the durable half of the log line
+        // below — DigitalOcean run logs only cover the current deployment, so
+        // on 2026-08-11 the codes for eight failed production payouts were
+        // gone by the next morning while the rows themselves survived, saying
+        // only 'failed'. See formatGatewayFailureReason for why this column
+        // redacts where the log beside it does not.
+        formatGatewayFailureReason({
           prefix: 'submit refused',
           codes: error.codes,
           httpStatus: error.httpStatus,
@@ -1109,7 +1105,8 @@ export async function startWithdrawal(
           accountNumber,
           accountHolderName,
         }),
-      });
+        { customerOnScreen: true },
+      );
       // Log their reason before it is flattened into the customer-facing
       // message below — the sibling deposit branch has done this since
       // 2026-08-04 and this one never did, so a live payout could refuse with
@@ -1517,6 +1514,9 @@ export async function refundWithdrawal(
    * whole change exists to abolish, so the type refuses it.
    */
   failureReason: string,
+  /** A refusal the customer is reading on screen right now: the words say
+   *  it, so no receipt email and no feed row. */
+  options: { customerOnScreen?: boolean } = {},
 ): ReturnType<GatewayWithdrawals['withdrawCreditsWithLedger']> {
   const packs = resolvePacks<GatewayWithdrawals>(scope);
   const refund = await packs.withdrawCreditsWithLedger({
@@ -1554,20 +1554,22 @@ export async function refundWithdrawal(
   // claim accepts a 'failed' row precisely so an operator can click Deny
   // again, which replays this whole sequence (the refund on its anchor, this
   // send under the notification module's idempotency key) and finishes it.
-  await sendWithdrawalReceipt(scope, {
-    customerId: withdrawal.customer_id,
-    amount: Number(withdrawal.amount),
-    // `||`, not `??` — an empty-string gateway id must fall through to the
-    // merchant reference. Same reasoning as the settle branch's identical
-    // choice in withdrawal-reconcile.ts; the fuller rationale lives
-    // there (it explains that call site too, so it did not move with this
-    // one — extracting the code must not orphan the comment from what else
-    // it covers).
-    reference:
-      withdrawal.gateway_transaction_id || withdrawal.merchant_transaction_id,
-    merchantTransactionId: withdrawal.merchant_transaction_id,
-    outcome: 'refunded',
-  });
+  if (!options.customerOnScreen) {
+    await sendWithdrawalReceipt(scope, {
+      customerId: withdrawal.customer_id,
+      amount: Number(withdrawal.amount),
+      // `||`, not `??` — an empty-string gateway id must fall through to the
+      // merchant reference. Same reasoning as the settle branch's identical
+      // choice in withdrawal-reconcile.ts; the fuller rationale lives
+      // there (it explains that call site too, so it did not move with this
+      // one — extracting the code must not orphan the comment from what else
+      // it covers).
+      reference:
+        withdrawal.gateway_transaction_id || withdrawal.merchant_transaction_id,
+      merchantTransactionId: withdrawal.merchant_transaction_id,
+      outcome: 'refunded',
+    });
+  }
   const closed = await packs.updateGatewayWithdrawals({
     selector: { id: withdrawal.id, status: fromStatus },
     data: {
@@ -1600,7 +1602,7 @@ export async function refundWithdrawal(
       );
     }
   }
-  if (!refund.replayed) {
+  if (!refund.replayed && !options.customerOnScreen) {
     try {
       await notifyFeed(scope, {
         receiverId: withdrawal.customer_id,

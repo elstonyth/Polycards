@@ -692,7 +692,9 @@ describe('startWithdrawal — money ordering', () => {
     // Refunded and closed like any definite refusal.
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
     expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'failed' }),
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'failed' }),
+      }),
     );
   });
 
@@ -956,12 +958,18 @@ describe('startWithdrawal — money ordering', () => {
     // and on 2026-08-11 that is exactly how eight production refusals ended up
     // unexplainable the following morning.
     expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-      id: 'gpw_1',
-      status: 'failed',
-      failure_reason: expect.stringContaining('PMT10013'),
+      selector: { id: 'gpw_1', status: 'pending' },
+      data: {
+        status: 'failed',
+        gateway_status: null,
+        failure_reason: expect.stringContaining('PMT10013'),
+      },
     });
-    const [{ failure_reason: reason }] =
-      h.packs.updateGatewayWithdrawals.mock.calls[0];
+    const [
+      {
+        data: { failure_reason: reason },
+      },
+    ] = h.packs.updateGatewayWithdrawals.mock.calls[0];
     expect(reason).toMatch(/httpStatus=200/);
     expect(reason).toMatch(/bankCode=MBB/);
     // Same PII rule as the log: never the account number or the holder name.
@@ -1071,9 +1079,12 @@ describe('startWithdrawal — money ordering', () => {
     // reason on it, which is what makes a thrown logger survivable at all now.
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
     expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-      id: 'gpw_1',
-      status: 'failed',
-      failure_reason: expect.stringContaining('PMT10013'),
+      selector: { id: 'gpw_1', status: 'pending' },
+      data: {
+        status: 'failed',
+        gateway_status: null,
+        failure_reason: expect.stringContaining('PMT10013'),
+      },
     });
   });
 
@@ -1091,10 +1102,11 @@ describe('startWithdrawal — money ordering', () => {
     expect(h.logger.error).toHaveBeenCalled();
     // No refund, and the row was never closed — the sweep still owns this one.
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalledWith({
-      id: 'gpw_1',
-      status: 'failed',
-    });
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'failed' }),
+      }),
+    );
   });
 
   // Production 2026-10-14 (PC-286fcc20…, RM 512.40): a refusal-shaped answer
@@ -1137,7 +1149,9 @@ describe('startWithdrawal — money ordering', () => {
       expect(fakeGateway.calls.withdrawalDetails).toHaveLength(1);
       expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
       expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalledWith(
-        expect.objectContaining({ status: 'failed' }),
+        expect.objectContaining({
+        data: expect.objectContaining({ status: 'failed' }),
+      }),
       );
       expect(h.logger.error).toHaveBeenCalledWith(
         expect.stringContaining('refusal not confirmed'),
@@ -1210,7 +1224,9 @@ describe('startWithdrawal — money ordering', () => {
       expect(result).toMatchObject({ status: 'pending', transactionId: null });
       expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
       expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalledWith(
-        expect.objectContaining({ status: 'failed' }),
+        expect.objectContaining({
+        data: expect.objectContaining({ status: 'failed' }),
+      }),
       );
     });
 
@@ -1653,9 +1669,12 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         h.packs.withdrawCreditsWithLedger.mock.calls[0][0].idempotencyReference,
       ).toMatch(/^wd-refund:/);
       expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-        id: 'gpw_1',
-        status: 'failed',
-        failure_reason: expect.stringContaining(TGPAY_PAYOUT_FLOAT_EMPTY),
+        selector: { id: 'gpw_1', status: 'pending' },
+        data: {
+          status: 'failed',
+          gateway_status: null,
+          failure_reason: expect.stringContaining(TGPAY_PAYOUT_FLOAT_EMPTY),
+        },
       });
       // Refund before the close, as on every refusal.
       expect(
@@ -1717,9 +1736,12 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       // Refunded now, not left pending for the sweep.
       expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
       expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-        id: 'gpw_1',
-        status: 'failed',
-        failure_reason: expect.stringContaining(TGPAY_PAYOUT_DISABLED),
+        selector: { id: 'gpw_1', status: 'pending' },
+        data: {
+          status: 'failed',
+          gateway_status: null,
+          failure_reason: expect.stringContaining(TGPAY_PAYOUT_DISABLED),
+        },
       });
       expect(sent).toHaveLength(1);
       expect(sent[0].chat_id).toBe('-100ops');
@@ -1753,6 +1775,34 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         /refused by the payment provider/i,
       );
       expect(sent).toHaveLength(0);
+    });
+
+    // Q5: the new path closes through refundWithdrawal, so a refund whose
+    // close lost to a settle for the same payout is shouted about here too.
+    it('a refund whose close lost to a settle raises the refund-vs-settled alarm', async () => {
+      fakeGateway.script({
+        submitWithdrawal: new GatewayError('nope', ['PMT10013'], 200, true),
+        getWithdrawalDetail: {
+          transactionId: 'T-1',
+          merchantTransactionId: 'PC-x',
+          statusId: null,
+          status: 'REJECTED',
+          amount: 50,
+          netAmount: Number.NaN,
+          paymentMethodCode: 'WD',
+          bankReferenceNo: null,
+          uniqueReferenceNo: null,
+          state: 'failed' as const,
+        },
+      });
+      const h = harness();
+      h.packs.updateGatewayWithdrawals.mockResolvedValue([]);
+      h.packs.listGatewayWithdrawals.mockResolvedValue([
+        { id: 'gpw_1', status: 'settled' },
+      ]);
+      await expect(start(h)).rejects.toThrow(/refused by the payment provider/);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text).toMatch(/was REFUNDED RM 50/);
     });
 
     // #747's 501 is exact (path + status + text) and means nothing was
