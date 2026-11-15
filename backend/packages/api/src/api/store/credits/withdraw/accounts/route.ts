@@ -4,7 +4,6 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
-  accountNumberForms,
   findBank,
   sandboxOnlyBank,
   savedAccountSlot,
@@ -31,11 +30,8 @@ import {
   ONE_TNG_ACCOUNT_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   SHARED_SAVE_MESSAGE,
-  blocksNewSave,
   holderConfirmMismatch,
   holderNameInvalid,
-  holderUnlikeSaved,
-  savedSlotFull,
   newSavedBankAccount,
   normalizeHolderName,
   parseSavedBankAccounts,
@@ -44,7 +40,11 @@ import {
   verifiedBankAccounts,
   type SavedBankAccount,
 } from '../../../../../modules/packs/saved-accounts';
-import { savedListHeld } from '../../../../../modules/packs/payout-destination';
+import {
+  saveVerdict,
+  savedListHeld,
+  type NumberStanding,
+} from '../../../../../modules/packs/payout-destination';
 import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-account-notice';
 import {
   channelStatus,
@@ -300,14 +300,10 @@ export async function POST(
     );
   }
   const packs = resolvePacks<CustomerWallet>(req.scope);
-  // A PayNow mobile is one number with or without its 65 (accountNumberForms).
-  const numbers = accountNumberForms(bankCode, accountNumber);
-  const banned = await Promise.all(
-    numbers.map((n) =>
-      packs.payoutAccountBanned(n, bank.wallet !== undefined, customerId),
-    ),
-  );
-  if (banned.some(Boolean)) {
+  // Every spelling (a PayNow mobile with or without its 65), at this bank.
+  const destination = { bankCode, accountNumber };
+  const number = await packs.payoutNumberStanding(customerId, destination);
+  if (number.bannedForPlayer) {
     req.scope
       .resolve('logger')
       .warn(
@@ -320,9 +316,11 @@ export async function POST(
   }
   // Compared by its letters (holderNameKey, on both sides in the query), so
   // a name dressed up with digits, accents or small capitals is the plain one.
-  const nameLinked = async () =>
-    !bank.wallet &&
-    (await packs.holderNameHeldByAnother(customerId, account.accountHolderName));
+  // A wallet has no holder name.
+  const nameNow = async () =>
+    bank.wallet
+      ? null
+      : await packs.payoutNameStanding(customerId, account.accountHolderName);
   const refuseLinkedName = (): never => {
     // Logged like a shared number, so a run of probes shows up. No name: PII.
     req.scope
@@ -335,7 +333,8 @@ export async function POST(
       HOLDER_NAME_LINKED_MESSAGE,
     );
   };
-  if (await nameLinked()) refuseLinkedName();
+  const name = await nameNow();
+  if (name && name.blocking.length > 0) refuseLinkedName();
 
   // Looked up before the lock (it reads OTHER customers, which this
   // customer's metadata lock does not cover) but applied inside it, where
@@ -348,21 +347,14 @@ export async function POST(
   // saves someone's number first locks the owner out until support acts; support
   // is the answer to that (ADR 0015). Support's verification lifts a payout hold
   // on a number already saved; it never lets a new one in.
-  const numberHeld = async () =>
-    blocksNewSave(
-      (
-        await Promise.all(
-          numbers.map((n) =>
-            packs.otherPayoutAccountHolders(
-              customerId,
-              n,
-              bank.wallet !== undefined,
-            ),
-          ),
-        )
-      ).flat(),
-      bankCode,
-    );
+  const verdict = (s: NumberStanding, accounts: SavedBankAccount[]) =>
+    saveVerdict({
+      number: s,
+      name,
+      saved: accounts,
+      accountId: account.id,
+      holderName: account.accountHolderName,
+    });
   const refuseShared = (): never => {
     // The refusal tells the customer the number is linked elsewhere; log it so
     // repeated probing for linked numbers shows up. Last 4 only.
@@ -373,18 +365,18 @@ export async function POST(
       );
     throw new MedusaError(MedusaError.Types.NOT_ALLOWED, SHARED_SAVE_MESSAGE);
   };
-  const shared = await numberHeld();
 
   // The cap is checked against the list read INSIDE the lock, not against one
   // this handler read earlier — otherwise two concurrent saves could both see
   // MAX-1 accounts and both be allowed through.
   let added = false;
   const saved = await mutateAccounts(req, customerId, (accounts) => {
+    const { alreadySaved, blocks } = verdict(number, accounts);
     // Already theirs: nothing to do. A saved account cannot be changed, its
     // holder name included, and keeps its original savedAt, so a re-save restarts
     // no cooling-off window and arms no old row.
-    if (accounts.some((a) => a.id === account.id)) return null;
-    if (savedSlotFull(accounts, bankCode)) {
+    if (alreadySaved) return null;
+    if (blocks.includes('slot_full')) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         savedAccountSlot(bankCode) === 'TNG'
@@ -393,7 +385,7 @@ export async function POST(
       );
     }
     // One name on every bank (holderUnlikeSaved).
-    if (holderUnlikeSaved(accounts, bankCode, account.accountHolderName)) {
+    if (blocks.includes('name_unlike_saved')) {
       // Logged like the other refusals, so repeated tries show up. No name.
       req.scope
         .resolve('logger')
@@ -405,7 +397,7 @@ export async function POST(
         HOLDER_NAME_DIFFERENT_MESSAGE,
       );
     }
-    if (shared) refuseShared();
+    if (blocks.includes('shared')) refuseShared();
     added = true;
     return [...accounts, account];
   });
@@ -414,8 +406,14 @@ export async function POST(
   // both pass them. Look again now the save is visible: a racer takes its entry
   // back off. Both racers may, and the next try is serial.
   if (added) {
-    const linked = await nameLinked();
-    if (linked || (await numberHeld())) {
+    const linked = ((await nameNow())?.blocking.length ?? 0) > 0;
+    if (
+      linked ||
+      verdict(
+        await packs.payoutNumberStanding(customerId, destination),
+        [],
+      ).blocks.includes('shared')
+    ) {
       await mutateAccounts(req, customerId, (accounts) =>
         accounts.filter((a) => a.id !== account.id),
       );
