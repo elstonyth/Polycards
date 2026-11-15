@@ -84,11 +84,14 @@ export async function GET(
     );
   }
 
-  // Keyed by the query as sent (not the computed window, which moves with now).
+  // Keyed by the window actually used: its start (each preset starts on a MYT
+  // day or month boundary, so the key turns over when the period does) and,
+  // for custom, the requested end day. A preset ignores from/to, so they never
+  // make a new key.
   const key = [
     range,
-    str(req.query.from) ?? '',
-    str(req.query.to) ?? '',
+    windows ? windows.current.from.toISOString() : 'all',
+    range === 'custom' ? (str(req.query.to) ?? '') : '',
     scope,
   ].join('|');
   const body = await cached(key, async () => {

@@ -1,4 +1,4 @@
-import { cached } from '../cache';
+import { cached, MAX_ENTRIES } from '../cache';
 
 describe('P&L report cache', () => {
   it('shares one run between concurrent requests for the same query', async () => {
@@ -36,5 +36,38 @@ describe('P&L report cache', () => {
       ),
     ).rejects.toThrow('db down');
     await expect(cached('k3', async () => 'ok', 1)).resolves.toBe('ok');
+  });
+
+  it('never sweeps a run still going, so a later request waits on it', async () => {
+    let runs = 0;
+    let finish: (v: unknown) => void = () => {};
+    const build = () => {
+      runs++;
+      return new Promise((r) => {
+        finish = r;
+      });
+    };
+    const first = cached('k4', build, 0);
+    const later = cached('k4', build, 10 * 60_000);
+    expect(later).toBe(first);
+    expect(runs).toBe(1);
+    finish('done');
+    await expect(later).resolves.toBe('done');
+  });
+
+  it(`keeps at most ${MAX_ENTRIES} results, dropping the oldest settled first`, async () => {
+    for (let i = 0; i < MAX_ENTRIES; i++)
+      await cached(`b${i}`, async () => i, 1);
+    await cached('b-new', async () => 'new', 2);
+    let rebuilt = false;
+    await cached(
+      'b0',
+      async () => {
+        rebuilt = true;
+        return 0;
+      },
+      3,
+    );
+    expect(rebuilt).toBe(true);
   });
 });
