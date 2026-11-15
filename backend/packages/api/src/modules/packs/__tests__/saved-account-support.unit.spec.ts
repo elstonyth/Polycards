@@ -296,6 +296,7 @@ describe('setHolderNameCleared', () => {
   const withHolders = (
     metadata: Record<string, unknown>,
     holders: string[] = ['cus_2'],
+    disabledReason: string | null = null,
   ) => {
     const made = fakeService(metadata);
     Object.assign(made.svc, {
@@ -303,9 +304,47 @@ describe('setHolderNameCleared', () => {
         holders,
         blocking: holders,
       })),
+      listCustomerAccountStates: jest.fn(async () =>
+        disabledReason === null ? [] : [{ disabled_reason: disabledReason }],
+      ),
     });
     return made;
   };
+
+  it('refuses a name shorter than 2 or longer than 120 characters', async () => {
+    for (const holderName of ['T', 'T'.repeat(121)]) {
+      const { svc, writes, ctx } = withHolders({});
+      await expect(
+        svc.setHolderNameCleared({ ...input, holderName }, ctx),
+      ).rejects.toThrow(/2–120 characters/);
+      expect(writes).toEqual([]);
+    }
+  });
+
+  it('refuses clearing for a permanently banned player, who may still take one back', async () => {
+    const ban = 'Permanent ban: shared bank account (owner, 2026-11-03)';
+    const banned = withHolders({}, ['cus_2'], ban);
+    await expect(banned.svc.setHolderNameCleared(input, banned.ctx)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/permanently banned: lift the ban first/),
+    });
+    expect(banned.writes).toEqual([]);
+    // Staff-disabled for another reason: the clearing goes through.
+    const disabled = withHolders({}, ['cus_2'], 'Disabled by staff');
+    await disabled.svc.setHolderNameCleared(input, disabled.ctx);
+    expect(disabled.writes).toHaveLength(1);
+    const back = withHolders(
+      {
+        holder_name_cleared: {
+          tanahkow: { name: 'Tan Ah Kow', at: STAMP, with: ['cus_2'] },
+        },
+      },
+      ['cus_2'],
+      ban,
+    );
+    await back.svc.setHolderNameCleared({ ...input, cleared: false }, back.ctx);
+    expect(back.writes[0].holder_name_cleared).toBeUndefined();
+  });
 
   it('stamps the name with the accounts holding it now, keeps the rest, audits them', async () => {
     const { svc, writes, audits, ctx } = withHolders({ avatar_url: 'a' });

@@ -444,7 +444,7 @@ describe('POST bank-accounts/name-clash', () => {
   });
 
   it.each([
-    [{ ...body, holder_name: 'x' }, /holder name/],
+    [{ ...body, holder_name: '' }, /English letters/],
     [{ ...body, holder_name: '陈大文' }, /English letters/],
     [{ ...body, cleared: 'yes' }, /true or false/],
     [{ ...body, reason: ' ' }, /reason/],

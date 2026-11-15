@@ -10305,6 +10305,28 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
+    // Checked here for the admin page and the assistant's card alike.
+    if (input.holderName.length < 2 || input.holderName.length > 120) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Enter the holder name (2–120 characters).',
+      );
+    }
+    // An unban wipes every name clearing (liftPermanentBan), so one made while
+    // the player is banned would be lost: the unban comes first.
+    if (input.cleared) {
+      const [state] = await this.listCustomerAccountStates(
+        { customer_id: input.customerId, disabled: true },
+        { select: ['disabled_reason'], take: 1 },
+        sharedContext,
+      );
+      if (state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX)) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          'This player is permanently banned: lift the ban first, then clear the name.',
+        );
+      }
+    }
     const key = holderNameKey(input.holderName);
     await this.refuseIfAuditedSince(
       input.customerId,
