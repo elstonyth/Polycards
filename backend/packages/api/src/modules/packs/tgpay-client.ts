@@ -177,16 +177,21 @@ function rsaSignature(
 }
 
 /**
- * What a refusal means, from the codes above. In this order: switched off,
- * then our empty wallet, then the one text production has shown creates no
- * payout (467 refused payouts by 2026-11-02, none later paid). Undefined
- * leaves a definite refusal as plain 'refused'.
+ * What a refusal means, from the codes above. A lookup's not-found whatever
+ * the HTTP class (the sweeps have always read it so); on a definite refusal,
+ * in this order: switched off, then our empty wallet, then the one text
+ * production has shown creates no payout (467 refused payouts by 2026-11-02,
+ * none later paid). Undefined leaves a definite refusal as plain 'refused'.
  */
 function tgpayResult(
   path: string,
   codes: string[],
   message: string,
+  definite: boolean,
 ): ProviderResult | undefined {
+  if (!definite) {
+    return codes.includes(TGPAY_NOT_FOUND) ? 'not-found' : undefined;
+  }
   if (codes.includes(TGPAY_PAYOUT_DISABLED)) return 'payouts-off';
   if (codes.includes(TGPAY_PAYOUT_FLOAT_EMPTY)) return 'wallet-empty';
   if (
@@ -288,17 +293,15 @@ async function post<T>(
     );
     if (upstreamError) codes.push(TGPAY_UPSTREAM_ERROR);
     const message = `${label} ${path} failed (HTTP ${response.status}): ${detail}`;
-    throw new TgpayError(
-      message,
-      codes,
-      response.status,
-      // 4xx with a JSON body = they parsed us and said no. 5xx, a 4xx wrapping
-      // an upstream server error, and 2xx-without-data are ambiguous: the
-      // request may have been accepted.
+    // 4xx with a JSON body = they parsed us and said no. 5xx, a 4xx wrapping
+    // an upstream server error, and 2xx-without-data are ambiguous: the
+    // request may have been accepted.
+    const definite =
       (response.status >= 400 && response.status < 500 && !upstreamError) ||
-        payoutDisabled,
-      { result: tgpayResult(path, codes, message) },
-    );
+      payoutDisabled;
+    throw new TgpayError(message, codes, response.status, definite, {
+      result: tgpayResult(path, codes, message, definite),
+    });
   }
   return parsed.data;
 }

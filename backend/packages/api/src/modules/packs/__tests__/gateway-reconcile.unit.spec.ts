@@ -339,12 +339,14 @@ describe('classifyRequeryError', () => {
     ).toEqual({ kind: 'not-found' });
   });
 
-  it('never reads a result off an ambiguous error', () => {
+  it('honours a not-found on an ambiguous error too, as the code always was', () => {
     expect(
       classifyRequeryError(
-        new GatewayError('nope', [], 400, false, { result: 'not-found' }),
+        new GatewayError('nope', [], 503, false, { result: 'not-found' }),
       ),
-    ).toEqual({ kind: 'ambiguous' });
+    ).toEqual({ kind: 'not-found' });
+    // An ambiguous error is never 'refused' by default.
+    expect(new GatewayError('nope', [], 503).result).toBeUndefined();
   });
 
   it('treats a 400 with no not-found code as ambiguous, never not-found', () => {

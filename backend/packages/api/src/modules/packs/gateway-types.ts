@@ -43,8 +43,9 @@ export class GatewayError extends Error {
    * ambiguous submit would double-pay if the payout later executes.
    */
   readonly definite: boolean;
-  /** Set on a definite error only ('refused' unless named), never on an
-   *  ambiguous one: no result means unclear, which never moves money. */
+  /** A definite error is at least 'refused'. An ambiguous one carries none,
+   *  except a lookup's 'not-found', which its client names whatever the HTTP
+   *  class. No result means unclear, which never moves money. */
   readonly result: ProviderResult | undefined;
   /** 'wallet-empty' confirmed by a balance read: what the wallet holds. */
   readonly available: number | undefined;
@@ -61,8 +62,8 @@ export class GatewayError extends Error {
     this.codes = codes;
     this.httpStatus = httpStatus;
     this.definite = definite;
-    this.result = definite ? (named.result ?? 'refused') : undefined;
-    this.available = definite ? named.available : undefined;
+    this.result = named.result ?? (definite ? 'refused' : undefined);
+    this.available = named.available;
   }
 
   has(code: string): boolean {

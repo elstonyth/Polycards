@@ -244,9 +244,9 @@ gateway's id), `refunded` with a reason (`payouts-off`, `wallet-empty`,
 `creates-nothing`, `not-sent`, `refused`) or `waiting`, and each caller words
 that answer itself. The reasons are the named results the adapters put on
 `GatewayError.result`, which also carries `not-found` for a lookup. No result
-means unclear, and an unclear answer never moves money: only a refusal known
-to create nothing refunds at once, anything else is checked with the gateway
-first, and what it cannot confirm waits for the sweep.
+means unclear, and an unclear answer never moves money. Payouts switched off
+and a refusal raised before sending refund at once; any other refusal is first
+checked with the gateway, and what it cannot confirm waits for the sweep.
 _Avoid_: reading a gateway's own error codes outside its adapter
 
 **Payout Destination**:

@@ -1560,7 +1560,8 @@ export async function submitHeldWithdrawal(
     gateway: gatewayId,
     config,
     fx: rowFx(row),
-    // The row IS the authoritative destination (see this function's comment).
+    // The row's own destination, never the saved list (see this function's
+    // comment).
     destination: {
       bankCode: row.bank_code,
       accountNumber: row.account_number,
