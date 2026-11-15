@@ -4,6 +4,8 @@ import {
   type LedgerTotals,
 } from '../../../modules/packs/economy';
 import { reasonCashSenSql } from '../../../modules/packs/bonus-credit';
+import { PACK_SALES_CASH } from '../../../modules/packs/money-figures';
+import { mytDaySql } from '../../../modules/packs/myt-window';
 import { EFFECTIVE_GROUP_SQL, type ReportDb, type SqlPart } from '../sql';
 
 export type ReasonCents = { reason: string; cents: string };
@@ -51,7 +53,7 @@ export async function ledgerTotalsByDay(
   filter: SqlPart,
 ): Promise<Array<{ day: string; totals: LedgerTotals }>> {
   const { rows } = await db.raw<ReasonCents & { day: string }>(
-    "SELECT to_char(ct.created_at AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD') AS day, " +
+    `SELECT ${mytDaySql('ct.created_at')} AS day, ` +
       `ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
       'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
       filter.sql +
@@ -144,9 +146,9 @@ export async function packSales(
     'SELECT COALESCE((SELECT p.pack_id FROM pull p WHERE p.open_id = ct.source_transaction_id ' +
       'AND p.deleted_at IS NULL LIMIT 1), (SELECT s.pack_id FROM ticket_spin s ' +
       'WHERE s.open_id = ct.source_transaction_id AND s.deleted_at IS NULL LIMIT 1)) AS pack_id, ' +
-      `COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
+      `COALESCE(SUM(${PACK_SALES_CASH.sen('ct.')}), 0)::bigint AS cents ` +
       'FROM credit_transaction ct ' +
-      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open'" +
+      `WHERE ct.deleted_at IS NULL AND ${PACK_SALES_CASH.where('ct.')}` +
       ledger.sql +
       ' GROUP BY 1',
     ledger.params,
@@ -165,8 +167,8 @@ export async function packSales(
   const bySlug = new Map<string, { opened: number; cents: number }>();
   let unattributedCents = 0;
   for (const r of revenue.rows) {
-    // Ledger rows are negative for a charge; revenue reads positive.
-    const cents = -Number(r.cents);
+    // PACK_SALES_CASH reads a charge positive (the ledger row is negative).
+    const cents = Number(r.cents);
     if (r.pack_id === null) unattributedCents += cents;
     else bySlug.set(r.pack_id, { opened: 0, cents });
   }
