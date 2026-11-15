@@ -88,6 +88,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await em().execute(
         'create table if not exists "customer" ("id" text primary key, "metadata" jsonb, "updated_at" timestamptz null, "deleted_at" timestamptz null)',
       );
+      // The ban list is raw SQL too (Migration20261103230000): the holder
+      // lookup's standing reads it.
+      await em().execute(
+        'create table if not exists "banned_payout_account" ("account_key" text not null primary key, "bank_code" text null, "reason" text null, "created_at" timestamptz not null default now())',
+      );
       await em().execute('delete from "customer"');
       const put = (id: string, metadata: Record<string, unknown>) =>
         em().execute(
@@ -263,21 +268,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const before = await rows();
       // On the class: the container hands out a wrapped service.
       const proto = PacksModuleService.prototype;
-      const real = proto.otherPayoutAccountHolders;
+      const real = proto.payoutNumberStanding;
       let calls = 0;
       const spy = jest
-        .spyOn(proto, 'otherPayoutAccountHolders')
-        .mockImplementation(function (this: PacksModuleService, ...args) {
+        .spyOn(proto, 'payoutNumberStanding')
+        .mockImplementation(async function (
+          this: PacksModuleService,
+          ...args
+        ) {
+          const standing = await real.apply(this, args);
           // The second look still sees a holder: a racer saved it meanwhile.
           return ++calls === 2
-            ? Promise.resolve([
-                {
-                  customer_id: 'cus_twin',
-                  bank_code: 'MBBEMYKL',
-                  holder_name: null,
-                },
-              ])
-            : real.apply(this, args);
+            ? {
+                ...standing,
+                holders: [
+                  { customerId: 'cus_twin', paid: true, verified: false },
+                ],
+              }
+            : standing;
         });
       await expect(
         service.freePayoutAccount({

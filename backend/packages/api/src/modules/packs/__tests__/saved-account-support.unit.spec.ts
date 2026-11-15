@@ -404,7 +404,10 @@ describe('setHolderNameCleared', () => {
   ) => {
     const made = fakeService(metadata);
     Object.assign(made.svc, {
-      holderNameHolders: jest.fn(async () => holders),
+      payoutNameStanding: jest.fn(async () => ({
+        holders,
+        blocking: holders,
+      })),
     });
     return made;
   };
@@ -412,7 +415,7 @@ describe('setHolderNameCleared', () => {
   it('stamps the name with the accounts holding it now, keeps the rest, audits them', async () => {
     const { svc, writes, audits, ctx } = withHolders({ avatar_url: 'a' });
     await svc.setHolderNameCleared(input, ctx);
-    expect(svc.holderNameHolders).toHaveBeenCalledWith(
+    expect(svc.payoutNameStanding).toHaveBeenCalledWith(
       'cus_1',
       'Tan Ah Kow',
       ctx,
@@ -549,14 +552,21 @@ describe('freePayoutAccount', () => {
         return base(query, params);
       },
     );
+    // Each look at who holds it, at this bank (the bank scope is the
+    // standing's: payout-destination.integration.spec).
     Object.assign(made.svc, {
-      otherPayoutAccountHolders: jest.fn(async () =>
-        (rounds[round++] ?? []).flatMap((customer_id) => [
-          { customer_id, bank_code: 'MBBEMYKL', holder_name: null },
-          // The same digits at another bank: someone else's account.
-          { customer_id: 'cus_9', bank_code: 'PBBEMYKL', holder_name: null },
-        ]),
-      ),
+      payoutNumberStanding: jest.fn(async () => ({
+        bankId: 'MBBEMYKL',
+        key: KEY,
+        forms: [KEY],
+        banned: false,
+        bannedForPlayer: false,
+        holders: (rounds[round++] ?? []).map((customerId) => ({
+          customerId,
+          paid: true,
+          verified: false,
+        })),
+      })),
     });
     return { ...made, cut };
   };
@@ -619,6 +629,13 @@ describe('freePayoutAccount', () => {
     const { svc, ctx } = freeing({ holders: [['cus_2'], ['cus_2']] });
     await expect(svc.freePayoutAccount(input, ctx)).rejects.toThrow(
       /still held by another account/,
+    );
+    // Both looks on the freeing transaction.
+    expect(svc.payoutNumberStanding).toHaveBeenNthCalledWith(
+      2,
+      'cus_1',
+      { bankCode: 'MBBEMYKL', accountNumber: KEY },
+      ctx,
     );
   });
 

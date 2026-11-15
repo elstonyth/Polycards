@@ -68,6 +68,7 @@ import {
   holderNameKeySql,
   nameStanding,
   numberStanding,
+  spellings,
   type NameStanding,
   type NumberStanding,
   type PayoutNumber,
@@ -10317,11 +10318,13 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     const holders = input.cleared
-      ? await this.holderNameHolders(
-          input.customerId,
-          input.holderName,
-          sharedContext,
-        )
+      ? (
+          await this.payoutNameStanding(
+            input.customerId,
+            input.holderName,
+            sharedContext,
+          )
+        ).holders
       : [];
     if (input.cleared && holders.length === 0) {
       throw new MedusaError(
@@ -10644,27 +10647,22 @@ class PacksModuleService extends MedusaService({
     }
     // A PayNow mobile is one number with or without its 65, as bank_save_check
     // and the ban list read it: holders, payouts and saved entries under both.
-    const forms = accountNumberForms(bank.id, key);
+    const forms = spellings(bank.id, key);
     await this.refuseIfAuditedSince(
       input.customerId,
       input.since,
       (a) => 'held_by' in a && auditNamesNumber(a, a.account_last4, forms),
       sharedContext,
     );
-    const holders = async () => {
-      const ids = new Set<string>();
-      for (const form of forms) {
-        for (const id of await this.payoutAccountHoldersAt(
+    // On this transaction: the re-check below sees this one's own writes.
+    const holders = async () =>
+      (
+        await this.payoutNumberStanding(
           input.customerId,
-          form,
-          bank.id,
+          { bankCode: bank.id, accountNumber: key },
           sharedContext,
-        )) {
-          ids.add(id);
-        }
-      }
-      return [...ids];
-    };
+        )
+      ).holders.map((h) => h.customerId);
     const before = await holders();
     if (before.length === 0) {
       throw new MedusaError(
@@ -10815,9 +10813,9 @@ class PacksModuleService extends MedusaService({
       own.map((n) => [n.account_key, n.bank_code]),
     );
     // A PayNow mobile is banned with or without its 65, as the withdrawal
-    // check reads it (accountNumberForms), so the list asks for both.
+    // check reads it (spellings), so the list asks for both.
     for (const n of own) {
-      for (const form of accountNumberForms(n.bank_code, n.account_key)) {
+      for (const form of spellings(n.bank_code, n.account_key)) {
         if (!byKey.has(form)) byKey.set(form, n.bank_code);
       }
     }
