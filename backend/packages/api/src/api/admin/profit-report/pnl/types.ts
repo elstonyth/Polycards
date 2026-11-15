@@ -1,14 +1,14 @@
 // The JSON body of GET /admin/profit-report/pnl, written once (ADR 0017): the
 // handler is checked against it and the admin imports it as
 // `@acme/api/admin/profit-report/pnl`. Types only: the admin typecheck reads
-// this file and everything it imports, so import only from pure modules,
-// never service.ts. Amounts are integer sen; dates are ISO strings, as sent.
+// this file and everything it imports, so import only the small modules that
+// work out the shape, never service.ts. Amounts are integer sen; dates are ISO
+// strings, as sent.
 import type { STATS_RANGES } from '../../../../modules/packs/myt-window';
 import type { CustomerScope } from '../../../../modules/packs/real-customers';
 import type {
   CogsFigures,
   CogsSection,
-  FreeSource,
   PackFigures,
   PackSalesSection,
   PackTree,
@@ -17,20 +17,19 @@ import type {
   TotalsSection,
 } from '../../../../modules/packs/pnl';
 import type {
-  CapsuleFigures,
   CoinFlipSection,
   Count,
   LuckyDrawSection,
 } from '../../../../modules/packs/pnl-games';
 import type {
   CardSource,
+  CashRewardSource,
   CreditSource,
   MarketingSection,
 } from '../../../../modules/packs/pnl-marketing';
 import type {
   AssetsSection,
   BonusSource,
-  CardsLine,
   FloatingSection,
 } from '../../../../modules/packs/pnl-balance';
 
@@ -62,15 +61,13 @@ export type PnlReport = {
 export type {
   AssetsSection as PnlAssetsSection,
   BonusSource as PnlBonusSource,
-  CapsuleFigures as PnlCapsuleFigures,
   CardSource as PnlCardSource,
-  CardsLine as PnlCardsLine,
+  CashRewardSource as PnlCashRewardSource,
   CogsFigures as PnlCogsFigures,
   CoinFlipSection as PnlCoinFlipSection,
   Count as PnlCount,
   CreditSource as PnlCreditSource,
   FloatingSection as PnlFloatingSection,
-  FreeSource as PnlFreeSource,
   LuckyDrawSection as PnlLuckyDrawSection,
   MarketingSection as PnlMarketing,
   PackFigures as PnlPackFigures,

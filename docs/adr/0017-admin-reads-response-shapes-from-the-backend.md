@@ -17,9 +17,13 @@ the other areas move one at a time, the most-changed first.
   in the api package's `exports` (`./admin/*` → `./src/api/admin/*/types.ts`).
   It has no runtime target, so a value import through it fails the admin build,
   and backend code cannot reach the admin bundle that way.
-- **The admin typecheck reads that file and everything it imports**, so a
-  `types.ts` imports only pure modules, never `service.ts`. CI runs the admin
-  typecheck in the backend build (`tsc -b` before `vite build`).
+- **The admin typecheck reads that file and everything it imports**, under the
+  admin's tsconfig, so a `types.ts` imports only the small modules that work out
+  the shape, never `service.ts`. (Some of those still import
+  `@medusajs/framework`, which resolves from `packages/api`.) The admin's
+  tsconfig is stricter (`strict`, `noUnusedLocals`, no node types), so a backend
+  edit that passes the api typecheck can still fail the admin build. CI runs the
+  admin typecheck in the backend build (`tsc -b` before `vite build`).
 - **The shape is the JSON on the wire.** Dates are ISO strings; a handler that
   holds a `Date` sends `.toISOString()`, the same bytes `res.json` already sent.
 - **The admin's fetchers stay.** `admin-rest.ts` keeps `getJson` and

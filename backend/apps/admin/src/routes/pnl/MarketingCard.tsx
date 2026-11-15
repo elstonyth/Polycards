@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Container, Heading, Table, Text } from '@medusajs/ui';
 import type {
   PnlCardSource,
+  PnlCashRewardSource,
   PnlCreditSource,
   PnlMarketing,
   PnlPair,
@@ -27,8 +28,15 @@ const CARD_ORDER: Record<PnlCardSource, true> = {
   task: true,
   weekly_challenge: true,
 };
+const CASH_ORDER: Record<PnlCashRewardSource, true> = {
+  checkin: true,
+  task: true,
+  weekly_challenge: true,
+  other: true,
+};
 const PNL_CREDIT_SOURCES = Object.keys(CREDIT_ORDER) as PnlCreditSource[];
 const PNL_CARD_SOURCES = Object.keys(CARD_ORDER) as PnlCardSource[];
+const PNL_CASH_SOURCES = Object.keys(CASH_ORDER) as PnlCashRewardSource[];
 
 const shows = (p: PnlPair) =>
   p.current_sen !== 0 || (p.previous_sen ?? 0) !== 0;
@@ -61,16 +69,13 @@ export const MarketingCard = ({ data }: { data: PnlMarketing }) => {
       (s) =>
         (s !== 'returned' && s !== 'lucky_draw' && s !== 'other') ||
         shows(data.credit_used.by_source[s]),
-    ).map(
-      (s): Line => ({
-        key: `used-${s}`,
-        label:
-          s === 'lucky_draw' ? t('pnl.marketing.luckyDrawUsed') : source(s),
-        pair: data.credit_used.by_source[s],
-        kind: 'item',
-        muted: s === 'lucky_draw',
-      }),
-    ),
+    ).map((s): Line => ({
+      key: `used-${s}`,
+      label: s === 'lucky_draw' ? t('pnl.marketing.luckyDrawUsed') : source(s),
+      pair: data.credit_used.by_source[s],
+      kind: 'item',
+      muted: s === 'lucky_draw',
+    })),
     ...(shows(data.credit_used.returned_back)
       ? [
           {
@@ -148,14 +153,14 @@ export const MarketingCard = ({ data }: { data: PnlMarketing }) => {
             pair: data.cash_rewards.total,
             kind: 'group' as const,
           },
-          ...(['checkin', 'task', 'weekly_challenge', 'other'] as const)
-            .filter((s) => shows(data.cash_rewards.by_source[s]))
-            .map((s) => ({
-              key: `cash-${s}`,
-              label: t(`pnl.marketing.cashSource.${s}`),
-              pair: data.cash_rewards.by_source[s],
-              kind: 'item' as const,
-            })),
+          ...PNL_CASH_SOURCES.filter((s) =>
+            shows(data.cash_rewards.by_source[s]),
+          ).map((s) => ({
+            key: `cash-${s}`,
+            label: t(`pnl.marketing.cashSource.${s}`),
+            pair: data.cash_rewards.by_source[s],
+            kind: 'item' as const,
+          })),
         ]
       : []),
     {

@@ -95,15 +95,18 @@ export const AssetsCard = ({ data }: { data: PnlAssetsSection }) => {
   );
 };
 
-const SOURCES: PnlBonusSource[] = [
-  'adjustment',
-  'checkin',
-  'task',
-  'weekly_challenge',
-  'returned',
-  'lucky_draw',
-  'other',
-];
+// Display order (key order), keyed by the backend's union so a source added or
+// dropped there fails this typecheck (ADR 0017).
+const SOURCE_ORDER: Record<PnlBonusSource, true> = {
+  adjustment: true,
+  checkin: true,
+  task: true,
+  weekly_challenge: true,
+  returned: true,
+  lucky_draw: true,
+  other: true,
+};
+const SOURCES = Object.keys(SOURCE_ORDER) as PnlBonusSource[];
 
 /** Customer floating money as of now (P&L spec §10): wallets (withdrawable,
  *  unused free credit by source, locked cash) + cards at buyback value. */
@@ -136,13 +139,11 @@ export const FloatingMoneyCard = ({ data }: { data: PnlFloatingSection }) => {
             (s) =>
               (s !== 'lucky_draw' && s !== 'other') ||
               wallet.free_credit_by_source[s] !== 0,
-          ).map(
-            (s): Line => ({
-              label: t(`pnl.floating.sources.${s}`),
-              sen: wallet.free_credit_by_source[s],
-              depth: 2,
-            }),
-          ),
+          ).map((s): Line => ({
+            label: t(`pnl.floating.sources.${s}`),
+            sen: wallet.free_credit_by_source[s],
+            depth: 2,
+          })),
           {
             label: t('pnl.floating.locked'),
             sen: wallet.locked_sen,
