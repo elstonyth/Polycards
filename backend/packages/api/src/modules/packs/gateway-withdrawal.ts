@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
 import { resolvePacks, type GatewayWithdrawals } from './facets';
 import {
@@ -24,31 +23,16 @@ import {
   paymentGateway,
   resolveActiveGateway,
   rowGateway,
-  submitWithdrawal,
-  getWithdrawalDetail,
-  GatewayError,
-  TGPAY_PAYOUT_DISABLED,
   GATEWAY_IDS,
   isLedgerGateway,
-  TGPAY_PAYOUT_FLOAT_EMPTY,
   checkBalance,
+  payoutFloatNeeded,
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
-import {
-  loadPaymentFxQuote,
-  payoutForWithdrawal,
-  rowFx,
-  type RowFx,
-} from './payment-fx';
-import { classifyRequeryError } from './gateway-reconcile';
+import { loadPaymentFxQuote, payoutForWithdrawal, rowFx } from './payment-fx';
 import { ledgerTrail } from './gateway-audit';
-import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
-import {
-  alertOps,
-  alertPayoutDisabled,
-  alertPayoutFloatEmpty,
-} from './ops-alert';
+import { alertPayoutFloatEmpty } from './ops-alert';
 import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
 import { gatewayEnv, gatewayEnvName } from './gateway-env';
@@ -57,16 +41,38 @@ import { nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
 import { notifyFeed } from './notify-feed';
 import { withdrawalFeedKey } from './feed-events';
 import { sendWithdrawalReceipt } from './withdrawal-receipt';
+import {
+  floatCannotPayAnything,
+  payoutBreaker,
+  redactPayoutText,
+  resetPayoutFloatBreaker,
+  tripPayoutFloatBreaker,
+  unconfirmed,
+  withdrawalSubmit,
+} from './withdrawal-submit';
+import {
+  refundWithdrawal,
+  withdrawalIdempotencyReference,
+  withdrawalRefundReference,
+} from './withdrawal-refund';
+
+export {
+  redactPayoutText,
+  refundWithdrawal,
+  resetPayoutFloatBreaker,
+  withdrawalIdempotencyReference,
+  withdrawalRefundReference,
+};
 
 // The submit half of the gateway payout loop (method WD), the inverse of
 // gateway-deposit.ts with the money ordering flipped:
 //
 //   write the row, its status decided up front ('held' above the approval
 //   threshold, 'pending' at or below it) -> DEBIT the ledger (atomic, floor
-//   0) -> SubmitWithdrawal, SKIPPED entirely when the row was written
-//   'held'. A DEFINITE gateway refusal refunds the debit immediately; an
-//   AMBIGUOUS submit error (timeout, reset — the payout may still execute)
-//   leaves the row pending for the sweep to resolve.
+//   0) -> Withdrawal Submit (withdrawal-submit.ts), SKIPPED entirely when the
+//   row was written 'held'. A definite refusal the gateway confirms refunds
+//   the debit immediately; anything unclear (timeout, reset — the payout may
+//   still execute) leaves the row pending for the sweep to resolve.
 //
 // The debit-before-submit ordering is the security property: real money must
 // never be queued to leave the merchant balance while the customer's site
@@ -90,26 +96,6 @@ import { sendWithdrawalReceipt } from './withdrawal-receipt';
  * live TGPay ceiling is RM 30,000) had no remaining reader and was removed.
  */
 export const GATEWAY_WD_MIN_RM = 50;
-
-/**
- * After TGPay refuses a payout because OUR payout wallet is short
- * (TGPAY_PAYOUT_FLOAT_EMPTY), every payout fails until ops tops it up. For
- * this long, new withdrawals are turned away before anything is written,
- * instead of each tap costing a row, a debit, a doomed submit and a refund
- * (2026-09-29: 19 refused attempts in two hours, 9–10 per customer).
- */
-export const PAYOUT_FLOAT_COOLDOWN_MS = 5 * 60_000;
-// ponytail: per process, and the web service runs 2 instances, so each can
-// still let one refused submit through per window. A shared Valkey key with a
-// TTL is the upgrade if that ever matters. Keyed by gateway: TGPay's empty
-// wallet must not hold back The 7 Pay, the gateway an operator switches to
-// precisely because TGPay's wallet is empty.
-const payoutFloatEmptyUntil = new Map<PaymentGateway, number>();
-
-/** Test seam: module state outlives a test (one jest process, one module). */
-export function resetPayoutFloatBreaker(): void {
-  payoutFloatEmptyUntil.clear();
-}
 
 /**
  * Above this RM figure a withdrawal is HELD for admin approval instead of
@@ -184,27 +170,13 @@ export function regionalPayoutGateways(
 export const RATE_CHANGED_MESSAGE =
   'The exchange rate just changed. Check the new amount and try again.';
 
+export { payoutFloatNeeded };
+
 /**
  * Is OUR float at a regional gateway short of `gatewayAmount`? A3Pay's
  * balance read is cheap and read-only; a failed read is NOT short (the submit
  * still decides), so a balance-endpoint outage never blocks payouts.
  */
-/**
- * What a payout of `gatewayAmount` takes from OUR float: the amount PLUS the
- * gateway's own fee (percent and flat), rounded up to the cent, since an
- * amount that passed on its own could still be refused.
- */
-export function payoutFloatNeeded(
-  gateway: PaymentGateway,
-  gatewayAmount: number,
-): number {
-  const { payoutFeePercent = 0, payoutFlatFee = 0 } = GATEWAYS[gateway] ?? {};
-  return (
-    Math.ceil(gatewayAmount * (100 + payoutFeePercent) - 1e-6) / 100 +
-    payoutFlatFee
-  );
-}
-
 async function regionalFloatShort(
   config: GatewayConfig,
   gatewayAmount: number,
@@ -219,42 +191,6 @@ async function regionalFloatShort(
   } catch {
     return null;
   }
-}
-
-/**
- * Does a payout refusal mean OUR float is short? TGPay says so with a platform
- * code. A3Pay only in its message text, which may also carry what the
- * customer typed, so its hint must be confirmed by a balance read before it
- * may count: a customer-specific refusal that happens to say "insufficient"
- * must not close payouts for everyone. `trip` follows the pre-checks' rule
- * (floatCannotPayAnything): short for THIS amount alone refuses this payout
- * without closing the gateway.
- */
-async function floatEmptyRefusal(
-  error: GatewayError,
-  gateway: PaymentGateway,
-  config: GatewayConfig,
-  gatewayAmount: number | null,
-): Promise<{ trip: boolean } | null> {
-  if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) return { trip: true };
-  if (!error.has(A3PAY_PAYOUT_FLOAT_EMPTY) || gatewayAmount === null)
-    return null;
-  const short = await regionalFloatShort(config, gatewayAmount);
-  return short ? { trip: floatCannotPayAnything(gateway, short) } : null;
-}
-
-/**
- * Trip the gateway-wide breaker only when the float cannot pay ANY payout
- * (below the gateway's own minimum). One request larger than the float is
- * refused on its own; it must not close withdrawals for every customer.
- */
-function floatCannotPayAnything(
-  gateway: PaymentGateway,
-  short: { available: number },
-): boolean {
-  return (
-    short.available < (GATEWAYS[gateway].currencyLimits?.withdrawalMin ?? 0)
-  );
 }
 
 /**
@@ -328,37 +264,6 @@ export function withdrawalsPausedMessage(until: number): string {
   return `Withdrawals are paused until ${at}. Please try again after ${at}.`;
 }
 
-/**
- * Idempotency anchor for the DEBIT row. Deterministic from (customer, our
- * reference) so a retried submit can never debit twice. Prefixed to stay
- * disjoint from every other anchor family in the ledger.
- */
-export function withdrawalIdempotencyReference(
-  customerId: string,
-  merchantTransactionId: string,
-): string {
-  const digest = createHash('sha256')
-    .update(JSON.stringify({ customerId, merchantTransactionId }))
-    .digest('hex');
-  return `wd:${digest}`;
-}
-
-/**
- * Idempotency anchor for the REFUND row of a failed payout. Derived from the
- * same inputs but a different prefix: however many times a failure is
- * observed (submit error, callback status 5, requery status 5 — any mix),
- * exactly one refund is appended.
- */
-export function withdrawalRefundReference(
-  customerId: string,
-  merchantTransactionId: string,
-): string {
-  const digest = createHash('sha256')
-    .update(JSON.stringify({ customerId, merchantTransactionId }))
-    .digest('hex');
-  return `wd-refund:${digest}`;
-}
-
 /** A card-number hint, not proof: 16 digits with Visa/Mastercard prefix and Luhn. */
 function looksLikeCardNumber(digits: string): boolean {
   if (!/^[0-9]{16}$/.test(digits)) return false;
@@ -430,86 +335,6 @@ export function withdrawalDetailsError(input: {
     return 'Enter the account holder name exactly as the bank has it.';
   }
   return null;
-}
-
-/**
- * The one place a gateway refusal is turned into a `failure_reason` string
- * (plan 095). Two callers build this — the store submit path below and the
- * admin approve route — and they must not drift, because the redaction here is
- * a control, not formatting.
- *
- * WHY REDACT AT ALL, when the log line beside each call site prints the same
- * message unredacted and the row already stores the account number: because
- * the two surfaces are not equivalent. The admin Withdrawals LIST masks
- * `account_number` to `••••1234` and serves the full value only from the
- * separate ./[id]/account route, so an unredacted provider message that echoed
- * a submitted account number would put it back on the list page — undoing the
- * mask through a column nobody thinks of as PII. Logs are a different audience
- * with different access; the database column is the one that renders.
- *
- * `msg` is the gateway's own text and the only field we do not compose, so it
- * is the only one that can carry anything we did not choose. Three rules run
- * over it, and the caller must pass the destination so the last two can:
- *
- *   1. digit sequences of 6+, SEPARATOR-TOLERANT — `1234-5678-9012` and
- *      `1234 5678 9012` are the same account number as `123456789012`, and a
- *      contiguous-only rule (the first version of this) passed the formatted
- *      forms straight through;
- *   2. the exact account number we submitted, for the short accounts rule 1
- *      cannot reach;
- *   3. the holder name we submitted, which carries no digits at all and so was
- *      wholly invisible to a digit rule — `AHMAD BIN ALI` is PII in a way
- *      `PMT10021` is not.
- *
- * The words around the redactions — where the diagnosis lives — survive.
- */
-export function formatGatewayFailureReason(input: {
-  prefix: string;
-  codes: readonly string[];
-  httpStatus: number;
-  bankCode: string;
-  message: string;
-  /** The destination we submitted, so its own value can be redacted out of
-   *  their echo of it. Both callers hold it at the point they build this. */
-  accountNumber: string;
-  accountHolderName: string;
-}): string {
-  const redacted = redactPayoutText(
-    input.message,
-    input.accountNumber,
-    input.accountHolderName,
-  );
-  return (
-    `${input.prefix}: codes=${input.codes.join(',') || 'none'} ` +
-    `httpStatus=${input.httpStatus} bankCode=${input.bankCode} ` +
-    `msg=${redacted}`
-  ).slice(0, 400);
-}
-
-/**
- * The three redaction rules above, for any gateway free text bound for
- * `failure_reason`: formatGatewayFailureReason's refusal message, and the
- * Remark an A3Pay operator types when they fail a payout by hand.
- */
-export function redactPayoutText(
-  message: string,
-  accountNumber: string,
-  accountHolderName: string,
-): string {
-  const escape = (raw: string) => raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  let redacted = message
-    // A digit, then 5+ more digits with an optional single space or hyphen
-    // between each — covers grouped, hyphenated and plain account numbers.
-    .replace(/\d(?:[\s-]?\d){5,}/g, '[redacted]');
-  const account = accountNumber.trim();
-  if (account.length >= 4) {
-    redacted = redacted.replaceAll(account, '[redacted]');
-  }
-  const holder = accountHolderName.trim();
-  if (holder.length >= 3) {
-    redacted = redacted.replace(new RegExp(escape(holder), 'gi'), '[redacted]');
-  }
-  return redacted;
 }
 
 export type StartWithdrawalInput = {
@@ -719,7 +544,7 @@ export async function startWithdrawal(
   // Our payout wallet was short moments ago (see PAYOUT_FLOAT_COOLDOWN_MS).
   // After the replay, so the retry of an in-flight withdrawal still reports
   // it; before any row or debit, so nothing is written for a certain refusal.
-  if (Date.now() < (payoutFloatEmptyUntil.get(gateway) ?? 0)) {
+  if (payoutBreaker(gateway)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Withdrawals are temporarily unavailable on our side — nothing was taken from your balance. Please try again in a few minutes.',
@@ -908,10 +733,7 @@ export async function startWithdrawal(
     const short = await regionalFloatShort(config, fx.gatewayAmount);
     if (short) {
       if (floatCannotPayAnything(gateway, short)) {
-        payoutFloatEmptyUntil.set(
-          gateway,
-          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
-        );
+        tripPayoutFloatBreaker(gateway, 'wallet-empty');
       }
       void alertPayoutFloatEmpty(scope, {
         amount,
@@ -1074,223 +896,138 @@ export async function startWithdrawal(
   // 3) Only now is money allowed to move on their side — and only to the
   // destination the LOCKED resolution returned, never to the precheck's copy.
   const bankCode = debit.destination.bankCode;
-  const accountNumber = debit.destination.accountNumber;
-  const accountHolderName = debit.destination.accountHolderName.trim();
-  let result;
-  try {
-    result = await submitWithdrawal(
-      {
-        merchantTransactionId,
-        merchantClientId: input.customerId,
-        amount,
-        destinationBankCode: bankCode,
-        destinationAccountNumber: accountNumber,
-        destinationAccountHolderName: accountHolderName,
-        notifyUrl,
-        returnUrl: verifyUrl,
-        ipAddress: input.ipAddress,
-        email: input.email,
-        ...(fx ? { gatewayAmount: fx.gatewayAmount } : {}),
-      },
-      config,
-    );
-  } catch (error) {
-    const verdict =
-      error instanceof GatewayError && error.definite
-        ? await judgeRefusal(error, {
-            gateway,
-            config,
-            fx: rowFx(row),
-            gatewayAmount: fx?.gatewayAmount ?? null,
-            merchantTransactionId,
-          })
-        : null;
-    if (error instanceof GatewayError && verdict?.refund) {
-      // The gateway PARSEABLY refused and, asked, holds no such payout.
-      // Refund the debit (idempotent) and close the row.
-      await packs.withdrawCreditsWithLedger({
-        customerId: input.customerId,
-        amount,
-        reason: 'cashout',
-        reference: merchantTransactionId,
-        idempotencyReference: withdrawalRefundReference(
-          input.customerId,
-          merchantTransactionId,
-        ),
-        ledger: {
-          outcome: 'refunded',
-          bankCode: bankCode,
-          accountNumber: accountNumber,
-          gatewayRef: merchantTransactionId,
-        },
-      });
-      // The reason rides along with the close, on the SAME write: a second
-      // round-trip could fail on its own and leave the row closed with nothing
-      // said. `failure_reason` is the durable half of the log line below —
-      // DigitalOcean run logs only cover the current deployment, so on
-      // 2026-08-11 the codes for eight failed production payouts were gone by
-      // the next morning while the rows themselves survived, saying only
-      // 'failed'. Their codes, the HTTP status and the destination BANK CODE,
-      // plus their message with digit runs redacted — see
-      // formatGatewayFailureReason for why this column redacts where the log
-      // beside it does not.
-      await packs.updateGatewayWithdrawals({
-        id: row.id,
-        status: 'failed',
-        failure_reason: formatGatewayFailureReason({
-          prefix: 'submit refused',
-          codes: error.codes,
-          httpStatus: error.httpStatus,
-          bankCode,
-          message: error.message,
-          // The destination we actually submitted — the only values their
-          // message could echo back at us.
-          accountNumber,
-          accountHolderName,
-        }),
-      });
-      // Log their reason before it is flattened into the customer-facing
-      // message below — the sibling deposit branch has done this since
-      // 2026-08-04 and this one never did, so a live payout could refuse with
-      // NOTHING on record: the row stores status 'failed' with no code, and a
-      // definitively-refused submit leaves no transaction at the gateway to
-      // requery. The generic message that reaches the customer ("check the bank
-      // details") is a guess, and an empty merchant payout float (PMT10013)
-      // produces exactly the same words. This line is the only thing that can
-      // tell those apart.
-      //
-      // AFTER the refund and the status update, mirroring the deposit branch.
-      // The try/catch below already covers a logger that THROWS, so ordering is
-      // no longer what protects the money path from that; what it still buys is
-      // protection from a logger that HANGS — a blocked transport or a full
-      // disk — which no catch can rescue. The cost is a real blind spot: if
-      // `withdrawCreditsWithLedger` itself throws, the refusal never reaches the
-      // logs, and a definite refusal whose refund also failed is the incident
-      // you would most want a record of. Accepted, because a hung logger
-      // stranding a refund is worse than a rare unlogged double failure.
-      //
-      // `error.message` carries the diagnosis when `codes` is empty. Safe to
-      // log: their codes and message, the HTTP status, the destination BANK CODE
-      // (the prime suspect when a picker offers a code their payout channel will
-      // not accept), the amount and our own opaque reference. We never ADD the
-      // account number or the holder name — those are the customer's PII — and
-      // never the envelope, which is signed and encrypted. `msg` is the one
-      // field we do not compose: it is the gateway's own text, so if they ever
-      // echo a submitted account number in a validation message it lands here.
-      // Internal logs and a number already in our own database, so the residual
-      // risk is accepted rather than scrubbed.
-      //
-      // Best-effort. Without the catch, a throw from `resolve` or `warn` escapes
-      // in place of the MedusaError below and the customer gets a crash instead
-      // of the one sentence that tells them what to do.
-      try {
-        scope
-          .resolve<{ warn: (message: string) => void }>('logger')
-          .warn(
-            `[payments] withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
-              `httpStatus=${error.httpStatus} definite=${error.definite} ` +
-              `bankCode=${bankCode} amount=${amount} ref=${merchantTransactionId} ` +
-              `msg=${error.message}`,
-          );
-      } catch {
-        // Swallowed deliberately: the logger is the thing that failed, so there
-        // is nothing left to report it with.
-      }
-      // OUR payout wallet at TGPay is short — the customer's details are fine
-      // and retrying cannot help until ops tops it up. On 2026-09-29 the copy
-      // below sent one customer through nine attempts and three bank accounts
-      // or name spellings. Not awaited: the answer must not wait on Telegram.
-      // Payouts switched off at the gateway (TGPAY_PAYOUT_DISABLED) is the
-      // same situation for the customer, so it shares the breaker and copy;
-      // only the ops alert names the different fix.
-      if (verdict.payoutDisabled || verdict.floatEmpty) {
-        warnOps(scope, verdict, gateway, {
-          amount,
-          ref: merchantTransactionId,
-          via: 'customer withdrawal',
-        });
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.',
+  const answer = await withdrawalSubmit(scope, {
+    row: {
+      id: row.id,
+      customer_id: input.customerId,
+      merchant_transaction_id: merchantTransactionId,
+      amount,
+    },
+    gateway,
+    config,
+    fx: rowFx(row),
+    destination: debit.destination,
+    notifyUrl,
+    verifyUrl,
+    ipAddress: input.ipAddress,
+    email: input.email,
+    gatewayAmount: fx?.gatewayAmount ?? null,
+    prefix: 'submit refused',
+    via: 'customer withdrawal',
+    // The refusal below is what they read: no receipt email, no feed row.
+    customerOnScreen: true,
+  });
+  if (answer.kind === 'refunded') {
+    const { error } = answer;
+    // Log their reason before it is flattened into the customer-facing
+    // message below — the sibling deposit branch has done this since
+    // 2026-08-04 and this one never did, so a live payout could refuse with
+    // NOTHING on record: the row stores status 'failed' with no code, and a
+    // definitively-refused submit leaves no transaction at the gateway to
+    // requery. The generic message that reaches the customer ("check the bank
+    // details") is a guess, and an empty merchant payout float (PMT10013)
+    // produces exactly the same words. This line, with the row's
+    // failure_reason (plan 095), is what tells those apart.
+    //
+    // AFTER the refund and the status update, mirroring the deposit branch.
+    // The try/catch below already covers a logger that THROWS, so ordering is
+    // no longer what protects the money path from that; what it still buys is
+    // protection from a logger that HANGS — a blocked transport or a full
+    // disk — which no catch can rescue. The cost is a real blind spot: if
+    // the refund itself throws, the refusal never reaches the logs, and a
+    // definite refusal whose refund also failed is the incident you would most
+    // want a record of. Accepted, because a hung logger stranding a refund is
+    // worse than a rare unlogged double failure.
+    //
+    // `error.message` carries the diagnosis when `codes` is empty. Safe to
+    // log: their codes and message, the HTTP status, the destination BANK CODE
+    // (the prime suspect when a picker offers a code their payout channel will
+    // not accept), the amount and our own opaque reference. We never ADD the
+    // account number or the holder name — those are the customer's PII — and
+    // never the envelope, which is signed and encrypted. `msg` is the one
+    // field we do not compose: it is the gateway's own text, so if they ever
+    // echo a submitted account number in a validation message it lands here.
+    // Internal logs and a number already in our own database, so the residual
+    // risk is accepted rather than scrubbed.
+    //
+    // Best-effort. Without the catch, a throw from `resolve` or `warn` escapes
+    // in place of the MedusaError below and the customer gets a crash instead
+    // of the one sentence that tells them what to do.
+    try {
+      scope
+        .resolve<{ warn: (message: string) => void }>('logger')
+        .warn(
+          `[payments] withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
+            `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+            `bankCode=${bankCode} amount=${amount} ref=${merchantTransactionId} ` +
+            `msg=${error.message}`,
         );
-      }
-      // TGPay's Touch 'n Go route refused 97 of 110 payouts in the week to
-      // 2026-10-14, at any amount, with "No payout provider is available for
-      // this order": their routing, not the customer's wallet. Under the
-      // generic copy below, customers retried 10+ times each "checking" correct
-      // details. Banks still pay, so point them there. (TNG is off unless
-      // TNG_PAYOUTS_ENABLED; this matters once it is back on.) Storefront
-      // passes it through on /temporarily unavailable/ (vault-errors.ts).
-      if (
-        findBank(bankCode)?.id === 'TNGMY' &&
-        /no payout provider is available/i.test(error.message)
-      ) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
-        );
-      }
-      // The same refusal for every bank: from 2026-10-20 17:40 TGPay refused
-      // all bank payouts this way (67 refusals, 8+ customers). Under the
-      // generic copy below customers blamed their bank details and retried 4–6
-      // times. Their routing, so say the details are fine and come back later.
-      // Worded to hit the storefront's existing /withdrawals are temporarily
-      // unavailable/ pass-through (vault-errors.ts), so it reads right whichever
-      // deploy lands first.
-      if (/no payout provider is available/i.test(error.message)) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.',
-        );
-      }
-      // Says who refused, and does not instruct the customer to fix something
-      // that may well be correct. The old wording ("check the bank details")
-      // was a guess dressed as a diagnosis: on 2026-08-11 two customers retried
-      // ten times against bank details that were fine — the payout channel was
-      // refusing every attempt — and nobody escalated, because the message read
-      // as their mistake. The refund is stated because it already happened
-      // above, and it is the fact that decides whether they need support at
-      // all.
+    } catch {
+      // Swallowed deliberately: the logger is the thing that failed, so there
+      // is nothing left to report it with.
+    }
+    // OUR payout wallet is short — the customer's details are fine and
+    // retrying cannot help until ops tops it up. On 2026-09-29 the copy below
+    // sent one customer through nine attempts and three bank accounts or name
+    // spellings. Payouts switched off at the gateway is the same situation for
+    // the customer, so it shares the breaker and copy; only the ops alert
+    // names the different fix.
+    if (answer.reason === 'payouts-off' || answer.reason === 'wallet-empty') {
       throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.',
+        MedusaError.Types.NOT_ALLOWED,
+        'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.',
       );
     }
-    if (verdict) {
-      // Refused, but not confirmed: the row stays pending for the sweep. An
-      // empty wallet still closes the gateway to the next customer.
-      warnOps(scope, verdict, gateway, {
-        amount,
-        ref: merchantTransactionId,
-        via: 'customer withdrawal',
-      });
-      // Their id, when they hold it, so their callback finds the row and the
-      // sweep never refunds it on a later "not found"; scoped to 'pending' like
-      // the success write below.
-      const held =
-        error instanceof GatewayError
-          ? heldRefusalFields(verdict, error, {
-              prefix: 'submit refused',
-              bankCode,
-              accountNumber,
-              accountHolderName,
-            })
-          : null;
-      if (held) {
-        await packs.updateGatewayWithdrawals({
-          selector: { id: row.id, status: 'pending' },
-          data: held,
-        });
-      }
+    // TGPay's Touch 'n Go route refused 97 of 110 payouts in the week to
+    // 2026-10-14, at any amount, with "No payout provider is available for
+    // this order": their routing, not the customer's wallet. Under the
+    // generic copy below, customers retried 10+ times each "checking" correct
+    // details. Banks still pay, so point them there. (TNG is off unless
+    // TNG_PAYOUTS_ENABLED; this matters once it is back on.) Storefront
+    // passes it through on /temporarily unavailable/ (vault-errors.ts).
+    if (
+      answer.reason === 'creates-nothing' &&
+      findBank(bankCode)?.id === 'TNGMY'
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
+      );
     }
-    // AMBIGUOUS (timeout, reset, WAF page): the request may have been
-    // accepted with only the response lost — the payout could still execute.
-    // Refunding here would double-pay, so the row stays pending and the
-    // reconcile sweep resolves it: requery success -> settle, failed ->
-    // refund, unknown-and-stale -> refund. The customer sees the same
+    // The same refusal for every bank: from 2026-10-20 17:40 TGPay refused
+    // all bank payouts this way (67 refusals, 8+ customers). Under the
+    // generic copy below customers blamed their bank details and retried 4–6
+    // times. Their routing, so say the details are fine and come back later.
+    // Worded to hit the storefront's existing /withdrawals are temporarily
+    // unavailable/ pass-through (vault-errors.ts), so it reads right whichever
+    // deploy lands first.
+    if (answer.reason === 'creates-nothing') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.',
+      );
+    }
+    // Says who refused, and does not instruct the customer to fix something
+    // that may well be correct. The old wording ("check the bank details")
+    // was a guess dressed as a diagnosis: on 2026-08-11 two customers retried
+    // ten times against bank details that were fine — the payout channel was
+    // refusing every attempt — and nobody escalated, because the message read
+    // as their mistake. The refund is stated because it already happened
+    // above, and it is the fact that decides whether they need support at
+    // all.
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.',
+    );
+  }
+  if (answer.kind === 'waiting') {
+    // AMBIGUOUS (timeout, reset, WAF page), or a refusal the gateway did not
+    // confirm: the payout could still execute, so the row stays pending and
+    // the reconcile sweep resolves it (requery success -> settle, failed ->
+    // refund, unknown-and-stale -> refund). The customer sees the same
     // async-processing state a slow payout produces.
     //
-    // Guarded for the same reason as the branch above, and the stakes here are
+    // Guarded for the same reason as the log above, and the stakes here are
     // higher. This branch must RETURN a pending result; a throw from the logger
     // turns it into a 500, so the customer sees a failure while their balance is
     // already gone and the payout may be in flight. The natural response to that
@@ -1301,370 +1038,24 @@ export async function startWithdrawal(
       scope
         .resolve<{ error: (msg: string) => void }>('logger')
         .error(
-          `[payments] withdrawal ${merchantTransactionId} submit outcome AMBIGUOUS (${unconfirmed(error)}) — left pending for the sweep`,
+          `[payments] withdrawal ${merchantTransactionId} submit outcome AMBIGUOUS (${unconfirmed(answer.error)}) — left pending for the sweep`,
         );
     } catch {
       // Swallowed deliberately: the logger is the thing that failed. The row
       // stays 'pending', so the reconcile sweep still resolves this payout
       // whether or not anyone ever reads about it.
     }
-    return {
-      merchantTransactionId,
-      transactionId: null,
-      amount,
-      balance: debit.balance,
-      // Reached only on the non-held branch — a held row already returned
-      // above, before this submit was ever attempted.
-      status: 'pending',
-      ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
-    };
   }
-
-  // Scoped to 'pending', matching the identical stamp in the callback route
-  // (api/hooks/tgpay/withdrawal/route.ts) and the admin approve route's
-  // own terminal write for this same field: if the sweep resolved this row
-  // while the submit above was still in flight (refunded and closed it
-  // 'failed'), an unscoped write would land a gateway id onto a refunded row
-  // afterwards — the one shape that makes a later reader believe the money
-  // went out. A silent no-op otherwise.
-  await packs.updateGatewayWithdrawals({
-    selector: { id: row.id, status: 'pending' },
-    data: { gateway_transaction_id: result.transactionId },
-  });
-
   return {
     merchantTransactionId,
-    transactionId: result.transactionId,
+    transactionId: answer.kind === 'submitted' ? answer.transactionId : null,
     amount,
     balance: debit.balance,
+    // Reached only on the non-held branch — a held row already returned
+    // above, before this submit was ever attempted.
     status: 'pending',
     ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
   };
-}
-
-/** The ambiguous log's reason: says when a refusal was not confirmed. */
-const unconfirmed = (error: unknown): string =>
-  error instanceof GatewayError && error.definite
-    ? `refusal not confirmed: the gateway holds this payout or could not be asked — ${error.message}`
-    : (error as Error).message;
-
-type RefusalVerdict = {
-  /** The gateway holds no such payout: refund and close the row. */
-  refund: boolean;
-  payoutDisabled: boolean;
-  floatEmpty: boolean;
-  /** Close the gateway to the next customer (see floatCannotPayAnything). */
-  trip: boolean;
-  /** The gateway holds the payout after all: its id, for the pending row. */
-  heldId: string | null;
-  /** Answered "not found", but not by a refusal known to create nothing: left
-   *  pending for the sweep's hour of grace, with the refusal on the row. */
-  unconfirmed: boolean;
-};
-
-/**
- * The one refusal text that production has shown creates no payout: 467 refused
- * payouts by 2026-11-02, none later paid. An empty wallet (`floatEmpty`, read
- * from the wallet itself) and payouts switched off count too. Any other text is
- * not proof: a gateway still writing the payout answers "not found" as well.
- */
-const PROVEN_REFUSAL = /no payout provider is available/i;
-
-/** What keeps a refusal on the row: both callers' write, one rule. The row is
- *  scoped to 'pending', and a row with no gateway id gets this write only in the
- *  same breath as its submit, so the sweep's clock barely moves (see
- *  jobs/withdrawal-reconcile.ts). */
-function heldRefusalFields(
-  verdict: RefusalVerdict,
-  error: GatewayError,
-  input: {
-    /** 'submit refused' | 'approve refused' */
-    prefix: string;
-    bankCode: string;
-    accountNumber: string;
-    accountHolderName: string;
-  },
-): Record<string, string> | null {
-  if (!verdict.heldId && !verdict.unconfirmed) return null;
-  return {
-    ...(verdict.heldId ? { gateway_transaction_id: verdict.heldId } : {}),
-    failure_reason: formatGatewayFailureReason({
-      prefix: `${input.prefix}, ${verdict.heldId ? 'but the gateway holds it' : 'not confirmed: left for the sweep'}`,
-      codes: error.codes,
-      httpStatus: error.httpStatus,
-      bankCode: input.bankCode,
-      message: error.message,
-      accountNumber: input.accountNumber,
-      accountHolderName: input.accountHolderName,
-    }),
-  };
-}
-
-/**
- * Before a refused payout is refunded, ask the gateway whether it holds it
- * anyway. Production 2026-10-14 (PC-286fcc20…): TGPay answered a RM 512.40
- * payout with a refusal-shaped 400 yet had created it. The instant refund let
- * the customer withdraw again, and both payouts stood at TGPay. Only an
- * explicit "not found" (classifyRequeryError), or the gateway holding it as
- * failed, confirms the refusal. A payout it holds, or a lookup that itself
- * fails, leaves the row pending for the sweep: the side that cannot pay
- * twice. Measured on TGPay 2026-10-15: a really refused payout answers 404
- * "Transaction not found", so a genuine refusal still refunds at once.
- *
- * That 404 alone is not proof either: it comes back milliseconds after the
- * submit, while the sweep gives the same answer an hour of grace "for a payout
- * to become visible". So it refunds at once only behind a refusal known to
- * create nothing (PROVEN_REFUSAL). Anything else waits for the sweep: an hour
- * for the customer, where a wrong refund pays them twice.
- *
- * Payouts switched off (TGPAY_PAYOUT_DISABLED) is the one refusal taken at
- * its word: an exact path + 501 + text that means nothing was created
- * (#747). Asking first left such a payout pending for good, since The 7
- * Pay's lookup need not answer while its payouts are off.
- */
-async function judgeRefusal(
-  error: GatewayError,
-  input: {
-    gateway: PaymentGateway;
-    config: GatewayConfig;
-    fx: RowFx;
-    gatewayAmount: number | null;
-    merchantTransactionId: string;
-  },
-): Promise<RefusalVerdict> {
-  const payoutDisabled = error.has(TGPAY_PAYOUT_DISABLED);
-  const floatEmpty = payoutDisabled
-    ? null
-    : await floatEmptyRefusal(
-        error,
-        input.gateway,
-        input.config,
-        input.gatewayAmount,
-      );
-  const kind = {
-    payoutDisabled,
-    floatEmpty: floatEmpty !== null,
-    trip: payoutDisabled || Boolean(floatEmpty?.trip),
-    unconfirmed: false,
-  };
-  if (payoutDisabled) return { ...kind, refund: true, heldId: null };
-  try {
-    const detail = await getWithdrawalDetail(
-      input.merchantTransactionId,
-      input.config,
-      input.fx,
-    );
-    return detail.state === 'failed'
-      ? { ...kind, refund: true, heldId: null }
-      : { ...kind, refund: false, heldId: detail.transactionId || null };
-  } catch (lookupError) {
-    const notFound = classifyRequeryError(lookupError).kind === 'not-found';
-    const proven = kind.floatEmpty || PROVEN_REFUSAL.test(error.message);
-    return {
-      ...kind,
-      refund: notFound && proven,
-      heldId: null,
-      unconfirmed: notFound && !proven,
-    };
-  }
-}
-
-/**
- * An empty payout wallet or payouts switched off: close the gateway to the
- * next customer and tell ops, whether or not this payout was refunded. Not
- * awaited: the answer must not wait on Telegram.
- */
-function warnOps(
-  scope: Parameters<typeof alertPayoutFloatEmpty>[0],
-  verdict: RefusalVerdict,
-  gateway: PaymentGateway,
-  detail: { amount: number; ref: string; via: string },
-): void {
-  if (verdict.trip) {
-    payoutFloatEmptyUntil.set(gateway, Date.now() + PAYOUT_FLOAT_COOLDOWN_MS);
-  }
-  const label = GATEWAYS[gateway].label;
-  if (verdict.payoutDisabled) {
-    void alertPayoutDisabled(scope, { ...detail, gateway: label });
-  } else if (verdict.floatEmpty) {
-    void alertPayoutFloatEmpty(scope, {
-      ...detail,
-      gateway: label,
-      refunded: verdict.refund,
-    });
-  }
-}
-
-/**
- * Refund and close a withdrawal row that will never reach the bank: the
- * reconcile sweep's stale/failed rows, and the admin deny route's denied
- * rows (plan 094 Task 5). Extracted here, the module that already owns the
- * refund's idempotency anchor, so those two paths share ONE copy of this
- * four-step money ordering instead of a second verbatim one that a bug fix
- * could land in without the other ever finding out. The payout callback
- * (api/hooks/tgpay/withdrawal/route.ts) is the third caller; its settle half
- * is applyWithdrawalOutcome below, the mirror of this function.
- *
- * The caller owns two preconditions this function does not re-check:
- *   - a debit actually exists for `withdrawal` — both callers verify this
- *     themselves before calling in (see the guard above each call site). A
- *     held row is NOT exempt: the row is written 'held' at step 1 and
- *     debited at step 2, so "no debit" can mean a genuinely stranded row (a
- *     crash between the two steps) or nothing worse than reaching the guard
- *     before step 2 returned — refunding either mints money if acted on too
- *     soon. The admin routes get that distinction from
- *     packs.claimWithdrawalAgainstDebit, which reads the debit and claims the
- *     row in one transaction holding the customer's `credit:` advisory lock,
- *     so its `debited: false` means no debit will EVER land (see that
- *     method). The sweep's own call site keeps its UNLOCKED read. Not
- *     because a 'pending' row is past its debit — it is not; a
- *     below-threshold row is written 'pending' at step 1 and debited at
- *     step 2, the same two-step shape as a held one — but because of two
- *     other things. First, unknownWithdrawalAction cannot return 'refund'
- *     until the row's updated_at is older than GATEWAY_STALE_AFTER_MS (1h),
- *     so the sweep's destructive branch is unreachable inside the debit
- *     window. Second, if it ever did close a row whose debit was queued
- *     behind the `credit:` lock, withdrawForCashout's step-1a re-read now
- *     refuses to debit a closed row. Narrowed, not closed: routing the
- *     sweep through claimWithdrawalAgainstDebit with from:['pending'] is
- *     the remaining piece, tracked separately;
- *   - the row is still in `fromStatus` — the terminal update below is scoped
- *     to it and is a SILENT NO-OP otherwise, which would leave a committed
- *     refund on a row that never closes. The sweep acts on rows it selected
- *     as 'pending' (the default); the deny route claims 'failed' before
- *     calling in and passes that. Pass the status the row is ACTUALLY in at
- *     call time, not the one it started in.
- */
-export async function refundWithdrawal(
-  scope: { resolve: <T>(key: string) => T },
-  withdrawal: {
-    id: string;
-    customer_id: string;
-    merchant_transaction_id: string;
-    gateway_transaction_id: string | null;
-    amount: unknown;
-    bank_code: string;
-    account_number: string;
-    /** The reason already on the row, if any — a row closed by the gateway
-     *  or the sweep keeps it (see the terminal update below). */
-    failure_reason?: string | null;
-  },
-  gatewayStatus: number | null,
-  fromStatus: 'pending' | 'held' | 'failed' = 'pending',
-  /**
-   * Why this payout is being closed, stored on the row (plan 095). REQUIRED,
-   * though the three callers know three different things: the admin deny route
-   * knows a human said no, the sweep knows what a requery answered, and the
-   * approve route knows the gateway's own codes. It was briefly optional, which
-   * bought an untested "omitted leaves the column alone" branch that no caller
-   * used — a closing writer with nothing to say about why is the state this
-   * whole change exists to abolish, so the type refuses it.
-   */
-  failureReason: string,
-): ReturnType<GatewayWithdrawals['withdrawCreditsWithLedger']> {
-  const packs = resolvePacks<GatewayWithdrawals>(scope);
-  const refund = await packs.withdrawCreditsWithLedger({
-    customerId: withdrawal.customer_id,
-    amount: Number(withdrawal.amount),
-    reason: 'cashout',
-    reference:
-      withdrawal.gateway_transaction_id ?? withdrawal.merchant_transaction_id,
-    idempotencyReference: withdrawalRefundReference(
-      withdrawal.customer_id,
-      withdrawal.merchant_transaction_id,
-    ),
-    ledger: {
-      outcome: 'refunded',
-      bankCode: withdrawal.bank_code,
-      accountNumber: withdrawal.account_number,
-      gatewayRef:
-        withdrawal.gateway_transaction_id ?? withdrawal.merchant_transaction_id,
-    },
-  });
-  // The emailed record — after the refund commit, BEFORE the terminal row
-  // update, outside any !replayed guard: once the row leaves 'pending'
-  // nothing re-runs this branch, so a crash between the update and a later
-  // send would lose the email forever. A crash after this send re-runs the
-  // branch next sweep (the refund replays, the notification module's unique
-  // idempotency_key dedupes the email). Non-throwing.
-  //
-  // That "next sweep retries" recovery belongs to the sweep specifically,
-  // which revisits every row this branch can reach on a fixed schedule. A
-  // 'held' row is never swept (nothing lists it; see the reconcile job's
-  // query and its held-row regression test), so the admin deny route does
-  // NOT get that retry for free: a crash in this exact window leaves the row
-  // stuck short of its terminal update with a committed refund behind it,
-  // and nothing automatic re-drives it. Its re-drive is a human — deny's
-  // claim accepts a 'failed' row precisely so an operator can click Deny
-  // again, which replays this whole sequence (the refund on its anchor, this
-  // send under the notification module's idempotency key) and finishes it.
-  await sendWithdrawalReceipt(scope, {
-    customerId: withdrawal.customer_id,
-    amount: Number(withdrawal.amount),
-    // `||`, not `??` — an empty-string gateway id must fall through to the
-    // merchant reference. Same reasoning as the settle branch's identical
-    // choice in withdrawal-reconcile.ts; the fuller rationale lives
-    // there (it explains that call site too, so it did not move with this
-    // one — extracting the code must not orphan the comment from what else
-    // it covers).
-    reference:
-      withdrawal.gateway_transaction_id || withdrawal.merchant_transaction_id,
-    merchantTransactionId: withdrawal.merchant_transaction_id,
-    outcome: 'refunded',
-  });
-  const closed = await packs.updateGatewayWithdrawals({
-    selector: { id: withdrawal.id, status: fromStatus },
-    data: {
-      status: 'failed',
-      gateway_status: gatewayStatus,
-      // First writer wins. The admin deny route is re-runnable on a 'failed'
-      // row by design, so a mistaken Deny on a row the bank already refused
-      // would otherwise replace the bank's diagnostic with "denied by admin"
-      // — and the deploy's logs have rotated by then (review 2026-09). Same
-      // stance as gateway_status, which deny passes back unchanged.
-      ...(failureReason && !withdrawal.failure_reason
-        ? { failure_reason: failureReason.slice(0, 400) }
-        : {}),
-    },
-  });
-  // The close is scoped to fromStatus. Losing it after the refund committed
-  // is harmless when another refund closed the row first, but not when a
-  // SUCCESS for the same payout claimed it in between (a FAIL and a SUCCESS
-  // racing): the customer is then refunded AND paid, and nothing else says so.
-  if (Array.isArray(closed) && closed.length === 0) {
-    const [row] = await packs.listGatewayWithdrawals(
-      { id: withdrawal.id },
-      { take: 1 },
-    );
-    if (row?.status === 'settled') {
-      void alertOps(
-        scope,
-        `refund-vs-settled:${withdrawal.merchant_transaction_id}`,
-        `Payout ${withdrawal.merchant_transaction_id} (customer ${withdrawal.customer_id}) was REFUNDED RM ${Number(withdrawal.amount)}, but a success for it settled the row at the same moment. If the gateway really paid, the customer has the money twice: check the gateway's record and recover the refund by hand.`,
-      );
-    }
-  }
-  if (!refund.replayed) {
-    try {
-      await notifyFeed(scope, {
-        receiverId: withdrawal.customer_id,
-        template: 'withdrawal_refunded',
-        data: {
-          amount_myr: Number(withdrawal.amount),
-          reference:
-            withdrawal.gateway_transaction_id ??
-            withdrawal.merchant_transaction_id,
-        },
-        idempotencyKey: withdrawalFeedKey(
-          withdrawal.merchant_transaction_id,
-          'refunded',
-        ),
-      });
-    } catch {
-      // Never fail a committed refund over a notification.
-    }
-  }
-  return refund;
 }
 
 /** The columns applyWithdrawalOutcome reads. */
@@ -1713,7 +1104,7 @@ export type WithdrawalSettlement = {
 
 /**
  * Settle and close a withdrawal row the bank actually paid — the OTHER half
- * of refundWithdrawal above, extracted here for the same reason and
+ * of refundWithdrawal (withdrawal-refund.ts), extracted for the same reason and
  * on the same terms: the payout callback and the reconcile sweep each carried
  * a verbatim copy of this three-step ordering, so a fix to it needed two
  * edits and got one.
@@ -1850,17 +1241,17 @@ export type HeldWithdrawalInput = {
  * row, debits the ledger, and returns without calling the gateway when the
  * amount is above the approval threshold. Step 3 happens here.
  *
- * WHY submitting the ROW's stored bank details is not the forbidden precheck
- * copy: startWithdrawal's step-3 comment says money may move "only to the
- * destination the LOCKED resolution returned, never to the precheck's copy" —
- * and this honours that. The row's bank_code / account_number /
- * account_holder_name were written from that same locked resolution inside
- * withdrawForCashout at debit time (its step 2 resolves the destination under
- * the `credit:` advisory lock and returns it to the caller), so the row IS the
- * authoritative destination, not a second unlocked read. It is also the only
- * one that can still be trusted now: re-resolving from the customer's saved
- * accounts at approval time would let a destination edited AFTER the debit
- * redirect a payout the customer already committed to.
+ * WHY this submits the ROW's stored bank details: startWithdrawal wrote them
+ * from its unlocked precheck read, BEFORE the debit, and nothing rewrites them
+ * afterwards. The bank and the number still match what the locked resolution
+ * in withdrawForCashout returned, because a saved account's id is derived
+ * from those two (savedBankAccountId). The holder name may not: a relabel
+ * between the two reads changes it (service.ts). The row is still the only
+ * destination that can be trusted now: re-resolving from the customer's
+ * saved accounts at approval time would let a destination edited AFTER the
+ * debit redirect a payout the customer already committed to. A new
+ * Withdrawal, by contrast, passes Withdrawal Submit the destination locked
+ * at debit.
  *
  * Every call is logged with the row id and the admin actor id, and NEVER the
  * account number.
@@ -1947,6 +1338,19 @@ export async function submitHeldWithdrawal(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'The payout channel is closed — a held withdrawal cannot be approved right now.',
+    );
+  }
+  // The payout breaker (PAYOUT_FLOAT_COOLDOWN_MS) is tripped: a submit now
+  // would be refused and refunded. Before the claim, so the row stays held
+  // for an approval after the fix, which the words name (owner, 2026-11-16).
+  const breaker = payoutBreaker(gatewayId);
+  if (breaker) {
+    const label = GATEWAYS[gatewayId].label;
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      breaker === 'payouts-off'
+        ? `Payouts are switched off on our ${label} account right now, so this withdrawal stays held. Ask ${label} to turn payouts back on, then approve it again.`
+        : `Our ${label} payout wallet is empty right now, so this withdrawal stays held. Top up the payout wallet, then approve it again.`,
     );
   }
   const amount = Number(row.amount);
@@ -2053,10 +1457,7 @@ export async function submitHeldWithdrawal(
     const short = await regionalFloatShort(config, Number(row.gateway_amount));
     if (short) {
       if (floatCannotPayAnything(gatewayId, short)) {
-        payoutFloatEmptyUntil.set(
-          gatewayId,
-          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
-        );
+        tripPayoutFloatBreaker(gatewayId, 'wallet-empty');
       }
       const label = GATEWAYS[gatewayId].label;
       void alertPayoutFloatEmpty(scope, {
@@ -2151,146 +1552,90 @@ export async function submitHeldWithdrawal(
     `[payments] admin ${adminId} APPROVED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${amount} to bank ${row.bank_code}`,
   );
 
-  let result;
-  try {
-    result = await submitWithdrawal(
-      {
-        email,
-        merchantTransactionId: row.merchant_transaction_id,
-        merchantClientId: row.customer_id,
-        // bigNumber column — it arrives as a string, and submitWithdrawal
-        // calls .toFixed(2) on it.
-        amount,
-        destinationBankCode: row.bank_code,
-        destinationAccountNumber: row.account_number,
-        destinationAccountHolderName: row.account_holder_name.trim(),
-        notifyUrl,
-        returnUrl: verifyUrl,
-        ipAddress: input.payerIp,
-        // The quote locked when the customer asked, never today's rate.
-        ...(row.gateway_amount != null
-          ? { gatewayAmount: Number(row.gateway_amount) }
-          : {}),
-      },
-      config,
-    );
-  } catch (error) {
-    // Both branches mirror startWithdrawal's post-#425 shape exactly.
-    // There is no third path: an outcome that is not a PARSED refusal is
-    // ambiguous, and ambiguity must never refund. A refusal the gateway does
-    // not confirm (judgeRefusal) is ambiguous too.
-    const verdict =
-      error instanceof GatewayError && error.definite
-        ? await judgeRefusal(error, {
-            gateway: gatewayId,
-            config,
-            fx: rowFx(row),
-            gatewayAmount:
-              row.gateway_amount != null ? Number(row.gateway_amount) : null,
-            merchantTransactionId: row.merchant_transaction_id,
-          })
-        : null;
-    if (error instanceof GatewayError && verdict?.refund) {
-      // The gateway parseably refused and, asked, holds no such payout.
-      // Refund (idempotent, on the shared anchor) and close the row. The
-      // claim above left it 'pending', which is what the helper's terminal
-      // update must be scoped to — its default.
-      await refundWithdrawal(
-        scope,
-        row,
-        null,
-        'pending',
-        // Same fields as the log line below, kept on the row because the log
-        // itself does not survive the next deployment (plan 095). Built by the
-        // shared formatter so this string and the store path's cannot drift —
-        // and so the digit redaction, which is a control rather than
-        // formatting, applies to both.
-        formatGatewayFailureReason({
-          prefix: 'approve refused',
-          codes: error.codes,
-          httpStatus: error.httpStatus,
-          bankCode: row.bank_code,
-          message: error.message,
-          // The row IS the submitted destination here (see the comment above
-          // the submit call), so these are the exact values their message
-          // could be echoing.
-          accountNumber: row.account_number,
-          accountHolderName: row.account_holder_name,
-        }),
+  const answer = await withdrawalSubmit(scope, {
+    row: {
+      id: row.id,
+      customer_id: row.customer_id,
+      merchant_transaction_id: row.merchant_transaction_id,
+      // bigNumber column — it arrives as a string.
+      amount,
+      failure_reason: row.failure_reason,
+    },
+    gateway: gatewayId,
+    config,
+    fx: rowFx(row),
+    // The row's own destination, never the saved list (see this function's
+    // comment).
+    destination: {
+      bankCode: row.bank_code,
+      accountNumber: row.account_number,
+      accountHolderName: row.account_holder_name,
+    },
+    notifyUrl,
+    verifyUrl,
+    ipAddress: input.payerIp,
+    email,
+    // The quote locked when the customer asked, never today's rate.
+    gatewayAmount:
+      row.gateway_amount != null ? Number(row.gateway_amount) : null,
+    prefix: 'approve refused',
+    via: 'admin approve',
+    // The customer is not watching an admin approve: tell them by email and
+    // feed row when it refunds.
+    customerOnScreen: false,
+  });
+  if (answer.kind === 'refunded') {
+    const { error } = answer;
+    // Their reason, on record, AFTER the money moved — a definitively
+    // refused submit leaves nothing at the gateway to requery later, so
+    // this line, with the row's failure_reason, is what tells an empty
+    // merchant payout float (PMT10013) apart from bad bank details. Best-effort:
+    // without the catch a throw from the logger would replace the error
+    // below and the operator would see a crash instead of the reason.
+    // Never the account number or the holder name; `msg` is the gateway's
+    // own text, the one field we do not compose (same accepted residual
+    // risk as the store path).
+    try {
+      logger.warn(
+        `[payments] admin-approved withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
+          `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+          `bankCode=${row.bank_code} amount=${amount} ref=${row.merchant_transaction_id} ` +
+          `msg=${error.message}`,
       );
-      // Their reason, on record, AFTER the money moved — a definitively
-      // refused submit leaves nothing at the gateway to requery later, so
-      // this line is the only thing that can tell an empty merchant payout
-      // float (PMT10013) apart from genuinely bad bank details. Best-effort:
-      // without the catch a throw from the logger would replace the error
-      // below and the operator would see a crash instead of the reason.
-      // Never the account number or the holder name; `msg` is the gateway's
-      // own text, the one field we do not compose (same accepted residual
-      // risk as the store path).
-      try {
-        logger.warn(
-          `[payments] admin-approved withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
-            `httpStatus=${error.httpStatus} definite=${error.definite} ` +
-            `bankCode=${row.bank_code} amount=${amount} ref=${row.merchant_transaction_id} ` +
-            `msg=${error.message}`,
-        );
-      } catch {
-        // Swallowed deliberately: the logger is the thing that failed, so
-        // there is nothing left to report it with.
-      }
-      // Same cause and same handling as startWithdrawal's branch: the refund
-      // above is untouched, only the words and the ops alert differ.
-      const label = GATEWAYS[gatewayId].label;
-      warnOps(scope, verdict, gatewayId, {
-        amount,
-        ref: row.merchant_transaction_id,
-        via: 'admin approve',
-      });
-      if (verdict.payoutDisabled) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `${label} refused this payout because payouts are not enabled on our ${label} account ("Payout not available"). The debit has been refunded and the withdrawal closed. Ask ${label} to enable payouts, or switch back to a gateway that pays out, then ask the customer to request the withdrawal again.`,
-        );
-      }
-      if (verdict.floatEmpty) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `${label} refused this payout because our ${label} payout wallet is short ("Insufficient payout credit balance"). The debit has been refunded and the withdrawal closed. Top up the payout wallet, then ask the customer to request the withdrawal again.`,
-        );
-      }
+    } catch {
+      // Swallowed deliberately: the logger is the thing that failed, so
+      // there is nothing left to report it with.
+    }
+    // Same causes as the store path; only the words differ.
+    const label = GATEWAYS[gatewayId].label;
+    if (answer.reason === 'payouts-off') {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        'The gateway refused this payout. The debit has been refunded and the withdrawal closed.',
+        `${label} refused this payout because payouts are not enabled on our ${label} account ("Payout not available"). The debit has been refunded and the withdrawal closed. Ask ${label} to enable payouts, or switch back to a gateway that pays out, then ask the customer to request the withdrawal again.`,
       );
     }
-    if (verdict) {
-      // Refused, but not confirmed: as on the customer path.
-      warnOps(scope, verdict, gatewayId, {
-        amount,
-        ref: row.merchant_transaction_id,
-        via: 'admin approve',
-      });
-      const held =
-        error instanceof GatewayError
-          ? heldRefusalFields(verdict, error, {
-              prefix: 'approve refused',
-              bankCode: row.bank_code,
-              accountNumber: row.account_number,
-              accountHolderName: row.account_holder_name,
-            })
-          : null;
-      if (held) {
-        await packs.updateGatewayWithdrawals({
-          selector: { id: row.id, status: 'pending' },
-          data: held,
-        });
-      }
+    if (answer.reason === 'wallet-empty') {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${label} refused this payout because our ${label} payout wallet is short ("Insufficient payout credit balance"). The debit has been refunded and the withdrawal closed. Top up the payout wallet, then ask the customer to request the withdrawal again.`,
+      );
     }
-    // AMBIGUOUS (timeout, reset, WAF page): the request may have been
-    // accepted with only the response lost, so the payout could still
-    // execute. Refunding would double-pay. The row stays 'pending' with NO
-    // gateway id — precisely the state the reconcile sweep resolves (requery
-    // success -> settle, failed -> refund, unknown-and-stale -> refund).
+    if (answer.reason === 'not-sent') {
+      // The adapter's message names the gateway first ("TGPay: cannot pay to
+      // bank X"); the label already does here.
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${label} cannot pay this bank (${error.message.replace(/^[^:]*:\s*/, '')}). Nothing was sent; the debit has been refunded and the withdrawal closed.`,
+      );
+    }
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'The gateway refused this payout. The debit has been refunded and the withdrawal closed.',
+    );
+  }
+  if (answer.kind === 'waiting') {
+    // AMBIGUOUS, or a refusal the gateway did not confirm: the row stays
+    // 'pending' — precisely the state the reconcile sweep resolves.
     //
     // WHAT MAKES THAT SAFE for a row that waited: the sweep's "too old for an
     // in-flight submit" clock reads the row's updated_at, not its created_at,
@@ -2309,39 +1654,17 @@ export async function submitHeldWithdrawal(
     // says exactly that with a null transaction_id.
     try {
       logger.error(
-        `[payments] admin ${adminId} approved withdrawal ${row.merchant_transaction_id} but the submit outcome is AMBIGUOUS (${unconfirmed(error)}) — left pending for the sweep`,
+        `[payments] admin ${adminId} approved withdrawal ${row.merchant_transaction_id} but the submit outcome is AMBIGUOUS (${unconfirmed(answer.error)}) — left pending for the sweep`,
       );
     } catch {
       // Swallowed deliberately: the row stays 'pending', so the sweep still
       // resolves this payout whether or not anyone ever reads about it.
     }
-    return {
-      id: row.id,
-      status: 'pending',
-      transaction_id: null,
-      approved: true,
-    };
   }
-
-  // Their W… id, recorded as early as it can be — it does not exist until the
-  // call above returns, and this is the next statement. The gap still matters:
-  // until the id lands, unknownWithdrawalAction's hasGatewayTransactionId
-  // guard cannot protect this row, and only the submit clock does.
-  //
-  // Scoped to 'pending' like every other terminal write on this path. Without
-  // the scope, a sweep that resolved this row while the submit was in flight
-  // (refunded and closed it 'failed') would have a gateway id written back
-  // onto it afterwards — a refunded row wearing the id of a payout, which is
-  // the one shape that makes a later reader believe the money went out.
-  await packs.updateGatewayWithdrawals({
-    selector: { id: row.id, status: 'pending' },
-    data: { gateway_transaction_id: result.transactionId },
-  });
-
   return {
     id: row.id,
     status: 'pending',
-    transaction_id: result.transactionId,
+    transaction_id: answer.kind === 'submitted' ? answer.transactionId : null,
     approved: true,
   };
 }

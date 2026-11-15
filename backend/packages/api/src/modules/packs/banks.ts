@@ -355,8 +355,8 @@ export function canonicalBankCode(alias: string): string | null {
 
 /**
  * The code (and paired name) a gateway wants for a bank. Null when that
- * gateway cannot pay to the bank — the adapter turns that into a definite
- * refusal, which refunds.
+ * gateway cannot pay to the bank — the adapter refuses it as 'not-sent'
+ * before calling the provider, and the withdrawal refunds at once.
  */
 export function gatewayBankCode(
   alias: string,

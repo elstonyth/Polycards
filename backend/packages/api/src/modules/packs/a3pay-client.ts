@@ -150,10 +150,10 @@ const PLATFORM_NOT_FOUND_CODE = 'PMT10016';
  * OUR A3Pay balance cannot cover a payout (SubmitPayout only). A3Pay's exact
  * wording is unrecorded (our balance was S$0 when this shipped and no payout
  * had been tried), so any SubmitPayout refusal that talks about balance /
- * insufficient funds is tagged — the withdrawal paths then share TGPay's
- * float-empty breaker, alert and customer copy. The pre-submit balance check
- * in gateway-withdrawal.ts (regionalFloatShort) catches the common case
- * without depending on this wording at all.
+ * insufficient funds is tagged — a HINT only: the A3Pay adapter (gateway.ts)
+ * names it 'wallet-empty' once its own balance read confirms it. The
+ * pre-submit balance check in gateway-withdrawal.ts (regionalFloatShort)
+ * catches the common case without depending on this wording at all.
  */
 export const A3PAY_PAYOUT_FLOAT_EMPTY = 'A3PAY_PAYOUT_FLOAT_EMPTY';
 const DETAIL_PATHS = new Set([
@@ -167,8 +167,9 @@ export class A3payError extends GatewayError {
     codes: string[],
     httpStatus: number,
     definite = false,
+    named: ConstructorParameters<typeof GatewayError>[4] = {},
   ) {
-    super(message, codes, httpStatus, definite);
+    super(message, codes, httpStatus, definite, named);
     this.name = 'A3payError';
   }
 }
@@ -245,6 +246,7 @@ function failure<T>(
     codes,
     httpStatus,
     parsed.isSuccess === false && httpStatus < 500,
+    codes.includes(A3PAY_NOT_FOUND) ? { result: 'not-found' } : {},
   );
 }
 

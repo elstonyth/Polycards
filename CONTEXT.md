@@ -236,6 +236,19 @@ re-checks the customer's freeze state live at click time (the queue's
 _Avoid_: pending (a _different_ status — that row already reached the
 gateway and is awaiting its callback)
 
+**Withdrawal Submit**:
+The one path that sends a debited Withdrawal to the gateway, shared by a new
+Withdrawal and an approved Held Withdrawal (`modules/packs/withdrawal-submit.ts`):
+submit, judge the answer, then refund or wait. It answers `submitted` (with the
+gateway's id), `refunded` with a reason (`payouts-off`, `wallet-empty`,
+`creates-nothing`, `not-sent`, `refused`) or `waiting`, and each caller words
+that answer itself. The reasons are the named results the adapters put on
+`GatewayError.result`, which also carries `not-found` for a lookup. No result
+means unclear, and an unclear answer never moves money. Payouts switched off
+and a refusal raised before sending refund at once; any other refusal is first
+checked with the gateway, and what it cannot confirm waits for the sweep.
+_Avoid_: reading a gateway's own error codes outside its adapter
+
 **Payout Destination**:
 A customer's saved bank account for Withdrawals. Adding one starts a
 `PAYOUT_DESTINATION_COOLDOWN_HOURS` cooling-off window (default 24h; `0` is

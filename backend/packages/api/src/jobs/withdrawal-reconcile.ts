@@ -151,7 +151,7 @@ export default async function withdrawalReconcileJob(
           // of an audit, not a coincidence: EVERY write this codebase makes to
           // a 'pending' row also CLOSES it (the callback route's two branches,
           // this sweep's settle and no-debit closes, the refund helper's
-          // terminal update, startWithdrawal's two failure closes),
+          // terminal update, startWithdrawal's no-debit close),
           // and every write that leaves a row pending stamps a
           // gateway_transaction_id — after which the guard above returns
           // 'wait' regardless of any clock. So nothing can push this forward
@@ -159,7 +159,8 @@ export default async function withdrawalReconcileJob(
           // invariant that function demands. The admin approve route's claim
           // (held -> pending) is the one write that legitimately restarts it,
           // one HTTP hop before its submit. The refusal note on an unconfirmed
-          // refusal (heldRefusalFields) is the one write with no id: it lands
+          // refusal (heldRefusalFields, withdrawal-submit.ts) is the one
+          // write with no id: it lands
           // in the same request as the submit, never later.
           //
           // Adding a write that leaves a row 'pending' without a gateway id

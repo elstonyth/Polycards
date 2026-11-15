@@ -144,6 +144,7 @@ describe('createPayment', () => {
       (e: unknown) => e,
     )) as TgpayError;
     expect(err.has(TGPAY_NOT_FOUND)).toBe(true);
+    expect(err.result).toBe('not-found');
     expect(err.httpStatus).toBe(404);
   });
 
@@ -217,6 +218,7 @@ describe('createPayout / balances', () => {
       (e: unknown) => e,
     )) as TgpayError;
     expect(err.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(true);
+    expect(err.result).toBe('wallet-empty');
     expect(err.definite).toBe(true);
     expect(err.httpStatus).toBe(400);
   });
@@ -247,6 +249,7 @@ describe('createPayout / balances', () => {
       (e: unknown) => e,
     )) as TgpayError;
     expect(query.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(false);
+    expect(query.result).toBe('refused');
 
     // A 5xx is ambiguous (the payout may exist), so it must never carry a
     // code whose handling assumes nothing was created.
@@ -259,6 +262,7 @@ describe('createPayout / balances', () => {
     )) as TgpayError;
     expect(ambiguous.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(false);
     expect(ambiguous.definite).toBe(false);
+    expect(ambiguous.result).toBeUndefined();
   });
 
   // The 7 Pay documents a 501 "Payout not available in production yet
@@ -278,6 +282,7 @@ describe('createPayout / balances', () => {
       (e: unknown) => e,
     )) as TgpayError;
     expect(err.has(TGPAY_PAYOUT_DISABLED)).toBe(true);
+    expect(err.result).toBe('payouts-off');
     expect(err.definite).toBe(true);
     expect(err.httpStatus).toBe(501);
   });
@@ -291,6 +296,7 @@ describe('createPayout / balances', () => {
     )) as TgpayError;
     expect(other501.has(TGPAY_PAYOUT_DISABLED)).toBe(false);
     expect(other501.definite).toBe(false);
+    expect(other501.result).toBeUndefined();
 
     stubFetch(
       { statusCode: 500, message: 'Payout not available in production yet' },
@@ -310,6 +316,29 @@ describe('createPayout / balances', () => {
     )) as TgpayError;
     expect(err.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(false);
     expect(err.definite).toBe(true);
+    expect(err.result).toBe('refused');
+  });
+
+  // 467 refused payouts by 2026-11-02 with this text, none later paid: the
+  // one refusal production has shown creates nothing. On the payout path only.
+  it('"No payout provider is available" on the payout path creates nothing', async () => {
+    stubFetch(
+      {
+        statusCode: 400,
+        message: 'No payout provider is available for this order',
+      },
+      400,
+    );
+    const err = (await createPayout(payout, config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(err.result).toBe('creates-nothing');
+    expect(err.definite).toBe(true);
+
+    const query = (await queryPayout('PC-w1', config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(query.result).toBe('refused');
   });
 
   // Production 2026-10-14 (PC-286fcc20…, RM 512.40): TGPay answered a JSON

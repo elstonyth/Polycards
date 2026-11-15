@@ -6,7 +6,7 @@ import {
   checkAccBalance,
   submitPayout,
 } from '../a3pay-client';
-import { inRowCurrency } from '../gateway';
+import { inRowCurrency, submitWithdrawal } from '../gateway';
 import { generateKeyPairSync } from 'node:crypto';
 
 // Response shapes measured live against A3Pay production on 2026-10-12.
@@ -42,6 +42,7 @@ describe('A3Pay live response shapes', () => {
       await expect(call('PC-x', config)).rejects.toMatchObject({
         definite: true,
         codes: [A3PAY_NOT_FOUND],
+        result: 'not-found',
       });
     }
   });
@@ -99,6 +100,8 @@ describe('A3Pay refusals that are on OUR side', () => {
     );
     const error = await submitPayout(payout, config).catch((e) => e);
     expect(error.codes).toContain(A3PAY_PAYOUT_FLOAT_EMPTY);
+    // A hint only: the adapter names it once its balance read confirms it.
+    expect(error.result).toBe('refused');
   });
 
   it('any other SubmitPayout refusal does not — a bare "balance" included', async () => {
@@ -156,5 +159,88 @@ describe('inRowCurrency — a requery asks in the currency the row was made in',
   it('keeps the config for a pre-column row, and when they already agree', () => {
     expect(inRowCurrency(config, fx())).toBe(config);
     expect(inRowCurrency(config, fx('SGD'))).toBe(config);
+  });
+});
+
+// The adapter, not the money path, turns A3Pay's balance hint into a named
+// result: only its own balance read may confirm it (gateway.ts).
+describe('the A3Pay adapter names a refusal', () => {
+  const wd = {
+    merchantTransactionId: 'PC-w1',
+    merchantClientId: 'cus_1',
+    amount: 330,
+    destinationBankCode: 'DBSSSGSG',
+    destinationAccountNumber: '0123456789',
+    destinationAccountHolderName: 'TAN AH KOW',
+    notifyUrl: 'https://api.example.test/hooks/a3pay/withdrawal',
+    returnUrl: 'https://api.example.test/hooks/a3pay/payout-verify',
+    ipAddress: '1.2.3.4',
+    // S$100 needs S$101.50 in the float (A3Pay's own fee).
+    gatewayAmount: 100,
+  };
+  const balance = (available: number) =>
+    JSON.stringify({
+      isSuccess: true,
+      data: {
+        currCode: 'SGD',
+        currentBalanceAmount: available,
+        availableBalanceAmount: available,
+        t1BalanceAmount: 0,
+      },
+    });
+  function route(read: string | Error, submit = 'Insufficient balance') {
+    global.fetch = jest.fn(async (url: string) => {
+      if (String(url).endsWith('CheckAccBalance')) {
+        if (read instanceof Error) throw read;
+        return { status: 200, text: async () => read };
+      }
+      return {
+        status: 400,
+        text: async () =>
+          JSON.stringify({
+            isSuccess: false,
+            errorMessage: submit,
+            data: null,
+          }),
+      };
+    }) as unknown as typeof fetch;
+  }
+
+  it.each([
+    ['short', balance(101), { result: 'wallet-empty', available: 101 }],
+    ['enough', balance(500), { result: 'refused', available: undefined }],
+    [
+      'unreadable',
+      new Error('socket hang up'),
+      { result: 'refused', available: undefined },
+    ],
+  ])(
+    'its balance hint with the float %s',
+    async (_label, read, expected) => {
+      route(read);
+      const error = await submitWithdrawal(wd, config).catch((e) => e);
+      expect(error).toMatchObject({ definite: true, ...expected });
+      // The provider's own code stays on record either way.
+      expect(error.codes).toContain(A3PAY_PAYOUT_FLOAT_EMPTY);
+    },
+  );
+
+  it('any other refusal is not checked against the balance', async () => {
+    route(balance(0), 'Invalid account number');
+    const error = await submitWithdrawal(wd, config).catch((e) => e);
+    expect(error.result).toBe('refused');
+    expect(
+      (global.fetch as jest.Mock).mock.calls.map(([url]) => String(url)),
+    ).toEqual(['https://mapi.example.test/api/Payout/SubmitPayout']);
+  });
+
+  it('a payout it refuses before calling A3Pay was not sent', async () => {
+    route(balance(0));
+    const error = await submitWithdrawal(
+      { ...wd, gatewayAmount: undefined },
+      config,
+    ).catch((e) => e);
+    expect(error).toMatchObject({ definite: true, result: 'not-sent' });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,7 @@ import {
   sign,
   timingSafeEqual,
 } from 'node:crypto';
-import { GatewayError } from './gateway-types';
+import { GatewayError, type ProviderResult } from './gateway-types';
 
 // TGPay HTTP client (sandbox docs read 2026-09-05, sandbox.tgpay365.com/docs/api).
 // Plain JSON over HTTPS: two static key headers and a unix `epoch` that must
@@ -113,8 +113,9 @@ export function tgpayIsSandbox(config: Pick<TgpayConfig, 'baseUrl'>): boolean {
 
 /**
  * Extends GatewayError so the orchestration's `definite` / `httpStatus`
- * / `has()` branches keep their meaning. `codes` carries a synthetic code per
- * HTTP class so callers can branch without parsing message text.
+ * branches keep their meaning. `codes` carries a synthetic code per HTTP
+ * class for the record; `result` (tgpayResult) names what a refusal means,
+ * so callers never parse message text or read these codes.
  */
 export class TgpayError extends GatewayError {
   constructor(
@@ -122,8 +123,9 @@ export class TgpayError extends GatewayError {
     codes: string[],
     httpStatus: number,
     definite = false,
+    named: ConstructorParameters<typeof GatewayError>[4] = {},
   ) {
-    super(message, codes, httpStatus, definite);
+    super(message, codes, httpStatus, definite, named);
     this.name = 'TgpayError';
   }
 }
@@ -172,6 +174,34 @@ function rsaSignature(
     Buffer.from(`POST\n${fullPath}\n${raw}`, 'utf8'),
     config.rsaPrivateKey as string,
   ).toString('base64');
+}
+
+/**
+ * What a refusal means, from the codes above. A lookup's not-found whatever
+ * the HTTP class (the sweeps have always read it so); on a definite refusal,
+ * in this order: switched off, then our empty wallet, then the one text
+ * production has shown creates no payout (467 refused payouts by 2026-11-02,
+ * none later paid). Undefined leaves a definite refusal as plain 'refused'.
+ */
+function tgpayResult(
+  path: string,
+  codes: string[],
+  message: string,
+  definite: boolean,
+): ProviderResult | undefined {
+  if (!definite) {
+    return codes.includes(TGPAY_NOT_FOUND) ? 'not-found' : undefined;
+  }
+  if (codes.includes(TGPAY_PAYOUT_DISABLED)) return 'payouts-off';
+  if (codes.includes(TGPAY_PAYOUT_FLOAT_EMPTY)) return 'wallet-empty';
+  if (
+    path === '/transaction/payout/withdraw' &&
+    /no payout provider is available/i.test(message)
+  ) {
+    return 'creates-nothing';
+  }
+  if (codes.includes(TGPAY_NOT_FOUND)) return 'not-found';
+  return undefined;
 }
 
 /**
@@ -262,16 +292,16 @@ async function post<T>(
       [parsed.errors, parsed.message, parsed.msg].filter(Boolean).join(' '),
     );
     if (upstreamError) codes.push(TGPAY_UPSTREAM_ERROR);
-    throw new TgpayError(
-      `${label} ${path} failed (HTTP ${response.status}): ${detail}`,
-      codes,
-      response.status,
-      // 4xx with a JSON body = they parsed us and said no. 5xx, a 4xx wrapping
-      // an upstream server error, and 2xx-without-data are ambiguous: the
-      // request may have been accepted.
+    const message = `${label} ${path} failed (HTTP ${response.status}): ${detail}`;
+    // 4xx with a JSON body = they parsed us and said no. 5xx, a 4xx wrapping
+    // an upstream server error, and 2xx-without-data are ambiguous: the
+    // request may have been accepted.
+    const definite =
       (response.status >= 400 && response.status < 500 && !upstreamError) ||
-        payoutDisabled,
-    );
+      payoutDisabled;
+    throw new TgpayError(message, codes, response.status, definite, {
+      result: tgpayResult(path, codes, message, definite),
+    });
   }
   return parsed.data;
 }
