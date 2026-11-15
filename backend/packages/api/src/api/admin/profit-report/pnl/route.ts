@@ -27,6 +27,7 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { resolveFxRate } from '../../../../modules/packs/pricing';
 import { reportDb } from '../../../reports/sql';
+import { cached } from './cache';
 import {
   capsuleSlugsOf,
   coinFlipSection,
@@ -83,112 +84,135 @@ export async function GET(
     );
   }
 
-  const db = reportDb(req);
-  const iso0 = (w: { from: Date; to: Date } | undefined) =>
-    w ? { from: w.from.toISOString(), to: w.to.toISOString() } : {};
-  // One statement at a time (the pool is small and shared with the storefront).
-  const cur = iso0(windows?.current);
-  const prev = windows ? iso0(windows.previous) : null;
-  const current = await packWindowRows(db, cur, scope);
-  const previous = prev ? await packWindowRows(db, prev, scope) : null;
-  const cogsCurrent = await cogsWindowRows(db, cur, scope);
-  const cogsPrevious = prev ? await cogsWindowRows(db, prev, scope) : null;
-  const gamesCurrent = await gamesWindowRows(db, cur, scope);
-  const gamesPrevious = prev ? await gamesWindowRows(db, prev, scope) : null;
-  const mkCurrent = await marketingWindowRows(db, cur, scope);
-  const mkPrevious = prev ? await marketingWindowRows(db, prev, scope) : null;
-  const meta = await packMeta(db, [
-    ...new Set([
-      ...slugsOf(current, previous),
-      ...cogsSlugsOf(cogsCurrent, cogsPrevious),
-      ...capsuleSlugsOf(gamesCurrent, gamesPrevious),
-    ]),
-  ]);
-  const handles = [
-    ...new Set(
-      [cogsCurrent, cogsPrevious].flatMap((w) =>
-        (w?.shipped ?? []).map((s) => s.handle),
-      ),
-    ),
-  ];
-  const costLines = await cardCostLines(db, handles);
-  const costOf = (handle: string, day: string) =>
-    costAsOf(costLines.get(handle) ?? [], day);
-  const rates = await dayRates(db);
-  const fallbackRate = await resolveFxRate(
-    req.scope.resolve<PacksModuleService>(PACKS_MODULE),
-  );
-  const shipCurrent = await shippingWindow(db, cur, scope);
-  const shipPrevious = prev ? await shippingWindow(db, prev, scope) : null;
-  // Point in time (as of now): the range does not apply.
-  const stock = await stockRows(db);
-  const stockCosts = await cardCosts(
-    db,
-    stock.map((x) => x.handle),
-  );
-  const wallets = await walletRows(db, scope);
-  const freeCredit = await freeCreditUnused(db, scope);
-  const balanceCards = await vaultCards(db, scope, fallbackRate);
-
-  const packSales = packSalesSection(meta, current, previous);
-  const cogs = cogsSection(
-    meta,
-    cogsCurrent,
-    cogsPrevious,
-    costOf,
-    rates,
-    fallbackRate,
-  );
-  const coinFlip = coinFlipSection(gamesCurrent, gamesPrevious);
-  const luckyDraw = luckyDrawSection(
-    meta,
-    gamesCurrent,
-    gamesPrevious,
-    rates,
-    fallbackRate,
-  );
-  const shipping = shippingSection(shipCurrent, shipPrevious);
-  const marketing = marketingSection(
-    meta,
-    current,
-    previous,
-    mkCurrent,
-    mkPrevious,
-    fallbackRate,
-    rates,
-  );
-
-  res.json({
-    as_of: now,
-    scope,
+  // Keyed by the window actually used: its start (each preset starts on a MYT
+  // day or month boundary, so the key turns over when the period does) and,
+  // for custom, the requested end day. A preset ignores from/to, so they never
+  // make a new key.
+  const key = [
     range,
-    window: windows
-      ? { from: windows.current.from, to: windows.current.to }
-      : null,
-    previous: windows
-      ? { from: windows.previous.from, to: windows.previous.to }
-      : null,
-    pack_sales: packSales,
-    cogs,
-    marketing,
-    coin_flip: coinFlip,
-    lucky_draw: luckyDraw,
-    shipping,
-    totals: totalsSection({
-      revenue: {
-        pack_sales: packSales.total,
-        coin_flip: coinFlip.revenue,
-        lucky_draw: luckyDraw.revenue,
-      },
-      other_revenue: { shipping: shipping.total },
-      cogs: {
-        packs: cogs.total,
-        coin_flip: coinFlip.cost,
-        lucky_draw: luckyDraw.cost,
-      },
-      marketing: marketing.total,
-    }),
-    assets: assetsSection(stock, stockCosts),
-    floating: floatingSection(wallets, freeCredit, balanceCards),
+    windows ? windows.current.from.toISOString() : 'all',
+    range === 'custom' ? (str(req.query.to) ?? '') : '',
+    scope,
+  ].join('|');
+  const body = await cached(key, async () => {
+    const db = reportDb(req);
+    const iso0 = (w: { from: Date; to: Date } | undefined) =>
+      w ? { from: w.from.toISOString(), to: w.to.toISOString() } : {};
+    // One statement at a time (the pool is small and shared with the storefront).
+    const cur = iso0(windows?.current);
+    const prev = windows ? iso0(windows.previous) : null;
+    const current = await packWindowRows(db, cur, scope);
+    const previous = prev ? await packWindowRows(db, prev, scope) : null;
+    const cogsCurrent = await cogsWindowRows(db, cur, scope);
+    const cogsPrevious = prev ? await cogsWindowRows(db, prev, scope) : null;
+    const gamesCurrent = await gamesWindowRows(db, cur, scope);
+    const gamesPrevious = prev ? await gamesWindowRows(db, prev, scope) : null;
+    const mkCurrent = await marketingWindowRows(db, cur, scope);
+    const mkPrevious = prev ? await marketingWindowRows(db, prev, scope) : null;
+    const meta = await packMeta(db, [
+      ...new Set([
+        ...slugsOf(current, previous),
+        ...cogsSlugsOf(cogsCurrent, cogsPrevious),
+        ...capsuleSlugsOf(gamesCurrent, gamesPrevious),
+      ]),
+    ]);
+    const handles = [
+      ...new Set(
+        [cogsCurrent, cogsPrevious].flatMap((w) =>
+          (w?.shipped ?? []).map((s) => s.handle),
+        ),
+      ),
+    ];
+    const costLines = await cardCostLines(db, handles);
+    const costOf = (handle: string, day: string) =>
+      costAsOf(costLines.get(handle) ?? [], day);
+    const rates = await dayRates(db);
+    const fallbackRate = await resolveFxRate(
+      req.scope.resolve<PacksModuleService>(PACKS_MODULE),
+    );
+    const shipCurrent = await shippingWindow(db, cur, scope);
+    const shipPrevious = prev ? await shippingWindow(db, prev, scope) : null;
+    // Point in time (as of now): the range does not apply, so one run per
+    // scope serves every range for 5 minutes.
+    const balance = (await cached(`balance|${scope}`, async () => {
+      const stock = await stockRows(db);
+      const stockCosts = await cardCosts(
+        db,
+        stock.map((x) => x.handle),
+      );
+      const wallets = await walletRows(db, scope);
+      const freeCredit = await freeCreditUnused(db, scope);
+      const balanceCards = await vaultCards(db, scope, fallbackRate);
+      return {
+        assets: assetsSection(stock, stockCosts),
+        floating: floatingSection(wallets, freeCredit, balanceCards),
+      };
+    })) as {
+      assets: ReturnType<typeof assetsSection>;
+      floating: ReturnType<typeof floatingSection>;
+    };
+
+    const packSales = packSalesSection(meta, current, previous);
+    const cogs = cogsSection(
+      meta,
+      cogsCurrent,
+      cogsPrevious,
+      costOf,
+      rates,
+      fallbackRate,
+    );
+    const coinFlip = coinFlipSection(gamesCurrent, gamesPrevious);
+    const luckyDraw = luckyDrawSection(
+      meta,
+      gamesCurrent,
+      gamesPrevious,
+      rates,
+      fallbackRate,
+    );
+    const shipping = shippingSection(shipCurrent, shipPrevious);
+    const marketing = marketingSection(
+      meta,
+      current,
+      previous,
+      mkCurrent,
+      mkPrevious,
+      fallbackRate,
+      rates,
+    );
+
+    return {
+      as_of: now,
+      scope,
+      range,
+      window: windows
+        ? { from: windows.current.from, to: windows.current.to }
+        : null,
+      previous: windows
+        ? { from: windows.previous.from, to: windows.previous.to }
+        : null,
+      pack_sales: packSales,
+      cogs,
+      marketing,
+      coin_flip: coinFlip,
+      lucky_draw: luckyDraw,
+      shipping,
+      totals: totalsSection({
+        revenue: {
+          pack_sales: packSales.total,
+          coin_flip: coinFlip.revenue,
+          lucky_draw: luckyDraw.revenue,
+        },
+        other_revenue: { shipping: shipping.total },
+        cogs: {
+          packs: cogs.total,
+          coin_flip: coinFlip.cost,
+          lucky_draw: luckyDraw.cost,
+        },
+        marketing: marketing.total,
+      }),
+      assets: balance.assets,
+      floating: balance.floating,
+    };
   });
+  res.json(body);
 }

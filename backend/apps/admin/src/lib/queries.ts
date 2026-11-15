@@ -324,10 +324,10 @@ export const usePnlReport = (
     queryFn: () => getPnlReport(range, from, to, scope),
     placeholderData: keepPreviousData,
     enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
-    // About 40 read-only statements (~15 s on prod): never refetch on focus,
-    // and keep a loaded period for 5 minutes. The pool is shared with the storefront.
+    // About 40 read-only statements: never refetch on focus (the pool is shared
+    // with the storefront). No client stale time: the server keeps each period
+    // 5 minutes already, so a revisit asks it and never shows older figures.
     refetchOnWindowFocus: false,
-    staleTime: 5 * 60_000,
   });
 
 // Stats page. keepPreviousData so switching presets swaps the numbers without
