@@ -174,6 +174,26 @@ medusaIntegrationTestRunner({
           paid_sen: 90000,
           total_sen: 150000,
         });
+
+        // The Excel export: same query, same guard, a real workbook.
+        const xlsx = await unwrapResponse(
+          api.get('/admin/profit-report/pnl/export?range=today', {
+            headers: { authorization: `Bearer ${adminToken}` },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(xlsx.status).toBe(200);
+        expect(xlsx.headers['content-type']).toContain('spreadsheetml');
+        expect(xlsx.headers['content-disposition']).toContain('pnl-today-');
+        // A zip (PK\x03\x04), not a JSON error.
+        expect(Buffer.from(xlsx.data).subarray(0, 2).toString()).toBe('PK');
+        expect(
+          (
+            await unwrapResponse(
+              api.get('/admin/profit-report/pnl/export?range=today'),
+            )
+          ).status,
+        ).toBe(401);
       });
 
       it('COGS = buyback paid + supplier cost of shipped cards, reward cards left out', async () => {
@@ -310,6 +330,34 @@ medusaIntegrationTestRunner({
         expect(res.data.cogs.purchase.current_sen).toBe(50000);
         // The reward card's buyback (RM 77) is a marketing cost: nowhere in COGS.
         expect(res.data.cogs.total.current_sen).toBe(79700);
+      });
+
+      it('keeps a closed period 6 hours and an open one 5 minutes, balances always 5 minutes', async () => {
+        const cache = getContainer().resolve(Modules.CACHE);
+        // An earlier case already worked out the scope's balances.
+        await cache.invalidate('pnl-report:balance|all');
+        const set = jest.spyOn(cache, 'set');
+        try {
+          // Distinct scope so no earlier case's run is reused.
+          const closed = await report('?range=yesterday&scope=all');
+          expect(closed.status).toBe(200);
+          const open = await report('?range=7d&scope=all');
+          expect(open.status).toBe(200);
+          const ttlOf = (prefix: string) =>
+            set.mock.calls
+              .filter(([k]) => String(k).startsWith(`pnl-report:${prefix}`))
+              .map(([, , ttl]) => ttl);
+          expect(ttlOf('yesterday|')).toEqual([6 * 60 * 60]);
+          expect(ttlOf('7d|')).toEqual([5 * 60]);
+          // Kept apart, so a long-kept period never shows old balances.
+          expect(ttlOf('balance|')).toEqual([5 * 60]);
+          expect(closed.data.balance_as_of).toEqual(expect.any(String));
+          expect(Date.parse(closed.data.window.to)).toBeLessThan(
+            Date.parse(closed.data.as_of),
+          );
+        } finally {
+          set.mockRestore();
+        }
       });
     });
   },
