@@ -320,7 +320,7 @@ import {
   type CustomerScope,
   type MoneyFilter,
 } from './real-customers';
-import { depositedPtSenSql } from './money-figures';
+import { depositedPtSenSql, populationSql } from './money-figures';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // The ledger columns the reversals read by raw SQL on their own transaction
@@ -12880,7 +12880,7 @@ class PacksModuleService extends MedusaService({
         `   AND o.rarity IN (${tiers.map(() => '?').join(', ')}))`
       : '';
     const groupSql = opts.defaultGroupOnly
-      ? ` AND pu.customer_id NOT IN (SELECT customer_id FROM (${EFFECTIVE_GROUP_SQL}) eff)`
+      ? populationSql({ kind: 'default_group' }, 'pu.customer_id').sql
       : '';
     const rows = await em.execute<
       {
