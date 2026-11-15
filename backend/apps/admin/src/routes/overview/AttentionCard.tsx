@@ -18,6 +18,7 @@ import {
   useReferralSettlements,
   usePricingHealth,
 } from '../../lib/queries';
+import type { PricingIssue } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
 import {
   attentionWithdrawals,
@@ -116,8 +117,32 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   if (drafts) counts.referrals = drafts.length;
   if (twice) counts.doublePay = twice.count;
   if (integrity.data) counts.integrity = integrity.data.findings.length;
-  if (pricing.data && !pricing.isError)
-    counts.pricing = pricing.data.cards.issues.length;
+  // A feed outage (token expired) is one alert, not one per card. The outage
+  // writes nothing to cards, so its only symptoms are staleness and the error
+  // rows the old sync left with its own token message; those fold into the
+  // alert. A missing product is never folded, and every other problem counts.
+  const feed = pricing.data?.feed;
+  const issues = pricing.data?.cards.issues ?? [];
+  const missing = new Set(pricing.data?.cards.missing_product ?? []);
+  const outageReasons: PricingIssue['reason'][] = ['stale', 'never_synced'];
+  const otherIssues = feed
+    ? issues.filter(
+        (i) =>
+          missing.has(i.handle) ||
+          !(
+            outageReasons.includes(i.reason) ||
+            (i.reason === 'sync_error' &&
+              (i.message === feed.message ||
+                /\btoken\b/i.test(i.message ?? '')))
+          ),
+      )
+    : issues;
+  // pricingFeed exists at 0 before an outage: the alert only fires for a
+  // queue that already had a reading.
+  if (pricing.data && !pricing.isError) {
+    counts.pricingFeed = feed ? 1 : 0;
+    counts.pricing = otherIssues.length;
+  }
   const { soundOn, setSound } = useAttentionAlert(counts);
 
   // A query this role may not read is left out; any other failure shows.
@@ -177,12 +202,30 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
       urgent: true,
     });
   }
-  if (pricing.data && pricing.data.cards.issues.length > 0) {
+  if (feed) {
+    items.push({
+      id: 'pricing-feed',
+      icon: <ExclamationCircle />,
+      title: t(
+        feed.status === 'no_token'
+          ? 'dashboard.pricingNoToken'
+          : 'dashboard.pricingTokenExpired',
+      ),
+      detail: t('dashboard.pricingFeedDetail', {
+        message: feed.message,
+        age: timeAgo(feed.at),
+      }),
+      to: '/cards?pricing=attention',
+      action: t('dashboard.check'),
+      urgent: true,
+    });
+  }
+  if (pricing.data && otherIssues.length > 0) {
     items.push({
       id: 'pricing',
       icon: <ExclamationCircle />,
       title: t('dashboard.pricingAttention', {
-        count: pricing.data.cards.issues.length,
+        count: otherIssues.length,
       }),
       detail: t('dashboard.pricingDetail', {
         count: pricing.data.cards.pending_confirmation,

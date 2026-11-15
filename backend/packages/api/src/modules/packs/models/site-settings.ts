@@ -22,6 +22,10 @@ export const SiteSettings = model.define('site_settings', {
   // and the decision live in withdrawal-controls.ts. NULL = never edited:
   // everything open, the env switches alone decide (today's behaviour).
   withdrawal_controls: model.json().nullable(),
+  // PriceCharting feed outage seen by the daily sync (PricechartingFeed in
+  // sync-market-prices.ts): { status, message, at }. Written by the job only;
+  // NULL = the feed answered on the last check (or never failed).
+  pricecharting_feed: model.json().nullable(),
 });
 
 export default SiteSettings;

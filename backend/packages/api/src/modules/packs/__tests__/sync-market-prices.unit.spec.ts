@@ -269,24 +269,71 @@ describe('anomalous price confirmation', () => {
     },
   );
 
-  it.each(['no-token', 'error'] as const)(
-    'clears observations after %s',
-    async (kind) => {
+  it.each([
+    [
+      { kind: 'no-token' as const },
+      'no_token',
+      'PRICECHARTING_API_TOKEN is not set',
+    ],
+    [
+      {
+        kind: 'error' as const,
+        message: 'Access token has expired',
+        cause: 'auth' as const,
+      },
+      'token_expired',
+      'Access token has expired',
+    ],
+  ])(
+    'a feed outage (%j) leaves the card row and its pending price untouched',
+    async (res, status, message) => {
       const { d, updates } = deps(4750);
-      await refreshCardPrice(waitingCard(), {
+      const r = await refreshCardPrice(waitingCard(), {
         ...d,
-        pcFetch: async () =>
-          kind === 'error'
-            ? { kind, message: 'upstream unavailable' }
-            : { kind },
+        pcFetch: async () => res,
       });
-      expect(updates[0]).toMatchObject({
-        pc_pending_price: null,
-        pc_sync_error: expect.any(String),
+      expect(updates).toEqual([]);
+      expect(r).toMatchObject({
+        changed: false,
+        newValue: 875,
+        skippedReason: message,
+        outage: { status, message, at: d.now.toISOString() },
       });
-      expect(updates[0]).not.toHaveProperty('market_value');
     },
   );
+
+  it('keeps the pending price when PriceCharting times out', async () => {
+    const { d, updates } = deps(4750);
+    const r = await refreshCardPrice(waitingCard(), {
+      ...d,
+      pcFetch: async () => ({
+        kind: 'error',
+        message: 'PriceCharting did not respond — try again.',
+        cause: 'unavailable',
+      }),
+    });
+    expect(r.outage).toBeUndefined();
+    expect(updates).toEqual([
+      {
+        id: 'card_1',
+        pc_pending_price: pending,
+        pc_sync_error: 'PriceCharting did not respond — try again.',
+      },
+    ]);
+  });
+
+  it('clears the pending price after a card-level error', async () => {
+    const { d, updates } = deps(4750);
+    await refreshCardPrice(waitingCard(), {
+      ...d,
+      pcFetch: async () => ({ kind: 'error', message: 'No such product' }),
+    });
+    expect(updates[0]).toMatchObject({
+      pc_pending_price: null,
+      pc_sync_error: 'No such product',
+    });
+    expect(updates[0]).not.toHaveProperty('market_value');
+  });
 
   it.each([4750, 0, 80000])(
     'a lost atomic write never reports a price change or successful sync (%s cents)',

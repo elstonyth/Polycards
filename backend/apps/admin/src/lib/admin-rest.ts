@@ -149,6 +149,14 @@ export interface PricingHealth {
     fetched_at: string | null;
     age_hours: number | null;
   } | null;
+  /** PriceCharting feed outage seen by the daily sync; null = feed fine.
+   *  Mirrors `PricechartingFeed` in
+   *  backend/packages/api/src/modules/packs/sync-market-prices.ts. */
+  feed: {
+    status: 'token_expired' | 'no_token';
+    message: string;
+    at: string;
+  } | null;
   cards: {
     linked: number;
     never_synced: number;

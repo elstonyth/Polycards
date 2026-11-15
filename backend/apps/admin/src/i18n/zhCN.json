@@ -41,7 +41,10 @@
   },
   "dashboard": {
     "pricingAttention": "{{count}} 张卡牌价格需要处理",
-    "pricingDetail": "{{count}} 张等待确认 · 检查过期价格及缺失来源"
+    "pricingDetail": "{{count}} 张等待确认 · 检查过期价格及缺失来源",
+    "pricingTokenExpired": "PriceCharting 令牌已过期：请续期并更新 PRICECHARTING_API_TOKEN",
+    "pricingNoToken": "PriceCharting 未配置：请设置 PRICECHARTING_API_TOKEN",
+    "pricingFeedDetail": "{{message}} · 最近失败 {{age}} · 卡牌价格保持最后的数值 · 下次每日同步（UTC 03:00）后清除"
   },
   "statsBoard": {
     "ranges": {

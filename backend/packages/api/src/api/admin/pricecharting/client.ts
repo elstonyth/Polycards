@@ -5,48 +5,117 @@
 // exposed to the browser, which is why the admin UI talks to these proxies.
 // Upstream prices are integer PENNIES; conversion to USD happens in the routes.
 
-const BASE_URL = "https://www.pricecharting.com";
+const BASE_URL = 'https://www.pricecharting.com';
 const TIMEOUT_MS = 10_000;
+// The statuses PriceCharting answers a bad token with.
+const TOKEN_STATUSES = [401, 403, 410];
 
 export const PC_TOKEN_MISSING =
-  "PriceCharting is not configured: set PRICECHARTING_API_TOKEN in the backend .env " +
-  "(requires a paid PriceCharting subscription) or enter the market value manually.";
+  'PriceCharting is not configured: set PRICECHARTING_API_TOKEN in the backend .env ' +
+  '(requires a paid PriceCharting subscription) or enter the market value manually.';
+
+// `cause` marks an error that is about the feed, not the card or query asked
+// for: "auth" = the token is expired/revoked (every request will fail until it
+// is renewed), "unavailable" = timeout, outage, rate limit or any error reply we
+// do not recognise (unknown errors default to feed-level). No cause = card-level,
+// only for a JSON 404 or a "no such product" / "not found" reply about this request.
+export type PcErrorCause = 'auth' | 'unavailable';
 
 export type PcResult<T> =
-  | { kind: "ok"; data: T }
-  | { kind: "no-token" }
-  | { kind: "error"; message: string };
+  | { kind: 'ok'; data: T }
+  | { kind: 'no-token' }
+  | { kind: 'error'; message: string; cause?: PcErrorCause };
 
-export async function pcFetch<T extends { status: string; "error-message"?: string }>(
-  path: string,
-  params: Record<string, string>
-): Promise<PcResult<T>> {
+export async function pcFetch<
+  T extends { status: string; 'error-message'?: string },
+>(path: string, params: Record<string, string>): Promise<PcResult<T>> {
   const token = process.env.PRICECHARTING_API_TOKEN;
-  if (!token) return { kind: "no-token" };
+  if (!token) return { kind: 'no-token' };
 
   const url = new URL(path, BASE_URL);
-  url.searchParams.set("t", token);
+  url.searchParams.set('t', token);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
   let resp: Response;
   try {
     resp = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch {
-    return { kind: "error", message: "PriceCharting did not respond — try again." };
+    return {
+      kind: 'error',
+      message: 'PriceCharting did not respond — try again.',
+      cause: 'unavailable',
+    };
   }
 
-  let data: T;
+  // Status first: an outage reply may not carry a JSON body; auth always needs
+  // a token message.
+  let data: T | undefined;
   try {
     data = (await resp.json()) as T;
   } catch {
-    return { kind: "error", message: "PriceCharting returned an unreadable response." };
+    data = undefined;
   }
+  const raw = data?.['error-message'];
+  // Upstream text reaches logs, card rows and the admin alert: collapse control
+  // characters so a multi-line reply cannot forge log lines.
+  const clean =
+    typeof raw === 'string'
+      ? // eslint-disable-next-line no-control-regex
+        raw.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 300)
+      : '';
+  const upstreamMessage = clean || undefined;
+  // Must not trip the admin dashboard's /\btoken\b/ fold ("_TOKEN" does not match).
+  const tokenHint = `PriceCharting refused the request (HTTP ${resp.status}); check PRICECHARTING_API_TOKEN`;
 
-  if (!resp.ok || data.status !== "success") {
+  if (resp.status >= 500 || resp.status === 429) {
     return {
-      kind: "error",
-      message: data["error-message"] ?? `PriceCharting error (HTTP ${resp.status}).`,
+      kind: 'error',
+      message: upstreamMessage ?? `PriceCharting error (HTTP ${resp.status}).`,
+      cause: 'unavailable',
     };
   }
-  return { kind: "ok", data };
+  // A 401/403/410 is auth only with a token message (the 2026-10-19 expiry was a
+  // 410 "Access token has expired"); without one it may be an edge/WAF block or
+  // a removed product, so it stays 'unavailable' but its message points the
+  // operator at the token env var.
+  const tokenMessage =
+    upstreamMessage && /\btoken\b/i.test(upstreamMessage)
+      ? upstreamMessage
+      : null;
+  if (
+    tokenMessage &&
+    (TOKEN_STATUSES.includes(resp.status) || data?.status !== 'success')
+  ) {
+    return { kind: 'error', message: tokenMessage, cause: 'auth' };
+  }
+  // The token check runs first on purpose, so a 404 "Token not found" is auth.
+  if (resp.status === 404 && data) {
+    return {
+      kind: 'error',
+      message: upstreamMessage ?? 'PriceCharting error (HTTP 404).',
+    };
+  }
+  if (!data) {
+    return {
+      kind: 'error',
+      message: TOKEN_STATUSES.includes(resp.status)
+        ? tokenHint
+        : `PriceCharting returned an unreadable response (HTTP ${resp.status}).`,
+      cause: 'unavailable',
+    };
+  }
+  if (!resp.ok || data.status !== 'success') {
+    return {
+      kind: 'error',
+      message:
+        upstreamMessage ??
+        (TOKEN_STATUSES.includes(resp.status)
+          ? tokenHint
+          : `PriceCharting error (HTTP ${resp.status}).`),
+      ...(/no such product|not found/i.test(upstreamMessage ?? '')
+        ? {}
+        : { cause: 'unavailable' as const }),
+    };
+  }
+  return { kind: 'ok', data };
 }

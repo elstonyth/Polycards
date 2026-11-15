@@ -7,6 +7,7 @@ import {
   recordPriceHistory,
   refreshCardPrice,
   type CardRow,
+  type PricechartingFeed,
 } from '../modules/packs/sync-market-prices';
 import { pageAll } from '../api/utils/page-all';
 
@@ -16,14 +17,42 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // upstream product payload (see api/admin/pricecharting/product/route.ts) is
 // integer-pennies fields keyed by PRICE_FIELDS (e.g. "manual-only-price").
 // Typing T as a plain Record here yields exactly the raw penny fields
-// refreshCardPrice expects — no reshaping needed, `pcFetch` already returns
-// { kind: "ok", data: <raw penny fields> } | { kind: "no-token" } | { kind: "error", message }.
+// refreshCardPrice expects — no reshaping needed. The result is `PcResult` in
+// api/admin/pricecharting/client.ts; its error `cause` ('auth' | 'unavailable')
+// drives the outage handling below.
 type PcProductRaw = { status: string; 'error-message'?: string } & Record<
   string,
   unknown
 >;
 const pcFetchRaw = (path: string, params: Record<string, string>) =>
   pcFetch<PcProductRaw>(path, params);
+
+// The admin "token expired" alert (GET /admin/pricing/health). Touches only
+// this column: the singleton also holds the payment gateway and withdrawal
+// switches.
+async function saveFeed(
+  packs: PacksModuleService,
+  feed: PricechartingFeed | null,
+): Promise<void> {
+  const [row] = await packs.listSiteSettings({}, { take: 1 });
+  if (row)
+    await packs.updateSiteSettings({
+      selector: { id: row.id },
+      data: { pricecharting_feed: feed },
+    });
+  else
+    try {
+      await packs.createSiteSettings([
+        { id: 'global', pricecharting_feed: feed },
+      ]);
+    } catch {
+      // Another writer created the singleton between our read and create.
+      await packs.updateSiteSettings({
+        selector: { id: 'global' },
+        data: { pricecharting_feed: feed },
+      });
+    }
+}
 
 // All scheduled jobs share ONE BullMQ slot (concurrency 1), and a full sweep
 // takes ~1.1 s per linked card. Awaiting it here held up deposit-reconcile
@@ -37,12 +66,16 @@ export default async function syncMarketPricesJob(
 ): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   if (running) {
-    logger.warn('[sync-market-prices] skipped: the previous sweep is still running');
+    logger.warn(
+      '[sync-market-prices] skipped: the previous sweep is still running',
+    );
     return;
   }
   running = runMarketPriceSync(container)
     .catch((e) =>
-      logger.error(`[sync-market-prices] sweep failed: ${(e as Error).message}`),
+      logger.error(
+        `[sync-market-prices] sweep failed: ${(e as Error).message}`,
+      ),
     )
     .finally(() => {
       running = null;
@@ -67,6 +100,65 @@ export async function runMarketPriceSync(
   const syncedAt = (c: CardRow) =>
     (c.pc_synced_at ? new Date(c.pc_synced_at).getTime() : 0) || 0;
   cards.sort((a, b) => syncedAt(a) - syncedAt(b));
+  // A stored outage clears on the first ok reply (the only answer that proves
+  // the token works), not at the end of the sweep: deploys cut sweeps short.
+  // Unreadable settings count as flagged: worst case one harmless null write.
+  let feedFlagged = true;
+  let feedKnown = false;
+  try {
+    const [settings] = await packs.listSiteSettings({}, { take: 1 });
+    feedFlagged = Boolean(settings?.pricecharting_feed);
+    feedKnown = true;
+  } catch (e) {
+    logger.error(
+      `[sync-market-prices] could not read the feed alert: ${(e as Error).message}`,
+    );
+  }
+  let feedAnswered = false;
+  let clearFailures = 0;
+  let lastClearError = '';
+  const fetchProduct: typeof pcFetchRaw = async (path, params) => {
+    const res = await pcFetchRaw(path, params);
+    if (res.kind === 'ok') feedAnswered = true;
+    return res;
+  };
+  // Runs after every card and once after the loop: a card that `continue`s
+  // skips the per-card attempt, so a failed clear still gets its retry.
+  const tryClear = async () => {
+    if (!feedFlagged || !feedAnswered) return;
+    try {
+      await saveFeed(packs, null);
+      feedFlagged = false;
+    } catch (e) {
+      // Logged once here, summed at the end of the sweep.
+      clearFailures++;
+      lastClearError = (e as Error).message;
+      if (clearFailures === 1)
+        logger.error(
+          `[sync-market-prices] could not clear the feed alert: ${lastClearError}`,
+        );
+    }
+  };
+  // The outage alert is the only signal (no card is written), so it is saved
+  // the moment it is seen, before the per-card delay, with one retry.
+  const recordOutage = async (feed: PricechartingFeed) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await saveFeed(packs, feed);
+        return;
+      } catch (e) {
+        if (attempt >= 2) {
+          logger.error(
+            `[sync-market-prices] feed outage NOT recorded — admin alert lost: ${(e as Error).message}`,
+          );
+          return;
+        }
+        await sleep(2000);
+      }
+    }
+  };
+  let outage: PricechartingFeed | undefined;
+  let stoppedAt = '';
   let changed = 0;
   let skipped = 0;
   let failed = 0;
@@ -81,10 +173,17 @@ export async function runMarketPriceSync(
       }
       observed = current;
       const r = await refreshCardPrice(current, {
-        pcFetch: pcFetchRaw,
+        pcFetch: fetchProduct,
         updateCards: ([update]) => packs.applyCardPriceSync(current, update),
         now: new Date(),
       });
+      // Every remaining card would fail the same way: stop, alert once.
+      if (r.outage) {
+        outage = r.outage;
+        stoppedAt = `${current.handle || current.id} (PriceCharting id ${current.pc_product_id})`;
+        await recordOutage(r.outage);
+        break;
+      }
       if (r.changed) {
         changed++;
         logger.info(
@@ -117,7 +216,24 @@ export async function runMarketPriceSync(
     } finally {
       await sleep(1100);
     }
+    await tryClear();
   }
+  if (outage) {
+    logger.error(
+      `[sync-market-prices] stopped at ${stoppedAt} after ${changed} updates, ${skipped} skipped, ${failed} failed: PriceCharting ${
+        outage.status === 'no_token'
+          ? `token is not set (${outage.message}); set PRICECHARTING_API_TOKEN`
+          : `token rejected (${outage.message}); renew it and update PRICECHARTING_API_TOKEN`
+      }`,
+    );
+    return;
+  }
+  await tryClear();
+  // Prod logs keep ~30 min: restate a clear that never landed next to the summary.
+  if (feedFlagged && feedAnswered)
+    logger.error(
+      `[sync-market-prices] feed alert NOT cleared although PriceCharting answered: ${clearFailures} failed attempts, last: ${lastClearError}; admin ${feedKnown ? 'still shows' : 'may still show'} the token alert`,
+    );
   const summary = `[sync-market-prices] done: ${changed}/${cards.length} updated, ${skipped} skipped, ${failed} failed`;
   if (skipped > 0 || failed > 0) logger.warn(summary);
   else logger.info(summary);

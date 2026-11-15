@@ -52,9 +52,11 @@ vi.mock('../../lib/queries', () => {
 
 import { AttentionCard } from './AttentionCard';
 import { PricingStatus } from '../cards/PricingStatus';
+import { attentionIncreased } from '../../lib/dashboard';
 
 const health: PricingHealth = {
   fx: null,
+  feed: null,
   cards: {
     linked: 1,
     never_synced: 0,
@@ -145,6 +147,165 @@ describe('pricing in dashboard attention', () => {
     };
     expect(render()).toContain('dashboard.allClear');
     expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('pricing', 0);
+  });
+});
+
+describe('PriceCharting feed outage in dashboard attention', () => {
+  it('shows one token alert instead of a per-card count', () => {
+    const issue = health.cards.issues[0];
+    state.pricing.data = {
+      ...health,
+      feed: {
+        status: 'token_expired',
+        message: 'Access token has expired',
+        at: '2026-10-19T03:00:00Z',
+      },
+      cards: {
+        ...health.cards,
+        issues: Array.from({ length: 877 }, (_, i) => ({
+          ...issue,
+          handle: `card-${i}`,
+          reason: 'stale' as const,
+        })),
+      },
+    };
+    const html = render();
+    expect(html).toContain('dashboard.pricingTokenExpired');
+    expect(html).toContain('dashboard.pricingFeedDetail');
+    expect(html).toContain('Access token has expired');
+    expect(html).not.toContain('dashboard.pricingAttention');
+    expect(html).not.toContain('dashboard.allClear');
+    expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('pricing', 0);
+    expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('pricingFeed', 1);
+  });
+
+  const outage: NonNullable<PricingHealth['feed']> = {
+    status: 'token_expired',
+    message: 'Access token has expired',
+    at: '2026-10-19T03:00:00Z',
+  };
+  const staleCards = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      ...health.cards.issues[0],
+      handle: `card-${i}`,
+      reason: 'stale' as const,
+    }));
+
+  it('keeps a missing product visible even when the outage masks it as stale', () => {
+    const issue = health.cards.issues[0];
+    state.pricing.data = {
+      ...health,
+      feed: outage,
+      cards: {
+        ...health.cards,
+        missing_product: ['gone'],
+        issues: [
+          ...staleCards(877),
+          { ...issue, handle: 'gone', reason: 'stale' as const },
+        ],
+      },
+    };
+    const html = render();
+    expect(html).toContain('dashboard.pricingTokenExpired');
+    expect(html).toContain('dashboard.pricingAttention {&quot;count&quot;:1}');
+    expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('pricing', 1);
+    expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('pricingFeed', 1);
+  });
+
+  it('keeps a real sync error visible beside the token alert', () => {
+    const issue = health.cards.issues[0];
+    state.pricing.data = {
+      ...health,
+      feed: outage,
+      cards: {
+        ...health.cards,
+        issues: [
+          {
+            ...issue,
+            reason: 'sync_error' as const,
+            message: 'above cap: 200000 > 100000',
+          },
+        ],
+      },
+    };
+    const html = render();
+    expect(html).toContain('dashboard.pricingAttention {&quot;count&quot;:1}');
+    expect(state.alert.mock.calls[0]?.[0]).toHaveProperty('pricing', 1);
+  });
+
+  it.each([
+    { reason: 'stale', message: null, folded: true },
+    { reason: 'never_synced', message: null, folded: true },
+    { reason: 'sync_error', message: 'Access token has expired', folded: true },
+    {
+      reason: 'sync_error',
+      message: 'above cap: 200000 > 100000',
+      folded: false,
+    },
+    {
+      reason: 'sync_error',
+      message:
+        'PriceCharting refused the request (HTTP 403); check PRICECHARTING_API_TOKEN',
+      folded: false,
+    },
+    { reason: 'pending_confirmation', message: null, folded: false },
+    { reason: 'unlinked', message: null, folded: false },
+    { reason: 'missing_product', message: null, folded: false },
+  ] as const)(
+    'during an outage a $reason card ($message) folded=$folded',
+    ({ reason, message, folded }) => {
+      state.pricing.data = {
+        ...health,
+        feed: outage,
+        cards: {
+          ...health.cards,
+          issues: [{ ...health.cards.issues[0], reason, message }],
+        },
+      };
+      const html = render();
+      expect(state.alert.mock.calls[0]?.[0]).toHaveProperty(
+        'pricing',
+        folded ? 0 : 1,
+      );
+      expect(html.includes('dashboard.pricingAttention')).toBe(!folded);
+    },
+  );
+
+  it('counts the outage under its own key so the alert sounds when it starts', () => {
+    state.pricing.data = { ...health, cards: { ...health.cards, issues: [] } };
+    render();
+    const before = state.alert.mock.lastCall?.[0] ?? {};
+    expect(before).toHaveProperty('pricingFeed', 0);
+    state.pricing.data = {
+      ...health,
+      feed: outage,
+      cards: { ...health.cards, issues: staleCards(877) },
+    };
+    render();
+    const after = state.alert.mock.lastCall?.[0] ?? {};
+    expect(after).toHaveProperty('pricingFeed', 1);
+    expect(attentionIncreased(before, after)).toBe(true);
+    expect(
+      attentionIncreased(
+        { pricing: 5, pricingFeed: 0 },
+        { pricing: 0, pricingFeed: 1 },
+      ),
+    ).toBe(true);
+  });
+
+  it('says the token is not set when it is missing', () => {
+    state.pricing.data = {
+      ...health,
+      feed: {
+        status: 'no_token',
+        message: 'not set',
+        at: '2026-10-19T03:00:00Z',
+      },
+      cards: { ...health.cards, issues: [] },
+    };
+    const html = render();
+    expect(html).toContain('dashboard.pricingNoToken');
+    expect(html).not.toContain('dashboard.pricingAttention');
   });
 });
 
