@@ -1,9 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import {
-  accountNumberForms,
-  findBank,
-} from '../../../../modules/packs/banks';
+import { accountNumberForms, findBank } from '../../../../modules/packs/banks';
 import {
   clearedHolderNames,
   liftedPayoutBans,
@@ -68,9 +65,9 @@ const banState = (disabled: boolean | null, reason: string | null) => ({
 
 const bankId = (code: string | null) => findBank(code)?.id ?? '';
 
-/** A stored number as the save and payout checks compare it: its bank, and
+/** A stored number as the save and withdrawal checks compare it: its bank, and
  *  its first spelling (a PayNow mobile without its 65) as the key. */
-function destination(bankCode: string, accountNumber: string) {
+function numberAtBank(bankCode: string, accountNumber: string) {
   const forms = accountNumberForms(
     bankCode,
     payoutAccountKey(accountNumber, false),
@@ -79,7 +76,7 @@ function destination(bankCode: string, accountNumber: string) {
   return { bank, key: forms[0], forms, id: `${bank}:${forms[0]}` };
 }
 
-/** Is a stored row the destination `key`, as the save and payout checks read
+/** Is a stored row the number `key`, as the save and withdrawal checks read
  *  it: under any spelling, and at `bank` when one is given (heldByAnother: the
  *  same digits at another bank are someone else's account). */
 const sameNumber =
@@ -141,9 +138,7 @@ async function accountsOn(
   match: (row: AtNumber) => boolean,
 ): Promise<(AccountRow & { keys: string[]; banks: string[] })[]> {
   const rows = (
-    await db.raw<
-      Omit<AccountRow, 'keys'> & AtNumber & { k: string | null }
-    >(
+    await db.raw<Omit<AccountRow, 'keys'> & AtNumber & { k: string | null }>(
       `WITH h AS (
          SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, ${DIGITS("a->>'accountNumber'")} AS digits,
                 ${NAME("a->>'accountHolderName'")} AS k
@@ -222,17 +217,17 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
       [id, id],
     )
   ).rows;
-  // One entry per number, as the save and payout checks match it: digits
+  // One entry per number, as the save and withdrawal checks match it: digits
   // without leading zeros under every spelling (a PayNow mobile with or without
   // its 65), at its own bank. A wallet has no holder to share.
   const byKey = new Map<
     string,
-    { row: NumberRow; at: ReturnType<typeof destination> }
+    { row: NumberRow; at: ReturnType<typeof numberAtBank> }
   >();
   for (const row of numbers) {
     // An entry from before the saved-list shape has no number to compare.
     if (!row.account_number || findBank(row.bank_code)?.wallet) continue;
-    const at = destination(row.bank_code, row.account_number);
+    const at = numberAtBank(row.bank_code, row.account_number);
     if (at.key.length > 4 && !byKey.has(at.id)) byKey.set(at.id, { row, at });
   }
 
@@ -302,7 +297,7 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
   const stamps = twinIds.length
     ? (
         await db.raw<{ id: string; metadata: Record<string, unknown> | null }>(
-          'SELECT id, metadata FROM customer WHERE id = ANY(string_to_array(?, \',\'))',
+          "SELECT id, metadata FROM customer WHERE id = ANY(string_to_array(?, ','))",
           [[id, ...twinIds].join(',')],
         )
       ).rows
@@ -319,7 +314,7 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
   >();
   for (const r of sameName) {
     if (!r.account_number || findBank(r.bank_code)?.wallet) continue;
-    const at = destination(r.bank_code, r.account_number);
+    const at = numberAtBank(r.bank_code, r.account_number);
     const entry = sameNameAccounts.get(r.customer_id) ?? {
       row: r,
       banks: new Map<string, string>(),
@@ -366,26 +361,35 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
 }
 
 /** Every account on one bank number. Staff give no bank, so the number is
- *  asked under every spelling a PayNow save would ask: the other spelling
+ *  looked up under every spelling a PayNow save would ask: the other spelling
  *  (with or without 65) matches PayNow rows only, any other bank needs the same
- *  digits. The ban is the list's, at any bank, with no player's lift. */
+ *  digits. Banned as a save of it at a bank it is at would read it (the list
+ *  is at any bank), with no player's lift: a 65 number at CIMB is not asked
+ *  without its 65. */
 async function numberView(db: ReportDb, key: string) {
   const forms = accountNumberForms('PAYNOWSG', key);
-  const accounts = await accountsOn(db, forms, sameNumber(key));
-  const payouts = await payoutsTo(db, forms, sameNumber(key));
+  const match = sameNumber(key);
+  const accounts = await accountsOn(db, forms, match);
+  const payouts = await payoutsTo(db, forms, match);
   const groups = nameGroups(accounts);
+  const banForms = [
+    ...new Set([
+      key,
+      ...accounts.flatMap((a) =>
+        a.banks.flatMap((b) => accountNumberForms(b, key)),
+      ),
+    ]),
+  ];
   return {
     bank_account: {
       // Every bank the number is at.
       banks: [
         ...new Set(
-          accounts.flatMap((a) =>
-            a.banks.map((b) => findBank(b)?.name ?? b),
-          ),
+          accounts.flatMap((a) => a.banks.map((b) => findBank(b)?.name ?? b)),
         ),
       ].sort(),
       last4: key.slice(-4),
-      banned_number: (await banOf(db, forms)).banned,
+      banned_number: (await banOf(db, banForms)).banned,
     },
     account_count: accounts.length,
     accounts: accounts.map((a) => ({
@@ -426,7 +430,7 @@ async function nameView(db: ReportDb, name: string) {
   >();
   for (const r of rows) {
     if (!r.account_number || findBank(r.bank_code)?.wallet) continue;
-    const at = destination(r.bank_code, r.account_number);
+    const at = numberAtBank(r.bank_code, r.account_number);
     if (at.key.length <= 4) continue;
     const entry = byCustomer.get(r.customer_id) ?? {
       row: r,

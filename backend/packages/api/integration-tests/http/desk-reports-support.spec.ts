@@ -461,6 +461,20 @@ medusaIntegrationTestRunner({
             },
           ]);
         }
+        // The saver was paid under the other spelling too: one number's payouts.
+        await packs().createGatewayWithdrawals([
+          {
+            merchant_transaction_id: 'sp-pn-3',
+            customer_id: saver,
+            amount: 10.15,
+            amount_settled: 10.15,
+            bank_code: PAYNOW,
+            account_number: LOCAL,
+            account_holder_name: 'Pay Person',
+            status: 'settled' as const,
+            settled_at: new Date(),
+          },
+        ]);
         await pg().raw(
           'INSERT INTO banned_payout_account (account_key, bank_code) VALUES (?, ?)',
           ['6591234567', PAYNOW],
@@ -503,12 +517,12 @@ medusaIntegrationTestRunner({
           last4: '4567',
           banned_number: true,
           lifted_for_player: false,
-          this_player_payouts: { count: 1, rm: 20 },
+          this_player_payouts: { count: 2, rm: 30.15 },
         });
         expect(await bannedFor(saver, PAYNOW)).toBe(true);
-        expect(usernames(saverView.bank_accounts[0].other_accounts)).toEqual(
-          ['Pay_Ring'],
-        );
+        expect(usernames(saverView.bank_accounts[0].other_accounts)).toEqual([
+          'Pay_Ring',
+        ]);
         expect((await othersAt(saver, PAYNOW)).map((id) => names[id])).toEqual([
           'Pay_Ring',
         ]);
@@ -544,6 +558,39 @@ medusaIntegrationTestRunner({
             banned_number: await bannedFor(null, PAYNOW),
           });
         }
+        // A 65 number at a Malaysian bank is not a PayNow mobile: its digits
+        // without the 65 being banned does not ban it, as a save at CIMB reads it.
+        const CIMB_NUMBER = '6512345678';
+        await packs().createGatewayWithdrawals([
+          {
+            merchant_transaction_id: 'sp-cimb-1',
+            customer_id: twin,
+            amount: 10,
+            amount_settled: 10,
+            bank_code: 'CIBBMYKL',
+            account_number: CIMB_NUMBER,
+            account_holder_name: 'Other Person',
+            status: 'settled' as const,
+            settled_at: new Date(),
+          },
+        ]);
+        await pg().raw(
+          'INSERT INTO banned_payout_account (account_key, bank_code) VALUES (?, ?)',
+          ['12345678', PAYNOW],
+        );
+        const cimbBanned = async (bank: string) =>
+          (
+            await Promise.all(
+              accountNumberForms(bank, CIMB_NUMBER).map((n) =>
+                packs().payoutAccountBanned(n, false),
+              ),
+            )
+          ).some(Boolean);
+        expect(await cimbBanned(PAYNOW)).toBe(true);
+        expect(await cimbBanned('CIBBMYKL')).toBe(false);
+        expect(
+          (await view(`ban?bank_account=${CIMB_NUMBER}`)).bank_account,
+        ).toMatchObject({ banks: ['CIMB Bank'], banned_number: false });
 
         // Unbanned for one player: banned for every other account still.
         await packs().setPayoutBanLifted({
@@ -569,7 +616,13 @@ medusaIntegrationTestRunner({
 
         for (const body of bodies) {
           expectNoSecrets(body);
-          for (const hidden of [LOCAL, 'Pay Person', 'Ring Person', 'Other Person']) {
+          for (const hidden of [
+            LOCAL,
+            '12345678',
+            'Pay Person',
+            'Ring Person',
+            'Other Person',
+          ]) {
             expect(JSON.stringify(body)).not.toContain(hidden);
           }
         }
