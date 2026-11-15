@@ -19,7 +19,7 @@ import { realNameKey, realNameKeySql } from '../../utils/real-name';
 // Payout Destination identity (ADR 0015: one Payout Destination per account).
 // The one answer to "is this number banned for this player, who else holds it
 // at this bank, is this holder name linked to another account": every
-// spelling, the bank scope, exact wallet matching, payout statuses, cut rows,
+// spelling, the bank scope, exact wallet matching, withdrawal statuses, cut rows,
 // lifts and name clearings live here. Messages, writes, the cooling-off window,
 // permissions and visitor signals (ADR 0016: a review clue, never a gate) stay
 // with the callers. Reads only, on the manager the caller hands in, so a
@@ -28,7 +28,7 @@ import { realNameKey, realNameKeySql } from '../../utils/real-name';
 export type PayoutNumber = { bankCode: string | null; accountNumber: string };
 
 /** Another live account on this number at this bank, once each. `paid`: a
- *  payout to it went out or is on its way. `verified`: support verified that
+ *  withdrawal to it went out or is on its way. `verified`: support verified that
  *  account on this number (one person, one account). */
 export type Holder = { customerId: string; paid: boolean; verified: boolean };
 
@@ -92,13 +92,13 @@ export const holderNameKeySql = (expr: string): string => {
   return `regexp_replace(lower(CASE WHEN octet_length(${expr}) = length(${expr}) THEN ${expr} ELSE ${folded} END), '[^a-z]', '', 'g')`;
 };
 
-// Other customers tied to one spelling: saved on a live account, or a payout
+// Other customers tied to one spelling: saved on a live account, or a withdrawal
 // to it that went out or is on its way (failed rows came back and prove
 // nothing). A deleted account frees its numbers: the deletion scrub cuts its
-// payout rows to the last 4 digits, which the length check keeps from matching
+// withdrawal rows to the last 4 digits, which the length check keeps from matching
 // a short zero-padded number, and its saved list is not read. Bank codes come
 // back raw (saved lists may still hold a retired gateway's alias); the caller
-// compares canonical ids. holder_name is NULL for a payout row. Digits only,
+// compares canonical ids. holder_name is NULL for a withdrawal row. Digits only,
 // without leading zeros, on both sides: padding with a 0, or an older entry
 // with spaces or dashes, does not slip past. A wallet address is compared
 // whole instead: its digits alone collide across unrelated Tron addresses.
@@ -124,12 +124,17 @@ const HOLDERS_DIGITS_SQL =
   "AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4 " +
   "AND status IN ('pending', 'held', 'settled')";
 
-/** The number as one destination compares: digits of the canonical spelling
- *  without leading zeros, a wallet address whole. */
-const destinationKey = (bankCode: string, accountNumber: string): string =>
-  findBank(bankCode)?.wallet
-    ? accountNumber
-    : payoutAccountKey(spellings(bankCode, accountNumber)[0], false);
+/** The number as one destination compares, banned and verified alike: digits
+ *  of the canonical spelling without leading zeros, a wallet address whole
+ *  (an EVM one in lower case). */
+const destinationKey = (
+  bankCode: string | null,
+  accountNumber: string,
+): string =>
+  payoutAccountKey(
+    spellings(bankCode, accountNumber)[0],
+    findBank(bankCode)?.wallet ?? false,
+  );
 
 /** Is this number banned (for anyone, and for this player), and who else holds
  *  it at this bank? Banned: any spelling's key is on banned_payout_account, at
@@ -219,7 +224,7 @@ export async function numberStanding(
   }
   return {
     bankId: bank?.id ?? null,
-    key: payoutAccountKey(forms[0], wallet),
+    key: destinationKey(n.bankCode, n.accountNumber),
     forms,
     banned: bannedKeys.length > 0,
     bannedForPlayer,
@@ -274,7 +279,7 @@ export async function nameStanding(
 /** Does someone else holding this number refuse a new save of it? Any holder
  *  of a bank number, under any name. A wallet's address is public on-chain and
  *  has no holder name, so a stranger who merely saved it must not stop its
- *  owner saving it: only one someone was already PAID to blocks. The payout
+ *  owner saving it: only one someone was already PAID to blocks. The withdrawal
  *  check still sees the saved entry (holdsPayout). */
 const blocksSave = (s: NumberStanding): boolean => {
   const wallet = findBank(s.bankId)?.wallet;
@@ -306,7 +311,7 @@ export function saveVerdict(a: {
   return { alreadySaved, blocks };
 }
 
-/** Does a payout to this number wait for support? Any other holder holds it,
+/** Does a withdrawal to this number wait for support? Any other holder holds it,
  *  a wallet someone only saved included, unless support verified this player
  *  on it. */
 export function holdsPayout(s: NumberStanding, verifiedHere: boolean): boolean {
