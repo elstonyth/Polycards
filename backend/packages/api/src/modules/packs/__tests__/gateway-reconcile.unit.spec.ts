@@ -314,23 +314,37 @@ describe('unknownDepositAction', () => {
 
 // A 400 is not evidence of anything on its own: a rotated key, a wrong
 // merchant id and an IP de-whitelisting all produce one. Only the explicit
-// not-found code (minted by the client on the gateway's own "transaction
+// not-found result (named by the client on the gateway's own "transaction
 // not found" answer) may authorise an action.
 describe('classifyRequeryError', () => {
-  it('acts only on the explicit not-found code', () => {
+  it('acts only on the explicit not-found result', () => {
     expect(
       classifyRequeryError(
-        new GatewayError('nope', [TGPAY_NOT_FOUND], 404, true),
+        new GatewayError('nope', [], 404, true, { result: 'not-found' }),
+      ),
+    ).toEqual({ kind: 'not-found' });
+    // A provider code alone is the client's business, not a result.
+    expect(
+      classifyRequeryError(
+        new GatewayError('nope', [TGPAY_NOT_FOUND], 400, true),
+      ),
+    ).toEqual({ kind: 'ambiguous' });
+  });
+
+  it('honours the not-found result at any HTTP status', () => {
+    expect(
+      classifyRequeryError(
+        new GatewayError('nope', [], 200, true, { result: 'not-found' }),
       ),
     ).toEqual({ kind: 'not-found' });
   });
 
-  it('honours the not-found code at any HTTP status', () => {
+  it('never reads a result off an ambiguous error', () => {
     expect(
       classifyRequeryError(
-        new GatewayError('nope', [TGPAY_NOT_FOUND], 200, true),
+        new GatewayError('nope', [], 400, false, { result: 'not-found' }),
       ),
-    ).toEqual({ kind: 'not-found' });
+    ).toEqual({ kind: 'ambiguous' });
   });
 
   it('treats a 400 with no not-found code as ambiguous, never not-found', () => {
@@ -456,7 +470,11 @@ describe('classifyRequeryError — A3Pay', () => {
 
   it('only the explicit platform not-found code authorises an action', () => {
     expect(
-      classifyRequeryError(new A3payError('nf', [A3PAY_NOT_FOUND], 200, true)),
+      classifyRequeryError(
+        new A3payError('nf', [A3PAY_NOT_FOUND], 200, true, {
+          result: 'not-found',
+        }),
+      ),
     ).toEqual({ kind: 'not-found' });
   });
 

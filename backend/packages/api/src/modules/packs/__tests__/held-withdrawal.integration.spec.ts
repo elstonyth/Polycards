@@ -448,6 +448,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
             ['PMT10013'],
             400,
             true,
+            { result: 'creates-nothing' },
           ),
         });
 

@@ -8,8 +8,29 @@
 export type SettlementState = 'success' | 'failed' | 'pending';
 
 /**
- * Carries a gateway's error codes through so callers can branch on them. The
- * flag that matters for money is `definite`.
+ * What a provider's definite answer means, named by the adapter or client
+ * that read the provider's own codes. The money paths read this, never a
+ * provider code:
+ * - `not-sent`: refused before anything reached the provider;
+ * - `payouts-off`: the provider has payouts switched off for us;
+ * - `wallet-empty`: our payout wallet there is short (`available`, when the
+ *   adapter confirmed it by its own balance read);
+ * - `creates-nothing`: a refusal known to create no payout;
+ * - `refused`: any other definite refusal;
+ * - `not-found`: a lookup answer, the provider has no such payment.
+ */
+export type ProviderResult =
+  | 'not-sent'
+  | 'payouts-off'
+  | 'wallet-empty'
+  | 'creates-nothing'
+  | 'refused'
+  | 'not-found';
+
+/**
+ * Carries a gateway's error codes through for the record (`failure_reason`,
+ * logs). The flag that matters for money is `definite`; what the refusal
+ * means is `result`.
  */
 export class GatewayError extends Error {
   readonly codes: string[];
@@ -22,18 +43,26 @@ export class GatewayError extends Error {
    * ambiguous submit would double-pay if the payout later executes.
    */
   readonly definite: boolean;
+  /** Set on a definite error only ('refused' unless named), never on an
+   *  ambiguous one: no result means unclear, which never moves money. */
+  readonly result: ProviderResult | undefined;
+  /** 'wallet-empty' confirmed by a balance read: what the wallet holds. */
+  readonly available: number | undefined;
 
   constructor(
     message: string,
     codes: string[],
     httpStatus: number,
     definite = false,
+    named: { result?: ProviderResult; available?: number } = {},
   ) {
     super(message);
     this.name = 'GatewayError';
     this.codes = codes;
     this.httpStatus = httpStatus;
     this.definite = definite;
+    this.result = definite ? (named.result ?? 'refused') : undefined;
+    this.available = definite ? named.available : undefined;
   }
 
   has(code: string): boolean {

@@ -4,7 +4,7 @@ import {
   sign,
   timingSafeEqual,
 } from 'node:crypto';
-import { GatewayError } from './gateway-types';
+import { GatewayError, type ProviderResult } from './gateway-types';
 
 // TGPay HTTP client (sandbox docs read 2026-09-05, sandbox.tgpay365.com/docs/api).
 // Plain JSON over HTTPS: two static key headers and a unix `epoch` that must
@@ -122,8 +122,9 @@ export class TgpayError extends GatewayError {
     codes: string[],
     httpStatus: number,
     definite = false,
+    named: ConstructorParameters<typeof GatewayError>[4] = {},
   ) {
-    super(message, codes, httpStatus, definite);
+    super(message, codes, httpStatus, definite, named);
     this.name = 'TgpayError';
   }
 }
@@ -172,6 +173,29 @@ function rsaSignature(
     Buffer.from(`POST\n${fullPath}\n${raw}`, 'utf8'),
     config.rsaPrivateKey as string,
   ).toString('base64');
+}
+
+/**
+ * What a refusal means, from the codes above. In this order: switched off,
+ * then our empty wallet, then the one text production has shown creates no
+ * payout (467 refused payouts by 2026-11-02, none later paid). Undefined
+ * leaves a definite refusal as plain 'refused'.
+ */
+function tgpayResult(
+  path: string,
+  codes: string[],
+  message: string,
+): ProviderResult | undefined {
+  if (codes.includes(TGPAY_PAYOUT_DISABLED)) return 'payouts-off';
+  if (codes.includes(TGPAY_PAYOUT_FLOAT_EMPTY)) return 'wallet-empty';
+  if (
+    path === '/transaction/payout/withdraw' &&
+    /no payout provider is available/i.test(message)
+  ) {
+    return 'creates-nothing';
+  }
+  if (codes.includes(TGPAY_NOT_FOUND)) return 'not-found';
+  return undefined;
 }
 
 /**
@@ -262,8 +286,9 @@ async function post<T>(
       [parsed.errors, parsed.message, parsed.msg].filter(Boolean).join(' '),
     );
     if (upstreamError) codes.push(TGPAY_UPSTREAM_ERROR);
+    const message = `${label} ${path} failed (HTTP ${response.status}): ${detail}`;
     throw new TgpayError(
-      `${label} ${path} failed (HTTP ${response.status}): ${detail}`,
+      message,
       codes,
       response.status,
       // 4xx with a JSON body = they parsed us and said no. 5xx, a 4xx wrapping
@@ -271,6 +296,7 @@ async function post<T>(
       // request may have been accepted.
       (response.status >= 400 && response.status < 500 && !upstreamError) ||
         payoutDisabled,
+      { result: tgpayResult(path, codes, message) },
     );
   }
   return parsed.data;

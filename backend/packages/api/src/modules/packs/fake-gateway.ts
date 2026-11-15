@@ -1,12 +1,6 @@
 import { banksFor } from './banks';
 import type { GatewayAdapter } from './gateway';
 import { GatewayError } from './gateway-types';
-import {
-  TGPAY_NOT_FOUND,
-  TGPAY_PAYOUT_DISABLED,
-  TGPAY_PAYOUT_FLOAT_EMPTY,
-} from './tgpay-client';
-import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
 import type {
   DepositDetail,
   MerchantBalance,
@@ -155,9 +149,10 @@ const adapter: GatewayAdapter<FakeConfig> = {
     ) {
       throw new GatewayError(
         `fake: ${merchantTransactionId} not found`,
-        [TGPAY_NOT_FOUND],
+        [],
         404,
         true,
+        { result: 'not-found' },
       );
     }
     return play(script.getWithdrawalDetail, () => ({
@@ -215,40 +210,20 @@ const REFUSAL_TEXT: Record<FakeRefusal, string> = {
 };
 
 /**
- * Script the next payout submit to be refused with `result`. Specs name the
- * outcome; how it is signalled is this helper's business.
+ * Script the next payout submit to be refused with `result`, named as a real
+ * adapter names it. An unconfirmed hint is just 'refused': the adapter that
+ * read the balance already decided.
  */
 function refuse(result: FakeRefusal, options: FakeRefusalOptions = {}): void {
-  const message = options.message ?? REFUSAL_TEXT[result];
-  const codes = [...(options.codes ?? [])];
-  let httpStatus = options.httpStatus ?? 400;
-  // shortcut: signalled the way today's pipeline reads it (provider codes and
-  // a balance read); becomes the named result once GatewayError carries one.
-  if (result === 'payouts-off') {
-    codes.push(TGPAY_PAYOUT_DISABLED);
-    httpStatus = options.httpStatus ?? 501;
-  }
-  if (result === 'wallet-empty' && options.available === undefined) {
-    codes.push(TGPAY_PAYOUT_FLOAT_EMPTY);
-  }
-  const hint =
-    (result === 'wallet-empty' && options.available !== undefined) ||
-    (result === 'refused' && options.unconfirmedHint);
-  if (hint) codes.push(A3PAY_PAYOUT_FLOAT_EMPTY);
   script = {
     ...script,
-    submitWithdrawal: new GatewayError(message, codes, httpStatus, true),
-    ...(hint
-      ? {
-          checkBalance: {
-            ...FAKE_BALANCE,
-            availableBalance:
-              result === 'wallet-empty'
-                ? (options.available as number)
-                : FAKE_BALANCE.availableBalance,
-          },
-        }
-      : {}),
+    submitWithdrawal: new GatewayError(
+      options.message ?? REFUSAL_TEXT[result],
+      [...(options.codes ?? [])],
+      options.httpStatus ?? (result === 'payouts-off' ? 501 : 400),
+      true,
+      { result, available: options.available },
+    ),
   };
 }
 

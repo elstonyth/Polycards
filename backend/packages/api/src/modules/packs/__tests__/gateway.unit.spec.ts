@@ -139,7 +139,9 @@ describe('TGPay deposits', () => {
   it('a TGPay 404 classifies as not-found for the sweep; a 400 stays ambiguous', () => {
     expect(
       classifyRequeryError(
-        new tgpay.TgpayError('x', [tgpay.TGPAY_NOT_FOUND], 404, true),
+        new tgpay.TgpayError('x', [tgpay.TGPAY_NOT_FOUND], 404, true, {
+          result: 'not-found',
+        }),
       ),
     ).toEqual({ kind: 'not-found' });
     expect(
@@ -180,6 +182,18 @@ describe('TGPay payouts', () => {
       notifyUrl: 'https://us/wd',
     });
     expect(r.transactionId).toBe('tx-9');
+  });
+
+  // Nothing reached TGPay, so the withdrawal may refund at once (Q4).
+  it.each([
+    ['a bank outside its SWIFT table', { destinationBankCode: 'NOSUCHBANK' }],
+    ['no recipient email', { email: undefined }],
+  ])('names a payout refused before sending (%s) not-sent', async (_l, over) => {
+    const error = await submitWithdrawal({ ...wd, ...over }, tgpayConfig).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({ definite: true, result: 'not-sent' });
+    expect(tgpay.createPayout).not.toHaveBeenCalled();
   });
 
   it('pays a bank saved under the retired gateway code through TGPay after a switch (legacy code → SWIFT pair)', async () => {

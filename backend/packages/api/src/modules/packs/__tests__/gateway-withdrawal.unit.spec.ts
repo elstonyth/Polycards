@@ -642,6 +642,7 @@ describe('startWithdrawal — money ordering', () => {
         [],
         400,
         true,
+        { result: 'creates-nothing' },
       );
       const h = harness([tng]);
       h.packs.withdrawForCashout.mockResolvedValue({
@@ -678,6 +679,7 @@ describe('startWithdrawal — money ordering', () => {
         [],
         400,
         true,
+        { result: 'creates-nothing' },
       ),
     });
     const error = (await start(h).catch((e: unknown) => e)) as Error;
@@ -932,6 +934,7 @@ describe('startWithdrawal — money ordering', () => {
         ['PMT10013'],
         200,
         true,
+        { result: 'creates-nothing' },
       ),
     });
     await expect(start(h)).rejects.toThrow(/temporarily unavailable/i);
@@ -1056,6 +1059,7 @@ describe('startWithdrawal — money ordering', () => {
         ['PMT10013'],
         200,
         true,
+        { result: 'creates-nothing' },
       ),
     });
     await expect(start(h)).rejects.toThrow(/temporarily unavailable/i);
@@ -1240,6 +1244,7 @@ describe('startWithdrawal — money ordering', () => {
           [],
           400,
           true,
+          { result: 'creates-nothing' },
         ),
       });
       await expect(start(h)).rejects.toThrow(/temporarily unavailable/i);
@@ -1599,6 +1604,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       [TGPAY_PAYOUT_FLOAT_EMPTY],
       400,
       true,
+      { result: 'wallet-empty' },
     );
   const payoutDisabled = () =>
     new GatewayError(
@@ -1606,6 +1612,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       [TGPAY_PAYOUT_DISABLED],
       501,
       true,
+      { result: 'payouts-off' },
     );
   const originalFetch = global.fetch;
   let sent: { chat_id: string; text: string }[];
@@ -1979,6 +1986,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
           ['PMT10013'],
           400,
           true,
+          { result: 'creates-nothing' },
         ),
       });
       await expect(approveHarness().approve()).rejects.toThrow(

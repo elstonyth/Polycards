@@ -1,5 +1,4 @@
 import { GatewayError } from '../../modules/packs/gateway-types';
-import { TGPAY_NOT_FOUND } from '../../modules/packs/tgpay-client';
 
 jest.mock('../../modules/packs/notify-feed', () => ({
   notifyFeed: jest.fn().mockResolvedValue(undefined),
@@ -222,12 +221,9 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
   it('still refunds on an EXPLICIT not-found — this is a narrowing, not a removal', async () => {
     const h = harness();
     fakeGateway.script({
-      getWithdrawalDetail: new GatewayError(
-        'Not found',
-        [TGPAY_NOT_FOUND],
-        404,
-        true,
-      ),
+      getWithdrawalDetail: new GatewayError('Not found', [], 404, true, {
+        result: 'not-found',
+      }),
     });
 
     await withdrawalReconcileJob(h.container);
@@ -408,12 +404,9 @@ describe('withdrawal sweep — a held row is structurally invisible to it', () =
     // `undefined.statusId` first — the failure must be caught by the RIGHT
     // mechanism, not an accidental one.
     fakeGateway.script({
-      getWithdrawalDetail: new GatewayError(
-        'Not found',
-        [TGPAY_NOT_FOUND],
-        404,
-        true,
-      ),
+      getWithdrawalDetail: new GatewayError('Not found', [], 404, true, {
+        result: 'not-found',
+      }),
     });
 
     await withdrawalReconcileJob(h.container);
@@ -480,12 +473,9 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
   it('does NOT refund a row approved minutes ago, however old the request is', async () => {
     const h = harness(approvedMinutesAgoRow);
     fakeGateway.script({
-      getWithdrawalDetail: new GatewayError(
-        'Not found',
-        [TGPAY_NOT_FOUND],
-        404,
-        true,
-      ),
+      getWithdrawalDetail: new GatewayError('Not found', [], 404, true, {
+        result: 'not-found',
+      }),
     });
 
     await withdrawalReconcileJob(h.container);
@@ -499,12 +489,9 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
   it('refunds exactly once, on the shared anchor, and closes failed', async () => {
     const h = harness(approvedThenAmbiguousRow);
     fakeGateway.script({
-      getWithdrawalDetail: new GatewayError(
-        'Not found',
-        [TGPAY_NOT_FOUND],
-        404,
-        true,
-      ),
+      getWithdrawalDetail: new GatewayError('Not found', [], 404, true, {
+        result: 'not-found',
+      }),
     });
 
     await withdrawalReconcileJob(h.container);

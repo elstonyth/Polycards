@@ -321,6 +321,22 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
 };
 
 /**
+ * What a payout of `gatewayAmount` takes from OUR float: the amount PLUS the
+ * gateway's own fee (percent and flat), rounded up to the cent, since an
+ * amount that passed on its own could still be refused.
+ */
+export function payoutFloatNeeded(
+  gateway: PaymentGateway,
+  gatewayAmount: number,
+): number {
+  const { payoutFeePercent = 0, payoutFlatFee = 0 } = GATEWAYS[gateway] ?? {};
+  return (
+    Math.ceil(gatewayAmount * (100 + payoutFeePercent) - 1e-6) / 100 +
+    payoutFlatFee
+  );
+}
+
+/**
  * The gateways an OPERATOR may be shown and may choose. Never the fake, in
  * any environment — a test selects it by env or by setActiveGateway, not from
  * the admin switch, and this list is also what the audit page walks.
@@ -612,6 +628,9 @@ const TGPAY_METHOD: Record<string, 'FPX' | 'EWALLET' | undefined> = {
   BQR: 'EWALLET',
 };
 
+/** A refusal raised before any call reached the provider. */
+const NOT_SENT = { result: 'not-sent' } as const;
+
 // One adapter for the whole TGPay platform family: `config.kind` picks the
 // label, the bank-code column and the env prefix; the wire format is shared.
 const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
@@ -624,6 +643,7 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
         ['TGPAY_UNSUPPORTED_METHOD'],
         400,
         true,
+        NOT_SENT,
       );
     }
     if (!input.customer) {
@@ -632,6 +652,7 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
         ['TGPAY_CUSTOMER_REQUIRED'],
         400,
         true,
+        NOT_SENT,
       );
     }
     const result = await tgpay.createPayment(
@@ -689,6 +710,7 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
         ['TGPAY_UNKNOWN_BANK'],
         400,
         true,
+        NOT_SENT,
       );
     }
     if (!input.email) {
@@ -697,6 +719,7 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
         ['TGPAY_CUSTOMER_REQUIRED'],
         400,
         true,
+        NOT_SENT,
       );
     }
     const result = await tgpay.createPayout(
@@ -765,9 +788,6 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   },
 };
 
-// Total over the kinds by construction: a new member of the GatewayConfig
-// union has no entry here until someone writes its adapter, and the compiler
-// says so.
 /** A definite refusal raised before any call — nothing exists on their side. */
 function a3payRefusal(
   config: A3payConfig,
@@ -779,7 +799,49 @@ function a3payRefusal(
     [code],
     400,
     true,
+    NOT_SENT,
   );
+}
+
+/**
+ * A3Pay says our balance is short only in its message text, which may also
+ * carry what the customer typed, so its hint counts once our own balance read
+ * confirms it: a customer-specific refusal that happens to say "insufficient"
+ * must not close payouts for everyone. Confirmed, the refusal is named
+ * 'wallet-empty' with what the wallet holds; otherwise (or when the read
+ * fails) it stays a plain refusal.
+ */
+async function a3payWalletEmpty(
+  error: unknown,
+  config: A3payConfig,
+  gatewayAmount: number,
+): Promise<unknown> {
+  if (
+    !(error instanceof a3pay.A3payError) ||
+    !error.definite ||
+    !error.has(a3pay.A3PAY_PAYOUT_FLOAT_EMPTY)
+  ) {
+    return error;
+  }
+  try {
+    const b = await a3pay.checkAccBalance(config);
+    const available = Number(b.availableBalanceAmount);
+    if (
+      !Number.isFinite(available) ||
+      available >= payoutFloatNeeded(config.kind, gatewayAmount)
+    ) {
+      return error;
+    }
+    return new a3pay.A3payError(
+      error.message,
+      error.codes,
+      error.httpStatus,
+      true,
+      { result: 'wallet-empty', available },
+    );
+  } catch {
+    return error;
+  }
 }
 
 // One adapter for every tenant of the A3Pay platform (A3Pay SGD, GlobePay365
@@ -870,23 +932,28 @@ const a3payAdapter: GatewayAdapter<A3payConfig> = {
         'A3PAY_UNKNOWN_BANK',
       );
     }
-    const r = await a3pay.submitPayout(
-      {
-        merchantTransactionId: input.merchantTransactionId,
-        customerId: input.merchantClientId,
-        amount: input.gatewayAmount,
-        ipAddress: input.ipAddress,
-        bankCode: bank.code,
-        accountNumber: input.destinationAccountNumber,
-        // A wallet has no holder: GlobePay365 wants MCustId repeated here.
-        accountHolderName: findBank(input.destinationBankCode)?.wallet
-          ? input.merchantClientId
-          : input.destinationAccountHolderName,
-        callbackUrl: input.notifyUrl,
-        verifyUrl: input.returnUrl,
-      },
-      config,
-    );
+    const gatewayAmount = input.gatewayAmount;
+    const r = await a3pay
+      .submitPayout(
+        {
+          merchantTransactionId: input.merchantTransactionId,
+          customerId: input.merchantClientId,
+          amount: gatewayAmount,
+          ipAddress: input.ipAddress,
+          bankCode: bank.code,
+          accountNumber: input.destinationAccountNumber,
+          // A wallet has no holder: GlobePay365 wants MCustId repeated here.
+          accountHolderName: findBank(input.destinationBankCode)?.wallet
+            ? input.merchantClientId
+            : input.destinationAccountHolderName,
+          callbackUrl: input.notifyUrl,
+          verifyUrl: input.returnUrl,
+        },
+        config,
+      )
+      .catch(async (error: unknown) => {
+        throw await a3payWalletEmpty(error, config, gatewayAmount);
+      });
     return { transactionId: r.paymentOrderId ?? '' };
   },
 
@@ -923,6 +990,9 @@ const a3payAdapter: GatewayAdapter<A3payConfig> = {
   },
 };
 
+// Total over the kinds by construction: a new member of the GatewayConfig
+// union has no entry here until someone writes its adapter, and the compiler
+// says so.
 const ADAPTERS: {
   [K in GatewayConfig['kind']]: GatewayAdapter<
     Extract<GatewayConfig, { kind: K }>

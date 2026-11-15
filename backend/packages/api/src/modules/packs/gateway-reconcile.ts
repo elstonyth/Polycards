@@ -1,10 +1,8 @@
-import { A3payError, A3PAY_NOT_FOUND } from './a3pay-client';
 import type { SettlementState } from './gateway-types';
 import { GatewayError } from './gateway-types';
 import { GATEWAY_MAX_RM } from './gateway-deposit';
 import { gatewayEnv } from './gateway-env';
 import { offLock, type RowFx } from './payment-fx';
-import { TGPAY_NOT_FOUND } from './tgpay-client';
 
 // Reconciliation policy for outstanding gateway deposits. Pure decisions,
 // no container and no HTTP, so the rules are unit-testable — the job wires them
@@ -231,15 +229,13 @@ export type RequeryRefusal =
 
 export function classifyRequeryError(error: unknown): RequeryRefusal {
   if (!(error instanceof GatewayError)) return { kind: 'rethrow' };
-  if (error.has(TGPAY_NOT_FOUND)) return { kind: 'not-found' };
-  // A3Pay: the client tags its live "Not found" refusal (measured against
-  // production 2026-10-12, see A3PAY_NOT_FOUND in a3pay-client.ts). Matched
-  // on an A3payError only and only as that explicit tag: any other 400 (a
-  // wrong AES key answers plain-text "Invalid Request") stays 'ambiguous', so
-  // a credential or whitelist failure can never read as "never existed".
-  if (error instanceof A3payError && error.has(A3PAY_NOT_FOUND)) {
-    return { kind: 'not-found' };
-  }
+  // Only the client that read the provider's own answer names a not-found:
+  // TGPay's 404 "Transaction not found", A3Pay's explicit "Not found"
+  // (measured against production 2026-10-12, see A3PAY_NOT_FOUND). Any other
+  // 400 (a wrong AES key answers plain-text "Invalid Request") stays
+  // 'ambiguous', so a credential or whitelist failure can never read as
+  // "never existed".
+  if (error.result === 'not-found') return { kind: 'not-found' };
   return error.httpStatus === 400 ? { kind: 'ambiguous' } : { kind: 'rethrow' };
 }
 

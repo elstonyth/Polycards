@@ -27,11 +27,10 @@ import {
   submitWithdrawal,
   getWithdrawalDetail,
   GatewayError,
-  TGPAY_PAYOUT_DISABLED,
   GATEWAY_IDS,
   isLedgerGateway,
-  TGPAY_PAYOUT_FLOAT_EMPTY,
   checkBalance,
+  payoutFloatNeeded,
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
@@ -43,7 +42,6 @@ import {
 } from './payment-fx';
 import { classifyRequeryError } from './gateway-reconcile';
 import { ledgerTrail } from './gateway-audit';
-import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
 import {
   alertOps,
   alertPayoutDisabled,
@@ -184,27 +182,13 @@ export function regionalPayoutGateways(
 export const RATE_CHANGED_MESSAGE =
   'The exchange rate just changed. Check the new amount and try again.';
 
+export { payoutFloatNeeded };
+
 /**
  * Is OUR float at a regional gateway short of `gatewayAmount`? A3Pay's
  * balance read is cheap and read-only; a failed read is NOT short (the submit
  * still decides), so a balance-endpoint outage never blocks payouts.
  */
-/**
- * What a payout of `gatewayAmount` takes from OUR float: the amount PLUS the
- * gateway's own fee (percent and flat), rounded up to the cent, since an
- * amount that passed on its own could still be refused.
- */
-export function payoutFloatNeeded(
-  gateway: PaymentGateway,
-  gatewayAmount: number,
-): number {
-  const { payoutFeePercent = 0, payoutFlatFee = 0 } = GATEWAYS[gateway] ?? {};
-  return (
-    Math.ceil(gatewayAmount * (100 + payoutFeePercent) - 1e-6) / 100 +
-    payoutFlatFee
-  );
-}
-
 async function regionalFloatShort(
   config: GatewayConfig,
   gatewayAmount: number,
@@ -219,28 +203,6 @@ async function regionalFloatShort(
   } catch {
     return null;
   }
-}
-
-/**
- * Does a payout refusal mean OUR float is short? TGPay says so with a platform
- * code. A3Pay only in its message text, which may also carry what the
- * customer typed, so its hint must be confirmed by a balance read before it
- * may count: a customer-specific refusal that happens to say "insufficient"
- * must not close payouts for everyone. `trip` follows the pre-checks' rule
- * (floatCannotPayAnything): short for THIS amount alone refuses this payout
- * without closing the gateway.
- */
-async function floatEmptyRefusal(
-  error: GatewayError,
-  gateway: PaymentGateway,
-  config: GatewayConfig,
-  gatewayAmount: number | null,
-): Promise<{ trip: boolean } | null> {
-  if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) return { trip: true };
-  if (!error.has(A3PAY_PAYOUT_FLOAT_EMPTY) || gatewayAmount === null)
-    return null;
-  const short = await regionalFloatShort(config, gatewayAmount);
-  return short ? { trip: floatCannotPayAnything(gateway, short) } : null;
 }
 
 /**
@@ -1101,7 +1063,6 @@ export async function startWithdrawal(
             gateway,
             config,
             fx: rowFx(row),
-            gatewayAmount: fx?.gatewayAmount ?? null,
             merchantTransactionId,
           })
         : null;
@@ -1223,7 +1184,7 @@ export async function startWithdrawal(
       // passes it through on /temporarily unavailable/ (vault-errors.ts).
       if (
         findBank(bankCode)?.id === 'TNGMY' &&
-        /no payout provider is available/i.test(error.message)
+        error.result === 'creates-nothing'
       ) {
         throw new MedusaError(
           MedusaError.Types.NOT_ALLOWED,
@@ -1237,7 +1198,7 @@ export async function startWithdrawal(
       // Worded to hit the storefront's existing /withdrawals are temporarily
       // unavailable/ pass-through (vault-errors.ts), so it reads right whichever
       // deploy lands first.
-      if (/no payout provider is available/i.test(error.message)) {
+      if (error.result === 'creates-nothing') {
         throw new MedusaError(
           MedusaError.Types.NOT_ALLOWED,
           'Withdrawals are temporarily unavailable from our payout partner. Your balance has been returned and your bank details are fine. Please try again later.',
@@ -1362,14 +1323,6 @@ type RefusalVerdict = {
   unconfirmed: boolean;
 };
 
-/**
- * The one refusal text that production has shown creates no payout: 467 refused
- * payouts by 2026-11-02, none later paid. An empty wallet (`floatEmpty`, read
- * from the wallet itself) and payouts switched off count too. Any other text is
- * not proof: a gateway still writing the payout answers "not found" as well.
- */
-const PROVEN_REFUSAL = /no payout provider is available/i;
-
 /** What keeps a refusal on the row: both callers' write, one rule. The row is
  *  scoped to 'pending', and a row with no gateway id gets this write only in the
  *  same breath as its submit, so the sweep's clock barely moves (see
@@ -1428,23 +1381,23 @@ async function judgeRefusal(
     gateway: PaymentGateway;
     config: GatewayConfig;
     fx: RowFx;
-    gatewayAmount: number | null;
     merchantTransactionId: string;
   },
 ): Promise<RefusalVerdict> {
-  const payoutDisabled = error.has(TGPAY_PAYOUT_DISABLED);
-  const floatEmpty = payoutDisabled
-    ? null
-    : await floatEmptyRefusal(
-        error,
-        input.gateway,
-        input.config,
-        input.gatewayAmount,
-      );
+  const payoutDisabled = error.result === 'payouts-off';
+  const floatEmpty = error.result === 'wallet-empty';
   const kind = {
     payoutDisabled,
-    floatEmpty: floatEmpty !== null,
-    trip: payoutDisabled || Boolean(floatEmpty?.trip),
+    floatEmpty,
+    // A wallet the adapter read (A3Pay) closes the gateway only when it
+    // cannot pay anything; one the provider called empty outright, always.
+    trip:
+      payoutDisabled ||
+      (floatEmpty &&
+        (error.available === undefined ||
+          floatCannotPayAnything(input.gateway, {
+            available: error.available,
+          }))),
     unconfirmed: false,
   };
   if (payoutDisabled) return { ...kind, refund: true, heldId: null };
@@ -1459,7 +1412,10 @@ async function judgeRefusal(
       : { ...kind, refund: false, heldId: detail.transactionId || null };
   } catch (lookupError) {
     const notFound = classifyRequeryError(lookupError).kind === 'not-found';
-    const proven = kind.floatEmpty || PROVEN_REFUSAL.test(error.message);
+    // Proof the refusal created nothing: an empty wallet, or the one text
+    // production has shown creates no payout. Any other refusal is not: a
+    // gateway still writing the payout answers "not found" as well.
+    const proven = kind.floatEmpty || error.result === 'creates-nothing';
     return {
       ...kind,
       refund: notFound && proven,
@@ -2185,8 +2141,6 @@ export async function submitHeldWithdrawal(
             gateway: gatewayId,
             config,
             fx: rowFx(row),
-            gatewayAmount:
-              row.gateway_amount != null ? Number(row.gateway_amount) : null,
             merchantTransactionId: row.merchant_transaction_id,
           })
         : null;
