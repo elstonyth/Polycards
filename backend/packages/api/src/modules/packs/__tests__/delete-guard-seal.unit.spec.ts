@@ -62,3 +62,19 @@ test('the only raw .deleteCreditTransactions( call in src/ is the single delegat
   // Path is relative to SRC_ROOT (src/), so no leading "src/" prefix.
   expect(rel).toBe('modules/packs/service.ts');
 });
+
+// The per-customer credit lock key is built in ONE place (credit-posting.ts's
+// creditLockKey): a hand-typed copy can drift from it, and a drifted key stops
+// two money paths from excluding each other. Template and concatenation forms.
+test('the credit: lock key is spelled only in modules/packs/credit-posting.ts', () => {
+  const offenders: RawDeleteOccurrence[] = [];
+  for (const file of collectTsFiles(SRC_ROOT)) {
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    lines.forEach((text, i) => {
+      if (/`credit:\$\{|['"]credit:['"]\s*\+/.test(text)) {
+        offenders.push({ file: path.relative(SRC_ROOT, file).replace(/\\/g, '/'), line: i + 1, text: text.trim() });
+      }
+    });
+  }
+  expect(offenders.map((o) => o.file)).toEqual(['modules/packs/credit-posting.ts']);
+});

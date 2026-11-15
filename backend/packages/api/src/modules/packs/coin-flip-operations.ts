@@ -7,6 +7,7 @@ import { coerceOddsSet, EFFECTIVE_GROUP_SQL } from './odds-sets';
 import { DEFAULT_MARKET_MULTIPLIER, displayMarketPrice, resolveFxRateStrict } from './pricing';
 import { FREE_PULL_LOCKED_MESSAGE } from './free-pack';
 import { groupPolicyOf } from './group-policy';
+import { lockCredit } from './credit-posting';
 import {
   assertCoinFlipEligible, COIN_FLIP_CONFIG_ID, COIN_FLIP_QUOTE_MS, COIN_FLIP_SCALE,
   coinFlipSettingsView, coinFlipStakeCents, coinFlipWins, effectiveCoinWinUnits, coinFlipSelection, coinFlipStakes,
@@ -19,10 +20,6 @@ const refuse = (message: string): never => { throw new MedusaError(MedusaError.T
 const notFound = (): never => { throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Coin flip not found.'); };
 export const coinFlipManager = (context: Context): LedgerSqlManager =>
   (context.transactionManager ?? context.manager) as unknown as LedgerSqlManager;
-
-export async function lockCoinFlipCustomer(customerId: string, context: Context): Promise<void> {
-  await coinFlipManager(context).execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [`credit:${customerId}`]);
-}
 
 async function eligible(service: PacksModuleService, customerId: string, context: Context): Promise<void> {
   if (await service.isAccountDisabled(customerId, context)) refuse('This account is unavailable.');
@@ -91,7 +88,7 @@ export async function quoteCoinFlipOperation(
   service: PacksModuleService, input: CoinFlipQuoteInput, context: Context,
 ): Promise<CoinFlipPublicRound> {
   const selection = coinFlipStakeSelection(input);
-  await lockCoinFlipCustomer(input.customerId, context);
+  await lockCredit(context, input.customerId);
   await eligible(service, input.customerId, context);
   const pulls: Awaited<ReturnType<typeof cardForFlip>>[] = [];
   for (const id of selection.pullIds) pulls.push(await cardForFlip(service, input.customerId, id, context));
@@ -142,7 +139,7 @@ export async function getCoinFlipRoundOperation(
 export async function acceptCoinFlipOperation(
   service: PacksModuleService, input: { customerId: string; roundId: string }, context: Context,
 ): Promise<CoinFlipPublicRound> {
-  await lockCoinFlipCustomer(input.customerId, context);
+  await lockCredit(context, input.customerId);
   const round = await getCoinFlipRoundOperation(input, context);
   if (round.status !== 'quoted') return publicCoinFlipRound(round);
   await eligible(service, input.customerId, context);

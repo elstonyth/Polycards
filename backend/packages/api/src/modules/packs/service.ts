@@ -99,7 +99,8 @@ import CoinFlipRound from './models/coin-flip-round';
 import { settleBuyback, type BuybackSettlement } from './buyback-settlement';
 import { COIN_FLIP_CONFIG_ID, parseCoinFlipSettings, coinFlipSettingsView, publicCoinFlipRound,
   type CoinFlipSettings, type CoinFlipPublicRound } from './coin-flip';
-import { coinFlipManager, lockCoinFlipCustomer, readCoinFlipSettings, quoteCoinFlipOperation,
+import { lockCredit } from './credit-posting';
+import { coinFlipManager, readCoinFlipSettings, quoteCoinFlipOperation,
   acceptCoinFlipOperation, getCoinFlipRoundOperation } from './coin-flip-operations';
 import DeliveryOrder from './models/delivery-order';
 import DeliveryOrderItem from './models/delivery-order-item';
@@ -1584,7 +1585,7 @@ class PacksModuleService extends MedusaService({
     const em = coinFlipManager(context);
     const [owner] = await em.execute<{ customer_id: string }[]>('SELECT customer_id FROM delivery_order WHERE id = ? AND deleted_at IS NULL', [input.orderId]);
     if (!owner) return;
-    await lockCoinFlipCustomer(owner.customer_id, context);
+    await lockCredit(context, owner.customer_id);
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [`delivery:${input.orderId}`]);
     const [order] = await this.listDeliveryOrders({ id: input.orderId }, { take: 1 }, context);
     if (!order || order.status !== input.expectedStatus) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Delivery changed; refusing to reverse it.');
@@ -1617,7 +1618,7 @@ class PacksModuleService extends MedusaService({
   async undoBuybackAtomic(input: { pullId: string; creditTransactionId: string; restoreEarmark: boolean }, @MedusaContext() context: Context = {}): Promise<boolean> {
     const [credit] = await this.listCreditTransactions({ id: input.creditTransactionId, pull_id: input.pullId, reason: 'buyback' }, { take: 1 }, context);
     if (!credit) return false;
-    await lockCoinFlipCustomer(credit.customer_id, context);
+    await lockCredit(context, credit.customer_id);
     const [liveCredit] = await coinFlipManager(context).execute<{ id: string }[]>(
       "SELECT id FROM credit_transaction WHERE id = ? AND pull_id = ? AND reason = 'buyback' AND deleted_at IS NULL",
       [input.creditTransactionId, input.pullId]);
@@ -1707,7 +1708,7 @@ class PacksModuleService extends MedusaService({
     if (!input.customerId || ids.length === 0 || ids.length !== input.pullIds.length) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid completed pull list.');
     }
-    await lockCoinFlipCustomer(input.customerId, context);
+    await lockCredit(context, input.customerId);
     const em = coinFlipManager(context);
     const placeholders = ids.map(() => '?').join(',');
     const rows = await em.execute<{ id: string }[]>(`SELECT id FROM pull WHERE id IN (${placeholders}) AND customer_id = ? AND deleted_at IS NULL FOR UPDATE`, [...ids, input.customerId]);
@@ -1719,7 +1720,7 @@ class PacksModuleService extends MedusaService({
   @InjectTransactionManager()
   async finalizeLegacyPullsForCoinFlip(input: { customerId: string; pullIds: string[]; ingressDrained: boolean }, @MedusaContext() context: Context = {}): Promise<void> {
     if (!input.ingressDrained) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Stop and drain pack ingress and workers before maintenance.');
-    await lockCoinFlipCustomer(input.customerId, context);
+    await lockCredit(context, input.customerId);
     await coinFlipManager(context).execute('INSERT INTO coin_flip_config (id) VALUES (?) ON CONFLICT DO NOTHING', [COIN_FLIP_CONFIG_ID]);
     await coinFlipManager(context).execute('SELECT id FROM coin_flip_config WHERE id = ? FOR SHARE', [COIN_FLIP_CONFIG_ID]);
     if ((await this.coinFlipSettings(context)).enabled) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Pause coin flip before maintenance.');
@@ -2116,9 +2117,7 @@ class PacksModuleService extends MedusaService({
     // Under the same per-account lock setAccountDisabled holds, so the recheck
     // and the attribution write cannot interleave with a disable committing
     // between them (CodeRabbit, 2026-09-03).
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.referrerId}`,
-    ]);
+    await lockCredit(sharedContext, input.referrerId);
     if (await this.isAccountDisabled(input.referrerId, sharedContext)) {
       return { bound: false, reason: 'referrer_disabled' };
     }
@@ -4866,9 +4865,7 @@ class PacksModuleService extends MedusaService({
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
     // 1) Serialize all credit mutations for THIS customer on the locked txn.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
 
     // 1a) Idempotent replay (top-up): under the lock, if a row already carries
     // this idempotency reference the request already applied — return it as a
@@ -5286,9 +5283,7 @@ class PacksModuleService extends MedusaService({
     //    human-initiated — but it is a real assumption. A future high-volume
     //    path must not inherit it without re-measuring; only mutations for THIS
     //    customer contend, so the blast radius is one account either way.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
 
     // 1a) THE ROW MUST STILL BE OPEN. Read under the lock, before anything
     //     else, and the debit half of the pact with
@@ -5699,9 +5694,7 @@ class PacksModuleService extends MedusaService({
       // Same key and same idiom as mutateCreditAtomic and withdrawForCashout.
       // Re-entrant per session, so a refund composed onto this context later
       // re-taking it is a no-op.
-      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-        `credit:${input.customerId}`,
-      ]);
+      await lockCredit(sharedContext, input.customerId);
 
       // The same read the routes did unlocked before this method existed —
       // deliberately the generated lister, not new raw SQL, so its soft-delete
@@ -5784,9 +5777,7 @@ class PacksModuleService extends MedusaService({
       // best-effort undo; a missing charge means the forward step never ran).
       return { id: transactionId };
     }
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${original.customer_id}`,
-    ]);
+    await lockCredit(sharedContext, original.customer_id);
 
     // Idempotency (Codex review): a saga that double-compensates the same charge
     // must NOT append a second refund. Under the lock, if a reversal row for this
@@ -5885,11 +5876,7 @@ class PacksModuleService extends MedusaService({
     const customerIds = [
       ...new Set(originals.map((r) => r.customer_id)),
     ].sort();
-    for (const cid of customerIds) {
-      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-        `credit:${cid}`,
-      ]);
-    }
+    await lockCredit(sharedContext, ...customerIds);
 
     // 3a) Snapshot committed raw balance per touched customer BEFORE writes (MikroORM
     //     UoW buffers ORM inserts; a raw em.execute read inside the same txn only sees
@@ -6059,9 +6046,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const rows = await em.execute<{ balance_cents: string | null }[]>(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
@@ -6133,13 +6118,9 @@ class PacksModuleService extends MedusaService({
       return { claimed: false, kind: '' };
     }
 
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-
     // Serialize against any concurrent credit mutation for THIS customer; the
     // re-read below then sees a consistent grant status (no double-claim race).
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
 
     // Frozen accounts cannot draw value out (Batch A item 5) — block this payout
     // under the same lock as the read below.
@@ -6244,9 +6225,7 @@ class PacksModuleService extends MedusaService({
 
     // 0) Serialize against any concurrent credit/withdrawal mutation for THIS
     //    customer — held across the validation, the cap COUNT, and the writes.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
 
     // Frozen accounts cannot draw value out (Batch A item 5) — block shipping a
     // prize under the same lock as the cap COUNT + writes below.
@@ -6492,7 +6471,7 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ orderId: string; itemIds: string[]; pullVersions: Record<string, number> }> {
-    await lockCoinFlipCustomer(input.customerId, sharedContext);
+    await lockCredit(sharedContext, input.customerId);
     if (await this.isAccountDisabled(input.customerId, sharedContext)) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'This account is unavailable.');
     await this.assertNotFrozen(input.customerId, sharedContext);
     if (!await this.hasTopUp(input.customerId, sharedContext)) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
@@ -6529,9 +6508,7 @@ class PacksModuleService extends MedusaService({
       // a transaction-level advisory lock is re-entrant).
       const em =
         sharedContext.transactionManager as unknown as LedgerSqlManager;
-      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-        `credit:${input.customerId}`,
-      ]);
+      await lockCredit(sharedContext, input.customerId);
       const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
       const used = await this.rewardShipmentsToday(em, input.customerId);
       if (used + prizes.length > withdrawals_per_day) {
@@ -6671,10 +6648,7 @@ class PacksModuleService extends MedusaService({
     input: { customerId: string; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ frozen: true }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
@@ -6832,10 +6806,7 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ disabled: boolean }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
@@ -6903,10 +6874,7 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: customerId },
       { take: 1 },
@@ -6961,9 +6929,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: customerId },
       { take: 1 },
@@ -7014,10 +6980,7 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
@@ -7094,10 +7057,7 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: customerId },
       { take: 1 },
@@ -11668,10 +11628,7 @@ class PacksModuleService extends MedusaService({
     input: { customerId: string; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ frozen: false }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
@@ -11734,9 +11691,7 @@ class PacksModuleService extends MedusaService({
     }
 
     // 1) Serialize all credit mutations for THIS customer on the locked txn.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
 
     // 1a) Freeze gate — must run inside the lock so a concurrent unfreeze can't
     //     race past this check before the debit lands.
@@ -12462,9 +12417,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     // Re-check INSIDE the lock. The caller's earlier preflight is the fast
     // rejection that gives the operator an actionable reason; THIS one
     // is the correctness gate. Without it a spin, sell, deposit credit or
@@ -14962,7 +14915,7 @@ class PacksModuleService extends MedusaService({
         'This customer’s account is disabled, so the order cannot be shipped. Cancel it, or enable the account first.',
       );
     }
-    await lockCoinFlipCustomer(owner.customer_id, sharedContext);
+    await lockCredit(sharedContext, owner.customer_id);
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `delivery:${input.orderId}`,
     ]);
@@ -16245,9 +16198,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     await em.execute(
       `INSERT INTO vip_member_state
          (id, customer_id, lifetime_external_spend_sen, highest_level_ever, current_level, vip_reset_at, created_at, updated_at)
@@ -16411,9 +16362,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ rowsUpdated: number }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const rows = await em.execute<
       {
         id: string;
@@ -16490,9 +16439,7 @@ class PacksModuleService extends MedusaService({
     releasedSen: number;
   }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const [done] = await em.execute<{ id: string }[]>(
       `SELECT id FROM admin_action_audit
         WHERE entity_type = 'customer' AND entity_id = ?
@@ -18125,9 +18072,7 @@ class PacksModuleService extends MedusaService({
 
     // 1) Serialize against every money path for this customer — SAME lock key
     //    as mutateCreditAtomic.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
 
     // 2) Check under the lock, INSIDE this txn (sharedContext!) — any existing
     //    row means a concurrent run or earlier tick already settled this

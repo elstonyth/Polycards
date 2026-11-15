@@ -1,7 +1,8 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import type { Context } from '@medusajs/framework/types';
 import type PacksModuleService from './service';
-import { coinFlipManager, lockCoinFlipCustomer } from './coin-flip-operations';
+import { coinFlipManager } from './coin-flip-operations';
+import { lockCredit } from './credit-posting';
 import { FREE_PULL_LOCKED_MESSAGE } from './free-pack';
 import { sellbackHoldBp } from './bonus-credit';
 import { withLossless } from './lossless';
@@ -16,7 +17,7 @@ export type BuybackSettlement = {
 export async function settleBuyback(
   service: PacksModuleService, input: { customerId: string; pullId: string }, context: Context,
 ): Promise<BuybackSettlement> {
-  await lockCoinFlipCustomer(input.customerId, context);
+  await lockCredit(context, input.customerId);
   if (await service.isAccountDisabled(input.customerId, context)) {
     throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'This account is unavailable.');
   }
