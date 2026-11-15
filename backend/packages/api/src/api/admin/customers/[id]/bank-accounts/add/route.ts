@@ -5,7 +5,6 @@ import type {
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import {
-  accountNumberForms,
   findBank,
   sandboxOnlyBank,
 } from '../../../../../../modules/packs/banks';
@@ -15,11 +14,9 @@ import { sendSavedAccountAddedNotice } from '../../../../../../modules/packs/sav
 import {
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
   HOLDER_NAME_INVALID_MESSAGE,
-  heldByAnother,
   holderNameInvalid,
   normalizeHolderName,
   newSavedBankAccount,
-  verifiedElsewhere,
 } from '../../../../../../modules/packs/saved-accounts';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 
@@ -35,9 +32,10 @@ type Body = {
 // another account holds the number, which paid-out rows make permanent. Support
 // vouches for a shared number by adding it, so it arrives verified, unless another
 // account already is. It is also the way past the one-name-on-every-bank rule
-// for a name two banks spell differently, so that rule is not checked here.
-// Same checks as a customer save otherwise, cooling-off and the owner's notice
-// included.
+// for a name two banks spell differently, so that rule is not checked here. Nor
+// is a holder name another account used (a customer save's name-linked rule):
+// support adds for a person it checked (decision 2026-11-15: kept as it is).
+// The ban list, cooling-off and the owner's notice apply as to a customer save.
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,
@@ -86,58 +84,37 @@ export async function POST(
 
   const customerId = req.params.id;
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  // A PayNow mobile is one number with or without its 65 (accountNumberForms).
-  const numbers = accountNumberForms(account.bankCode, account.accountNumber);
+  // Every spelling: a PayNow mobile is one number with or without its 65.
+  const number = await packs.payoutNumberStanding(customerId, {
+    bankCode: account.bankCode,
+    accountNumber: account.accountNumber,
+  });
   // A banned number stays banned, support's add included (owner, 2026-11-03).
-  if (
-    (
-      await Promise.all(
-        numbers.map((n) =>
-          packs.payoutAccountBanned(n, bank.wallet !== undefined, customerId),
-        ),
-      )
-    ).some(Boolean)
-  ) {
+  if (number.bannedForPlayer) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       BANNED_PAYOUT_ACCOUNT_MESSAGE,
     );
   }
-  const holders = (
-    await Promise.all(
-      numbers.map((n) =>
-        packs.otherPayoutAccountHolders(
-          customerId,
-          n,
-          bank.wallet !== undefined,
-        ),
-      ),
-    )
-  )
-    .flat()
-    .filter((h) => heldByAnother([h], account.bankCode));
-  const others = [...new Set(holders.map((h) => h.customer_id))];
-  if (others.length > 0) {
-    const customers = req.scope.resolve(Modules.CUSTOMER);
-    const alreadyVerified = (
-      await customers.listCustomers(
-        { id: others },
-        { select: ['id', 'metadata'], take: others.length },
-      )
-    ).find((c) => verifiedElsewhere(c.metadata ?? {}, account));
-    if (alreadyVerified) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        `One person, one account: ${alreadyVerified.metadata?.handle ?? alreadyVerified.id} is already verified on this bank account. Undo that first if this is the right account.`,
+  const verifiedId = number.holders.find((h) => h.verified)?.customerId;
+  if (verifiedId) {
+    const [other] = await req.scope
+      .resolve(Modules.CUSTOMER)
+      .listCustomers(
+        { id: [verifiedId] },
+        { select: ['id', 'metadata'], take: 1 },
       );
-    }
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `One person, one account: ${other?.metadata?.handle ?? verifiedId} is already verified on this bank account. Undo that first if this is the right account.`,
+    );
   }
 
   await packs.addSavedBankAccount({
     customerId,
     adminId: req.auth_context.actor_id,
     account,
-    verify: others.length > 0,
+    verify: number.holders.length > 0,
     reason: reason.trim(),
   });
   // A new payout destination is a security event whoever adds it. After commit,

@@ -27,14 +27,24 @@ const PAYNOW = {
   bankName: 'PayNow (mobile number)',
   accountNumber: '91234567',
 };
-const heldWith65 = async (_id: string, n: string) =>
-  n === '6591234567'
-    ? [{ customer_id: 'cus_2', bank_code: 'PAYNOWSG', holder_name: null }]
-    : [];
+/** A Payout Destination standing (payout-destination.ts): what the routes
+ *  read about a number. Its spellings, bank scope and verified holders are
+ *  pinned in payout-destination.integration.spec. */
+const standing = (
+  holders: { customerId: string; paid?: boolean; verified?: boolean }[] = [],
+  over: Record<string, unknown> = {},
+) => ({
+  bankId: 'MBBEMYKL',
+  key: '512345678901',
+  forms: ['512345678901'],
+  banned: false,
+  bannedForPlayer: false,
+  holders: holders.map((h) => ({ paid: false, verified: false, ...h })),
+  ...over,
+});
 
 const packs = {
-  otherPayoutAccountHolders: jest.fn(),
-  payoutAccountBanned: jest.fn(),
+  payoutNumberStanding: jest.fn(),
   createAdminActionAudits: jest.fn(),
   removeSavedBankAccount: jest.fn(),
   setBankShareVerified: jest.fn(),
@@ -66,16 +76,13 @@ const mkRes = () => {
   const res = { json: jest.fn(), setHeader: jest.fn() };
   return res as never as { json: jest.Mock; setHeader: jest.Mock };
 };
-const holderOn = (customer: string, bank = 'MBBEMYKL') => ({
-  customer_id: customer,
-  bank_code: bank,
-  holder_name: null,
-});
+/** Another account on the number, paid to it. */
+const heldBy = (customerId: string, verified = false) =>
+  standing([{ customerId, paid: true, verified }]);
 
 beforeEach(() => {
   jest.clearAllMocks();
-  packs.otherPayoutAccountHolders.mockResolvedValue([]);
-  packs.payoutAccountBanned.mockResolvedValue(false);
+  packs.payoutNumberStanding.mockResolvedValue(standing());
   packs.createAdminActionAudits.mockResolvedValue(undefined);
   customers.retrieveCustomer.mockResolvedValue({
     metadata: { bank_accounts: [ACCOUNT] },
@@ -92,37 +99,40 @@ beforeEach(() => {
 });
 
 describe('GET bank-accounts', () => {
-  it('names who else is on the number, once each, and never caches', async () => {
-    packs.otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'X' },
-      holderOn('cus_2'),
-      holderOn('cus_3', 'PBBEMYKL'),
-    ]);
+  it('names who else is on the number, and never caches', async () => {
+    packs.payoutNumberStanding.mockResolvedValue(heldBy('cus_2'));
     customers.listCustomers.mockResolvedValue([
       { id: 'cus_2', metadata: { handle: 'Collector2' } },
     ]);
     const res = mkRes();
     await GET(mkReq(), res as never);
     expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'MBBEMYKL',
+      accountNumber: '512345678901',
+    });
     const body = res.json.mock.calls[0][0];
     expect(body.accounts).toEqual([
       expect.objectContaining({
         id: ACCOUNT.id,
         account_number: '512345678901',
         verified_at: null,
-        // cus_3 holds the same digits at another bank: a different account.
         linked: [{ customer_id: 'cus_2', handle: 'Collector2' }],
       }),
     ]);
   });
 
-  it('links a PayNow mobile another account holds with its 65', async () => {
+  it('asks about a PayNow mobile as saved; its spellings are the module\'s', async () => {
     customers.retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [PAYNOW] },
     });
-    packs.otherPayoutAccountHolders.mockImplementation(heldWith65);
+    packs.payoutNumberStanding.mockResolvedValue(heldBy('cus_2'));
     const res = mkRes();
     await GET(mkReq(), res as never);
+    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'PAYNOWSG',
+      accountNumber: '91234567',
+    });
     expect(res.json.mock.calls[0][0].accounts[0].linked).toEqual([
       { customer_id: 'cus_2', handle: null },
     ]);
@@ -241,16 +251,9 @@ describe('POST bank-accounts/verify', () => {
   });
 
   it('one person, one account: refuses a second account on the number', async () => {
-    packs.otherPayoutAccountHolders.mockResolvedValue([holderOn('cus_2')]);
+    packs.payoutNumberStanding.mockResolvedValue(heldBy('cus_2', true));
     customers.listCustomers.mockResolvedValue([
-      {
-        id: 'cus_2',
-        metadata: {
-          handle: 'Collector2',
-          bank_accounts: [ACCOUNT],
-          bank_share_verified: { [ACCOUNT.id]: STAMP },
-        },
-      },
+      { id: 'cus_2', metadata: { handle: 'Collector2' } },
     ]);
     await expect(VERIFY(verify(), mkRes() as never)).rejects.toThrow(
       /Collector2 is already verified/,
@@ -258,39 +261,29 @@ describe('POST bank-accounts/verify', () => {
     expect(packs.setBankShareVerified).not.toHaveBeenCalled();
   });
 
-  it('a stamp on another number of theirs does not count', async () => {
-    packs.otherPayoutAccountHolders.mockResolvedValue([holderOn('cus_2')]);
-    const elsewhere = {
-      ...ACCOUNT,
-      id: 'other',
-      accountNumber: '999999999999',
-    };
-    customers.listCustomers.mockResolvedValue([
-      {
-        id: 'cus_2',
-        metadata: {
-          bank_accounts: [elsewhere],
-          bank_share_verified: { other: STAMP },
-        },
-      },
-    ]);
+  it('a holder not verified on this number does not count', async () => {
+    packs.payoutNumberStanding.mockResolvedValue(heldBy('cus_2'));
     await VERIFY(verify(), mkRes() as never);
     expect(packs.setBankShareVerified).toHaveBeenCalledTimes(1);
   });
 
-  it('verifies a PayNow mobile another account holds with its 65', async () => {
+  it('asks about a PayNow mobile as saved', async () => {
     customers.retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [PAYNOW] },
     });
-    packs.otherPayoutAccountHolders.mockImplementation(heldWith65);
+    packs.payoutNumberStanding.mockResolvedValue(heldBy('cus_2'));
     await VERIFY(verify({ account_id: PAYNOW.id }), mkRes() as never);
+    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'PAYNOWSG',
+      accountNumber: '91234567',
+    });
     expect(packs.setBankShareVerified).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: PAYNOW.id, verified: true }),
     );
   });
 
   it('verifies with the admin from the token, for this account', async () => {
-    packs.otherPayoutAccountHolders.mockResolvedValue([holderOn('cus_2')]);
+    packs.payoutNumberStanding.mockResolvedValue(heldBy('cus_2'));
     const res = mkRes();
     await VERIFY(verify({ reason: ' checked ' }), res as never);
     expect(packs.setBankShareVerified).toHaveBeenCalledWith({
@@ -310,7 +303,7 @@ describe('POST bank-accounts/verify', () => {
       expect.objectContaining({ verified: false, accountId: ACCOUNT.id }),
     );
     expect(res.json).toHaveBeenCalledWith({ verified: false });
-    expect(packs.otherPayoutAccountHolders).not.toHaveBeenCalled();
+    expect(packs.payoutNumberStanding).not.toHaveBeenCalled();
   });
 });
 
@@ -355,9 +348,9 @@ describe('POST bank-accounts/add', () => {
     expect(sent).not.toContain('512345678901');
   });
 
-  it('refuses a PayNow mobile banned under its other spelling', async () => {
-    packs.payoutAccountBanned.mockImplementation(
-      async (n: string) => n === '6591234567',
+  it('refuses a banned number, asked for this player', async () => {
+    packs.payoutNumberStanding.mockResolvedValue(
+      standing([], { banned: true, bannedForPlayer: true }),
     );
     await expect(
       ADD(
@@ -365,28 +358,25 @@ describe('POST bank-accounts/add', () => {
         mkRes() as never,
       ),
     ).rejects.toThrow(/cannot be used on Polycards/);
+    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'PAYNOWSG',
+      accountNumber: '91234567',
+    });
     expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
   });
 
-  it('vouches for a PayNow mobile another account holds with its 65', async () => {
-    packs.otherPayoutAccountHolders.mockImplementation(heldWith65);
-    customers.listCustomers.mockResolvedValue([
-      { id: 'cus_2', metadata: { bank_accounts: [] } },
-    ]);
-    await ADD(
-      mkReq(body({ bank_code: 'PAYNOWSG', account_number: '91234567' })),
-      mkRes() as never,
+  it('adds a number support unbanned for this player', async () => {
+    packs.payoutNumberStanding.mockResolvedValue(
+      standing([], { banned: true, bannedForPlayer: false }),
     );
-    expect(packs.addSavedBankAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ verify: true }),
-    );
+    await ADD(mkReq(body()), mkRes() as never);
+    expect(packs.addSavedBankAccount).toHaveBeenCalledTimes(1);
   });
 
   it('vouches for a shared number by adding it', async () => {
-    packs.otherPayoutAccountHolders.mockResolvedValue([holderOn('cus_2')]);
-    customers.listCustomers.mockResolvedValue([
-      { id: 'cus_2', metadata: { bank_accounts: [] } },
-    ]);
+    packs.payoutNumberStanding.mockResolvedValue(
+      standing([{ customerId: 'cus_2', paid: false }]),
+    );
     await ADD(mkReq(body()), mkRes() as never);
     expect(packs.addSavedBankAccount).toHaveBeenCalledWith(
       expect.objectContaining({ verify: true }),
@@ -394,16 +384,9 @@ describe('POST bank-accounts/add', () => {
   });
 
   it('one person, one account: refuses while another account is verified on it', async () => {
-    packs.otherPayoutAccountHolders.mockResolvedValue([holderOn('cus_2')]);
+    packs.payoutNumberStanding.mockResolvedValue(heldBy('cus_2', true));
     customers.listCustomers.mockResolvedValue([
-      {
-        id: 'cus_2',
-        metadata: {
-          handle: 'Collector2',
-          bank_accounts: [ACCOUNT],
-          bank_share_verified: { [ACCOUNT.id]: STAMP },
-        },
-      },
+      { id: 'cus_2', metadata: { handle: 'Collector2' } },
     ]);
     await expect(ADD(mkReq(body()), mkRes() as never)).rejects.toThrow(
       /Collector2 is already verified/,
