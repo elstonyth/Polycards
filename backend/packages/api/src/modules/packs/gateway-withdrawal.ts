@@ -73,10 +73,10 @@ export {
 //
 //   write the row, its status decided up front ('held' above the approval
 //   threshold, 'pending' at or below it) -> DEBIT the ledger (atomic, floor
-//   0) -> SubmitWithdrawal, SKIPPED entirely when the row was written
-//   'held'. A DEFINITE gateway refusal refunds the debit immediately; an
-//   AMBIGUOUS submit error (timeout, reset — the payout may still execute)
-//   leaves the row pending for the sweep to resolve.
+//   0) -> Withdrawal Submit (withdrawal-submit.ts), SKIPPED entirely when the
+//   row was written 'held'. A definite refusal the gateway confirms refunds
+//   the debit immediately; anything unclear (timeout, reset — the payout may
+//   still execute) leaves the row pending for the sweep to resolve.
 //
 // The debit-before-submit ordering is the security property: real money must
 // never be queued to leave the merchant balance while the customer's site
@@ -1108,7 +1108,7 @@ export type WithdrawalSettlement = {
 
 /**
  * Settle and close a withdrawal row the bank actually paid — the OTHER half
- * of refundWithdrawal above, extracted here for the same reason and
+ * of refundWithdrawal (withdrawal-refund.ts), extracted for the same reason and
  * on the same terms: the payout callback and the reconcile sweep each carried
  * a verbatim copy of this three-step ordering, so a fix to it needed two
  * edits and got one.
@@ -1245,17 +1245,17 @@ export type HeldWithdrawalInput = {
  * row, debits the ledger, and returns without calling the gateway when the
  * amount is above the approval threshold. Step 3 happens here.
  *
- * WHY submitting the ROW's stored bank details is not the forbidden precheck
- * copy: startWithdrawal's step-3 comment says money may move "only to the
- * destination the LOCKED resolution returned, never to the precheck's copy" —
- * and this honours that. The row's bank_code / account_number /
- * account_holder_name were written from that same locked resolution inside
- * withdrawForCashout at debit time (its step 2 resolves the destination under
- * the `credit:` advisory lock and returns it to the caller), so the row IS the
- * authoritative destination, not a second unlocked read. It is also the only
- * one that can still be trusted now: re-resolving from the customer's saved
- * accounts at approval time would let a destination edited AFTER the debit
- * redirect a payout the customer already committed to.
+ * WHY this submits the ROW's stored bank details: startWithdrawal wrote them
+ * from its unlocked precheck read, BEFORE the debit, and nothing rewrites them
+ * afterwards. The bank and the number still match what the locked resolution
+ * in withdrawForCashout returned, because a saved account's id is derived
+ * from those two (savedBankAccountId). The holder name may not: a relabel
+ * between the two reads changes it (service.ts). The row is still the only
+ * destination that can be trusted now: re-resolving from the customer's
+ * saved accounts at approval time would let a destination edited AFTER the
+ * debit redirect a payout the customer already committed to. A new
+ * Withdrawal, by contrast, passes Withdrawal Submit the destination locked
+ * at debit.
  *
  * Every call is logged with the row id and the admin actor id, and NEVER the
  * account number.

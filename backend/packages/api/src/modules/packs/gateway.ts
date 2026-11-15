@@ -788,7 +788,8 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   },
 };
 
-/** A definite refusal raised before any call — nothing exists on their side. */
+/** A refusal raised before any call, named 'not-sent': nothing exists on
+ *  their side, so a withdrawal refunds at once. */
 function a3payRefusal(
   config: A3payConfig,
   message: string,

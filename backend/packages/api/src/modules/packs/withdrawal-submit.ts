@@ -352,8 +352,8 @@ function warnOps(
 }
 
 /**
- * After TGPay refuses a payout because OUR payout wallet is short
- * (TGPAY_PAYOUT_FLOAT_EMPTY), every payout fails until ops tops it up. For
+ * After a gateway refuses a payout because OUR payout wallet is short
+ * ('wallet-empty'), every payout fails until ops tops it up. For
  * this long, new withdrawals are turned away before anything is written,
  * instead of each tap costing a row, a debit, a doomed submit and a refund
  * (2026-09-29: 19 refused attempts in two hours, 9–10 per customer).
@@ -397,9 +397,9 @@ export function floatCannotPayAnything(
 
 /**
  * The one place a gateway refusal is turned into a `failure_reason` string
- * (plan 095). Two callers build this — the store submit path below and the
- * admin approve route — and they must not drift, because the redaction here is
- * a control, not formatting.
+ * (plan 095). Withdrawal Submit builds it for both its callers (a new
+ * Withdrawal and an admin approve), because the redaction here is a control,
+ * not formatting.
  *
  * WHY REDACT AT ALL, when the log line beside each call site prints the same
  * message unredacted and the row already stores the account number: because

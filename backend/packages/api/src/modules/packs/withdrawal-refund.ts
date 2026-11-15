@@ -42,13 +42,13 @@ export function withdrawalRefundReference(
 
 /**
  * Refund and close a withdrawal row that will never reach the bank: the
- * reconcile sweep's stale/failed rows, and the admin deny route's denied
- * rows (plan 094 Task 5). Extracted here, the module that already owns the
- * refund's idempotency anchor, so those two paths share ONE copy of this
+ * reconcile sweep's stale/failed rows, the admin deny route's denied rows
+ * (plan 094 Task 5), and a refusal Withdrawal Submit confirmed. Beside the
+ * refund's idempotency anchor, so every path shares ONE copy of this
  * four-step money ordering instead of a second verbatim one that a bug fix
- * could land in without the other ever finding out. The payout callback
- * (api/hooks/tgpay/withdrawal/route.ts) is the third caller; its settle half
- * is applyWithdrawalOutcome below, the mirror of this function.
+ * could land in without the other ever finding out. The payout callbacks
+ * call it too; their settle half is applyWithdrawalOutcome in
+ * gateway-withdrawal.ts, the mirror of this function.
  *
  * The caller owns two preconditions this function does not re-check:
  *   - a debit actually exists for `withdrawal` — both callers verify this

@@ -113,8 +113,9 @@ export function tgpayIsSandbox(config: Pick<TgpayConfig, 'baseUrl'>): boolean {
 
 /**
  * Extends GatewayError so the orchestration's `definite` / `httpStatus`
- * / `has()` branches keep their meaning. `codes` carries a synthetic code per
- * HTTP class so callers can branch without parsing message text.
+ * branches keep their meaning. `codes` carries a synthetic code per HTTP
+ * class for the record; `result` (tgpayResult) names what a refusal means,
+ * so callers never parse message text or read these codes.
  */
 export class TgpayError extends GatewayError {
   constructor(
