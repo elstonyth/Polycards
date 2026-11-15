@@ -82,3 +82,48 @@ describe('planPosting', () => {
     expect(plan({ amount: -10 }, totals(1000, -200))).toMatchObject({ balanceAfterCents: 0, bonusAfterCents: 0 });
   });
 });
+
+describe('planPosting variants', () => {
+  const t0 = (balance: number, bonus = 0, external = 0) => ({ balanceCents: balance, bonusCents: bonus, externalCents: external });
+  const se = { type: 'SE' as const, payload: { type: 'SE' as const, card_handle: 'h', sp_ref_id: null, price: 10, rate: 0.9 } };
+
+  it('pack_open spends bonus first; only the rest consumes external money', () => {
+    expect(planPosting({ customerId: 'c', amount: -12, reason: 'pack_open', sourceTransactionId: 'open_1' }, t0(2500, 500, 2000)).row)
+      .toMatchObject({ bonus_cents: -500, external_funded_cents: -700, source_transaction_id: 'open_1' });
+  });
+
+  it('a sell-back stamps its held share as external money, NULL when nothing is held (D9)', () => {
+    const held = planPosting({ customerId: 'c', amount: 90, reason: 'buyback', pullId: 'p1', holdBp: 5000, ledger: se }, t0(0));
+    expect(held.row).toMatchObject({ pull_id: 'p1', external_funded_cents: 4500, bonus_cents: null, reference: null });
+    expect(held.unfreeze).toBe(true);
+    expect(planPosting({ customerId: 'c', amount: 90, reason: 'buyback', pullId: 'p2', holdBp: 0, ledger: se }, t0(0)).row)
+      .toMatchObject({ external_funded_cents: null, bonus_cents: null });
+  });
+
+  it('a coin flip win is anchored on its round, byte-identical', () => {
+    const cf = { type: 'CF' as const, payload: { type: 'CF' as const, round_id: 'r1', pull_id: 'p', card_handle: 'h', outcome: 'won' as const, value: 1, published_win_percent: 50 } };
+    expect(planPosting({ customerId: 'c', amount: 1, reason: 'coin_flip_win', roundId: 'r1', ledger: cf }, t0(0)).row).toMatchObject({
+      reference: 'r1', source_transaction_id: 'coin-flip:r1', bonus_cents: 0, external_funded_cents: 0,
+    });
+  });
+
+  it('a commission row keeps NULL external, bonus and source, and never unfreezes inline', () => {
+    const rf = { type: 'RF' as const, refId: 'wsl_1', payload: { type: 'RF' as const, week_start: '2026-11-09', basis_cents: 1, rate_bp: 50 } };
+    const plan = planPosting({ customerId: 'c', amount: 5, reason: 'referral_commission', unlocked: true, ledger: rf }, t0(-100));
+    expect(plan.row).toMatchObject({ external_funded_cents: null, bonus_cents: null, source_transaction_id: null, reference: null });
+    expect(plan.unfreeze).toBe(false);
+  });
+
+  it('a reversal mirrors its original exactly and never unfreezes (D2)', () => {
+    const plan = planPosting({
+      reversalOf: { id: 'ct_1', customer_id: 'c', amount: '-12', reason: 'pack_open', reference: null,
+        external_funded_cents: -700, bonus_cents: -500, source_transaction_id: 'open_1' },
+      sourceTransactionId: 'open_1',
+    }, t0(1300));
+    expect(plan).toEqual({
+      row: { customer_id: 'c', amount: 12, reason: 'pack_open', pull_id: null, reference: 'reversal:ct_1',
+        external_funded_cents: 700, bonus_cents: 500, source_transaction_id: 'open_1' },
+      unfreeze: false, balanceAfterCents: 2500, bonusAfterCents: 500,
+    });
+  });
+});
