@@ -76,13 +76,15 @@ test('month edges follow the Malaysia calendar', () => {
   );
 });
 
-test('rolling windows end now (not the dashboard 7d and 30d tabs, which start at Malaysia midnight)', () => {
+test('last 7 and 30 days are the dashboard 7d and 30d tabs: from Malaysia midnight', () => {
+  // Before the owner decision of 2026-11-16 they were rolling: 09-23T02:00Z
+  // and 08-31T02:00Z.
   assert.deepEqual(range('last_7_days'), [
-    '2026-09-23T02:00:00.000Z',
+    '2026-09-23T16:00:00.000Z',
     '2026-09-30T02:00:00.000Z',
   ]);
   assert.deepEqual(range('last_30_days'), [
-    '2026-08-31T02:00:00.000Z',
+    '2026-08-31T16:00:00.000Z',
     '2026-09-30T02:00:00.000Z',
   ]);
 });

@@ -26,6 +26,6 @@ describe('Finance tool text matches the desk bots', () => {
       economy.parameters as { properties: { period: { description: string } } }
     ).properties.period.description;
     expect(desk).toContain(period);
-    expect(period).toContain('not the dashboard 7d and 30d tabs');
+    expect(period).toContain('are the dashboard 7d and 30d tabs');
   });
 });

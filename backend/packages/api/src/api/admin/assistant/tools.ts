@@ -95,7 +95,7 @@ const object = (
 const windowProps = {
   period: oneOf(
     PERIODS,
-    "Malaysia-time window. today, yesterday, this_week (Mon-Sun), last_week, this_month and last_month are calendar periods; last_7_days and last_30_days are rolling (exactly 7 or 30 days back from now), so they are not the dashboard 7d and 30d tabs, which start at Malaysia midnight 6 or 29 days back; custom needs from (and optionally to).",
+    "Malaysia-time window. today, yesterday, this_week (Mon-Sun), last_week, this_month and last_month are calendar periods; last_7_days and last_30_days are the dashboard 7d and 30d tabs: from Malaysia midnight 6 or 29 days back until now; custom needs from (and optionally to).",
   ),
   from: str('custom only: first day, YYYY-MM-DD.'),
   to: str('custom only: last day, YYYY-MM-DD, included. Defaults to from.'),

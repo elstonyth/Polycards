@@ -1,9 +1,8 @@
 // Malaysia time (UTC+8, no daylight saving) for the reports: every Polycards
 // date boundary is a Malaysia one. One home for the window calculators (the
 // Dashboard's statsWindows, the reports' resolvePeriod) and the SQL day
-// buckets. Note they differ on purpose today: the Dashboard's 7d starts at
-// MYT midnight six days back, the period last_7_days is a rolling 7 x 24 h
-// (aligning them is an open owner decision).
+// buckets. The periods last_7_days / last_30_days are the Dashboard's 7d /
+// 30d (owner decision 2026-11-16).
 
 /** The Malaysia calendar day of a timestamptz column, as 'YYYY-MM-DD'. */
 export const mytDaySql = (column: string): string =>
@@ -204,8 +203,10 @@ export function resolvePeriod(
     last_week: () => [weekStart - 7 * DAY_MS, weekStart],
     this_month: () => [monthStart(now), monthStart(now, 1)],
     last_month: () => [monthStart(now, -1), monthStart(now)],
-    last_7_days: () => [now - 7 * DAY_MS, now],
-    last_30_days: () => [now - 30 * DAY_MS, now],
+    // The Dashboard's 7d and 30d windows (statsWindows): today and the six
+    // or 29 Malaysia days before it, up to now.
+    last_7_days: () => [today - 6 * DAY_MS, now],
+    last_30_days: () => [today - 29 * DAY_MS, now],
     custom: () => {
       const start = dateStart(from, 'from');
       const end = dateStart(to ?? from, 'to') + DAY_MS; // `to` is included
