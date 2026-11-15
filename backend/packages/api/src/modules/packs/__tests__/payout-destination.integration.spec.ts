@@ -225,6 +225,51 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
     });
 
+    it("a deleted account's lift and name clearing count for no one", async () => {
+      await ban(NUMBER);
+      await put('cus_saved', {
+        bank_accounts: [entry('MBBEMYKL', '998877665544')],
+      });
+      await put('cus_gone', {
+        payout_ban_lifted: {
+          [NUMBER]: { bank_code: 'MBBEMYKL', at: '2026-11-04T00:00:00.000Z' },
+        },
+        holder_name_cleared: {
+          tanahkow: {
+            name: NAME,
+            at: '2026-11-04T00:00:00.000Z',
+            with: ['cus_saved'],
+          },
+        },
+      });
+      expect(
+        (await standing('cus_gone', 'MBBEMYKL', NUMBER)).bannedForPlayer,
+      ).toBe(false);
+      expect((await nameStanding(sql(), 'cus_gone', NAME)).blocking).toEqual([]);
+      await em().execute(
+        "update customer set deleted_at = now() where id = 'cus_gone'",
+      );
+      expect(
+        (await standing('cus_gone', 'MBBEMYKL', NUMBER)).bannedForPlayer,
+      ).toBe(true);
+      expect((await nameStanding(sql(), 'cus_gone', NAME)).blocking).toEqual([
+        'cus_saved',
+      ]);
+    });
+
+    it('an EVM address is banned and keyed in lower case, as it is stored', async () => {
+      // The EIP-55 checksum example address: a test vector, nobody's wallet.
+      const EVM = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
+      await ban(EVM.toLowerCase());
+      expect(await standing('cus_player', 'USDTERC20', EVM)).toMatchObject({
+        key: EVM.toLowerCase(),
+        banned: true,
+        bannedForPlayer: true,
+      });
+      // A Tron address is case-sensitive: kept as typed.
+      expect((await standing('cus_player', 'USDTTRC20', TRON)).key).toBe(TRON);
+    });
+
     it('an unknown bank checks no holders', async () => {
       await put('cus_saver', { bank_accounts: [entry('MBBEMYKL', NUMBER)] });
       expect(await standing('cus_player', null, NUMBER)).toMatchObject({

@@ -135,14 +135,18 @@ const destinationKey = (bankCode: string, accountNumber: string): string =>
  *  it at this bank? Banned: any spelling's key is on banned_payout_account, at
  *  any bank, however it is padded; for this player, unless support lifted that
  *  same key for them (setPayoutBanLifted). Holders: every spelling, at this
- *  bank only (the same digits at another bank are someone else's account). */
+ *  bank only (the same digits at another bank are someone else's account); a
+ *  wallet address compared whole. A caller that lists or frees bank numbers
+ *  only checks bank.wallet itself. A deleted account's lifts count for no one. */
 export async function numberStanding(
   em: LedgerSqlManager,
   customerId: string,
   n: PayoutNumber,
 ): Promise<NumberStanding> {
   const bank = findBank(n.bankCode);
-  const wallet = bank?.wallet !== undefined;
+  // The chain, not just "a wallet": an EVM address keys lower case, as it is
+  // stored (newSavedBankAccount) and banned.
+  const wallet = bank?.wallet ?? false;
   const forms = spellings(n.bankCode, n.accountNumber);
   const keys = [...new Set(forms.map((f) => payoutAccountKey(f, wallet)))];
   const bannedKeys = (
@@ -155,7 +159,9 @@ export async function numberStanding(
   if (bannedKeys.length > 0) {
     const [me] = await em.execute<
       { metadata: Record<string, unknown> | null }[]
-    >('SELECT metadata FROM customer WHERE id = ?', [customerId]);
+    >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
+      customerId,
+    ]);
     const lifted = liftedPayoutBans(me?.metadata ?? {});
     bannedForPlayer = bannedKeys.some((k) => !lifted[k]);
   }
@@ -256,7 +262,7 @@ export async function nameStanding(
   ).map((r) => r.customer_id);
   if (holders.length === 0) return { holders, blocking: [] };
   const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
-    'SELECT metadata FROM customer WHERE id = ?',
+    'SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL',
     [customerId],
   );
   const cleared =
