@@ -56,7 +56,14 @@ export async function pcFetch<
     data = undefined;
   }
   const raw = data?.['error-message'];
-  const upstreamMessage = typeof raw === 'string' && raw ? raw : undefined;
+  // Upstream text reaches logs, card rows and the admin alert: collapse control
+  // characters so a multi-line reply cannot forge log lines.
+  const clean =
+    typeof raw === 'string'
+      ? // eslint-disable-next-line no-control-regex
+        raw.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 300)
+      : '';
+  const upstreamMessage = clean || undefined;
   // Must not trip the admin dashboard's /\btoken\b/ fold ("_TOKEN" does not match).
   const tokenHint = `PriceCharting refused the request (HTTP ${resp.status}); check PRICECHARTING_API_TOKEN`;
 

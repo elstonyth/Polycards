@@ -142,6 +142,19 @@ it('a 404 without a JSON body is the feed being unavailable', async () => {
   });
 });
 
+it('collapses control characters in upstream text so it cannot forge log lines', async () => {
+  reply(410, {
+    status: 'error',
+    'error-message':
+      'Access token has expired\n[sync-market-prices] done: 877/877\r\n',
+  });
+  expect(await pcFetch('/api/product', { id: '1' })).toEqual({
+    kind: 'error',
+    message: 'Access token has expired [sync-market-prices] done: 877/877',
+    cause: 'auth',
+  });
+});
+
 it('no token never calls upstream', async () => {
   delete process.env.PRICECHARTING_API_TOKEN;
   const fetchSpy = jest.spyOn(global, 'fetch');

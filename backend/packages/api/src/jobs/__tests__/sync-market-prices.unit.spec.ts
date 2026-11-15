@@ -404,7 +404,7 @@ describe('PriceCharting feed outage', () => {
     expect(clearErrors).toHaveLength(1);
     // The sweep ends saying the alert is still up, not just a clean summary.
     const notCleared = logger.error.mock.calls.filter(([msg]) =>
-      /feed alert NOT cleared although PriceCharting answered: 3 failed attempts/.test(
+      /feed alert NOT cleared although PriceCharting answered: 4 failed attempts/.test(
         String(msg),
       ),
     );
@@ -420,7 +420,7 @@ describe('PriceCharting feed outage', () => {
     await expect(run()).resolves.toBeUndefined();
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringMatching(
-        /feed alert NOT cleared although PriceCharting answered: 3 failed attempts.*admin may still show the token alert/,
+        /feed alert NOT cleared although PriceCharting answered: 4 failed attempts.*admin may still show the token alert/,
       ),
     );
   });
@@ -446,8 +446,51 @@ describe('PriceCharting feed outage', () => {
     });
     packs.updateSiteSettings.mockRejectedValue(new Error('db down'));
     await expect(run()).resolves.toBeUndefined();
+    // One retry before giving up: the alert is the only signal of the outage.
+    expect(packs.updateSiteSettings).toHaveBeenCalledTimes(2);
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringMatching(/NOT recorded/),
+    );
+  });
+
+  it('records the outage by updating the row when another writer created it first', async () => {
+    const { packs, run } = setup();
+    packs.listSiteSettings.mockResolvedValue([]);
+    packs.createSiteSettings.mockRejectedValue(new Error('duplicate key'));
+    jest.mocked(pcFetch).mockResolvedValue({
+      kind: 'error',
+      message: 'Access token has expired',
+      cause: 'auth',
+    });
+    await run();
+    expect(packs.updateSiteSettings).toHaveBeenCalledWith({
+      selector: { id: 'global' },
+      data: {
+        pricecharting_feed: expect.objectContaining({ status: 'token_expired' }),
+      },
+    });
+  });
+
+  it('retries a failed clear after the loop when the remaining cards are skipped', async () => {
+    const { packs, logger, run } = setup(storedOutage);
+    // Card a answers; b and c were unlinked mid-sweep, so they `continue`.
+    packs.listCards.mockImplementation(async (filter: { id?: string }) => {
+      const all = ['a', 'b', 'c'].map((id) => ({
+        id,
+        handle: id,
+        pc_product_id: filter.id && filter.id !== 'a' ? '' : id,
+        pc_grade: 'PSA 10',
+        market_value: 1,
+      }));
+      return filter.id ? all.filter((c) => c.id === filter.id) : all;
+    });
+    okReplies();
+    packs.updateSiteSettings.mockRejectedValueOnce(new Error('db down'));
+    await run();
+    expect(packs.updateSiteSettings).toHaveBeenCalledTimes(2);
+    expect(packs.updateSiteSettings).toHaveBeenLastCalledWith(cleared);
+    expect(logger.error).not.toHaveBeenCalledWith(
+      expect.stringMatching(/feed alert NOT cleared/),
     );
   });
 });
