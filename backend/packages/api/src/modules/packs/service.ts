@@ -165,6 +165,7 @@ import {
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
 import {
+  disabledAccountSql,
   mayPlay as mayPlayFor,
   type Game,
   type PlayRefusal,
@@ -1209,10 +1210,7 @@ const DELIVERY_TOWARD_COURIER: ReadonlySet<string> = new Set([
 // lucky_draw_entry, so the totals and the top 10 are the ones the draw will use
 // (owner 2026-11-12: a disabled account shows nowhere). Appended after the
 // entry table's own WHERE; it must stay unaliased in those queries.
-const LUCKY_DRAW_LIVE_ENTRY_SQL =
-  'AND NOT EXISTS (SELECT 1 FROM customer_account_state s ' +
-  'WHERE s.customer_id = lucky_draw_entry.customer_id ' +
-  'AND s.disabled = true AND s.deleted_at IS NULL) ';
+const LUCKY_DRAW_LIVE_ENTRY_SQL = `AND NOT ${disabledAccountSql('lucky_draw_entry.customer_id')} `;
 /** A finished event stays on the page this long. */
 const LUCKY_DRAW_LINGER_MS = 7 * 24 * 60 * 60 * 1000;
 /** A draw time must be at least this far ahead when it is set or published:
@@ -19418,9 +19416,7 @@ class PacksModuleService extends MedusaService({
           -- bought for (owner rule 2026-11-12). A packed one keeps its cards
           -- held until staff cancel it, so they are not handed out twice.
           AND NOT (dord.status IN ('requested','processed','packing')
-            AND EXISTS (SELECT 1 FROM customer_account_state s
-                         WHERE s.customer_id = dord.customer_id
-                           AND s.disabled = true AND s.deleted_at IS NULL))
+            AND ${disabledAccountSql('dord.customer_id')})
         ORDER BY dord.created_at, dord.id`,
     );
     const byId = new Map<
