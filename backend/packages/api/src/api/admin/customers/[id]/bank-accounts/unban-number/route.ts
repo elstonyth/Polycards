@@ -2,10 +2,11 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { hasPermission } from '@medusajs/framework';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
+import { accessFor } from '../../../../assistant/access';
+import { BAN_LIST_NEED } from '../../../../assistant/confirm';
 
 type Body = {
   last4?: unknown;
@@ -59,20 +60,11 @@ export async function POST(
       'A reason (1–500 chars) is required.',
     );
   }
-  const roles =
-    (
-      req as unknown as {
-        auth_context?: { app_metadata?: { roles?: string[] } };
-      }
-    ).auth_context?.app_metadata?.roles ?? [];
-  // hasPermission answers true for an empty role list: never here.
-  const fromBanList =
-    roles.length > 0 &&
-    (await hasPermission({
-      roles,
-      actions: { resource: 'customer', operation: 'update' },
-      container: req.scope,
-    }));
+  // Judged as the assistant's unban card judges it: a super admin, or a role
+  // with the ban-list need. No roles is never enough, and a failed permission
+  // lookup refuses the fallback rather than the request.
+  const access = accessFor(req.scope, req.auth_context);
+  const fromBanList = access.superAdmin || (await access.can(BAN_LIST_NEED));
   const done = await req.scope
     .resolve<PacksModuleService>(PACKS_MODULE)
     .setPayoutBanLifted({

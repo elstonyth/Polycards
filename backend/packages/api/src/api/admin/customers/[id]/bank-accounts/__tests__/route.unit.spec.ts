@@ -6,6 +6,38 @@ import { POST as VERIFY } from '../verify/route';
 import { POST as NAME_CLASH } from '../name-clash/route';
 import { POST as UNBAN_NUMBER } from '../unban-number/route';
 
+// Role policies for the unban fallback (assistant/access.ts reads them): a
+// super admin's every permission, an editor's customer:update, the Support
+// viewer's unban without it, and a role whose lookup fails.
+jest.mock('@medusajs/framework', () => ({
+  ...jest.requireActual('@medusajs/framework'),
+  hasPermission: jest.fn(
+    async ({
+      roles,
+      actions,
+    }: {
+      roles: string[];
+      actions: { resource: string; operation: string };
+    }) => {
+      if (roles.includes('broken_role')) throw new Error('policy store down');
+      const policies: Record<string, string[]> = {
+        role_super_admin: ['*:*'],
+        customer_editor: ['customer:update'],
+        support_viewer: ['customer:read', 'assistant_unban:update'],
+      };
+      return roles.some((r) =>
+        (policies[r] ?? []).some((p) => {
+          const [res, op] = p.split(':');
+          return (
+            (res === '*' || res === actions.resource) &&
+            (op === '*' || op === actions.operation)
+          );
+        }),
+      );
+    },
+  ),
+}));
+
 // What support sees and does for a tied bank account (ADR 0015). The service
 // methods are pinned in modules/packs/__tests__/saved-account-support; these pin
 // the routes around them. All details here are made up: the repo is public.
@@ -467,6 +499,23 @@ describe('POST bank-accounts/unban-number', () => {
       lifted: true,
       changed: true,
     });
+  });
+
+  it.each([
+    [['role_super_admin'], true],
+    [['customer_editor'], true],
+    [['support_viewer'], false],
+    // The lookup failing refuses the fallback, not the unban.
+    [['broken_role'], false],
+  ])('roles %j: from the ban list %s', async (roles, fromBanList) => {
+    const req = mkReq({ last4: '8901', reason: 'x' }) as unknown as {
+      auth_context: Record<string, unknown>;
+    };
+    req.auth_context = { ...req.auth_context, app_metadata: { roles } };
+    await UNBAN_NUMBER(req as never, mkRes() as never);
+    expect(packs.setPayoutBanLifted).toHaveBeenCalledWith(
+      expect.objectContaining({ fromBanList }),
+    );
   });
 
   it.each([
