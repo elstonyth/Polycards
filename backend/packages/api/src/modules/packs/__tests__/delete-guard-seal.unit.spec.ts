@@ -31,7 +31,7 @@ function collectTsFiles(dir: string): string[] {
   return results;
 }
 
-interface RawDeleteOccurrence {
+interface SourceHit {
   file: string;
   line: number;
   text: string;
@@ -39,7 +39,7 @@ interface RawDeleteOccurrence {
 
 test('the only raw .deleteCreditTransactions( call in src/ is the single delegation inside service.ts', () => {
   const files = collectTsFiles(SRC_ROOT);
-  const occurrences: RawDeleteOccurrence[] = [];
+  const occurrences: SourceHit[] = [];
 
   for (const file of files) {
     const lines = fs.readFileSync(file, 'utf8').split('\n');
@@ -67,7 +67,7 @@ test('the only raw .deleteCreditTransactions( call in src/ is the single delegat
 // creditLockKey): a hand-typed copy can drift from it, and a drifted key stops
 // two money paths from excluding each other. Template and concatenation forms.
 test('the credit: lock key is spelled only in modules/packs/credit-posting.ts', () => {
-  const offenders: RawDeleteOccurrence[] = [];
+  const offenders: SourceHit[] = [];
   for (const file of collectTsFiles(SRC_ROOT)) {
     const lines = fs.readFileSync(file, 'utf8').split('\n');
     lines.forEach((text, i) => {
@@ -84,7 +84,7 @@ test('the credit: lock key is spelled only in modules/packs/credit-posting.ts', 
 // paired ledger row live there. So the ONE raw .createCreditTransactions( call
 // in src/ is its insert — a second writer would pair rows by hand again.
 test('the only .createCreditTransactions( call in src/ is mutateCreditAtomic\'s insert', () => {
-  const found: RawDeleteOccurrence[] = [];
+  const found: SourceHit[] = [];
   for (const file of collectTsFiles(SRC_ROOT)) {
     const lines = fs.readFileSync(file, 'utf8').split('\n');
     lines.forEach((text, i) => {

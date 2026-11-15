@@ -92,7 +92,7 @@ export const buybackPullStep = createStep(
     const balance = await packs.creditBalance(input.customer_id);
 
     // F1: the sale already lifted an AUTO freeze whose debt it repays, inline
-    // in its own transaction (the buyback posting, D2).
+    // in its own transaction (the buyback posting).
 
     const result: BuybackResult = {
       pull_id: pull.id,

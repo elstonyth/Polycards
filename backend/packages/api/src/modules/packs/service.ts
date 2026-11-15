@@ -99,7 +99,7 @@ import CoinFlipRound from './models/coin-flip-round';
 import { settleBuyback, type BuybackSettlement } from './buyback-settlement';
 import { COIN_FLIP_CONFIG_ID, parseCoinFlipSettings, coinFlipSettingsView, publicCoinFlipRound,
   type CoinFlipSettings, type CoinFlipPublicRound } from './coin-flip';
-import { insufficientCreditsMessage, lockCredit, planPosting, type CreditMutationInput, type GeneralPosting, type LedgerReversalRow } from './credit-posting';
+import { LEDGER_REVERSAL_COLS, lockCredit, planPosting, type CreditPosting, type GeneralPosting, type LedgerReversalRow } from './credit-posting';
 import { coinFlipManager, readCoinFlipSettings, quoteCoinFlipOperation,
   acceptCoinFlipOperation, getCoinFlipRoundOperation } from './coin-flip-operations';
 import DeliveryOrder from './models/delivery-order';
@@ -250,7 +250,6 @@ import {
   FLAT_PERCENT,
 } from './buyback-rate';
 import type { CashCents, CashSide, OwedCents, PeriodCents } from './profit';
-import { consumeExternalSen } from './external-funded';
 import {
   BONUS_BP_FULL,
   LEADERBOARD_PULL_SQL,
@@ -259,7 +258,6 @@ import {
   allocateBonusSen,
   bonusBpFor,
   bonusShareSen,
-  consumeBonusSen,
   normalSenSql,
   reasonCashSenSql,
   releasableRewardHoldSen,
@@ -322,10 +320,6 @@ import {
 } from './real-customers';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
-// The columns of LedgerReversalRow (credit-posting.ts).
-const LEDGER_REVERSAL_COLS =
-  'id, customer_id, amount, reason, reference, external_funded_cents, bonus_cents, source_transaction_id';
-
 // plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
 // amount, plus the held part of a card sale (sellbackHoldBp: the bonus-paid
 // share or a welcome card's sale, operator rule 2026-10-09; gift and reward
@@ -387,7 +381,7 @@ export const holderNameKeySql = (expr: string): string => {
 // table (+ per-pack rarity), Pull = the result ledger doubling as the vault,
 // CreditTransaction = the site-credit ledger written by buybacks.
 
-export type { CreditMutationInput, CreditMutationReason } from './credit-posting';
+export type { CreditPosting, CreditMutationReason } from './credit-posting';
 
 export type RevealPullResult = {
   /** Epoch ms the 30s instant-sell window closes. */
@@ -1534,9 +1528,9 @@ class PacksModuleService extends MedusaService({
   }
 
   // A credit posting's compensation (top-up, adjustment): its credit row and
-  // its ledger row go in ONE transaction, under the customer's credit lock
-  // (D4), like undoBuybackAtomic. No auto-freeze if that leaves the balance
-  // negative (owner decision).
+  // its ledger row go in ONE transaction, under the customer's credit lock,
+  // like undoBuybackAtomic. No auto-freeze if that leaves the balance
+  // negative (owner decision 2026-11-15).
   @InjectTransactionManager()
   async undoCreditPosting(input: { creditTransactionId: string; ledgerType: LedgerType }, @MedusaContext() context: Context = {}): Promise<void> {
     const [credit] = await this.listCreditTransactions({ id: input.creditTransactionId }, { take: 1 }, context);
@@ -4761,15 +4755,18 @@ class PacksModuleService extends MedusaService({
     return (await this.creditSummary(customerId)).balance;
   }
 
-  // Serialized, balance-checked credit-ledger write. Holds a per-customer
-  // xact-scoped Postgres advisory lock across the Σ(ledger) re-read, the floor
+  // THE credit posting: every credit row is written here (sealed by
+  // delete-guard-seal.unit.spec.ts), planned by planPosting, with its ledger
+  // row in the same transaction. Holds a per-customer xact-scoped Postgres
+  // advisory lock across the replay check, the Σ(ledger) re-read, the floor
   // check, and the insert — all in ONE transaction — so two concurrent credit
   // mutations for the same customer can't both pass the check and overspend
   // (fixes pack-open/pack-open and pack-open/admin-deduct double-spend). The
-  // lock auto-releases on commit/rollback; arithmetic is done in integer cents.
+  // one exception is an unlocked commission (see CommissionPosting). The lock
+  // auto-releases on commit/rollback; arithmetic is done in integer cents.
   @InjectTransactionManager()
   async mutateCreditAtomic(
-    input: CreditMutationInput,
+    input: CreditPosting,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     id: string;
@@ -4783,8 +4780,8 @@ class PacksModuleService extends MedusaService({
     /** Bonus balance after the write (MYR), read under the lock. Absent on a
      *  replay, which wrote nothing. */
     bonusBalance?: number;
-    /** The written row's signed bonus sen (NULL on a sell-back, D9). Absent
-     *  on a replay. */
+    /** The written row's signed bonus sen (NULL on a sell-back or a
+     *  commission). Absent on a replay. */
     rowBonusCents?: number | null;
     /** The ledger row the posting's ledger part wrote. */
     ledger?: { id: string; display_id: string };
@@ -4806,7 +4803,7 @@ class PacksModuleService extends MedusaService({
     }
 
     // 1) Serialize all credit mutations for THIS customer on the locked txn
-    //    (a commission run posts unlocked, D1: see CommissionPosting).
+    //    (a commission run posts unlocked: see CommissionPosting).
     if (!commission?.unlocked) await lockCredit(sharedContext, customerId);
 
     // 1a) Idempotent replay: under the lock, if a row already carries this
@@ -4833,8 +4830,8 @@ class PacksModuleService extends MedusaService({
     // this line's ref_id means the money moved on an earlier run whose line
     // update was lost, and minting the credit anyway would pay that customer
     // twice — recordLedgerEntry returns the existing row instead of throwing
-    // (security review 2026-08-25). Its credit row has no anchor (D9), so a
-    // replay has no credit id to return: id is ''.
+    // (security review 2026-08-25). Its credit row has no anchor (NULLs kept
+    // on purpose), so a replay has no credit id to return: id is ''.
     const rf = commission
       ? await this.recordLedgerEntry(
           {
@@ -17894,8 +17891,8 @@ class PacksModuleService extends MedusaService({
 
     // 3c) WP ledger row (POLYCARD-BACK §5, Plan 060) — one row per settled
     // winner, not per card, keyed on the 3a credit's anchor. A replayed
-    // credit moved no money and wrote nothing, so neither does its WP (D5,
-    // the rule every posting follows); a cards-only payout still writes it.
+    // credit moved no money and wrote nothing, so neither does its WP (the
+    // rule every posting follows); a cards-only payout still writes it.
     // vaultDelta stays null (WP is a straight reward credit like TP, not a
     // vault-liability move). `stage` has no single source — RankPayout is
     // already a union of every unlocked stage's rewards (challenge-settle.ts

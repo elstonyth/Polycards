@@ -6,9 +6,9 @@ import { BONUS_NOT_SPENDABLE_MESSAGE, bonusShareSen, consumeBonusSen } from './b
 import { consumeExternalSen } from './external-funded';
 import type { LedgerPayload, LedgerType } from './ledger';
 
-// Credit posting: the one home of the per-customer credit lock (design
-// plans/architecture-deepening/03-credit-posting-design.md). No service
-// import, so the service and its helper files can all use it.
+// Credit posting: the one home of the per-customer credit lock and of the
+// rules every credit row is posted by. No service import, so the service and
+// its helper files can all use it.
 
 /** The per-customer credit lock key. Keep it byte-identical across releases:
  *  during a rolling deploy old and new pods must still exclude each other. */
@@ -84,8 +84,9 @@ type PostingFields = {
    * Bonus credit (spec 2026-10-07): the signed sen of this row that is
    * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
    * the row's amount in sen. A 'reward_credit' row (task / challenge prize) or
-   * a 'voucher_claim' row (VIP voucher) is stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
-   * opens take theirs bonus first (planPosting). A 'delivery_fee' charge takes its
+   * a 'voucher_claim' row (VIP voucher) is stamped whole-row bonus by
+   * planPosting (2026-10-11). Pack opens take theirs bonus first. A
+   * 'delivery_fee' charge takes its
    * bonus share itself (bonus first, ADR 0014); a 'delivery_fee' refund passes
    * the share its charge took, 0..amount, so it goes back as bonus.
    */
@@ -125,10 +126,10 @@ export type CoinFlipPosting = PostingFields & {
 
 /** A weekly referral commission, keyed on its settlement line (the RF
  *  ref_id). The RF row is written FIRST and its replay is the double-pay
- *  guard: no credit row carries an anchor (D9). `unlocked` (D1, owner
- *  decision): a pay run posts every line in one transaction, and a credit
- *  lock per line would hold N locks in line order until commit, which can
- *  deadlock against reverseOpen's sorted locks. */
+ *  guard: the credit row carries no anchor (its NULLs are kept on purpose).
+ *  `unlocked` (owner decision 2026-11-15): a pay run posts every line in one
+ *  transaction, and a credit lock per line would hold N locks in line order
+ *  until commit, which can deadlock against reverseOpen's sorted locks. */
 export type CommissionPosting = PostingFields & {
   reason: 'referral_commission';
   ledger: LedgerPart & { type: 'RF'; refId: string };
@@ -137,6 +138,8 @@ export type CommissionPosting = PostingFields & {
 
 // The ledger columns a reversal reads by raw SQL on its own transaction (an
 // ORM list would take a second pool connection; see mutateCreditAtomic).
+export const LEDGER_REVERSAL_COLS =
+  'id, customer_id, amount, reason, reference, external_funded_cents, bonus_cents, source_transaction_id';
 export type LedgerReversalRow = {
   id: string;
   customer_id: string;
@@ -164,7 +167,6 @@ export type CreditPosting =
   | CoinFlipPosting
   | CommissionPosting
   | ReversalPosting;
-export type CreditMutationInput = CreditPosting;
 
 /** The locked Σ read a posting is planned against, in integer sen. */
 export type PostingTotals = { balanceCents: number; bonusCents: number; externalCents: number };
@@ -176,7 +178,8 @@ export type CreditRow = {
   reason: InferTypeOf<typeof CreditTransaction>['reason'];
   pull_id: string | null;
   reference: string | null;
-  /** NULL, not 0, on a sell-back with nothing held (D9). */
+  /** NULL, not 0, on a sell-back with nothing held and on a commission:
+   *  the top-up `IS NULL` readers depend on it. */
   external_funded_cents: number | null;
   bonus_cents: number | null;
   source_transaction_id: string | null;
@@ -232,15 +235,16 @@ export function planPosting(input: CreditPosting, totals: PostingTotals): Postin
     };
     return {
       row,
-      // An open's refund never lifts an auto freeze (D2, owner decision).
+      // An open's refund never lifts an auto freeze (owner decision).
       unfreeze: false,
       balanceAfterCents: totals.balanceCents + Math.round(row.amount * 100),
       bonusAfterCents: Math.max(0, totals.bonusCents) + (row.bonus_cents ?? 0),
     };
   }
   const beforeCents = totals.balanceCents;
-  // Spend-only bonus credit (spec 2026-10-07): only a pack open may spend it
-  // (settleOpen), so every other debit is floored against the NORMAL balance.
+  // Spend-only bonus credit (spec 2026-10-07): only a pack open or a delivery
+  // fee (ADR 0014) may spend it, so every other debit is floored against the
+  // NORMAL balance.
   // Clamped: a negative Σ (only reachable by deleting a buyback row whose
   // bonus was already spent) must never inflate the normal balance.
   const bonusBeforeCents = Math.max(0, totals.bonusCents);
@@ -407,7 +411,7 @@ export function planPosting(input: CreditPosting, totals: PostingTotals): Postin
       // A sell-back's bonus share is held for packs: stamped as external money
       // in, like a deposit, so opens consume it and the playthrough gate
       // counts it (DEPOSITED_PT_SEN_SQL). Rounded up, toward the locked side.
-      // A commission row stamps neither (NULL, D9).
+      // A commission row stamps neither (NULL).
       external_funded_cents:
         input.reason === 'buyback'
           ? bonusShareSen(deltaCents, input.holdBp) || null

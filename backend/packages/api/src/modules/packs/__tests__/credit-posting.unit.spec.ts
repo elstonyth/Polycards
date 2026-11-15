@@ -54,7 +54,7 @@ describe('planPosting', () => {
     expect(() => plan(input as never, totals(10_000))).toThrow(message);
   });
 
-  it('pack_open (this path) consumes external money up to the price, no bonus', () => {
+  it('a pack open with no bonus held consumes external money up to the price', () => {
     expect(plan({ reason: 'pack_open', amount: -12.5, sourceTransactionId: 'open_1' }, totals(1500, 0, 1000))).toMatchObject({
       row: { amount: -12.5, external_funded_cents: -1000, bonus_cents: 0, source_transaction_id: 'open_1' },
       unfreeze: false, balanceAfterCents: 250,
