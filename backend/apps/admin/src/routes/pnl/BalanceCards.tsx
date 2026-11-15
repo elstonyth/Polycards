@@ -4,7 +4,7 @@ import type {
   PnlAssetsSection,
   PnlBonusSource,
   PnlFloatingSection,
-} from './pnl-balance-types';
+} from '../../lib/admin-rest';
 import { sen } from './pnl-format';
 
 type Line = {
@@ -95,15 +95,18 @@ export const AssetsCard = ({ data }: { data: PnlAssetsSection }) => {
   );
 };
 
-const SOURCES: PnlBonusSource[] = [
-  'adjustment',
-  'checkin',
-  'task',
-  'weekly_challenge',
-  'returned',
-  'lucky_draw',
-  'other',
-];
+// Display order (key order), keyed by the backend's union so a source added or
+// dropped there fails this typecheck (ADR 0017).
+const SOURCE_ORDER: Record<PnlBonusSource, true> = {
+  adjustment: true,
+  checkin: true,
+  task: true,
+  weekly_challenge: true,
+  returned: true,
+  lucky_draw: true,
+  other: true,
+};
+const SOURCES = Object.keys(SOURCE_ORDER) as PnlBonusSource[];
 
 /** Customer floating money as of now (P&L spec §10): wallets (withdrawable,
  *  unused free credit by source, locked cash) + cards at buyback value. */
