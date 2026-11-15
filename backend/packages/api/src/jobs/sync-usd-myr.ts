@@ -2,7 +2,7 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
-import { FX_USD_MYR_URL } from '../modules/packs/pricing';
+import { FX_USD_MYR_URL, resolveFxRateInfo } from '../modules/packs/pricing';
 import { PAYMENT_FX_MAX_AGE_MS } from '../modules/packs/payment-fx';
 import { fetchPaymentFx, PAYMENT_FX_MAX_JUMP } from './sync-payment-fx';
 
@@ -30,6 +30,42 @@ const WHERE = 'Admin → Storefront → Pricing — exchange rate (USD → MYR)'
 export default async function syncUsdMyrJob(
   container: MedusaContainer,
 ): Promise<void> {
+  await syncUsdMyr(container);
+  await recordFxDay(container);
+}
+
+export const FX_DAY_UPSERT_SQL =
+  'insert into fx_rate_day (pair, day, rate, recorded_at) values (?, ?, ?, now()) ' +
+  'on conflict (pair, day) do update set rate = excluded.rate, recorded_at = now()';
+
+/**
+ * Save today's (MYT) effective rate in fx_rate_day so a report on a past day
+ * prices it at that day's rate. Runs after every sync attempt, so a pin or the
+ * last good rate is still saved on a day every feed fails. Never throws: a
+ * missed save only means that day falls back to a neighbouring one.
+ */
+export async function recordFxDay(container: MedusaContainer): Promise<void> {
+  const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
+  try {
+    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    const { rate, firm } = await resolveFxRateInfo(packs);
+    // The display fallback is a constant nobody set: never record it.
+    if (!firm) return;
+    const day = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'Asia/Kuala_Lumpur',
+    });
+    const pg = container.resolve(ContainerRegistrationKeys.PG_CONNECTION) as {
+      raw: (sql: string, bindings: unknown[]) => Promise<unknown>;
+    };
+    await pg.raw(FX_DAY_UPSERT_SQL, ['USD_MYR', day, rate]);
+  } catch (e) {
+    logger.warn(
+      `[sync-usd-myr] today's rate not saved to fx_rate_day: ${(e as Error).message}`,
+    );
+  }
+}
+
+async function syncUsdMyr(container: MedusaContainer): Promise<void> {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
@@ -40,7 +76,9 @@ export default async function syncUsdMyrJob(
       // A feed still serving an old day (ECB stuck) is a failed feed too:
       // ECB's longest holiday gap is ~5.6 days, so a week is broken.
       if (Date.now() - answer.asOf.getTime() > PAYMENT_FX_MAX_AGE_MS)
-        throw new Error(`stale, dated ${answer.asOf.toISOString().slice(0, 10)}`);
+        throw new Error(
+          `stale, dated ${answer.asOf.toISOString().slice(0, 10)}`,
+        );
       got = answer;
       break;
     } catch (e) {

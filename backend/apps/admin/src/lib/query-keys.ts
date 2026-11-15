@@ -60,6 +60,9 @@ export const qk = {
   profitReportKey: ['admin', 'profit-report'] as const,
   profitReport: (range: string, from: string, to: string, scope: string) =>
     ['admin', 'profit-report', range, from, to, scope] as const,
+  // Under profit-report so invalidating profitReportKey refreshes it too.
+  pnlReport: (range: string, from: string, to: string, scope: string) =>
+    ['admin', 'profit-report', 'pnl', range, from, to, scope] as const,
   gatewayBalance: (currency: string) =>
     ['admin', 'gateway-balance', currency] as const,
   gatewayAudit: (currency: string) =>

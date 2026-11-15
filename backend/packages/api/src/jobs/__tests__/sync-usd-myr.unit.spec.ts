@@ -1,4 +1,4 @@
-import syncUsdMyrJob, { config } from '../sync-usd-myr';
+import syncUsdMyrJob, { config, FX_DAY_UPSERT_SQL } from '../sync-usd-myr';
 import { config as paymentFxConfig } from '../sync-payment-fx';
 
 // USD->MYR prices every card and every sell-back: hourly, ECB first, Coinbase
@@ -38,10 +38,15 @@ function container(stored: number | null, pinned: number | null = null) {
     createFxRates: jest.fn().mockResolvedValue(undefined),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  const pg = { raw: jest.fn().mockResolvedValue(undefined) };
   return {
     packs,
     logger,
-    c: { resolve: (k: string) => (k === 'logger' ? logger : packs) } as never,
+    pg,
+    c: {
+      resolve: (k: string) =>
+        k === 'logger' ? logger : k === '__pg_connection__' ? pg : packs,
+    } as never,
   };
 }
 
@@ -139,6 +144,64 @@ describe('sync-usd-myr', () => {
     expect(packs.createFxRates.mock.calls[0][0][0]).toMatchObject({
       pair: 'USD_MYR',
       rate: 4.21,
+    });
+  });
+
+  // fx_rate_day: one effective rate per MYT day for the P&L report.
+  describe('daily rate history', () => {
+    const TODAY = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'Asia/Kuala_Lumpur',
+    });
+
+    it("saves today's rate after a sync", async () => {
+      feeds({ 'api.frankfurter.app': ECB(4.21) });
+      const { c, pg } = container(4.2);
+      await syncUsdMyrJob(c);
+      // The stored row (mocked, not re-read) is what prices today.
+      expect(pg.raw).toHaveBeenCalledWith(FX_DAY_UPSERT_SQL, [
+        'USD_MYR',
+        TODAY,
+        4.2,
+      ]);
+    });
+
+    it('saves the pin, not the feed, while a pin is set', async () => {
+      feeds({ 'api.frankfurter.app': ECB(4.21) });
+      const { c, pg } = container(4.2, 4.3);
+      await syncUsdMyrJob(c);
+      expect(pg.raw).toHaveBeenCalledWith(FX_DAY_UPSERT_SQL, [
+        'USD_MYR',
+        TODAY,
+        4.3,
+      ]);
+    });
+
+    it('still saves the last good rate when every feed fails', async () => {
+      feeds({});
+      const { c, pg } = container(4.2);
+      await syncUsdMyrJob(c);
+      expect(pg.raw).toHaveBeenCalledWith(FX_DAY_UPSERT_SQL, [
+        'USD_MYR',
+        TODAY,
+        4.2,
+      ]);
+    });
+
+    it('never saves the display fallback', async () => {
+      feeds({});
+      const { c, pg } = container(null);
+      await syncUsdMyrJob(c);
+      expect(pg.raw).not.toHaveBeenCalled();
+    });
+
+    it('a failed save is logged, never thrown', async () => {
+      feeds({ 'api.frankfurter.app': ECB(4.21) });
+      const { c, pg, logger } = container(4.2);
+      pg.raw.mockRejectedValue(new Error('relation does not exist'));
+      await expect(syncUsdMyrJob(c)).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('not saved to fx_rate_day'),
+      );
     });
   });
 });
