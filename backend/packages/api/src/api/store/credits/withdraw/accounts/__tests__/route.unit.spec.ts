@@ -54,6 +54,21 @@ const otherPayoutAccountHolders = jest.fn();
 // Banned numbers and names used elsewhere (owner, 2026-11-03); none by default.
 const payoutAccountBanned = jest.fn();
 const holderNameHeldByAnother = jest.fn();
+// The Payout Destination reads (payout-destination.ts; their SQL is pinned in
+// payout-destination.integration.spec). Nobody else holds it by default.
+const payoutNumberStanding = jest.fn();
+const standing = (
+  holders: { customerId: string; paid?: boolean }[] = [],
+  over: Record<string, unknown> = {},
+) => ({
+  bankId: 'MBBEMYKL',
+  key: '123456789012',
+  forms: ['123456789012'],
+  banned: false,
+  bannedForPlayer: false,
+  holders: holders.map((h) => ({ paid: false, verified: false, ...h })),
+  ...over,
+});
 
 // The admin withdrawal controls; open by default.
 const withdrawalControls = jest.fn(async () => DEFAULT_WITHDRAWAL_CONTROLS);
@@ -69,6 +84,7 @@ const scope = {
         otherPayoutAccountHolders,
         payoutAccountBanned,
         holderNameHeldByAnother,
+        payoutNumberStanding,
         withdrawalControls,
       } satisfies FakeFacet<CustomerWallet>;
     if (key === 'notification') return { createNotifications };
@@ -159,6 +175,8 @@ beforeEach(() => {
   payoutAccountBanned.mockResolvedValue(false);
   holderNameHeldByAnother.mockReset();
   holderNameHeldByAnother.mockResolvedValue(false);
+  payoutNumberStanding.mockReset();
+  payoutNumberStanding.mockResolvedValue(standing());
   logger.warn.mockReset();
   logger.error.mockReset();
   retrieveCustomer.mockResolvedValue({ metadata: {} });
@@ -869,15 +887,13 @@ describe('POST accounts — a saved account changes through support', () => {
 });
 
 describe('GET accounts — a shared bank account is on hold', () => {
-  const held = [
-    { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: null },
-  ];
+  const held = standing([{ customerId: 'cus_2', paid: true }]);
 
   it('marks it unavailable, says what to do, and hides nothing', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
-    otherPayoutAccountHolders.mockResolvedValue(held);
+    payoutNumberStanding.mockResolvedValue(held);
     const res = mkRes();
     await GET(mkReq(), res);
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0]
@@ -894,8 +910,9 @@ describe('GET accounts — a shared bank account is on hold', () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape(), other] },
     });
-    otherPayoutAccountHolders.mockImplementation(async (_id, number) =>
-      number === '123456789012' ? held : [],
+    payoutNumberStanding.mockImplementation(
+      async (_id: string, n: { accountNumber: string }) =>
+        n.accountNumber === '123456789012' ? held : standing(),
     );
     const res = mkRes();
     await GET(mkReq(), res);
@@ -913,13 +930,13 @@ describe('GET accounts — a shared bank account is on hold', () => {
         bank_share_verified: { [savedShape().id]: '2026-11-03T00:00:00.000Z' },
       },
     });
-    otherPayoutAccountHolders.mockResolvedValue(held);
+    payoutNumberStanding.mockResolvedValue(held);
     const res = mkRes();
     await GET(mkReq(), res);
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0]
       .accounts;
     expect(account.supported).toBe(true);
-    expect(otherPayoutAccountHolders).not.toHaveBeenCalled();
+    expect(payoutNumberStanding).not.toHaveBeenCalled();
   });
 
   it('verifying one number does not lift a hold from another on the list', async () => {
@@ -930,7 +947,7 @@ describe('GET accounts — a shared bank account is on hold', () => {
         bank_share_verified: { [savedShape().id]: '2026-11-03T00:00:00.000Z' },
       },
     });
-    otherPayoutAccountHolders.mockResolvedValue(held);
+    payoutNumberStanding.mockResolvedValue(held);
     const res = mkRes();
     await GET(mkReq(), res);
     const { accounts } = (res as { json: jest.Mock }).json.mock.calls[0][0];
@@ -955,24 +972,29 @@ describe('GET accounts — a shared bank account is on hold', () => {
         ],
       },
     });
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'USDTTRC20', holder_name: 'USDT · TRC20 (Tron)' },
-    ]);
+    payoutNumberStanding.mockResolvedValue(
+      standing([{ customerId: 'cus_2', paid: false }], {
+        bankId: 'USDTTRC20',
+        key: TRON,
+        forms: [TRON],
+      }),
+    );
     const res = mkRes();
     await GET(mkReq(), res);
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0].accounts;
     expect(account.supported).toBe(false);
   });
 
-  it('does not hold the same digits at another bank', async () => {
+  it('asks about each saved number at its bank; nobody else on it, no hold', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
-    otherPayoutAccountHolders.mockResolvedValue([
-      { customer_id: 'cus_2', bank_code: 'PBBEMYKL', holder_name: null },
-    ]);
     const res = mkRes();
     await GET(mkReq(), res);
+    expect(payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'MBBEMYKL',
+      accountNumber: '123456789012',
+    });
     const [account] = (res as { json: jest.Mock }).json.mock.calls[0][0]
       .accounts;
     expect(account.supported).toBe(true);

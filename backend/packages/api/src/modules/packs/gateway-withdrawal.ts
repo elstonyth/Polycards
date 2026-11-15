@@ -4,13 +4,13 @@ import { resolvePacks, type GatewayWithdrawals } from './facets';
 import {
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   bankSupportedBy,
-  anySavedAccountShared,
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
   heldByAnother,
   resolveWithdrawalDestination,
   savedBankAccountId,
 } from './saved-accounts';
 import { accountNumberForms, findBank, walletAddressValid } from './banks';
+import { savedListHeld } from './payout-destination';
 import {
   channelStatus,
   destinationMinRm,
@@ -803,9 +803,8 @@ export async function startWithdrawal(
   // every account on it, whoever was paid first, and whichever saved number this
   // payout goes to, until support acts (ADR 0015). Refused before any row or debit.
   if (
-    await anySavedAccountShared(
-      packs,
-      input.customerId,
+    await savedListHeld(
+      (n) => packs.payoutNumberStanding(input.customerId, n),
       savedAccounts,
       await packs.bankShareVerifiedFor(input.customerId),
     )

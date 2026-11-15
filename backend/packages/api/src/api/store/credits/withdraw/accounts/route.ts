@@ -31,7 +31,6 @@ import {
   ONE_TNG_ACCOUNT_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   SHARED_SAVE_MESSAGE,
-  anySavedAccountShared,
   blocksNewSave,
   holderConfirmMismatch,
   holderNameInvalid,
@@ -45,6 +44,7 @@ import {
   verifiedBankAccounts,
   type SavedBankAccount,
 } from '../../../../../modules/packs/saved-accounts';
+import { savedListHeld } from '../../../../../modules/packs/payout-destination';
 import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-account-notice';
 import {
   channelStatus,
@@ -183,9 +183,8 @@ async function accountViews(
 ) {
   const accounts = parseSavedBankAccounts(metadata.bank_accounts);
   const packs = resolvePacks<CustomerWallet>(req.scope);
-  const onHold = await anySavedAccountShared(
-    packs,
-    customerId,
+  const onHold = await savedListHeld(
+    (n) => packs.payoutNumberStanding(customerId, n),
     accounts,
     verifiedBankAccounts(metadata),
   );

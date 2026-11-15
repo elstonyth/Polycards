@@ -59,12 +59,29 @@ const SAVED_ACCOUNT = {
   savedAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
 };
 
+/** A Payout Destination standing (payout-destination.ts): not banned, nobody
+ *  else on it, unless a test says so. */
+const standing = (
+  holders: { customerId: string; paid?: boolean }[] = [],
+  over: Record<string, unknown> = {},
+) => ({
+  bankId: 'MBBEMYKL',
+  key: SAVED_ACCOUNT.accountNumber,
+  forms: [SAVED_ACCOUNT.accountNumber],
+  banned: false,
+  bannedForPlayer: false,
+  holders: holders.map((h) => ({ paid: false, verified: false, ...h })),
+  ...over,
+});
+
 function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
   const packs = {
     // The unlocked precheck's list read. The AUTHORITATIVE one is inside
     // withdrawForCashout, on that method's own transaction manager — see the
     // service describe below, which runs the real SQL against a fake `em`.
     savedBankAccountsFor: jest.fn().mockResolvedValue(savedAccounts),
+    // Ban and other holders of a saved number. Clean by default.
+    payoutNumberStanding: jest.fn().mockResolvedValue(standing()),
     // Other customers on the same number. None by default.
     otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
     payoutAccountBanned: jest.fn().mockResolvedValue(false),
@@ -486,15 +503,15 @@ describe('startWithdrawal — money ordering', () => {
   // A shared number is held at payout for every account on it, before any row
   // or debit, until support verifies this customer (ADR 0015).
   describe('a shared bank account', () => {
-    const paid = { customer_id: 'cus_2', bank_code: 'MYMB2U', holder_name: null };
-    const saved = { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'X' };
+    const paid = standing([{ customerId: 'cus_2', paid: true }]);
+    const saved = standing([{ customerId: 'cus_2', paid: false }]);
 
     it.each([
       ['paid out to another customer', paid],
       ['only saved by another customer, under any name', saved],
-    ])('is refused when %s', async (_label, holder) => {
+    ])('is refused when %s', async (_label, held) => {
       const h = harness();
-      h.packs.otherPayoutAccountHolders.mockResolvedValue([holder]);
+      h.packs.payoutNumberStanding.mockResolvedValue(held);
       await expect(start(h, { gateway: 'tgpay', amount: 56 })).rejects.toThrow(
         /linked to another Polycards account/,
       );
@@ -509,9 +526,9 @@ describe('startWithdrawal — money ordering', () => {
         accountNumber: '999999999999',
       };
       const h = harness([SAVED_ACCOUNT, shared]);
-      h.packs.otherPayoutAccountHolders.mockImplementation(
-        async (_id: string, number: string) =>
-          number === shared.accountNumber ? [paid] : [],
+      h.packs.payoutNumberStanding.mockImplementation(
+        async (_id: string, n: { accountNumber: string }) =>
+          n.accountNumber === shared.accountNumber ? paid : standing(),
       );
       await expect(
         start(h, { gateway: 'tgpay', amount: 56, accountId: SAVED_ACCOUNT.id }),
@@ -522,7 +539,7 @@ describe('startWithdrawal — money ordering', () => {
     it('is refused however long ago it was saved', async () => {
       const old = { ...SAVED_ACCOUNT, savedAt: '2026-10-01T00:00:00+08:00' };
       const h = harness([old]);
-      h.packs.otherPayoutAccountHolders.mockResolvedValue([paid]);
+      h.packs.payoutNumberStanding.mockResolvedValue(paid);
       await expect(start(h, { gateway: 'tgpay', amount: 56 })).rejects.toThrow(
         /linked to another Polycards account/,
       );
@@ -530,7 +547,7 @@ describe('startWithdrawal — money ordering', () => {
 
     it('pays once support verified this customer', async () => {
       const h = harness();
-      h.packs.otherPayoutAccountHolders.mockResolvedValue([paid]);
+      h.packs.payoutNumberStanding.mockResolvedValue(paid);
       h.packs.bankShareVerifiedFor.mockResolvedValue({
         [SAVED_ACCOUNT.id]: '2026-11-03T00:00:00.000Z',
       });
@@ -539,14 +556,15 @@ describe('startWithdrawal — money ordering', () => {
       ).resolves.toBeTruthy();
     });
 
-    it('does not count the same digits at another bank', async () => {
+    it('asks about the saved number at its bank; nobody else on it pays', async () => {
       const h = harness();
-      h.packs.otherPayoutAccountHolders.mockResolvedValue([
-        { customer_id: 'cus_2', bank_code: 'PBBEMYKL', holder_name: null },
-      ]);
       await expect(
         start(h, { gateway: 'tgpay', amount: 56 }),
       ).resolves.toBeTruthy();
+      expect(h.packs.payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+        bankCode: 'MBBEMYKL',
+        accountNumber: SAVED_ACCOUNT.accountNumber,
+      });
     });
   });
 
