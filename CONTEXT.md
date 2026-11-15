@@ -258,6 +258,27 @@ never recovered. See ADR 0006.
 _Avoid_: deactivate, disable (Account Disable is a separate, reversible
 surface — see `disabled-guard.ts` — do not conflate the two)
 
+**Player Eligibility**:
+Who may show, receive or play. The play gate, the board cut and the SQL
+twins live in `modules/packs/eligibility.ts`; the store session block stays
+in `disabled-guard.ts`. Shows: a disabled account (a deleted one
+too, since the purge writes a disabled tombstone) is left off every public
+board, and the board re-numbers without gaps (`topShown`, the same cut that
+settlement pays); past results, replays and pull-gap rows show it as
+"Anonymous" instead, and the referral friends list still names it. Receives:
+a disabled account receives nothing (`assertMayReceive`), while refunds of
+its own money stay open and Lucky Draw ticket refunds stay removed. Plays:
+`playRefusal` per game. A disabled account plays nothing; Coin Flip refuses
+any freeze; only the DEFAULT group (or no group) must have topped up; a
+withdrawal-blocked group flips without the playthrough. The SQL twins
+(`disabledAccountSql`, `realGroupMemberSql`, `EFFECTIVE_GROUP_SQL`) are
+pinned to the JS readers by `eligibility.integration.spec.ts`.
+Automation-list accounts rank and get paid like any player (#875), and IP or
+device signals are a review clue, never a gate (ADR 0016).
+_Avoid_: eligible for cash-out (Withdrawals and Delivery Orders keep their
+own gates: the first top-up and the Withdrawable rule); the Flip
+eligibility stamp, which marks a Pull, not a player
+
 **Expired Deposit**:
 A top-up whose gateway status never resolved within `GATEWAY_STALE_AFTER_MS`
 (1h, well past a hosted checkout's own timeout). Non-terminal: the slow

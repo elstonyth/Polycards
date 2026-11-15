@@ -9,7 +9,7 @@ const windowArgs = {
   period: z
     .enum(PERIODS)
     .describe(
-      'Malaysia-time window. today, yesterday, this_week (Mon-Sun), last_week, this_month and last_month are calendar periods; last_7_days and last_30_days are rolling, like the dashboard Weekly and Monthly tabs; custom needs from (and optionally to).',
+      'Malaysia-time window. today, yesterday, this_week (Mon-Sun), last_week, this_month and last_month are calendar periods; last_7_days and last_30_days are the dashboard 7d and 30d tabs: from Malaysia midnight 6 or 29 days back until now; custom needs from (and optionally to).',
     ),
   from: z.string().optional().describe('custom only: first day, YYYY-MM-DD.'),
   to: z
@@ -22,7 +22,7 @@ const groupArg = {
     .string()
     .optional()
     .describe(
-      "Player group: 'all' (default), 'default' (the DEFAULT group: players in no other group), or a group name.",
+      "Player group: 'all' (default), 'default' (real customers, as the admin Profit page counts them: players in no group other than DEFAULT), or a group name.",
     ),
 };
 
@@ -42,7 +42,7 @@ export const TOOLS = {
     {
       name: 'economy',
       description:
-        'Money totals exactly like the admin Economy page, for one Malaysia-time window and player group. revenue = credits spent on packs; payouts = buybacks paid; net = revenue - payouts (the gacha margin); topups = deposits credited; cashout = withdrawals, a signed ledger sum (negative = money paid out to players; report it as an amount paid out); adjustments = admin credit changes (either sign); deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).',
+        "Ledger money totals (the Finance Economy report) for one Malaysia-time window and player group; the reply's basis field says what each figure counts, so repeat it when staff ask what a number includes. revenue = pack sales, cash only (bonus credit spent is not revenue; capsule packs included); payouts = buybacks paid, cash part; coinFlipPayouts = credit paid to coin flip winners; net = revenue - payouts - coinFlipPayouts (the gacha margin); topups = top-ups as the wallet ledger records them (the payments tool and the admin Profit page count the gateway's settled deposits, so they can differ); cashout = withdrawals taken from wallets, a signed ledger sum (negative = money withdrawn; report it as an amount withdrawn, never as paid out: it includes withdrawals still pending at the gateway, and the payments tool tells settled from pending); adjustments = admin credit changes (either sign); deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).",
       inputSchema: { ...windowArgs, ...groupArg },
       request: windowed('economy'),
     },
@@ -63,7 +63,7 @@ export const TOOLS = {
     {
       name: 'pack_sales',
       description:
-        'Per-pack sales in the window: packs opened (paid) and revenue (credits spent, net of reversals), largest first. unattributed_revenue is pack spend from older rows that cannot be linked to a pack; total_revenue equals economy revenue. Amounts in RM (MYR).',
+        'Per-pack sales in the window: packs opened (paid with cash or bonus credit) and revenue (cash only, net of reversals; capsule packs included), largest first. Bonus credit is not revenue, so a pack opened only with bonus credit shows its opens at RM 0: that is correct, not a fault. unattributed_revenue is pack spend from older rows that cannot be linked to a pack; total_revenue equals economy revenue. The admin P&L counts pack sales at full price (cash plus bonus) and leaves capsule packs out, so its pack sales differ. Amounts in RM (MYR).',
       inputSchema: { ...windowArgs, ...groupArg },
       request: windowed('pack-sales'),
     },
@@ -86,7 +86,7 @@ export const TOOLS = {
     {
       name: 'groups',
       description:
-        'The player groups and how many players each holds now (by current group). default_players counts players in no group other than DEFAULT. Use these names as the group argument of the other tools.',
+        'The player groups and how many players each holds now (by current group). default_players counts the real customers, the same players as group default. Use these names as the group argument of the other tools.',
       inputSchema: {},
       request: () => ({ path: 'groups', params: {} }),
     },

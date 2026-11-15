@@ -1,12 +1,8 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import PacksModuleService from '../service';
 import {
-  anySavedAccountShared,
-  blocksNewSave,
-  heldByAnother,
   savedBankAccountId,
   verifiedBankAccounts,
-  verifiedElsewhere,
   withBankShareStamp,
 } from '../saved-accounts';
 
@@ -287,107 +283,6 @@ describe('the stamp helpers', () => {
       ),
     ).toEqual({ x: 1 });
   });
-
-  it('verifiedElsewhere matches digits at the same bank, not a stranger', () => {
-    const elsewhere = (accountNumber: string, bankCode = 'MBBEMYKL') => {
-      const a = {
-        ...ACCOUNT,
-        id: savedBankAccountId(bankCode, accountNumber),
-        bankCode,
-        accountNumber,
-      };
-      return {
-        bank_accounts: [a],
-        bank_share_verified: { [a.id]: STAMP },
-      };
-    };
-    expect(verifiedElsewhere(elsewhere('123456789012'), ACCOUNT)).toBe(true);
-    expect(verifiedElsewhere(elsewhere('0123456789012'), ACCOUNT)).toBe(true);
-    expect(verifiedElsewhere(elsewhere('999999999999'), ACCOUNT)).toBe(false);
-    expect(
-      verifiedElsewhere(elsewhere('123456789012', 'PBBEMYKL'), ACCOUNT),
-    ).toBe(false);
-    expect(verifiedElsewhere({ bank_accounts: [ACCOUNT] }, ACCOUNT)).toBe(
-      false,
-    );
-  });
-});
-
-describe('who holds a destination', () => {
-  it('heldByAnother counts any holder at the same bank, under a retired code too', () => {
-    expect(heldByAnother([{ bank_code: 'MYMB2U' }], 'MBBEMYKL')).toBe(true);
-    expect(heldByAnother([{ bank_code: 'PBBEMYKL' }], 'MBBEMYKL')).toBe(false);
-    expect(heldByAnother([], 'MBBEMYKL')).toBe(false);
-  });
-
-  it('heldByAnother counts a wallet someone only saved, so sharing one cannot race a payout', () => {
-    expect(heldByAnother([{ bank_code: 'USDTTRC20' }], 'USDTTRC20')).toBe(true);
-  });
-
-  it('blocksNewSave: any holder of a bank number', () => {
-    expect(
-      blocksNewSave(
-        [{ bank_code: 'MYMB2U', holder_name: 'Anyone' }],
-        'MBBEMYKL',
-      ),
-    ).toBe(true);
-    expect(
-      blocksNewSave([{ bank_code: 'PBBEMYKL', holder_name: null }], 'MBBEMYKL'),
-    ).toBe(false);
-  });
-
-  it('blocksNewSave: only a wallet someone was already paid to', () => {
-    expect(
-      blocksNewSave(
-        [{ bank_code: 'USDTTRC20', holder_name: 'USDT' }],
-        'USDTTRC20',
-      ),
-    ).toBe(false);
-    expect(
-      blocksNewSave(
-        [{ bank_code: 'USDTTRC20', holder_name: null }],
-        'USDTTRC20',
-      ),
-    ).toBe(true);
-  });
-});
-
-describe('anySavedAccountShared', () => {
-  const holders = (shared: string[]) => ({
-    otherPayoutAccountHolders: jest.fn(async (_id: string, number: string) =>
-      shared.includes(number) ? [{ bank_code: 'MBBEMYKL' }] : [],
-    ),
-  });
-
-  it('one shared number on the list holds the whole list', async () => {
-    const packs = holders([OTHER.accountNumber]);
-    expect(
-      await anySavedAccountShared(packs, 'cus_1', [ACCOUNT, OTHER], {}),
-    ).toBe(true);
-  });
-
-  it('verifying one number does not vouch for another on the list', async () => {
-    const packs = holders([ACCOUNT.accountNumber, OTHER.accountNumber]);
-    expect(
-      await anySavedAccountShared(packs, 'cus_1', [ACCOUNT, OTHER], {
-        [ACCOUNT.id]: STAMP,
-      }),
-    ).toBe(true);
-    expect(
-      await anySavedAccountShared(packs, 'cus_1', [ACCOUNT, OTHER], {
-        [ACCOUNT.id]: STAMP,
-        [OTHER.id]: STAMP,
-      }),
-    ).toBe(false);
-  });
-
-  it('an empty or clean list is not held', async () => {
-    const packs = holders([]);
-    expect(await anySavedAccountShared(packs, 'cus_1', [], {})).toBe(false);
-    expect(await anySavedAccountShared(packs, 'cus_1', [ACCOUNT], {})).toBe(
-      false,
-    );
-  });
 });
 
 describe('setHolderNameCleared', () => {
@@ -401,18 +296,60 @@ describe('setHolderNameCleared', () => {
   const withHolders = (
     metadata: Record<string, unknown>,
     holders: string[] = ['cus_2'],
+    disabledReason: string | null = null,
   ) => {
     const made = fakeService(metadata);
     Object.assign(made.svc, {
-      holderNameHolders: jest.fn(async () => holders),
+      payoutNameStanding: jest.fn(async () => ({
+        holders,
+        blocking: holders,
+      })),
+      listCustomerAccountStates: jest.fn(async () =>
+        disabledReason === null ? [] : [{ disabled_reason: disabledReason }],
+      ),
     });
     return made;
   };
 
+  it('refuses a name shorter than 2 or longer than 120 characters', async () => {
+    for (const holderName of ['T', 'T'.repeat(121)]) {
+      const { svc, writes, ctx } = withHolders({});
+      await expect(
+        svc.setHolderNameCleared({ ...input, holderName }, ctx),
+      ).rejects.toThrow(/2–120 characters/);
+      expect(writes).toEqual([]);
+    }
+  });
+
+  it('refuses clearing for a permanently banned player, who may still take one back', async () => {
+    const ban = 'Permanent ban: shared bank account (owner, 2026-11-03)';
+    const banned = withHolders({}, ['cus_2'], ban);
+    await expect(banned.svc.setHolderNameCleared(input, banned.ctx)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/permanently banned: lift the ban first/),
+    });
+    expect(banned.writes).toEqual([]);
+    // Staff-disabled for another reason: the clearing goes through.
+    const disabled = withHolders({}, ['cus_2'], 'Disabled by staff');
+    await disabled.svc.setHolderNameCleared(input, disabled.ctx);
+    expect(disabled.writes).toHaveLength(1);
+    const back = withHolders(
+      {
+        holder_name_cleared: {
+          tanahkow: { name: 'Tan Ah Kow', at: STAMP, with: ['cus_2'] },
+        },
+      },
+      ['cus_2'],
+      ban,
+    );
+    await back.svc.setHolderNameCleared({ ...input, cleared: false }, back.ctx);
+    expect(back.writes[0].holder_name_cleared).toBeUndefined();
+  });
+
   it('stamps the name with the accounts holding it now, keeps the rest, audits them', async () => {
     const { svc, writes, audits, ctx } = withHolders({ avatar_url: 'a' });
     await svc.setHolderNameCleared(input, ctx);
-    expect(svc.holderNameHolders).toHaveBeenCalledWith(
+    expect(svc.payoutNameStanding).toHaveBeenCalledWith(
       'cus_1',
       'Tan Ah Kow',
       ctx,
@@ -549,14 +486,21 @@ describe('freePayoutAccount', () => {
         return base(query, params);
       },
     );
+    // Each look at who holds it, at this bank (the bank scope is the
+    // standing's: payout-destination.integration.spec).
     Object.assign(made.svc, {
-      otherPayoutAccountHolders: jest.fn(async () =>
-        (rounds[round++] ?? []).flatMap((customer_id) => [
-          { customer_id, bank_code: 'MBBEMYKL', holder_name: null },
-          // The same digits at another bank: someone else's account.
-          { customer_id: 'cus_9', bank_code: 'PBBEMYKL', holder_name: null },
-        ]),
-      ),
+      payoutNumberStanding: jest.fn(async () => ({
+        bankId: 'MBBEMYKL',
+        key: KEY,
+        forms: [KEY],
+        banned: false,
+        bannedForPlayer: false,
+        holders: (rounds[round++] ?? []).map((customerId) => ({
+          customerId,
+          paid: true,
+          verified: false,
+        })),
+      })),
     });
     return { ...made, cut };
   };
@@ -620,6 +564,13 @@ describe('freePayoutAccount', () => {
     await expect(svc.freePayoutAccount(input, ctx)).rejects.toThrow(
       /still held by another account/,
     );
+    // Both looks on the freeing transaction.
+    expect(svc.payoutNumberStanding).toHaveBeenNthCalledWith(
+      2,
+      'cus_1',
+      { bankCode: 'MBBEMYKL', accountNumber: KEY },
+      ctx,
+    );
   });
 
   it('refuses anything but a bank number at a known bank', async () => {
@@ -630,58 +581,6 @@ describe('freePayoutAccount', () => {
     await expect(
       svc.freePayoutAccount({ ...input, bankCode: 'USDTTRC20' }, ctx),
     ).rejects.toThrow(/Not a bank account number/);
-  });
-});
-
-describe('holderNameHeldByAnother — a name support cleared', () => {
-  const service = (metadata: Record<string, unknown>, holders: string[]) => {
-    const svc = Object.create(
-      PacksModuleService.prototype,
-    ) as PacksModuleService;
-    const execute = jest.fn(async (query: string) =>
-      query.startsWith('SELECT metadata')
-        ? [{ metadata }]
-        : holders.map((customer_id) => ({ customer_id })),
-    );
-    const em = { execute };
-    return { svc, ctx: { transactionManager: em, manager: em } as never };
-  };
-  const cleared = {
-    holder_name_cleared: {
-      tanahkow: { name: 'Tan Ah Kow', at: STAMP, with: ['cus_2'] },
-    },
-  };
-
-  it('does not count the account support checked', async () => {
-    const { svc, ctx } = service(cleared, ['cus_2']);
-    await expect(
-      svc.holderNameHeldByAnother('cus_1', 'TAN AH-KOW', ctx),
-    ).resolves.toBe(false);
-  });
-
-  it('still counts an account that holds the name and was not checked', async () => {
-    const { svc, ctx } = service(cleared, ['cus_2', 'cus_3']);
-    await expect(
-      svc.holderNameHeldByAnother('cus_1', 'Tan Ah Kow', ctx),
-    ).resolves.toBe(true);
-  });
-
-  it('still counts any holder of another name, or with no clearing', async () => {
-    const other = service(cleared, ['cus_2']);
-    await expect(
-      other.svc.holderNameHeldByAnother('cus_1', 'Lim Mei Ling', other.ctx),
-    ).resolves.toBe(true);
-    const none = service({}, ['cus_2']);
-    await expect(
-      none.svc.holderNameHeldByAnother('cus_1', 'Tan Ah Kow', none.ctx),
-    ).resolves.toBe(true);
-  });
-
-  it('is held by no one when no other account uses the name', async () => {
-    const { svc, ctx } = service({}, []);
-    await expect(
-      svc.holderNameHeldByAnother('cus_1', 'Tan Ah Kow', ctx),
-    ).resolves.toBe(false);
   });
 });
 
@@ -719,9 +618,6 @@ describe('unbanning a bank number for one player', () => {
         )
       ) {
         return banned.filter((b) => b.account_key.endsWith(String(params[0])));
-      }
-      if (query.startsWith('SELECT 1 FROM banned_payout_account')) {
-        return banned.some((b) => b.account_key === params[0]) ? [{}] : [];
       }
       if (query.startsWith('UPDATE customer')) {
         writes.push(JSON.parse(params[0] as string));
@@ -858,23 +754,6 @@ describe('unbanning a bank number for one player', () => {
     });
     await back.svc.setPayoutBanLifted({ ...input, lifted: false }, back.ctx);
     expect(back.writes[0].payout_ban_lifted).toBeUndefined();
-  });
-
-  it('payoutAccountBanned: not banned for the player it was lifted for, banned for anyone else', async () => {
-    const banned = [{ account_key: OWN, bank_code: 'MBBEMYKL' }];
-    const lifted = service(banned, {
-      payout_ban_lifted: { [OWN]: { bank_code: 'MBBEMYKL', at: STAMP } },
-    });
-    await expect(
-      lifted.svc.payoutAccountBanned(OWN, false, 'cus_1', lifted.ctx),
-    ).resolves.toBe(false);
-    const other = service(banned, {});
-    await expect(
-      other.svc.payoutAccountBanned(OWN, false, 'cus_2', other.ctx),
-    ).resolves.toBe(true);
-    await expect(
-      other.svc.payoutAccountBanned(OWN, false, null, other.ctx),
-    ).resolves.toBe(true);
   });
 });
 const svc = (made: { svc: PacksModuleService }) => made.svc;

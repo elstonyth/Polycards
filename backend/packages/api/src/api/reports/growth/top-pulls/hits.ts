@@ -42,7 +42,7 @@ export async function loadTopPulls(
   packs: PacksModuleService,
   window: { from: Date; to: Date },
   limit: number,
-  only: { tiers?: readonly Rarity[]; defaultGroupOnly?: boolean } = {},
+  only: { tiers?: readonly Rarity[]; realCustomersOnly?: boolean } = {},
 ): Promise<TopPull[]> {
   const rows = await packs.topPullsInWindow({
     ...window,

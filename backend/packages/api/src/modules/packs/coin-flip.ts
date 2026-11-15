@@ -1,6 +1,5 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import type { OddsSet } from './odds-sets';
-import { NO_TOPUP_MESSAGE } from './withdrawable';
 import { MAX_ADMIN_TICKETS } from './lucky-draw';
 
 export const COIN_FLIP_SCALE = 1_000_000;
@@ -214,23 +213,6 @@ export function coinFlipWins(roll: number, winUnits: number): boolean {
     return invalid('Invalid coin flip draw.');
   }
   return roll < winUnits;
-}
-
-export function assertCoinFlipEligible(wallet: {
-  isFrozen: boolean;
-  hasTopup: boolean;
-  playthrough: { remaining: number };
-}, group: { withdrawals_blocked: boolean } | null = null): void {
-  if (wallet.isFrozen) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Coin flips are unavailable while your account is under review.');
-  // `group` is the effective player group's policy, null for DEFAULT or no group.
-  // A withdrawal-blocked group can never cash out (blockGroupWithdrawals), so its
-  // members skip both cash-out gates. Any other real group skips only the top-up
-  // (owner 2026-11-04, the Lucky Draw's rule): only DEFAULT must have topped up.
-  if (group?.withdrawals_blocked) return;
-  if (!group && !wallet.hasTopup) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
-  if (!Number.isFinite(wallet.playthrough.remaining) || wallet.playthrough.remaining > 0) {
-    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Complete your deposit playthrough before flipping a card.');
-  }
 }
 
 export function publicCoinFlipRound(row: CoinFlipRoundRecord): CoinFlipPublicRound {

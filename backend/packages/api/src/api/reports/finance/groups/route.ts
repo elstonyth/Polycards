@@ -7,7 +7,7 @@ import { groupSizes } from '../queries';
 
 // GET /reports/finance/groups: the player groups a ?group= scope can name,
 // with how many players each holds now by EFFECTIVE group. default_players
-// counts everyone in no group other than DEFAULT.
+// counts the real customers, the players ?group=default counts.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,

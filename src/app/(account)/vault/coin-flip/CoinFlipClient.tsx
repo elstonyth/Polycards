@@ -37,6 +37,7 @@ import {
 import {
   COIN_FLIP_QUOTE_MS,
   coinFlipPendingKey,
+  coinFlipRefusal,
   coinFlipTicketsGone,
   coinFlipTicketsLabel,
   quoteIsLive,
@@ -1009,7 +1010,7 @@ export function CoinFlipClient({
                   )}
                   {config && !config.eligible && (
                     <p className="mt-3 text-xs text-neutral-300">
-                      {config.reason}
+                      {coinFlipRefusal(config)}
                     </p>
                   )}
                   {!settings.ok && (

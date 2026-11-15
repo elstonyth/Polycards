@@ -1,7 +1,11 @@
 {
   "profit": {
-    "moved": { "coin_flip_payouts": "抛硬币派彩" },
+    "moved": {
+      "capsule_sales": "幸运抽奖胶囊",
+      "coin_flip_payouts": "抛硬币派彩"
+    },
     "movedHint": {
+      "capsule_sales": "开胶囊属于幸运抽奖销售，因此不计入卡包销售。",
       "coin_flip_payouts": "获胜后发放的信用余额。失去卡牌的价值记于抛硬币记录，不计为现金收入。"
     }
   },

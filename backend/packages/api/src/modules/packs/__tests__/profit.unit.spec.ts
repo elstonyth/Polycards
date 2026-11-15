@@ -92,9 +92,10 @@ describe('profit fold', () => {
         { reason: 'referral_commission', amount: 2 },
         { reason: 'adjustment', amount: -10 },
         { reason: 'topup', amount: 999 },
-      ]),
+      ], 0),
     ).toEqual({
       pack_sales: 300,
+      capsule_sales: 0,
       sellbacks: 120,
       coin_flip_payouts: 100.25,
       promo_given: 55,
@@ -102,6 +103,14 @@ describe('profit fold', () => {
       referral_commission: 2,
       adjustments: -10,
     });
+  });
+
+  it('moves capsule sales off pack sales onto their own line (P&L decision 3)', () => {
+    // RM 300 of opens, RM 45 of it capsules: pack sales 300 -> 255.
+    const a = profitActivity([{ reason: 'pack_open', amount: -300 }], 4_500);
+    expect([a.pack_sales, a.capsule_sales]).toEqual([255, 45]);
+    // Nothing spent: 0, never -0.
+    expect(Object.is(profitActivity([], 0).pack_sales, 0)).toBe(true);
   });
 
   it('reports top-ups with no amount on file as missing gross', () => {
@@ -116,8 +125,9 @@ describe('profit fold', () => {
   });
 
   it('missing reasons are zero, never NaN', () => {
-    expect(profitActivity([])).toEqual({
+    expect(profitActivity([], 0)).toEqual({
       pack_sales: 0,
+      capsule_sales: 0,
       sellbacks: 0,
       coin_flip_payouts: 0,
       promo_given: 0,

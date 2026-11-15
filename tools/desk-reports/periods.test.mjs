@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { resolvePeriod } from './periods.mjs';
 
 // Wednesday 30 Sep 2026, 10:00 Malaysia time.
@@ -75,13 +76,15 @@ test('month edges follow the Malaysia calendar', () => {
   );
 });
 
-test('rolling windows end now, like the dashboard Weekly and Monthly tabs', () => {
+test('last 7 and 30 days are the dashboard 7d and 30d tabs: from Malaysia midnight', () => {
+  // Before the owner decision of 2026-11-16 they were rolling: 09-23T02:00Z
+  // and 08-31T02:00Z.
   assert.deepEqual(range('last_7_days'), [
-    '2026-09-23T02:00:00.000Z',
+    '2026-09-23T16:00:00.000Z',
     '2026-09-30T02:00:00.000Z',
   ]);
   assert.deepEqual(range('last_30_days'), [
-    '2026-08-31T02:00:00.000Z',
+    '2026-08-31T16:00:00.000Z',
     '2026-09-30T02:00:00.000Z',
   ]);
 });
@@ -125,4 +128,25 @@ test('labels spell out the Malaysia-time window', () => {
     resolvePeriod('today', {}, NOW).label,
     'today (Malaysia time 2026-09-30 00:00 to 2026-10-01 00:00, end excluded)',
   );
+});
+
+// The shared table (periods.fixture.json), which the backend's
+// myt-window.unit.spec.ts also runs against the admin assistant's copy.
+const fixture = JSON.parse(
+  readFileSync(new URL('./periods.fixture.json', import.meta.url), 'utf8'),
+);
+
+test('every period in the shared fixture resolves as listed', () => {
+  for (const c of fixture.windows) {
+    const now = Date.parse(c.now ?? fixture.now);
+    const r = resolvePeriod(c.period, c.args ?? {}, now);
+    assert.deepEqual([r.from, r.to], [c.from, c.to], c.period);
+    if (c.label) assert.equal(r.label, c.label);
+  }
+  for (const c of fixture.errors) {
+    assert.throws(
+      () => resolvePeriod(c.period, c.args, Date.parse(fixture.now)),
+      new RegExp(c.error),
+    );
+  }
 });

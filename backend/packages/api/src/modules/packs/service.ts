@@ -46,12 +46,12 @@ import {
   withdrawalGateError,
 } from './withdrawable';
 import {
-  MAX_SAVED_BANK_ACCOUNTS,
   loadSavedBankAccounts,
   parseSavedBankAccounts,
   payoutAccountKey,
   PERMANENT_BAN_REASON_PREFIX,
   resolveWithdrawalDestination,
+  savedSlotFull,
   verifiedBankAccounts,
   withBankShareStamp,
   clearedHolderNames,
@@ -59,14 +59,19 @@ import {
   liftedPayoutBans,
   withLiftedPayoutBan,
   holderNameKey,
-  LETTER_FOLDS,
-  SMALL_CAPS,
-  SMALL_CAP_LETTERS,
   withClearedHolderName,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
-import { accountNumberForms, findBank, savedAccountSlot } from './banks';
+import { findBank, savedAccountSlot } from './banks';
+import {
+  nameStanding,
+  numberStanding,
+  spellings,
+  type NameStanding,
+  type NumberStanding,
+  type PayoutNumber,
+} from './payout-destination';
 import { challengePackId } from './challenge-prize';
 import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
@@ -99,7 +104,8 @@ import CoinFlipRound from './models/coin-flip-round';
 import { settleBuyback, type BuybackSettlement } from './buyback-settlement';
 import { COIN_FLIP_CONFIG_ID, parseCoinFlipSettings, coinFlipSettingsView, publicCoinFlipRound,
   type CoinFlipSettings, type CoinFlipPublicRound } from './coin-flip';
-import { coinFlipManager, lockCoinFlipCustomer, readCoinFlipSettings, quoteCoinFlipOperation,
+import { LEDGER_REVERSAL_COLS, lockCredit, planPosting, type CreditPosting, type GeneralPosting, type LedgerReversalRow } from './credit-posting';
+import { coinFlipManager, readCoinFlipSettings, quoteCoinFlipOperation,
   acceptCoinFlipOperation, getCoinFlipRoundOperation } from './coin-flip-operations';
 import DeliveryOrder from './models/delivery-order';
 import DeliveryOrderItem from './models/delivery-order-item';
@@ -164,6 +170,14 @@ import {
 } from './referral';
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
+import {
+  BOARD_FETCH_N,
+  disabledAccountSql,
+  mayPlay as mayPlayFor,
+  topShown,
+  type Game,
+  type PlayRefusal,
+} from './eligibility';
 import {
   DEFAULT_PLAYER_GROUP_FLAG,
   DEFAULT_PLAYER_GROUP_NAME,
@@ -249,17 +263,14 @@ import {
   FLAT_PERCENT,
 } from './buyback-rate';
 import type { CashCents, CashSide, OwedCents, PeriodCents } from './profit';
-import { consumeExternalSen } from './external-funded';
 import {
   BONUS_BP_FULL,
-  BONUS_NOT_SPENDABLE_MESSAGE,
   LEADERBOARD_PULL_SQL,
   NORMAL_SHARE_SQL,
   REAL_MONEY_PULL_SQL,
   allocateBonusSen,
   bonusBpFor,
   bonusShareSen,
-  consumeBonusSen,
   normalSenSql,
   reasonCashSenSql,
   releasableRewardHoldSen,
@@ -320,22 +331,18 @@ import {
   type CustomerScope,
   type MoneyFilter,
 } from './real-customers';
+import {
+  GATEWAY,
+  LIVE_VALUE_USD_SQL,
+  cardValueSen,
+  exceptNonPositiveTopupsSql,
+  inActiveDeliverySql,
+  inShippedDeliverySql,
+  playthroughBasisSenSql,
+  populationSql,
+} from './money-figures';
+import { mytPeriodStartSql } from './myt-window';
 import type { MedusaContainer } from '@medusajs/framework/types';
-
-// The ledger columns the reversals read by raw SQL on their own transaction
-// (an ORM list would take a second pool connection; see mutateCreditAtomic).
-type LedgerReversalRow = {
-  id: string;
-  customer_id: string;
-  amount: string;
-  reason: InferTypeOf<typeof CreditTransaction>['reason'];
-  reference: string | null;
-  external_funded_cents: number | null;
-  bonus_cents: number | null;
-  source_transaction_id: string | null;
-};
-const LEDGER_REVERSAL_COLS =
-  'id, customer_id, amount, reason, reference, external_funded_cents, bonus_cents, source_transaction_id';
 
 // plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
 // amount, plus the held part of a card sale (sellbackHoldBp: the bonus-paid
@@ -344,9 +351,7 @@ const LEDGER_REVERSAL_COLS =
 // external_funded_cents — it pays NORMAL credit that must be played through
 // once, like a deposit. Shared between creditSummary and walletSummary (and
 // mirrored by credit-summary.ts's fold) so the scans can't drift.
-const DEPOSITED_PT_SEN_SQL =
-  "CASE WHEN reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL THEN ROUND(amount * 100) " +
-  "WHEN reason = 'buyback' THEN COALESCE(external_funded_cents, 0) ELSE 0 END";
+const DEPOSITED_PT_SEN_SQL = playthroughBasisSenSql();
 
 // The VIP basis: a credit_transaction row counts only if it is newer than the
 // customer's operator VIP reset (vip_member_state.vip_reset_at, resetVipLevel).
@@ -374,42 +379,9 @@ function isUniqueViolation(e: unknown): boolean {
   return code === '23505';
 }
 
-// Cents → customer-facing "RM 12.34" (matches the existing inline formatting
-// in this file's error messages).
-function rm(cents: number): string {
-  return `RM ${(cents / 100).toFixed(2)}`;
-}
-
-// Store-facing insufficient-credits message for a pack open: names the price,
-// the customer's (available) balance, and the exact shortfall so a newbie with
-// RM 3 can see a RM 25 pack needs a RM 22 top-up (sim day-3 LOW, ux-friction).
-function insufficientCreditsMessage(
-  costCents: number,
-  haveCents: number,
-): string {
-  return (
-    `Not enough credits to open this pack. It costs ${rm(costCents)} and ` +
-    `you have ${rm(haveCents)} — top up at least ${rm(costCents - haveCents)}.`
-  );
-}
-
-// holderNameKey in SQL, for holder names already stored: NFKD, the small
-// capitals and LETTER_FOLDS folded, lower case, a-z only (the combining marks
-// go with that strip). The parity spec runs it against holderNameKey.
-const HOLDER_FOLDS = Object.entries(LETTER_FOLDS);
-const HOLDER_FOLD_ONE = HOLDER_FOLDS.filter(([, to]) => to.length === 1);
-const HOLDER_FOLD_FROM = `${SMALL_CAPS}${HOLDER_FOLD_ONE.map(([c]) => c).join('')}`;
-const HOLDER_FOLD_TO = `${SMALL_CAP_LETTERS}${HOLDER_FOLD_ONE.map(([, to]) => to).join('')}`;
-const HOLDER_FOLD_MANY = HOLDER_FOLDS.filter(([, to]) => to.length > 1);
-export const holderNameKeySql = (expr: string): string => {
-  const folded = HOLDER_FOLD_MANY.reduce(
-    (sql, [c, to]) => `replace(${sql}, '${c}', '${to}')`,
-    `translate(normalize(${expr}, NFKD), '${HOLDER_FOLD_FROM}', '${HOLDER_FOLD_TO}')`,
-  );
-  // ASCII has nothing to fold (one byte a character): skipping the folds
-  // keeps the scan as cheap as before.
-  return `regexp_replace(lower(CASE WHEN octet_length(${expr}) = length(${expr}) THEN ${expr} ELSE ${folded} END), '[^a-z]', '', 'g')`;
-};
+// holderNameKey in SQL: lives with the Payout Destination reads now; kept
+// exported here for older importers.
+export { holderNameKeySql } from './payout-destination';
 
 // Auto-generates CRUD for each model: list/retrieve/create/update/delete<Model>s
 // (e.g. listPacks, listCards, listPackOdds, createPulls,
@@ -417,52 +389,7 @@ export const holderNameKeySql = (expr: string): string => {
 // table (+ per-pack rarity), Pull = the result ledger doubling as the vault,
 // CreditTransaction = the site-credit ledger written by buybacks.
 
-/** A signed credit-ledger write reason (mirrors CreditTransaction.reason). */
-export type CreditMutationReason =
-  | 'buyback'
-  | 'topup'
-  | 'pack_open'
-  | 'adjustment'
-  | 'cashout'
-  | 'voucher_claim'
-  | 'reward_credit'
-  | 'daily_reward'
-  | 'delivery_fee'
-  | 'bonus_grant';
-
-export type CreditMutationInput = {
-  customerId: string;
-  /** Signed MYR (RM) decimal (never cents): negative = spend, positive = grant. */
-  amount: number;
-  reason: CreditMutationReason;
-  /** Note (adjustment) / gateway ref (top-up); null otherwise. */
-  reference?: string | null;
-  /** The pull this credit came from (buyback rows only). */
-  pullId?: string | null;
-  /** Minimum allowed resulting balance in MYR (RM) (default RM 0 — no overdraft). */
-  floor?: number;
-  /** The open's stable id (open_id), stamped on pack_open charge rows. */
-  sourceTransactionId?: string | null;
-  /**
-   * When set, the insert is IDEMPOTENT on this reference under the per-customer
-   * advisory lock: if a row already carries it, that row is returned unchanged
-   * instead of appending a second credit (top-up replay protection — security
-   * audit 2026-06-23). The stored `reference` becomes this value. Mirrors the
-   * `reversal:${id}` locked-dedupe used by reverseCreditTransaction; no DB
-   * unique needed — the lock serializes check-then-insert per customer.
-   */
-  idempotencyReference?: string | null;
-  /**
-   * Bonus credit (spec 2026-10-07): the signed sen of this row that is
-   * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
-   * the row's amount in sen. A 'reward_credit' row (task / challenge prize) or
-   * a 'voucher_claim' row (VIP voucher) is stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
-   * opens compute theirs in settleOpen. A 'delivery_fee' charge takes its
-   * bonus share itself (bonus first, ADR 0014); a 'delivery_fee' refund passes
-   * the share its charge took, 0..amount, so it goes back as bonus.
-   */
-  bonusCents?: number;
-};
+export type { CreditPosting, CreditMutationReason } from './credit-posting';
 
 export type RevealPullResult = {
   /** Epoch ms the 30s instant-sell window closes. */
@@ -568,12 +495,6 @@ export type LedgerEntryRow = {
   payload: unknown;
 };
 
-// Live card value in USD: FMV × the card's multiplier (default when the row
-// carries none). Requires alias `card c`; binds ONE `?`
-// (DEFAULT_MARKET_MULTIPLIER). Shared by PULLED_VALUE_USD_SQL's fallback and
-// the backfill (which pins exactly this expression).
-const LIVE_VALUE_USD_SQL = 'c.market_value * COALESCE(c.market_multiplier, ?)';
-
 // Pulled value of one pull row in USD: the draw-time snapshot when stamped,
 // live fallback for pre-backfill rows. Shared by every pulled-value aggregate
 // (leaderboardTop wins CTE, challengeWeekPool, challengeWeekTop,
@@ -644,7 +565,7 @@ function playerSortSql(
       return {
         join:
           'LEFT JOIN (SELECT p.customer_id, ' +
-          `SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)) AS cents ` +
+          `SUM(${cardValueSen('display')}) AS cents ` +
           'FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
           "WHERE p.status = 'vaulted' AND p.deleted_at IS NULL " +
           'GROUP BY p.customer_id) v ON v.customer_id = c.id',
@@ -1204,10 +1125,7 @@ const DELIVERY_TOWARD_COURIER: ReadonlySet<string> = new Set([
 // lucky_draw_entry, so the totals and the top 10 are the ones the draw will use
 // (owner 2026-11-12: a disabled account shows nowhere). Appended after the
 // entry table's own WHERE; it must stay unaliased in those queries.
-const LUCKY_DRAW_LIVE_ENTRY_SQL =
-  'AND NOT EXISTS (SELECT 1 FROM customer_account_state s ' +
-  'WHERE s.customer_id = lucky_draw_entry.customer_id ' +
-  'AND s.disabled = true AND s.deleted_at IS NULL) ';
+const LUCKY_DRAW_LIVE_ENTRY_SQL = `AND NOT ${disabledAccountSql('lucky_draw_entry.customer_id')} `;
 /** A finished event stays on the page this long. */
 const LUCKY_DRAW_LINGER_MS = 7 * 24 * 60 * 60 * 1000;
 /** A draw time must be at least this far ahead when it is set or published:
@@ -1584,7 +1502,7 @@ class PacksModuleService extends MedusaService({
     const em = coinFlipManager(context);
     const [owner] = await em.execute<{ customer_id: string }[]>('SELECT customer_id FROM delivery_order WHERE id = ? AND deleted_at IS NULL', [input.orderId]);
     if (!owner) return;
-    await lockCoinFlipCustomer(owner.customer_id, context);
+    await lockCredit(context, owner.customer_id);
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [`delivery:${input.orderId}`]);
     const [order] = await this.listDeliveryOrders({ id: input.orderId }, { take: 1 }, context);
     if (!order || order.status !== input.expectedStatus) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Delivery changed; refusing to reverse it.');
@@ -1608,6 +1526,18 @@ class PacksModuleService extends MedusaService({
     }
   }
 
+  // A credit posting's compensation (top-up, adjustment): its credit row and
+  // its ledger row go in ONE transaction, under the customer's credit lock,
+  // like undoBuybackAtomic. No auto-freeze if that leaves the balance
+  // negative (owner decision 2026-11-15).
+  @InjectTransactionManager()
+  async undoCreditPosting(input: { creditTransactionId: string; ledgerType: LedgerType }, @MedusaContext() context: Context = {}): Promise<void> {
+    const [credit] = await this.listCreditTransactions({ id: input.creditTransactionId }, { take: 1 }, context);
+    if (credit) await lockCredit(context, credit.customer_id);
+    await this.deleteCreditTransactionsGuarded([input.creditTransactionId], context);
+    await this.deleteLedgerEntryByRef(input.ledgerType, input.creditTransactionId, context);
+  }
+
   @InjectTransactionManager()
   async buybackPullAtomic(input: { customerId: string; pullId: string }, @MedusaContext() context: Context = {}): Promise<BuybackSettlement> {
     return settleBuyback(this, input, context);
@@ -1617,7 +1547,7 @@ class PacksModuleService extends MedusaService({
   async undoBuybackAtomic(input: { pullId: string; creditTransactionId: string; restoreEarmark: boolean }, @MedusaContext() context: Context = {}): Promise<boolean> {
     const [credit] = await this.listCreditTransactions({ id: input.creditTransactionId, pull_id: input.pullId, reason: 'buyback' }, { take: 1 }, context);
     if (!credit) return false;
-    await lockCoinFlipCustomer(credit.customer_id, context);
+    await lockCredit(context, credit.customer_id);
     const [liveCredit] = await coinFlipManager(context).execute<{ id: string }[]>(
       "SELECT id FROM credit_transaction WHERE id = ? AND pull_id = ? AND reason = 'buyback' AND deleted_at IS NULL",
       [input.creditTransactionId, input.pullId]);
@@ -1707,7 +1637,7 @@ class PacksModuleService extends MedusaService({
     if (!input.customerId || ids.length === 0 || ids.length !== input.pullIds.length) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid completed pull list.');
     }
-    await lockCoinFlipCustomer(input.customerId, context);
+    await lockCredit(context, input.customerId);
     const em = coinFlipManager(context);
     const placeholders = ids.map(() => '?').join(',');
     const rows = await em.execute<{ id: string }[]>(`SELECT id FROM pull WHERE id IN (${placeholders}) AND customer_id = ? AND deleted_at IS NULL FOR UPDATE`, [...ids, input.customerId]);
@@ -1719,7 +1649,7 @@ class PacksModuleService extends MedusaService({
   @InjectTransactionManager()
   async finalizeLegacyPullsForCoinFlip(input: { customerId: string; pullIds: string[]; ingressDrained: boolean }, @MedusaContext() context: Context = {}): Promise<void> {
     if (!input.ingressDrained) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Stop and drain pack ingress and workers before maintenance.');
-    await lockCoinFlipCustomer(input.customerId, context);
+    await lockCredit(context, input.customerId);
     await coinFlipManager(context).execute('INSERT INTO coin_flip_config (id) VALUES (?) ON CONFLICT DO NOTHING', [COIN_FLIP_CONFIG_ID]);
     await coinFlipManager(context).execute('SELECT id FROM coin_flip_config WHERE id = ? FOR SHARE', [COIN_FLIP_CONFIG_ID]);
     if ((await this.coinFlipSettings(context)).enabled) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Pause coin flip before maintenance.');
@@ -2116,9 +2046,7 @@ class PacksModuleService extends MedusaService({
     // Under the same per-account lock setAccountDisabled holds, so the recheck
     // and the attribution write cannot interleave with a disable committing
     // between them (CodeRabbit, 2026-09-03).
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.referrerId}`,
-    ]);
+    await lockCredit(sharedContext, input.referrerId);
     if (await this.isAccountDisabled(input.referrerId, sharedContext)) {
       return { bound: false, reason: 'referrer_disabled' };
     }
@@ -2340,7 +2268,8 @@ class PacksModuleService extends MedusaService({
         'FROM customer_group_customer cgc ' +
         'JOIN customer_group cg ON cg.id = cgc.customer_group_id AND cg.deleted_at IS NULL ' +
         `WHERE cgc.customer_id IN (${ph}) AND cgc.deleted_at IS NULL ` +
-        'ORDER BY cg.created_at ASC, cg.id ASC',
+        // effectivePlayerGroup's order: whole ms, then id by code point.
+        `ORDER BY date_trunc('milliseconds', cg.created_at) ASC, cg.id COLLATE "C" ASC`,
       ids,
     );
     const seen = new Set<string>();
@@ -3153,52 +3082,46 @@ class PacksModuleService extends MedusaService({
       // Voided since the list above (or claimed by a concurrent pay) — no
       // money for this line from this run.
       if (claimed.length !== 1) continue;
-      // Ledger next, and its `replayed` flag is load-bearing: an RF row
-      // already carrying this line's ref_id means the money moved on an
-      // earlier run whose line update was lost. Minting the credit before
-      // this check would pay that customer twice — recordLedgerEntry returns
-      // the existing row instead of throwing (security review 2026-08-25).
-      const entry = await this.recordLedgerEntry(
+      // RF next, then the credit: the posting writes the RF row first and its
+      // replay is load-bearing — an RF row already carrying this line's ref_id
+      // means the money moved on an earlier run whose line update was lost
+      // (see CommissionPosting).
+      const posted = await this.mutateCreditAtomic(
         {
-          type: 'RF',
           customerId: line.customer_id,
-          refId: line.id,
-          walletDelta: line.amount_cents / 100,
-          vaultDelta: null,
-          payload: {
+          amount: line.amount_cents / 100,
+          reason: 'referral_commission',
+          unlocked: true,
+          ledger: {
             type: 'RF',
-            week_start: weekStartIso,
-            basis_cents: line.basis_cents,
-            rate_bp: line.rate_bp,
+            refId: line.id,
+            walletDelta: line.amount_cents / 100,
+            vaultDelta: null,
+            payload: {
+              type: 'RF',
+              week_start: weekStartIso,
+              basis_cents: line.basis_cents,
+              rate_bp: line.rate_bp,
+            },
           },
         },
         sharedContext,
       );
       // Already paid: the claim above repaired the line's status; move on.
-      if (entry.replayed) continue;
-      const [txn] = await this.createCreditTransactions(
-        [
-          {
-            customer_id: line.customer_id,
-            amount: line.amount_cents / 100,
-            reason: 'referral_commission',
-          },
-        ],
-        sharedContext,
-      );
+      if (posted.replayed) continue;
       // The row is ours (claimed above, lock held), so the stamp needs no
       // guard — the ledger row is still the authority on whether money moved.
       await this.updateWeeklySettlementLines(
-        { selector: { id: line.id }, data: { paid_transaction_id: txn.id } },
+        { selector: { id: line.id }, data: { paid_transaction_id: posted.id } },
         sharedContext,
       );
       paid++;
-      // This credit was written outside mutateCreditAtomic, so it skipped the
-      // inline auto-unfreeze — a referrer sitting on an AUTO freeze whose debt
-      // this repays stays frozen. The caller lifts it, POST-commit and bare.
-      // Not here: this method is one transaction, so an in-loop unfreeze would
-      // hold a `credit:<id>` advisory lock per customer until the whole run
-      // commits, racing every concurrent top-up.
+      // The commission posts unlocked, so it skips the inline auto-unfreeze —
+      // a referrer sitting on an AUTO freeze whose debt this repays stays
+      // frozen. The caller lifts it, POST-commit and bare. Not here: this
+      // method is one transaction, so an in-loop unfreeze would hold a
+      // `credit:<id>` advisory lock per customer until the whole run commits,
+      // racing every concurrent top-up.
       paidCustomerIds.push(line.customer_id);
     }
 
@@ -4059,36 +3982,28 @@ class PacksModuleService extends MedusaService({
 
     let ref: string | null = null;
     if (reward.type === 'credit') {
-      const { id, amount } = await this.mutateCreditAtomic(
+      // With its WP ledger row, in the same transaction — the tasks spec pays
+      // out "through the same mechanics as the challenge payout path". Without
+      // it a claim moved the balance with nothing in the transaction history
+      // (two customers, RM 50 each, on 2026-09-30). refId defaults to the
+      // credit row, so the admin Wallet tab's display-id join finds it; a
+      // replay wrote both rows already and writes nothing.
+      const { id } = await this.mutateCreditAtomic(
         {
           customerId: input.customerId,
           amount: reward.amount_myr,
           reason: 'reward_credit',
           idempotencyReference: `task:${def.id}:${input.customerId}:${periodKey || 'once'}`,
-        },
-        sharedContext,
-      );
-      // Its ledger row, in the same transaction — every other credit writer
-      // posts one, and the tasks spec pays out "through the same mechanics as
-      // the challenge payout path" (WP). Without it a claim moved the balance
-      // with nothing in the transaction history (two customers, RM 50 each,
-      // on 2026-09-30). refId = the credit row, like the top-up and
-      // adjustment writers, so the admin Wallet tab's display-id join finds it;
-      // a replayed credit re-dedupes on (WP, refId).
-      await this.recordLedgerEntry(
-        {
-          type: 'WP',
-          customerId: input.customerId,
-          refId: id,
-          walletDelta: amount,
-          vaultDelta: null,
-          payload: {
+          ledger: {
             type: 'WP',
-            period: `task:${def.id}:${periodKey || 'once'}`,
-            stage: 0,
-            rank: 0,
-            sku: null,
-            value: 0,
+            payload: {
+              type: 'WP',
+              period: `task:${def.id}:${periodKey || 'once'}`,
+              stage: 0,
+              rank: 0,
+              sku: null,
+              value: 0,
+            },
           },
         },
         sharedContext,
@@ -4840,18 +4755,23 @@ class PacksModuleService extends MedusaService({
     return (await this.creditSummary(customerId)).balance;
   }
 
-  // Serialized, balance-checked credit-ledger write. Holds a per-customer
-  // xact-scoped Postgres advisory lock across the Σ(ledger) re-read, the floor
+  // THE credit posting: every credit row is written here (sealed by
+  // delete-guard-seal.unit.spec.ts), planned by planPosting, with its ledger
+  // row in the same transaction. Holds a per-customer xact-scoped Postgres
+  // advisory lock across the replay check, the Σ(ledger) re-read, the floor
   // check, and the insert — all in ONE transaction — so two concurrent credit
   // mutations for the same customer can't both pass the check and overspend
   // (fixes pack-open/pack-open and pack-open/admin-deduct double-spend). The
-  // lock auto-releases on commit/rollback; arithmetic is done in integer cents.
+  // one exception is an unlocked commission (see CommissionPosting). The lock
+  // auto-releases on commit/rollback; arithmetic is done in integer cents.
   @InjectTransactionManager()
   async mutateCreditAtomic(
-    input: CreditMutationInput,
+    input: CreditPosting,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     id: string;
+    /** Balance after, read under the lock. NaN for an unlocked commission,
+     *  which reads none (nothing it could read is serialized). */
     balance: number;
     amount: number;
     replayed: boolean;
@@ -4862,52 +4782,132 @@ class PacksModuleService extends MedusaService({
     /** Bonus balance after the write (MYR), read under the lock. Absent on a
      *  replay, which wrote nothing. */
     bonusBalance?: number;
+    /** The written row's signed bonus sen (NULL on a sell-back or a
+     *  commission). Absent on a replay. */
+    rowBonusCents?: number | null;
+    /** The ledger row the posting's ledger part wrote. */
+    ledger?: { id: string; display_id: string };
   }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-
-    // 1) Serialize all credit mutations for THIS customer on the locked txn.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
-
-    // 1a) Idempotent replay (top-up): under the lock, if a row already carries
-    // this idempotency reference the request already applied — return it as a
-    // no-op rather than appending a second credit. The lock makes the
-    // check-then-insert atomic per customer, so concurrent identical-key
-    // requests can't both insert (same guarantee as reverseCreditTransaction's
-    // `reversal:` dedupe — no DB unique required).
-    if (input.idempotencyReference) {
-      // The idempotency anchor is stored in source_transaction_id (NOT reference)
-      // so the public `reference` column stays free to hold the gateway/charge
-      // reference for reconciliation + refunds (CodeRabbit). Scope the dedupe to
-      // THIS customer: the advisory lock above is per customer, so the check-then-
-      // insert is only atomic within one customer; customer_id also makes the
-      // lookup index-assisted (IDX_credit_transaction_customer_id_created_at)
-      // instead of a full ledger scan.
-      // Raw, on the locked transaction: an ORM list here takes a second pool
-      // connection while this one holds the lock, and callers waiting on the
-      // lock each hold one too.
-      const [existing] = await em.execute<
-        { id: string; amount: string; reference: string | null }[]
-      >(
-        `SELECT id, amount, reference FROM credit_transaction
-           WHERE customer_id = ? AND source_transaction_id = ? AND deleted_at IS NULL
-           LIMIT 1`,
-        [input.customerId, input.idempotencyReference],
+    const customerId =
+      'reversalOf' in input ? input.reversalOf.customer_id : input.customerId;
+    const open = !('reversalOf' in input) && input.reason === 'pack_open' ? input : null;
+    const commission =
+      !('reversalOf' in input) && input.reason === 'referral_commission' ? input : null;
+    // An open's id is its idempotency key (open_id). Reject an empty one at
+    // the boundary so a bad caller can't write rows that escape the
+    // partial-unique index (Sourcery review).
+    if (open && !open.sourceTransactionId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'settleOpen requires a non-empty sourceTransactionId (the open_id).',
       );
-      if (existing) {
-        const balRows = await em.execute<{ balance_cents: string | null }[]>(
-          'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
-            'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-          [input.customerId],
+    }
+
+    // 1) Serialize all credit mutations for THIS customer on the locked txn
+    //    (a commission run posts unlocked: see CommissionPosting).
+    if (!commission?.unlocked) await lockCredit(sharedContext, customerId);
+
+    // 1a) Idempotent replay: under the lock, if a row already carries this
+    // posting's key the request already applied — return it as a no-op rather
+    // than appending a second credit. The lock makes the check-then-insert
+    // atomic per customer, so concurrent identical-key requests can't both
+    // insert (no DB unique required). The key is the idempotency anchor, or
+    // for a reversal `reversal:<original id>` (a saga that double-compensates
+    // must not append a second refund).
+    //
+    // The idempotency anchor is stored in source_transaction_id (NOT
+    // reference) so the public `reference` column stays free to hold the
+    // gateway/charge reference for reconciliation + refunds (CodeRabbit).
+    // Scope that dedupe to THIS customer: the advisory lock above is per
+    // customer, so the check-then-insert is only atomic within one customer;
+    // customer_id also makes the lookup index-assisted
+    // (IDX_credit_transaction_customer_id_created_at) instead of a full ledger
+    // scan. The reversal LIKE repeats IDX_credit_transaction_reversal_reference's
+    // predicate so the planner can use it; equality alone can't prove it.
+    // Raw, on the locked transaction: an ORM list here takes a second pool
+    // connection while this one holds the lock, and callers waiting on the
+    // lock each hold one too.
+    // A commission's key is its RF row, written FIRST: one already carrying
+    // this line's ref_id means the money moved on an earlier run whose line
+    // update was lost, and minting the credit anyway would pay that customer
+    // twice — recordLedgerEntry returns the existing row instead of throwing
+    // (security review 2026-08-25). Its credit row has no anchor (NULLs kept
+    // on purpose), so a replay has no credit id to return: id is ''.
+    const rf = commission
+      ? await this.recordLedgerEntry(
+          {
+            type: 'RF',
+            customerId,
+            refId: commission.ledger.refId,
+            walletDelta: commission.ledger.walletDelta,
+            vaultDelta: commission.ledger.vaultDelta ?? null,
+            payload: commission.ledger.payload,
+          },
+          sharedContext,
+        )
+      : undefined;
+    const unread = commission?.unlocked === true;
+    type Replayed = { id: string; amount: string; reference: string | null };
+    const [existing] =
+      commission && rf?.replayed
+        ? [{ id: '', amount: String(Math.round(commission.amount * 100) / 100), reference: null }]
+        : 'reversalOf' in input
+        ? await em.execute<Replayed[]>(
+            "SELECT id, amount, reference FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
+            [`reversal:${input.reversalOf.id}`],
+          )
+        : input.idempotencyReference
+          ? await em.execute<Replayed[]>(
+              `SELECT id, amount, reference FROM credit_transaction
+                 WHERE customer_id = ? AND source_transaction_id = ? AND deleted_at IS NULL
+                 LIMIT 1`,
+              [customerId, input.idempotencyReference],
+            )
+          : [];
+    if (existing) {
+      const balRows = unread
+        ? []
+        : await em.execute<{ balance_cents: string | null }[]>(
+            'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
+              'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+            [customerId],
+          );
+      return {
+        id: existing.id,
+        balance: unread ? Number.NaN : Number(balRows[0]?.balance_cents ?? 0) / 100,
+        amount: Number(existing.amount),
+        replayed: true,
+        reference: existing.reference ?? null,
+        ...(rf && { ledger: { id: rf.id, display_id: rf.display_id } }),
+      };
+    }
+
+    // 1b) An open: never from a frozen account — checked inside the lock so a
+    //     concurrent unfreeze can't race past it — and one debit per open id.
+    //     The duplicate pre-check is raw SQL, so it fires HERE, under the
+    //     lock: MikroORM buffers the insert until flush, so a 23505 from the
+    //     debit's partial-unique index would fire at commit, after this
+    //     method returns, where dbErrorMapper intercepts it.
+    if (open) {
+      if (await this.isFrozen(customerId, sharedContext)) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          'This account is frozen.',
         );
-        return {
-          id: existing.id,
-          balance: Number(balRows[0]?.balance_cents ?? 0) / 100,
-          amount: Number(existing.amount),
-          replayed: true,
-          reference: existing.reference ?? null,
-        };
+      }
+      const [settled] = await em.execute<{ id: string }[]>(
+        `SELECT id FROM credit_transaction
+           WHERE source_transaction_id = ? AND reason = 'pack_open' AND amount < 0
+             AND deleted_at IS NULL
+           LIMIT 1`,
+        [open.sourceTransactionId],
+      );
+      if (settled) {
+        throw new MedusaError(
+          MedusaError.Types.DUPLICATE_ERROR,
+          `Open '${open.sourceTransactionId}' has already been settled.`,
+        );
       }
     }
 
@@ -4915,211 +4915,84 @@ class PacksModuleService extends MedusaService({
     //    lock, in ONE scan (exact; soft-delete aware). external_funded_cents is
     //    only consumed by pack_open, but folding it into the existing balance
     //    scan avoids a second O(n) pass over the customer's ledger per open.
-    const rows = await em.execute<
-      {
-        balance_cents: string | null;
-        ext_cents: string | null;
-        bonus_cents: string | null;
-      }[]
-    >(
-      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
-        'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
-        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-      [input.customerId],
-    );
-    const beforeCents = Number(rows[0]?.balance_cents ?? 0);
-    // Spend-only bonus credit (spec 2026-10-07): only a pack open may spend it
-    // (settleOpen), so every other debit is floored against the NORMAL balance.
-    // Clamped: a negative Σ (only reachable by deleting a buyback row whose
-    // bonus was already spent) must never inflate the normal balance.
-    const bonusBeforeCents = Math.max(0, Number(rows[0]?.bonus_cents ?? 0));
-    const deltaCents = Math.round(input.amount * 100);
-    const floorCents = Math.round((input.floor ?? 0) * 100);
-
-    // 2a) Sign invariants — fail LOUD on misuse rather than silently stamping
-    // external_funded_cents = 0 and corrupting the VIP basis. A top-up is always
-    // a credit (> 0); a pack_open is always a debit (< 0); free packs skip this
-    // method entirely upstream. (adjustment is intentionally sign-agnostic.)
-    if (input.reason === 'topup' && deltaCents <= 0) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'topup amount must be greater than 0.',
-      );
-    }
-    if (input.reason === 'pack_open' && deltaCents >= 0) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'pack_open amount must be less than 0.',
-      );
-    }
-
-    // 2a') bonus_grant: the whole row is bonus, either sign, and the bonus
-    // balance can never go negative (a take-back larger than the bonus held).
-    let bonusDeltaCents = 0;
-    if (input.reason === 'bonus_grant') {
-      if (deltaCents === 0 || input.bonusCents !== deltaCents) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          'A bonus_grant row must carry bonusCents equal to its amount.',
+    //    An unlocked commission skips it: a credit with no floor, bonus or
+    //    inline unfreeze needs none, and a pay run posts every line.
+    type Totals = { balance_cents: string | null; ext_cents: string | null; bonus_cents: string | null };
+    const rows = unread
+      ? ([] as Totals[])
+      : await em.execute<Totals[]>(
+          'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
+            'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
+            'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
+            'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+          [customerId],
         );
-      }
-      if (bonusBeforeCents + deltaCents < 0) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          `Bonus credit cannot go below RM 0 (bonus balance RM ${(
-            bonusBeforeCents / 100
-          ).toFixed(2)}).`,
-        );
-      }
-      bonusDeltaCents = deltaCents;
-    } else if (input.reason === 'delivery_fee') {
-      // Bonus credit may pay delivery fees, bonus first like a pack open
-      // (owner rule 2026-10-17, ADR 0014). A refund returns the bonus part its
-      // charge took AS bonus, or request-then-cancel would launder bonus into
-      // withdrawable cash.
-      if (deltaCents < 0) {
-        if (input.bonusCents) {
-          throw new MedusaError(
-            MedusaError.Types.INVALID_DATA,
-            'A delivery fee charge takes its bonus share itself.',
-          );
-        }
-        bonusDeltaCents = -Math.min(bonusBeforeCents, -deltaCents);
-      } else {
-        const back = input.bonusCents ?? 0;
-        if (!Number.isInteger(back) || back < 0 || back > deltaCents) {
-          throw new MedusaError(
-            MedusaError.Types.INVALID_DATA,
-            'A delivery fee refund can return at most its own amount as bonus.',
-          );
-        }
-        bonusDeltaCents = back;
-      }
-    } else if (input.bonusCents) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'Only a bonus_grant or delivery_fee row may carry bonusCents.',
-      );
-    } else if (
-      input.reason === 'reward_credit' ||
-      input.reason === 'voucher_claim'
-    ) {
-      // Task and weekly-challenge prizes and VIP level-up vouchers are
-      // spend-only bonus credit too (operator rule 2026-10-11). Stamped HERE,
-      // the one place their writers (claimTask, settleChallengeWinner,
-      // claimReward) route through, so none can pay withdrawable credit by
-      // forgetting a flag. The reasons stay their own, not bonus_grant: bonus_grant rows count against the
-      // admin 24h mint ceiling (rollingAdjustmentMintCents), and task claims
-      // must neither eat that allowance nor be blocked by it.
-      if (bonusBeforeCents + deltaCents < 0) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          `Bonus credit cannot go below RM 0 (bonus balance RM ${(
-            bonusBeforeCents / 100
-          ).toFixed(2)}).`,
-        );
-      }
-      bonusDeltaCents = deltaCents;
-    }
-
-    // 2b) External-funded snapshot (Phase 1b) — uses the external balance from
-    // the SAME locked read above, so the consume is race-safe against concurrent
-    // top-ups/opens. A top-up adds its full amount as external money in; a
-    // pack_open consumes min(price, external balance) and snapshots the NEGATIVE
-    // consumed sen; buyback / adjustment never touch the external counter (0).
-    let externalFundedCents = 0;
-    if (input.reason === 'topup' && deltaCents > 0) {
-      externalFundedCents = deltaCents;
-    } else if (input.reason === 'pack_open' && deltaCents < 0) {
-      const externalBalanceSen = Number(rows[0]?.ext_cents ?? 0);
-      externalFundedCents = -consumeExternalSen(
-        -deltaCents,
-        externalBalanceSen,
-      );
-    }
-    // Defensive: a pack_open debit snapshots the NEGATED consumed sen, so it
-    // must be non-positive. If a future consumeExternalSen regression flipped
-    // the sign, a positive value would inflate the VIP spend basis — fail loudly
-    // rather than silently corrupt it.
-    if (input.reason === 'pack_open' && externalFundedCents > 0) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'pack_open external_funded_cents must be <= 0.',
-      );
-    }
-
-    // 3) Floor check — covers both "enough credit to open" and "no overdraft".
-    //    Only a pack open or a delivery fee may spend bonus credit; every other
-    //    debit is floored against the NORMAL balance (a bonus take-back was
-    //    bounded above).
-    const spendableCents =
-      input.reason === 'pack_open' ||
-      input.reason === 'delivery_fee' ||
-      input.reason === 'bonus_grant' ||
-      input.reason === 'reward_credit' ||
-      input.reason === 'voucher_claim'
-        ? beforeCents
-        : beforeCents - bonusBeforeCents;
-    if (deltaCents < 0 && spendableCents + deltaCents < floorCents) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        input.reason === 'pack_open'
-          ? insufficientCreditsMessage(-deltaCents, beforeCents - floorCents)
-          : beforeCents + deltaCents >= floorCents
-            ? BONUS_NOT_SPENDABLE_MESSAGE
-            : `Deduction exceeds the customer's balance (RM ${(
-                beforeCents / 100
-              ).toFixed(2)}) — the balance cannot go below RM ${(
-                floorCents / 100
-              ).toFixed(2)}.`,
-      );
-    }
+    // 3) The posting rules (credit-posting.ts planPosting): sign, bonus split,
+    //    external snapshot and floor, against the locked Σ above.
+    const plan = planPosting(input, {
+      balanceCents: Number(rows[0]?.balance_cents ?? 0),
+      bonusCents: Number(rows[0]?.bonus_cents ?? 0),
+      externalCents: Number(rows[0]?.ext_cents ?? 0),
+    });
 
     // 4) Insert the ledger row IN THE SAME TRANSACTION (thread sharedContext so
     //    the write enrolls in the locked txn — not a separate connection).
-    const [txn] = await this.createCreditTransactions(
-      [
-        {
-          customer_id: input.customerId,
-          // Persist exact cents (matches the SUM(ROUND(...)) re-read + the
-          // returned balance) so a non-cent input can't drift the ledger
-          // vs. creditSummary's raw sum (CodeRabbit).
-          amount: deltaCents / 100,
-          reason: input.reason,
-          pull_id: input.pullId ?? null,
-          // `reference` keeps the gateway/charge ref (or plain note) for
-          // reconciliation; the idempotency anchor lives in source_transaction_id
-          // (the dedupe target above) so the two never clobber each other.
-          reference: input.reference ?? null,
-          external_funded_cents: externalFundedCents,
-          bonus_cents: bonusDeltaCents,
-          source_transaction_id:
-            input.idempotencyReference ?? input.sourceTransactionId ?? null,
-        },
-      ],
-      sharedContext,
-    );
+    let txn: Awaited<ReturnType<typeof this.createCreditTransactions>>[0];
+    try {
+      [txn] = await this.createCreditTransactions([plan.row], sharedContext);
+    } catch (e) {
+      // A 23505 on an open means its open_id already settled (the debit
+      // index). It already aborted THIS txn (25P02); re-raise as
+      // DUPLICATE_ERROR so @InjectTransactionManager rolls the whole open
+      // back, debit included. No SAVEPOINT — that would let the duplicate
+      // debit commit.
+      if (open && isUniqueViolation(e)) {
+        throw new MedusaError(
+          MedusaError.Types.DUPLICATE_ERROR,
+          `Open '${open.sourceTransactionId}' has already been settled.`,
+        );
+      }
+      throw e;
+    }
 
-    // Auto-clear an AUTO freeze if this inflow repays the debt. projectedBalance
-    // is computed from the committed snapshot (beforeCents) + the just-inserted
-    // delta — never re-read after the insert (MikroORM UoW buffers until flush,
-    // so a raw SELECT inside the same txn would NOT see the new row).
-    if (deltaCents > 0) {
+    // 5) Its ledger row, same transaction.
+    const part = 'reversalOf' in input || commission ? undefined : input.ledger;
+    const ledger = rf ?? (part
+      ? await this.recordLedgerEntry(
+          {
+            type: part.type,
+            customerId,
+            refId: part.refId ?? txn.id,
+            walletDelta:
+              part.walletDelta === undefined ? plan.row.amount : part.walletDelta,
+            vaultDelta: part.vaultDelta ?? null,
+            payload: part.payload,
+          },
+          sharedContext,
+        )
+      : undefined);
+
+    // Auto-clear an AUTO freeze if this inflow repays the debt. The projected
+    // balance is the locked snapshot + this delta — never re-read after the
+    // insert (MikroORM UoW buffers until flush, so a raw SELECT inside the
+    // same txn would NOT see the new row).
+    if (plan.unfreeze) {
       await this.maybeAutoUnfreeze(
-        input.customerId,
-        beforeCents + deltaCents,
+        customerId,
+        plan.balanceAfterCents,
         sharedContext,
       );
     }
 
     return {
       id: txn.id,
-      balance: (beforeCents + deltaCents) / 100,
-      amount: deltaCents / 100,
+      balance: unread ? Number.NaN : plan.balanceAfterCents / 100,
+      amount: plan.row.amount,
       replayed: false,
-      reference: input.reference ?? null,
-      bonusBalance: (bonusBeforeCents + bonusDeltaCents) / 100,
+      reference: plan.row.reference,
+      bonusBalance: unread ? Number.NaN : plan.bonusAfterCents / 100,
+      rowBonusCents: plan.row.bonus_cents,
+      ...(ledger && { ledger: { id: ledger.id, display_id: ledger.display_id } }),
     };
   }
 
@@ -5135,34 +5008,30 @@ class PacksModuleService extends MedusaService({
   // single ledger row.
   @InjectTransactionManager()
   async topUpCreditsWithLedger(
-    input: CreditMutationInput & {
+    input: Omit<Extract<GeneralPosting, { reason: 'topup' }>, 'ledger'> & {
       ledgerPaymentMethod?: string;
       ledgerGatewayRef?: string | null;
     },
     @MedusaContext() sharedContext: Context = {},
   ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
-    const result = await this.mutateCreditAtomic(input, sharedContext);
-    if (!result.replayed) {
-      await this.recordLedgerEntry(
-        {
+    const { ledgerPaymentMethod, ledgerGatewayRef, ...posting } = input;
+    return this.mutateCreditAtomic(
+      {
+        ...posting,
+        ledger: {
           type: 'TP',
-          customerId: input.customerId,
-          refId: result.id,
-          walletDelta: result.amount,
-          vaultDelta: null,
           payload: {
             type: 'TP',
-            payment_method: input.ledgerPaymentMethod ?? 'mock',
+            payment_method: ledgerPaymentMethod ?? 'mock',
             gateway_ref:
-              input.ledgerGatewayRef === undefined
-                ? result.reference
-                : input.ledgerGatewayRef,
+              ledgerGatewayRef === undefined
+                ? (posting.reference ?? null)
+                : ledgerGatewayRef,
           },
         },
-        sharedContext,
-      );
-    }
-    return result;
+      },
+      sharedContext,
+    );
   }
 
   // The withdrawal counterpart: every balance move on the payout path writes a
@@ -5176,7 +5045,7 @@ class PacksModuleService extends MedusaService({
   // and one ledger row.
   @InjectTransactionManager()
   async withdrawCreditsWithLedger(
-    input: CreditMutationInput & {
+    input: Omit<Extract<GeneralPosting, { reason: 'cashout' }>, 'ledger'> & {
       ledger: {
         outcome: 'requested' | 'refunded';
         bankCode: string | null;
@@ -5186,31 +5055,27 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): ReturnType<PacksModuleService['mutateCreditAtomic']> {
-    const result = await this.mutateCreditAtomic(input, sharedContext);
-    if (!result.replayed) {
-      await this.recordLedgerEntry(
-        {
+    const { ledger, ...posting } = input;
+    return this.mutateCreditAtomic(
+      {
+        ...posting,
+        ledger: {
           type: 'WD',
-          customerId: input.customerId,
-          refId: result.id,
-          walletDelta: result.amount,
-          vaultDelta: null,
           payload: {
             type: 'WD',
-            outcome: input.ledger.outcome,
-            bank_code: input.ledger.bankCode,
+            outcome: ledger.outcome,
+            bank_code: ledger.bankCode,
             // Last 4 only — the ledger is a customer- and operator-visible
             // surface; the full number stays on gateway_withdrawal.
-            account_last4: input.ledger.accountNumber
-              ? input.ledger.accountNumber.slice(-4)
+            account_last4: ledger.accountNumber
+              ? ledger.accountNumber.slice(-4)
               : null,
-            gateway_ref: input.ledger.gatewayRef,
+            gateway_ref: ledger.gatewayRef,
           },
         },
-        sharedContext,
-      );
-    }
-    return result;
+      },
+      sharedContext,
+    );
   }
 
   // The ONE writer of a cashout DEBIT: the destination lookup, the withdrawal
@@ -5286,9 +5151,7 @@ class PacksModuleService extends MedusaService({
     //    human-initiated — but it is a real assumption. A future high-volume
     //    path must not inherit it without re-measuring; only mutations for THIS
     //    customer contend, so the blast radius is one account either way.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
 
     // 1a) THE ROW MUST STILL BE OPEN. Read under the lock, before anything
     //     else, and the debit half of the pact with
@@ -5699,9 +5562,7 @@ class PacksModuleService extends MedusaService({
       // Same key and same idiom as mutateCreditAtomic and withdrawForCashout.
       // Re-entrant per session, so a refund composed onto this context later
       // re-taking it is a no-op.
-      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-        `credit:${input.customerId}`,
-      ]);
+      await lockCredit(sharedContext, input.customerId);
 
       // The same read the routes did unlocked before this method existed —
       // deliberately the generated lister, not new raw SQL, so its soft-delete
@@ -5760,82 +5621,12 @@ class PacksModuleService extends MedusaService({
     }
   }
 
-  // Append-only reversal of a single ledger row (the open-saga compensation).
-  // Holds the SAME per-customer advisory lock as mutateCreditAtomic, then writes
-  // a mirror row: sign-flipped amount (refund) + sign-flipped external_funded_cents
-  // (restores external balance; Task-1 fold nets the VIP basis). The original is
-  // NEVER deleted — a reversed open keeps its history (spec §3 invariant 1).
-  // Idempotent under the
-  // lock (below): a repeated compensation of the same charge returns the
-  // existing reversal rather than appending a second full refund.
-  @InjectTransactionManager()
-  async reverseCreditTransaction(
-    transactionId: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const [original] = await em.execute<LedgerReversalRow[]>(
-      `SELECT ${LEDGER_REVERSAL_COLS} FROM credit_transaction
-         WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
-      [transactionId],
-    );
-    if (!original) {
-      // Already gone / never written — nothing to reverse (compensation is a
-      // best-effort undo; a missing charge means the forward step never ran).
-      return { id: transactionId };
-    }
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${original.customer_id}`,
-    ]);
-
-    // Idempotency (Codex review): a saga that double-compensates the same charge
-    // must NOT append a second refund. Under the lock, if a reversal row for this
-    // charge already exists, return it as a no-op. `reversal:${id}` is the
-    // per-charge reversal key.
-    const [existingReversal] = await em.execute<{ id: string }[]>(
-      // LIKE: lets the planner use IDX_credit_transaction_reversal_reference.
-      "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
-      [`reversal:${transactionId}`],
-    );
-    if (existingReversal) {
-      return { id: existingReversal.id };
-    }
-
-    const originalExt = Number(
-      (original as { external_funded_cents?: number | null })
-        .external_funded_cents ?? 0,
-    );
-    const [reversal] = await this.createCreditTransactions(
-      [
-        {
-          customer_id: original.customer_id,
-          amount: -Number(original.amount), // refund (flips the charge sign)
-          reason: original.reason, // stays 'pack_open' so economy nets honestly
-          pull_id: null, // unique pull_id belongs to the original only
-          reference: `reversal:${transactionId}`,
-          external_funded_cents: -originalExt, // restores external balance + basis
-          // restores the bonus the original spent (or clawed back)
-          bonus_cents:
-            0 -
-            Number(
-              (original as { bonus_cents?: number | null }).bonus_cents ?? 0,
-            ),
-          source_transaction_id:
-            (original as { source_transaction_id?: string | null })
-              .source_transaction_id ?? null, // present after Task 4
-        },
-      ],
-      sharedContext,
-    );
-    return { id: reversal.id };
-  }
-
   // Cascading reversal of an entire open — the saga compensation for the
   // recruit's debit. ONE transaction. Collects all originals sharing the open_id,
   // locks each touched customer (sorted -> deadlock-safe), and appends an
   // append-only compensating row per original, idempotent via reference
   // `reversal:${rowId}`. The refund keeps reason 'pack_open' (nets the open's
-  // external basis, exactly like reverseCreditTransaction — an aborted open
+  // external basis — an aborted open
   // correctly stops counting toward VIP basis; there is no separate VIP
   // projection to inverse). Re-running adds nothing (returns reversed: 0).
   // Exactly-once rests on the sorted credit: locks + the per-row reference check
@@ -5885,11 +5676,7 @@ class PacksModuleService extends MedusaService({
     const customerIds = [
       ...new Set(originals.map((r) => r.customer_id)),
     ].sort();
-    for (const cid of customerIds) {
-      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-        `credit:${cid}`,
-      ]);
-    }
+    await lockCredit(sharedContext, ...customerIds);
 
     // 3a) Snapshot committed raw balance per touched customer BEFORE writes (MikroORM
     //     UoW buffers ORM inserts; a raw em.execute read inside the same txn only sees
@@ -5907,37 +5694,12 @@ class PacksModuleService extends MedusaService({
     let reversed = 0;
     const deltaMap = new Map<string, number>(); // per-customer reversal delta in cents
     for (const original of originals) {
-      const [existing] = await em.execute<{ id: string }[]>(
-        // The LIKE repeats IDX_credit_transaction_reversal_reference's
-        // predicate so the planner can use it; equality alone can't prove it.
-        "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
-        [`reversal:${original.id}`],
-      );
-      if (existing) continue; // already reversed — no-op
-      const originalExt = Number(
-        (original as { external_funded_cents?: number | null })
-          .external_funded_cents ?? 0,
-      );
-      const [rev] = await this.createCreditTransactions(
-        [
-          {
-            customer_id: original.customer_id,
-            amount: -Number(original.amount), // refund / claw-back
-            reason: original.reason,
-            pull_id: null,
-            reference: `reversal:${original.id}`,
-            external_funded_cents: -originalExt, // restores basis
-            // restores the bonus the open spent
-            bonus_cents:
-              0 -
-              Number(
-                (original as { bonus_cents?: number | null }).bonus_cents ?? 0,
-              ),
-            source_transaction_id: sourceTransactionId,
-          },
-        ],
+      // The mirror posting re-enters the lock taken above (sorted).
+      const { replayed } = await this.mutateCreditAtomic(
+        { reversalOf: original, sourceTransactionId },
         sharedContext,
       );
+      if (replayed) continue; // already reversed — no-op
       deltaMap.set(
         original.customer_id,
         (deltaMap.get(original.customer_id) ?? 0) +
@@ -6017,7 +5779,7 @@ class PacksModuleService extends MedusaService({
   // caller (mutateCreditAtomic) passes committed snapshot + just-inserted delta
   // (it can't re-read — MikroORM UoW buffers until flush, so a raw SQL read inside
   // the same txn would NOT see the new row); the out-of-band caller
-  // (maybeAutoUnfreezeForCustomer, used by buyback) passes a fresh post-commit
+  // (maybeAutoUnfreezeForCustomer, used by the commission pay) passes a fresh post-commit
   // re-read under the same lock. A MANUAL freeze is never auto-lifted. SYSTEM
   // event — recorded on the state row, NOT in admin_action_audit.
   private async maybeAutoUnfreeze(
@@ -6045,10 +5807,9 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // Auto-clear an AUTO freeze after a positive inflow written OUTSIDE
-  // mutateCreditAtomic (the buyback step inserts its credit directly, with a
-  // UNIQUE pull_id duplicate guard + clean error mapping that the generic
-  // mutate path would lose). Takes the SAME per-customer advisory lock and
+  // Auto-clear an AUTO freeze after a positive inflow posted without the
+  // inline unfreeze (the weekly commission run posts unlocked: the pay route
+  // and job call this post-commit). Takes the SAME per-customer advisory lock and
   // re-reads the committed balance, so it's race-safe against concurrent
   // mutations and idempotent — calling it after the credit has committed lifts
   // an AUTO freeze whose debt is now repaid, the same as mutateCreditAtomic's
@@ -6059,9 +5820,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const rows = await em.execute<{ balance_cents: string | null }[]>(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
@@ -6133,13 +5892,9 @@ class PacksModuleService extends MedusaService({
       return { claimed: false, kind: '' };
     }
 
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-
     // Serialize against any concurrent credit mutation for THIS customer; the
     // re-read below then sees a consistent grant status (no double-claim race).
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
 
     // Frozen accounts cannot draw value out (Batch A item 5) — block this payout
     // under the same lock as the read below.
@@ -6244,9 +5999,7 @@ class PacksModuleService extends MedusaService({
 
     // 0) Serialize against any concurrent credit/withdrawal mutation for THIS
     //    customer — held across the validation, the cap COUNT, and the writes.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
 
     // Frozen accounts cannot draw value out (Batch A item 5) — block shipping a
     // prize under the same lock as the cap COUNT + writes below.
@@ -6377,22 +6130,18 @@ class PacksModuleService extends MedusaService({
         amount: -fee.total,
         reason: 'delivery_fee',
         reference: order.id,
-      },
-      sharedContext,
-    );
-    await this.recordLedgerEntry(
-      {
-        type: 'OD',
-        customerId,
-        refId: order.id,
-        walletDelta: -fee.total,
-        vaultDelta: 0,
-        payload: {
+        ledger: {
           type: 'OD',
-          handles: countByHandle([pull.card_id]),
-          status: 'requested',
-          shipping_fee: fee.shipping,
-          insurance_fee: fee.insurance,
+          refId: order.id,
+          walletDelta: -fee.total,
+          vaultDelta: 0,
+          payload: {
+            type: 'OD',
+            handles: countByHandle([pull.card_id]),
+            status: 'requested',
+            shipping_fee: fee.shipping,
+            insurance_fee: fee.insurance,
+          },
         },
       },
       sharedContext,
@@ -6492,7 +6241,7 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ orderId: string; itemIds: string[]; pullVersions: Record<string, number> }> {
-    await lockCoinFlipCustomer(input.customerId, sharedContext);
+    await lockCredit(sharedContext, input.customerId);
     if (await this.isAccountDisabled(input.customerId, sharedContext)) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'This account is unavailable.');
     await this.assertNotFrozen(input.customerId, sharedContext);
     if (!await this.hasTopUp(input.customerId, sharedContext)) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
@@ -6524,14 +6273,11 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (prizes.length) {
-      // The prize daily cap, counted under the same credit: lock
-      // recordRewardWithdrawal holds (mutateCreditAtomic below re-takes it;
-      // a transaction-level advisory lock is re-entrant).
+      // The prize daily cap, counted under the credit: lock this method took
+      // first (the key recordRewardWithdrawal holds; mutateCreditAtomic below
+      // re-enters it).
       const em =
         sharedContext.transactionManager as unknown as LedgerSqlManager;
-      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-        `credit:${input.customerId}`,
-      ]);
       const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
       const used = await this.rewardShipmentsToday(em, input.customerId);
       if (used + prizes.length > withdrawals_per_day) {
@@ -6587,9 +6333,23 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    // Charge the wallet inside this SAME transaction — mutateCreditAtomic
-    // joins via sharedContext (no second pool connection) and its floor guard
-    // rolls the whole order back when the balance can't cover the fee.
+    // Charge the wallet inside this SAME transaction, with its OD row —
+    // mutateCreditAtomic joins via sharedContext (no second pool connection)
+    // and its floor guard rolls the whole order back when the balance can't
+    // cover the fee. A free parcel writes the OD row alone.
+    const od = {
+      type: 'OD' as const,
+      refId: order.id,
+      walletDelta: -fee.total,
+      vaultDelta: -vaultDelta,
+      payload: {
+        type: 'OD' as const,
+        handles: countByHandle(pulls.map((p) => p.card_id)),
+        status: 'requested',
+        shipping_fee: fee.shipping,
+        insurance_fee: fee.insurance,
+      },
+    };
     if (fee.total > 0) {
       await this.mutateCreditAtomic(
         {
@@ -6597,28 +6357,13 @@ class PacksModuleService extends MedusaService({
           amount: -fee.total,
           reason: 'delivery_fee',
           reference: order.id,
+          ledger: od,
         },
         sharedContext,
       );
+    } else {
+      await this.recordLedgerEntry({ ...od, customerId: input.customerId }, sharedContext);
     }
-
-    await this.recordLedgerEntry(
-      {
-        type: 'OD',
-        customerId: input.customerId,
-        refId: order.id,
-        walletDelta: -fee.total,
-        vaultDelta: -vaultDelta,
-        payload: {
-          type: 'OD',
-          handles: countByHandle(pulls.map((p) => p.card_id)),
-          status: 'requested',
-          shipping_fee: fee.shipping,
-          insurance_fee: fee.insurance,
-        },
-      },
-      sharedContext,
-    );
     return { orderId: order.id, itemIds: items.map((i) => i.id), pullVersions: Object.fromEntries(pulls.map(p => [p.id, p.flip_version + 1])) };
   }
 
@@ -6671,10 +6416,7 @@ class PacksModuleService extends MedusaService({
     input: { customerId: string; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ frozen: true }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
@@ -6832,10 +6574,7 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ disabled: boolean }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
@@ -6903,10 +6642,7 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: customerId },
       { take: 1 },
@@ -6961,9 +6697,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: customerId },
       { take: 1 },
@@ -7014,10 +6748,7 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
@@ -7094,10 +6825,7 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: customerId },
       { take: 1 },
@@ -7239,7 +6967,8 @@ class PacksModuleService extends MedusaService({
     ]);
   }
 
-  // At least one positive top-up ever (any era, any amount). Withdrawals and
+  // At least one positive top-up ever (any era), counted in rounded sen like
+  // walletSummary's topup sum, so a sub-sen row counts in neither. Withdrawals and
   // both delivery paths stay locked until then (2026-10-11): promo credit and
   // prizes must not leave an account that never deposited. Promo-funded
   // opens make hasPaidOpen true, so it cannot answer this.
@@ -7252,29 +6981,21 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ one: number }[]>(
       "SELECT 1 AS one FROM credit_transaction WHERE customer_id = ? AND reason = 'topup' " +
-        'AND amount > 0 AND deleted_at IS NULL LIMIT 1',
+        'AND amount > 0 AND ROUND(amount * 100) > 0 AND deleted_at IS NULL LIMIT 1',
       [customerId],
     );
     return rows.length > 0;
   }
 
-  // The Lucky Draw's entry gate. Only the DEFAULT group (no group reads the same)
-  // has to have topped up; anyone in a real player group enters without (operator,
-  // 2026-11-02). EFFECTIVE_GROUP_SQL is the one definition of a real group. This
-  // gate alone: withdrawals and deliveries keep reading hasTopUp.
+  // Why a game turns this player away, or null (eligibility.ts: playRefusal).
+  // The games' gate alone: withdrawals and deliveries keep reading hasTopUp.
   @InjectManager()
-  async mayEnterLuckyDraw(
+  async mayPlay(
     customerId: string,
+    game: Game,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
-    if (await this.hasTopUp(customerId, sharedContext)) return true;
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ one: number }[]>(
-      `SELECT 1 AS one FROM (${EFFECTIVE_GROUP_SQL}) eff WHERE eff.customer_id = ? LIMIT 1`,
-      [customerId],
-    );
-    return rows.length > 0;
+  ): Promise<PlayRefusal | null> {
+    return mayPlayFor(this, customerId, game, sharedContext);
   }
 
   // A customer's Lucky Draw ticket balance: the sum of their live ledger rows
@@ -7301,7 +7022,7 @@ class PacksModuleService extends MedusaService({
   // spends so two parallel enters cannot both pass the balance check). Every
   // read below runs on this locked transaction. `tickets` is validated before
   // any lock is taken. A refusal is a return value; only a bad amount or a
-  // frozen account throws.
+  // frozen or disabled account throws.
   @InjectTransactionManager()
   async enterLuckyDraw(
     input: {
@@ -7364,9 +7085,18 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    if (!(await this.mayEnterLuckyDraw(customerId, sharedContext))) {
-      return refuse('no_topup');
+    const refusal = await this.mayPlay(
+      customerId,
+      'lucky_draw',
+      sharedContext,
+    );
+    if (refusal === 'unavailable') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is unavailable.',
+      );
     }
+    if (refusal) return refuse('no_topup'); // Lucky Draw's only other refusal
     const before = await this.luckyDrawBalance(customerId, sharedContext);
     if (before < tickets) return refuse('not_enough_tickets');
     // The ORM creates below are not flushed until the transaction ends, so a raw
@@ -7463,9 +7193,18 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    if (!(await this.mayEnterLuckyDraw(customerId, sharedContext))) {
-      return refuse('no_topup');
+    const refusal = await this.mayPlay(
+      customerId,
+      'lucky_draw',
+      sharedContext,
+    );
+    if (refusal === 'unavailable') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is unavailable.',
+      );
     }
+    if (refusal) return refuse('no_topup'); // Lucky Draw's only other refusal
     const before = await this.luckyDrawBalance(customerId, sharedContext);
     if (before < tickets) return refuse('not_enough_tickets');
     // Read before the ORM creates below, which are not flushed until the
@@ -8422,29 +8161,22 @@ class PacksModuleService extends MedusaService({
   ): Promise<{ creditTransactionId: string | null; pullId: string | null }> {
     if (prize.kind === 'credit') {
       // Bonus credit, like a weekly-challenge money prize; claimTask's shape.
-      const { id, amount } = await this.mutateCreditAtomic(
+      const { id } = await this.mutateCreditAtomic(
         {
           customerId: winnerId,
           amount: toMoney(prize.credit_myr),
           reason: 'reward_credit',
           idempotencyReference: `luckydraw:${prize.id}`,
-        },
-        sharedContext,
-      );
-      await this.recordLedgerEntry(
-        {
-          type: 'WP',
-          customerId: winnerId,
-          refId: id,
-          walletDelta: amount,
-          vaultDelta: null,
-          payload: {
+          ledger: {
             type: 'WP',
-            period: `luckydraw:${prize.id}`,
-            stage: 0,
-            rank: 0,
-            sku: null,
-            value: 0,
+            payload: {
+              type: 'WP',
+              period: `luckydraw:${prize.id}`,
+              stage: 0,
+              rank: 0,
+              sku: null,
+              value: 0,
+            },
           },
         },
         sharedContext,
@@ -10315,6 +10047,28 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
+    // Checked here for the admin page and the assistant's card alike.
+    if (input.holderName.length < 2 || input.holderName.length > 120) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Enter the holder name (2–120 characters).',
+      );
+    }
+    // An unban wipes every name clearing (liftPermanentBan), so one made while
+    // the player is banned would be lost: the unban comes first.
+    if (input.cleared) {
+      const [state] = await this.listCustomerAccountStates(
+        { customer_id: input.customerId, disabled: true },
+        { select: ['disabled_reason'], take: 1 },
+        sharedContext,
+      );
+      if (state?.disabled_reason?.startsWith(PERMANENT_BAN_REASON_PREFIX)) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          'This player is permanently banned: lift the ban first, then clear the name.',
+        );
+      }
+    }
     const key = holderNameKey(input.holderName);
     await this.refuseIfAuditedSince(
       input.customerId,
@@ -10326,11 +10080,13 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     const holders = input.cleared
-      ? await this.holderNameHolders(
-          input.customerId,
-          input.holderName,
-          sharedContext,
-        )
+      ? (
+          await this.payoutNameStanding(
+            input.customerId,
+            input.holderName,
+            sharedContext,
+          )
+        ).holders
       : [];
     if (input.cleared && holders.length === 0) {
       throw new MedusaError(
@@ -10426,10 +10182,7 @@ class PacksModuleService extends MedusaService({
         mutate: (current) => {
           const accounts = parseSavedBankAccounts(current.bank_accounts);
           const slot = savedAccountSlot(input.account.bankCode);
-          if (
-            accounts.filter((a) => savedAccountSlot(a.bankCode) === slot)
-              .length >= MAX_SAVED_BANK_ACCOUNTS
-          ) {
+          if (savedSlotFull(accounts, input.account.bankCode)) {
             // Names the slot: an RM bank and a Touch 'n Go share a currency, so
             // "this currency" would not say which one to remove.
             const held = {
@@ -10472,63 +10225,6 @@ class PacksModuleService extends MedusaService({
         reason: `Added saved bank account: ${input.reason}`,
       },
       sharedContext,
-    );
-  }
-
-  // Other customers already tied to this account number: saved on a live
-  // account, or a payout to it that went out or is on its way (failed rows
-  // came back and prove nothing). A deleted account frees its numbers: the
-  // deletion scrub cuts its payout rows to the last 4 digits (deleteAccount),
-  // which the length check below keeps from matching a short zero-padded number,
-  // and its saved list is not read.
-  // The bank codes come back raw (saved lists may still hold a retired
-  // gateway's alias); the caller compares canonical ids. holder_name is the
-  // saved entry's holder (NULL for a payout row, which already proves the
-  // number pays out). Read by the saved-accounts routes and the payout check
-  // (heldByAnother decides), which refuse a number someone else holds:
-  // 13 clusters of 2-3 accounts on one bank account farmed welcome packs and
-  // tasks by 2026-10-14. Both sides compare digits only, without leading
-  // zeros: padding with a 0, or an older saved entry with spaces or dashes,
-  // does not slip past it. A USDT wallet address (`exact`) is compared whole
-  // instead: its digits alone collide across unrelated Tron addresses. EVM
-  // addresses are stored lowercase, so exact equality covers them too.
-  @InjectManager()
-  async otherPayoutAccountHolders(
-    customerId: string,
-    accountNumber: string,
-    exact = false,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<
-    { customer_id: string; bank_code: string; holder_name: string | null }[]
-  > {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    if (exact) {
-      return await em.execute(
-        "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name " +
-          'FROM customer c ' +
-          "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-          "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-          "WHERE c.deleted_at IS NULL AND c.id <> ? AND a->>'accountNumber' = ? " +
-          'UNION ' +
-          'SELECT customer_id, bank_code, NULL AS holder_name FROM gateway_withdrawal ' +
-          'WHERE deleted_at IS NULL AND customer_id <> ? AND account_number = ? ' +
-          "AND status IN ('pending', 'held', 'settled')",
-        [customerId, accountNumber, customerId, accountNumber],
-      );
-    }
-    return await em.execute(
-      "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name " +
-        'FROM customer c ' +
-        "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-        "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        "WHERE c.deleted_at IS NULL AND c.id <> ? AND ltrim(regexp_replace(a->>'accountNumber', '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
-        'UNION ' +
-        'SELECT customer_id, bank_code, NULL AS holder_name FROM gateway_withdrawal ' +
-        "WHERE deleted_at IS NULL AND customer_id <> ? AND ltrim(regexp_replace(account_number, '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
-        "AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4 " +
-        "AND status IN ('pending', 'held', 'settled')",
-      [customerId, accountNumber, customerId, accountNumber],
     );
   }
 
@@ -10582,43 +10278,13 @@ class PacksModuleService extends MedusaService({
     return [...byKey].map(([account_key, n]) => ({ account_key, ...n }));
   }
 
-  // The other accounts that hold this bank number AT THIS BANK, as a save of
-  // it is refused for (blocksNewSave) and a payout of it held (heldByAnother):
-  // the same digits at another bank, or a wallet whose digits happen to match,
-  // are another account and hold nothing here. Ids once each. What the
-  // assistant lists, and what freePayoutAccount frees.
-  @InjectManager()
-  async payoutAccountHoldersAt(
-    customerId: string,
-    accountKey: string,
-    bankCode: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<string[]> {
-    const bank = findBank(bankCode)?.id;
-    if (!bank || findBank(bank)?.wallet !== undefined) return [];
-    return [
-      ...new Set(
-        (
-          await this.otherPayoutAccountHolders(
-            customerId,
-            accountKey,
-            false,
-            sharedContext,
-          )
-        )
-          .filter((h) => findBank(h.bank_code)?.id === bank)
-          .map((h) => h.customer_id),
-      ),
-    ];
-  }
-
   // Support frees a bank number from the other accounts on it, so this player
   // can save it themselves (owner, 2026-11-04: "let them add it, we record the
   // change"; the unban-pair cases): each of those accounts loses its saved
   // entries of the number at this bank, verification included, and its settled
   // or failed payout rows to it are cut to the last 4 with no holder name, as
   // account deletion cuts them. Paid-out rows are what keep a number "shared"
-  // for good, so this is the one way past blocksNewSave for the player's own
+  // for good, so this is the one way past the shared block for the player's own
   // save besides support's add (addSavedBankAccount), and it stops those rows
   // counting the name on them too. Only holders at this bank: the same digits
   // at another bank are someone else's account. Cannot be undone: the audit
@@ -10651,30 +10317,24 @@ class PacksModuleService extends MedusaService({
         'Not a bank account number at a known bank.',
       );
     }
+    // On this transaction: the re-check below sees this one's own writes.
+    const standing = () =>
+      this.payoutNumberStanding(
+        input.customerId,
+        { bankCode: bank.id, accountNumber: key },
+        sharedContext,
+      );
+    const first = await standing();
     // A PayNow mobile is one number with or without its 65, as bank_save_check
     // and the ban list read it: holders, payouts and saved entries under both.
-    const forms = accountNumberForms(bank.id, key);
+    const { forms } = first;
     await this.refuseIfAuditedSince(
       input.customerId,
       input.since,
       (a) => 'held_by' in a && auditNamesNumber(a, a.account_last4, forms),
       sharedContext,
     );
-    const holders = async () => {
-      const ids = new Set<string>();
-      for (const form of forms) {
-        for (const id of await this.payoutAccountHoldersAt(
-          input.customerId,
-          form,
-          bank.id,
-          sharedContext,
-        )) {
-          ids.add(id);
-        }
-      }
-      return [...ids];
-    };
-    const before = await holders();
+    const before = first.holders.map((h) => h.customerId);
     if (before.length === 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -10770,7 +10430,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    if ((await holders()).length > 0) {
+    if ((await standing()).holders.length > 0) {
       throw new MedusaError(
         MedusaError.Types.CONFLICT,
         `${bank.name} …${last4} is still held by another account. Nothing was changed; ask again.`,
@@ -10824,9 +10484,9 @@ class PacksModuleService extends MedusaService({
       own.map((n) => [n.account_key, n.bank_code]),
     );
     // A PayNow mobile is banned with or without its 65, as the withdrawal
-    // check reads it (accountNumberForms), so the list asks for both.
+    // check reads it (spellings), so the list asks for both.
     for (const n of own) {
-      for (const form of accountNumberForms(n.bank_code, n.account_key)) {
+      for (const form of spellings(n.bank_code, n.account_key)) {
         if (!byKey.has(form)) byKey.set(form, n.bank_code);
       }
     }
@@ -11027,95 +10687,34 @@ class PacksModuleService extends MedusaService({
     };
   }
 
-  // A permanently banned payout number (owner, 2026-11-03): the farm rings'
-  // banks, in banned_payout_account only (the repo is public). Matched on
-  // payoutAccountKey, so at any bank and however it is padded. Not banned for
-  // the one customer support unbanned it for (setPayoutBanLifted).
+  // Payout Destination identity (payout-destination.ts) on this service's
+  // manager: the caller's transaction when it hands one in.
   @InjectManager()
-  async payoutAccountBanned(
-    accountNumber: string,
-    wallet = false,
-    customerId: string | null = null,
+  async payoutNumberStanding(
+    customerId: string,
+    n: PayoutNumber,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const key = payoutAccountKey(accountNumber, wallet);
-    const rows = await em.execute<unknown[]>(
-      'SELECT 1 FROM banned_payout_account WHERE account_key = ? LIMIT 1',
-      [key],
+  ): Promise<NumberStanding> {
+    return await numberStanding(
+      (sharedContext.transactionManager ??
+        sharedContext.manager) as unknown as LedgerSqlManager,
+      customerId,
+      n,
     );
-    if (rows.length === 0) return false;
-    if (!customerId) return true;
-    const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
-      'SELECT metadata FROM customer WHERE id = ?',
-      [customerId],
-    );
-    return !liftedPayoutBans(me?.metadata ?? {})[key];
   }
 
-  // Another account already used this holder name on a bank, saved or paid
-  // (owner, 2026-11-03: a different bank under the same name is refused too).
-  // Names compare by holderNameKey, the stored ones in SQL (holderNameKeySql),
-  // so a variant saved with accents or symbols still finds the plain name. A
-  // wallet entry carries its network's name, which no person's name equals.
-  // The accounts support checked as another person with this name
-  // (setHolderNameCleared) do not count, for this customer only; any other
-  // account still does.
   @InjectManager()
-  async holderNameHeldByAnother(
+  async payoutNameStanding(
     customerId: string,
     holderName: string,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
-    const others = await this.holderNameHolders(
+  ): Promise<NameStanding> {
+    return await nameStanding(
+      (sharedContext.transactionManager ??
+        sharedContext.manager) as unknown as LedgerSqlManager,
       customerId,
       holderName,
-      sharedContext,
     );
-    if (others.length === 0) return false;
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
-      'SELECT metadata FROM customer WHERE id = ?',
-      [customerId],
-    );
-    const checked =
-      clearedHolderNames(me?.metadata ?? {})[holderNameKey(holderName)]?.with ??
-      [];
-    return others.some((id) => !checked.includes(id));
-  }
-
-  // The other accounts that saved or were paid under this holder name, as
-  // holderNameHeldByAnother counts them. Never truncated: the decision needs
-  // every holder, or an unchecked one could slip past a clearing.
-  @InjectManager()
-  async holderNameHolders(
-    customerId: string,
-    holderName: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<string[]> {
-    // A name with no English letter (saved before such names were refused)
-    // keys empty by its letters; it is compared by its old key instead, so
-    // its holders are still found. Empty both ways names no one.
-    const letters = holderNameKey(holderName);
-    const key = letters || realNameKey(holderName);
-    if (!key) return [];
-    const keySql = letters ? holderNameKeySql : realNameKeySql;
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ customer_id: string }[]>(
-      'SELECT c.id AS customer_id FROM customer c ' +
-        "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-        "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${keySql("a->>'accountHolderName'")} = ? ` +
-        'UNION ' +
-        'SELECT customer_id FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
-        `AND ${keySql('account_holder_name')} = ? ` +
-        "AND status IN ('pending', 'held', 'settled')",
-      [customerId, key, customerId, key],
-    );
-    return rows.map((r) => r.customer_id);
   }
 
   // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob
@@ -11668,10 +11267,7 @@ class PacksModuleService extends MedusaService({
     input: { customerId: string; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ frozen: false }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
+    await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
@@ -11715,7 +11311,6 @@ class PacksModuleService extends MedusaService({
     input: SettleOpenInput,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<SettleOpenResult> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const deltaCents = Math.round(input.amount * 100);
     if (deltaCents >= 0) {
       throw new MedusaError(
@@ -11723,124 +11318,21 @@ class PacksModuleService extends MedusaService({
         'settleOpen amount must be less than 0 (an open is a debit).',
       );
     }
-    // sourceTransactionId is the open-settlement idempotency key (open_id).
-    // Reject an empty/missing one at the boundary so a bad caller can't write
-    // rows that escape the partial-unique index (Sourcery review).
-    if (!input.sourceTransactionId) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'settleOpen requires a non-empty sourceTransactionId (the open_id).',
-      );
-    }
-
-    // 1) Serialize all credit mutations for THIS customer on the locked txn.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${input.customerId}`,
-    ]);
-
-    // 1a) Freeze gate — must run inside the lock so a concurrent unfreeze can't
-    //     race past this check before the debit lands.
-    if (await this.isFrozen(input.customerId, sharedContext)) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'This account is frozen.',
-      );
-    }
-
-    // 2) Locked balance + external + bonus read (one scan), exact +
-    //    soft-delete aware.
-    const rows = await em.execute<
+    // The open id, the lock, the freeze gate, the duplicate check, the bonus
+    // split and the floor are the posting's own (mutateCreditAtomic).
+    const posted = await this.mutateCreditAtomic(
       {
-        balance_cents: string | null;
-        ext_cents: string | null;
-        bonus_cents: string | null;
-      }[]
-    >(
-      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
-        'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
-        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-      [input.customerId],
+        customerId: input.customerId,
+        amount: input.amount,
+        reason: 'pack_open',
+        sourceTransactionId: input.sourceTransactionId,
+      },
+      sharedContext,
     );
-    const beforeCents = Number(rows[0]?.balance_cents ?? 0);
-    const externalBalanceSen = Number(rows[0]?.ext_cents ?? 0);
-    // Bonus credit is spent FIRST (spec 2026-10-07 §4.1); only the rest draws
-    // on deposit money, so bonus-funded play banks no playthrough.
-    const bonusUsedSen = consumeBonusSen(
-      -deltaCents,
-      Math.max(0, Number(rows[0]?.bonus_cents ?? 0)),
-    );
-    const externalFundedCents = -consumeExternalSen(
-      -deltaCents - bonusUsedSen,
-      externalBalanceSen,
-    );
-
-    // 3) Floor check against the balance. There is no raw-balance opt-out (Codex
-    //    review removed the unused floorMode:'raw' bypass).
-    const availableCents = beforeCents;
-    if (availableCents + deltaCents < 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        insufficientCreditsMessage(-deltaCents, availableCents),
-      );
-    }
-
-    // 4) Idempotency pre-check + debit insert (Phase 3b).
-    // MikroORM's Unit of Work buffers ORM inserts until flush (transaction end), so
-    // a 23505 from the debit row's partial-unique index fires at commit time — AFTER
-    // settleOpen returns — where dbErrorMapper would intercept it before our catch.
-    // Instead we do an explicit pre-check (raw SQL, fires immediately inside the
-    // advisory lock) so a replayed no-sponsor open_id is caught here with a clear
-    // DUPLICATE_ERROR. The lock held since step 1 makes this read-then-write safe.
-    const [existing] = await em.execute<{ id: string }[]>(
-      `SELECT id FROM credit_transaction
-         WHERE source_transaction_id = ? AND reason = 'pack_open' AND amount < 0
-           AND deleted_at IS NULL
-         LIMIT 1`,
-      [input.sourceTransactionId],
-    );
-    if (existing) {
-      throw new MedusaError(
-        MedusaError.Types.DUPLICATE_ERROR,
-        `Open '${input.sourceTransactionId}' has already been settled.`,
-      );
-    }
-
-    let txn: Awaited<ReturnType<typeof this.createCreditTransactions>>[0];
-    try {
-      [txn] = await this.createCreditTransactions(
-        [
-          {
-            customer_id: input.customerId,
-            amount: deltaCents / 100,
-            reason: 'pack_open',
-            pull_id: null,
-            reference: null,
-            external_funded_cents: externalFundedCents,
-            bonus_cents: 0 - bonusUsedSen,
-            source_transaction_id: input.sourceTransactionId,
-          },
-        ],
-        sharedContext,
-      );
-    } catch (e) {
-      // A 23505 means this open_id already settled (the debit index).
-      // The 23505 already aborted THIS txn (25P02); re-raise as DUPLICATE_ERROR so
-      // @InjectTransactionManager rolls the whole settleOpen back, DEBIT included.
-      // No SAVEPOINT — that would let the duplicate debit commit.
-      if (isUniqueViolation(e)) {
-        throw new MedusaError(
-          MedusaError.Types.DUPLICATE_ERROR,
-          `Open '${input.sourceTransactionId}' has already been settled.`,
-        );
-      }
-      throw e;
-    }
-
     return {
-      id: txn.id,
-      balance: (beforeCents + deltaCents) / 100,
-      bonusCents: bonusUsedSen,
+      id: posted.id,
+      balance: posted.balance,
+      bonusCents: 0 - (posted.rowBonusCents ?? 0),
     };
   }
 
@@ -12462,9 +11954,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     // Re-check INSIDE the lock. The caller's earlier preflight is the fast
     // rejection that gives the operator an actionable reason; THIS one
     // is the correctness gate. Without it a spin, sell, deposit credit or
@@ -12849,8 +12339,8 @@ class PacksModuleService extends MedusaService({
   // Two optional narrowings, both in SQL so they apply BEFORE the LIMIT (a
   // Legendary pull ranked below the top N by value must still be found):
   // `tiers` keeps pulls whose card sits at one of those tiers in the pack it
-  // came from (PULL_TIER_SQL's pack-level join), and `defaultGroupOnly` keeps
-  // players whose effective player group is DEFAULT (the reports' rule).
+  // came from (PULL_TIER_SQL's pack-level join), and `realCustomersOnly` keeps
+  // real customers (the reports' ?group=default).
   @InjectManager()
   async topPullsInWindow(
     opts: {
@@ -12858,7 +12348,7 @@ class PacksModuleService extends MedusaService({
       to: Date;
       limit: number;
       tiers?: readonly Rarity[];
-      defaultGroupOnly?: boolean;
+      realCustomersOnly?: boolean;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
@@ -12880,8 +12370,8 @@ class PacksModuleService extends MedusaService({
         '   AND o.card_id = pu.card_id AND o.deleted_at IS NULL ' +
         `   AND o.rarity IN (${tiers.map(() => '?').join(', ')}))`
       : '';
-    const groupSql = opts.defaultGroupOnly
-      ? ` AND pu.customer_id NOT IN (SELECT customer_id FROM (${EFFECTIVE_GROUP_SQL}) eff)`
+    const groupSql = opts.realCustomersOnly
+      ? populationSql({ kind: 'real' }, 'pu.customer_id').sql
       : '';
     const rows = await em.execute<
       {
@@ -13299,7 +12789,7 @@ class PacksModuleService extends MedusaService({
       // (and paid back on sells before 2026-10-09) is not cash; bonus_grant is
       // its own bucket.
       `SELECT reason, COALESCE(SUM(${reasonCashSenSql()}), 0)::bigint AS cents ` +
-      'FROM credit_transaction WHERE deleted_at IS NULL';
+      `FROM credit_transaction WHERE deleted_at IS NULL AND ${exceptNonPositiveTopupsSql()}`;
     if (from) {
       sql += ' AND created_at >= ?::timestamptz';
       params.push(from);
@@ -13880,8 +13370,7 @@ class PacksModuleService extends MedusaService({
     }
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const bucket = (column: string) =>
-      `to_char(date_trunc('${granularity}', ${column} AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM-DD')`;
+    const bucket = (column: string) => mytPeriodStartSql(granularity, column);
     // One rail's currency (the Settlement page's tabs), or every row.
     // Real customers only (the Dashboard's switch), or every account. The
     // scope clause binds nothing, so the argument lists below are unchanged.
@@ -13897,7 +13386,7 @@ class PacksModuleService extends MedusaService({
       n: string;
       gross_cents: string;
       net_cents: string;
-      gross_with_net_cents: string;
+      fee_cents: string;
       missing_net: string;
       missing_gross: string;
     };
@@ -13906,7 +13395,7 @@ class PacksModuleService extends MedusaService({
       count: Number(r.n),
       grossCents: Number(r.gross_cents),
       netCents: Number(r.net_cents),
-      grossWithNetCents: Number(r.gross_with_net_cents),
+      feeCents: Number(r.fee_cents),
       missingNet: Number(r.missing_net),
       missingGross: Number(r.missing_gross),
     });
@@ -13925,7 +13414,8 @@ class PacksModuleService extends MedusaService({
               COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
+              COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint
+                - COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS fee_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
               COUNT(*) FILTER (WHERE amount_settled IS NULL)::bigint AS missing_gross
          FROM gateway_deposit
@@ -13939,19 +13429,20 @@ class PacksModuleService extends MedusaService({
     // Withdrawal GROSS is `amount` (the debit basis — always present), not
     // amount_settled, which is NULL on every row settled before the
     // settlement mirror shipped; that keeps pre-mirror history in the report.
-    // The FEE basis is different: gross_with_net_cents pairs with net_cents to
-    // produce fee = gross − net, and their net is derived from what they
-    // ACTUALLY paid — so on a row where the settled amount disagrees with the
-    // instructed one (logged loudly by the callback, now durable on the row),
-    // pairing `amount` with their net would fold the whole disagreement into
-    // the fee. COALESCE to the settled amount when known; known-net rows are
-    // post-mirror rows, which always carry it (same update writes both).
+    // The FEE basis is different: a row's fee is |net − what was paid|, ABS
+    // per row (GATEWAY.payoutFeeSen, as Profit sums it), and their net is
+    // derived from what they ACTUALLY paid — so on a row where the settled
+    // amount disagrees with the instructed one (logged loudly by the callback,
+    // now durable on the row), pairing `amount` with their net would fold the
+    // whole disagreement into the fee. COALESCE to the settled amount when
+    // known; known-net rows are post-mirror rows, which always carry it (same
+    // update writes both).
     const withdrawalRows = await em.execute<RawGateway[]>(
       `SELECT ${bucket('settled_at')} AS period,
               COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COALESCE(SUM(ROUND(COALESCE(amount_settled, amount) * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
+              COALESCE(SUM(${GATEWAY.payoutFeeSen()}) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS fee_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
               0::bigint AS missing_gross  -- withdrawals gross on \`amount\`, never NULL
          FROM gateway_withdrawal
@@ -14041,7 +13532,7 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ n: string; cents: string }[]>(
       'SELECT COUNT(*)::bigint AS n, ' +
-        `       COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)), 0)::bigint AS cents ` +
+        `       COALESCE(SUM(${cardValueSen('display')}), 0)::bigint AS cents ` +
         '  FROM pull p ' +
         '  JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
         " WHERE p.status = 'vaulted' AND p.deleted_at IS NULL",
@@ -14122,12 +13613,12 @@ class PacksModuleService extends MedusaService({
          n: 'count(*) FILTER (WHERE {w})::int',
          gross:
            'COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE {w}), 0)::bigint',
-         fee: 'COALESCE(SUM(ROUND((amount_settled - net_amount) * 100)) FILTER (WHERE {w} AND net_amount IS NOT NULL AND amount_settled IS NOT NULL), 0)::bigint',
+         fee: `COALESCE(SUM(${GATEWAY.depositFeeSen()}) FILTER (WHERE {w} AND net_amount IS NOT NULL AND amount_settled IS NOT NULL), 0)::bigint`,
          missing:
            'count(*) FILTER (WHERE {w} AND (net_amount IS NULL OR amount_settled IS NULL))::int',
          missing_gross:
            'count(*) FILTER (WHERE {w} AND amount_settled IS NULL)::int',
-         fx: "COALESCE(SUM(ROUND((gateway_amount * COALESCE(amount_settled, amount_requested) / NULLIF(amount_requested, 0) * fx_mid - COALESCE(amount_settled, amount_requested)) * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint",
+         fx: `COALESCE(SUM(ROUND(${GATEWAY.depositFxRm()} * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint`,
        })}
          FROM r`,
       params,
@@ -14138,10 +13629,10 @@ class PacksModuleService extends MedusaService({
          n: 'count(*) FILTER (WHERE {w})::int',
          gross:
            'COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE {w}), 0)::bigint',
-         fee: 'COALESCE(SUM(ROUND(ABS(net_amount - COALESCE(amount_settled, amount)) * 100)) FILTER (WHERE {w} AND net_amount IS NOT NULL), 0)::bigint',
+         fee: `COALESCE(SUM(${GATEWAY.payoutFeeSen()}) FILTER (WHERE {w} AND net_amount IS NOT NULL), 0)::bigint`,
          missing: 'count(*) FILTER (WHERE {w} AND net_amount IS NULL)::int',
          missing_gross: '0',
-         fx: "COALESCE(SUM(ROUND((amount - gateway_amount * COALESCE(amount_settled, amount) / NULLIF(amount, 0) * fx_mid) * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint",
+         fx: `COALESCE(SUM(ROUND(${GATEWAY.payoutFxRm()} * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint`,
        })}
          FROM r`,
       params,
@@ -14169,9 +13660,10 @@ class PacksModuleService extends MedusaService({
   // customers: their normal (non-bonus) wallet balance, split by whether they
   // ever topped up (no top-up = no withdrawal or delivery, #748); their bonus;
   // payouts requested but not paid; referral commission in a closed week not
-  // paid yet; and the cards still owed (vaulted, or in an active delivery) at
-  // the vault sell-back rate, split the same way. Cards already delivered are
-  // valued at the same basis as a cost (they left as goods). A negative
+  // paid yet; and the cards still owed (vaulted, or delivering in an order
+  // requested to ready to ship: P&L decision 15) at the vault sell-back rate,
+  // split the same way. Cards delivered, or delivering in a shipped order,
+  // are valued at the same basis as a cost (they left as goods). A negative
   // per-customer balance owes nobody anything. Run one after the other: one
   // pool connection at a time.
   @InjectManager()
@@ -14233,7 +13725,10 @@ class PacksModuleService extends MedusaService({
       // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
       `WITH t AS (
          SELECT p.status,
-                ROUND(${LIVE_VALUE_USD_SQL} * ? * ?) AS cents,
+                p.status = 'vaulted' OR (p.status = 'delivering' AND ${inActiveDeliverySql('p.')}) AS owed,
+                p.status = 'delivered' OR (p.status = 'delivering' AND NOT ${inActiveDeliverySql('p.')}
+                  AND ${inShippedDeliverySql('p.')}) AS gone,
+                ${cardValueSen('vault')} AS cents,
                 EXISTS (
                   SELECT 1 FROM credit_transaction ct
                    WHERE ct.customer_id = p.customer_id AND ct.reason = 'topup'
@@ -14244,13 +13739,13 @@ class PacksModuleService extends MedusaService({
           WHERE p.status IN ('vaulted', 'delivering', 'delivered')
             AND p.deleted_at IS NULL${filterSql(scope, 'p.customer_id').sql}
        )
-       SELECT (count(*) FILTER (WHERE status <> 'delivered' AND has_topup))::bigint AS n,
-              (count(*) FILTER (WHERE status = 'delivering' AND has_topup))::bigint AS delivering,
-              COALESCE(SUM(cents) FILTER (WHERE status <> 'delivered' AND has_topup), 0)::bigint AS cents,
-              (count(*) FILTER (WHERE status <> 'delivered' AND NOT has_topup))::bigint AS n_no_topup,
-              COALESCE(SUM(cents) FILTER (WHERE status <> 'delivered' AND NOT has_topup), 0)::bigint AS cents_no_topup,
-              (count(*) FILTER (WHERE status = 'delivered'))::bigint AS shipped,
-              COALESCE(SUM(cents) FILTER (WHERE status = 'delivered'), 0)::bigint AS shipped_cents
+       SELECT (count(*) FILTER (WHERE owed AND has_topup))::bigint AS n,
+              (count(*) FILTER (WHERE owed AND status = 'delivering' AND has_topup))::bigint AS delivering,
+              COALESCE(SUM(cents) FILTER (WHERE owed AND has_topup), 0)::bigint AS cents,
+              (count(*) FILTER (WHERE owed AND NOT has_topup))::bigint AS n_no_topup,
+              COALESCE(SUM(cents) FILTER (WHERE owed AND NOT has_topup), 0)::bigint AS cents_no_topup,
+              (count(*) FILTER (WHERE gone))::bigint AS shipped,
+              COALESCE(SUM(cents) FILTER (WHERE gone), 0)::bigint AS shipped_cents
          FROM t`,
       [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT, ...filterParams(scope)],
     );
@@ -14536,7 +14031,7 @@ class PacksModuleService extends MedusaService({
       { customer_id: string; n: string; cents: string }[]
     >(
       'SELECT p.customer_id, COUNT(*)::bigint AS n, ' +
-        `  COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * 100)), 0)::bigint AS cents ` +
+        `  COALESCE(SUM(${cardValueSen('display')}), 0)::bigint AS cents ` +
         '  FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
         ` WHERE p.status = 'vaulted' AND p.deleted_at IS NULL AND p.customer_id IN (${ph}) GROUP BY p.customer_id`,
       [DEFAULT_MARKET_MULTIPLIER, fx, ...ids],
@@ -14690,7 +14185,7 @@ class PacksModuleService extends MedusaService({
   }
 
   // Delete-guard: the credit ledger is append-only — money rows are never
-  // hard-deleted, compensation MUST use reverseCreditTransaction. The referral
+  // hard-deleted, compensation MUST append a reversal (reverseOpen). The referral
   // commission lifecycle this guard used to check was removed with the referral
   // engine, so it currently has no dependent table to refuse on; it stays as the
   // single chokepoint (sealed by delete-guard-seal.unit.spec.ts) so a future
@@ -14962,7 +14457,7 @@ class PacksModuleService extends MedusaService({
         'This customer’s account is disabled, so the order cannot be shipped. Cancel it, or enable the account first.',
       );
     }
-    await lockCoinFlipCustomer(owner.customer_id, sharedContext);
+    await lockCredit(sharedContext, owner.customer_id);
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `delivery:${input.orderId}`,
     ]);
@@ -15114,6 +14609,24 @@ class PacksModuleService extends MedusaService({
           );
         }
         const refund = -storedWallet || 0; // stored charge is negative; || 0 kills -0
+        // Still needed for the payload's handle tally (countByHandle) — the
+        // reversal amount no longer comes from these rows.
+        const pulls = await this.listPulls(
+          { id: input.pullIds },
+          { take: input.pullIds.length },
+          sharedContext,
+        );
+        const odCancel = {
+          type: 'OD' as const,
+          refId: `cancel:${input.orderId}`,
+          walletDelta: refund,
+          vaultDelta: -stored,
+          payload: {
+            type: 'OD' as const,
+            handles: countByHandle(pulls.map((p) => p.card_id)),
+            status: 'canceled',
+          },
+        };
         if (refund > 0) {
           // The bonus part the charge took goes back as bonus (ADR 0014).
           const [taken] = await em.execute<{ bonus_cents: string | null }[]>(
@@ -15132,32 +14645,14 @@ class PacksModuleService extends MedusaService({
                 Math.max(0, Number(taken?.bonus_cents ?? 0)),
                 Math.round(refund * 100),
               ),
+              ledger: odCancel,
             },
             sharedContext,
           );
+        } else {
+          // A pre-fee order refunds no wallet money: the vault reversal alone.
+          await this.recordLedgerEntry({ ...odCancel, customerId: order.customer_id }, sharedContext);
         }
-        // Still needed for the payload's handle tally (countByHandle) — the
-        // reversal amount no longer comes from these rows.
-        const pulls = await this.listPulls(
-          { id: input.pullIds },
-          { take: input.pullIds.length },
-          sharedContext,
-        );
-        await this.recordLedgerEntry(
-          {
-            type: 'OD',
-            customerId: order.customer_id,
-            refId: `cancel:${input.orderId}`,
-            walletDelta: refund,
-            vaultDelta: -stored,
-            payload: {
-              type: 'OD',
-              handles: countByHandle(pulls.map((p) => p.card_id)),
-              status: 'canceled',
-            },
-          },
-          sharedContext,
-        );
       }
     }
 
@@ -15338,14 +14833,12 @@ class PacksModuleService extends MedusaService({
       }
     }
 
-    // `amount` here is mutateCreditAtomic's own cent-rounded value (matches
-    // the SUM(ROUND(...)) actually persisted to credit_transaction) — used
-    // below for the ledger row so it can't drift from input.amount when this
-    // method is called directly (bypassing the HTTP route's epsilon gate),
-    // same fix as Task 4's topUpCreditsWithLedger. The audit "before" calc
-    // and the return value below intentionally keep input.amount — untouched,
-    // out of this fix's scope.
-    const { id, balance, amount, bonusBalance } = await this.mutateCreditAtomic(
+    // The AD row's wallet_delta is the posting's own cent-rounded amount
+    // (matches the SUM(ROUND(...)) actually persisted to credit_transaction),
+    // so it can't drift from input.amount when this method is called directly
+    // (bypassing the HTTP route's epsilon gate). The audit "before" calc and
+    // the return value below intentionally keep input.amount.
+    const { id, balance, bonusBalance } = await this.mutateCreditAtomic(
       {
         customerId: input.customerId,
         amount: input.amount,
@@ -15354,6 +14847,17 @@ class PacksModuleService extends MedusaService({
         floor: 0,
         sourceTransactionId: requestReference,
         bonusCents: input.bonus ? Math.round(input.amount * 100) : undefined,
+        ledger: {
+          type: 'AD',
+          payload: {
+            type: 'AD',
+            admin_id: input.adminId,
+            reason: input.note,
+            // 'bonus' marks spend-only credit (spec 2026-10-07 §4.10).
+            detail: input.bonus ? 'bonus' : null,
+            card_handle: null,
+          },
+        },
       },
       sharedContext,
     );
@@ -15377,24 +14881,6 @@ class PacksModuleService extends MedusaService({
             ? { balance, bonus: bonusBalance }
             : { balance },
         reason: input.note,
-      },
-      sharedContext,
-    );
-    await this.recordLedgerEntry(
-      {
-        type: 'AD',
-        customerId: input.customerId,
-        refId: id, // the credit_transaction id already in scope
-        walletDelta: amount,
-        vaultDelta: null,
-        payload: {
-          type: 'AD',
-          admin_id: input.adminId,
-          reason: input.note,
-          // 'bonus' marks spend-only credit (spec 2026-10-07 §4.10).
-          detail: input.bonus ? 'bonus' : null,
-          card_handle: null,
-        },
       },
       sharedContext,
     );
@@ -15757,51 +15243,39 @@ class PacksModuleService extends MedusaService({
       bonusBp?: number;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<
-    Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>
-  > {
+  ): Promise<{ id: string }[]> {
     // A card opened with bonus credit or the welcome pack sells back as NORMAL
     // credit (operator rule 2026-10-09), but its bonus share must be played
-    // through once before it can be withdrawn: stamped as external money in,
-    // like a deposit, so opens consume it and the playthrough gate counts it
-    // (DEPOSITED_PT_SEN_SQL). Rounded up, toward the locked side.
+    // through once before it can be withdrawn: the posting stamps it as
+    // external money in (planPosting); the SE row shows the same share.
     const playthroughCents = bonusShareSen(
       Math.round(input.amount * 100),
       input.bonusBp ?? 0,
     );
-    const rows = await this.createCreditTransactions(
-      [
-        {
-          customer_id: input.customerId,
-          amount: input.amount,
-          reason: 'buyback' as const,
-          pull_id: input.pullId,
-          ...(playthroughCents
-            ? { external_funded_cents: playthroughCents }
-            : {}),
-        },
-      ],
-      sharedContext,
-    );
-    await this.recordLedgerEntry(
+    const { id } = await this.mutateCreditAtomic(
       {
-        type: 'SE',
         customerId: input.customerId,
-        refId: rows[0].id,
-        walletDelta: input.amount,
-        vaultDelta: -input.valueMyr,
-        payload: {
+        amount: input.amount,
+        reason: 'buyback',
+        pullId: input.pullId,
+        holdBp: input.bonusBp ?? 0,
+        ledger: {
           type: 'SE',
-          card_handle: input.cardHandle,
-          sp_ref_id: input.openId,
-          price: input.valueMyr,
-          rate: input.rate,
-          ...(playthroughCents ? { playthrough: playthroughCents / 100 } : {}),
+          walletDelta: input.amount,
+          vaultDelta: -input.valueMyr,
+          payload: {
+            type: 'SE',
+            card_handle: input.cardHandle,
+            sp_ref_id: input.openId,
+            price: input.valueMyr,
+            rate: input.rate,
+            ...(playthroughCents ? { playthrough: playthroughCents / 100 } : {}),
+          },
         },
       },
       sharedContext,
     );
-    return rows;
+    return [{ id }];
   }
 
   // recordLedgerEntry — THE write primitive for POLYCARD-BACK §5. Every
@@ -16245,9 +15719,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     await em.execute(
       `INSERT INTO vip_member_state
          (id, customer_id, lifetime_external_spend_sen, highest_level_ever, current_level, vip_reset_at, created_at, updated_at)
@@ -16411,9 +15883,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ rowsUpdated: number }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const rows = await em.execute<
       {
         id: string;
@@ -16490,9 +15960,7 @@ class PacksModuleService extends MedusaService({
     releasedSen: number;
   }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
     const [done] = await em.execute<{ id: string }[]>(
       `SELECT id FROM admin_action_audit
         WHERE entity_type = 'customer' AND entity_id = ?
@@ -17971,10 +17439,13 @@ class PacksModuleService extends MedusaService({
     let ranking: string[] = prior?.ranking ?? [];
     if (ranking.length === 0) {
       const top = (
-        await this.challengeWeekTop({ ...week, limit: 20 }, sharedContext)
+        await this.challengeWeekTop(
+          { ...week, limit: BOARD_FETCH_N },
+          sharedContext,
+        )
       ).map((t) => t.customer_id);
       const disabled = await this.disabledCustomerIds(top, sharedContext);
-      ranking = top.filter((id) => !disabled.has(id)).slice(0, 10);
+      ranking = topShown(top, disabled, (id) => id).shown;
     }
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
@@ -18125,9 +17596,7 @@ class PacksModuleService extends MedusaService({
 
     // 1) Serialize against every money path for this customer — SAME lock key
     //    as mutateCreditAtomic.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
+    await lockCredit(sharedContext, customerId);
 
     // 2) Check under the lock, INSIDE this txn (sharedContext!) — any existing
     //    row means a concurrent run or earlier tick already settled this
@@ -18191,6 +17660,7 @@ class PacksModuleService extends MedusaService({
 
     // 3a) Credits — one ledger mutation for the summed amount.
     let creditTxnId: string | null = null;
+    let creditsReplayed = false;
     if (payout.credits > 0) {
       const { id, replayed } = await this.mutateCreditAtomic(
         {
@@ -18202,6 +17672,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
       creditTxnId = id;
+      creditsReplayed = replayed;
       rows.push({
         week_start: weekStart,
         customer_id: customerId,
@@ -18294,15 +17765,16 @@ class PacksModuleService extends MedusaService({
     if (rows.length === 0) return null;
 
     // 3c) WP ledger row (POLYCARD-BACK §5, Plan 060) — one row per settled
-    // winner, not per card. Same ref_id as the 3a credit mutation so a retry
-    // dedupes on recordLedgerEntry's own (type, ref_id) idempotency.
+    // winner, not per card, keyed on the 3a credit's anchor. A replayed
+    // credit moved no money and wrote nothing, so neither does its WP (the
+    // rule every posting follows); a cards-only payout still writes it.
     // vaultDelta stays null (WP is a straight reward credit like TP, not a
     // vault-liability move). `stage` has no single source — RankPayout is
     // already a union of every unlocked stage's rewards (challenge-settle.ts
     // payoutByRank) — so this reports the highest stage unlocked that week,
     // the frontier the payout reflects; SettleSnapshot carries no per-card
     // FMV, so `value` stays 0 rather than threading new data through the job.
-    await this.recordLedgerEntry(
+    if (!creditsReplayed) await this.recordLedgerEntry(
       {
         type: 'WP',
         customerId,
@@ -19411,9 +18883,7 @@ class PacksModuleService extends MedusaService({
           -- bought for (owner rule 2026-11-12). A packed one keeps its cards
           -- held until staff cancel it, so they are not handed out twice.
           AND NOT (dord.status IN ('requested','processed','packing')
-            AND EXISTS (SELECT 1 FROM customer_account_state s
-                         WHERE s.customer_id = dord.customer_id
-                           AND s.disabled = true AND s.deleted_at IS NULL))
+            AND ${disabledAccountSql('dord.customer_id')})
         ORDER BY dord.created_at, dord.id`,
     );
     const byId = new Map<

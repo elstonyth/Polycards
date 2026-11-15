@@ -52,13 +52,13 @@ medusaIntegrationTestRunner({
         await expect(
           packs.settleOpen({ customerId: "cus_short", amount: -25, sourceTransactionId: "y" }),
         ).rejects.toThrow(expected);
-        // Same guard, other changed branch: the legacy mutateCreditAtomic
-        // pack_open path computes "have" as balance-above-floor and must emit
-        // the identical message. The failed settle above rolled back, so
-        // cus_short still holds RM 3.
+        // Same guard through the posting entry point settleOpen delegates
+        // to: "have" is the balance above the floor, so the message is
+        // identical. The failed settle above rolled back, so cus_short still
+        // holds RM 3.
         await expect(
           packs.mutateCreditAtomic({
-            customerId: "cus_short", amount: -25, reason: "pack_open",
+            customerId: "cus_short", amount: -25, reason: "pack_open", sourceTransactionId: "z",
           }),
         ).rejects.toThrow(expected);
       });

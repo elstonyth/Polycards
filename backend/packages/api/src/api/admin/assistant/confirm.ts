@@ -11,7 +11,8 @@ import { MAX_SCHEDULES, nextRun } from './schedule';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { LASTING_WRITES, type Need } from './access';
-import { accountNumberForms, findBank } from '../../../modules/packs/banks';
+import { findBank } from '../../../modules/packs/banks';
+import { spellings } from '../../../modules/packs/payout-destination';
 import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
 
 // What lasts waits for a tap (security review 2026-10-29). A note or a
@@ -345,7 +346,7 @@ export async function saveProposal(
           (k) =>
             k.slice(-4) === proposal.last4 &&
             // The card may carry the other PayNow spelling (with or without 65).
-            accountNumberForms(proposal.bank_code, k).some(
+            spellings(proposal.bank_code, k).some(
               (f) => numberMark(f, container) === proposal.number_mark,
             ),
         );

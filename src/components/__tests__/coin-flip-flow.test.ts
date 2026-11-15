@@ -1098,6 +1098,40 @@ describe('coin flip confirmation and recovery', () => {
       expect(named('Choose cards')).toBe(true);
       expect(named('Flip again')).toBe(false);
     });
+    it.each([
+      ['no_topup', 'Top up once to play Coin Flip.', 'unlock deliveries'],
+      // No code (an older backend): the server's own text, as before.
+      [undefined, 'unlock deliveries', 'Top up once to play Coin Flip.'],
+    ])(
+      'words a refusal with code %s as Coin Flip copy',
+      async (code, shown, hidden) => {
+        const refused = (reason_code?: string) => ({
+          ok: true as const,
+          settings: {
+            ...settings.settings,
+            eligible: false,
+            reason:
+              'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.',
+            ...(reason_code ? { reason_code } : {}),
+          },
+        });
+        const show = async (s: ReturnType<typeof refused>) =>
+          act(async () =>
+            root.render(
+              createElement(CoinFlipClient, {
+                customerId: 'c1',
+                initialVault: vault,
+                initialSettings: s,
+                initialPullId: 'p1',
+              }),
+            ),
+          );
+        mocks.settings.mockResolvedValue(refused(code));
+        await show(refused(code));
+        expect(host.textContent).toContain(shown);
+        expect(host.textContent).not.toContain(hidden);
+      },
+    );
     it('is not offered while the account cannot flip', async () => {
       mocks.settings.mockResolvedValue({
         ok: true,

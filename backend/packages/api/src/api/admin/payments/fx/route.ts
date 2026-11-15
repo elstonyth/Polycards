@@ -18,6 +18,7 @@ import {
   type PaymentFxRow,
 } from '../../../../modules/packs/payment-fx';
 import { REGIONAL_CURRENCIES } from '../../../../modules/packs/gateway';
+import { GATEWAY } from '../../../../modules/packs/money-figures';
 import { reqReason } from '../../rewards-settings/validate';
 import { paymentCurrencyParam } from '../../../utils/payment-currency';
 import { PACKS_MODULE } from '../../../../modules/packs';
@@ -67,18 +68,12 @@ async function earnings(
     SELECT
       (SELECT count(*) FROM gateway_deposit d
          WHERE d.currency = :currency AND d.status = 'settled' AND d.deleted_at IS NULL) AS deposit_count,
-      (SELECT coalesce(sum(
-           d.gateway_amount * coalesce(d.amount_settled, d.amount_requested)
-             / nullif(d.amount_requested, 0) * d.fx_mid
-           - coalesce(d.amount_settled, d.amount_requested)), 0)
+      (SELECT coalesce(sum(${GATEWAY.depositFxRm('d.')}), 0)
          FROM gateway_deposit d
          WHERE d.currency = :currency AND d.status = 'settled' AND d.deleted_at IS NULL) AS deposit_rm,
       (SELECT count(*) FROM gateway_withdrawal w
          WHERE w.currency = :currency AND w.status = 'settled' AND w.deleted_at IS NULL) AS payout_count,
-      (SELECT coalesce(sum(
-           w.amount
-           - w.gateway_amount * coalesce(w.amount_settled, w.amount)
-             / nullif(w.amount, 0) * w.fx_mid), 0)
+      (SELECT coalesce(sum(${GATEWAY.payoutFxRm('w.')}), 0)
          FROM gateway_withdrawal w
          WHERE w.currency = :currency AND w.status = 'settled' AND w.deleted_at IS NULL) AS payout_rm
   `,

@@ -5,6 +5,7 @@ import { display } from '../../../../modules/packs/pull-card';
 import type { Access } from '../access';
 import { brandImage, generateImage, ImageRefused } from '../images';
 import { resolvePeriod } from '../periods';
+import { statsWindows } from '../../../../modules/packs/stats';
 import { systemPrompt } from '../prompt';
 
 describe('brandImage', () => {
@@ -148,10 +149,17 @@ describe('resolvePeriod (same as the desk tools)', () => {
       from: '2025-11-30T16:00:00.000Z',
       to: '2025-12-31T16:00:00.000Z',
     });
-    expect(resolvePeriod('last_7_days', {}, now)).toMatchObject({
-      from: new Date(now - 7 * 864e5).toISOString(),
-      to: new Date(now).toISOString(),
-    });
+    // The Dashboard's 7d and 30d windows (owner decision 2026-11-16).
+    for (const [period, range] of [
+      ['last_7_days', '7d'],
+      ['last_30_days', '30d'],
+    ] as const) {
+      const dash = statsWindows(range, new Date(now))!.current;
+      expect(resolvePeriod(period, {}, now)).toMatchObject({
+        from: dash.from.toISOString(),
+        to: dash.to.toISOString(),
+      });
+    }
   });
   it('leaves all time open', () => {
     expect(resolvePeriod('all_time', {}, now)).toEqual({

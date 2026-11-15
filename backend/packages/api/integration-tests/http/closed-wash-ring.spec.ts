@@ -42,6 +42,7 @@ medusaIntegrationTestRunner({
               customerId: cust,
               amount: -open,
               reason: "pack_open",
+              sourceTransactionId: `open_wash_${cust}_${i}`,
               floor: 0,
             });
             // Buyback at 90% — internal credit, NOT external.

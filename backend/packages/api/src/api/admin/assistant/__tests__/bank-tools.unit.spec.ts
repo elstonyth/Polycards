@@ -28,6 +28,28 @@ const PEOPLE: Record<string, { first_name: string; handle: string }> = {
 let banned: string[] = [];
 let realName: string | null = 'Tan Ah Kow';
 let metadata: Record<string, unknown> = {};
+/** A Payout Destination standing (payout-destination.ts; its spellings and
+ *  bank scope are pinned in payout-destination.integration.spec). */
+const standing = (
+  holders: string[],
+  over: Record<string, unknown> = {},
+) => ({
+  bankId: 'MBBEMYKL',
+  key: KEY,
+  forms: [KEY],
+  banned: false,
+  bannedForPlayer: false,
+  holders: holders.map((customerId) => ({
+    customerId,
+    paid: true,
+    verified: false,
+  })),
+  ...over,
+});
+const nameHeldBy = (holders: string[], blocking = holders) => ({
+  holders,
+  blocking,
+});
 
 const packs = {
   findCustomerIdByUsername: jest.fn(),
@@ -49,9 +71,8 @@ const packs = {
   ),
   payoutAccountsOf: jest.fn(),
   resolveBannedPayoutAccount: jest.fn(),
-  payoutAccountHoldersAt: jest.fn(),
-  payoutAccountBanned: jest.fn(),
-  holderNameHolders: jest.fn(),
+  payoutNumberStanding: jest.fn(),
+  payoutNameStanding: jest.fn(),
   freePayoutAccount: jest.fn(),
   setHolderNameCleared: jest.fn(),
 };
@@ -107,9 +128,11 @@ beforeEach(() => {
   packs.payoutAccountsOf.mockResolvedValue([
     { account_key: KEY, bank_code: 'MBBEMYKL', wallet: false },
   ]);
-  packs.payoutAccountHoldersAt.mockResolvedValue(['cus_y1']);
-  packs.payoutAccountBanned.mockResolvedValue(false);
-  packs.holderNameHolders.mockResolvedValue(['cus_y1', 'cus_y2']);
+  packs.payoutNumberStanding.mockImplementation(
+    async (_id: string, n: { bankCode: string | null }) =>
+      standing(n.bankCode ? ['cus_y1'] : [], { bankId: n.bankCode }),
+  );
+  packs.payoutNameStanding.mockResolvedValue(nameHeldBy(['cus_y1', 'cus_y2']));
 });
 
 describe('namedIn', () => {
@@ -241,7 +264,9 @@ describe('bank_save_check', () => {
   });
 
   it('names each block and its fix, never the number or the name', async () => {
-    packs.payoutAccountBanned.mockResolvedValue(true);
+    packs.payoutNumberStanding.mockResolvedValue(
+      standing(['cus_y1'], { banned: true, bannedForPlayer: true }),
+    );
     const raw = await run(
       'bank_save_check',
       { username: 'Test Player', last4: '0001' },
@@ -250,10 +275,13 @@ describe('bank_save_check', () => {
     expect(raw).not.toContain(KEY);
     expect(raw).not.toMatch(/tan ah kow/i);
     const out = JSON.parse(raw);
-    expect(packs.payoutAccountHoldersAt).toHaveBeenCalledWith(
+    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_x', {
+      bankCode: 'MBBEMYKL',
+      accountNumber: KEY,
+    });
+    expect(packs.payoutNameStanding).toHaveBeenCalledWith(
       'cus_x',
-      KEY,
-      'MBBEMYKL',
+      'Tan Ah Kow',
     );
     expect(out).toMatchObject({
       player: 'Test Player (@Test_Handle), open',
@@ -275,15 +303,18 @@ describe('bank_save_check', () => {
     );
   });
 
-  it('asks for a PayNow mobile with and without its 65, as a save does', async () => {
+  it('asks about a PayNow mobile at its bank, as a save does', async () => {
     packs.payoutAccountsOf.mockResolvedValue([
       { account_key: '91234567', bank_code: 'PAYNOWSG', wallet: false },
     ]);
-    packs.payoutAccountBanned.mockImplementation(
-      async (n: string) => n === '6591234567',
-    );
-    packs.payoutAccountHoldersAt.mockImplementation(
-      async (_id: string, n: string) => (n === '6591234567' ? ['cus_y1'] : []),
+    packs.payoutNumberStanding.mockResolvedValue(
+      standing(['cus_y1'], {
+        bankId: 'PAYNOWSG',
+        key: '91234567',
+        forms: ['91234567', '6591234567'],
+        banned: true,
+        bannedForPlayer: true,
+      }),
     );
     const out = JSON.parse(
       await run(
@@ -292,6 +323,10 @@ describe('bank_save_check', () => {
         'why can Test Player not add PayNow 4567',
       ).done,
     );
+    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_x', {
+      bankCode: 'PAYNOWSG',
+      accountNumber: '91234567',
+    });
     expect(out.number).toMatchObject({
       banned_for_this_player: true,
       other_accounts: ['RingOne, banned'],
@@ -300,13 +335,9 @@ describe('bank_save_check', () => {
   });
 
   it('says can_save when nothing blocks, and null when a part is unchecked', async () => {
-    packs.payoutAccountHoldersAt.mockResolvedValue([]);
-    packs.holderNameHolders.mockResolvedValue(['cus_y2']);
-    metadata = {
-      holder_name_cleared: {
-        tanahkow: { name: 'Tan Ah Kow', at: 'x', with: ['cus_y2'] },
-      },
-    };
+    packs.payoutNumberStanding.mockResolvedValue(standing([]));
+    // Support cleared the one other account on the name for this player.
+    packs.payoutNameStanding.mockResolvedValue(nameHeldBy(['cus_y2'], []));
     const out = JSON.parse(
       await run(
         'bank_save_check',
@@ -315,6 +346,9 @@ describe('bank_save_check', () => {
       ).done,
     );
     expect(out).toMatchObject({ can_save: true, fixes: [], unchecked: [] });
+    expect(out.name.other_accounts).toEqual([
+      { account: 'OpenTwo, open', cleared_for_this_player: true },
+    ]);
     const noNumber = JSON.parse(
       await run(
         'bank_save_check',
@@ -323,6 +357,66 @@ describe('bank_save_check', () => {
       ).done,
     );
     expect(noNumber.can_save).toBeNull();
+  });
+
+  describe('a number already saved on this player', () => {
+    beforeEach(() => {
+      metadata = {
+        bank_accounts: [
+          {
+            id: 'b1',
+            bankCode: 'MBBEMYKL',
+            bankName: 'Maybank',
+            accountNumber: `0${KEY}`,
+            accountHolderName: 'Tan Ah Kow',
+            savedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      };
+    });
+    const check = async () =>
+      JSON.parse(
+        await run(
+          'bank_save_check',
+          { username: 'Test Player', last4: '0001' },
+          'can Test Player save Maybank 0001',
+        ).done,
+      );
+
+    it('saves as a no-op when nothing comes before it: holders and the slot do not count', async () => {
+      packs.payoutNameStanding.mockResolvedValue(nameHeldBy([]));
+      const out = await check();
+      expect(out).toMatchObject({
+        can_save: true,
+        fixes: [],
+        number: { already_saved: true, blocks_save: false },
+      });
+    });
+
+    it('is still refused when banned for this player, as the save refuses it first', async () => {
+      packs.payoutNumberStanding.mockResolvedValue(
+        standing(['cus_y1'], { banned: true, bannedForPlayer: true }),
+      );
+      packs.payoutNameStanding.mockResolvedValue(nameHeldBy([]));
+      const out = await check();
+      expect(out).toMatchObject({
+        can_save: false,
+        number: {
+          already_saved: true,
+          banned_for_this_player: true,
+          blocks_save: true,
+        },
+      });
+      expect(out.fixes.join(' ')).toMatch(/unban_bank_number/);
+      expect(out.fixes.join(' ')).not.toMatch(/free_bank_number/);
+    });
+
+    it('is still refused when the name is linked to another account', async () => {
+      const out = await check();
+      expect(out.can_save).toBe(false);
+      expect(out.name.blocks_save).toBe(true);
+      expect(out.fixes.join(' ')).toMatch(/clear_name_clash/);
+    });
   });
 
   it('a number it cannot find leaves the name checked, and the bank unknown is said', async () => {
@@ -350,8 +444,8 @@ describe('bank_save_check', () => {
   });
 
   it('checks the number as typed against the bank rules', async () => {
-    packs.payoutAccountHoldersAt.mockResolvedValue([]);
-    packs.holderNameHolders.mockResolvedValue([]);
+    packs.payoutNumberStanding.mockResolvedValue(standing([]));
+    packs.payoutNameStanding.mockResolvedValue(nameHeldBy([]));
     const out = JSON.parse(
       await run(
         'bank_save_check',
@@ -407,19 +501,20 @@ describe('free_bank_number', () => {
     expect(packs.freePayoutAccount).not.toHaveBeenCalled();
   });
 
-  it('finds the holders of a PayNow mobile with and without its 65 (#1008)', async () => {
+  it('asks about a PayNow mobile at its bank (#1008: its spellings are the module\'s)', async () => {
     packs.payoutAccountsOf.mockResolvedValue([
       { account_key: '91234567', bank_code: 'PAYNOWSG', wallet: false },
     ]);
-    packs.payoutAccountHoldersAt.mockImplementation(
-      async (_id: string, n: string) => (n === '6591234567' ? ['cus_y1'] : []),
-    );
     const { propose, done } = run(
       'free_bank_number',
       { username: 'Test Player', last4: '4567', reason: 'owner approved' },
       'free PayNow 4567 for Test Player, owner approved',
     );
     await done;
+    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_x', {
+      bankCode: 'PAYNOWSG',
+      accountNumber: '91234567',
+    });
     expect(propose.mock.calls[0][0]).toMatchObject({
       bank_code: 'PAYNOWSG',
       last4: '4567',
@@ -493,7 +588,7 @@ describe('free_bank_number', () => {
     packs.payoutAccountsOf.mockResolvedValue([
       { account_key: KEY, bank_code: 'MBBEMYKL', wallet: false },
     ]);
-    packs.payoutAccountHoldersAt.mockResolvedValue([]);
+    packs.payoutNumberStanding.mockResolvedValue(standing([]));
     await expect(
       run(
         'free_bank_number',
@@ -510,11 +605,10 @@ describe('free_bank_number', () => {
       'free 0001 for Test Player',
     );
     await done;
-    expect(packs.payoutAccountHoldersAt).toHaveBeenCalledWith(
-      'cus_x',
-      KEY,
-      'MBBEMYKL',
-    );
+    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_x', {
+      bankCode: 'MBBEMYKL',
+      accountNumber: KEY,
+    });
     expect(propose.mock.calls[0][0]).toMatchObject({ bank_code: 'MBBEMYKL' });
   });
 
@@ -626,17 +720,12 @@ describe('clear_name_clash', () => {
   });
 
   it('refuses when nobody else uses it, or every one is already cleared', async () => {
-    packs.holderNameHolders.mockResolvedValue([]);
+    packs.payoutNameStanding.mockResolvedValue(nameHeldBy([]));
     await expect(
       run('clear_name_clash', { username: 'Test Player' }, 'clear Test Player')
         .done,
     ).rejects.toThrow(/nothing to clear/);
-    packs.holderNameHolders.mockResolvedValue(['cus_y2']);
-    metadata = {
-      holder_name_cleared: {
-        tanahkow: { name: 'Tan Ah Kow', at: 'x', with: ['cus_y2'] },
-      },
-    };
+    packs.payoutNameStanding.mockResolvedValue(nameHeldBy(['cus_y2'], []));
     await expect(
       run('clear_name_clash', { username: 'Test Player' }, 'clear Test Player')
         .done,

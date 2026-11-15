@@ -1,4 +1,5 @@
 import type PacksModuleService from '../../modules/packs/service';
+import { BOARD_FETCH_N, topShown } from '../../modules/packs/eligibility';
 import type { LiveRankTarget } from './automation-live-types';
 import type { RankObservation } from './automation-rank';
 
@@ -35,14 +36,14 @@ export async function observeLiveRanks(
         : null;
       const bounds = anchor ? await packs.challengeWeekBounds(anchor) : null;
       const ranked = anchor
-        ? (await packs.challengeWeekTop({ ...anchor, limit: 20 })).map(
+        ? (await packs.challengeWeekTop({ ...anchor, limit: BOARD_FETCH_N })).map(
             (row) => ({
               customerId: row.customer_id,
               pulls: row.pulls,
               valueMyr: row.volumeMyr,
             }),
           )
-        : (await packs.leaderboardTop({ sinceMs: null, limit: 20 })).map(
+        : (await packs.leaderboardTop({ sinceMs: null, limit: BOARD_FETCH_N })).map(
             (row) => ({
               customerId: row.customer_id,
               pulls: row.pulls,
@@ -52,9 +53,7 @@ export async function observeLiveRanks(
       const disabled = await packs.disabledCustomerIds(
         ranked.map((row) => row.customerId),
       );
-      const entries = ranked
-        .filter((row) => !disabled.has(row.customerId))
-        .slice(0, 10);
+      const entries = topShown(ranked, disabled, (row) => row.customerId).shown;
       const own = anchor
         ? await Promise.all(
             selected.map(async (target) => {

@@ -12,7 +12,7 @@
 // `net_amount` is NULL on any row that settled before the settlement mirror
 // shipped (Migration20260817090000) and on any settlement where the gateway
 // omitted it. So the fee is computed only over rows whose net is known —
-// `grossWithNetCents − netCents` — and the rows excluded from it are COUNTED
+// `feeCents` — and the rows excluded from it are COUNTED
 // and shown (`missingNet`), rather than silently deflating the fee.
 // `amount_settled` (deposits only) can ALSO be NULL — not from the gateway,
 // but from a deposit settled BY HAND outside every writer that sets the
@@ -32,7 +32,10 @@
 //     charges the payout fee on top (docs/payments/tgpay-setup.md, verified
 //     2026-09-05: a RM 50 payout with a RM 1 fee drained the wallet by 51).
 // So the fee is |gross − net| per direction, still over the known-net subset
-// only. `gross` stays the LEDGER ANCHOR in both directions — it is the figure
+// only. A payout's fee is summed as |net − paid| PER ROW (GATEWAY.payoutFeeSen,
+// owner decision 2026-11-16, as Profit does): TGPay payouts settled before
+// 2026-09-10 stored net the other way round, and a signed sum let each one
+// cancel a real fee. `gross` stays the LEDGER ANCHOR in both directions — it is the figure
 // the customer's balance moved by (a deposit's credited amount, a payout's
 // debited amount), which is what `delta` below compares against the credit
 // ledger. Never key a ledger comparison on net: net includes the gateway's
@@ -48,8 +51,9 @@ export type GatewayPeriodRow = {
   grossCents: number;
   /** Σ net_amount over rows where it is non-NULL, cents. */
   netCents: number;
-  /** Σ gross over the SAME non-NULL-net rows, cents — the fee's other half. */
-  grossWithNetCents: number;
+  /** Σ fee over the SAME non-NULL-net rows, cents: a deposit's gross − net,
+   *  a payout's |net − paid| per row (the DIRECTION RULE). */
+  feeCents: number;
   /** Rows in this bucket with net_amount IS NULL ("unknown", pre-mirror). */
   missingNet: number;
   /** Settled rows in this bucket whose gross is NULL — they count in `count`
@@ -121,21 +125,15 @@ const EMPTY_DIRECTION: SettlementDirection = {
   missingGross: 0,
 };
 
-function toDirection(
-  row: GatewayPeriodRow | undefined,
-  direction: 'deposit' | 'withdrawal',
-): SettlementDirection {
+function toDirection(row: GatewayPeriodRow | undefined): SettlementDirection {
   if (!row) return EMPTY_DIRECTION;
   return {
     count: row.count,
     gross: row.grossCents / 100,
     net: row.netCents / 100,
     // Fee over the known-net subset ONLY — see the NULL rule above — and
-    // signed per direction, see the DIRECTION RULE.
-    fee:
-      direction === 'deposit'
-        ? (row.grossWithNetCents - row.netCents) / 100
-        : (row.netCents - row.grossWithNetCents) / 100,
+    // per direction, see the DIRECTION RULE (both in the SQL).
+    fee: row.feeCents / 100,
     missingNet: row.missingNet,
     missingGross: row.missingGross,
   };
@@ -164,8 +162,8 @@ export function mergeSettlementPeriods(
   ].sort((a, b) => (a < b ? 1 : -1));
 
   return periods.map((period) => {
-    const d = toDirection(depositsBy.get(period), 'deposit');
-    const w = toDirection(withdrawalsBy.get(period), 'withdrawal');
+    const d = toDirection(depositsBy.get(period));
+    const w = toDirection(withdrawalsBy.get(period));
     const l = ledgerBy.get(period);
     const topupCredited = (l?.topupCents ?? 0) / 100;
     const cashoutNet = (l?.cashoutCents ?? 0) / 100;

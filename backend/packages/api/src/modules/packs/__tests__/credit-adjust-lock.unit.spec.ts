@@ -156,11 +156,13 @@ describe('PacksModuleService.adminAdjustCredit — mint-window lock', () => {
     const f = fakeService();
     Object.assign(f.svc, { listCreditTransactions: jest.fn(async () => []) });
     await f.svc.adminAdjustCredit({ ...grant(5), idempotencyKey: 'batch:cus_1' }, f.ctx);
+    // The AD row rides the posting itself, not a second hand-paired write.
     expect(f.writes.mutateCreditAtomic).toHaveBeenCalledWith(expect.objectContaining({
       sourceTransactionId: expect.stringMatching(/^adjust-idem:[a-f0-9]{64}$/),
+      ledger: expect.objectContaining({ type: 'AD' }),
     }), f.ctx);
     expect(f.writes.createAdminActionAudits).toHaveBeenCalledTimes(1);
-    expect(f.writes.recordLedgerEntry).toHaveBeenCalledTimes(1);
+    expect(f.writes.recordLedgerEntry).not.toHaveBeenCalled();
   });
 
   it('takes the GLOBAL mint lock BEFORE summing the window, then writes', async () => {

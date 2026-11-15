@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
 import {
-  accountNumberForms,
   bankPayoutMinRm,
   findBank,
   gatewayBankCode,
@@ -120,7 +119,7 @@ const SMALL_CAP_RE = new RegExp(`[${SMALL_CAPS}]`, 'gu');
 
 // Letters NFKD does not break down, written as the English letters they
 // read as (a name typed with Đ or ß is the same person's), and the look-alikes
-// ı and ɑ. Kept in step with the SQL key in service.ts (holderNameKeySql).
+// ı and ɑ. Kept in step with the SQL key (holderNameKeySql, payout-destination.ts).
 export const LETTER_FOLDS: Readonly<Record<string, string>> = {
   đ: 'd', Đ: 'D', ð: 'd', Ð: 'D', ł: 'l', Ł: 'L', ø: 'o', Ø: 'O',
   ħ: 'h', Ħ: 'H', ŧ: 't', Ŧ: 'T', ı: 'i', ɑ: 'a',
@@ -177,7 +176,7 @@ export function holderConfirmMismatch(args: {
 }
 
 /** How banned numbers are stored and matched: digits without leading zeros for a
- *  bank, at any bank, as otherPayoutAccountHolders compares them; a wallet
+ *  bank, at any bank, as the holder lookup (payout-destination.ts) compares them; a wallet
  *  address whole (an EVM one in lower case, as newSavedBankAccount stores it;
  *  a Tron address is case-sensitive). */
 export function payoutAccountKey(
@@ -514,16 +513,6 @@ export const SHARED_PAYOUT_ACCOUNT_MESSAGE =
 export const SHARED_SAVE_MESSAGE =
   'This bank account is linked to another Polycards account. If it is yours, contact support.';
 
-/** Does anyone else hold this destination, saved or paid? The same digits at
- *  another bank are a different account. */
-export function heldByAnother(
-  holders: { bank_code: string }[],
-  bankCode: string,
-): boolean {
-  const bank = findBank(bankCode);
-  return holders.some((h) => findBank(h.bank_code)?.id === bank?.id);
-}
-
 /** Has the customer saved a bank, not only a USDT wallet? The welcome pack needs
  *  one (owner, 2026-11-03): a bank number sits on one account only, while a fresh
  *  wallet costs nothing. Takes the customer's metadata. */
@@ -531,62 +520,6 @@ export function hasSavedBank(
   metadata: Record<string, unknown> | null | undefined,
 ): boolean {
   return includesBank(parseSavedBankAccounts(metadata?.bank_accounts));
-}
-
-/** Does a new save of this destination get refused? Stricter than a hold on one
- *  point only: a wallet's address is public on-chain and has no holder name, so
- *  a stranger who merely saved it must not stop its owner saving it. Only one
- *  someone was already PAID to blocks (a payout row has a null holder_name). The
- *  payout check still sees the saved entry, so sharing a wallet earns no money. */
-export function blocksNewSave(
-  holders: { bank_code: string; holder_name?: string | null }[],
-  bankCode: string,
-): boolean {
-  const bank = findBank(bankCode);
-  return holders.some(
-    (h) =>
-      findBank(h.bank_code)?.id === bank?.id &&
-      (!bank?.wallet || h.holder_name == null),
-  );
-}
-
-/** Is any saved account that support has not verified held by someone else? The
- *  whole list counts, not only the one being paid: a second saved number must not
- *  be the way round a hold. Lists hold a handful of rows, so one lookup each is
- *  fine. */
-export async function anySavedAccountShared(
-  packs: {
-    otherPayoutAccountHolders(
-      customerId: string,
-      accountNumber: string,
-      exact?: boolean,
-    ): Promise<{ bank_code: string }[]>;
-  },
-  customerId: string,
-  accounts: SavedBankAccount[],
-  verified: Record<string, string>,
-): Promise<boolean> {
-  const verdicts = await Promise.all(
-    accounts
-      .filter((a) => !verified[a.id])
-      .map(async (a) =>
-        heldByAnother(
-          (
-            await Promise.all(
-              accountNumberForms(a.bankCode, a.accountNumber).map((n) =>
-                packs.otherPayoutAccountHolders(
-                  customerId,
-                  n,
-                  findBank(a.bankCode)?.wallet !== undefined,
-                ),
-              ),
-            )
-          ).flat(),
-          a.bankCode,
-        ),
-      ),
-  );
-  return verdicts.some(Boolean);
 }
 
 /** customer.metadata key: saved account id to when support verified it. Per number,
@@ -712,28 +645,6 @@ export function withBankShareStamp(
   return Object.keys(stamps).length > 0
     ? { ...rest, [BANK_SHARE_VERIFIED_KEY]: stamps }
     : rest;
-}
-
-/** Has this other customer got the same destination verified? One person, one
- *  account: only one account per number can be. Digits only for a bank, as the
- *  holder lookup compares them; a wallet address is compared whole. */
-export function verifiedElsewhere(
-  metadata: Record<string, unknown>,
-  account: SavedBankAccount,
-): boolean {
-  const key = (a: SavedBankAccount) =>
-    findBank(a.bankCode)?.wallet
-      ? a.accountNumber
-      : accountNumberForms(a.bankCode, a.accountNumber)[0]
-          .replace(/\D/g, '')
-          .replace(/^0+/, '');
-  const stamps = verifiedBankAccounts(metadata);
-  return parseSavedBankAccounts(metadata.bank_accounts).some(
-    (a) =>
-      Boolean(stamps[a.id]) &&
-      findBank(a.bankCode)?.id === findBank(account.bankCode)?.id &&
-      key(a) === key(account),
-  );
 }
 
 /** A new entry for a saved list, from details withdrawalDetailsError passed. */

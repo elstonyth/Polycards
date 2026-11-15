@@ -12,6 +12,7 @@ const LINES: {
   hint?: boolean;
 }[] = [
   { key: 'pack_sales' },
+  { key: 'capsule_sales', hint: true },
   { key: 'delivery_fees' },
   { key: 'sellbacks', out: true, hint: true },
   { key: 'coin_flip_payouts', out: true, hint: true },

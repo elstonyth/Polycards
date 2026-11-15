@@ -58,8 +58,10 @@ export function resolvePeriod(period, { from, to } = {}, now = Date.now()) {
     last_week: () => [weekStart - 7 * DAY_MS, weekStart],
     this_month: () => [monthStart(now), monthStart(now, 1)],
     last_month: () => [monthStart(now, -1), monthStart(now)],
-    last_7_days: () => [now - 7 * DAY_MS, now],
-    last_30_days: () => [now - 30 * DAY_MS, now],
+    // The Dashboard's 7d and 30d windows (the backend's statsWindows): the
+    // Malaysia day and the six or 29 before it, up to now.
+    last_7_days: () => [today - 6 * DAY_MS, now],
+    last_30_days: () => [today - 29 * DAY_MS, now],
     custom: () => {
       const start = dateStart(from, 'from');
       const end = dateStart(to ?? from, 'to') + DAY_MS; // `to` is included

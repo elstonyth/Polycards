@@ -226,7 +226,7 @@ medusaIntegrationTestRunner({
             image: '/qa.png',
           },
         ]);
-        await packs.createPulls([
+        const [, delivering] = await packs.createPulls([
           {
             customer_id: real.id,
             pack_id: 'profit-pack',
@@ -241,6 +241,24 @@ medusaIntegrationTestRunner({
             status: 'delivering' as const,
             rolled_at: now,
           },
+        ]);
+        // In a live order, so it is still owed (P&L decision 15). With no
+        // order at all it would count as neither owed nor shipped.
+        const [order] = await packs.createDeliveryOrders([
+          {
+            customer_id: grouped.id,
+            status: 'requested' as const,
+            ship_name: 'Profit',
+            ship_address_1: '1 Street',
+            ship_city: 'City',
+            ship_postal_code: '10000',
+            ship_country_code: 'my',
+            ship_phone: '+60100000000',
+            shipping_fee: 10,
+          },
+        ]);
+        await packs.createDeliveryOrderItems([
+          { delivery_order_id: order.id, pull_id: delivering.id },
         ]);
 
         const realOnly = await report('?range=all');
@@ -282,6 +300,7 @@ medusaIntegrationTestRunner({
         });
         expect(realOnly.data.activity).toEqual({
           pack_sales: 80,
+          capsule_sales: 0,
           sellbacks: 30,
           coin_flip_payouts: 0,
           promo_given: 0,
