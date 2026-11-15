@@ -285,7 +285,12 @@ medusaIntegrationTestRunner({
           },
         ] as Parameters<typeof packs.createPurchaseInvoiceLines>[0]);
 
-        const res = await report('?range=today');
+        // Its own query: the route keeps each query's result 5 minutes, so
+        // reusing the earlier test's ?range=today would read that result.
+        const today = new Date().toLocaleDateString('en-CA', {
+          timeZone: 'Asia/Kuala_Lumpur',
+        });
+        const res = await report(`?range=custom&from=${today}&to=${today}`);
         expect(res.status).toBe(200);
         const silver = res.data.cogs.franchises
           .find((f: { category: string }) => f.category === 'pokemon')

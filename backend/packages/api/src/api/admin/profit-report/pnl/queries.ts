@@ -38,18 +38,19 @@ export async function packWindowRows(
     full_sen: string;
     bonus_sen: string;
   }>(
-    'SELECT op.pack_id, ' +
+    // The pack via one IDX_pull_open_id lookup per charge in the window (an
+    // open's pulls share one pack). Joining a DISTINCT of every pull ever made
+    // took 20 s on prod (2026-11-15).
+    'SELECT (SELECT p.pack_id FROM pull p WHERE p.open_id = ct.source_transaction_id ' +
+      'AND p.deleted_at IS NULL LIMIT 1) AS pack_id, ' +
       'COALESCE(SUM(-ROUND(ct.amount * 100)), 0)::bigint AS full_sen, ' +
       'COALESCE(SUM(-COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen ' +
       'FROM credit_transaction ct ' +
-      'LEFT JOIN (SELECT DISTINCT open_id, pack_id FROM pull ' +
-      'WHERE open_id IS NOT NULL AND deleted_at IS NULL) op ' +
-      'ON op.open_id = ct.source_transaction_id ' +
       "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open' " +
       'AND NOT EXISTS (SELECT 1 FROM ticket_spin s WHERE s.open_id = ct.source_transaction_id ' +
       'AND s.deleted_at IS NULL)' +
       ledger.sql +
-      ' GROUP BY op.pack_id',
+      ' GROUP BY 1',
     ledger.params,
   );
 
