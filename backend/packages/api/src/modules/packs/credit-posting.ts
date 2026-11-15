@@ -448,10 +448,13 @@ export function planPosting(input: CreditPosting, totals: PostingTotals): Postin
           ? `coin-flip:${input.roundId}`
           : (input.idempotencyReference ?? input.sourceTransactionId ?? null),
     },
-    // A commission posts unlocked, so the pay route and job lift an AUTO
-    // freeze after commit instead. (A frozen account cannot flip, so a coin
-    // flip win never finds one.)
-    unfreeze: deltaCents > 0 && input.reason !== 'referral_commission',
+    // An unlocked commission holds no lock to touch account state under, so
+    // the pay route and job lift an AUTO freeze after commit instead. A
+    // frozen account cannot flip (coin-flip.ts), so a win skips the read.
+    unfreeze:
+      deltaCents > 0 &&
+      input.reason !== 'coin_flip_win' &&
+      !(input.reason === 'referral_commission' && input.unlocked),
     balanceAfterCents: beforeCents + deltaCents,
     bonusAfterCents: bonusBeforeCents + bonusDeltaCents,
   };

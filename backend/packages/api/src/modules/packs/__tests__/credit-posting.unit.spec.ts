@@ -102,9 +102,12 @@ describe('planPosting variants', () => {
 
   it('a coin flip win is anchored on its round, byte-identical', () => {
     const cf = { type: 'CF' as const, payload: { type: 'CF' as const, round_id: 'r1', pull_id: 'p', card_handle: 'h', outcome: 'won' as const, value: 1, published_win_percent: 50 } };
-    expect(planPosting({ customerId: 'c', amount: 1, reason: 'coin_flip_win', roundId: 'r1', ledger: cf }, t0(0)).row).toMatchObject({
+    const win = planPosting({ customerId: 'c', amount: 1, reason: 'coin_flip_win', roundId: 'r1', ledger: cf }, t0(0));
+    expect(win.row).toMatchObject({
       reference: 'r1', source_transaction_id: 'coin-flip:r1', bonus_cents: 0, external_funded_cents: 0,
     });
+    expect(win.unfreeze).toBe(false); // a frozen account cannot flip
+
   });
 
   it('a commission row keeps NULL external, bonus and source, and never unfreezes inline', () => {
@@ -112,6 +115,8 @@ describe('planPosting variants', () => {
     const plan = planPosting({ customerId: 'c', amount: 5, reason: 'referral_commission', unlocked: true, ledger: rf }, t0(-100));
     expect(plan.row).toMatchObject({ external_funded_cents: null, bonus_cents: null, source_transaction_id: null, reference: null });
     expect(plan.unfreeze).toBe(false);
+    // Only the unlocked mode defers the unfreeze to the pay route and job.
+    expect(planPosting({ customerId: 'c', amount: 5, reason: 'referral_commission', ledger: rf }, t0(-100)).unfreeze).toBe(true);
   });
 
   it('a reversal mirrors its original exactly and never unfreezes (D2)', () => {
