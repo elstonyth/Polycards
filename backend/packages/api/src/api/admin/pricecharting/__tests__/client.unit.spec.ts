@@ -31,7 +31,6 @@ it.each([
     { status: 'error', 'error-message': 'Invalid access token' },
     'Invalid access token',
   ],
-  [410, '', 'PriceCharting rejected the API token (HTTP 410).'],
   [
     404,
     { status: 'error', 'error-message': 'Token not found' },
@@ -61,6 +60,7 @@ it.each([
   [429, { status: 'error', 'error-message': 'Too many token requests' }],
   [400, { status: 'error', 'error-message': 'Invalid API key' }],
   [410, { status: 'error', 'error-message': 'Product removed' }],
+  [410, ''],
 ])('HTTP %s %j is the feed being unavailable', async (status, body) => {
   reply(status, body);
   expect(await pcFetch('/api/product', { id: '1' })).toMatchObject({
@@ -98,11 +98,12 @@ it.each([404, 200])(
   },
 );
 
-it('a 404 without a JSON body is still card-level', async () => {
+it('a 404 without a JSON body is the feed being unavailable', async () => {
   reply(404, '<html>Not Found</html>');
   expect(await pcFetch('/api/product', { id: '1' })).toEqual({
     kind: 'error',
-    message: 'PriceCharting error (HTTP 404).',
+    message: 'PriceCharting returned an unreadable response (HTTP 404).',
+    cause: 'unavailable',
   });
 });
 

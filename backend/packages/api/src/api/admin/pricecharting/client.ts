@@ -16,7 +16,7 @@ export const PC_TOKEN_MISSING =
 // for: "auth" = the token is expired/revoked (every request will fail until it
 // is renewed), "unavailable" = timeout, outage, rate limit or any error reply we
 // do not recognise (unknown errors default to feed-level). No cause = card-level,
-// only for a 404 or a "no such product" / "not found" reply about this request.
+// only for a JSON 404 or a "no such product" / "not found" reply about this request.
 export type PcErrorCause = 'auth' | 'unavailable';
 
 export type PcResult<T> =
@@ -61,12 +61,12 @@ export async function pcFetch<
       cause: 'unavailable',
     };
   }
-  // 410 is what PriceCharting sent for "Access token has expired" (2026-10-19);
-  // a 410 with another message may be a removed product, and a bare 401/403
-  // may be an edge/WAF block, so those need a token message.
+  // Every auth reply needs a token message: the 2026-10-19 expiry was a 410 with
+  // "Access token has expired"; a 410 without one may be a removed product, and
+  // a bare 401/403 may be an edge/WAF block.
   const tokenMessage = /\btoken\b/i.test(upstreamMessage ?? '');
   if (
-    (resp.status === 410 && (tokenMessage || !upstreamMessage)) ||
+    (resp.status === 410 && tokenMessage) ||
     (tokenMessage &&
       (resp.status === 401 ||
         resp.status === 403 ||
@@ -80,7 +80,8 @@ export async function pcFetch<
       cause: 'auth',
     };
   }
-  if (resp.status === 404) {
+  // The token check runs first on purpose, so a 404 "Token not found" is auth.
+  if (resp.status === 404 && data) {
     return {
       kind: 'error',
       message: upstreamMessage ?? 'PriceCharting error (HTTP 404).',

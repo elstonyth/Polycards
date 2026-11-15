@@ -133,8 +133,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
             outageReasons.includes(i.reason) ||
             (i.reason === 'sync_error' &&
               (i.message === feed.message ||
-                /\btoken\b/i.test(i.message ?? '') ||
-                i.message === 'no token'))
+                /\btoken\b/i.test(i.message ?? '')))
           ),
       )
     : issues;

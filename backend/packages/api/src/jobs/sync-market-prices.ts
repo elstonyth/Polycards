@@ -17,8 +17,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // upstream product payload (see api/admin/pricecharting/product/route.ts) is
 // integer-pennies fields keyed by PRICE_FIELDS (e.g. "manual-only-price").
 // Typing T as a plain Record here yields exactly the raw penny fields
-// refreshCardPrice expects — no reshaping needed, `pcFetch` already returns
-// { kind: "ok", data: <raw penny fields> } | { kind: "no-token" } | { kind: "error", message }.
+// refreshCardPrice expects — no reshaping needed. The result is `PcResult` in
+// api/admin/pricecharting/client.ts; its error `cause` ('auth' | 'unavailable')
+// drives the outage handling below.
 type PcProductRaw = { status: string; 'error-message'?: string } & Record<
   string,
   unknown
@@ -104,6 +105,7 @@ export async function runMarketPriceSync(
     );
   }
   let feedAnswered = false;
+  let clearErrorLogged = false;
   const fetchProduct: typeof pcFetchRaw = async (path, params) => {
     const res = await pcFetchRaw(path, params);
     if (res.kind === 'ok') feedAnswered = true;
@@ -132,7 +134,7 @@ export async function runMarketPriceSync(
       // Every remaining card would fail the same way: stop, alert once.
       if (r.outage) {
         outage = r.outage;
-        stoppedAt = `${current.handle} (PriceCharting id ${current.pc_product_id})`;
+        stoppedAt = `${current.handle || current.id} (PriceCharting id ${current.pc_product_id})`;
         break;
       }
       if (r.changed) {
@@ -172,9 +174,12 @@ export async function runMarketPriceSync(
         await saveFeed(packs, null);
         feedFlagged = false; // a failed clear stays flagged: the next card retries
       } catch (e) {
-        logger.error(
-          `[sync-market-prices] could not clear the feed alert: ${(e as Error).message}`,
-        );
+        // Logged once per sweep; the retry on every later card stays.
+        if (!clearErrorLogged)
+          logger.error(
+            `[sync-market-prices] could not clear the feed alert: ${(e as Error).message}`,
+          );
+        clearErrorLogged = true;
       }
     }
   }

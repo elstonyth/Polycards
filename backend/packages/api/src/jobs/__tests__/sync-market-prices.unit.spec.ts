@@ -389,6 +389,18 @@ describe('PriceCharting feed outage', () => {
     expect(packs.updateSiteSettings).toHaveBeenNthCalledWith(2, cleared);
   });
 
+  it('logs a clear that keeps failing once per sweep, still syncing every card', async () => {
+    const { packs, logger, run } = setup(storedOutage);
+    okReplies();
+    packs.updateSiteSettings.mockRejectedValue(new Error('db down'));
+    await expect(run()).resolves.toBeUndefined();
+    expect(packs.applyCardPriceSync).toHaveBeenCalledTimes(3);
+    const clearErrors = logger.error.mock.calls.filter(([msg]) =>
+      /could not clear the feed alert/.test(String(msg)),
+    );
+    expect(clearErrors).toHaveLength(1);
+  });
+
   it('still sweeps when the stored alert cannot be read, clearing on the first ok', async () => {
     const { packs, logger, run } = setup();
     packs.listSiteSettings.mockRejectedValueOnce(new Error('db down'));
