@@ -74,21 +74,24 @@ export async function gamesWindowRows(
   );
 
   // Capsule charges at full price (amount = cash + bonus share; bonus_cents the
-  // bonus share), linked through the open's spins — a batch shares one open_id.
+  // bonus share), linked through the open's spins — a batch shares one open_id
+  // and one pack. Per charge in the window, by IDX_ticket_spin_open, not a
+  // DISTINCT of every spin ever made.
   const capsules = await db.raw<{
     slug: string;
     full_sen: string;
     bonus_sen: string;
   }>(
-    'SELECT s.pack_id AS slug, ' +
+    'SELECT (SELECT s.pack_id FROM ticket_spin s WHERE s.open_id = ct.source_transaction_id ' +
+      'AND s.deleted_at IS NULL LIMIT 1) AS slug, ' +
       'COALESCE(SUM(-ROUND(ct.amount * 100)), 0)::bigint AS full_sen, ' +
       'COALESCE(SUM(-COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen ' +
       'FROM credit_transaction ct ' +
-      'JOIN (SELECT DISTINCT open_id, pack_id FROM ticket_spin ' +
-      'WHERE open_id IS NOT NULL AND deleted_at IS NULL) s ON s.open_id = ct.source_transaction_id ' +
-      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open'" +
+      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open' " +
+      'AND EXISTS (SELECT 1 FROM ticket_spin s WHERE s.open_id = ct.source_transaction_id ' +
+      'AND s.deleted_at IS NULL)' +
       ledger.sql +
-      ' GROUP BY s.pack_id',
+      ' GROUP BY 1',
     ledger.params,
   );
 

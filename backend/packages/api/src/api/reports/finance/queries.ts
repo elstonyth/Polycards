@@ -127,8 +127,6 @@ export async function statusTotals(
  * Packs opened = paid pulls and spins (alias p, filtered by `pulls`). A charge
  * with neither (rows from before open_id, or an open that never produced pulls)
  * is unattributed, so every pack plus unattributed equals economy revenue.
- * ponytail: the UNION scans pull.open_id, which has no index; fine at
- * report frequency. Add an index on pull(open_id) if this reaches slow logs.
  */
 export async function packSales(
   db: ReportDb,
@@ -138,17 +136,19 @@ export async function packSales(
   bySlug: Map<string, { opened: number; cents: number }>;
   unattributedCents: number;
 }> {
+  // The pack via one IDX_pull_open_id lookup per charge in the window, else
+  // its spins' (IDX_ticket_spin_open): an open's pulls and spins share one
+  // pack (no open on the 11-02 prod copy has two). Joining a UNION of every
+  // pull and spin ever made is the shape that took 20 s in the P&L on prod.
   const revenue = await db.raw<{ pack_id: string | null; cents: string }>(
-    `SELECT op.pack_id, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
+    'SELECT COALESCE((SELECT p.pack_id FROM pull p WHERE p.open_id = ct.source_transaction_id ' +
+      'AND p.deleted_at IS NULL LIMIT 1), (SELECT s.pack_id FROM ticket_spin s ' +
+      'WHERE s.open_id = ct.source_transaction_id AND s.deleted_at IS NULL LIMIT 1)) AS pack_id, ' +
+      `COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
       'FROM credit_transaction ct ' +
-      'LEFT JOIN (SELECT open_id, pack_id FROM pull ' +
-      'WHERE open_id IS NOT NULL AND deleted_at IS NULL ' +
-      'UNION SELECT open_id, pack_id FROM ticket_spin ' +
-      'WHERE open_id IS NOT NULL AND deleted_at IS NULL) op ' +
-      'ON op.open_id = ct.source_transaction_id ' +
       "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open'" +
       ledger.sql +
-      ' GROUP BY op.pack_id',
+      ' GROUP BY 1',
     ledger.params,
   );
   // Every open that took money counts beside the money it took: a bonus

@@ -31,6 +31,8 @@ import { FLAT_PERCENT } from '../../src/modules/packs/buyback-rate';
 import { scopeFilter, type ReportDb } from '../../src/api/reports/sql';
 import { resolveGroupScope } from '../../src/api/reports/params';
 import { packWindowRows } from '../../src/api/admin/profit-report/pnl/queries';
+import { gamesWindowRows } from '../../src/api/admin/profit-report/pnl/queries-games';
+import { packSales } from '../../src/api/reports/finance/queries';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 import { vaultCards } from '../../src/api/admin/profit-report/pnl/queries-balance';
 
@@ -227,6 +229,74 @@ medusaIntegrationTestRunner({
             coin_flip_payouts: COIN_FLIP_WINS.note,
           },
         });
+      });
+    });
+
+    describe('one pack per charge', () => {
+      it('Finance pack sales and P&L capsule sales attribute each charge once', async () => {
+        const [p] = await customers().createCustomers([{ email: 'mf-attr@test.dev' }]);
+        const ct = (amount: number, bonus_cents: number, source: string | null) => ({
+          customer_id: p.id,
+          reason: 'pack_open',
+          amount: -amount,
+          bonus_cents: -bonus_cents,
+          source_transaction_id: source,
+        });
+        await packs().createCreditTransactions(
+          [
+            ct(10, 400, 'mf-batch'), // a count=3 batch: one charge, three pulls
+            ct(4, 0, 'mf-single'),
+            ct(3, 100, 'mf-capsule'), // a two-spin capsule batch
+            ct(2, 0, null), // before open_id
+            ct(1, 0, 'mf-nopulls'), // an open that never produced pulls
+            ct(0.5, 0, 'mf-gone'), // its only pull was deleted
+          ] as never,
+        );
+        const pull = (open_id: string, pack_id: string) => ({
+          customer_id: p.id,
+          pack_id,
+          card_id: 'mf-none',
+          status: 'vaulted' as const,
+          source: 'pack' as const,
+          open_id,
+          rolled_at: new Date(),
+        });
+        const pulls = await packs().createPulls([
+          pull('mf-batch', 'mf-a'),
+          pull('mf-batch', 'mf-a'),
+          pull('mf-batch', 'mf-a'),
+          pull('mf-single', 'mf-b'),
+          pull('mf-gone', 'mf-b'),
+        ] as never);
+        await db().raw('UPDATE pull SET deleted_at = now() WHERE id = ?', [
+          (pulls as unknown as { id: string }[])[4].id,
+        ]);
+        const spin = () => ({
+          customer_id: p.id,
+          pack_id: 'mf-cap',
+          tickets: 4,
+          source: 'pack' as const,
+          open_id: 'mf-capsule',
+          rolled_at: new Date(),
+        });
+        await packs().createTicketSpins([spin(), spin()] as never);
+
+        const sales = await packSales(
+          db(),
+          populationSql({ kind: 'customer', id: p.id }, 'ct.customer_id'),
+          populationSql({ kind: 'customer', id: p.id }, 'p.customer_id'),
+        );
+        expect(Object.fromEntries(sales.bySlug)).toEqual({
+          'mf-a': { opened: 3, cents: 600 }, // cash part of RM 10 with RM 4 bonus
+          'mf-b': { opened: 1, cents: 400 },
+          'mf-cap': { opened: 2, cents: 200 },
+        });
+        expect(sales.unattributedCents).toBe(200 + 100 + 50);
+
+        const games = await gamesWindowRows(db(), {}, 'all');
+        expect(games.capsules.filter((c) => c.slug === 'mf-cap')).toEqual([
+          { slug: 'mf-cap', full_sen: 300, bonus_sen: 100 },
+        ]);
       });
     });
 
