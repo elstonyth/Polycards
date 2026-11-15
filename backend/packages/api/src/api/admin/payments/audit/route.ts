@@ -49,7 +49,7 @@ export async function GET(
   let retiredTotal = 0;
   // Acknowledged on Settlement: listed, greyed, never in the badge.
   let acknowledgedTotal = totals.acknowledged;
-  const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
+  const history: GatewayAudit['history'] = [];
   // Retired gateways (globepay) were all RM.
   const others = [
     ...gatewaysFor(currency),
@@ -156,7 +156,7 @@ export async function GET(
   res.json({
     currency,
     gateway: active,
-    last_audited_at: wireDateOrNull(totals.lastAuditedAt),
+    last_audited_at: totals.lastAuditedAt,
     findings_total: findingsTotal,
     retired_total: retiredTotal,
     acknowledged_total: acknowledgedTotal,
@@ -184,7 +184,7 @@ const acknowledgement = (r: {
 
 const isRefunded = (f: { kind: string; status: string }) =>
   f.kind === 'withdrawal' && f.status === 'failed';
-// A Date from the model, by time: as a string it starts with the weekday.
+// By time, whether it is still a Date or already the ISO string sent.
 const auditedMs = (at: Date | string | null | undefined) =>
   at ? new Date(at).getTime() : 0;
 

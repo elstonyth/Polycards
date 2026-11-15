@@ -45,7 +45,7 @@ export type GatewayAuditFinding = {
 export type GatewayAudit = {
   currency: string;
   /** The rail's gateway (for RM: the active one). */
-  gateway: HistoricalGatewayId;
+  gateway: PaymentGateway;
   last_audited_at: string | null;
   /** Rows the gateway disagrees with. */
   findings_total: number;

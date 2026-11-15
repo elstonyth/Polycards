@@ -11,7 +11,7 @@ import {
 } from '@medusajs/ui';
 import { usePaymentGateway, useSavePaymentGateway } from '../../lib/queries';
 import { gatewayPreflightRefusal } from '../../lib/admin-rest';
-import type { PaymentGatewayId } from '../../lib/admin-rest';
+import type { PaymentGateway } from '../../lib/admin-rest';
 
 type GatewaySave = ReturnType<typeof useSavePaymentGateway>;
 
@@ -64,7 +64,7 @@ const GatewaySwitch = ({
   const { t } = useTranslation();
   const gateway = usePaymentGateway();
   const prompt = usePrompt();
-  const [chosen, setChosen] = useState<PaymentGatewayId | null>(null);
+  const [chosen, setChosen] = useState<PaymentGateway | null>(null);
   const [gatewayReason, setGatewayReason] = useState('');
   const activeGateway = gateway.data?.active ?? null;
   const wantedGateway = chosen ?? activeGateway;
@@ -133,7 +133,7 @@ const GatewaySwitch = ({
           </Text>
           <RadioGroup
             value={wantedGateway ?? undefined}
-            onValueChange={(value) => setChosen(value as PaymentGatewayId)}
+            onValueChange={(value) => setChosen(value as PaymentGateway)}
             className="flex flex-col gap-3"
           >
             {gateway.data.gateways.map((g) => (

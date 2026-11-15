@@ -688,7 +688,13 @@ export async function exportPnlXlsx(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
+  | 'today'
+  | 'yesterday'
+  | '7d'
+  | '30d'
+  | 'month'
+  | 'last_month'
+  | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -792,7 +798,9 @@ import type {
   GatewayAudit,
 } from '@acme/api/admin/payments/audit';
 import type { MoneyIntegrity } from '@acme/api/admin/payments/integrity';
-import type { CreditDepositResult } from '@acme/api/admin/payments/deposits/[id]/credit';
+import type {
+  CreditDepositResult,
+} from '@acme/api/admin/payments/deposits/[id]/credit';
 import type {
   GatewayPreflightRefusal,
   PaymentGateway,
@@ -805,16 +813,17 @@ export type {
   SettlementPeriod,
   SettlementReport,
 } from '@acme/api/admin/payments/settlement';
+export type { GatewayBalance } from '@acme/api/admin/payments/balance';
 export type {
-  GatewayBalance,
   GatewayAudit,
-  MoneyIntegrity,
+  GatewayAuditFinding,
+} from '@acme/api/admin/payments/audit';
+export type { MoneyIntegrity } from '@acme/api/admin/payments/integrity';
+export type {
+  PaymentGateway,
   PaymentGatewaySetting,
-  PaymentFxState,
-};
-export type { GatewayAuditFinding } from '@acme/api/admin/payments/audit';
-/** The gateways the switch can pick. */
-export type PaymentGatewayId = PaymentGateway;
+} from '@acme/api/admin/payments/gateway';
+export type { PaymentFxState } from '@acme/api/admin/payments/fx';
 
 export async function getSettlementReport(
   granularity: SettlementGranularity,
@@ -844,7 +853,11 @@ export const acknowledgeAuditFinding = (body: {
   id: string;
   note: string;
   reason: string;
-}) => postJson<AcknowledgeResult>('/admin/payments/audit/acknowledge', body);
+}) =>
+  postJson<AcknowledgeResult>(
+    '/admin/payments/audit/acknowledge',
+    body,
+  );
 
 export const getMoneyIntegrity = () =>
   getJson<MoneyIntegrity>('/admin/payments/integrity');
@@ -868,7 +881,8 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    Partial<GatewayPreflightRefusal> | undefined;
+    | Partial<GatewayPreflightRefusal>
+    | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -880,7 +894,7 @@ export async function getPaymentGateway(): Promise<PaymentGatewaySetting> {
 }
 
 export async function savePaymentGateway(input: {
-  gateway: PaymentGatewayId;
+  gateway: PaymentGateway;
   reason: string;
   /** Switch even though the live check found problems. */
   force?: boolean;
@@ -1150,7 +1164,11 @@ export interface DeliveryTrackingSnapshot {
   tracking_number: string;
   carrier: 'ninjavan' | 'poslaju' | 'dhl_ecommerce' | null;
   state:
-    'delivered' | 'in_transit' | 'problem' | 'not_found' | 'unknown_carrier';
+    | 'delivered'
+    | 'in_transit'
+    | 'problem'
+    | 'not_found'
+    | 'unknown_carrier';
   event: string | null;
   event_at: string | null;
   delivered_at: string | null;
@@ -1589,7 +1607,11 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // pending two sweeps later with a gateway id, i.e. possibly a payment that
 // landed at the gateway without ever being credited here.
 export type GatewayDepositView =
-  'pending' | 'settled' | 'failed' | 'expired' | 'all';
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'expired'
+  | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1665,7 +1687,11 @@ export function getGatewayDeposits(
 // always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GatewayWithdrawalView =
-  'held' | 'pending' | 'settled' | 'failed' | 'all';
+  | 'held'
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'all';
 
 export interface GatewayWithdrawal {
   id: string;
@@ -2277,7 +2303,15 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 
 /** The ledger event types (POLYCARD-BACK §5.1). */
 export type LedgerType =
-  'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF' | 'CF';
+  | 'TP'
+  | 'SP'
+  | 'SE'
+  | 'OD'
+  | 'AD'
+  | 'WP'
+  | 'WD'
+  | 'RF'
+  | 'CF';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw
