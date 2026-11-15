@@ -571,12 +571,15 @@ medusaIntegrationTestRunner({
           count: 1,
           liability: displaySen / 100,
         });
-        // Profit: vaulted and EVERY delivering pull at sell-back (owner G3).
+        // Profit, owner decision 2026-11-16 (G3), P&L decision 15: owed is the
+        // vaulted card and the one in a requested order; the card in a shipped
+        // order left as goods. Before: owed 3 cards, shipped 1.
         expect(await valued('vault', 'delivering')).toBe(2 * vaultSen);
         const owed = await packs().profitOwed('all', fx);
-        expect([owed.cardCount, owed.cardSellbackCents]).toEqual([3, 3 * vaultSen]);
-        expect([owed.shippedCount, owed.shippedCents]).toEqual([1, vaultSen]);
-        // P&L: only the delivering pull in an active order.
+        expect([owed.cardCount, owed.cardSellbackCents]).toEqual([2, 2 * vaultSen]);
+        expect(owed.deliveringCount).toBe(1);
+        expect([owed.shippedCount, owed.shippedCents]).toEqual([2, 2 * vaultSen]);
+        // P&L: the same owed cards.
         expect(await vaultCards(db(), 'all', fx)).toEqual({
           vault: { cards: 1, sen: vaultSen },
           processing: { cards: 1, sen: vaultSen },

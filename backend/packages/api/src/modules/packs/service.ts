@@ -324,6 +324,8 @@ import {
   GATEWAY,
   LIVE_VALUE_USD_SQL,
   cardValueSen,
+  inActiveOrderSql,
+  inShippedOrderSql,
   playthroughBasisSenSql,
   populationSql,
 } from './money-figures';
@@ -14170,9 +14172,10 @@ class PacksModuleService extends MedusaService({
   // customers: their normal (non-bonus) wallet balance, split by whether they
   // ever topped up (no top-up = no withdrawal or delivery, #748); their bonus;
   // payouts requested but not paid; referral commission in a closed week not
-  // paid yet; and the cards still owed (vaulted, or in an active delivery) at
-  // the vault sell-back rate, split the same way. Cards already delivered are
-  // valued at the same basis as a cost (they left as goods). A negative
+  // paid yet; and the cards still owed (vaulted, or delivering in an order
+  // requested to ready to ship: P&L decision 15) at the vault sell-back rate,
+  // split the same way. Cards delivered, or delivering in a shipped order,
+  // are valued at the same basis as a cost (they left as goods). A negative
   // per-customer balance owes nobody anything. Run one after the other: one
   // pool connection at a time.
   @InjectManager()
@@ -14234,6 +14237,8 @@ class PacksModuleService extends MedusaService({
       // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
       `WITH t AS (
          SELECT p.status,
+                p.status = 'vaulted' OR (p.status = 'delivering' AND ${inActiveOrderSql('p.')}) AS owed,
+                p.status = 'delivered' OR (p.status = 'delivering' AND ${inShippedOrderSql('p.')}) AS gone,
                 ${cardValueSen('vault')} AS cents,
                 EXISTS (
                   SELECT 1 FROM credit_transaction ct
@@ -14245,13 +14250,13 @@ class PacksModuleService extends MedusaService({
           WHERE p.status IN ('vaulted', 'delivering', 'delivered')
             AND p.deleted_at IS NULL${filterSql(scope, 'p.customer_id').sql}
        )
-       SELECT (count(*) FILTER (WHERE status <> 'delivered' AND has_topup))::bigint AS n,
-              (count(*) FILTER (WHERE status = 'delivering' AND has_topup))::bigint AS delivering,
-              COALESCE(SUM(cents) FILTER (WHERE status <> 'delivered' AND has_topup), 0)::bigint AS cents,
-              (count(*) FILTER (WHERE status <> 'delivered' AND NOT has_topup))::bigint AS n_no_topup,
-              COALESCE(SUM(cents) FILTER (WHERE status <> 'delivered' AND NOT has_topup), 0)::bigint AS cents_no_topup,
-              (count(*) FILTER (WHERE status = 'delivered'))::bigint AS shipped,
-              COALESCE(SUM(cents) FILTER (WHERE status = 'delivered'), 0)::bigint AS shipped_cents
+       SELECT (count(*) FILTER (WHERE owed AND has_topup))::bigint AS n,
+              (count(*) FILTER (WHERE owed AND status = 'delivering' AND has_topup))::bigint AS delivering,
+              COALESCE(SUM(cents) FILTER (WHERE owed AND has_topup), 0)::bigint AS cents,
+              (count(*) FILTER (WHERE owed AND NOT has_topup))::bigint AS n_no_topup,
+              COALESCE(SUM(cents) FILTER (WHERE owed AND NOT has_topup), 0)::bigint AS cents_no_topup,
+              (count(*) FILTER (WHERE gone))::bigint AS shipped,
+              COALESCE(SUM(cents) FILTER (WHERE gone), 0)::bigint AS shipped_cents
          FROM t`,
       [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT, ...filterParams(scope)],
     );

@@ -199,6 +199,33 @@ export const GATEWAY = {
     `(${t}amount - ${t}gateway_amount * COALESCE(${t}amount_settled, ${t}amount) / NULLIF(${t}amount, 0) * ${t}fx_mid)`,
 };
 
+// ── Cards in delivery ────────────────────────────────────────────────────────
+
+/** The delivery-order statuses by shelf bucket (inventoryLifecycleBuckets in
+ *  service.ts; 'packing' = legacy 'processed'), as SQL lists. */
+export const ORDER_STATUSES = {
+  requested: "('requested', 'processed', 'packing')",
+  readyToShip: "('ready_to_ship', 'pending_ship')",
+  shipped: "('shipped', 'completed', 'delivered')",
+} as const;
+
+const inOrderSql = (p: string, statuses: string): string =>
+  'EXISTS (SELECT 1 FROM delivery_order_item i ' +
+  'JOIN delivery_order o ON o.id = i.delivery_order_id AND o.deleted_at IS NULL ' +
+  `WHERE i.pull_id = ${p}id AND i.deleted_at IS NULL AND (${statuses}))`;
+
+/** A delivering pull still on our shelf: in an order requested to ready to
+ *  ship (P&L decision 15). The P&L and Profit count it as owed. */
+export const inActiveOrderSql = (p: string): string =>
+  inOrderSql(
+    p,
+    `o.status IN ${ORDER_STATUSES.requested} OR o.status IN ${ORDER_STATUSES.readyToShip}`,
+  );
+
+/** A delivering pull whose order has shipped: it left as goods (a cost). */
+export const inShippedOrderSql = (p: string): string =>
+  inOrderSql(p, `o.status IN ${ORDER_STATUSES.shipped}`);
+
 // ── Card value ───────────────────────────────────────────────────────────────
 
 /** A card's live DISPLAY value in USD (FMV × market multiplier). Requires

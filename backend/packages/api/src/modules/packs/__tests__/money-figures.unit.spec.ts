@@ -12,6 +12,8 @@ import {
   TOPUPS_LEDGER,
   bonusSourceSql,
   cardValueSen,
+  inActiveOrderSql,
+  inShippedOrderSql,
   playthroughBasisSenSql,
   fromCustomerScope,
   fromGroupScope,
@@ -165,6 +167,19 @@ describe('gateway figures', () => {
     for (const f of Object.values(GATEWAY)) {
       expect(f('w.')).not.toMatch(/\?|::/);
     }
+  });
+});
+
+describe('cards in delivery', () => {
+  it("inActiveOrderSql is the P&L balance's processing test", () => {
+    expect(inActiveOrderSql('p.')).toBe(
+      'EXISTS (SELECT 1 FROM delivery_order_item i ' +
+        'JOIN delivery_order o ON o.id = i.delivery_order_id AND o.deleted_at IS NULL ' +
+        "WHERE i.pull_id = p.id AND i.deleted_at IS NULL AND (o.status IN ('requested', 'processed', 'packing') OR o.status IN ('ready_to_ship', 'pending_ship')))",
+    );
+    expect(inShippedOrderSql('p.')).toContain(
+      "(o.status IN ('shipped', 'completed', 'delivered'))",
+    );
   });
 });
 

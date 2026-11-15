@@ -1,8 +1,10 @@
 import type { CustomerScope } from '../../../../modules/packs/real-customers';
 import { filterSql } from '../../../../modules/packs/real-customers';
 import {
+  ORDER_STATUSES,
   bonusSourceSql,
   cardValueSen,
+  inActiveOrderSql,
   playthroughBasisSenSql,
 } from '../../../../modules/packs/money-figures';
 import {
@@ -22,9 +24,9 @@ import type { ReportDb } from '../../../reports/sql';
 
 // The delivery-order statuses that still hold a card on the shelf
 // (inventoryLifecycleBuckets in service.ts; 'packing' = legacy 'processed').
-const REQUESTED = "('requested', 'processed', 'packing')";
-const READY_TO_SHIP = "('ready_to_ship', 'pending_ship')";
-const SHIPPED = "('shipped', 'completed', 'delivered')";
+const REQUESTED = ORDER_STATUSES.requested;
+const READY_TO_SHIP = ORDER_STATUSES.readyToShip;
+const SHIPPED = ORDER_STATUSES.shipped;
 
 /** Every received card's shelf counts, the Stock page's (inventory-view.ts):
  *  on hand = GRN lines + invoice lines not transferred from a GRN − shipped;
@@ -163,9 +165,7 @@ export async function vaultCards(
   }>(
     'WITH t AS (SELECT CASE ' +
       "WHEN p.status = 'vaulted' THEN 'vault' " +
-      "WHEN p.status = 'delivering' AND EXISTS (SELECT 1 FROM delivery_order_item i " +
-      'JOIN delivery_order o ON o.id = i.delivery_order_id AND o.deleted_at IS NULL ' +
-      `WHERE i.pull_id = p.id AND i.deleted_at IS NULL AND (o.status IN ${REQUESTED} OR o.status IN ${READY_TO_SHIP})) ` +
+      `WHEN p.status = 'delivering' AND ${inActiveOrderSql('p.')} ` +
       "THEN 'processing' END AS k, " +
       `${cardValueSen('vault')} AS sen ` +
       'FROM pull p JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
