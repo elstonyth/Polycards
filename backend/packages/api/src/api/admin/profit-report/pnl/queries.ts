@@ -6,6 +6,7 @@ import type {
   FreeSource,
   PackMeta,
   PackWindowRows,
+  ShippingWindow,
 } from '../../../../modules/packs/pnl';
 import {
   weightedAverageCost,
@@ -255,4 +256,31 @@ export async function dayRates(db: ReportDb): Promise<DayRate[]> {
       "WHERE pair = 'USD_MYR' ORDER BY day",
   );
   return rows.map((r) => ({ day: r.day, rate: Number(r.rate) }));
+}
+
+/** Delivery charge and insurance by order creation date, canceled orders left
+ *  out (spec §5). Prize and vault orders pay their zone fee alike. */
+export async function shippingWindow(
+  db: ReportDb,
+  window: ReportWindow,
+  scope: CustomerScope,
+): Promise<ShippingWindow> {
+  const orders = and(
+    windowFilter(window, 'o.created_at'),
+    filterSql(scope, 'o.customer_id'),
+  );
+  const { rows } = await db.raw<{ ship: string; ins: string; n: string }>(
+    'SELECT COALESCE(SUM(ROUND(COALESCE(o.shipping_fee, 0) * 100)), 0)::bigint AS ship, ' +
+      'COALESCE(SUM(ROUND(COALESCE(o.insurance_fee, 0) * 100)), 0)::bigint AS ins, ' +
+      'COUNT(*)::bigint AS n FROM delivery_order o ' +
+      "WHERE o.deleted_at IS NULL AND o.status <> 'canceled'" +
+      orders.sql,
+    orders.params,
+  );
+  const r = rows[0];
+  return {
+    shipping_sen: Number(r?.ship ?? 0),
+    insurance_sen: Number(r?.ins ?? 0),
+    orders: Number(r?.n ?? 0),
+  };
 }

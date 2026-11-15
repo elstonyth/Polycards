@@ -84,8 +84,13 @@ function figures(
   const paid = w.paid.get(slug) ?? { full_sen: 0, bonus_sen: 0 };
   const free_qty = zeroFree();
   for (const f of w.free) if (f.slug === slug) free_qty[f.source] += f.qty;
-  const freeCount = FREE_SOURCES.reduce((n, s) => n + free_qty[s], 0);
-  const free_sen = freeCount * priceSen;
+  // Welcome packs count at RM 0 whatever the pack's price (decision 20), the
+  // same rule as the marketing section, so the two always cancel (review F4).
+  const paidFree = FREE_SOURCES.reduce(
+    (n, s) => n + (s === 'welcome' ? 0 : free_qty[s]),
+    0,
+  );
+  const free_sen = paidFree * priceSen;
   return {
     opens: w.opens.get(slug) ?? 0,
     paid_sen: paid.full_sen,
@@ -368,5 +373,100 @@ export function cogsSection(
     },
     estimated_cards: sum((f) => f.estimated_cards, false),
     franchises: tree.franchises,
+  };
+}
+
+// ── Shipping (other revenue) and totals (spec §5, §8) ────────────────────────
+
+export type ShippingWindow = {
+  shipping_sen: number;
+  insurance_sen: number;
+  orders: number;
+};
+
+export type ShippingSection = {
+  shipping: Pair;
+  insurance: Pair;
+  total: Pair;
+  orders: { current: number; previous: number | null };
+};
+
+/** Delivery charge and insurance by order creation date, canceled orders out. */
+export function shippingSection(
+  current: ShippingWindow,
+  previous: ShippingWindow | null,
+): ShippingSection {
+  const pair = (pick: (w: ShippingWindow) => number): Pair => ({
+    current_sen: pick(current),
+    previous_sen: previous ? pick(previous) : null,
+  });
+  return {
+    shipping: pair((w) => w.shipping_sen),
+    insurance: pair((w) => w.insurance_sen),
+    total: pair((w) => w.shipping_sen + w.insurance_sen),
+    orders: {
+      current: current.orders,
+      previous: previous ? previous.orders : null,
+    },
+  };
+}
+
+export type TotalsInput = {
+  revenue: Record<string, Pair>;
+  other_revenue: Record<string, Pair>;
+  cogs: Record<string, Pair>;
+  marketing: Pair;
+};
+
+export type TotalsSection = {
+  /** The named lines each total was summed from, for the page. */
+  parts: TotalsInput;
+  revenue: Pair;
+  other_revenue: Pair;
+  total_revenue: Pair;
+  cogs: Pair;
+  gross: Pair;
+  marketing: Pair;
+  net: Pair;
+};
+
+const sumPairs = (pairs: Pair[]): Pair =>
+  pairs.reduce<Pair>(
+    (a, b) => ({
+      current_sen: a.current_sen + b.current_sen,
+      previous_sen:
+        a.previous_sen === null || b.previous_sen === null
+          ? null
+          : a.previous_sen + b.previous_sen,
+    }),
+    { current_sen: 0, previous_sen: 0 },
+  );
+
+const minus = (a: Pair, b: Pair): Pair =>
+  sumPairs([
+    a,
+    {
+      current_sen: -b.current_sen,
+      previous_sen: b.previous_sen === null ? null : -b.previous_sen,
+    },
+  ]);
+
+/** The owner's bottom line (decision 7: no discount line): revenue + other
+ *  revenue = total revenue; total − COGS = gross; gross − marketing = net. */
+export function totalsSection(i: TotalsInput): TotalsSection {
+  const revenue = sumPairs(Object.values(i.revenue));
+  const other_revenue = sumPairs(Object.values(i.other_revenue));
+  const total_revenue = sumPairs([revenue, other_revenue]);
+  const cogs = sumPairs(Object.values(i.cogs));
+  const gross = minus(total_revenue, cogs);
+  return {
+    parts: i,
+    revenue,
+    other_revenue,
+    total_revenue,
+    cogs,
+    gross,
+    marketing: i.marketing,
+    net: minus(gross, i.marketing),
   };
 }

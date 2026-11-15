@@ -6,18 +6,39 @@ import {
   cogsSection,
   cogsSlugsOf,
   packSalesSection,
+  shippingSection,
   slugsOf,
+  totalsSection,
 } from '../../../../modules/packs/pnl';
+import { marketingSection } from '../../../../modules/packs/pnl-marketing';
+import {
+  assetsSection,
+  floatingSection,
+} from '../../../../modules/packs/pnl-balance';
+import { marketingWindowRows } from './queries-marketing';
+import {
+  freeCreditUnused,
+  stockRows,
+  vaultCards,
+  walletRows,
+} from './queries-balance';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { resolveFxRate } from '../../../../modules/packs/pricing';
 import { reportDb } from '../../../reports/sql';
+import {
+  capsuleSlugsOf,
+  coinFlipSection,
+  luckyDrawSection,
+} from '../../../../modules/packs/pnl-games';
+import { gamesWindowRows } from './queries-games';
 import {
   cardCosts,
   cogsWindowRows,
   dayRates,
   packMeta,
   packWindowRows,
+  shippingWindow,
 } from './queries';
 
 const RANGES = [...STATS_RANGES, 'all'] as const;
@@ -70,10 +91,15 @@ export async function GET(
   const previous = prev ? await packWindowRows(db, prev, scope) : null;
   const cogsCurrent = await cogsWindowRows(db, cur, scope);
   const cogsPrevious = prev ? await cogsWindowRows(db, prev, scope) : null;
+  const gamesCurrent = await gamesWindowRows(db, cur, scope);
+  const gamesPrevious = prev ? await gamesWindowRows(db, prev, scope) : null;
+  const mkCurrent = await marketingWindowRows(db, cur, scope);
+  const mkPrevious = prev ? await marketingWindowRows(db, prev, scope) : null;
   const meta = await packMeta(db, [
     ...new Set([
       ...slugsOf(current, previous),
       ...cogsSlugsOf(cogsCurrent, cogsPrevious),
+      ...capsuleSlugsOf(gamesCurrent, gamesPrevious),
     ]),
   ]);
   const handles = [
@@ -88,6 +114,44 @@ export async function GET(
   const fallbackRate = await resolveFxRate(
     req.scope.resolve<PacksModuleService>(PACKS_MODULE),
   );
+  const shipCurrent = await shippingWindow(db, cur, scope);
+  const shipPrevious = prev ? await shippingWindow(db, prev, scope) : null;
+  // Point in time (as of now): the range does not apply.
+  const stock = await stockRows(db);
+  const stockCosts = await cardCosts(
+    db,
+    stock.map((x) => x.handle),
+  );
+  const wallets = await walletRows(db, scope);
+  const freeCredit = await freeCreditUnused(db, scope);
+  const balanceCards = await vaultCards(db, scope, fallbackRate);
+
+  const packSales = packSalesSection(meta, current, previous);
+  const cogs = cogsSection(
+    meta,
+    cogsCurrent,
+    cogsPrevious,
+    costs,
+    rates,
+    fallbackRate,
+  );
+  const coinFlip = coinFlipSection(gamesCurrent, gamesPrevious);
+  const luckyDraw = luckyDrawSection(
+    meta,
+    gamesCurrent,
+    gamesPrevious,
+    rates,
+    fallbackRate,
+  );
+  const shipping = shippingSection(shipCurrent, shipPrevious);
+  const marketing = marketingSection(
+    meta,
+    current,
+    previous,
+    mkCurrent,
+    mkPrevious,
+    fallbackRate,
+  );
 
   res.json({
     as_of: now,
@@ -99,14 +163,27 @@ export async function GET(
     previous: windows
       ? { from: windows.previous.from, to: windows.previous.to }
       : null,
-    pack_sales: packSalesSection(meta, current, previous),
-    cogs: cogsSection(
-      meta,
-      cogsCurrent,
-      cogsPrevious,
-      costs,
-      rates,
-      fallbackRate,
-    ),
+    pack_sales: packSales,
+    cogs,
+    marketing,
+    coin_flip: coinFlip,
+    lucky_draw: luckyDraw,
+    shipping,
+    totals: totalsSection({
+      revenue: {
+        pack_sales: packSales.total,
+        coin_flip: coinFlip.revenue,
+        lucky_draw: luckyDraw.revenue,
+      },
+      other_revenue: { shipping: shipping.total },
+      cogs: {
+        packs: cogs.total,
+        coin_flip: coinFlip.cost,
+        lucky_draw: luckyDraw.cost,
+      },
+      marketing: marketing.total,
+    }),
+    assets: assetsSection(stock, stockCosts),
+    floating: floatingSection(wallets, freeCredit, balanceCards),
   });
 }

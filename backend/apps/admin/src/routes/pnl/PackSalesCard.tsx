@@ -12,7 +12,8 @@ const freeCount = (q: Record<string, number>) =>
 export const PackSalesCard = ({ data }: { data: PnlReport['pack_sales'] }) => {
   const { t } = useTranslation();
   const footer: FooterRow[] = [
-    ...(data.unattributed.current_sen !== 0
+    ...(data.unattributed.current_sen !== 0 ||
+    (data.unattributed.previous_sen ?? 0) !== 0
       ? [{ label: t('pnl.packSales.unattributed'), pair: data.unattributed }]
       : []),
     { label: t('pnl.packSales.grandTotal'), pair: data.total, strong: true },

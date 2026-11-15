@@ -612,6 +612,11 @@ export async function getProfitReport(
   return getJson<ProfitReport>(`/admin/profit-report?${qs.toString()}`);
 }
 
+import type { PnlMarketing } from '../routes/pnl/pnl-marketing-types';
+import type {
+  PnlAssetsSection,
+  PnlFloatingSection,
+} from '../routes/pnl/pnl-balance-types';
 // ── P&L report (GET /admin/profit-report/pnl) ──────────────────────────────
 // Amounts are integer sen; previous_sen is null for range=all.
 
@@ -673,6 +678,70 @@ export type PnlReport = {
     estimated_cards: number;
     franchises: PnlPackTree<PnlCogsFigures>;
   };
+  coin_flip: PnlCoinFlipSection;
+  lucky_draw: PnlLuckyDrawSection;
+  shipping: PnlShippingSection;
+  marketing: PnlMarketing;
+  totals: PnlTotalsSection;
+  assets: PnlAssetsSection;
+  floating: PnlFloatingSection;
+};
+
+export type PnlShippingSection = {
+  shipping: PnlPair;
+  insurance: PnlPair;
+  total: PnlPair;
+  orders: { current: number; previous: number | null };
+};
+
+export type PnlTotalsSection = {
+  parts: {
+    revenue: Record<string, PnlPair>;
+    other_revenue: Record<string, PnlPair>;
+    cogs: Record<string, PnlPair>;
+    marketing: PnlPair;
+  };
+  revenue: PnlPair;
+  other_revenue: PnlPair;
+  total_revenue: PnlPair;
+  cogs: PnlPair;
+  gross: PnlPair;
+  marketing: PnlPair;
+  net: PnlPair;
+};
+
+/** A count with the window before; previous is null for range=all. */
+export type PnlCount = { current: number; previous: number | null };
+
+export type PnlCoinFlipSection = {
+  revenue: PnlPair;
+  cost: PnlPair;
+  bet_value: PnlPair;
+  flips: PnlCount;
+  tickets_lost: PnlCount;
+  tickets_won: PnlCount;
+};
+
+export type PnlCapsuleFigures = {
+  spins: number;
+  sales_sen: number;
+  bonus_sen: number;
+};
+
+export type PnlLuckyDrawSection = {
+  revenue: PnlPair;
+  capsules: {
+    slug: string;
+    title: string;
+    price_sen: number;
+    current: PnlCapsuleFigures;
+    previous: PnlCapsuleFigures | null;
+  }[];
+  cost: PnlPair;
+  credit_prizes: PnlPair;
+  card_prizes: PnlPair;
+  prize_count: { credit: PnlCount; card: PnlCount };
+  tickets: { reason: string; given: PnlCount; spent: PnlCount }[];
 };
 
 // Same query contract as getProfitReport.

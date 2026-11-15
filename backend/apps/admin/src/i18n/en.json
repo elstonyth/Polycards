@@ -1631,7 +1631,7 @@
     },
     "cogs": {
       "title": "Cost of goods sold",
-      "subtitle": "What the cards cost: buyback credit paid out plus the supplier cost of cards shipped. Reward cards (check-in, task, challenge and Lucky Draw cards) are a marketing cost, so their buybacks and shipping are left out. Card value pulled and supplier purchases are shown for information and are not part of the cost.",
+      "subtitle": "What the cards cost: buyback credit paid out plus the supplier cost of cards shipped. Reward cards from check-in, tasks and the weekly challenge are a marketing cost, and Lucky Draw prize cards are counted under Lucky Draw prizes, so their buybacks and shipping are left out here. Card value pulled and supplier purchases are shown for information and are not part of the cost.",
       "estimatedNote_one": "{{count}} shipped card has no supplier cost yet: it is costed at market value × that day's exchange rate.",
       "estimatedNote_other": "{{count}} shipped cards have no supplier cost yet: they are costed at market value × that day's exchange rate.",
       "estimatedHint_one": "{{count}} card costed at market value (no purchase invoice)",
@@ -1646,6 +1646,149 @@
       "pulledTotal": "Card value pulled (information)",
       "purchases": "Supplier purchases in the period (information)",
       "empty": "No buybacks or shipped cards in this period."
+    },
+    "coinFlip": {
+      "title": "Coin flip",
+      "subtitle": "Revenue is the cards players lost, at the value they were flipped for, free reward cards included. Cost is the credit paid out on wins. Card bet value and tickets are for information; tickets are counts, never money.",
+      "line": "Line",
+      "amount": "Amount",
+      "vsPrevious": "vs previous",
+      "revenue": "Cards lost by players (revenue)",
+      "betValue": "Card bet value, won + lost (information)",
+      "ticketsStaked": "Tickets staked (information)",
+      "ticketsLost": "Tickets lost by players",
+      "cost": "Credit paid on wins (COGS)",
+      "ticketsWon": "Tickets paid out on wins",
+      "flips": "Flips settled"
+    },
+    "luckyDraw": {
+      "title": "Lucky Draw",
+      "subtitle": "Revenue is capsule sales at full price (cash and bonus credit). Cost is the prizes given: credit prizes at their amount, card prizes at the vault buyback value (90% of the card's price today). Tickets are counts, never money.",
+      "line": "Prizes given",
+      "amount": "Amount",
+      "vsPrevious": "vs previous",
+      "capsule": "Capsule",
+      "spins": "Spins",
+      "sales": "Sales",
+      "bonusHint": "Of which bonus credit: {{amount}}",
+      "salesTotal": "Capsule sales total",
+      "creditPrizes_one": "{{count}} credit prize",
+      "creditPrizes_other": "{{count}} credit prizes",
+      "cardPrizes_one": "{{count}} card prize",
+      "cardPrizes_other": "{{count}} card prizes",
+      "cost": "Prizes given (COGS)",
+      "ticketReason": "Tickets",
+      "ticketsGiven": "Given",
+      "ticketsSpent": "Spent",
+      "vsPreviousSpent": "vs previous",
+      "reason": {
+        "pack_spin": "Capsule spins",
+        "task_claim": "Tasks",
+        "coin_flip": "Coin flip",
+        "admin_grant": "Admin grants",
+        "refund": "Refunds",
+        "entry": "Entered in draws"
+      }
+    },
+    "marketing": {
+      "title": "Marketing",
+      "subtitle": "What promotions cost: free credit customers spent, free reward cards, free packs at the pack's price, and referral commission. Free credit spent is matched to each customer's oldest free credit first. Lucky Draw prizes are in the Lucky Draw section. Free credit given out is shown for information and is not part of the total.",
+      "item": "Item",
+      "qty": "Qty",
+      "amount": "Amount",
+      "creditUsed": "Free credit used",
+      "luckyDrawUsed": "Lucky Draw prize credit used (in Lucky Draw cost, not here)",
+      "freeCards": "Free cards (sold back = amount paid, the rest = 90% of today's value)",
+      "cardsQty_one": "{{cards}} card · {{sold}} sold back",
+      "cardsQty_other": "{{cards}} cards · {{sold}} sold back",
+      "freePacks": "Free packs",
+      "welcomeFree": "Welcome pack · RM 0",
+      "packQtyHint": "Admin gifts {{adjustment}} · check-in {{checkin}} · tasks {{task}} · welcome {{welcome}} · other {{other}}",
+      "referral": "Referral commission",
+      "cashRewards": "Rewards paid as cash (before free credit started, 11 Oct)",
+      "cashSource": {
+        "checkin": "Check-in",
+        "task": "Tasks",
+        "weekly_challenge": "Weekly challenge",
+        "other": "Other rewards"
+      },
+      "total": "Marketing total",
+      "creditGiven": "Free credit given (information, not in the total)",
+      "removed": "Removed by admin",
+      "returnedBack": "Came back by a refund or reversal (taken off the total)",
+      "source": {
+        "adjustment": "Admin gifts",
+        "checkin": "Check-in",
+        "task": "Tasks",
+        "weekly_challenge": "Weekly challenge",
+        "returned": "Spent again after a refund",
+        "lucky_draw": "Lucky Draw prizes"
+      }
+    },
+    "assets": {
+      "title": "Assets",
+      "subtitle": "As of now: cards on the shelf that no customer order is holding (on hand minus requested and ready to ship), at the average price paid to suppliers. The same for every period and scope.",
+      "unsold": "Unsold stock",
+      "cards_one": "{{count, number}} card",
+      "cards_other": "{{count, number}} cards",
+      "noCostNote_one": "{{count}} unsold card has no supplier cost yet, so it is counted but not valued.",
+      "noCostNote_other": "{{count}} unsold cards have no supplier cost yet, so they are counted but not valued."
+    },
+    "floating": {
+      "title": "Customer floating money",
+      "subtitle": "As of now: what customers hold in their wallets, plus their cards at the 90% sell-back price. Ignores the period picked above.",
+      "withdrawable": "Withdrawable now",
+      "freeCredit": "Free credit not used yet",
+      "sources": {
+        "adjustment": "Admin adjustments",
+        "checkin": "Check-in",
+        "task": "Tasks",
+        "weekly_challenge": "Weekly challenge",
+        "returned": "Came back by a refund or reversal",
+        "lucky_draw": "Lucky Draw prizes"
+      },
+      "locked": "Locked cash (still to play through, frozen, or never topped up)",
+      "wallets": "Customer wallets",
+      "vault": "Cards in vaults",
+      "processing": "Cards in orders being processed",
+      "cards_one": "{{count, number}} card",
+      "cards_other": "{{count, number}} cards",
+      "cardsTotal": "Customer cards",
+      "total": "Customer floating money"
+    },
+    "shipping": {
+      "title": "Shipping",
+      "subtitle_one": "Other revenue: delivery charge and insurance on {{count}} order, by order date. Canceled orders are left out.",
+      "subtitle_other": "Other revenue: delivery charge and insurance on {{count}} orders, by order date. Canceled orders are left out.",
+      "charge": "Delivery charge",
+      "insurance": "Insurance",
+      "total": "Shipping total"
+    },
+    "totals": {
+      "title": "Profit and loss",
+      "subtitle": "Revenue + other revenue = total revenue. Total revenue − COGS = gross profit. Gross profit − marketing = net profit.",
+      "line": "Line",
+      "amount": "Amount",
+      "revenue": "Revenue",
+      "otherRevenue": "Other revenue",
+      "totalRevenue": "Total revenue",
+      "cogs": "COGS",
+      "gross": "Gross profit",
+      "marketing": "Marketing",
+      "net": "Net profit",
+      "parts": {
+        "revenue": {
+          "pack_sales": "Pack sales",
+          "coin_flip": "Coin flip",
+          "lucky_draw": "Lucky Draw capsules"
+        },
+        "other_revenue": { "shipping": "Shipping" },
+        "cogs": {
+          "packs": "Pack cards (buyback + supplier cost)",
+          "coin_flip": "Coin flip paid out",
+          "lucky_draw": "Lucky Draw prizes"
+        }
+      }
     }
   },
   "profit": {

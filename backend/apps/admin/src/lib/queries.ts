@@ -324,7 +324,10 @@ export const usePnlReport = (
     queryFn: () => getPnlReport(range, from, to, scope),
     placeholderData: keepPreviousData,
     enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
-    refetchOnWindowFocus: true,
+    // About 40 read-only statements (~15 s on prod): never refetch on focus,
+    // and keep a loaded period for 5 minutes. The pool is shared with the storefront.
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60_000,
   });
 
 // Stats page. keepPreviousData so switching presets swaps the numbers without

@@ -2,6 +2,8 @@ import {
   cogsSection,
   packSalesSection,
   rateOn,
+  shippingSection,
+  totalsSection,
   type CogsWindowRows,
   type PackMeta,
   type PackWindowRows,
@@ -118,6 +120,22 @@ describe('packSalesSection', () => {
     expect(w.current.free_qty.welcome).toBe(40);
     expect(w.current.total_sen).toBe(0);
     expect(s.total.current_sen).toBe(0);
+  });
+
+  it('values welcome packs at RM 0 even on a priced pack (decision 20, review F4)', () => {
+    const s = packSalesSection(
+      META,
+      rows({
+        free: [
+          { slug: '151', source: 'welcome', qty: 5 },
+          { slug: '151', source: 'task', qty: 2 },
+        ],
+      }),
+      null,
+    );
+    const p151 = s.franchises[0].types[0].packs[0];
+    expect(p151.current.free_qty.welcome).toBe(5);
+    expect(p151.current.free_sen).toBe(2 * 4000);
   });
 
   it('keeps charges with no pack as unattributed, inside the total', () => {
@@ -247,5 +265,62 @@ describe('cogsSection', () => {
     expect(s.pulled.current_sen).toBe(4500);
     // Pulled value alone is info: the pack shows, COGS stays 0.
     expect(s.total.current_sen).toBe(0);
+  });
+});
+
+describe('shippingSection', () => {
+  it('splits delivery charge and insurance, and totals them as other revenue', () => {
+    const s = shippingSection(
+      { shipping_sen: 1500, insurance_sen: 250, orders: 3 },
+      { shipping_sen: 1000, insurance_sen: 0, orders: 2 },
+    );
+    expect(s).toEqual({
+      shipping: { current_sen: 1500, previous_sen: 1000 },
+      insurance: { current_sen: 250, previous_sen: 0 },
+      total: { current_sen: 1750, previous_sen: 1000 },
+      orders: { current: 3, previous: 2 },
+    });
+    expect(
+      shippingSection({ shipping_sen: 1, insurance_sen: 2, orders: 1 }, null)
+        .total,
+    ).toEqual({
+      current_sen: 3,
+      previous_sen: null,
+    });
+  });
+});
+
+describe('totalsSection', () => {
+  const p = (c: number, prev: number | null = null) => ({
+    current_sen: c,
+    previous_sen: prev,
+  });
+  it('revenue + other revenue = total; total − COGS = gross; gross − marketing = net', () => {
+    const t = totalsSection({
+      revenue: {
+        pack_sales: p(1000, 800),
+        coin_flip: p(50, 40),
+        lucky_draw: p(30, 0),
+      },
+      other_revenue: { shipping: p(20, 10) },
+      cogs: { packs: p(700, 600), coin_flip: p(60, 30), lucky_draw: p(10, 0) },
+      marketing: p(100, 90),
+    });
+    expect(t.revenue).toEqual(p(1080, 840));
+    expect(t.other_revenue).toEqual(p(20, 10));
+    expect(t.total_revenue).toEqual(p(1100, 850));
+    expect(t.cogs).toEqual(p(770, 630));
+    expect(t.gross).toEqual(p(330, 220));
+    expect(t.marketing).toEqual(p(100, 90));
+    expect(t.net).toEqual(p(230, 130));
+  });
+  it('keeps previous null when any part has no previous window', () => {
+    const t = totalsSection({
+      revenue: { pack_sales: p(10) },
+      other_revenue: {},
+      cogs: {},
+      marketing: p(1),
+    });
+    expect(t.net).toEqual(p(9, null));
   });
 });

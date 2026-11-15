@@ -31,7 +31,7 @@ const seen = new Map();
 const errors = [];
 try {
   const ctx = await browser.newContext({
-    viewport: { width: 1440, height: 3400 },
+    viewport: { width: 1440, height: Number(process.env.CAP_H || 3400) },
   });
   await ctx.route("http://localhost:9000/**", async (route) => {
     const u = new URL(route.request().url());
@@ -94,7 +94,7 @@ try {
         fullPage: true,
       });
     }
-    await page.setViewportSize({ width: 390, height: 2600 });
+    await page.setViewportSize({ width: 390, height: Number(process.env.CAP_H_MOBILE || 2600) });
     await page.waitForTimeout(1500);
     await page.screenshot({
       path: path.join(outDir, "pnl-month-390.png"),

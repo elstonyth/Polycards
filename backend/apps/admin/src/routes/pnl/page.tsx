@@ -12,6 +12,10 @@ import { SectionError } from '../overview/SectionState';
 import { ScopeSwitch } from '../economy/ScopeSwitch';
 import { PackSalesCard } from './PackSalesCard';
 import { CogsCard } from './CogsCard';
+import { CoinFlipCard, LuckyDrawCard } from './GamesCards';
+import { ShippingCard, TotalsCard } from './SummaryCards';
+import { MarketingCard } from './MarketingCard';
+import { AssetsCard, FloatingMoneyCard } from './BalanceCards';
 
 export const config: RouteConfig = {
   label: 'pcNav.pnl',
@@ -89,6 +93,13 @@ const PnlPage = () => {
         >
           <PackSalesCard data={data.pack_sales} />
           <CogsCard data={data.cogs} />
+          <MarketingCard data={data.marketing} />
+          <CoinFlipCard data={data.coin_flip} />
+          <LuckyDrawCard data={data.lucky_draw} />
+          <ShippingCard data={data.shipping} />
+          <TotalsCard data={data.totals} />
+          <AssetsCard data={data.assets} />
+          <FloatingMoneyCard data={data.floating} />
         </div>
       )}
     </div>
