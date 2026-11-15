@@ -3993,36 +3993,28 @@ class PacksModuleService extends MedusaService({
 
     let ref: string | null = null;
     if (reward.type === 'credit') {
-      const { id, amount } = await this.mutateCreditAtomic(
+      // With its WP ledger row, in the same transaction — the tasks spec pays
+      // out "through the same mechanics as the challenge payout path". Without
+      // it a claim moved the balance with nothing in the transaction history
+      // (two customers, RM 50 each, on 2026-09-30). refId defaults to the
+      // credit row, so the admin Wallet tab's display-id join finds it; a
+      // replay wrote both rows already and writes nothing.
+      const { id } = await this.mutateCreditAtomic(
         {
           customerId: input.customerId,
           amount: reward.amount_myr,
           reason: 'reward_credit',
           idempotencyReference: `task:${def.id}:${input.customerId}:${periodKey || 'once'}`,
-        },
-        sharedContext,
-      );
-      // Its ledger row, in the same transaction — every other credit writer
-      // posts one, and the tasks spec pays out "through the same mechanics as
-      // the challenge payout path" (WP). Without it a claim moved the balance
-      // with nothing in the transaction history (two customers, RM 50 each,
-      // on 2026-09-30). refId = the credit row, like the top-up and
-      // adjustment writers, so the admin Wallet tab's display-id join finds it;
-      // a replayed credit re-dedupes on (WP, refId).
-      await this.recordLedgerEntry(
-        {
-          type: 'WP',
-          customerId: input.customerId,
-          refId: id,
-          walletDelta: amount,
-          vaultDelta: null,
-          payload: {
+          ledger: {
             type: 'WP',
-            period: `task:${def.id}:${periodKey || 'once'}`,
-            stage: 0,
-            rank: 0,
-            sku: null,
-            value: 0,
+            payload: {
+              type: 'WP',
+              period: `task:${def.id}:${periodKey || 'once'}`,
+              stage: 0,
+              rank: 0,
+              sku: null,
+              value: 0,
+            },
           },
         },
         sharedContext,
@@ -6146,22 +6138,18 @@ class PacksModuleService extends MedusaService({
         amount: -fee.total,
         reason: 'delivery_fee',
         reference: order.id,
-      },
-      sharedContext,
-    );
-    await this.recordLedgerEntry(
-      {
-        type: 'OD',
-        customerId,
-        refId: order.id,
-        walletDelta: -fee.total,
-        vaultDelta: 0,
-        payload: {
+        ledger: {
           type: 'OD',
-          handles: countByHandle([pull.card_id]),
-          status: 'requested',
-          shipping_fee: fee.shipping,
-          insurance_fee: fee.insurance,
+          refId: order.id,
+          walletDelta: -fee.total,
+          vaultDelta: 0,
+          payload: {
+            type: 'OD',
+            handles: countByHandle([pull.card_id]),
+            status: 'requested',
+            shipping_fee: fee.shipping,
+            insurance_fee: fee.insurance,
+          },
         },
       },
       sharedContext,
@@ -6353,9 +6341,23 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    // Charge the wallet inside this SAME transaction — mutateCreditAtomic
-    // joins via sharedContext (no second pool connection) and its floor guard
-    // rolls the whole order back when the balance can't cover the fee.
+    // Charge the wallet inside this SAME transaction, with its OD row —
+    // mutateCreditAtomic joins via sharedContext (no second pool connection)
+    // and its floor guard rolls the whole order back when the balance can't
+    // cover the fee. A free parcel writes the OD row alone.
+    const od = {
+      type: 'OD' as const,
+      refId: order.id,
+      walletDelta: -fee.total,
+      vaultDelta: -vaultDelta,
+      payload: {
+        type: 'OD' as const,
+        handles: countByHandle(pulls.map((p) => p.card_id)),
+        status: 'requested',
+        shipping_fee: fee.shipping,
+        insurance_fee: fee.insurance,
+      },
+    };
     if (fee.total > 0) {
       await this.mutateCreditAtomic(
         {
@@ -6363,28 +6365,13 @@ class PacksModuleService extends MedusaService({
           amount: -fee.total,
           reason: 'delivery_fee',
           reference: order.id,
+          ledger: od,
         },
         sharedContext,
       );
+    } else {
+      await this.recordLedgerEntry({ ...od, customerId: input.customerId }, sharedContext);
     }
-
-    await this.recordLedgerEntry(
-      {
-        type: 'OD',
-        customerId: input.customerId,
-        refId: order.id,
-        walletDelta: -fee.total,
-        vaultDelta: -vaultDelta,
-        payload: {
-          type: 'OD',
-          handles: countByHandle(pulls.map((p) => p.card_id)),
-          status: 'requested',
-          shipping_fee: fee.shipping,
-          insurance_fee: fee.insurance,
-        },
-      },
-      sharedContext,
-    );
     return { orderId: order.id, itemIds: items.map((i) => i.id), pullVersions: Object.fromEntries(pulls.map(p => [p.id, p.flip_version + 1])) };
   }
 
@@ -8171,29 +8158,22 @@ class PacksModuleService extends MedusaService({
   ): Promise<{ creditTransactionId: string | null; pullId: string | null }> {
     if (prize.kind === 'credit') {
       // Bonus credit, like a weekly-challenge money prize; claimTask's shape.
-      const { id, amount } = await this.mutateCreditAtomic(
+      const { id } = await this.mutateCreditAtomic(
         {
           customerId: winnerId,
           amount: toMoney(prize.credit_myr),
           reason: 'reward_credit',
           idempotencyReference: `luckydraw:${prize.id}`,
-        },
-        sharedContext,
-      );
-      await this.recordLedgerEntry(
-        {
-          type: 'WP',
-          customerId: winnerId,
-          refId: id,
-          walletDelta: amount,
-          vaultDelta: null,
-          payload: {
+          ledger: {
             type: 'WP',
-            period: `luckydraw:${prize.id}`,
-            stage: 0,
-            rank: 0,
-            sku: null,
-            value: 0,
+            payload: {
+              type: 'WP',
+              period: `luckydraw:${prize.id}`,
+              stage: 0,
+              rank: 0,
+              sku: null,
+              value: 0,
+            },
           },
         },
         sharedContext,
@@ -14856,6 +14836,24 @@ class PacksModuleService extends MedusaService({
           );
         }
         const refund = -storedWallet || 0; // stored charge is negative; || 0 kills -0
+        // Still needed for the payload's handle tally (countByHandle) — the
+        // reversal amount no longer comes from these rows.
+        const pulls = await this.listPulls(
+          { id: input.pullIds },
+          { take: input.pullIds.length },
+          sharedContext,
+        );
+        const odCancel = {
+          type: 'OD' as const,
+          refId: `cancel:${input.orderId}`,
+          walletDelta: refund,
+          vaultDelta: -stored,
+          payload: {
+            type: 'OD' as const,
+            handles: countByHandle(pulls.map((p) => p.card_id)),
+            status: 'canceled',
+          },
+        };
         if (refund > 0) {
           // The bonus part the charge took goes back as bonus (ADR 0014).
           const [taken] = await em.execute<{ bonus_cents: string | null }[]>(
@@ -14874,32 +14872,14 @@ class PacksModuleService extends MedusaService({
                 Math.max(0, Number(taken?.bonus_cents ?? 0)),
                 Math.round(refund * 100),
               ),
+              ledger: odCancel,
             },
             sharedContext,
           );
+        } else {
+          // A pre-fee order refunds no wallet money: the vault reversal alone.
+          await this.recordLedgerEntry({ ...odCancel, customerId: order.customer_id }, sharedContext);
         }
-        // Still needed for the payload's handle tally (countByHandle) — the
-        // reversal amount no longer comes from these rows.
-        const pulls = await this.listPulls(
-          { id: input.pullIds },
-          { take: input.pullIds.length },
-          sharedContext,
-        );
-        await this.recordLedgerEntry(
-          {
-            type: 'OD',
-            customerId: order.customer_id,
-            refId: `cancel:${input.orderId}`,
-            walletDelta: refund,
-            vaultDelta: -stored,
-            payload: {
-              type: 'OD',
-              handles: countByHandle(pulls.map((p) => p.card_id)),
-              status: 'canceled',
-            },
-          },
-          sharedContext,
-        );
       }
     }
 
@@ -15080,14 +15060,12 @@ class PacksModuleService extends MedusaService({
       }
     }
 
-    // `amount` here is mutateCreditAtomic's own cent-rounded value (matches
-    // the SUM(ROUND(...)) actually persisted to credit_transaction) — used
-    // below for the ledger row so it can't drift from input.amount when this
-    // method is called directly (bypassing the HTTP route's epsilon gate),
-    // same fix as Task 4's topUpCreditsWithLedger. The audit "before" calc
-    // and the return value below intentionally keep input.amount — untouched,
-    // out of this fix's scope.
-    const { id, balance, amount, bonusBalance } = await this.mutateCreditAtomic(
+    // The AD row's wallet_delta is the posting's own cent-rounded amount
+    // (matches the SUM(ROUND(...)) actually persisted to credit_transaction),
+    // so it can't drift from input.amount when this method is called directly
+    // (bypassing the HTTP route's epsilon gate). The audit "before" calc and
+    // the return value below intentionally keep input.amount.
+    const { id, balance, bonusBalance } = await this.mutateCreditAtomic(
       {
         customerId: input.customerId,
         amount: input.amount,
@@ -15096,6 +15074,17 @@ class PacksModuleService extends MedusaService({
         floor: 0,
         sourceTransactionId: requestReference,
         bonusCents: input.bonus ? Math.round(input.amount * 100) : undefined,
+        ledger: {
+          type: 'AD',
+          payload: {
+            type: 'AD',
+            admin_id: input.adminId,
+            reason: input.note,
+            // 'bonus' marks spend-only credit (spec 2026-10-07 §4.10).
+            detail: input.bonus ? 'bonus' : null,
+            card_handle: null,
+          },
+        },
       },
       sharedContext,
     );
@@ -15119,24 +15108,6 @@ class PacksModuleService extends MedusaService({
             ? { balance, bonus: bonusBalance }
             : { balance },
         reason: input.note,
-      },
-      sharedContext,
-    );
-    await this.recordLedgerEntry(
-      {
-        type: 'AD',
-        customerId: input.customerId,
-        refId: id, // the credit_transaction id already in scope
-        walletDelta: amount,
-        vaultDelta: null,
-        payload: {
-          type: 'AD',
-          admin_id: input.adminId,
-          reason: input.note,
-          // 'bonus' marks spend-only credit (spec 2026-10-07 §4.10).
-          detail: input.bonus ? 'bonus' : null,
-          card_handle: null,
-        },
       },
       sharedContext,
     );
