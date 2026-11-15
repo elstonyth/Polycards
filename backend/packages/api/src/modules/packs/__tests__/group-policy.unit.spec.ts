@@ -227,6 +227,16 @@ describe('effectivePlayerGroup', () => {
     expect(effectivePlayerGroup(groups)?.id).toBe('cg_0');
   });
 
+  // EFFECTIVE_GROUP_SQL's twin: whole milliseconds, then id by code point
+  // (COLLATE "C"), never by locale.
+  it('breaks a same-millisecond tie by id code point', () => {
+    const groups = [
+      { id: 'cg_a', name: 'a', created_at: '2026-01-01T00:00:00.123100Z' },
+      { id: 'cg_B', name: 'b', created_at: '2026-01-01T00:00:00.123400Z' },
+    ];
+    expect(effectivePlayerGroup(groups)?.id).toBe('cg_B');
+  });
+
   it('skips DEFAULT and is null with no real group', () => {
     const dflt = {
       id: 'cg_d',

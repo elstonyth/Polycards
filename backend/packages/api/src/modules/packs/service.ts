@@ -2345,7 +2345,8 @@ class PacksModuleService extends MedusaService({
         'FROM customer_group_customer cgc ' +
         'JOIN customer_group cg ON cg.id = cgc.customer_group_id AND cg.deleted_at IS NULL ' +
         `WHERE cgc.customer_id IN (${ph}) AND cgc.deleted_at IS NULL ` +
-        'ORDER BY cg.created_at ASC, cg.id ASC',
+        // effectivePlayerGroup's order: whole ms, then id by code point.
+        `ORDER BY date_trunc('milliseconds', cg.created_at) ASC, cg.id COLLATE "C" ASC`,
       ids,
     );
     const seen = new Set<string>();

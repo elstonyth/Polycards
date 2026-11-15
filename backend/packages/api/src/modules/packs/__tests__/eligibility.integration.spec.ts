@@ -47,6 +47,12 @@ const GROUPS: [string, string, Record<string, unknown>, string, string | null][]
   ['grp_new', 'Newer', { odds_set: 3 }, T1, null],
   ['grp_eq_a', 'Equal A', {}, T1, null],
   ['grp_eq_b', 'Equal B', {}, T1, null],
+  // D5: the same millisecond, the later id first by microsecond.
+  ['grp_us_b', 'Micro B', {}, '2026-02-01T00:00:00.123100Z', null],
+  ['grp_us_a', 'Micro A', {}, '2026-02-01T00:00:00.123400Z', null],
+  // D5: equal times; by locale 'a' < 'B', by code point 'B' < 'a'.
+  ['grp_cs_B', 'Case B', {}, T1, null],
+  ['grp_cs_a', 'Case A', {}, T1, null],
   ['grp_gone', 'Gone', {}, '2025-11-01T00:00:00.000100Z', '2026-03-01T00:00:00.000100Z'],
   ['grp_blocked', 'Partner', { partner_rate_bp: 100, withdrawals_blocked: true }, T0, null],
   ['grp_rebate', 'Rebate', { partner_rate_bp: 300, withdrawals_blocked: false }, T0, null],
@@ -61,6 +67,10 @@ const MEMBERS: [string, string, string | null][] = [
   ['c_two', 'grp_old', null],
   ['c_eq', 'grp_eq_b', null],
   ['c_eq', 'grp_eq_a', null],
+  ['c_us', 'grp_us_b', null],
+  ['c_us', 'grp_us_a', null],
+  ['c_cs', 'grp_cs_a', null],
+  ['c_cs', 'grp_cs_B', null],
   ['c_gone_group', 'grp_gone', null],
   ['c_gone_member', 'grp_new', '2026-03-01T00:00:00.000100Z'],
   ['c_partner', 'grp_blocked', null],
@@ -168,8 +178,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
       );
       // Not vacuous: each fixture lands where the rule says.
       expect(Object.fromEntries([...sql].sort())).toEqual({
+        c_cs: 'grp_cs_B', // id by code point, not by locale
         c_default_plus: 'grp_new', // DEFAULT plus a real group follows the real group
         c_eq: 'grp_eq_a', // equal created_at: id breaks the tie
+        c_us: 'grp_us_a', // created_at to the millisecond, as JS reads it
         c_frozen_manual: 'grp_rebate',
         c_partner: 'grp_blocked',
         c_rebate: 'grp_rebate',
