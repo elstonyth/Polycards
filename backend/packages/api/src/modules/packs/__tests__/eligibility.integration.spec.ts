@@ -232,6 +232,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await mayPlay(service, id, 'lucky_draw', ctx()),
         ];
         expect([id, ...got]).toEqual([id, playRefusal('coin_flip', coin), playRefusal('lucky_draw', lucky)]);
+        expect([id, await service.mayPlay(id, 'coin_flip'), await service.mayPlay(id, 'lucky_draw')]).toEqual([id, ...got]);
         seen[id] = got;
       }
       expect(seen).toMatchObject({

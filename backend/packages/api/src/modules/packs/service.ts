@@ -165,6 +165,11 @@ import {
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
 import {
+  mayPlay as mayPlayFor,
+  type Game,
+  type PlayRefusal,
+} from './eligibility';
+import {
   DEFAULT_PLAYER_GROUP_FLAG,
   DEFAULT_PLAYER_GROUP_NAME,
   EFFECTIVE_GROUP_SQL,
@@ -7258,23 +7263,15 @@ class PacksModuleService extends MedusaService({
     return rows.length > 0;
   }
 
-  // The Lucky Draw's entry gate. Only the DEFAULT group (no group reads the same)
-  // has to have topped up; anyone in a real player group enters without (operator,
-  // 2026-11-02). EFFECTIVE_GROUP_SQL is the one definition of a real group. This
-  // gate alone: withdrawals and deliveries keep reading hasTopUp.
+  // Why a game turns this player away, or null (eligibility.ts: playRefusal).
+  // The games' gate alone: withdrawals and deliveries keep reading hasTopUp.
   @InjectManager()
-  async mayEnterLuckyDraw(
+  async mayPlay(
     customerId: string,
+    game: Game,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
-    if (await this.hasTopUp(customerId, sharedContext)) return true;
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ one: number }[]>(
-      `SELECT 1 AS one FROM (${EFFECTIVE_GROUP_SQL}) eff WHERE eff.customer_id = ? LIMIT 1`,
-      [customerId],
-    );
-    return rows.length > 0;
+  ): Promise<PlayRefusal | null> {
+    return mayPlayFor(this, customerId, game, sharedContext);
   }
 
   // A customer's Lucky Draw ticket balance: the sum of their live ledger rows
@@ -7301,7 +7298,7 @@ class PacksModuleService extends MedusaService({
   // spends so two parallel enters cannot both pass the balance check). Every
   // read below runs on this locked transaction. `tickets` is validated before
   // any lock is taken. A refusal is a return value; only a bad amount or a
-  // frozen account throws.
+  // frozen or disabled account throws.
   @InjectTransactionManager()
   async enterLuckyDraw(
     input: {
@@ -7364,9 +7361,14 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    if (!(await this.mayEnterLuckyDraw(customerId, sharedContext))) {
-      return refuse('no_topup');
+    const gate = await this.mayPlay(customerId, 'lucky_draw', sharedContext);
+    if (gate === 'unavailable') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is unavailable.',
+      );
     }
+    if (gate) return refuse('no_topup');
     const before = await this.luckyDrawBalance(customerId, sharedContext);
     if (before < tickets) return refuse('not_enough_tickets');
     // The ORM creates below are not flushed until the transaction ends, so a raw
@@ -7463,9 +7465,14 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    if (!(await this.mayEnterLuckyDraw(customerId, sharedContext))) {
-      return refuse('no_topup');
+    const gate = await this.mayPlay(customerId, 'lucky_draw', sharedContext);
+    if (gate === 'unavailable') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is unavailable.',
+      );
     }
+    if (gate) return refuse('no_topup');
     const before = await this.luckyDrawBalance(customerId, sharedContext);
     if (before < tickets) return refuse('not_enough_tickets');
     // Read before the ORM creates below, which are not flushed until the

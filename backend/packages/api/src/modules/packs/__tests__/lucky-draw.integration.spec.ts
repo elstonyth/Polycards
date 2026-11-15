@@ -380,6 +380,23 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(await service.luckyDrawBalance('cus_n')).toBe(100);
     });
 
+    it('throws for a disabled account, topped up or not, and spends nothing', async () => {
+      const prize = await livePrize();
+      await fund('cus_dis', 100);
+      await service.createCustomerAccountStates([
+        { customer_id: 'cus_dis', disabled: true },
+      ]);
+
+      await expect(
+        service.enterLuckyDraw({
+          customerId: 'cus_dis',
+          prizeId: prize.id,
+          tickets: 1,
+        }),
+      ).rejects.toThrow('This account is unavailable.');
+      expect(await service.luckyDrawBalance('cus_dis')).toBe(100);
+    });
+
     it('refuses more tickets than the balance', async () => {
       const prize = await livePrize();
       await fund('cus_b', 5);
