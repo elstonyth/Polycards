@@ -7,6 +7,9 @@
   "exports": {
     "./_generated": {
       "types": "./.mercur/_generated/index.ts"
+    },
+    "./admin/*": {
+      "types": "./src/api/admin/*/types.ts"
     }
   },
   "keywords": [

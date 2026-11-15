@@ -4,7 +4,7 @@ import type {
   PnlAssetsSection,
   PnlBonusSource,
   PnlFloatingSection,
-} from './pnl-balance-types';
+} from '../../lib/admin-rest';
 import { sen } from './pnl-format';
 
 type Line = {
@@ -136,11 +136,13 @@ export const FloatingMoneyCard = ({ data }: { data: PnlFloatingSection }) => {
             (s) =>
               (s !== 'lucky_draw' && s !== 'other') ||
               wallet.free_credit_by_source[s] !== 0,
-          ).map((s): Line => ({
-            label: t(`pnl.floating.sources.${s}`),
-            sen: wallet.free_credit_by_source[s],
-            depth: 2,
-          })),
+          ).map(
+            (s): Line => ({
+              label: t(`pnl.floating.sources.${s}`),
+              sen: wallet.free_credit_by_source[s],
+              depth: 2,
+            }),
+          ),
           {
             label: t('pnl.floating.locked'),
             sen: wallet.locked_sen,

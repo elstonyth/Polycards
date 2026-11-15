@@ -1,14 +1,34 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Container, Heading, Table, Text } from '@medusajs/ui';
-import type { PnlPair } from '../../lib/admin-rest';
+import type {
+  PnlCardSource,
+  PnlCreditSource,
+  PnlMarketing,
+  PnlPair,
+} from '../../lib/admin-rest';
 import { Hint } from '../../components/Hint';
 import { sen, vs } from './pnl-format';
-import {
-  PNL_CARD_SOURCES,
-  PNL_CREDIT_SOURCES,
-  type PnlMarketing,
-} from './pnl-marketing-types';
+
+// Display order (key order). The type-only seam carries no values, so the
+// lists live here as records keyed by the backend's unions: a source added or
+// dropped there fails this typecheck.
+const CREDIT_ORDER: Record<PnlCreditSource, true> = {
+  adjustment: true,
+  checkin: true,
+  task: true,
+  weekly_challenge: true,
+  returned: true,
+  lucky_draw: true,
+  other: true,
+};
+const CARD_ORDER: Record<PnlCardSource, true> = {
+  checkin: true,
+  task: true,
+  weekly_challenge: true,
+};
+const PNL_CREDIT_SOURCES = Object.keys(CREDIT_ORDER) as PnlCreditSource[];
+const PNL_CARD_SOURCES = Object.keys(CARD_ORDER) as PnlCardSource[];
 
 const shows = (p: PnlPair) =>
   p.current_sen !== 0 || (p.previous_sen ?? 0) !== 0;
@@ -41,13 +61,16 @@ export const MarketingCard = ({ data }: { data: PnlMarketing }) => {
       (s) =>
         (s !== 'returned' && s !== 'lucky_draw' && s !== 'other') ||
         shows(data.credit_used.by_source[s]),
-    ).map((s): Line => ({
-      key: `used-${s}`,
-      label: s === 'lucky_draw' ? t('pnl.marketing.luckyDrawUsed') : source(s),
-      pair: data.credit_used.by_source[s],
-      kind: 'item',
-      muted: s === 'lucky_draw',
-    })),
+    ).map(
+      (s): Line => ({
+        key: `used-${s}`,
+        label:
+          s === 'lucky_draw' ? t('pnl.marketing.luckyDrawUsed') : source(s),
+        pair: data.credit_used.by_source[s],
+        kind: 'item',
+        muted: s === 'lucky_draw',
+      }),
+    ),
     ...(shows(data.credit_used.returned_back)
       ? [
           {
