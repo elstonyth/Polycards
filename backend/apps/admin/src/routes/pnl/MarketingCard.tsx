@@ -39,7 +39,7 @@ export const MarketingCard = ({ data }: { data: PnlMarketing }) => {
     },
     ...PNL_CREDIT_SOURCES.filter(
       (s) =>
-        (s !== 'returned' && s !== 'lucky_draw') ||
+        (s !== 'returned' && s !== 'lucky_draw' && s !== 'other') ||
         shows(data.credit_used.by_source[s]),
     ).map((s): Line => ({
       key: `used-${s}`,

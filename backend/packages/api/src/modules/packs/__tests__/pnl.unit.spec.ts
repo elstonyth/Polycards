@@ -1,5 +1,7 @@
 import {
   cogsSection,
+  costAsOf,
+  type CostOf,
   packSalesSection,
   rateOn,
   shippingSection,
@@ -179,6 +181,27 @@ describe('rateOn', () => {
   });
 });
 
+const costsOf =
+  (m: Map<string, number | null>): CostOf =>
+  (h) =>
+    m.get(h) ?? null;
+
+describe('costAsOf', () => {
+  const lines = [
+    { day: '2026-10-01', qty: 2, unit_cost: 100 },
+    { day: '2026-11-10', qty: 2, unit_cost: 200 },
+  ];
+  it('averages only the invoices dated on or before the day, so later invoices never move it', () => {
+    expect(costAsOf(lines, '2026-10-31')).toBe(100);
+    expect(costAsOf(lines, '2026-11-10')).toBe(150);
+    expect(costAsOf(lines, null)).toBe(150);
+  });
+  it('falls back to every invoice when none is dated by then (a late-booked invoice beats an estimate)', () => {
+    expect(costAsOf(lines, '2026-09-01')).toBe(150);
+    expect(costAsOf([], '2026-09-01')).toBeNull();
+  });
+});
+
 describe('cogsSection', () => {
   const cogsRows = (r: Partial<CogsWindowRows> = {}): CogsWindowRows => ({
     buyback: new Map(),
@@ -207,7 +230,7 @@ describe('cogsSection', () => {
         purchase_sen: 999,
       }),
       null,
-      new Map([['charizard', 120.5]]),
+      costsOf(new Map([['charizard', 120.5]])),
       rates,
       4.5,
     );
@@ -241,7 +264,7 @@ describe('cogsSection', () => {
         ],
       }),
       cogsRows(),
-      new Map([['mew', null]]),
+      costsOf(new Map([['mew', null]])),
       rates,
       4.5,
     );
@@ -258,7 +281,7 @@ describe('cogsSection', () => {
       META,
       cogsRows({ pulled: [{ slug: '151', day: '2026-10-01', usd: 10, n: 1 }] }),
       null,
-      new Map(),
+      costsOf(new Map()),
       rates,
       4.5,
     );

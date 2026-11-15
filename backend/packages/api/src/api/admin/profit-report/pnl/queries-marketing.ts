@@ -21,7 +21,11 @@ const CREDIT_SOURCE_SQL =
   "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'luckydraw:%' THEN 'lucky_draw' " +
   "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'task:%' THEN " +
   "CASE WHEN td.requirement->>'type' = 'checkin_days' THEN 'checkin' ELSE 'task' END " +
-  "ELSE 'returned' END";
+  // Bonus coming back by an undo (an open reversed, a fee refunded, a
+  // bonus-bought card sold back) is 'returned'; any other grant (voucher,
+  // daily reward, a future promo) is 'other' and stays a marketing cost.
+  "WHEN ct.reason IN ('pack_open', 'delivery_fee', 'buyback') THEN 'returned' " +
+  "ELSE 'other' END";
 
 /** One window's marketing rows: free credit used/given by source, reward
  *  cards given, referral commission. Statements run one after another. */
@@ -85,6 +89,7 @@ export async function marketingWindowRows(
   );
   const cards = await db.raw<{
     source: CardSource;
+    day: string;
     n: string;
     sold: string;
     sold_sen: string;
@@ -92,6 +97,7 @@ export async function marketingWindowRows(
   }>(
     "SELECT CASE WHEN p.pack_id LIKE 'challenge-%' THEN 'weekly_challenge' " +
       "WHEN td.requirement->>'type' = 'checkin_days' THEN 'checkin' ELSE 'task' END AS source, " +
+      "to_char((p.rolled_at AT TIME ZONE 'Asia/Kuala_Lumpur')::date, 'YYYY-MM-DD') AS day, " +
       'COUNT(*)::bigint AS n, COUNT(p.buyback_amount)::bigint AS sold, ' +
       'COALESCE(SUM(ROUND(p.buyback_amount * 100)), 0)::bigint AS sold_sen, ' +
       'COALESCE(SUM(c.market_value * COALESCE(c.market_multiplier, ?)) ' +
@@ -103,7 +109,7 @@ export async function marketingWindowRows(
       "AND (p.pack_id = 'task-reward' OR p.pack_id LIKE 'challenge-%') " +
       'AND NOT EXISTS (SELECT 1 FROM pack pk WHERE pk.slug = p.pack_id)' +
       pulls.sql +
-      ' GROUP BY 1',
+      ' GROUP BY 1, 2',
     [DEFAULT_MARKET_MULTIPLIER, ...pulls.params],
   );
 
@@ -148,6 +154,7 @@ export async function marketingWindowRows(
     })),
     cards: cards.rows.map((r) => ({
       source: r.source,
+      day: r.day,
       n: Number(r.n),
       sold: Number(r.sold),
       sold_sen: Number(r.sold_sen),

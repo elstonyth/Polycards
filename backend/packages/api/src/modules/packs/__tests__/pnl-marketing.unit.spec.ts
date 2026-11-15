@@ -124,6 +124,24 @@ describe('marketingSection', () => {
     expect(s.total.current_sen).toBe(2200);
   });
 
+  it("counts an 'other' promo grant as used, never nets it as a refund (review)", () => {
+    const s = marketingSection(
+      META,
+      packRows(),
+      null,
+      mk({
+        credit: [
+          { kind: 'given', source: 'other', sen: 10000 },
+          { kind: 'used', source: 'other', sen: 6000 },
+        ],
+      }),
+      null,
+      4.5,
+    );
+    expect(s.credit_used.returned_back.current_sen).toBe(0);
+    expect(s.credit_used.total.current_sen).toBe(6000);
+  });
+
   it('keeps free credit given (and admin removals) out of the total', () => {
     const s = marketingSection(
       META,

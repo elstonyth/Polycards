@@ -5,6 +5,7 @@ import { parseScope } from '../../../../modules/packs/real-customers';
 import {
   cogsSection,
   cogsSlugsOf,
+  costAsOf,
   packSalesSection,
   shippingSection,
   slugsOf,
@@ -33,6 +34,7 @@ import {
 } from '../../../../modules/packs/pnl-games';
 import { gamesWindowRows } from './queries-games';
 import {
+  cardCostLines,
   cardCosts,
   cogsWindowRows,
   dayRates,
@@ -109,7 +111,9 @@ export async function GET(
       ),
     ),
   ];
-  const costs = await cardCosts(db, handles);
+  const costLines = await cardCostLines(db, handles);
+  const costOf = (handle: string, day: string) =>
+    costAsOf(costLines.get(handle) ?? [], day);
   const rates = await dayRates(db);
   const fallbackRate = await resolveFxRate(
     req.scope.resolve<PacksModuleService>(PACKS_MODULE),
@@ -131,7 +135,7 @@ export async function GET(
     meta,
     cogsCurrent,
     cogsPrevious,
-    costs,
+    costOf,
     rates,
     fallbackRate,
   );
@@ -151,6 +155,7 @@ export async function GET(
     mkCurrent,
     mkPrevious,
     fallbackRate,
+    rates,
   );
 
   res.json({

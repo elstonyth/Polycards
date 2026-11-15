@@ -127,7 +127,8 @@ export async function freeCreditUnused(
       "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'luckydraw:%' THEN 'lucky_draw' " +
       "WHEN ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'task:%' THEN " +
       "CASE WHEN td.requirement->>'type' = 'checkin_days' THEN 'checkin' ELSE 'task' END " +
-      "ELSE 'returned' END AS source " +
+      "WHEN ct.reason IN ('pack_open', 'delivery_fee', 'buyback') THEN 'returned' " +
+      "ELSE 'other' END AS source " +
       'FROM credit_transaction ct ' +
       "LEFT JOIN task_definition td ON ct.reason = 'reward_credit' AND ct.source_transaction_id LIKE 'task:%' " +
       "AND td.id = split_part(ct.source_transaction_id, ':', 2) " +

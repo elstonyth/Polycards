@@ -1,3 +1,5 @@
+import { weightedAverageCost, type CostLine } from './inventory-cost';
+
 // The P&L report's pure folds (GET /admin/profit-report/pnl; spec
 // plans/pnl-report/SPEC.md, decisions plans/pnl-report-decisions.md). Every
 // amount is integer sen so the page's "vs previous" never drifts.
@@ -218,6 +220,22 @@ export function packSalesSection(
 
 // ── COGS (spec §6, decisions 1, 12, 17) ─────────────────────────────────────
 
+/** One purchase-invoice line with its invoice's MYT day. */
+export type DatedCostLine = CostLine & { day: string };
+
+/** Weighted-average supplier cost (inventory-cost.ts) from the invoices dated
+ *  on or before `day` (null = every invoice), so a closed month's shipped cost
+ *  is not moved by later invoices. A card with no invoice by then falls back to
+ *  every invoice, so a late-booked invoice still replaces a market estimate. */
+export function costAsOf(
+  lines: readonly DatedCostLine[],
+  day: string | null,
+): number | null {
+  const all = weightedAverageCost([...lines]);
+  if (day === null) return all;
+  return weightedAverageCost(lines.filter((l) => l.day <= day)) ?? all;
+}
+
 /** One saved USD_MYR rate per MYT day (fx_rate_day), oldest first. */
 export type DayRate = { day: string; rate: number };
 
@@ -255,6 +273,9 @@ export type CogsWindowRows = {
   purchase_sen: number;
 };
 
+/** A card's supplier cost in RM as of a ship day, null when it has none. */
+export type CostOf = (handle: string, day: string) => number | null;
+
 export type CogsFigures = {
   pulls: number;
   /** Information only, not in total_sen. */
@@ -279,7 +300,7 @@ export type CogsSection = {
 function cogsFigures(
   slug: string,
   w: CogsWindowRows,
-  costs: ReadonlyMap<string, number | null>,
+  costOf: CostOf,
   rates: readonly DayRate[],
   fallback: number,
 ): CogsFigures {
@@ -300,7 +321,7 @@ function cogsFigures(
   for (const s of w.shipped) {
     if (s.slug !== slug) continue;
     f.shipped_cards += s.n;
-    const cost = costs.get(s.handle) ?? null;
+    const cost = costOf(s.handle, s.day);
     if (cost !== null) {
       f.shipped_cost_sen += Math.round(cost * 100) * s.n;
     } else {
@@ -331,13 +352,14 @@ export function cogsSlugsOf(...windows: (CogsWindowRows | null)[]): string[] {
 
 /** COGS by franchise → type → pack: buyback paid + supplier cost of shipped
  *  cards (decision 1). Coin flip and Lucky Draw costs join in their own
- *  sections. `costs` is each card's weighted-average supplier cost in RM
+ *  sections. `costOf(handle, day)` is the card's weighted-average supplier
+ *  cost in RM as of that ship day (costAsOf)
  *  (inventory-cost.ts), null when it has none. */
 export function cogsSection(
   meta: readonly PackMeta[],
   current: CogsWindowRows,
   previous: CogsWindowRows | null,
-  costs: ReadonlyMap<string, number | null>,
+  costOf: CostOf,
   rates: readonly DayRate[],
   fallbackRate: number,
 ): CogsSection {
@@ -346,9 +368,9 @@ export function cogsSection(
     cogsSlugsOf(current, previous),
     !!previous,
     (m) => {
-      const cur = cogsFigures(m.slug, current, costs, rates, fallbackRate);
+      const cur = cogsFigures(m.slug, current, costOf, rates, fallbackRate);
       const prev = previous
-        ? cogsFigures(m.slug, previous, costs, rates, fallbackRate)
+        ? cogsFigures(m.slug, previous, costOf, rates, fallbackRate)
         : null;
       return cogsActive(cur) || cogsActive(prev)
         ? { current: cur, previous: prev }

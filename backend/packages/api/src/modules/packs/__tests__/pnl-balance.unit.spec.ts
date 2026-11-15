@@ -17,6 +17,7 @@ const SOURCES = {
   weekly_challenge: 0,
   returned: 0,
   lucky_draw: 0,
+  other: 0,
 };
 const NO_CARDS = {
   vault: { cards: 0, sen: 0 },

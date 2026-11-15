@@ -102,6 +102,7 @@ const SOURCES: PnlBonusSource[] = [
   'weekly_challenge',
   'returned',
   'lucky_draw',
+  'other',
 ];
 
 /** Customer floating money as of now (P&L spec §10): wallets (withdrawable,
@@ -132,14 +133,14 @@ export const FloatingMoneyCard = ({ data }: { data: PnlFloatingSection }) => {
           },
           // Lucky Draw prize credit shows only once one exists (none on prod yet).
           ...SOURCES.filter(
-            (s) => s !== 'lucky_draw' || wallet.free_credit_by_source[s] !== 0,
-          ).map(
-            (s): Line => ({
-              label: t(`pnl.floating.sources.${s}`),
-              sen: wallet.free_credit_by_source[s],
-              depth: 2,
-            }),
-          ),
+            (s) =>
+              (s !== 'lucky_draw' && s !== 'other') ||
+              wallet.free_credit_by_source[s] !== 0,
+          ).map((s): Line => ({
+            label: t(`pnl.floating.sources.${s}`),
+            sen: wallet.free_credit_by_source[s],
+            depth: 2,
+          })),
           {
             label: t('pnl.floating.locked'),
             sen: wallet.locked_sen,

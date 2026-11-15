@@ -1722,7 +1722,8 @@
         "task": "Tasks",
         "weekly_challenge": "Weekly challenge",
         "returned": "Spent again after a refund",
-        "lucky_draw": "Lucky Draw prizes"
+        "lucky_draw": "Lucky Draw prizes",
+        "other": "Other promotions"
       }
     },
     "assets": {
@@ -1745,7 +1746,8 @@
         "task": "Tasks",
         "weekly_challenge": "Weekly challenge",
         "returned": "Came back by a refund or reversal",
-        "lucky_draw": "Lucky Draw prizes"
+        "lucky_draw": "Lucky Draw prizes",
+        "other": "Other promotions"
       },
       "locked": "Locked cash (still to play through, frozen, or never topped up)",
       "wallets": "Customer wallets",

@@ -10,6 +10,7 @@ export const PNL_CREDIT_SOURCES = [
   'weekly_challenge',
   'returned',
   'lucky_draw',
+  'other',
 ] as const;
 export type PnlCreditSource = (typeof PNL_CREDIT_SOURCES)[number];
 

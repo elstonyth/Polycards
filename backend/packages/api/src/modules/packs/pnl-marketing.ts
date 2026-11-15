@@ -8,6 +8,8 @@ import {
   type Pair,
   type PackMeta,
   type PackWindowRows,
+  type DayRate,
+  rateOn,
 } from './pnl';
 
 /** Where a bonus credit lot came from (decision 21, oldest grant first).
@@ -21,6 +23,7 @@ export const CREDIT_SOURCES = [
   'weekly_challenge',
   'returned',
   'lucky_draw',
+  'other',
 ] as const;
 export type CreditSource = (typeof CREDIT_SOURCES)[number];
 
@@ -30,6 +33,7 @@ const GIVEN_SOURCES: readonly CreditSource[] = [
   'checkin',
   'task',
   'weekly_challenge',
+  'other',
 ];
 
 /** Reward CARDS that are marketing. Lucky Draw card prizes are Lucky Draw cost. */
@@ -62,6 +66,8 @@ export type MarketingWindowRows = {
     sold: number;
     sold_sen: number;
     unsold_usd: number;
+    /** MYT day given, for that day's saved rate; absent = the current rate. */
+    day?: string;
   }[];
   referral_sen: number;
   /** Cash part of reward credits given in the window (decision 24: before
@@ -126,12 +132,25 @@ const creditSen = (
     .reduce((n, r) => n + r.sen, 0);
 
 // Sold cards at the RM actually credited; the rest at the vault sell-back
-// rate on live value (FLAT_PERCENT, the profitOwed basis). USD × rate × % = sen.
-const cardSen = (w: MarketingWindowRows, source: CardSource, fx: number) =>
+// rate on live value (FLAT_PERCENT, the profitOwed basis) at the day given's
+// saved rate. USD × rate × % = sen.
+// shortcut: reward pulls carry no draw-time card value, so the USD is today's
+// price and a closed month still moves with card prices; snapshot at payout to fix.
+const cardSen = (
+  w: MarketingWindowRows,
+  source: CardSource,
+  fx: number,
+  rates: readonly DayRate[],
+) =>
   w.cards
     .filter((c) => c.source === source)
     .reduce(
-      (n, c) => n + c.sold_sen + Math.round(c.unsold_usd * fx * FLAT_PERCENT),
+      (n, c) =>
+        n +
+        c.sold_sen +
+        Math.round(
+          c.unsold_usd * rateOn(c.day ?? '', rates, fx) * FLAT_PERCENT,
+        ),
       0,
     );
 
@@ -158,6 +177,7 @@ export function marketingSection(
   current: MarketingWindowRows,
   previous: MarketingWindowRows | null,
   fx: number,
+  rates: readonly DayRate[] = [],
 ): MarketingSection {
   const has = previous !== null;
   const bySource = (kind: 'used' | 'given') =>
@@ -214,8 +234,8 @@ export function marketingSection(
           cards: rows.reduce((n, c) => n + c.n, 0),
           sold: rows.reduce((n, c) => n + c.sold, 0),
           value: pair(
-            cardSen(current, s, fx),
-            previous ? cardSen(previous, s, fx) : null,
+            cardSen(current, s, fx, rates),
+            previous ? cardSen(previous, s, fx, rates) : null,
           ),
         },
       ];

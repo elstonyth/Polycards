@@ -8,7 +8,8 @@ export type PnlBonusSource =
   | 'task'
   | 'weekly_challenge'
   | 'returned'
-  | 'lucky_draw';
+  | 'lucky_draw'
+  | 'other';
 
 export type PnlAssetsSection = {
   total_sen: number;

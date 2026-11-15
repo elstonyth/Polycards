@@ -7,11 +7,9 @@ import type {
   PackMeta,
   PackWindowRows,
   ShippingWindow,
+  DatedCostLine,
 } from '../../../../modules/packs/pnl';
-import {
-  weightedAverageCost,
-  type CostLine,
-} from '../../../../modules/packs/inventory-cost';
+import { costAsOf } from '../../../../modules/packs/pnl';
 import { DEFAULT_MARKET_MULTIPLIER } from '../../../../modules/packs/pricing';
 import { packOpens } from '../../../reports/finance/queries';
 import { and, windowFilter, type ReportDb } from '../../../reports/sql';
@@ -33,7 +31,8 @@ export async function packWindowRows(
   );
   // A pack_open row's amount is the full price (cash + bonus share, negative);
   // bonus_cents is the bonus share (negative). Linked to its pack through the
-  // open's pulls or, for a capsule, its spins — the Finance pack-sales join.
+  // open's pulls. A charge whose open made capsule spins is Lucky Draw revenue
+  // (decision 3), left out here by that link, whatever the pack row says.
   const paid = await db.raw<{
     pack_id: string | null;
     full_sen: string;
@@ -43,12 +42,12 @@ export async function packWindowRows(
       'COALESCE(SUM(-ROUND(ct.amount * 100)), 0)::bigint AS full_sen, ' +
       'COALESCE(SUM(-COALESCE(ct.bonus_cents, 0)), 0)::bigint AS bonus_sen ' +
       'FROM credit_transaction ct ' +
-      'LEFT JOIN (SELECT open_id, pack_id FROM pull ' +
-      'WHERE open_id IS NOT NULL AND deleted_at IS NULL ' +
-      'UNION SELECT open_id, pack_id FROM ticket_spin ' +
+      'LEFT JOIN (SELECT DISTINCT open_id, pack_id FROM pull ' +
       'WHERE open_id IS NOT NULL AND deleted_at IS NULL) op ' +
       'ON op.open_id = ct.source_transaction_id ' +
-      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open'" +
+      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open' " +
+      'AND NOT EXISTS (SELECT 1 FROM ticket_spin s WHERE s.open_id = ct.source_transaction_id ' +
+      'AND s.deleted_at IS NULL)' +
       ledger.sql +
       ' GROUP BY op.pack_id',
     ledger.params,
@@ -167,9 +166,11 @@ export async function cogsWindowRows(
     [DEFAULT_MARKET_MULTIPLIER, ...pulls.params],
   );
 
+  // One row per pull at its first shipment (a pull can sit on two item rows),
+  // statuses as the Stock page counts shipped; then window and scope.
   const orders = and(
-    windowFilter(window, 'o.shipped_at'),
-    filterSql(scope, 'o.customer_id'),
+    windowFilter(window, 'x.shipped_at'),
+    filterSql(scope, 'x.customer_id'),
   );
   const shipped = await db.raw<{
     slug: string;
@@ -178,14 +179,17 @@ export async function cogsWindowRows(
     n: string;
     market_usd: number | null;
   }>(
-    `SELECT p.pack_id AS slug, p.card_id AS handle, ${mytDay('o.shipped_at')} AS day, ` +
+    `SELECT x.slug, x.handle, ${mytDay('x.shipped_at')} AS day, ` +
       'COUNT(*)::bigint AS n, MAX(c.market_value)::float8 AS market_usd ' +
-      'FROM delivery_order o ' +
+      'FROM (SELECT DISTINCT ON (p.id) p.pack_id AS slug, p.card_id AS handle, ' +
+      'p.customer_id, o.shipped_at FROM delivery_order o ' +
       'JOIN delivery_order_item i ON i.delivery_order_id = o.id AND i.deleted_at IS NULL ' +
       'JOIN pull p ON p.id = i.pull_id ' +
-      'LEFT JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
-      "WHERE o.deleted_at IS NULL AND o.status IN ('shipped', 'completed') " +
-      `AND ${NOT_REWARD_CARD}` +
+      "WHERE o.deleted_at IS NULL AND o.status IN ('shipped', 'completed', 'delivered') " +
+      `AND o.shipped_at IS NOT NULL AND ${NOT_REWARD_CARD} ` +
+      'ORDER BY p.id, o.shipped_at) x ' +
+      'LEFT JOIN card c ON c.handle = x.handle AND c.deleted_at IS NULL ' +
+      'WHERE TRUE' +
       orders.sql +
       ' GROUP BY 1, 2, 3',
     orders.params,
@@ -221,32 +225,46 @@ export async function cogsWindowRows(
   };
 }
 
-/** Each card's weighted-average supplier cost in RM (inventory-cost.ts, all
- *  invoices, all time), null when it has none. */
-export async function cardCosts(
+/** Each card's purchase-invoice lines with the invoice's MYT day, for
+ *  costAsOf (pnl.ts). */
+export async function cardCostLines(
   db: ReportDb,
   handles: readonly string[],
-): Promise<Map<string, number | null>> {
-  const out = new Map<string, number | null>(handles.map((h) => [h, null]));
+): Promise<Map<string, DatedCostLine[]>> {
+  const out = new Map<string, DatedCostLine[]>();
   if (handles.length === 0) return out;
   const { rows } = await db.raw<{
     card_handle: string;
+    day: string;
     qty: number;
     unit_cost: string;
   }>(
-    'SELECT l.card_handle, l.qty, l.unit_cost FROM purchase_invoice_line l ' +
+    `SELECT l.card_handle, ${mytDay('pi.date')} AS day, l.qty, l.unit_cost ` +
+      'FROM purchase_invoice_line l ' +
       'JOIN purchase_invoice pi ON pi.id = l.invoice_id AND pi.deleted_at IS NULL ' +
       `WHERE l.deleted_at IS NULL AND l.card_handle IN (${handles.map(() => '?').join(', ')})`,
     handles,
   );
-  const lines = new Map<string, CostLine[]>();
   for (const r of rows) {
-    const list = lines.get(r.card_handle) ?? [];
-    list.push({ qty: Number(r.qty), unit_cost: Number(r.unit_cost) });
-    lines.set(r.card_handle, list);
+    const list = out.get(r.card_handle) ?? [];
+    list.push({
+      day: r.day,
+      qty: Number(r.qty),
+      unit_cost: Number(r.unit_cost),
+    });
+    out.set(r.card_handle, list);
   }
-  for (const [h, l] of lines) out.set(h, weightedAverageCost(l));
   return out;
+}
+
+/** Each card's weighted-average supplier cost in RM today (inventory-cost.ts,
+ *  every invoice), null when it has none. */
+export async function cardCosts(
+  db: ReportDb,
+  handles: readonly string[],
+): Promise<Map<string, number | null>> {
+  const lines = await cardCostLines(db, handles);
+  return new Map(handles.map((h) => [h, costAsOf(lines.get(h) ?? [], null)]));
 }
 
 /** Saved USD_MYR day rates (fx_rate_day), oldest first. */

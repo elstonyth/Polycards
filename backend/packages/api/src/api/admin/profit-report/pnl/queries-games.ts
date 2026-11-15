@@ -63,7 +63,8 @@ export async function gamesWindowRows(
     'SELECT t.reason, ' +
       'COALESCE(SUM(t.delta) FILTER (WHERE t.delta > 0), 0)::bigint AS given, ' +
       'COALESCE(SUM(-t.delta) FILTER (WHERE t.delta < 0), 0)::bigint AS spent, ' +
-      "COUNT(*) FILTER (WHERE t.reason = 'coin_flip' AND NOT EXISTS (" +
+      // Rounds, not rows: a ticket-only flip can write a stake and a payout row.
+      "COUNT(DISTINCT t.ref) FILTER (WHERE t.reason = 'coin_flip' AND NOT EXISTS (" +
       "SELECT 1 FROM ledger_entry le WHERE le.type = 'CF' AND le.ref_id = t.ref " +
       'AND le.deleted_at IS NULL))::bigint AS ticket_only ' +
       'FROM lucky_draw_ticket t WHERE t.deleted_at IS NULL' +

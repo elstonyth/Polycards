@@ -13,6 +13,8 @@ export const BONUS_SOURCES = [
   'returned',
   // A Lucky Draw credit prize not yet spent (review F3): its own line, not 'returned'.
   'lucky_draw',
+  // Any other promo grant (voucher, daily reward), not a refund.
+  'other',
 ] as const;
 export type BonusSource = (typeof BONUS_SOURCES)[number];
 
