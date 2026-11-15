@@ -359,6 +359,66 @@ describe('bank_save_check', () => {
     expect(noNumber.can_save).toBeNull();
   });
 
+  describe('a number already saved on this player', () => {
+    beforeEach(() => {
+      metadata = {
+        bank_accounts: [
+          {
+            id: 'b1',
+            bankCode: 'MBBEMYKL',
+            bankName: 'Maybank',
+            accountNumber: `0${KEY}`,
+            accountHolderName: 'Tan Ah Kow',
+            savedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      };
+    });
+    const check = async () =>
+      JSON.parse(
+        await run(
+          'bank_save_check',
+          { username: 'Test Player', last4: '0001' },
+          'can Test Player save Maybank 0001',
+        ).done,
+      );
+
+    it('saves as a no-op when nothing comes before it: holders and the slot do not count', async () => {
+      packs.payoutNameStanding.mockResolvedValue(nameHeldBy([]));
+      const out = await check();
+      expect(out).toMatchObject({
+        can_save: true,
+        fixes: [],
+        number: { already_saved: true, blocks_save: false },
+      });
+    });
+
+    it('is still refused when banned for this player, as the save refuses it first', async () => {
+      packs.payoutNumberStanding.mockResolvedValue(
+        standing(['cus_y1'], { banned: true, bannedForPlayer: true }),
+      );
+      packs.payoutNameStanding.mockResolvedValue(nameHeldBy([]));
+      const out = await check();
+      expect(out).toMatchObject({
+        can_save: false,
+        number: {
+          already_saved: true,
+          banned_for_this_player: true,
+          blocks_save: true,
+        },
+      });
+      expect(out.fixes.join(' ')).toMatch(/unban_bank_number/);
+      expect(out.fixes.join(' ')).not.toMatch(/free_bank_number/);
+    });
+
+    it('is still refused when the name is linked to another account', async () => {
+      const out = await check();
+      expect(out.can_save).toBe(false);
+      expect(out.name.blocks_save).toBe(true);
+      expect(out.fixes.join(' ')).toMatch(/clear_name_clash/);
+    });
+  });
+
   it('a number it cannot find leaves the name checked, and the bank unknown is said', async () => {
     packs.payoutAccountsOf.mockResolvedValue([]);
     packs.resolveBannedPayoutAccount.mockRejectedValue(new Error('none'));

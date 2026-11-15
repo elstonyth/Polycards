@@ -721,6 +721,11 @@ export const AGENT_TOOLS: AgentTool[] = [
           accountNumber: number.key,
         });
         const { banned, bannedForPlayer } = standing;
+        if (bannedForPlayer) {
+          fixes.push(
+            `…${number.last4} is banned for this player: unban_bank_number unbans it for them only.`,
+          );
+        }
         if (
           bank &&
           saved.some(
@@ -729,21 +734,18 @@ export const AGENT_TOOLS: AgentTool[] = [
               payoutAccountKey(a.accountNumber, false) === number?.key,
           )
         ) {
-          // A save of what is already theirs is a no-op that succeeds.
-          return JSON.stringify({
-            ...out,
-            number: { bank: bank.name, last4: number.last4, already_saved: true },
-            fixes: [],
-            unchecked: [],
-            can_save: true,
-          });
-        }
-        if (bannedForPlayer) {
-          fixes.push(
-            `…${number.last4} is banned for this player: unban_bank_number unbans it for them only.`,
-          );
-        }
-        if (!bank) {
+          // A save of what is already theirs is a no-op that succeeds, but only
+          // past the ban and the name check, which the save runs first (the
+          // slot, the one-name rule and other holders do not apply to it).
+          out.number = {
+            bank: bank.name,
+            last4: number.last4,
+            already_saved: true,
+            banned,
+            banned_for_this_player: bannedForPlayer,
+            blocks_save: bannedForPlayer,
+          };
+        } else if (!bank) {
           out.number = {
             last4: number.last4,
             banned,
