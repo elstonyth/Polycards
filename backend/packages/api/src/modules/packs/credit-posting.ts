@@ -1,7 +1,7 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import type { Context } from '@medusajs/framework/types';
 import type { LedgerSqlManager } from './claim';
-import { BONUS_NOT_SPENDABLE_MESSAGE } from './bonus-credit';
+import { BONUS_NOT_SPENDABLE_MESSAGE, bonusShareSen } from './bonus-credit';
 import { consumeExternalSen } from './external-funded';
 import type { LedgerPayload, LedgerType } from './ledger';
 
@@ -58,15 +58,12 @@ export type CreditMutationReason =
   | 'delivery_fee'
   | 'bonus_grant';
 
-export type CreditMutationInput = {
+type PostingFields = {
   customerId: string;
   /** Signed MYR (RM) decimal (never cents): negative = spend, positive = grant. */
   amount: number;
-  reason: CreditMutationReason;
   /** Note (adjustment) / gateway ref (top-up); null otherwise. */
   reference?: string | null;
-  /** The pull this credit came from (buyback rows only). */
-  pullId?: string | null;
   /** Minimum allowed resulting balance in MYR (RM) (default RM 0 — no overdraft). */
   floor?: number;
   /** The open's stable id (open_id), stamped on pack_open charge rows. */
@@ -94,6 +91,25 @@ export type CreditMutationInput = {
   ledger?: LedgerPart;
 };
 
+/** A posting for a general reason: top-up, cashout, adjustment, bonus grant,
+ *  reward credit, voucher, delivery fee, pack open. */
+export type GeneralPosting = PostingFields & {
+  reason: Exclude<CreditMutationReason, 'buyback'>;
+};
+
+/** A sell-back credit: the pull it came from, and the bonus share of it
+ *  (holdBp, ADR 0012) that must be played through before withdrawal. */
+export type BuybackPosting = PostingFields & {
+  reason: 'buyback';
+  pullId: string;
+  holdBp: number;
+  ledger: LedgerPart & { type: 'SE' };
+};
+
+/** Every credit posting, keyed on reason. */
+export type CreditPosting = GeneralPosting | BuybackPosting;
+export type CreditMutationInput = CreditPosting;
+
 /** The locked Σ read a posting is planned against, in integer sen. */
 export type PostingTotals = { balanceCents: number; bonusCents: number; externalCents: number };
 
@@ -104,8 +120,9 @@ export type CreditRow = {
   reason: CreditMutationReason;
   pull_id: string | null;
   reference: string | null;
-  external_funded_cents: number;
-  bonus_cents: number;
+  /** NULL, not 0, on a sell-back with nothing held (D9). */
+  external_funded_cents: number | null;
+  bonus_cents: number | null;
   source_transaction_id: string | null;
 };
 
@@ -141,7 +158,7 @@ export function insufficientCreditsMessage(
  * (playthrough) snapshot and the floor, planned against the locked Σ read.
  * Throws the same MedusaErrors, in the same order, as mutateCreditAtomic did.
  */
-export function planPosting(input: CreditMutationInput, totals: PostingTotals): PostingPlan {
+export function planPosting(input: CreditPosting, totals: PostingTotals): PostingPlan {
   const beforeCents = totals.balanceCents;
   // Spend-only bonus credit (spec 2026-10-07): only a pack open may spend it
   // (settleOpen), so every other debit is floored against the NORMAL balance.
@@ -298,17 +315,24 @@ export function planPosting(input: CreditMutationInput, totals: PostingTotals): 
       // vs. creditSummary's raw sum (CodeRabbit).
       amount: deltaCents / 100,
       reason: input.reason,
-      pull_id: input.pullId ?? null,
+      pull_id: input.reason === 'buyback' ? input.pullId : null,
       // `reference` keeps the gateway/charge ref (or plain note) for
       // reconciliation; the idempotency anchor lives in source_transaction_id
       // (the replay check's target) so the two never clobber each other.
       reference: input.reference ?? null,
-      external_funded_cents: externalFundedCents,
-      bonus_cents: bonusDeltaCents,
+      // A sell-back's bonus share is held for packs: stamped as external money
+      // in, like a deposit, so opens consume it and the playthrough gate
+      // counts it (DEPOSITED_PT_SEN_SQL). Rounded up, toward the locked side.
+      external_funded_cents:
+        input.reason === 'buyback'
+          ? bonusShareSen(deltaCents, input.holdBp) || null
+          : externalFundedCents,
+      bonus_cents: input.reason === 'buyback' ? null : bonusDeltaCents,
       source_transaction_id:
         input.idempotencyReference ?? input.sourceTransactionId ?? null,
     },
-    unfreeze: deltaCents > 0,
+    // A sell-back lifts an AUTO freeze after commit (buyback-pull.ts).
+    unfreeze: deltaCents > 0 && input.reason !== 'buyback',
     balanceAfterCents: beforeCents + deltaCents,
     bonusAfterCents: bonusBeforeCents + bonusDeltaCents,
   };

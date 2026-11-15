@@ -99,7 +99,7 @@ import CoinFlipRound from './models/coin-flip-round';
 import { settleBuyback, type BuybackSettlement } from './buyback-settlement';
 import { COIN_FLIP_CONFIG_ID, parseCoinFlipSettings, coinFlipSettingsView, publicCoinFlipRound,
   type CoinFlipSettings, type CoinFlipPublicRound } from './coin-flip';
-import { insufficientCreditsMessage, lockCredit, planPosting, type CreditMutationInput } from './credit-posting';
+import { insufficientCreditsMessage, lockCredit, planPosting, type CreditMutationInput, type GeneralPosting } from './credit-posting';
 import { coinFlipManager, readCoinFlipSettings, quoteCoinFlipOperation,
   acceptCoinFlipOperation, getCoinFlipRoundOperation } from './coin-flip-operations';
 import DeliveryOrder from './models/delivery-order';
@@ -4788,8 +4788,9 @@ class PacksModuleService extends MedusaService({
     /** Bonus balance after the write (MYR), read under the lock. Absent on a
      *  replay, which wrote nothing. */
     bonusBalance?: number;
-    /** The written row's signed bonus sen. Absent on a replay. */
-    rowBonusCents?: number;
+    /** The written row's signed bonus sen (NULL on a sell-back, D9). Absent
+     *  on a replay. */
+    rowBonusCents?: number | null;
     /** The ledger row the posting's ledger part wrote. */
     ledger?: { id: string; display_id: string };
   }> {
@@ -4922,7 +4923,7 @@ class PacksModuleService extends MedusaService({
   // single ledger row.
   @InjectTransactionManager()
   async topUpCreditsWithLedger(
-    input: Omit<CreditMutationInput, 'ledger'> & {
+    input: Omit<GeneralPosting, 'ledger'> & {
       ledgerPaymentMethod?: string;
       ledgerGatewayRef?: string | null;
     },
@@ -4959,7 +4960,7 @@ class PacksModuleService extends MedusaService({
   // and one ledger row.
   @InjectTransactionManager()
   async withdrawCreditsWithLedger(
-    input: Omit<CreditMutationInput, 'ledger'> & {
+    input: Omit<GeneralPosting, 'ledger'> & {
       ledger: {
         outcome: 'requested' | 'refunded';
         bankCode: string | null;
@@ -15470,51 +15471,39 @@ class PacksModuleService extends MedusaService({
       bonusBp?: number;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<
-    Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>
-  > {
+  ): Promise<{ id: string }[]> {
     // A card opened with bonus credit or the welcome pack sells back as NORMAL
     // credit (operator rule 2026-10-09), but its bonus share must be played
-    // through once before it can be withdrawn: stamped as external money in,
-    // like a deposit, so opens consume it and the playthrough gate counts it
-    // (DEPOSITED_PT_SEN_SQL). Rounded up, toward the locked side.
+    // through once before it can be withdrawn: the posting stamps it as
+    // external money in (planPosting); the SE row shows the same share.
     const playthroughCents = bonusShareSen(
       Math.round(input.amount * 100),
       input.bonusBp ?? 0,
     );
-    const rows = await this.createCreditTransactions(
-      [
-        {
-          customer_id: input.customerId,
-          amount: input.amount,
-          reason: 'buyback' as const,
-          pull_id: input.pullId,
-          ...(playthroughCents
-            ? { external_funded_cents: playthroughCents }
-            : {}),
-        },
-      ],
-      sharedContext,
-    );
-    await this.recordLedgerEntry(
+    const { id } = await this.mutateCreditAtomic(
       {
-        type: 'SE',
         customerId: input.customerId,
-        refId: rows[0].id,
-        walletDelta: input.amount,
-        vaultDelta: -input.valueMyr,
-        payload: {
+        amount: input.amount,
+        reason: 'buyback',
+        pullId: input.pullId,
+        holdBp: input.bonusBp ?? 0,
+        ledger: {
           type: 'SE',
-          card_handle: input.cardHandle,
-          sp_ref_id: input.openId,
-          price: input.valueMyr,
-          rate: input.rate,
-          ...(playthroughCents ? { playthrough: playthroughCents / 100 } : {}),
+          walletDelta: input.amount,
+          vaultDelta: -input.valueMyr,
+          payload: {
+            type: 'SE',
+            card_handle: input.cardHandle,
+            sp_ref_id: input.openId,
+            price: input.valueMyr,
+            rate: input.rate,
+            ...(playthroughCents ? { playthrough: playthroughCents / 100 } : {}),
+          },
         },
       },
       sharedContext,
     );
-    return rows;
+    return [{ id }];
   }
 
   // recordLedgerEntry — THE write primitive for POLYCARD-BACK §5. Every
