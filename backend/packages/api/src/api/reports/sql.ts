@@ -4,6 +4,7 @@ import { EFFECTIVE_GROUP_SQL } from '../../modules/packs/odds-sets';
 import {
   fromGroupScope,
   populationSql,
+  type SqlPart,
 } from '../../modules/packs/money-figures';
 import type { GroupScope, ReportWindow } from './params';
 
@@ -20,8 +21,7 @@ export const reportDb = (req: MedusaRequest): ReportDb =>
     ContainerRegistrationKeys.PG_CONNECTION,
   ) as unknown as ReportDb;
 
-/** A WHERE fragment (starting with " AND", or empty) and its bindings. */
-export type SqlPart = { sql: string; params: unknown[] };
+export type { SqlPart };
 
 // Defined beside the JS rule it mirrors; re-exported for the reports.
 export { EFFECTIVE_GROUP_SQL };

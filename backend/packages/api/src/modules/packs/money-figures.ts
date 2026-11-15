@@ -1,5 +1,3 @@
-import type { GroupScope } from '../../api/reports/params';
-import type { SqlPart } from '../../api/reports/sql';
 import { reasonCashSenSql } from './bonus-credit';
 import { EFFECTIVE_GROUP_SQL } from './odds-sets';
 import { realCustomerSql, type CustomerScope } from './real-customers';
@@ -9,6 +7,10 @@ import { realCustomerSql, type CustomerScope } from './real-customers';
 // 04-money-figures-design.md). Callers keep their own queries and splice these
 // in. Plain strings, no Medusa imports: service.ts cannot import from api/.
 // A fragment takes the table alias with its dot ('ct.'), or '' for none.
+
+/** A WHERE fragment (starting with " AND", or empty) and its bindings.
+ *  Defined here, below api/, and re-exported by api/reports/sql.ts. */
+export type SqlPart = { sql: string; params: unknown[] };
 
 // ── Who a figure counts ──────────────────────────────────────────────────────
 
@@ -30,6 +32,13 @@ export type Population =
 /** ?scope= (CustomerScope): 'default' is the real customers. */
 export const fromCustomerScope = (s: CustomerScope): Population =>
   s === 'all' ? { kind: 'everyone' } : { kind: 'real' };
+
+/** The desk reports' ?group= scope, as api/reports/params.ts resolves it
+ *  (its GroupScope; spelled here so modules/ needs nothing from api/). */
+type GroupScope =
+  | { kind: 'all' }
+  | { kind: 'default' }
+  | { kind: 'group'; id: string; name: string };
 
 /** ?group= (GroupScope): 'default' is the DEFAULT group, credential accounts
  *  included. Reading it as `real` would change the desk numbers (an open owner
