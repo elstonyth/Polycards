@@ -7363,14 +7363,18 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    const gate = await this.mayPlay(customerId, 'lucky_draw', sharedContext);
-    if (gate === 'unavailable') {
+    const refusal = await this.mayPlay(
+      customerId,
+      'lucky_draw',
+      sharedContext,
+    );
+    if (refusal === 'unavailable') {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         'This account is unavailable.',
       );
     }
-    if (gate) return refuse('no_topup');
+    if (refusal) return refuse('no_topup'); // Lucky Draw's only other refusal
     const before = await this.luckyDrawBalance(customerId, sharedContext);
     if (before < tickets) return refuse('not_enough_tickets');
     // The ORM creates below are not flushed until the transaction ends, so a raw
@@ -7467,14 +7471,18 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    const gate = await this.mayPlay(customerId, 'lucky_draw', sharedContext);
-    if (gate === 'unavailable') {
+    const refusal = await this.mayPlay(
+      customerId,
+      'lucky_draw',
+      sharedContext,
+    );
+    if (refusal === 'unavailable') {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         'This account is unavailable.',
       );
     }
-    if (gate) return refuse('no_topup');
+    if (refusal) return refuse('no_topup'); // Lucky Draw's only other refusal
     const before = await this.luckyDrawBalance(customerId, sharedContext);
     if (before < tickets) return refuse('not_enough_tickets');
     // Read before the ORM creates below, which are not flushed until the

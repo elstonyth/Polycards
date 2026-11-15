@@ -88,14 +88,17 @@ export type PlayFacts = {
   frozen: boolean;
   hasTopup: boolean;
   playthroughRemaining: number;
-  /** The effective player group's policy; null for DEFAULT or no group. */
+  /** The effective player group's policy; null for DEFAULT or no group. A
+   *  topped-up Lucky Draw player may pass null unread: the group only matters
+   *  without a top-up. Lucky Draw likewise reads no freeze or playthrough. */
   group: GroupPolicy | null;
 };
 
 /**
  * Why `game` turns this player away, or null. In order:
  *  1. a disabled account plays nothing;
- *  2. Coin Flip: any freeze (Lucky Draw reads none: D6, kept);
+ *  2. Coin Flip: any freeze, manual or auto (Lucky Draw entry checks only a
+ *     manual one, through its own assertNotFrozen);
  *  3. Coin Flip: a withdrawal-blocked group can never cash out, so its members
  *     skip both cash-out gates below;
  *  4. only DEFAULT (or no group) must have topped up (owner 2026-11-02/04);

@@ -47,10 +47,10 @@ const GROUPS: [string, string, Record<string, unknown>, string, string | null][]
   ['grp_new', 'Newer', { odds_set: 3 }, T1, null],
   ['grp_eq_a', 'Equal A', {}, T1, null],
   ['grp_eq_b', 'Equal B', {}, T1, null],
-  // D5: the same millisecond, the later id first by microsecond.
+  // The same millisecond: the later id comes first by microsecond.
   ['grp_us_b', 'Micro B', {}, '2026-02-01T00:00:00.123100Z', null],
   ['grp_us_a', 'Micro A', {}, '2026-02-01T00:00:00.123400Z', null],
-  // D5: equal times; by locale 'a' < 'B', by code point 'B' < 'a'.
+  // Equal times: by locale 'a' < 'B', by code point 'B' < 'a'.
   ['grp_cs_B', 'Case B', {}, T1, null],
   ['grp_cs_a', 'Case A', {}, T1, null],
   ['grp_gone', 'Gone', {}, '2025-11-01T00:00:00.000100Z', '2026-03-01T00:00:00.000100Z'],
@@ -135,7 +135,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         { customer_id: 'c_played', amount: 10, reason: 'topup', external_funded_cents: 1000 },
         { customer_id: 'c_played', amount: -10, reason: 'pack_open', external_funded_cents: -1000 },
         { customer_id: 'c_negative', amount: -5, reason: 'topup' },
-        // Under half a sen: rounds to 0 in the wallet's topup sum (D4).
+        // Under half a sen: rounds to 0, so neither hasTopUp nor the wallet counts it.
         { customer_id: 'c_subsen', amount: 0.004, reason: 'topup' },
       ]);
     };
@@ -261,7 +261,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         c_rebate: [null, null],
         c_disabled: ['unavailable', 'unavailable'],
         c_soft_disabled: ['no_topup', 'no_topup'],
-        c_frozen_manual: ['frozen', null], // Lucky Draw reads no freeze (D6)
+        c_frozen_manual: ['frozen', null], // the play gate reads no freeze for Lucky Draw
         c_frozen_auto: ['frozen', 'no_topup'],
         c_topup: ['playthrough', null],
         c_played: [null, null],
