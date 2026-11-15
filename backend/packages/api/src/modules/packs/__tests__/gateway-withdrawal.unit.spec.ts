@@ -82,9 +82,6 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     savedBankAccountsFor: jest.fn().mockResolvedValue(savedAccounts),
     // Ban and other holders of a saved number. Clean by default.
     payoutNumberStanding: jest.fn().mockResolvedValue(standing()),
-    // Other customers on the same number. None by default.
-    otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
-    payoutAccountBanned: jest.fn().mockResolvedValue(false),
     // Support's verification of a shared number. Not verified by default.
     bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
     createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
@@ -577,14 +574,33 @@ describe('startWithdrawal — money ordering', () => {
       accountNumber: '91234567',
     };
     const h = harness([paynow]);
-    h.packs.payoutAccountBanned.mockImplementation(
-      async (n: string) => n === '6591234567',
+    h.packs.payoutNumberStanding.mockResolvedValue(
+      standing([], {
+        bankId: 'PAYNOWSG',
+        forms: ['91234567', '6591234567'],
+        banned: true,
+        bannedForPlayer: true,
+      }),
     );
     await expect(
       start(h, { gateway: 'tgpay', amount: 56, accountId: paynow.id }),
     ).rejects.toThrow('This bank account cannot be used on Polycards.');
+    expect(h.packs.payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
+      bankCode: 'PAYNOWSG',
+      accountNumber: '91234567',
+    });
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+  });
+
+  it('pays a number support unbanned for this customer', async () => {
+    const h = harness();
+    h.packs.payoutNumberStanding.mockResolvedValue(
+      standing([], { banned: true, bannedForPlayer: false }),
+    );
+    await expect(
+      start(h, { gateway: 'tgpay', amount: 56 }),
+    ).resolves.toBeTruthy();
   });
 
   it('holds a destination to its own payout floor before any row or debit', async () => {
@@ -1791,8 +1807,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       const packs = {
         listGatewayWithdrawals: jest.fn().mockResolvedValue([heldRow]),
         listCustomerAccountStates: jest.fn().mockResolvedValue([]),
-        otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
-        payoutAccountBanned: jest.fn().mockResolvedValue(false),
+        payoutNumberStanding: jest.fn().mockResolvedValue(standing()),
         bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
         claimWithdrawalAgainstDebit: jest
           .fn()
@@ -1841,30 +1856,36 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
     // One bank account, one Polycards account, on the row's own number: a row
     // held before the rule shipped, or a number since removed, stays held.
     describe('a shared bank account', () => {
-      const elsewhere = {
-        customer_id: 'cus_2',
-        bank_code: 'MBBEMYKL',
-        holder_name: null,
-      };
+      const elsewhere = standing([{ customerId: 'cus_2', paid: true }]);
 
       it('refuses, and the row stays held', async () => {
         const h = approveHarness();
-        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        h.packs.payoutNumberStanding.mockResolvedValue(elsewhere);
         await expect(h.approve()).rejects.toThrow(
           /linked to another Polycards account/,
         );
-        expect(h.packs.otherPayoutAccountHolders).toHaveBeenCalledWith(
+        // Judged on the row's own number, at the row's bank.
+        expect(h.packs.payoutNumberStanding).toHaveBeenCalledWith(
           heldRow.customer_id,
-          heldRow.account_number,
-          false,
+          { bankCode: heldRow.bank_code, accountNumber: heldRow.account_number },
         );
         expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
         expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
       });
 
+      it('refuses when another account only saved it', async () => {
+        const h = approveHarness();
+        h.packs.payoutNumberStanding.mockResolvedValue(
+          standing([{ customerId: 'cus_2', paid: false }]),
+        );
+        await expect(h.approve()).rejects.toThrow(
+          /linked to another Polycards account/,
+        );
+      });
+
       it('refuses a stamp on another number', async () => {
         const h = approveHarness();
-        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        h.packs.payoutNumberStanding.mockResolvedValue(elsewhere);
         h.packs.bankShareVerifiedFor.mockResolvedValue({
           other_account: '2026-11-03T00:00:00.000Z',
         });
@@ -1875,7 +1896,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
 
       it('lets a verified number through', async () => {
         const h = approveHarness();
-        h.packs.otherPayoutAccountHolders.mockResolvedValue([elsewhere]);
+        h.packs.payoutNumberStanding.mockResolvedValue(elsewhere);
         h.packs.bankShareVerifiedFor.mockResolvedValue({
           [savedBankAccountId('MBBEMYKL', heldRow.account_number)]:
             '2026-11-03T00:00:00.000Z',
@@ -1886,43 +1907,19 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalled();
       });
 
-      it('does not count the same digits at another bank', async () => {
+      it('pays when nobody else holds it', async () => {
         const h = approveHarness();
-        h.packs.otherPayoutAccountHolders.mockResolvedValue([
-          { ...elsewhere, bank_code: 'PBBEMYKL' },
-        ]);
         const out = await h.approve().catch((e: Error) => e);
         expect(String((out as Error).message)).not.toMatch(/linked to another/);
         expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalled();
       });
 
-      // A PayNow mobile is one number with or without its 65.
-      const paynowRow = {
-        ...heldRow,
-        bank_code: 'PAYNOWSG',
-        account_number: '91234567',
-      };
-
-      it('refuses a PayNow mobile banned under its other spelling', async () => {
+      it('refuses a banned number, asked for this customer', async () => {
         const h = approveHarness();
-        h.packs.listGatewayWithdrawals.mockResolvedValue([paynowRow]);
-        h.packs.payoutAccountBanned.mockImplementation(
-          async (n: string) => n === '6591234567',
+        h.packs.payoutNumberStanding.mockResolvedValue(
+          standing([], { banned: true, bannedForPlayer: true }),
         );
         await expect(h.approve()).rejects.toThrow(/banned on Polycards/);
-        expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
-      });
-
-      it('refuses a PayNow mobile another account holds under its other spelling', async () => {
-        const h = approveHarness();
-        h.packs.listGatewayWithdrawals.mockResolvedValue([paynowRow]);
-        h.packs.otherPayoutAccountHolders.mockImplementation(
-          async (_id: string, n: string) =>
-            n === '6591234567' ? [{ ...elsewhere, bank_code: 'PAYNOWSG' }] : [],
-        );
-        await expect(h.approve()).rejects.toThrow(
-          /linked to another Polycards account/,
-        );
         expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
       });
     });

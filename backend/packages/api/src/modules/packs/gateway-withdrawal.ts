@@ -5,12 +5,11 @@ import {
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   bankSupportedBy,
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
-  heldByAnother,
   resolveWithdrawalDestination,
   savedBankAccountId,
 } from './saved-accounts';
-import { accountNumberForms, findBank, walletAddressValid } from './banks';
-import { savedListHeld } from './payout-destination';
+import { findBank, walletAddressValid } from './banks';
+import { holdsPayout, savedListHeld } from './payout-destination';
 import {
   channelStatus,
   destinationMinRm,
@@ -757,19 +756,11 @@ export async function startWithdrawal(
   // 2026-11-03). A PayNow mobile is one number with or without its 65.
   if (
     (
-      await Promise.all(
-        accountNumberForms(
-          precheckDestination.bankCode,
-          precheckDestination.accountNumber,
-        ).map((n) =>
-          packs.payoutAccountBanned(
-            n,
-            findBank(precheckDestination.bankCode)?.wallet !== undefined,
-            input.customerId,
-          ),
-        ),
-      )
-    ).some(Boolean)
+      await packs.payoutNumberStanding(input.customerId, {
+        bankCode: precheckDestination.bankCode,
+        accountNumber: precheckDestination.accountNumber,
+      })
+    ).bannedForPlayer
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
@@ -2028,21 +2019,12 @@ export async function submitHeldWithdrawal(
   // support may already have changed. The row stays held.
   const rowBank = findBank(row.bank_code);
   // Every spelling of the number: a PayNow mobile with or without its 65.
-  const rowNumbers = accountNumberForms(row.bank_code, row.account_number);
+  const rowStanding = await packs.payoutNumberStanding(row.customer_id, {
+    bankCode: row.bank_code,
+    accountNumber: row.account_number,
+  });
   // A banned number never pays on a click either (owner, 2026-11-03).
-  if (
-    (
-      await Promise.all(
-        rowNumbers.map((n) =>
-          packs.payoutAccountBanned(
-            n,
-            rowBank?.wallet !== undefined,
-            row.customer_id,
-          ),
-        ),
-      )
-    ).some(Boolean)
-  ) {
+  if (rowStanding.bannedForPlayer) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'This bank account is banned on Polycards. Deny the withdrawal.',
@@ -2053,20 +2035,9 @@ export async function submitHeldWithdrawal(
     row.account_number,
   );
   if (
-    !(await packs.bankShareVerifiedFor(row.customer_id))[rowAccountId] &&
-    heldByAnother(
-      (
-        await Promise.all(
-          rowNumbers.map((n) =>
-            packs.otherPayoutAccountHolders(
-              row.customer_id,
-              n,
-              rowBank?.wallet !== undefined,
-            ),
-          ),
-        )
-      ).flat(),
-      row.bank_code,
+    holdsPayout(
+      rowStanding,
+      Boolean((await packs.bankShareVerifiedFor(row.customer_id))[rowAccountId]),
     )
   ) {
     throw new MedusaError(
