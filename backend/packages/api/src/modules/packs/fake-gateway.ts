@@ -195,8 +195,8 @@ export type FakeRefusalOptions = {
   /** 'wallet-empty' only: the adapter confirmed it by reading this balance
    *  (A3Pay). Absent = the provider said so outright (TGPay). */
   available?: number;
-  /** 'refused' only: an A3Pay balance hint its own balance read did NOT
-   *  confirm. */
+  /** 'refused' only, for the reader: an A3Pay balance hint its own balance
+   *  read did NOT confirm. Changes nothing: the adapter already decided. */
   unconfirmedHint?: boolean;
 };
 

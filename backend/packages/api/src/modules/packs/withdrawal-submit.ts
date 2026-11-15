@@ -66,10 +66,10 @@ export type WithdrawalSubmitInput = {
   email?: string;
   /** The locked payout-currency amount; null on an RM rail. */
   gatewayAmount: number | null;
-  /** Starts `failure_reason`: 'submit refused' | 'approve refused'. */
-  prefix: string;
+  /** Starts `failure_reason`. */
+  prefix: 'submit refused' | 'approve refused';
   /** Names the caller in ops alerts. */
-  via: string;
+  via: 'customer withdrawal' | 'admin approve';
   /** The customer reads the refusal on screen: no receipt, no feed row. */
   customerOnScreen: boolean;
 };

@@ -42,9 +42,7 @@ import { notifyFeed } from './notify-feed';
 import { withdrawalFeedKey } from './feed-events';
 import { sendWithdrawalReceipt } from './withdrawal-receipt';
 import {
-  PAYOUT_FLOAT_COOLDOWN_MS,
   floatCannotPayAnything,
-  formatGatewayFailureReason,
   payoutFloatEmpty,
   redactPayoutText,
   resetPayoutFloatBreaker,
@@ -59,8 +57,6 @@ import {
 } from './withdrawal-refund';
 
 export {
-  PAYOUT_FLOAT_COOLDOWN_MS,
-  formatGatewayFailureReason,
   redactPayoutText,
   refundWithdrawal,
   resetPayoutFloatBreaker,
@@ -930,8 +926,8 @@ export async function startWithdrawal(
     // definitively-refused submit leaves no transaction at the gateway to
     // requery. The generic message that reaches the customer ("check the bank
     // details") is a guess, and an empty merchant payout float (PMT10013)
-    // produces exactly the same words. This line is the only thing that can
-    // tell those apart.
+    // produces exactly the same words. This line, with the row's
+    // failure_reason (plan 095), is what tells those apart.
     //
     // AFTER the refund and the status update, mirroring the deposit branch.
     // The try/catch below already covers a logger that THROWS, so ordering is
@@ -1587,8 +1583,8 @@ export async function submitHeldWithdrawal(
     const { error } = answer;
     // Their reason, on record, AFTER the money moved — a definitively
     // refused submit leaves nothing at the gateway to requery later, so
-    // this line is the only thing that can tell an empty merchant payout
-    // float (PMT10013) apart from genuinely bad bank details. Best-effort:
+    // this line, with the row's failure_reason, is what tells an empty
+    // merchant payout float (PMT10013) apart from bad bank details. Best-effort:
     // without the catch a throw from the logger would replace the error
     // below and the operator would see a crash instead of the reason.
     // Never the account number or the holder name; `msg` is the gateway's
