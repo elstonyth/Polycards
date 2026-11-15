@@ -29,6 +29,7 @@ import {
   tgpayEnvName,
 } from '../../../../modules/packs/tgpay-client';
 import { reqReason } from '../../rewards-settings/validate';
+import type { GatewayPreflightRefusal, PaymentGatewaySetting } from './types';
 
 // GET/POST /admin/payments/gateway — the operator's switch for which payment
 // gateway the storefront pays through (plan 130 §runtime switch). Only a
@@ -102,7 +103,7 @@ async function preflight(
 
 export async function GET(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<PaymentGatewaySetting>,
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   await resolveActiveGateway(req.scope);
@@ -113,7 +114,7 @@ export async function GET(
 
 export async function POST(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<PaymentGatewaySetting | GatewayPreflightRefusal>,
 ): Promise<void> {
   const adminId = req.auth_context.actor_id;
   const reason = reqReason(req.body);

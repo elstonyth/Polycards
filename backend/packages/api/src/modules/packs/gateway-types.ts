@@ -4,6 +4,15 @@
 // retired), so a new gateway is an adapter that maps onto them, nothing in
 // the orchestration or the sweeps.
 
+// Every gateway the code knows. 'fake' is the in-process adapter the specs
+// drive (fake-gateway.ts). It is in the union so the compiler forces a
+// registry entry AND an adapter for it like any other gateway, and it is
+// unreachable outside NODE_ENV=test: see testOnly() in gateway.ts, which gates
+// isPaymentGateway (and therefore gatewayConfigFor, resolveActiveGateway and
+// the admin switch), plus the registry entry's own `configured` /
+// `configFromEnv`.
+export type PaymentGateway = 'tgpay' | 'the7pay' | 'a3pay' | 'gp365' | 'fake';
+
 /** What a deposit or payout has come to, in our terms. */
 export type SettlementState = 'success' | 'failed' | 'pending';
 

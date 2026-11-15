@@ -6,6 +6,7 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { IUserModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import type { AcknowledgeConflict, AcknowledgeResult } from '../types';
 
 type Body = { kind?: unknown; id?: unknown; note?: unknown; reason?: unknown };
 
@@ -19,7 +20,7 @@ type Body = { kind?: unknown; id?: unknown; note?: unknown; reason?: unknown };
  */
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
-  res: MedusaResponse,
+  res: MedusaResponse<AcknowledgeResult | AcknowledgeConflict>,
 ): Promise<void> {
   const { kind, id, note } = req.body ?? {};
   const reason =

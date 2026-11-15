@@ -688,13 +688,7 @@ export async function exportPnlXlsx(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  | 'today'
-  | 'yesterday'
-  | '7d'
-  | '30d'
-  | 'month'
-  | 'last_month'
-  | 'custom';
+  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -787,43 +781,40 @@ export async function getOnlineNow(
 
 // ── Gateway settlement report (calendar weekly/monthly gateway result) ───────
 
-export type SettlementGranularity = 'week' | 'month';
-
-export interface SettlementDirection {
-  count: number;
-  gross: number;
-  /** Σ net over settled rows whose net is known (NULL = pre-mirror row). */
-  net: number;
-  /** gross − net over the known-net subset only — a FLOOR when missingNet>0. */
-  fee: number;
-  /** Settled rows with no net on file: unknown fee, never zero fee. */
-  missingNet: number;
-  /** Settled rows with no gross on file: unknown gross, never zero gross —
-   *  `gross` above is a FLOOR, not a total, whenever this is non-zero. */
-  missingGross: number;
-}
-
-export interface SettlementPeriod {
-  /** MYT calendar bucket key, 'YYYY-MM-DD' (first day of the week/month). */
-  period: string;
-  deposits: SettlementDirection;
-  withdrawals: SettlementDirection;
-  ledger: { topupCredited: number; cashoutNet: number };
-  /** Gateway-vs-ledger cross-check. Deposits expected ~0; withdrawals is
-   *  timing-skewed across bucket boundaries by design (debit at submit,
-   *  settle later). */
-  delta: { deposits: number; withdrawals: number };
-}
-
-export interface SettlementReport {
-  granularity: SettlementGranularity;
-  /** The rail the report is scoped to; null = every gateway. Amounts are RM
-   *  either way (a regional payment at the rate it locked). */
-  currency: string | null;
-  periods_requested: number;
-  since: string;
-  periods: SettlementPeriod[];
-}
+// Shapes are the backend's (ADR 0017).
+import type {
+  SettlementGranularity,
+  SettlementReport,
+} from '@acme/api/admin/payments/settlement';
+import type { GatewayBalance } from '@acme/api/admin/payments/balance';
+import type {
+  AcknowledgeResult,
+  GatewayAudit,
+} from '@acme/api/admin/payments/audit';
+import type { MoneyIntegrity } from '@acme/api/admin/payments/integrity';
+import type { CreditDepositResult } from '@acme/api/admin/payments/deposits/[id]/credit';
+import type {
+  GatewayPreflightRefusal,
+  PaymentGateway,
+  PaymentGatewaySetting,
+} from '@acme/api/admin/payments/gateway';
+import type { PaymentFxState } from '@acme/api/admin/payments/fx';
+export type {
+  SettlementDirection,
+  SettlementGranularity,
+  SettlementPeriod,
+  SettlementReport,
+} from '@acme/api/admin/payments/settlement';
+export type {
+  GatewayBalance,
+  GatewayAudit,
+  MoneyIntegrity,
+  PaymentGatewaySetting,
+  PaymentFxState,
+};
+export type { GatewayAuditFinding } from '@acme/api/admin/payments/audit';
+/** The gateways the switch can pick. */
+export type PaymentGatewayId = PaymentGateway;
 
 export async function getSettlementReport(
   granularity: SettlementGranularity,
@@ -836,29 +827,6 @@ export async function getSettlementReport(
   );
 }
 
-export interface GatewayBalance {
-  /** The rail asked for, and the gateway that serves it (for RM: the active
-   *  one). */
-  currency: string;
-  gateway: string;
-  label: string;
-  enabled: boolean;
-  balance: {
-    currency_code: string;
-    current: number;
-    available: number;
-    /** null when the gateway reports no T+1 figure (TGPay family). */
-    t1: number | null;
-    /** TGPay family: `current` is the pay-in wallet and `available` the
-     *  separate payout wallet, not one wallet with part of it locked. */
-    separate_wallets: boolean;
-  } | null;
-  /** The gateway answered but left a wallet out (shown as 0). */
-  warning: string | null;
-  /** The gateway could not be reached; balance is null. */
-  error: string | null;
-}
-
 export async function getGatewayBalance(
   currency: string,
 ): Promise<GatewayBalance> {
@@ -869,75 +837,6 @@ export async function getGatewayBalance(
 
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
 
-/** Mirrors the backend's PaymentGateway union — the gateways the switch can pick. */
-export type PaymentGatewayId = 'tgpay' | 'the7pay';
-/** A gateway a ROW may name: a live one, or a retired one ('globepay') whose
- *  settled rows are still history on the audit panel. */
-export type HistoricalGatewayId = PaymentGatewayId | (string & {});
-
-// ── Gateway audit (plan 130): gateway = source of truth for money in/out ─────
-
-export interface GatewayAuditTotals {
-  count: number;
-  gross: number;
-  /** Σ net over rows whose net is known — a FLOOR when missing_net > 0. For a
-   *  deposit that is what we RECEIVED (amount − fee); for a payout it is what
-   *  the wallet PAID (amount + fee — TGPay charges payout fees on top). */
-  net: number;
-  missing_net: number;
-  /** Settled deposits whose amount_settled is NULL (settled by hand) —
-   *  `gross` is a FLOOR when > 0. Always 0 on the payout side: a payout's
-   *  gross is `amount`, which is NOT NULL. */
-  missing_gross: number;
-}
-
-export interface GatewayAuditFinding {
-  kind: 'deposit' | 'withdrawal';
-  /** The gateway the row was created under — live or retired. */
-  gateway: HistoricalGatewayId;
-  id: string;
-  merchant_transaction_id: string;
-  gateway_transaction_id: string | null;
-  customer_id: string;
-  status: string;
-  amount: number | null;
-  note: string;
-  audited_at: string | null;
-  /** Who acknowledged this finding on Settlement and when, while the note is
-   *  still the one they acknowledged. Absent from an older backend. */
-  acknowledged?: {
-    by: string | null;
-    at: string | null;
-    /** From the admin action log; absent from an older backend. */
-    reason?: string | null;
-  } | null;
-}
-
-export interface GatewayAudit {
-  currency: string;
-  /** The rail's gateway (for RM: the active one). Its live wallet is
-   *  getGatewayBalance's. */
-  gateway: HistoricalGatewayId;
-  last_audited_at: string | null;
-  /** Rows the gateway disagrees with. */
-  findings_total: number;
-  /** Rows from a retired gateway, which can never be checked again: listed,
-   *  counted apart. Absent from a backend older than this field. */
-  retired_total?: number;
-  /** Findings an operator acknowledged: listed last, greyed, never in
-   *  findings_total. Absent from a backend older than this field. */
-  acknowledged_total?: number;
-  totals: { deposits: GatewayAuditTotals; withdrawals: GatewayAuditTotals };
-  /** Settled totals of every OTHER gateway that ever moved money, so a switch
-   *  never hides the previous gateway's history from this page. */
-  history: {
-    gateway: HistoricalGatewayId;
-    deposits: GatewayAuditTotals;
-    withdrawals: GatewayAuditTotals;
-  }[];
-  findings: GatewayAuditFinding[];
-}
-
 /** Settlement's Acknowledge: the note is the one on screen, so a finding the
  *  audit has re-worded since is refused (409) rather than acknowledged blind. */
 export const acknowledgeAuditFinding = (body: {
@@ -945,29 +844,14 @@ export const acknowledgeAuditFinding = (body: {
   id: string;
   note: string;
   reason: string;
-}) =>
-  postJson<{ acknowledged: boolean }>(
-    '/admin/payments/audit/acknowledge',
-    body,
-  );
-
-/** Money a crash left half-moved. Detection only: nothing here moves money. */
-export interface MoneyIntegrity {
-  findings: {
-    kind: 'open_without_prize' | 'sold_without_flip' | 'denied_without_refund';
-    id: string;
-    customer_id: string;
-    amount: number;
-    at: string;
-  }[];
-}
+}) => postJson<AcknowledgeResult>('/admin/payments/audit/acknowledge', body);
 
 export const getMoneyIntegrity = () =>
   getJson<MoneyIntegrity>('/admin/payments/integrity');
 
 /** Settlement's Credit deposit: the backend asks the gateway again first. */
 export const creditGatewayDeposit = (body: { id: string; reason: string }) =>
-  postJson<{ credited: boolean; replayed: boolean }>(
+  postJson<CreditDepositResult>(
     `/admin/payments/deposits/${encodeURIComponent(body.id)}/credit`,
     { reason: body.reason },
   );
@@ -980,35 +864,11 @@ export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
 
 // ── Active payment gateway switch (plan 130 §runtime switch) ────────────────
 
-export interface PaymentGatewaySetting {
-  /** What the backend is using right now. */
-  active: PaymentGatewayId;
-  /** The persisted admin choice; null = env default applies. */
-  setting: string | null;
-  env_default: PaymentGatewayId;
-  gateways: { id: PaymentGatewayId; label: string; configured: boolean }[];
-  /** One Settlement tab each: RM first, then every regional rail. */
-  currencies: string[];
-  /** After a switch: non-blocking findings from the live check (e.g. an
-   *  empty payout wallet). */
-  warnings?: string[];
-}
-
-/** The switch was refused by the live check; `problems` say why, and the
- *  operator may resend with `force: true` ("Switch anyway"). */
-export type GatewayPreflightRefusal = {
-  type: 'gateway_preflight_failed';
-  problems: string[];
-  warnings: string[];
-  can_force: true;
-};
-
 export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    | Partial<GatewayPreflightRefusal>
-    | undefined;
+    Partial<GatewayPreflightRefusal> | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1220,48 +1080,6 @@ export const getFxHistory = () =>
 
 // ── Regional conversion (A3Pay: SGD — payment-fx.ts) ─────────────────────────
 
-export interface PaymentFxQuote {
-  currency: string;
-  mid: number;
-  /** Fee switched on? Off = both rates are the mid. */
-  feeEnabled: boolean;
-  /** Percent of the mid each way (0 while switched off). */
-  depositFeePercent: number;
-  payoutFeePercent: number;
-  /** RM credited per 1 unit paid in. */
-  depositRate: number;
-  /** RM debited per 1 unit paid out. */
-  payoutRate: number;
-  source: 'manual' | 'feed';
-}
-
-export interface PaymentFxState {
-  currency: string;
-  pair: string;
-  /** "S$1" — how one unit reads in labels. */
-  unit: string;
-  /** Sane band for a manual rate (RM per unit); null = unbounded. */
-  manual_band: { min: number | null; max: number | null };
-  feed_rate: number | null;
-  source: string | null;
-  fetched_at: string | null;
-  manual_override: boolean;
-  manual_rate: number | null;
-  /** null = never configured: the rail stays paused until saved once. */
-  fee_enabled: boolean | null;
-  /** Percent of the mid; kept while the fee is switched off. */
-  deposit_fee_percent: number;
-  payout_fee_percent: number;
-  max_fee_percent: number;
-  quote: PaymentFxQuote | null;
-  quote_error: string | null;
-  earnings: {
-    deposits: { count: number; rm: number };
-    payouts: { count: number; rm: number };
-    total_rm: number;
-  };
-}
-
 export const getPaymentFx = (currency: string) =>
   getJson<PaymentFxState>(
     `/admin/payments/fx?currency=${encodeURIComponent(currency)}`,
@@ -1332,11 +1150,7 @@ export interface DeliveryTrackingSnapshot {
   tracking_number: string;
   carrier: 'ninjavan' | 'poslaju' | 'dhl_ecommerce' | null;
   state:
-    | 'delivered'
-    | 'in_transit'
-    | 'problem'
-    | 'not_found'
-    | 'unknown_carrier';
+    'delivered' | 'in_transit' | 'problem' | 'not_found' | 'unknown_carrier';
   event: string | null;
   event_at: string | null;
   delivered_at: string | null;
@@ -1775,11 +1589,7 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // pending two sweeps later with a gateway id, i.e. possibly a payment that
 // landed at the gateway without ever being credited here.
 export type GatewayDepositView =
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'expired'
-  | 'all';
+  'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1855,11 +1665,7 @@ export function getGatewayDeposits(
 // always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GatewayWithdrawalView =
-  | 'held'
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'all';
+  'held' | 'pending' | 'settled' | 'failed' | 'all';
 
 export interface GatewayWithdrawal {
   id: string;
@@ -2471,15 +2277,7 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 
 /** The ledger event types (POLYCARD-BACK §5.1). */
 export type LedgerType =
-  | 'TP'
-  | 'SP'
-  | 'SE'
-  | 'OD'
-  | 'AD'
-  | 'WP'
-  | 'WD'
-  | 'RF'
-  | 'CF';
+  'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF' | 'CF';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw

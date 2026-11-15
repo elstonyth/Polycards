@@ -10,6 +10,8 @@ import {
   rowGateway,
 } from '../../../../modules/packs/gateway';
 import { toOptionalMoney } from '../../../../modules/packs/money';
+import { wireDateOrNull } from '../../../utils/wire-date';
+import type { GatewayAudit } from './types';
 import {
   paymentCurrencyParam,
   railGateway,
@@ -27,7 +29,7 @@ const FINDINGS_LIMIT = 100;
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<GatewayAudit>,
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   const packs = resolvePacks<GatewayReports>(req.scope);
@@ -105,8 +107,9 @@ export async function GET(
       amount:
         toOptionalMoney(d.amount_settled) ??
         toOptionalMoney(d.amount_requested),
-      note: d.audit_note,
-      audited_at: d.audited_at,
+      // Listed only where audit_note is set (the query's filter).
+      note: d.audit_note ?? '',
+      audited_at: wireDateOrNull(d.audited_at),
       acknowledged: acknowledgement(d),
     })),
     ...withdrawals.map((w) => ({
@@ -118,8 +121,9 @@ export async function GET(
       customer_id: w.customer_id,
       status: w.status,
       amount: toOptionalMoney(w.amount),
-      note: w.audit_note,
-      audited_at: w.audited_at,
+      // Listed only where audit_note is set (the query's filter).
+      note: w.audit_note ?? '',
+      audited_at: wireDateOrNull(w.audited_at),
       acknowledged: acknowledgement(w),
     })),
   ].sort(
@@ -152,7 +156,7 @@ export async function GET(
   res.json({
     currency,
     gateway: active,
-    last_audited_at: totals.lastAuditedAt,
+    last_audited_at: wireDateOrNull(totals.lastAuditedAt),
     findings_total: findingsTotal,
     retired_total: retiredTotal,
     acknowledged_total: acknowledgedTotal,
@@ -173,7 +177,7 @@ const acknowledgement = (r: {
   r.audit_ack_note !== null && r.audit_ack_note === r.audit_note
     ? {
         by: r.audit_ack_by,
-        at: r.audit_ack_at,
+        at: wireDateOrNull(r.audit_ack_at),
         reason: null as string | null,
       }
     : null;

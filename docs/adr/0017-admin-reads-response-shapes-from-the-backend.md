@@ -13,6 +13,9 @@ the other areas move one at a time, the most-changed first.
   declares `res: MedusaResponse<Shape>`, so the backend fails the typecheck if it
   sends something else. Where a module already types a part (the P&L sections in
   `modules/packs/pnl*.ts`), `types.ts` re-exports it instead of writing it again.
+  When the module's type is not the wire shape (it holds a `Date`) or its file
+  reaches `service.ts`, `types.ts` declares the wire shape and the route maps
+  to it (`api/utils/wire-date.ts` sends a `Date` as the same ISO string).
 - **The admin imports it as `@acme/api/admin/<route path>`**, a types-only entry
   in the api package's `exports` (`./admin/*` → `./src/api/admin/*/types.ts`).
   It has no runtime target, so a value import through it fails the admin build,
