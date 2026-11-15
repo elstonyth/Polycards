@@ -4838,10 +4838,7 @@ class PacksModuleService extends MedusaService({
             type: 'RF',
             customerId,
             refId: commission.ledger.refId,
-            walletDelta:
-              commission.ledger.walletDelta === undefined
-                ? Math.round(commission.amount * 100) / 100
-                : commission.ledger.walletDelta,
+            walletDelta: commission.ledger.walletDelta,
             vaultDelta: commission.ledger.vaultDelta ?? null,
             payload: commission.ledger.payload,
           },
@@ -5019,7 +5016,7 @@ class PacksModuleService extends MedusaService({
   // single ledger row.
   @InjectTransactionManager()
   async topUpCreditsWithLedger(
-    input: Omit<GeneralPosting, 'ledger'> & {
+    input: Omit<Extract<GeneralPosting, { reason: 'topup' }>, 'ledger'> & {
       ledgerPaymentMethod?: string;
       ledgerGatewayRef?: string | null;
     },
@@ -5056,7 +5053,7 @@ class PacksModuleService extends MedusaService({
   // and one ledger row.
   @InjectTransactionManager()
   async withdrawCreditsWithLedger(
-    input: Omit<GeneralPosting, 'ledger'> & {
+    input: Omit<Extract<GeneralPosting, { reason: 'cashout' }>, 'ledger'> & {
       ledger: {
         outcome: 'requested' | 'refunded';
         bankCode: string | null;

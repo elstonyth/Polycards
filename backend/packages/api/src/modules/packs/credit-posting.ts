@@ -95,16 +95,34 @@ type PostingFields = {
   ledger?: LedgerPart;
 };
 
-/** A posting for a general reason: top-up, cashout, adjustment, bonus grant,
- *  reward credit, voucher, delivery fee, pack open. */
-export type GeneralPosting = PostingFields & {
-  reason: Exclude<CreditMutationReason, 'buyback' | 'coin_flip_win' | 'pack_open' | 'referral_commission'>;
+/** The ledger row each general reason writes with its credit. A voucher
+ *  writes none (suspended surface, ADR 0004). */
+type LedgerTypeFor = {
+  topup: 'TP';
+  cashout: 'WD';
+  adjustment: 'AD';
+  bonus_grant: 'AD';
+  reward_credit: 'WP';
+  delivery_fee: 'OD';
+  voucher_claim: never;
+  daily_reward: never;
 };
+
+/** A posting for a general reason: top-up, cashout, adjustment, bonus grant,
+ *  reward credit, voucher, delivery fee. Its ledger part's type follows the
+ *  reason, so the two cannot disagree. */
+export type GeneralPosting = {
+  [R in keyof LedgerTypeFor]: PostingFields & {
+    reason: R;
+    ledger?: LedgerPart & { type: LedgerTypeFor[R] };
+  };
+}[keyof LedgerTypeFor];
 
 /** An open's debit: once per open id (open_id), bonus credit first. */
 export type PackOpenPosting = PostingFields & {
   reason: 'pack_open';
   sourceTransactionId: string;
+  idempotencyReference?: never;
 };
 
 /** A sell-back credit: the pull it came from, and the bonus share of it
@@ -113,6 +131,7 @@ export type BuybackPosting = PostingFields & {
   reason: 'buyback';
   pullId: string;
   holdBp: number;
+  idempotencyReference?: never;
   ledger: LedgerPart & { type: 'SE' };
 };
 
@@ -121,6 +140,7 @@ export type BuybackPosting = PostingFields & {
 export type CoinFlipPosting = PostingFields & {
   reason: 'coin_flip_win';
   roundId: string;
+  idempotencyReference?: never;
   ledger: LedgerPart & { type: 'CF' };
 };
 
@@ -132,7 +152,8 @@ export type CoinFlipPosting = PostingFields & {
  *  until commit, which can deadlock against reverseOpen's sorted locks. */
 export type CommissionPosting = PostingFields & {
   reason: 'referral_commission';
-  ledger: LedgerPart & { type: 'RF'; refId: string };
+  ledger: LedgerPart & { type: 'RF'; refId: string; walletDelta: number };
+  idempotencyReference?: never;
   unlocked?: true;
 };
 

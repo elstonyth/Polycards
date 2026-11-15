@@ -108,7 +108,7 @@ describe('planPosting variants', () => {
   });
 
   it('a commission row keeps NULL external, bonus and source, and never unfreezes inline', () => {
-    const rf = { type: 'RF' as const, refId: 'wsl_1', payload: { type: 'RF' as const, week_start: '2026-11-09', basis_cents: 1, rate_bp: 50 } };
+    const rf = { type: 'RF' as const, refId: 'wsl_1', walletDelta: 5, payload: { type: 'RF' as const, week_start: '2026-11-09', basis_cents: 1, rate_bp: 50 } };
     const plan = planPosting({ customerId: 'c', amount: 5, reason: 'referral_commission', unlocked: true, ledger: rf }, t0(-100));
     expect(plan.row).toMatchObject({ external_funded_cents: null, bonus_cents: null, source_transaction_id: null, reference: null });
     expect(plan.unfreeze).toBe(false);
