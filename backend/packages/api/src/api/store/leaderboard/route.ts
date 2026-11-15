@@ -2,6 +2,7 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
+import { BOARD_FETCH_N, topShown } from '../../../modules/packs/eligibility';
 import { publicProfileFields, seedOf } from '../../../utils/profile-handle';
 
 // GET /store/leaderboard?period=weekly|alltime — public leaderboard. A plain
@@ -19,13 +20,8 @@ import { publicProfileFields, seedOf } from '../../../utils/profile-handle';
 //   over players with real pack-open spend; points = Σ(pack_open ledger
 //   debits, RM) × 100 — see PacksModuleService.leaderboardTop.
 // `volume` = Σ won-card MYR display value; `pulls` = pull count (reward-box
-// draws excluded on both paths).
-const TOP_N = 10;
-// Over-fetch, because the disabled filter below runs AFTER the aggregate: a
-// disabled player in the top 10 must not shorten the board to 9. Double is the
-// bound — a board where more than half the top 20 are disabled renders short,
-// which is the honest outcome.
-const FETCH_N = TOP_N * 2;
+// draws excluded on both paths). Over-fetched to BOARD_FETCH_N so the disabled
+// filter below cannot shorten the board (eligibility.ts).
 
 // Avatar seed = the shared `seedOf` (utils/profile-handle) so the leaderboard
 // and the public profile page render the SAME avatar for the same customer.
@@ -96,7 +92,7 @@ async function computeBoard(
       timezone: s.timezone,
       resetDay: s.reset_day,
       resetHour: s.reset_hour,
-      limit: FETCH_N,
+      limit: BOARD_FETCH_N,
     });
     ranked = rows.map((r) => ({
       customer_id: r.customer_id,
@@ -105,7 +101,10 @@ async function computeBoard(
       points: r.volumeMyr,
     }));
   } else {
-    ranked = await packs.leaderboardTop({ sinceMs: null, limit: FETCH_N });
+    ranked = await packs.leaderboardTop({
+      sinceMs: null,
+      limit: BOARD_FETCH_N,
+    });
   }
   // An administratively disabled player is hidden from every public surface —
   // disabling an account from the dashboard must not leave it on display here.
@@ -137,9 +136,7 @@ async function computeBoard(
   const disabled = await packs.disabledCustomerIds(
     ranked.map((r) => r.customer_id),
   );
-  ranked = ranked
-    .filter((r) => !disabled.has(r.customer_id))
-    .slice(0, TOP_N);
+  ranked = topShown(ranked, disabled, (r) => r.customer_id).shown;
   if (ranked.length === 0) {
     return { period, entries: [] };
   }

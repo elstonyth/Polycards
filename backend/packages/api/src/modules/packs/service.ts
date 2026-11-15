@@ -170,6 +170,14 @@ import {
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
 import {
+  BOARD_FETCH_N,
+  disabledAccountSql,
+  mayPlay as mayPlayFor,
+  topShown,
+  type Game,
+  type PlayRefusal,
+} from './eligibility';
+import {
   DEFAULT_PLAYER_GROUP_FLAG,
   DEFAULT_PLAYER_GROUP_NAME,
   EFFECTIVE_GROUP_SQL,
@@ -1195,10 +1203,7 @@ const DELIVERY_TOWARD_COURIER: ReadonlySet<string> = new Set([
 // lucky_draw_entry, so the totals and the top 10 are the ones the draw will use
 // (owner 2026-11-12: a disabled account shows nowhere). Appended after the
 // entry table's own WHERE; it must stay unaliased in those queries.
-const LUCKY_DRAW_LIVE_ENTRY_SQL =
-  'AND NOT EXISTS (SELECT 1 FROM customer_account_state s ' +
-  'WHERE s.customer_id = lucky_draw_entry.customer_id ' +
-  'AND s.disabled = true AND s.deleted_at IS NULL) ';
+const LUCKY_DRAW_LIVE_ENTRY_SQL = `AND NOT ${disabledAccountSql('lucky_draw_entry.customer_id')} `;
 /** A finished event stays on the page this long. */
 const LUCKY_DRAW_LINGER_MS = 7 * 24 * 60 * 60 * 1000;
 /** A draw time must be at least this far ahead when it is set or published:
@@ -2331,7 +2336,8 @@ class PacksModuleService extends MedusaService({
         'FROM customer_group_customer cgc ' +
         'JOIN customer_group cg ON cg.id = cgc.customer_group_id AND cg.deleted_at IS NULL ' +
         `WHERE cgc.customer_id IN (${ph}) AND cgc.deleted_at IS NULL ` +
-        'ORDER BY cg.created_at ASC, cg.id ASC',
+        // effectivePlayerGroup's order: whole ms, then id by code point.
+        `ORDER BY date_trunc('milliseconds', cg.created_at) ASC, cg.id COLLATE "C" ASC`,
       ids,
     );
     const seen = new Set<string>();
@@ -7230,7 +7236,8 @@ class PacksModuleService extends MedusaService({
     ]);
   }
 
-  // At least one positive top-up ever (any era, any amount). Withdrawals and
+  // At least one positive top-up ever (any era), counted in rounded sen like
+  // walletSummary's topup sum, so a sub-sen row counts in neither. Withdrawals and
   // both delivery paths stay locked until then (2026-10-11): promo credit and
   // prizes must not leave an account that never deposited. Promo-funded
   // opens make hasPaidOpen true, so it cannot answer this.
@@ -7243,29 +7250,21 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ one: number }[]>(
       "SELECT 1 AS one FROM credit_transaction WHERE customer_id = ? AND reason = 'topup' " +
-        'AND amount > 0 AND deleted_at IS NULL LIMIT 1',
+        'AND amount > 0 AND ROUND(amount * 100) > 0 AND deleted_at IS NULL LIMIT 1',
       [customerId],
     );
     return rows.length > 0;
   }
 
-  // The Lucky Draw's entry gate. Only the DEFAULT group (no group reads the same)
-  // has to have topped up; anyone in a real player group enters without (operator,
-  // 2026-11-02). EFFECTIVE_GROUP_SQL is the one definition of a real group. This
-  // gate alone: withdrawals and deliveries keep reading hasTopUp.
+  // Why a game turns this player away, or null (eligibility.ts: playRefusal).
+  // The games' gate alone: withdrawals and deliveries keep reading hasTopUp.
   @InjectManager()
-  async mayEnterLuckyDraw(
+  async mayPlay(
     customerId: string,
+    game: Game,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
-    if (await this.hasTopUp(customerId, sharedContext)) return true;
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ one: number }[]>(
-      `SELECT 1 AS one FROM (${EFFECTIVE_GROUP_SQL}) eff WHERE eff.customer_id = ? LIMIT 1`,
-      [customerId],
-    );
-    return rows.length > 0;
+  ): Promise<PlayRefusal | null> {
+    return mayPlayFor(this, customerId, game, sharedContext);
   }
 
   // A customer's Lucky Draw ticket balance: the sum of their live ledger rows
@@ -7292,7 +7291,7 @@ class PacksModuleService extends MedusaService({
   // spends so two parallel enters cannot both pass the balance check). Every
   // read below runs on this locked transaction. `tickets` is validated before
   // any lock is taken. A refusal is a return value; only a bad amount or a
-  // frozen account throws.
+  // frozen or disabled account throws.
   @InjectTransactionManager()
   async enterLuckyDraw(
     input: {
@@ -7355,9 +7354,18 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    if (!(await this.mayEnterLuckyDraw(customerId, sharedContext))) {
-      return refuse('no_topup');
+    const refusal = await this.mayPlay(
+      customerId,
+      'lucky_draw',
+      sharedContext,
+    );
+    if (refusal === 'unavailable') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is unavailable.',
+      );
     }
+    if (refusal) return refuse('no_topup'); // Lucky Draw's only other refusal
     const before = await this.luckyDrawBalance(customerId, sharedContext);
     if (before < tickets) return refuse('not_enough_tickets');
     // The ORM creates below are not flushed until the transaction ends, so a raw
@@ -7454,9 +7462,18 @@ class PacksModuleService extends MedusaService({
     );
     if (result) return refuse('closed');
 
-    if (!(await this.mayEnterLuckyDraw(customerId, sharedContext))) {
-      return refuse('no_topup');
+    const refusal = await this.mayPlay(
+      customerId,
+      'lucky_draw',
+      sharedContext,
+    );
+    if (refusal === 'unavailable') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is unavailable.',
+      );
     }
+    if (refusal) return refuse('no_topup'); // Lucky Draw's only other refusal
     const before = await this.luckyDrawBalance(customerId, sharedContext);
     if (before < tickets) return refuse('not_enough_tickets');
     // Read before the ORM creates below, which are not flushed until the
@@ -17829,10 +17846,13 @@ class PacksModuleService extends MedusaService({
     let ranking: string[] = prior?.ranking ?? [];
     if (ranking.length === 0) {
       const top = (
-        await this.challengeWeekTop({ ...week, limit: 20 }, sharedContext)
+        await this.challengeWeekTop(
+          { ...week, limit: BOARD_FETCH_N },
+          sharedContext,
+        )
       ).map((t) => t.customer_id);
       const disabled = await this.disabledCustomerIds(top, sharedContext);
-      ranking = top.filter((id) => !disabled.has(id)).slice(0, 10);
+      ranking = topShown(top, disabled, (id) => id).shown;
     }
     if (ranking.length === 0) {
       return { weekStartIso, settled: false, winners: [] };
@@ -19269,9 +19289,7 @@ class PacksModuleService extends MedusaService({
           -- bought for (owner rule 2026-11-12). A packed one keeps its cards
           -- held until staff cancel it, so they are not handed out twice.
           AND NOT (dord.status IN ('requested','processed','packing')
-            AND EXISTS (SELECT 1 FROM customer_account_state s
-                         WHERE s.customer_id = dord.customer_id
-                           AND s.disabled = true AND s.deleted_at IS NULL))
+            AND ${disabledAccountSql('dord.customer_id')})
         ORDER BY dord.created_at, dord.id`,
     );
     const byId = new Map<

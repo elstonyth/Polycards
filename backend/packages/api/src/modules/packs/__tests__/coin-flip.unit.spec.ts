@@ -4,7 +4,6 @@ import {
   effectiveCoinWinUnits,
   coinFlipWins,
   publicCoinFlipRound,
-  assertCoinFlipEligible,
   coinFlipSelection,
   coinFlipStakeCents,
   coinFlipStakeSelection,
@@ -130,24 +129,6 @@ describe('coin flip rules', () => {
     expect(coinFlipWins(451234, 451234)).toBe(false);
     expect(() => coinFlipWins(1000000, 500000)).toThrow();
     expect(() => coinFlipWins(-1, 500000)).toThrow();
-  });
-
-  it('allows eligible zero-balance accounts and refuses eligibility failures', () => {
-    const wallet = { isFrozen: false, hasTopup: true, playthrough: { remaining: 0 } };
-    expect(() => assertCoinFlipEligible(wallet)).not.toThrow();
-    expect(() => assertCoinFlipEligible({ ...wallet, isFrozen: true })).toThrow(/review/i);
-    expect(() => assertCoinFlipEligible({ ...wallet, hasTopup: false })).toThrow(/top up/i);
-    expect(() => assertCoinFlipEligible({ ...wallet, playthrough: { remaining: 0.01 } })).toThrow(/playthrough/i);
-    expect(() => assertCoinFlipEligible({ ...wallet, hasTopup: false }, null)).toThrow(/top up/i);
-    // Any real group skips the top-up; playthrough still holds where withdrawals are allowed.
-    const open = { withdrawals_blocked: false };
-    expect(() => assertCoinFlipEligible({ ...wallet, hasTopup: false }, open)).not.toThrow();
-    expect(() => assertCoinFlipEligible({ ...wallet, playthrough: { remaining: 0.01 } }, open)).toThrow(/playthrough/i);
-    expect(() => assertCoinFlipEligible({ ...wallet, isFrozen: true }, open)).toThrow(/review/i);
-    // A withdrawal-blocked group can never cash out, so only the freeze still applies.
-    const blocked = { withdrawals_blocked: true };
-    expect(() => assertCoinFlipEligible({ ...wallet, hasTopup: false, playthrough: { remaining: 5 } }, blocked)).not.toThrow();
-    expect(() => assertCoinFlipEligible({ ...wallet, isFrozen: true }, blocked)).toThrow(/review/i);
   });
 
   it('allowlists public receipt and pays only terminal wins', () => {
