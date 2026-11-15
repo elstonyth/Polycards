@@ -77,29 +77,31 @@ it.each(['won', 'lost', 'quoted', ['won', 'quoted']])('history ignores status %j
   expect(service.listAndCountCoinFlipRounds.mock.calls[0][0]).toEqual({ customer_id: 'owner', status: ['won', 'lost'] });
 });
 
-it('shows published settings while keeping admin odds out of the storefront', async () => {
+const settingsFor = async (config: Record<string, unknown>, refusal: string | null) => {
   const service = {
-    coinFlipSettings: jest.fn().mockResolvedValue({ enabled: true, published_win_percent: 50, win_percent: 35, win_percent_2: 20, revision: 7 }),
-    walletSummary: jest.fn().mockResolvedValue({ hasTopup: true, isFrozen: false, playthrough: { remaining: 0 } }),
+    coinFlipSettings: jest.fn().mockResolvedValue(config),
+    mayPlay: jest.fn().mockResolvedValue(refusal),
   };
   const res = { json: jest.fn() };
-  await settings({ auth_context: { actor_id: 'owner' }, scope: { resolve: (key: string) => key === 'customer' ? { listCustomerGroups: async () => [] } : service } } as never, res as never);
-  expect(res.json).toHaveBeenCalledWith({ enabled: true, published_win_percent: 50, eligible: true, reason: null });
+  await settings({ auth_context: { actor_id: 'owner' }, scope: { resolve: () => service } } as never, res as never);
+  return { service, body: res.json.mock.calls[0][0] };
+};
+
+it('shows published settings while keeping admin odds out of the storefront', async () => {
+  const { service, body } = await settingsFor(
+    { enabled: true, published_win_percent: 50, win_percent: 35, win_percent_2: 20, revision: 7 }, null);
+  expect(service.mayPlay).toHaveBeenCalledWith('owner', 'coin_flip');
+  expect(body).toEqual({ enabled: true, published_win_percent: 50, eligible: true, reason: null });
 });
 
-it.each([
-  ['no group', [], false],
-  ['DEFAULT', [{ id: 'd', name: 'DEFAULT', metadata: {} }], false],
-  ['a plain group', [{ id: 'g', name: 'Influencers', metadata: {} }], true],
-  ['a partner group that may withdraw', [{ id: 'r', name: 'Rebate', metadata: { partner_rate_bp: 300 } }], true],
-])('settings: a player in %s who never topped up is eligible=%s', async (_label, groups, eligible) => {
-  const service = {
-    coinFlipSettings: jest.fn().mockResolvedValue({ enabled: true, published_win_percent: 50 }),
-    walletSummary: jest.fn().mockResolvedValue({ hasTopup: false, isFrozen: false, playthrough: { remaining: 0 } }),
-  };
-  const res = { json: jest.fn() };
-  await settings({ auth_context: { actor_id: 'owner' }, scope: { resolve: (key: string) => key === 'customer' ? { listCustomerGroups: async () => groups } : service } } as never, res as never);
-  expect(res.json.mock.calls[0][0]).toMatchObject({ eligible, reason: eligible ? null : expect.stringMatching(/top up/i) });
+// The group/top-up matrix is playRefusal's (eligibility.unit.spec.ts); the route maps its refusal.
+it('settings: a refusal maps to its coin flip text, and a pause wins', async () => {
+  expect((await settingsFor({ enabled: true, published_win_percent: 50 }, 'no_topup')).body)
+    .toMatchObject({ eligible: false, reason: expect.stringMatching(/top up/i) });
+  expect((await settingsFor({ enabled: true, published_win_percent: 50 }, 'playthrough')).body)
+    .toMatchObject({ eligible: false, reason: 'Complete your deposit playthrough before flipping a card.' });
+  expect((await settingsFor({ enabled: false, published_win_percent: 50 }, 'no_topup')).body)
+    .toMatchObject({ eligible: false, reason: 'Coin flip is currently paused.' });
 });
 
 describe('everyone feed', () => {
