@@ -289,8 +289,6 @@ describe('a regional payout', () => {
         bannedForPlayer: false,
         holders: [],
       }),
-      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
-      payoutAccountBanned: jest.fn().mockResolvedValue(false),
       bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
@@ -486,8 +484,6 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
         bannedForPlayer: false,
         holders: [],
       }),
-      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
-      payoutAccountBanned: jest.fn().mockResolvedValue(false),
       bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
@@ -660,8 +656,6 @@ describe('approving a held A3Pay payout', () => {
         bannedForPlayer: false,
         holders: [],
       }),
-      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
-      payoutAccountBanned: jest.fn().mockResolvedValue(false),
       bankShareVerifiedFor: jest.fn().mockResolvedValue({}),
       claimWithdrawalAgainstDebit: jest
         .fn()

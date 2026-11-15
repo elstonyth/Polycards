@@ -1,7 +1,6 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import {
   HOLDER_NAME_CLEARED_KEY,
-  anySavedAccountShared,
   clearedHolderNames,
   holderNameInvalid,
   holderNameKey,
@@ -323,29 +322,6 @@ describe('holder names compare by their letters', () => {
     expect(cleared[holderNameKey('TAN AH KOW&')]?.with.sort()).toEqual([
       'cus_2',
       'cus_3',
-    ]);
-  });
-});
-
-describe('anySavedAccountShared — a PayNow mobile with or without its 65', () => {
-  it('asks for both spellings, so an old row in the other one still holds it', async () => {
-    const otherPayoutAccountHolders = jest.fn(
-      async (_customerId: string, accountNumber: string) =>
-        accountNumber === '6591234567' ? [{ bank_code: 'PAYNOWSG' }] : [],
-    );
-    const paynow: SavedBankAccount = {
-      id: savedBankAccountId('PAYNOWSG', '91234567'),
-      bankCode: 'PAYNOWSG',
-      bankName: 'PayNow (mobile number)',
-      accountNumber: '91234567',
-      accountHolderName: 'Tan Ah Kow',
-    };
-    await expect(
-      anySavedAccountShared({ otherPayoutAccountHolders }, 'cus_1', [paynow], {}),
-    ).resolves.toBe(true);
-    expect(otherPayoutAccountHolders.mock.calls.map((c) => c[1])).toEqual([
-      '91234567',
-      '6591234567',
     ]);
   });
 });

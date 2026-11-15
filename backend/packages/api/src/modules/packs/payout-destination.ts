@@ -1,5 +1,5 @@
 import type { LedgerSqlManager } from './claim';
-import { accountNumberForms, findBank } from './banks';
+import { findBank } from './banks';
 import {
   LETTER_FOLDS,
   SMALL_CAPS,
@@ -59,12 +59,19 @@ export type SaveBlock =
 
 /** Every spelling of one destination, the canonical one first: a Singapore
  *  PayNow mobile with or without its 65 is one number. Saved rows keep what was
- *  typed and old rows hold either, so the holder and ban lookups ask for each. */
+ *  typed and old rows hold either, so the holder and ban lookups, which match
+ *  digits exactly, ask for each. The only place a number's spellings are made. */
 export function spellings(
   bankCode: string | null,
   accountNumber: string,
 ): string[] {
-  return accountNumberForms(bankCode ?? '', accountNumber);
+  if (findBank(bankCode)?.id !== 'PAYNOWSG') return [accountNumber];
+  // Digits as the keys read them, so '65 9123-4567' is the same number.
+  const local = accountNumber
+    .replace(/\D/g, '')
+    .replace(/^0+/, '')
+    .replace(/^65(?=\d{8}$)/, '');
+  return /^\d{8}$/.test(local) ? [local, `65${local}`] : [accountNumber];
 }
 
 // holderNameKey in SQL, for holder names already stored: NFKD, the small

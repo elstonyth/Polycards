@@ -260,12 +260,15 @@ medusaIntegrationTestRunner({
             settled_at: new Date(),
           },
         ]);
-        expect(
-          await packs().otherPayoutAccountHolders('cus_other', NUMBER),
-        ).toEqual([expect.objectContaining({ customer_id: holder })]);
-        expect(
-          await packs().otherPayoutAccountHolders('cus_other', '01234'),
-        ).toEqual([]);
+        const holders = async (bankCode: string, accountNumber: string) =>
+          (
+            await packs().payoutNumberStanding('cus_other', {
+              bankCode,
+              accountNumber,
+            })
+          ).holders.map((h) => h.customerId);
+        expect(await holders('MBBEMYKL', NUMBER)).toEqual([holder]);
+        expect(await holders('SCBLMYKX', '01234')).toEqual([]);
       });
 
       it('the admin customer routes cannot write the stamp or blank the blob', async () => {

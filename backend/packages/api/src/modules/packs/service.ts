@@ -63,12 +63,10 @@ import {
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
-import { accountNumberForms, findBank, savedAccountSlot } from './banks';
+import { findBank, savedAccountSlot } from './banks';
 import {
-  holderNameKeySql,
   nameStanding,
   numberStanding,
-  spellings,
   type NameStanding,
   type NumberStanding,
   type PayoutNumber,
@@ -401,7 +399,7 @@ function insufficientCreditsMessage(
 
 // holderNameKey in SQL: lives with the Payout Destination reads now; kept
 // exported here for older importers.
-export { holderNameKeySql };
+export { holderNameKeySql } from './payout-destination';
 
 // Auto-generates CRUD for each model: list/retrieve/create/update/delete<Model>s
 // (e.g. listPacks, listCards, listPackOdds, createPulls,
@@ -10469,63 +10467,6 @@ class PacksModuleService extends MedusaService({
     );
   }
 
-  // Other customers already tied to this account number: saved on a live
-  // account, or a payout to it that went out or is on its way (failed rows
-  // came back and prove nothing). A deleted account frees its numbers: the
-  // deletion scrub cuts its payout rows to the last 4 digits (deleteAccount),
-  // which the length check below keeps from matching a short zero-padded number,
-  // and its saved list is not read.
-  // The bank codes come back raw (saved lists may still hold a retired
-  // gateway's alias); the caller compares canonical ids. holder_name is the
-  // saved entry's holder (NULL for a payout row, which already proves the
-  // number pays out). Read by the saved-accounts routes and the payout check
-  // (heldByAnother decides), which refuse a number someone else holds:
-  // 13 clusters of 2-3 accounts on one bank account farmed welcome packs and
-  // tasks by 2026-10-14. Both sides compare digits only, without leading
-  // zeros: padding with a 0, or an older saved entry with spaces or dashes,
-  // does not slip past it. A USDT wallet address (`exact`) is compared whole
-  // instead: its digits alone collide across unrelated Tron addresses. EVM
-  // addresses are stored lowercase, so exact equality covers them too.
-  @InjectManager()
-  async otherPayoutAccountHolders(
-    customerId: string,
-    accountNumber: string,
-    exact = false,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<
-    { customer_id: string; bank_code: string; holder_name: string | null }[]
-  > {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    if (exact) {
-      return await em.execute(
-        "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name " +
-          'FROM customer c ' +
-          "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-          "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-          "WHERE c.deleted_at IS NULL AND c.id <> ? AND a->>'accountNumber' = ? " +
-          'UNION ' +
-          'SELECT customer_id, bank_code, NULL AS holder_name FROM gateway_withdrawal ' +
-          'WHERE deleted_at IS NULL AND customer_id <> ? AND account_number = ? ' +
-          "AND status IN ('pending', 'held', 'settled')",
-        [customerId, accountNumber, customerId, accountNumber],
-      );
-    }
-    return await em.execute(
-      "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name " +
-        'FROM customer c ' +
-        "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-        "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        "WHERE c.deleted_at IS NULL AND c.id <> ? AND ltrim(regexp_replace(a->>'accountNumber', '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
-        'UNION ' +
-        'SELECT customer_id, bank_code, NULL AS holder_name FROM gateway_withdrawal ' +
-        "WHERE deleted_at IS NULL AND customer_id <> ? AND ltrim(regexp_replace(account_number, '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
-        "AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4 " +
-        "AND status IN ('pending', 'held', 'settled')",
-      [customerId, accountNumber, customerId, accountNumber],
-    );
-  }
-
   // Every number this customer saved, was paid to (any status) or had a ban
   // lifted for, one entry per key: what support's last 4 can mean for this
   // player (bannedPayoutAccountsOf, the assistant's bank tools). A lift comes
@@ -10576,43 +10517,13 @@ class PacksModuleService extends MedusaService({
     return [...byKey].map(([account_key, n]) => ({ account_key, ...n }));
   }
 
-  // The other accounts that hold this bank number AT THIS BANK, as a save of
-  // it is refused for (blocksNewSave) and a payout of it held (heldByAnother):
-  // the same digits at another bank, or a wallet whose digits happen to match,
-  // are another account and hold nothing here. Ids once each. What the
-  // assistant lists, and what freePayoutAccount frees.
-  @InjectManager()
-  async payoutAccountHoldersAt(
-    customerId: string,
-    accountKey: string,
-    bankCode: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<string[]> {
-    const bank = findBank(bankCode)?.id;
-    if (!bank || findBank(bank)?.wallet !== undefined) return [];
-    return [
-      ...new Set(
-        (
-          await this.otherPayoutAccountHolders(
-            customerId,
-            accountKey,
-            false,
-            sharedContext,
-          )
-        )
-          .filter((h) => findBank(h.bank_code)?.id === bank)
-          .map((h) => h.customer_id),
-      ),
-    ];
-  }
-
   // Support frees a bank number from the other accounts on it, so this player
   // can save it themselves (owner, 2026-11-04: "let them add it, we record the
   // change"; the unban-pair cases): each of those accounts loses its saved
   // entries of the number at this bank, verification included, and its settled
   // or failed payout rows to it are cut to the last 4 with no holder name, as
   // account deletion cuts them. Paid-out rows are what keep a number "shared"
-  // for good, so this is the one way past blocksNewSave for the player's own
+  // for good, so this is the one way past the shared block for the player's own
   // save besides support's add (addSavedBankAccount), and it stops those rows
   // counting the name on them too. Only holders at this bank: the same digits
   // at another bank are someone else's account. Cannot be undone: the audit
@@ -10645,25 +10556,24 @@ class PacksModuleService extends MedusaService({
         'Not a bank account number at a known bank.',
       );
     }
+    // On this transaction: the re-check below sees this one's own writes.
+    const standing = () =>
+      this.payoutNumberStanding(
+        input.customerId,
+        { bankCode: bank.id, accountNumber: key },
+        sharedContext,
+      );
+    const first = await standing();
     // A PayNow mobile is one number with or without its 65, as bank_save_check
     // and the ban list read it: holders, payouts and saved entries under both.
-    const forms = spellings(bank.id, key);
+    const { forms } = first;
     await this.refuseIfAuditedSince(
       input.customerId,
       input.since,
       (a) => 'held_by' in a && auditNamesNumber(a, a.account_last4, forms),
       sharedContext,
     );
-    // On this transaction: the re-check below sees this one's own writes.
-    const holders = async () =>
-      (
-        await this.payoutNumberStanding(
-          input.customerId,
-          { bankCode: bank.id, accountNumber: key },
-          sharedContext,
-        )
-      ).holders.map((h) => h.customerId);
-    const before = await holders();
+    const before = first.holders.map((h) => h.customerId);
     if (before.length === 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -10759,7 +10669,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    if ((await holders()).length > 0) {
+    if ((await standing()).holders.length > 0) {
       throw new MedusaError(
         MedusaError.Types.CONFLICT,
         `${bank.name} …${last4} is still held by another account. Nothing was changed; ask again.`,
@@ -10813,9 +10723,13 @@ class PacksModuleService extends MedusaService({
       own.map((n) => [n.account_key, n.bank_code]),
     );
     // A PayNow mobile is banned with or without its 65, as the withdrawal
-    // check reads it (spellings), so the list asks for both.
+    // check reads it (the standing's spellings), so the list asks for both.
     for (const n of own) {
-      for (const form of spellings(n.bank_code, n.account_key)) {
+      const { forms } = await numberStanding(em, customerId, {
+        bankCode: n.bank_code,
+        accountNumber: n.account_key,
+      });
+      for (const form of forms) {
         if (!byKey.has(form)) byKey.set(form, n.bank_code);
       }
     }
@@ -11014,97 +10928,6 @@ class PacksModuleService extends MedusaService({
       lifted: input.lifted,
       changed,
     };
-  }
-
-  // A permanently banned payout number (owner, 2026-11-03): the farm rings'
-  // banks, in banned_payout_account only (the repo is public). Matched on
-  // payoutAccountKey, so at any bank and however it is padded. Not banned for
-  // the one customer support unbanned it for (setPayoutBanLifted).
-  @InjectManager()
-  async payoutAccountBanned(
-    accountNumber: string,
-    wallet = false,
-    customerId: string | null = null,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const key = payoutAccountKey(accountNumber, wallet);
-    const rows = await em.execute<unknown[]>(
-      'SELECT 1 FROM banned_payout_account WHERE account_key = ? LIMIT 1',
-      [key],
-    );
-    if (rows.length === 0) return false;
-    if (!customerId) return true;
-    const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
-      'SELECT metadata FROM customer WHERE id = ?',
-      [customerId],
-    );
-    return !liftedPayoutBans(me?.metadata ?? {})[key];
-  }
-
-  // Another account already used this holder name on a bank, saved or paid
-  // (owner, 2026-11-03: a different bank under the same name is refused too).
-  // Names compare by holderNameKey, the stored ones in SQL (holderNameKeySql),
-  // so a variant saved with accents or symbols still finds the plain name. A
-  // wallet entry carries its network's name, which no person's name equals.
-  // The accounts support checked as another person with this name
-  // (setHolderNameCleared) do not count, for this customer only; any other
-  // account still does.
-  @InjectManager()
-  async holderNameHeldByAnother(
-    customerId: string,
-    holderName: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<boolean> {
-    const others = await this.holderNameHolders(
-      customerId,
-      holderName,
-      sharedContext,
-    );
-    if (others.length === 0) return false;
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const [me] = await em.execute<{ metadata: Record<string, unknown> | null }[]>(
-      'SELECT metadata FROM customer WHERE id = ?',
-      [customerId],
-    );
-    const checked =
-      clearedHolderNames(me?.metadata ?? {})[holderNameKey(holderName)]?.with ??
-      [];
-    return others.some((id) => !checked.includes(id));
-  }
-
-  // The other accounts that saved or were paid under this holder name, as
-  // holderNameHeldByAnother counts them. Never truncated: the decision needs
-  // every holder, or an unchecked one could slip past a clearing.
-  @InjectManager()
-  async holderNameHolders(
-    customerId: string,
-    holderName: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<string[]> {
-    // A name with no English letter (saved before such names were refused)
-    // keys empty by its letters; it is compared by its old key instead, so
-    // its holders are still found. Empty both ways names no one.
-    const letters = holderNameKey(holderName);
-    const key = letters || realNameKey(holderName);
-    if (!key) return [];
-    const keySql = letters ? holderNameKeySql : realNameKeySql;
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ customer_id: string }[]>(
-      'SELECT c.id AS customer_id FROM customer c ' +
-        "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-        "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${keySql("a->>'accountHolderName'")} = ? ` +
-        'UNION ' +
-        'SELECT customer_id FROM gateway_withdrawal WHERE deleted_at IS NULL AND customer_id <> ? ' +
-        `AND ${keySql('account_holder_name')} = ? ` +
-        "AND status IN ('pending', 'held', 'settled')",
-      [customerId, key, customerId, key],
-    );
-    return rows.map((r) => r.customer_id);
   }
 
   // Payout Destination identity (payout-destination.ts) on this service's
