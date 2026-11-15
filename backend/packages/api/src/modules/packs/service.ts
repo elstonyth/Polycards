@@ -99,7 +99,7 @@ import CoinFlipRound from './models/coin-flip-round';
 import { settleBuyback, type BuybackSettlement } from './buyback-settlement';
 import { COIN_FLIP_CONFIG_ID, parseCoinFlipSettings, coinFlipSettingsView, publicCoinFlipRound,
   type CoinFlipSettings, type CoinFlipPublicRound } from './coin-flip';
-import { insufficientCreditsMessage, lockCredit, planPosting, type CreditMutationInput, type GeneralPosting } from './credit-posting';
+import { insufficientCreditsMessage, lockCredit, planPosting, type CreditMutationInput, type GeneralPosting, type LedgerReversalRow } from './credit-posting';
 import { coinFlipManager, readCoinFlipSettings, quoteCoinFlipOperation,
   acceptCoinFlipOperation, getCoinFlipRoundOperation } from './coin-flip-operations';
 import DeliveryOrder from './models/delivery-order';
@@ -322,18 +322,7 @@ import {
 } from './real-customers';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
-// The ledger columns the reversals read by raw SQL on their own transaction
-// (an ORM list would take a second pool connection; see mutateCreditAtomic).
-type LedgerReversalRow = {
-  id: string;
-  customer_id: string;
-  amount: string;
-  reason: InferTypeOf<typeof CreditTransaction>['reason'];
-  reference: string | null;
-  external_funded_cents: number | null;
-  bonus_cents: number | null;
-  source_transaction_id: string | null;
-};
+// The columns of LedgerReversalRow (credit-posting.ts).
 const LEDGER_REVERSAL_COLS =
   'id, customer_id, amount, reason, reference, external_funded_cents, bonus_cents, source_transaction_id';
 
@@ -4795,10 +4784,13 @@ class PacksModuleService extends MedusaService({
     ledger?: { id: string; display_id: string };
   }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const customerId =
+      'reversalOf' in input ? input.reversalOf.customer_id : input.customerId;
+    const open = !('reversalOf' in input) && input.reason === 'pack_open' ? input : null;
     // An open's id is its idempotency key (open_id). Reject an empty one at
     // the boundary so a bad caller can't write rows that escape the
     // partial-unique index (Sourcery review).
-    if (input.reason === 'pack_open' && !input.sourceTransactionId) {
+    if (open && !open.sourceTransactionId) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         'settleOpen requires a non-empty sourceTransactionId (the open_id).',
@@ -4806,47 +4798,56 @@ class PacksModuleService extends MedusaService({
     }
 
     // 1) Serialize all credit mutations for THIS customer on the locked txn.
-    await lockCredit(sharedContext, input.customerId);
+    await lockCredit(sharedContext, customerId);
 
-    // 1a) Idempotent replay (top-up): under the lock, if a row already carries
-    // this idempotency reference the request already applied — return it as a
-    // no-op rather than appending a second credit. The lock makes the
-    // check-then-insert atomic per customer, so concurrent identical-key
-    // requests can't both insert (same guarantee as reverseCreditTransaction's
-    // `reversal:` dedupe — no DB unique required).
-    if (input.idempotencyReference) {
-      // The idempotency anchor is stored in source_transaction_id (NOT reference)
-      // so the public `reference` column stays free to hold the gateway/charge
-      // reference for reconciliation + refunds (CodeRabbit). Scope the dedupe to
-      // THIS customer: the advisory lock above is per customer, so the check-then-
-      // insert is only atomic within one customer; customer_id also makes the
-      // lookup index-assisted (IDX_credit_transaction_customer_id_created_at)
-      // instead of a full ledger scan.
-      // Raw, on the locked transaction: an ORM list here takes a second pool
-      // connection while this one holds the lock, and callers waiting on the
-      // lock each hold one too.
-      const [existing] = await em.execute<
-        { id: string; amount: string; reference: string | null }[]
-      >(
-        `SELECT id, amount, reference FROM credit_transaction
-           WHERE customer_id = ? AND source_transaction_id = ? AND deleted_at IS NULL
-           LIMIT 1`,
-        [input.customerId, input.idempotencyReference],
+    // 1a) Idempotent replay: under the lock, if a row already carries this
+    // posting's key the request already applied — return it as a no-op rather
+    // than appending a second credit. The lock makes the check-then-insert
+    // atomic per customer, so concurrent identical-key requests can't both
+    // insert (no DB unique required). The key is the idempotency anchor, or
+    // for a reversal `reversal:<original id>` (a saga that double-compensates
+    // must not append a second refund).
+    //
+    // The idempotency anchor is stored in source_transaction_id (NOT
+    // reference) so the public `reference` column stays free to hold the
+    // gateway/charge reference for reconciliation + refunds (CodeRabbit).
+    // Scope that dedupe to THIS customer: the advisory lock above is per
+    // customer, so the check-then-insert is only atomic within one customer;
+    // customer_id also makes the lookup index-assisted
+    // (IDX_credit_transaction_customer_id_created_at) instead of a full ledger
+    // scan. The reversal LIKE repeats IDX_credit_transaction_reversal_reference's
+    // predicate so the planner can use it; equality alone can't prove it.
+    // Raw, on the locked transaction: an ORM list here takes a second pool
+    // connection while this one holds the lock, and callers waiting on the
+    // lock each hold one too.
+    type Replayed = { id: string; amount: string; reference: string | null };
+    const [existing] =
+      'reversalOf' in input
+        ? await em.execute<Replayed[]>(
+            "SELECT id, amount, reference FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
+            [`reversal:${input.reversalOf.id}`],
+          )
+        : input.idempotencyReference
+          ? await em.execute<Replayed[]>(
+              `SELECT id, amount, reference FROM credit_transaction
+                 WHERE customer_id = ? AND source_transaction_id = ? AND deleted_at IS NULL
+                 LIMIT 1`,
+              [customerId, input.idempotencyReference],
+            )
+          : [];
+    if (existing) {
+      const balRows = await em.execute<{ balance_cents: string | null }[]>(
+        'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
+          'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+        [customerId],
       );
-      if (existing) {
-        const balRows = await em.execute<{ balance_cents: string | null }[]>(
-          'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents ' +
-            'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-          [input.customerId],
-        );
-        return {
-          id: existing.id,
-          balance: Number(balRows[0]?.balance_cents ?? 0) / 100,
-          amount: Number(existing.amount),
-          replayed: true,
-          reference: existing.reference ?? null,
-        };
-      }
+      return {
+        id: existing.id,
+        balance: Number(balRows[0]?.balance_cents ?? 0) / 100,
+        amount: Number(existing.amount),
+        replayed: true,
+        reference: existing.reference ?? null,
+      };
     }
 
     // 1b) An open: never from a frozen account — checked inside the lock so a
@@ -4855,8 +4856,8 @@ class PacksModuleService extends MedusaService({
     //     lock: MikroORM buffers the insert until flush, so a 23505 from the
     //     debit's partial-unique index would fire at commit, after this
     //     method returns, where dbErrorMapper intercepts it.
-    if (input.reason === 'pack_open') {
-      if (await this.isFrozen(input.customerId, sharedContext)) {
+    if (open) {
+      if (await this.isFrozen(customerId, sharedContext)) {
         throw new MedusaError(
           MedusaError.Types.NOT_ALLOWED,
           'This account is frozen.',
@@ -4867,12 +4868,12 @@ class PacksModuleService extends MedusaService({
            WHERE source_transaction_id = ? AND reason = 'pack_open' AND amount < 0
              AND deleted_at IS NULL
            LIMIT 1`,
-        [input.sourceTransactionId],
+        [open.sourceTransactionId],
       );
       if (settled) {
         throw new MedusaError(
           MedusaError.Types.DUPLICATE_ERROR,
-          `Open '${input.sourceTransactionId}' has already been settled.`,
+          `Open '${open.sourceTransactionId}' has already been settled.`,
         );
       }
     }
@@ -4892,7 +4893,7 @@ class PacksModuleService extends MedusaService({
         'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
         'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-      [input.customerId],
+      [customerId],
     );
     // 3) The posting rules (credit-posting.ts planPosting): sign, bonus split,
     //    external snapshot and floor, against the locked Σ above.
@@ -4913,28 +4914,27 @@ class PacksModuleService extends MedusaService({
       // DUPLICATE_ERROR so @InjectTransactionManager rolls the whole open
       // back, debit included. No SAVEPOINT — that would let the duplicate
       // debit commit.
-      if (input.reason === 'pack_open' && isUniqueViolation(e)) {
+      if (open && isUniqueViolation(e)) {
         throw new MedusaError(
           MedusaError.Types.DUPLICATE_ERROR,
-          `Open '${input.sourceTransactionId}' has already been settled.`,
+          `Open '${open.sourceTransactionId}' has already been settled.`,
         );
       }
       throw e;
     }
 
     // 5) Its ledger row, same transaction.
-    const ledger = input.ledger
+    const part = 'reversalOf' in input ? undefined : input.ledger;
+    const ledger = part
       ? await this.recordLedgerEntry(
           {
-            type: input.ledger.type,
-            customerId: input.customerId,
-            refId: input.ledger.refId ?? txn.id,
+            type: part.type,
+            customerId,
+            refId: part.refId ?? txn.id,
             walletDelta:
-              input.ledger.walletDelta === undefined
-                ? plan.row.amount
-                : input.ledger.walletDelta,
-            vaultDelta: input.ledger.vaultDelta ?? null,
-            payload: input.ledger.payload,
+              part.walletDelta === undefined ? plan.row.amount : part.walletDelta,
+            vaultDelta: part.vaultDelta ?? null,
+            payload: part.payload,
           },
           sharedContext,
         )
@@ -4946,7 +4946,7 @@ class PacksModuleService extends MedusaService({
     // same txn would NOT see the new row).
     if (plan.unfreeze) {
       await this.maybeAutoUnfreeze(
-        input.customerId,
+        customerId,
         plan.balanceAfterCents,
         sharedContext,
       );
@@ -5589,80 +5589,12 @@ class PacksModuleService extends MedusaService({
     }
   }
 
-  // Append-only reversal of a single ledger row (the open-saga compensation).
-  // Holds the SAME per-customer advisory lock as mutateCreditAtomic, then writes
-  // a mirror row: sign-flipped amount (refund) + sign-flipped external_funded_cents
-  // (restores external balance; Task-1 fold nets the VIP basis). The original is
-  // NEVER deleted — a reversed open keeps its history (spec §3 invariant 1).
-  // Idempotent under the
-  // lock (below): a repeated compensation of the same charge returns the
-  // existing reversal rather than appending a second full refund.
-  @InjectTransactionManager()
-  async reverseCreditTransaction(
-    transactionId: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const [original] = await em.execute<LedgerReversalRow[]>(
-      `SELECT ${LEDGER_REVERSAL_COLS} FROM credit_transaction
-         WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
-      [transactionId],
-    );
-    if (!original) {
-      // Already gone / never written — nothing to reverse (compensation is a
-      // best-effort undo; a missing charge means the forward step never ran).
-      return { id: transactionId };
-    }
-    await lockCredit(sharedContext, original.customer_id);
-
-    // Idempotency (Codex review): a saga that double-compensates the same charge
-    // must NOT append a second refund. Under the lock, if a reversal row for this
-    // charge already exists, return it as a no-op. `reversal:${id}` is the
-    // per-charge reversal key.
-    const [existingReversal] = await em.execute<{ id: string }[]>(
-      // LIKE: lets the planner use IDX_credit_transaction_reversal_reference.
-      "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
-      [`reversal:${transactionId}`],
-    );
-    if (existingReversal) {
-      return { id: existingReversal.id };
-    }
-
-    const originalExt = Number(
-      (original as { external_funded_cents?: number | null })
-        .external_funded_cents ?? 0,
-    );
-    const [reversal] = await this.createCreditTransactions(
-      [
-        {
-          customer_id: original.customer_id,
-          amount: -Number(original.amount), // refund (flips the charge sign)
-          reason: original.reason, // stays 'pack_open' so economy nets honestly
-          pull_id: null, // unique pull_id belongs to the original only
-          reference: `reversal:${transactionId}`,
-          external_funded_cents: -originalExt, // restores external balance + basis
-          // restores the bonus the original spent (or clawed back)
-          bonus_cents:
-            0 -
-            Number(
-              (original as { bonus_cents?: number | null }).bonus_cents ?? 0,
-            ),
-          source_transaction_id:
-            (original as { source_transaction_id?: string | null })
-              .source_transaction_id ?? null, // present after Task 4
-        },
-      ],
-      sharedContext,
-    );
-    return { id: reversal.id };
-  }
-
   // Cascading reversal of an entire open — the saga compensation for the
   // recruit's debit. ONE transaction. Collects all originals sharing the open_id,
   // locks each touched customer (sorted -> deadlock-safe), and appends an
   // append-only compensating row per original, idempotent via reference
   // `reversal:${rowId}`. The refund keeps reason 'pack_open' (nets the open's
-  // external basis, exactly like reverseCreditTransaction — an aborted open
+  // external basis — an aborted open
   // correctly stops counting toward VIP basis; there is no separate VIP
   // projection to inverse). Re-running adds nothing (returns reversed: 0).
   // Exactly-once rests on the sorted credit: locks + the per-row reference check
@@ -5730,37 +5662,12 @@ class PacksModuleService extends MedusaService({
     let reversed = 0;
     const deltaMap = new Map<string, number>(); // per-customer reversal delta in cents
     for (const original of originals) {
-      const [existing] = await em.execute<{ id: string }[]>(
-        // The LIKE repeats IDX_credit_transaction_reversal_reference's
-        // predicate so the planner can use it; equality alone can't prove it.
-        "SELECT id FROM credit_transaction WHERE reference = ? AND reference LIKE 'reversal:%' AND deleted_at IS NULL LIMIT 1",
-        [`reversal:${original.id}`],
-      );
-      if (existing) continue; // already reversed — no-op
-      const originalExt = Number(
-        (original as { external_funded_cents?: number | null })
-          .external_funded_cents ?? 0,
-      );
-      const [rev] = await this.createCreditTransactions(
-        [
-          {
-            customer_id: original.customer_id,
-            amount: -Number(original.amount), // refund / claw-back
-            reason: original.reason,
-            pull_id: null,
-            reference: `reversal:${original.id}`,
-            external_funded_cents: -originalExt, // restores basis
-            // restores the bonus the open spent
-            bonus_cents:
-              0 -
-              Number(
-                (original as { bonus_cents?: number | null }).bonus_cents ?? 0,
-              ),
-            source_transaction_id: sourceTransactionId,
-          },
-        ],
+      // The mirror posting re-enters the lock taken above (sorted).
+      const { replayed } = await this.mutateCreditAtomic(
+        { reversalOf: original, sourceTransactionId },
         sharedContext,
       );
+      if (replayed) continue; // already reversed — no-op
       deltaMap.set(
         original.customer_id,
         (deltaMap.get(original.customer_id) ?? 0) +
@@ -14364,7 +14271,7 @@ class PacksModuleService extends MedusaService({
   }
 
   // Delete-guard: the credit ledger is append-only — money rows are never
-  // hard-deleted, compensation MUST use reverseCreditTransaction. The referral
+  // hard-deleted, compensation MUST append a reversal (reverseOpen). The referral
   // commission lifecycle this guard used to check was removed with the referral
   // engine, so it currently has no dependent table to refuse on; it stays as the
   // single chokepoint (sealed by delete-guard-seal.unit.spec.ts) so a future

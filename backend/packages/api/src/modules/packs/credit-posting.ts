@@ -1,6 +1,7 @@
 import { MedusaError } from '@medusajs/framework/utils';
-import type { Context } from '@medusajs/framework/types';
+import type { Context, InferTypeOf } from '@medusajs/framework/types';
 import type { LedgerSqlManager } from './claim';
+import type CreditTransaction from './models/credit-transaction';
 import { BONUS_NOT_SPENDABLE_MESSAGE, bonusShareSen, consumeBonusSen } from './bonus-credit';
 import { consumeExternalSen } from './external-funded';
 import type { LedgerPayload, LedgerType } from './ledger';
@@ -74,7 +75,7 @@ type PostingFields = {
    * advisory lock: if a row already carries it, that row is returned unchanged
    * instead of appending a second credit (top-up replay protection — security
    * audit 2026-06-23). The stored `reference` becomes this value. Mirrors the
-   * `reversal:${id}` locked-dedupe used by reverseCreditTransaction; no DB
+   * `reversal:${id}` locked-dedupe the reversal posting uses; no DB
    * unique needed — the lock serializes check-then-insert per customer.
    */
   idempotencyReference?: string | null;
@@ -121,8 +122,34 @@ export type CoinFlipPosting = PostingFields & {
   ledger: LedgerPart & { type: 'CF' };
 };
 
-/** Every credit posting, keyed on reason. */
-export type CreditPosting = GeneralPosting | PackOpenPosting | BuybackPosting | CoinFlipPosting;
+// The ledger columns a reversal reads by raw SQL on its own transaction (an
+// ORM list would take a second pool connection; see mutateCreditAtomic).
+export type LedgerReversalRow = {
+  id: string;
+  customer_id: string;
+  amount: string;
+  reason: InferTypeOf<typeof CreditTransaction>['reason'];
+  reference: string | null;
+  external_funded_cents: number | null;
+  bonus_cents: number | null;
+  source_transaction_id: string | null;
+};
+
+/** The append-only mirror of one ledger row (an open's compensation). The
+ *  original is never deleted; idempotent on `reversal:<row id>`. */
+export type ReversalPosting = {
+  reversalOf: LedgerReversalRow;
+  /** Default: the original's own. */
+  sourceTransactionId?: string | null;
+};
+
+/** Every credit posting, keyed on reason (a reversal mirrors its original). */
+export type CreditPosting =
+  | GeneralPosting
+  | PackOpenPosting
+  | BuybackPosting
+  | CoinFlipPosting
+  | ReversalPosting;
 export type CreditMutationInput = CreditPosting;
 
 /** The locked Σ read a posting is planned against, in integer sen. */
@@ -132,7 +159,7 @@ export type PostingTotals = { balanceCents: number; bonusCents: number; external
 export type CreditRow = {
   customer_id: string;
   amount: number;
-  reason: CreditMutationReason;
+  reason: InferTypeOf<typeof CreditTransaction>['reason'];
   pull_id: string | null;
   reference: string | null;
   /** NULL, not 0, on a sell-back with nothing held (D9). */
@@ -174,6 +201,29 @@ export function insufficientCreditsMessage(
  * Throws the same MedusaErrors, in the same order, as mutateCreditAtomic did.
  */
 export function planPosting(input: CreditPosting, totals: PostingTotals): PostingPlan {
+  if ('reversalOf' in input) {
+    const original = input.reversalOf;
+    const row: CreditRow = {
+      customer_id: original.customer_id,
+      amount: -Number(original.amount), // refund / claw-back: flips the sign
+      // Stays the original's ('pack_open' for an open), so economy nets
+      // honestly and the open stops counting toward the VIP basis.
+      reason: original.reason,
+      pull_id: null, // unique pull_id belongs to the original only
+      reference: `reversal:${original.id}`,
+      external_funded_cents: -Number(original.external_funded_cents ?? 0), // restores basis
+      bonus_cents: 0 - Number(original.bonus_cents ?? 0), // restores the bonus it spent
+      source_transaction_id:
+        input.sourceTransactionId ?? original.source_transaction_id ?? null,
+    };
+    return {
+      row,
+      // An open's refund never lifts an auto freeze (D2, owner decision).
+      unfreeze: false,
+      balanceAfterCents: totals.balanceCents + Math.round(row.amount * 100),
+      bonusAfterCents: Math.max(0, totals.bonusCents) + (row.bonus_cents ?? 0),
+    };
+  }
   const beforeCents = totals.balanceCents;
   // Spend-only bonus credit (spec 2026-10-07): only a pack open may spend it
   // (settleOpen), so every other debit is floored against the NORMAL balance.
