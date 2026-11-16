@@ -63,11 +63,72 @@ The script injects secrets, writes a resolved spec to gitignored
 > changes, and an app whose diff can't be computed is deployed (safe default).
 > Rules: `.github/scripts/deploy-targets.mjs`. Redeploy by hand from
 > Actions → Deploy → Run workflow **on the `master` branch** (other branches
-> skip the deploy jobs), target `both`, `backend` or `storefront`. It
-> authenticates with the `DIGITALOCEAN_ACCESS_TOKEN` repo secret (scopes
+> skip every job), target `both`, `backend` or `storefront`. A manual run is
+> gated too: it deploys only once `ci-ok` passed on the master head. The
+> break-glass path around the gate is `scripts/do-apply.ps1` (below). It
+> authenticates with the `DIGITALOCEAN_ACCESS_TOKEN` secret (scopes
 > `app:read` + `app:update`, expires 2027-11-16; renew it before then). Spec
 > changes (env, sizes) still reach the live app only via `do-apply.ps1`
 > (doctl), which redeploys that app.
+
+### Deploy gates
+
+- **CI first.** The `wait for CI` job polls the `ci-ok` check run of the
+  push-triggered CI run on the commit (`.github/scripts/ci-gate.mjs`,
+  self-check `--test`) for up to 60 minutes. A manual CI run's `ci-ok` on
+  the same commit is ignored: it neither blocks nor stands in. Only `success` deploys. A failed, skipped or timed-out
+  `ci-ok` fails the run and nothing deploys; so does a commit with no CI run
+  at all after 5 minutes (a `[skip ci]` push). Once master has moved past
+  the commit, the run skips quietly instead, whatever `ci-ok` said: App
+  Platform builds the tip, and the newer push's run ships this commit once
+  its own CI passes. After fixing or re-running CI,
+  re-run the Deploy run's failed jobs. The gate relies on `ci-ok` concluding
+  `success` on every green master push, including CI's master fast path.
+- **Branch tip check.** App Platform builds the tip of `master`, not a given
+  commit, so each deploy job re-reads the master head right before it starts
+  a deployment and skips when master has moved on.
+- **After ACTIVE.** `.github/scripts/verify-deploy.sh` checks that every
+  component runs the pushed commit, then that
+  `https://admin.polycards.gg/health` or `https://polycards.gg/healthz`
+  answers 200. Either failing fails the job; the failed run is the alert.
+- **`production` environment.** The plan, deploy and rollback jobs run in the
+  GitHub `production` environment. A first run would create it with no
+  branch policy, so the owner creates it first (below).
+
+### Owner setup for the `production` environment
+
+Run these once as the repo owner, in this order; step 1 before the Deploy
+gate change merges, so the branch policy holds from the first run. Until
+step 3, the jobs keep reading the repo-level secret, so nothing breaks in
+between.
+
+1. Create the environment restricted to `master` (Settings > Environments >
+   New environment `production` > Deployment branches and tags > Selected
+   branches and tags > add `master`), or:
+
+   ```bash
+   gh api -X PUT repos/elstonyth/Polycards/environments/production \
+     -F 'deployment_branch_policy[protected_branches]=false' \
+     -F 'deployment_branch_policy[custom_branch_policies]=true'
+   gh api -X POST repos/elstonyth/Polycards/environments/production/deployment-branch-policies \
+     -f name=master -f type=branch
+   ```
+
+2. Add the token as an environment secret (it prompts for the value; paste
+   it, never put it in the command line). `app:read` + `app:update` covers
+   deploys and rollback: DigitalOcean's OpenAPI spec lists `app:update` for
+   all four rollback endpoints.
+
+   ```bash
+   gh secret set DIGITALOCEAN_ACCESS_TOKEN --env production
+   ```
+
+3. After one green Deploy run on the environment secret, delete the repo-level
+   copy: `gh secret delete DIGITALOCEAN_ACCESS_TOKEN`.
+
+A Deploy or Rollback run dispatched from any other branch skips every job
+(each has a `master` ref check), and the branch policy refuses the
+environment's secrets to other refs as a second fence.
 
 ## Admin user
 
@@ -80,15 +141,32 @@ without throwing — so it is safe on every deploy and self-heals a lost admin.
 ## Rollback
 
 App Platform keeps previous deployments; a bad deploy rolls back without a git
-revert:
+revert. doctl has no rollback commands, so use the GitHub **Rollback**
+workflow (Actions > Rollback > Run workflow, on `master`). It calls App
+Platform's rollback API (`POST /v2/apps/{app_id}/rollback`, plus
+`/rollback/validate`, `/rollback/commit` and `/rollback/revert`) through
+`.github/scripts/do-rollback.sh`:
 
-```pwsh
-doctl apps list-deployments <APP_ID>                 # find the last good deployment
-doctl apps create-deployment <APP_ID> --wait         # redeploy current spec (rebuild)
-# Pin to a previous deployment (true rollback, no rebuild):
-doctl apps create-rollback <APP_ID> --deployment-id <DEPLOYMENT_ID> --wait
-doctl apps validate-rollback <APP_ID> --deployment-id <DEPLOYMENT_ID>  # dry-run first
-```
+1. **`validate`** (default, dry run). Lists the last 20 deployments with
+   their commits and asks DigitalOcean whether the rollback would work. With
+   `deployment_id` empty the target is the deployment before the active one;
+   that can be a spec-only redeploy of the same commit, so pick an id from the
+   list to go further back.
+2. **`rollback`**. Validates, rolls back, waits for ACTIVE and checks the
+   health URL. The app is then **pinned**: every new deployment fails, the
+   Deploy workflow included, until step 3.
+3. **`commit`** keeps the rollback and unpins the app; the next master push
+   deploys the master tip again, so revert the bad change on master first.
+   **`revert`** undoes the rollback (deploys the latest spec again) and
+   unpins.
+
+Limits: only the ten most recent successful deployments can be targets, and
+a rollback restores code, config and app spec, **never database data**. A
+Rollback run shares the app's `deploy-<app>` concurrency group with the
+Deploy workflow, so while it is still queued a newer pending deploy can
+displace it (GitHub cancels the older pending run; re-run it).
+`doctl apps create-deployment <APP_ID> --wait` (rebuild of the current spec)
+still works by hand when the app is not pinned.
 
 **Migration rule that makes rollback survivable:** migrations must stay
 backward-compatible for one release (expand/contract — add columns/tables
