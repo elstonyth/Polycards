@@ -1,0 +1,62 @@
+name: Cache prune
+
+# Deletes CodeQL overlay-base caches that can no longer be restored, keeping
+# the newest per key prefix. CodeQL default setup saves ~360 MB per master
+# push and never removes old ones, so they filled the 10 GB Actions cache and
+# LRU eviction then dropped the yarn/node_modules caches (cold installs).
+# .github/scripts/prune-caches.mjs holds the rules and touches only
+# `codeql-overlay-base-*` keys.
+#
+# schedule and push delete. workflow_dispatch deletes only with dry_run off.
+# pull_request (edits to this workflow or the script) is always a dry run.
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  push:
+    branches:
+      - master
+  pull_request:
+    paths:
+      - .github/workflows/cache-prune.yml
+      - .github/scripts/prune-caches.mjs
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list what would be deleted
+        type: boolean
+        default: true
+
+permissions:
+  actions: write
+
+concurrency:
+  group: cache-prune-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: prune
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Self-check
+        run: node .github/scripts/prune-caches.mjs --test
+
+      - name: Prune CodeQL overlay caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APPLY: ${{ github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
+        run: |
+          if [ "$APPLY" = "true" ]; then
+            node .github/scripts/prune-caches.mjs --apply
+          else
+            node .github/scripts/prune-caches.mjs
+          fi
