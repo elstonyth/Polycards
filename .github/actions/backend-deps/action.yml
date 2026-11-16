@@ -7,6 +7,12 @@ description: >-
   build, from the `turbo-cache-hit` / `turbo-key` outputs.
 
 inputs:
+  always-install:
+    description: >-
+      'true' runs `yarn install --immutable` even on an exact node_modules
+      cache hit (backend-quality, which verifies the lockfile and saves the
+      caches). Otherwise an exact hit skips the install and the yarn restore.
+    default: 'false'
   save:
     description: "'true' saves the node_modules and yarn caches after install (backend-quality on master)."
     default: 'false'
@@ -31,8 +37,36 @@ runs:
       with:
         node-version: 22
 
+    # The ~71s install is pure node_modules materialization (unpack + link a
+    # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
+    # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
+    # lockfile, so the --immutable install below is a fast verify. The
+    # install-state is essential: WITHOUT it the node-modules linker rebuilds
+    # its state from scratch (~37s even with node_modules present), which is
+    # what makes the state file — not just node_modules — the thing that pays.
+    # Exact key, NO restore-keys on purpose: a partial restore that mismatched
+    # the lockfile would make `yarn install --immutable` FAIL (it refuses to
+    # mutate node_modules). On a lockfile change the key misses -> full
+    # install -> backend-quality saves a fresh entry, on master pushes only
+    # (see the Save steps below). (Key is v2: actions/cache never
+    # overwrites an existing key, so adding install-state needs a new key.)
+    # Restored first, so an exact hit can skip both the ~0.56 GB yarn
+    # download and the install.
+    - name: Restore backend node_modules
+      id: bnm-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: |
+          backend/node_modules
+          backend/apps/*/node_modules
+          backend/packages/*/node_modules
+          backend/.yarn/install-state.gz
+        key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
+
+    # Only the install reads the yarn cache.
     - name: Restore yarn (berry global cache)
       id: yarn-cache
+      if: inputs.always-install == 'true' || steps.bnm-cache.outputs.cache-hit != 'true'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.yarn/berry/cache
@@ -57,31 +91,14 @@ runs:
         path: backend/.turbo
         key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
 
-    # The ~71s install is pure node_modules materialization (unpack + link a
-    # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
-    # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
-    # lockfile, so the --immutable install below is a fast verify. The
-    # install-state is essential: WITHOUT it the node-modules linker rebuilds
-    # its state from scratch (~37s even with node_modules present), which is
-    # what makes the state file — not just node_modules — the thing that pays.
-    # Exact key, NO restore-keys on purpose: a partial restore that mismatched
-    # the lockfile would make `yarn install --immutable` FAIL (it refuses to
-    # mutate node_modules). On a lockfile change the key misses -> full
-    # install -> backend-quality saves a fresh entry, on master pushes only
-    # (see the Save steps below). (Key is v2: actions/cache never
-    # overwrites an existing key, so adding install-state needs a new key.)
-    - name: Restore backend node_modules
-      id: bnm-cache
-      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-      with:
-        path: |
-          backend/node_modules
-          backend/apps/*/node_modules
-          backend/packages/*/node_modules
-          backend/.yarn/install-state.gz
-        key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
-
+    # An exact hit restores the very tree a full install of this lockfile
+    # produced: node_modules (dependency build-script output included),
+    # .yarn-state.yml and install-state.gz. No workspace has a postinstall or
+    # prepare script, and Yarn's node-modules linker writes nothing outside
+    # those paths, so the skip loses nothing. Corepack fetches Yarn on the
+    # job's first `corepack yarn` call instead of here.
     - name: Install backend dependencies
+      if: inputs.always-install == 'true' || steps.bnm-cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: backend
       run: corepack yarn install --immutable

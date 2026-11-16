@@ -206,7 +206,10 @@ jobs:
         id: deps
         uses: ./.github/actions/backend-deps
         with:
-          # Only backend-quality saves the caches, and only on master pushes.
+          # The full --immutable install runs here every time (the test jobs
+          # skip it on an exact node_modules hit), and only this job saves
+          # the caches, only on master pushes.
+          always-install: 'true'
           save: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Lint
