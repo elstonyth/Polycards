@@ -18,18 +18,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Most PRs here are storefront work — don't make them pay the ~10-min backend
-  # toll for code they didn't touch. Backend jobs run only when backend/** (or
-  # this workflow) changes. They are NOT individually required checks: a
-  # required check that skips would block every storefront-only PR forever,
-  # and integration-http's contexts are per-shard ("integration-http (N)").
-  # Instead the always-run `backend-gate` job (bottom of this file) aggregates
-  # their results — success or skipped passes, failure or cancelled fails —
-  # and THAT single context is meant to be the required check (round 15,
-  # 2026-09-10). As of 2026-11-09 it is NOT: master protection requires only
-  # quality, gitleaks and dependency-review, so a red backend still merges
-  # (#964: every http shard red, all three required checks green). Add
-  # `backend-gate` to the required checks; until then this gate is advisory.
+  # Path-aware CI. `changes` decides which areas a PR touches; the heavy jobs
+  # run only for their area, gated by a job-level `if` (a job skipped that way
+  # reports success, unlike a workflow skipped by `on.*.paths`, whose checks
+  # stay Pending and block the merge). The only required checks are `ci-ok`
+  # (bottom of this file), which aggregates every job here — success or
+  # skipped passes, failure or cancelled fails — and `dependency-review`,
+  # which is its own workflow. Add new jobs to `ci-ok`'s needs, never to
+  # branch protection. integration-http's contexts are per-shard, another
+  # reason to require only the aggregate.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -38,11 +35,14 @@ jobs:
       pull-requests: read # paths-filter reads the PR file list
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
+      storefront: ${{ steps.storefront.outputs.storefront }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # storefront detection diffs from the merge-base
+          filter: blob:none
 
       - name: Detect changed areas
         id: filter
@@ -52,12 +52,40 @@ jobs:
             backend:
               - 'backend/**'
               - '.github/workflows/ci.yml'
+            ci:
+              - '.github/workflows/ci.yml'
+              - '.github/scripts/deploy-targets.mjs'
 
-  # Storefront gate: lint, format, typecheck, unit tests, prod build.
+      # The classifier below decides what gets skipped, so a broken rule must
+      # fail CI rather than quietly skip checks. Its self-check runs on every
+      # PR, and editing it forces the storefront checks (filter `ci` above).
+      - name: Self-check change rules
+        run: node .github/scripts/deploy-targets.mjs --test
+
+      # Same rule the Deploy workflow uses to decide whether the storefront
+      # needs a redeploy (.github/scripts/deploy-targets.mjs): a deny-list of
+      # files its build never reads, so anything unknown runs the checks.
+      # An unreadable diff also runs them.
+      - name: Detect storefront changes
+        id: storefront
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          CI_CHANGED: ${{ steps.filter.outputs.ci }}
+        run: |
+          if [ "$CI_CHANGED" = "true" ]; then
+            echo "ci.yml or the change rules changed: running storefront checks"
+            echo "storefront=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BEFORE=$(git merge-base "$BASE" "$HEAD" 2>/dev/null || echo "$BASE")
+          BEFORE="$BEFORE" SHA="$HEAD" node .github/scripts/deploy-targets.mjs
+
+  # Repo-wide hygiene on every PR: ESLint and Prettier. Cheap, so never gated.
   # Node 24 = the local baseline (root engines: >=24).
-  quality:
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -79,6 +107,29 @@ jobs:
 
       - name: Format check
         run: npm run format:check
+
+  # Storefront gate: typecheck, unit tests, prod build. Runs only when the
+  # storefront's build inputs changed (see `changes`).
+  storefront:
+    needs: changes
+    if: needs.changes.outputs.storefront == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Type check
         run: npm run typecheck
@@ -724,3 +775,25 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The single required check for this workflow. Runs always and fails only
+  # when a job it needs failed or was cancelled; a job skipped because its
+  # area didn't change counts as passing. `changes` is in needs for the same
+  # reason as in backend-gate: a failed detector must not read as all-green.
+  ci-ok:
+    needs: [changes, lint, storefront, backend-gate, gitleaks]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          bad=$(echo "$RESULTS" | { grep -Eo '"result": *"(failure|cancelled)"' || true; } | wc -l)
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::$bad job(s) failed or were cancelled"
+            exit 1
+          fi
+          echo "ci-ok: every job succeeded or was skipped"
