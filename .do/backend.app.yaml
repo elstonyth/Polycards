@@ -14,10 +14,12 @@
 # Components all build from backend/Dockerfile (build context = backend/):
 #   - service "backend" : Medusa web (API + /dashboard + /seller), MEDUSA_WORKER_MODE=server
 #   - worker  "worker"  : drains event/workflow queues, MEDUSA_WORKER_MODE=worker
-#   - job     "migrate" : PRE_DEPLOY `deploy:migrate-user` (db:migrate + idempotent
-#                         create-admin) — runs every deploy, ensures the admin user
-#                         exists. create-admin.ts checks for an existing user and
-#                         SKIPS (no throw), so re-running is safe and self-healing.
+#   - job     "migrate" : PRE_DEPLOY `deploy:migrate-user` (db:migrate, then ONE
+#                         `medusa exec` of deploy-bootstrap.ts = idempotent
+#                         create-admin + VIP ladder seed) — runs every deploy,
+#                         ensures the admin user exists. create-admin.ts checks for
+#                         an existing user and SKIPS (no throw), so re-running is
+#                         safe and self-healing.
 #                         ADMIN_EMAIL/ADMIN_PASSWORD below feed it.
 # Must match the LIVE app name, or `doctl apps update --spec` renames the app.
 # App recreated 2026-07-16; default hostname is now polycards-backend-gce6p
@@ -94,7 +96,8 @@ envs:
     type: SECRET
     value: __SECRET__COOKIE_SECRET__
   # Super-admin for /dashboard login, created idempotently by the migrate job's
-  # deploy:migrate-user (create-admin.ts). Skipped if the user already exists.
+  # deploy:migrate-user (deploy-bootstrap.ts -> create-admin.ts). Skipped if the
+  # user already exists.
   - key: ADMIN_EMAIL
     scope: RUN_TIME
     value: admin@polycards.gg
@@ -756,9 +759,9 @@ jobs:
     github:
       repo: elstonyth/Polycards
       branch: master
-    # basic-s, not basic-xxs: deploy:migrate-user runs two `medusa exec`
-    # scripts after db:migrate, each a full app boot, which OOM-kills a 512 MB
-    # job on 2.19 (silent "exit code: 128"). See the worker note above.
+    # basic-s, not basic-xxs: deploy:migrate-user runs a `medusa exec`
+    # (deploy-bootstrap.ts) after db:migrate, a full app boot, which OOM-kills
+    # a 512 MB job on 2.19 (silent "exit code: 128"). See the worker note above.
     instance_size_slug: basic-s
     # Explicit because the live app carries it — see the ingress note above.
     instance_count: 1
