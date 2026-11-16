@@ -2,7 +2,8 @@
 // Waits for master CI to pass on a commit before deploy.yml deploys it.
 //
 // Polls the `ci-ok` check run (ci.yml's aggregate job, posted by the GitHub
-// Actions app) on SHA until it completes. Only `success` deploys. One case
+// Actions app) of the push-event CI run on SHA until it completes; a manual
+// CI run's ci-ok never counts. Only `success` deploys. One case
 // skips quietly instead of failing: master has moved on past SHA. App
 // Platform builds the branch tip, so this run could never ship SHA anyway,
 // and the newer push's Deploy run ships it from its live-commit diff once its
@@ -26,8 +27,8 @@ const GITHUB_ACTIONS_APP_ID = 15368; // ignore same-named checks from other apps
 
 // run: the latest ci-ok check run on SHA, or null if none exists yet.
 // head: the commit master points at now.
-// ciRuns: how many ci.yml workflow runs exist for SHA (read only while there
-// is no ci-ok yet). waitedMs: time since the gate started.
+// ciRuns: how many push-event ci.yml runs exist for SHA (it matters only
+// while there is no ci-ok yet). waitedMs: time since the gate started.
 // Returns { state: 'wait' | 'deploy' | 'superseded' | 'fail', why }.
 export function decide({ run, head, sha, ciRuns, waitedMs = 0, graceMs }) {
   if (head && head !== sha) {
@@ -90,31 +91,36 @@ async function api(path, accept = 'application/vnd.github+json') {
   return accept.endsWith('.sha') ? (await res.text()).trim() : res.json();
 }
 
+// The ci-ok to judge: newest one on SHA from a push-event ci.yml run. A
+// manual (workflow_dispatch) CI run posts its own ci-ok on the same sha, and
+// it may be a debug run that fails or sits on a tmate shell; it must neither
+// shadow nor stand in for the push run. filter=latest already keeps only the
+// newest attempt per check suite, so a re-run push CI still wins.
+export function pickRun(checkRuns, pushSuiteIds, sha) {
+  return (
+    checkRuns
+      .filter((r) => r.head_sha === sha && pushSuiteIds.has(r.check_suite?.id))
+      .toSorted((a, b) => b.id - a.id)[0] ?? null
+  );
+}
+
 async function readState(repo, sha) {
+  const wf = await api(
+    `/repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&per_page=100`,
+  );
+  const pushSuiteIds = new Set(wf.workflow_runs.map((r) => r.check_suite_id));
   const q = new URLSearchParams({
     check_name: CHECK_NAME,
     filter: 'latest',
     app_id: String(GITHUB_ACTIONS_APP_ID),
   });
   const runs = await api(`/repos/${repo}/commits/${sha}/check-runs?${q}`);
-  // filter=latest keeps the newest attempt per check suite; a re-run CI is
-  // its newest attempt, so the highest id wins.
-  const run =
-    runs.check_runs
-      .toSorted((a, b) => b.id - a.id)
-      .find((r) => r.head_sha === sha) ?? null;
+  const run = pickRun(runs.check_runs, pushSuiteIds, sha);
   const head = await api(
     `/repos/${repo}/commits/master`,
     'application/vnd.github.sha',
   );
-  let ciRuns;
-  if (!run) {
-    const wf = await api(
-      `/repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=1`,
-    );
-    ciRuns = wf.total_count;
-  }
-  return { run, head, ciRuns };
+  return { run, head, ciRuns: wf.total_count };
 }
 
 async function main() {
@@ -210,6 +216,61 @@ function selfTest() {
     [{ run: run('completed', 'startup_failure'), head: sha }, 'fail'],
     [{ run: run('completed', 'stale'), head: sha }, 'fail'],
   ];
+  // Push vs manual CI runs on the same sha: suite 1 is the push run, suite 2
+  // a later workflow_dispatch run.
+  const check = (id, suite, status, conclusion = null) => ({
+    id,
+    head_sha: sha,
+    check_suite: { id: suite },
+    status,
+    conclusion,
+  });
+  const push = new Set([1]);
+  const picked = [
+    // dispatch failure newer than push success: still judged on the push run
+    [
+      [
+        check(10, 1, 'completed', 'success'),
+        check(20, 2, 'completed', 'failure'),
+      ],
+      push,
+      1,
+      'deploy',
+    ],
+    // dispatch still running (tmate) after a green push run: deploy
+    [
+      [check(10, 1, 'completed', 'success'), check(20, 2, 'in_progress')],
+      push,
+      1,
+      'deploy',
+    ],
+    // dispatch success while the push run failed: the dispatch can't stand in
+    [
+      [
+        check(10, 1, 'completed', 'failure'),
+        check(20, 2, 'completed', 'success'),
+      ],
+      push,
+      1,
+      'fail',
+    ],
+    // dispatch-only: no push run yet, so wait, then fail once the grace is up
+    [[check(20, 2, 'completed', 'success')], new Set(), 0, 'wait'],
+    [[check(20, 2, 'completed', 'success')], new Set(), 0, 'fail', 5 * 60_000],
+    // a ci-ok on another sha never counts
+    [
+      [{ ...check(10, 1, 'completed', 'success'), head_sha: newer }],
+      push,
+      1,
+      'wait',
+    ],
+  ];
+  for (const [checks, suites, ciRuns, want, waitedMs = 0] of picked) {
+    cases.push([
+      { run: pickRun(checks, suites, sha), head: sha, ciRuns, waitedMs },
+      want,
+    ]);
+  }
   let failed = 0;
   for (const [input, want] of cases) {
     const got = decide({ ...grace, ...input, sha }).state;

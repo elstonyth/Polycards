@@ -73,9 +73,10 @@ The script injects secrets, writes a resolved spec to gitignored
 
 ### Deploy gates
 
-- **CI first.** The `wait for CI` job polls the `ci-ok` check run on the
-  pushed commit (`.github/scripts/ci-gate.mjs`, self-check `--test`) for up
-  to 60 minutes. Only `success` deploys. A failed, skipped or timed-out
+- **CI first.** The `wait for CI` job polls the `ci-ok` check run of the
+  push-triggered CI run on the commit (`.github/scripts/ci-gate.mjs`,
+  self-check `--test`) for up to 60 minutes. A manual CI run's `ci-ok` on
+  the same commit is ignored: it neither blocks nor stands in. Only `success` deploys. A failed, skipped or timed-out
   `ci-ok` fails the run and nothing deploys; so does a commit with no CI run
   at all after 5 minutes (a `[skip ci]` push). Once master has moved past
   the commit, the run skips quietly instead, whatever `ci-ok` said: App
