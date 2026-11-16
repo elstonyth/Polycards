@@ -435,12 +435,10 @@ medusaIntegrationTestRunner({
       // (owner, 2026-11-16): the real name, a saved bank's holder, a payout's
       // holder. Made-up names only.
       describe('?q= by any of a player\'s names', () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const idsFor = async (q: string): Promise<string[]> => {
           const res = await list(`?q=${encodeURIComponent(q)}`);
           expect(res.status).toBe(200);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return res.data.players.map((p: any) => p.id).sort();
+          return res.data.players.map((p: { id: string }) => p.id).sort();
         };
 
         beforeEach(async () => {
@@ -501,8 +499,9 @@ medusaIntegrationTestRunner({
           expect(await idsFor('zzq')).toEqual([aId, bId].sort());
           // A is in a group of its own, so the default group keeps only B.
           const res = await list('?q=zzq&group=default');
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          expect(res.data.players.map((p: any) => p.id)).toEqual([bId]);
+          expect(res.data.players.map((p: { id: string }) => p.id)).toEqual([
+            bId,
+          ]);
         });
       });
 
