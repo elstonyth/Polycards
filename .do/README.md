@@ -51,11 +51,18 @@ The script injects secrets, writes a resolved spec to gitignored
 `deploy/<app>.app.yaml`, runs `doctl apps spec validate`, then (without
 `-Validate`) `doctl apps update`.
 
-> **`deploy_on_push: true`** — both apps auto-deploy on every push to
-> **`master`** (see the `github.branch` keys in the specs). So merging a PR
-> redeploys prod just like `do-apply.ps1` does. Pushing spec/Dockerfile changes
-> = a live deploy. Spec **env** changes, however, only reach the live app via
-> `do-apply.ps1` (doctl), not via git push.
+> **Deploys come from the GitHub `Deploy` workflow**
+> (`.github/workflows/deploy.yml`), not from App Platform: `deploy_on_push` is
+> `false` in both specs and on the live apps. On every push to **`master`** the
+> workflow redeploys only an app whose build inputs changed since the commit
+> that app is running: `backend/**` redeploys the backend, storefront build
+> inputs redeploy the storefront, and docs, agent config, `.github/` and `.do/`
+> redeploy neither (rules: `.github/scripts/deploy-targets.mjs`). Redeploy by
+> hand from Actions → Deploy → Run workflow (`both`, `backend` or
+> `storefront`). It authenticates with the `DIGITALOCEAN_ACCESS_TOKEN` repo
+> secret (scopes `app:read` + `app:update`, expires 2027-11-16; renew it
+> before then). Spec changes (env, sizes) still reach the live app only via
+> `do-apply.ps1` (doctl), which redeploys that app.
 
 ## Admin user
 
