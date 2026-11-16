@@ -1,4 +1,5 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
+import type { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
@@ -58,7 +59,7 @@ medusaIntegrationTestRunner({
         const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
         const info = jest.spyOn(logger, 'info');
 
-        await deployBootstrap({ container, args: [] } as any);
+        await deployBootstrap({ container, args: [] } as unknown as ExecArgs);
         const first = await state();
         expect(first.users).toHaveLength(1);
         expect(first.identities).toHaveLength(1);
@@ -71,7 +72,7 @@ medusaIntegrationTestRunner({
         expect(firstLogs).toContain(`Seeded ${VIP_LEVELS_SEED.length} VIP levels.`);
 
         info.mockClear();
-        await deployBootstrap({ container, args: [] } as any);
+        await deployBootstrap({ container, args: [] } as unknown as ExecArgs);
         const second = await state();
         expect(second.users.map((u) => u.id)).toEqual(first.users.map((u) => u.id));
         expect(second.identities).toHaveLength(1);
@@ -92,7 +93,7 @@ medusaIntegrationTestRunner({
         delete process.env.ADMIN_PASSWORD;
         await clearVip();
 
-        await deployBootstrap({ container: getContainer(), args: [] } as any);
+        await deployBootstrap({ container: getContainer(), args: [] } as unknown as ExecArgs);
         const s = await state(email);
         expect(s.users).toHaveLength(0);
         expect(s.vipCount).toBe(VIP_LEVELS_SEED.length);
