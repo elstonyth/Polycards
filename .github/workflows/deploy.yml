@@ -19,8 +19,8 @@ name: Deploy
 # the branch tip rather than a given commit, so each deploy job also re-checks
 # that master still points at this commit right before it starts a deploy.
 # After a deployment goes ACTIVE, the job checks that every component runs
-# this commit and that the public health URL answers, and posts to Discord
-# (secret DISCORD_WEBHOOK, optional) when any deploy step fails.
+# this commit and that the public health URL answers; a mismatch or a dead
+# health URL fails the job, and the failed run is the alert.
 
 on:
   push:
@@ -116,8 +116,8 @@ jobs:
   # cancel-in-progress stays false: it would only cancel the GitHub job, and a
   # DigitalOcean deploy must never be cancelled. The ref check keeps a manual
   # run from a branch away from the token, and the `production` environment
-  # (master-only branch policy, holds DIGITALOCEAN_ACCESS_TOKEN and
-  # DISCORD_WEBHOOK; see .do/README.md) enforces the same on GitHub's side.
+  # (master-only branch policy, holds DIGITALOCEAN_ACCESS_TOKEN; see
+  # .do/README.md) enforces the same on GitHub's side.
   backend:
     name: deploy backend
     needs: [plan, gate]
@@ -149,12 +149,6 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: bash .github/scripts/verify-deploy.sh polycards-backend https://admin.polycards.gg/health "$EXPECTED_SHA"
-      - name: Alert Discord
-        if: failure()
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          MESSAGE: 'Deploy of polycards-backend at ${{ github.sha }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-        run: bash .github/scripts/notify-discord.sh "$MESSAGE"
 
   storefront:
     name: deploy storefront
@@ -187,9 +181,3 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: bash .github/scripts/verify-deploy.sh polycards-storefront https://polycards.gg/healthz "$EXPECTED_SHA"
-      - name: Alert Discord
-        if: failure()
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          MESSAGE: 'Deploy of polycards-storefront at ${{ github.sha }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-        run: bash .github/scripts/notify-discord.sh "$MESSAGE"

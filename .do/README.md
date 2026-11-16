@@ -85,9 +85,7 @@ The script injects secrets, writes a resolved spec to gitignored
 - **After ACTIVE.** `.github/scripts/verify-deploy.sh` checks that every
   component runs the pushed commit, then that
   `https://admin.polycards.gg/health` or `https://polycards.gg/healthz`
-  answers 200. Any failed deploy step posts the run link to Discord through
-  the `DISCORD_WEBHOOK` secret; without the secret the alert step does
-  nothing.
+  answers 200. Either failing fails the job; the failed run is the alert.
 - **`production` environment.** The plan, deploy and rollback jobs run in the
   GitHub `production` environment. A first run would create it with no
   branch policy, so the owner creates it first (below).
@@ -108,15 +106,14 @@ between.
    gh api -X POST repos/elstonyth/Polycards/environments/production/deployment-branch-policies      -f name=master -f type=branch
    ```
 
-2. Add the token and the webhook as environment secrets (each prompts for
-   the value; paste it, never put it in the command line). DigitalOcean
+2. Add the token as an environment secret (it prompts for the value; paste
+   it, never put it in the command line). DigitalOcean
    names no scope for the rollback endpoints; if the first Rollback
    `validate` run answers 403, the token needs more than `app:read` +
    `app:update`.
 
    ```bash
    gh secret set DIGITALOCEAN_ACCESS_TOKEN --env production
-   gh secret set DISCORD_WEBHOOK --env production
    ```
 
 3. After one green Deploy run on the environment secret, delete the repo-level
@@ -149,7 +146,7 @@ Platform's rollback API (`POST /v2/apps/{app_id}/rollback`, plus
    list to go further back.
 2. **`rollback`**. Validates, rolls back, waits for ACTIVE and checks the
    health URL. The app is then **pinned**: every new deployment fails, the
-   Deploy workflow included (each failure also alerts Discord), until step 3.
+   Deploy workflow included, until step 3.
 3. **`commit`** keeps the rollback and unpins the app; the next master push
    deploys the master tip again, so revert the bad change on master first.
    **`revert`** undoes the rollback (deploys the latest spec again) and

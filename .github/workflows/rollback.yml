@@ -70,9 +70,3 @@ jobs:
           ACTION: ${{ inputs.action }}
           DEPLOYMENT_ID: ${{ inputs.deployment_id }}
         run: bash .github/scripts/do-rollback.sh "polycards-$APP" "$ACTION" "$DEPLOYMENT_ID"
-      - name: Alert Discord
-        if: failure() && inputs.action != 'validate'
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          MESSAGE: 'Rollback (${{ inputs.action }}) of polycards-${{ inputs.app }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-        run: bash .github/scripts/notify-discord.sh "$MESSAGE"

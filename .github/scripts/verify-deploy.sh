@@ -16,7 +16,7 @@ url=${2:?usage: verify-deploy.sh <app-name> <health-url> [expected-sha]}
 want=${3:-}
 
 # Retry a command on transient errors: 3 tries, 10 s then 30 s apart, so one
-# API blip after a good deploy doesn't page anyone. Same as do-deploy.sh.
+# API blip doesn't fail a good deploy. Same as do-deploy.sh.
 retry() {
   local delay
   for delay in 10 30 0; do
