@@ -54,6 +54,13 @@ jobs:
               - '.github/workflows/ci.yml'
             ci:
               - '.github/workflows/ci.yml'
+              - '.github/scripts/deploy-targets.mjs'
+
+      # The classifier below decides what gets skipped, so a broken rule must
+      # fail CI rather than quietly skip checks. Its self-check runs on every
+      # PR, and editing it forces the storefront checks (filter `ci` above).
+      - name: Self-check change rules
+        run: node .github/scripts/deploy-targets.mjs --test
 
       # Same rule the Deploy workflow uses to decide whether the storefront
       # needs a redeploy (.github/scripts/deploy-targets.mjs): a deny-list of
@@ -67,7 +74,7 @@ jobs:
           CI_CHANGED: ${{ steps.filter.outputs.ci }}
         run: |
           if [ "$CI_CHANGED" = "true" ]; then
-            echo "ci.yml changed: running storefront checks"
+            echo "ci.yml or the change rules changed: running storefront checks"
             echo "storefront=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
