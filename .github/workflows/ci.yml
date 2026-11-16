@@ -122,7 +122,9 @@ jobs:
   # Cheap, so never gated.
   # Node 24 = the local baseline (root engines: >=24).
   lint:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the shellcheck step uses the image's
+    # preinstalled shellcheck.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -156,17 +158,14 @@ jobs:
       # Both app Dockerfiles. Fails on warning or error; info-level style
       # hints (DL3059 consecutive RUNs, DL3066 named USER) are not enforced.
       # Silence a real finding with a justified `# hadolint ignore=` line.
-      - name: Hadolint (storefront Dockerfile)
-        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
-        with:
-          dockerfile: Dockerfile
-          failure-threshold: warning
-
-      - name: Hadolint (backend Dockerfile)
-        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
-        with:
-          dockerfile: backend/Dockerfile
-          failure-threshold: warning
+      # The hadolint image is run directly, pinned by digest (the one
+      # hadolint-action v3.5.0 pins), so nothing on this required path is
+      # built from a Dockerfile at run time.
+      - name: Hadolint (Dockerfile, backend/Dockerfile)
+        run: >-
+          docker run --rm -v "$PWD:/work:ro" -w /work
+          ghcr.io/hadolint/hadolint:v2.15.1-debian@sha256:9a3944b7fddcb947d1ffd90829ac1a6e5c30479223358f249d8b96c7d0019e27
+          hadolint --failure-threshold warning Dockerfile backend/Dockerfile
 
       # The deploy scripts. shellcheck is preinstalled on the ubuntu-24.04
       # runner image, so no action is needed.
@@ -467,6 +466,14 @@ jobs:
       # are accepted; with none there, the step fails without a session. It
       # waits 10 min for a connection, then holds the runner until you exit
       # or the job times out.
+      #
+      # No web shell, though the logs are public: limit-access-to-actor
+      # starts tmate with `-a <authorized_keys>`, and the tmate.io websocket
+      # server then marks the session ssh_only. It never publishes tmate_web
+      # (so the action prints no "Web shell" URL) and answers any web join
+      # with 403 "SSH access required" (tmate-io/tmate-websocket
+      # lib/tmate/session.ex, ws_api/websocket.ex). The SSH line it does
+      # print accepts only those keys.
       - name: Debug session (tmate)
         if: failure() && github.event_name == 'workflow_dispatch' && matrix.shard == inputs.debug_shard
         uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3.24
