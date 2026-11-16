@@ -33,9 +33,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: read # paths-filter reads the PR file list
+      checks: read # the master fast path reads ci-ok on the PR head
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       storefront: ${{ steps.storefront.outputs.storefront }}
+      fast: ${{ steps.fastpath.outputs.fast }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -62,6 +64,27 @@ jobs:
       # PR, and editing it forces the storefront checks (filter `ci` above).
       - name: Self-check change rules
         run: node .github/scripts/deploy-targets.mjs --test
+
+      # Also proves the contract the fast path depends on: backend-gate's and
+      # ci-ok's real scripts (read from this file) pass when the three test
+      # jobs are skipped, so a fast-pathed master push still gets a green
+      # ci-ok and the deploy gate still deploys.
+      - name: Self-check master fast path
+        run: node .github/scripts/ci-fast-path.mjs --test
+
+      # Master-CI fast path (.github/scripts/ci-fast-path.mjs): a push to
+      # master whose tree its merged PR already passed ci-ok on skips
+      # backend-unit, integration-http and integration-modules. Any doubt or
+      # error prints fast=false (full run); continue-on-error so that a crash
+      # leaves the output unset (also a full run) instead of failing ci-ok.
+      - name: Master fast path
+        id: fastpath
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: node .github/scripts/ci-fast-path.mjs
 
       # Same rule the Deploy workflow uses to decide whether the storefront
       # needs a redeploy (.github/scripts/deploy-targets.mjs): a deny-list of
@@ -270,7 +293,9 @@ jobs:
   # (#953, 2026-11-03) on a 16 GB runner. Each shard holds half the heap.
   backend-unit:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    # Skipped on a master push whose tree already passed on its PR (the fast
+    # path in `changes`); a skip reads as passing in backend-gate.
+    if: needs.changes.outputs.backend == 'true' && needs.changes.outputs.fast != 'true'
     runs-on: ubuntu-latest
     # 25, not 15: see backend-quality — a cold install alone spent 15m47s here
     # and the job was killed before a single test ran.
@@ -329,7 +354,8 @@ jobs:
   # integration-tests/run-http-shards.mjs MUST match.
   integration-http:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    # Fast path: see backend-unit.
+    if: needs.changes.outputs.backend == 'true' && needs.changes.outputs.fast != 'true'
     runs-on: ubuntu-latest
     # 30, not 20: see backend-quality. Shard 4 reported "63 passed" and was
     # then cancelled in the same second, twice, because a cold install had
@@ -420,7 +446,8 @@ jobs:
   # lighter than the HTTP suites and run as one unsharded job.
   integration-modules:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    # Fast path: see backend-unit.
+    if: needs.changes.outputs.backend == 'true' && needs.changes.outputs.fast != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
