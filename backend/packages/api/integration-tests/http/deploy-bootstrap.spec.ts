@@ -27,13 +27,13 @@ medusaIntegrationTestRunner({
         restore('ADMIN_PASSWORD', saved.password);
       });
 
-      const state = async () => {
+      const state = async (email = EMAIL) => {
         const c = getContainer();
-        const users = await c.resolve(Modules.USER).listUsers({ email: EMAIL });
+        const users = await c.resolve(Modules.USER).listUsers({ email });
         const identities = await c
           .resolve(Modules.AUTH)
           .listProviderIdentities(
-            { entity_id: EMAIL, provider: 'emailpass' },
+            { entity_id: email, provider: 'emailpass' },
             { relations: ['auth_identity'] },
           );
         const vip = await c
@@ -85,12 +85,15 @@ medusaIntegrationTestRunner({
       });
 
       it('still seeds VIP when ADMIN_PASSWORD is unset', async () => {
-        process.env.ADMIN_EMAIL = EMAIL;
+        // Own email: the assertion must not depend on the runner wiping the
+        // previous test's admin between tests.
+        const email = 'deploy-bootstrap-nopw@test.dev';
+        process.env.ADMIN_EMAIL = email;
         delete process.env.ADMIN_PASSWORD;
         await clearVip();
 
         await deployBootstrap({ container: getContainer(), args: [] } as any);
-        const s = await state();
+        const s = await state(email);
         expect(s.users).toHaveLength(0);
         expect(s.vipCount).toBe(VIP_LEVELS_SEED.length);
       });
