@@ -109,6 +109,7 @@ CLAUDE.md
 GEMINI.md
 .clinerules
 .windsurfrules
+.windsurf/
 .aider.conf.yml
 .cursor/
 .amazonq/
