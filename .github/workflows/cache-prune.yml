@@ -1,0 +1,91 @@
+name: Cache prune
+
+# Deletes CodeQL overlay-base caches that can no longer be restored, keeping
+# the newest per key prefix. CodeQL default setup saves ~360 MB per master
+# push and never removes old ones, so they filled the 10 GB Actions cache and
+# LRU eviction then dropped the yarn/node_modules caches (cold installs).
+# .github/scripts/prune-caches.mjs holds the rules and touches only
+# `codeql-overlay-base-*` keys.
+#
+# schedule and push delete. workflow_dispatch deletes only with dry_run off.
+# pull_request (edits to this workflow or the script) runs PR code, so it gets
+# a separate read-only job that can only list: never give it actions: write.
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  push:
+    branches:
+      - master
+  pull_request:
+    paths:
+      - .github/workflows/cache-prune.yml
+      - .github/scripts/prune-caches.mjs
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list what would be deleted
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: cache-prune-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: prune
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      # checkout; works without it only while the repo is public
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Self-check
+        run: node .github/scripts/prune-caches.mjs --test
+
+      - name: Prune CodeQL overlay caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APPLY: ${{ github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
+        run: |
+          if [ "$APPLY" = "true" ]; then
+            node .github/scripts/prune-caches.mjs --apply
+          else
+            node .github/scripts/prune-caches.mjs
+          fi
+
+  dry-run:
+    name: prune (dry run)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Self-check
+        run: node .github/scripts/prune-caches.mjs --test
+
+      - name: List what a prune would delete
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node .github/scripts/prune-caches.mjs
