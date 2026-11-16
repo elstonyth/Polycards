@@ -6,7 +6,10 @@
 #
 # Token: PRs opened with GITHUB_TOKEN don't trigger CI, and this PR must pass
 # ci-ok like any other, so the push + PR use TIMINGS_PR_TOKEN (see the first
-# step for what to create). GITHUB_TOKEN only reads runs and logs.
+# step for what to create). It is an ENVIRONMENT secret of `timings-bot`,
+# whose deployment branches are limited to master, so a workflow edited on
+# another branch and dispatched there can't read it. GITHUB_TOKEN only reads
+# runs and logs.
 #
 # Coupling: refresh-test-timings.mjs parses job names "integration-http (N)"
 # and "backend-unit (N)" from ci.yml. Renaming those jobs breaks this
@@ -22,7 +25,7 @@ on:
         description: CI run id to read (blank = newest master run whose backend shards ran)
         required: false
       dry_run:
-        description: Refresh and show the diff, but don't push or open a PR
+        description: Refresh and print the diff, but don't push or touch PRs
         type: boolean
         default: false
 
@@ -36,6 +39,7 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: timings-bot
     permissions:
       contents: read
       actions: read # gh run list / view --log
@@ -51,7 +55,7 @@ jobs:
           TIMINGS_PR_TOKEN: ${{ secrets.TIMINGS_PR_TOKEN }}
         run: |
           if [ -z "$TIMINGS_PR_TOKEN" ]; then
-            echo "::error title=TIMINGS_PR_TOKEN is not set::Create a repository secret TIMINGS_PR_TOKEN (Settings > Secrets and variables > Actions) holding EITHER a fine-grained PAT with Repository access = only ${GITHUB_REPOSITORY} and permissions Contents: Read and write + Pull requests: Read and write (Metadata: Read is added automatically), OR a GitHub App installation token with contents: write + pull_requests: write on this repo only. GITHUB_TOKEN can't be used: PRs it opens don't trigger CI."
+            echo "::error title=TIMINGS_PR_TOKEN is not set::Create a fine-grained PAT with Repository access = only ${GITHUB_REPOSITORY} and permissions Contents: Read and write + Pull requests: Read and write (Metadata: Read is added automatically). Then in Settings > Environments create (or open) the environment timings-bot, set Deployment branches and tags to Selected branches = master, and add the PAT there as the environment secret TIMINGS_PR_TOKEN. GITHUB_TOKEN can't be used: PRs it opens don't trigger CI."
             exit 1
           fi
 
@@ -72,18 +76,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_RUN_ID: ${{ inputs.run_id }}
         run: |
+          # A usable run: ci.yml on a master push, green, with the backend
+          # shards actually run (most master runs skip them by path gate).
+          usable() {
+            gh run view "$1" --json workflowName,headBranch,event,conclusion,jobs -q '
+              .workflowName == "CI" and .headBranch == "master" and .event == "push"
+              and .conclusion == "success"
+              and ([.jobs[] | select(.conclusion == "success" and (.name | startswith("integration-http (")))] | length > 0)'
+          }
           if [ -n "$INPUT_RUN_ID" ]; then
             case "$INPUT_RUN_ID" in *[!0-9]*) echo "::error::run_id must be numeric"; exit 1 ;; esac
+            if [ "$(usable "$INPUT_RUN_ID")" != true ]; then
+              echo "::error::Run $INPUT_RUN_ID is not a successful CI push run on master whose integration-http shards ran."
+              exit 1
+            fi
             id=$INPUT_RUN_ID
           else
-            # Most master runs are "success" with the backend jobs skipped
-            # (path-gated), so take the newest one where they actually ran.
             id=
             for c in $(gh run list --workflow ci.yml --branch master --event push --status success -L 50 --json databaseId -q '.[].databaseId'); do
-              ran=$(gh run view "$c" --json jobs -q '[.jobs[] | select(.conclusion == "success" and (.name | startswith("integration-http (")))] | length')
-              if [ "$ran" -gt 0 ]; then id=$c; break; fi
+              if [ "$(usable "$c")" = true ]; then id=$c; break; fi
             done
             if [ -z "$id" ]; then
+              # No backend change in 50 master pushes, so the newest such run
+              # was already read by an earlier refresh.
               echo "::notice::No master CI run in the last 50 successful ones ran the backend shards; nothing to refresh."
               exit 0
             fi
@@ -103,11 +118,23 @@ jobs:
         run: |
           node integration-tests/refresh-test-timings.mjs "$RUN_ID"
           if git diff --quiet -- integration-tests/test-timings.json; then
-            echo "::notice::test-timings.json is unchanged; no PR."
+            echo "::notice::test-timings.json is unchanged."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git diff --stat -- integration-tests/test-timings.json
+            git diff -- integration-tests/test-timings.json
             echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Close outdated PR
+        if: steps.refresh.outputs.changed == 'false' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TIMINGS_PR_TOKEN }}
+          RUN_ID: ${{ steps.pick.outputs.id }}
+        run: |
+          pr=$(gh pr list --head "$BRANCH" --base master --state open --json number -q '.[0].number')
+          if [ -n "$pr" ]; then
+            gh pr close "$pr" --delete-branch --comment "Closed: CI run $RUN_ID gives the same timings as master."
           fi
 
       - name: Push branch and open or update PR
