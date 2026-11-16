@@ -77,6 +77,7 @@ edge_headers() { grep -i -E '^(server|cf-ray|cf-mitigated|cf-cache-status):' "$h
 url=${ingress%/}$path
 code=000
 for attempt in 1 2 3 4 5 6; do
+  : >"$headers"
   code=$(curl -sS -o /dev/null -D "$headers" -w '%{http_code}' --max-time 15 "$url" || true)
   if [ "$code" = 200 ]; then
     echo "$url answered 200"
@@ -93,6 +94,7 @@ fi
 
 # Informational only: never fails the job.
 url=$public$path
+: >"$headers"
 code=$(curl -sS -o /dev/null -D "$headers" -w '%{http_code}' --max-time 15 "$url" || true)
 if [ "$code" = 200 ]; then
   echo "$url answered 200"
