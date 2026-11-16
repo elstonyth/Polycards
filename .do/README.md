@@ -52,17 +52,22 @@ The script injects secrets, writes a resolved spec to gitignored
 `-Validate`) `doctl apps update`.
 
 > **Deploys come from the GitHub `Deploy` workflow**
-> (`.github/workflows/deploy.yml`), not from App Platform: `deploy_on_push` is
-> `false` in both specs and on the live apps. On every push to **`master`** the
-> workflow redeploys only an app whose build inputs changed since the commit
-> that app is running: `backend/**` redeploys the backend, storefront build
-> inputs redeploy the storefront, and docs, agent config, `.github/` and `.do/`
-> redeploy neither (rules: `.github/scripts/deploy-targets.mjs`). Redeploy by
-> hand from Actions → Deploy → Run workflow (`both`, `backend` or
-> `storefront`). It authenticates with the `DIGITALOCEAN_ACCESS_TOKEN` repo
-> secret (scopes `app:read` + `app:update`, expires 2027-11-16; renew it
-> before then). Spec changes (env, sizes) still reach the live app only via
-> `do-apply.ps1` (doctl), which redeploys that app.
+> (`.github/workflows/deploy.yml`), not from App Platform: push deploys are
+> off on the live apps (`deploy_on_push: false` in these specs). On every push
+> to **`master`**, each app is compared with the commit it is running and
+> redeploys only if a file it builds from changed since then: anything under
+> `backend/` except `backend/.claude/` for the backend (including backend
+> Markdown), and the storefront's build inputs for the storefront. Root-level
+> docs, `docs/`, agent config, `.github/` and `.do/` never trigger a deploy on
+> their own, but any push catches an app up if it is behind on earlier
+> changes, and an app whose diff can't be computed is deployed (safe default).
+> Rules: `.github/scripts/deploy-targets.mjs`. Redeploy by hand from
+> Actions → Deploy → Run workflow **on the `master` branch** (other branches
+> skip the deploy jobs), target `both`, `backend` or `storefront`. It
+> authenticates with the `DIGITALOCEAN_ACCESS_TOKEN` repo secret (scopes
+> `app:read` + `app:update`, expires 2027-11-16; renew it before then). Spec
+> changes (env, sizes) still reach the live app only via `do-apply.ps1`
+> (doctl), which redeploys that app.
 
 ## Admin user
 
