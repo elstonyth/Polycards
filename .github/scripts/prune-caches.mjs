@@ -29,8 +29,13 @@ const PREFIX = 'codeql-overlay-base-';
 // until LRU evicts it, which is fine because it is then the least recently
 // used cache; prune by version too if CLI upgrades ever pile them up.
 const KEY_RE = /^(codeql-overlay-base-.+-)[0-9a-f]{40,64}-\d+-\d+$/;
+// A run that started restoring before the newest entry existed may still be
+// downloading an older one. CodeQL caps a restore at 10 minutes
+// (MAX_CACHE_OPERATION_MS), so older entries wait until the newest is 30
+// minutes old; a later hourly run deletes them.
+const GRACE_MS = 30 * 60 * 1000;
 
-export function plan(entries) {
+export function plan(entries, now = Date.now()) {
   const groups = new Map();
   for (const e of entries) {
     const m = KEY_RE.exec(e.key);
@@ -41,16 +46,18 @@ export function plan(entries) {
   }
   const keep = [];
   const remove = [];
+  const held = [];
   for (const list of groups.values()) {
     list.sort(
       (a, b) =>
         Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id,
     );
     keep.push(list[0]);
-    remove.push(...list.slice(1));
+    const young = now - Date.parse(list[0].createdAt) < GRACE_MS;
+    (young ? held : remove).push(...list.slice(1));
   }
   const bytes = remove.reduce((n, e) => n + e.sizeInBytes, 0);
-  return { keep, remove, bytes };
+  return { keep, remove, held, bytes };
 }
 
 const gb = (n) => `${(n / 1e9).toFixed(2)} GB`;
@@ -94,7 +101,10 @@ function run(apply) {
   const lines = [];
   for (const e of p.keep)
     lines.push(`keep   ${mb(e.sizeInBytes)}  ${e.ref}  ${e.key}`);
+  for (const e of p.held)
+    lines.push(`held   ${mb(e.sizeInBytes)}  ${e.ref}  ${e.key}`);
   let failed = 0;
+  let freed = 0;
   for (const e of p.remove) {
     let status = 'would delete';
     if (apply) {
@@ -102,10 +112,11 @@ function run(apply) {
       if (!KEY_RE.test(e.key)) throw new Error(`refusing to delete ${e.key}`);
       status = deleteCache(e.id);
       if (status.startsWith('FAILED')) failed++;
-    }
+      else if (status === 'deleted') freed += e.sizeInBytes;
+    } else freed += e.sizeInBytes;
     lines.push(`${status}  ${mb(e.sizeInBytes)}  ${e.ref}  ${e.key}`);
   }
-  const summary = `${apply ? 'Deleted' : 'Dry run: would delete'} ${p.remove.length - failed} of ${p.remove.length + p.keep.length} CodeQL overlay caches, freeing ${gb(p.bytes)}; kept ${p.keep.length} (newest per prefix).`;
+  const summary = `${apply ? 'Deleted' : 'Dry run: would delete'} ${p.remove.length - failed} of ${p.remove.length + p.keep.length + p.held.length} CodeQL overlay caches, freeing ${gb(freed)}; kept ${p.keep.length} (newest per prefix), held ${p.held.length} (newest < 30 min old).`;
   console.log(lines.join('\n'));
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -233,8 +244,9 @@ function selfTest() {
     ],
   ];
   let failed = 0;
+  const later = Date.parse('2026-12-01T00:00:00Z');
   for (const [name, entries, wantKeep, wantRemove] of cases) {
-    const got = plan(entries);
+    const got = plan(entries, later);
     const k = JSON.stringify(ids(got.keep));
     const r = JSON.stringify(ids(got.remove));
     if (k !== JSON.stringify(wantKeep) || r !== JSON.stringify(wantRemove)) {
@@ -244,18 +256,32 @@ function selfTest() {
       );
     }
   }
-  const b = plan([
-    js('a', 1, T(1), 1),
-    js('b', 2, T(2), 2),
-    py('a', 1, T(1), 3),
-    py('b', 2, T(2), 4),
-  ]).bytes;
+  // newest entry only 10 minutes old: the older one is held, not deleted
+  const young = plan(
+    [js('a', 1, T(1), 1), js('b', 2, T(2), 2), py('a', 1, T(1), 3)],
+    Date.parse(T(2)) + 10 * 60 * 1000,
+  );
+  if (young.remove.length || ids(young.held).join() !== '1') {
+    failed++;
+    console.error(
+      `FAIL grace: remove=${ids(young.remove)} held=${ids(young.held)}, want remove= held=1`,
+    );
+  }
+  const b = plan(
+    [
+      js('a', 1, T(1), 1),
+      js('b', 2, T(2), 2),
+      py('a', 1, T(1), 3),
+      py('b', 2, T(2), 4),
+    ],
+    later,
+  ).bytes;
   if (b !== 105) {
     failed++;
     console.error(`FAIL bytes freed = ${b}, want 105`);
   }
   console.log(
-    failed ? `${failed} failed` : `all ${cases.length + 1} checks passed`,
+    failed ? `${failed} failed` : `all ${cases.length + 2} checks passed`,
   );
   process.exit(failed ? 1 : 0);
 }

@@ -8,7 +8,8 @@ name: Cache prune
 # `codeql-overlay-base-*` keys.
 #
 # schedule and push delete. workflow_dispatch deletes only with dry_run off.
-# pull_request (edits to this workflow or the script) is always a dry run.
+# pull_request (edits to this workflow or the script) runs PR code, so it gets
+# a separate read-only job that can only list: never give it actions: write.
 
 on:
   schedule:
@@ -27,8 +28,7 @@ on:
         type: boolean
         default: true
 
-permissions:
-  actions: write
+permissions: {}
 
 concurrency:
   group: cache-prune-${{ github.ref }}
@@ -37,8 +37,11 @@ concurrency:
 jobs:
   prune:
     name: prune
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -60,3 +63,26 @@ jobs:
           else
             node .github/scripts/prune-caches.mjs
           fi
+
+  dry-run:
+    name: prune (dry run)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Self-check
+        run: node .github/scripts/prune-caches.mjs --test
+
+      - name: List what a prune would delete
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node .github/scripts/prune-caches.mjs
