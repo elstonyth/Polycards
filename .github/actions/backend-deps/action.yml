@@ -75,15 +75,13 @@ runs:
 
     # turbo writes its local cache to backend/.turbo; without restoring it every
     # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
-    # commit: all four backend jobs then share ONE entry, instead of every
-    # commit minting a fresh ~900 MB entry that no later run can ever hit by
-    # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
-    # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
-    # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-    # entry — which is what made backend installs cold. No restore-keys: turbo
-    # never prunes its local cache, so seeding each lockfile's entry from the
-    # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
-    # lockfile change now starts turbo cold and saves just that build.
+    # commit, so all four backend jobs share ONE entry (until 2026-08 a
+    # per-commit key minted a ~900 MB entry every push that no later run could
+    # hit, which filled the 10 GB cache cap). No restore-keys: turbo never
+    # prunes its local cache, so seeding each lockfile's entry from the last
+    # one only grew it. A lockfile change starts turbo cold and saves just
+    # that build; the entry measured ~11 MB on 2026-11-16, so it is not what
+    # evicts `bnm2-*` today (see backend-quality's timeout comment in ci.yml).
     - name: Restore turbo
       id: turbo-cache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -111,7 +109,9 @@ runs:
     # ref, which no other branch can read, and that pushed master's entries
     # out. PRs still restore master's entries; a lockfile PR now pays a cold
     # node_modules link (~30-45s measured with the yarn restore-key hit) on
-    # each push instead. paths here MUST match the restore steps exactly: the
+    # each push instead. (PR saves were one source of churn; the larger one,
+    # CodeQL overlay databases, is covered in ci.yml's backend-quality
+    # timeout comment.) paths here MUST match the restore steps exactly: the
     # cache version is a hash of the path list.
     - name: Save backend node_modules
       if: inputs.save == 'true' && steps.bnm-cache.outputs.cache-hit != 'true'
