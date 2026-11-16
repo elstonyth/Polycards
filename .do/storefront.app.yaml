@@ -50,7 +50,7 @@ services:
     github:
       repo: elstonyth/Polycards
       branch: master
-      deploy_on_push: true
+      deploy_on_push: false
     http_port: 3000
     # Dedicated 1 vCPU / 2 GiB, autoscaled 3-14 on CPU (App Platform autoscaling
     # needs a dedicated size). Keep the heap in NODE_OPTIONS below in step with

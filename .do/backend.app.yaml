@@ -638,7 +638,7 @@ services:
     github:
       repo: elstonyth/Polycards
       branch: master
-      deploy_on_push: true
+      deploy_on_push: false
     http_port: 9000
     # Dedicated 2 vCPU / 4 GiB with a 3 GiB heap (NODE_OPTIONS below). On
     # 2026-10-20 the shared 1 GiB box hit the ~500 MB default V8 heap and
@@ -720,7 +720,7 @@ workers:
     github:
       repo: elstonyth/Polycards
       branch: master
-      deploy_on_push: true
+      deploy_on_push: false
     # basic-s, not basic-xxs: this component does a full Medusa boot, and on
     # 2.19 that no longer fits in 512 MB — the container is OOM-killed mid-boot
     # with a bare "exit code: 128" and no stack trace. Raised 2026-08-26 with
