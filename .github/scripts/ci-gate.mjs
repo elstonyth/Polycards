@@ -3,17 +3,21 @@
 //
 // Polls the `ci-ok` check run (ci.yml's aggregate job, posted by the GitHub
 // Actions app) on SHA until it completes. Only `success` deploys. One case
-// skips quietly instead of failing: CI was cancelled because a newer push
-// replaced it (ci.yml cancels superseded master runs), so the newer push's
-// Deploy run ships this commit too, from its live-commit diff.
-// Anything else (failure, timed_out, skipped, a cancel on the current master
-// head, no ci-ok within TIMEOUT_MIN) fails the gate and nothing deploys.
+// skips quietly instead of failing: master has moved on past SHA. App
+// Platform builds the branch tip, so this run could never ship SHA anyway,
+// and the newer push's Deploy run ships it from its live-commit diff once its
+// own CI passes. (ci.yml cancels superseded master runs, and `ci-ok` then
+// concludes failure, so a moved head is the signal, not the conclusion.)
+// Anything else (failure, timed_out, skipped, no ci-ok within TIMEOUT_MIN, no
+// CI run at all after NO_CI_GRACE_MIN, e.g. [skip ci]) fails the gate and
+// nothing deploys.
 //
 //   node .github/scripts/ci-gate.mjs          CI: reads env, writes deploy=true|false
 //   node .github/scripts/ci-gate.mjs --test   built-in self-check
 //
-// Env: GITHUB_TOKEN (checks: read), GITHUB_REPOSITORY, SHA, optional
-// TIMEOUT_MIN (default 60), INTERVAL_S (default 30), GITHUB_API_URL.
+// Env: GITHUB_TOKEN (checks: read, actions: read), GITHUB_REPOSITORY, SHA,
+// optional TIMEOUT_MIN (default 60), NO_CI_GRACE_MIN (default 5), INTERVAL_S
+// (default 30), GITHUB_API_URL.
 
 import { appendFileSync } from 'node:fs';
 
@@ -22,20 +26,30 @@ const GITHUB_ACTIONS_APP_ID = 15368; // ignore same-named checks from other apps
 
 // run: the latest ci-ok check run on SHA, or null if none exists yet.
 // head: the commit master points at now.
+// ciRuns: how many ci.yml workflow runs exist for SHA (read only while there
+// is no ci-ok yet). waitedMs: time since the gate started.
 // Returns { state: 'wait' | 'deploy' | 'superseded' | 'fail', why }.
-export function decide({ run, head, sha }) {
-  if (!run) return { state: 'wait', why: `no ${CHECK_NAME} check run yet` };
+export function decide({ run, head, sha, ciRuns, waitedMs = 0, graceMs }) {
+  if (head && head !== sha) {
+    return {
+      state: 'superseded',
+      why: `master moved on to ${head.slice(0, 9)}; that push's Deploy run ships this commit once its CI passes`,
+    };
+  }
+  if (!run) {
+    if (ciRuns === 0 && waitedMs >= graceMs) {
+      return {
+        state: 'fail',
+        why: `no CI run exists for this commit after ${graceMs / 60_000} min (a [skip ci] push never gets one)`,
+      };
+    }
+    return { state: 'wait', why: `no ${CHECK_NAME} check run yet` };
+  }
   if (run.status !== 'completed') {
     return { state: 'wait', why: `${CHECK_NAME} is ${run.status}` };
   }
   if (run.conclusion === 'success') {
     return { state: 'deploy', why: `${CHECK_NAME} passed` };
-  }
-  if (run.conclusion === 'cancelled' && head && head !== sha) {
-    return {
-      state: 'superseded',
-      why: `CI was cancelled and master moved on to ${head.slice(0, 9)}; that push's Deploy run ships this commit`,
-    };
   }
   return {
     state: 'fail',
@@ -56,8 +70,21 @@ async function api(path, accept = 'application/vnd.github+json') {
     const err = new Error(
       `GET ${path}: HTTP ${res.status} ${await res.text()}`,
     );
-    // 401/403/404/422 will not fix themselves (missing `checks: read`, unknown sha).
-    err.fatal = [401, 403, 404, 422].includes(res.status);
+    const retryAfter = Number(res.headers.get('retry-after'));
+    const reset = Number(res.headers.get('x-ratelimit-reset'));
+    const limited =
+      [403, 429].includes(res.status) &&
+      (retryAfter > 0 || res.headers.get('x-ratelimit-remaining') === '0');
+    if (limited) {
+      // A (secondary) rate limit clears on its own: wait it out.
+      err.retryAfterMs =
+        retryAfter > 0
+          ? retryAfter * 1000
+          : Math.max(0, reset * 1000 - Date.now());
+    } else {
+      // 401/403/404/422 will not fix themselves (missing permission, unknown sha).
+      err.fatal = [401, 403, 404, 422].includes(res.status);
+    }
     throw err;
   }
   return accept.endsWith('.sha') ? (await res.text()).trim() : res.json();
@@ -80,7 +107,14 @@ async function readState(repo, sha) {
     `/repos/${repo}/commits/master`,
     'application/vnd.github.sha',
   );
-  return { run, head };
+  let ciRuns;
+  if (!run) {
+    const wf = await api(
+      `/repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=1`,
+    );
+    ciRuns = wf.total_count;
+  }
+  return { run, head, ciRuns };
 }
 
 async function main() {
@@ -92,8 +126,10 @@ async function main() {
     process.exit(1);
   }
   const timeoutMs = Number(process.env.TIMEOUT_MIN || 60) * 60_000;
+  const graceMs = Number(process.env.NO_CI_GRACE_MIN || 5) * 60_000;
   const intervalMs = Number(process.env.INTERVAL_S || 30) * 1000;
-  const deadline = Date.now() + timeoutMs;
+  const started = Date.now();
+  const deadline = started + timeoutMs;
   const finish = (deploy, code) => {
     if (GITHUB_OUTPUT) appendFileSync(GITHUB_OUTPUT, `deploy=${deploy}\n`);
     process.exit(code);
@@ -102,13 +138,17 @@ async function main() {
   let last = '';
   for (;;) {
     let verdict;
+    let pauseMs = intervalMs;
     try {
-      verdict = decide({ ...(await readState(repo, sha)), sha });
+      const state = await readState(repo, sha);
+      const waitedMs = Date.now() - started;
+      verdict = decide({ ...state, sha, waitedMs, graceMs });
     } catch (err) {
       if (err.fatal) {
         console.error(`::error::${err.message}`);
         finish(false, 1);
       }
+      pauseMs = Math.max(intervalMs, err.retryAfterMs ?? 0);
       verdict = { state: 'wait', why: `API error, retrying: ${err.message}` };
     }
     if (verdict.why !== last) console.log(`${sha.slice(0, 9)}: ${verdict.why}`);
@@ -125,13 +165,13 @@ async function main() {
       );
       finish(false, 1);
     }
-    if (Date.now() + intervalMs > deadline) {
+    if (Date.now() + pauseMs > deadline) {
       console.error(
         `::error::Not deploying ${sha.slice(0, 9)}: ${CHECK_NAME} did not pass within ${timeoutMs / 60_000} min (${last}). A push with [skip ci] never gets one.`,
       );
       finish(false, 1);
     }
-    await new Promise((r) => setTimeout(r, intervalMs));
+    await new Promise((r) => setTimeout(r, pauseMs));
   }
 }
 
@@ -139,18 +179,30 @@ function selfTest() {
   const sha = 'a'.repeat(40);
   const newer = 'b'.repeat(40);
   const run = (status, conclusion = null) => ({ status, conclusion });
+  const grace = { graceMs: 5 * 60_000 };
   const cases = [
-    [{ run: null, head: sha }, 'wait'],
+    [{ run: null, head: sha, ciRuns: 1 }, 'wait'],
+    // CI not created yet: wait out the grace period, then fail fast
+    [{ run: null, head: sha, ciRuns: 0, waitedMs: 60_000 }, 'wait'],
+    [{ run: null, head: sha, ciRuns: 0, waitedMs: 5 * 60_000 }, 'fail'],
+    [{ run: null, head: sha, ciRuns: 1, waitedMs: 30 * 60_000 }, 'wait'],
     [{ run: run('queued'), head: sha }, 'wait'],
-    [{ run: run('in_progress'), head: newer }, 'wait'],
+    [{ run: run('in_progress'), head: sha }, 'wait'],
     [{ run: run('completed', 'success'), head: sha }, 'deploy'],
-    // passed but master moved: still deploy; do-deploy.sh's head check skips it
-    [{ run: run('completed', 'success'), head: newer }, 'deploy'],
+    // master moved on: this run can't ship SHA (App Platform builds the tip)
+    [{ run: run('in_progress'), head: newer }, 'superseded'],
+    [{ run: run('completed', 'success'), head: newer }, 'superseded'],
     [{ run: run('completed', 'cancelled'), head: newer }, 'superseded'],
+    // ci-ok concludes failure when a newer push cancels its needs
+    [{ run: run('completed', 'failure'), head: newer }, 'superseded'],
+    [
+      { run: null, head: newer, ciRuns: 0, waitedMs: 10 * 60_000 },
+      'superseded',
+    ],
     // a cancel with nothing newer is a real failure
     [{ run: run('completed', 'cancelled'), head: sha }, 'fail'],
     [{ run: run('completed', 'cancelled'), head: '' }, 'fail'],
-    [{ run: run('completed', 'failure'), head: newer }, 'fail'],
+    [{ run: run('completed', 'failure'), head: sha }, 'fail'],
     [{ run: run('completed', 'skipped'), head: sha }, 'fail'],
     [{ run: run('completed', 'timed_out'), head: sha }, 'fail'],
     [{ run: run('completed', 'neutral'), head: sha }, 'fail'],
@@ -160,7 +212,7 @@ function selfTest() {
   ];
   let failed = 0;
   for (const [input, want] of cases) {
-    const got = decide({ ...input, sha }).state;
+    const got = decide({ ...grace, ...input, sha }).state;
     if (got !== want) {
       failed++;
       console.error(

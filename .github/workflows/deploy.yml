@@ -43,6 +43,9 @@ permissions:
 jobs:
   plan:
     name: plan
+    # deployment: false may not enforce the environment's branch policy, so
+    # keep the token away from other refs here too.
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Reads the DigitalOcean token for the live commits, so it needs the
@@ -96,6 +99,7 @@ jobs:
     permissions:
       contents: read
       checks: read
+      actions: read # tells "no CI run for this commit" from "not started yet"
     outputs:
       deploy: ${{ steps.gate.outputs.deploy }}
     steps:
@@ -148,7 +152,8 @@ jobs:
         if: steps.deploy.outputs.active == 'true'
         env:
           EXPECTED_SHA: ${{ github.sha }}
-        run: bash .github/scripts/verify-deploy.sh polycards-backend https://admin.polycards.gg/health "$EXPECTED_SHA"
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
+        run: bash .github/scripts/verify-deploy.sh polycards-backend https://admin.polycards.gg/health "$EXPECTED_SHA" "$DEPLOYMENT"
 
   storefront:
     name: deploy storefront
@@ -180,4 +185,5 @@ jobs:
         if: steps.deploy.outputs.active == 'true'
         env:
           EXPECTED_SHA: ${{ github.sha }}
-        run: bash .github/scripts/verify-deploy.sh polycards-storefront https://polycards.gg/healthz "$EXPECTED_SHA"
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
+        run: bash .github/scripts/verify-deploy.sh polycards-storefront https://polycards.gg/healthz "$EXPECTED_SHA" "$DEPLOYMENT"

@@ -3,10 +3,11 @@
 # Used by .github/workflows/deploy.yml and rollback.yml. Needs doctl, already
 # authenticated, plus curl and jq.
 #
-#   bash .github/scripts/verify-deploy.sh <app-name> <health-url> [expected-sha]
+#   bash .github/scripts/verify-deploy.sh <app-name> <health-url> [expected-sha [deployment-id]]
 #
-# With expected-sha, every component of the live deployment must run that
-# commit. A mismatch means master moved between the CI gate and App Platform's
+# With expected-sha, every component of the deployment must run that commit:
+# deployment-id (the one do-deploy.sh watched go ACTIVE), else the app's
+# active deployment. A mismatch means master moved between the CI gate and App Platform's
 # build, so the live commit skipped this run's gate: that fails loudly.
 # Then the public health URL must answer 200 (retried, the edge can lag).
 set -euo pipefail
@@ -14,6 +15,7 @@ set -euo pipefail
 app_name=${1:?usage: verify-deploy.sh <app-name> <health-url> [expected-sha]}
 url=${2:?usage: verify-deploy.sh <app-name> <health-url> [expected-sha]}
 want=${3:-}
+dep=${4:-}
 
 # Retry a command on transient errors: 3 tries, 10 s then 30 s apart, so one
 # API blip doesn't fail a good deploy. Same as do-deploy.sh.
@@ -31,7 +33,9 @@ if [ -n "$want" ]; then
   apps=$(retry doctl apps list --format ID,Spec.Name --no-header)
   app_id=$(awk -v n="$app_name" '$2 == n { print $1 }' <<<"$apps")
   [ -n "$app_id" ] || { echo "::error::App $app_name not found"; exit 1; }
-  dep=$(retry doctl apps get "$app_id" --format ActiveDeployment.ID --no-header)
+  if [ -z "$dep" ]; then
+    dep=$(retry doctl apps get "$app_id" --format ActiveDeployment.ID --no-header)
+  fi
   # One line per component: "<name> <commit>". The spec is never printed.
   commits=$(retry doctl apps get-deployment "$app_id" "$dep" --output json |
     jq -r '(if type == "array" then .[0] else . end)
@@ -59,7 +63,7 @@ for attempt in 1 2 3 4 5 6; do
     exit 0
   fi
   echo "::warning::$url answered ${code} (attempt $attempt of 6)"
-  sleep 10
+  [ "$attempt" -eq 6 ] || sleep 10
 done
 
 # A Cloudflare challenge to the runner's IP is not the app being down.

@@ -11,8 +11,8 @@
 # newer master would ship a commit whose CI this run never checked. That run's
 # own Deploy ships it instead, so this one skips.
 #
-# Writes active=true to GITHUB_OUTPUT when this deployment went live, so the
-# caller verifies only a deployment that is actually serving.
+# Writes active=true and deployment=<id> to GITHUB_OUTPUT when this
+# deployment went live, so the caller verifies only that deployment.
 #
 # Never cancels a deployment: a cancelled deploy once rolled production back.
 set -euo pipefail
@@ -65,7 +65,7 @@ for _ in $(seq 1 80); do
   case "$phase" in
     ACTIVE)
       echo "$app_name is live on deployment $dep"
-      echo "active=true" >>"$out"
+      printf 'active=true\ndeployment=%s\n' "$dep" >>"$out"
       exit 0
       ;;
     SUPERSEDED)

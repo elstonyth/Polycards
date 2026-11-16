@@ -63,7 +63,9 @@ The script injects secrets, writes a resolved spec to gitignored
 > changes, and an app whose diff can't be computed is deployed (safe default).
 > Rules: `.github/scripts/deploy-targets.mjs`. Redeploy by hand from
 > Actions → Deploy → Run workflow **on the `master` branch** (other branches
-> skip the deploy jobs), target `both`, `backend` or `storefront`. It
+> skip every job), target `both`, `backend` or `storefront`. A manual run is
+> gated too: it deploys only once `ci-ok` passed on the master head. The
+> break-glass path around the gate is `scripts/do-apply.ps1` (below). It
 > authenticates with the `DIGITALOCEAN_ACCESS_TOKEN` secret (scopes
 > `app:read` + `app:update`, expires 2027-11-16; renew it before then). Spec
 > changes (env, sizes) still reach the live app only via `do-apply.ps1`
@@ -74,9 +76,11 @@ The script injects secrets, writes a resolved spec to gitignored
 - **CI first.** The `wait for CI` job polls the `ci-ok` check run on the
   pushed commit (`.github/scripts/ci-gate.mjs`, self-check `--test`) for up
   to 60 minutes. Only `success` deploys. A failed, skipped or timed-out
-  `ci-ok`, or none at all (a `[skip ci]` push), fails the run and nothing
-  deploys. A `ci-ok` cancelled because a newer push replaced it is skipped
-  quietly: that push's run ships the commit. After fixing or re-running CI,
+  `ci-ok` fails the run and nothing deploys; so does a commit with no CI run
+  at all after 5 minutes (a `[skip ci]` push). Once master has moved past
+  the commit, the run skips quietly instead, whatever `ci-ok` said: App
+  Platform builds the tip, and the newer push's run ships this commit once
+  its own CI passes. After fixing or re-running CI,
   re-run the Deploy run's failed jobs. The gate relies on `ci-ok` concluding
   `success` on every green master push, including CI's master fast path.
 - **Branch tip check.** App Platform builds the tip of `master`, not a given
@@ -102,15 +106,17 @@ between.
    branches and tags > add `master`), or:
 
    ```bash
-   gh api -X PUT repos/elstonyth/Polycards/environments/production      -F 'deployment_branch_policy[protected_branches]=false'      -F 'deployment_branch_policy[custom_branch_policies]=true'
-   gh api -X POST repos/elstonyth/Polycards/environments/production/deployment-branch-policies      -f name=master -f type=branch
+   gh api -X PUT repos/elstonyth/Polycards/environments/production \
+     -F 'deployment_branch_policy[protected_branches]=false' \
+     -F 'deployment_branch_policy[custom_branch_policies]=true'
+   gh api -X POST repos/elstonyth/Polycards/environments/production/deployment-branch-policies \
+     -f name=master -f type=branch
    ```
 
 2. Add the token as an environment secret (it prompts for the value; paste
-   it, never put it in the command line). DigitalOcean
-   names no scope for the rollback endpoints; if the first Rollback
-   `validate` run answers 403, the token needs more than `app:read` +
-   `app:update`.
+   it, never put it in the command line). `app:read` + `app:update` covers
+   deploys and rollback: DigitalOcean's OpenAPI spec lists `app:update` for
+   all four rollback endpoints.
 
    ```bash
    gh secret set DIGITALOCEAN_ACCESS_TOKEN --env production
@@ -119,8 +125,9 @@ between.
 3. After one green Deploy run on the environment secret, delete the repo-level
    copy: `gh secret delete DIGITALOCEAN_ACCESS_TOKEN`.
 
-With the branch policy on, a Deploy or Rollback run dispatched from any other
-branch fails at its first job instead of skipping.
+A Deploy or Rollback run dispatched from any other branch skips every job
+(each has a `master` ref check), and the branch policy refuses the
+environment's secrets to other refs as a second fence.
 
 ## Admin user
 
@@ -153,7 +160,10 @@ Platform's rollback API (`POST /v2/apps/{app_id}/rollback`, plus
    unpins.
 
 Limits: only the ten most recent successful deployments can be targets, and
-a rollback restores code, config and app spec, **never database data**.
+a rollback restores code, config and app spec, **never database data**. A
+Rollback run shares the app's `deploy-<app>` concurrency group with the
+Deploy workflow, so while it is still queued a newer pending deploy can
+displace it (GitHub cancels the older pending run; re-run it).
 `doctl apps create-deployment <APP_ID> --wait` (rebuild of the current spec)
 still works by hand when the app is not pinned.
 

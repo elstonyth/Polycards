@@ -44,11 +44,13 @@ app_id=$(doctl apps list --format ID,Spec.Name --no-header | awk -v n="$app_name
 [ -n "$app_id" ] || { echo "::error::App $app_name not found"; exit 1; }
 
 # POST to the app's rollback API. --fail-with-body keeps DO's error JSON.
+# The token header goes in on stdin (-H @-; printf is a builtin), never argv,
+# so it doesn't show up in the process list.
 do_post() {
-  curl -sS --fail-with-body --max-time 60 -X POST \
-    -H "Authorization: Bearer $DIGITALOCEAN_ACCESS_TOKEN" \
-    -H 'Content-Type: application/json' \
-    -d "${2:-}" "https://api.digitalocean.com/v2/apps/$app_id/$1"
+  printf 'Authorization: Bearer %s\n' "$DIGITALOCEAN_ACCESS_TOKEN" |
+    curl -sS --fail-with-body --max-time 60 -X POST -H @- \
+      -H 'Content-Type: application/json' \
+      -d "${2:-}" "https://api.digitalocean.com/v2/apps/$app_id/$1"
 }
 
 pick_target() {
