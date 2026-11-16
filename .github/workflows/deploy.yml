@@ -13,6 +13,14 @@ name: Deploy
 # also catches up after a failed or skipped deploy.
 # .github/scripts/deploy-targets.mjs holds the rules and deploys an app
 # whenever its diff can't be computed.
+#
+# Nothing deploys until master CI passes on the commit: the `gate` job waits
+# for ci.yml's `ci-ok` check (.github/scripts/ci-gate.mjs). App Platform builds
+# the branch tip rather than a given commit, so each deploy job also re-checks
+# that master still points at this commit right before it starts a deploy.
+# After a deployment goes ACTIVE, the job checks that every component runs
+# this commit and that the public health URL answers; a mismatch or a dead
+# health URL fails the job, and the failed run is the alert.
 
 on:
   push:
@@ -35,8 +43,17 @@ permissions:
 jobs:
   plan:
     name: plan
+    # deployment: false may not enforce the environment's branch policy, so
+    # keep the token away from other refs here too.
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Reads the DigitalOcean token for the live commits, so it needs the
+    # environment once the token lives there; deployment: false keeps a plan
+    # from showing up as a production deployment.
+    environment:
+      name: production
+      deployment: false
     # secrets can't appear in a step `if`, so expose only whether one is set.
     env:
       HAS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN != '' }}
@@ -71,17 +88,47 @@ jobs:
           LIVE_STOREFRONT: ${{ steps.live.outputs.storefront }}
         run: node .github/scripts/deploy-targets.mjs
 
+  # Waits for master CI on this commit. Runs only when an app would deploy, so
+  # a docs-only push never waits on (or turns red from) CI.
+  gate:
+    name: wait for CI
+    needs: plan
+    if: (needs.plan.outputs.backend == 'true' || needs.plan.outputs.storefront == 'true') && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    permissions:
+      contents: read
+      checks: read
+      actions: read # tells "no CI run for this commit" from "not started yet"
+    outputs:
+      deploy: ${{ steps.gate.outputs.deploy }}
+    steps:
+      - name: Checkout gate script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Wait for ci-ok
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: node .github/scripts/ci-gate.mjs
+
   # One job per app, gated at job level: a skipped job never joins its
   # concurrency group, so it can't displace a pending deploy of that app.
   # cancel-in-progress stays false: it would only cancel the GitHub job, and a
   # DigitalOcean deploy must never be cancelled. The ref check keeps a manual
-  # run from a branch away from the token.
+  # run from a branch away from the token, and the `production` environment
+  # (master-only branch policy, holds DIGITALOCEAN_ACCESS_TOKEN; see
+  # .do/README.md) enforces the same on GitHub's side.
   backend:
     name: deploy backend
-    needs: plan
-    if: needs.plan.outputs.backend == 'true' && github.ref == 'refs/heads/master'
+    needs: [plan, gate]
+    if: needs.plan.outputs.backend == 'true' && needs.gate.outputs.deploy == 'true' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: production
     concurrency:
       group: deploy-backend
       cancel-in-progress: false
@@ -95,14 +142,26 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Deploy and wait
+        id: deploy
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
         run: bash .github/scripts/do-deploy.sh polycards-backend
+      # Only when this deployment went live: a skipped or superseded one is
+      # checked by the run that replaced it.
+      - name: Verify live commit and health
+        if: steps.deploy.outputs.active == 'true'
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
+        run: bash .github/scripts/verify-deploy.sh polycards-backend https://admin.polycards.gg/health "$EXPECTED_SHA" "$DEPLOYMENT"
 
   storefront:
     name: deploy storefront
-    needs: plan
-    if: needs.plan.outputs.storefront == 'true' && github.ref == 'refs/heads/master'
+    needs: [plan, gate]
+    if: needs.plan.outputs.storefront == 'true' && needs.gate.outputs.deploy == 'true' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: production
     concurrency:
       group: deploy-storefront
       cancel-in-progress: false
@@ -116,4 +175,15 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Deploy and wait
+        id: deploy
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
         run: bash .github/scripts/do-deploy.sh polycards-storefront
+      # Only when this deployment went live: a skipped or superseded one is
+      # checked by the run that replaced it.
+      - name: Verify live commit and health
+        if: steps.deploy.outputs.active == 'true'
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
+        run: bash .github/scripts/verify-deploy.sh polycards-storefront https://polycards.gg/healthz "$EXPECTED_SHA" "$DEPLOYMENT"
