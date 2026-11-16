@@ -1,0 +1,136 @@
+name: Backend dependencies
+description: >-
+  Node 22 + Corepack, restore the backend yarn / turbo / node_modules caches,
+  install backend dependencies, and (backend-quality on master only) save
+  them. Shared by the four backend jobs in ci.yml so their cache keys and
+  paths cannot drift apart. The turbo cache is saved by the caller, after its
+  build, from the `turbo-cache-hit` / `turbo-key` outputs.
+
+inputs:
+  always-install:
+    description: >-
+      'true' runs `yarn install --immutable` even on an exact node_modules
+      cache hit (backend-quality, which verifies the lockfile and saves the
+      caches). Otherwise an exact hit skips the install and the yarn restore.
+    default: 'false'
+  save:
+    description: "'true' saves the node_modules and yarn caches after install (backend-quality on master)."
+    default: 'false'
+
+outputs:
+  turbo-cache-hit:
+    description: actions/cache/restore cache-hit for backend/.turbo
+    value: ${{ steps.turbo-cache.outputs.cache-hit }}
+  turbo-key:
+    description: Primary key for backend/.turbo, for the caller's save step
+    value: ${{ steps.turbo-cache.outputs.cache-primary-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Enable Corepack
+      shell: bash
+      run: corepack enable
+
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+      with:
+        node-version: 22
+
+    # The ~71s install is pure node_modules materialization (unpack + link a
+    # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
+    # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
+    # lockfile, so the --immutable install below is a fast verify. The
+    # install-state is essential: WITHOUT it the node-modules linker rebuilds
+    # its state from scratch (~37s even with node_modules present), which is
+    # what makes the state file — not just node_modules — the thing that pays.
+    # Exact key, NO restore-keys on purpose: a partial restore that mismatched
+    # the lockfile would make `yarn install --immutable` FAIL (it refuses to
+    # mutate node_modules). On a lockfile change the key misses -> full
+    # install -> backend-quality saves a fresh entry, on master pushes only
+    # (see the Save steps below). (Key is v2: actions/cache never
+    # overwrites an existing key, so adding install-state needs a new key.)
+    # Restored first, so an exact hit can skip both the ~0.56 GB yarn
+    # download and the install.
+    - name: Restore backend node_modules
+      id: bnm-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: |
+          backend/node_modules
+          backend/apps/*/node_modules
+          backend/packages/*/node_modules
+          backend/.yarn/install-state.gz
+        # .yarnrc.yml is in the hash because it shapes the node_modules
+        # layout (nodeLinker, nmHoistingLimits) without touching the lockfile;
+        # keyed on yarn.lock alone, a .yarnrc.yml change would keep restoring
+        # (and, since the key never changes, never re-save) the old layout.
+        key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock', 'backend/.yarnrc.yml') }}
+
+    # Only the install reads the yarn cache.
+    - name: Restore yarn (berry global cache)
+      id: yarn-cache
+      if: inputs.always-install == 'true' || steps.bnm-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/.yarn/berry/cache
+        key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
+        restore-keys: yarn-${{ runner.os }}-
+
+    # turbo writes its local cache to backend/.turbo; without restoring it every
+    # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
+    # commit, so all four backend jobs share ONE entry (until 2026-08 a
+    # per-commit key minted a ~900 MB entry every push that no later run could
+    # hit, which filled the 10 GB cache cap). No restore-keys: turbo never
+    # prunes its local cache, so seeding each lockfile's entry from the last
+    # one only grew it. A lockfile change starts turbo cold and saves just
+    # that build; the entry measured ~11 MB on 2026-11-16, so it is not what
+    # evicts `bnm2-*` today (see backend-quality's timeout comment in ci.yml).
+    - name: Restore turbo
+      id: turbo-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: backend/.turbo
+        key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
+
+    # An exact hit restores the very tree a full install of this lockfile
+    # produced: node_modules (dependency build-script output included),
+    # .yarn-state.yml and install-state.gz. No workspace has a postinstall or
+    # prepare script, and Yarn's node-modules linker writes nothing outside
+    # those paths, so the skip loses nothing. Corepack fetches Yarn on the
+    # job's first `corepack yarn` call instead of here.
+    - name: Install backend dependencies
+      if: inputs.always-install == 'true' || steps.bnm-cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: backend
+      run: corepack yarn install --immutable
+
+    # The four backend jobs only RESTORE their caches; backend-quality alone
+    # saves them, and only on pushes to master. Measured 2026-11-09: 27
+    # entries, 10.77 GB against the 10 GB cap — eviction again, this time from
+    # PRs. A PR that changes backend/yarn.lock (every dependabot bump) used to
+    # save ~1.9 GB (turbo 1.06 + yarn 0.56 + bnm2 0.30) scoped to that PR's
+    # ref, which no other branch can read, and that pushed master's entries
+    # out. PRs still restore master's entries; a lockfile PR now pays a cold
+    # node_modules link (~30-45s measured with the yarn restore-key hit) on
+    # each push instead. (PR saves were one source of churn; the larger one,
+    # CodeQL overlay databases, is covered in ci.yml's backend-quality
+    # timeout comment.) paths here MUST match the restore steps exactly: the
+    # cache version is a hash of the path list.
+    - name: Save backend node_modules
+      if: inputs.save == 'true' && steps.bnm-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: |
+          backend/node_modules
+          backend/apps/*/node_modules
+          backend/packages/*/node_modules
+          backend/.yarn/install-state.gz
+        key: ${{ steps.bnm-cache.outputs.cache-primary-key }}
+
+    - name: Save yarn (berry global cache)
+      if: inputs.save == 'true' && steps.yarn-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/.yarn/berry/cache
+        key: ${{ steps.yarn-cache.outputs.cache-primary-key }}

@@ -124,7 +124,7 @@ scripts/              # Playwright capture/measure/QA + serve-standalone.ps1
 
 ## Deployment
 
-Deploys to **DigitalOcean App Platform** (managed via the `doctl` CLI). Both the storefront and backend build from `git master`. The GitHub **Deploy** workflow redeploys an app only when its build inputs changed since the commit it is running (App Platform's `deploy_on_push` is off), and can be run by hand from the Actions tab on `master`. Media is served from a DigitalOcean Spaces bucket + CDN. See [`.do/README.md`](.do/README.md) for the deploy specs and operational details.
+Deploys to **DigitalOcean App Platform** (managed via the `doctl` CLI). Both the storefront and backend build from `git master`. The GitHub **Deploy** workflow redeploys an app only when its build inputs changed since the commit it is running (App Platform's `deploy_on_push` is off), and can be run by hand from the Actions tab on `master`. It deploys only after master CI (`ci-ok`) passes on the commit, then checks the live commit and the health URLs, and runs in the GitHub `production` environment. A **Rollback** workflow returns an app to a recent successful deployment (it never restores the database). Media is served from a DigitalOcean Spaces bucket + CDN. See [`.do/README.md`](.do/README.md) for the deploy specs and operational details.
 
 ## License
 
