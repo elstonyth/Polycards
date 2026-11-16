@@ -146,6 +146,13 @@ jobs:
       - name: Format check
         run: npm run format:check
 
+      # Self-check of the deploy gate's ci-ok lookup (deploy.yml). The `if:`
+      # keeps this job green until that script lands on master; drop it once
+      # the script is there, so deleting the script fails CI.
+      - name: Self-check deploy gate
+        if: hashFiles('.github/scripts/ci-gate.mjs') != ''
+        run: node .github/scripts/ci-gate.mjs --test
+
       # Both app Dockerfiles. Fails on warning or error; info-level style
       # hints (DL3059 consecutive RUNs, DL3066 named USER) are not enforced.
       # Silence a real finding with a justified `# hadolint ignore=` line.
