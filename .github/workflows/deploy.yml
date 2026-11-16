@@ -153,7 +153,7 @@ jobs:
         if: failure()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          MESSAGE: "Deploy of polycards-backend at ${{ github.sha }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          MESSAGE: 'Deploy of polycards-backend at ${{ github.sha }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
         run: bash .github/scripts/notify-discord.sh "$MESSAGE"
 
   storefront:
@@ -191,5 +191,5 @@ jobs:
         if: failure()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          MESSAGE: "Deploy of polycards-storefront at ${{ github.sha }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          MESSAGE: 'Deploy of polycards-storefront at ${{ github.sha }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
         run: bash .github/scripts/notify-discord.sh "$MESSAGE"

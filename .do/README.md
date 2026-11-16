@@ -131,15 +131,29 @@ without throwing — so it is safe on every deploy and self-heals a lost admin.
 ## Rollback
 
 App Platform keeps previous deployments; a bad deploy rolls back without a git
-revert:
+revert. doctl has no rollback commands, so use the GitHub **Rollback**
+workflow (Actions > Rollback > Run workflow, on `master`). It calls App
+Platform's rollback API (`POST /v2/apps/{app_id}/rollback`, plus
+`/rollback/validate`, `/rollback/commit` and `/rollback/revert`) through
+`.github/scripts/do-rollback.sh`:
 
-```pwsh
-doctl apps list-deployments <APP_ID>                 # find the last good deployment
-doctl apps create-deployment <APP_ID> --wait         # redeploy current spec (rebuild)
-# Pin to a previous deployment (true rollback, no rebuild):
-doctl apps create-rollback <APP_ID> --deployment-id <DEPLOYMENT_ID> --wait
-doctl apps validate-rollback <APP_ID> --deployment-id <DEPLOYMENT_ID>  # dry-run first
-```
+1. **`validate`** (default, dry run). Lists the last 20 deployments with
+   their commits and asks DigitalOcean whether the rollback would work. With
+   `deployment_id` empty the target is the deployment before the active one;
+   that can be a spec-only redeploy of the same commit, so pick an id from the
+   list to go further back.
+2. **`rollback`**. Validates, rolls back, waits for ACTIVE and checks the
+   health URL. The app is then **pinned**: every new deployment fails, the
+   Deploy workflow included (each failure also alerts Discord), until step 3.
+3. **`commit`** keeps the rollback and unpins the app; the next master push
+   deploys the master tip again, so revert the bad change on master first.
+   **`revert`** undoes the rollback (deploys the latest spec again) and
+   unpins.
+
+Limits: only the ten most recent successful deployments can be targets, and
+a rollback restores code, config and app spec, **never database data**.
+`doctl apps create-deployment <APP_ID> --wait` (rebuild of the current spec)
+still works by hand when the app is not pinned.
 
 **Migration rule that makes rollback survivable:** migrations must stay
 backward-compatible for one release (expand/contract — add columns/tables

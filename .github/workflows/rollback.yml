@@ -1,0 +1,78 @@
+name: Rollback
+
+# Manual only: returns one DigitalOcean app to an earlier deployment through
+# App Platform's rollback API (.github/scripts/do-rollback.sh). Defaults to a
+# dry run (validate). Run it from the master branch.
+#
+# - Only the app's ten most recent successful deployments can be targets.
+# - It restores code, config and app spec, NEVER database data. Migrations
+#   already applied stay applied, which is why they must stay
+#   backward-compatible for one release (.do/README.md, Rollback).
+# - rollback leaves the app PINNED: every new deployment, the Deploy workflow
+#   included, fails until a run with action commit (keep it) or revert (undo
+#   it).
+#
+# This repo is public and the job holds a DigitalOcean token, so never add
+# pull_request(_target) here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Which app
+        type: choice
+        options:
+          - backend
+          - storefront
+      action:
+        description: validate = dry run; rollback = roll back and pin; commit = keep the rollback and unpin; revert = undo it and unpin
+        type: choice
+        options:
+          - validate
+          - rollback
+          - commit
+          - revert
+        default: validate
+      deployment_id:
+        description: Target deployment UUID (validate/rollback). Empty = the one before the active deployment, which can be a spec-only redeploy of the same commit; the validate log lists the last 20 with their commits.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: ${{ inputs.action }} ${{ inputs.app }}
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    # Same group as that app's deploy job in deploy.yml, so a rollback never
+    # overlaps a deploy. Never cancel: a cancelled deploy once rolled prod back.
+    concurrency:
+      group: deploy-${{ inputs.app }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Install doctl
+        uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Run ${{ inputs.action }}
+        env:
+          DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          APP: ${{ inputs.app }}
+          ACTION: ${{ inputs.action }}
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+        run: bash .github/scripts/do-rollback.sh "polycards-$APP" "$ACTION" "$DEPLOYMENT_ID"
+      - name: Alert Discord
+        if: failure() && inputs.action != 'validate'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          MESSAGE: 'Rollback (${{ inputs.action }}) of polycards-${{ inputs.app }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+        run: bash .github/scripts/notify-discord.sh "$MESSAGE"
