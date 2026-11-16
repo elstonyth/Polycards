@@ -1,0 +1,103 @@
+name: Deploy
+
+# Redeploys each DigitalOcean app only when a push to master changes files its
+# build reads. This replaces App Platform's deploy_on_push, which redeployed
+# both apps on every push (a skills-only change rebuilt the backend too).
+#
+# Triggers are push-to-master and manual only. This repo is public and the job
+# holds a DigitalOcean token, so never add pull_request(_target) here.
+#
+# The changed files are diffed inside the job rather than with `on.push.paths`:
+# GitHub evaluates path filters on at most 3,000 files and silently skips the
+# run past that. .github/scripts/deploy-targets.mjs holds the rules and deploys
+# both apps whenever the diff can't be computed.
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which app to redeploy
+        type: choice
+        options:
+          - both
+          - backend
+          - storefront
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.plan.outputs.backend }}
+      storefront: ${{ steps.plan.outputs.storefront }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Decide which apps changed
+        id: plan
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          TARGET: ${{ inputs.target }}
+        run: node .github/scripts/deploy-targets.mjs
+
+  deploy:
+    name: deploy ${{ matrix.app }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: backend
+            name: polycards-backend
+          - app: storefront
+            name: polycards-storefront
+    # One deploy per app at a time. cancel-in-progress stays false: it would
+    # only cancel this GitHub job, but a DigitalOcean deploy must never be
+    # cancelled (a cancel once rolled production back).
+    concurrency:
+      group: deploy-${{ matrix.app }}
+      cancel-in-progress: false
+    steps:
+      - name: Skip if unchanged
+        if: needs.plan.outputs[matrix.app] != 'true'
+        run: echo "No change for ${{ matrix.app }}; nothing to deploy."
+      - name: Install doctl
+        if: needs.plan.outputs[matrix.app] == 'true'
+        uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Deploy and wait
+        if: needs.plan.outputs[matrix.app] == 'true'
+        env:
+          APP_NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          app_id=$(doctl apps list --format ID,Spec.Name --no-header | awk -v n="$APP_NAME" '$2 == n { print $1 }')
+          if [ -z "$app_id" ]; then echo "::error::App $APP_NAME not found"; exit 1; fi
+          dep=$(doctl apps create-deployment "$app_id" --format ID --no-header)
+          echo "Started deployment $dep for $APP_NAME"
+          for _ in $(seq 1 80); do
+            phase=$(doctl apps get-deployment "$app_id" "$dep" --format Phase --no-header)
+            case "$phase" in
+              ACTIVE) echo "$APP_NAME is live on deployment $dep"; exit 0 ;;
+              SUPERSEDED|CANCELED) echo "::notice::Deployment $dep ended $phase: a newer deployment replaced it"; exit 0 ;;
+              ERROR) echo "::error::Deployment $dep failed. See: doctl apps logs $app_id --deployment $dep --type build"; exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "::error::Deployment $dep did not finish within 40 minutes (last phase: $phase)"
+          exit 1

@@ -1,0 +1,215 @@
+#!/usr/bin/env node
+// Decides which DigitalOcean apps a push to master must redeploy.
+//
+// Used by .github/workflows/deploy.yml. The rule errs toward deploying: an
+// extra deploy is harmless, a missed one ships stale code. So the storefront
+// is a deny-list (everything deploys except files its build never reads), and
+// any doubt (no diff, unknown event) deploys both apps.
+//
+//   node .github/scripts/deploy-targets.mjs              CI: reads env, writes GITHUB_OUTPUT
+//   node .github/scripts/deploy-targets.mjs --commit SHA  what one commit would deploy
+//   node .github/scripts/deploy-targets.mjs --test        built-in self-check
+
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { dirname, join, normalize } from 'node:path';
+
+// Backend app: built from backend/ (source_dir) with backend/Dockerfile.
+const BACKEND_IGNORE_PREFIXES = ['backend/.claude/'];
+
+// Storefront app: root Dockerfile, `COPY . .` minus .dockerignore, then
+// `next build`, which type-checks every file tsconfig.json includes. These
+// paths are never read by that build. Dockerfile and .dockerignore are NOT
+// here: they are excluded from the image yet decide how it is built.
+const STOREFRONT_IGNORE_PREFIXES = [
+  'backend/', // tsconfig excludes it; files the storefront imports are added back below
+  'docs/',
+  'scripts/',
+  '.github/',
+  '.do/',
+  '.claude/',
+  '.agents/',
+  '.codebuddy/',
+  '.kiro/',
+  '.qoder/',
+  '.codex/',
+  '.cursor/',
+  '.windsurf/',
+  '.gemini/',
+  '.continue/',
+  '.amazonq/',
+  '.augment/',
+  '.opencode/',
+  '.vscode/',
+  '.idea/',
+  'graphify-out/',
+];
+const STOREFRONT_IGNORE_FILES = new Set([
+  'AGENTS.md',
+  'CLAUDE.md',
+  'GEMINI.md',
+  'CODEBUDDY.md',
+  'QODER.md',
+  'README.md',
+  'CHANGELOG.md',
+  'CONTEXT.md',
+  'DESIGN.md',
+  'PRODUCT.md',
+  'LICENSE',
+  'skills-lock.json',
+  '.cursorrules',
+  '.clinerules',
+  '.windsurfrules',
+  '.aider.conf.yml',
+  'docker-compose.yml',
+  '.gitignore',
+]);
+
+const IMPORT_RE = /from\s+['"]((?:\.\.\/)+backend\/[^'"]+)['"]/g;
+
+// Backend files that storefront code imports directly (today: two parity
+// tests). The storefront build type-checks them, so a change there must
+// redeploy the storefront too.
+// shortcut: direct imports only, not their own imports; follow the chain if
+// one of these files ever starts importing other backend code.
+export function backendFilesImportedByStorefront(repoRoot = '.') {
+  const listed = execFileSync('git', ['ls-files', 'src', 'tests', 'tools'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  const found = new Set();
+  for (const file of listed.split('\n')) {
+    if (!/\.(m?ts|tsx)$/.test(file)) continue;
+    const text = readFileSync(join(repoRoot, file), 'utf8');
+    for (const m of text.matchAll(IMPORT_RE)) {
+      const target = normalize(join(dirname(file), m[1])).replaceAll('\\', '/');
+      found.add(/\.(m?ts|tsx|js|mjs)$/.test(target) ? target : `${target}.ts`);
+    }
+  }
+  return found;
+}
+
+const firstMatch = (files, pred) => files.find(pred) ?? null;
+
+export function decide(files, storefrontBackendFiles = new Set()) {
+  const backendHit = firstMatch(
+    files,
+    (f) =>
+      f.startsWith('backend/') &&
+      !BACKEND_IGNORE_PREFIXES.some((p) => f.startsWith(p)),
+  );
+  const storefrontHit = firstMatch(files, (f) => {
+    if (storefrontBackendFiles.has(f)) return true;
+    if (STOREFRONT_IGNORE_FILES.has(f)) return false;
+    return !STOREFRONT_IGNORE_PREFIXES.some((p) => f.startsWith(p));
+  });
+  return {
+    backend: backendHit !== null,
+    storefront: storefrontHit !== null,
+    reasons: { backend: backendHit, storefront: storefrontHit },
+  };
+}
+
+const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
+const lines = (s) => s.split('\n').filter(Boolean);
+const ALL = (why) => ({
+  backend: true,
+  storefront: true,
+  reasons: { backend: why, storefront: why },
+});
+
+function planFromEnv(env) {
+  if (env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
+    const t = env.TARGET || 'both';
+    const why = `manual run (target=${t})`;
+    return {
+      backend: t === 'both' || t === 'backend',
+      storefront: t === 'both' || t === 'storefront',
+      reasons: { backend: why, storefront: why },
+    };
+  }
+  const before = env.BEFORE || '';
+  const sha = env.SHA || 'HEAD';
+  if (!before || /^0+$/.test(before))
+    return ALL('no previous commit to diff against');
+  let files;
+  try {
+    files = lines(git('diff', '--name-only', before, sha));
+  } catch {
+    return ALL(
+      `could not diff ${before.slice(0, 9)}..${sha.slice(0, 9)} (force-push or missing history)`,
+    );
+  }
+  return decide(files, backendFilesImportedByStorefront());
+}
+
+function report(plan) {
+  for (const app of ['backend', 'storefront']) {
+    const why = plan.reasons[app];
+    console.log(
+      `${app}: ${plan[app] ? 'deploy' : 'skip'}${why ? ` (${why})` : ' (no file it builds from changed)'}`,
+    );
+  }
+}
+
+function selfTest() {
+  const imported = new Set(['backend/packages/api/src/utils/real-name.ts']);
+  const cases = [
+    [['skills-lock.json', '.agents/skills/x/SKILL.md'], false, false],
+    [['backend/packages/api/src/x.ts', 'docs/adr/0017.md'], true, false],
+    [['backend/apps/admin/src/routes/x.tsx', 'CONTEXT.md'], true, false],
+    [['src/app/page.tsx'], false, true],
+    [['Dockerfile'], false, true],
+    [['.dockerignore'], false, true],
+    [['package-lock.json'], false, true],
+    [['tools/desk-reports/tools.mjs'], false, true],
+    [['backend/packages/api/src/utils/real-name.ts'], true, true],
+    [['backend/.claude/skills/x/SKILL.md'], false, false],
+    [
+      ['.github/workflows/deploy.yml', 'scripts/serve-standalone.ps1'],
+      false,
+      false,
+    ],
+    [[], false, false],
+  ];
+  let failed = 0;
+  for (const [files, wantB, wantS] of cases) {
+    const got = decide(files, imported);
+    if (got.backend !== wantB || got.storefront !== wantS) {
+      failed++;
+      console.error(
+        `FAIL ${JSON.stringify(files)} -> backend=${got.backend} storefront=${got.storefront}, want ${wantB}/${wantS}`,
+      );
+    }
+  }
+  const real = backendFilesImportedByStorefront();
+  if (!real.has('backend/packages/api/src/utils/real-name.ts')) {
+    failed++;
+    console.error(
+      'FAIL import scan missed backend/packages/api/src/utils/real-name.ts',
+    );
+  }
+  console.log(
+    failed ? `${failed} failed` : `all ${cases.length + 1} checks passed`,
+  );
+  process.exit(failed ? 1 : 0);
+}
+
+const args = process.argv.slice(2);
+if (args[0] === '--test') {
+  selfTest();
+} else if (args[0] === '--commit') {
+  const files = lines(
+    git('diff-tree', '--no-commit-id', '--name-only', '-r', args[1]),
+  );
+  report(decide(files, backendFilesImportedByStorefront()));
+} else {
+  const plan = planFromEnv(process.env);
+  report(plan);
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(
+      process.env.GITHUB_OUTPUT,
+      `backend=${plan.backend}\nstorefront=${plan.storefront}\n`,
+    );
+  }
+}
