@@ -82,7 +82,8 @@ jobs:
           BEFORE=$(git merge-base "$BASE" "$HEAD" 2>/dev/null || echo "$BASE")
           BEFORE="$BEFORE" SHA="$HEAD" node .github/scripts/deploy-targets.mjs
 
-  # Repo-wide hygiene on every PR: ESLint and Prettier. Cheap, so never gated.
+  # Repo-wide hygiene on every PR: ESLint, Prettier, hadolint and shellcheck.
+  # Cheap, so never gated.
   # Node 24 = the local baseline (root engines: >=24).
   lint:
     runs-on: ubuntu-latest
@@ -108,6 +109,28 @@ jobs:
 
       - name: Format check
         run: npm run format:check
+
+      # Both app Dockerfiles. Fails on warning or error; info-level style
+      # hints (DL3059 consecutive RUNs, DL3066 named USER) are not enforced.
+      # Silence a real finding with a justified `# hadolint ignore=` line.
+      - name: Hadolint (storefront Dockerfile)
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+      - name: Hadolint (backend Dockerfile)
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: backend/Dockerfile
+          failure-threshold: warning
+
+      # The deploy scripts. shellcheck is preinstalled on the ubuntu-24.04
+      # runner image, so no action is needed.
+      - name: ShellCheck (.github/scripts)
+        run: |
+          shellcheck --version
+          shellcheck .github/scripts/*.sh
 
   # Storefront gate: typecheck, unit tests, prod build. Runs only when the
   # storefront's build inputs changed (see `changes`).
