@@ -432,11 +432,33 @@ medusaIntegrationTestRunner({
       });
 
       it('takes one query at a time, with two waiting, and turns the rest away', async () => {
-        const statuses = (
-          await Promise.all([1, 2, 3, 4].map(() => query(SLOW)))
-        ).map((r) => r.status);
-        expect(statuses.filter((s) => s === 429)).toHaveLength(1);
-        expect(statuses.filter((s) => s === 400)).toHaveLength(3);
+        // Four requests fired at once reach the queue in whatever order and
+        // timing their middleware allows, so the split was a race (CI saw two
+        // 429s). Step it instead: nothing of ours running, then one query
+        // running in Postgres, then three more at once (two wait, one is
+        // turned away).
+        const running = async (): Promise<number> =>
+          (
+            await sharedDb().raw(
+              "SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'desk-bots-sql' AND state = 'active'",
+            )
+          ).rows[0].n as number;
+        const waitFor = async (done: (n: number) => boolean) => {
+          for (let i = 0; i < 100; i += 1) {
+            if (done(await running())) return;
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          throw new Error('desk-bots-sql activity never reached the expected state');
+        };
+        await waitFor((n) => n === 0);
+        const first = query(SLOW);
+        await waitFor((n) => n === 1);
+        const rest = await Promise.all([1, 2, 3].map(() => query(SLOW)));
+        const all = [await first, ...rest];
+        const busy = all.filter((r) => r.status === 429);
+        expect(busy).toHaveLength(1);
+        expect(busy[0].data.message).toMatch(/busy with other questions/);
+        expect(all.filter((r) => r.status === 400)).toHaveLength(3);
       });
 
       it('passes a Postgres error on in plain words', async () => {
