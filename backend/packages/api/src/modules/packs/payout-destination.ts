@@ -285,6 +285,61 @@ export async function nameStanding(
   return { holders, blocking: holders.filter((id) => !cleared.includes(id)) };
 }
 
+// Where a player's names are stored: the real name (its realNameKeySql index
+// is Migration20261103190000's), a saved bank's holder, a payout's holder.
+const NAME_SOURCES: [from: string, col: string][] = [
+  [
+    'SELECT customer_id AS id FROM customer_account_state WHERE real_name IS NOT NULL AND deleted_at IS NULL AND ',
+    'real_name',
+  ],
+  [
+    'SELECT c.id FROM customer c ' +
+      "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
+      "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
+      'WHERE c.deleted_at IS NULL AND ',
+    "a->>'accountHolderName'",
+  ],
+  [
+    'SELECT customer_id AS id FROM gateway_withdrawal WHERE deleted_at IS NULL AND ',
+    'account_holder_name',
+  ],
+];
+
+/** The players any of whose names is this one (owner, 2026-11-16: admin
+ *  lookup finds a player by any of their names): the real name, a saved bank's
+ *  holder, a payout's holder, compared whole by both keys, realNameKeySql and
+ *  holderNameKey. A key that is empty is left out: a name in another script
+ *  has no letters to key by, and every such stored name would match it. At
+ *  most `limit` ids; the caller drops deleted accounts. */
+export async function namedCustomerIds(
+  em: LedgerSqlManager,
+  name: string,
+  limit: number,
+): Promise<string[]> {
+  const real = realNameKey(name) !== '';
+  const letters = holderNameKey(name);
+  const branches: string[] = [];
+  const params: (string | number)[] = [];
+  for (const [from, col] of NAME_SOURCES) {
+    if (real) {
+      branches.push(`${from}${realNameKeySql(col)} = ${realNameKeySql('?::text')}`);
+      params.push(name);
+    }
+    if (letters) {
+      branches.push(`${from}${holderNameKeySql(col)} = ?`);
+      params.push(letters);
+    }
+  }
+  if (branches.length === 0) return [];
+  // ponytail: the saved-holder and payout branches scan, as nameStanding's
+  // do; index them if an admin search ever shows up as slow.
+  const rows = await em.execute<{ id: string }[]>(
+    `${branches.join(' UNION ')} LIMIT ?`,
+    [...params, limit],
+  );
+  return rows.map((r) => r.id);
+}
+
 /** Does someone else holding this number refuse a new save of it? Any holder
  *  of a bank number, under any name. A wallet's address is public on-chain and
  *  has no holder name, so a stranger who merely saved it must not stop its

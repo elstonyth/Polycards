@@ -93,9 +93,11 @@ export const VAULT_RULES: ErrorRule[] = [
   // Above /amount/i and /not found|404/i, per the ORDER note.
   // "withdrawals unlock once" is the current locked refusal; "is for opening
   // packs" is the 2026-10-15 partial-hold text, kept for deploy skew. "more on
-  // packs" appears in both the current and the pre-2026-10-14 wording.
+  // packs" appears in both the current and the pre-2026-10-14 wording. "two
+  // names do not match" is the pre-2026-11-16 typed-twice refusal (deploy skew);
+  // since then a bank is saved in the real name, and those refusals say so.
   [
-    /top up at least once|withdrawals unlock once|is for opening packs|more on packs|must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|your bank account is linked|already has a (bank|touch 'n go) account|saved bank account cannot be removed|two names do not match|this name is already linked|select a saved bank account|choose a bank from the list|choose another bank|mobile number linked to PayNow|valid account number|looks like a card number|account numbers are|account holder name|add an email address|withdrawal is no longer open/i,
+    /top up at least once|withdrawals unlock once|is for opening packs|more on packs|must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|your bank account is linked|already has a (bank|touch 'n go) account|saved bank account cannot be removed|two names do not match|this name is already linked|paid to your real name|real name on file|another name than your real name|select a saved bank account|choose a bank from the list|choose another bank|mobile number linked to PayNow|valid account number|looks like a card number|account numbers are|account holder name|add an email address|withdrawal is no longer open/i,
     (text) => text,
   ],
   // Regional rails (A3Pay SGD, GlobePay365 USDT) and USDT wallets

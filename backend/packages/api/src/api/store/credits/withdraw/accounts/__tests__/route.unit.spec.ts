@@ -67,6 +67,13 @@ const standing = (
   ...over,
 });
 
+// The account's real name, which a bank is saved under (owner, 2026-11-16).
+let realName: string | null = 'Tan Ah Kow';
+const getVerificationState = jest.fn(async (_id: string) => ({
+  phoneVerified: true,
+  realName,
+}));
+
 // The admin withdrawal controls; open by default.
 const withdrawalControls = jest.fn(async () => DEFAULT_WITHDRAWAL_CONTROLS);
 
@@ -77,6 +84,7 @@ const scope = {
   resolve: jest.fn((key: string) => {
     if (key === 'packs')
       return {
+        getVerificationState,
         mutateCustomerMetadata,
         payoutNameStanding,
         payoutNumberStanding,
@@ -104,23 +112,14 @@ const expectNoStore = (res: never) =>
     'no-store',
   );
 
-// A bank save types the holder name twice; a body without the second copy gets
-// it filled in, so only the tests about it need to say so.
 const mkReq = (body: Record<string, unknown> | null = null) =>
-  ({
-    auth_context: { actor_id: 'cus_1' },
-    body:
-      body && 'account_holder_name' in body && !('account_holder_name_confirm' in body)
-        ? { ...body, account_holder_name_confirm: body.account_holder_name }
-        : body,
-    scope,
-  }) as never;
+  ({ auth_context: { actor_id: 'cus_1' }, body, scope }) as never;
 
+// No holder name: a bank is saved in the real name (getVerificationState).
 const VALID_BODY = {
   bank_code: 'MBBEMYKL',
   bank_name: 'Maybank',
   account_number: '123456789012',
-  account_holder_name: 'Tan Ah Kow',
 };
 
 /** A saved list already at the cap. */
@@ -177,6 +176,8 @@ beforeEach(() => {
   payoutNameStanding.mockResolvedValue({ holders: [], blocking: [] });
   logger.warn.mockReset();
   logger.error.mockReset();
+  realName = 'Tan Ah Kow';
+  getVerificationState.mockClear();
   retrieveCustomer.mockResolvedValue({ metadata: {} });
   updateCustomers.mockResolvedValue({});
   createNotifications.mockResolvedValue(undefined);
@@ -427,11 +428,9 @@ describe('POST /store/credits/withdraw/accounts', () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
+    realName = 'Tan A. Kow';
     const res = mkRes();
-    await POST(
-      mkReq({ ...VALID_BODY, account_holder_name: 'Tan A. Kow' }),
-      res,
-    );
+    await POST(mkReq(VALID_BODY), res);
     expect(updateCustomers).not.toHaveBeenCalled();
     const [echoed] = (res as { json: jest.Mock }).json.mock.calls[0][0].accounts;
     expect(echoed.accountHolderName).toBe('Tan Ah Kow');
@@ -558,10 +557,7 @@ describe('POST accounts — the new-destination notice', () => {
       metadata: { bank_accounts: [savedShape()] },
       email: 'player@example.test',
     });
-    await POST(
-      mkReq({ ...VALID_BODY, account_holder_name: 'Tan A. Kow' }),
-      mkRes(),
-    );
+    await POST(mkReq(VALID_BODY), mkRes());
     expect(createNotifications.mock.calls.length).toBe(0);
   });
 
@@ -855,14 +851,75 @@ describe('POST accounts — a saved account changes through support', () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },
     });
+    realName = 'Someone Else';
     const res = mkRes();
-    await POST(
-      mkReq({ ...VALID_BODY, account_holder_name: 'Someone Else' }),
-      res,
-    );
+    await POST(mkReq(VALID_BODY), res);
     expect(updateCustomers).not.toHaveBeenCalled();
     const [echoed] = (res as { json: jest.Mock }).json.mock.calls[0][0].accounts;
     expect(echoed.accountHolderName).toBe('Tan Ah Kow');
+  });
+});
+
+// One name per account (owner, 2026-11-16): a bank's holder IS the real name.
+describe('POST accounts — the holder is the real name', () => {
+  const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+
+  it('saves a bank in the real name and drops a holder name an old page typed', async () => {
+    await POST(
+      mkReq({
+        ...VALID_BODY,
+        account_holder_name: 'Someone Else',
+        account_holder_name_confirm: 'Another Name',
+      }),
+      mkRes(),
+    );
+    expect(getVerificationState).toHaveBeenCalledWith('cus_1');
+    expect(payoutNameStanding).toHaveBeenCalledWith('cus_1', 'Tan Ah Kow');
+    expect(
+      updateCustomers.mock.calls[0][1].metadata.bank_accounts[0].accountHolderName,
+    ).toBe('Tan Ah Kow');
+  });
+
+  it('refuses a bank when no real name is on file, and writes nothing', async () => {
+    realName = null;
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      /real name.*none on your account.*contact support/i,
+    );
+    expect(payoutNumberStanding).not.toHaveBeenCalled();
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it.each([['陈大文'], ['Иван Петров'], ['Таn Ah Kow']])(
+    'refuses a bank when the real name %j is not in English letters',
+    async (name) => {
+      realName = name;
+      await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+        /real name.*not in English letters.*contact support/i,
+      );
+      expect(updateCustomers).not.toHaveBeenCalled();
+    },
+  );
+
+  it('the copy never names the verification provider', async () => {
+    for (const name of [null, '陈大文']) {
+      realName = name;
+      const err = await POST(mkReq(VALID_BODY), mkRes()).catch((e) => e);
+      expect(String(err.message)).not.toMatch(/touch|tng/i);
+    }
+  });
+
+  it('a wallet needs no real name and never asks for one', async () => {
+    realName = null;
+    await POST(mkReq({ bank_code: 'USDTTRC20', account_number: TRON }), mkRes());
+    expect(getVerificationState).not.toHaveBeenCalled();
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('a bad bank code is refused as before, without reading the real name', async () => {
+    await expect(
+      POST(mkReq({ ...VALID_BODY, bank_code: 'NOPE' }), mkRes()),
+    ).rejects.toThrow(/bank from the list/);
+    expect(getVerificationState).not.toHaveBeenCalled();
   });
 });
 
@@ -984,24 +1041,6 @@ describe('GET accounts — a shared bank account is on hold', () => {
 describe('POST accounts — owner rules of 2026-11-03', () => {
   const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 
-  it('refuses a holder name not typed the same twice, ignoring case and spaces', async () => {
-    await expect(
-      POST(
-        mkReq({ ...VALID_BODY, account_holder_name_confirm: 'Tan Ah Kaw' }),
-        mkRes(),
-      ),
-    ).rejects.toThrow(/do not match/);
-    await expect(
-      POST(mkReq({ ...VALID_BODY, account_holder_name_confirm: undefined }), mkRes()),
-    ).rejects.toThrow(/do not match/);
-    expect(updateCustomers).not.toHaveBeenCalled();
-    await POST(
-      mkReq({ ...VALID_BODY, account_holder_name_confirm: ' tan  AH kow ' }),
-      mkRes(),
-    );
-    expect(updateCustomers).toHaveBeenCalledTimes(1);
-  });
-
   it('refuses a banned number and logs only its last 4', async () => {
     payoutNumberStanding.mockResolvedValue(
       standing([], { banned: true, bannedForPlayer: true }),
@@ -1038,7 +1077,7 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
     expect(updateCustomers).toHaveBeenCalledTimes(1);
   });
 
-  it('a wallet needs no second name and skips the name check', async () => {
+  it('a wallet skips the name check', async () => {
     await POST(
       mkReq({ bank_code: 'USDTTRC20', account_number: TRON }),
       mkRes(),
@@ -1079,19 +1118,21 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
     ).rejects.toThrow(/already has a Touch 'n Go account/);
   });
 
-  it('one name on every bank: a Touch \'n Go under another name is refused', async () => {
+  it('one name on every bank: a Touch \'n Go is refused when a saved bank is in another name', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: {
         bank_accounts: [savedShape({ accountNumber: '999999999999', id: 'x' })],
       },
     });
     const TNG = { ...VALID_BODY, bank_code: 'TNGMY', account_number: '120000000001' };
-    await expect(
-      POST(mkReq({ ...TNG, account_holder_name: 'Lim Mei Ling' }), mkRes()),
-    ).rejects.toThrow(/same account holder name as your saved bank account/);
+    realName = 'Lim Mei Ling';
+    await expect(POST(mkReq(TNG), mkRes())).rejects.toThrow(
+      /saved bank account is in another name than your real name.*contact support/i,
+    );
     expect(updateCustomers).not.toHaveBeenCalled();
     // Case and separators do not make it another name.
-    await POST(mkReq({ ...TNG, account_holder_name: 'TAN AH-KOW' }), mkRes());
+    realName = 'TAN AH-KOW';
+    await POST(mkReq(TNG), mkRes());
     expect(updateCustomers).toHaveBeenCalledTimes(1);
   });
 
@@ -1101,16 +1142,13 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
         bank_accounts: [savedShape({ accountNumber: '999999999999', id: 'x' })],
       },
     });
+    realName = 'Lim Mei Ling';
     await expect(
       POST(
-        mkReq({
-          bank_code: 'DBSSSGSG',
-          account_number: '0123456789',
-          account_holder_name: 'Lim Mei Ling',
-        }),
+        mkReq({ bank_code: 'DBSSSGSG', account_number: '0123456789' }),
         mkRes(),
       ),
-    ).rejects.toThrow(/same account holder name as your saved bank account/);
+    ).rejects.toThrow(/another name than your real name/);
   });
 
   it('one name on every bank: a saved wallet sets no name', async () => {
@@ -1162,12 +1200,9 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
         ],
       },
     });
+    realName = 'Tan Ah Kow Bin Abu';
     await POST(
-      mkReq({
-        bank_code: 'DBSSSGSG',
-        account_number: '0123456789',
-        account_holder_name: 'Tan Ah Kow Bin Abu',
-      }),
+      mkReq({ bank_code: 'DBSSSGSG', account_number: '0123456789' }),
       mkRes(),
     );
     expect(updateCustomers).toHaveBeenCalledTimes(1);
@@ -1186,14 +1221,8 @@ describe('POST accounts — owner rules of 2026-11-03', () => {
 
 describe('POST accounts — holder names compare as one person reads them', () => {
   it('stores the name with invisible characters and odd spaces folded away', async () => {
-    await POST(
-      mkReq({
-        ...VALID_BODY,
-        account_holder_name: 'Tan​ Ah  Kow',
-        account_holder_name_confirm: 'tan ah kow',
-      }),
-      mkRes(),
-    );
+    realName = 'Tan\u200b Ah  Kow';
+    await POST(mkReq(VALID_BODY), mkRes());
     expect(payoutNameStanding).toHaveBeenCalledWith('cus_1', 'Tan Ah Kow');
     expect(
       updateCustomers.mock.calls[0][1].metadata.bank_accounts[0].accountHolderName,
@@ -1201,11 +1230,12 @@ describe('POST accounts — holder names compare as one person reads them', () =
   });
 
   it.each([['Таn Ah Kow'], ['--'], ['Tan Ah Kow 😀'], ['Tan Ah Ŋow']])(
-    'refuses %j: Latin letters, digits and name punctuation only',
+    'refuses a real name %j: Latin letters, digits and name punctuation only',
     async (name) => {
-      await expect(
-        POST(mkReq({ ...VALID_BODY, account_holder_name: name }), mkRes()),
-      ).rejects.toThrow(/English letters/);
+      realName = name;
+      await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+        /English letters/,
+      );
       expect(updateCustomers).not.toHaveBeenCalled();
     },
   );
@@ -1214,9 +1244,10 @@ describe('POST accounts — holder names compare as one person reads them', () =
     'refuses %j when the plain name is on another account (the query compares letters)',
     async (name) => {
       payoutNameStanding.mockResolvedValue(linkedName);
-      await expect(
-        POST(mkReq({ ...VALID_BODY, account_holder_name: name }), mkRes()),
-      ).rejects.toThrow(/name is already linked/);
+      realName = name;
+      await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+        /name is already linked/,
+      );
       // Asked once, as typed: the read keys both sides by their letters
       // (holder-name-key-sql.integration.spec).
       expect(payoutNameStanding).toHaveBeenCalledTimes(1);

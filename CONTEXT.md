@@ -80,7 +80,10 @@ account. Required at emailpass signup (form + double confirm, saved by
 account without one meets a non-dismissable gate on the account pages
 (`RealNameModal`, after the phone gate). The customer sets it ONCE; only
 customer service changes it (`POST /admin/customers/:id/real-name`, audited
-`set_real_name`). Private: never on a public profile, log line or report.
+`set_real_name`). Since 2026-11-16 it is also every saved bank's holder name
+(one name per account, ADR 0015): a bank is saved in it and never in a typed
+name, and a correction carries to the banks saved in the old name. Private:
+never on a public profile, log line or report.
 _Avoid_: legal name, full name (in code), `last_name` (that is a separate,
 client-editable Medusa field Google fills)
 
@@ -254,7 +257,7 @@ A customer's saved bank account for Withdrawals. Adding one starts a
 `PAYOUT_DESTINATION_COOLDOWN_HOURS` cooling-off window (default 24h; `0` is
 a deliberate, explicit operator opt-out, never the default) before it may be
 paid out to — the control on the steal-a-token → add-a-destination →
-cash-out chain.
+cash-out chain. A bank's holder is the account's Real Name (2026-11-16).
 _Avoid_: bank account (fine as plain English inside a definition; Payout
 Destination is the domain term when naming the entity)
 

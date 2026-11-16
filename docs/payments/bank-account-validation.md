@@ -95,6 +95,10 @@ The [ABS FAST account-structure guide, 1 April 2026](https://abs.org.sg/docs/lib
 
 [DBS's PayNow FAQ](https://www.dbs.com.sg/personal/deposits/cas-paynow-faq.page) confirms both local and foreign mobile numbers may be registered. Do not restrict every PayNow recipient to an eight-digit Singapore number. This application's digits-only mobile route accepts 7–15 digits with a non-zero first digit, following its existing E.164 shape guard without the `+`; overseas numbers must include their country code. This is a format check, not verification of PayNow registration. NRIC/FIN, UEN and VPA routes are not supported by this numeric field.
 
+## Holder name
+
+A bank's holder name is the account's real name, never typed (ADR 0015, amendment 2026-11-16). A save is refused when the account has no real name, or when the name is not in English letters (`holderNameInvalid`: Latin letters, digits and the punctuation names carry, every letter readable as an English one). Only that format is checked; the name is not verified with the bank. A USDT wallet has no holder.
+
 ## Enforcement
 
 The canonical registry supplies lengths, optional mobile pattern and guidance to the bank picker. The shared server validator runs when saving, before withdrawal debit, and before held-payout approval. Invalid saved accounts remain visible but unavailable. Missing rules fail closed in the picker and payout routing; sandbox dummy accounts have their own 12-digit test format. No account numbers are converted to numeric values or rewritten to another country.

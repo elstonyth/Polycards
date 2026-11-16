@@ -179,13 +179,17 @@ describe('VAULT_RULES backend-message contract', () => {
       'This bank account is linked to another Polycards account. If it is yours, contact support.',
       'Your Polycards account already has a bank account. Contact support to change it.',
       'A saved bank account cannot be removed here. Contact support to change it.',
-      // the 2026-11-03 rules: name typed twice, banned numbers, per currency
+      // the 2026-11-03 rules: banned numbers, per currency (the typed-twice
+      // refusal is the pre-2026-11-16 backend's, kept for deploy skew)
       'The two names do not match. Type the same name twice.',
       'This name is already linked to another Polycards account. If you are a different person with the same name, contact support.',
       'This bank account cannot be used on Polycards.',
       'Your Polycards account already has a bank account for this currency. It cannot be changed.',
       "Your Polycards account already has a Touch 'n Go account. It cannot be changed.",
-      'Use the same account holder name as your saved bank account. All bank accounts on one Polycards account must be in one name. If your banks spell your name differently, contact support.',
+      // the 2026-11-16 rule: a bank is saved in the real name
+      'Your saved bank account is in another name than your real name. All bank accounts on one Polycards account must be in one name. Contact support.',
+      'Bank accounts are paid to your real name, and there is none on your account yet. Add your real name in Settings first. If you cannot, contact support.',
+      'Your real name on file is not in English letters, so a bank account cannot be paid to it. Contact support to correct it to the name your bank shows.',
       'A saved bank account cannot be removed or changed.',
       // gateway-withdrawal.ts startWithdrawal / withdrawalDetailsError
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',

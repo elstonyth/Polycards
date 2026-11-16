@@ -58,7 +58,10 @@ import {
   HOLDER_NAME_CLEARED_KEY,
   liftedPayoutBans,
   withLiftedPayoutBan,
+  holderMatchKey,
+  holderNameInvalid,
   holderNameKey,
+  normalizeHolderName,
   withClearedHolderName,
   type SavedBankAccount,
 } from './saved-accounts';
@@ -66,6 +69,7 @@ import { FRAME_LEVELS } from './avatar-frames';
 import { findBank, savedAccountSlot } from './banks';
 import {
   nameStanding,
+  namedCustomerIds,
   numberStanding,
   spellings,
   type NameStanding,
@@ -6738,6 +6742,17 @@ class PacksModuleService extends MedusaService({
   // whatever is on file; state + audit share one transaction, like
   // setAccountDisabled — an unaudited identity change is not an acceptable
   // partial failure.
+  //
+  // One name per account (owner, 2026-11-16): a saved bank's holder IS the
+  // real name, so the correction carries to every saved bank (never a wallet)
+  // whose holder keys as the OLD real name (holderMatchKey), in this same
+  // transaction and audit row. A bank in any other name is left as it is. A
+  // name not in English letters is refused while a bank would carry it.
+  //
+  // Lock order: `metadata:` first, then `credit:`, as liftPermanentBan takes
+  // them, so the two can never deadlock. mutateCustomerMetadata below re-takes
+  // the metadata lock this transaction already holds, so it never waits while
+  // `credit:` is held.
   @InjectTransactionManager()
   async adminSetRealName(
     input: {
@@ -6748,12 +6763,53 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${input.customerId}`,
+    ]);
     await lockCredit(sharedContext, input.customerId);
     const [existing] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
       { take: 1 },
       sharedContext,
     );
+    const oldKey = existing?.real_name ? holderMatchKey(existing.real_name) : '';
+    const holder = normalizeHolderName(input.realName);
+    // Bank name and last 4 beside each holder, like the other saved-bank audits.
+    let carried: { bank: string; last4: string; before: string }[] = [];
+    if (oldKey) {
+      await this.mutateCustomerMetadata(
+        {
+          customerId: input.customerId,
+          mutate: (current) => {
+            const accounts = parseSavedBankAccounts(current.bank_accounts);
+            const inOldName = (a: SavedBankAccount) =>
+              !findBank(a.bankCode)?.wallet &&
+              a.accountHolderName !== holder &&
+              holderMatchKey(a.accountHolderName) === oldKey;
+            carried = accounts.filter(inOldName).map((a) => ({
+              bank: a.bankName,
+              last4: a.accountNumber.slice(-4),
+              before: a.accountHolderName,
+            }));
+            if (carried.length === 0) return null;
+            if (holderNameInvalid(holder)) {
+              throw new MedusaError(
+                MedusaError.Types.NOT_ALLOWED,
+                'A saved bank account carries the real name, so it must be in English letters as the bank shows it.',
+              );
+            }
+            return {
+              ...current,
+              bank_accounts: accounts.map((a) =>
+                inOldName(a) ? { ...a, accountHolderName: holder } : a,
+              ),
+            };
+          },
+        },
+        sharedContext,
+      );
+    }
     const data = { real_name: input.realName, real_name_set_at: new Date() };
     if (existing) {
       await this.updateCustomerAccountStates(
@@ -6772,8 +6828,30 @@ class PacksModuleService extends MedusaService({
         entity_type: 'customer',
         entity_id: input.customerId,
         action: 'set_real_name',
-        before: { real_name: existing?.real_name ?? null },
-        after: { real_name: input.realName },
+        before: {
+          real_name: existing?.real_name ?? null,
+          ...(carried.length > 0
+            ? {
+                bank_holders: carried.map(({ bank, last4, before }) => ({
+                  bank,
+                  last4,
+                  holder: before,
+                })),
+              }
+            : {}),
+        },
+        after: {
+          real_name: input.realName,
+          ...(carried.length > 0
+            ? {
+                bank_holders: carried.map(({ bank, last4 }) => ({
+                  bank,
+                  last4,
+                  holder,
+                })),
+              }
+            : {}),
+        },
         reason: input.reason,
       },
       sharedContext,
@@ -10714,6 +10792,21 @@ class PacksModuleService extends MedusaService({
         sharedContext.manager) as unknown as LedgerSqlManager,
       customerId,
       holderName,
+    );
+  }
+
+  // Admin lookup by any of a player's names (namedCustomerIds).
+  @InjectManager()
+  async findCustomerIdsByName(
+    name: string,
+    limit: number,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    return await namedCustomerIds(
+      (sharedContext.transactionManager ??
+        sharedContext.manager) as unknown as LedgerSqlManager,
+      name,
+      limit,
     );
   }
 

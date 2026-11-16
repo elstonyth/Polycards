@@ -76,6 +76,7 @@ const standing = (
 });
 
 const packs = {
+  getVerificationState: jest.fn(),
   payoutNumberStanding: jest.fn(),
   createAdminActionAudits: jest.fn(),
   removeSavedBankAccount: jest.fn(),
@@ -114,6 +115,10 @@ const heldBy = (customerId: string, verified = false) =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+  packs.getVerificationState.mockResolvedValue({
+    phoneVerified: true,
+    realName: ' Test Holder ',
+  });
   packs.payoutNumberStanding.mockResolvedValue(standing());
   packs.createAdminActionAudits.mockResolvedValue(undefined);
   customers.retrieveCustomer.mockResolvedValue({
@@ -343,7 +348,6 @@ describe('POST bank-accounts/add', () => {
   const body = (over: Record<string, unknown> = {}) => ({
     bank_code: 'MBBEMYKL',
     account_number: '512345678901',
-    account_holder_name: ' Test Holder ',
     reason: 'owner proved it',
     ...over,
   });
@@ -378,6 +382,58 @@ describe('POST bank-accounts/add', () => {
     expect(res.json).toHaveBeenCalledWith({ added: true });
     const sent = JSON.stringify(notifications.createNotifications.mock.calls);
     expect(sent).not.toContain('512345678901');
+  });
+
+  // One name per account (owner, 2026-11-16): support adds in the real name
+  // only, and corrects the real name first to fix a spelling.
+  it('adds in the real name, never a typed holder name', async () => {
+    await ADD(
+      mkReq(body({ account_holder_name: 'Someone Else' })),
+      mkRes() as never,
+    );
+    expect(packs.getVerificationState).toHaveBeenCalledWith('cus_1');
+    expect(packs.addSavedBankAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: expect.objectContaining({ accountHolderName: 'Test Holder' }),
+      }),
+    );
+  });
+
+  it('refuses with no real name on file, or one not in English letters', async () => {
+    packs.getVerificationState.mockResolvedValue({
+      phoneVerified: true,
+      realName: null,
+    });
+    await expect(ADD(mkReq(body()), mkRes() as never)).rejects.toThrow(
+      /no real name on file/,
+    );
+    packs.getVerificationState.mockResolvedValue({
+      phoneVerified: true,
+      realName: '陈大文',
+    });
+    await expect(ADD(mkReq(body()), mkRes() as never)).rejects.toThrow(
+      /not in English letters.*Correct the real name first/,
+    );
+    expect(packs.payoutNumberStanding).not.toHaveBeenCalled();
+    expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
+  });
+
+  it('a wallet needs no real name', async () => {
+    packs.getVerificationState.mockResolvedValue({
+      phoneVerified: true,
+      realName: null,
+    });
+    await ADD(
+      mkReq(
+        body({
+          bank_code: 'USDTTRC20',
+          account_number: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        }),
+      ),
+      mkRes() as never,
+    );
+    expect(packs.getVerificationState).not.toHaveBeenCalled();
+    expect(packs.addSavedBankAccount).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a banned number, asked for this player', async () => {

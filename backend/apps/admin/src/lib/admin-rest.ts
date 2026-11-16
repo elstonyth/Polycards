@@ -2100,12 +2100,12 @@ export const setHolderNameCleared = (
     { holder_name: holderName, cleared, reason },
   );
 
+/** The holder is the player's real name (owner, 2026-11-16): never sent. */
 export const addSavedBankAccount = (
   id: string,
   details: {
     bank_code: string;
     account_number: string;
-    account_holder_name: string;
     reason: string;
   },
 ) =>

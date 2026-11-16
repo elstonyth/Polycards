@@ -443,22 +443,18 @@ export async function fetchSavedBankAccounts(): Promise<SavedBankAccountsResult>
 }
 
 /** Save a payout account for reuse. The backend applies the same validation
- *  as the payout submit, so a saved account is always a submittable one. */
+ *  as the payout submit, so a saved account is always a submittable one. No
+ *  holder name: a bank is saved in the account's real name (owner, 2026-11-16). */
 export async function addSavedBankAccount(input: {
   bankCode: string;
   bankName: string;
   accountNumber: string;
-  accountHolderName: string;
-  /** The holder name typed a second time; the backend refuses a mismatch. */
-  accountHolderNameConfirm: string;
 }): Promise<SavedBankAccountsResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (
     typeof input.bankCode !== 'string' ||
     typeof input.bankName !== 'string' ||
-    typeof input.accountNumber !== 'string' ||
-    typeof input.accountHolderName !== 'string' ||
-    typeof input.accountHolderNameConfirm !== 'string'
+    typeof input.accountNumber !== 'string'
   ) {
     return { ok: false, error: 'Fill in every bank field.' };
   }
@@ -469,8 +465,6 @@ export async function addSavedBankAccount(input: {
       bank_code: input.bankCode,
       bank_name: input.bankName,
       account_number: input.accountNumber,
-      account_holder_name: input.accountHolderName,
-      account_holder_name_confirm: input.accountHolderNameConfirm,
     },
   );
   if (!r.ok) return vaultFailure(r, LOGIN_FIRST);

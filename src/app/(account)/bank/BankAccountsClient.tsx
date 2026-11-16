@@ -21,7 +21,8 @@ import { cn } from '@/lib/utils';
 // from here, so this page is the only place a payout destination is chosen. One
 // account per currency, Touch 'n Go apart from the RM bank, and once saved it
 // cannot be changed (ADR 0015, owner 2026-11-03), so the form says so before the
-// save. A bank's holder name is typed twice and both must match. The backend
+// save. A bank is paid to the account's real name, shown read-only and never
+// typed (owner, 2026-11-16): support corrects a wrong one. The backend
 // validates with the payout-submit rules; existing accounts are rechecked when listed and used.
 //
 // A newly added account may have to wait out a cooling-off window before it can
@@ -32,10 +33,6 @@ import { cn } from '@/lib/utils';
 
 /** Touch 'n Go eWallet's id (backend banks.ts TNG_BANK_ID). */
 const TNG_BANK_ID = 'TNGMY';
-
-/** A name compared the way a person reads it: case and spacing ignored. */
-const nameKey = (name: string) =>
-  name.replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** Show only the tail on the list — enough to recognise, nothing to shoulder-surf. */
 const maskAccount = (accountNumber: string) =>
@@ -69,7 +66,14 @@ function payoutStatus(
     : { label: 'Ready for withdrawals', ready: true };
 }
 
-export function BankAccountsClient() {
+/** `realName`: the account's real name, which every bank is paid to; `null`
+ *  when none is on file, `undefined` when it could not be read (the server
+ *  decides then). */
+export function BankAccountsClient({
+  realName,
+}: {
+  realName?: string | null;
+}) {
   const [accounts, setAccounts] = useState<SavedBankAccount[] | null>(null);
   const [banks, setBanks] = useState<WithdrawBank[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,8 +83,6 @@ export function BankAccountsClient() {
   const [country, setCountry] = useState('');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
-  const [holderName, setHolderName] = useState('');
-  const [holderConfirm, setHolderConfirm] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -154,28 +156,11 @@ export function BankAccountsClient() {
   const numberInvalid =
     selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
-  // One name on every bank (backend saved-accounts route): a new bank or
-  // Touch 'n Go carries the holder name already saved, so the form names it.
-  const savedName = (accounts ?? []).find(
-    (a) => !a.wallet && a.accountHolderName,
-  )?.accountHolderName;
-  const namesMatch = nameKey(holderName) === nameKey(holderConfirm);
-  // Not while the second name is still being typed (a prefix of the first).
-  const confirmMismatch =
-    holderConfirm.trim() !== '' &&
-    !namesMatch &&
-    !nameKey(holderName).startsWith(nameKey(holderConfirm));
-  const resetNames = () => {
-    setHolderName('');
-    setHolderConfirm('');
-  };
+  // A bank needs a real name to be paid to; a wallet has no holder.
   const formValid =
     selectedBank !== undefined &&
     accountNumberValid &&
-    (wallet !== undefined ||
-      (namesMatch &&
-        holderName.trim().length >= 2 &&
-        holderName.trim().length <= 120));
+    (wallet !== undefined || realName !== null);
 
   async function submitAdd() {
     if (submitting || !formValid) return;
@@ -186,8 +171,6 @@ export function BankAccountsClient() {
         bankCode,
         bankName: selectedBank.bankName,
         accountNumber,
-        accountHolderName: wallet ? '' : holderName.trim(),
-        accountHolderNameConfirm: wallet ? '' : holderConfirm.trim(),
       });
       if (!res.ok) {
         setError(res.error);
@@ -198,7 +181,6 @@ export function BankAccountsClient() {
       setCountry('');
       setBankCode('');
       setAccountNumber('');
-      resetNames();
     } catch {
       // The action catches its own failures — this is for the action CALL
       // itself failing (network), which would otherwise leave silence.
@@ -280,7 +262,6 @@ export function BankAccountsClient() {
               setCountry(next);
               setBankCode('');
               setAccountNumber('');
-              resetNames();
               setError(null);
             }}
             className="mb-3"
@@ -295,7 +276,6 @@ export function BankAccountsClient() {
                 // Digits for a bank, an address for a wallet: never carry one
                 // over as the other.
                 setAccountNumber('');
-                resetNames();
                 setError(null);
               }}
               disabled={!shown}
@@ -401,45 +381,17 @@ export function BankAccountsClient() {
                 {numberHint}
               </p>
 
-              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-                Account holder name
-                <input
-                  type="text"
-                  value={holderName}
-                  onChange={(e) => setHolderName(e.target.value)}
-                  aria-label="Account holder name"
-                  placeholder="Exactly as the bank has it"
-                  aria-describedby="holder-name-warning"
-                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
-                />
-              </label>
-              <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-                Confirm account holder name
-                <input
-                  type="text"
-                  value={holderConfirm}
-                  onChange={(e) => setHolderConfirm(e.target.value)}
-                  aria-label="Confirm account holder name"
-                  autoComplete="off"
-                  aria-invalid={confirmMismatch}
-                  aria-describedby="holder-name-warning"
-                  placeholder="Type the same name again"
-                  className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
-                />
-              </label>
-              <p
-                id="holder-name-warning"
-                aria-live="polite"
-                className={cn(
-                  'mt-1.5 text-[12px] leading-snug',
-                  confirmMismatch ? 'text-red-300' : 'text-amber-300/80',
-                )}
-              >
-                {confirmMismatch
-                  ? 'The two names do not match. Type the same name twice.'
-                  : savedName
-                    ? `Use the same name as your saved bank account: ${savedName}. It must also match this bank exactly, or the withdrawal will not be paid. If your banks spell your name differently, contact support.`
-                    : 'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.'}
+              {/* The payee: the account's real name, read-only. */}
+              <p className="mt-3 text-[13px] font-semibold text-neutral-300">
+                Paid to:{' '}
+                <span className="text-white">
+                  {realName ?? 'the real name on your account'}
+                </span>
+              </p>
+              <p className="mt-1.5 text-[12px] leading-snug text-amber-300/80">
+                {realName === null
+                  ? 'Bank accounts are paid to your real name, and there is none on your account yet. Add it in Settings first.'
+                  : 'The bank account must be in this name, or the withdrawal will not be paid. If the name is wrong, contact support.'}
               </p>
             </>
           )}
@@ -461,10 +413,7 @@ export function BankAccountsClient() {
             </Pill>
             <button
               type="button"
-              onClick={() => {
-                setAdding(false);
-                resetNames();
-              }}
+              onClick={() => setAdding(false)}
               className={cn(pillVariants({ variant: 'secondary', size: 'lg' }))}
             >
               Cancel
