@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Decides which DigitalOcean apps a push to master must redeploy.
 //
-// Used by .github/workflows/deploy.yml. The rule errs toward deploying: an
+// Used by .github/workflows/deploy.yml, and by ci.yml's `changes` job to decide
+// whether a PR needs the storefront checks. The rule errs toward deploying: an
 // extra deploy is harmless, a missed one ships stale code. So the storefront
 // is a deny-list (everything deploys except files its build never reads), and
 // any doubt (no diff, unknown event) deploys both apps.
