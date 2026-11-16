@@ -18,6 +18,9 @@ name: Deploy
 # for ci.yml's `ci-ok` check (.github/scripts/ci-gate.mjs). App Platform builds
 # the branch tip rather than a given commit, so each deploy job also re-checks
 # that master still points at this commit right before it starts a deploy.
+# After a deployment goes ACTIVE, the job checks that every component runs
+# this commit and that the public health URL answers, and posts to Discord
+# (secret DISCORD_WEBHOOK, optional) when any deploy step fails.
 
 on:
   push:
@@ -126,9 +129,23 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Deploy and wait
+        id: deploy
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: bash .github/scripts/do-deploy.sh polycards-backend
+      # Only when this deployment went live: a skipped or superseded one is
+      # checked by the run that replaced it.
+      - name: Verify live commit and health
+        if: steps.deploy.outputs.active == 'true'
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: bash .github/scripts/verify-deploy.sh polycards-backend https://admin.polycards.gg/health "$EXPECTED_SHA"
+      - name: Alert Discord
+        if: failure()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          MESSAGE: "Deploy of polycards-backend at ${{ github.sha }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: bash .github/scripts/notify-discord.sh "$MESSAGE"
 
   storefront:
     name: deploy storefront
@@ -149,6 +166,20 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Deploy and wait
+        id: deploy
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: bash .github/scripts/do-deploy.sh polycards-storefront
+      # Only when this deployment went live: a skipped or superseded one is
+      # checked by the run that replaced it.
+      - name: Verify live commit and health
+        if: steps.deploy.outputs.active == 'true'
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: bash .github/scripts/verify-deploy.sh polycards-storefront https://polycards.gg/healthz "$EXPECTED_SHA"
+      - name: Alert Discord
+        if: failure()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          MESSAGE: "Deploy of polycards-storefront at ${{ github.sha }} failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: bash .github/scripts/notify-discord.sh "$MESSAGE"
