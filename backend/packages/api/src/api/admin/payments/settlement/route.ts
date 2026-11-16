@@ -10,6 +10,7 @@ import {
 import { paymentCurrencyParam } from '../../../utils/payment-currency';
 import { MedusaError } from '@medusajs/framework/utils';
 import { parseScope } from '../../../../modules/packs/real-customers';
+import type { SettlementReport } from './types';
 
 // GET /admin/payments/settlement — the gateway's weekly/monthly result, read
 // from OUR database (money-path-accuracy-audit-2026-08-17 B4). Calendar MYT
@@ -55,7 +56,7 @@ export function parsePeriods(raw: unknown): number {
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<SettlementReport>,
 ): Promise<void> {
   const packs = resolvePacks<GatewayReports>(req.scope);
 

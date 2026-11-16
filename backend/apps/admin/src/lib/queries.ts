@@ -276,7 +276,7 @@ export const invalidateMoneyViews = (qc: QueryClient) =>
   Promise.all([
     qc.invalidateQueries({ queryKey: qk.profitReportKey }),
     qc.invalidateQueries({ queryKey: ['admin', 'stats'] }),
-    qc.invalidateQueries({ queryKey: ['admin', 'gateway-settlement'] }),
+    qc.invalidateQueries({ queryKey: qk.settlementKey }),
     // Every player's money card (qk.customerMoney), whichever player moved.
     qc.invalidateQueries({
       predicate: (q) =>
@@ -451,8 +451,7 @@ export const useAcknowledgeFinding = () => {
     onSuccess: () => toast.success(t('settlement.acknowledgedToast')),
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     // Also after a refusal: a 409 means the note changed, so show the new one.
-    onSettled: () =>
-      qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.gatewayAuditKey }),
   });
 };
 
@@ -465,8 +464,7 @@ export const useCreditDeposit = () => {
     mutationFn: creditGatewayDeposit,
     onSuccess: () => toast.success(t('settlement.creditedToast')),
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-    onSettled: () =>
-      qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.gatewayAuditKey }),
   });
 };
 

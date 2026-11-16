@@ -23,6 +23,8 @@ import { reqReason } from '../../rewards-settings/validate';
 import { paymentCurrencyParam } from '../../../utils/payment-currency';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
+import { wireDateOrNull } from '../../../utils/wire-date';
+import type { PaymentFxState } from './types';
 
 // GET/POST /admin/payments/fx?currency=SGD — the conversion behind a
 // regional gateway (payment-fx.ts), one currency per call (default SGD; any
@@ -91,7 +93,7 @@ async function earnings(
 
 export async function GET(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<PaymentFxState>,
 ): Promise<void> {
   const currency = currencyOf(
     (req.body as Record<string, unknown> | undefined)?.currency ??
@@ -115,7 +117,7 @@ export async function GET(
     },
     feed_rate: row && Number(row.rate) > 0 ? Number(row.rate) : null,
     source: row?.source ?? null,
-    fetched_at: row?.fetched_at ?? null,
+    fetched_at: wireDateOrNull(row?.fetched_at),
     manual_override: row?.manual_override ?? false,
     manual_rate: row?.manual_rate != null ? Number(row.manual_rate) : null,
     fee_enabled: row?.fee_enabled ?? null,
@@ -141,7 +143,7 @@ const number = (value: unknown, field: string): number => {
 
 export async function POST(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<PaymentFxState>,
 ): Promise<void> {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const currency = currencyOf(body.currency);

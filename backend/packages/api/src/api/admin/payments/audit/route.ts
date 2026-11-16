@@ -10,6 +10,8 @@ import {
   rowGateway,
 } from '../../../../modules/packs/gateway';
 import { toOptionalMoney } from '../../../../modules/packs/money';
+import { wireDateOrNull } from '../../../utils/wire-date';
+import type { GatewayAudit } from './types';
 import {
   paymentCurrencyParam,
   railGateway,
@@ -27,7 +29,7 @@ const FINDINGS_LIMIT = 100;
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<GatewayAudit>,
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   const packs = resolvePacks<GatewayReports>(req.scope);
@@ -47,7 +49,7 @@ export async function GET(
   let retiredTotal = 0;
   // Acknowledged on Settlement: listed, greyed, never in the badge.
   let acknowledgedTotal = totals.acknowledged;
-  const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
+  const history: GatewayAudit['history'] = [];
   // Retired gateways (globepay) were all RM.
   const others = [
     ...gatewaysFor(currency),
@@ -105,8 +107,9 @@ export async function GET(
       amount:
         toOptionalMoney(d.amount_settled) ??
         toOptionalMoney(d.amount_requested),
-      note: d.audit_note,
-      audited_at: d.audited_at,
+      // Listed only where audit_note is set (the query's filter).
+      note: d.audit_note ?? '',
+      audited_at: wireDateOrNull(d.audited_at),
       acknowledged: acknowledgement(d),
     })),
     ...withdrawals.map((w) => ({
@@ -118,8 +121,9 @@ export async function GET(
       customer_id: w.customer_id,
       status: w.status,
       amount: toOptionalMoney(w.amount),
-      note: w.audit_note,
-      audited_at: w.audited_at,
+      // Listed only where audit_note is set (the query's filter).
+      note: w.audit_note ?? '',
+      audited_at: wireDateOrNull(w.audited_at),
       acknowledged: acknowledgement(w),
     })),
   ].sort(
@@ -173,14 +177,14 @@ const acknowledgement = (r: {
   r.audit_ack_note !== null && r.audit_ack_note === r.audit_note
     ? {
         by: r.audit_ack_by,
-        at: r.audit_ack_at,
+        at: wireDateOrNull(r.audit_ack_at),
         reason: null as string | null,
       }
     : null;
 
 const isRefunded = (f: { kind: string; status: string }) =>
   f.kind === 'withdrawal' && f.status === 'failed';
-// A Date from the model, by time: as a string it starts with the weekday.
+// By time, whether it is still a Date or already the ISO string sent.
 const auditedMs = (at: Date | string | null | undefined) =>
   at ? new Date(at).getTime() : 0;
 

@@ -21,6 +21,7 @@ import { LEDGER_CURRENCY, payoutCost, toOptionalMoney } from './money';
 import type {
   DepositDetail,
   MerchantBalance,
+  PaymentGateway,
   SubmitDepositInput,
   SubmitDepositResult,
   SubmitWithdrawalInput,
@@ -61,13 +62,9 @@ export type {
 // way, so they live at src/api/hooks/<gateway>/. Adding a gateway = a client
 // file, a hooks folder, an entry in GATEWAYS and an adapter below.
 
-// 'fake' is the in-process adapter the specs drive (fake-gateway.ts). It is
-// in the union so the compiler forces a registry entry AND an adapter for it
-// like any other gateway, and it is unreachable outside NODE_ENV=test: see
-// testOnly() below, which gates isPaymentGateway (and therefore
-// gatewayConfigFor, resolveActiveGateway and the admin switch), plus the
-// registry entry's own `configured` / `configFromEnv`.
-export type PaymentGateway = 'tgpay' | 'the7pay' | 'a3pay' | 'gp365' | 'fake';
+// The union lives in gateway-types.ts (no imports), so the admin can import
+// it without pulling this file in (ADR 0017).
+export type { PaymentGateway };
 
 export { LEDGER_CURRENCY };
 

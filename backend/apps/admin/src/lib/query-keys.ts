@@ -65,8 +65,14 @@ export const qk = {
     ['admin', 'profit-report', 'pnl', range, from, to, scope] as const,
   gatewayBalance: (currency: string) =>
     ['admin', 'gateway-balance', currency] as const,
+  // Prefixes: invalidating one refreshes every currency / period.
+  settlementKey: ['admin', 'gateway-settlement'] as const,
+  gatewayAuditKey: ['admin', 'gateway-audit'] as const,
   gatewayAudit: (currency: string) =>
     ['admin', 'gateway-audit', currency] as const,
+  // Kept without the 'admin' prefix it has always had, so no invalidation
+  // reaches it that did not before.
+  paymentFx: (currency: string) => ['payment-fx', currency] as const,
   moneyIntegrity: ['admin', 'money-integrity'] as const,
   paymentGateway: ['admin', 'payment-gateway'] as const,
   withdrawalControls: ['admin', 'withdrawal-controls'] as const,

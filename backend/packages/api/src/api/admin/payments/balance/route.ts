@@ -1,4 +1,5 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import type { GatewayBalance } from './types';
 import {
   checkBalance,
   gatewayConfigFor,
@@ -34,7 +35,7 @@ import {
 // audit panel used to read the same wallet a second time.
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<GatewayBalance>,
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   const currency = paymentCurrencyParam(req.query.currency) ?? LEDGER_CURRENCY;

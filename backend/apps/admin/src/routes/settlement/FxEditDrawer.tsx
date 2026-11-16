@@ -12,7 +12,8 @@ import {
 } from '@medusajs/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { setPaymentFx, type PaymentFxState } from '../../lib/admin-rest';
-import { floorCents, fmtRate, fxKey, round6, usePaymentFx } from './fx-shared';
+import { qk } from '../../lib/query-keys';
+import { floorCents, fmtRate, round6, usePaymentFx } from './fx-shared';
 
 type FxSave = ReturnType<typeof useSaveFx>;
 
@@ -22,7 +23,7 @@ const useSaveFx = (currency: string) => {
   return useMutation({
     mutationFn: setPaymentFx,
     onSuccess: (next) => {
-      qc.setQueryData(fxKey(currency), next);
+      qc.setQueryData(qk.paymentFx(currency), next);
       toast.success(t('settlement.fxSaved', { currency }));
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),

@@ -52,6 +52,7 @@ const report = (
 ): SettlementReport => ({
   granularity,
   currency: null,
+  scope: 'all',
   since,
   periods_requested,
   periods,
@@ -399,6 +400,7 @@ describe('doublePayRisks', () => {
     amount: 512.4,
     note: 'gateway still reports pending for a payout we refunded',
     audited_at: null,
+    acknowledged: null,
     ...o,
   });
 

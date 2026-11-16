@@ -4,6 +4,7 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { creditDepositByAdmin } from '../../../../../../modules/packs/gateway-deposit';
+import type { CreditDepositResult } from './types';
 
 type Body = { reason?: unknown };
 
@@ -15,7 +16,7 @@ type Body = { reason?: unknown };
  */
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
-  res: MedusaResponse,
+  res: MedusaResponse<CreditDepositResult>,
 ): Promise<void> {
   const reason =
     typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';

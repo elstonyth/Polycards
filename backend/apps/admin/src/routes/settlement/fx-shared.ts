@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getPaymentFx } from '../../lib/admin-rest';
+import { qk } from '../../lib/query-keys';
 
 // A regional rail's conversion (A3Pay: SGD): the market rate into RM and OUR
 // fee on it, a percent of the market rate each way behind an on/off switch.
@@ -9,11 +10,9 @@ import { getPaymentFx } from '../../lib/admin-rest';
 // = both at the market rate. Every payment locks the rate it was quoted at,
 // so a change only affects payments started AFTER it is saved.
 
-export const fxKey = (currency: string) => ['payment-fx', currency] as const;
-
 export const usePaymentFx = (currency: string) =>
   useQuery({
-    queryKey: fxKey(currency),
+    queryKey: qk.paymentFx(currency),
     queryFn: () => getPaymentFx(currency),
   });
 
