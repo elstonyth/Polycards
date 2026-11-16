@@ -64,10 +64,61 @@ The script injects secrets, writes a resolved spec to gitignored
 > Rules: `.github/scripts/deploy-targets.mjs`. Redeploy by hand from
 > Actions → Deploy → Run workflow **on the `master` branch** (other branches
 > skip the deploy jobs), target `both`, `backend` or `storefront`. It
-> authenticates with the `DIGITALOCEAN_ACCESS_TOKEN` repo secret (scopes
+> authenticates with the `DIGITALOCEAN_ACCESS_TOKEN` secret (scopes
 > `app:read` + `app:update`, expires 2027-11-16; renew it before then). Spec
 > changes (env, sizes) still reach the live app only via `do-apply.ps1`
 > (doctl), which redeploys that app.
+
+### Deploy gates
+
+- **CI first.** The `wait for CI` job polls the `ci-ok` check run on the
+  pushed commit (`.github/scripts/ci-gate.mjs`, self-check `--test`) for up
+  to 60 minutes. Only `success` deploys. A failed, skipped or timed-out
+  `ci-ok`, or none at all (a `[skip ci]` push), fails the run and nothing
+  deploys. A `ci-ok` cancelled because a newer push replaced it is skipped
+  quietly: that push's run ships the commit. After fixing or re-running CI,
+  re-run the Deploy run's failed jobs. The gate relies on `ci-ok` concluding
+  `success` on every green master push, including CI's master fast path.
+- **Branch tip check.** App Platform builds the tip of `master`, not a given
+  commit, so each deploy job re-reads the master head right before it starts
+  a deployment and skips when master has moved on.
+- **After ACTIVE.** `.github/scripts/verify-deploy.sh` checks that every
+  component runs the pushed commit, then that
+  `https://admin.polycards.gg/health` or `https://polycards.gg/healthz`
+  answers 200. Any failed deploy step posts the run link to Discord through
+  the `DISCORD_WEBHOOK` secret; without the secret the alert step does
+  nothing.
+- **`production` environment.** The plan, deploy and rollback jobs run in the
+  GitHub `production` environment (created automatically by their first run).
+
+### Owner setup for the `production` environment
+
+GitHub can't do these for the agent; run them once as the repo owner, in
+this order. Until step 3, the jobs keep reading the repo-level secret, so
+nothing breaks in between.
+
+1. Restrict the environment to `master` (Settings > Environments >
+   production > Deployment branches and tags > Selected branches and tags >
+   add `master`), or:
+
+   ```bash
+   gh api -X PUT repos/elstonyth/Polycards/environments/production      -F 'deployment_branch_policy[protected_branches]=false'      -F 'deployment_branch_policy[custom_branch_policies]=true'
+   gh api -X POST repos/elstonyth/Polycards/environments/production/deployment-branch-policies      -f name=master -f type=branch
+   ```
+
+2. Add the token and the webhook as environment secrets (each prompts for
+   the value; paste it, never put it in the command line):
+
+   ```bash
+   gh secret set DIGITALOCEAN_ACCESS_TOKEN --env production
+   gh secret set DISCORD_WEBHOOK --env production
+   ```
+
+3. After one green Deploy run on the environment secret, delete the repo-level
+   copy: `gh secret delete DIGITALOCEAN_ACCESS_TOKEN`.
+
+With the branch policy on, a Deploy or Rollback run dispatched from any other
+branch fails at its first job instead of skipping.
 
 ## Admin user
 

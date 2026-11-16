@@ -45,6 +45,12 @@ jobs:
     name: plan
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Reads the DigitalOcean token for the live commits, so it needs the
+    # environment once the token lives there; deployment: false keeps a plan
+    # from showing up as a production deployment.
+    environment:
+      name: production
+      deployment: false
     # secrets can't appear in a step `if`, so expose only whether one is set.
     env:
       HAS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN != '' }}
@@ -109,13 +115,16 @@ jobs:
   # concurrency group, so it can't displace a pending deploy of that app.
   # cancel-in-progress stays false: it would only cancel the GitHub job, and a
   # DigitalOcean deploy must never be cancelled. The ref check keeps a manual
-  # run from a branch away from the token.
+  # run from a branch away from the token, and the `production` environment
+  # (master-only branch policy, holds DIGITALOCEAN_ACCESS_TOKEN and
+  # DISCORD_WEBHOOK; see .do/README.md) enforces the same on GitHub's side.
   backend:
     name: deploy backend
     needs: [plan, gate]
     if: needs.plan.outputs.backend == 'true' && needs.gate.outputs.deploy == 'true' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: production
     concurrency:
       group: deploy-backend
       cancel-in-progress: false
@@ -153,6 +162,7 @@ jobs:
     if: needs.plan.outputs.storefront == 'true' && needs.gate.outputs.deploy == 'true' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: production
     concurrency:
       group: deploy-storefront
       cancel-in-progress: false
