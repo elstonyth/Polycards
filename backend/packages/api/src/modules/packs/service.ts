@@ -10823,9 +10823,10 @@ class PacksModuleService extends MedusaService({
   //
   // Key namespace is `metadata:`, NOT `credit:`. The credit ledger's invariant
   // (at most one `credit:` advisory lock per transaction, ever) is untouched by
-  // a different namespace, but nothing
-  // here may be composed into a transaction that already holds a `credit:`
-  // lock.
+  // a different namespace. The order rule: never take `metadata:` after
+  // `credit:` in one transaction (liftPermanentBan and adminSetRealName take
+  // `metadata:` first). Re-entering a `metadata:` lock the transaction already
+  // holds is fine: an advisory lock is re-entrant within its session.
   //
   // The lock, the read and the write are all raw SQL on the SAME `em`, i.e. the
   // SAME pooled connection. This is load-bearing, not a style choice: driving
@@ -15783,8 +15784,8 @@ class PacksModuleService extends MedusaService({
   // Operator VIP reset: restart a customer at L1 with zero VIP spend, then
   // unequip their frame — frames unlock off highest_level_ever, and the
   // leaderboard, profile and pullers readers do not re-check it. Two
-  // transactions on purpose, so this takes no sharedContext:
-  // mutateCustomerMetadata must never run inside a credit-locked one. Ladder
+  // transactions on purpose, so this takes no sharedContext: resetVipState
+  // holds `credit:`, and `metadata:` is never taken after `credit:`. Ladder
   // grants already given stay; re-crossing a rung grants nothing again, so a
   // reset is not a reward farm.
   async resetVipLevel(customerId: string): Promise<void> {
