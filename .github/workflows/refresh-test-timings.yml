@@ -1,0 +1,141 @@
+# Keeps the jest shard split balanced. duration-sequencer.js splits the
+# backend-unit and integration-http shards by test-timings.json; a stale file
+# (new specs land at the median, slow specs drift) lets the slowest shard
+# set CI's wall time. Weekly, this re-reads the newest master CI run whose
+# backend shards actually ran and opens or updates ONE PR on a fixed branch.
+#
+# Token: PRs opened with GITHUB_TOKEN don't trigger CI, and this PR must pass
+# ci-ok like any other, so the push + PR use TIMINGS_PR_TOKEN (see the first
+# step for what to create). GITHUB_TOKEN only reads runs and logs.
+#
+# Coupling: refresh-test-timings.mjs parses job names "integration-http (N)"
+# and "backend-unit (N)" from ci.yml. Renaming those jobs breaks this
+# workflow (it fails with "no ... PASS lines").
+name: Refresh test timings
+
+on:
+  schedule:
+    - cron: '17 3 * * 1' # Mondays 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: CI run id to read (blank = newest master run whose backend shards ran)
+        required: false
+      dry_run:
+        description: Refresh and show the diff, but don't push or open a PR
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: refresh-test-timings
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read # gh run list / view --log
+    env:
+      GH_REPO: ${{ github.repository }}
+      BRANCH: chore/refresh-test-timings
+      TIMINGS: backend/packages/api/integration-tests/test-timings.json
+      DRY_RUN: ${{ inputs.dry_run == true }}
+    steps:
+      - name: Check TIMINGS_PR_TOKEN
+        if: env.DRY_RUN != 'true'
+        env:
+          TIMINGS_PR_TOKEN: ${{ secrets.TIMINGS_PR_TOKEN }}
+        run: |
+          if [ -z "$TIMINGS_PR_TOKEN" ]; then
+            echo "::error title=TIMINGS_PR_TOKEN is not set::Create a repository secret TIMINGS_PR_TOKEN (Settings > Secrets and variables > Actions) holding EITHER a fine-grained PAT with Repository access = only ${GITHUB_REPOSITORY} and permissions Contents: Read and write + Pull requests: Read and write (Metadata: Read is added automatically), OR a GitHub App installation token with contents: write + pull_requests: write on this repo only. GITHUB_TOKEN can't be used: PRs it opens don't trigger CI."
+            exit 1
+          fi
+
+      - name: Checkout master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: master
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 24
+
+      - name: Pick CI run
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          if [ -n "$INPUT_RUN_ID" ]; then
+            case "$INPUT_RUN_ID" in *[!0-9]*) echo "::error::run_id must be numeric"; exit 1 ;; esac
+            id=$INPUT_RUN_ID
+          else
+            # Most master runs are "success" with the backend jobs skipped
+            # (path-gated), so take the newest one where they actually ran.
+            id=
+            for c in $(gh run list --workflow ci.yml --branch master --event push --status success -L 50 --json databaseId -q '.[].databaseId'); do
+              ran=$(gh run view "$c" --json jobs -q '[.jobs[] | select(.conclusion == "success" and (.name | startswith("integration-http (")))] | length')
+              if [ "$ran" -gt 0 ]; then id=$c; break; fi
+            done
+            if [ -z "$id" ]; then
+              echo "::notice::No master CI run in the last 50 successful ones ran the backend shards; nothing to refresh."
+              exit 0
+            fi
+          fi
+          sha=$(gh run view "$id" --json headSha -q .headSha)
+          echo "Using CI run $id (master ${sha:0:9})"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh timings
+        if: steps.pick.outputs.id != ''
+        id: refresh
+        working-directory: backend/packages/api
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.pick.outputs.id }}
+        run: |
+          node integration-tests/refresh-test-timings.mjs "$RUN_ID"
+          if git diff --quiet -- integration-tests/test-timings.json; then
+            echo "::notice::test-timings.json is unchanged; no PR."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --stat -- integration-tests/test-timings.json
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push branch and open or update PR
+        if: steps.refresh.outputs.changed == 'true' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TIMINGS_PR_TOKEN }}
+          RUN_ID: ${{ steps.pick.outputs.id }}
+          RUN_SHA: ${{ steps.pick.outputs.sha }}
+        run: |
+          gh auth setup-git
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Bot-owned branch: rebuilt from current master every run, so the
+          # force-push is intended (one commit on top of master, never stale).
+          git switch -C "$BRANCH"
+          git commit -q -m "chore(ci): refresh test timings from CI run $RUN_ID" -- "$TIMINGS"
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+
+          body=$(cat <<EOF
+          Re-measured \`test-timings.json\` from CI run [$RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID) (master \`${RUN_SHA:0:9}\`), so \`duration-sequencer.js\` keeps the backend-unit and integration-http shards balanced.
+
+          Opened by the [Refresh test timings]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) workflow. Every run re-measures each spec, so small diffs are normal run-to-run noise. Merge when CI is green.
+          EOF
+          )
+          pr=$(gh pr list --head "$BRANCH" --base master --state open --json number -q '.[0].number')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --title "chore(ci): refresh test timings from CI run $RUN_ID" --body "$body"
+            echo "Updated PR #$pr"
+          else
+            gh pr create --base master --head "$BRANCH" --title "chore(ci): refresh test timings from CI run $RUN_ID" --body "$body"
+          fi
