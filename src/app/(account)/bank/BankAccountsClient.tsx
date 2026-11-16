@@ -34,6 +34,15 @@ import { cn } from '@/lib/utils';
 /** Touch 'n Go eWallet's id (backend banks.ts TNG_BANK_ID). */
 const TNG_BANK_ID = 'TNGMY';
 
+/** A real name no bank can be paid to: a letter of another script, or no
+ *  Latin letter. Only the plain case of the server's holderNameInvalid
+ *  (backend saved-accounts.ts), so the form never refuses a name the server
+ *  takes; the server has the last word. */
+const notInEnglishLetters = (name: string) => {
+  const n = name.normalize('NFKC');
+  return !/\p{Script=Latin}/u.test(n) || /(?!\p{Script=Latin})\p{L}/u.test(n);
+};
+
 /** Show only the tail on the list — enough to recognise, nothing to shoulder-surf. */
 const maskAccount = (accountNumber: string) =>
   `···· ${accountNumber.slice(-4)}`;
@@ -152,11 +161,14 @@ export function BankAccountsClient({ realName }: { realName?: string | null }) {
   const numberInvalid =
     selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
-  // A bank needs a real name to be paid to; a wallet has no holder.
+  // A bank needs a real name in English letters to be paid to; a wallet has
+  // no holder.
+  const realNameUnusable =
+    typeof realName === 'string' && notInEnglishLetters(realName);
   const formValid =
     selectedBank !== undefined &&
     accountNumberValid &&
-    (wallet !== undefined || realName !== null);
+    (wallet !== undefined || (realName !== null && !realNameUnusable));
 
   async function submitAdd() {
     if (submitting || !formValid) return;
@@ -387,7 +399,9 @@ export function BankAccountsClient({ realName }: { realName?: string | null }) {
               <p className="mt-1.5 text-[12px] leading-snug text-amber-300/80">
                 {realName === null
                   ? 'Bank accounts are paid to your real name, and there is none on your account yet. Add it in Settings first.'
-                  : 'The bank account must be in this name, or the withdrawal will not be paid. If the name is wrong, contact support.'}
+                  : realNameUnusable
+                    ? 'Your real name on file is not in English letters, so a bank account cannot be paid to it. Contact support to correct it to the name your bank shows.'
+                    : 'The bank account must be in this name, or the withdrawal will not be paid. If the name is wrong, contact support.'}
               </p>
             </>
           )}

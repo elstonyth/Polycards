@@ -545,6 +545,27 @@ describe('BankAccountsClient — paid to the real name', () => {
     expect(saveButton().disabled).toBe(true);
   });
 
+  it.each([['陈大文'], ['Иван Петров'], ['Таn Ah Kow']])(
+    'with the real name %j not in English letters, says so and keeps Save off',
+    async (name) => {
+      await ready(name);
+      expect(container.textContent).toContain(
+        'Your real name on file is not in English letters, so a bank account cannot be paid to it. Contact support to correct it to the name your bank shows.',
+      );
+      expect(saveButton().disabled).toBe(true);
+    },
+  );
+
+  // Only the plain case is checked here; the server has the last word, so the
+  // form must never refuse a name the server takes.
+  it.each([['Tan Ah Kow'], ['José Ñúñez'], ['Ｔａｎ Ah Kow'], ['𝐓𝐚𝐧 Ah Kow']])(
+    'keeps Save on for the real name %j',
+    async (name) => {
+      await ready(name);
+      expect(saveButton().disabled).toBe(false);
+    },
+  );
+
   it('when the real name could not be read, the server decides', async () => {
     await ready(undefined);
     expect(container.textContent).toContain(
@@ -554,7 +575,7 @@ describe('BankAccountsClient — paid to the real name', () => {
   });
 
   it('never names the verification provider', async () => {
-    for (const name of ['Test Customer', null]) {
+    for (const name of ['Test Customer', null, '陈大文']) {
       await ready(name);
       expect(container.textContent).not.toMatch(/touch|tng/i);
       act(() => root.unmount());
