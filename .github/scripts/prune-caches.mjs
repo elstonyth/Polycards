@@ -37,9 +37,15 @@ const GRACE_MS = 30 * 60 * 1000;
 
 export function plan(entries, now = Date.now()) {
   const groups = new Map();
+  // Overlay keys in a format we don't recognise: never deleted, but reported
+  // so a codeql-action key change can't silently stop the pruning.
+  const unmatched = [];
   for (const e of entries) {
     const m = KEY_RE.exec(e.key);
-    if (!m) continue;
+    if (!m) {
+      if (e.key.startsWith(PREFIX)) unmatched.push(e);
+      continue;
+    }
     const group = `${e.ref}\n${m[1]}`;
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(e);
@@ -57,8 +63,13 @@ export function plan(entries, now = Date.now()) {
     (young ? held : remove).push(...list.slice(1));
   }
   const bytes = remove.reduce((n, e) => n + e.sizeInBytes, 0);
-  return { keep, remove, held, bytes };
+  return { keep, remove, held, unmatched, bytes };
 }
+
+// gh's own 404 text (cli pkg/cmd/cache/delete/delete.go). Never match a bare
+// "404": gh errors end in the request URL, and a cache id can contain 404.
+export const isGone = (msg) =>
+  /Could not find a cache matching|HTTP 404:/.test(msg);
 
 const gb = (n) => `${(n / 1e9).toFixed(2)} GB`;
 const mb = (n) => `${Math.round(n / 1e6)} MB`;
@@ -91,7 +102,7 @@ function deleteCache(id) {
   } catch (err) {
     // Eviction or a parallel run may have removed it first.
     const msg = `${err.stderr ?? ''}${err.stdout ?? ''}`;
-    if (/404|not found|could not find/i.test(msg)) return 'already gone';
+    if (isGone(msg)) return 'already gone';
     return `FAILED: ${msg.trim() || err.message}`;
   }
 }
@@ -119,6 +130,11 @@ function run(apply) {
   const summary = `${apply ? 'Deleted' : 'Dry run: would delete'} ${p.remove.length - failed} of ${p.remove.length + p.keep.length + p.held.length} CodeQL overlay caches, freeing ${gb(freed)}; kept ${p.keep.length} (newest per prefix), held ${p.held.length} (newest < 30 min old).`;
   console.log(lines.join('\n'));
   console.log(summary);
+  if (p.unmatched.length) {
+    console.log(
+      `::warning::${p.unmatched.length} ${PREFIX}* caches have an unrecognised key format and were not pruned (codeql-action key change?): ${p.unmatched.map((e) => e.key).join(', ')}`,
+    );
+  }
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
@@ -280,8 +296,50 @@ function selfTest() {
     failed++;
     console.error(`FAIL bytes freed = ${b}, want 105`);
   }
+  // overlay keys in an unknown format are reported, other caches are not
+  const odd = plan(
+    [
+      js('a', 1, T(1), 1),
+      other('yarn-Linux-399f62c3827857e9d7025bf3ecbe78a8', 2),
+      other('codeql-overlay-base-database-2-abc-javascript-2.28.0-v2', 7),
+      other(`codeql-overlay-base-database-1-x-javascript-${sha('a')}-12`, 8),
+    ],
+    later,
+  );
+  if (ids(odd.unmatched).join() !== '7,8' || ids(odd.keep).join() !== '1') {
+    failed++;
+    console.error(
+      `FAIL unmatched=${ids(odd.unmatched)} keep=${ids(odd.keep)}, want 7,8 and 1`,
+    );
+  }
+  // only gh's own 404 text counts as already gone
+  const gone = [
+    ['X Could not find a cache matching 10599404123 in elstonyth/x', true],
+    [
+      'HTTP 404: Not Found (https://api.github.com/repos/o/r/actions/caches/1)',
+      true,
+    ],
+    [
+      'HTTP 403: Resource not accessible by integration (https://api.github.com/repos/elstonyth/Polycards/actions/caches/10599404123)',
+      false,
+    ],
+    [
+      'HTTP 502: Bad Gateway (https://api.github.com/repos/o/r/actions/caches/404)',
+      false,
+    ],
+  ];
+  for (const [msg, want] of gone) {
+    if (isGone(msg) !== want) {
+      failed++;
+      console.error(
+        `FAIL isGone(${JSON.stringify(msg)}) = ${!want}, want ${want}`,
+      );
+    }
+  }
   console.log(
-    failed ? `${failed} failed` : `all ${cases.length + 2} checks passed`,
+    failed
+      ? `${failed} failed`
+      : `all ${cases.length + 3 + gone.length} checks passed`,
   );
   process.exit(failed ? 1 : 0);
 }
