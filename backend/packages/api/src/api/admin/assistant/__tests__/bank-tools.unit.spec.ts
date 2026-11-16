@@ -503,6 +503,24 @@ describe('bank_save_check', () => {
       expect(JSON.stringify(out)).not.toContain('陈大文');
     });
 
+    it('a wallet needs no real name, as the save asks none', async () => {
+      realName = null;
+      const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+      packs.payoutNumberStanding.mockResolvedValue(
+        standing([], { bankId: 'USDTTRC20', key: TRON, forms: [TRON] }),
+      );
+      const out = JSON.parse(
+        await run(
+          'bank_save_check',
+          { username: 'Test Player', bank: 'USDT TRC20', bank_account: TRON },
+          `check Test Player USDT TRC20 ${TRON}`,
+        ).done,
+      );
+      expect(out.name).toBe('not needed: a wallet has no holder');
+      expect(out.fixes.join(' ')).not.toMatch(/real name/);
+      expect(packs.payoutNameStanding).not.toHaveBeenCalled();
+    });
+
     it('a saved bank in another name than the real name refuses the save', async () => {
       metadata = {
         bank_accounts: [

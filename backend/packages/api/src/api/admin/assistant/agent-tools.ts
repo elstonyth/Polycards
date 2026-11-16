@@ -695,13 +695,6 @@ export const AGENT_TOOLS: AgentTool[] = [
       const realName = state?.real_name ?? null;
       const holderName = realNameHolder(realName);
       const holder = holderName ? { name: holderName } : null;
-      if (!holder) {
-        fixes.push(
-          realName?.trim()
-            ? 'The real name on file is not in English letters, so no bank can be saved in it: support corrects the real name on the admin player page first.'
-            : 'The player has no real name on file, and a bank is saved in the real name: they add it in Settings, or support sets it on the admin player page.',
-        );
-      }
       let number: Awaited<ReturnType<typeof numberFor>> | null = null;
       if (digitsArg(args.last4) || digitsArg(args.bank_account)) {
         try {
@@ -803,7 +796,18 @@ export const AGENT_TOOLS: AgentTool[] = [
           if (invalid) fixes.push(`The save would be refused: ${invalid}`);
         }
       }
-      if (!holder) {
+      // A wallet has no holder: the save asks for no name, so neither does this.
+      const wallet = Boolean(
+        number?.bankCode && findBank(number.bankCode)?.wallet,
+      );
+      if (wallet) {
+        out.name = 'not needed: a wallet has no holder';
+      } else if (!holder) {
+        fixes.push(
+          realName?.trim()
+            ? 'The real name on file is not in English letters, so no bank can be saved in it: support corrects the real name on the admin player page first.'
+            : 'The player has no real name on file, and a bank is saved in the real name: they add it in Settings, or support sets it on the admin player page.',
+        );
         out.name = {
           checked: NAME_SOURCE.on_file,
           on_file: Boolean(realName?.trim()),
