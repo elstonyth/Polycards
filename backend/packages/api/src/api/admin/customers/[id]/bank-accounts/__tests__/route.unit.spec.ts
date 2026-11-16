@@ -418,6 +418,25 @@ describe('POST bank-accounts/add', () => {
     expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
   });
 
+  // Read before the add's lock: a correction landing in between must not leave
+  // the bank in the old name.
+  it('takes the add back when the real name changes during it', async () => {
+    packs.getVerificationState
+      .mockResolvedValueOnce({ phoneVerified: true, realName: 'Test Holder' })
+      .mockResolvedValueOnce({ phoneVerified: true, realName: 'Test Holdre' });
+    await expect(ADD(mkReq(body()), mkRes() as never)).rejects.toThrow(
+      /real name changed.*try again/i,
+    );
+    expect(packs.addSavedBankAccount).toHaveBeenCalledTimes(1);
+    expect(packs.removeSavedBankAccount).toHaveBeenCalledWith({
+      customerId: 'cus_1',
+      adminId: 'user_1',
+      accountId: ACCOUNT.id,
+      reason: expect.stringMatching(/real name changed/),
+    });
+    expect(notifications.createNotifications).not.toHaveBeenCalled();
+  });
+
   it('a wallet needs no real name', async () => {
     packs.getVerificationState.mockResolvedValue({
       phoneVerified: true,

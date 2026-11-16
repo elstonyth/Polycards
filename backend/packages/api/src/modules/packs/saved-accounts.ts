@@ -110,6 +110,10 @@ export const REAL_NAME_NEEDED_MESSAGE =
 export const REAL_NAME_NOT_HOLDER_MESSAGE =
   'Your real name on file is not in English letters, so a bank account cannot be paid to it. Contact support to correct it to the name your bank shows.';
 
+// Support corrected the real name while the save ran (read before the lock).
+export const REAL_NAME_CHANGED_MESSAGE =
+  'Your real name on file changed while this bank account was being saved, so it was not saved. Try again.';
+
 export const HOLDER_NAME_INVALID_MESSAGE =
   'Enter the account holder name in English letters, exactly as your bank shows it.';
 

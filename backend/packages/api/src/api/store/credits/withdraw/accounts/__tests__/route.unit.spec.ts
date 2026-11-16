@@ -921,6 +921,45 @@ describe('POST accounts — the holder is the real name', () => {
     ).rejects.toThrow(/bank from the list/);
     expect(getVerificationState).not.toHaveBeenCalled();
   });
+
+  // The real name is read before the metadata lock, so support may correct it
+  // while a save is under way. The bank must not stay in the old name.
+  it.each([['Tan Ah Koh'], ['陈大文']])(
+    'takes the save back off when the real name changes to %j during it',
+    async (name) => {
+      getVerificationState
+        .mockResolvedValueOnce({ phoneVerified: true, realName: 'Tan Ah Kow' })
+        .mockResolvedValueOnce({ phoneVerified: true, realName: name });
+      retrieveCustomer
+        .mockResolvedValueOnce({ metadata: {} })
+        .mockResolvedValueOnce({ metadata: { bank_accounts: [savedShape()] } });
+      await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+        /real name on file changed.*try again/i,
+      );
+      expect(updateCustomers).toHaveBeenCalledTimes(2);
+      expect(updateCustomers.mock.calls[1][1].metadata.bank_accounts).toEqual(
+        [],
+      );
+      expect(createNotifications).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a save the correction already carried to the new name', async () => {
+    getVerificationState
+      .mockResolvedValueOnce({ phoneVerified: true, realName: 'Tan Ah Kow' })
+      .mockResolvedValueOnce({ phoneVerified: true, realName: 'Tan Ah Koh' });
+    const carried = savedShape({ accountHolderName: 'Tan Ah Koh' });
+    retrieveCustomer
+      .mockResolvedValueOnce({ metadata: {} })
+      .mockResolvedValueOnce({ metadata: { bank_accounts: [carried] } });
+    const res = mkRes();
+    await POST(mkReq(VALID_BODY), res);
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+    const { json } = res as unknown as { json: jest.Mock };
+    expect(json.mock.calls[0][0].accounts[0].accountHolderName).toBe(
+      'Tan Ah Koh',
+    );
+  });
 });
 
 describe('GET accounts — a shared bank account is on hold', () => {

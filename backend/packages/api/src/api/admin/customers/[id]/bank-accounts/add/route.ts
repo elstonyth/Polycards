@@ -13,6 +13,7 @@ import { withdrawalDetailsError } from '../../../../../../modules/packs/gateway-
 import { sendSavedAccountAddedNotice } from '../../../../../../modules/packs/saved-account-notice';
 import {
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
+  holderMatchKey,
   newSavedBankAccount,
   realNameHolder,
 } from '../../../../../../modules/packs/saved-accounts';
@@ -131,6 +132,26 @@ export async function POST(
     verify: number.holders.length > 0,
     reason: reason.trim(),
   });
+  // The real name was read before the add's lock: a correction landing in
+  // between would leave the bank in the old name. Take it back (its own audit
+  // row) and let support try again.
+  if (holderName) {
+    const now = realNameHolder(
+      (await packs.getVerificationState(customerId)).realName,
+    );
+    if (!now || holderMatchKey(now) !== holderMatchKey(holderName)) {
+      await packs.removeSavedBankAccount({
+        customerId,
+        adminId: req.auth_context.actor_id,
+        accountId: account.id,
+        reason: 'the real name changed during the add',
+      });
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'The real name changed while this bank account was being added, so it was not added. Try again.',
+      );
+    }
+  }
   // A new payout destination is a security event whoever adds it. After commit,
   // and it never fails the add (the helper swallows its own errors).
   await sendSavedAccountAddedNotice(req.scope, {

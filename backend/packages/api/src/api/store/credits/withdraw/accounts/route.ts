@@ -26,10 +26,12 @@ import {
   MAX_SAVED_BANK_ACCOUNTS,
   ONE_BANK_ACCOUNT_MESSAGE,
   ONE_TNG_ACCOUNT_MESSAGE,
+  REAL_NAME_CHANGED_MESSAGE,
   REAL_NAME_NEEDED_MESSAGE,
   REAL_NAME_NOT_HOLDER_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   SHARED_SAVE_MESSAGE,
+  holderMatchKey,
   newSavedBankAccount,
   parseSavedBankAccounts,
   realNameHolder,
@@ -369,7 +371,7 @@ export async function POST(
   // this handler read earlier — otherwise two concurrent saves could both see
   // MAX-1 accounts and both be allowed through.
   let added = false;
-  const saved = await mutateAccounts(req, customerId, (accounts) => {
+  let saved = await mutateAccounts(req, customerId, (accounts) => {
     const { alreadySaved, blocks } = verdict(number, accounts);
     // Already theirs: nothing to do. A saved account cannot be changed, its
     // holder name included, and keeps its original savedAt, so a re-save restarts
@@ -401,6 +403,32 @@ export async function POST(
     added = true;
     return [...accounts, account];
   });
+  // The real name was read before the lock, so support may have corrected it
+  // since. Read it again: a bank left in the old name comes back off. One the
+  // correction already carried to the new name stays.
+  if (added && holderName) {
+    const now = realNameHolder(
+      (await packs.getVerificationState(customerId)).realName,
+    );
+    const nowKey = now ? holderMatchKey(now) : '';
+    if (nowKey !== holderMatchKey(holderName)) {
+      let kept = false;
+      saved = await mutateAccounts(req, customerId, (accounts) => {
+        const entry = accounts.find((a) => a.id === account.id);
+        kept =
+          !!entry &&
+          nowKey !== '' &&
+          holderMatchKey(entry.accountHolderName) === nowKey;
+        return kept ? null : accounts.filter((a) => a.id !== account.id);
+      });
+      if (!kept) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          REAL_NAME_CHANGED_MESSAGE,
+        );
+      }
+    }
+  }
   // The name and number lookups read other customers, which this customer's
   // lock does not cover, so two accounts saving one name or one number at once
   // both pass them. Look again now the save is visible: a racer takes its entry
