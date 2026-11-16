@@ -7,10 +7,12 @@ name: Deploy
 # Triggers are push-to-master and manual only. This repo is public and the job
 # holds a DigitalOcean token, so never add pull_request(_target) here.
 #
-# The changed files are diffed inside the job rather than with `on.push.paths`:
-# GitHub evaluates path filters on at most 3,000 files and silently skips the
-# run past that. .github/scripts/deploy-targets.mjs holds the rules and deploys
-# both apps whenever the diff can't be computed.
+# Each app is diffed inside the job from the commit DigitalOcean reports it is
+# running, not with `on.push.paths`: GitHub evaluates path filters on at most
+# 3,000 files and silently skips the run past that, and a live-commit diff
+# also catches up after a failed or skipped deploy.
+# .github/scripts/deploy-targets.mjs holds the rules and deploys an app
+# whenever its diff can't be computed.
 
 on:
   push:
@@ -35,6 +37,9 @@ jobs:
     name: plan
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # secrets can't appear in a step `if`, so expose only whether one is set.
+    env:
+      HAS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN != '' }}
     outputs:
       backend: ${{ steps.plan.outputs.backend }}
       storefront: ${{ steps.plan.outputs.storefront }}
@@ -44,12 +49,26 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
+      # Read the commit each app is running, so the plan diffs from what is
+      # live rather than from the previous push. Best effort: without the
+      # token (or off master) the plan falls back to the push's own range.
+      - name: Install doctl
+        if: env.HAS_TOKEN == 'true' && github.ref == 'refs/heads/master'
+        uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Read live commits
+        id: live
+        if: env.HAS_TOKEN == 'true' && github.ref == 'refs/heads/master'
+        run: bash .github/scripts/live-commits.sh | tee -a "$GITHUB_OUTPUT"
       - name: Decide which apps changed
         id: plan
         env:
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
           TARGET: ${{ inputs.target }}
+          LIVE_BACKEND: ${{ steps.live.outputs.backend }}
+          LIVE_STOREFRONT: ${{ steps.live.outputs.storefront }}
         run: node .github/scripts/deploy-targets.mjs
 
   # One job per app, gated at job level: a skipped job never joins its

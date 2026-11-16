@@ -107,11 +107,6 @@ export function decide(files, storefrontBackendFiles = new Set()) {
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
 const lines = (s) => s.split('\n').filter(Boolean);
-const ALL = (why) => ({
-  backend: true,
-  storefront: true,
-  reasons: { backend: why, storefront: why },
-});
 
 function planFromEnv(env) {
   if (env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
@@ -123,21 +118,40 @@ function planFromEnv(env) {
       reasons: { backend: why, storefront: why },
     };
   }
-  const before = env.BEFORE || '';
+  // Each app is diffed from the commit it is actually running (LIVE_BACKEND,
+  // LIVE_STOREFRONT, read from DigitalOcean), so a push after a failed or
+  // skipped deploy still ships everything since. Without a live commit it
+  // falls back to the push's own range (BEFORE..SHA).
   const sha = env.SHA || 'HEAD';
-  if (!before || /^0+$/.test(before))
-    return ALL('no previous commit to diff against');
-  let files;
-  try {
-    // --no-renames lists a moved file at both paths, so moving a build input
-    // into an ignored folder still counts as a change to the app.
-    files = lines(git('diff', '--name-only', '--no-renames', before, sha));
-  } catch {
-    return ALL(
-      `could not diff ${before.slice(0, 9)}..${sha.slice(0, 9)} (force-push or missing history)`,
-    );
+  const imported = backendFilesImportedByStorefront();
+  const plan = { reasons: {} };
+  for (const app of ['backend', 'storefront']) {
+    const live = env[`LIVE_${app.toUpperCase()}`] || '';
+    const base = live || env.BEFORE || '';
+    const from = live ? 'live' : 'previous push';
+    if (!base || /^0+$/.test(base)) {
+      plan[app] = true;
+      plan.reasons[app] = 'no commit to diff against';
+      continue;
+    }
+    let files;
+    try {
+      // --no-renames lists a moved file at both paths, so moving a build input
+      // into an ignored folder still counts as a change to the app.
+      files = lines(git('diff', '--name-only', '--no-renames', base, sha));
+    } catch {
+      plan[app] = true;
+      plan.reasons[app] =
+        `could not diff ${base.slice(0, 9)}..${sha.slice(0, 9)} (force-push or missing history)`;
+      continue;
+    }
+    const d = decide(files, imported);
+    plan[app] = d[app];
+    plan.reasons[app] = d.reasons[app]
+      ? `${d.reasons[app]}; vs ${from} ${base.slice(0, 9)}`
+      : `nothing it builds from changed since ${from} ${base.slice(0, 9)}`;
   }
-  return decide(files, backendFilesImportedByStorefront());
+  return plan;
 }
 
 function report(plan) {
@@ -197,8 +211,40 @@ function selfTest() {
       'FAIL import scan missed backend/packages/api/src/utils/real-name.ts',
     );
   }
+  // Live-commit diffs on real master history (#1048 9f9026d .. #1052 6753561).
+  const live = [
+    // skills-only push while both apps are live on #1051: nothing to deploy
+    [
+      { SHA: '6753561', LIVE_BACKEND: 'a94353f', LIVE_STOREFRONT: 'a94353f' },
+      false,
+      false,
+    ],
+    // same push, but the backend is still on #1049: it must catch up on #1050/#1051
+    [
+      { SHA: '6753561', LIVE_BACKEND: 'e99ced5', LIVE_STOREFRONT: 'a94353f' },
+      true,
+      false,
+    ],
+    // storefront live on #1047 misses #1048's src/ change
+    [
+      { SHA: '6753561', LIVE_BACKEND: '6753561', LIVE_STOREFRONT: '80fdd9b' },
+      false,
+      true,
+    ],
+  ];
+  for (const [env, wantB, wantS] of live) {
+    const got = planFromEnv(env);
+    if (got.backend !== wantB || got.storefront !== wantS) {
+      failed++;
+      console.error(
+        `FAIL live ${JSON.stringify(env)} -> backend=${got.backend} storefront=${got.storefront}, want ${wantB}/${wantS}`,
+      );
+    }
+  }
   console.log(
-    failed ? `${failed} failed` : `all ${cases.length + 1} checks passed`,
+    failed
+      ? `${failed} failed`
+      : `all ${cases.length + 1 + live.length} checks passed`,
   );
   process.exit(failed ? 1 : 0);
 }
