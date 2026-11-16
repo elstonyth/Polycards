@@ -78,7 +78,7 @@ The script injects secrets, writes a resolved spec to gitignored
   self-check `--test`) for up to 60 minutes. A manual CI run's `ci-ok` on
   the same commit is ignored: it neither blocks nor stands in. Only `success` deploys. A failed, skipped or timed-out
   `ci-ok` fails the run and nothing deploys; so does a commit with no CI run
-  at all after 5 minutes (a `[skip ci]` push). Once master has moved past
+  at all after 5 minutes (a push whose message carries a CI skip marker). Once master has moved past
   the commit, the run skips quietly instead, whatever `ci-ok` said: App
   Platform builds the tip, and the newer push's run ships this commit once
   its own CI passes. After fixing or re-running CI,
@@ -88,9 +88,13 @@ The script injects secrets, writes a resolved spec to gitignored
   commit, so each deploy job re-reads the master head right before it starts
   a deployment and skips when master has moved on.
 - **After ACTIVE.** `.github/scripts/verify-deploy.sh` checks that every
-  component runs the pushed commit, then that
-  `https://admin.polycards.gg/health` or `https://polycards.gg/healthz`
-  answers 200. Either failing fails the job; the failed run is the alert.
+  component runs the pushed commit, then that `/health` (backend) or
+  `/healthz` (storefront) answers 200 on the app's App Platform default
+  ingress (`*.ondigitalocean.app`, read with `doctl` at run time). Either
+  failing fails the job; the failed run is the alert. It then curls the
+  custom domain (`admin.polycards.gg`, `polycards.gg`) for information only:
+  Cloudflare challenges GitHub runner IPs there (403 with
+  `cf-mitigated: challenge`), so that check only ever warns.
 - **`production` environment.** The plan, deploy and rollback jobs run in the
   GitHub `production` environment. A first run would create it with no
   branch policy, so the owner creates it first (below).
@@ -154,7 +158,7 @@ Platform's rollback API (`POST /v2/apps/{app_id}/rollback`, plus
    that can be a spec-only redeploy of the same commit, so pick an id from the
    list to go further back.
 2. **`rollback`**. Validates, rolls back, waits for ACTIVE and checks the
-   health URL. The app is then **pinned**: every new deployment fails, the
+   health path on the default ingress. The app is then **pinned**: every new deployment fails, the
    Deploy workflow included, until step 3.
 3. **`commit`** keeps the rollback and unpins the app; the next master push
    deploys the master tip again, so revert the bad change on master first.
