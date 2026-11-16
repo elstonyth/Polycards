@@ -129,7 +129,9 @@ function planFromEnv(env) {
     return ALL('no previous commit to diff against');
   let files;
   try {
-    files = lines(git('diff', '--name-only', before, sha));
+    // --no-renames lists a moved file at both paths, so moving a build input
+    // into an ignored folder still counts as a change to the app.
+    files = lines(git('diff', '--name-only', '--no-renames', before, sha));
   } catch {
     return ALL(
       `could not diff ${before.slice(0, 9)}..${sha.slice(0, 9)} (force-push or missing history)`,
@@ -205,9 +207,25 @@ const args = process.argv.slice(2);
 if (args[0] === '--test') {
   selfTest();
 } else if (args[0] === '--commit') {
-  const files = lines(
-    git('diff-tree', '--no-commit-id', '--name-only', '-r', args[1]),
-  );
+  // Diff against the first parent so merge commits list their changes too;
+  // a root commit has no parent, so fall back to listing its whole tree.
+  let files;
+  try {
+    files = lines(
+      git('diff', '--name-only', '--no-renames', `${args[1]}^1`, args[1]),
+    );
+  } catch {
+    files = lines(
+      git(
+        'diff-tree',
+        '--root',
+        '--no-commit-id',
+        '--name-only',
+        '-r',
+        args[1],
+      ),
+    );
+  }
   report(decide(files, backendFilesImportedByStorefront()));
 } else {
   const plan = planFromEnv(process.env);

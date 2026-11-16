@@ -52,52 +52,49 @@ jobs:
           TARGET: ${{ inputs.target }}
         run: node .github/scripts/deploy-targets.mjs
 
-  deploy:
-    name: deploy ${{ matrix.app }}
+  # One job per app, gated at job level: a skipped job never joins its
+  # concurrency group, so it can't displace a pending deploy of that app.
+  # cancel-in-progress stays false: it would only cancel the GitHub job, and a
+  # DigitalOcean deploy must never be cancelled. The ref check keeps a manual
+  # run from a branch away from the token.
+  backend:
+    name: deploy backend
     needs: plan
+    if: needs.plan.outputs.backend == 'true' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - app: backend
-            name: polycards-backend
-          - app: storefront
-            name: polycards-storefront
-    # One deploy per app at a time. cancel-in-progress stays false: it would
-    # only cancel this GitHub job, but a DigitalOcean deploy must never be
-    # cancelled (a cancel once rolled production back).
     concurrency:
-      group: deploy-${{ matrix.app }}
+      group: deploy-backend
       cancel-in-progress: false
     steps:
-      - name: Skip if unchanged
-        if: needs.plan.outputs[matrix.app] != 'true'
-        run: echo "No change for ${{ matrix.app }}; nothing to deploy."
+      - name: Checkout deploy script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: .github/scripts
       - name: Install doctl
-        if: needs.plan.outputs[matrix.app] == 'true'
         uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Deploy and wait
-        if: needs.plan.outputs[matrix.app] == 'true'
-        env:
-          APP_NAME: ${{ matrix.name }}
-        run: |
-          set -euo pipefail
-          app_id=$(doctl apps list --format ID,Spec.Name --no-header | awk -v n="$APP_NAME" '$2 == n { print $1 }')
-          if [ -z "$app_id" ]; then echo "::error::App $APP_NAME not found"; exit 1; fi
-          dep=$(doctl apps create-deployment "$app_id" --format ID --no-header)
-          echo "Started deployment $dep for $APP_NAME"
-          for _ in $(seq 1 80); do
-            phase=$(doctl apps get-deployment "$app_id" "$dep" --format Phase --no-header)
-            case "$phase" in
-              ACTIVE) echo "$APP_NAME is live on deployment $dep"; exit 0 ;;
-              SUPERSEDED|CANCELED) echo "::notice::Deployment $dep ended $phase: a newer deployment replaced it"; exit 0 ;;
-              ERROR) echo "::error::Deployment $dep failed. See: doctl apps logs $app_id --deployment $dep --type build"; exit 1 ;;
-            esac
-            sleep 30
-          done
-          echo "::error::Deployment $dep did not finish within 40 minutes (last phase: $phase)"
-          exit 1
+        run: bash .github/scripts/do-deploy.sh polycards-backend
+
+  storefront:
+    name: deploy storefront
+    needs: plan
+    if: needs.plan.outputs.storefront == 'true' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: deploy-storefront
+      cancel-in-progress: false
+    steps:
+      - name: Checkout deploy script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: .github/scripts
+      - name: Install doctl
+        uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Deploy and wait
+        run: bash .github/scripts/do-deploy.sh polycards-storefront
