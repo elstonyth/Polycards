@@ -20,7 +20,11 @@ FROM node:${NODE_VERSION} AS builder
 WORKDIR /app
 
 # Toolchain for any native addon rebuilds (node-gyp deps); removed with the
-# stage — never reaches the runtime image.
+# stage — never reaches the runtime image. Not version-pinned (DL3008):
+# Debian drops superseded package versions from its mirrors, so a pin breaks
+# the build at the next security update; the base image tag already fixes the
+# Debian release.
+# hadolint ignore=DL3008
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
@@ -113,5 +117,5 @@ EXPOSE 9000
 # In-image health probe (App Platform has its own; this helps local/compose +
 # `docker` orchestration). Node's global fetch (Node 18+) avoids needing curl.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "fetch('http://localhost:9000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD ["node", "-e", "fetch('http://localhost:9000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 CMD ["corepack", "yarn", "start"]

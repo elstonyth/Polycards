@@ -7,14 +7,25 @@ on:
   pull_request:
     branches:
       - master
+  # Manual full run of any branch (Actions -> CI -> Run workflow). Runs every
+  # job regardless of paths. debug_shard opens an SSH (tmate) session on that
+  # integration-http shard if it fails; see the step there.
+  workflow_dispatch:
+    inputs:
+      debug_shard:
+        description: 'integration-http shard (1-10) to SSH into if it fails; 0 = none'
+        type: number
+        default: 0
 
 # Least-privilege GITHUB_TOKEN; jobs that need more declare it themselves.
 permissions:
   contents: read
 
 # Stacked pushes to the same ref supersede each other — don't bill for both.
+# The event is in the group so a manual (debug) run never cancels a master
+# push's run: that would cancel its ci-ok and block the deploy.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -33,9 +44,12 @@ jobs:
     permissions:
       contents: read
       pull-requests: read # paths-filter reads the PR file list
+      checks: read # the master fast path reads ci-ok on the PR head
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+      # A manual run tests everything; paths-filter has no base to diff then.
+      backend: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.backend }}
       storefront: ${{ steps.storefront.outputs.storefront }}
+      fast: ${{ steps.fastpath.outputs.fast }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -46,12 +60,14 @@ jobs:
 
       - name: Detect changed areas
         id: filter
+        if: github.event_name != 'workflow_dispatch'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         with:
           filters: |
             backend:
               - 'backend/**'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             ci:
               - '.github/workflows/ci.yml'
               - '.github/scripts/deploy-targets.mjs'
@@ -61,6 +77,27 @@ jobs:
       # PR, and editing it forces the storefront checks (filter `ci` above).
       - name: Self-check change rules
         run: node .github/scripts/deploy-targets.mjs --test
+
+      # Also proves the contract the fast path depends on: backend-gate's and
+      # ci-ok's real scripts (read from this file) pass when the three test
+      # jobs are skipped, so a fast-pathed master push still gets a green
+      # ci-ok and the deploy gate still deploys.
+      - name: Self-check master fast path
+        run: node .github/scripts/ci-fast-path.mjs --test
+
+      # Master-CI fast path (.github/scripts/ci-fast-path.mjs): a push to
+      # master whose tree its merged PR already passed ci-ok on skips
+      # backend-unit, integration-http and integration-modules. Any doubt or
+      # error prints fast=false (full run); continue-on-error so that a crash
+      # leaves the output unset (also a full run) instead of failing ci-ok.
+      - name: Master fast path
+        id: fastpath
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: node .github/scripts/ci-fast-path.mjs
 
       # Same rule the Deploy workflow uses to decide whether the storefront
       # needs a redeploy (.github/scripts/deploy-targets.mjs): a deny-list of
@@ -81,10 +118,13 @@ jobs:
           BEFORE=$(git merge-base "$BASE" "$HEAD" 2>/dev/null || echo "$BASE")
           BEFORE="$BEFORE" SHA="$HEAD" node .github/scripts/deploy-targets.mjs
 
-  # Repo-wide hygiene on every PR: ESLint and Prettier. Cheap, so never gated.
+  # Repo-wide hygiene on every PR: ESLint, Prettier, hadolint and shellcheck.
+  # Cheap, so never gated.
   # Node 24 = the local baseline (root engines: >=24).
   lint:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the shellcheck step uses the image's
+    # preinstalled shellcheck.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -107,6 +147,32 @@ jobs:
 
       - name: Format check
         run: npm run format:check
+
+      # Self-check of the deploy gate's ci-ok lookup (deploy.yml). The `if:`
+      # keeps this job green until that script lands on master; drop it once
+      # the script is there, so deleting the script fails CI.
+      - name: Self-check deploy gate
+        if: hashFiles('.github/scripts/ci-gate.mjs') != ''
+        run: node .github/scripts/ci-gate.mjs --test
+
+      # Both app Dockerfiles. Fails on warning or error; info-level style
+      # hints (DL3059 consecutive RUNs, DL3066 named USER) are not enforced.
+      # Silence a real finding with a justified `# hadolint ignore=` line.
+      # The hadolint image is run directly, pinned by digest (the one
+      # hadolint-action v3.5.0 pins), so nothing on this required path is
+      # built from a Dockerfile at run time.
+      - name: Hadolint (Dockerfile, backend/Dockerfile)
+        run: >-
+          docker run --rm -v "$PWD:/work:ro" -w /work
+          ghcr.io/hadolint/hadolint:v2.15.1-debian@sha256:9a3944b7fddcb947d1ffd90829ac1a6e5c30479223358f249d8b96c7d0019e27
+          hadolint --failure-threshold warning Dockerfile backend/Dockerfile
+
+      # The deploy scripts. shellcheck is preinstalled on the ubuntu-24.04
+      # runner image, so no action is needed.
+      - name: ShellCheck (.github/scripts)
+        run: |
+          shellcheck --version
+          shellcheck .github/scripts/*.sh
 
   # Storefront gate: typecheck, unit tests, prod build. Runs only when the
   # storefront's build inputs changed (see `changes`).
@@ -165,35 +231,35 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    # 30, not 20 — but the cost model behind that number has been corrected, so
-    # read this before touching it.
+    # 30, not 20 — read this before touching it.
     #
-    # WHY IT WAS RAISED: the cache that pays for the install below — `bnm2-*`
-    # (node_modules + install-state) — kept vanishing, so backend jobs restored
-    # nothing and paid a COLD ~16 min `yarn install` instead of the ~71s
-    # immutable verify the cache was sized for. At 20 the jobs were killed
-    # mid-step with "The operation was canceled" — backend-quality during its
-    # build, integration-http shard 4 right after printing "63 passed" — which
-    # reads as a red build caused by the diff.
+    # WHY IT WAS RAISED: the cache that pays for the install — `bnm2-*`
+    # (node_modules + install-state, .github/actions/backend-deps) — kept
+    # vanishing, so backend jobs restored nothing and paid a COLD ~16 min
+    # `yarn install` instead of the ~71s immutable verify the cache was sized
+    # for. At 20 the jobs were killed mid-step with "The operation was
+    # canceled" — backend-quality during its build, integration-http shard 4
+    # right after printing "63 passed" — which reads as a red build caused by
+    # the diff.
     #
-    # THE ACTUAL CAUSE (measured 2026-08-26, plan 127): not a missing cache
-    # declaration — eviction. The turbo cache was keyed per-commit, minting a
-    # fresh ~900 MB entry every push that no later run could hit by key. Nine of
-    # them (~8.09 GB) sat in a 12.46 GB / 26-entry total against GitHub's 10 GB
-    # per-repo cap, so LRU eviction ran continuously and the `bnm2-*` entries
-    # were the collateral. `bnm2-*` entries DO exist (four at 290-306 MB at the
-    # time of measuring); they were simply being evicted faster than they were
-    # being hit. The turbo key is now the lockfile hash, so the four backend jobs
-    # share one entry and the churn stops.
+    # THE CAUSE: least-recently-used eviction against GitHub's 10 GB per-repo
+    # cache cap, not a missing cache declaration. In 2026-08 (plan 127) the
+    # filler was a per-commit turbo key (~900 MB a push); that key is now the
+    # lockfile hash and the turbo entry is ~11 MB, so turbo is no longer the
+    # problem. Measured 2026-11-16: 10.96 GB in 57 entries, of which 8.6 GB
+    # was 47 `codeql-overlay-base-*` CodeQL default-setup databases (~340 MB
+    # added per master push). Those are what still push `bnm2-*` out; the
+    # cache-prune workflow (.github/workflows/cache-prune.yml)
+    # keeps only the newest per key prefix.
     #
-    # WHEN TO DROP BACK TO 20: these timeouts now sit ~5x above measured
-    # wall-clock (backend-quality 2m48s; worst integration-http shard 5m40s).
-    # They are deliberately NOT lowered in the same change that fixed the key,
-    # because a cold install killed mid-step looks like a red build caused by the
-    # diff — the exact failure the raise was introduced to stop. Lower all four
-    # backend timeouts to 20 once a `bnm2-*` entry has SURVIVED several
-    # consecutive commits on master (check with
+    # WHEN TO DROP BACK TO 20: once the prune is live, lower all four backend
+    # timeouts to 20 after a `bnm2-*` entry has SURVIVED several consecutive
+    # commits on master (check with
     # `gh api repos/elstonyth/Polycards/actions/caches`), not merely appeared.
+    # Not before: a cold install killed mid-step looks like a red build caused
+    # by the diff — the exact failure the raise was introduced to stop.
+    # Measured wall-clock is far below these limits (backend-quality 2m48s;
+    # worst integration-http shard 5m40s).
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -201,95 +267,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+      - name: Backend dependencies
+        id: deps
+        uses: ./.github/actions/backend-deps
         with:
-          node-version: 22
-
-      - name: Restore yarn (berry global cache)
-        id: yarn-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-
-      # turbo writes its local cache to backend/.turbo; without restoring it every
-      # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
-      # commit: all four backend jobs then share ONE entry, instead of every
-      # commit minting a fresh ~900 MB entry that no later run can ever hit by
-      # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
-      # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
-      # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-      # entry — which is what made backend installs cold. No restore-keys: turbo
-      # never prunes its local cache, so seeding each lockfile's entry from the
-      # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
-      # lockfile change now starts turbo cold and saves just that build.
-      - name: Restore turbo
-        id: turbo-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: backend/.turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-
-      # The ~71s install is pure node_modules materialization (unpack + link a
-      # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
-      # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
-      # lockfile, so the --immutable install below is a fast verify. The
-      # install-state is essential: WITHOUT it the node-modules linker rebuilds
-      # its state from scratch (~37s even with node_modules present), which is
-      # what makes the state file — not just node_modules — the thing that pays.
-      # Exact key, NO restore-keys on purpose: a partial restore that mismatched
-      # the lockfile would make `yarn install --immutable` FAIL (it refuses to
-      # mutate node_modules). On a lockfile change the key misses -> full
-      # install -> backend-quality saves a fresh entry, on master pushes only
-      # (see the Save steps there). (Key is v2: actions/cache never
-      # overwrites an existing key, so adding install-state needs a new key.)
-      - name: Restore backend node_modules
-        id: bnm-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            backend/node_modules
-            backend/apps/*/node_modules
-            backend/packages/*/node_modules
-            backend/.yarn/install-state.gz
-          key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: corepack yarn install --immutable
-
-      # The four backend jobs only RESTORE their caches; this job alone saves
-      # them, and only on pushes to master. Measured 2026-11-09: 27 entries,
-      # 10.77 GB against the 10 GB cap — eviction again, this time from PRs. A
-      # PR that changes backend/yarn.lock (every dependabot bump) used to save
-      # ~1.9 GB (turbo 1.06 + yarn 0.56 + bnm2 0.30) scoped to that PR's ref,
-      # which no other branch can read, and that pushed master's entries out.
-      # PRs still restore master's entries; a lockfile PR now pays a cold
-      # node_modules link (~30-45s measured with the yarn restore-key hit) on
-      # each push instead. paths here MUST match the restore steps exactly: the
-      # cache version is a hash of the path list.
-      - name: Save backend node_modules
-        if: github.ref == 'refs/heads/master' && steps.bnm-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            backend/node_modules
-            backend/apps/*/node_modules
-            backend/packages/*/node_modules
-            backend/.yarn/install-state.gz
-          key: ${{ steps.bnm-cache.outputs.cache-primary-key }}
-
-      - name: Save yarn (berry global cache)
-        if: github.ref == 'refs/heads/master' && steps.yarn-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.yarn/berry/cache
-          key: ${{ steps.yarn-cache.outputs.cache-primary-key }}
+          # The full --immutable install runs here every time (the test jobs
+          # skip it on an exact node_modules hit), and only this job saves
+          # the caches, only on master pushes.
+          always-install: 'true'
+          save: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Lint
         working-directory: backend
@@ -309,11 +295,11 @@ jobs:
       # never overwritten, so an entry saved after a red lint skipped the build
       # would stay buildless until the next lockfile change.
       - name: Save turbo
-        if: github.ref == 'refs/heads/master' && steps.turbo-cache.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/master' && steps.deps.outputs.turbo-cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
-          key: ${{ steps.turbo-cache.outputs.cache-primary-key }}
+          key: ${{ steps.deps.outputs.turbo-key }}
 
   # Backend unit gate. The jest unit suites (TEST_TYPE=unit) and the turbo `test`
   # task (admin vitest + odds-math/pokemon jest) were defined but run by no
@@ -326,7 +312,9 @@ jobs:
   # (#953, 2026-11-03) on a 16 GB runner. Each shard holds half the heap.
   backend-unit:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    # Skipped on a master push whose tree already passed on its PR (the fast
+    # path in `changes`); a skip reads as passing in backend-gate.
+    if: needs.changes.outputs.backend == 'true' && needs.changes.outputs.fast != 'true'
     runs-on: ubuntu-latest
     # 25, not 15: see backend-quality — a cold install alone spent 15m47s here
     # and the job was killed before a single test ran.
@@ -341,67 +329,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: 22
-
-      - name: Restore yarn (berry global cache)
-        id: yarn-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-
-      # turbo writes its local cache to backend/.turbo; without restoring it every
-      # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
-      # commit: all four backend jobs then share ONE entry, instead of every
-      # commit minting a fresh ~900 MB entry that no later run can ever hit by
-      # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
-      # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
-      # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-      # entry — which is what made backend installs cold. No restore-keys: turbo
-      # never prunes its local cache, so seeding each lockfile's entry from the
-      # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
-      # lockfile change now starts turbo cold and saves just that build.
-      - name: Restore turbo
-        id: turbo-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: backend/.turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-
-      # The ~71s install is pure node_modules materialization (unpack + link a
-      # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
-      # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
-      # lockfile, so the --immutable install below is a fast verify. The
-      # install-state is essential: WITHOUT it the node-modules linker rebuilds
-      # its state from scratch (~37s even with node_modules present), which is
-      # what makes the state file — not just node_modules — the thing that pays.
-      # Exact key, NO restore-keys on purpose: a partial restore that mismatched
-      # the lockfile would make `yarn install --immutable` FAIL (it refuses to
-      # mutate node_modules). On a lockfile change the key misses -> full
-      # install -> backend-quality saves a fresh entry, on master pushes only
-      # (see the Save steps there). (Key is v2: actions/cache never
-      # overwrites an existing key, so adding install-state needs a new key.)
-      - name: Restore backend node_modules
-        id: bnm-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            backend/node_modules
-            backend/apps/*/node_modules
-            backend/packages/*/node_modules
-            backend/.yarn/install-state.gz
-          key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: corepack yarn install --immutable
+      - name: Backend dependencies
+        id: deps
+        uses: ./.github/actions/backend-deps
 
       # jest resolves @acme/odds-math via its dist/ entrypoint (built here); the
       # api source itself is SWC-transformed, so only its workspace deps build.
@@ -443,7 +373,8 @@ jobs:
   # integration-tests/run-http-shards.mjs MUST match.
   integration-http:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    # Fast path: see backend-unit.
+    if: needs.changes.outputs.backend == 'true' && needs.changes.outputs.fast != 'true'
     runs-on: ubuntu-latest
     # 30, not 20: see backend-quality. Shard 4 reported "63 passed" and was
     # then cancelled in the same second, twice, because a cold install had
@@ -502,67 +433,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: 22
-
-      - name: Restore yarn (berry global cache)
-        id: yarn-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-
-      # The ~71s install is pure node_modules materialization (unpack + link a
-      # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
-      # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
-      # lockfile, so the --immutable install below is a fast verify. The
-      # install-state is essential: WITHOUT it the node-modules linker rebuilds
-      # its state from scratch (~37s even with node_modules present), which is
-      # what makes the state file — not just node_modules — the thing that pays.
-      # Exact key, NO restore-keys on purpose: a partial restore that mismatched
-      # the lockfile would make `yarn install --immutable` FAIL (it refuses to
-      # mutate node_modules). On a lockfile change the key misses -> full
-      # install -> backend-quality saves a fresh entry, on master pushes only
-      # (see the Save steps there). (Key is v2: actions/cache never
-      # overwrites an existing key, so adding install-state needs a new key.)
-      - name: Restore backend node_modules
-        id: bnm-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            backend/node_modules
-            backend/apps/*/node_modules
-            backend/packages/*/node_modules
-            backend/.yarn/install-state.gz
-          key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
-
-      # turbo writes its local cache to backend/.turbo; without restoring it every
-      # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
-      # commit: all four backend jobs then share ONE entry, instead of every
-      # commit minting a fresh ~900 MB entry that no later run can ever hit by
-      # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
-      # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
-      # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-      # entry — which is what made backend installs cold. No restore-keys: turbo
-      # never prunes its local cache, so seeding each lockfile's entry from the
-      # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
-      # lockfile change now starts turbo cold and saves just that build.
-      - name: Restore turbo
-        id: turbo-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: backend/.turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: corepack yarn install --immutable
+      - name: Backend dependencies
+        id: deps
+        uses: ./.github/actions/backend-deps
 
       # jest resolves @acme/odds-math via its dist/ entrypoint, which doesn't
       # exist on a fresh install. Build only the api's workspace deps (^ = deps,
@@ -587,12 +460,33 @@ jobs:
           path: backend/packages/api/http-tests.log
           retention-days: 7
 
+      # Live SSH into a failing shard, for a manual run only: Run workflow with
+      # debug_shard = N. Unreachable from pull_request or push (the repo is
+      # public). Only the SSH keys on the dispatching user's GitHub profile
+      # are accepted; with none there, the step fails without a session. It
+      # waits 10 min for a connection, then holds the runner until you exit
+      # or the job times out.
+      #
+      # No web shell, though the logs are public: limit-access-to-actor
+      # starts tmate with `-a <authorized_keys>`, and the tmate.io websocket
+      # server then marks the session ssh_only. It never publishes tmate_web
+      # (so the action prints no "Web shell" URL) and answers any web join
+      # with 403 "SSH access required" (tmate-io/tmate-websocket
+      # lib/tmate/session.ex, ws_api/websocket.ex). The SSH line it does
+      # print accepts only those keys.
+      - name: Debug session (tmate)
+        if: failure() && github.event_name == 'workflow_dispatch' && matrix.shard == inputs.debug_shard
+        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3.24
+        with:
+          limit-access-to-actor: true
+
   # Backend module integration gate. Not previously in CI. These use
   # moduleIntegrationTestRunner (real DB, no full medusa app boot), so they're
   # lighter than the HTTP suites and run as one unsharded job.
   integration-modules:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    # Fast path: see backend-unit.
+    if: needs.changes.outputs.backend == 'true' && needs.changes.outputs.fast != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -637,67 +531,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: 22
-
-      - name: Restore yarn (berry global cache)
-        id: yarn-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-          restore-keys: yarn-${{ runner.os }}-
-
-      # turbo writes its local cache to backend/.turbo; without restoring it every
-      # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
-      # commit: all four backend jobs then share ONE entry, instead of every
-      # commit minting a fresh ~900 MB entry that no later run can ever hit by
-      # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
-      # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
-      # eviction ran continuously and kept clearing the `bnm2-*` node_modules
-      # entry — which is what made backend installs cold. No restore-keys: turbo
-      # never prunes its local cache, so seeding each lockfile's entry from the
-      # last one only grew it (~900 MB on 2026-08-26, 1.06 GB by 2026-11-09). A
-      # lockfile change now starts turbo cold and saves just that build.
-      - name: Restore turbo
-        id: turbo-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: backend/.turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
-
-      # The ~71s install is pure node_modules materialization (unpack + link a
-      # ~450MB tree) — the fixed per-shard overhead that caps how far sharding
-      # helps. Cache node_modules + Yarn Berry's install-state.gz, keyed on the
-      # lockfile, so the --immutable install below is a fast verify. The
-      # install-state is essential: WITHOUT it the node-modules linker rebuilds
-      # its state from scratch (~37s even with node_modules present), which is
-      # what makes the state file — not just node_modules — the thing that pays.
-      # Exact key, NO restore-keys on purpose: a partial restore that mismatched
-      # the lockfile would make `yarn install --immutable` FAIL (it refuses to
-      # mutate node_modules). On a lockfile change the key misses -> full
-      # install -> backend-quality saves a fresh entry, on master pushes only
-      # (see the Save steps there). (Key is v2: actions/cache never
-      # overwrites an existing key, so adding install-state needs a new key.)
-      - name: Restore backend node_modules
-        id: bnm-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            backend/node_modules
-            backend/apps/*/node_modules
-            backend/packages/*/node_modules
-            backend/.yarn/install-state.gz
-          key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: corepack yarn install --immutable
+      - name: Backend dependencies
+        id: deps
+        uses: ./.github/actions/backend-deps
 
       - name: Build workspace deps
         working-directory: backend
