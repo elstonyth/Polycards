@@ -42,20 +42,15 @@ const STOREFRONT_IGNORE_PREFIXES = [
   '.opencode/',
   '.vscode/',
   '.idea/',
+  '.impeccable/',
+  'plans/',
   'graphify-out/',
 ];
+// Root-level *.md files are docs too (no source imports markdown).
+const isRootMarkdown = (f) => !f.includes('/') && f.endsWith('.md');
 const STOREFRONT_IGNORE_FILES = new Set([
-  'AGENTS.md',
-  'CLAUDE.md',
-  'GEMINI.md',
-  'CODEBUDDY.md',
-  'QODER.md',
-  'README.md',
-  'CHANGELOG.md',
-  'CONTEXT.md',
-  'DESIGN.md',
-  'PRODUCT.md',
   'LICENSE',
+  '.gitleaksignore',
   'skills-lock.json',
   '.cursorrules',
   '.clinerules',
@@ -100,7 +95,7 @@ export function decide(files, storefrontBackendFiles = new Set()) {
   );
   const storefrontHit = firstMatch(files, (f) => {
     if (storefrontBackendFiles.has(f)) return true;
-    if (STOREFRONT_IGNORE_FILES.has(f)) return false;
+    if (STOREFRONT_IGNORE_FILES.has(f) || isRootMarkdown(f)) return false;
     return !STOREFRONT_IGNORE_PREFIXES.some((p) => f.startsWith(p));
   });
   return {
@@ -163,6 +158,17 @@ function selfTest() {
     [['.dockerignore'], false, true],
     [['package-lock.json'], false, true],
     [['tools/desk-reports/tools.mjs'], false, true],
+    [
+      [
+        'slot-machine-redesign.md',
+        '.gitleaksignore',
+        'plans/x.md',
+        '.impeccable/m.png',
+      ],
+      false,
+      false,
+    ],
+    [['src/content/notes.md'], false, true],
     [['backend/packages/api/src/utils/real-name.ts'], true, true],
     [['backend/.claude/skills/x/SKILL.md'], false, false],
     [
