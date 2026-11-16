@@ -69,11 +69,7 @@ function payoutStatus(
 /** `realName`: the account's real name, which every bank is paid to; `null`
  *  when none is on file, `undefined` when it could not be read (the server
  *  decides then). */
-export function BankAccountsClient({
-  realName,
-}: {
-  realName?: string | null;
-}) {
+export function BankAccountsClient({ realName }: { realName?: string | null }) {
   const [accounts, setAccounts] = useState<SavedBankAccount[] | null>(null);
   const [banks, setBanks] = useState<WithdrawBank[] | null>(null);
   const [error, setError] = useState<string | null>(null);

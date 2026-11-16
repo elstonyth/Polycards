@@ -521,8 +521,13 @@ describe('BankAccountsClient — paid to the real name', () => {
     expect(container.textContent).toContain(
       'The bank account must be in this name, or the withdrawal will not be paid. If the name is wrong, contact support.',
     );
-    for (const label of ['Account holder name', 'Confirm account holder name']) {
-      expect(container.querySelector('[aria-label="' + label + '"]')).toBeNull();
+    for (const label of [
+      'Account holder name',
+      'Confirm account holder name',
+    ]) {
+      expect(
+        container.querySelector('[aria-label="' + label + '"]'),
+      ).toBeNull();
     }
     expect(saveButton().disabled).toBe(false);
     addSavedBankAccount.mockResolvedValue({ ok: true, accounts: [] });
