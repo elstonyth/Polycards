@@ -15,12 +15,25 @@ app_name=${1:?usage: verify-deploy.sh <app-name> <health-url> [expected-sha]}
 url=${2:?usage: verify-deploy.sh <app-name> <health-url> [expected-sha]}
 want=${3:-}
 
+# Retry a command on transient errors: 3 tries, 10 s then 30 s apart, so one
+# API blip after a good deploy doesn't page anyone. Same as do-deploy.sh.
+retry() {
+  local delay
+  for delay in 10 30 0; do
+    if "$@"; then return 0; fi
+    if [ "$delay" -eq 0 ]; then return 1; fi
+    echo "::warning::'$*' failed; retrying in ${delay}s" >&2
+    sleep "$delay"
+  done
+}
+
 if [ -n "$want" ]; then
-  app_id=$(doctl apps list --format ID,Spec.Name --no-header | awk -v n="$app_name" '$2 == n { print $1 }')
+  apps=$(retry doctl apps list --format ID,Spec.Name --no-header)
+  app_id=$(awk -v n="$app_name" '$2 == n { print $1 }' <<<"$apps")
   [ -n "$app_id" ] || { echo "::error::App $app_name not found"; exit 1; }
-  dep=$(doctl apps get "$app_id" --format ActiveDeployment.ID --no-header)
+  dep=$(retry doctl apps get "$app_id" --format ActiveDeployment.ID --no-header)
   # One line per component: "<name> <commit>". The spec is never printed.
-  commits=$(doctl apps get-deployment "$app_id" "$dep" --output json |
+  commits=$(retry doctl apps get-deployment "$app_id" "$dep" --output json |
     jq -r '(if type == "array" then .[0] else . end)
       | [.services[]?, .workers[]?, .jobs[]?, .static_sites[]?]
       | .[] | "\(.name) \(.source_commit_hash // "")"')

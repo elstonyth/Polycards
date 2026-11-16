@@ -89,17 +89,19 @@ The script injects secrets, writes a resolved spec to gitignored
   the `DISCORD_WEBHOOK` secret; without the secret the alert step does
   nothing.
 - **`production` environment.** The plan, deploy and rollback jobs run in the
-  GitHub `production` environment (created automatically by their first run).
+  GitHub `production` environment. A first run would create it with no
+  branch policy, so the owner creates it first (below).
 
 ### Owner setup for the `production` environment
 
-GitHub can't do these for the agent; run them once as the repo owner, in
-this order. Until step 3, the jobs keep reading the repo-level secret, so
-nothing breaks in between.
+Run these once as the repo owner, in this order; step 1 before the Deploy
+gate change merges, so the branch policy holds from the first run. Until
+step 3, the jobs keep reading the repo-level secret, so nothing breaks in
+between.
 
-1. Restrict the environment to `master` (Settings > Environments >
-   production > Deployment branches and tags > Selected branches and tags >
-   add `master`), or:
+1. Create the environment restricted to `master` (Settings > Environments >
+   New environment `production` > Deployment branches and tags > Selected
+   branches and tags > add `master`), or:
 
    ```bash
    gh api -X PUT repos/elstonyth/Polycards/environments/production      -F 'deployment_branch_policy[protected_branches]=false'      -F 'deployment_branch_policy[custom_branch_policies]=true'
@@ -107,7 +109,10 @@ nothing breaks in between.
    ```
 
 2. Add the token and the webhook as environment secrets (each prompts for
-   the value; paste it, never put it in the command line):
+   the value; paste it, never put it in the command line). DigitalOcean
+   names no scope for the rollback endpoints; if the first Rollback
+   `validate` run answers 403, the token needs more than `app:read` +
+   `app:update`.
 
    ```bash
    gh secret set DIGITALOCEAN_ACCESS_TOKEN --env production
