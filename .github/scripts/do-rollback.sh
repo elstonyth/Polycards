@@ -28,12 +28,6 @@ target=${3:-}
 : "${DIGITALOCEAN_ACCESS_TOKEN:?DIGITALOCEAN_ACCESS_TOKEN is not set}"
 here=$(dirname "$0")
 
-case "$app_name" in
-  polycards-backend) health=https://admin.polycards.gg/health ;;
-  polycards-storefront) health=https://polycards.gg/healthz ;;
-  *) echo "::error::Unknown app $app_name"; exit 1 ;;
-esac
-
 uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 if [ -n "$target" ] && ! [[ $target =~ $uuid_re ]]; then
   echo "::error::deployment_id must be a deployment UUID (doctl apps list-deployments <app-id>)"
@@ -78,7 +72,7 @@ wait_and_check() {
   [ -n "$dep" ] || { echo "::error::No deployment in the response"; exit 1; }
   echo "Waiting for deployment $dep"
   bash "$here/do-deploy.sh" "$app_name" "$dep"
-  bash "$here/verify-deploy.sh" "$app_name" "$health"
+  bash "$here/verify-deploy.sh" "$app_name"
 }
 
 validate() {
