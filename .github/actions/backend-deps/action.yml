@@ -61,7 +61,11 @@ runs:
           backend/apps/*/node_modules
           backend/packages/*/node_modules
           backend/.yarn/install-state.gz
-        key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
+        # .yarnrc.yml is in the hash because it shapes the node_modules
+        # layout (nodeLinker, nmHoistingLimits) without touching the lockfile;
+        # keyed on yarn.lock alone, a .yarnrc.yml change would keep restoring
+        # (and, since the key never changes, never re-save) the old layout.
+        key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock', 'backend/.yarnrc.yml') }}
 
     # Only the install reads the yarn cache.
     - name: Restore yarn (berry global cache)
