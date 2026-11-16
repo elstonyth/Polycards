@@ -9,7 +9,7 @@ import { VIP_LEVELS_SEED } from './vip-levels.data';
 // VIP page then shows "top level" at level 1. Same idempotent upsert-if-absent
 // block as seed.ts (by `level`), safe to re-run anywhere:
 //   corepack yarn medusa exec ./src/scripts/seed-vip-achievements.ts
-// (Filename kept: the deploy:migrate-user job references it by path.)
+// (Filename kept: deploy-bootstrap.ts imports it; run by deploy:migrate-user.)
 export default async function seedVipLevels({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);

@@ -8,7 +8,8 @@
 #   deploy:init          -> db:migrate + seed (5 EMPTY DRAFT packs post-cutover,
 #                           the "Webshop" publishable key) + print-publishable-key
 #   deploy:migrate-user  -> idempotent create-admin (ADMIN_EMAIL/ADMIN_PASSWORD)
-#                           + seed-vip-achievements
+#                           + seed-vip-achievements, one boot via
+#                           deploy-bootstrap.ts
 #   seed:e2e             -> E2E-only fixture: installs a MIRROR OF THE PROD
 #                           CATALOG (the five real tier packs + real cards, from
 #                           the committed snapshot in prod-catalog.data.ts) and

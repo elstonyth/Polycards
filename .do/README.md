@@ -133,7 +133,8 @@ environment's secrets to other refs as a second fence.
 ## Admin user
 
 The PRE_DEPLOY `migrate` job permanently runs `deploy:migrate-user`
-(`db:migrate` + `create-admin.ts` + `seed-vip-achievements.ts`). Creation is
+(`db:migrate`, then `create-admin.ts` + `seed-vip-achievements.ts` in one app
+boot via `deploy-bootstrap.ts`). Creation is
 **idempotent** — `create-admin.ts` checks for an existing user and SKIPS
 without throwing — so it is safe on every deploy and self-heals a lost admin.
 `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `backend.app.yaml` feed it.
