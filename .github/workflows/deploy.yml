@@ -13,6 +13,11 @@ name: Deploy
 # also catches up after a failed or skipped deploy.
 # .github/scripts/deploy-targets.mjs holds the rules and deploys an app
 # whenever its diff can't be computed.
+#
+# Nothing deploys until master CI passes on the commit: the `gate` job waits
+# for ci.yml's `ci-ok` check (.github/scripts/ci-gate.mjs). App Platform builds
+# the branch tip rather than a given commit, so each deploy job also re-checks
+# that master still points at this commit right before it starts a deploy.
 
 on:
   push:
@@ -71,6 +76,32 @@ jobs:
           LIVE_STOREFRONT: ${{ steps.live.outputs.storefront }}
         run: node .github/scripts/deploy-targets.mjs
 
+  # Waits for master CI on this commit. Runs only when an app would deploy, so
+  # a docs-only push never waits on (or turns red from) CI.
+  gate:
+    name: wait for CI
+    needs: plan
+    if: (needs.plan.outputs.backend == 'true' || needs.plan.outputs.storefront == 'true') && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      deploy: ${{ steps.gate.outputs.deploy }}
+    steps:
+      - name: Checkout gate script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Wait for ci-ok
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: node .github/scripts/ci-gate.mjs
+
   # One job per app, gated at job level: a skipped job never joins its
   # concurrency group, so it can't displace a pending deploy of that app.
   # cancel-in-progress stays false: it would only cancel the GitHub job, and a
@@ -78,8 +109,8 @@ jobs:
   # run from a branch away from the token.
   backend:
     name: deploy backend
-    needs: plan
-    if: needs.plan.outputs.backend == 'true' && github.ref == 'refs/heads/master'
+    needs: [plan, gate]
+    if: needs.plan.outputs.backend == 'true' && needs.gate.outputs.deploy == 'true' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     concurrency:
@@ -95,12 +126,14 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Deploy and wait
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
         run: bash .github/scripts/do-deploy.sh polycards-backend
 
   storefront:
     name: deploy storefront
-    needs: plan
-    if: needs.plan.outputs.storefront == 'true' && github.ref == 'refs/heads/master'
+    needs: [plan, gate]
+    if: needs.plan.outputs.storefront == 'true' && needs.gate.outputs.deploy == 'true' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     concurrency:
@@ -116,4 +149,6 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       - name: Deploy and wait
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
         run: bash .github/scripts/do-deploy.sh polycards-storefront

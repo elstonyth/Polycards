@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 # Starts a DigitalOcean App Platform deployment for one app and waits for it.
-# Used by .github/workflows/deploy.yml. Needs doctl, already authenticated.
+# Used by .github/workflows/deploy.yml and rollback.yml. Needs doctl, already
+# authenticated.
 #
-#   bash .github/scripts/do-deploy.sh <app-name>
+#   bash .github/scripts/do-deploy.sh <app-name>                  start one and wait
+#   bash .github/scripts/do-deploy.sh <app-name> <deployment-id>  only wait for it
+#
+# With EXPECTED_SHA set (deploy.yml), it first checks that master still points
+# at that commit. App Platform builds the branch tip, not a given commit, so a
+# newer master would ship a commit whose CI this run never checked. That run's
+# own Deploy ships it instead, so this one skips.
+#
+# Writes active=true to GITHUB_OUTPUT when this deployment went live, so the
+# caller verifies only a deployment that is actually serving.
 #
 # Never cancels a deployment: a cancelled deploy once rolled production back.
 set -euo pipefail
 
-app_name=${1:?usage: do-deploy.sh <app-name>}
+app_name=${1:?usage: do-deploy.sh <app-name> [deployment-id]}
+dep=${2:-}
+out=${GITHUB_OUTPUT:-/dev/null}
 
-# Retry a doctl call on transient API errors: 3 tries, 10 s then 30 s apart.
+# Retry a command on transient errors: 3 tries, 10 s then 30 s apart.
 # Warnings go to stderr so callers can capture stdout.
 retry() {
   local delay
@@ -28,8 +40,24 @@ if [ -z "$app_id" ]; then
   exit 1
 fi
 
-dep=$(retry doctl apps create-deployment "$app_id" --format ID --no-header)
-echo "Started deployment $dep for $app_name"
+if [ -z "$dep" ]; then
+  if [ -n "${EXPECTED_SHA:-}" ]; then
+    head=$(retry git ls-remote "https://github.com/${GITHUB_REPOSITORY:?}.git" refs/heads/master | cut -f1) || head=""
+    if [ -z "$head" ]; then
+      echo "::error::Could not read the master head; not deploying an unchecked commit"
+      exit 1
+    fi
+    if [ "$head" != "$EXPECTED_SHA" ]; then
+      echo "::notice::Not deploying: master moved on to ${head:0:9}; that push's Deploy run ships ${EXPECTED_SHA:0:9} too"
+      exit 0
+    fi
+  fi
+  if ! dep=$(retry doctl apps create-deployment "$app_id" --format ID --no-header); then
+    echo "::error::Could not start a deployment for $app_name. If a rollback pinned the app, commit or revert it first (Actions > Rollback, action commit or revert)."
+    exit 1
+  fi
+  echo "Started deployment $dep for $app_name"
+fi
 
 phase=unknown
 for _ in $(seq 1 80); do
@@ -37,6 +65,7 @@ for _ in $(seq 1 80); do
   case "$phase" in
     ACTIVE)
       echo "$app_name is live on deployment $dep"
+      echo "active=true" >>"$out"
       exit 0
       ;;
     SUPERSEDED)
