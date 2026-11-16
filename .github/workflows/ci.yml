@@ -7,14 +7,25 @@ on:
   pull_request:
     branches:
       - master
+  # Manual full run of any branch (Actions -> CI -> Run workflow). Runs every
+  # job regardless of paths. debug_shard opens an SSH (tmate) session on that
+  # integration-http shard if it fails; see the step there.
+  workflow_dispatch:
+    inputs:
+      debug_shard:
+        description: 'integration-http shard (1-10) to SSH into if it fails; 0 = none'
+        type: number
+        default: 0
 
 # Least-privilege GITHUB_TOKEN; jobs that need more declare it themselves.
 permissions:
   contents: read
 
 # Stacked pushes to the same ref supersede each other — don't bill for both.
+# The event is in the group so a manual (debug) run never cancels a master
+# push's run: that would cancel its ci-ok and block the deploy.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,7 +46,8 @@ jobs:
       pull-requests: read # paths-filter reads the PR file list
       checks: read # the master fast path reads ci-ok on the PR head
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+      # A manual run tests everything; paths-filter has no base to diff then.
+      backend: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.backend }}
       storefront: ${{ steps.storefront.outputs.storefront }}
       fast: ${{ steps.fastpath.outputs.fast }}
     steps:
@@ -48,6 +60,7 @@ jobs:
 
       - name: Detect changed areas
         id: filter
+        if: github.event_name != 'workflow_dispatch'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         with:
           filters: |
@@ -440,6 +453,18 @@ jobs:
           name: http-integration-log-shard-${{ matrix.shard }}
           path: backend/packages/api/http-tests.log
           retention-days: 7
+
+      # Live SSH into a failing shard, for a manual run only: Run workflow with
+      # debug_shard = N. Unreachable from pull_request or push (the repo is
+      # public). Only the SSH keys on the dispatching user's GitHub profile
+      # are accepted; with none there, the step fails without a session. It
+      # waits 10 min for a connection, then holds the runner until you exit
+      # or the job times out.
+      - name: Debug session (tmate)
+        if: failure() && github.event_name == 'workflow_dispatch' && matrix.shard == inputs.debug_shard
+        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3.24
+        with:
+          limit-access-to-actor: true
 
   # Backend module integration gate. Not previously in CI. These use
   # moduleIntegrationTestRunner (real DB, no full medusa app boot), so they're
