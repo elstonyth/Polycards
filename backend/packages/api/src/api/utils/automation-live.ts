@@ -558,7 +558,139 @@ export function validateLiveConfig(
   } as unknown as LiveConfig;
 }
 
-interface LiveCycleServices {
+/** Why a claimed account may not draw now, or null when it may. Checked
+ *  before any money moves; a refusal is a cycle error, which fails the run. */
+export function liveAccountRefusal(account: {
+  selected: boolean;
+  disabled: boolean;
+  frozen: boolean;
+}): string | null {
+  if (!account.selected || account.disabled)
+    return 'Account is no longer selected or is disabled.';
+  if (account.frozen) return 'Account is frozen.';
+  return null;
+}
+
+/** The pack this draw opens and its fixed price, picked before the balance
+ *  check. `skipped` means the wallet cannot cover it: one empty wallet must
+ *  not stop the other accounts, so it only ends this account's draws. */
+export function planLiveDraw(
+  config: Pick<LiveConfig, 'packSlug' | 'packMix'>,
+  pricesCents: Record<string, number>,
+  balanceCents: number,
+  random: () => number = timingRandom,
+): { packSlug: string; priceCents: number; skipped?: string } {
+  const packSlug = config.packMix
+    ? pickLivePack(config.packMix, pricesCents, balanceCents, random)
+    : config.packSlug;
+  const priceCents = pricesCents[packSlug];
+  if (balanceCents < priceCents)
+    return {
+      packSlug,
+      priceCents,
+      skipped: `Balance RM ${(balanceCents / 100).toFixed(2)} cannot cover RM ${(priceCents / 100).toFixed(2)}. No more draws for this account in this run.`,
+    };
+  return { packSlug, priceCents };
+}
+
+/** What one live cycle needs from the store, the workflows and the event bus. */
+export interface LiveCycleDeps {
+  /** The claimed cycle. Checkpoints write into it, and the caller completes it. */
+  cycle: LiveCycle;
+  packSlug: string;
+  creditSummary(
+    customerId: string,
+  ): Promise<{ balance: number; bonusBalance: number }>;
+  isAccountDisabled(customerId: string): Promise<boolean>;
+  openPack(input: {
+    customer_id: string;
+    pack_id: string;
+    open_id: string;
+    max_price: number;
+  }): Promise<{
+    pull: { id: string };
+    card: { name: string; handle: string };
+    price: number;
+    bonus_cents: number;
+  }>;
+  revealPull(
+    pullId: string,
+    customerId: string,
+  ): Promise<{ first_reveal: boolean }>;
+  emit(event: {
+    name: 'pull.revealed';
+    data: {
+      pull_id: string;
+      pack_id: string;
+      card_id: string;
+      customer_id: string;
+    };
+  }): Promise<unknown>;
+  buyback(input: {
+    customer_id: string;
+    pull_id: string;
+  }): Promise<{ amount: number }>;
+  warn(message: string): void;
+  /** Saves the cycle as the pending row, if this run still owns it. */
+  persist(): Promise<void>;
+}
+
+/** The live adapter executeLiveCycle runs against. */
+export function liveCycleServices(deps: LiveCycleDeps): LiveCycleServices {
+  const { cycle, packSlug } = deps;
+  return {
+    balance: () => deps.creditSummary(cycle.customerId),
+    open: async (customerId, openId, maxPrice) => {
+      const result = await deps.openPack({
+        customer_id: customerId,
+        pack_id: packSlug,
+        open_id: openId,
+        max_price: maxPrice,
+      });
+      // Only this newly committed draw is revealed; never scan past cycles.
+      try {
+        const revealed = await deps.revealPull(result.pull.id, customerId);
+        if (revealed.first_reveal) {
+          await deps.emit({
+            name: 'pull.revealed',
+            data: {
+              pull_id: result.pull.id,
+              pack_id: packSlug,
+              card_id: result.card.handle,
+              customer_id: customerId,
+            },
+          });
+        }
+      } catch (error) {
+        // An announcement failure must not interrupt the paid draw's settlement.
+        deps.warn(
+          `Live automation announcement dropped for pull ${result.pull.id}: ${
+            error instanceof Error ? error.message : 'reveal unavailable'
+          }`,
+        );
+      }
+      return {
+        pullId: result.pull.id,
+        cardName: result.card.name,
+        price: result.price,
+        bonusUsed: result.bonus_cents / 100,
+      };
+    },
+    checkpoint: async (result) => {
+      Object.assign(cycle, result);
+      await deps.persist();
+    },
+    sell: async (customerId, pullId) => {
+      if (await deps.isAccountDisabled(customerId))
+        throw new Error(
+          'Account was disabled before settlement. The paid card remains in the vault.',
+        );
+      return deps.buyback({ customer_id: customerId, pull_id: pullId });
+    },
+  };
+}
+
+export interface LiveCycleServices {
   balance(): Promise<{ balance: number; bonusBalance: number }>;
   open(
     customerId: string,

@@ -23,7 +23,9 @@ import {
   completeLiveCycle,
   createLiveState,
   executeLiveCycle,
-  pickLivePack,
+  liveAccountRefusal,
+  liveCycleServices,
+  planLiveDraw,
   validateLiveConfig,
 } from './automation-live';
 import type {
@@ -348,89 +350,56 @@ export async function tickLive(
       state.pending = { ...cycle };
     });
   try {
-    if (
-      !(await selectedCustomers(packs)).includes(cycle.customerId) ||
-      (await packs.isAccountDisabled(cycle.customerId))
-    )
-      throw new Error('Account is no longer selected or is disabled.');
-    const [account] = await packs.listCustomerAccountStates(
-      { customer_id: cycle.customerId },
-      { take: 1 },
+    // Each read runs only once the earlier ones let the account through.
+    const selected = (await selectedCustomers(packs)).includes(
+      cycle.customerId,
     );
-    if (account?.frozen) throw new Error('Account is frozen.');
+    const disabled =
+      selected && (await packs.isAccountDisabled(cycle.customerId));
+    const frozen =
+      selected &&
+      !disabled &&
+      Boolean(
+        (
+          await packs.listCustomerAccountStates(
+            { customer_id: cycle.customerId },
+            { take: 1 },
+          )
+        )[0]?.frozen,
+      );
+    const refusal = liveAccountRefusal({ selected, disabled, frozen });
+    if (refusal) throw new Error(refusal);
     await resolveFxRateStrict(packs);
-    const balanceCents = Math.round(
-      (await packs.creditSummary(cycle.customerId)).balance * 100,
+    const plan = planLiveDraw(
+      claimed.config,
+      claimed.pricesCents,
+      Math.round((await packs.creditSummary(cycle.customerId)).balance * 100),
     );
-    const packSlug = claimed.config.packMix
-      ? pickLivePack(claimed.config.packMix, claimed.pricesCents, balanceCents)
-      : claimed.config.packSlug;
-    cycle.packSlug = packSlug;
-    const priceCents = claimed.pricesCents[packSlug];
-    // Checked before any money moves: one empty wallet must not stop the
-    // other accounts, so it only ends this account's draws for the run.
-    if (balanceCents < priceCents) {
-      cycle.skipped = `Balance RM ${(balanceCents / 100).toFixed(2)} cannot cover RM ${(priceCents / 100).toFixed(2)}. No more draws for this account in this run.`;
+    cycle.packSlug = plan.packSlug;
+    if (plan.skipped) {
+      cycle.skipped = plan.skipped;
     } else {
       const amounts = await executeLiveCycle(
         cycle.customerId,
         cycle.id,
-        priceCents / 100,
-        {
-          balance: () => packs.creditSummary(cycle.customerId),
-          open: async (customerId, openId, maxPrice) => {
-            const { result } = await openPackWorkflow(container).run({
-              input: {
-                customer_id: customerId,
-                pack_id: packSlug,
-                open_id: openId,
-                max_price: maxPrice,
-              },
-            });
-            // Only this newly committed draw is revealed; never scan past cycles.
-            try {
-              const revealed = await packs.revealPull(result.pull.id, customerId);
-              if (revealed.first_reveal) {
-                await container.resolve(Modules.EVENT_BUS).emit({
-                  name: 'pull.revealed',
-                  data: {
-                    pull_id: result.pull.id,
-                    pack_id: packSlug,
-                    card_id: result.card.handle,
-                    customer_id: customerId,
-                  },
-                });
-              }
-            } catch (error) {
-              // An announcement failure must not interrupt the paid draw's settlement.
-              container.resolve(ContainerRegistrationKeys.LOGGER).warn(
-                `Live automation announcement dropped for pull ${result.pull.id}: ${
-                  error instanceof Error ? error.message : 'reveal unavailable'
-                }`,
-              );
-            }
-            return {
-              pullId: result.pull.id,
-              cardName: result.card.name,
-              price: result.price,
-              bonusUsed: result.bonus_cents / 100,
-            };
-          },
-          checkpoint: async (result) => {
-            Object.assign(cycle, result);
-            await checkpoint();
-          },
-          sell: async (customerId, pullId) => {
-            if (await packs.isAccountDisabled(customerId))
-              throw new Error(
-                'Account was disabled before settlement. The paid card remains in the vault.',
-              );
-            const { result } = await buybackPullWorkflow(container).run({
-              input: { customer_id: customerId, pull_id: pullId },
-            });
-            return result;
-          },
-        },
+        plan.priceCents / 100,
+        liveCycleServices({
+          cycle,
+          packSlug: plan.packSlug,
+          creditSummary: (customerId) => packs.creditSummary(customerId),
+          isAccountDisabled: (customerId) =>
+            packs.isAccountDisabled(customerId),
+          openPack: async (input) =>
+            (await openPackWorkflow(container).run({ input })).result,
+          revealPull: (pullId, customerId) =>
+            packs.revealPull(pullId, customerId),
+          emit: (event) => container.resolve(Modules.EVENT_BUS).emit(event),
+          buyback: async (input) =>
+            (await buybackPullWorkflow(container).run({ input })).result,
+          warn: (message) =>
+            container.resolve(ContainerRegistrationKeys.LOGGER).warn(message),
+          persist: checkpoint,
+        }),
       );
       Object.assign(cycle, amounts);
     }
