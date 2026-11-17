@@ -57,10 +57,10 @@ import {
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
 import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
-import { getPackGifts } from '@/lib/actions/pack-gifts';
+import { usePackGifts } from '@/lib/use-pack-gifts';
 import {
-  giftsHeldFor,
   giftsUsed,
+  paidCost as costAfterGifts,
   vaultButtonLabel,
   vaultCostLabel,
 } from '@/lib/vault-packs';
@@ -318,36 +318,16 @@ export default function PackDetailClient({
   // Vault packs: packs an admin gifted into this customer's vault apply
   // themselves here, however the player arrived (spec 2026-10-07 §1). Read
   // client-side after mount and only when signed in — the server loader stays
-  // customer-free. Keyed on customer + pack so a switch of either never shows
-  // the other's count; a failed read settles as no gifts (the reel then
-  // charges the price shown here). Never on the free welcome pack.
-  const customerId = customer?.id ?? null;
-  const giftKey =
-    customerId && !isFreePack ? `${customerId}:${active.id}` : null;
-  const [heldGifts, setHeldGifts] = useState<{
-    key: string;
-    count: number;
-  } | null>(null);
-  useEffect(() => {
-    if (!giftKey) return;
-    let live = true;
-    void getPackGifts()
-      .then((g) => {
-        if (live) {
-          setHeldGifts({ key: giftKey, count: giftsHeldFor(g, active.id) });
-        }
-      })
-      .catch(() => {
-        if (live) setHeldGifts({ key: giftKey, count: 0 });
-      });
-    return () => {
-      live = false;
-    };
-  }, [giftKey, active.id]);
-  const held = heldGifts && heldGifts.key === giftKey ? heldGifts.count : 0;
-  // Still reading: the price shown may yet drop to a gift, so no credit
-  // refusal until it lands (the reel re-checks before any charge).
-  const giftsPending = giftKey !== null && heldGifts?.key !== giftKey;
+  // customer-free. A failed read shows no gifts here (the spin page says so
+  // and offers a Retry before any charge). Never on the free welcome pack.
+  // Still reading (giftsPending) or unread (giftsFailed): the price shown may
+  // yet drop to a gift, so no credit refusal here (the reel re-reads, offers
+  // Retry and re-checks before any charge).
+  const {
+    held,
+    pending: giftsPending,
+    failed: giftsFailed,
+  } = usePackGifts(isFreePack ? null : (customer?.id ?? null), active.id);
   // Sold out (admin): still listed, but the backend refuses a paid open. Only
   // vault gifts may still open it, so quantity is capped at the gifts held.
   // A Draft card pack can be looked at but not opened: a card open writes pulls
@@ -364,7 +344,7 @@ export default function PackDetailClient({
     : 1;
   // Gifts cover rows first; only the rest is paid (gifts → bonus → normal).
   const vaultGifts = giftsUsed(qty, held);
-  const paidCost = priceNum * (qty - vaultGifts);
+  const paidCost = costAfterGifts(priceNum, qty, held);
   const vaultCost = vaultCostLabel(qty, vaultGifts, priceNum);
   const openLabel = vaultButtonLabel(qty, vaultGifts) ?? `Open ${Noun}`;
   // Nothing this customer holds covers the open: no buy controls at all.
@@ -491,7 +471,12 @@ export default function PackDetailClient({
       router.push(`/slots/${active.id}/spin?count=1`);
       return;
     }
-    if (!giftsPending && balance !== null && !affordable(balance, paidCost)) {
+    if (
+      !giftsPending &&
+      !giftsFailed &&
+      balance !== null &&
+      !affordable(balance, paidCost)
+    ) {
       setNeedsTopUp(true);
       setOpenError('Not enough balance to open.');
       return;
