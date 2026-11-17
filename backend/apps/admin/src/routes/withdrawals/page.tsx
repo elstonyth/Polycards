@@ -30,6 +30,7 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { withdrawalStatusBadge } from '../../components/PaymentStatusBadge';
 import { WithdrawalControlsPanel } from './WithdrawalControlsPanel';
+import { WithdrawalReviewDrawer } from './WithdrawalReviewDrawer';
 import { When } from '../customers/[id]/bits';
 
 export const config: RouteConfig = {
@@ -127,6 +128,8 @@ const WithdrawalsPage = () => {
   // buttons disable, since they are mutually exclusive outcomes for the same
   // withdrawal.
   const [acting, setActing] = useState<ReadonlySet<string>>(new Set());
+  // The held row whose review drawer is open (ADR 0018), if any.
+  const [reviewing, setReviewing] = useState<GatewayWithdrawal | null>(null);
 
   const withActing = async (id: string, run: () => Promise<void>) => {
     if (acting.has(id)) return;
@@ -156,13 +159,13 @@ const WithdrawalsPage = () => {
       ? `${rm(w.amount)} (${w.currency} ${w.gateway_amount.toFixed(2)})`
       : rm(w.amount);
 
-  const approveHeld = (w: GatewayWithdrawal) =>
+  const approveHeld = (w: GatewayWithdrawal, verifyDevicePeers: string[] = []) =>
     withActing(w.id, async () => {
       const ok = await prompt({
         title: t('withdrawals.confirmApproveTitle'),
         description: t('withdrawals.confirmApproveBody', {
           amount: payoutLabel(w),
-          bank: w.bank_code,
+          bank: w.bank_name ?? w.bank_code,
           account: w.account_number,
           holder: w.account_holder_name,
         }),
@@ -170,7 +173,10 @@ const WithdrawalsPage = () => {
         variant: 'confirmation',
       });
       if (!ok) return;
-      await approveMutation.mutateAsync(w.id);
+      await approveMutation.mutateAsync(
+        verifyDevicePeers.length > 0 ? { id: w.id, verifyDevicePeers } : w.id,
+      );
+      setReviewing(null);
     });
 
   const denyHeld = (w: GatewayWithdrawal) =>
@@ -179,7 +185,7 @@ const WithdrawalsPage = () => {
         title: t('withdrawals.confirmDenyTitle'),
         description: t('withdrawals.confirmDenyBody', {
           amount: payoutLabel(w),
-          bank: w.bank_code,
+          bank: w.bank_name ?? w.bank_code,
           account: w.account_number,
           holder: w.account_holder_name,
         }),
@@ -188,6 +194,7 @@ const WithdrawalsPage = () => {
       });
       if (!ok) return;
       await denyMutation.mutateAsync(w.id);
+      setReviewing(null);
     });
 
   // The same call as Deny, on a row a Deny closed and never refunded. The
@@ -204,6 +211,7 @@ const WithdrawalsPage = () => {
       });
       if (!ok) return;
       await denyMutation.mutateAsync(w.id);
+      setReviewing(null);
     });
 
   // A view change restarts paging — page 3 of "pending" has nothing to do
@@ -345,6 +353,12 @@ const WithdrawalsPage = () => {
                             {t('withdrawals.frozen')}
                           </StatusBadge>
                         )}
+                        {/* Why it waits (ADR 0018): staff only. */}
+                        {w.status === 'held' && w.hold_reason === 'shared_device' && (
+                          <StatusBadge color="orange">
+                            {t('withdrawals.holdShared')}
+                          </StatusBadge>
+                        )}
                       </div>
                     </Table.Cell>
                     {/* The destination we instructed — the dispute record,
@@ -470,6 +484,19 @@ const WithdrawalsPage = () => {
                     <Table.Cell>
                       {canDecide && w.status === 'held' ? (
                         <div className="flex items-center gap-x-2">
+                          {/* The one-screen review: links, banks, money,
+                              and the same Approve and Deny. Needs the bank
+                              read policy, as the reveal does. */}
+                          {canReveal && (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              disabled={acting.has(w.id)}
+                              onClick={() => setReviewing(w)}
+                            >
+                              {t('withdrawals.review.button')}
+                            </Button>
+                          )}
                           {/* Pre-emptively disabled on a frozen account: the
                               backend refuses this one anyway (Task 5), so
                               skip the doomed round-trip — the red badge above
@@ -527,6 +554,17 @@ const WithdrawalsPage = () => {
           />
         )}
       </Container>
+      {reviewing && (
+        <WithdrawalReviewDrawer
+          withdrawal={reviewing}
+          open
+          onOpenChange={(open) => !open && setReviewing(null)}
+          canDecide={canDecide}
+          busy={acting.has(reviewing.id)}
+          onApprove={(verify) => approveHeld(reviewing, verify)}
+          onDeny={() => denyHeld(reviewing)}
+        />
+      )}
       <WithdrawalControlsPanel />
     </div>
   );

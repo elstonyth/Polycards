@@ -1517,6 +1517,33 @@ describe('startWithdrawal — approval threshold (held)', () => {
     playthrough: { deposited: 0, used: 0, remaining: 0 },
   };
 
+  it('a shared browser holds any amount, tagged for staff (ADR 0018)', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    const result = await start(h, { amount: 60, reviewHold: 'shared_device' });
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
+    expect(result.status).toBe('held');
+    expect(h.packs.createGatewayWithdrawals.mock.calls[0][0][0]).toMatchObject(
+      { status: 'held', hold_reason: 'shared_device' },
+    );
+    expect(h.packs.withdrawForCashout).toHaveBeenCalledTimes(1);
+  });
+
+  it('a row over the threshold is tagged amount; an unheld row has no reason', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue(roomyWallet);
+    await start(h, { amount: 1000.01 });
+    expect(h.packs.createGatewayWithdrawals.mock.calls[0][0][0]).toMatchObject(
+      { status: 'held', hold_reason: 'amount' },
+    );
+    const h2 = harness();
+    h2.packs.walletSummary.mockResolvedValue(roomyWallet);
+    await start(h2, { amount: 60, reviewHold: null });
+    expect(h2.packs.createGatewayWithdrawals.mock.calls[0][0][0]).toMatchObject(
+      { status: 'pending', hold_reason: null },
+    );
+  });
+
   it('RM 1,000.00 exactly still auto-submits — the boundary is strictly greater-than', async () => {
     const h = harness();
     h.packs.walletSummary.mockResolvedValue(roomyWallet);

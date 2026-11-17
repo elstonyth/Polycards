@@ -2,22 +2,8 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from '../../../../../../modules/packs';
-import {
-  findBank,
-  sandboxOnlyBank,
-} from '../../../../../../modules/packs/banks';
-import { resolveActiveGateway } from '../../../../../../modules/packs/gateway';
-import { withdrawalDetailsError } from '../../../../../../modules/packs/gateway-withdrawal';
-import { sendSavedAccountAddedNotice } from '../../../../../../modules/packs/saved-account-notice';
-import {
-  BANNED_PAYOUT_ACCOUNT_MESSAGE,
-  holderMatchKey,
-  newSavedBankAccount,
-  realNameHolder,
-} from '../../../../../../modules/packs/saved-accounts';
-import type PacksModuleService from '../../../../../../modules/packs/service';
+import { MedusaError } from '@medusajs/framework/utils';
+import { savePayoutDestination } from '../../../../../../modules/packs/payout-destination-save';
 
 // An older admin page may still send account_holder_name: never read.
 type Body = {
@@ -57,109 +43,17 @@ export async function POST(
       'A reason (1–500 chars) is required.',
     );
   }
-  const customerId = req.params.id;
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const picked =
-    typeof body.bank_code === 'string' ? findBank(body.bank_code) : undefined;
-  let holderName = '';
-  if (picked && !picked.wallet) {
-    const { realName } = await packs.getVerificationState(customerId);
-    const holder = realNameHolder(realName);
-    if (!holder) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        realName?.trim()
-          ? "This player's real name is not in English letters, so a bank account cannot carry it. Correct the real name first."
-          : 'This player has no real name on file. A bank account is saved in the real name: set it first.',
-      );
-    }
-    holderName = holder;
-  }
-  const invalid = withdrawalDetailsError({
+  // The real name, the ban list, the verified-elsewhere refusal, the lock, the
+  // re-check and the owner's notice are the save's (payout-destination-save.ts).
+  await savePayoutDestination(req.scope, {
+    customerId: req.params.id,
+    actor: {
+      kind: 'support',
+      adminId: req.auth_context.actor_id,
+      reason: reason.trim(),
+    },
     bankCode: body.bank_code,
     accountNumber: body.account_number,
-    accountHolderName: holderName,
-  });
-  if (invalid) throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
-  const bank = findBank(body.bank_code as string);
-  if (
-    !bank ||
-    sandboxOnlyBank(bank.id, process.env, await resolveActiveGateway(req.scope))
-  ) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      'Pick a bank from the list.',
-    );
-  }
-  // Stored as a customer save stores it, so the one-name rule sees support's
-  // entries too.
-  const account = newSavedBankAccount(
-    bank,
-    body.account_number as string,
-    holderName,
-  );
-
-  // Every spelling: a PayNow mobile is one number with or without its 65.
-  const number = await packs.payoutNumberStanding(customerId, {
-    bankCode: account.bankCode,
-    accountNumber: account.accountNumber,
-  });
-  // A banned number stays banned, support's add included (owner, 2026-11-03).
-  if (number.bannedForPlayer) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      BANNED_PAYOUT_ACCOUNT_MESSAGE,
-    );
-  }
-  const verifiedId = number.holders.find((h) => h.verified)?.customerId;
-  if (verifiedId) {
-    const [other] = await req.scope
-      .resolve(Modules.CUSTOMER)
-      .listCustomers(
-        { id: [verifiedId] },
-        { select: ['id', 'metadata'], take: 1 },
-      );
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      `One person, one account: ${other?.metadata?.handle ?? verifiedId} is already verified on this bank account. Undo that first if this is the right account.`,
-    );
-  }
-
-  await packs.addSavedBankAccount({
-    customerId,
-    adminId: req.auth_context.actor_id,
-    account,
-    verify: number.holders.length > 0,
-    reason: reason.trim(),
-  });
-  // The real name was read before the add's lock: a correction landing in
-  // between would leave the bank in the old name. Take it back (its own audit
-  // row) and let support try again.
-  if (holderName) {
-    const now = realNameHolder(
-      (await packs.getVerificationState(customerId)).realName,
-    );
-    if (!now || holderMatchKey(now) !== holderMatchKey(holderName)) {
-      await packs.removeSavedBankAccount({
-        customerId,
-        adminId: req.auth_context.actor_id,
-        accountId: account.id,
-        reason: 'the real name changed during the add',
-      });
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'The real name changed while this bank account was being added, so it was not added. Try again.',
-      );
-    }
-  }
-  // A new payout destination is a security event whoever adds it. After commit,
-  // and it never fails the add (the helper swallows its own errors).
-  await sendSavedAccountAddedNotice(req.scope, {
-    customerId,
-    accountId: account.id,
-    bankName: account.bankName,
-    accountNumber: account.accountNumber,
-    savedAt: account.savedAt as string,
   });
   res.json({ added: true });
 }

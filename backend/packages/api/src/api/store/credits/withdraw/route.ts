@@ -13,6 +13,8 @@ import {
   type GatewayWithdrawals,
 } from '../../../../modules/packs/facets';
 import { payerIpOf } from '../../../utils/payer-ip';
+import { vouchedVisitorDevice } from '../../../utils/visitor-ip';
+import type PacksModuleService from '../../../../modules/packs/service';
 import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
   gatewayUrls,
@@ -111,6 +113,13 @@ export async function POST(
     await contactIfNeeded(req.scope, gateway, customerId, 'payout')
   )?.email;
 
+  // An earlier account on this browser that support has not confirmed as one
+  // household holds the withdrawal for review (ADR 0018). Staff see why; the
+  // customer sees the usual "awaiting approval".
+  const sharedPeers = await resolvePacks<
+    Pick<PacksModuleService, 'sharedDeviceHoldPeers'>
+  >(req.scope).sharedDeviceHoldPeers(customerId, vouchedVisitorDevice(req));
+
   const result = await startWithdrawal(
     req.scope,
     {
@@ -123,6 +132,7 @@ export async function POST(
       savedAccounts,
       quotedRate: quotedRateOf(body.quoted_rate),
       idempotencyKey: trimmedKey !== '' ? trimmedKey : undefined,
+      reviewHold: sharedPeers.length > 0 ? 'shared_device' : null,
     },
     notifyUrl,
     verifyUrl,

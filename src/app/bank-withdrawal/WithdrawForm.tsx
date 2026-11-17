@@ -366,8 +366,8 @@ export default function WithdrawForm({
   const amountValid = Number.isFinite(amount) && amount > 0;
   const selected = usableAccounts.find((a) => a.id === accountId);
   const formValid = amountValid && selected !== undefined;
-  // A destination can carry its own floor above the gateway's (Touch 'n Go:
-  // RM 100 — smaller TNG payouts are refused by the gateway). The backend
+  // A destination can carry its own floor above the gateway's (Touch 'n Go
+  // has one, plus any higher admin minimum). The backend
   // enforces the same figure; this states it before the customer taps.
   const accountMin =
     selected?.minRm != null && selected.minRm > payoutBand.minRm
@@ -383,7 +383,7 @@ export default function WithdrawForm({
   // Gate open but less than the payout floor: no amount can pass the band, and
   // nextAmountText would snap every attempt down below it — say so instead.
   // The floor is the one shown on top: the rail's (S$ rail: RM 96.05 at
-  // 3.2017), or the chosen account's own (Touch 'n Go: RM 100).
+  // 3.2017), or the chosen account's own (Touch 'n Go has one).
   const belowMin = !onHold && withdrawable != null && withdrawable < minRm;
   const blocked = onHold || belowMin;
   const guidanceId = withdrawalsClosed
@@ -501,7 +501,7 @@ export default function WithdrawForm({
         )}
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
           {held
-            ? `Withdrawals this size need staff approval before they're sent to your ${toWallet ? 'wallet' : 'bank'} — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know.`
+            ? `This withdrawal needs a check by our team before it's sent to your ${toWallet ? 'wallet' : 'bank'} — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know.`
             : toWallet
               ? 'Your USDT transfer is processing — most arrive within minutes. If it fails, the full amount returns to your balance automatically.'
               : 'Your bank transfer is processing — most arrive within minutes. If the bank rejects it, the full amount returns to your balance automatically.'}

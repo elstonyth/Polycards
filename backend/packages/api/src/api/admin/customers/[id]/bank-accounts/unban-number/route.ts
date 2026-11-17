@@ -6,7 +6,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 import { accessFor } from '../../../../assistant/access';
-import { BAN_LIST_NEED } from '../../../../assistant/confirm';
+import { fromBanList } from '../../../../../../modules/packs/ban-list-access';
 
 type Body = {
   last4?: unknown;
@@ -64,7 +64,6 @@ export async function POST(
   // with the ban-list need. No roles is never enough, and a failed permission
   // lookup refuses the fallback rather than the request.
   const access = accessFor(req.scope, req.auth_context);
-  const fromBanList = access.superAdmin || (await access.can(BAN_LIST_NEED));
   const done = await req.scope
     .resolve<PacksModuleService>(PACKS_MODULE)
     .setPayoutBanLifted({
@@ -74,7 +73,7 @@ export async function POST(
       bankCode: bankCode || null,
       lifted,
       reason: reason.trim(),
-      fromBanList,
+      fromBanList: await fromBanList(access),
     });
   res.json(done);
 }

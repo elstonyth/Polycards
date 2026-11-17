@@ -74,7 +74,7 @@ describe('admin RBAC coverage', () => {
       if (!ours && !core) {
         failures.push(
           `${method} ${url} (src/api/${relPath}) has no RBAC policy — add its ` +
-            'prefix to CUSTOM_ADMIN_RESOURCES or the route to CORE_PREFIX_WRITES',
+            'prefix to CUSTOM_ADMIN_RESOURCES or the route to ADMIN_ROUTES',
         );
       }
     }

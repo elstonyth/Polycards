@@ -25,6 +25,7 @@ import type PacksModuleService from '../service';
 import { CORE_CUSTOMER_MODELS } from '../test-support/core-customer-models';
 import { snapshotAddress } from '../delivery';
 import { referralWeekFor } from '../referral';
+import { payLuckyDrawPrize } from '../lucky-draw-operations';
 
 jest.setTimeout(300 * 1000);
 
@@ -286,7 +287,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     it('payLuckyDrawPrize: reward_credit bonus row + WP keyed on the credit row', async () => {
       const c = 'cus_g_draw';
       await inTxn((ctx) =>
-        svc.payLuckyDrawPrize({ id: 'ldp_g_1', kind: 'credit', credit_myr: 9.99 }, c, null, ctx),
+        payLuckyDrawPrize(svc.luckyDrawPort(), { id: 'ldp_g_1', kind: 'credit', credit_myr: 9.99 }, c, null, ctx),
       );
       expect(await golden([c])).toEqual(GOLDEN.luckydraw);
     });
