@@ -42,7 +42,7 @@ import { rewardsRedemptionEnabled } from './rewards-gate';
 import {
   NO_TOPUP_MESSAGE,
   playthroughState,
-  withdrawableCents,
+  walletWithdrawable,
   withdrawalGateError,
 } from './withdrawable';
 import {
@@ -12274,38 +12274,34 @@ class PacksModuleService extends MedusaService({
     }
 
     const frozen = await this.isFrozen(customerId, sharedContext);
-    // Rounded through integer cents so the figure the gate compares and the
-    // figure the UI renders with toFixed(2) can never disagree by a float hair
-    // (withdrawalGateError compares `amount <= withdrawable`).
-    const available = frozen ? 0 : Math.round(balance * 100) / 100;
-
-    // Playthrough gate: nothing leaves until what is still to use on packs is
-    // used (spend first, ADR 0013). Spending on packs stays unrestricted
-    // either way — the gate only limits cashout.
-    const gate = playthroughState({ depositedCents, usedCents });
-    // Bonus credit is spend-only (spec 2026-10-07): it sits inside the
-    // balance but never inside what may leave.
-    // No top-up ever = nothing may leave (2026-10-11): promo credit and prize
-    // sell-backs are not cash for an account that never deposited.
-    const withdrawable = hasTopup
-      ? withdrawableCents({
-          availableCents: Math.round(available * 100),
-          bonusCents,
-          remainingCents: gate.remainingCents,
-        }) / 100
-      : 0;
+    // The rule's branches (frozen, no top-up, spend first, bonus spend-only)
+    // live in walletWithdrawable, shared with the P&L's floating money. The
+    // bonus arrives clamped at 0 (the scan above, or creditSummary through
+    // `precomputed`) and this caller rounds the balance to cents. In integer
+    // cents, so the figure the gate compares and the figure the UI renders
+    // with toFixed(2) can never disagree by a float hair
+    // (withdrawalGateError compares `amount <= withdrawable`). Spending on
+    // packs stays unrestricted either way — the gate only limits cashout.
+    const fold = walletWithdrawable({
+      balanceCents: Math.round(balance * 100),
+      bonusCents,
+      depositedCents,
+      usedCents,
+      hasTopup,
+      frozen,
+    });
 
     return {
       balance,
-      available,
+      available: fold.availableCents / 100,
       isFrozen: frozen,
       hasTopup,
-      withdrawable,
-      bonus: bonusCents / 100,
+      withdrawable: fold.withdrawableCents / 100,
+      bonus: fold.bonusCents / 100,
       playthrough: {
         deposited: depositedCents / 100,
         used: usedCents / 100,
-        remaining: gate.remainingCents / 100,
+        remaining: fold.remainingCents / 100,
       },
     };
   }

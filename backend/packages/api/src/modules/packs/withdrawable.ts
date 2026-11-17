@@ -20,9 +20,10 @@ import { MedusaError } from '@medusajs/framework/utils';
 //   deposit 20,  used 0                  -> nothing leaves
 //   card sold for 1000, then deposit 500 -> nothing leaves until 500 is used
 //
-// Pure cent math, unit-tested here; walletSummary computes the same two sums
-// in SQL and feeds them through this gate. The future cashout writer MUST
-// route through this function before writing a 'cashout' ledger row.
+// Pure cent math, unit-tested here. walletWithdrawable (below) is the whole
+// rule over a wallet's raw facts; walletSummary and the P&L read it, and the
+// future cashout writer MUST route through it before writing a 'cashout'
+// ledger row.
 export interface PlaythroughInput {
   /** Σ positive `topup` rows **with a non-NULL external basis** (post-1b era),
    *  plus each buyback's stamp (the free share of a sale, 2026-10-09), in
@@ -60,6 +61,51 @@ export function withdrawableCents(t: {
   return t.remainingCents > 0
     ? 0
     : Math.max(0, t.availableCents - t.bonusCents);
+}
+
+/** One wallet's ledger facts, in integer cents (sen). */
+export interface WalletFacts {
+  balanceCents: number;
+  /** Spend-only bonus credit. Each caller's scan clamps a negative sum at 0
+   *  before it gets here. */
+  bonusCents: number;
+  depositedCents: number;
+  usedCents: number;
+  /** At least one positive top-up row ever (any era, any amount). */
+  hasTopup: boolean;
+  frozen: boolean;
+}
+
+export interface WithdrawableAnswer {
+  /** The balance a frozen account may not touch reads 0. */
+  availableCents: number;
+  bonusCents: number;
+  remainingCents: number;
+  withdrawableCents: number;
+}
+
+/**
+ * The whole withdrawable rule over raw facts, every branch in one place:
+ * frozen reads as nothing available, no top-up ever as nothing withdrawable
+ * (2026-10-11), then spend first (ADR 0013).
+ * walletSummary (what both withdrawal gates read) and the P&L's floating
+ * money both fold a wallet through this, so they cannot drift.
+ */
+export function walletWithdrawable(f: WalletFacts): WithdrawableAnswer {
+  const availableCents = f.frozen ? 0 : f.balanceCents;
+  const { bonusCents } = f;
+  const { remainingCents } = playthroughState({
+    depositedCents: f.depositedCents,
+    usedCents: f.usedCents,
+  });
+  return {
+    availableCents,
+    bonusCents,
+    remainingCents,
+    withdrawableCents: f.hasTopup
+      ? withdrawableCents({ availableCents, bonusCents, remainingCents })
+      : 0,
+  };
 }
 
 /** Refusal for an account that never topped up (2026-10-11): promo credit

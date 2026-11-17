@@ -18,9 +18,9 @@ they can withdraw anything.
 ## Decision
 
 - **Withdrawable = 0 while `playthrough.remaining` > 0, else
-  `max(0, available − bonus)`.** `withdrawableCents` in `withdrawable.ts` is
+  `max(0, available − bonus)`.** `walletWithdrawable` in `withdrawable.ts` is
   still the one place it is computed. It also stays 0 before the first real
-  top-up and while the account is frozen (`walletSummary`).
+  top-up and while the account is frozen.
 - Nothing else moves: `sellbackHoldBp`, the buyback stamps, the spend order
   (bonus first, then money for packs, then the rest) and the delivery rules.
   An open already uses money for packs before other money, so normal play
