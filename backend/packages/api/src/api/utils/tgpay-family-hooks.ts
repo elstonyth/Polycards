@@ -239,7 +239,6 @@ export function tgpayWithdrawalCallback(kind: TgpayKind): Handler {
     // write storing their id.
     const answer = await handleWithdrawalCallback(req.scope, {
       kind,
-      tag,
       label,
       find: {
         gatewayTransactionId,
@@ -260,10 +259,9 @@ export function tgpayWithdrawalCallback(kind: TgpayKind): Handler {
           : null,
       // The callback carries no bank references, so those columns are left
       // alone.
-      settlement: (withdrawal) => ({
-        gatewayRef: gatewayTransactionId,
-        gatewayTransactionId:
-          withdrawal.gateway_transaction_id ?? gatewayTransactionId,
+      settlement: (withdrawal, reported) => ({
+        gatewayRef: reported,
+        gatewayTransactionId: withdrawal.gateway_transaction_id ?? reported,
         amountSettled: toOptionalMoney(data.amount),
         // net_amount on a payout is what the wallet PAID — amount + fee (the
         // platform charges on top). NULL when the callback omits the fee —

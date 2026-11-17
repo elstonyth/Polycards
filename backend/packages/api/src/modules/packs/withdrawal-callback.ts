@@ -30,7 +30,7 @@ import { stampWithdrawalAudit } from './withdrawal-lifecycle';
  * gateway's ack bytes stay its adapter's business.
  */
 
-type Logger = { warn: (m: string) => void; error: (m: string) => void };
+type Logger = { error: (m: string) => void };
 
 export type CallbackRow = Awaited<
   ReturnType<GatewayWithdrawals['listGatewayWithdrawals']>
@@ -40,8 +40,6 @@ export type CallbackRow = Awaited<
  *  functions, called only at the step that needs them, as the platforms did. */
 export type WithdrawalNotice = {
   kind: PaymentGateway;
-  /** Log prefix, e.g. `[tgpay]`. */
-  tag: string;
   /** Operator-facing gateway name for ops alerts. */
   label: string;
   /** Where to look, in this order. Each lookup is also scoped to `kind`. */
@@ -49,7 +47,9 @@ export type WithdrawalNotice = {
   /** The gateway's own status value, verbatim, for log lines. */
   rawStatus: string;
   state: SettlementState;
-  /** Their id as this callback should report it, given the row. */
+  /** Their id as this callback should report it, given the row. The
+   *  row-dependent reads below are the adapter's because only it knows its
+   *  units: A3Pay converts at the row's locked rate, TGPay reports RM. */
   gatewayTransactionId: (row: CallbackRow) => string;
   /** What the gateway says it paid, in ledger RM, for a contradiction note. */
   paidAmount: (row: CallbackRow) => number;
@@ -72,7 +72,8 @@ export async function handleWithdrawalCallback(
   scope: { resolve: <T>(key: string) => T },
   notice: WithdrawalNotice,
 ): Promise<CallbackAnswer> {
-  const { kind, tag, label, find, state, rawStatus } = notice;
+  const { kind, label, find, state, rawStatus } = notice;
+  const tag = `[${kind}]`;
   const logger = scope.resolve<Logger>('logger');
   const packs = resolvePacks<GatewayWithdrawals>(scope);
 
@@ -95,7 +96,7 @@ export async function handleWithdrawalCallback(
   }
   if (!withdrawal) {
     logger.error(
-      `${tag} verified withdrawal callback for UNKNOWN payout ${find.merchantTransactionId ?? find.gatewayTransactionId} (status ${rawStatus}) — nothing changed; the sweep will requery`,
+      `${tag} verified withdrawal callback for UNKNOWN payout ${find.merchantTransactionId || find.gatewayTransactionId} (status ${rawStatus}) — nothing changed; the sweep will requery`,
     );
     return ACK;
   }

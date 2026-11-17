@@ -35,7 +35,6 @@ const SETTLED_AT = new Date('2026-11-17T00:00:00Z');
 function notice(over: Partial<WithdrawalNotice> = {}): WithdrawalNotice {
   return {
     kind: 'tgpay',
-    tag: '[fake]',
     label: 'Fake',
     find: { gatewayTransactionId: 'T-1', merchantTransactionId: 'PC-1' },
     rawStatus: 'RAW',
@@ -81,7 +80,7 @@ test('an unknown payout is acknowledged and changes nothing', async () => {
   const h = harness([]);
   await expect(handleWithdrawalCallback(h.scope, notice())).resolves.toEqual(OK);
   expect(h.logger.error).toHaveBeenCalledWith(
-    '[fake] verified withdrawal callback for UNKNOWN payout PC-1 (status RAW) — nothing changed; the sweep will requery',
+    '[tgpay] verified withdrawal callback for UNKNOWN payout PC-1 (status RAW) — nothing changed; the sweep will requery',
   );
   expect(refundWithdrawal).not.toHaveBeenCalled();
   expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
@@ -106,7 +105,7 @@ test('a success on a refunded row logs, alerts ops and notes the row', async () 
   const h = harness([[row({ status: 'failed' })]]);
   await expect(handleWithdrawalCallback(h.scope, notice())).resolves.toEqual(OK);
   expect(h.logger.error.mock.calls[0][0]).toBe(
-    '[fake] withdrawal PC-1 callback says RAW (success) but the row is already failed — possible double payment, investigate (gateway T-1)',
+    '[tgpay] withdrawal PC-1 callback says RAW (success) but the row is already failed — possible double payment, investigate (gateway T-1)',
   );
   expect(alertOps).toHaveBeenCalledWith(
     h.scope,
@@ -125,7 +124,7 @@ test('a contradiction note that cannot be written still acknowledges', async () 
   h.packs.updateGatewayWithdrawals.mockRejectedValue(new Error('db down'));
   await expect(handleWithdrawalCallback(h.scope, notice())).resolves.toEqual(OK);
   expect(h.logger.error.mock.calls[1][0]).toBe(
-    '[fake] could not record the contradiction on PC-1: db down',
+    '[tgpay] could not record the contradiction on PC-1: db down',
   );
 });
 
@@ -159,7 +158,7 @@ test('failed: a refund that throws answers 500 so the gateway retries', async ()
     handleWithdrawalCallback(h.scope, notice({ state: 'failed' })),
   ).resolves.toEqual({ status: 500, body: 'error' });
   expect(h.logger.error).toHaveBeenCalledWith(
-    '[fake] failed to refund withdrawal PC-1: lock',
+    '[tgpay] failed to refund withdrawal PC-1: lock',
   );
 });
 
@@ -172,7 +171,7 @@ test.each([
     h.scope,
     notice({ amountMismatch: () => ({ note: 'paid 99, debited 100', alert }) }),
   );
-  expect(h.logger.error).toHaveBeenCalledWith('[fake] paid 99, debited 100');
+  expect(h.logger.error).toHaveBeenCalledWith('[tgpay] paid 99, debited 100');
   expect((alertOps as jest.Mock).mock.calls).toHaveLength(alerts);
   expect(applyWithdrawalOutcome).toHaveBeenCalledTimes(1);
 });

@@ -325,7 +325,6 @@ export function a3payWithdrawalCallback(kind: A3payKind): Handler {
     }
     const answer = await handleWithdrawalCallback(req.scope, {
       kind,
-      tag,
       label,
       find: { merchantTransactionId },
       rawStatus: String(data.Status),
