@@ -13,14 +13,14 @@ import {
 } from '@/lib/actions/vault';
 import {
   DEFAULT_PAYMENT_LIMITS,
-  regionalCredit,
   type PaymentLimits,
 } from '@/lib/payment-limits';
-import { openRails, regionalRailUi } from '@/lib/regional-rails';
+import { regionalRailUi } from '@/lib/regional-rails';
+import { depositOffer } from '@/lib/rail-offer';
 import { leaveFor } from '@/lib/navigation';
 import { markDepositInFlight } from '@/lib/deposit-return';
 import { trackPixel } from '@/lib/pixel';
-import { CountryFlag, type FlagCountry } from '@/components/ui/country-flag';
+import { CountryFlag } from '@/components/ui/country-flag';
 import { Pill } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -61,26 +61,10 @@ const DEFAULT_AMOUNT = USE_GATEWAY ? '300' : '25';
 
 // A regional rail (Singapore via A3Pay): the customer pays in that currency
 // and is credited RM at the rate the backend quotes (market rate minus our
-// markup). Its rungs, channels and labels live in lib/regional-rails.ts.
+// markup). Its rungs, channels and labels live in lib/regional-rails.ts; which
+// rails are on offer, their bands and the currency rows, in lib/rail-offer.ts.
 /** 'MYR', or a regional rail's currency code. */
 type Currency = string;
-
-/**
- * One row of the "Choose a currency" step. The list is built from what the
- * backend reports open (getPaymentLimits) and what lib/regional-rails.ts
- * knows how to present, so a new rail (USDT next) needs no change here.
- */
-type CurrencyOption = {
-  code: Currency;
-  /** Shown after the name and in front of amounts. */
-  symbol: string;
-  /** The badge: which country's banks pay in this currency. */
-  flag: FlagCountry;
-  name: string;
-  hint: string;
-  /** Listed but not choosable (the RM gateway is paused). */
-  disabled?: boolean;
-};
 
 /**
  * Global top-up bottom sheet (90scard's profile top-up flow, dark skin).
@@ -174,25 +158,18 @@ export default function TopUpSheet({
   // the mock has no channels — and failure keeps the compiled list, since the
   // action re-checks the code anyway and a refused channel shows its own error.
   const [limits, setLimits] = useState<PaymentLimits>(DEFAULT_PAYMENT_LIMITS);
-  // The regional rails the backend has open AND priced (gateway path only),
-  // and the one being paid through, if any. Undefined = paying in RM.
-  const rails = USE_GATEWAY ? openRails(limits.regional, 'deposit') : [];
-  const rail = rails.find((option) => option.currency === currency);
+  // Which rails, what band, is it open (lib/rail-offer.ts). `rail` is the
+  // regional rail being paid through, if any. Undefined = paying in RM.
+  const {
+    options: currencyOptions,
+    rail,
+    band: { min: minAmount, max: maxAmount },
+    closed: depositsClosed,
+    methods: shownMethods,
+    credit: creditFor,
+  } = depositOffer(limits, methods, currency, { gateway: USE_GATEWAY });
   const money = rail ? rail.ui.money : rm;
   const money0 = rail ? rail.ui.money0 : rm0;
-  const minAmount = rail
-    ? Math.max(0.01, rail.deposit.min ?? 0.01)
-    : USE_GATEWAY
-      ? Math.max(0.01, limits.deposit.minRm)
-      : 0.01;
-  const maxAmount = rail
-    ? (rail.deposit.max ?? 10_000)
-    : USE_GATEWAY
-      ? limits.deposit.maxRm
-      : 10_000;
-  // The channel itself, not the band — the admin can close deposits outright
-  // while a gateway stays configured (getPaymentLimits, plan 135).
-  const depositsClosed = USE_GATEWAY && !rail && !limits.depositsEnabled;
   const amount = Number(amountText.trim());
   const amountValid =
     /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(amountText.trim()) &&
@@ -205,8 +182,7 @@ export default function TopUpSheet({
   // What lands on the balance: the amount itself in RM, or the quoted RM
   // credit for a regional payment (floored to the cent, as the backend
   // quotes it).
-  const credit =
-    rail && amountValid ? regionalCredit(amount, rail.rate.deposit) : amount;
+  const credit = amountValid ? creditFor(amount) : amount;
   // A rail that matches the transfer against the payer's account name
   // (A3Pay) always sends one: a saved account's holder, shown with "Change"
   // because the customer may pay from another account, or — none saved —
@@ -241,48 +217,8 @@ export default function TopUpSheet({
   const payerValid =
     !askFor || (payerName.trim().length >= 2 && payerName.trim().length <= 120);
   const canPay = amountValid && !depositsClosed && !payerLoading && payerValid;
-  const shownMethods = rail ? rail.ui.methods : methods;
   const presets = rail ? rail.ui.presets : PRESETS;
 
-  // Step 1's rows: RM always — marked paused, not hidden, when the admin has
-  // closed RM top-ups, so the customer is told rather than left wondering —
-  // then every open regional rail, then any closed one the backend still
-  // reports, paused for the same reason.
-  const rmPaused = USE_GATEWAY && !limits.depositsEnabled;
-  const currencyOptions: CurrencyOption[] = [
-    {
-      code: 'MYR',
-      symbol: 'RM',
-      flag: 'MY',
-      name: 'Malaysian Ringgit',
-      hint: rmPaused
-        ? 'Paused right now — your balance and cards are unaffected'
-        : 'Online banking (FPX) · QR / e-wallet',
-      disabled: rmPaused,
-    },
-    ...rails.map((option) => ({
-      code: option.currency,
-      symbol: option.ui.symbol,
-      flag: option.ui.flag,
-      name: option.ui.name,
-      hint: `${option.ui.hint} · ${option.ui.unit} = RM ${option.rate.deposit.toFixed(4)}`,
-    })),
-    ...(USE_GATEWAY ? (limits.regional ?? []) : []).flatMap((closed) => {
-      const ui = regionalRailUi(closed.currency);
-      return ui && !rails.some((open) => open.currency === closed.currency)
-        ? [
-            {
-              code: closed.currency,
-              symbol: ui.symbol,
-              flag: ui.flag,
-              name: ui.name,
-              hint: 'Paused right now — your balance and cards are unaffected',
-              disabled: true,
-            },
-          ]
-        : [];
-    }),
-  ];
   // The picker shows until a currency is chosen — and again if the chosen
   // rail closes while the sheet is open (its form would have nothing to pay).
   const picking = currency === null || (currency !== 'MYR' && !rail);

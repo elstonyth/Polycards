@@ -6,10 +6,10 @@ import { CheckCircle2, ChevronDown, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
 import {
   bankCountryGroups,
-  openRails,
   regionalRailUi,
   type RegionalRailUi,
 } from '@/lib/regional-rails';
+import { payoutOffer } from '@/lib/rail-offer';
 import { isWithdrawLocked, walletSplit } from '@/lib/wallet-split';
 import {
   MoneyRows,
@@ -24,7 +24,6 @@ import {
 } from '@/lib/actions/vault';
 import {
   DEFAULT_PAYMENT_LIMITS,
-  regionalPayout,
   type PaymentLimits,
 } from '@/lib/payment-limits';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -328,32 +327,21 @@ export default function WithdrawForm({
     setAccountId(usable.length === 1 ? (usable[0]?.id ?? '') : '');
   }
 
-  // Regional payout rails (Singapore via A3Pay), open and priced. An account
-  // in a regional currency is paid through its rail in that currency; every
-  // other account through the active gateway in RM.
-  const rails = openRails(limits.regional, 'withdrawal');
   const selectedAccount = saved?.find((a) => a.id === accountId);
-  // The currency this payout goes out in: the chosen account's, else that of
-  // the country on show, so the Singapore pill shows the S$ rail's band
-  // before an account is picked.
-  const payCurrency = selectedAccount
-    ? selectedAccount.currency
-    : shown?.items[0]?.currency;
-  const toRegional = payCurrency !== undefined && payCurrency !== 'MYR';
-  const rail = toRegional
-    ? rails.find((option) => option.currency === payCurrency)
-    : undefined;
-  // The RM band THIS payout is judged by: the rail's own (its RM band
-  // narrowed to what pays inside its S$ band) for a regional account, else
-  // the active gateway's. At 3.2017, S$30 needs RM 96.05, not RM 50.
-  const payoutBand = rail?.withdrawalRm ?? limits.withdrawal;
-  // The channel itself, not the band — the admin can close withdrawals
-  // outright while a gateway stays configured (getPaymentLimits, plan 135).
-  // Judged against the rail that would pay the country on show; with no
-  // saved account at all, open if any rail is.
-  const withdrawalsClosed = toRegional
-    ? !rail
-    : !limits.withdrawalsEnabled && (shown !== undefined || rails.length === 0);
+  const selected = usableAccounts.find((a) => a.id === accountId);
+  // Which rail pays, the RM band it is judged by and whether it is open
+  // (lib/rail-offer.ts). The destination is the chosen account, else the
+  // first of the country on show, so the Singapore pill shows the S$ rail's
+  // band before an account is picked; the floor is the selected payable
+  // account's own (Touch 'n Go: RM 100).
+  const {
+    rail,
+    band: { minRm, maxRm },
+    accountMin,
+    closed: withdrawalsClosed,
+    payout,
+    outOfBand,
+  } = payoutOffer(limits, selectedAccount ?? shown?.items[0], selected?.minRm);
   // A timed pause or the admin's switch / daily hours names when to come
   // back, in Malaysia time.
   const resumeAt = limits.withdrawalsPausedUntil
@@ -364,21 +352,11 @@ export default function WithdrawForm({
   // decimals, so stripping the commas leaves a plain number (or "." -> NaN).
   const amount = Number(amountText.replace(/,/g, ''));
   const amountValid = Number.isFinite(amount) && amount > 0;
-  const selected = usableAccounts.find((a) => a.id === accountId);
   const formValid = amountValid && selected !== undefined;
-  // A destination can carry its own floor above the gateway's (Touch 'n Go:
-  // RM 100 — smaller TNG payouts are refused by the gateway). The backend
-  // enforces the same figure; this states it before the customer taps.
-  const accountMin =
-    selected?.minRm != null && selected.minRm > payoutBand.minRm
-      ? selected.minRm
-      : null;
-  const minRm = accountMin ?? payoutBand.minRm;
   // The band shown under the figure and named by the band refusal — one
   // wording for both, the selected account's (per-bank floor included).
   const floorText = bandEdge(minRm, rm, rm0);
-  const maxText = bandEdge(payoutBand.maxRm, rm, rm0);
-  const band = rail?.withdrawal;
+  const maxText = bandEdge(maxRm, rm, rm0);
   const regionalBand = rail ? regionalBandText(rail.withdrawal, rail.ui) : null;
   // Gate open but less than the payout floor: no amount can pass the band, and
   // nextAmountText would snap every attempt down below it — say so instead.
@@ -393,13 +371,13 @@ export default function WithdrawForm({
       : undefined;
   // What a regional bank receives for this RM amount, at today's payout rate
   // (floored to the cent, exactly as the backend quotes and locks it).
-  const payoutRegional =
-    rail && amountValid ? regionalPayout(amount, rail.rate.payout) : null;
+  const payoutRegional = amountValid ? payout(amount) : null;
 
   async function submit() {
     if (submitting || !formValid || withdrawalsClosed || blocked) return;
     setError(null);
-    if (amount < minRm || amount > payoutBand.maxRm) {
+    const outside = outOfBand(amount);
+    if (outside === 'rm') {
       setError(
         accountMin === null && rail?.withdrawalRm
           ? `${rail.ui.payoutNoun} must be between ${floorText} and ${maxText} today.`
@@ -407,13 +385,8 @@ export default function WithdrawForm({
       );
       return;
     }
-    if (
-      rail &&
-      payoutRegional !== null &&
-      band &&
-      ((band.min !== null && payoutRegional < band.min) ||
-        (band.max !== null && payoutRegional > band.max))
-    ) {
+    if (outside === 'regional' && rail && payoutRegional !== null) {
+      const band = rail.withdrawal;
       setError(
         `${rail.ui.payoutNoun} must come to between ${rail.ui.money(band.min ?? 0)} and ${rail.ui.money(band.max ?? 0)} (${rm(amount)} is ${rail.ui.money(payoutRegional)}).`,
       );
