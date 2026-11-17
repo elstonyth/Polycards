@@ -62,6 +62,50 @@ export function withdrawableCents(t: {
     : Math.max(0, t.availableCents - t.bonusCents);
 }
 
+/** One wallet's ledger facts, in integer sen. */
+export interface WalletFacts {
+  balanceCents: number;
+  /** Σ bonus_cents; a negative sum is read as none. */
+  bonusCents: number;
+  depositedCents: number;
+  usedCents: number;
+  /** At least one positive top-up row ever (any era, any amount). */
+  hasTopup: boolean;
+  frozen: boolean;
+}
+
+export interface WalletWithdrawable {
+  /** The balance a frozen account may not touch reads 0. */
+  availableCents: number;
+  bonusCents: number;
+  remainingCents: number;
+  withdrawableCents: number;
+}
+
+/**
+ * The whole withdrawable rule over raw facts, every branch in one place:
+ * frozen reads as nothing available, a negative bonus as none, no top-up
+ * ever as nothing withdrawable (2026-10-11), then spend first (ADR 0013).
+ * walletSummary (what both withdrawal gates read) and the P&L's floating
+ * money both fold a wallet through this, so they cannot drift.
+ */
+export function walletWithdrawable(f: WalletFacts): WalletWithdrawable {
+  const availableCents = f.frozen ? 0 : f.balanceCents;
+  const bonusCents = Math.max(0, f.bonusCents);
+  const { remainingCents } = playthroughState({
+    depositedCents: f.depositedCents,
+    usedCents: f.usedCents,
+  });
+  return {
+    availableCents,
+    bonusCents,
+    remainingCents,
+    withdrawableCents: f.hasTopup
+      ? withdrawableCents({ availableCents, bonusCents, remainingCents })
+      : 0,
+  };
+}
+
 /** Refusal for an account that never topped up (2026-10-11): promo credit
  *  and prizes must not leave as cash or as a shipped card from an account
  *  that never deposited. Shared by the withdrawal gate and both delivery
