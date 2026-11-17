@@ -24,8 +24,12 @@ import {
   closeInstantWindow,
 } from '@/lib/actions/packs';
 import { spinTaskReward } from '@/lib/actions/tasks';
-import { getPackGifts } from '@/lib/actions/pack-gifts';
-import { giftsHeldFor, giftsUsed, spinBetLabel } from '@/lib/vault-packs';
+import { usePackGifts } from '@/lib/use-pack-gifts';
+import {
+  giftsUsed,
+  paidCost as costAfterGifts,
+  spinBetLabel,
+} from '@/lib/vault-packs';
 import type { WonCard } from '@/lib/actions/packs';
 import { sellBackPull } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -261,46 +265,21 @@ export default function SlotMachineClient({
   // read on the client only, and a press waits for that read for whoever is
   // signed in NOW — a server seed would be a second call, and an account switch
   // without a reload, or a Back-restored page, would otherwise act on a stale
-  // count (stale-low charges full price for a gift-covered row). null = re-read
-  // (mount, a stale-gift refusal, Retry). A failed read settles at 0 —
+  // count (stale-low charges full price for a gift-covered row). invalidate()
+  // = re-read (a stale-gift refusal, Retry). A failed read settles at 0 —
   // the price the screen shows, so an outage never blocks a paid spin — and
   // says so with a Retry.
-  const customerId = customer?.id ?? null;
-  const giftKey = customerId ? `${customerId}:${pack.id}` : null;
-  const [gifts, setGifts] = useState<{
-    key: string;
-    count: number;
-    failed?: boolean;
-  } | null>(null);
-  const giftsRead = giftKey !== null && gifts?.key === giftKey;
-  const giftsPending = giftKey !== null && !giftsRead;
-  const giftsFailed = giftsRead && gifts?.failed === true;
-  const held = giftsRead ? (gifts?.count ?? 0) : 0;
-  useEffect(() => {
-    if (!giftsPending || !giftKey) return;
-    let live = true;
-    const failed = { key: giftKey, count: 0, failed: true };
-    void getPackGifts()
-      .then((g) => {
-        // getPackGifts reports a failed call as null rather than throwing.
-        if (live) {
-          setGifts(
-            g === null
-              ? failed
-              : { key: giftKey, count: giftsHeldFor(g, pack.id) },
-          );
-        }
-      })
-      .catch(() => {
-        if (live) setGifts(failed);
-      });
-    return () => {
-      live = false;
-    };
-  }, [giftsPending, giftKey, pack.id]);
-  const vaultGifts = mode === 'paid' ? giftsUsed(reels, held) : 0;
+  const {
+    held,
+    pending: giftsPending,
+    failed: giftsFailed,
+    consume: consumeGifts,
+    invalidate: rereadGifts,
+  } = usePackGifts(customer?.id ?? null, pack.id);
+  const usableGifts = mode === 'paid' ? held : 0;
+  const vaultGifts = giftsUsed(reels, usableGifts);
   // What this press actually charges: the rows no gift covers.
-  const paidCost = cost * (reels - vaultGifts);
+  const paidCost = costAfterGifts(cost, reels, usableGifts);
   // Shrink the cell so multiple reels fit across the viewport. On a roomy
   // viewport the cell grows instead: the phone layout on a desktop left the
   // machine a ~110px band floating in ~900px of empty room, which reads as an
@@ -597,7 +576,7 @@ export default function SlotMachineClient({
       // A press that offered gifts may have spent them (a lost response, a
       // post-charge mapping failure) or found them gone (409): re-read the
       // count rather than trust the one on screen — the Spin waits for it.
-      if (request.gifts > 0) setGifts(null);
+      if (request.gifts > 0) rereadGifts();
       if (res.kind === 'unreachable') {
         // The charge may well have landed (the server executed, the response
         // did not transport back). Telling the player to check their balance
@@ -689,9 +668,7 @@ export default function SlotMachineClient({
     }
     // The gifts this open consumed are gone — same identity guard.
     if (batch.giftsUsed > 0 && batch.forId === customerIdRef.current) {
-      setGifts((g) =>
-        g ? { ...g, count: Math.max(0, g.count - batch.giftsUsed) } : g,
-      );
+      consumeGifts(batch.giftsUsed);
     }
 
     // The cards are in the vault as of this response — the open workflow writes
@@ -1359,7 +1336,7 @@ export default function SlotMachineClient({
               Couldn&apos;t check your vault packs —{' '}
               <button
                 type="button"
-                onClick={() => setGifts(null)}
+                onClick={rereadGifts}
                 className="font-semibold text-white/70 underline underline-offset-2 hover:text-white"
               >
                 Retry

@@ -23,6 +23,10 @@ export type PackGift = {
 export const giftsUsed = (qty: number, held: number): number =>
   Math.min(qty, Math.max(0, held));
 
+/** What an open of `qty` rows at `price` charges: the rows no gift covers. */
+export const paidCost = (price: number, qty: number, held: number): number =>
+  price * (qty - giftsUsed(qty, held));
+
 /** Gifts held for this pack that an open can actually use. */
 export const giftsHeldFor = (
   gifts: readonly PackGift[] | null,
