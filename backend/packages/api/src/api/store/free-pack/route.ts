@@ -7,6 +7,7 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { hasSavedBank } from '../../../modules/packs/saved-accounts';
+import { vouchedVisitorDevice } from '../../utils/visitor-ip';
 
 // GET /store/free-pack — feeds the storefront's floating FREE PACK badge.
 //
@@ -73,10 +74,20 @@ export async function GET(
     { customer_id: customerId },
     { take: 1 },
   );
-  const active =
+  const unclaimed =
     state?.free_pack_available_at && !state?.free_pack_claimed_at
       ? await packs.getActiveFreePack()
       : null;
+  // One per person or household (ADR 0018): another account on this browser
+  // already took it, so the open would refuse. Not offered at all, the same as
+  // an account that claimed it, rather than offered and refused at the reel.
+  const active =
+    unclaimed &&
+    (
+      await packs.sharedBrowserAccounts(customerId, vouchedVisitorDevice(req))
+    ).some((other) => other.welcome_claimed)
+      ? null
+      : unclaimed;
 
   // What the claim step (workflows/steps/claim-free-pack.ts) will still refuse
   // for (spec 2026-10-06), so the storefront can send the customer to finish

@@ -124,18 +124,18 @@ describe('parseWithdrawalControlsBody', () => {
     ],
     [
       'a TNG minimum below the provider floor',
-      { tng: { ...channel(), min_rm: 50 } },
-      /between RM 100 and RM 30,000/,
+      { tng: { ...channel(), min_rm: 49.99 } },
+      /between RM 50 and RM 30,000/,
     ],
     [
       'a TNG minimum above the payout ceiling',
       { tng: { ...channel(), min_rm: 30_001 } },
-      /between RM 100/,
+      /between RM 50/,
     ],
     [
       'a TNG minimum with sub-sen digits',
       { tng: { ...channel(), min_rm: 100.005 } },
-      /between RM 100/,
+      /between RM 50/,
     ],
   ])('refuses %s', (_label, over, message) => {
     expect(() => parse(body(over))).toThrow(message);

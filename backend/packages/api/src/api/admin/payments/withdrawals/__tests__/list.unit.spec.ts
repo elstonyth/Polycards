@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GET, maskAccountNumber, parseStatusFilter } from '../route';
 import { GET as REVEAL } from '../[id]/account/route';
+import { ADMIN_ROUTES } from '../../../../admin-rbac';
 import { GATEWAY_STALE_AFTER_MS } from '../../../../../modules/packs/gateway-reconcile';
 import { WITHDRAWAL_STATUSES } from '../../../../../modules/packs/models/gateway-withdrawal';
 import {
@@ -459,20 +460,20 @@ describe('GET /admin/payments/withdrawals/:id/account', () => {
   // framework's blanket `/admin` guard (registered in router.js before any
   // matcher in src/api/middlewares.ts), exactly like every sibling admin route
   // in this directory — none of which test auth either. What this spec CAN
-  // pin is the rate-limit registration, which is ours and is easy to drop.
-  // Source-text, not an import: middlewares.ts constructs its rate limiters at
-  // module load (Redis connections), which a unit spec must not do.
+  // pin is the rate-limit registration, which is ours and is easy to drop:
+  // its record in the admin route table (admin-rbac.ts ADMIN_ROUTES), which
+  // __tests__/admin-route-table.unit.spec.ts proves middlewares.ts registers.
   it('is registered on the admin action rate limiter', () => {
-    const middlewares = readFileSync(
-      join(__dirname, '../../../../middlewares.ts'),
-      'utf8',
-    );
-    // The whole entry, not just the matcher string: a matcher registered
-    // without adminActionRateLimit would leave the reveal unthrottled, which is
-    // the failure this guards.
-    expect(middlewares).toMatch(
-      /matcher: '\/admin\/payments\/withdrawals\/\*\/account',\s*method: 'GET',\s*middlewares: \[adminActionRateLimit\]/,
-    );
+    // The whole record, not just the matcher: a matcher without the
+    // admin-action limiter would leave the reveal unthrottled, which is the
+    // failure this guards.
+    expect(
+      ADMIN_ROUTES.filter(
+        (r) =>
+          r.matcher === '/admin/payments/withdrawals/*/account' &&
+          r.method === 'GET',
+      ).map((r) => r.limits),
+    ).toEqual([['admin-action']]);
   });
 });
 

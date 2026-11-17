@@ -16,7 +16,7 @@ jest.mock('../openrouter', () => ({
 jest.mock('../access', () => ({
   accessFor: () => ({ userId: 'user_1' }),
   allowedTools: async () => [],
-  LASTING_WRITES: new Set(),
+  scheduledRunAllows: () => true,
 }));
 jest.mock('../agent-tools', () => ({ memoryFor: async () => [] }));
 jest.mock('../tools', () => ({ TOOLS: [] }));

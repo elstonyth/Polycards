@@ -54,7 +54,7 @@ Ranges include every integer in the range. The current/savings union matters: HS
 | BOCMY | Bank of China | 13, 15 | No current registry payout code |
 | BOFAMY | Bank of America | 5–17 | Corporate range; no current registry payout code |
 | JPMMY | JP Morgan | 10–17 | No current registry payout code |
-| GXBANKMY | GX Bank | 11, 13, 14 | No current registry payout code |
+| GXBANKMY | GX Bank | 11, 13, 14 | TGPay payout code `GXSPMYKL` (2026-11-17; older `GXBKMYKL` still accepted) |
 | MTRADEMY | Merchantrade | 12 | No current registry payout code |
 | RYTMY | Ryt Bank | 10 | No current registry payout code |
 

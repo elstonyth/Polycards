@@ -63,6 +63,8 @@ import {
   holderNameKey,
   normalizeHolderName,
   withClearedHolderName,
+  DEVICE_SHARE_VERIFIED_KEY,
+  verifiedDevicePeers,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
@@ -77,7 +79,11 @@ import {
   type PayoutNumber,
 } from './payout-destination';
 import { challengePackId } from './challenge-prize';
-import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
+import {
+  FREE_PACK_HOUSEHOLD_MESSAGE,
+  FREE_PULL_LOCKED_MESSAGE,
+  FREE_WELCOME_CATEGORY,
+} from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
 import {
   parseWithdrawalControls,
@@ -178,6 +184,7 @@ import {
   BOARD_FETCH_N,
   disabledAccountSql,
   mayPlay as mayPlayFor,
+  realGroupMemberSql,
   topShown,
   type Game,
   type PlayRefusal,
@@ -6451,9 +6458,36 @@ class PacksModuleService extends MedusaService({
   @InjectTransactionManager()
   async claimFreePack(
     customerId: string,
+    deviceId: string | null = null,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // One welcome pack per person or household (ADR 0018): refused when another
+    // account on this browser already took one. A lock per browser id makes two
+    // accounts claiming on one browser at once take turns, so the second sees
+    // the first's stamp.
+    const [{ ids }] = await em.execute<{ ids: string[] }[]>(
+      "SELECT coalesce(array_agg(DISTINCT d ORDER BY d), '{}') AS ids FROM (" +
+        "SELECT device_id AS d FROM visitor_signal WHERE customer_id = ? AND device_id <> '' " +
+        "UNION SELECT ?::text WHERE ?::text <> '') x",
+      [customerId, deviceId ?? '', deviceId ?? ''],
+    );
+    for (const id of ids) {
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `welcome-pack-device:${id}`,
+      ]);
+    }
+    if (
+      ids.length &&
+      (await this.sharedBrowserAccounts(customerId, deviceId, sharedContext)).some(
+        (other) => other.welcome_claimed,
+      )
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PACK_HOUSEHOLD_MESSAGE,
+      );
+    }
     return claimOne(em, {
       table: 'customer_account_state',
       ids: [customerId],
@@ -7280,6 +7314,125 @@ class PacksModuleService extends MedusaService({
       })),
       ip_total: ip[0]?.total ?? 0,
     };
+  }
+
+  // Other open accounts that share a browser id with this one (ADR 0018): the
+  // seen ids plus `deviceId`, the one on this request when the storefront
+  // vouched for it. `earlier` marks accounts made before this one, so the first
+  // account on a browser is never the "second"; `welcome_claimed` marks one that
+  // took the welcome pack. A browser id is a cookie, so no id means no match.
+  @InjectManager()
+  async sharedBrowserAccounts(
+    customerId: string,
+    deviceId: string | null = null,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    { customer_id: string; earlier: boolean; welcome_claimed: boolean }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    // No browser id on file or on the request: nothing to match, one cheap read.
+    if (!deviceId) {
+      const [seen] = await em.execute<{ any: boolean }[]>(
+        "SELECT EXISTS (SELECT 1 FROM visitor_signal WHERE customer_id = ? AND device_id <> '') AS any",
+        [customerId],
+      );
+      if (!seen?.any) return [];
+    }
+    return await em.execute<
+      { customer_id: string; earlier: boolean; welcome_claimed: boolean }[]
+    >(
+      'WITH mine AS (' +
+        "SELECT device_id FROM visitor_signal WHERE customer_id = ? AND device_id <> '' " +
+        "UNION SELECT ?::text WHERE ?::text <> ''), " +
+        'me AS (SELECT id, created_at FROM customer WHERE id = ?) ' +
+        'SELECT o.customer_id, ' +
+        'bool_or((c.created_at, c.id) < ((SELECT created_at FROM me), (SELECT id FROM me))) AS earlier, ' +
+        'bool_or(s.free_pack_claimed_at IS NOT NULL) AS welcome_claimed ' +
+        'FROM visitor_signal o ' +
+        'JOIN customer c ON c.id = o.customer_id AND c.deleted_at IS NULL ' +
+        'LEFT JOIN customer_account_state s ON s.customer_id = o.customer_id ' +
+        // device_id <> '' repeated so IDX_visitor_signal_device (partial) applies.
+        "WHERE o.customer_id <> ? AND o.device_id <> '' AND o.device_id IN (SELECT device_id FROM mine) " +
+        // The rows that decide (a claimed welcome pack, an earlier account)
+        // first, so the cap never drops them.
+        'GROUP BY o.customer_id ORDER BY welcome_claimed DESC, earlier DESC LIMIT 50',
+      [customerId, deviceId ?? '', deviceId ?? '', customerId, customerId],
+    );
+  }
+
+  // The earlier accounts on this account's browsers that support has not
+  // confirmed as one household (ADR 0018). While any remain, a withdrawal from
+  // this account waits for review. A real player group (partners, house) is
+  // exempt, as it is from the no-top-up gate.
+  @InjectManager()
+  async sharedDeviceHoldPeers(
+    customerId: string,
+    deviceId: string | null = null,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [me] = await em.execute<
+      { exempt: boolean; metadata: Record<string, unknown> | null }[]
+    >(
+      `SELECT ${realGroupMemberSql('c.id')} AS exempt, c.metadata FROM customer c WHERE c.id = ?`,
+      [customerId],
+    );
+    if (!me || me.exempt) return [];
+    const verified = verifiedDevicePeers(me.metadata ?? {});
+    return (
+      await this.sharedBrowserAccounts(customerId, deviceId, sharedContext)
+    )
+      .filter((other) => other.earlier && !(other.customer_id in verified))
+      .map((other) => other.customer_id);
+  }
+
+  // Support confirms that `peerIds` and this account are one household on one
+  // browser (ADR 0018), so the shared-device hold stops for those pairs. Never
+  // touches the one-welcome-pack rule. Audited on the customer.
+  @InjectTransactionManager()
+  async verifyDevicePeers(
+    input: {
+      customerId: string;
+      peerIds: string[];
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    if (!input.peerIds.length) return;
+    const at = new Date().toISOString();
+    let before: Record<string, string> = {};
+    let after: Record<string, string> = {};
+    await this.mutateCustomerMetadata(
+      {
+        customerId: input.customerId,
+        mutate: (current) => {
+          before = verifiedDevicePeers(current);
+          after = {
+            ...before,
+            ...Object.fromEntries(input.peerIds.map((id) => [id, at])),
+          };
+          return { ...current, [DEVICE_SHARE_VERIFIED_KEY]: after };
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { [DEVICE_SHARE_VERIFIED_KEY]: before },
+          after: { [DEVICE_SHARE_VERIFIED_KEY]: after },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
   }
 
   // The 180 days the privacy page promises (jobs/purge-visitor-signals.ts), and

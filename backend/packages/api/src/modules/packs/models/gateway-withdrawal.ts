@@ -103,6 +103,10 @@ export const GatewayWithdrawal = model
     // message from a definite submit refusal. Never the request envelope
     // (signed and encrypted) and never the account number or holder name.
     failure_reason: model.text().nullable(),
+    // Why a 'held' row waits for review (ADR 0018): 'amount' (over the approval
+    // threshold) or 'shared_device' (an earlier account shares its browser).
+    // Staff only; the customer sees the same "awaiting approval" either way.
+    hold_reason: model.text().nullable(),
     // Which gateway this row was created under. The sweeps and the admin
     // approve route talk to THIS gateway, not the active one, so switching
     // gateways never strands money already in flight on the old one. The

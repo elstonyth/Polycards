@@ -7,12 +7,12 @@ import sharp from 'sharp';
 import { ASSISTANT_MODULE } from '../../../../modules/assistant';
 import { openKey } from '../../../../modules/assistant/key-vault';
 import type AssistantModuleService from '../../../../modules/assistant/service';
-import { accessFor, allowedTools } from '../access';
+import { accessFor, allowedTools, scheduledRunAllows } from '../access';
 import { runTurn } from '../engine';
 import { storeImage } from '../images';
 import { DEFAULT_IMAGE_STYLE, styleRefs } from '../brand-style';
 import { memoryFor } from '../agent-tools';
-import { scheduledRunAllows, sealProposal } from '../confirm';
+import { sealProposal } from '../confirm';
 import {
   cutToolMarkup,
   generationCost,
