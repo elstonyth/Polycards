@@ -82,10 +82,10 @@ const NEEDS_RESAVE_ACCOUNT = {
 async function render(
   accounts: unknown[] = [READY_ACCOUNT],
   withdrawable: number | null = 100,
-  hold: {
+  wallet: {
     available?: number;
-    frozen?: boolean;
-    noTopup?: boolean;
+    /** The wallet's `hold`, as the backend gate names it. */
+    hold?: 'frozen' | 'no_topup' | 'locked' | null;
     bonus?: number;
     remaining?: number;
   } = {},
@@ -95,7 +95,7 @@ async function render(
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(WithdrawForm, { withdrawable, ...hold }));
+    root.render(createElement(WithdrawForm, { withdrawable, ...wallet }));
   });
 }
 
@@ -765,7 +765,11 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   });
 
   it('slab RM 300 sold, RM 50 top-up unspent: the steps replace the form', async () => {
-    await render([READY_ACCOUNT], 0, { available: 350, remaining: 50 });
+    await render([READY_ACCOUNT], 0, {
+      available: 350,
+      remaining: 50,
+      hold: 'locked',
+    });
     expect(status()).toContain('RM 0.00 withdrawable');
     expect(container.querySelectorAll('#withdraw-hold-reason')).toHaveLength(1);
     expect(steps()).toContain('Top up onceDone');
@@ -799,7 +803,11 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   });
 
   it('locked with an account already saved: no nudge, /bank offers no second one', async () => {
-    await render([COOLING_ACCOUNT], 0, { available: 350, remaining: 50 });
+    await render([COOLING_ACCOUNT], 0, {
+      available: 350,
+      remaining: 50,
+      hold: 'locked',
+    });
     expect(container.querySelector('a[href="/bank"]')).toBeNull();
   });
 
@@ -821,7 +829,11 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   });
 
   it('locked with no account at all: one quiet nudge to save one now', async () => {
-    await render([], 0, { available: 350, remaining: 50 });
+    await render([], 0, {
+      available: 350,
+      remaining: 50,
+      hold: 'locked',
+    });
     const links = container.querySelectorAll('a[href="/bank"]');
     expect(links).toHaveLength(1);
     expect(links[0]?.textContent).toBe(`Save your bank account now${NB}→`);
@@ -835,6 +847,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
       available: 125,
       bonus: 15,
       remaining: 80,
+      hold: 'locked',
     });
     expect(steps()).toContain(`Use RM${NB}95.00 more on packs`);
     expect(steps()).toContain(
@@ -848,17 +861,19 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
       available: 10,
       bonus: 10,
       remaining: 20,
+      hold: 'locked',
     });
     expect(steps()).toContain(`Use RM${NB}30.00 more on packs`);
     expect(steps()).toContain('Delivery fees don’t count as pack spending.');
     expect(moneyRows()).not.toHaveProperty('Withdrawable later');
   });
 
-  it('an older backend paying part out is not locked: the form stays open', async () => {
+  it('no hold from the backend: the form stays open whatever is left for packs', async () => {
     await render([READY_ACCOUNT], 100, {
       available: 190,
       bonus: 10,
       remaining: 80,
+      hold: null,
     });
     expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
     expect(container.querySelector('#withdraw-hold-reason ol')).toBeNull();
@@ -870,7 +885,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     // The 2026-10-13 ticket: RM 80.97 balance, no top-up ever, and the page
     // said "Reach RM 50 to withdraw" — a goal the customer had already met.
     await render([READY_ACCOUNT], 0, {
-      noTopup: true,
+      hold: 'no_topup',
       available: 80.97,
       remaining: 20.5,
     });
@@ -902,8 +917,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
 
   it('frozen: one message and nothing else', async () => {
     await render([READY_ACCOUNT], 0, {
-      frozen: true,
-      noTopup: true,
+      hold: 'frozen',
       available: 50,
       bonus: 15,
       remaining: 50,
@@ -918,9 +932,9 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     expect(container.textContent).not.toContain('Top up once');
   });
 
-  it('a missing top-up outranks a lock: one hold reason, the top-up steps', async () => {
+  it('a no-top-up hold: one hold reason, the top-up steps', async () => {
     await render([READY_ACCOUNT], 0, {
-      noTopup: true,
+      hold: 'no_topup',
       available: 50,
       remaining: 50,
     });
@@ -965,16 +979,17 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   });
 
   it('puts the fix under a backend refusal', async () => {
+    // A race: the page loaded open, and the gate shut before the submit.
     startWithdrawal.mockResolvedValue({
       ok: false,
       error:
-        'You can withdraw up to RM 28.40 right now. The other RM 10.55 is for opening packs.',
+        "Withdrawals unlock once you've used RM 10.55 more on packs. Then your balance, except bonus credit, can be withdrawn.",
     });
     await render();
     fillValidForm();
     await submit();
     const alert = container.querySelector('[role="alert"]');
-    expect(alert?.textContent).toContain('is for opening packs');
+    expect(alert?.textContent).toContain('Withdrawals unlock once');
     expect(alert?.querySelector('a[href="/slots"]')?.textContent).toBe(
       'Open packs',
     );
@@ -1095,21 +1110,6 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
       withdrawRemedy(
         "Withdrawals unlock once you've used your RM 50.00 for packs. Open packs with it, then your balance can be withdrawn.",
       ),
-    ).toEqual({ href: '/slots', label: 'Open packs' });
-    // Older held refusals (deploy skew) still lead to opening packs.
-    expect(
-      withdrawRemedy(
-        'You can withdraw up to RM 28.40 right now. The other RM 10.55 is for opening packs.',
-      ),
-    ).toEqual({ href: '/slots', label: 'Open packs' });
-    expect(
-      withdrawRemedy(
-        'Nothing is withdrawable yet. Your RM 45.00 is for opening packs.',
-      ),
-    ).toEqual({ href: '/slots', label: 'Open packs' });
-    // The pre-2026-10-15 wording, still matched for a storefront-first deploy.
-    expect(
-      withdrawRemedy('Spend RM 5.00 more on packs to unlock withdrawals.'),
     ).toEqual({ href: '/slots', label: 'Open packs' });
     // null href = open the top-up sheet rather than navigate.
     expect(

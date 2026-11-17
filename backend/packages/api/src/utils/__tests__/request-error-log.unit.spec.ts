@@ -55,6 +55,19 @@ describe('requestErrorLog', () => {
     expect(ours).toEqual([]);
   });
 
+  // withdrawalGateError's refusals name their hold here (withdrawable.ts).
+  it("sends a MedusaError's code beside its message", () => {
+    const { res } = call(
+      new MedusaError(MedusaError.Types.NOT_ALLOWED, 'nope', 'locked'),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({
+      type: 'not_allowed',
+      code: 'locked',
+      message: 'nope',
+    });
+  });
+
   it('does not let a client-sent id forge log lines', () => {
     const { ours } = call(new Error('x'), 'abc\n{"level":"info"} fake');
     expect(ours[0]).toMatch(/^request_id=abclevel:infofake POST/);

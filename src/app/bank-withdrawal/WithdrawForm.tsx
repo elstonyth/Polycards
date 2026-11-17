@@ -10,7 +10,7 @@ import {
   regionalRailUi,
   type RegionalRailUi,
 } from '@/lib/regional-rails';
-import { isWithdrawLocked, walletSplit } from '@/lib/wallet-split';
+import { walletSplit, type WithdrawHold } from '@/lib/wallet-split';
 import {
   MoneyRows,
   WithdrawRules,
@@ -129,7 +129,12 @@ export function minimumGap(minRm: number, withdrawable: number): number {
  *  wording, which reaches this form verbatim through lib/vault-errors.ts's
  *  withdrawal pass-through rule. Refusals that already say what to do (the
  *  cap, the daily limit, a paused channel) get no link. The phone gate has
- *  its own PhoneGateAction. */
+ *  its own PhoneGateAction. A hold known up front never gets this far: the
+ *  wallet's `hold` replaces the form with its own way out.
+ *
+ *  shortcut: js-sdk FetchError drops the body's code; switch to code once the
+ *  store adapter carries it (the gate refusals already send one:
+ *  withdrawable.ts WithdrawalRefusalCode). */
 const REMEDIES: [RegExp, string | null, string][] = [
   // First: the no-top-up refusal also talks about "money for packs", and it
   // is the top-up that fixes it. null = open the top-up sheet in place.
@@ -137,10 +142,6 @@ const REMEDIES: [RegExp, string | null, string][] = [
   // The locked refusal (spend first, 2026-10-15): "Withdrawals unlock once
   // you've used RM X more on packs. …"
   [/withdrawals unlock once/i, '/slots', 'Open packs'],
-  // shortcut: older backend texts ("… is for opening packs.", "… more on
-  // packs"), kept for a storefront-first deploy; drop once both are live.
-  [/is for opening packs/i, '/slots', 'Open packs'],
-  [/more on packs/i, '/slots', 'Open packs'],
   // Above the /bank account/ rule: a shared account on hold is support's to
   // verify, and a saved account cannot be changed at all, so the /bank page
   // cannot help (ADR 0015).
@@ -200,8 +201,7 @@ function WithdrawRemedy({ error }: { error: string }) {
 export default function WithdrawForm({
   withdrawable,
   available = null,
-  frozen = false,
-  noTopup = false,
+  hold = null,
   bonus = 0,
   remaining = 0,
 }: {
@@ -210,10 +210,10 @@ export default function WithdrawForm({
   /** The wallet's `available` (0 while frozen). What of it is not
    *  withdrawable is the "For packs" part, named so the gap is no mystery. */
   available?: number | null;
-  /** The account is frozen for review — outranks every other hold. */
-  frozen?: boolean;
-  /** The account has never topped up, so nothing may leave (2026-10-11). */
-  noTopup?: boolean;
+  /** Why nothing may leave, as the backend gate names it (wallet `hold`):
+   *  frozen for review, never topped up (2026-10-11), or money still to use
+   *  on packs. null when withdrawals are open. */
+  hold?: WithdrawHold | null;
   /** Spend-only bonus credit inside the balance, already left out of
    *  `withdrawable` — the first line of the For-packs part. */
   bonus?: number;
@@ -221,26 +221,18 @@ export default function WithdrawForm({
    *  left, the backend shuts the whole gate (spend first, 2026-10-15). */
   remaining?: number;
 }) {
-  const needsTopup = !frozen && noTopup;
+  const frozen = hold === 'frozen';
   // The wallet page's split, so both pages agree.
   const split =
     !frozen && withdrawable != null && available != null
       ? walletSplit({ available, withdrawable, bonus, remaining })
       : null;
-  // Topped up, but money is still to use on packs: nothing may leave yet.
-  const locked =
-    withdrawable != null &&
-    isWithdrawLocked({
-      hasTopup: !noTopup,
-      isFrozen: frozen,
-      remaining,
-      withdrawable,
-    });
-  // Can't withdraw yet: the steps replace the form.
-  const cantYet = needsTopup || locked;
+  // Can't withdraw yet (never topped up, or money still to use on packs):
+  // the steps replace the form.
+  const cantYet = hold === 'no_topup' || hold === 'locked';
   // Any hold means no amount can pass the server's gate, so the form says
   // why up front and does not invite an attempt that is certain to fail.
-  const onHold = frozen || needsTopup || locked;
+  const onHold = hold !== null;
   // The payout debits the balance server-side; repaint it here so the header
   // chip is not stale. (This used to light the Me-tab money dot too — that dot
   // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
@@ -571,7 +563,7 @@ export default function WithdrawForm({
           <WithdrawSteps
             id="withdraw-hold-reason"
             className="mt-5"
-            hasTopup={!noTopup}
+            hasTopup={hold !== 'no_topup'}
             depositMinRm={limits.deposit.minRm}
             available={available ?? 0}
             bonus={bonus}

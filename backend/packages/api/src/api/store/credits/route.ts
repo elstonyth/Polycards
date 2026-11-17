@@ -238,6 +238,12 @@ export async function GET(
         used: wallet.playthrough.used,
         remaining: wallet.playthrough.remaining,
       },
+      // Why nothing may leave ('frozen' | 'no_topup' | 'locked', in the
+      // gate's order), or null — named by withdrawable.ts so the storefront
+      // never re-derives it. unlock_spend: what packs must still take before
+      // a 'locked' hold opens (bonus + remaining), else 0.
+      hold: wallet.hold,
+      unlock_spend: wallet.unlockSpend,
     },
   });
 }

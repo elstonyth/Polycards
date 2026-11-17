@@ -19,12 +19,7 @@ import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import { getOwnProfileHandle, getPublicProfile } from '@/lib/data/profiles';
 import { getWallet } from '@/lib/actions/wallet';
-import {
-  isWithdrawLocked,
-  sen,
-  TOPUP_FIRST_HEADING,
-  walletSplit,
-} from '@/lib/wallet-split';
+import { sen, TOPUP_FIRST_HEADING } from '@/lib/wallet-split';
 import { getVip } from '@/lib/actions/vip';
 import { levelProgressPct } from '@/lib/actions/vip-map';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
@@ -86,14 +81,8 @@ export default async function MePage() {
   ]);
   // Locked gate (spend first): what packs must still take before withdrawals
   // open; null when withdrawals aren't waiting on packs.
-  const gate = walletResult.ok
-    ? {
-        ...walletResult.wallet,
-        remaining: walletResult.wallet.playthrough.remaining,
-      }
-    : null;
-  const unlockSpend =
-    gate && isWithdrawLocked(gate) ? walletSplit(gate).unlockSpend : null;
+  const gate = walletResult.ok ? walletResult.wallet : null;
+  const unlockSpend = gate?.hold === 'locked' ? gate.unlockSpend : null;
   // The Withdraw button only when there is something to withdraw.
   const canWithdraw =
     gate !== null && !gate.isFrozen && sen(gate.withdrawable) > 0;

@@ -17,6 +17,7 @@ import {
   type ErrorRule,
 } from '@/lib/errors';
 import { WalletEnvelopeSchema } from '@/lib/data/schemas';
+import { legacyWithdrawHold, type WithdrawHold } from '@/lib/wallet-split';
 
 export type Wallet = {
   balance: number;
@@ -31,6 +32,10 @@ export type Wallet = {
   bonus: number;
   /** At least one top-up ever — withdrawals and deliveries need it. */
   hasTopup: boolean;
+  /** Why nothing may leave, named by the backend gate; null when open. */
+  hold: WithdrawHold | null;
+  /** What packs must still take before a 'locked' hold opens (RM). */
+  unlockSpend: number;
 };
 
 export type WalletResult =
@@ -69,21 +74,30 @@ export async function getWallet(): Promise<WalletResult> {
   const r = await store.get('/store/credits', WalletEnvelopeSchema);
   if (!r.ok) return walletFailure(r);
   const w = r.data.wallet;
+  const wallet = {
+    balance: w.balance,
+    available: w.available,
+    isFrozen: w.is_frozen,
+    // Deploy-skew fallback: a backend missing these renders as
+    // not-yet-withdrawable (0) rather than crashing the page. Default to 0
+    // — never another balance field — so unknown never overstates.
+    withdrawable: w.withdrawable ?? 0,
+    playthrough: w.playthrough ?? { deposited: 0, used: 0, remaining: 0 },
+    // An older backend has no bonus credit at all.
+    bonus: w.bonus ?? 0,
+    // An older backend has no top-up gate.
+    hasTopup: w.has_topup ?? true,
+  };
   return {
     ok: true,
     wallet: {
-      balance: w.balance,
-      available: w.available,
-      isFrozen: w.is_frozen,
-      // Deploy-skew fallback: a backend missing these renders as
-      // not-yet-withdrawable (0) rather than crashing the page. Default to 0
-      // — never another balance field — so unknown never overstates.
-      withdrawable: w.withdrawable ?? 0,
-      playthrough: w.playthrough ?? { deposited: 0, used: 0, remaining: 0 },
-      // An older backend has no bonus credit at all.
-      bonus: w.bonus ?? 0,
-      // An older backend has no top-up gate.
-      hasTopup: w.has_topup ?? true,
+      ...wallet,
+      ...(w.hold !== undefined
+        ? { hold: w.hold, unlockSpend: w.unlock_spend ?? 0 }
+        : legacyWithdrawHold({
+            ...wallet,
+            remaining: wallet.playthrough.remaining,
+          })),
     },
   };
 }
