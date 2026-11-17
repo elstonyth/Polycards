@@ -76,6 +76,10 @@ jobs:
         uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          # Pinned: `latest` asks GitHub's API anonymously, a rate-limited
+          # runner falls back to doctl 1.98.1, and that prints <nil> for
+          # --format Phase, so do-deploy.sh waited out its 40 min (11-17).
+          version: 2.5.2
       - name: Read live commits
         id: live
         if: env.HAS_TOKEN == 'true' && github.ref == 'refs/heads/master'
@@ -143,6 +147,10 @@ jobs:
         uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          # Pinned: `latest` asks GitHub's API anonymously, a rate-limited
+          # runner falls back to doctl 1.98.1, and that prints <nil> for
+          # --format Phase, so do-deploy.sh waited out its 40 min (11-17).
+          version: 2.5.2
       - name: Deploy and wait
         id: deploy
         env:
@@ -176,6 +184,10 @@ jobs:
         uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          # Pinned: `latest` asks GitHub's API anonymously, a rate-limited
+          # runner falls back to doctl 1.98.1, and that prints <nil> for
+          # --format Phase, so do-deploy.sh waited out its 40 min (11-17).
+          version: 2.5.2
       - name: Deploy and wait
         id: deploy
         env:
