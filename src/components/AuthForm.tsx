@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useReducer, useRef, useState, type FormEvent } from 'react';
 import { useRouter, unstable_isUnrecognizedActionError } from 'next/navigation';
 import {
   IdCard,
@@ -41,6 +41,12 @@ import {
   REAL_NAME_INVALID,
   REAL_NAME_MAX,
 } from '@/lib/real-name';
+import {
+  SIGNUP_OTP_START,
+  heldProof,
+  proofIsDead,
+  signupOtpReducer,
+} from '@/lib/signup-otp';
 
 // The Field inputs below carry a pl-9 for their leading icon; PhoneField has
 // no icon, so it gets the same chrome with plain px-3.
@@ -72,17 +78,6 @@ function failureNote(err: unknown): Note {
       : 'Something went wrong. Please try again.',
   };
 }
-
-// The signup form's values as they travel through the OTP detour: held for
-// the deferred signup() call and re-seeded into the remounted form.
-type SignupFields = {
-  email: string;
-  password: string;
-  first_name: string;
-  /** Spec 2026-10-06: required, normalized, confirmed via the checkbox. */
-  real_name: string;
-  referral_code: string;
-};
 
 export default function AuthForm({
   mode,
@@ -128,30 +123,19 @@ export default function AuthForm({
     maskedEmail: string;
   } | null>(null);
   const [otpChannel, setOtpChannel] = useState<PhoneOtpChannel>('sms');
-  // Signup-only sub-view: once the phone OTP is sent, hold the rest of the
-  // form's values here so `onVerified` can finish the real signup() call.
-  const [otp, setOtp] = useState<{
-    phone: string;
-    pending: SignupFields;
-  } | null>(null);
-  // Snapshot of the signup form's values, taken the moment the OTP step is
-  // entered. Unlike `otp`, this SURVIVES `setOtp(null)` (Back, or a
-  // signup() failure after a real SMS was already sent) — the remounted
-  // signup form below reads it to re-seed its uncontrolled inputs via
-  // `defaultValue` instead of rendering empty. Only ever set from the
+  // Signup-only phone-code step (src/lib/signup-otp.ts). `signupDraft` is the
+  // form's values from the moment a code was sent: on the code step they are
+  // what `onVerified` sends to signup(), and after it (Back, or a signup()
+  // failure after a real SMS) they re-seed the remounted signup form's
+  // uncontrolled inputs via `defaultValue`. Only ever set from the
   // PHONE_VERIFICATION_REQUIRED branch of onSubmit, so it stays null (no
   // behavior change) on the flag-off path.
-  const [signupDraft, setSignupDraft] = useState<
-    | (SignupFields & {
-        phone: string;
-        // A still-valid proof token from a signup() that failed AFTER the OTP
-        // passed (e.g. duplicate email). Reused on the next submit for the
-        // SAME phone so the user isn't texted (and billed) twice; cleared when
-        // the backend rejects it or the phone changes.
-        proofToken: string | null;
-      })
-    | null
-  >(null);
+  const [signupOtp, dispatchSignupOtp] = useReducer(
+    signupOtpReducer,
+    SIGNUP_OTP_START,
+  );
+  const signupDraft = signupOtp.draft;
+  const otp = signupOtp.enteringCode ? signupOtp.draft : null;
   // The Google button sits outside the <form>; it reads the referral code
   // through this ref so a pasted code survives the OAuth hop.
   const formRef = useRef<HTMLFormElement>(null);
@@ -159,8 +143,7 @@ export default function AuthForm({
   function switchMode(m: 'login' | 'signup') {
     setForgot('none');
     setNote(null);
-    setOtp(null);
-    setSignupDraft(null);
+    dispatchSignupOtp({ type: 'reset' });
     onSwitchMode(m);
   }
 
@@ -358,38 +341,28 @@ export default function AuthForm({
     if (PHONE_VERIFICATION_REQUIRED) {
       setBusy(true);
       try {
-        // A proof token from a failed post-OTP signup() stays valid for ~10
-        // minutes for the SAME phone — reuse it instead of sending (and
-        // paying for) another SMS. Only when the backend rejects the token
-        // (expired) does the flow fall through to a fresh OTP send.
-        if (signupDraft?.proofToken && signupDraft.phone === phone) {
+        const fields = {
+          email,
+          password,
+          first_name,
+          real_name,
+          phone,
+          referral_code,
+        };
+        // A proof from a failed post-OTP signup() is reused for the SAME phone
+        // instead of paying for another SMS (see signup-otp.ts). Only a
+        // refusal of the proof itself falls through to a fresh code.
+        const proof = heldProof(signupOtp, phone);
+        if (proof) {
           const retry = await signup({
-            email,
-            password,
-            first_name,
-            real_name,
-            phone,
-            referral_code,
-            phone_verification_token: signupDraft.proofToken,
+            ...fields,
+            phone_verification_token: proof,
           });
-          if (retry.ok || !/verif/i.test(retry.error)) {
-            // Keep the token for another retry (e.g. a second duplicate
-            // email) and refresh the draft to what was just typed.
-            setSignupDraft({
-              email,
-              password,
-              first_name,
-              real_name,
-              phone,
-              referral_code,
-              proofToken: signupDraft.proofToken,
-            });
+          dispatchSignupOtp({ type: 'proof-retried', fields, result: retry });
+          if (!proofIsDead(retry)) {
             finishAuth(retry);
             return;
           }
-          // Verification-shaped rejection — token expired/consumed. Clear it
-          // and fall through to a fresh OTP.
-          setSignupDraft({ ...signupDraft, proofToken: null });
         }
         const otpResult = await sendOtp({ phone, purpose: 'signup' });
         if (!otpResult.ok) {
@@ -397,23 +370,9 @@ export default function AuthForm({
           return;
         }
         setOtpChannel(otpResult.channel);
-        // Defer the real signup() call until the code is verified — pending
-        // fields ride along in state for onVerified to use. signupDraft is
-        // the same values, but kept around after setOtp(null) (see its
-        // comment).
-        setOtp({
-          phone,
-          pending: { email, password, first_name, real_name, referral_code },
-        });
-        setSignupDraft({
-          email,
-          password,
-          first_name,
-          real_name,
-          phone,
-          referral_code,
-          proofToken: null,
-        });
+        // Defer the real signup() call until the code is verified — the
+        // fields ride along in the draft for onVerified to use.
+        dispatchSignupOtp({ type: 'code-sent', fields });
       } catch (err) {
         setNote(failureNote(err));
       } finally {
@@ -707,7 +666,7 @@ export default function AuthForm({
             Real name on your account
           </p>
           <p className="mt-0.5 text-sm font-semibold break-words text-white">
-            {otp.pending.real_name}
+            {otp.real_name}
           </p>
           <p className="mt-1 text-[11px] text-white/55">
             {REAL_NAME_HINT} Wrong? Go back and fix it now.
@@ -717,11 +676,15 @@ export default function AuthForm({
           phone={otp.phone}
           channel={otpChannel}
           purpose="signup"
-          onBack={() => setOtp(null)}
+          onBack={() => dispatchSignupOtp({ type: 'back' })}
           onVerified={async (token) => {
             const result = await signup({
-              ...otp.pending,
+              email: otp.email,
+              password: otp.password,
+              first_name: otp.first_name,
+              real_name: otp.real_name,
               phone: otp.phone,
+              referral_code: otp.referral_code,
               phone_verification_token: token,
             });
             // On failure, fall back to the signup form — signupDraft (still
@@ -730,10 +693,8 @@ export default function AuthForm({
             // second paid SMS (see onSubmit). finishAuth handles both
             // branches: setCustomer/onSuccess/refresh on ok, setNote on
             // failure.
-            if (!result.ok) {
-              setSignupDraft((d) => (d ? { ...d, proofToken: token } : d));
-              setOtp(null);
-            }
+            if (!result.ok)
+              dispatchSignupOtp({ type: 'verified-signup-failed', token });
             finishAuth(result);
           }}
         />
