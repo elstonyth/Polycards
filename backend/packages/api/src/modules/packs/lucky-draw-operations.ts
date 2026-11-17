@@ -9,6 +9,12 @@
 // names and transaction decorators, so routes, jobs and workflows are unchanged.
 // Every advisory lock key (`luckydraw:`, `luckydrawevent:`, `tickets:`), its
 // order and every transaction boundary is the one the service had.
+//
+// Calls inside this module that already carry a context (luckyDrawBalance,
+// luckyDrawMyEventTickets, luckyDrawEventResultRows, luckyDrawTicketHistory,
+// saveLuckyDrawEvent) call the module function directly, not the decorated
+// service method. So a spec that stubs `svc.<method>` no longer intercepts
+// them; stub the port member or the SQL they run instead.
 import type { Context } from '@medusajs/framework/types';
 import { MedusaError } from '@medusajs/framework/utils';
 import type PacksModuleService from './service';
