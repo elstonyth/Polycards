@@ -135,3 +135,35 @@ it('neither route swallows the operation’s MedusaError — the status code is 
   await expect(APPROVE(mkReq(), mkRes().res)).rejects.toThrow('boom');
   await expect(DENY(mkReq(), mkRes().res)).rejects.toThrow('boom');
 });
+
+describe('approve with verify_device_peers (ADR 0018)', () => {
+  const packsWith = () => ({
+    listGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1', customer_id: 'cus_later' }]),
+    sharedDeviceHoldPeers: jest.fn().mockResolvedValue(['cus_first']),
+    verifyDevicePeers: jest.fn().mockResolvedValue(undefined),
+  });
+
+  it('stamps the current peers as one household after a successful approve', async () => {
+    approveOp.mockResolvedValue({ id: 'gpw_1', status: 'pending', approved: true });
+    const packs = packsWith();
+    const req = mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: true } });
+    await APPROVE(req, mkRes().res);
+    expect(packs.verifyDevicePeers).toHaveBeenCalledWith({
+      customerId: 'cus_later',
+      peerIds: ['cus_first'],
+      adminId: 'usr_admin_1',
+      reason: 'one household, confirmed approving held withdrawal gpw_1',
+    });
+  });
+
+  it('stamps nothing without the tick, or when the approve is refused', async () => {
+    const packs = packsWith();
+    approveOp.mockResolvedValue({ id: 'gpw_1', status: 'pending', approved: true });
+    await APPROVE(mkReq({ scope: { resolve: () => packs } }), mkRes().res);
+    approveOp.mockRejectedValue(new Error('frozen'));
+    await expect(
+      APPROVE(mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: true } }), mkRes().res),
+    ).rejects.toThrow('frozen');
+    expect(packs.verifyDevicePeers).not.toHaveBeenCalled();
+  });
+});
