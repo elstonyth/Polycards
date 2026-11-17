@@ -4,6 +4,7 @@ import {
   backend as memoryBackend,
 } from '@/lib/__tests__/store-shim';
 import type { MemoryRoutes } from '@/lib/store-memory';
+import { proofIsDead } from '@/lib/signup-otp';
 
 // The three token exchanges go through the `Store` port; point that import at
 // an in-memory backend per test (src/lib/__tests__/store-shim.ts).
@@ -393,7 +394,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
       error:
         'Your phone verification expired. Please verify your number again.',
     });
-    expect(!r.ok && /verif/i.test(r.error)).toBe(true);
+    expect(proofIsDead(r)).toBe(true);
     expect(mocks.customerCreate).not.toHaveBeenCalled();
   });
 

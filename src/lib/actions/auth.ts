@@ -136,8 +136,8 @@ const AUTH_RULES: ErrorRule[] = [
   ],
   // The signup gate's refusal for a missing, expired or already-used proof —
   // register and create both check it, and a proof creates one account. The
-  // copy keeps "verif" on purpose: AuthForm's draft retry sends a fresh code
-  // only on /verif/i instead of replaying the dead proof.
+  // copy keeps "verif" on purpose: signup-otp.ts `proofIsDead` reads it, so
+  // AuthForm's draft retry sends a fresh code instead of replaying the proof.
   [
     /phone verification required/i,
     'Your phone verification expired. Please verify your number again.',
