@@ -36,11 +36,13 @@ import {
   type DeliveryOrderStatus,
 } from '@/lib/data/schemas';
 import {
+  actionFailure,
+  COPY,
   friendlyError,
-  friendlyFailure,
   isAuthError,
   TRANSPORT_RULES,
   UNAUTHORIZED,
+  type ActionFailure,
   type ErrorRule,
 } from '@/lib/errors';
 import {
@@ -176,24 +178,16 @@ const LOGIN_FIRST = 'Please log in first.';
 const LOGIN_TO_VIEW_ORDERS = 'Please log in to view your orders.';
 
 /**
- * A port `Failure` in this file's vocabulary. No cookie at all (the call never
- * left — `status` is undefined) keeps the action's own logged-out copy;
- * anything the backend actually said goes through the caller's rules table,
- * with `needsAuth` when it was a 401.
+ * A port `Failure` in this file's vocabulary: `actionFailure` (lib/errors.ts)
+ * over the caller's rules table. A malformed 2xx gets the shared "unexpected
+ * response" copy, like every other action.
  */
 function deliveryFailure(
   f: Failure,
   loggedOut: string,
   rules: readonly ErrorRule[] = DELIVERY_RULES,
-): { ok: false; error: string; needsAuth?: boolean } {
-  if (f.kind === 'unauthenticated' && f.status === undefined) {
-    return { ok: false, error: loggedOut, needsAuth: true };
-  }
-  return {
-    ok: false,
-    error: friendlyFailure(f, rules, DELIVERY_FALLBACK),
-    needsAuth: f.kind === 'unauthenticated',
-  };
+): ActionFailure {
+  return actionFailure(f, { loggedOut, rules, fallback: DELIVERY_FALLBACK });
 }
 
 export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
@@ -256,7 +250,7 @@ export async function requestDelivery(
     if (!orderId) {
       return {
         ok: false,
-        error: 'Got an unexpected response. Please try again.',
+        error: COPY.unexpected,
       };
     }
     return { ok: true, orderId };

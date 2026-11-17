@@ -19,12 +19,12 @@
  *
  * Every call goes through the `Store` port (src/lib/store.ts), which owns the
  * cookie read, the bearer, the schema check and the failure log. What stays
- * here is each action's logged-out answer and its copy (`notifFailure`, over
+ * here is each action's logged-out answer and its copy (`actionFailure`, over
  * NOTIF_RULES).
  */
-import { store, type Failure } from '@/lib/store';
+import { store } from '@/lib/store';
 import { sanePage } from '@/lib/page-param';
-import { friendlyFailure, COPY, type ErrorRule } from '@/lib/errors';
+import { actionFailure, COPY, type ErrorRule } from '@/lib/errors';
 import {
   NotificationsEnvelopeSchema,
   NotificationsPageSchema,
@@ -76,29 +76,9 @@ const NOTIF_RULES: ErrorRule[] = [
 const NOTIF_FALLBACK = COPY.generic;
 const LOGIN_FIRST = COPY.loginRequired;
 const LOGIN_TO_VIEW = 'Please log in to view your notifications.';
-const UNEXPECTED_RESPONSE = 'Got an unexpected response. Please try again.';
-
-/** A port `Failure` in this file's vocabulary: no cookie at all (the call
- *  never left — `status` is undefined) gives the action's own logged-out copy;
- *  a 2xx that failed its schema gives the "unexpected response" copy; anything
- *  the backend actually said goes through NOTIF_RULES, with `needsAuth` when
- *  it was a 401. */
-function notifFailure(
-  f: Failure,
-  loggedOut: string,
-): { ok: false; error: string; needsAuth?: boolean } {
-  if (f.kind === 'invalid_shape') {
-    return { ok: false, error: UNEXPECTED_RESPONSE };
-  }
-  if (f.kind === 'unauthenticated' && f.status === undefined) {
-    return { ok: false, error: loggedOut, needsAuth: true };
-  }
-  return {
-    ok: false,
-    error: friendlyFailure(f, NOTIF_RULES, NOTIF_FALLBACK),
-    needsAuth: f.kind === 'unauthenticated',
-  };
-}
+/** This file's copy for `actionFailure` (lib/errors.ts); each action adds its
+ *  own logged-out sentence. */
+const NOTIF_COPY = { rules: NOTIF_RULES, fallback: NOTIF_FALLBACK };
 
 /** Coerce a backend read_at (string | Date | null) to string | null. */
 function coerceReadAt(value: string | Date | null | undefined): string | null {
@@ -116,7 +96,8 @@ export async function getNotifications(
   const r = await store.get('/store/notifications', NotificationsPageSchema, {
     query: { limit: PAGE_SIZE, offset: (safePage - 1) * PAGE_SIZE },
   });
-  if (!r.ok) return notifFailure(r, LOGIN_TO_VIEW);
+  if (!r.ok)
+    return actionFailure(r, { ...NOTIF_COPY, loggedOut: LOGIN_TO_VIEW });
   const { envelope, rows } = r.data;
 
   return {
@@ -146,7 +127,7 @@ export async function markRead(id: string): Promise<MarkReadResult> {
     MarkReadSchema,
     {},
   );
-  if (!r.ok) return notifFailure(r, LOGIN_FIRST);
+  if (!r.ok) return actionFailure(r, { ...NOTIF_COPY, loggedOut: LOGIN_FIRST });
 
   return {
     ok: true,
@@ -184,7 +165,7 @@ export async function markAllRead(): Promise<MarkAllReadResult> {
     MarkAllReadSchema,
     {},
   );
-  if (!r.ok) return notifFailure(r, LOGIN_FIRST);
+  if (!r.ok) return actionFailure(r, { ...NOTIF_COPY, loggedOut: LOGIN_FIRST });
 
   return {
     ok: true,

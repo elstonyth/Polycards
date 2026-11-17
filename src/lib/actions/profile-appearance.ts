@@ -23,6 +23,7 @@ import { logger } from '@/lib/logger';
 import {
   friendlyError,
   friendlyFailure,
+  isLoggedOut,
   COPY,
   RATE_LIMITED,
   UNAUTHORIZED,
@@ -139,8 +140,6 @@ export async function setAvatarFrame(
  *  logged-out sentence; anything the backend actually said goes through
  *  APPEARANCE_RULES, the same table the upload's own refusals use. */
 function appearanceError(f: Failure): string {
-  if (f.kind === 'unauthenticated' && f.status === undefined) {
-    return LOGIN_FIRST;
-  }
+  if (isLoggedOut(f)) return LOGIN_FIRST;
   return friendlyFailure(f, APPEARANCE_RULES, FALLBACK);
 }

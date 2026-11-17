@@ -22,7 +22,7 @@ import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { sanePage } from '@/lib/page-param';
 import { elapsedLabel } from '@/lib/transactions';
-import { friendlyFailure } from '@/lib/errors';
+import { actionFailure, COPY, type ActionFailure } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
 import {
   DEFAULT_DEPOSIT_METHOD,
@@ -77,30 +77,22 @@ export type SellBackResult =
 
 const LOGIN_FIRST = 'Please log in first.';
 const LOGIN_TO_VIEW_VAULT = 'Please log in to view your vault.';
-const UNEXPECTED_RESPONSE = 'Got an unexpected response. Please try again.';
-
 /**
- * A port `Failure` in this file's vocabulary — the three answers these
- * actions have always given. No cookie at all (the call never left — `status`
- * is undefined) → the action's own logged-out copy. A 2xx that failed its
- * schema → the action's "unexpected response" copy (VAULT_FALLBACK for the
- * reads that never had one). Anything the backend actually said → the
- * VAULT_RULES table, with `needsAuth` when it was a 401.
+ * A port `Failure` in this file's vocabulary: `actionFailure` (lib/errors.ts)
+ * over VAULT_RULES. `unexpected` is the copy for a 2xx that failed its schema
+ * (VAULT_FALLBACK for the reads that never had an "unexpected response" line).
  */
 function vaultFailure(
   f: Failure,
   loggedOut: string,
-  unexpected: string = UNEXPECTED_RESPONSE,
-): { ok: false; error: string; needsAuth?: boolean } {
-  if (f.kind === 'invalid_shape') return { ok: false, error: unexpected };
-  if (f.kind === 'unauthenticated' && f.status === undefined) {
-    return { ok: false, error: loggedOut, needsAuth: true };
-  }
-  return {
-    ok: false,
-    error: friendlyFailure(f, VAULT_RULES, VAULT_FALLBACK),
-    needsAuth: f.kind === 'unauthenticated',
-  };
+  unexpected?: string,
+): ActionFailure {
+  return actionFailure(f, {
+    loggedOut,
+    rules: VAULT_RULES,
+    fallback: VAULT_FALLBACK,
+    unexpected,
+  });
 }
 
 // A balance that fails its schema reads as 0 on the vault page (as it always
@@ -891,7 +883,7 @@ export async function toggleShowcase(
     logger.error(
       `[vault] showcase toggle id mismatch: requested '${pullId}', got '${r.data.pull_id}'`,
     );
-    return { ok: false, error: UNEXPECTED_RESPONSE };
+    return { ok: false, error: COPY.unexpected };
   }
   return { ok: true, showcased: r.data.showcased };
 }
