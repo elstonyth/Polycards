@@ -73,12 +73,12 @@ const eslintConfig = defineConfig([
       ],
     },
   },
-  // Enforce the single-entry Zod contract: src/lib/data/schemas.ts sets
+  // Enforce the single-entry Zod contract: src/lib/data/schemas/zod.ts sets
   // `z.config({ jitless: true })` so Zod 4's JIT parser never calls `new
   // Function` — which our CSP `script-src` forbids ('unsafe-eval' is absent, see
   // src/lib/security/csp.ts). A direct `zod` import anywhere else would bypass
   // that config and reintroduce CSP eval violations, so route all Zod use through
-  // schemas.ts.
+  // the schemas module.
   {
     files: ['src/**/*.{ts,tsx}'],
     rules: {
@@ -103,9 +103,9 @@ const eslintConfig = defineConfig([
       ],
     },
   },
-  // schemas.ts IS the single Zod entry point — it must import zod directly.
+  // schemas/zod.ts IS the single Zod entry point — it must import zod directly.
   {
-    files: ['src/lib/data/schemas.ts'],
+    files: ['src/lib/data/schemas/zod.ts'],
     rules: { 'no-restricted-imports': 'off' },
   },
 ]);
