@@ -186,3 +186,50 @@ test("success: settles with the adapter's settlement and their id", async () => 
   );
   expect(h.logger.error).not.toHaveBeenCalled();
 });
+
+test('a failure on a settled row is a contradiction without the refunded-and-paid warning', async () => {
+  const h = harness([[row({ status: 'settled' })]]);
+  await expect(
+    handleWithdrawalCallback(h.scope, notice({ state: 'failed' })),
+  ).resolves.toEqual(OK);
+  expect(h.logger.error.mock.calls[0][0]).toBe(
+    '[tgpay] withdrawal PC-1 callback says RAW (failed) but the row is already settled — possible double payment, investigate (gateway T-1)',
+  );
+  expect(alertOps).toHaveBeenCalledWith(
+    h.scope,
+    'payout-contradiction',
+    'Fake says payout PC-1 is failed, but our row is already settled. Investigate Fake T-1.',
+  );
+  expect(refundWithdrawal).not.toHaveBeenCalled();
+  expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
+});
+
+test('a paid amount that cannot be read still acknowledges the contradiction', async () => {
+  const h = harness([[row({ status: 'failed' })]]);
+  const answer = await handleWithdrawalCallback(
+    h.scope,
+    notice({
+      paidAmount: () => {
+        throw new Error('no fx lock');
+      },
+    }),
+  );
+  expect(answer).toEqual(OK);
+  expect(h.logger.error).toHaveBeenCalledWith(
+    '[tgpay] could not record the contradiction on PC-1: no fx lock',
+  );
+  expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+  expect(alertOps).toHaveBeenCalledTimes(1);
+});
+
+test('a notice naming only our reference looks the row up once, by it', async () => {
+  const h = harness([[row()]]);
+  await handleWithdrawalCallback(
+    h.scope,
+    notice({ find: { merchantTransactionId: 'PC-1' } }),
+  );
+  expect(h.packs.listGatewayWithdrawals.mock.calls).toEqual([
+    [{ merchant_transaction_id: 'PC-1', gateway: 'tgpay' }, { take: 1 }],
+  ]);
+  expect(applyWithdrawalOutcome).toHaveBeenCalledTimes(1);
+});
