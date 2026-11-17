@@ -30,6 +30,10 @@ export const qk = {
   // row across views (out of 'held', into 'pending' or 'failed'), unlike a
   // plain read that only ever touches the one (page, status, sort) it fetched.
   gatewayWithdrawalsKey: ['admin', 'gateway-withdrawals'] as const,
+  // NOT under the withdrawals prefix: every fetch is an audited reveal, so an
+  // approve or deny must not refetch it behind the reviewer's back.
+  withdrawalLinks: (id: string) =>
+    ['admin', 'withdrawal-links', id] as const,
   // (range, from, to, scope) always render — custom dates are '' for the
   // presets, scope 'all' unless the real-customer switch is on.
   stats: (range: string, from: string, to: string, scope = 'all') =>

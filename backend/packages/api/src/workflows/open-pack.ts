@@ -18,6 +18,8 @@ export type OpenPackInput = {
   customer_id: string; // from the authenticated token — NEVER the request body
   open_id?: string;
   max_price?: number;
+  /** The vouched browser id, for the welcome pack's one-per-household check. */
+  device_id?: string | null;
 };
 
 // open-pack — the gacha "open a pack" business process.

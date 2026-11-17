@@ -25,6 +25,7 @@ const LINKS = [
   { href: '/how-it-works', label: 'How it works' },
   { href: '/about', label: 'About' },
   { href: '/contact', label: 'Contact' },
+  { href: '/rules', label: 'Rules' },
   { href: '/privacy', label: 'Privacy' },
 ] as const;
 

@@ -11,7 +11,7 @@ import { TNG_BANK_ID, bankPayoutMinRm, findBank } from './banks';
  *    touches payouts already in flight: the reconcile sweep, callbacks and
  *    held-payout approval keep running, so nobody's money gets stuck.
  *  - `tng` — payouts to Touch 'n Go only, same rules, plus `min_rm`, a floor
- *    the admin may raise above the provider's (RM 100) but never lower.
+ *    the admin may raise above the provider's (RM 50) but never lower.
  *
  * A channel is closed while its switch is off — until `off_until` if the
  * admin set one, after which it reopens by itself — or while its daily closed
