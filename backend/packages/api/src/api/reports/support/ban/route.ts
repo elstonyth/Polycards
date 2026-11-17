@@ -184,7 +184,13 @@ async function accountsOn(
 }
 
 /** One player's ban and every bank they saved or were paid to. */
-async function playerView(db: ReportDb, id: string, lookupNote?: string) {
+// Also the bank and name half of the held-withdrawal review drawer
+// (admin/payments/withdrawals/[id]/links, ADR 0018).
+export async function playerView(
+  db: ReportDb,
+  id: string,
+  lookupNote?: string,
+) {
   const [state] = (
     await db.raw<{
       disabled: boolean | null;

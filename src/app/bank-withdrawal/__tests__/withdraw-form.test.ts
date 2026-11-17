@@ -346,7 +346,7 @@ describe('WithdrawForm', () => {
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
 
-  // A destination's own floor (Touch 'n Go: RM 100) is the band's lower edge
+  // A destination's own floor (Touch 'n Go has one) is the band's lower edge
   // once it is chosen — never two different minimums on one screen.
   it("shows a per-bank floor as the band's minimum for that account", async () => {
     const TNG_ACCOUNT = {

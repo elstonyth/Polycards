@@ -167,8 +167,8 @@ export type PayoutOffer = {
 /**
  * What the withdraw form offers for a payout to `to`: the chosen account, or
  * the first one of the country on show (undefined = no saved account at all).
- * `accountFloorRm` is the selected payable account's own floor (Touch 'n Go:
- * RM 100).
+ * `accountFloorRm` is the selected payable account's own floor (Touch 'n Go
+ * has one, plus any higher admin minimum).
  */
 export function payoutOffer(
   limits: PaymentLimits,
@@ -188,8 +188,8 @@ export function payoutOffer(
   // narrowed to what pays inside its S$ band) for a regional account, else
   // the active gateway's. At 3.2017, S$30 needs RM 96.05, not RM 50.
   const railBand = rail?.withdrawalRm ?? limits.withdrawal;
-  // A destination can carry its own floor above the gateway's (Touch 'n Go:
-  // RM 100 — smaller TNG payouts are refused by the gateway). The backend
+  // A destination can carry its own floor above the gateway's (Touch 'n Go
+  // has one, plus any higher admin minimum). The backend
   // enforces the same figure; this states it before the customer taps.
   const accountMin =
     accountFloorRm != null && accountFloorRm > railBand.minRm
