@@ -330,10 +330,10 @@ export default function WithdrawForm({
   const selectedAccount = saved?.find((a) => a.id === accountId);
   const selected = usableAccounts.find((a) => a.id === accountId);
   // Which rail pays, the RM band it is judged by and whether it is open
-  // (lib/rail-offer.ts). The destination is the chosen account, else the
-  // first of the country on show, so the Singapore pill shows the S$ rail's
-  // band before an account is picked; the floor is the selected payable
-  // account's own (Touch 'n Go: RM 100).
+  // (lib/rail-offer.ts). The currency this payout goes out in: the chosen
+  // account's, else that of the country on show, so the Singapore pill shows
+  // the S$ rail's band before an account is picked. The floor is the selected
+  // payable account's own (Touch 'n Go: RM 100).
   const {
     rail,
     band: { minRm, maxRm },

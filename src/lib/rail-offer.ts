@@ -54,6 +54,8 @@ export type DepositOffer = {
   rail: OpenRail | undefined;
   /** The amount the customer pays, in the chosen currency. */
   band: { min: number; max: number };
+  /** Does `paid` sit inside the band (edges included)? */
+  inBand: (paid: number) => boolean;
   /** The RM channel is shut: no amount can be paid. */
   closed: boolean;
   /** The channels the payment can go through. */
@@ -134,6 +136,7 @@ export function depositOffer(
     options,
     rail,
     band,
+    inBand: (paid) => paid >= band.min && paid <= band.max,
     // The channel itself, not the band — the admin can close deposits outright
     // while a gateway stays configured (getPaymentLimits, plan 135).
     closed: gateway && !rail && !limits.depositsEnabled,

@@ -164,6 +164,7 @@ export default function TopUpSheet({
     options: currencyOptions,
     rail,
     band: { min: minAmount, max: maxAmount },
+    inBand,
     closed: depositsClosed,
     methods: shownMethods,
     credit: creditFor,
@@ -174,8 +175,7 @@ export default function TopUpSheet({
   const amountValid =
     /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(amountText.trim()) &&
     Number.isFinite(amount) &&
-    amount >= minAmount &&
-    amount <= maxAmount;
+    inBand(amount);
   // A valid amount into a closed channel still cannot be paid — fold the
   // channel into the same "can this actually be submitted" signal the button
   // and its label already key off, rather than adding a second disabled path.

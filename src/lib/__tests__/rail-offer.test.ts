@@ -116,6 +116,29 @@ describe('depositOffer: band and closed', () => {
   });
 });
 
+describe('depositOffer: inBand', () => {
+  it.each([
+    { name: 'RM below the gateway floor', currency: 'MYR', amount: 49.99, ok: false },
+    { name: 'RM on the floor', currency: 'MYR', amount: 50, ok: true },
+    { name: 'RM on the ceiling', currency: 'MYR', amount: 10000, ok: true },
+    { name: 'RM above the ceiling', currency: 'MYR', amount: 10000.01, ok: false },
+    { name: 'S$ below the rail floor', currency: 'SGD', amount: 29.99, ok: false },
+    { name: 'S$ under the RM floor but inside its own', currency: 'SGD', amount: 30, ok: true },
+    { name: 'S$ above the rail ceiling', currency: 'SGD', amount: 5000.01, ok: false },
+  ])('$name', ({ currency, amount, ok }) => {
+    expect(
+      depositOffer(limits(), DEPOSIT_METHODS, currency, gateway).inBand(amount),
+    ).toBe(ok);
+  });
+
+  it('mock: one cent passes, above 10,000 does not', () => {
+    const offer = depositOffer(limits(), DEPOSIT_METHODS, 'MYR', mock);
+    expect(offer.inBand(0.01)).toBe(true);
+    expect(offer.inBand(0)).toBe(false);
+    expect(offer.inBand(10_000.01)).toBe(false);
+  });
+});
+
 describe('depositOffer: rail, channels and credit', () => {
   it('RM: no rail, the RM channels as given, credit is the amount', () => {
     const offer = depositOffer(limits(), DEPOSIT_METHODS, 'MYR', gateway);
