@@ -152,6 +152,8 @@ medusaIntegrationTestRunner({
           }),
         ]);
         expect(res.data.unverified_peers).toBe(1);
+        expect(res.data.unverified_peer_ids).toEqual([s.first]);
+        expect(res.data.invited_total).toBe(0);
         expect(res.headers['cache-control']).toBe('no-store');
 
         const audits = await packs().listAdminActionAudits({
@@ -196,7 +198,7 @@ medusaIntegrationTestRunner({
         const refused = await unwrapResponse(
           api.post(
             `/admin/payments/withdrawals/${s.withdrawal}/approve`,
-            { verify_device_peers: true },
+            { verify_device_peers: [s.first] },
             as(approver),
           ),
         );
@@ -209,7 +211,7 @@ medusaIntegrationTestRunner({
         const admin = await unwrapResponse(
           api.post(
             `/admin/payments/withdrawals/${s.withdrawal}/approve`,
-            { verify_device_peers: true },
+            { verify_device_peers: [s.first] },
             as(adminToken),
           ),
         );

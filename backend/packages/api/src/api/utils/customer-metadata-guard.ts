@@ -165,6 +165,9 @@ const SECRET_METADATA = [
   { key: HOLDER_NAME_CLEARED_KEY, resource: 'customer_bank_account' },
   // Numbers unbanned for one player: full numbers, like the list's.
   { key: PAYOUT_BAN_LIFTED_KEY, resource: 'customer_bank_account' },
+  // Accounts confirmed as one household on one browser: same-browser links,
+  // like visitor-signals and the review drawer (ADR 0018).
+  { key: DEVICE_SHARE_VERIFIED_KEY, resource: 'customer_bank_account' },
   { key: PARTNER_CREDENTIAL_KEY, resource: 'partner_credential' },
 ] as const;
 

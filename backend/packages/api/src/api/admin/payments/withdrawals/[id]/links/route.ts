@@ -6,6 +6,7 @@ import { MedusaError } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../../../../../modules/packs";
 import type PacksModuleService from "../../../../../../modules/packs/service";
 import { findBank } from "../../../../../../modules/packs/banks";
+import { verifiedDevicePeers } from "../../../../../../modules/packs/saved-accounts";
 import { PERMANENT_BAN_REASON_PREFIX } from "../../../../../utils/disabled-guard";
 import { reportDb } from "../../../../../reports/sql";
 import { playerView } from "../../../../../reports/support/ban/route";
@@ -71,25 +72,36 @@ export async function GET(
       packs.visitorSignalMatches(customerId),
       packs.sharedBrowserAccounts(customerId),
       packs.sharedDeviceHoldPeers(customerId),
-      db.raw<{ customer_id: string; referrer_id: string }>(
-        "SELECT customer_id, referrer_id FROM referral_attribution WHERE (customer_id = ? OR referrer_id = ?) AND deleted_at IS NULL",
+      // Who invited it, plus its 50 newest invitees (a big referrer can have
+      // thousands): the total comes back separately.
+      db.raw<{ customer_id: string; referrer_id: string; total: number }>(
+        "(SELECT customer_id, referrer_id, 1 AS total FROM referral_attribution WHERE customer_id = ? AND deleted_at IS NULL) " +
+          "UNION ALL (SELECT customer_id, referrer_id, (count(*) OVER ())::int AS total FROM referral_attribution WHERE referrer_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 50)",
         [customerId, customerId],
       ),
     ]);
+  // Support's confirmations, read from the account itself: an exempt account
+  // (real player group) has no hold peers, but that confirms nobody.
+  const [meta] = (
+    await db.raw<{ metadata: Record<string, unknown> | null }>(
+      'SELECT metadata FROM customer WHERE id = ?',
+      [customerId],
+    )
+  ).rows;
+  const stamped = verifiedDevicePeers(meta?.metadata ?? {});
   const sameBrowser = new Set(browserPeers.map((p) => p.customer_id));
   const earlier = new Set(
     browserPeers.filter((p) => p.earlier).map((p) => p.customer_id),
   );
-  const unverified = new Set(holdPeers);
   const sameNetwork = new Set(visitors.ip.flatMap((n) => n.customer_ids));
   const invitedBy = referral.rows.find(
     (r) => r.customer_id === customerId,
   )?.referrer_id;
-  const invited = new Set(
-    referral.rows
-      .filter((r) => r.referrer_id === customerId)
-      .map((r) => r.customer_id),
+  const invitedRows = referral.rows.filter(
+    (r) => r.referrer_id === customerId,
   );
+  const invited = new Set(invitedRows.map((r) => r.customer_id));
+  const invitedTotal = invitedRows[0]?.total ?? 0;
   const ids = [
     ...new Set([
       customerId,
@@ -135,8 +147,12 @@ export async function GET(
         reason: "held withdrawal review",
       },
     ]);
-  } catch {
-    // The review still opens: a missing audit row must not block a payout decision.
+  } catch (error) {
+    // The review still opens (a missing audit row must not block a payout
+    // decision), but the disclosure is still recorded somewhere.
+    (req.scope.resolve("logger") as { warn: (m: string) => void }).warn(
+      `[payments] admin ${req.auth_context.actor_id} opened links for withdrawal ${row.id}; the audit row failed (${(error as { code?: string })?.code ?? 'no code'})`,
+    );
   }
 
   res.setHeader("Cache-Control", "no-store");
@@ -159,7 +175,7 @@ export async function GET(
         same_browser: sameBrowser.has(a.id),
         made_earlier_on_browser: earlier.has(a.id),
         // Support confirmed one household with this account: no hold for it.
-        household_verified: earlier.has(a.id) && !unverified.has(a.id),
+        household_verified: a.id in stamped,
         same_network: sameNetwork.has(a.id),
         invited_this_account: a.id === invitedBy,
         invited_by_this_account: invited.has(a.id),
@@ -171,5 +187,10 @@ export async function GET(
     bank_accounts: player.bank_accounts,
     same_name_accounts: player.same_name_accounts,
     unverified_peers: holdPeers.length,
+    // Earlier accounts on its browser not yet confirmed, as the drawer showed
+    // them: Approve's household tick confirms only these (ADR 0018).
+    unverified_peer_ids: holdPeers,
+    // All invitees; `linked` lists the 50 newest.
+    invited_total: invitedTotal,
   });
 }

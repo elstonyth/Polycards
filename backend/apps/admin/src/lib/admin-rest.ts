@@ -1813,12 +1813,12 @@ export interface WithdrawalApproveResult {
  *  or the row was never actually debited — each with its own specific
  *  MedusaError message, which is what reaches the operator's toast. No body:
  *  the route acts only on `:id` and the session's admin actor. */
-export const approveWithdrawal = (id: string, verifyDevicePeers = false) =>
+export const approveWithdrawal = (id: string, verifyDevicePeers: string[] = []) =>
   postJson<WithdrawalApproveResult>(
     `/admin/payments/withdrawals/${encodeURIComponent(id)}/approve`,
-    // Also confirms the accounts sharing its browser as one household, so its
-    // next withdrawal is not held for them (ADR 0018).
-    verifyDevicePeers ? { verify_device_peers: true } : {},
+    // Also confirms these accounts (the ones the review drawer showed) as one
+    // household with it, so its next withdrawal is not held for them (ADR 0018).
+    verifyDevicePeers.length > 0 ? { verify_device_peers: verifyDevicePeers } : {},
   );
 
 /** One account on the review screen, money in RM. */
@@ -1895,6 +1895,10 @@ export interface WithdrawalLinks {
   }[];
   /** Earlier accounts on its browser not yet confirmed as one household. */
   unverified_peers: number;
+  /** Their ids: what Approve's household tick confirms. */
+  unverified_peer_ids: string[];
+  /** Every invitee; `linked` lists the 50 newest. */
+  invited_total: number;
 }
 
 export const getWithdrawalLinks = (id: string) =>

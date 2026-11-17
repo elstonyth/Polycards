@@ -282,7 +282,8 @@ export const WithdrawalReviewDrawer = ({
   onOpenChange: (open: boolean) => void;
   canDecide: boolean;
   busy: boolean;
-  onApprove: (verifyDevicePeers: boolean) => void;
+  /** The peers to confirm as one household: those the drawer showed. */
+  onApprove: (verifyDevicePeers: string[]) => void;
   onDeny: () => void;
 }) => {
   const { t } = useTranslation();
@@ -292,6 +293,9 @@ export const WithdrawalReviewDrawer = ({
     queryFn: () => getWithdrawalLinks(withdrawal.id),
     enabled: open,
     staleTime: Infinity,
+    // Gone when the drawer closes: each open is a fresh, audited reveal, and
+    // other customers' banks do not linger in memory.
+    gcTime: 0,
   });
   const canVerify = (links?.unverified_peers ?? 0) > 0;
   return (
@@ -338,7 +342,11 @@ export const WithdrawalReviewDrawer = ({
                 variant="primary"
                 size="small"
                 disabled={busy || withdrawal.frozen}
-                onClick={() => onApprove(canVerify && household)}
+                onClick={() =>
+                  onApprove(
+                    canVerify && household ? (links?.unverified_peer_ids ?? []) : [],
+                  )
+                }
               >
                 {t('withdrawals.approve')}
               </Button>

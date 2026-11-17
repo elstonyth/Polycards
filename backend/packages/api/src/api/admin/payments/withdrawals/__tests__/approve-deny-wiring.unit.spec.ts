@@ -144,14 +144,14 @@ it('neither route swallows the operation’s MedusaError — the status code is 
 describe('approve with verify_device_peers (ADR 0018)', () => {
   const packsWith = () => ({
     listGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1', customer_id: 'cus_later' }]),
-    sharedDeviceHoldPeers: jest.fn().mockResolvedValue(['cus_first']),
+    sharedDeviceHoldPeers: jest.fn().mockResolvedValue(['cus_first', 'cus_joined_later']),
     verifyDevicePeers: jest.fn().mockResolvedValue(undefined),
   });
 
-  it('stamps the current peers as one household after a successful approve', async () => {
+  it('stamps only the peers the reviewer saw, still unverified, after a successful approve', async () => {
     approveOp.mockResolvedValue({ id: 'gpw_1', status: 'pending', approved: true });
     const packs = packsWith();
-    const req = mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: true } });
+    const req = mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: ['cus_first'] } });
     await APPROVE(req, mkRes().res);
     expect(packs.verifyDevicePeers).toHaveBeenCalledWith({
       customerId: 'cus_later',
@@ -167,10 +167,10 @@ describe('approve with verify_device_peers (ADR 0018)', () => {
     await APPROVE(mkReq({ scope: { resolve: () => packs } }), mkRes().res);
     // An approve that did nothing (already handled) stamps nothing either.
     approveOp.mockResolvedValue({ id: 'gpw_1', status: 'failed', approved: false });
-    await APPROVE(mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: true } }), mkRes().res);
+    await APPROVE(mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: ['cus_first'] } }), mkRes().res);
     approveOp.mockRejectedValue(new Error('frozen'));
     await expect(
-      APPROVE(mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: true } }), mkRes().res),
+      APPROVE(mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: ['cus_first'] } }), mkRes().res),
     ).rejects.toThrow('frozen');
     expect(packs.verifyDevicePeers).not.toHaveBeenCalled();
   });
@@ -186,7 +186,7 @@ it('a failed household stamp never turns a sent payout into an error', async () 
     verifyDevicePeers: jest.fn().mockRejectedValue(Object.assign(new Error('x'), { code: 'E1' })),
   };
   const { res, out } = mkRes();
-  await APPROVE(mkReq({ scope: { resolve: (k: string) => (k === 'logger' ? { warn } : packs) }, body: { verify_device_peers: true } }), res);
+  await APPROVE(mkReq({ scope: { resolve: (k: string) => (k === 'logger' ? { warn } : packs) }, body: { verify_device_peers: ['cus_first'] } }), res);
   expect(out.body).toBe(answer);
   expect(warn).toHaveBeenCalledTimes(1);
 });
@@ -196,10 +196,18 @@ it('refuses the household tick, before paying, for an approver without the bank 
   try {
     approveOp.mockResolvedValue({ id: 'gpw_1', status: 'pending', approved: true });
     await expect(
-      APPROVE(mkReq({ body: { verify_device_peers: true } }), mkRes().res),
+      APPROVE(mkReq({ body: { verify_device_peers: ['cus_first'] } }), mkRes().res),
     ).rejects.toThrow(/needs access to bank details/);
     expect(approveOp).not.toHaveBeenCalled();
   } finally {
     permission.allowed = true;
   }
+});
+
+it('a bare true is not a peer list: nothing is stamped', async () => {
+  approveOp.mockResolvedValue({ id: 'gpw_1', status: 'pending', approved: true });
+  const verifyDevicePeers = jest.fn();
+  const packs = { listGatewayWithdrawals: jest.fn(), sharedDeviceHoldPeers: jest.fn(), verifyDevicePeers };
+  await APPROVE(mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: true } }), mkRes().res);
+  expect(verifyDevicePeers).not.toHaveBeenCalled();
 });

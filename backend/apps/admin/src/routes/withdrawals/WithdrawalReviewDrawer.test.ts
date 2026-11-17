@@ -87,6 +87,8 @@ const links: WithdrawalLinks = {
     },
   ],
   unverified_peers: 1,
+  unverified_peer_ids: ['cus_first'],
+  invited_total: 0,
 };
 const row = { id: 'gpw_1', status: 'held', frozen: false } as GatewayWithdrawal;
 
@@ -157,14 +159,14 @@ describe('WithdrawalReviewDrawer', () => {
     const approve = () =>
       buttons().find((b) => /approve/i.test(b.textContent ?? ''))!;
     act(() => approve().click());
-    expect(onApprove).toHaveBeenLastCalledWith(false);
+    expect(onApprove).toHaveBeenLastCalledWith([]);
     act(() =>
       (
         document.body.querySelector('#review-household') as HTMLButtonElement
       ).click(),
     );
     act(() => approve().click());
-    expect(onApprove).toHaveBeenLastCalledWith(true);
+    expect(onApprove).toHaveBeenLastCalledWith(['cus_first']);
     act(() =>
       buttons()
         .find((b) => /deny/i.test(b.textContent ?? ''))!

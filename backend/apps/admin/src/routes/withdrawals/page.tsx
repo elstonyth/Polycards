@@ -159,13 +159,13 @@ const WithdrawalsPage = () => {
       ? `${rm(w.amount)} (${w.currency} ${w.gateway_amount.toFixed(2)})`
       : rm(w.amount);
 
-  const approveHeld = (w: GatewayWithdrawal, verifyDevicePeers = false) =>
+  const approveHeld = (w: GatewayWithdrawal, verifyDevicePeers: string[] = []) =>
     withActing(w.id, async () => {
       const ok = await prompt({
         title: t('withdrawals.confirmApproveTitle'),
         description: t('withdrawals.confirmApproveBody', {
           amount: payoutLabel(w),
-          bank: w.bank_code,
+          bank: w.bank_name ?? w.bank_code,
           account: w.account_number,
           holder: w.account_holder_name,
         }),
@@ -174,7 +174,7 @@ const WithdrawalsPage = () => {
       });
       if (!ok) return;
       await approveMutation.mutateAsync(
-        verifyDevicePeers ? { id: w.id, verifyDevicePeers } : w.id,
+        verifyDevicePeers.length > 0 ? { id: w.id, verifyDevicePeers } : w.id,
       );
       setReviewing(null);
     });
@@ -185,7 +185,7 @@ const WithdrawalsPage = () => {
         title: t('withdrawals.confirmDenyTitle'),
         description: t('withdrawals.confirmDenyBody', {
           amount: payoutLabel(w),
-          bank: w.bank_code,
+          bank: w.bank_name ?? w.bank_code,
           account: w.account_number,
           holder: w.account_holder_name,
         }),
