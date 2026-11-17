@@ -3,6 +3,7 @@ import {
   cancelLuckyDrawPrize,
   drawDueLuckyDrawEvents,
   drawLuckyDrawEvent,
+  drawLuckyDrawPrize,
   publishLuckyDrawEvent,
   withdrawLuckyDrawEvent,
   type LuckyDrawPort,
@@ -417,6 +418,63 @@ describe('Lucky Draw through its port', () => {
       expect(f.credits).toHaveLength(0);
       expect(f.t.eventResults.rows).toHaveLength(0);
     });
+  });
+
+  it('a per_prize draw takes the prize lock, pays its winner and writes the result', async () => {
+    const f = fakePort();
+    const [event] = await f.t.events.create([
+      {
+        status: 'published',
+        draw_mode: 'per_prize',
+        starts_at: at(-2 * HOUR),
+        ends_at: at(HOUR),
+      },
+    ]);
+    const [prize] = await f.t.prizes.create([
+      {
+        event_id: event.id,
+        kind: 'credit',
+        credit_myr: 7.5,
+        draw_at: at(-HOUR),
+        ...commitDrawSeed('unit-spec-secret'),
+      },
+    ]);
+    await f.t.entries.create([
+      { prize_id: prize.id, customer_id: 'cus_win', tickets: 2 },
+    ]);
+
+    const outcome = await drawLuckyDrawPrize(
+      f.port,
+      { prizeId: prize.id, now },
+      f.ctx,
+    );
+
+    expect(f.locks()).toEqual([`luckydraw:${prize.id}`]);
+    expect(outcome).toEqual({
+      prizeId: prize.id,
+      winnerId: 'cus_win',
+      kind: 'credit',
+      cardHandle: null,
+      pullId: null,
+    });
+    expect(f.credits).toEqual([
+      expect.objectContaining({
+        customerId: 'cus_win',
+        amount: 7.5,
+        idempotencyReference: `luckydraw:${prize.id}`,
+      }),
+    ]);
+    expect(f.t.results.rows).toEqual([
+      expect.objectContaining({
+        prize_id: prize.id,
+        winner_customer_id: 'cus_win',
+        credit_transaction_id: 'ct_1',
+      }),
+    ]);
+    // Drawn once: the result row stops a second draw.
+    expect(
+      await drawLuckyDrawPrize(f.port, { prizeId: prize.id, now }, f.ctx),
+    ).toBeNull();
   });
 
   it('the job draws each due event through the port with no context (its own transaction)', async () => {
