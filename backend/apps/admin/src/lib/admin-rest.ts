@@ -1720,6 +1720,10 @@ export interface GatewayWithdrawal {
   account_number: string;
   account_holder_name: string;
   status: 'held' | 'pending' | 'settled' | 'failed';
+  /** Why a held row waits (ADR 0018): over the approval threshold, or an
+   *  earlier account shares its browser. Null on rows not held, and on rows
+   *  held before the column. */
+  hold_reason: 'amount' | 'shared_device' | null;
   gateway_status: number | null;
   /** Why the payout died — the gateway's own codes, a sweep verdict, or the
    *  admin who denied it. Null on rows that never failed, and on the ten
@@ -1809,10 +1813,93 @@ export interface WithdrawalApproveResult {
  *  or the row was never actually debited — each with its own specific
  *  MedusaError message, which is what reaches the operator's toast. No body:
  *  the route acts only on `:id` and the session's admin actor. */
-export const approveWithdrawal = (id: string) =>
+export const approveWithdrawal = (id: string, verifyDevicePeers = false) =>
   postJson<WithdrawalApproveResult>(
     `/admin/payments/withdrawals/${encodeURIComponent(id)}/approve`,
-    {},
+    // Also confirms the accounts sharing its browser as one household, so its
+    // next withdrawal is not held for them (ADR 0018).
+    verifyDevicePeers ? { verify_device_peers: true } : {},
+  );
+
+/** One account on the review screen, money in RM. */
+export interface WithdrawalAccountView {
+  id: string;
+  handle: string | null;
+  username: string | null;
+  created_at: string;
+  disabled: boolean;
+  banned: boolean;
+  topups: number;
+  withdrawn: number;
+  /** Sales of task, challenge and welcome cards. */
+  prize_sales: number;
+  balance: number;
+}
+
+/** An account linked to the withdrawing one, and why. */
+export interface WithdrawalLinkedAccount extends WithdrawalAccountView {
+  same_browser: boolean;
+  made_earlier_on_browser: boolean;
+  /** Support confirmed one household with the withdrawing account. */
+  household_verified: boolean;
+  same_network: boolean;
+  invited_this_account: boolean;
+  invited_by_this_account: boolean;
+}
+
+type Payouts = { count: number; rm: number };
+
+/** GET /admin/payments/withdrawals/:id/links (customer_bank_account:read,
+ *  an audited reveal): the held-withdrawal review screen. */
+export interface WithdrawalLinks {
+  withdrawal: {
+    id: string;
+    amount: number;
+    status: string;
+    hold_reason: 'amount' | 'shared_device' | null;
+    created_at: string;
+    bank_name: string;
+    last4: string;
+    holder_name: string;
+  };
+  account: WithdrawalAccountView | null;
+  linked: WithdrawalLinkedAccount[];
+  networks_shared: number;
+  unsigned_requests: boolean;
+  /** Every bank saved or paid to, and the other accounts on each. */
+  bank_accounts: {
+    bank: string;
+    last4: string;
+    banned_number: boolean;
+    lifted_for_player: boolean;
+    this_player_payouts: Payouts;
+    other_accounts: {
+      username: string | null;
+      handle: string | null;
+      banned: boolean;
+      disabled: boolean;
+      deleted: boolean;
+      same_holder_name: boolean | null;
+      payouts: Payouts;
+    }[];
+  }[];
+  /** Accounts under one of its holder names at another bank. */
+  same_name_accounts: {
+    username: string | null;
+    handle: string | null;
+    banned: boolean;
+    disabled: boolean;
+    deleted: boolean;
+    cleared_as_different_person: boolean;
+    banks: { bank: string; last4: string }[];
+  }[];
+  /** Earlier accounts on its browser not yet confirmed as one household. */
+  unverified_peers: number;
+}
+
+export const getWithdrawalLinks = (id: string) =>
+  getJson<WithdrawalLinks>(
+    `/admin/payments/withdrawals/${encodeURIComponent(id)}/links`,
   );
 
 /** Mirrors ./[id]/deny's response verbatim. `refunded:false` is the

@@ -1348,7 +1348,10 @@ export const useCustomerGatewayWithdrawals = (
 export const useApproveWithdrawal = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => approveWithdrawal(id),
+    mutationFn: (v: string | { id: string; verifyDevicePeers?: boolean }) =>
+      typeof v === 'string'
+        ? approveWithdrawal(v)
+        : approveWithdrawal(v.id, v.verifyDevicePeers === true),
     onSuccess: (data) => {
       switch (classifyApproveResult(data)) {
         case 'submitted':
