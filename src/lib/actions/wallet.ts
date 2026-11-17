@@ -9,9 +9,9 @@
  * WalletEnvelopeSchema reads the nested `wallet` block out of that envelope,
  * so only the inner object is validated (not the transactions).
  */
-import { store, type Failure } from '@/lib/store';
+import { store } from '@/lib/store';
 import {
-  friendlyFailure,
+  actionFailure,
   COPY,
   UNAUTHORIZED,
   type ErrorRule,
@@ -49,30 +49,15 @@ const LOGIN_REQUIRED = 'Please log in to view your wallet.';
 const WALLET_RULES: ErrorRule[] = [[UNAUTHORIZED, LOGIN_REQUIRED]];
 const WALLET_FALLBACK = COPY.generic;
 
-/** A port `Failure` in this action's vocabulary: no cookie at all (the call
- *  never left — `status` is undefined) and a 2xx with the wrong shape each
- *  keep their own copy; anything the backend actually said goes through
- *  WALLET_RULES, with `needsAuth` when it was a 401. */
-function walletFailure(f: Failure): WalletResult {
-  if (f.kind === 'invalid_shape') {
-    return {
-      ok: false,
-      error: 'Got an unexpected response. Please try again.',
-    };
-  }
-  if (f.kind === 'unauthenticated' && f.status === undefined) {
-    return { ok: false, error: LOGIN_REQUIRED, needsAuth: true };
-  }
-  return {
-    ok: false,
-    error: friendlyFailure(f, WALLET_RULES, WALLET_FALLBACK),
-    needsAuth: f.kind === 'unauthenticated',
-  };
-}
-
 export async function getWallet(): Promise<WalletResult> {
   const r = await store.get('/store/credits', WalletEnvelopeSchema);
-  if (!r.ok) return walletFailure(r);
+  if (!r.ok) {
+    return actionFailure(r, {
+      loggedOut: LOGIN_REQUIRED,
+      rules: WALLET_RULES,
+      fallback: WALLET_FALLBACK,
+    });
+  }
   const w = r.data.wallet;
   const wallet = {
     balance: w.balance,

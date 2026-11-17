@@ -31,7 +31,7 @@
  * backend/packages/api/src/api/utils/rate-limit.ts.
  */
 import { headers } from 'next/headers';
-import { store, type Failure } from '@/lib/store';
+import { store } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { visitorRefusal } from '@/lib/visitor-country';
 import { UncheckedSchema } from '@/lib/data/schemas';
@@ -45,7 +45,7 @@ import {
   type PhoneOtpChannel,
   type PhoneOtpPurpose,
 } from '@/lib/phone-verification';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { COPY, friendlyError, isLoggedOut, type ErrorRule } from '@/lib/errors';
 
 type Fail = { ok: false; error: string; retryAfterSeconds?: number };
 const fail = (error: string): Fail => ({ ok: false, error });
@@ -53,13 +53,6 @@ const fail = (error: string): Fail => ({ ok: false, error });
 // 429s carry a useful retry message; keep it, genericize everything else.
 const messageOf = (text: string, fallback: string): string =>
   /try again in \d+s/i.test(text) ? text : fallback;
-
-/** No cookie at all — the call never left (`status` is undefined), so there is
- *  no backend text to read, and the answer is the login prompt rather than
- *  anything `messageOf` would generalize. Only `changePhone` is authenticated;
- *  the other three routes run with `auth: 'none'` and never see this. */
-const loggedOut = (f: Failure): boolean =>
-  f.kind === 'unauthenticated' && f.status === undefined;
 
 // The post-OTP outcomes password-reset/route.ts is DESIGNED to
 // disclose to a proven phone-holder (Task 5 comment) — a raw FetchError's
@@ -315,7 +308,11 @@ export async function changePhone(input: {
     },
   );
   if (!r.ok) {
-    if (loggedOut(r)) return fail('Please log in first.');
+    // No cookie at all: there is no backend text to read, so the answer is the
+    // login prompt rather than anything `messageOf` would generalize. Only
+    // `changePhone` is authenticated; the other three routes run with
+    // `auth: 'none'` and never see this.
+    if (isLoggedOut(r)) return fail(COPY.loginRequired);
     // Re-auth refusals win; then the same 429 retry-hint passthrough as
     // startPhoneOtp/checkPhoneOtp — a rate-limited change should say how long
     // to wait, not invite an immediate retry; then the generic copy.
