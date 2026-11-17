@@ -34,6 +34,8 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
+import VisitorSignal from '../models/visitor-signal';
+import { FREE_PACK_HOUSEHOLD_MESSAGE } from '../free-pack';
 
 jest.setTimeout(300 * 1000);
 
@@ -56,8 +58,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
+    VisitorSignal,
   ],
-  testSuite: ({ service }) => {
+  testSuite: ({ MikroOrmWrapper, service }) => {
     describe('free pack claim state', () => {
       it('markFreePackAvailable stamps once, idempotently', async () => {
         await service.markFreePackAvailable('cus_1');
@@ -75,6 +78,34 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await service.markFreePackAvailable('cus_2');
         expect(await service.claimFreePack('cus_2')).toBe(true);
         expect(await service.claimFreePack('cus_2')).toBe(false); // second claim loses
+      });
+
+      it('one welcome pack per person or household: a second account on a claimed browser is refused (ADR 0018)', async () => {
+        const em = MikroOrmWrapper.forkManager();
+        await em.execute(
+          'CREATE TABLE IF NOT EXISTS customer (id text primary key, created_at timestamptz not null default now(), deleted_at timestamptz null)',
+        );
+        await em.execute(
+          "INSERT INTO customer (id, created_at) VALUES ('cus_hh_a', now() - interval '2 days'), ('cus_hh_b', now() - interval '1 day'), ('cus_hh_c', now()) ON CONFLICT DO NOTHING",
+        );
+        const shared = '11111111-2222-4333-8444-555555555555';
+        await service.recordVisitorSignal({ customerId: 'cus_hh_a', ip: '10.0.0.1', deviceId: shared });
+        await service.recordVisitorSignal({ customerId: 'cus_hh_b', ip: '10.0.0.2', deviceId: shared });
+        for (const id of ['cus_hh_a', 'cus_hh_b', 'cus_hh_c']) await service.markFreePackAvailable(id);
+
+        // No one on the browser has claimed yet, so the later account may.
+        expect(await service.sharedBrowserAccounts('cus_hh_b')).toEqual([
+          { customer_id: 'cus_hh_a', earlier: true, welcome_claimed: false },
+        ]);
+        expect(await service.claimFreePack('cus_hh_b')).toBe(true);
+        // Now the earlier account on the same browser is refused, and keeps its pack waiting.
+        await expect(service.claimFreePack('cus_hh_a')).rejects.toThrow(FREE_PACK_HOUSEHOLD_MESSAGE);
+        const [a] = await service.listCustomerAccountStates({ customer_id: 'cus_hh_a' }, { take: 1 });
+        expect(a.free_pack_claimed_at).toBeNull();
+        // The browser on this request counts even before it was ever recorded.
+        await expect(service.claimFreePack('cus_hh_c', shared)).rejects.toThrow(FREE_PACK_HOUSEHOLD_MESSAGE);
+        // A different browser, or none, is not matched.
+        expect(await service.claimFreePack('cus_hh_c', '99999999-2222-4333-8444-555555555555')).toBe(true);
       });
 
       it('clearFreePackClaim re-opens the claim (compensation path)', async () => {

@@ -77,7 +77,11 @@ import {
   type PayoutNumber,
 } from './payout-destination';
 import { challengePackId } from './challenge-prize';
-import { FREE_PULL_LOCKED_MESSAGE, FREE_WELCOME_CATEGORY } from './free-pack';
+import {
+  FREE_PACK_HOUSEHOLD_MESSAGE,
+  FREE_PULL_LOCKED_MESSAGE,
+  FREE_WELCOME_CATEGORY,
+} from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
 import {
   parseWithdrawalControls,
@@ -6945,9 +6949,36 @@ class PacksModuleService extends MedusaService({
   @InjectTransactionManager()
   async claimFreePack(
     customerId: string,
+    deviceId: string | null = null,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // One welcome pack per person or household (ADR 0018): refused when another
+    // account on this browser already took one. A lock per browser id makes two
+    // accounts claiming on one browser at once take turns, so the second sees
+    // the first's stamp.
+    const [{ ids }] = await em.execute<{ ids: string[] }[]>(
+      "SELECT coalesce(array_agg(DISTINCT d ORDER BY d), '{}') AS ids FROM (" +
+        "SELECT device_id AS d FROM visitor_signal WHERE customer_id = ? AND device_id <> '' " +
+        "UNION SELECT ?::text WHERE ?::text <> '') x",
+      [customerId, deviceId ?? '', deviceId ?? ''],
+    );
+    for (const id of ids) {
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        `welcome-pack-device:${id}`,
+      ]);
+    }
+    if (
+      ids.length &&
+      (await this.sharedBrowserAccounts(customerId, deviceId, sharedContext)).some(
+        (other) => other.welcome_claimed,
+      )
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PACK_HOUSEHOLD_MESSAGE,
+      );
+    }
     return claimOne(em, {
       table: 'customer_account_state',
       ids: [customerId],
@@ -9960,6 +9991,40 @@ class PacksModuleService extends MedusaService({
       })),
       ip_total: ip[0]?.total ?? 0,
     };
+  }
+
+  // Other open accounts that share a browser id with this one (ADR 0018): the
+  // seen ids plus `deviceId`, the one on this request when the storefront
+  // vouched for it. `earlier` marks accounts made before this one, so the first
+  // account on a browser is never the "second"; `welcome_claimed` marks one that
+  // took the welcome pack. A browser id is a cookie, so no id means no match.
+  @InjectManager()
+  async sharedBrowserAccounts(
+    customerId: string,
+    deviceId: string | null = null,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    { customer_id: string; earlier: boolean; welcome_claimed: boolean }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    return await em.execute<
+      { customer_id: string; earlier: boolean; welcome_claimed: boolean }[]
+    >(
+      'WITH mine AS (' +
+        "SELECT device_id FROM visitor_signal WHERE customer_id = ? AND device_id <> '' " +
+        "UNION SELECT ?::text WHERE ?::text <> ''), " +
+        'me AS (SELECT id, created_at FROM customer WHERE id = ?) ' +
+        'SELECT o.customer_id, ' +
+        'bool_or((c.created_at, c.id) < ((SELECT created_at FROM me), (SELECT id FROM me))) AS earlier, ' +
+        'bool_or(s.free_pack_claimed_at IS NOT NULL) AS welcome_claimed ' +
+        'FROM visitor_signal o ' +
+        'JOIN customer c ON c.id = o.customer_id AND c.deleted_at IS NULL ' +
+        'LEFT JOIN customer_account_state s ON s.customer_id = o.customer_id ' +
+        'WHERE o.customer_id <> ? AND o.device_id IN (SELECT device_id FROM mine) ' +
+        'GROUP BY o.customer_id LIMIT 50',
+      [customerId, deviceId ?? '', deviceId ?? '', customerId, customerId],
+    );
   }
 
   // The 180 days the privacy page promises (jobs/purge-visitor-signals.ts), and
