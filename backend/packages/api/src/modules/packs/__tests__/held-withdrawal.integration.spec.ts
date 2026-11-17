@@ -1059,6 +1059,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
           // locked claim left it in); nothing claims a 'held' row bare.
           expect(statusClaims.flatMap((c) => c.from)).not.toContain('held');
           if (_name === 'submitHeldWithdrawal') {
+            // A successful approve refunds nothing, so it claims nothing bare.
+            expect(called).not.toContain('claimWithdrawalStatus');
             expect(withdrawalUpdates).toHaveLength(1);
             const [update] = withdrawalUpdates[0] as [{ data: unknown }];
             expect(update.data).not.toHaveProperty('status');
