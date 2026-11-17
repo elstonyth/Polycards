@@ -24,19 +24,24 @@ import {
 
 type Labelled = { __label?: string; name?: string };
 
-// One stand-in per rateLimit() call, numbered per tier: a second instance of
-// a tier (a split budget) shows up as `#2`.
+// One labelled stand-in per tier name, as rateLimit itself returns one
+// limiter per name.
 jest.mock('../utils/rate-limit', () => {
   const actual = jest.requireActual('../utils/rate-limit');
-  const made: Record<string, number> = {};
+  const made = new Map<string, unknown>();
   return {
     ...actual,
     rateLimit: (name: string) => {
-      made[name] = (made[name] ?? 0) + 1;
-      return Object.assign(
-        (_req: unknown, _res: unknown, next: () => void) => next(),
-        { __label: `${name}#${made[name]}` },
-      );
+      if (!made.has(name)) {
+        made.set(
+          name,
+          Object.assign(
+            (_req: unknown, _res: unknown, next: () => void) => next(),
+            { __label: name },
+          ),
+        );
+      }
+      return made.get(name);
     },
     warmOtpSendBudget: () => undefined,
     warmSignupProofClaims: () => undefined,
@@ -89,7 +94,7 @@ describe('admin route table', () => {
       const limited = routes
         .map((e, i) => ({ e, i }))
         .filter(({ e }) => own(e) && !e.policies);
-      const want = (r.limits ?? []).map((l) => `${l}#1`);
+      const want = [...(r.limits ?? [])];
       if (!r.limits) {
         if (limited.length) failures.push(`${key(r)}: unexpected entry`);
         continue;
@@ -200,7 +205,7 @@ describe('admin route table', () => {
       'rejectAdminBankAccountsMetadata',
       'rejectAdminPhoneWrite',
       'policy customer:update',
-      'admin-action#1',
+      'admin-action',
     ]);
     expect(chain('POST', '/admin/customer-groups/cusgroup_1/policy')).toEqual([
       ...adminGuards,
@@ -208,7 +213,7 @@ describe('admin route table', () => {
       'rejectGroupPolicyMetadata',
       'rejectGroupOddsSetUpdate',
       'policy customer_group:update',
-      'admin-action#1',
+      'admin-action',
     ]);
     expect(chain('POST', '/admin/customers')).toEqual([
       ...adminGuards,
@@ -218,8 +223,8 @@ describe('admin route table', () => {
     expect(chain('POST', '/admin/assistant/chat')).toEqual([
       ...adminGuards,
       'policy assistant:update',
-      'admin-action#1',
-      'assistant-chat#1',
+      'admin-action',
+      'assistant-chat',
       'jsonParser',
     ]);
   });

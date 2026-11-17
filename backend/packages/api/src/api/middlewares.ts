@@ -106,6 +106,11 @@ import { requestErrorLog } from '../utils/request-error-log';
 // src/app/api/free-pack/route.ts, so this limiter is a backstop, not the
 // primary defense.
 
+// rateLimit(name) returns one limiter per name (utils/rate-limit.ts), so
+// every route naming a tier, bound here or called inline below, shares that
+// tier's one budget, failover bucket and Redis connection. A route that needs
+// its own budget needs its own name in RATE_LIMITS.
+//
 // One instance shared by the vault + credits matchers: the two reads travel
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = rateLimit('store-read');
@@ -120,9 +125,8 @@ const adminMfaCodeRateLimit = rateLimit('admin-mfa-code');
 // The per-identifier (per-email) credential tier. ONE instance shared by every
 // credential matcher below: they are one budget per account across login,
 // register and reset, and one instance also means one Redis connection fronting
-// the single `rl:auth-identifier:` keyspace (two instances would share the
-// Redis budget but NOT the in-memory failover budget — split-brain when Redis
-// blips).
+// the single `rl:auth-identifier:` keyspace, whose in-memory failover budget
+// is then shared too when Redis blips.
 const authIdentifierRateLimit = rateLimit('auth-identifier');
 // Shared by ALL write-tier matchers below (delivery-order writes, rewards
 // claim/withdraw, daily draw, avatar upload, verified phone change): one
@@ -1199,8 +1203,8 @@ export default defineMiddlewares({
     },
     {
       // Credit top-up through the (mock) payment gateway
-      // (POST /store/credits/topup) — a write, so it gets its own limiter,
-      // not the shared read budget.
+      // (POST /store/credits/topup) — a write, so it gets the credit-topup
+      // limiter, not the shared read budget.
       matcher: '/store/credits/topup',
       method: 'POST',
       middlewares: [
@@ -1211,7 +1215,7 @@ export default defineMiddlewares({
     },
     {
       // Real gateway deposit (POST /store/credits/deposit). Same tier as the
-      // mock top-up above: authenticated write, own limiter. Each call creates
+      // mock top-up above: authenticated write, the credit-topup limiter. Each call creates
       // a payment at the gateway, so an unlimited caller could flood their
       // back office even without ever paying.
       //
@@ -1272,7 +1276,7 @@ export default defineMiddlewares({
     },
     {
       // Real gateway payout (POST /store/credits/withdraw). Money OUT, so it
-      // shares the top-up write tier: authenticated, own limiter. The
+      // shares the top-up write tier: authenticated, the credit-topup limiter. The
       // gateway's callback (POST /hooks/tgpay/withdrawal) is deliberately
       // OUTSIDE /store/* — webhook auth is the gateway's key pair.
       matcher: '/store/credits/withdraw',
