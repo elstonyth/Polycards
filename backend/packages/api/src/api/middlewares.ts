@@ -1203,8 +1203,8 @@ export default defineMiddlewares({
     },
     {
       // Credit top-up through the (mock) payment gateway
-      // (POST /store/credits/topup) — a write, so it gets its own limiter,
-      // not the shared read budget.
+      // (POST /store/credits/topup) — a write, so it gets the credit-topup
+      // limiter, not the shared read budget.
       matcher: '/store/credits/topup',
       method: 'POST',
       middlewares: [
@@ -1215,7 +1215,7 @@ export default defineMiddlewares({
     },
     {
       // Real gateway deposit (POST /store/credits/deposit). Same tier as the
-      // mock top-up above: authenticated write, own limiter. Each call creates
+      // mock top-up above: authenticated write, the credit-topup limiter. Each call creates
       // a payment at the gateway, so an unlimited caller could flood their
       // back office even without ever paying.
       //
@@ -1276,7 +1276,7 @@ export default defineMiddlewares({
     },
     {
       // Real gateway payout (POST /store/credits/withdraw). Money OUT, so it
-      // shares the top-up write tier: authenticated, own limiter. The
+      // shares the top-up write tier: authenticated, the credit-topup limiter. The
       // gateway's callback (POST /hooks/tgpay/withdrawal) is deliberately
       // OUTSIDE /store/* — webhook auth is the gateway's key pair.
       matcher: '/store/credits/withdraw',

@@ -23,6 +23,19 @@ import {
   type RateLimitStore,
 } from '../rate-limit';
 
+/** rateLimit builds each name once per module and reads its env then, so a
+ *  test that pins env loads its own copy: a test added earlier in this file
+ *  cannot have built the name first. */
+const freshRateLimit = (
+  name: Parameters<typeof rateLimit>[0],
+): ReturnType<typeof rateLimit> => {
+  let mod!: typeof import('../rate-limit');
+  jest.isolateModules(() => {
+    mod = require('../rate-limit');
+  });
+  return mod.rateLimit(name);
+};
+
 const MINUTE = 60_000;
 const T0 = 1_700_000_000_000; // fixed epoch-ms base so tests are deterministic
 
@@ -754,7 +767,7 @@ describe('consumeOtpSendBudget', () => {
     delete process.env.REDIS_URL;
     const now = jest.spyOn(Date, 'now');
     try {
-      const middleware = rateLimit('phone-otp-start-phone');
+      const middleware = freshRateLimit('phone-otp-start-phone');
       const phone = '+60177000901';
       const start = T0;
       const replies: number[] = [];
@@ -787,7 +800,7 @@ describe('consumeOtpSendBudget', () => {
     delete process.env.REDIS_URL;
     const clock = jest.spyOn(Date, 'now');
     try {
-      const middleware = rateLimit('phone-otp-start-phone');
+      const middleware = freshRateLimit('phone-otp-start-phone');
       const phone = '+60177000902';
       const replies: number[] = [];
       for (const [elapsed, routeDelay] of [
@@ -1136,10 +1149,13 @@ describe('rateLimit', () => {
     process.env.TASK_ACTION_RATE_WINDOW_MS = '60000';
 
     try {
-      // The env above is read on the first call for a name: no other test in
-      // this file builds task-action.
-      const first = rateLimit('task-action');
-      const second = rateLimit('task-action');
+      // Its own module copy, so the env above is what it is built with.
+      let mod!: typeof import('../rate-limit');
+      jest.isolateModules(() => {
+        mod = require('../rate-limit');
+      });
+      const first = mod.rateLimit('task-action');
+      const second = mod.rateLimit('task-action');
 
       expect(first).toBe(second);
       expect(await invoke(first)).toEqual({ passed: true, status: undefined });
@@ -1392,8 +1408,9 @@ describe('the two auth rate-limit tiers (Plan 081)', () => {
   let saved: Array<[string, string | undefined]> = [];
 
   beforeEach(() => {
-    // rateLimit reads env AT CONSTRUCTION, so the environment has to be
-    // pinned before the create calls below. Two things must go:
+    // A limiter reads env when it is built, once per name per module, so the
+    // tests below build theirs with freshRateLimit after this pins the
+    // environment. Two things must go:
     //  - REDIS_URL, so the limiter stays on its in-memory store (a unit test
     //    must not open a socket);
     //  - every AUTH_*_RATE_* override, because .env.test widens the auth
@@ -1463,7 +1480,7 @@ describe('the two auth rate-limit tiers (Plan 081)', () => {
   };
 
   it('gives different emails from the same IP different buckets', async () => {
-    const mw = rateLimit('auth-identifier');
+    const mw = freshRateLimit('auth-identifier');
 
     // Burst limit is 1, so the second attempt on the SAME email is denied...
     expect((await post(mw, { email: 'a@x.com', password: 'p' })).passed).toBe(
@@ -1493,7 +1510,7 @@ describe('the two auth rate-limit tiers (Plan 081)', () => {
   });
 
   it('does not consume any budget for a body with no identifier (skipWhenNoKey)', async () => {
-    const mw = rateLimit('auth-identifier');
+    const mw = freshRateLimit('auth-identifier');
     // /auth/*/emailpass/update — token + password, no identifier. Repeated
     // well past the burst limit of 1; none of it may bind.
     for (let i = 0; i < 5; i++) {
@@ -1505,18 +1522,21 @@ describe('the two auth rate-limit tiers (Plan 081)', () => {
   // so the victim's second reset request must 429 no matter what the attacker
   // puts in the field the route ignores, and no matter how they spell the path.
   it('a decoy identifier cannot buy a fresh bucket on reset-password', async () => {
-    const mw = rateLimit('auth-identifier');
-    for (const [i, path] of [
+    const mw = freshRateLimit('auth-identifier');
+    const [plain, ...others] = [
       '/auth/customer/emailpass/reset-password',
       '/auth/customer/emailpass/reset-password/',
       '/auth/customer/emailpass/RESET-PASSWORD',
-    ].entries()) {
-      // One limiter per name, so a fresh victim (fresh bucket) per spelling.
-      const victim = `victim-${i}@x.com`;
-      expect((await post(mw, { identifier: victim }, path)).passed).toBe(true);
+    ];
+    // One limiter serves every spelling: the victim's one admitted request
+    // spends the bucket that every later spelling, decoy or not, hits.
+    expect((await post(mw, { identifier: 'victim@x.com' }, plain)).passed).toBe(
+      true,
+    );
+    for (const path of [plain, ...others]) {
       const bombed = await post(
         mw,
-        { email: `decoy-${Math.random()}@x.com`, identifier: victim },
+        { email: `decoy-${Math.random()}@x.com`, identifier: 'victim@x.com' },
         path,
       );
       expect({ path, ...bombed }).toMatchObject({ passed: false, status: 429 });
@@ -1529,7 +1549,7 @@ describe('the two auth rate-limit tiers (Plan 081)', () => {
   // requests per minute for the entire site, which 429'd honest sign-ins and
   // was a trivial DoS lever. Guards a revert of that number specifically.
   it('admits far more than 30 sign-ins a minute from the one storefront IP', async () => {
-    const mw = rateLimit('auth'); // real defaults, no env override
+    const mw = freshRateLimit('auth'); // real defaults, no env override
     for (let i = 0; i < 40; i++) {
       const r = await post(mw, { email: `user${i}@x.com`, password: 'p' });
       expect({ i, ...r }).toMatchObject({ passed: true });
