@@ -12274,12 +12274,14 @@ class PacksModuleService extends MedusaService({
     }
 
     const frozen = await this.isFrozen(customerId, sharedContext);
-    // Every branch of the rule (frozen, bonus, no top-up, spend first) lives
-    // in walletWithdrawable, shared with the P&L's floating money. In integer
+    // The rule's branches (frozen, no top-up, spend first, bonus spend-only)
+    // live in walletWithdrawable, shared with the P&L's floating money. The
+    // bonus arrives clamped at 0 (the scan above, or creditSummary through
+    // `precomputed`) and this caller rounds the balance to cents. In integer
     // cents, so the figure the gate compares and the figure the UI renders
-    // with toFixed(2) can never disagree by a float hair (withdrawalGateError
-    // compares `amount <= withdrawable`). Spending on packs stays
-    // unrestricted either way — the gate only limits cashout.
+    // with toFixed(2) can never disagree by a float hair
+    // (withdrawalGateError compares `amount <= withdrawable`). Spending on
+    // packs stays unrestricted either way — the gate only limits cashout.
     const fold = walletWithdrawable({
       balanceCents: Math.round(balance * 100),
       bonusCents,
