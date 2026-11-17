@@ -55,7 +55,7 @@ describe('bank registry', () => {
   it('covers every TGPay SWIFT row and keeps every retired-gateway code as an alias', () => {
     const tgpay = MY_BANKS.filter((b) => b.codes.tgpay).length;
     const aliased = MY_BANKS.filter((b) => b.legacyAliases.length).length;
-    expect(tgpay).toBe(21);
+    expect(tgpay).toBe(22);
     expect(aliased).toBe(31);
   });
 
@@ -90,19 +90,21 @@ describe('bank registry', () => {
       name: "Touch 'n Go",
     });
     expect(banksFor('tgpay', { env: on }).map((b) => b.bankCode)).toContain('TNGMY');
-    // Touch 'n Go carries its own RM 100 payout floor (TGPay refused smaller
-    // TNG payouts on 2026-10-09); banks have none of their own.
-    expect(bankPayoutMinRm('TNGMY')).toBe(100);
-    expect(bankPayoutMinRm('MYTNGO')).toBe(100);
+    // Touch 'n Go carries its own payout floor, RM 50 since TGPay's
+    // 2026-11-17 notice; banks have none of their own.
+    expect(bankPayoutMinRm('TNGMY')).toBe(50);
+    expect(bankPayoutMinRm('MYTNGO')).toBe(50);
+    expect(bankPayoutMinRm('GXBANKMY')).toBeNull();
     expect(bankPayoutMinRm('MBBEMYKL')).toBeNull();
     expect(bankPayoutMinRm('NOPE')).toBeNull();
   });
 
   it('picker lists carry canonical ids and neutral names; the dummy bank only on the TGPay sandbox', () => {
-    // 21 TGPay rows; Touch 'n Go is left out while its switch is off.
+    // 22 TGPay rows; Touch 'n Go is left out while its switch is off.
     const tgpay = banksFor('tgpay', { env: {} });
-    expect(tgpay).toHaveLength(20);
-    expect(banksFor('tgpay', { env: { TNG_PAYOUTS_ENABLED: 'true' } })).toHaveLength(21);
+    expect(tgpay).toHaveLength(21);
+    expect(banksFor('tgpay', { env: { TNG_PAYOUTS_ENABLED: 'true' } })).toHaveLength(22);
+    expect(tgpay).toContainEqual({ bankCode: 'GXBANKMY', bankName: 'GX Bank' });
     expect(tgpay[0]).toEqual({ bankCode: 'PHBMMYKL', bankName: 'Affin Bank' });
     expect(banksFor('tgpay', { sandbox: true })[0].bankCode).toBe(
       TGPAY_SANDBOX_BANK.id,

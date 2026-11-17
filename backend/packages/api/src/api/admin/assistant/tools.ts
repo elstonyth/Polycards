@@ -10,7 +10,7 @@ import {
   PACK_SALES_FULL,
 } from '../../../modules/packs/money-figures';
 import { capBody } from '../../reports/admin/proxy';
-import type { Access, Need } from './access';
+import { IMAGES, screen, type Access, type Tool } from './access';
 import type { Proposal } from './confirm';
 import { adminReadAs, callReport, type ReportImage } from './bridge';
 import { brandImage, generateImage } from './images';
@@ -24,9 +24,10 @@ import {
 import { PERIODS, resolvePeriod } from './periods';
 
 // What the assistant can look up or make (spec 2026-10-29). The data tools
-// are the Discord desk tools (tools/desk-reports/tools.mjs) with the same
-// descriptions, minus the Discord-only parts. Each tool names the RBAC
-// policy of the admin screen that shows the same data (`needs`); the model
+// are the Discord desk tools (tools/desk-reports/tools.mjs), described in
+// their words where both say the same (desk-tool-text.unit.spec.ts). Each
+// tool names the RBAC policy of the admin screen that shows the same data
+// (`needs`, read from admin-rbac.ts) and what it does (`effect`); the model
 // is only ever offered the tools the asker's roles allow (access.ts), and
 // the chat route checks again before running one.
 
@@ -59,18 +60,7 @@ export type ToolCtx = {
   signal: AbortSignal;
 };
 
-export type AssistantTool = {
-  name: string;
-  /** A short label for the chat's step timeline. */
-  label: string;
-  description: string;
-  parameters: Record<string, unknown>;
-  needs: Need[];
-  run(args: Record<string, unknown>, ctx: ToolCtx): Promise<string>;
-};
-
-const read = (resource: string): Need => ({ resource, operation: 'read' });
-const IMAGES: Need = { resource: 'assistant_image', operation: 'create' };
+export type AssistantTool = Tool<ToolCtx>;
 
 // --- JSON Schema helpers --------------------------------------------------
 
@@ -234,7 +224,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       "Ledger money totals (the Finance Economy report) for one Malaysia-time window and player group; the reply's basis field says what each figure counts, so repeat it when staff ask what a number includes. revenue = pack sales, cash only (bonus credit spent is not revenue; capsule packs included); payouts = buybacks paid, cash part; coinFlipPayouts = credit paid to coin flip winners; net = revenue - payouts - coinFlipPayouts (the gacha margin); topups = top-ups as the wallet ledger records them (the payments tool and the admin Profit page count the gateway's settled deposits, so they can differ); cashout = withdrawals taken from wallets, a signed ledger sum (negative = money withdrawn; report it as an amount withdrawn, never as paid out: it includes withdrawals still pending at the gateway, and the payments tool tells settled from pending); adjustments = admin credit changes (either sign); deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).",
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
-    needs: [read('economy')],
+    needs: [screen('economy')],
+    effect: 'read',
     run: windowed('finance', 'economy'),
   },
   {
@@ -243,7 +234,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       'The same totals as economy, split per Malaysia calendar day (days with no activity are left out). The window must be 93 days or less; all_time is not allowed.',
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
-    needs: [read('economy')],
+    needs: [screen('economy')],
+    effect: 'read',
     run: windowed('finance', 'daily'),
   },
   {
@@ -253,7 +245,8 @@ export const TOOLS: AssistantTool[] = [
       'Payment-gateway deposits and withdrawals created in the window, counted and summed per status, plus what is open right now whatever the window. Deposit statuses: pending, settled, failed, expired. Withdrawal statuses: pending, settled, failed, held (held = waiting for admin approval). Amounts in RM (MYR).',
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
     // Gateway money: the payment screens' policy as well as the economy's.
-    needs: [read('economy'), read('payment')],
+    needs: [screen('economy'), screen('payments')],
+    effect: 'read',
     run: windowed('finance', 'payments'),
   },
   {
@@ -262,7 +255,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       "Per-pack sales in the window: packs opened (paid with cash or bonus credit) and revenue (cash only, net of reversals; capsule packs included), largest first. Bonus credit is not revenue, so a pack opened only with bonus credit shows its opens at RM 0: that is correct, not a fault. unattributed_revenue is pack spend from older rows that cannot be linked to a pack; total_revenue equals economy revenue. The admin P&L counts pack sales at full price (cash plus bonus) and leaves capsule packs out, so its pack sales differ. Amounts in RM (MYR).",
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
-    needs: [read('economy')],
+    needs: [screen('economy')],
+    effect: 'read',
     run: windowed('finance', 'pack-sales'),
   },
   {
@@ -271,7 +265,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       'The player groups and how many players each holds now (by current group). default_players counts the real customers, the same players as group default. Use these names as the group argument of the other tools.',
     parameters: object({}),
-    needs: [read('economy')],
+    needs: [screen('economy')],
+    effect: 'read',
     run: report('finance', 'groups'),
   },
   // One customer (the Support viewer's scope).
@@ -288,7 +283,8 @@ export const TOOLS: AssistantTool[] = [
       },
       ['username'],
     ),
-    needs: [read('customer'), read('payment')],
+    needs: [screen('customers'), screen('payments')],
+    effect: 'read',
     run: report('finance', 'player', (a) => ({ username: s(a.username) })),
   },
   {
@@ -305,7 +301,8 @@ export const TOOLS: AssistantTool[] = [
       ['username'],
     ),
     // It carries deposits and withdrawals: the payment screens' policy too.
-    needs: [read('customer'), read('payment'), read('delivery_order')],
+    needs: [screen('customers'), screen('payments'), screen('delivery-orders')],
+    effect: 'read',
     run: report('support', 'account', (a) => ({ username: s(a.username) })),
   },
   {
@@ -324,7 +321,8 @@ export const TOOLS: AssistantTool[] = [
     }),
     // Bank name and last 4 only, so the Support viewer (yu) may read it; it
     // carries payout sums, so the payment screens' policy too.
-    needs: [read('customer'), read('payment')],
+    needs: [screen('customers'), screen('payments')],
+    effect: 'read',
     // A number may arrive unquoted; read it as the digits it is.
     run: report('support', 'ban', (a) => {
       const v = (x: unknown) => (typeof x === 'number' ? String(x) : s(x));
@@ -350,7 +348,8 @@ export const TOOLS: AssistantTool[] = [
       },
       ['number'],
     ),
-    needs: [read('delivery_order')],
+    needs: [screen('delivery-orders')],
+    effect: 'read',
     run: report('support', 'order', (a) => ({ number: s(a.number) })),
   },
   // Growth data.
@@ -360,7 +359,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       "The Weekly Pulled Value Challenge. week current (default): the running week exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes with the official card image link, the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). Until the week ends, the top player is the current leader, not the winner. hidden_players_above_cut counts disabled players left off the board; they are not paid while disabled, and the ranks shown are the ranks paid. week next: the next challenge waiting in the admin queue. Amounts in RM (MYR).",
     parameters: object(weekProp('the running week')),
-    needs: [read('challenge')],
+    needs: [screen('challenge')],
+    effect: 'read',
     run: report('growth', 'challenge', (a) => ({ week: s(a.week) })),
   },
   {
@@ -369,7 +369,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       "Last week's Weekly Pulled Value Challenge result, exactly as settlement paid it: the week's dates, the pool and the stages it unlocked, and for each winner the paid rank, public name and profile handle, that week's pulled value, the cards they received (name, official image, quantity, today's value) and credits, and what the prize is worth today in total. Amounts in RM (MYR).",
     parameters: object({}),
-    needs: [read('challenge')],
+    needs: [screen('challenge')],
+    effect: 'read',
     run: report('growth', 'challenge-results'),
   },
   {
@@ -378,7 +379,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       'New player accounts per Malaysia day (days with none are left out), counted like the admin Stats page, plus first top-ups: players whose first-ever deposit settled in the window, whenever they signed up. The window must be 93 days or less; all_time is not allowed.',
     parameters: object(windowProps, ['period']),
-    needs: [read('stats')],
+    needs: [screen('stats')],
+    effect: 'read',
     run: windowed('growth', 'signups', false),
   },
   {
@@ -387,7 +389,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       'Packs opened per Malaysia day (paid packs, plus free welcome packs counted separately; task and challenge prize draws are not counted) and the 10 most-opened packs, for one window and player group. The window must be 93 days or less; all_time is not allowed.',
     parameters: object({ ...windowProps, ...groupProp }, ['period']),
-    needs: [read('stats')],
+    needs: [screen('stats')],
+    effect: 'read',
     run: windowed('growth', 'packs'),
   },
   {
@@ -399,7 +402,8 @@ export const TOOLS: AssistantTool[] = [
       day: str('The Malaysia day, YYYY-MM-DD. Default: yesterday.'),
       limit: int('How many pulls. Default 10.', 1, 20),
     }),
-    needs: [read('stats')],
+    needs: [screen('stats')],
+    effect: 'read',
     run: report('growth', 'top-pulls', (a) => ({
       day: s(a.day),
       limit: n(a.limit),
@@ -411,7 +415,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       "The weekly tasks and achievements exactly as the /task page shows them: each task's title, what it asks for (requirement; level = the VIP level a reach_level achievement needs), its prize, what the page says the prize is worth (value_myr), the prize's picture link and when the task stops showing. Weekly tasks reset every Monday 00:00 Malaysia time. week next: the tasks already switched on for next week. Amounts in RM (MYR).",
     parameters: object(weekProp("this week's tasks")),
-    needs: [read('task')],
+    needs: [screen('tasks')],
+    effect: 'read',
     run: report('growth', 'tasks', (a) =>
       s(a.week) ? { week: s(a.week) } : {},
     ),
@@ -423,7 +428,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       "Every pack with the numbers the admin pack list shows: title, category, status, whether it is listed publicly, whether it is sold out (still listed, but paid opens are refused), price, buyback %, pool mix (RAW, GRADED or MIX), the published tier odds with their EV and RTP, and the real EV and RTP of odds set 1 (what the DEFAULT group plays) at today's card prices. Amounts in RM (MYR).",
     parameters: object({}),
-    needs: [read('pack')],
+    needs: [screen('packs')],
+    effect: 'read',
     run: report('store', 'packs'),
   },
   {
@@ -434,7 +440,8 @@ export const TOOLS: AssistantTool[] = [
     parameters: object({ slug: str('The pack slug, like silver-pack.') }, [
       'slug',
     ]),
-    needs: [read('pack')],
+    needs: [screen('packs')],
+    effect: 'read',
     run: report('store', 'pack', (a) => ({ slug: s(a.slug) })),
   },
   {
@@ -448,7 +455,8 @@ export const TOOLS: AssistantTool[] = [
       ),
       limit: int('How many cards to list, lowest first. Default 50.', 1, 200),
     }),
-    needs: [read('inventory')],
+    needs: [screen('inventory')],
+    effect: 'read',
     run: report('store', 'stock', (a) => ({
       max: n(a.max),
       limit: n(a.limit),
@@ -474,7 +482,8 @@ export const TOOLS: AssistantTool[] = [
       },
       ['path'],
     ),
-    needs: [read('assistant_browse')],
+    needs: [{ resource: 'assistant_browse', operation: 'read' }],
+    effect: 'read',
     run: async (args, ctx) =>
       JSON.stringify(
         await adminReadAs({
@@ -527,6 +536,7 @@ export const TOOLS: AssistantTool[] = [
       ['sql'],
     ),
     needs: ['super_admin'],
+    effect: 'read',
     run: async (args, ctx) =>
       JSON.stringify(
         await callReport({
@@ -557,7 +567,8 @@ export const TOOLS: AssistantTool[] = [
         description: 'true adds the current top-3 leaders. Default false.',
       },
     }),
-    needs: [IMAGES, read('challenge')],
+    needs: [IMAGES, screen('challenge')],
+    effect: 'read',
     run: poster('challenge-poster', (a) => ({
       stage: n(a.stage),
       leaders: b(a.leaders) === undefined ? undefined : b(a.leaders) ? 1 : 0,
@@ -570,7 +581,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       "A finished poster of every stage of the Weekly Pulled Value Challenge on one image (1080x1350): each stage's unlock threshold, its #1 to #3 prizes as the official card art with today's value, and what ranks 4 to 10 win. Stages still locked show dimmed. week next: the next queued challenge. This is THE weekly challenge promo (推广图): use it whenever staff ask for the week's or next week's challenge poster, unless they name one stage.",
     parameters: object(weekProp('the running week')),
-    needs: [IMAGES, read('challenge')],
+    needs: [IMAGES, screen('challenge')],
+    effect: 'read',
     run: poster(
       'challenge-stages-poster',
       (a) => ({ week: s(a.week) }),
@@ -588,7 +600,8 @@ export const TOOLS: AssistantTool[] = [
         'top (default): the top 3. rest: ranks 4-10.',
       ),
     }),
-    needs: [IMAGES, read('challenge')],
+    needs: [IMAGES, screen('challenge')],
+    effect: 'read',
     run: poster('challenge-results-poster', (a) => ({ part: s(a.part) })),
   },
   {
@@ -602,7 +615,8 @@ export const TOOLS: AssistantTool[] = [
         'top (default): the top 3. rest: ranks 4-10.',
       ),
     }),
-    needs: [IMAGES, read('challenge')],
+    needs: [IMAGES, screen('challenge')],
+    effect: 'read',
     run: poster('challenge-standings-poster', (a) => ({ part: s(a.part) })),
   },
   {
@@ -636,7 +650,8 @@ export const TOOLS: AssistantTool[] = [
       },
       ['headline'],
     ),
-    needs: [IMAGES, read('stats')],
+    needs: [IMAGES, screen('stats')],
+    effect: 'read',
     run: poster(
       'brand-poster',
       (a) => ({
@@ -661,7 +676,8 @@ export const TOOLS: AssistantTool[] = [
       min_level: int('The lowest VIP level to show.', 1, 100),
       max_level: int('The highest VIP level to show.', 1, 100),
     }),
-    needs: [IMAGES, read('task')],
+    needs: [IMAGES, screen('tasks')],
+    effect: 'read',
     run: poster(
       'achievements-poster',
       (a) => ({ min_level: n(a.min_level), max_level: n(a.max_level) }),
@@ -674,7 +690,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       "A finished poster of this week's tasks as the /task page shows them (1080x1350): the daily check-in strip, then one tile per other weekly task with its prize and value. week next draws next week's tasks (use it for dates after this Sunday).",
     parameters: object(weekProp("this week's tasks")),
-    needs: [IMAGES, read('task')],
+    needs: [IMAGES, screen('tasks')],
+    effect: 'read',
     run: poster('tasks-poster', (a) => ({ week: s(a.week) }), 'prize'),
   },
   {
@@ -686,7 +703,8 @@ export const TOOLS: AssistantTool[] = [
       day: str('The Malaysia day, YYYY-MM-DD. Default: yesterday.'),
       limit: int('How many pulls on the poster. Default 10.', 1, 10),
     }),
-    needs: [IMAGES, read('stats')],
+    needs: [IMAGES, screen('stats')],
+    effect: 'read',
     run: poster(
       'top-pulls-poster',
       (a) => ({ day: s(a.day), limit: n(a.limit) }),
@@ -700,6 +718,7 @@ export const TOOLS: AssistantTool[] = [
       'The official Polycards wordmark (white on transparent, 360x97 PNG), shown in the chat to download. Never draw or imitate the logo with image generation; generated images get it added automatically.',
     parameters: object({}),
     needs: [IMAGES],
+    effect: 'read',
     run: async (_args, ctx) => {
       await ctx.showImage(
         Buffer.from(BRAND_LOGO_B64, 'base64'),
@@ -756,6 +775,7 @@ export const TOOLS: AssistantTool[] = [
       ['scene', 'headline'],
     ),
     needs: [IMAGES],
+    effect: 'read',
     run: async (args, ctx) => {
       const scene = s(args.scene);
       if (!scene) throw new Error('scene is required.');
@@ -833,6 +853,7 @@ export const TOOLS: AssistantTool[] = [
       ['prompt'],
     ),
     needs: [IMAGES],
+    effect: 'read',
     run: async (args, ctx) => {
       const prompt = s(args.prompt);
       if (!prompt) throw new Error('prompt is required.');

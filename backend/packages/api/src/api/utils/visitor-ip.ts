@@ -85,6 +85,22 @@ export function vouchedVisitorIp(
 }
 
 /**
+ * The browser id on a request the storefront vouched for, or null: an unsigned
+ * request, or a header that is not one of the storefront's ids.
+ */
+export function vouchedVisitorDevice(
+  req: { headers?: RequestHeaders },
+  nowMs: number = Date.now(),
+): string | null {
+  const device = req.headers?.[VISITOR_DEVICE_HEADER];
+  return vouchedVisitorIp(req, nowMs) &&
+    typeof device === 'string' &&
+    DEVICE_ID.test(device)
+    ? device
+    : null;
+}
+
+/**
  * The rate-limit identity of a vouched address: an IPv4 address itself, and
  * for IPv6 its /64. One subscriber is normally handed a whole /64 and the
  * device picks the low 64 bits itself, so keying on the full address would

@@ -370,6 +370,12 @@ export type StartWithdrawalInput = {
   >;
   /** The payout rate (RM per unit) the customer was shown; regional only. */
   quotedRate?: number;
+  /**
+   * Set by the route when an earlier account shares this one's browser and
+   * support has not confirmed the pair (ADR 0018): the row is held for review
+   * whatever its amount.
+   */
+  reviewHold?: 'shared_device' | null;
 };
 
 export type StartWithdrawalResult = {
@@ -630,7 +636,7 @@ export async function startWithdrawal(
       SHARED_PAYOUT_ACCOUNT_MESSAGE,
     );
   }
-  // A destination with its own payout floor (Touch 'n Go: RM 100, or the
+  // A destination with its own payout floor (Touch 'n Go: RM 50, or the
   // admin's higher minimum) is held to it here, before any row or debit — the
   // gateway refuses below its floor as a definite error, which would cost a
   // row, a debit and a refund per tap. The wording keeps the band phrase the
@@ -753,13 +759,21 @@ export async function startWithdrawal(
   // Approval-threshold check, read PER CALL — never latched at module load
   // (the plan-066 convention). Strictly greater-than, integer cents: RM
   // 1,000.00 exactly still auto-submits (Global Constraint 1).
-  const held =
+  const overThreshold =
     Math.round(amount * 100) >
     nonNegativeIntFromEnv(
       gatewayEnvName('GATEWAY_WD_APPROVAL_ABOVE_RM'),
       GATEWAY_WD_APPROVAL_ABOVE_RM_DEFAULT,
     ) *
       100;
+  // A shared browser holds any amount (ADR 0018); the reason is for staff.
+  const holdReason =
+    input.reviewHold === 'shared_device'
+      ? 'shared_device'
+      : overThreshold
+        ? 'amount'
+        : null;
+  const held = holdReason !== null;
 
   // 1) Row first — the callback echoes MerchantTransactionId but not our
   // customer id, so this row is the only way back (same shape as deposits).
@@ -785,6 +799,7 @@ export async function startWithdrawal(
           account_number: precheckDestination.accountNumber,
           account_holder_name: precheckDestination.accountHolderName.trim(),
           status: held ? 'held' : 'pending',
+          hold_reason: holdReason,
           gateway,
           ...(fx
             ? {
