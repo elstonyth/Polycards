@@ -89,7 +89,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipRewardGrant,
     NotificationRead,
   ],
-  testSuite: ({ service }) => {
+  testSuite: ({ MikroOrmWrapper, service }) => {
     const customerId = 'cus_free_reader';
 
     // The claim step reads the customer's phone and refuses one shared by two
@@ -303,6 +303,27 @@ moduleIntegrationTestRunner<PacksModuleService>({
           image: FREE_IMAGE,
           missing: ['phone', 'real_name'],
         });
+      });
+
+      // One per person or household (ADR 0018): another account on this
+      // browser took it, so it is not offered, the same as a claimed one.
+      it('not eligible once another account on the same browser claimed it', async () => {
+        const em = MikroOrmWrapper.forkManager();
+        await em.execute(
+          'CREATE TABLE IF NOT EXISTS customer (id text primary key, created_at timestamptz not null default now(), deleted_at timestamptz null)',
+        );
+        await em.execute(
+          "INSERT INTO customer (id) VALUES (?), ('cus_free_sibling') ON CONFLICT DO NOTHING",
+          [customerId],
+        );
+        const browser = '44444444-2222-4333-8444-555555555555';
+        await service.recordVisitorSignal({ customerId, ip: '10.0.2.1', deviceId: browser });
+        await service.recordVisitorSignal({ customerId: 'cus_free_sibling', ip: '10.0.2.1', deviceId: browser });
+        await service.markFreePackAvailable(customerId);
+        expect((await eligibility()).eligible).toBe(true);
+        await service.markFreePackAvailable('cus_free_sibling');
+        expect(await service.claimFreePack('cus_free_sibling')).toBe(true);
+        expect((await eligibility()).eligible).toBe(false);
       });
 
       // Spec 2026-10-06: `missing` names what the claim step would still

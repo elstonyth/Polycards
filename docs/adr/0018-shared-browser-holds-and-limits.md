@@ -34,7 +34,7 @@ two places.
 
 Holds, not blocks: a block would teach farms to clear cookies and rotate networks, and
 would lose the overlap that exposed them. A hold keeps the signal and lets a family
-through after one check. Expect about 9 reviews a day at November volumes.
+through after one check.
 
 Not done (owner 2026-11-17): a prize allowance tied to top-ups, a hold on coin-flip
 wins, and referral commission on deposit-funded spend only.

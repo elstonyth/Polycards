@@ -10011,6 +10011,14 @@ class PacksModuleService extends MedusaService({
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    // No browser id on file or on the request: nothing to match, one cheap read.
+    if (!deviceId) {
+      const [seen] = await em.execute<{ any: boolean }[]>(
+        "SELECT EXISTS (SELECT 1 FROM visitor_signal WHERE customer_id = ? AND device_id <> '') AS any",
+        [customerId],
+      );
+      if (!seen?.any) return [];
+    }
     return await em.execute<
       { customer_id: string; earlier: boolean; welcome_claimed: boolean }[]
     >(
