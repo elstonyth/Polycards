@@ -320,12 +320,14 @@ export default function PackDetailClient({
   // client-side after mount and only when signed in — the server loader stays
   // customer-free. A failed read shows no gifts here (the spin page says so
   // and offers a Retry before any charge). Never on the free welcome pack.
-  // Still reading (giftsPending): the price shown may yet drop to a gift, so
-  // no credit refusal until it lands (the reel re-checks before any charge).
-  const { held, pending: giftsPending } = usePackGifts(
-    isFreePack ? null : (customer?.id ?? null),
-    active.id,
-  );
+  // Still reading (giftsPending) or unread (giftsFailed): the price shown may
+  // yet drop to a gift, so no credit refusal here (the reel re-reads, offers
+  // Retry and re-checks before any charge).
+  const {
+    held,
+    pending: giftsPending,
+    failed: giftsFailed,
+  } = usePackGifts(isFreePack ? null : (customer?.id ?? null), active.id);
   // Sold out (admin): still listed, but the backend refuses a paid open. Only
   // vault gifts may still open it, so quantity is capped at the gifts held.
   // A Draft card pack can be looked at but not opened: a card open writes pulls
@@ -469,7 +471,12 @@ export default function PackDetailClient({
       router.push(`/slots/${active.id}/spin?count=1`);
       return;
     }
-    if (!giftsPending && balance !== null && !affordable(balance, paidCost)) {
+    if (
+      !giftsPending &&
+      !giftsFailed &&
+      balance !== null &&
+      !affordable(balance, paidCost)
+    ) {
       setNeedsTopUp(true);
       setOpenError('Not enough balance to open.');
       return;
