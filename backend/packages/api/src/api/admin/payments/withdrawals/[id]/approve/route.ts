@@ -33,21 +33,28 @@ export async function POST(
   });
   // The reviewer confirmed that the accounts sharing this one's browser are
   // one household (ADR 0018): its later withdrawals are not held for them
-  // again. Only after the approval went through, so a refused approve leaves
-  // no stamp.
-  if (body.verify_device_peers === true) {
+  // again. Only when THIS approve went through (approved: true), so a refused
+  // or already-handled one leaves no stamp. The payout is already submitted
+  // by now, so a failed stamp is logged, never answered as a failed approve.
+  if (body.verify_device_peers === true && result.approved === true) {
     const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-    const [row] = await packs.listGatewayWithdrawals(
-      { id: req.params.id },
-      { take: 1 },
-    );
-    if (row?.customer_id) {
-      await packs.verifyDevicePeers({
-        customerId: row.customer_id,
-        peerIds: await packs.sharedDeviceHoldPeers(row.customer_id),
-        adminId: req.auth_context.actor_id,
-        reason: `one household, confirmed approving held withdrawal ${row.id}`,
-      });
+    try {
+      const [row] = await packs.listGatewayWithdrawals(
+        { id: req.params.id },
+        { take: 1 },
+      );
+      if (row?.customer_id) {
+        await packs.verifyDevicePeers({
+          customerId: row.customer_id,
+          peerIds: await packs.sharedDeviceHoldPeers(row.customer_id),
+          adminId: req.auth_context.actor_id,
+          reason: `one household, confirmed approving held withdrawal ${row.id}`,
+        });
+      }
+    } catch (error) {
+      (req.scope.resolve('logger') as { warn: (m: string) => void }).warn(
+        `[payments] withdrawal ${req.params.id} approved, but the household stamp failed (${(error as { code?: string })?.code ?? 'no code'})`,
+      );
     }
   }
   res.setHeader('Cache-Control', 'no-store');

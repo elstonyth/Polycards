@@ -160,10 +160,28 @@ describe('approve with verify_device_peers (ADR 0018)', () => {
     const packs = packsWith();
     approveOp.mockResolvedValue({ id: 'gpw_1', status: 'pending', approved: true });
     await APPROVE(mkReq({ scope: { resolve: () => packs } }), mkRes().res);
+    // An approve that did nothing (already handled) stamps nothing either.
+    approveOp.mockResolvedValue({ id: 'gpw_1', status: 'failed', approved: false });
+    await APPROVE(mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: true } }), mkRes().res);
     approveOp.mockRejectedValue(new Error('frozen'));
     await expect(
       APPROVE(mkReq({ scope: { resolve: () => packs }, body: { verify_device_peers: true } }), mkRes().res),
     ).rejects.toThrow('frozen');
     expect(packs.verifyDevicePeers).not.toHaveBeenCalled();
   });
+});
+
+it('a failed household stamp never turns a sent payout into an error', async () => {
+  const answer = { id: 'gpw_1', status: 'pending', approved: true };
+  approveOp.mockResolvedValue(answer);
+  const warn = jest.fn();
+  const packs = {
+    listGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1', customer_id: 'cus_later' }]),
+    sharedDeviceHoldPeers: jest.fn().mockResolvedValue(['cus_first']),
+    verifyDevicePeers: jest.fn().mockRejectedValue(Object.assign(new Error('x'), { code: 'E1' })),
+  };
+  const { res, out } = mkRes();
+  await APPROVE(mkReq({ scope: { resolve: (k: string) => (k === 'logger' ? { warn } : packs) }, body: { verify_device_peers: true } }), res);
+  expect(out.body).toBe(answer);
+  expect(warn).toHaveBeenCalledTimes(1);
 });

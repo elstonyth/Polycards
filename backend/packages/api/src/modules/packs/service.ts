@@ -10032,8 +10032,11 @@ class PacksModuleService extends MedusaService({
         'FROM visitor_signal o ' +
         'JOIN customer c ON c.id = o.customer_id AND c.deleted_at IS NULL ' +
         'LEFT JOIN customer_account_state s ON s.customer_id = o.customer_id ' +
-        'WHERE o.customer_id <> ? AND o.device_id IN (SELECT device_id FROM mine) ' +
-        'GROUP BY o.customer_id LIMIT 50',
+        // device_id <> '' repeated so IDX_visitor_signal_device (partial) applies.
+        "WHERE o.customer_id <> ? AND o.device_id <> '' AND o.device_id IN (SELECT device_id FROM mine) " +
+        // The rows that decide (a claimed welcome pack, an earlier account)
+        // first, so the cap never drops them.
+        'GROUP BY o.customer_id ORDER BY welcome_claimed DESC, earlier DESC LIMIT 50',
       [customerId, deviceId ?? '', deviceId ?? '', customerId, customerId],
     );
   }

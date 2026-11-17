@@ -183,8 +183,13 @@ const stripSecretMetadata = (node: unknown, hidden: string[]): void => {
 
 /** Keys a customer never gets back on their own record: support's notes on
  *  OTHER accounts (holder_name_cleared lists who a name was checked against,
- *  by customer id, which public seeds can match to a handle). */
-const STORE_HIDDEN_METADATA = [HOLDER_NAME_CLEARED_KEY, PAYOUT_BAN_LIFTED_KEY];
+ *  by customer id, which public seeds can match to a handle;
+ *  device_share_verified names the accounts on the same browser, ADR 0018). */
+const STORE_HIDDEN_METADATA = [
+  HOLDER_NAME_CLEARED_KEY,
+  PAYOUT_BAN_LIFTED_KEY,
+  DEVICE_SHARE_VERIFIED_KEY,
+];
 
 /** Strips STORE_HIDDEN_METADATA from every store customer response. */
 export function hideStoreCustomerMetadata(
