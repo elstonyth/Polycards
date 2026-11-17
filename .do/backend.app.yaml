@@ -660,7 +660,14 @@ services:
     # KnexTimeoutError against a perfectly healthy database, which is the exact
     # outage the pool cap was written to prevent. Raise the cluster first, or
     # lower DB_POOL_MAX in step, before going past 2.
-    instance_count: 2
+    # One instance most of the time (7-day load 2026-11-17: ~7% CPU, peak 23%,
+    # memory <=24% per box), a second on CPU, never a third (see above).
+    autoscaling:
+      min_instance_count: 1
+      max_instance_count: 2
+      metrics:
+        cpu:
+          percent: 60
     # Shallow on purpose (decided 2026-11-11, backend audit): Medusa's /health
     # answers 200 without touching the DB. App Platform pulls and restarts an
     # instance on a failed check, and a pool check fails on BOTH instances at
