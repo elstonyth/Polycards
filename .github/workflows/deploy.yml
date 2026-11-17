@@ -19,8 +19,10 @@ name: Deploy
 # the branch tip rather than a given commit, so each deploy job also re-checks
 # that master still points at this commit right before it starts a deploy.
 # After a deployment goes ACTIVE, the job checks that every component runs
-# this commit and that the public health URL answers; a mismatch or a dead
-# health URL fails the job, and the failed run is the alert.
+# this commit and that the health path answers on App Platform's default
+# ingress (the custom domain is checked too, but only warns: Cloudflare
+# challenges runner IPs); a mismatch or a dead health check fails the job,
+# and the failed run is the alert.
 
 on:
   push:
@@ -153,7 +155,7 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.sha }}
           DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
-        run: bash .github/scripts/verify-deploy.sh polycards-backend https://admin.polycards.gg/health "$EXPECTED_SHA" "$DEPLOYMENT"
+        run: bash .github/scripts/verify-deploy.sh polycards-backend "$EXPECTED_SHA" "$DEPLOYMENT"
 
   storefront:
     name: deploy storefront
@@ -186,4 +188,4 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.sha }}
           DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
-        run: bash .github/scripts/verify-deploy.sh polycards-storefront https://polycards.gg/healthz "$EXPECTED_SHA" "$DEPLOYMENT"
+        run: bash .github/scripts/verify-deploy.sh polycards-storefront "$EXPECTED_SHA" "$DEPLOYMENT"
