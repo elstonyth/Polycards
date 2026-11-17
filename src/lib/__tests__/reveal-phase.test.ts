@@ -21,7 +21,7 @@ import {
 } from '@/lib/reveal-phase';
 
 /** Fold a run of events from a starting phase — how the machine is actually
- *  driven (one setPhase functional update per event). */
+ *  driven (one usePackMachine dispatch per event). */
 const run = (from: Phase, ...events: PhaseEvent[]) =>
   events.reduce(nextPhase, from);
 
@@ -64,10 +64,12 @@ describe('nextPhase — the paths a player actually takes', () => {
     expect(run('idle', 'spin', 'rolled', 'abort')).toBe('idle');
   });
 
-  test('a post-charge failure still reaches the reveal from resolving', () => {
-    // The charge landed but the cosmetic mapping threw, so handleSettled runs
-    // while the reels never started. The player paid — the cards MUST land.
-    expect(run('idle', 'spin', 'settle')).toBe('flood');
+  test('a post-charge failure reaches the reveal through spinning', () => {
+    // The charge landed but the cosmetic mapping threw: usePackMachine
+    // dispatches 'rolled' and settles in the same batch, so 'spinning' never
+    // renders but the path through it is the only one. The cards MUST land.
+    expect(run('idle', 'spin', 'rolled', 'settle')).toBe('flood');
+    expect(nextPhase('resolving', 'settle')).toBe('resolving');
   });
 
   test('skipping the flood jumps the whole theater, not one beat of it', () => {
@@ -100,16 +102,12 @@ describe('nextPhase — events that must NOT move the machine', () => {
     expect(nextPhase('idle', 'settle')).toBe('idle');
   });
 
-  test('concluding from a reveal beat lands idle, never holds', () => {
-    // handleConclude clears spin/offers/lockedReveal BEFORE asking for this
-    // transition, so a held phase would unmount the reveal and leave the player
-    // on a dimmed screen with a disabled Spin. Master set 'idle'
-    // unconditionally; these two pin that.
-    expect(nextPhase('transform', 'conclude')).toBe('idle');
+  test('only the sell window concludes; earlier beats hold', () => {
     expect(nextPhase('review', 'conclude')).toBe('idle');
-    // 'flood' has no conclude edge because nothing can press it there: the only
-    // onConclude button lives in a footer gated on `flipped`, which is settable
-    // only from 'review'. Holding is safe here in a way it is not above.
+    // Nothing can press conclude before review: the only onConclude button
+    // lives in a footer gated on `flipped`, settable only from 'review'.
+    // Holding is safe because usePackMachine keeps the roll with the phase.
+    expect(nextPhase('transform', 'conclude')).toBe('transform');
     expect(nextPhase('flood', 'conclude')).toBe('flood');
   });
 

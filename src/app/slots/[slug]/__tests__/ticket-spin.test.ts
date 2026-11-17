@@ -18,7 +18,6 @@ import {
 const mocks = vi.hoisted(() => ({
   customer: { id: 'cus_1' } as { id: string } | null,
   openBatch: vi.fn(),
-  refreshVaultDot: vi.fn(),
   playReveal: vi.fn(),
   vibrate: vi.fn(),
 }));
@@ -68,7 +67,7 @@ vi.mock('@/components/app-shell/TopUpProvider', () => ({
   }),
 }));
 vi.mock('@/components/app-shell/VaultDotProvider', () => ({
-  useVaultDot: () => ({ refresh: mocks.refreshVaultDot }),
+  useVaultDot: () => ({ refresh: vi.fn() }),
 }));
 vi.mock('@/lib/use-sound', () => ({
   useSound: () => ({
@@ -184,7 +183,6 @@ beforeEach(() => {
   root = createRoot(container);
   mocks.customer = { id: 'cus_1' };
   mocks.openBatch.mockReset();
-  mocks.refreshVaultDot.mockReset();
   mocks.playReveal.mockReset();
   mocks.vibrate.mockReset();
 });
@@ -304,12 +302,13 @@ describe('SlotMachineClient — ticket pack', () => {
     expect(text).toContain('1,060 tickets');
   });
 
-  test('stays out of the recent pulls and the vault dot', async () => {
+  // The vault-dot rule (a ticket roll vaults nothing) is pinned in
+  // press-outcome.test.ts; the ticker is the machine's own.
+  test('stays out of the recent pulls', async () => {
     mocks.openBatch.mockResolvedValue(ticketBatch(100));
     await render();
     await spin();
     expect(byTestId('recent').textContent).toBe('0');
-    expect(mocks.refreshVaultDot).not.toHaveBeenCalled();
   });
 
   test('announces the tickets to a screen reader', async () => {
@@ -397,6 +396,5 @@ describe('SlotMachineClient — ticket pack', () => {
     expect(container.textContent).toContain('SLAB STAGE');
     expect(container.textContent).not.toContain('Go to Lucky Draw');
     expect(byTestId('recent').textContent).toBe('1');
-    expect(mocks.refreshVaultDot).toHaveBeenCalled();
   });
 });

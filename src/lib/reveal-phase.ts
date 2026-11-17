@@ -48,36 +48,22 @@ export type PhaseEvent =
   | 'conclude';
 
 // The legal transitions, and ONLY the legal ones: every entry below is a
-// setPhase call site in SlotMachineClient, so an unlisted (phase, event) pair
-// is a pair no reachable code path produces. nextPhase holds the phase for
+// dispatch in usePackMachine (its only driver), so an unlisted (phase, event)
+// pair is a pair no reachable code path produces. nextPhase holds the phase for
 // those rather than throwing — a charged player must never be stranded on a
-// dead machine because a stale timer fired one beat late.
+// dead machine because a stale timer fired one beat late. Holding is safe
+// because the hook carries each phase's roll WITH the phase: a held phase still
+// has everything it renders.
 //
-// Two edges look surprising and are not:
-//   resolving --settle--> flood   the post-charge mapping catch settles a spin
-//                                 whose reels never started (the customer is
-//                                 already charged, so the result must land).
-//   flood --skip--> review        the flood overlay's own skip button jumps the
-//                                 whole theater; it does NOT pass through
-//                                 transform.
-//   transform --conclude--> idle  NOT currently reachable: the demo footer that
-//                                 owns the only onConclude button is gated on
-//                                 `flipped` (RevealStage), and `flipped` is only
-//                                 settable from 'review'. The edge is here
-//                                 anyway because master set 'idle'
-//                                 UNCONDITIONALLY, and handleConclude clears
-//                                 spin/offers/lockedReveal BEFORE asking for the
-//                                 transition. Holding the phase there would
-//                                 strand a player on a dimmed screen with no
-//                                 mounted reveal and a disabled Spin. Do not
-//                                 "tidy" this row away without first making
-//                                 handleConclude transition-first.
+// One edge looks surprising and is not:
+//   flood --skip--> review   the flood overlay's own skip button jumps the
+//                            whole theater; it does NOT pass through transform.
 const TRANSITIONS: Record<Phase, Partial<Record<PhaseEvent, Phase>>> = {
   idle: { spin: 'resolving', 'demo-spin': 'spinning' },
-  resolving: { rolled: 'spinning', settle: 'flood', abort: 'idle' },
+  resolving: { rolled: 'spinning', abort: 'idle' },
   spinning: { settle: 'flood', abort: 'idle' },
   flood: { morph: 'transform', skip: 'review' },
-  transform: { reveal: 'review', skip: 'review', conclude: 'idle' },
+  transform: { reveal: 'review', skip: 'review' },
   review: { conclude: 'idle' },
 };
 
@@ -85,9 +71,9 @@ const TRANSITIONS: Record<Phase, Partial<Record<PhaseEvent, Phase>>> = {
  * The phase `event` leads to from `from`, or `from` unchanged when that pair is
  * not a legal transition.
  *
- * Always apply this through a functional state update
- * (`setPhase((p) => nextPhase(p, 'morph'))`). React applies queued updaters in
- * order, so two beats landing in one batch still compose
+ * Always apply this through a reducer or functional state update (usePackMachine
+ * dispatches it). React applies queued updates in order, so two beats landing
+ * in one batch still compose
  * (flood --morph--> transform --reveal--> review) instead of the later one
  * winning outright — which is exactly what happens under reduced motion, where
  * both reveal timers are scheduled at 0ms.

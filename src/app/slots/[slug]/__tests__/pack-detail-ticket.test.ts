@@ -81,7 +81,6 @@ const TICKET_DETAIL: PackDetail = {
   topHits: [],
   pool: [ticketCard(10, 'Common'), ticketCard(1000, 'Immortal')],
   publishedOdds: { tiers: { Immortal: 0.1, Common: 99.9 } },
-  demoOdds: null,
 };
 
 const CARD_DETAIL: PackDetail = {
@@ -99,7 +98,6 @@ const CARD_DETAIL: PackDetail = {
     },
   ],
   publishedOdds: { tiers: { Immortal: 100 } },
-  demoOdds: null,
 };
 
 let container: HTMLDivElement;

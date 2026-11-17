@@ -394,13 +394,9 @@ export interface PackDetail {
   /** The full public prize pool (display fields only, weights stay secret) —
    *  feeds the guest demo spin's client-side weighted sample. */
   pool: PackCard[];
-  /** Admin-published PUBLIC odds; null = not set (the odds panel is hidden). */
+  /** Admin-published PUBLIC odds; null = not set (the odds panel is hidden).
+   *  Also what the guest demo spin samples on. */
   publishedOdds: PublishedOdds | null;
-  /** Odds SET 3's real tier split, backend-aggregated — what the guest demo
-   *  spin samples on (never shown as the odds panel, never used by a real
-   *  spin). Null on an older backend / an unpullable pool → the demo falls
-   *  back to the published odds. */
-  demoOdds: PublishedOdds | null;
 }
 
 // Sanitize the backend's published_odds json (jsonb passthrough — validate at
@@ -441,7 +437,7 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
 function toPackDetail(
   row: ReturnType<typeof PackDetailPageSchema.parse>,
 ): PackDetail | null {
-  const { published_odds, demo_odds } = row;
+  const { published_odds } = row;
   if (row.prize_type === 'tickets') {
     const pool = parseList(TicketOddsRowSchema, row.odds).map((o) =>
       ticketCard(o.tickets, o.rarity),
@@ -452,7 +448,6 @@ function toPackDetail(
           topHits: [],
           pool,
           publishedOdds: parsePublishedOdds(published_odds),
-          demoOdds: parsePublishedOdds(demo_odds),
         };
   }
   const valid = row.odds as BackendOddsEntry[];
@@ -483,8 +478,6 @@ function toPackDetail(
     topHits,
     pool,
     publishedOdds: parsePublishedOdds(published_odds),
-    // Same { tiers } shape from the backend, so the same sanitizer applies.
-    demoOdds: parsePublishedOdds(demo_odds),
   };
 }
 
