@@ -630,7 +630,7 @@ export async function startWithdrawal(
       SHARED_PAYOUT_ACCOUNT_MESSAGE,
     );
   }
-  // A destination with its own payout floor (Touch 'n Go: RM 100, or the
+  // A destination with its own payout floor (Touch 'n Go: RM 50, or the
   // admin's higher minimum) is held to it here, before any row or debit — the
   // gateway refuses below its floor as a definite error, which would cost a
   // row, a debit and a refund per tap. The wording keeps the band phrase the
