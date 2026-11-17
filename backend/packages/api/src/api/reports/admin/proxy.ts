@@ -3,6 +3,7 @@ import type {
   MedusaContainer,
 } from '@medusajs/framework/types';
 import { Modules } from '@medusajs/framework/utils';
+import { deskBotBlockedRoutes } from '../../admin-rbac';
 
 // The desk bots' read-only admin proxy (GET /reports/admin/read): the owner's
 // call on 2026-10-04 was "full access", read-only, for every desk bot. Any
@@ -54,10 +55,9 @@ const BLOCKED: [RegExp, string][] = [
   [/^\/admin\/notifications(\/|$)/, 'notification contents (reset links)'],
   [/^\/admin\/uploads(\/|$)/, 'uploads'],
   [/^\/admin\/coin-flips(\/|$)/, 'coin flip rounds and settings (actual odds)'],
-  [
-    /^\/admin\/customers\/[^/]+\/visitor-signals(\/|$)/,
-    "customers' IP addresses and browser ids",
-  ],
+  // Per-route blocks (admin-rbac.ts ADMIN_ROUTES `deskBotsBlocked`):
+  // customers' IP addresses and browser ids.
+  ...deskBotBlockedRoutes,
   [
     /^\/admin\/pricecharting(\/|$)/,
     'PriceCharting lookups (each one costs an API call)',

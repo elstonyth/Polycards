@@ -19,6 +19,9 @@ const startMock = startWithdrawal as jest.Mock;
 
 const res = { json: jest.fn() } as never;
 
+// The earlier accounts sharing this one's browser (ADR 0018); none by default.
+let sharedPeers: string[] = [];
+
 const mkReq = (over: Record<string, unknown> = {}) =>
   ({
     auth_context: { actor_id: 'cus_1' },
@@ -41,7 +44,7 @@ const mkReq = (over: Record<string, unknown> = {}) =>
                 phone: '0123456789',
               }),
             }
-          : {},
+          : { sharedDeviceHoldPeers: async () => sharedPeers },
     },
     socket: {},
     ...over,
@@ -58,6 +61,7 @@ const ORIGINAL_ENV = {
 
 beforeEach(() => {
   startMock.mockClear();
+  sharedPeers = [];
   process.env.PAYMENT_CALLBACK_BASE = 'https://us';
   process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
   process.env.TGPAY_PUBLIC_KEY = 'pk-test';
@@ -124,5 +128,15 @@ describe('POST /store/credits/withdraw — customer IP', () => {
       /not open yet/i,
     );
     expect(startMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /store/credits/withdraw — shared-device hold (ADR 0018)', () => {
+  it('holds for review when an earlier account shares the browser, and not otherwise', async () => {
+    await POST(mkReq({ ip: '203.0.113.7' }), res);
+    expect(startMock.mock.calls[0][1].reviewHold).toBeNull();
+    sharedPeers = ['cus_first'];
+    await POST(mkReq({ ip: '203.0.113.7' }), res);
+    expect(startMock.mock.calls[1][1].reviewHold).toBe('shared_device');
   });
 });

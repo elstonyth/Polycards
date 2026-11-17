@@ -69,7 +69,7 @@ medusaIntegrationTestRunner({
           open: true,
           reopens_at: null,
         });
-        expect(res.data.tng_min_floor_rm).toBe(100);
+        expect(res.data.tng_min_floor_rm).toBe(50);
       });
 
       it('refuses an edit without a reason and writes nothing', async () => {

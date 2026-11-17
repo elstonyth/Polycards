@@ -11,10 +11,14 @@ const disabledService = (
 ) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const em = {
+    // The ticket balance (0) and the admin grant replay check are both read
+    // with SQL on this manager by the Lucky Draw module.
     execute: jest.fn(async (sql: string) =>
-      sql.includes('FROM lucky_draw_ticket') && opts.doneDelta !== undefined
-        ? [{ delta: opts.doneDelta }]
-        : [],
+      sql.includes('SUM(delta)')
+        ? [{ balance: 0 }]
+        : sql.includes("reason = 'admin_grant'") && opts.doneDelta !== undefined
+          ? [{ delta: opts.doneDelta }]
+          : [],
     ),
   };
   const writes = {
@@ -23,7 +27,6 @@ const disabledService = (
   };
   Object.assign(svc, {
     isAccountDisabled: jest.fn(async () => true),
-    luckyDrawBalance: jest.fn(async () => 0),
     listPacks: jest.fn(async () => [
       {
         id: 'pk_1',

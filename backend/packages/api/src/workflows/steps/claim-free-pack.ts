@@ -11,7 +11,11 @@ import {
 } from '../../modules/packs/free-pack';
 import { hasSavedBank } from '../../modules/packs/saved-accounts';
 
-export type ClaimFreePackInput = { pack_id: string; customer_id: string };
+export type ClaimFreePackInput = {
+  pack_id: string;
+  customer_id: string;
+  device_id?: string | null;
+};
 export type ClaimFreePackResult = { free: boolean };
 // The compensate payload. createStep's CompensateFn already adds `| undefined`
 // (the step may return no payload), so this type must NOT include it — the
@@ -100,7 +104,11 @@ export const claimFreePackStep = createStep(
         FREE_PACK_BANK_MESSAGE,
       );
     }
-    const claimed = await packs.claimFreePack(input.customer_id);
+    // Also refuses a second account on a browser that already took one (ADR 0018).
+    const claimed = await packs.claimFreePack(
+      input.customer_id,
+      input.device_id ?? null,
+    );
     if (!claimed) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,

@@ -405,9 +405,9 @@ The 7 Pay is the gateway id `the7pay`, a second entry in the gateway registry
   its own `THE7PAY_CALLBACK_IPS` allowlist, and `preserveRawBody` for the HMAC.
 - `modules/packs/banks.ts` — The 7 Pay pays to the same SWIFT pairs as TGPay.
   That includes Touch 'n Go eWallet (`TNGDRMYKL`, live for TGPay since #713).
-  Both tables also list GX Bank (`GXBKMYKL`) and Ryt Bank (`RYTBKMYKL`), which
-  are not mapped yet; saved accounts at those stay "not available with the
-  current payout provider".
+  Both tables also list GX Bank (`GXBKMYKL`, mapped since 2026-11-17 to TGPay's
+  newer `GXSPMYKL`) and Ryt Bank (`RYTBKMYKL`). Ryt is not mapped yet; saved
+  accounts there stay "not available with the current payout provider".
 - The payout-wallet-empty breaker is per gateway, so TGPay's empty wallet does
   not block withdrawals after a switch to The 7 Pay.
 

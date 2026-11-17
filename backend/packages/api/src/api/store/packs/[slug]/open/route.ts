@@ -8,6 +8,7 @@ import {
 } from '@medusajs/framework/http';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { openPackWorkflow } from '../../../../../workflows/open-pack';
+import { vouchedVisitorDevice } from '../../../../utils/visitor-ip';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
@@ -46,7 +47,7 @@ export async function POST(
   const { slug } = req.params;
 
   const run = await openPackWorkflow(req.scope).run({
-    input: { pack_id: slug, customer_id: customerId },
+    input: { pack_id: slug, customer_id: customerId, device_id: vouchedVisitorDevice(req) },
   });
 
   const packsService = req.scope.resolve<PacksModuleService>(PACKS_MODULE);

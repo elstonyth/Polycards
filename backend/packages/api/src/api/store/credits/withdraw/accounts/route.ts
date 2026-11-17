@@ -3,11 +3,7 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
-import {
-  findBank,
-  sandboxOnlyBank,
-  savedAccountSlot,
-} from '../../../../../modules/packs/banks';
+import { findBank } from '../../../../../modules/packs/banks';
 import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
 import {
   regionalPayoutGateways,
@@ -20,39 +16,23 @@ import {
 } from '../../../../../modules/packs/facets';
 import {
   BANK_ACCOUNT_LOCKED_MESSAGE,
-  BANNED_PAYOUT_ACCOUNT_MESSAGE,
-  HOLDER_NAME_DIFFERENT_MESSAGE,
-  HOLDER_NAME_LINKED_MESSAGE,
   MAX_SAVED_BANK_ACCOUNTS,
-  ONE_BANK_ACCOUNT_MESSAGE,
-  ONE_TNG_ACCOUNT_MESSAGE,
-  REAL_NAME_CHANGED_MESSAGE,
-  REAL_NAME_NEEDED_MESSAGE,
-  REAL_NAME_NOT_HOLDER_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   SHARED_SAVE_MESSAGE,
-  holderMatchKey,
-  newSavedBankAccount,
   parseSavedBankAccounts,
-  realNameHolder,
   savedBankAccountId,
   savedBankAccountViews,
   verifiedBankAccounts,
   type SavedBankAccount,
 } from '../../../../../modules/packs/saved-accounts';
-import {
-  saveVerdict,
-  savedListHeld,
-  type NumberStanding,
-} from '../../../../../modules/packs/payout-destination';
-import { sendSavedAccountAddedNotice } from '../../../../../modules/packs/saved-account-notice';
+import { savedListHeld } from '../../../../../modules/packs/payout-destination';
+import { savePayoutDestination } from '../../../../../modules/packs/payout-destination-save';
 import {
   channelStatus,
   destinationMinRm,
   isTngBank,
   tngPausedReason,
 } from '../../../../../modules/packs/withdrawal-controls';
-import { realNameKey } from '../../../../../utils/real-name';
 
 // Saved payout bank accounts — GET (list) / POST (add) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
@@ -77,8 +57,8 @@ import { realNameKey } from '../../../../../utils/real-name';
 // cooling-off window below — then withdraw to it. Do not "simplify" it away on
 // the belief that the framework already rejects metadata.
 //
-// The write goes through
-// PacksModuleService.mutateCustomerMetadata, which holds a `metadata:<customer>`
+// The save itself is modules/packs/payout-destination-save.ts. Its write goes
+// through PacksModuleService.mutateCustomerMetadata, which holds a `metadata:<customer>`
 // advisory lock across the read and the write — the blob is shared with the
 // avatar and frame routes, and an unlocked merge drops whichever key the loser
 // had just written.
@@ -139,26 +119,6 @@ async function loadMetadata(
     requireCustomerId(customerId),
   );
   return (customer.metadata ?? {}) as Record<string, unknown>;
-}
-
-/**
- * Run `mutate` against this customer's metadata under the
- * `metadata:<customer>` advisory lock and return the blob as it was actually
- * written — never as the caller hoped to write it.
- */
-async function mutateAccounts(
-  req: AuthenticatedMedusaRequest,
-  customerId: string,
-  mutate: (accounts: SavedBankAccount[]) => SavedBankAccount[] | null,
-): Promise<Record<string, unknown>> {
-  const packs = resolvePacks<CustomerWallet>(req.scope);
-  return await packs.mutateCustomerMetadata({
-    customerId: requireCustomerId(customerId),
-    mutate: (current) => {
-      const next = mutate(parseSavedBankAccounts(current.bank_accounts));
-      return next === null ? null : { ...current, bank_accounts: next };
-    },
-  });
 }
 
 /**
@@ -245,228 +205,21 @@ export async function POST(
 ): Promise<void> {
   const customerId = requireCustomerId(req.auth_context.actor_id);
   // Pages from before 2026-11-16 still send account_holder_name and
-  // account_holder_name_confirm: accepted, and never read.
+  // account_holder_name_confirm: accepted, and never read. The holder is the
+  // real name, and every rule, the lock, the re-checks and the new-destination
+  // notice are the save's (payout-destination-save.ts).
   const body = (req.body ?? {}) as {
     bank_code?: unknown;
     account_number?: unknown;
   };
-  const packs = resolvePacks<CustomerWallet>(req.scope);
-
-  // One name per account (owner, 2026-11-16): a bank's holder IS the account's
-  // real name, never typed. No real name, or one not in English letters, and
-  // no bank can be saved: support corrects the real name. A wallet has no
-  // holder, so it never asks.
-  const picked =
-    typeof body.bank_code === 'string' ? findBank(body.bank_code) : undefined;
-  let holderName = '';
-  if (picked && !picked.wallet) {
-    const { realName } = await packs.getVerificationState(customerId);
-    const holder = realNameHolder(realName);
-    if (!holder) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        realName?.trim() ? REAL_NAME_NOT_HOLDER_MESSAGE : REAL_NAME_NEEDED_MESSAGE,
-      );
-    }
-    holderName = holder;
-  }
-
-  // Same gate as the payout submit, so the saved list can never hold an
-  // account the withdraw path would refuse.
-  const invalid = withdrawalDetailsError({
+  const { metadata } = await savePayoutDestination(req.scope, {
+    customerId,
+    actor: { kind: 'customer' },
     bankCode: body.bank_code,
     accountNumber: body.account_number,
-    accountHolderName: holderName,
   });
-  if (invalid) {
-    throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
-  }
-  // The picker hands out canonical bank ids (banks.ts); any gateway's own
-  // code is accepted as an alias and normalised, so a saved account never
-  // depends on which gateway was active when it was saved. An unknown bank
-  // is refused: nothing could ever pay to it.
-  const bank = findBank(body.bank_code as string);
-  if (
-    !bank ||
-    sandboxOnlyBank(bank.id, process.env, await resolveActiveGateway(req.scope))
-  ) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      'Pick a bank from the list.',
-    );
-  }
-  const account = newSavedBankAccount(
-    bank,
-    body.account_number as string,
-    holderName,
-  );
-  const { accountNumber, bankCode } = account;
-  // Every spelling (a PayNow mobile with or without its 65), at this bank.
-  const destination = { bankCode, accountNumber };
-  const number = await packs.payoutNumberStanding(customerId, destination);
-  if (number.bannedForPlayer) {
-    req.scope
-      .resolve('logger')
-      .warn(
-        `[saved-accounts] refused a banned payout account for ${customerId} (${bankCode} …${accountNumber.slice(-4)})`,
-      );
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      BANNED_PAYOUT_ACCOUNT_MESSAGE,
-    );
-  }
-  // Compared by its letters (holderNameKey, on both sides in the query), so
-  // a name dressed up with digits, accents or small capitals is the plain one.
-  // A wallet has no holder name.
-  const nameNow = async () =>
-    bank.wallet
-      ? null
-      : await packs.payoutNameStanding(customerId, account.accountHolderName);
-  const refuseLinkedName = (): never => {
-    // Logged like a shared number, so a run of probes shows up. No name: PII.
-    req.scope
-      .resolve('logger')
-      .warn(
-        `[saved-accounts] refused a holder name another account used, for ${customerId}`,
-      );
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      HOLDER_NAME_LINKED_MESSAGE,
-    );
-  };
-  const name = await nameNow();
-  if (name && name.blocking.length > 0) refuseLinkedName();
-
-  // Looked up before the lock (it reads OTHER customers, which this
-  // customer's metadata lock does not cover) but applied inside it, where
-  // "already on my list" is decided from the locked read. Two strangers saving
-  // one number in the same instant both pass it, so it is asked again once the
-  // save is visible (below).
-  //
-  // Any holder blocks, under any name: one ring typed ten holder names onto one
-  // number, which the old same-name rule let straight through. A stranger who
-  // saves someone's number first locks the owner out until support acts; support
-  // is the answer to that (ADR 0015). Support's verification lifts a payout hold
-  // on a number already saved; it never lets a new one in.
-  const verdict = (s: NumberStanding, accounts: SavedBankAccount[]) =>
-    saveVerdict({
-      number: s,
-      name,
-      saved: accounts,
-      accountId: account.id,
-      holderName: account.accountHolderName,
-    });
-  const refuseShared = (): never => {
-    // The refusal tells the customer the number is linked elsewhere; log it so
-    // repeated probing for linked numbers shows up. Last 4 only.
-    req.scope
-      .resolve('logger')
-      .warn(
-        `[saved-accounts] refused a shared payout account for ${customerId} (${bankCode} …${accountNumber.slice(-4)})`,
-      );
-    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, SHARED_SAVE_MESSAGE);
-  };
-
-  // The cap is checked against the list read INSIDE the lock, not against one
-  // this handler read earlier — otherwise two concurrent saves could both see
-  // MAX-1 accounts and both be allowed through.
-  let added = false;
-  let saved = await mutateAccounts(req, customerId, (accounts) => {
-    const { alreadySaved, blocks } = verdict(number, accounts);
-    // Already theirs: nothing to do. A saved account cannot be changed, its
-    // holder name included, and keeps its original savedAt, so a re-save restarts
-    // no cooling-off window and arms no old row.
-    if (alreadySaved) return null;
-    if (blocks.includes('slot_full')) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        savedAccountSlot(bankCode) === 'TNG'
-          ? ONE_TNG_ACCOUNT_MESSAGE
-          : ONE_BANK_ACCOUNT_MESSAGE,
-      );
-    }
-    // One name on every bank (holderUnlikeSaved): an older saved bank in
-    // another name than the real name.
-    if (blocks.includes('name_unlike_saved')) {
-      // Logged like the other refusals, so repeated tries show up. No name.
-      req.scope
-        .resolve('logger')
-        .warn(
-          `[saved-accounts] refused a holder name unlike the saved one, for ${customerId}`,
-        );
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        HOLDER_NAME_DIFFERENT_MESSAGE,
-      );
-    }
-    if (blocks.includes('shared')) refuseShared();
-    added = true;
-    return [...accounts, account];
-  });
-  // The real name was read before the lock, so support may have corrected it
-  // since. Read it again: a bank left in the old name comes back off. One the
-  // correction already carried to the new name stays.
-  if (added && holderName) {
-    const now = realNameHolder(
-      (await packs.getVerificationState(customerId)).realName,
-    );
-    const nowKey = now ? holderMatchKey(now) : '';
-    if (nowKey !== holderMatchKey(holderName)) {
-      let kept = false;
-      saved = await mutateAccounts(req, customerId, (accounts) => {
-        const entry = accounts.find((a) => a.id === account.id);
-        kept =
-          !!entry &&
-          nowKey !== '' &&
-          holderMatchKey(entry.accountHolderName) === nowKey;
-        return kept ? null : accounts.filter((a) => a.id !== account.id);
-      });
-      if (!kept) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          REAL_NAME_CHANGED_MESSAGE,
-        );
-      }
-    }
-  }
-  // The name and number lookups read other customers, which this customer's
-  // lock does not cover, so two accounts saving one name or one number at once
-  // both pass them. Look again now the save is visible: a racer takes its entry
-  // back off. Both racers may, and the next try is serial.
-  if (added) {
-    const linked = ((await nameNow())?.blocking.length ?? 0) > 0;
-    if (
-      linked ||
-      verdict(
-        await packs.payoutNumberStanding(customerId, destination),
-        [],
-      ).blocks.includes('shared')
-    ) {
-      await mutateAccounts(req, customerId, (accounts) =>
-        accounts.filter((a) => a.id !== account.id),
-      );
-      if (linked) refuseLinkedName();
-      refuseShared();
-    }
-  }
-
-  // A NEW payout destination is the event worth telling the account owner
-  // about: it is the first half of "steal a token, wait out the cooling-off,
-  // cash out". Fired after the write has committed and never allowed to fail
-  // the save (the helper swallows its own errors) — a dropped notice must not
-  // cost the customer their saved account. Re-saving an account they already
-  // had changes nothing, so it stays silent.
-  if (added) {
-    await sendSavedAccountAddedNotice(req.scope, {
-      customerId,
-      accountId: account.id,
-      bankName: account.bankName,
-      accountNumber: account.accountNumber,
-      savedAt: account.savedAt as string,
-    });
-  }
   noStore(res).json({
-    accounts: await accountViews(req, customerId, saved),
+    accounts: await accountViews(req, customerId, metadata),
   });
 }
 

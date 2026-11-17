@@ -59,6 +59,7 @@ import DeliveryOrderItem from '../models/delivery-order-item';
 import VipLevel from '../models/vip-level';
 import RewardsSettings from '../models/rewards-settings';
 import CustomerAccountState from '../models/customer-account-state';
+import VisitorSignal from '../models/visitor-signal';
 import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
@@ -101,6 +102,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipLevel,
     RewardsSettings,
     CustomerAccountState,
+    VisitorSignal,
     AdminActionAudit,
     VipMemberState,
     VipRewardGrant,

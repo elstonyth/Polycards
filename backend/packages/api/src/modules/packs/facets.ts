@@ -68,17 +68,16 @@ export type GatewayReports = Pick<
 
 /**
  * The customer-facing wallet surface: `/store/credits`, `/balance`,
- * `/latest`, and the saved-payout-accounts metadata mutator. Ledger reads and
- * a metadata write, not gateway rows — kept separate from `GatewayDeposits`/
- * `GatewayWithdrawals` even though it shares two members with them, because
- * this area never submits to or reconciles against the gateway itself.
+ * `/latest`, and the saved-payout-accounts list. Ledger reads, not gateway
+ * rows — kept separate from `GatewayDeposits`/`GatewayWithdrawals` even though
+ * it shares two members with them, because this area never submits to or
+ * reconciles against the gateway itself. Saving an account is
+ * `PayoutDestinations`.
  */
 export type CustomerWallet = Pick<
   PacksModuleService,
   | 'creditBalance'
   | 'creditSummary'
-  // The real name, which a saved bank's holder is (owner, 2026-11-16).
-  | 'getVerificationState'
   | 'listCreditTransactions'
   | 'listGatewayDeposits'
   | 'listGatewayWithdrawals'
@@ -87,11 +86,23 @@ export type CustomerWallet = Pick<
   | 'listPacks'
   | 'listPulls'
   | 'listTicketSpins'
-  | 'mutateCustomerMetadata'
-  | 'payoutNameStanding'
   | 'payoutNumberStanding'
   | 'walletSummary'
   | 'withdrawalControls'
+>;
+
+/** Saving a Payout Destination (payout-destination-save.ts), for the
+ *  customer's own save and support's add: the real name a bank is saved in,
+ *  the number and name standings, and the locked or audited writes. */
+export type PayoutDestinations = Pick<
+  PacksModuleService,
+  | 'addSavedBankAccount'
+  // The real name, which a saved bank's holder is (owner, 2026-11-16).
+  | 'getVerificationState'
+  | 'mutateCustomerMetadata'
+  | 'payoutNameStanding'
+  | 'payoutNumberStanding'
+  | 'removeSavedBankAccount'
 >;
 
 /**

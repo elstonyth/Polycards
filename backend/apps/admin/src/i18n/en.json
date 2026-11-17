@@ -657,7 +657,46 @@
     "confirmFinishRefundBody": "This withdrawal was denied, but the {{amount}} never came back to the customer's balance. This returns it. It can only land once, so don't also make a hand adjustment.",
     "confirmDenyTitle": "Deny this withdrawal?",
     "confirmDenyBody": "Refuse this {{amount}} withdrawal. Nothing is sent to {{bank}} {{account}} ({{holder}}) — the funds are returned to the customer's in-app balance instead.",
-    "paidOutIn": "paid out as {{amount}}"
+    "paidOutIn": "paid out as {{amount}}",
+    "review": {
+      "open": "Open",
+      "button": "Review",
+      "title": "Review withdrawal",
+      "loadError": "Could not load the review.",
+      "withdrawal": "Withdrawal",
+      "account": "This account",
+      "joined": "joined {{date}}",
+      "money": "Topped up {{topups}} · withdrawn {{withdrawn}} · prize-card sales {{prize}} · balance {{balance}}",
+      "linked": "Linked accounts ({{n}})",
+      "noLinked": "No other account shares its browser or network, or is linked by referral.",
+      "networks": "Shares {{n}} network(s) with other accounts. A busy mobile network can put strangers on one address, so read this with the other signals.",
+      "banks": "Banks used",
+      "noBanks": "No bank saved or paid to.",
+      "bannedNumber": "Banned number",
+      "paidHere": "paid to this account: {{amount}}",
+      "onlyThis": "No other account used this number.",
+      "otherOnBank": "{{who}}, paid {{paid}}",
+      "sameHolder": "same holder name",
+      "sameName": "Same holder name at another bank",
+      "differentPerson": "checked as a different person",
+      "sameBrowser": "Same browser",
+      "householdVerified": "Same browser, household confirmed",
+      "sameNetwork": "Same network",
+      "invitedThis": "Invited this account",
+      "invitedByThis": "Invited by this account",
+      "banned": "Banned",
+      "disabled": "Disabled",
+      "markHousehold": "These accounts are one household I have checked. Do not hold this account again for sharing a browser with them.",
+      "col": {
+        "account": "Account",
+        "why": "Linked by",
+        "topups": "Topped up",
+        "withdrawn": "Withdrawn",
+        "prize": "Prize sales"
+      }
+    },
+    "holdShared": "Held: shares a browser",
+    "holdAmount": "Held: over the approval amount"
   },
   "withdrawalControls": {
     "title": "Withdrawal controls",
@@ -1794,7 +1833,9 @@
           "coin_flip": "Coin flip",
           "lucky_draw": "Lucky Draw capsules"
         },
-        "other_revenue": { "shipping": "Shipping" },
+        "other_revenue": {
+          "shipping": "Shipping"
+        },
         "cogs": {
           "packs": "Pack cards (buyback + supplier cost)",
           "coin_flip": "Coin flip paid out",
