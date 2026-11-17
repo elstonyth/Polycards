@@ -1385,6 +1385,22 @@ describe('startWithdrawal — money ordering', () => {
     expect(fakeGateway.calls.withdrawals).toEqual([]);
   });
 
+  // The close is a claim from the two open statuses. It loses on a row an
+  // admin already closed 'failed' under the credit lock; the debit's own
+  // error must still reach the customer, unchanged.
+  it('still throws the debit error when the no-debit close loses its claim', async () => {
+    const h = harness();
+    h.packs.withdrawForCashout.mockRejectedValue(
+      new Error('Insufficient credits'),
+    );
+    h.packs.claimWithdrawalStatus.mockResolvedValue(false);
+    await expect(start(h)).rejects.toThrow('Insufficient credits');
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledTimes(1);
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
+  });
+
   it('closes the row WITHOUT refunding when the debit itself fails (insufficient balance)', async () => {
     const h = harness();
     h.packs.withdrawForCashout.mockRejectedValue(
