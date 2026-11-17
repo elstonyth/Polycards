@@ -1,5 +1,50 @@
 # Custom Workflows
 
+## Single-step workflows (kept on purpose)
+
+These workflows wrap exactly one step and are called only from routes and jobs:
+`adjust-credits`, `topup-credits`, `buyback-pull`, `create-card`, `update-card`,
+`request-delivery`, `update-delivery-order`, `ensure-profile-handle` and
+`create-product-from-pricecharting`. A review on 2026-11-17 (architecture
+candidate #10) asked whether they should be plain module calls. They stay
+workflows. Do not re-suggest removing them without new evidence.
+
+How compensation actually behaves (Medusa 2.19, pinned by
+`__tests__/single-step-compensation.unit.spec.ts`):
+
+- When a step's invoke throws, Medusa still calls that step's own compensator,
+  but with no data (`undefined`), never the work it did. Every compensator
+  here starts with `if (!data) return`, so it does nothing. A step that writes
+  more than once must therefore undo its own partial work inline before
+  rethrowing (`create-card`, `update-card`, `create-product-from-pricecharting`
+  do).
+- The compensator gets its data only when a later step in the same run fails,
+  when the workflow runs nested inside another one, or when a finished run is
+  cancelled with `workflow(container).cancel({ transaction })`. No code here
+  does any of these today, so in production these compensators never undo
+  anything.
+- They are kept anyway. They are the correct undo for when a step is composed
+  into a longer workflow or a run is cancelled, which is the standard Medusa
+  shape: the docs' own `create-post` example is a one-step workflow with a
+  compensator. Deleting them would remove that safety net and gain nothing.
+
+Why the wrappers stay instead of direct module calls:
+
+- Medusa's guidance is that custom API routes perform mutations through
+  workflows.
+- Callers depend on the workflow error shape: a failed `run()` throws a
+  serialized plain object, not an `Error` instance (see `tickLive` in
+  `api/utils/automation-live-store.ts`). A direct call would change what
+  routes and jobs catch and log.
+- A step can grow (for example a real-gateway capture after `topup-credits`)
+  without touching any caller.
+
+The exported `*Invoke` functions (`registerCardInvoke`, `updateCardInvoke`,
+`updateDeliveryOrderInvoke`, `createProductFromPcInvoke`, ...) are the step
+bodies, exported so unit specs can call them without the workflow runtime.
+
+## Medusa scaffold notes
+
 A workflow is a series of queries and actions that complete a task.
 
 The workflow is created in a TypeScript or JavaScript file under the `src/workflows` directory.

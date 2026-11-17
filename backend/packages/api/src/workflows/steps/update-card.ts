@@ -209,11 +209,12 @@ export const updateCardInvoke = async (
   // leaves the card's current link + mirror untouched — a price-only save can't
   // wipe a linked sprite); null → all three cleared; a picked id → link + its
   // mirrored dex/image_url. Throws NOT_FOUND if the id doesn't resolve.
-  // Medusa runs a step's compensate only when a LATER step throws (see
-  // record-pull.ts). A throw INSIDE this invoke gets no compensation, so the
-  // Card mutation below + the slab bake above would be left half-applied
-  // against an unchanged Product. Self-compensate like create-card.ts: undo
-  // the mutation and reclaim the new file, then rethrow. The try starts at the
+  // Medusa hands a step's compensate its data only when a LATER step throws
+  // (workflows/README.md). A throw INSIDE this invoke reaches it with no data,
+  // so it undoes nothing: the Card mutation below + the slab bake above
+  // would be left half-applied against an unchanged Product. Self-compensate
+  // like create-card.ts: undo the mutation and reclaim the new file, then
+  // rethrow. The try starts at the
   // pixel resolve (not the mutation) because resolvePixelPokemonPatch can throw
   // NOT_FOUND after the bake already ran, orphaning the new file otherwise.
   try {

@@ -231,9 +231,11 @@ export const createProductFromPcInvoke = async (
     // Level creation failed after the product exists — delete it so the
     // operator gets a clean retry instead of a tracked-but-unstocked orphan.
     // NOTE: this inline rollback is required — the step's compensate() below
-    // only runs when a LATER workflow step fails, not when THIS invoke throws,
-    // so it cannot cover an in-invoke failure. Do not remove this in favour of
-    // compensate() or the product would be orphaned on level-creation failure.
+    // gets this step's data only when a LATER workflow step fails; when THIS
+    // invoke throws it is called with no data and returns, so it cannot cover
+    // an in-invoke failure (workflows/README.md). Do not remove this in favour
+    // of compensate() or the product would be orphaned on level-creation
+    // failure.
     await rollbackProduct();
     throw e;
   }
@@ -246,7 +248,8 @@ export const createProductFromPcInvoke = async (
 export const createProductFromPcStep = createStep(
   'create-product-from-pricecharting',
   createProductFromPcInvoke,
-  // Fires only if a LATER workflow step fails after this one succeeds.
+  // Undoes the product only if a LATER workflow step fails or a finished run
+  // is cancelled. This one-step workflow does neither today (README.md).
   async (data: CompensateData, { container }) => {
     if (!data) return;
     await deleteProductsWorkflow(container).run({
