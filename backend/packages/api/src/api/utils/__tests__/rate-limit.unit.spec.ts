@@ -1115,7 +1115,12 @@ describe('rateLimit', () => {
     return { passed: next.mock.calls.length === 1, status: statusCode };
   };
 
-  it('keeps repeated constructions independent while one reused handler shares its bucket', async () => {
+  // One name, one budget: middlewares.ts names a tier on several routes
+  // (credit-topup on topup, deposit and withdraw), and with Redis up they
+  // already share it through the one `rl:<name>:` keyspace. Separate
+  // instances would split the in-memory failover budget N ways during a Redis
+  // blip, so every call for a name returns the same limiter.
+  it('gives one name one limiter, so its routes share one budget even without Redis', async () => {
     const names = [
       'REDIS_URL',
       'TASK_ACTION_RATE_BURST_LIMIT',
@@ -1134,10 +1139,9 @@ describe('rateLimit', () => {
       const first = rateLimit('task-action');
       const second = rateLimit('task-action');
 
-      expect(first).not.toBe(second);
+      expect(first).toBe(second);
       expect(await invoke(first)).toEqual({ passed: true, status: undefined });
-      expect(await invoke(first)).toEqual({ passed: false, status: 429 });
-      expect(await invoke(second)).toEqual({ passed: true, status: undefined });
+      expect(await invoke(second)).toEqual({ passed: false, status: 429 });
     } finally {
       for (const [name, value] of saved) {
         if (value === undefined) delete process.env[name];
@@ -1499,18 +1503,18 @@ describe('the two auth rate-limit tiers (Plan 081)', () => {
   // so the victim's second reset request must 429 no matter what the attacker
   // puts in the field the route ignores, and no matter how they spell the path.
   it('a decoy identifier cannot buy a fresh bucket on reset-password', async () => {
-    for (const path of [
+    const mw = rateLimit('auth-identifier');
+    for (const [i, path] of [
       '/auth/customer/emailpass/reset-password',
       '/auth/customer/emailpass/reset-password/',
       '/auth/customer/emailpass/RESET-PASSWORD',
-    ]) {
-      const mw = rateLimit('auth-identifier'); // fresh bucket per spelling
-      expect(
-        (await post(mw, { identifier: 'victim@x.com' }, path)).passed,
-      ).toBe(true);
+    ].entries()) {
+      // One limiter per name, so a fresh victim (fresh bucket) per spelling.
+      const victim = `victim-${i}@x.com`;
+      expect((await post(mw, { identifier: victim }, path)).passed).toBe(true);
       const bombed = await post(
         mw,
-        { email: `decoy-${Math.random()}@x.com`, identifier: 'victim@x.com' },
+        { email: `decoy-${Math.random()}@x.com`, identifier: victim },
         path,
       );
       expect({ path, ...bombed }).toMatchObject({ passed: false, status: 429 });

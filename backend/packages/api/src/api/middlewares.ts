@@ -106,6 +106,11 @@ import { requestErrorLog } from '../utils/request-error-log';
 // src/app/api/free-pack/route.ts, so this limiter is a backstop, not the
 // primary defense.
 
+// rateLimit(name) returns one limiter per name (utils/rate-limit.ts), so
+// every route naming a tier, bound here or called inline below, shares that
+// tier's one budget, failover bucket and Redis connection. A route that needs
+// its own budget needs its own name in RATE_LIMITS.
+//
 // One instance shared by the vault + credits matchers: the two reads travel
 // together in the UI, so they share one budget (and one Redis connection).
 const storeReadRateLimit = rateLimit('store-read');
