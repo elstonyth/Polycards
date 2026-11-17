@@ -1,6 +1,7 @@
 import { scheduledRunAllows, type Need } from '../access';
 import { UNBAN_NEED } from '../confirm';
 import { TOOLS } from '../tools';
+import { BAN_LIST_NEED } from '../../../../modules/packs/ban-list-access';
 
 // Every assistant tool's policy as it stands (2026-11-17): what the asker's
 // roles must hold, whether the engine refuses it once any tool output is in
@@ -136,6 +137,15 @@ describe('assistant tool policy', () => {
       t.needs.map(needText).includes(unban),
     )) {
       expect([tool.name, tool.effect]).toEqual([tool.name, 'ban_change']);
+    }
+  });
+
+  it('never lets a tool that needs the ban-list policy run unwatched', () => {
+    const banList = needText(BAN_LIST_NEED);
+    for (const tool of TOOLS.filter((t) =>
+      t.needs.map(needText).includes(banList),
+    )) {
+      expect([tool.name, tool.effect === 'read']).toEqual([tool.name, false]);
     }
   });
 });
