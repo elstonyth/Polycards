@@ -253,6 +253,8 @@ export async function GET(
     // masking it would push that lookup somewhere unaudited.
     account_holder_name: r.account_holder_name,
     status: r.status,
+    // Why a held row waits (ADR 0018): 'amount' or 'shared_device'.
+    hold_reason: r.hold_reason ?? null,
     gateway_status: r.gateway_status,
     // Plan 095. Both are operator-facing on purpose: `failure_reason` says why
     // a payout died, and `verify_outcome` says how we answered their Payout
