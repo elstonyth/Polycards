@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { PackGift } from '@/lib/vault-packs';
 
 // The one Pack Gift read the pack page and the spin page share: keyed to the
 // customer + pack it was read for, re-read on invalidate(), decremented by
@@ -48,7 +49,7 @@ async function renderHook(initial: Props) {
   return { result, rerender };
 }
 
-const gift = (count: number, over: Record<string, unknown> = {}) => ({
+const gift = (count: number, over: Partial<PackGift> = {}): PackGift => ({
   packId: 'bronze',
   count,
   title: 'Bronze Pack',

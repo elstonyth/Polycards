@@ -38,8 +38,7 @@ export function usePackGifts(
   useEffect(() => {
     if (!pending || !key) return;
     let live = true;
-    // A failed read is flagged, not settled as "holds none": the screen can
-    // say so and offer a Retry, so a holder never pays full price unwarned.
+    // Failed, not "none held": a holder is warned (Retry) before paying full.
     const failed: Read = { key, count: 0, failed: true };
     void getPackGifts()
       .then((g) => {

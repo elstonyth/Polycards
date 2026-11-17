@@ -35,7 +35,7 @@ describe('paidCost — only the rows no gift covers are charged', () => {
     [300, 3, 2, 300],
     [300, 2, -1, 600],
     [12.5, 3, 1, 25],
-  ])('price %d × %d with %d held = %d', (price, qty, held, charged) => {
+  ])('price %s × %s with %s held = %s', (price, qty, held, charged) => {
     expect(paidCost(price, qty, held)).toBe(charged);
   });
 });
