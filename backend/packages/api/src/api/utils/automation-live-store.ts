@@ -350,24 +350,20 @@ export async function tickLive(
       state.pending = { ...cycle };
     });
   try {
-    // Each read runs only once the earlier ones let the account through.
-    const selected = (await selectedCustomers(packs)).includes(
-      cycle.customerId,
-    );
-    const disabled =
-      selected && (await packs.isAccountDisabled(cycle.customerId));
-    const frozen =
-      selected &&
-      !disabled &&
-      Boolean(
-        (
-          await packs.listCustomerAccountStates(
-            { customer_id: cycle.customerId },
-            { take: 1 },
-          )
-        )[0]?.frozen,
-      );
-    const refusal = liveAccountRefusal({ selected, disabled, frozen });
+    const refusal = await liveAccountRefusal({
+      selected: async () =>
+        (await selectedCustomers(packs)).includes(cycle.customerId),
+      disabled: () => packs.isAccountDisabled(cycle.customerId),
+      frozen: async () =>
+        Boolean(
+          (
+            await packs.listCustomerAccountStates(
+              { customer_id: cycle.customerId },
+              { take: 1 },
+            )
+          )[0]?.frozen,
+        ),
+    });
     if (refusal) throw new Error(refusal);
     await resolveFxRateStrict(packs);
     const plan = planLiveDraw(

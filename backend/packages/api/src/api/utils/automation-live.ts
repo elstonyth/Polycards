@@ -559,15 +559,16 @@ export function validateLiveConfig(
 }
 
 /** Why a claimed account may not draw now, or null when it may. Checked
- *  before any money moves; a refusal is a cycle error, which fails the run. */
-export function liveAccountRefusal(account: {
-  selected: boolean;
-  disabled: boolean;
-  frozen: boolean;
-}): string | null {
-  if (!account.selected || account.disabled)
+ *  before any money moves. Each read runs only once the earlier ones let
+ *  the account through, and a read that throws stops the check. */
+export async function liveAccountRefusal(account: {
+  selected(): Promise<boolean>;
+  disabled(): Promise<boolean>;
+  frozen(): Promise<boolean>;
+}): Promise<string | null> {
+  if (!(await account.selected()) || (await account.disabled()))
     return 'Account is no longer selected or is disabled.';
-  if (account.frozen) return 'Account is frozen.';
+  if (await account.frozen()) return 'Account is frozen.';
   return null;
 }
 

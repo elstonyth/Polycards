@@ -17,22 +17,47 @@ const config: LiveConfig = {
 };
 
 describe('liveAccountRefusal', () => {
+  const reads = (selected: boolean, disabled: boolean, frozen: boolean) => ({
+    selected: jest.fn(async () => selected),
+    disabled: jest.fn(async () => disabled),
+    frozen: jest.fn(async () => frozen),
+  });
+
+  // [selected, disabled, frozen, refusal, reads made]
   it.each([
-    [true, false, false, null],
-    [false, false, false, 'Account is no longer selected or is disabled.'],
-    [true, true, false, 'Account is no longer selected or is disabled.'],
-    [false, true, false, 'Account is no longer selected or is disabled.'],
-    [true, false, true, 'Account is frozen.'],
-    // Not selected or disabled wins over frozen: the frozen read never happens then.
-    [false, false, true, 'Account is no longer selected or is disabled.'],
-    [true, true, true, 'Account is no longer selected or is disabled.'],
-    [false, true, true, 'Account is no longer selected or is disabled.'],
-  ])(
-    'selected=%s disabled=%s frozen=%s refuses with %p',
-    (selected, disabled, frozen, refusal) => {
-      expect(liveAccountRefusal({ selected, disabled, frozen })).toBe(refusal);
+    [true, false, false, null, 3],
+    [false, false, false, 'Account is no longer selected or is disabled.', 1],
+    [true, true, false, 'Account is no longer selected or is disabled.', 2],
+    [false, true, false, 'Account is no longer selected or is disabled.', 1],
+    [true, false, true, 'Account is frozen.', 3],
+    [false, false, true, 'Account is no longer selected or is disabled.', 1],
+    [true, true, true, 'Account is no longer selected or is disabled.', 2],
+    [false, true, true, 'Account is no longer selected or is disabled.', 1],
+  ] as const)(
+    'selected=%s disabled=%s frozen=%s refuses with %p after %i reads',
+    async (selected, disabled, frozen, refusal, made) => {
+      const account = reads(selected, disabled, frozen);
+      await expect(liveAccountRefusal(account)).resolves.toBe(refusal);
+      // Reads run once each, in order (selected, disabled, frozen), and stop
+      // at the first refusal.
+      expect(
+        [account.selected, account.disabled, account.frozen].map(
+          (read) => read.mock.calls.length,
+        ),
+      ).toEqual([0, 1, 2].map((index) => (index < made ? 1 : 0)));
     },
   );
+
+  it('lets a failed read through without making the later ones', async () => {
+    const account = {
+      ...reads(true, false, true),
+      disabled: jest.fn(async () => {
+        throw new Error('db down');
+      }),
+    };
+    await expect(liveAccountRefusal(account)).rejects.toThrow('db down');
+    expect(account.frozen).not.toHaveBeenCalled();
+  });
 });
 
 describe('planLiveDraw', () => {
@@ -132,12 +157,12 @@ describe('a guard outcome and the run', () => {
     return { state, cycle };
   };
 
-  it('a refusal is a cycle error, which fails the whole run for review', () => {
+  it('a refusal is a cycle error, which fails the whole run for review', async () => {
     const { state, cycle } = claimed();
-    cycle.error = liveAccountRefusal({
-      selected: true,
-      disabled: false,
-      frozen: true,
+    cycle.error = await liveAccountRefusal({
+      selected: async () => true,
+      disabled: async () => false,
+      frozen: async () => true,
     });
     completeLiveCycle(state, cycle, 2, () => 0);
     expect(state.status).toBe('failed');
