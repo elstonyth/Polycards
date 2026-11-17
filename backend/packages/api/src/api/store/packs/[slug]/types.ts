@@ -1,4 +1,4 @@
-// The JSON body of GET /store/packs/:slug, written once (ADR 0017). Types
+// The JSON body of GET /store/packs/:slug, written once (ADR 0018). Types
 // only. No imports: the storefront typecheck reads this file (as
 // `@acme/api/store/packs/[slug]`) without the backend's node_modules.
 

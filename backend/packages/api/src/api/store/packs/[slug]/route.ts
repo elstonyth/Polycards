@@ -32,9 +32,10 @@ import type { StorePackDetailResponse } from './types';
 // computes per window and ≤TTL cross-instance skew, display-only either
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
-// The full wire body is stored; Lossless is laid over a copy per request.
-type DetailBody = StorePackDetailResponse;
-const packCache = new Map<string, { expires: number; body: DetailBody }>();
+const packCache = new Map<
+  string,
+  { expires: number; body: StorePackDetailResponse }
+>();
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
  *  one process, so test A's cached pack would be served to test B. */
@@ -52,7 +53,7 @@ export async function GET(
 
   // The cache holds the plain body; Lossless Mode is laid over a copy on every
   // request (see store/packs/route.ts), never cached.
-  const send = async (body: DetailBody): Promise<void> => {
+  const send = async (body: StorePackDetailResponse): Promise<void> => {
     const windows = await losslessWindowsForDisplay(req);
     res.json({ ...body, pack: withLossless(body.pack, windows, Date.now()) });
   };

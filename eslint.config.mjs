@@ -81,7 +81,7 @@ const eslintConfig = defineConfig([
   // the schemas module.
   //
   // The same rule keeps backend code out of the bundle: `@acme/api/store/*` is a
-  // tsconfig path to a route's response types (ADR 0017), and Next resolves
+  // tsconfig path to a route's response types (ADR 0018), and Next resolves
   // tsconfig paths, so only a type import may use it.
   {
     files: ['src/**/*.{ts,tsx}'],

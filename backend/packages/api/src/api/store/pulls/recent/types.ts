@@ -1,4 +1,4 @@
-// The JSON body of GET /store/pulls/recent, written once (ADR 0017). Types
+// The JSON body of GET /store/pulls/recent, written once (ADR 0018). Types
 // only. No imports: the storefront typecheck reads this file (as
 // `@acme/api/store/pulls/recent`) without the backend's node_modules.
 
@@ -12,12 +12,21 @@ export type StorePullerFields = {
   frame_url: string | null;
 };
 
-/** A card pack's feed row. */
-export type StoreRecentCardPull = StorePullerFields & {
+/** What every feed row carries, card or ticket. */
+export type StoreRecentPullBase = StorePullerFields & {
   id: string;
+  rarity: string;
+  pack_id: string;
+  /** null when the pack was deleted. */
+  pack_title: string | null;
+  pack_image: string | null;
+  rolled_at: string;
+};
+
+/** A card pack's feed row. */
+export type StoreRecentCardPull = StoreRecentPullBase & {
   handle: string;
   name: string;
-  rarity: string;
   /** Raw USD FMV. */
   market_value: number;
   marketPriceMyr: number;
@@ -26,22 +35,11 @@ export type StoreRecentCardPull = StorePullerFields & {
   set: string;
   pokemon_dex: number | null;
   sprite_image: string | null;
-  pack_id: string;
-  /** null when the pack was deleted. */
-  pack_title: string | null;
-  pack_image: string | null;
-  rolled_at: string;
 };
 
 /** A ticket pack's feed row: the amount won in place of a card. */
-export type StoreRecentTicketPull = StorePullerFields & {
-  id: string;
+export type StoreRecentTicketPull = StoreRecentPullBase & {
   tickets: number;
-  rarity: string;
-  pack_id: string;
-  pack_title: string | null;
-  pack_image: string | null;
-  rolled_at: string;
 };
 
 export type StoreRecentPullsResponse = {

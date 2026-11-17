@@ -62,7 +62,7 @@ const STOREFRONT_IGNORE_FILES = new Set([
 ]);
 
 const IMPORT_RE = /from\s+['"]((?:\.\.\/)+backend\/[^'"]+)['"]/g;
-// The store response types (ADR 0017): `@acme/api/store/<route>` is a tsconfig
+// The store response types (ADR 0018): `@acme/api/store/<route>` is a tsconfig
 // path to that route's types.ts.
 const STORE_TYPES_RE = /from\s+['"]@acme\/api\/store\/([^'"]+)['"]/g;
 const STORE_TYPES_DIR = 'backend/packages/api/src/api/store/';
@@ -257,10 +257,11 @@ function selfTest() {
     }
   }
   const real = backendFilesImportedByStorefront();
-  for (const want of [
+  const scanWants = [
     'backend/packages/api/src/utils/real-name.ts',
     'backend/packages/api/src/api/store/vault/types.ts',
-  ]) {
+  ];
+  for (const want of scanWants) {
     if (!real.has(want)) {
       failed++;
       console.error(`FAIL import scan missed ${want}`);
@@ -303,7 +304,7 @@ function selfTest() {
   console.log(
     failed
       ? `${failed} failed`
-      : `all ${cases.length + 3 + live.length} checks passed`,
+      : `all ${cases.length + scanWants.length + 1 + live.length} checks passed`,
   );
   process.exit(failed ? 1 : 0);
 }

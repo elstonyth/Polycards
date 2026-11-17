@@ -15,15 +15,12 @@ import 'server-only';
 import { cache } from 'react';
 import type {
   StoreProfilePull,
-  StoreProfileRarity,
   StoreProfileResponse,
   StoreProfileShowcaseCard,
 } from '@acme/api/store/profiles/[handle]';
 import { store } from '@/lib/store';
 import { PublicProfileSchema, ProfileHandleSchema } from '@/lib/data/schemas';
 import type { MaybeAbsent } from '@/lib/store-wire';
-
-export type ProfileRarity = StoreProfileRarity;
 
 /** A profile card. Absent on older backends: `marketPriceMyr`, `slab_image`,
  *  and `rarity` on collection items; `rarity` null = the odds row is gone

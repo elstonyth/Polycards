@@ -1,5 +1,5 @@
 // The JSON body of GET /store/packs (and GET /store/customers/me/draft-packs,
-// which sends the same rows), written once (ADR 0017). Types only. No imports:
+// which sends the same rows), written once (ADR 0018). Types only. No imports:
 // the storefront typecheck reads this file (as `@acme/api/store/packs`)
 // without the backend's node_modules.
 

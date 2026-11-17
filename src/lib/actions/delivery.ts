@@ -148,10 +148,15 @@ type BackendDeliveryOrder = MaybeAbsent<
     StoreDeliveryOrder['address'],
     'address_1' | 'address_2' | 'province' | 'postal_code' | 'phone'
   >;
-  items: MaybeAbsent<
-    StoreDeliveryOrder['items'][number],
+  items: (MaybeAbsent<
+    Omit<StoreDeliveryOrder['items'][number], 'card'>,
     'challenge_prize' | 'lucky_draw_prize'
-  >[];
+  > & {
+    card: MaybeAbsent<
+      NonNullable<StoreDeliveryOrder['items'][number]['card']>,
+      'slab_image'
+    > | null;
+  })[];
 };
 
 // The address book goes through `sdk.store.customer.*` — built-in Medusa

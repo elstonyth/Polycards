@@ -29,6 +29,11 @@ and both sides are checked against it.
   handle that at runtime, and `MaybeAbsent` (`src/lib/store-wire.ts`) marks the
   same fields optional in the type, so their `??` defaults stay load-bearing.
   The cast is now a plain `as` from the parsed value to the backend-derived type.
+- **Where a zod guard is looser than the backend type, the guard wins at
+  runtime.** Delivery's `address_1` and `postal_code` may read as null, its
+  `tracking_number`, `address` and `items` as absent, and a recent pull's
+  `seed` is `number | null` on the backend but optional `number` in the guard.
+  The mappers keep their `??` defaults for all of them.
 - **A store change reruns the storefront checks.** `deploy-targets.mjs` counts
   every store `types.ts` the storefront imports as a storefront input, so a
   backend-only PR that changes one runs the storefront typecheck.

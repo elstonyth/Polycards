@@ -1,4 +1,4 @@
-// The JSON body of GET /store/profiles/:handle, written once (ADR 0017). Types
+// The JSON body of GET /store/profiles/:handle, written once (ADR 0018). Types
 // only. No imports: the storefront typecheck reads this file (as
 // `@acme/api/store/profiles/[handle]`) without the backend's node_modules.
 
