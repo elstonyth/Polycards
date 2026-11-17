@@ -1,15 +1,15 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import { AGENT_TOOLS } from '../agent-tools';
+import { scheduledRunAllows } from '../access';
 import {
-  BAN_LIST_NEED,
   ConfirmRefused,
   numberMark,
   oneNumber,
   saveProposal,
-  scheduledRunAllows,
   UNBAN_NEED,
   type Proposal,
 } from '../confirm';
+import { BAN_LIST_NEED } from '../../../../modules/packs/ban-list-access';
 import { namedIn, namedPlayer } from '../named';
 
 // The bank tools (owner, 2026-11-04: staff do in the chat what support did by

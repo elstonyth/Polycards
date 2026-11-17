@@ -1,6 +1,5 @@
-import type { Need } from '../access';
-import { LASTING_WRITES } from '../access';
-import { scheduledRunAllows } from '../confirm';
+import { scheduledRunAllows, type Need } from '../access';
+import { UNBAN_NEED } from '../confirm';
 import { TOOLS } from '../tools';
 
 // Every assistant tool's policy as it stands (2026-11-17): what the asker's
@@ -122,12 +121,18 @@ describe('assistant tool policy', () => {
     const want = POLICY[name];
     expect({
       needs: tool.needs.map(needText),
-      refusedAfterOutsideRead: LASTING_WRITES.has(tool.name),
+      refusedAfterOutsideRead: tool.effect === 'lasting_write',
       scheduledRun: scheduledRunAllows(tool),
     }).toEqual({
       needs: want.needs,
       refusedAfterOutsideRead: want.refusedAfterOutsideRead,
       scheduledRun: want.scheduledRun,
     });
+  });
+
+  it('never lets a tool that needs the unban policy run unwatched', () => {
+    for (const tool of TOOLS.filter((t) => t.needs.includes(UNBAN_NEED))) {
+      expect([tool.name, tool.effect]).toEqual([tool.name, 'ban_change']);
+    }
   });
 });
