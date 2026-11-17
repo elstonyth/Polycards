@@ -128,3 +128,103 @@ export const quoteIsLive = (round: CoinFlipRound, now: number) =>
   round.status === 'quoted' && Date.parse(round.expires_at) > now;
 export const coinFlipPendingKey = (customerId: string) =>
   `polycards:coin-flip:${customerId}`;
+
+/* ------------------------------------------------------------------ *
+ * Page phase — the one machine behind CoinFlipClient, tested in
+ * src/lib/__tests__/coin-flip-phase.test.ts (the same shape as
+ * reveal-phase.ts's nextPhase).
+ * ------------------------------------------------------------------ */
+
+export type CoinFlipPhase =
+  | 'loading'
+  | 'idle'
+  | 'quoting'
+  | 'confirm'
+  | 'armed'
+  | 'submitting'
+  | 'recovering'
+  | 'animating'
+  | 'result';
+
+export type CoinFlipEvent =
+  /** The page mounted with no flip to resume. */
+  | 'ready'
+  /** A flip is opened by id: the mount's resume, a history row, Check result. */
+  | 'open'
+  /** Review pressed: ask for a quote. */
+  | 'review'
+  /** The quote arrived. */
+  | 'quoted'
+  /** The quote or the accept was refused, or the quote never arrived: nothing
+   *  is staked, so the stake is picked again. */
+  | 'refused'
+  /** The opened flip no longer exists. */
+  | 'missing'
+  /** Confirm pressed on the quote: the coin is armed. */
+  | 'arm'
+  /** Cancel, the backdrop, Escape or Review again: back to picking. */
+  | 'cancel'
+  /** Flip coin pressed or the coin flicked. */
+  | 'toss'
+  /** Retry same flip, for a flip whose result is unknown. */
+  | 'retry'
+  /** A settled receipt shown without the toss (a reopened or retried flip). */
+  | 'settled'
+  /** A settled receipt from a toss made here: the coin flies first. */
+  | 'tossed'
+  /** The coin's flight ended, or Skip. */
+  | 'landed'
+  /** The result is not confirmed: only Check result or Retry may follow. */
+  | 'uncertain'
+  /** Flip again, Choose cards or Choose amount from a result. */
+  | 'restake';
+
+// Every entry is a setPhase call site in CoinFlipClient, and the from-phases
+// are the ones its guards (busy, `locked`, the paused history) let through, so
+// an unlisted pair is one no reachable code path produces. coinFlipNext holds
+// the phase for those rather than throwing: a late event must never strand a
+// staked flip without its receipt.
+//
+// Two rows look surprising and are not:
+//   confirm --open--> loading   the confirm sheet covers the history, but the
+//                               page set 'loading' unconditionally before this
+//                               table, so the row stays in case focus escapes.
+//   armed --open--> loading     the history stays live while armed; opening a
+//                               row drops the armed quote, as it always did.
+// submitting and animating accept only their own outcomes: a toss in the air
+// cannot be interrupted (busy, and the history pauses).
+const COIN_FLIP_TRANSITIONS: Record<
+  CoinFlipPhase,
+  Partial<Record<CoinFlipEvent, CoinFlipPhase>>
+> = {
+  loading: {
+    ready: 'idle',
+    open: 'loading',
+    settled: 'result',
+    uncertain: 'recovering',
+    missing: 'idle',
+  },
+  idle: { review: 'quoting', open: 'loading' },
+  quoting: { quoted: 'confirm', refused: 'idle' },
+  confirm: { arm: 'armed', cancel: 'idle', open: 'loading' },
+  armed: { toss: 'submitting', cancel: 'idle', open: 'loading' },
+  submitting: {
+    tossed: 'animating',
+    settled: 'result',
+    refused: 'idle',
+    uncertain: 'recovering',
+  },
+  recovering: { retry: 'submitting', open: 'loading' },
+  animating: { landed: 'result' },
+  result: { restake: 'idle', open: 'loading' },
+};
+
+/** The phase `event` leads to from `from`, or `from` unchanged when the pair is
+ *  not a legal transition. Apply it through a functional state update
+ *  (`setPhase((p) => coinFlipNext(p, 'quoted'))`). */
+export function coinFlipNext(
+  from: CoinFlipPhase,
+  event: CoinFlipEvent,
+): CoinFlipPhase {
+  return COIN_FLIP_TRANSITIONS[from][event] ?? from;
+}
