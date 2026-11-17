@@ -252,6 +252,17 @@ and a refusal raised before sending refund at once; any other refusal is first
 checked with the gateway, and what it cannot confirm waits for the sweep.
 _Avoid_: reading a gateway's own error codes outside its adapter
 
+**Withdrawal lifecycle**:
+The only code that writes a Withdrawal row after it is inserted
+(`modules/packs/withdrawal-lifecycle.ts`, sealed by a source-scan spec). Its
+transitions: `claimHeldWithdrawal` (admin approve or deny, under the
+customer's credit lock), `settleWithdrawal` (pending to settled),
+`failWithdrawal` (to failed), and the stamps that never move status
+(`stampPendingWithdrawal`, `stampWithdrawalAudit`). Every status change is a
+conditional claim that answers whether this caller moved the row.
+_Avoid_: `updateGatewayWithdrawals({ selector, data })` for a status change
+(a find-then-write with no row lock)
+
 **Payout Destination**:
 A customer's saved bank account for Withdrawals. Adding one starts a
 `PAYOUT_DESTINATION_COOLDOWN_HOURS` cooling-off window (default 24h; `0` is

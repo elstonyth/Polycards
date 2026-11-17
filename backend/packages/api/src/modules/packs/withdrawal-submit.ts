@@ -10,6 +10,7 @@ import {
 import { classifyRequeryError } from './gateway-reconcile';
 import { alertPayoutDisabled, alertPayoutFloatEmpty } from './ops-alert';
 import type { RowFx } from './payment-fx';
+import { stampPendingWithdrawal } from './withdrawal-lifecycle';
 import { refundWithdrawal } from './withdrawal-refund';
 
 // Withdrawal Submit: the one submit -> judge -> refund-or-wait path shared by
@@ -168,10 +169,7 @@ export async function withdrawalSubmit(
         ...reasonFields,
       });
       if (held) {
-        await packs.updateGatewayWithdrawals({
-          selector: { id: row.id, status: 'pending' },
-          data: held,
-        });
+        await stampPendingWithdrawal(packs, row.id, held);
       }
     }
     return { kind: 'waiting', error };
@@ -182,9 +180,8 @@ export async function withdrawalSubmit(
   // flight (refunded and closed it 'failed'), an unscoped write would land a
   // gateway id on a refunded row, the one shape that makes a later reader
   // believe the money went out. A silent no-op otherwise.
-  await packs.updateGatewayWithdrawals({
-    selector: { id: row.id, status: 'pending' },
-    data: { gateway_transaction_id: result.transactionId },
+  await stampPendingWithdrawal(packs, row.id, {
+    gateway_transaction_id: result.transactionId,
   });
   return { kind: 'submitted', transactionId: result.transactionId };
 }

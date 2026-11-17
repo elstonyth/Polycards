@@ -19,6 +19,7 @@ import {
   refundWithdrawal,
 } from '../../modules/packs/gateway-withdrawal';
 import { alertOps } from '../../modules/packs/ops-alert';
+import { stampWithdrawalAudit } from '../../modules/packs/withdrawal-lifecycle';
 import {
   stampNote,
   withdrawalAuditNote,
@@ -306,8 +307,7 @@ export function tgpayWithdrawalCallback(kind: TgpayKind): Handler {
         // Best-effort: the gateway still gets its 200 either way.
         try {
           const paid = Number(data.amount);
-          await packs.updateGatewayWithdrawals({
-            id: withdrawal.id,
+          await stampWithdrawalAudit(packs, withdrawal.id, {
             audited_at: new Date(),
             ...stampNote(
               withdrawal,

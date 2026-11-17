@@ -229,10 +229,8 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
     await withdrawalReconcileJob(h.container);
 
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: 'failed' }),
-      }),
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'failed' }),
     );
   });
 
@@ -264,10 +262,11 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
     await withdrawalReconcileJob(h.container);
 
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-      selector: { id: pendingRow.id, status: 'pending' },
-      data: {
-        status: 'failed',
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+      id: pendingRow.id,
+      from: ['pending'],
+      to: 'failed',
+      set: {
         gateway_status: null,
         failure_reason: 'sweep: requery said reject',
       },
@@ -284,10 +283,11 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
     await withdrawalReconcileJob(h.container);
 
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-      selector: { id: pendingRow.id, status: 'pending' },
-      data: {
-        status: 'failed',
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+      id: pendingRow.id,
+      from: ['pending'],
+      to: 'failed',
+      set: {
         gateway_status: 5,
         failure_reason: 'sweep: requery said FAIL (statusId 5)',
       },
@@ -515,15 +515,17 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
         gatewayRef: approvedThenAmbiguousRow.merchant_transaction_id,
       },
     });
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledTimes(1);
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-      selector: { id: approvedThenAmbiguousRow.id, status: 'pending' },
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledTimes(1);
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+      id: approvedThenAmbiguousRow.id,
+      from: ['pending'],
+      to: 'failed',
       // classifyRequeryError's not-found branch never sets gatewayStatus —
       // the row was never heard of, so there is no gateway status to record.
       // Plan 095: the sweep records WHICH verdict closed the row — a stale
       // payout with no gateway record reads differently from a requeried fail.
-      data: {
-        status: 'failed',
+      set: {
         gateway_status: null,
         failure_reason: 'sweep: stale with no gateway record',
       },
@@ -549,7 +551,7 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
     // that will ever re-run this branch for a held row's future deny
     // caller, so the email has to go out first.
     expect(receipt.mock.invocationCallOrder[0]).toBeLessThan(
-      h.packs.updateGatewayWithdrawals.mock.invocationCallOrder[0],
+      h.packs.claimWithdrawalStatus.mock.invocationCallOrder[0],
     );
   });
 });
@@ -704,5 +706,39 @@ describe('with new payouts switched off', () => {
     const h = harness();
     await withdrawalReconcileJob(h.container);
     expect(h.packs.listGatewayWithdrawals).not.toHaveBeenCalled();
+  });
+});
+
+// A stale row whose debit never landed is closed without a refund. The close
+// is a claim from 'pending' (withdrawal-lifecycle.ts): a callback that moved
+// the row after the sweep read it wins, and the sweep then reports nothing.
+describe('withdrawal sweep — a stale row with no debit', () => {
+  const notFound = () =>
+    new GatewayError('Not found', [], 404, true, { result: 'not-found' });
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])('claim won=%s: closes failed without a refund', async (won, logs) => {
+    const h = harness();
+    h.packs.listCreditTransactions.mockResolvedValue([]);
+    h.packs.claimWithdrawalStatus.mockResolvedValue(won);
+    fakeGateway.script({ getWithdrawalDetail: notFound() });
+
+    await withdrawalReconcileJob(h.container);
+
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+      id: 'gpw_1',
+      from: ['pending'],
+      to: 'failed',
+      set: { gateway_status: null },
+    });
+    expect(
+      h.logger.warn.mock.calls.filter(([m]) =>
+        /closed PW-1 without a refund/.test(String(m)),
+      ),
+    ).toHaveLength(logs);
   });
 });

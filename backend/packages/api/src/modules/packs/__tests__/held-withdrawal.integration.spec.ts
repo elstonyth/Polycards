@@ -85,6 +85,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
      */
     let called: string[] = [];
     let withdrawalUpdates: unknown[][] = [];
+    let statusClaims: { from: readonly string[] }[] = [];
 
     const logger = {
       info: (m: string) => logged.push(m),
@@ -102,6 +103,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           called.push(prop);
           if (prop === 'updateGatewayWithdrawals') {
             withdrawalUpdates.push(args);
+          }
+          if (prop === 'claimWithdrawalStatus') {
+            statusClaims.push(args[0] as { from: readonly string[] });
           }
           return (value as (...a: unknown[]) => unknown).apply(target, args);
         };
@@ -1013,7 +1017,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
      * The proxy also records generated-update arguments: a redundant
      * same-status write would escape final-row assertions. Successful approve
      * must update only the provider reference after the locked claim; refund
-     * paths legitimately write a terminal status through the generated method.
+     * paths close the row with a claim from 'failed' (withdrawal-lifecycle.ts).
      */
     describe('the debit decision never happens outside the lock', () => {
       it.each([
@@ -1040,6 +1044,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           // holds the operation's own calls alone.
           called = [];
           withdrawalUpdates = [];
+          statusClaims = [];
 
           await run(row.id);
 
@@ -1050,7 +1055,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
             called.filter((c) => c === 'claimWithdrawalAgainstDebit'),
           ).toHaveLength(1);
           expect(called).not.toContain('listCreditTransactions');
-          expect(called).not.toContain('claimWithdrawalStatus');
+          // A refund's close claims the row from 'failed' (the status the
+          // locked claim left it in); nothing claims a 'held' row bare.
+          expect(statusClaims.flatMap((c) => c.from)).not.toContain('held');
           if (_name === 'submitHeldWithdrawal') {
             expect(withdrawalUpdates).toHaveLength(1);
             const [update] = withdrawalUpdates[0] as [{ data: unknown }];

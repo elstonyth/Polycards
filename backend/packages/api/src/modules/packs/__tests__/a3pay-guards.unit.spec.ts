@@ -488,6 +488,7 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
       updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+      claimWithdrawalStatus: jest.fn().mockResolvedValue(true),
       withdrawForCashout: jest.fn().mockResolvedValue({
         id: 'ct_1',
         balance: 0,
