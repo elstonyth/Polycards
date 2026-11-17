@@ -20,7 +20,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'The welcome pack',
-    body: 'The free welcome pack is one per person or household. To claim it, verify your phone number, add your real name and add your bank account. If someone in your household has already claimed it, another account cannot claim it.',
+    body: 'The free welcome pack is one per person or household. To claim it, verify your phone number, add your real name and add your bank account. Our fraud detection checks every claim. If it flags an account, for example because someone in the same household has already claimed the pack, that account cannot claim it. If you think this is a mistake, contact customer service.',
   },
   {
     title: 'Withdrawing',
