@@ -54,15 +54,19 @@ export function holderUnlikeSaved(
   holderName: string,
 ): boolean {
   if (findBank(bankCode)?.wallet) return false;
-  // A name saved before this key with no English letters keys empty; it keeps
-  // its old key, so its owner is still held to it rather than let off.
-  const key = (n: string) => holderNameKey(n) || realNameKey(n);
   const savedNames = accounts
     .filter((a) => !findBank(a.bankCode)?.wallet)
-    .map((a) => key(a.accountHolderName ?? ''))
+    .map((a) => holderMatchKey(a.accountHolderName ?? ''))
     .filter(Boolean);
-  return savedNames.length > 0 && !savedNames.includes(key(holderName));
+  return savedNames.length > 0 && !savedNames.includes(holderMatchKey(holderName));
 }
+
+/** The key a saved holder name and a real name are matched by: holderNameKey.
+ *  A name saved before that key with no English letters keys empty; it keeps
+ *  its old key (realNameKey), so its owner is still held to it rather than let
+ *  off. */
+export const holderMatchKey = (name: string): string =>
+  holderNameKey(name) || realNameKey(name);
 
 export const ONE_BANK_ACCOUNT_MESSAGE =
   'Your Polycards account already has a bank account for this currency. It cannot be changed.';
@@ -84,18 +88,31 @@ export const BANNED_PAYOUT_ACCOUNT_MESSAGE =
  *  its own message; lifting one clears the saved banks (liftPermanentBan). */
 export const PERMANENT_BAN_REASON_PREFIX = 'Permanent ban:';
 
-export const HOLDER_NAME_CONFIRM_MESSAGE =
-  'The two names do not match. Type the same name twice.';
-
 /** A different bank under a name another account already used (owner,
  *  2026-11-03). */
 export const HOLDER_NAME_LINKED_MESSAGE =
   'This name is already linked to another Polycards account. If you are a different person with the same name, contact support.';
 
 /** A bank or Touch 'n Go under another name than the one already saved on
- *  this account (owner, 2026-11-03): one account, one person, one name. */
+ *  this account (owner, 2026-11-03): one account, one person, one name. Since
+ *  2026-11-16 a new bank carries the real name, so only an older saved bank in
+ *  another name refuses it. */
 export const HOLDER_NAME_DIFFERENT_MESSAGE =
-  'Use the same account holder name as your saved bank account. All bank accounts on one Polycards account must be in one name. If your banks spell your name differently, contact support.';
+  'Your saved bank account is in another name than your real name. All bank accounts on one Polycards account must be in one name. Contact support.';
+
+/** A bank is saved in the account's real name (owner, 2026-11-16), and this
+ *  account has none yet. */
+export const REAL_NAME_NEEDED_MESSAGE =
+  'Bank accounts are paid to your real name, and there is none on your account yet. Add your real name in Settings first. If you cannot, contact support.';
+
+/** The real name is in another script than English letters, which no bank
+ *  holder name may be. Support corrects the real name. */
+export const REAL_NAME_NOT_HOLDER_MESSAGE =
+  'Your real name on file is not in English letters, so a bank account cannot be paid to it. Contact support to correct it to the name your bank shows.';
+
+// Support corrected the real name while the save ran (read before the lock).
+export const REAL_NAME_CHANGED_MESSAGE =
+  'Your real name on file changed while this bank account was being saved, so it was not saved. Try again.';
 
 export const HOLDER_NAME_INVALID_MESSAGE =
   'Enter the account holder name in English letters, exactly as your bank shows it.';
@@ -159,20 +176,14 @@ export function holderNameInvalid(name: string): boolean {
   );
 }
 
-/** A customer types a bank's holder name twice, and the two must match (owner,
- *  2026-11-03): a name that differs from the bank's is never paid out. A wallet
+/** The holder name a bank is saved under: the account's real name, as a
+ *  holder name is stored (owner, 2026-11-16: one name per account, never
+ *  typed). null when there is no real name, or it is not in English letters,
+ *  which no holder name may be: support corrects the real name then. A wallet
  *  has no holder. */
-export function holderConfirmMismatch(args: {
-  bank: Bank;
-  holderName: string;
-  holderConfirm: unknown;
-}): boolean {
-  if (args.bank.wallet) return false;
-  const typed = (s: string) => normalizeHolderName(s).toLowerCase();
-  return (
-    typeof args.holderConfirm !== 'string' ||
-    typed(args.holderConfirm) !== typed(args.holderName)
-  );
+export function realNameHolder(realName: string | null): string | null {
+  const name = normalizeHolderName(realName ?? '');
+  return name && !holderNameInvalid(name) ? name : null;
 }
 
 /** How banned numbers are stored and matched: digits without leading zeros for a

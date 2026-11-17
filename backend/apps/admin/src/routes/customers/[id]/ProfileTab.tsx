@@ -623,22 +623,15 @@ const SavedBankAccountsCard = ({
               })),
             },
             { key: 'account_number', label: t('players.savedBankNumber') },
-            { key: 'account_holder_name', label: t('players.savedBankHolder') },
             { key: 'reason', label: t('players.savedBankReason') },
           ]}
           busy={add.isPending}
           onClose={() => setDialog(null)}
-          onSubmit={({
-            bank_code,
-            account_number,
-            account_holder_name,
-            reason,
-          }) =>
+          onSubmit={({ bank_code, account_number, reason }) =>
             add.mutate(
               {
                 bank_code: bank_code as string,
                 account_number: account_number as string,
-                account_holder_name: account_holder_name as string,
                 reason: reason as string,
               },
               { onSuccess: () => setDialog(null) },

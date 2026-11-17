@@ -81,7 +81,8 @@ The owner tightened the rule after the farm rings were listed:
 - **One name.** A bank holder name another account already used, saved or paid, is
   refused at save at any bank. Names compare as real names do. Wallets have no holder.
 - **Typed twice.** A bank's holder name is typed twice and both must match. A name that
-  differs from the bank's is not paid out.
+  differs from the bank's is not paid out. (Replaced 2026-11-16: the holder is the
+  real name, below.)
 - **One account per currency**, replacing one account in total: one RM bank, one SGD
   bank, one USDT wallet (`bankCurrency`, fixed per bank so a gateway switch never
   moves it). Touch 'n Go has its own slot beside the RM bank (owner, 2026-11-03;
@@ -91,7 +92,8 @@ The owner tightened the rule after the farm rings were listed:
 - **Same name on every bank** (owner, 2026-11-03). A bank or Touch 'n Go saved
   beside another carries a holder name already saved on that account, compared as
   real names are. A wallet has none. Support's add is the way past it for a name
-  two banks spell differently, and the refusal says to contact support.
+  two banks spell differently, and the refusal says to contact support. (Since
+  2026-11-16 support's add saves in the real name too, below.)
 - **Unbanning a number** (owner, 2026-11-04). Support unbans a banned number for ONE
   player, from the player page or the admin assistant (policy `assistant_unban`):
   that player may save it and be paid to it, and it stays banned for every other
@@ -126,3 +128,44 @@ The owner tightened the rule after the farm rings were listed:
 
 Accepted: two real people with one name, or a name a ring account used first, go
 through support. A banned account's balance and vault stay locked.
+
+## Amendment, 2026-11-16: the holder name is the real name
+
+Each account held two names that were never compared: the real name, typed once after
+signup, and a bank's holder name, typed twice per bank. A farm ring was paid to banks
+in other people's names. The owner decided on one name per account:
+
+- **The holder is the real name.** A bank or Touch 'n Go is saved in the account's
+  real name (`customer_account_state.real_name`), never in a typed one. The save form
+  shows it read-only as the payee. A page from before this change still sends a holder
+  name; it is accepted and dropped. A wallet has no holder, as before.
+- **No real name, no bank.** With no real name on file, or one not in English letters
+  (`holderNameInvalid`, as for any holder name), the save is refused and tells the
+  customer to contact support. Support corrects the real name.
+- **Support's add has no override.** It saves in the real name too, with no typed
+  holder. To fix a spelling, support corrects the real name first. The ban list, the
+  refusal while another account is verified on the number, and the owner's notice
+  stay. This replaces "support's add is the way past it" above.
+- **A correction carries to the banks.** When support corrects a real name, every
+  saved bank whose holder keys as the old name (`holderMatchKey`) takes the new name,
+  in the same transaction and audit row (bank, last 4, holder before and after). A
+  bank in any other name is left as it is. A new name not in English letters is
+  refused while a bank would carry it. The `metadata:` lock is taken before
+  `credit:`, the order lifting a ban uses, so the two cannot deadlock.
+- **Admin lookup finds every name.** The players search also matches a real name, a
+  saved bank's holder or a payout's holder, compared whole by both name keys
+  (`realNameKeySql` and `holderNameKeySql`), and adds them to the text matches.
+
+Not changed:
+
+- Holders on banks saved before this change: no migration. A saved bank in another
+  name than the real name is being reviewed separately, and the owner decides its
+  withdraw behaviour afterwards. Until then the one-name-on-every-bank rule refuses
+  a new bank beside it, and support's add is the way past that.
+- Withdrawals and their approval, payout rows and `player_payout_details`.
+- `realNameKeySql`, which an index is built on.
+- A name support cleared as two people (`holder_name_cleared`) is keyed by that name,
+  so after a correction it does not cover the new name.
+
+Accepted: a real name spelled unlike the customer's SGD bank can now fail A3Pay's
+payer-name check (`payer-name.ts`). Support fixes it by correcting the real name.

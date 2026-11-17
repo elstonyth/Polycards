@@ -2,10 +2,12 @@ import { MedusaError } from '@medusajs/framework/utils';
 import {
   HOLDER_NAME_CLEARED_KEY,
   clearedHolderNames,
+  holderMatchKey,
   holderNameInvalid,
   holderNameKey,
   holderUnlikeSaved,
   payoutDestinationCooldownHours,
+  realNameHolder,
   resolveWithdrawalDestination,
   savedBankAccountId,
   type SavedBankAccount,
@@ -323,5 +325,29 @@ describe('holder names compare by their letters', () => {
       'cus_2',
       'cus_3',
     ]);
+  });
+});
+
+// One name per account (owner, 2026-11-16): a bank's holder IS the real name.
+describe('realNameHolder — the real name as a bank holder', () => {
+  it('stores the real name as a holder name is stored', () => {
+    expect(realNameHolder('  Tan​ Ah  Kow ')).toBe('Tan Ah Kow');
+    expect(realNameHolder("Siti Aminah binti Abu")).toBe('Siti Aminah binti Abu');
+  });
+
+  it('none when there is no real name, or it is not in English letters', () => {
+    expect(realNameHolder(null)).toBeNull();
+    expect(realNameHolder('')).toBeNull();
+    expect(realNameHolder('陈大文')).toBeNull();
+    expect(realNameHolder('Иван Петров')).toBeNull();
+  });
+});
+
+describe('holderMatchKey — one key for holder and real names', () => {
+  it('compares by letters, and a name with none by its old key', () => {
+    expect(holderMatchKey('TAN AH-KOW (1)')).toBe(holderMatchKey('Tan Ah Kow'));
+    expect(holderMatchKey('陈大文')).toBe('陈大文');
+    expect(holderMatchKey('陈大文')).not.toBe(holderMatchKey('陈小文'));
+    expect(holderMatchKey('')).toBe('');
   });
 });

@@ -456,6 +456,92 @@ describe('bank_save_check', () => {
     expect(out.fixes.join(' ')).toMatch(/would be refused/);
   });
 
+  // One name per account (owner, 2026-11-16): a bank is saved in the real
+  // name on file, never a typed or saved one.
+  describe('the holder is the real name', () => {
+    const check = async (args: Record<string, unknown> = {}) =>
+      JSON.parse(
+        await run(
+          'bank_save_check',
+          { username: 'Test Player', last4: '0001', ...args },
+          'check Test Player 0001',
+        ).done,
+      );
+
+    beforeEach(() => {
+      packs.payoutNumberStanding.mockResolvedValue(standing([]));
+      packs.payoutNameStanding.mockResolvedValue(nameHeldBy([]));
+    });
+
+    it('checks the real name, never a holder name the model passes', async () => {
+      const out = await check({ holder_name: 'Someone Else' });
+      expect(packs.payoutNameStanding).toHaveBeenCalledWith('cus_x', 'Tan Ah Kow');
+      expect(out).toMatchObject({
+        can_save: true,
+        name: { checked: 'the real name on file', format_ok: true },
+      });
+      expect(tool('bank_save_check').parameters).not.toHaveProperty(
+        'properties.holder_name',
+      );
+    });
+
+    it('no real name on file blocks the save, and says who fixes it', async () => {
+      realName = null;
+      const out = await check();
+      expect(out.can_save).toBe(false);
+      expect(out.name).toMatchObject({ on_file: false, blocks_save: true });
+      expect(out.fixes.join(' ')).toMatch(/no real name on file.*Settings/);
+      expect(packs.payoutNameStanding).not.toHaveBeenCalled();
+    });
+
+    it('a real name not in English letters blocks the save: support corrects it', async () => {
+      realName = '陈大文';
+      const out = await check();
+      expect(out.can_save).toBe(false);
+      expect(out.name).toMatchObject({ on_file: true, format_ok: false });
+      expect(out.fixes.join(' ')).toMatch(/not in English letters.*corrects the real name/);
+      expect(JSON.stringify(out)).not.toContain('陈大文');
+    });
+
+    it('a wallet needs no real name, as the save asks none', async () => {
+      realName = null;
+      const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+      packs.payoutNumberStanding.mockResolvedValue(
+        standing([], { bankId: 'USDTTRC20', key: TRON, forms: [TRON] }),
+      );
+      const out = JSON.parse(
+        await run(
+          'bank_save_check',
+          { username: 'Test Player', bank: 'USDT TRC20', bank_account: TRON },
+          `check Test Player USDT TRC20 ${TRON}`,
+        ).done,
+      );
+      expect(out.name).toBe('not needed: a wallet has no holder');
+      expect(out.fixes.join(' ')).not.toMatch(/real name/);
+      expect(packs.payoutNameStanding).not.toHaveBeenCalled();
+    });
+
+    it('a saved bank in another name than the real name refuses the save', async () => {
+      metadata = {
+        bank_accounts: [
+          {
+            id: 'b2',
+            bankCode: 'TNGMY',
+            bankName: "Touch 'n Go eWallet",
+            accountNumber: '120000000001',
+            accountHolderName: 'Lim Ah Lian',
+            savedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      };
+      const out = await check();
+      expect(packs.payoutNameStanding).toHaveBeenCalledWith('cus_x', 'Tan Ah Kow');
+      expect(out.can_save).toBe(false);
+      expect(out.fixes.join(' ')).toMatch(/another name than the real name/);
+      expect(JSON.stringify(out)).not.toMatch(/lim ah lian/i);
+    });
+  });
+
   it('an admin-only fix says so to the Support viewer', async () => {
     const support = {
       userId: 'user_2',

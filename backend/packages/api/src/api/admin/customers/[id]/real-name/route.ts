@@ -18,7 +18,9 @@ type Body = { real_name?: unknown; reason?: unknown };
 // it themselves (store/customers/me/real-name); this is the only other writer.
 // Same validation as the customer's write, a mandatory reason, and an audit row
 // in the same transaction. admin_id comes from the verified auth_context, never
-// the body; admin routes are framework-auth-protected.
+// the body; admin routes are framework-auth-protected. A saved bank's holder is
+// the real name (owner, 2026-11-16), so adminSetRealName carries the correction
+// to the saved banks in the old name, and refuses a name a bank cannot carry.
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
   res: MedusaResponse,

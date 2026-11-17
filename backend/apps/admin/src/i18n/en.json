@@ -1097,7 +1097,7 @@
     "savedBankNameUnclear": "Take back",
     "savedBankNameUnclearTitle": "Take back the shared name",
     "savedBankNameUnclearBody": "{{name}} counts as another account's again for this player's new saves. Banks already saved stay.",
-    "savedBankAddBody": "Only after you have checked that it belongs to them. If another account holds the number, this verifies it for this player. The name may differ from their other banks (a spelling their banks differ on): it is not checked, so check it against the bank's own record. They are told, and it starts the usual wait before first use.",
+    "savedBankAddBody": "Only after you have checked that it belongs to them. It is saved in the player's real name, so the bank account must be in that name: to fix a spelling, correct the real name first. If another account holds the number, this verifies it for this player. They are told, and it starts the usual wait before first use.",
     "savedBankChooseBank": "Bank",
     "savedBankChoose": "Choose a bank",
     "savedBankNumber": "Account number",

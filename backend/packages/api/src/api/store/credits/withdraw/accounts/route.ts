@@ -21,20 +21,20 @@ import {
 import {
   BANK_ACCOUNT_LOCKED_MESSAGE,
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
-  HOLDER_NAME_CONFIRM_MESSAGE,
   HOLDER_NAME_DIFFERENT_MESSAGE,
-  HOLDER_NAME_INVALID_MESSAGE,
   HOLDER_NAME_LINKED_MESSAGE,
   MAX_SAVED_BANK_ACCOUNTS,
   ONE_BANK_ACCOUNT_MESSAGE,
   ONE_TNG_ACCOUNT_MESSAGE,
+  REAL_NAME_CHANGED_MESSAGE,
+  REAL_NAME_NEEDED_MESSAGE,
+  REAL_NAME_NOT_HOLDER_MESSAGE,
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   SHARED_SAVE_MESSAGE,
-  holderConfirmMismatch,
-  holderNameInvalid,
+  holderMatchKey,
   newSavedBankAccount,
-  normalizeHolderName,
   parseSavedBankAccounts,
+  realNameHolder,
   savedBankAccountId,
   savedBankAccountViews,
   verifiedBankAccounts,
@@ -244,19 +244,39 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const customerId = requireCustomerId(req.auth_context.actor_id);
+  // Pages from before 2026-11-16 still send account_holder_name and
+  // account_holder_name_confirm: accepted, and never read.
   const body = (req.body ?? {}) as {
     bank_code?: unknown;
     account_number?: unknown;
-    account_holder_name?: unknown;
-    account_holder_name_confirm?: unknown;
   };
+  const packs = resolvePacks<CustomerWallet>(req.scope);
+
+  // One name per account (owner, 2026-11-16): a bank's holder IS the account's
+  // real name, never typed. No real name, or one not in English letters, and
+  // no bank can be saved: support corrects the real name. A wallet has no
+  // holder, so it never asks.
+  const picked =
+    typeof body.bank_code === 'string' ? findBank(body.bank_code) : undefined;
+  let holderName = '';
+  if (picked && !picked.wallet) {
+    const { realName } = await packs.getVerificationState(customerId);
+    const holder = realNameHolder(realName);
+    if (!holder) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        realName?.trim() ? REAL_NAME_NOT_HOLDER_MESSAGE : REAL_NAME_NEEDED_MESSAGE,
+      );
+    }
+    holderName = holder;
+  }
 
   // Same gate as the payout submit, so the saved list can never hold an
   // account the withdraw path would refuse.
   const invalid = withdrawalDetailsError({
     bankCode: body.bank_code,
     accountNumber: body.account_number,
-    accountHolderName: body.account_holder_name,
+    accountHolderName: holderName,
   });
   if (invalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
@@ -278,28 +298,9 @@ export async function POST(
   const account = newSavedBankAccount(
     bank,
     body.account_number as string,
-    normalizeHolderName((body.account_holder_name as string | undefined) ?? ''),
+    holderName,
   );
   const { accountNumber, bankCode } = account;
-  if (
-    holderConfirmMismatch({
-      bank,
-      holderName: account.accountHolderName,
-      holderConfirm: body.account_holder_name_confirm,
-    })
-  ) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      HOLDER_NAME_CONFIRM_MESSAGE,
-    );
-  }
-  if (!bank.wallet && holderNameInvalid(account.accountHolderName)) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      HOLDER_NAME_INVALID_MESSAGE,
-    );
-  }
-  const packs = resolvePacks<CustomerWallet>(req.scope);
   // Every spelling (a PayNow mobile with or without its 65), at this bank.
   const destination = { bankCode, accountNumber };
   const number = await packs.payoutNumberStanding(customerId, destination);
@@ -370,7 +371,7 @@ export async function POST(
   // this handler read earlier — otherwise two concurrent saves could both see
   // MAX-1 accounts and both be allowed through.
   let added = false;
-  const saved = await mutateAccounts(req, customerId, (accounts) => {
+  let saved = await mutateAccounts(req, customerId, (accounts) => {
     const { alreadySaved, blocks } = verdict(number, accounts);
     // Already theirs: nothing to do. A saved account cannot be changed, its
     // holder name included, and keeps its original savedAt, so a re-save restarts
@@ -384,7 +385,8 @@ export async function POST(
           : ONE_BANK_ACCOUNT_MESSAGE,
       );
     }
-    // One name on every bank (holderUnlikeSaved).
+    // One name on every bank (holderUnlikeSaved): an older saved bank in
+    // another name than the real name.
     if (blocks.includes('name_unlike_saved')) {
       // Logged like the other refusals, so repeated tries show up. No name.
       req.scope
@@ -401,6 +403,32 @@ export async function POST(
     added = true;
     return [...accounts, account];
   });
+  // The real name was read before the lock, so support may have corrected it
+  // since. Read it again: a bank left in the old name comes back off. One the
+  // correction already carried to the new name stays.
+  if (added && holderName) {
+    const now = realNameHolder(
+      (await packs.getVerificationState(customerId)).realName,
+    );
+    const nowKey = now ? holderMatchKey(now) : '';
+    if (nowKey !== holderMatchKey(holderName)) {
+      let kept = false;
+      saved = await mutateAccounts(req, customerId, (accounts) => {
+        const entry = accounts.find((a) => a.id === account.id);
+        kept =
+          !!entry &&
+          nowKey !== '' &&
+          holderMatchKey(entry.accountHolderName) === nowKey;
+        return kept ? null : accounts.filter((a) => a.id !== account.id);
+      });
+      if (!kept) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          REAL_NAME_CHANGED_MESSAGE,
+        );
+      }
+    }
+  }
   // The name and number lookups read other customers, which this customer's
   // lock does not cover, so two accounts saving one name or one number at once
   // both pass them. Look again now the save is visible: a racer takes its entry

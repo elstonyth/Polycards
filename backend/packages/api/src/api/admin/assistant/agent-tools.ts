@@ -30,6 +30,7 @@ import {
   parseSavedBankAccounts,
   payoutAccountKey,
   PERMANENT_BAN_REASON_PREFIX,
+  realNameHolder,
   savedSlotFull,
 } from '../../../modules/packs/saved-accounts';
 import {
@@ -642,17 +643,12 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: 'bank_save_check',
     label: 'Why a bank save is refused',
     description:
-      "Check, the way the app checks a player's own save, why a player cannot add (save, link) a bank account, and what fixes each block (owner, 2026-11-04). Use it whenever staff say a player cannot add a bank or is refused, before proposing unban_bank_number, free_bank_number or clear_name_clash, and again when staff say they tapped one, to confirm it worked. Give the player (shown name or profile handle; '@name' means the handle), the bank, and the number's last 4, or the full number if staff pasted it (in this chat; pass it again to re-check); holder_name only if staff typed the name the player saves under (otherwise the name on their saved bank, then the real name on file, is used). `fixes` lists each block with the tool that fixes it, in order; `unchecked` what it could not check. can_save true means nothing blocks, false that something does, null that a part was not checked. Explain it in plain words; never repeat a full number or a holder name back.",
+      "Check, the way the app checks a player's own save, why a player cannot add (save, link) a bank account, and what fixes each block (owner, 2026-11-04). Use it whenever staff say a player cannot add a bank or is refused, before proposing unban_bank_number, free_bank_number or clear_name_clash, and again when staff say they tapped one, to confirm it worked. Give the player (shown name or profile handle; '@name' means the handle), the bank, and the number's last 4, or the full number if staff pasted it (in this chat; pass it again to re-check). A bank is always saved in the player's real name on file (owner, 2026-11-16: one name per account, never typed), so that is the name checked; to fix a spelling, support corrects the real name first. `fixes` lists each block with the tool that fixes it, in order; `unchecked` what it could not check. can_save true means nothing blocks, false that something does, null that a part was not checked. Explain it in plain words; never repeat a full number or a holder name back.",
     parameters: {
       type: 'object',
       properties: {
         username: PLAYER_ARG,
         ...NUMBER_ARGS,
-        holder_name: {
-          type: 'string',
-          description:
-            'The holder name the player saves under, only when staff typed it.',
-        },
       },
       required: ['username'],
       additionalProperties: false,
@@ -691,14 +687,14 @@ export const AGENT_TOOLS: AgentTool[] = [
           last4: a.accountNumber.slice(-4),
         })),
       };
-      const holder = await holderNameFor(
-        ctx,
-        customerId,
-        args,
-        me.metadata,
-        false,
-        again,
+      // The save's own holder: the real name on file, never a typed one.
+      const [state] = await packs.listCustomerAccountStates(
+        { customer_id: customerId },
+        { select: ['real_name'], take: 1 },
       );
+      const realName = state?.real_name ?? null;
+      const holderName = realNameHolder(realName);
+      const holder = holderName ? { name: holderName } : null;
       let number: Awaited<ReturnType<typeof numberFor>> | null = null;
       if (digitsArg(args.last4) || digitsArg(args.bank_account)) {
         try {
@@ -784,7 +780,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           }
           if (holder && holderUnlikeSaved(saved, bank.id, holder.name)) {
             fixes.push(
-              'A different holder name is already saved on this account: a new bank must use it, or support adds the bank on the admin player page.',
+              'A bank already saved on this account is in another name than the real name, so the player\'s own save is refused: support adds the bank (in the real name) on the admin player page.',
             );
           }
           // Lengths and patterns per bank need the number as typed: a stored
@@ -800,27 +796,37 @@ export const AGENT_TOOLS: AgentTool[] = [
           if (invalid) fixes.push(`The save would be refused: ${invalid}`);
         }
       }
-      if (!holder) {
-        out.name = 'not checked';
-        unchecked.push(
-          'the holder name: none is saved or on file that a bank takes; ask staff for the name the player saves under',
+      // A wallet has no holder: the save asks for no name, so neither does this.
+      const wallet = Boolean(
+        number?.bankCode && findBank(number.bankCode)?.wallet,
+      );
+      if (wallet) {
+        out.name = 'not needed: a wallet has no holder';
+      } else if (!holder) {
+        fixes.push(
+          realName?.trim()
+            ? 'The real name on file is not in English letters, so no bank can be saved in it: support corrects the real name on the admin player page first.'
+            : 'The player has no real name on file, and a bank is saved in the real name: they add it in Settings, or support sets it on the admin player page.',
         );
+        out.name = {
+          checked: NAME_SOURCE.on_file,
+          on_file: Boolean(realName?.trim()),
+          format_ok: false,
+          blocks_save: true,
+        };
       } else {
         const name = await packs.payoutNameStanding(customerId, holder.name);
         const others = await whoAre(ctx, name.holders);
         const blocking = others.filter((o) => name.blocking.includes(o.id));
         out.name = {
-          checked: NAME_SOURCE[holder.source],
-          format_ok: !holderNameInvalid(holder.name),
+          checked: NAME_SOURCE.on_file,
+          format_ok: true,
           other_accounts: others.map((o) => ({
             account: o.label,
             cleared_for_this_player: !name.blocking.includes(o.id),
           })),
           blocks_save: blocking.length > 0,
         };
-        if (holderNameInvalid(holder.name)) {
-          fixes.push(`The name would be refused: ${HOLDER_NAME_INVALID_MESSAGE}`);
-        }
         if (blocking.length > 0) {
           const viaNumber = blocking.some((o) => numberHolders.includes(o.id));
           fixes.push(

@@ -5,6 +5,8 @@ import { createRoot, type Root } from 'react-dom/client';
 
 // The add-account form lists one country's payout banks at a time, picked by
 // flag, before accepting bank details. The backend supplies account lengths.
+// A bank is paid to the account's real name, shown and never typed (owner,
+// 2026-11-16).
 
 const fetchSavedBankAccounts = vi.fn();
 const fetchWithdrawBanks = vi.fn();
@@ -64,13 +66,16 @@ afterEach(() => {
   container.remove();
 });
 
-async function openAddForm(banks: unknown[]) {
+async function openAddForm(
+  banks: unknown[],
+  props: { realName?: string | null } = { realName: 'Test Customer' },
+) {
   fetchWithdrawBanks.mockResolvedValue({ ok: true, banks });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(BankAccountsClient));
+    root.render(createElement(BankAccountsClient, props));
   });
   const add = [...container.querySelectorAll('button')].find(
     (b) => b.textContent === 'Add bank account',
@@ -124,8 +129,6 @@ describe('BankAccountsClient — bank country', () => {
     ]);
     act(() => countryButton('Malaysia')!.click());
     setValue('Bank', 'SCBLMYKX');
-    setValue('Account holder name', 'Test Customer');
-    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '0012');
     expect(saveButton().disabled).toBe(true);
     setValue('Account number', '00123');
@@ -152,8 +155,6 @@ describe('BankAccountsClient — bank country', () => {
     ]);
     act(() => countryButton('Singapore')!.click());
     setValue('Bank', 'PAYNOWSG');
-    setValue('Account holder name', 'Test Customer');
-    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '0123456789');
     expect(saveButton().disabled).toBe(true);
     expect(
@@ -242,8 +243,6 @@ describe('BankAccountsClient — bank country', () => {
     await openAddForm([...MY, ...SG]);
     act(() => countryButton('Singapore')!.click());
     setValue('Bank', 'MBBESGSG');
-    setValue('Account holder name', 'Test Customer');
-    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '123456789012');
     expect(saveButton().disabled).toBe(true);
     expect(container.textContent).toContain(
@@ -273,8 +272,6 @@ describe('BankAccountsClient — bank country', () => {
     await openAddForm(MY);
     act(() => countryButton('Malaysia')!.click());
     setValue('Bank', 'MBB');
-    setValue('Account holder name', 'Test Customer');
-    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '12345678901');
     expect(saveButton().disabled).toBe(true);
     setValue('Account number', '123456789012');
@@ -291,8 +288,6 @@ describe('BankAccountsClient — bank country', () => {
     await openAddForm(MY);
     act(() => countryButton('Malaysia')!.click());
     setValue('Bank', 'CIMB');
-    setValue('Account holder name', 'Test Customer');
-    setValue('Confirm account holder name', 'Test Customer');
     for (const value of ['1234567890', '12345678901234']) {
       setValue('Account number', value);
       expect(saveButton().disabled).toBe(false);
@@ -319,8 +314,6 @@ describe('BankAccountsClient — bank country', () => {
     ]);
     act(() => countryButton('Singapore')!.click());
     setValue('Bank', 'HSBCSGSG');
-    setValue('Account holder name', 'Test Customer');
-    setValue('Confirm account holder name', 'Test Customer');
     setValue('Account number', '1234567890123456');
     expect(saveButton().disabled).toBe(false);
     expect(
@@ -348,7 +341,7 @@ describe('BankAccountsClient — a tied account', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(createElement(BankAccountsClient));
+      root.render(createElement(BankAccountsClient, { realName: 'Tan' }));
     });
   };
 
@@ -387,7 +380,7 @@ describe('BankAccountsClient — a tied account', () => {
     ) as HTMLButtonElement;
     await act(async () => add.click());
     expect(container.textContent).toContain('cannot be changed later');
-    expect(container.textContent).not.toContain('contact support');
+    expect(container.textContent).toContain('Paid to: Tan');
   });
 });
 
@@ -415,7 +408,9 @@ describe('BankAccountsClient — one account per currency', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(createElement(BankAccountsClient));
+      root.render(
+        createElement(BankAccountsClient, { realName: 'Test Customer' }),
+      );
     });
   };
   const addButton = () =>
@@ -489,23 +484,18 @@ describe('BankAccountsClient — one account per currency', () => {
     expect(bankOptions()).toEqual(['MBB', 'CIMB']);
   });
 
-  it('names the saved holder name when another bank is added', async () => {
+  it('a bank beside a saved one is paid to the real name too', async () => {
     await mountWith([saved('MBB', 'Maybank')], [...MY, TNG]);
     act(() => addButton()!.click());
     act(() => countryButton('Malaysia')!.click());
-    expect(container.textContent).toContain(
-      'Use the same name as your saved bank account: Test Customer.',
-    );
+    expect(container.textContent).toContain('Paid to: Test Customer');
   });
 
-  it('names no holder when only a wallet is saved', async () => {
-    await mountWith([WALLET], [...MY, TNG]);
+  it('a wallet shows no payee: it has no holder', async () => {
+    await mountWith([], [...MY, USDT]);
     act(() => addButton()!.click());
-    act(() => countryButton('Malaysia')!.click());
-    expect(container.textContent).toContain(
-      'Type the name exactly as your bank shows it.',
-    );
-    expect(container.textContent).not.toContain('Use the same name');
+    act(() => countryButton('USDT')!.click());
+    expect(container.textContent).not.toContain('Paid to');
   });
 
   it("offers no Add once the RM bank and Touch 'n Go are both saved", async () => {
@@ -517,63 +507,81 @@ describe('BankAccountsClient — one account per currency', () => {
   });
 });
 
-describe('BankAccountsClient — holder name typed twice', () => {
-  it('stays quiet while the second name is still being typed, and Cancel clears both', async () => {
-    await openAddForm(MY);
+describe('BankAccountsClient — paid to the real name', () => {
+  const ready = async (realName?: string | null) => {
+    await openAddForm(MY, { realName });
     act(() => countryButton('Malaysia')!.click());
     setValue('Bank', 'MBB');
-    setValue('Account holder name', 'Test Customer');
-    setValue('Confirm account holder name', 'test cus');
-    expect(container.textContent).not.toContain('The two names do not match');
-    expect(
-      container
-        .querySelector('[aria-label="Confirm account holder name"]')
-        ?.getAttribute('autocomplete'),
-    ).toBe('off');
-    const cancel = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent === 'Cancel',
-    )!;
-    act(() => cancel.click());
-    const add = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent === 'Add bank account',
-    )!;
-    act(() => add.click());
+    setValue('Account number', '123456789012');
+  };
+
+  it('shows the real name read-only and sends no holder name', async () => {
+    await ready('Test Customer');
+    expect(container.textContent).toContain('Paid to: Test Customer');
+    expect(container.textContent).toContain(
+      'The bank account must be in this name, or the withdrawal will not be paid. If the name is wrong, contact support.',
+    );
     for (const label of [
       'Account holder name',
       'Confirm account holder name',
     ]) {
       expect(
-        container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
-          .value,
-      ).toBe('');
+        container.querySelector('[aria-label="' + label + '"]'),
+      ).toBeNull();
     }
-  });
-
-  it('keeps Save off until both names match, then sends both', async () => {
-    await openAddForm(MY);
-    act(() => countryButton('Malaysia')!.click());
-    setValue('Bank', 'MBB');
-    setValue('Account number', '123456789012');
-    setValue('Account holder name', 'Test Customer');
-    expect(container.textContent).toContain(
-      'Type the name exactly as your bank shows it. If it does not match your bank, the withdrawal will not be paid, so check carefully.',
-    );
-    expect(saveButton().disabled).toBe(true);
-    setValue('Confirm account holder name', 'Test Custmer');
-    expect(saveButton().disabled).toBe(true);
-    expect(container.textContent).toContain(
-      'The two names do not match. Type the same name twice.',
-    );
-    // Case and spacing are not a mismatch.
-    setValue('Confirm account holder name', ' test  customer ');
     expect(saveButton().disabled).toBe(false);
     addSavedBankAccount.mockResolvedValue({ ok: true, accounts: [] });
     await act(async () => saveButton().click());
-    expect(addSavedBankAccount).toHaveBeenCalledWith(
-      expect.objectContaining({
-        accountHolderName: 'Test Customer',
-        accountHolderNameConfirm: 'test  customer',
-      }),
+    expect(addSavedBankAccount).toHaveBeenCalledWith({
+      bankCode: 'MBB',
+      bankName: 'Maybank',
+      accountNumber: '123456789012',
+    });
+  });
+
+  it('with no real name on file, asks for it first and keeps Save off', async () => {
+    await ready(null);
+    expect(container.textContent).toContain('Add it in Settings first.');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it.each([['陈大文'], ['Иван Петров'], ['Таn Ah Kow']])(
+    'with the real name %j not in English letters, says so and keeps Save off',
+    async (name) => {
+      await ready(name);
+      expect(container.textContent).toContain(
+        'Your real name on file is not in English letters, so a bank account cannot be paid to it. Contact support to correct it to the name your bank shows.',
+      );
+      expect(saveButton().disabled).toBe(true);
+    },
+  );
+
+  // Only the plain case is checked here; the server has the last word, so the
+  // form must never refuse a name the server takes.
+  it.each([['Tan Ah Kow'], ['José Ñúñez'], ['Ｔａｎ Ah Kow'], ['𝐓𝐚𝐧 Ah Kow']])(
+    'keeps Save on for the real name %j',
+    async (name) => {
+      await ready(name);
+      expect(saveButton().disabled).toBe(false);
+    },
+  );
+
+  it('when the real name could not be read, the server decides', async () => {
+    await ready(undefined);
+    expect(container.textContent).toContain(
+      'Paid to: the real name on your account',
     );
+    expect(saveButton().disabled).toBe(false);
+  });
+
+  it('never names the verification provider', async () => {
+    for (const name of ['Test Customer', null, '陈大文']) {
+      await ready(name);
+      expect(container.textContent).not.toMatch(/touch|tng/i);
+      act(() => root.unmount());
+      container.remove();
+    }
+    // afterEach unmounts once more.
+    await openAddForm(MY);
   });
 });

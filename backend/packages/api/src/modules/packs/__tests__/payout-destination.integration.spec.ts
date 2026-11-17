@@ -14,10 +14,12 @@ import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
 import PacksModuleService from '../service';
+import CustomerAccountState from '../models/customer-account-state';
 import GatewayWithdrawal from '../models/gateway-withdrawal';
 import VisitorSignal from '../models/visitor-signal';
 import {
   nameStanding,
+  namedCustomerIds,
   numberStanding,
   saveVerdict,
 } from '../payout-destination';
@@ -46,7 +48,7 @@ const entry = (bankCode: string, accountNumber: string, holder = NAME) => ({
 moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
-  moduleModels: [GatewayWithdrawal, VisitorSignal],
+  moduleModels: [CustomerAccountState, GatewayWithdrawal, VisitorSignal],
   testSuite: ({ service, MikroOrmWrapper }) => {
     const em = () => MikroOrmWrapper.forkManager();
     const sql = () => em() as unknown as LedgerSqlManager;
@@ -414,6 +416,60 @@ moduleIntegrationTestRunner<PacksModuleService>({
           holderName: NAME,
         }),
       ).toEqual({ alreadySaved: false, blocks: [] });
+    });
+
+    // Admin lookup finds a player by any of their names (owner, 2026-11-16).
+    describe('namedCustomerIds', () => {
+      const named = async (q: string, limit = 1000) =>
+        (await namedCustomerIds(sql(), q, limit)).sort();
+
+      beforeEach(async () => {
+        await service.createCustomerAccountStates([
+          { customer_id: 'cus_real', real_name: 'Tan Ah-Kow' },
+          { customer_id: 'cus_han', real_name: '陈大文' },
+          { customer_id: 'cus_han2', real_name: '陈小文' },
+        ]);
+        await put('cus_saved', {
+          bank_accounts: [entry('MBBEMYKL', NUMBER, 'TAN AH KOW (1)')],
+        });
+        await put('cus_gone', {
+          bank_accounts: [entry('MBBEMYKL', NUMBER, NAME)],
+        });
+        await em().execute(
+          'update "customer" set "deleted_at" = now() where "id" = ?',
+          ['cus_gone'],
+        );
+        await put('cus_other', {
+          bank_accounts: [entry('MBBEMYKL', '512345670002', STRANGER)],
+        });
+        // Any payout status: the name was on it.
+        await payout('cus_paid', 'MBBEMYKL', NUMBER, 'failed', 'Tán Ah Kow');
+      });
+
+      it('finds the real name, a saved holder and a payout holder, on both keys', async () => {
+        expect(await named('tan ah kow')).toEqual([
+          'cus_paid',
+          'cus_real',
+          'cus_saved',
+        ]);
+        expect(await named("Tan.Ah'Kow")).toEqual([
+          'cus_paid',
+          'cus_real',
+          'cus_saved',
+        ]);
+        expect(await named('LIM AH LIAN')).toEqual(['cus_other']);
+      });
+
+      it('an empty key names no one: names in another script stay apart', async () => {
+        expect(await named('陈大文')).toEqual(['cus_han']);
+        expect(await named('陈')).toEqual([]);
+        expect(await named('--')).toEqual([]);
+        expect(await named('')).toEqual([]);
+      });
+
+      it('takes at most the limit', async () => {
+        expect(await named('tan ah kow', 2)).toHaveLength(2);
+      });
     });
   },
 });

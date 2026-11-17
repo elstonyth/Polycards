@@ -160,27 +160,34 @@ export async function GET(
   // (leading "@" allowed) ADDS that player to what `q` matches, never replaces
   // it: handles were frozen from display names (Migration20260930140000), so
   // many are plain words, and "lee" must still list every Lee.
-  // ponytail: the union takes at most 1000 text matches; page it in SQL if an
-  // exact-handle search ever matches more players than that.
+  //
+  // So does any of a player's names, compared whole (owner, 2026-11-16): the
+  // real name, a saved bank's holder, a payout's holder (namedCustomerIds).
+  // ponytail: the union takes at most 1000 matches, the exact ones first; page
+  // it in SQL if a search ever matches more players than that.
   const handle = q?.replace(/^@/, '').trim();
   const byHandle =
     handle && isValidUsername(handle)
       ? await packs.findCustomerIdByHandle(handle)
       : null;
-  const textIds = byHandle
-    ? (
-        await customers.listCustomers({ q }, { select: ['id'], take: 1000 })
-      ).map((c) => c.id)
-    : [];
+  const byName = q ? await packs.findCustomerIdsByName(q, 1000) : [];
+  const exact = [...new Set([...(byHandle ? [byHandle] : []), ...byName])];
+  const textIds =
+    exact.length > 0
+      ? (
+          await customers.listCustomers({ q }, { select: ['id'], take: 1000 })
+        ).map((c) => c.id)
+      : [];
 
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
   // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
   // the set, so this holds; revisit only if a page ever short-counts.
-  let filters: { id?: string[] | { $nin: string[] }; q?: string } = byHandle
-    ? { id: [...new Set([byHandle, ...textIds])] }
-    : q
-      ? { q }
-      : {};
+  let filters: { id?: string[] | { $nin: string[] }; q?: string } =
+    exact.length > 0
+      ? { id: [...new Set([...exact, ...textIds])].slice(0, 1000) }
+      : q
+        ? { q }
+        : {};
   // The group narrows whatever the search matched.
   const include =
     group && group !== 'default' ? await packs.groupMemberIds(group) : null;
@@ -223,7 +230,7 @@ export async function GET(
           relations: ['groups'],
         });
 
-  // A handle search is an explicit id list of at most 1001 players: order it
+  // A handle search is an explicit id list of at most 1000 players: order it
   // whole, put the pinned player first, then cut the page.
   async function pinnedPage(id: string, all: string[]) {
     const ordered = PLAYER_SORTS.has(sortKey)
@@ -264,8 +271,8 @@ export async function GET(
   // The same filters, ordered in SQL: the sorted ids come from SQL, then the
   // customers are loaded and put back in that order.
   async function sqlSortedPage() {
-    // An explicit id list (a handle match, or a group's members) is the
-    // scope; a text search resolves to its matches, the group included.
+    // An explicit id list (a handle or name match, or a group's members) is
+    // the scope; a text search resolves to its matches, the group included.
     const scope = filters.q
       ? (
           await customers.listCustomers(customerFilters, {

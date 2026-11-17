@@ -7,7 +7,9 @@
  *    write is refused and never overwrites.
  *  - setRealName: a name another account holds is refused (ADR 0015).
  *  - getVerificationState: the two facts the welcome-pack gate reads.
- *  - adminSetRealName: overwrites, audited with before/after/reason.
+ *  - adminSetRealName: overwrites, audited with before/after/reason, and
+ *    carries the correction to saved banks in the old name (owner,
+ *    2026-11-16: a bank's holder IS the real name).
  *  - recordAdminPhoneChange: audits the move (the route writes + stamps).
  *
  * Test-runner caveat: moduleIntegrationTestRunner rebuilds schema from MODELS,
@@ -22,6 +24,7 @@ import type PacksModuleService from '../service';
 import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
 import { REAL_NAME_TAKEN } from '../../../utils/real-name';
+import { savedBankAccountId } from '../saved-accounts';
 
 jest.setTimeout(300 * 1000);
 
@@ -29,7 +32,27 @@ moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [CustomerAccountState, AdminActionAudit],
-  testSuite: ({ service }) => {
+  testSuite: ({ service, MikroOrmWrapper }) => {
+    const em = () => MikroOrmWrapper.forkManager();
+    // The saved banks are raw SQL on the core customer table, which this
+    // runner does not build (free-payout-account.integration.spec's setup).
+    const putCustomer = (id: string, metadata: Record<string, unknown> = {}) =>
+      em().execute(
+        'insert into "customer" ("id", "metadata") values (?, ?::jsonb) on conflict ("id") do update set "metadata" = excluded."metadata"',
+        [id, JSON.stringify(metadata)],
+      );
+    const banksOf = async (id: string) =>
+      (
+        await em().execute<
+          { metadata: { bank_accounts: { accountHolderName: string }[] } }[]
+        >('select metadata from customer where id = ?', [id])
+      )[0].metadata.bank_accounts.map((a) => a.accountHolderName);
+    beforeEach(async () => {
+      await em().execute(
+        'create table if not exists "customer" ("id" text primary key, "metadata" jsonb, "updated_at" timestamptz null, "deleted_at" timestamptz null)',
+      );
+    });
+
     const stateOf = async (customerId: string) => {
       const rows = await service.listCustomerAccountStates({
         customer_id: customerId,
@@ -190,6 +213,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
     describe('customer-service corrections', () => {
       it('adminSetRealName overwrites a set name and audits before/after', async () => {
+        await putCustomer('cus_cs_1');
         await service.setRealName('cus_cs_1', 'Tan Ah Kow');
         await service.adminSetRealName({
           customerId: 'cus_cs_1',
@@ -222,6 +246,50 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((await stateOf('cus_cs_2'))!.real_name).toBe('Lee Mei Ling');
         // A customer write afterwards is still refused — the name is on file.
         expect(await service.setRealName('cus_cs_2', 'Other Name')).toBe(false);
+      });
+
+      // One name per account (owner, 2026-11-16).
+      it('adminSetRealName carries the correction to banks in the old name, in one transaction', async () => {
+        const bank = (number: string, holder: string) => ({
+          id: savedBankAccountId('MBBEMYKL', number),
+          bankCode: 'MBBEMYKL',
+          bankName: 'Maybank',
+          accountNumber: number,
+          accountHolderName: holder,
+          savedAt: '2026-11-01T00:00:00.000Z',
+        });
+        await putCustomer('cus_cs_4', {
+          avatar_url: 'keep',
+          bank_accounts: [bank('512345678901', 'TAN AH KOW'), bank('512345678902', 'Lim Mei Ling')],
+        });
+        await service.setRealName('cus_cs_4', 'Tan Ah-Kow');
+        await service.adminSetRealName({
+          customerId: 'cus_cs_4',
+          adminId: 'user_cs',
+          realName: 'Tan Ah Kau',
+          reason: 'typo',
+        });
+        expect(await banksOf('cus_cs_4')).toEqual(['Tan Ah Kau', 'Lim Mei Ling']);
+        const [audit] = await service.listAdminActionAudits({
+          entity_id: 'cus_cs_4',
+          action: 'set_real_name',
+        });
+        expect(audit.after).toMatchObject({
+          real_name: 'Tan Ah Kau',
+          bank_holders: [{ bank: 'Maybank', last4: '8901', holder: 'Tan Ah Kau' }],
+        });
+
+        // A name a bank cannot carry is refused, and nothing moves.
+        await expect(
+          service.adminSetRealName({
+            customerId: 'cus_cs_4',
+            adminId: 'user_cs',
+            realName: '陈大文',
+            reason: 'typo',
+          }),
+        ).rejects.toThrow(/English letters/);
+        expect((await stateOf('cus_cs_4'))!.real_name).toBe('Tan Ah Kau');
+        expect(await banksOf('cus_cs_4')).toEqual(['Tan Ah Kau', 'Lim Mei Ling']);
       });
 
       it('recordAdminPhoneChange audits the move', async () => {

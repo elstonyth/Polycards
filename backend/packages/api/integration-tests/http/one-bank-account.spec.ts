@@ -10,15 +10,15 @@ jest.setTimeout(240 * 1000);
 
 // One bank account per Polycards account, one Polycards account per bank account
 // (ADR 0015), through the real routes and the real SQL. Details are made up.
+// A bank is saved in the account's real name, never a typed one (owner,
+// 2026-11-16), so each customer here has a real name of their own.
 
 const NUMBER = '512345678901';
 const ACCOUNT_ID = savedBankAccountId('MBBEMYKL', NUMBER);
 const ACCOUNTS = '/store/credits/withdraw/accounts';
-const save = (number = NUMBER, holder = 'Test Holder') => ({
+const save = (number = NUMBER) => ({
   bank_code: 'MBBEMYKL',
   account_number: number,
-  account_holder_name: holder,
-  account_holder_name_confirm: holder,
 });
 
 medusaIntegrationTestRunner({
@@ -48,10 +48,23 @@ medusaIntegrationTestRunner({
       const packs = () =>
         getContainer().resolve<PacksModuleService>(PACKS_MODULE);
 
-      const newCustomer = async (email: string): Promise<string> => {
+      // A real name of its own by default (one per account, ADR 0015); null
+      // for none, or a name another account holds, set as support sets it.
+      const newCustomer = async (
+        email: string,
+        realName: string | null = `Holder ${email.split('@')[0].replace(/[^a-z]/g, ' ')}`,
+      ): Promise<string> => {
         const [customer] = await getContainer()
           .resolve(Modules.CUSTOMER)
           .createCustomers([{ email, has_account: true }]);
+        if (realName) {
+          await packs().adminSetRealName({
+            customerId: customer.id,
+            adminId: 'user_test',
+            realName,
+            reason: 'test',
+          });
+        }
         return customer.id;
       };
 
@@ -120,12 +133,12 @@ medusaIntegrationTestRunner({
         expect(await accounts(a)).toHaveLength(1);
       });
 
-      it('a number on another account is refused under any holder name', async () => {
+      it('a number on another account is refused, whatever the name', async () => {
         const a = await newCustomer('one-bank-b@test.dev');
         const b = await newCustomer('one-bank-c@test.dev');
         await unwrapResponse(api.post(ACCOUNTS, save(), asCustomer(a)));
         const res = await unwrapResponse(
-          api.post(ACCOUNTS, save(NUMBER, 'Someone Else'), asCustomer(b)),
+          api.post(ACCOUNTS, save(NUMBER), asCustomer(b)),
         );
         expect(res.status).toBe(400);
         expect(res.data.message).toMatch(/linked to another/);
@@ -298,27 +311,65 @@ medusaIntegrationTestRunner({
         expect(create.status).toBe(400);
       });
 
-      // Owner, 2026-11-03: the name typed twice, banned numbers, one name per
-      // person at any bank, one account per currency.
-      it('refuses a holder name that was not typed the same twice', async () => {
-        const a = await newCustomer('one-bank-k@test.dev');
-        const res = await unwrapResponse(
-          api.post(
-            ACCOUNTS,
-            { ...save(), account_holder_name_confirm: 'Test Holdr' },
-            asCustomer(a),
-          ),
-        );
-        expect(res.status).toBe(400);
-        expect(res.data.message).toMatch(/do not match/);
+      // Owner, 2026-11-03: banned numbers, one name per person at any bank,
+      // one account per currency. Owner, 2026-11-16: the name is the real name.
+      it('saves a bank in the real name, drops a typed one, and refuses without one', async () => {
+        const a = await newCustomer('one-bank-k@test.dev', 'Test  Holder Kay');
         const ok = await unwrapResponse(
           api.post(
             ACCOUNTS,
-            { ...save(), account_holder_name_confirm: ' test  holder ' },
+            {
+              ...save(),
+              account_holder_name: 'Someone Else',
+              account_holder_name_confirm: 'Another Name',
+            },
             asCustomer(a),
           ),
         );
         expect(ok.status).toBe(200);
+        expect(ok.data.accounts[0].accountHolderName).toBe('Test Holder Kay');
+
+        const none = await newCustomer('one-bank-w@test.dev', null);
+        const refused = await unwrapResponse(
+          api.post(ACCOUNTS, save('512345678912'), asCustomer(none)),
+        );
+        expect(refused.status).toBe(400);
+        expect(refused.data.message).toMatch(/real name/);
+        const byStaff = await unwrapResponse(
+          api.post(
+            `/admin/customers/${none}/bank-accounts/add`,
+            { ...save('512345678912'), reason: 'try' },
+            asAdmin(),
+          ),
+        );
+        expect(byStaff.status).toBe(400);
+        expect(byStaff.data.message).toMatch(/no real name on file/);
+        expect(await accounts(none)).toEqual([]);
+      });
+
+      it('support correcting the real name carries it to the bank in the old name', async () => {
+        const a = await newCustomer('one-bank-x@test.dev', 'Tset Holder');
+        await unwrapResponse(api.post(ACCOUNTS, save(), asCustomer(a)));
+        const fixed = await unwrapResponse(
+          api.post(
+            `/admin/customers/${a}/real-name`,
+            { real_name: 'Test Holder', reason: 'typo, checked' },
+            asAdmin(),
+          ),
+        );
+        expect(fixed.status).toBe(200);
+        expect((await card(a)).accounts[0].account_holder_name).toBe(
+          'Test Holder',
+        );
+        const [audit] = await packs().listAdminActionAudits({
+          entity_id: a,
+          action: 'set_real_name',
+          reason: 'typo, checked',
+        });
+        expect(audit.after).toMatchObject({
+          real_name: 'Test Holder',
+          bank_holders: [expect.objectContaining({ holder: 'Test Holder' })],
+        });
       });
 
       it('support unbans a number for one player; it stays banned for the others', async () => {
@@ -356,7 +407,7 @@ medusaIntegrationTestRunner({
         ]);
         // Still banned for everyone else.
         const other = await unwrapResponse(
-          api.post(ACCOUNTS, save('512345678911', 'Other Holder'), asCustomer(b)),
+          api.post(ACCOUNTS, save('512345678911'), asCustomer(b)),
         );
         expect(other.status).toBe(400);
         expect(other.data.message).toMatch(/cannot be used/);
@@ -387,19 +438,17 @@ medusaIntegrationTestRunner({
       });
 
       it('refuses a name another account used, saved or paid, at another bank', async () => {
-        const a = await newCustomer('one-bank-m@test.dev');
-        const b = await newCustomer('one-bank-n@test.dev');
-        const c = await newCustomer('one-bank-o@test.dev');
+        const a = await newCustomer('one-bank-m@test.dev', 'Ring Name');
+        // Support may set a name another account holds (two real people).
+        const b = await newCustomer('one-bank-n@test.dev', 'RING  name');
+        const c = await newCustomer('one-bank-o@test.dev', 'Paid Name');
         await unwrapResponse(
-          api.post(ACCOUNTS, save('512345678904', 'Ring Name'), asCustomer(a)),
+          api.post(ACCOUNTS, save('512345678904'), asCustomer(a)),
         );
         const saved = await unwrapResponse(
           api.post(
             ACCOUNTS,
-            {
-              ...save('7012345678', 'RING  name'),
-              bank_code: 'CIBBMYKL',
-            },
+            { ...save('7012345678'), bank_code: 'CIBBMYKL' },
             asCustomer(b),
           ),
         );
@@ -420,7 +469,7 @@ medusaIntegrationTestRunner({
           },
         ]);
         const paid = await unwrapResponse(
-          api.post(ACCOUNTS, save('512345678905', 'Paid Name'), asCustomer(c)),
+          api.post(ACCOUNTS, save('512345678905'), asCustomer(c)),
         );
         expect(paid.status).toBe(400);
         expect(paid.data.message).toMatch(/name is already linked/);
@@ -431,7 +480,7 @@ medusaIntegrationTestRunner({
         await unwrapResponse(
           api.post(
             ACCOUNTS,
-            save('512345678907', 'Banned Owner'),
+            save('512345678907'),
             asCustomer(a),
           ),
         );
@@ -461,7 +510,7 @@ medusaIntegrationTestRunner({
         await unwrapResponse(
           api.post(
             ACCOUNTS,
-            save('512345678908', 'Staff Disabled'),
+            save('512345678908'),
             asCustomer(b),
           ),
         );
@@ -487,7 +536,7 @@ medusaIntegrationTestRunner({
         await unwrapResponse(
           api.post(
             ACCOUNTS,
-            save('512345678906', 'Wallet Owner'),
+            save('512345678906'),
             asCustomer(a),
           ),
         );
@@ -508,11 +557,11 @@ medusaIntegrationTestRunner({
       it("Touch 'n Go has its own slot beside the RM bank, under the same name", async () => {
         const a = await newCustomer('one-bank-q@test.dev');
         const tng = (number: string) => ({
-          ...save(number, 'Slot Owner'),
+          ...save(number),
           bank_code: 'TNGMY',
         });
         await unwrapResponse(
-          api.post(ACCOUNTS, save('512345678907', 'Slot Owner'), asCustomer(a)),
+          api.post(ACCOUNTS, save('512345678907'), asCustomer(a)),
         );
         // The linked-name rule reads other accounts only: the owner's own
         // bank under that name does not block the Touch 'n Go.
@@ -532,21 +581,13 @@ medusaIntegrationTestRunner({
       });
 
       it('support clears a name two real people share, for each account on its own', async () => {
-        const a = await newCustomer('one-bank-s@test.dev');
-        const b = await newCustomer('one-bank-t@test.dev');
+        const a = await newCustomer('one-bank-s@test.dev', 'Shared Name');
+        const b = await newCustomer('one-bank-t@test.dev', 'Shared Name');
         await unwrapResponse(
-          api.post(
-            ACCOUNTS,
-            save('512345678909', 'Shared Name'),
-            asCustomer(a),
-          ),
+          api.post(ACCOUNTS, save('512345678909'), asCustomer(a)),
         );
         const refused = await unwrapResponse(
-          api.post(
-            ACCOUNTS,
-            save('512345678910', 'Shared Name'),
-            asCustomer(b),
-          ),
+          api.post(ACCOUNTS, save('512345678910'), asCustomer(b)),
         );
         expect(refused.status).toBe(400);
         expect(refused.data.message).toMatch(/already linked to another/);
@@ -559,11 +600,7 @@ medusaIntegrationTestRunner({
         );
         expect(cleared.status).toBe(200);
         const saved = await unwrapResponse(
-          api.post(
-            ACCOUNTS,
-            save('512345678910', 'Shared Name'),
-            asCustomer(b),
-          ),
+          api.post(ACCOUNTS, save('512345678910'), asCustomer(b)),
         );
         expect(saved.status).toBe(200);
         expect(await accounts(b)).toHaveLength(1);
@@ -579,20 +616,34 @@ medusaIntegrationTestRunner({
         );
       });
 
-      it("a Touch 'n Go under another name than the saved bank is refused", async () => {
-        const a = await newCustomer('one-bank-r@test.dev');
-        await unwrapResponse(
-          api.post(ACCOUNTS, save('512345678908', 'Slot Owner'), asCustomer(a)),
-        );
+      it("a Touch 'n Go is refused while a saved bank is in another name than the real name", async () => {
+        const a = await newCustomer('one-bank-r@test.dev', 'Slot Owner');
+        // An older bank, saved before the holder was the real name.
+        await getContainer()
+          .resolve(Modules.CUSTOMER)
+          .updateCustomers(a, {
+            metadata: {
+              bank_accounts: [
+                {
+                  id: savedBankAccountId('MBBEMYKL', '512345678908'),
+                  bankCode: 'MBBEMYKL',
+                  bankName: 'Maybank',
+                  accountNumber: '512345678908',
+                  accountHolderName: 'Another Person',
+                  savedAt: '2026-01-01T00:00:00.000Z',
+                },
+              ],
+            },
+          });
         const other = await unwrapResponse(
           api.post(
             ACCOUNTS,
-            { ...save('120000000009', 'Another Person'), bank_code: 'TNGMY' },
+            { ...save('120000000009'), bank_code: 'TNGMY' },
             asCustomer(a),
           ),
         );
         expect(other.status).toBe(400);
-        expect(other.data.message).toMatch(/same account holder name/);
+        expect(other.data.message).toMatch(/another name than your real name/);
         expect(await accounts(a)).toHaveLength(1);
       });
     });

@@ -431,6 +431,80 @@ medusaIntegrationTestRunner({
         expect(second.data.total).toBe(2);
       });
 
+      // Admin lookup finds a player by any of their names, compared whole
+      // (owner, 2026-11-16): the real name, a saved bank's holder, a payout's
+      // holder. Made-up names only.
+      describe('?q= by any of a player\'s names', () => {
+        const idsFor = async (q: string): Promise<string[]> => {
+          const res = await list(`?q=${encodeURIComponent(q)}`);
+          expect(res.status).toBe(200);
+          return res.data.players.map((p: { id: string }) => p.id).sort();
+        };
+
+        beforeEach(async () => {
+          const packs = packsService();
+          await packs.setRealName(aId, 'Siti Test-Aminah');
+          await packs.setRealName(bId, '陈测试');
+          await getContainer()
+            .resolve(Modules.CUSTOMER)
+            .updateCustomers(bId, {
+              metadata: {
+                handle: B_HANDLE,
+                bank_accounts: [
+                  {
+                    id: 'players-list-bank',
+                    bankCode: 'MBBEMYKL',
+                    bankName: 'Maybank',
+                    accountNumber: '512345670009',
+                    accountHolderName: 'BRAVO HOLDER TEST',
+                    savedAt: '2026-11-01T00:00:00.000Z',
+                  },
+                ],
+              },
+            });
+          await packs.createGatewayWithdrawals([
+            {
+              merchant_transaction_id: 'PW-players-list-name',
+              customer_id: aId,
+              amount: 10,
+              bank_code: 'MBBEMYKL',
+              account_number: '512345670008',
+              account_holder_name: 'Charlie Pàid Test',
+              gateway: 'fake',
+              status: 'failed',
+            },
+          ] as never);
+        });
+
+        it('finds the real name, a saved holder and a payout holder, either key', async () => {
+          expect(await idsFor('siti test aminah')).toEqual([aId]);
+          expect(await idsFor('Bravo Holder-Test')).toEqual([bId]);
+          expect(await idsFor('charlie paid test')).toEqual([aId]);
+          expect(await idsFor('陈测试')).toEqual([bId]);
+        });
+
+        it('a part of a name, or one character of a name in another script, is no match', async () => {
+          expect(await idsFor('陈')).toEqual([]);
+          expect(await idsFor('siti test')).toEqual([]);
+        });
+
+        it('a name match adds to the text matches, and the group still narrows', async () => {
+          // B's real name is part of A's email: A by text, B by name.
+          await packsService().adminSetRealName({
+            customerId: bId,
+            adminId: 'user_test',
+            realName: 'Zzq',
+            reason: 'test',
+          });
+          expect(await idsFor('zzq')).toEqual([aId, bId].sort());
+          // A is in a group of its own, so the default group keeps only B.
+          const res = await list('?q=zzq&group=default');
+          expect(res.data.players.map((p: { id: string }) => p.id)).toEqual([
+            bId,
+          ]);
+        });
+      });
+
       it('each row carries the profile handle', async () => {
         const res = await list();
         expect(rowFor(res, aId).handle).toBe(A_HANDLE);

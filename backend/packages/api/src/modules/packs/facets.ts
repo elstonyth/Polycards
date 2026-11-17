@@ -77,6 +77,8 @@ export type CustomerWallet = Pick<
   PacksModuleService,
   | 'creditBalance'
   | 'creditSummary'
+  // The real name, which a saved bank's holder is (owner, 2026-11-16).
+  | 'getVerificationState'
   | 'listCreditTransactions'
   | 'listGatewayDeposits'
   | 'listGatewayWithdrawals'
