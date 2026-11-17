@@ -26,6 +26,7 @@ import {
   isLoggedOut,
   RATE_LIMITED,
   UNAUTHORIZED,
+  type ActionFailure,
   type ErrorRule,
 } from '@/lib/errors';
 import { parseOne, UncheckedSchema, WonCardSchema } from '@/lib/data/schemas';
@@ -146,12 +147,7 @@ const TICKETS_CHARGED_BUT_UNSHOWABLE =
  * note on friendlyError in lib/errors.ts). Both calls use `UncheckedSchema`,
  * so `invalid_shape` never reaches here.
  */
-function openFailure(f: Failure): {
-  ok: false;
-  error: string;
-  needsAuth?: boolean;
-  needsTopUp?: boolean;
-} {
+function openFailure(f: Failure): ActionFailure & { needsTopUp?: boolean } {
   const base = actionFailure(f, {
     loggedOut: LOGIN_TO_OPEN,
     rules: PACKS_RULES,

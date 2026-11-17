@@ -45,7 +45,7 @@ import {
   type PhoneOtpChannel,
   type PhoneOtpPurpose,
 } from '@/lib/phone-verification';
-import { friendlyError, isLoggedOut, type ErrorRule } from '@/lib/errors';
+import { COPY, friendlyError, isLoggedOut, type ErrorRule } from '@/lib/errors';
 
 type Fail = { ok: false; error: string; retryAfterSeconds?: number };
 const fail = (error: string): Fail => ({ ok: false, error });
@@ -312,7 +312,7 @@ export async function changePhone(input: {
     // login prompt rather than anything `messageOf` would generalize. Only
     // `changePhone` is authenticated; the other three routes run with
     // `auth: 'none'` and never see this.
-    if (isLoggedOut(r)) return fail('Please log in first.');
+    if (isLoggedOut(r)) return fail(COPY.loginRequired);
     // Re-auth refusals win; then the same 429 retry-hint passthrough as
     // startPhoneOtp/checkPhoneOtp — a rate-limited change should say how long
     // to wait, not invite an immediate retry; then the generic copy.

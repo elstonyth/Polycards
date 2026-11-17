@@ -25,7 +25,7 @@ const RULES: ErrorRule[] = [
   [/not enough credits/i, 'Top up first.'],
   [UNAUTHORIZED, 'Your session ended.'],
 ];
-const map = (f: Failure, unexpected?: string) =>
+const translate = (f: Failure, unexpected?: string) =>
   actionFailure(f, {
     loggedOut: LOGGED_OUT,
     rules: RULES,
@@ -97,21 +97,26 @@ describe('actionFailure', () => {
       { ok: false, error: FALLBACK, needsAuth: false },
     ],
   ])('%s', (_, f, expected) => {
-    expect(map(f)).toStrictEqual(expected);
+    expect(translate(f)).toStrictEqual(expected);
   });
 
   it('lets a caller word its own unexpected-response copy', () => {
     expect(
-      map(
+      translate(
         fail('invalid_shape', 'Unexpected response shape.'),
         'Could not load the bank list.',
       ),
     ).toStrictEqual({ ok: false, error: 'Could not load the bank list.' });
   });
 
+  it('answers invalid_shape before the rules, even when a rule would match', () => {
+    const f = fail('invalid_shape', 'Not enough credits.');
+    expect(translate(f)).toStrictEqual({ ok: false, error: COPY.unexpected });
+  });
+
   it('checks logged out before the rules, even when a rule would match', () => {
     // The no-cookie text is 'Not authenticated.', which UNAUTHORIZED matches.
-    expect(map(fail('unauthenticated', 'Not authenticated.')).error).toBe(
+    expect(translate(fail('unauthenticated', 'Not authenticated.')).error).toBe(
       LOGGED_OUT,
     );
   });

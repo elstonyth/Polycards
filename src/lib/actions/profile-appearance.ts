@@ -21,9 +21,8 @@ import { store, type Failure } from '@/lib/store';
 import { AUTH_COOKIE } from '@/lib/store-port';
 import { logger } from '@/lib/logger';
 import {
+  actionFailure,
   friendlyError,
-  friendlyFailure,
-  isLoggedOut,
   COPY,
   RATE_LIMITED,
   UNAUTHORIZED,
@@ -56,7 +55,7 @@ const APPEARANCE_RULES: ErrorRule[] = [
   [UNAUTHORIZED, 'Please log in again.'],
 ];
 const FALLBACK = COPY.generic;
-const LOGIN_FIRST = 'Please log in first.';
+const LOGIN_FIRST = COPY.loginRequired;
 
 export type AppearanceResult = { ok: true } | { ok: false; error: string };
 
@@ -136,10 +135,15 @@ export async function setAvatarFrame(
   return { ok: true };
 }
 
-/** No cookie at all (the call never left — `status` is undefined) keeps the
- *  logged-out sentence; anything the backend actually said goes through
- *  APPEARANCE_RULES, the same table the upload's own refusals use. */
+/** `actionFailure` (lib/errors.ts) over APPEARANCE_RULES, the same table the
+ *  upload's own refusals use. Only the copy is kept: these results carry no
+ *  `needsAuth`. Both calls use `UncheckedSchema`, so `invalid_shape` never
+ *  reaches here; it would read as FALLBACK, as before. */
 function appearanceError(f: Failure): string {
-  if (isLoggedOut(f)) return LOGIN_FIRST;
-  return friendlyFailure(f, APPEARANCE_RULES, FALLBACK);
+  return actionFailure(f, {
+    loggedOut: LOGIN_FIRST,
+    rules: APPEARANCE_RULES,
+    fallback: FALLBACK,
+    unexpected: FALLBACK,
+  }).error;
 }
