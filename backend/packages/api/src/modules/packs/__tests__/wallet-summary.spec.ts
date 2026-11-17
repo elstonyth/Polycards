@@ -91,6 +91,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
             used: 40,
             remaining: 60,
           });
+          // The gate names the hold, so no client re-derives it.
+          expect(w.hold).toBe('locked');
+          expect(w.unlockSpend).toBeCloseTo(60, 2);
 
           // open the remaining RM60 -> gate opens, full available withdrawable.
           await service.createCreditTransactions([
@@ -111,6 +114,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
           });
           expect(w.withdrawable).toBeCloseTo(w.available, 2);
           expect(w.withdrawable).toBeCloseTo(100, 2);
+          expect(w.hold).toBeNull();
+          expect(w.unlockSpend).toBe(0);
         },
       );
 
@@ -227,6 +232,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           expect(w.available).toBe(0);
           expect(w.withdrawable).toBe(0);
           expect(w.isFrozen).toBe(true);
+          expect(w.hold).toBe('frozen');
         },
       );
 

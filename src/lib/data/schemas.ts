@@ -30,6 +30,7 @@ import { isRarity } from '@/lib/packs-format';
 import type { Rarity } from '@/lib/packs-data';
 import { avatarForSeed } from '@/lib/avatar-seed';
 import { LUCKY_DRAW_TIERS } from '@/lib/lucky-draw';
+import { WITHDRAW_HOLDS } from '@/lib/wallet-split';
 
 // Zod 4's JIT compiles schemas with `new Function(...)`; our CSP `script-src`
 // has no 'unsafe-eval' (see src/lib/security/csp.ts), so that probe fires a CSP
@@ -989,6 +990,13 @@ export const WalletSchema = z.looseObject({
   // At least one top-up ever: withdrawals and deliveries stay locked until
   // then (2026-10-11). Optional: an older backend has no such gate.
   has_topup: z.boolean().optional(),
+  // Why nothing may leave, named by the backend gate (withdrawable.ts
+  // withdrawalHold), and what packs must still take before a 'locked' hold
+  // opens. Absent from an older backend, and a hold this storefront does not
+  // know reads as absent too (.catch), so neither blanks the wallet: getWallet
+  // derives the hold instead.
+  hold: z.enum(WITHDRAW_HOLDS).nullable().optional().catch(undefined),
+  unlock_spend: finite.optional(),
 });
 
 /** GET /store/credits as getWallet() reads it — only the `wallet` block. */

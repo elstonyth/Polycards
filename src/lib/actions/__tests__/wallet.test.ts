@@ -15,6 +15,8 @@ const WALLET = {
   is_frozen: false,
   withdrawable: 40,
   playthrough: { deposited: 200, used: 160, remaining: 40 },
+  hold: null,
+  unlock_spend: 0,
 };
 
 describe('getWallet', () => {
@@ -34,6 +36,8 @@ describe('getWallet', () => {
         bonus: 0,
         // Absent on the wire = an older backend with no top-up gate.
         hasTopup: true,
+        hold: null,
+        unlockSpend: 0,
       },
     });
     expect(mem.requests).toEqual([
@@ -56,6 +60,80 @@ describe('getWallet', () => {
       used: 0,
       remaining: 0,
     });
+  });
+
+  it('reads the hold the backend names, as is', async () => {
+    backend({
+      'GET /store/credits': {
+        body: {
+          wallet: {
+            ...WALLET,
+            withdrawable: 0,
+            bonus: 5,
+            hold: 'locked',
+            unlock_spend: 45,
+          },
+        },
+      },
+    });
+    const r = await getWallet();
+    expect(
+      r.ok && { hold: r.wallet.hold, unlockSpend: r.wallet.unlockSpend },
+    ).toEqual({
+      hold: 'locked',
+      unlockSpend: 45,
+    });
+  });
+
+  // Deploy skew: a backend older than `hold` (or one naming a hold this
+  // storefront does not know) gets today's derivation instead.
+  it.each([
+    [{ is_frozen: true, has_topup: false }, 'frozen', 0],
+    [{ has_topup: false }, 'no_topup', 0],
+    [{ withdrawable: 0, bonus: 5 }, 'locked', 45],
+    // An older backend that still pays part out is not locked.
+    [{}, null, 0],
+    // Judged in sen: a float hair of withdrawable is still nothing, and a
+    // float hair of remaining is nothing left for packs.
+    [{ withdrawable: 0.004 }, 'locked', 40],
+    [
+      {
+        withdrawable: 0,
+        playthrough: { deposited: 1, used: 1, remaining: 0.004 },
+      },
+      null,
+      0,
+    ],
+    [
+      { withdrawable: 0, playthrough: { deposited: 1, used: 1, remaining: 0 } },
+      null,
+      0,
+    ],
+  ] as const)(
+    'no hold on the wire: %o reads as %s',
+    async (over, hold, unlockSpend) => {
+      const { hold: _h, unlock_spend: _u, ...legacy } = WALLET;
+      backend({
+        'GET /store/credits': { body: { wallet: { ...legacy, ...over } } },
+      });
+      const r = await getWallet();
+      expect(
+        r.ok && { hold: r.wallet.hold, unlockSpend: r.wallet.unlockSpend },
+      ).toEqual({
+        hold,
+        unlockSpend,
+      });
+    },
+  );
+
+  it('a hold this storefront does not know falls back too', async () => {
+    backend({
+      'GET /store/credits': {
+        body: { wallet: { ...WALLET, withdrawable: 0, hold: 'kyc' } },
+      },
+    });
+    const r = await getWallet();
+    expect(r.ok && r.wallet.hold).toBe('locked');
   });
 
   it('reads the top-up gate', async () => {
