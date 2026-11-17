@@ -102,7 +102,7 @@ export function floatingSection(
     const normal = Math.max(0, w.balance_sen - w.bonus_sen);
     const fold = walletWithdrawable({
       balanceCents: w.balance_sen,
-      bonusCents: w.bonus_sen,
+      bonusCents: Math.max(0, w.bonus_sen),
       depositedCents: w.deposited_sen,
       usedCents: w.used_sen,
       hasTopup: w.has_topup,

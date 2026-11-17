@@ -12280,7 +12280,7 @@ class PacksModuleService extends MedusaService({
     // with toFixed(2) can never disagree by a float hair (withdrawalGateError
     // compares `amount <= withdrawable`). Spending on packs stays
     // unrestricted either way — the gate only limits cashout.
-    const gate = walletWithdrawable({
+    const fold = walletWithdrawable({
       balanceCents: Math.round(balance * 100),
       bonusCents,
       depositedCents,
@@ -12291,15 +12291,15 @@ class PacksModuleService extends MedusaService({
 
     return {
       balance,
-      available: gate.availableCents / 100,
+      available: fold.availableCents / 100,
       isFrozen: frozen,
       hasTopup,
-      withdrawable: gate.withdrawableCents / 100,
-      bonus: gate.bonusCents / 100,
+      withdrawable: fold.withdrawableCents / 100,
+      bonus: fold.bonusCents / 100,
       playthrough: {
         deposited: depositedCents / 100,
         used: usedCents / 100,
-        remaining: gate.remainingCents / 100,
+        remaining: fold.remainingCents / 100,
       },
     };
   }
