@@ -14,6 +14,8 @@ import {
 import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
 import { categoryParam, liveTicketPacks } from '../category';
 import { loadPullerProfiles } from '../pullers';
+import { wireDate } from '../../../utils/wire-date';
+import type { StoreRecentPullsResponse } from './types';
 
 // GET /store/pulls/recent — the most recent pulls across all packs, for the
 // pull-history feed. A plain publishable-key-scoped store route (no customer
@@ -64,11 +66,14 @@ const CACHE_TTL_MS = 5_000;
 // ponytail: hard bound on the map's key count — see the eviction check at
 // the cache-set site below.
 const MAX_ENTRIES = 256;
-const recentCache = new Map<string, { expires: number; body: unknown }>();
+const recentCache = new Map<
+  string,
+  { expires: number; body: StoreRecentPullsResponse }
+>();
 // One rebuild per key at a time. Without it every request landing while a
 // rebuild runs starts its own (~8 queries), and at feed volume that herd
 // drained the DB pool and OOM'd the backend (2026-10-20 incident).
-const inflight = new Map<string, Promise<unknown>>();
+const inflight = new Map<string, Promise<StoreRecentPullsResponse>>();
 // An expired body this young is served while the rebuild runs; older waits.
 const STALE_SERVE_MS = 60_000;
 
@@ -79,11 +84,11 @@ export function clearRecentPullsCache(): void {
   inflight.clear();
 }
 
-const EMPTY_BODY = { pulls: [], drought: {} };
+const EMPTY_BODY: StoreRecentPullsResponse = { pulls: [], drought: {} };
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StoreRecentPullsResponse>,
 ): Promise<void> {
   // ?pack_id=<Pack.slug> scopes the feed to one pack (the /slots/[slug] pages);
   // absent = the global feed (home).
@@ -131,7 +136,7 @@ async function buildFeed(
   category: string | null,
   rarity: Rarity | null,
   cacheKey: string,
-): Promise<unknown> {
+): Promise<StoreRecentPullsResponse> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
   if (category) {
@@ -248,7 +253,7 @@ async function buildFeed(
         pack_image: pack?.image ?? null,
         // Full display name + handle/avatar/frame — never customer_id/email.
         ...pullers.profileOf(p.customer_id, p.id),
-        rolled_at: p.rolled_at,
+        rolled_at: wireDate(p.rolled_at),
       };
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
@@ -269,7 +274,7 @@ async function buildTicketFeed(
   scope: { slug: string; title: string; image: string }[],
   rarity: Rarity | null,
   cacheKey: string,
-): Promise<unknown> {
+): Promise<StoreRecentPullsResponse> {
   const packIds = scope.map((p) => p.slug);
   const [fetched, droughtCounts, prizes] = await Promise.all([
     packs.recentTicketSpinRows({
@@ -306,7 +311,7 @@ async function buildTicketFeed(
         pack_title: packBySlug.get(s.pack_id)?.title ?? null,
         pack_image: packBySlug.get(s.pack_id)?.image ?? null,
         ...pullers.profileOf(s.customer_id, s.id),
-        rolled_at: s.rolled_at,
+        rolled_at: wireDate(s.rolled_at),
       })),
     drought: Object.fromEntries(
       DROUGHT_TIERS.map((tier, i) => [tier, droughtCounts[i]]),
@@ -325,7 +330,7 @@ async function buildTicketFeed(
 // every hot key on the same request that trips the bound). Not "don't cache
 // empties": a legitimately quiet pack returns [] too, and that is the case
 // the TTL exists to protect.
-function remember(key: string, body: unknown): void {
+function remember(key: string, body: StoreRecentPullsResponse): void {
   if (recentCache.size > MAX_ENTRIES) {
     recentCache.delete(recentCache.keys().next().value as string);
   }

@@ -10,6 +10,9 @@ const raw = (buyback: BackendVaultItem['buyback']): BackendVaultItem => ({
   card: {
     handle: 'test-card',
     name: 'Test Card',
+    set: 'Base',
+    grader: 'PSA',
+    grade: '10',
     image: '/card.png',
     slab_image: null,
     rarity: 'rare',

@@ -125,9 +125,7 @@ export async function getVault(): Promise<VaultResult> {
   // `unknown`, so this is the seam where guarded and merely-carried fields
   // meet. Tightening VaultItemSchema to erase it would make a stale field
   // drop the row — i.e. delete a card from the customer's own vault.
-  const items = (vault.data.items as unknown as BackendVaultItem[]).map(
-    mapVaultItem,
-  );
+  const items = (vault.data.items as BackendVaultItem[]).map(mapVaultItem);
 
   return { ok: true, items, balance: credit.data?.balance ?? 0 };
 }
