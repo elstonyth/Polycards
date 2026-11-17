@@ -10,6 +10,7 @@ import {
   type MedusaNextFunction,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
+import express from 'express';
 import multer from 'multer';
 import {
   rateLimit,
@@ -1462,11 +1463,16 @@ export default defineMiddlewares({
     // The per-route admin limiters (admin-rbac.ts ADMIN_ROUTES), right after
     // the RBAC entries. Guarded by
     // __tests__/admin-rate-limit-coverage.unit.spec.ts.
-    ...adminRouteLimits({
-      'admin-action': adminActionRateLimit,
-      'assistant-chat': assistantChatRateLimit,
-      'assistant-speak': assistantSpeakRateLimit,
-    }),
+    ...adminRouteLimits(
+      {
+        'admin-action': adminActionRateLimit,
+        'assistant-chat': assistantChatRateLimit,
+        'assistant-speak': assistantSpeakRateLimit,
+      },
+      // The assistant chat's body, read after the login, the role check and
+      // the limits (see its record).
+      (limit) => express.json({ limit, inflate: false }),
+    ),
     {
       // The framework's own POST /admin/customers (bare collection — create)
       // is NOT reached by the '/admin/customers/*' matcher below: path-to-regexp

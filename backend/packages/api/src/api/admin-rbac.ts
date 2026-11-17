@@ -1,5 +1,4 @@
 import type { MiddlewareRoute } from '@medusajs/framework/http';
-import express from 'express';
 
 // RBAC for the custom admin API (2026-10-17). RBAC is on (medusa-config
 // `rbac: true`), but only routes a middleware entry gives `policies` are
@@ -621,9 +620,11 @@ type Middleware = NonNullable<MiddlewareRoute['middlewares']>[number];
 
 /** The limiter entries middlewares.ts spreads in right after adminRbacRoutes,
  *  one per ADMIN_ROUTES record with `limits`. middlewares.ts passes its one
- *  instance of each limiter, so routes on the same tier share one budget. */
+ *  instance of each limiter, so routes on the same tier share one budget,
+ *  and the parser for a `lateJsonBody` record (this file loads no express). */
 export function adminRouteLimits(
   limiters: Record<AdminLimiter, Middleware>,
+  lateJson: (limit: string) => Middleware,
 ): MiddlewareRoute[] {
   return ADMIN_ROUTES.flatMap((r) =>
     r.limits
@@ -634,9 +635,7 @@ export function adminRouteLimits(
             ...(r.lateJsonBody && { bodyParser: false as const }),
             middlewares: [
               ...r.limits.map((l) => limiters[l]),
-              ...(r.lateJsonBody
-                ? [express.json({ limit: r.lateJsonBody, inflate: false })]
-                : []),
+              ...(r.lateJsonBody ? [lateJson(r.lateJsonBody)] : []),
             ],
           },
         ]

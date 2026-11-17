@@ -152,6 +152,78 @@ describe('admin route table', () => {
     }
   });
 
+  // The order a request actually runs its middlewares in: entries flattened
+  // as Medusa's MiddlewareFileLoader does, sorted by its RoutesSorter, then
+  // matched the way Express matches them (a method-less entry is `app.use`,
+  // a prefix match). Pinned on chains taken from master before the table:
+  // the guards outside the table must keep running before its limiters.
+  it('guards outside the table still run before the table limiters', () => {
+    const httpDir = path.dirname(require.resolve('@medusajs/framework/http'));
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { RoutesSorter } = require(path.join(httpDir, 'routes-sorter.js'));
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Layer = require('express/lib/router/layer');
+    const rows = routes.flatMap((e) =>
+      (e.middlewares.length ? e.middlewares : [{}]).map((m) => ({
+        matcher: e.matcher,
+        methods: e.methods,
+        handler: m,
+        name: e.policies
+          ? `policy ${(e.policies as { resource: string; operation: string }[])
+              .map((p) => `${p.resource}:${p.operation}`)
+              .join(',')}`
+          : label(m) || (m as Labelled).name,
+        layer: new Layer(
+          e.matcher,
+          { sensitive: false, strict: false, end: !!e.methods },
+          () => {},
+        ),
+      })),
+    );
+    const sorted = new RoutesSorter(rows).sort() as typeof rows;
+    const chain = (method: string, url: string) =>
+      sorted
+        .filter(
+          (r) =>
+            (!r.methods || r.methods.includes(method)) && r.layer.match(url),
+        )
+        .map((r) => r.name);
+    const adminGuards = [
+      'refuseCrossOriginAdminWrite',
+      'capAdminSessionAge',
+      'requireAdminAuthenticator',
+      'redactCustomerSecrets',
+      'noStoreForAuthenticatedAdmin',
+    ];
+    expect(chain('POST', '/admin/customers/cus_1/phone')).toEqual([
+      ...adminGuards,
+      'rejectAdminBankAccountsMetadata',
+      'rejectAdminPhoneWrite',
+      'policy customer:update',
+      'admin-action#1',
+    ]);
+    expect(chain('POST', '/admin/customer-groups/cusgroup_1/policy')).toEqual([
+      ...adminGuards,
+      'stripAdditionalData',
+      'rejectGroupPolicyMetadata',
+      'rejectGroupOddsSetUpdate',
+      'policy customer_group:update',
+      'admin-action#1',
+    ]);
+    expect(chain('POST', '/admin/customers')).toEqual([
+      ...adminGuards,
+      'rejectAdminBankAccountsMetadata',
+      'rejectAdminPhoneWrite',
+    ]);
+    expect(chain('POST', '/admin/assistant/chat')).toEqual([
+      ...adminGuards,
+      'policy assistant:update',
+      'admin-action#1',
+      'assistant-chat#1',
+      'jsonParser',
+    ]);
+  });
+
   it('per-route desk-bot blocks keep their pattern and reach the proxy', () => {
     expect(deskBotBlockedRoutes.map(([re]) => re.source)).toEqual([
       '^\\/admin\\/customers\\/[^/]+\\/visitor-signals(\\/|$)',
