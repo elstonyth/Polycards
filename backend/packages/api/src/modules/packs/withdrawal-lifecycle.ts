@@ -1,14 +1,17 @@
+import type { GatewayWithdrawals } from './facets';
 import type PacksModuleService from './service';
 import type { WITHDRAWAL_STATUSES } from './models/gateway-withdrawal';
 
 type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
 
 /**
- * The Withdrawal lifecycle: the ONLY code that writes a gateway_withdrawal
- * row after its insert. withdrawal-lifecycle-seal.unit.spec.ts fails CI on a
- * write anywhere else.
+ * The Withdrawal lifecycle: the ONLY code that changes a gateway_withdrawal
+ * row's status, and the only caller of the generated updater for it.
+ * withdrawal-lifecycle-seal.unit.spec.ts fails CI on either anywhere else.
  *
- *   held ── claimHeldWithdrawal ──▶ pending (debited) | failed (never debited)
+ *   held ── claimHeldWithdrawal ──▶ approve: pending, or failed if never debited
+ *                                   deny: failed (refundWithdrawal then refunds
+ *                                   a debit and closes it with failWithdrawal)
  *   pending ── settleWithdrawal ──▶ settled
  *   pending | held | failed ── failWithdrawal ──▶ failed
  *
@@ -21,9 +24,12 @@ type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
  * racing writers both see the old status and both act.
  *
  * The non-status stamps (stampPendingWithdrawal, stampWithdrawalAudit) stay on
- * the generated updater. They write bigNumber columns (net_amount) that cannot
- * ride a raw statement (see SettlementMirror in service.ts), and they move no
- * money.
+ * the generated updater, as before this module existed: they move no money.
+ * The audit stamp writes a bigNumber (net_amount) that cannot ride a raw
+ * statement (see SettlementMirror in service.ts). The pending stamp could be a
+ * claim; until it is, its 'pending' scope is find-then-write (see below).
+ * The other generated-updater call is writeSettlementMirror in service.ts:
+ * the bigNumber half of a won claim, on the claim's own transaction.
  *
  * Known writes outside this module, all non-status and all raw SQL on purpose:
  *   - the insert, startWithdrawal (gateway-withdrawal.ts), with the row's
@@ -35,7 +41,7 @@ type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
  */
 
 type Packs = Pick<
-  PacksModuleService,
+  GatewayWithdrawals,
   | 'claimWithdrawalStatus'
   | 'claimWithdrawalAgainstDebit'
   | 'updateGatewayWithdrawals'
@@ -133,8 +139,12 @@ export function failWithdrawal(
 /**
  * Stamp the gateway's id, or why it refused, on a row that is still
  * 'pending'. Scoped so a row the sweep closed while a submit was in flight
- * never gets a gateway id: that is the one shape that makes a later reader
+ * does not get a gateway id: that is the one shape that makes a later reader
  * believe the money went out. A silent no-op otherwise.
+ *
+ * shortcut: the scope is the generated find-then-write, so a close landing
+ * between its read and its write still loses that race (as before this
+ * module); upgrade to a pending ── pending claim if it ever shows up.
  */
 export async function stampPendingWithdrawal(
   packs: Pick<Packs, 'updateGatewayWithdrawals'>,

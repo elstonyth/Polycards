@@ -253,7 +253,7 @@ checked with the gateway, and what it cannot confirm waits for the sweep.
 _Avoid_: reading a gateway's own error codes outside its adapter
 
 **Withdrawal lifecycle**:
-The only code that writes a Withdrawal row after it is inserted
+The only code that changes a Withdrawal's status
 (`modules/packs/withdrawal-lifecycle.ts`, sealed by a source-scan spec). Its
 transitions: `claimHeldWithdrawal` (admin approve or deny, under the
 customer's credit lock), `settleWithdrawal` (pending to settled),
