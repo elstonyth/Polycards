@@ -20,7 +20,9 @@ const won = (handle: string): WonCard => ({
   spriteImage: null,
 });
 
-const batch = (over: Partial<RolledBatch> & { mode: RollMode }): RolledBatch => ({
+const batch = (
+  over: Partial<RolledBatch> & { mode: RollMode },
+): RolledBatch => ({
   spinAt: 1,
   cards: [won('a')],
   offers: [null],

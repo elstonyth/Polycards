@@ -66,7 +66,8 @@ export type RevealState = { phase: RevealPhase } & HeldRoll;
 /** A phase with a roll on screen: from the reel's launch to the conclude. */
 export type RollState = ({ phase: 'spinning' } & HeldRoll) | RevealState;
 
-export type MachineState = { phase: 'idle' } | { phase: 'resolving' } | RollState;
+export type MachineState =
+  { phase: 'idle' } | { phase: 'resolving' } | RollState;
 
 /** True from the reel's launch until the reveal concludes. */
 export function hasRoll(s: MachineState): s is RollState {
@@ -118,7 +119,9 @@ const IDLE: MachineState = { phase: 'idle' };
 function reduce(s: MachineState, a: Action): MachineState {
   // The demo has no round-trip, so its roll arrives straight from idle.
   const event: PhaseEvent =
-    a.event === 'rolled' && a.held.batch.mode === 'demo' ? 'demo-spin' : a.event;
+    a.event === 'rolled' && a.held.batch.mode === 'demo'
+      ? 'demo-spin'
+      : a.event;
   const to = nextPhase(s.phase, event);
   if (to === s.phase) return s;
   if (to === 'idle' || to === 'resolving') return { phase: to };

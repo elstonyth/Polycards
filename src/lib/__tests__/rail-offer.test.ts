@@ -118,13 +118,38 @@ describe('depositOffer: band and closed', () => {
 
 describe('depositOffer: inBand', () => {
   it.each([
-    { name: 'RM below the gateway floor', currency: 'MYR', amount: 49.99, ok: false },
+    {
+      name: 'RM below the gateway floor',
+      currency: 'MYR',
+      amount: 49.99,
+      ok: false,
+    },
     { name: 'RM on the floor', currency: 'MYR', amount: 50, ok: true },
     { name: 'RM on the ceiling', currency: 'MYR', amount: 10000, ok: true },
-    { name: 'RM above the ceiling', currency: 'MYR', amount: 10000.01, ok: false },
-    { name: 'S$ below the rail floor', currency: 'SGD', amount: 29.99, ok: false },
-    { name: 'S$ under the RM floor but inside its own', currency: 'SGD', amount: 30, ok: true },
-    { name: 'S$ above the rail ceiling', currency: 'SGD', amount: 5000.01, ok: false },
+    {
+      name: 'RM above the ceiling',
+      currency: 'MYR',
+      amount: 10000.01,
+      ok: false,
+    },
+    {
+      name: 'S$ below the rail floor',
+      currency: 'SGD',
+      amount: 29.99,
+      ok: false,
+    },
+    {
+      name: 'S$ under the RM floor but inside its own',
+      currency: 'SGD',
+      amount: 30,
+      ok: true,
+    },
+    {
+      name: 'S$ above the rail ceiling',
+      currency: 'SGD',
+      amount: 5000.01,
+      ok: false,
+    },
   ])('$name', ({ currency, amount, ok }) => {
     expect(
       depositOffer(limits(), DEPOSIT_METHODS, currency, gateway).inBand(amount),
@@ -203,7 +228,11 @@ describe('depositOffer: the currency rows', () => {
       null,
       gateway,
     ).options[0];
-    expect(rm).toMatchObject({ code: 'MYR', disabled: true, hint: PAUSED_HINT });
+    expect(rm).toMatchObject({
+      code: 'MYR',
+      disabled: true,
+      hint: PAUSED_HINT,
+    });
   });
 
   it('a closed or unpriced rail is a paused row after the open ones', () => {
@@ -232,9 +261,9 @@ describe('depositOffer: the currency rows', () => {
   });
 
   it('a currency this build has no rail for gets no row', () => {
-    expect(
-      codes(limits({ regional: [{ ...SGD, currency: 'THB' }] })),
-    ).toEqual([['MYR', false]]);
+    expect(codes(limits({ regional: [{ ...SGD, currency: 'THB' }] }))).toEqual([
+      ['MYR', false],
+    ]);
   });
 
   it('mock: RM only, never paused', () => {
@@ -329,7 +358,12 @@ describe('payoutOffer: rail, band and closed', () => {
 
 describe('payoutOffer: an account floor above the band', () => {
   it.each([
-    { name: 'above the floor: it binds', floor: 100, accountMin: 100, min: 100 },
+    {
+      name: 'above the floor: it binds',
+      floor: 100,
+      accountMin: 100,
+      min: 100,
+    },
     { name: 'equal to the floor: none', floor: 50, accountMin: null, min: 50 },
     { name: 'below the floor: none', floor: 10, accountMin: null, min: 50 },
     { name: 'null: none', floor: null, accountMin: null, min: 50 },
@@ -368,9 +402,9 @@ describe('payoutOffer: payout and outOfBand', () => {
   });
 
   it('below an account floor is out of the RM band', () => {
-    expect(
-      payoutOffer(limits(), { currency: 'MYR' }, 100).outOfBand(99),
-    ).toBe('rm');
+    expect(payoutOffer(limits(), { currency: 'MYR' }, 100).outOfBand(99)).toBe(
+      'rm',
+    );
   });
 
   it('S$: converts at the payout rate, floored to the cent', () => {
@@ -379,7 +413,11 @@ describe('payoutOffer: payout and outOfBand', () => {
   });
 
   it.each([
-    { name: 'below the rail RM floor: the RM check first', amount: 90, out: 'rm' },
+    {
+      name: 'below the rail RM floor: the RM check first',
+      amount: 90,
+      out: 'rm',
+    },
     { name: 'inside both bands', amount: 500, out: null },
   ])('S$ $name', ({ amount, out }) => {
     expect(payoutOffer(limits(), { currency: 'SGD' }).outOfBand(amount)).toBe(

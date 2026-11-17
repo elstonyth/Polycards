@@ -62,7 +62,12 @@ const shot = (name) =>
 for (const scenario of ['locked', 'frozen']) {
   await open(scenario);
   await shot(scenario);
-  console.log(scenario, (await page.locator('main').innerText()).slice(0, 300).replace(/\n+/g, ' | '));
+  console.log(
+    scenario,
+    (await page.locator('main').innerText())
+      .slice(0, 300)
+      .replace(/\n+/g, ' | '),
+  );
 }
 
 // Open wallet, then a refusal raced in: the remedy follows the code.
