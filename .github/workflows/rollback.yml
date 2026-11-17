@@ -63,6 +63,8 @@ jobs:
         uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          # Pinned for the same reason as deploy.yml (latest falls back to 1.98.1).
+          version: 2.5.2
       - name: Run ${{ inputs.action }}
         env:
           DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
