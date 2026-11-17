@@ -125,9 +125,8 @@ const adminMfaCodeRateLimit = rateLimit('admin-mfa-code');
 // The per-identifier (per-email) credential tier. ONE instance shared by every
 // credential matcher below: they are one budget per account across login,
 // register and reset, and one instance also means one Redis connection fronting
-// the single `rl:auth-identifier:` keyspace (two instances would share the
-// Redis budget but NOT the in-memory failover budget — split-brain when Redis
-// blips).
+// the single `rl:auth-identifier:` keyspace, whose in-memory failover budget
+// is then shared too when Redis blips.
 const authIdentifierRateLimit = rateLimit('auth-identifier');
 // Shared by ALL write-tier matchers below (delivery-order writes, rewards
 // claim/withdraw, daily draw, avatar upload, verified phone change): one

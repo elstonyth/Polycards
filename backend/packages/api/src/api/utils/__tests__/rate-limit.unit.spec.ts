@@ -1136,6 +1136,8 @@ describe('rateLimit', () => {
     process.env.TASK_ACTION_RATE_WINDOW_MS = '60000';
 
     try {
+      // The env above is read on the first call for a name: no other test in
+      // this file builds task-action.
       const first = rateLimit('task-action');
       const second = rateLimit('task-action');
 
