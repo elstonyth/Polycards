@@ -3,6 +3,7 @@ import { resolvePacks, type GatewayWithdrawals } from './facets';
 import { withdrawalFeedKey } from './feed-events';
 import { notifyFeed } from './notify-feed';
 import { alertOps } from './ops-alert';
+import { failWithdrawal } from './withdrawal-lifecycle';
 import { sendWithdrawalReceipt } from './withdrawal-receipt';
 
 // The withdrawal ledger anchors and the one refund that closes a payout row.
@@ -162,26 +163,22 @@ export async function refundWithdrawal(
       outcome: 'refunded',
     });
   }
-  const closed = await packs.updateGatewayWithdrawals({
-    selector: { id: withdrawal.id, status: fromStatus },
-    data: {
-      status: 'failed',
-      gateway_status: gatewayStatus,
-      // First writer wins. The admin deny route is re-runnable on a 'failed'
-      // row by design, so a mistaken Deny on a row the bank already refused
-      // would otherwise replace the bank's diagnostic with "denied by admin"
-      // — and the deploy's logs have rotated by then (review 2026-09). Same
-      // stance as gateway_status, which deny passes back unchanged.
-      ...(failureReason && !withdrawal.failure_reason
-        ? { failure_reason: failureReason.slice(0, 400) }
-        : {}),
-    },
+  const closed = await failWithdrawal(packs, withdrawal.id, {
+    from: [fromStatus],
+    gatewayStatus,
+    // First writer wins. The admin deny route is re-runnable on a 'failed'
+    // row by design, so a mistaken Deny on a row the bank already refused
+    // would otherwise replace the bank's diagnostic with "denied by admin"
+    // — and the deploy's logs have rotated by then (review 2026-09). Same
+    // stance as gateway_status, which deny passes back unchanged.
+    ...(failureReason && !withdrawal.failure_reason ? { failureReason } : {}),
   });
-  // The close is scoped to fromStatus. Losing it after the refund committed
-  // is harmless when another refund closed the row first, but not when a
-  // SUCCESS for the same payout claimed it in between (a FAIL and a SUCCESS
-  // racing): the customer is then refunded AND paid, and nothing else says so.
-  if (Array.isArray(closed) && closed.length === 0) {
+  // The close is a claim from fromStatus. Losing it after the refund
+  // committed is harmless when another refund closed the row first, but not
+  // when a SUCCESS for the same payout claimed it in between (a FAIL and a
+  // SUCCESS racing): the customer is then refunded AND paid, and nothing else
+  // says so.
+  if (!closed) {
     const [row] = await packs.listGatewayWithdrawals(
       { id: withdrawal.id },
       { take: 1 },

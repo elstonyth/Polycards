@@ -344,6 +344,10 @@ describe('POST bank-accounts/verify', () => {
   });
 });
 
+// The route maps HTTP onto the save as support (payout-destination-save.ts):
+// the player from the path, the admin from the token, the trimmed reason. The
+// real name, ban, verified-elsewhere and re-check rules are pinned in
+// modules/packs/__tests__/payout-destination-save.unit.spec.
 describe('POST bank-accounts/add', () => {
   const body = (over: Record<string, unknown> = {}) => ({
     bank_code: 'MBBEMYKL',
@@ -352,153 +356,53 @@ describe('POST bank-accounts/add', () => {
     ...over,
   });
 
-  it('needs a reason and valid details, and refuses a bank nothing can pay', async () => {
-    await expect(
-      ADD(mkReq(body({ reason: ' ' })), mkRes() as never),
-    ).rejects.toThrow(/reason/i);
-    await expect(
-      ADD(mkReq(body({ account_number: '123' })), mkRes() as never),
-    ).rejects.toThrow();
-    await expect(
-      ADD(mkReq(body({ bank_code: 'NOTABANK' })), mkRes() as never),
-    ).rejects.toThrow();
+  it('needs a reason of 1-500 characters, before anything is read', async () => {
+    for (const reason of [undefined, ' ', 'x'.repeat(501), 7]) {
+      await expect(
+        ADD(mkReq(body({ reason })), mkRes() as never),
+      ).rejects.toThrow('A reason (1–500 chars) is required.');
+    }
+    expect(packs.getVerificationState).not.toHaveBeenCalled();
     expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
   });
 
-  it('adds a number nobody else holds, unverified, and tells the owner', async () => {
+  it('adds for the path player, as the token admin, with the reason trimmed', async () => {
     const res = mkRes();
-    await ADD(mkReq(body()), res as never);
+    await ADD(
+      mkReq(
+        body({ reason: '  owner proved it  ', account_holder_name: 'Someone Else' }),
+      ),
+      res as never,
+    );
     expect(packs.addSavedBankAccount).toHaveBeenCalledWith({
       customerId: 'cus_1',
       adminId: 'user_1',
       account: expect.objectContaining({
         id: ACCOUNT.id,
         bankCode: 'MBBEMYKL',
+        // The real name; an older page's typed holder is never read.
         accountHolderName: 'Test Holder',
       }),
       verify: false,
       reason: 'owner proved it',
     });
     expect(res.json).toHaveBeenCalledWith({ added: true });
-    const sent = JSON.stringify(notifications.createNotifications.mock.calls);
-    expect(sent).not.toContain('512345678901');
   });
 
-  // One name per account (owner, 2026-11-16): support adds in the real name
-  // only, and corrects the real name first to fix a spelling.
-  it('adds in the real name, never a typed holder name', async () => {
-    await ADD(
-      mkReq(body({ account_holder_name: 'Someone Else' })),
-      mkRes() as never,
-    );
-    expect(packs.getVerificationState).toHaveBeenCalledWith('cus_1');
-    expect(packs.addSavedBankAccount).toHaveBeenCalledWith(
-      expect.objectContaining({
-        account: expect.objectContaining({ accountHolderName: 'Test Holder' }),
-      }),
-    );
-  });
-
-  it('refuses with no real name on file, or one not in English letters', async () => {
-    packs.getVerificationState.mockResolvedValue({
-      phoneVerified: true,
-      realName: null,
-    });
-    await expect(ADD(mkReq(body()), mkRes() as never)).rejects.toThrow(
-      /no real name on file/,
-    );
-    packs.getVerificationState.mockResolvedValue({
-      phoneVerified: true,
-      realName: '陈大文',
-    });
-    await expect(ADD(mkReq(body()), mkRes() as never)).rejects.toThrow(
-      /not in English letters.*Correct the real name first/,
-    );
-    expect(packs.payoutNumberStanding).not.toHaveBeenCalled();
-    expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
-  });
-
-  // Read before the add's lock: a correction landing in between must not leave
-  // the bank in the old name.
-  it('takes the add back when the real name changes during it', async () => {
-    packs.getVerificationState
-      .mockResolvedValueOnce({ phoneVerified: true, realName: 'Test Holder' })
-      .mockResolvedValueOnce({ phoneVerified: true, realName: 'Test Holdre' });
-    await expect(ADD(mkReq(body()), mkRes() as never)).rejects.toThrow(
-      /real name changed.*try again/i,
-    );
-    expect(packs.addSavedBankAccount).toHaveBeenCalledTimes(1);
-    expect(packs.removeSavedBankAccount).toHaveBeenCalledWith({
-      customerId: 'cus_1',
-      adminId: 'user_1',
-      accountId: ACCOUNT.id,
-      reason: expect.stringMatching(/real name changed/),
-    });
-    expect(notifications.createNotifications).not.toHaveBeenCalled();
-  });
-
-  it('a wallet needs no real name', async () => {
-    packs.getVerificationState.mockResolvedValue({
-      phoneVerified: true,
-      realName: null,
-    });
-    await ADD(
-      mkReq(
-        body({
-          bank_code: 'USDTTRC20',
-          account_number: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-        }),
-      ),
-      mkRes() as never,
-    );
-    expect(packs.getVerificationState).not.toHaveBeenCalled();
-    expect(packs.addSavedBankAccount).toHaveBeenCalledTimes(1);
-  });
-
-  it('refuses a banned number, asked for this player', async () => {
+  it('passes a refusal through with its type and message, and answers nothing', async () => {
     packs.payoutNumberStanding.mockResolvedValue(
       standing([], { banned: true, bannedForPlayer: true }),
     );
-    await expect(
-      ADD(
-        mkReq(body({ bank_code: 'PAYNOWSG', account_number: '91234567' })),
-        mkRes() as never,
-      ),
-    ).rejects.toThrow(/cannot be used on Polycards/);
-    expect(packs.payoutNumberStanding).toHaveBeenCalledWith('cus_1', {
-      bankCode: 'PAYNOWSG',
-      accountNumber: '91234567',
+    const res = mkRes();
+    await expect(ADD(mkReq(body()), res as never)).rejects.toMatchObject({
+      type: 'not_allowed',
+      message: expect.stringMatching(/cannot be used on Polycards/),
     });
+    await expect(
+      ADD(mkReq(body({ account_number: '123' })), res as never),
+    ).rejects.toMatchObject({ type: 'invalid_data' });
     expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
-  });
-
-  it('adds a number support unbanned for this player', async () => {
-    packs.payoutNumberStanding.mockResolvedValue(
-      standing([], { banned: true, bannedForPlayer: false }),
-    );
-    await ADD(mkReq(body()), mkRes() as never);
-    expect(packs.addSavedBankAccount).toHaveBeenCalledTimes(1);
-  });
-
-  it('vouches for a shared number by adding it', async () => {
-    packs.payoutNumberStanding.mockResolvedValue(
-      standing([{ customerId: 'cus_2', paid: false }]),
-    );
-    await ADD(mkReq(body()), mkRes() as never);
-    expect(packs.addSavedBankAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ verify: true }),
-    );
-  });
-
-  it('one person, one account: refuses while another account is verified on it', async () => {
-    packs.payoutNumberStanding.mockResolvedValue(heldBy('cus_2', true));
-    customers.listCustomers.mockResolvedValue([
-      { id: 'cus_2', metadata: { handle: 'Collector2' } },
-    ]);
-    await expect(ADD(mkReq(body()), mkRes() as never)).rejects.toThrow(
-      /Collector2 is already verified/,
-    );
-    expect(packs.addSavedBankAccount).not.toHaveBeenCalled();
+    expect(res.json).not.toHaveBeenCalled();
   });
 });
 

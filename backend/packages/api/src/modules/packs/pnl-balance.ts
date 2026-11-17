@@ -2,7 +2,7 @@
 // decisions 14-16 and 21): unsold stock and customer floating money, as of
 // now, in integer sen. The range is ignored; the SQL is
 // api/admin/profit-report/pnl/queries-balance.ts.
-import { playthroughState, withdrawableCents } from './withdrawable';
+import { walletWithdrawable } from './withdrawable';
 
 /** Where unused free credit came from (decision 21, bonus-fifo-proof.sql). */
 export const BONUS_SOURCES = [
@@ -99,22 +99,18 @@ export function floatingSection(
   let bonus = 0;
   let locked = 0;
   for (const w of wallets) {
-    const b = Math.max(0, w.bonus_sen);
     const normal = Math.max(0, w.balance_sen - w.bonus_sen);
-    const { remainingCents } = playthroughState({
+    const fold = walletWithdrawable({
+      balanceCents: w.balance_sen,
+      bonusCents: Math.max(0, w.bonus_sen),
       depositedCents: w.deposited_sen,
       usedCents: w.used_sen,
+      hasTopup: w.has_topup,
+      frozen: w.frozen,
     });
-    const out = w.has_topup
-      ? withdrawableCents({
-          availableCents: w.frozen ? 0 : w.balance_sen,
-          bonusCents: b,
-          remainingCents,
-        })
-      : 0;
-    withdrawable += out;
-    bonus += b;
-    locked += normal - out;
+    withdrawable += fold.withdrawableCents;
+    bonus += fold.bonusCents;
+    locked += normal - fold.withdrawableCents;
   }
   const walletTotal = withdrawable + bonus + locked;
   const cardsTotal = cards.vault.sen + cards.processing.sen;

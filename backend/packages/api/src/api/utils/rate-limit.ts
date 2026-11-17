@@ -1277,13 +1277,24 @@ export const RATE_LIMITS = {
   },
 } as const satisfies Record<string, RateLimitSpec>;
 
+const limiters = new Map<keyof typeof RATE_LIMITS, MiddlewareHandler>();
+
 /**
- * Constructs one limiter from the named spec. Calls deliberately return
- * independent handlers: middlewares.ts hoists the names whose routes share a
- * fallback bucket and calls this separately where the existing factories did.
+ * The limiter for the named spec: one per name per process, built (and its
+ * Redis connection opened) on the first call. Every route that names a tier
+ * shares one budget. With Redis up, separate instances would share it anyway
+ * through the one `rl:<name>:` keyspace, but each would keep its own
+ * in-memory failover bucket and Redis connection, so a Redis blip would split
+ * the budget N ways. A route that needs its own budget needs its own name in
+ * RATE_LIMITS. The spec's env vars are read on that first call.
  */
 export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
-  return createEnvRateLimit({ name, ...RATE_LIMITS[name] });
+  let limiter = limiters.get(name);
+  if (!limiter) {
+    limiter = createEnvRateLimit({ name, ...RATE_LIMITS[name] });
+    limiters.set(name, limiter);
+  }
+  return limiter;
 }
 
 /**

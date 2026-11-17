@@ -89,6 +89,8 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
     creditBalance: jest.fn().mockResolvedValue(50),
     updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+    // The Withdrawal lifecycle's status claims. `true` = this caller moved the row.
+    claimWithdrawalStatus: jest.fn().mockResolvedValue(true),
     // The wd: debit lookup after a failed debit call. None by default.
     listCreditTransactions: jest.fn().mockResolvedValue([]),
     // The gate + debit unit. Everything the old caller-side policy check did
@@ -691,10 +693,8 @@ describe('startWithdrawal — money ordering', () => {
     );
     // Refunded and closed like any definite refusal.
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: 'failed' }),
-      }),
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'failed' }),
     );
   });
 
@@ -957,19 +957,20 @@ describe('startWithdrawal — money ordering', () => {
     // line below says the same thing but does not survive the next deployment,
     // and on 2026-08-11 that is exactly how eight production refusals ended up
     // unexplainable the following morning.
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-      selector: { id: 'gpw_1', status: 'pending' },
-      data: {
-        status: 'failed',
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+      id: 'gpw_1',
+      from: ['pending'],
+      to: 'failed',
+      set: {
         gateway_status: null,
         failure_reason: expect.stringContaining('PMT10013'),
       },
     });
     const [
       {
-        data: { failure_reason: reason },
+        set: { failure_reason: reason },
       },
-    ] = h.packs.updateGatewayWithdrawals.mock.calls[0];
+    ] = h.packs.claimWithdrawalStatus.mock.calls[0];
     expect(reason).toMatch(/httpStatus=200/);
     expect(reason).toMatch(/bankCode=MBB/);
     // Same PII rule as the log: never the account number or the holder name.
@@ -1078,10 +1079,11 @@ describe('startWithdrawal — money ordering', () => {
     // And the money path still completed: refund issued, row closed — with the
     // reason on it, which is what makes a thrown logger survivable at all now.
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-      selector: { id: 'gpw_1', status: 'pending' },
-      data: {
-        status: 'failed',
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+      id: 'gpw_1',
+      from: ['pending'],
+      to: 'failed',
+      set: {
         gateway_status: null,
         failure_reason: expect.stringContaining('PMT10013'),
       },
@@ -1372,12 +1374,30 @@ describe('startWithdrawal — money ordering', () => {
     );
     await expect(start(h)).rejects.toThrow(/Withdrawals unlock once/);
     expect(h.packs.createGatewayWithdrawals).toHaveBeenCalledTimes(1);
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
       id: 'gpw_1',
-      status: 'failed',
+      from: ['pending', 'held'],
+      to: 'failed',
+      set: {},
     });
     // No money moved and nothing was refunded (there was no debit to refund).
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
+  });
+
+  // The close is a claim from the two open statuses. It loses on a row an
+  // admin already closed 'failed' under the credit lock; the debit's own
+  // error must still reach the customer, unchanged.
+  it('still throws the debit error when the no-debit close loses its claim', async () => {
+    const h = harness();
+    h.packs.withdrawForCashout.mockRejectedValue(
+      new Error('Insufficient credits'),
+    );
+    h.packs.claimWithdrawalStatus.mockResolvedValue(false);
+    await expect(start(h)).rejects.toThrow('Insufficient credits');
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledTimes(1);
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
     expect(fakeGateway.calls.withdrawals).toEqual([]);
   });
 
@@ -1390,9 +1410,11 @@ describe('startWithdrawal — money ordering', () => {
     // Nothing was debited, so nothing to refund.
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(fakeGateway.calls.withdrawals).toEqual([]);
-    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+    expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
       id: 'gpw_1',
-      status: 'failed',
+      from: ['pending', 'held'],
+      to: 'failed',
+      set: {},
     });
   });
 
@@ -1695,10 +1717,11 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       expect(
         h.packs.withdrawCreditsWithLedger.mock.calls[0][0].idempotencyReference,
       ).toMatch(/^wd-refund:/);
-      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-        selector: { id: 'gpw_1', status: 'pending' },
-        data: {
-          status: 'failed',
+      expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        from: ['pending'],
+        to: 'failed',
+        set: {
           gateway_status: null,
           failure_reason: expect.stringContaining(TGPAY_PAYOUT_FLOAT_EMPTY),
         },
@@ -1707,7 +1730,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       expect(
         h.packs.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
       ).toBeLessThan(
-        h.packs.updateGatewayWithdrawals.mock.invocationCallOrder[0],
+        h.packs.claimWithdrawalStatus.mock.invocationCallOrder[0],
       );
       // The per-refusal log line still fires, now carrying the code.
       expect(h.logger.warn.mock.calls[0][0]).toMatch(
@@ -1762,10 +1785,11 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       expect(error.message).not.toMatch(/check your bank details/i);
       // Refunded now, not left pending for the sweep.
       expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
-      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-        selector: { id: 'gpw_1', status: 'pending' },
-        data: {
-          status: 'failed',
+      expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        from: ['pending'],
+        to: 'failed',
+        set: {
           gateway_status: null,
           failure_reason: expect.stringContaining(TGPAY_PAYOUT_DISABLED),
         },
@@ -1823,7 +1847,8 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         },
       });
       const h = harness();
-      h.packs.updateGatewayWithdrawals.mockResolvedValue([]);
+      // The close's claim lost: a settle moved the row first.
+      h.packs.claimWithdrawalStatus.mockResolvedValue(false);
       h.packs.listGatewayWithdrawals.mockResolvedValue([
         { id: 'gpw_1', status: 'settled' },
       ]);
@@ -1904,6 +1929,8 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
           reference: null,
         }),
         updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+        // The Withdrawal lifecycle's status claims. `true` = this caller moved the row.
+        claimWithdrawalStatus: jest.fn().mockResolvedValue(true),
       };
       const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
       const others: Record<string, unknown> = {
@@ -2032,10 +2059,11 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       expect(
         h.packs.withdrawCreditsWithLedger.mock.calls[0][0].idempotencyReference,
       ).toBe(withdrawalRefundReference('cus_1', 'PW-HELD-1'));
-      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
-        selector: { id: 'gpw_h1', status: 'pending' },
-        data: expect.objectContaining({
-          status: 'failed',
+      expect(h.packs.claimWithdrawalStatus).toHaveBeenCalledWith({
+        id: 'gpw_h1',
+        from: ['pending'],
+        to: 'failed',
+        set: expect.objectContaining({
           failure_reason: expect.stringContaining(TGPAY_PAYOUT_FLOAT_EMPTY),
         }),
       });

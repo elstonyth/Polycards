@@ -1,6 +1,11 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import { resolvePacks, type GatewayWithdrawals } from './facets';
 import {
+  claimHeldWithdrawal,
+  failWithdrawal,
+  settleWithdrawal,
+} from './withdrawal-lifecycle';
+import {
   SHARED_PAYOUT_ACCOUNT_MESSAGE,
   bankSupportedBy,
   BANNED_PAYOUT_ACCOUNT_MESSAGE,
@@ -857,12 +862,12 @@ export async function startWithdrawal(
     //
     // Safe on the newest reason to land here — withdrawForCashout's step-1a
     // refusal, which fires precisely when an admin already closed this row
-    // 'failed' under the `credit:` lock. This write is an unscoped
-    // `status = 'failed'` by id, so re-stamping the value it already holds is
-    // a no-op, and no other close state is reachable: an admin only claims
-    // 'pending' when it has SEEN the debit (in which case this call did not
-    // throw), and nothing has submitted to the gateway yet, so 'settled' is
-    // impossible.
+    // 'failed' under the `credit:` lock. The close claims the row from its
+    // two open statuses, so on that row it loses and writes nothing: the row
+    // is already where this would put it. No other close state is
+    // reachable: an admin only claims 'pending' when it has SEEN the debit
+    // (in which case this call did not throw), and nothing has submitted to
+    // the gateway yet, so 'settled' is impossible.
     //
     // Unless the debit DID commit and only its answer was lost (a dropped
     // connection): a 'failed' row is never refunded, so closing it would
@@ -886,7 +891,7 @@ export async function startWithdrawal(
       // Cannot tell: pending is the side that cannot lose money.
     }
     if (debited === false) {
-      await packs.updateGatewayWithdrawals({ id: row.id, status: 'failed' });
+      await failWithdrawal(packs, row.id, { from: ['pending', 'held'] });
     }
     throw error;
   }
@@ -1152,7 +1157,6 @@ export async function applyWithdrawalOutcome(
   const packs = resolvePacks<GatewayWithdrawals>(scope);
   const amount = Number(withdrawal.amount);
   const usdtAmount = usdtPaidAmount(withdrawal);
-  const gatewayTransactionId = outcome.gatewayTransactionId || null;
 
   await sendWithdrawalReceipt(scope, {
     customerId: withdrawal.customer_id,
@@ -1163,33 +1167,14 @@ export async function applyWithdrawalOutcome(
     ...(usdtAmount !== undefined ? { usdtAmount } : {}),
   });
 
-  const claimed = await packs.claimWithdrawalStatus({
-    id: withdrawal.id,
-    from: ['pending'],
-    to: 'settled',
-    set: {
-      settled_at: outcome.settledAt,
-      ...(gatewayTransactionId
-        ? { gateway_transaction_id: gatewayTransactionId }
-        : {}),
-      ...(outcome.gatewayStatus !== undefined
-        ? { gateway_status: outcome.gatewayStatus }
-        : {}),
-      ...(outcome.bankReferenceNo !== undefined
-        ? { bank_reference_no: outcome.bankReferenceNo }
-        : {}),
-      ...(outcome.uniqueReferenceNo !== undefined
-        ? { unique_reference_no: outcome.uniqueReferenceNo }
-        : {}),
-    },
-    money: {
-      ...(outcome.amountSettled !== undefined
-        ? { amount_settled: outcome.amountSettled }
-        : {}),
-      ...(outcome.netAmount !== undefined
-        ? { net_amount: outcome.netAmount }
-        : {}),
-    },
+  const claimed = await settleWithdrawal(packs, withdrawal.id, {
+    settledAt: outcome.settledAt,
+    gatewayTransactionId: outcome.gatewayTransactionId,
+    gatewayStatus: outcome.gatewayStatus,
+    bankReferenceNo: outcome.bankReferenceNo,
+    uniqueReferenceNo: outcome.uniqueReferenceNo,
+    amountSettled: outcome.amountSettled,
+    netAmount: outcome.netAmount,
   });
 
   if (claimed) {
@@ -1511,7 +1496,7 @@ export async function submitHeldWithdrawal(
   // An undebited row is closed 'failed' by that same call — scoped to 'held',
   // so an undebited row in another status (a 'pending' one is the sweep's to
   // resolve) is refused without being touched.
-  const { debited, claimed } = await packs.claimWithdrawalAgainstDebit({
+  const { debited, claimed } = await claimHeldWithdrawal(packs, {
     id: row.id,
     customerId: row.customer_id,
     debitReference: withdrawalIdempotencyReference(
@@ -1787,7 +1772,7 @@ export async function denyHeldWithdrawal(
   // 'pending' belongs to the gateway and the sweep, 'settled' is already
   // paid. Refusing loudly is right here (unlike approve's silent no-op): the
   // operator asked to give money back and it did not happen.
-  const { debited, claimed } = await packs.claimWithdrawalAgainstDebit({
+  const { debited, claimed } = await claimHeldWithdrawal(packs, {
     id: row.id,
     customerId: row.customer_id,
     debitReference: withdrawalIdempotencyReference(

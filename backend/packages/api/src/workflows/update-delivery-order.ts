@@ -10,7 +10,8 @@ import {
 // update-delivery-order — operator advances an order's status (with the
 // transition rules in delivery.ts) and/or sets a tracking number. On delivered
 // the covered pulls become delivered (terminal); on canceled they return to the
-// vault. Single compensated step.
+// vault. Single step; its compensator only runs for a later step or a cancel
+// (README.md).
 export const updateDeliveryOrderWorkflow = createWorkflow(
   'update-delivery-order',
   function (input: UpdateDeliveryOrderInput) {

@@ -34,6 +34,7 @@ import {
 } from '../../modules/packs/gateway-audit';
 import { toOptionalMoney } from '../../modules/packs/money';
 import { alertOps } from '../../modules/packs/ops-alert';
+import { stampWithdrawalAudit } from '../../modules/packs/withdrawal-lifecycle';
 import {
   callbackLedgerAmount,
   rowFx,
@@ -371,8 +372,7 @@ export function a3payWithdrawalCallback(kind: A3payKind): Handler {
         // audit's own unit. Best-effort: the gateway still gets its answer.
         try {
           const paid = toLedgerAmount(rowFx(withdrawal), Number(data.Amount));
-          await packs.updateGatewayWithdrawals({
-            id: withdrawal.id,
+          await stampWithdrawalAudit(packs, withdrawal.id, {
             audited_at: new Date(),
             ...stampNote(
               withdrawal,

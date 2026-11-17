@@ -398,8 +398,8 @@ describe('POST /hooks/a3pay/withdrawal', () => {
         }),
       ),
     );
-    const [[{ data }]] = h.packs.updateGatewayWithdrawals.mock.calls;
-    expect(data.failure_reason).toBe(
+    const [[{ set }]] = h.packs.claimWithdrawalStatus.mock.calls;
+    expect(set.failure_reason).toBe(
       'callback status 5: acct [redacted] name [redacted] mismatch',
     );
   });
@@ -409,8 +409,8 @@ describe('POST /hooks/a3pay/withdrawal', () => {
     h.packs.listGatewayWithdrawals
       .mockResolvedValueOnce([sgdPayout])
       .mockResolvedValueOnce([{ ...sgdPayout, status: 'settled' }]);
-    // The close is scoped to 'pending' and lost the race: zero rows updated.
-    h.packs.updateGatewayWithdrawals.mockResolvedValueOnce([]);
+    // The close is a claim from 'pending' and lost the race.
+    h.packs.claimWithdrawalStatus.mockResolvedValueOnce(false);
     (alertOps as jest.Mock).mockClear();
     await run(withdrawal, h, message(payout({ Status: 5 })));
     expect(alertOps).toHaveBeenCalledWith(
@@ -425,7 +425,7 @@ describe('POST /hooks/a3pay/withdrawal', () => {
     h.packs.listGatewayWithdrawals
       .mockResolvedValueOnce([sgdPayout])
       .mockResolvedValueOnce([{ ...sgdPayout, status: 'failed' }]);
-    h.packs.updateGatewayWithdrawals.mockResolvedValueOnce([]);
+    h.packs.claimWithdrawalStatus.mockResolvedValueOnce(false);
     (alertOps as jest.Mock).mockClear();
     await run(withdrawal, h, message(payout({ Status: 5 })));
     expect(alertOps).not.toHaveBeenCalledWith(
