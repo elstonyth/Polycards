@@ -30,10 +30,14 @@ and both sides are checked against it.
   same fields optional in the type, so their `??` defaults stay load-bearing.
   The cast is now a plain `as` from the parsed value to the backend-derived type.
 - **Where a zod guard is looser than the backend type, the guard wins at
-  runtime.** Delivery's `address_1` and `postal_code` may read as null, its
-  `tracking_number`, `address` and `items` as absent, and a recent pull's
-  `seed` is `number | null` on the backend but optional `number` in the guard.
-  The mappers keep their `??` defaults for all of them.
+  runtime.** Delivery's `address_1` and `postal_code` may read as null, and
+  its `tracking_number`, `address` and `items` as absent. The mappers keep
+  their `??` defaults for all of them.
+- **One guard is stricter than the backend type.** A recent pull's `seed` is
+  `number | null` on the backend (the shared puller type), but
+  `RecentPullSchema` takes only an optional finite number, so a null seed would
+  drop the feed row. It cannot happen today: the recent feed always seeds a
+  number (`profileOf`). Loosen the guard before the feed ever sends null.
 - **A store change reruns the storefront checks.** `deploy-targets.mjs` counts
   every store `types.ts` the storefront imports as a storefront input, so a
   backend-only PR that changes one runs the storefront typecheck.
