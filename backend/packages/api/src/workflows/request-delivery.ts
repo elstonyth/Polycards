@@ -10,7 +10,8 @@ import {
 // request-delivery — a customer requests physical delivery of a batch of
 // vaulted pulls: validate ownership + vaulted state, snapshot the chosen
 // address, create the order + items, and flip the pulls to delivering. Single
-// compensated step (the pure body leaves room to append an audit/event step).
+// step; its compensator only runs for a later step or a cancel (README.md),
+// and the pure body leaves room to append an audit/event step.
 export const requestDeliveryWorkflow = createWorkflow(
   "request-delivery",
   function (input: RequestDeliveryInput) {
