@@ -16,17 +16,31 @@ How compensation actually behaves (Medusa 2.19, pinned by
   but with no data (`undefined`), never the work it did. Every compensator
   here starts with `if (!data) return`, so it does nothing. A step that writes
   more than once must therefore undo its own partial work inline before
-  rethrowing (`create-card`, `update-card`, `create-product-from-pricecharting`
-  do).
+  rethrowing. `create-card`, `update-card` and
+  `create-product-from-pricecharting` do. `ensure-profile-handle` does not: if
+  `claimHandle` throws after `claimUsername` renamed the account, the rename
+  stays (a valid username the next call reuses). That is a known gap, left
+  as it is.
 - The compensator gets its data only when a later step in the same run fails,
-  when the workflow runs nested inside another one, or when a finished run is
-  cancelled with `workflow(container).cancel({ transaction })`. No code here
-  does any of these today, so in production these compensators never undo
-  anything.
+  when the workflow runs nested inside another one (not pinned by the spec),
+  or when a finished run is cancelled with
+  `workflow(container).cancel({ transaction })`. A cancel needs the
+  in-memory `transaction` from that `run()`: these workflows set no `store`
+  or `retentionTime`, so the Redis workflow engine drops a finished run and a
+  cancel by `transactionId` finds nothing. No code here does any of these
+  today, so in production these compensators never undo anything.
 - They are kept anyway. They are the correct undo for when a step is composed
   into a longer workflow or a run is cancelled, which is the standard Medusa
-  shape: the docs' own `create-post` example is a one-step workflow with a
-  compensator. Deleting them would remove that safety net and gain nothing.
+  shape: the docs' own `create-post` example
+  (https://docs.medusajs.com/learn/fundamentals/modules) is a one-step
+  workflow with a compensator. Deleting them would remove that safety net and gain nothing.
+
+What the wrappers do not give these callers today: no hooks (`createHook`),
+no retries (Medusa's default is 0 and none is configured), no workflow-level
+idempotency (replay safety lives in the module, e.g. `replayed` on credit
+postings), no lock step, no caller-supplied `transactionId`, no
+`emitEventStep` grouping, and no stored run history. They are not kept for
+runtime features.
 
 Why the wrappers stay instead of direct module calls:
 

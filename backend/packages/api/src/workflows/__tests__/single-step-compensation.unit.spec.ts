@@ -40,6 +40,13 @@ const succeeding = createStep(
   },
 );
 
+const twoStepWorkflow = createWorkflow(
+  'single-step-compensation-two-step-wf',
+  () => {
+    succeeding();
+    return new WorkflowResponse(failing());
+  },
+);
 const failingWorkflow = createWorkflow(
   'single-step-compensation-failing-wf',
   () => new WorkflowResponse(failing()),
@@ -65,7 +72,16 @@ it('never compensates a run that succeeds', async () => {
   expect(calls).toEqual([]);
 });
 
-it("hands the compensator its data only when a finished run is cancelled", async () => {
+it('hands an earlier step its data when a later step throws', async () => {
+  const { errors } = await twoStepWorkflow().run({ throwOnError: false });
+  expect(errors.map((e) => e.error?.message)).toEqual(['step failed']);
+  expect(calls).toEqual([
+    { step: 'failing', data: undefined },
+    { step: 'succeeding', data: { rowId: 'row_1' } },
+  ]);
+});
+
+it('hands the compensator its data when a finished run is cancelled', async () => {
   const { transaction } = await succeedingWorkflow().run();
   await succeedingWorkflow().cancel({ transaction });
   expect(calls).toEqual([{ step: 'succeeding', data: { rowId: 'row_1' } }]);

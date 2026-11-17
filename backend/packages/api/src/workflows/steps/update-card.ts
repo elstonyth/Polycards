@@ -214,9 +214,9 @@ export const updateCardInvoke = async (
   // so it undoes nothing: the Card mutation below + the slab bake above
   // would be left half-applied against an unchanged Product. Self-compensate
   // like create-card.ts: undo the mutation and reclaim the new file, then
-  // rethrow. The try starts at the
-  // pixel resolve (not the mutation) because resolvePixelPokemonPatch can throw
-  // NOT_FOUND after the bake already ran, orphaning the new file otherwise.
+  // rethrow. The try starts at the pixel resolve (not the mutation) because
+  // resolvePixelPokemonPatch can throw NOT_FOUND after the bake already ran,
+  // orphaning the new file otherwise.
   try {
     const pixelPatch = await resolvePixelPokemonPatch(
       packs,
