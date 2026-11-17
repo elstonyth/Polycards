@@ -233,7 +233,8 @@ below, the saved account, not the money-out event)
 A Withdrawal above `GATEWAY_WD_APPROVAL_ABOVE_RM` (default RM 1,000,
 strictly greater-than), or from a later account on a browser an earlier
 account shares and support has not confirmed as one household (ADR 0018,
-`hold_reason` 'amount' or 'shared_device', staff only), is written status
+`hold_reason` 'amount' or 'shared_device', staff only; a real player group is
+exempt from the shared-device hold), is written status
 `held` — debited from the customer
 but never submitted to the gateway — until an admin approves or denies it
 from the admin `/withdrawals` queue, whose default view is `held`. Approve

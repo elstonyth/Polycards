@@ -67,7 +67,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'Where your data lives',
-    body: 'Data is stored with our hosting provider (DigitalOcean, Singapore region) and retained while your account is active. The IP address and browser id we record when you sign up, check in, claim a reward or withdraw are kept for 180 days from the last time we saw them (the cookie itself can stay in your browser for up to 400 days), so our team can check for one person running several accounts, and are deleted sooner if your account is deleted. The same browser id lets us keep the welcome pack to one per household, and can send a withdrawal for a quick check by our team when another account was used on the same device (see the Fair Play Rules).',
+    body: 'Data is stored with our hosting provider (DigitalOcean, Singapore region) and retained while your account is active. The IP address and browser id we record when you sign up, check in, claim a reward or withdraw are kept for 180 days from the last time we saw them (the cookie itself can stay in your browser for up to 400 days), so our team can check for one person running several accounts, and are deleted sooner if your account is deleted. The same browser id lets us keep the welcome pack to one per household, and can send a withdrawal for a check by our team when another account was used on the same device (see the Fair Play Rules).',
   },
   {
     title: 'Your choices',

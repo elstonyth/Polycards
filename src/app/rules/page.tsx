@@ -20,15 +20,15 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'The welcome pack',
-    body: 'The free welcome pack is one per person or household. To claim it, verify your phone number, add your real name and add your bank account. If an account in your household has already claimed it on the same device, another account cannot claim it again.',
+    body: 'The free welcome pack is one per person or household. To claim it, verify your phone number, add your real name and add your bank account. If someone in your household has already claimed it, another account cannot claim it.',
   },
   {
     title: 'Withdrawing',
-    body: 'Top up at least once, and use your top-ups on packs, before you withdraw. Bonus credit is for packs only and cannot be withdrawn. Withdrawals are paid to a bank account in your own real name.',
+    body: 'Top up at least once, and use your top-ups on packs, before you withdraw. Bonus credit is for packs only and cannot be withdrawn. Your welcome-pack card can be sold or delivered after your first paid pack. Money from selling it, and the part of any card paid with bonus credit, must be used on packs once more before it can be withdrawn. Withdrawals go only to an account in your own name.',
   },
   {
     title: 'Checks before a payout',
-    body: 'Some withdrawals are checked by our team before they are sent, such as large amounts, or a withdrawal from an account used on the same device as another account. During the check the amount is set aside, and it returns to your balance if the withdrawal is not approved. If your family shares a device, contact customer service: once we confirm you are separate people in one household, later withdrawals are not held for that reason.',
+    body: 'Some withdrawals are checked by our team before they are sent, such as large amounts, or an account that may be linked to another. During the check the amount is set aside, and it returns to your balance if the withdrawal is not approved. If your family shares a device, a withdrawal from the newer account may be checked by our team. Once we confirm you are separate people in one household, that account’s later withdrawals are not held for that reason.',
   },
   {
     title: 'Not allowed',

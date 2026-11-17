@@ -8,14 +8,16 @@ farmer can clear, so it is never a gate at signup. Where it does match, it now a
 two places.
 
 - **One welcome pack per person or household.** `claimFreePack` refuses an account
-  when another open account that shares a browser id with it has already claimed one.
+  when another account that shares a browser id with it has already claimed one (any
+  account not deleted: banned and disabled ones count).
   The ids checked are the ones recorded for the account plus the one on the open
   request (`vouchedVisitorDevice`). A lock per browser id makes two accounts claiming
   at once take turns. The refusal says "one per person or household" and never names
   the browser, so it teaches nothing to work around. No browser id means no match.
   A confirmed household does not unlock a second pack.
 - **A withdrawal from a later account on a shared browser waits for review.** If an
-  earlier open account shares the browser and support has not confirmed the pair, the
+  earlier account (not deleted; banned and disabled ones count) shares the browser and
+  support has not confirmed the pair, the
   withdraw route sets `reviewHold`, and the row is written `held` with
   `hold_reason = 'shared_device'`, whatever its amount. The first account on a
   browser is never held. A real player group (partners, house) is exempt, as it is
@@ -31,6 +33,9 @@ two places.
   `metadata.device_share_verified`, audited, so the account is not held for those
   accounts again. Only the approve route writes it, and the metadata guard refuses it
   everywhere else.
+
+Both rules see only the browser ids still kept, the 180 days after an account was last
+seen (ADR 0016), and none for an account whose cookie was cleared.
 
 Holds, not blocks: a block would teach farms to clear cookies and rotate networks, and
 would lose the overlap that exposed them. A hold keeps the signal and lets a family

@@ -501,7 +501,7 @@ export default function WithdrawForm({
         )}
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
           {held
-            ? `This withdrawal needs a quick check by our team before it's sent to your ${toWallet ? 'wallet' : 'bank'} — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know.`
+            ? `This withdrawal needs a check by our team before it's sent to your ${toWallet ? 'wallet' : 'bank'} — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know.`
             : toWallet
               ? 'Your USDT transfer is processing — most arrive within minutes. If it fails, the full amount returns to your balance automatically.'
               : 'Your bank transfer is processing — most arrive within minutes. If the bank rejects it, the full amount returns to your balance automatically.'}
