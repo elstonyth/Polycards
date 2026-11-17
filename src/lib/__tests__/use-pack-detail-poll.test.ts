@@ -26,7 +26,6 @@ const detailA: PackDetail = {
   topHits: [],
   pool: [],
   publishedOdds: null,
-  demoOdds: null,
 };
 
 beforeAll(async () => {
@@ -134,10 +133,9 @@ it.each([
       },
     ],
     publishedOdds: null,
-    demoOdds: null,
   },
-  { topHits: [], pool: [null], publishedOdds: null, demoOdds: null },
-  { topHits: 'broken', pool: [], publishedOdds: null, demoOdds: null },
+  { topHits: [], pool: [null], publishedOdds: null },
+  { topHits: 'broken', pool: [], publishedOdds: null },
 ])(
   'retains seed and last-good detail when a poll is incompatible: %j',
   async (incompatible) => {

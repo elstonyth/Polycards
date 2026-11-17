@@ -129,6 +129,36 @@ export interface WithdrawalGateWallet {
   playthrough: { remaining: number };
 }
 
+/** Why nothing may leave, in the gate's order (freeze, then no top-up, then
+ *  money still to use on packs). The storefront shows this as is and never
+ *  re-derives it; a refusal from withdrawalGateError carries the same name as
+ *  its `code`. */
+export type WithdrawalHold = 'frozen' | 'no_topup' | 'locked';
+
+/** The machine code on each withdrawalGateError refusal: a hold, or
+ *  `over_limit` for the plain "you can withdraw up to X" cap. */
+export type WithdrawalRefusalCode = WithdrawalHold | 'over_limit';
+
+/** The gate's hold, named once for both the refusals below and walletSummary
+ *  (credits route `hold`). `unlockSpend` is what packs must still take before
+ *  a `locked` gate opens: bonus credit (packs spend it first) plus
+ *  `playthrough.remaining`, in MYR; 0 for any other hold. */
+export function withdrawalHold(
+  wallet: Pick<WithdrawalGateWallet, 'isFrozen' | 'hasTopup' | 'bonus' | 'playthrough'>,
+): { hold: WithdrawalHold | null; unlockSpend: number } {
+  // In cents so a float hair can't print or lock.
+  const remainingCents = Math.round(wallet.playthrough.remaining * 100);
+  if (wallet.isFrozen) return { hold: 'frozen', unlockSpend: 0 };
+  if (!wallet.hasTopup) return { hold: 'no_topup', unlockSpend: 0 };
+  if (remainingCents > 0) {
+    return {
+      hold: 'locked',
+      unlockSpend: (remainingCents + Math.round(wallet.bonus * 100)) / 100,
+    };
+  }
+  return { hold: null, unlockSpend: 0 };
+}
+
 /**
  * The customer-facing refusals of the withdrawal gate, in one place.
  * Returns the error to throw, or null when the amount is allowed.
@@ -138,6 +168,11 @@ export interface WithdrawalGateWallet {
  * PacksModuleService.withdrawForCashout (under the credit: advisory lock), and
  * the pre-row precheck in gateway-withdrawal.ts. A second copy that drifted
  * would surface as a silently different refusal on one path only.
+ *
+ * Each refusal carries a machine `code` (WithdrawalRefusalCode: the hold, or
+ * `over_limit`). Medusa's error handler sends it as the body's `code`. The
+ * storefront cannot read it yet (js-sdk's FetchError keeps only the message),
+ * so it still routes by phrase. Never rename a code once a client maps it.
  *
  * Who matches on these strings, if you are considering a reword: the backend
  * unit tests in __tests__/gateway-withdrawal.unit.spec.ts assert them by
@@ -160,29 +195,40 @@ export function withdrawalGateError(
 ): MedusaError | null {
   // In cents so a float hair can't print. Checked before the early return
   // too: money still to use on packs refuses even if `withdrawable` (read
-  // elsewhere) disagrees — defense in depth for the spend-first rule.
+  // elsewhere) disagrees — defense in depth for the spend-first rule. The
+  // hold only picks WHICH refusal.
   const remainingCents = Math.round(wallet.playthrough.remaining * 100);
   if (amount <= wallet.withdrawable && remainingCents <= 0) return null;
-  if (wallet.isFrozen) {
-    return new MedusaError(
+  const { hold, unlockSpend } = withdrawalHold(wallet);
+  // The code rides beside the message (Medusa's error handler sends it as
+  // `code`), so a client can route a refusal without matching its English.
+  const refuse = (
+    type: string,
+    message: string,
+    code: WithdrawalRefusalCode,
+  ) => new MedusaError(type, message, code);
+  if (hold === 'frozen') {
+    return refuse(
       MedusaError.Types.NOT_ALLOWED,
       'Withdrawals are unavailable while your account is under review. Contact support.',
+      'frozen',
     );
   }
-  if (!wallet.hasTopup) {
-    return new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
+  if (hold === 'no_topup') {
+    return refuse(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE, 'no_topup');
   }
   // Spend first (ADR 0013): spending on packs really does unlock the rest.
   // Packs spend bonus first, so the amount to spend counts it in.
-  if (remainingCents > 0) {
-    const toSpend = (remainingCents + Math.round(wallet.bonus * 100)) / 100;
-    return new MedusaError(
+  if (hold === 'locked') {
+    return refuse(
       MedusaError.Types.NOT_ALLOWED,
-      `Withdrawals unlock once you've used RM ${toSpend.toFixed(2)} more on packs. Then your balance, except bonus credit, can be withdrawn.`,
+      `Withdrawals unlock once you've used RM ${unlockSpend.toFixed(2)} more on packs. Then your balance, except bonus credit, can be withdrawn.`,
+      'locked',
     );
   }
-  return new MedusaError(
+  return refuse(
     MedusaError.Types.INVALID_DATA,
     `You can withdraw up to RM ${wallet.withdrawable.toFixed(2)} right now.`,
+    'over_limit',
   );
 }

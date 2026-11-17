@@ -38,7 +38,11 @@ import {
   CardDetailOverlay,
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
-import { sellTotals, toggleSelectAll } from '@/lib/vault-selection';
+import {
+  select,
+  selectAllState,
+  selectionSummary,
+} from '@/lib/vault-selection';
 import { VaultActionBar } from '@/components/account/VaultActionBar';
 import { useConsent } from '@/lib/use-consent';
 
@@ -108,49 +112,25 @@ export default function VaultClient({
   const [rarityFilter, setRarityFilter] = useState<string | null>(null);
 
   // Multi-select → bulk ship or bulk sell-back.
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [deliverOpen, setDeliverOpen] = useState(false);
   const [confirmBulkSell, setConfirmBulkSell] = useState(false);
   const [bulkSelling, setBulkSelling] = useState(false);
 
-  // Locked cards (the free welcome pull before the first PAID open) can be
-  // neither sold nor delivered — the backend refuses both — so they never enter
-  // a selection. Keyed on `locked` ONLY: a weekly-challenge prize is
-  // source='reward' with a live, sellable quote and must stay selectable.
-  const toggleSelect = (pullId: string) =>
-    setSelected((prev) => {
-      if (items.some((i) => i.pullId === pullId && i.locked)) return prev;
-      const next = new Set(prev);
-      if (next.has(pullId)) next.delete(pullId);
-      else next.add(pullId);
-      return next;
-    });
   // Which locked cards have had their explainer tapped away. Dismissing only
   // uncovers the art — the row stays unselectable, and tapping it re-explains.
   const [lockDismissed, setLockDismissed] = useState<Set<string>>(new Set());
-  const selectedItems = items.filter(
-    (i) => selected.has(i.pullId) && !i.locked,
-  );
-  // Money sums read the MYR price (`priceMyr`; the raw USD FMV never reaches
-  // the view). An unpriced card (null — an older backend) counts as 0 here so
-  // the totals stay numbers; the confirm/action bar then show '—' for a 0 fmv.
-  const selectedFmv = selectedItems.reduce(
-    (s, i) => s + (i.card.priceMyr ?? 0),
-    0,
-  );
-  // The sell math runs over the backend's `sellable` subset of the selection,
-  // never the selection itself, so the total can only ever include cards the
-  // buyback step will honour. (Since 2026-09-03 that subset is every unlocked
-  // card — reward cards sell too — but the backend stays the authority.)
-  const sellableSelected = selectedItems.filter((i) => i.sellable);
-  const sellableFmv = sellableSelected.reduce(
-    (s, i) => s + (i.card.priceMyr ?? 0),
-    0,
-  );
-  // The total, and the part of it that is for opening packs (bonus share, the
-  // welcome card) — the confirm and the sold notice both name it.
-  const { amount: selectedBuyback, held: selectedBonus } =
-    sellTotals(sellableSelected);
+  // The confirm/action bar show '—' for a 0 fmv. (Since 2026-09-03 the
+  // sellable subset is every unlocked card — reward cards sell too — but the
+  // backend stays the authority.)
+  const {
+    items: selectedItems,
+    sellable: sellableSelected,
+    fmv: selectedFmv,
+    sellableFmv,
+    amount: selectedBuyback,
+    held: selectedBonus,
+  } = selectionSummary(selected, items);
   // The vault buyback is a flat rate, uniform across all vaulted items (see the
   // footer copy + actions/vault.ts), so the first item's percent represents the
   // whole batch. The confirm's "You receive" total is the exact sum of per-item
@@ -189,6 +169,10 @@ export default function VaultClient({
           (!i.challengePrize && i.card.rarity === rarityFilter)),
     );
   }, [items, query, rarityFilter]);
+
+  // Locked cards never enter a selection: vault-selection owns that rule.
+  const toggleSelect = (pullId: string) =>
+    setSelected((prev) => select(prev, visible, { type: 'toggle', pullId }));
 
   // Progressive paging: render the grid in steps so a 500-card vault doesn't
   // mount hundreds of slab images at once. Selection/select-all still operate
@@ -256,12 +240,10 @@ export default function VaultClient({
     };
   }, []);
 
-  // Select All operates on the SELECTABLE visible set — a locked row filtered
-  // out here as well as in `toggleSelect`, or Select All would re-add it and
-  // re-arm the sell CTA behind the per-row guard.
-  const visibleIds = visible.filter((i) => !i.locked).map((i) => i.pullId);
-  const allVisibleSelected =
-    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  // Select All operates on the SELECTABLE visible set (vault-selection skips
+  // locked rows), or it would re-arm the sell CTA behind the per-row guard.
+  const { count: selectableVisibleCount, allSelected: allVisibleSelected } =
+    selectAllState(selected, visible);
 
   async function handleToggleShowcase(item: VaultItem) {
     if (showcasingId) return;
@@ -914,13 +896,13 @@ export default function VaultClient({
           selectedCount={selected.size}
           sellableCount={sellableSelected.length}
           allVisibleSelected={allVisibleSelected}
-          visibleCount={visibleIds.length}
+          visibleCount={selectableVisibleCount}
           fmv={selectedFmv}
           sellTotal={selectedBuyback}
           quotesFirm={quotesFirm}
           busy={bulkSelling}
           onToggleSelectAll={() =>
-            setSelected((prev) => toggleSelectAll(prev, visibleIds))
+            setSelected((prev) => select(prev, visible, { type: 'toggleAll' }))
           }
           onSell={() => setConfirmBulkSell(true)}
           onDeliver={() => setDeliverOpen(true)}

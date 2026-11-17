@@ -77,10 +77,6 @@ export default async function SlotSpinPage({
       freeRipClaimId={
         typeof freeRip === 'string' && freeRip.trim() !== '' ? freeRip : null
       }
-      // The demo draw rolls odds SET 3's real tier split (aggregated backend-
-      // side), not the marketing published odds — display is unaffected. Gated
-      // like demoPool above: only the demo reads it, so only the demo gets it.
-      demoOdds={demo === '1' ? (detail?.demoOdds ?? null) : null}
     />
   );
 }

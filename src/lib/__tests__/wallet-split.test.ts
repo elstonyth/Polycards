@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  isWithdrawLocked,
-  sen,
-  stepTwoCopy,
-  walletSplit,
-} from '../wallet-split';
+import { sen, stepTwoCopy, walletSplit } from '../wallet-split';
 
 // Helper strings keep "RM" and the figure on one line.
 const NB = ' ';
@@ -204,61 +199,9 @@ describe('walletSplit — Balance / Withdrawable / For packs', () => {
                 ).toBe(sen(available));
                 expect(sen(s.bonus) + sen(s.stillToUse)).toBe(sen(s.forPacks));
                 expect(sen(s.unlockSpend)).toBe(sen(bonus) + sen(remaining));
-                // Locked exactly when the backend shuts the whole gate.
-                expect(
-                  isWithdrawLocked({
-                    hasTopup,
-                    isFrozen: frozen,
-                    remaining,
-                    withdrawable,
-                  }),
-                ).toBe(
-                  hasTopup &&
-                    !frozen &&
-                    sen(remaining) > 0 &&
-                    sen(withdrawable) === 0,
-                );
-                if (model === 'spend-first')
-                  expect(
-                    isWithdrawLocked({
-                      hasTopup,
-                      isFrozen: frozen,
-                      remaining,
-                      withdrawable,
-                    }),
-                  ).toBe(hasTopup && !frozen && sen(remaining) > 0);
                 for (const v of Object.values(s))
                   expect(v).toBeGreaterThanOrEqual(0);
               }
-  });
-});
-
-describe('isWithdrawLocked — matches the backend gate', () => {
-  const base = {
-    hasTopup: true,
-    isFrozen: false,
-    remaining: 50,
-    withdrawable: 0,
-  };
-
-  it('locks a topped-up account with money still to use and nothing withdrawable', () => {
-    expect(isWithdrawLocked(base)).toBe(true);
-  });
-
-  it('frozen or never topped up outranks locked', () => {
-    expect(isWithdrawLocked({ ...base, isFrozen: true })).toBe(false);
-    expect(isWithdrawLocked({ ...base, hasTopup: false })).toBe(false);
-  });
-
-  it('judges zero in sen', () => {
-    expect(isWithdrawLocked({ ...base, remaining: 0 })).toBe(false);
-    expect(isWithdrawLocked({ ...base, remaining: 0.004 })).toBe(false);
-    // A float hair of withdrawable is still nothing withdrawable.
-    expect(isWithdrawLocked({ ...base, withdrawable: 0.004 })).toBe(true);
-  });
-
-  it('an older backend that still pays part out is not locked', () => {
-    expect(isWithdrawLocked({ ...base, withdrawable: 30 })).toBe(false);
   });
 });
 

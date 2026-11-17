@@ -253,7 +253,7 @@ function PoolModal({
   // Bucket by canonical tier, rarest first. No unknown-rarity fallback is
   // needed: the store route's OddsEntrySchema refines `rarity` through
   // isRarity, and PackDetailPageSchema's droppableArray drops the rows that
-  // fail (src/lib/data/schemas.ts), so every card reaching here is already
+  // fail (src/lib/data/schemas/packs.ts), so every card reaching here is already
   // typed to a known tier.
   const noun = tickets ? 'prize' : 'card';
   const groups = RARITY_ORDER.map((rarity) => ({

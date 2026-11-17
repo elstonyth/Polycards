@@ -5,6 +5,7 @@ import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
 import { withLossless } from '../../../modules/packs/lossless';
 import { losslessWindowsForDisplay } from './lossless-display';
 import { catalogRows } from './pack-bodies';
+import type { StorePacksResponse } from './types';
 
 // GET /store/packs — the gacha pack catalog for /claw and the home "Open Packs"
 // tiles. A plain Medusa store route (publishable-key scoped, but NOT subject to
@@ -40,7 +41,7 @@ export function clearPackListCache(): void {
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StorePacksResponse>,
 ): Promise<void> {
   const cached = listCache.get(LIST_KEY);
   if (cached && cached.expires > Date.now()) {

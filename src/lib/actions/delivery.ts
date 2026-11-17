@@ -20,6 +20,7 @@
  * keep `getAuthToken`, which is why this file still imports it.
  */
 import type { HttpTypes } from '@medusajs/types';
+import type { StoreDeliveryOrder } from '@acme/api/store/delivery-orders';
 import { sdk } from '@/lib/medusa';
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
@@ -36,11 +37,13 @@ import {
   type DeliveryOrderStatus,
 } from '@/lib/data/schemas';
 import {
+  actionFailure,
+  COPY,
   friendlyError,
-  friendlyFailure,
   isAuthError,
   TRANSPORT_RULES,
   UNAUTHORIZED,
+  type ActionFailure,
   type ErrorRule,
 } from '@/lib/errors';
 import {
@@ -55,6 +58,7 @@ import {
   postcodeHint,
 } from '@/lib/delivery-fee';
 import { toCardView, type CardView } from '@/lib/card-view';
+import type { MaybeAbsent } from '@/lib/store-wire';
 
 export type DeliveryOrderItemView = {
   pullId: string;
@@ -134,36 +138,28 @@ export type AddressView = {
   phone: string | null;
 };
 
-interface BackendDeliveryOrder {
-  id: string;
+// The /store/delivery-orders row as the mapper reads it: the backend's shape,
+// with the fields an older backend may lack marked optional.
+type BackendDeliveryOrder = MaybeAbsent<
+  Omit<StoreDeliveryOrder, 'address' | 'items'>,
+  'shipping_fee' | 'insurance_fee' | 'proof_images'
+> & {
+  /** Narrowed by DeliveryOrderSchema (an unknown status drops the order). */
   status: DeliveryOrderView['status'];
-  tracking_number: string | null;
-  shipping_fee?: number | null;
-  insurance_fee?: number | null;
-  proof_images?: string[] | null;
-  created_at: string;
-  address: {
-    name: string;
-    address_1?: string | null;
-    address_2?: string | null;
-    city: string;
-    province?: string | null;
-    postal_code?: string | null;
-    country_code: string;
-    phone?: string | null;
-  };
-  items: {
-    pull_id: string;
-    challenge_prize?: boolean;
-    lucky_draw_prize?: boolean;
-    card: {
-      handle: string;
-      name: string;
-      image: string;
-      slab_image?: string | null;
-    } | null;
-  }[];
-}
+  address: MaybeAbsent<
+    StoreDeliveryOrder['address'],
+    'address_1' | 'address_2' | 'province' | 'postal_code' | 'phone'
+  >;
+  items: (MaybeAbsent<
+    Omit<StoreDeliveryOrder['items'][number], 'card'>,
+    'challenge_prize' | 'lucky_draw_prize'
+  > & {
+    card: MaybeAbsent<
+      NonNullable<StoreDeliveryOrder['items'][number]['card']>,
+      'slab_image'
+    > | null;
+  })[];
+};
 
 // The address book goes through `sdk.store.customer.*` — built-in Medusa
 // endpoints (exception 3 in lib/store.ts's header), so those three actions
@@ -176,24 +172,16 @@ const LOGIN_FIRST = 'Please log in first.';
 const LOGIN_TO_VIEW_ORDERS = 'Please log in to view your orders.';
 
 /**
- * A port `Failure` in this file's vocabulary. No cookie at all (the call never
- * left — `status` is undefined) keeps the action's own logged-out copy;
- * anything the backend actually said goes through the caller's rules table,
- * with `needsAuth` when it was a 401.
+ * A port `Failure` in this file's vocabulary: `actionFailure` (lib/errors.ts)
+ * over the caller's rules table. A malformed 2xx gets the shared "unexpected
+ * response" copy, like every other action.
  */
 function deliveryFailure(
   f: Failure,
   loggedOut: string,
   rules: readonly ErrorRule[] = DELIVERY_RULES,
-): { ok: false; error: string; needsAuth?: boolean } {
-  if (f.kind === 'unauthenticated' && f.status === undefined) {
-    return { ok: false, error: loggedOut, needsAuth: true };
-  }
-  return {
-    ok: false,
-    error: friendlyFailure(f, rules, DELIVERY_FALLBACK),
-    needsAuth: f.kind === 'unauthenticated',
-  };
+): ActionFailure {
+  return actionFailure(f, { loggedOut, rules, fallback: DELIVERY_FALLBACK });
 }
 
 export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
@@ -202,7 +190,7 @@ export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
   // The assertion widens the parse output to the fields the mapper also READS
   // but DeliveryOrderSchema deliberately does not guard — they ride the
   // `looseObject` typed `unknown` (same seam as getVault's items).
-  const raw = r.data.items as unknown as BackendDeliveryOrder[];
+  const raw = r.data.items as BackendDeliveryOrder[];
   const orders: DeliveryOrderView[] = raw.map((o) => ({
     id: o.id,
     status: o.status,
@@ -256,7 +244,7 @@ export async function requestDelivery(
     if (!orderId) {
       return {
         ok: false,
-        error: 'Got an unexpected response. Please try again.',
+        error: COPY.unexpected,
       };
     }
     return { ok: true, orderId };

@@ -19,7 +19,7 @@
 import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
-import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
+import { COPY, friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import {
   parseList,
   parseOne,
@@ -115,7 +115,7 @@ export async function getDaily(): Promise<DailyResult> {
     if (!parsed) {
       return {
         ok: false,
-        error: 'Got an unexpected response. Please try again.',
+        error: COPY.unexpected,
       };
     }
 
@@ -169,7 +169,7 @@ export async function claimVoucher(grantId: string): Promise<ClaimGrantResult> {
     if (!parsed) {
       return {
         ok: false,
-        error: 'Got an unexpected response. Please try again.',
+        error: COPY.unexpected,
       };
     }
     return { ok: true, claimed: parsed.claimed, kind: parsed.kind };
@@ -215,7 +215,7 @@ export async function withdrawPrize(
     if (!parsed) {
       return {
         ok: false,
-        error: 'Got an unexpected response. Please try again.',
+        error: COPY.unexpected,
       };
     }
     return { ok: true, status: parsed.status };

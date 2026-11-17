@@ -9,6 +9,7 @@
  */
 import { store, type Failure } from '@/lib/store';
 import { eventResultDetail } from '@/lib/lucky-draw';
+import { COPY, isLoggedOut } from '@/lib/errors';
 import {
   LuckyDrawBalanceSchema,
   LuckyDrawEnterSchema,
@@ -26,9 +27,7 @@ import {
 
 /** No cookie at all: the call never left (`status` is undefined). */
 const loggedOut = (f: Failure): string | null =>
-  f.kind === 'unauthenticated' && f.status === undefined
-    ? 'Please log in first.'
-    : null;
+  isLoggedOut(f) ? COPY.loginRequired : null;
 
 /** Is a Lucky Draw on? Needs no sign-in (the Games sheet asks for visitors
  *  too); null when the backend can't say. */

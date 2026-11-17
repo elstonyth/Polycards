@@ -41,22 +41,15 @@ import {
   coinFlipTicketsGone,
   coinFlipTicketsLabel,
   quoteIsLive,
+  coinFlipNext,
+  type CoinFlipEvent,
+  type CoinFlipPhase,
   type CoinFlipRound,
   type CoinSide,
   coinSideLabel,
 } from '@/lib/coin-flip';
 import { num, rm } from '@/lib/format';
 
-type Phase =
-  | 'loading'
-  | 'idle'
-  | 'quoting'
-  | 'confirm'
-  | 'armed'
-  | 'submitting'
-  | 'recovering'
-  | 'animating'
-  | 'result';
 type SettingsResult = Awaited<ReturnType<typeof getCoinFlipSettings>>;
 
 export function CoinFlipClient({
@@ -90,7 +83,12 @@ export function CoinFlipClient({
       : [],
   );
   const [chosenSide, setChosenSide] = useState<CoinSide>('head');
-  const [phase, setPhase] = useState<Phase>('loading');
+  const [phase, setPhaseState] = useState<CoinFlipPhase>('loading');
+  // Every phase change goes through coinFlipNext's table (src/lib/coin-flip.ts).
+  const advance = useCallback(
+    (event: CoinFlipEvent) => setPhaseState((p) => coinFlipNext(p, event)),
+    [],
+  );
   const [round, setRound] = useState<CoinFlipRound | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState(initialVault.ok ? '' : initialVault.error);
@@ -103,10 +101,7 @@ export function CoinFlipClient({
   const [motionProfile, setMotionProfile] = useState<CoinGesture>(0.5);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dragReady, setDragReady] = useState(false);
-  const finishMotion = useCallback(
-    () => setPhase((p) => (p === 'animating' ? 'result' : p)),
-    [],
-  );
+  const finishMotion = useCallback(() => advance('landed'), [advance]);
   const busy = useRef(false);
   const mounted = useRef(false);
   const unrevealedReceipt = useRef(false);
@@ -134,7 +129,7 @@ export function CoinFlipClient({
   const canReview = selectedCards.length > 0 || pickedTickets > 0;
   const focusReview = useRef(false);
 
-  useModalA11y(panel, phase === 'confirm', () => setPhase('idle'));
+  useModalA11y(panel, phase === 'confirm', () => advance('cancel'));
 
   function showRoundInUrl(id: string | null) {
     const url = new URL(window.location.href);
@@ -206,7 +201,7 @@ export function CoinFlipClient({
       );
     }
     setError('');
-    setPhase(animate ? 'animating' : 'result');
+    advance(animate ? 'tossed' : 'settled');
     setTossed(animate);
     unrevealedReceipt.current = animate;
     setHistoryRevision((value) => value + 1);
@@ -216,7 +211,7 @@ export function CoinFlipClient({
     busy.current = true;
     setPendingId(id);
     // "Resolve your previous flip" is for a real problem, not for opening a receipt.
-    setPhase('loading');
+    advance('open');
     // A pending flip outranks the address it was opened from, so the two must agree.
     try {
       showRoundInUrl(id);
@@ -229,7 +224,7 @@ export function CoinFlipClient({
         setRound(response.round);
         if (response.round.status !== 'quoted') settled(response.round);
         else {
-          setPhase('recovering');
+          advance('uncertain');
           setError(
             'This flip has no confirmed result yet. Retry the same flip to resolve it.',
           );
@@ -238,12 +233,12 @@ export function CoinFlipClient({
         if (response.missing) {
           clearPending(id, true);
           setRound(null);
-          setPhase('idle');
-        } else setPhase('recovering');
+          advance('missing');
+        } else advance('uncertain');
         setError(response.error);
       }
     } catch {
-      setPhase('recovering');
+      advance('uncertain');
       setError(
         'Connection interrupted. Your result is unknown. Check this flip again.',
       );
@@ -276,7 +271,7 @@ export function CoinFlipClient({
       if (!active) return;
       refreshStake();
       if (id) void recover(id);
-      else setPhase('idle');
+      else advance('ready');
     });
     return () => {
       active = false;
@@ -367,7 +362,7 @@ export function CoinFlipClient({
   async function handleReview() {
     if (busy.current || locked || !canReview || !config?.eligible) return;
     busy.current = true;
-    setPhase('quoting');
+    advance('review');
     setError('');
     try {
       const response = await quoteCoinFlip(
@@ -386,18 +381,18 @@ export function CoinFlipClient({
           arrived -
             (Date.parse(response.round.expires_at) - COIN_FLIP_QUOTE_MS),
         );
-        setPhase('confirm');
+        advance('quoted');
       } else {
         setError(response.error);
         // A refusal usually means this page's picture of the Vault is out of date.
         refreshStake();
-        setPhase('idle');
+        advance('refused');
       }
     } catch {
       setError(
         `Could not load a quote. Your ${selectedCards.length ? 'cards' : 'tickets'} have not been committed.`,
       );
-      setPhase('idle');
+      advance('refused');
     } finally {
       busy.current = false;
     }
@@ -422,7 +417,7 @@ export function CoinFlipClient({
       busy.current = false;
       return;
     }
-    setPhase('submitting');
+    advance(retry ? 'retry' : 'toss');
     setError('');
     if (!retry)
       coinView.current?.scrollIntoView({
@@ -436,17 +431,17 @@ export function CoinFlipClient({
       else if (!response.ok && !response.uncertain) {
         clearPending(id, true);
         setRound(null);
-        setPhase('idle');
+        advance('refused');
         setError(response.error);
         refreshStake();
       } else {
-        setPhase('recovering');
+        advance('uncertain');
         setError(
           'Your result is not confirmed yet. Check this flip before starting another.',
         );
       }
     } catch {
-      setPhase('recovering');
+      advance('uncertain');
       setError(
         'Connection interrupted. Your result is unknown. Check this flip again.',
       );
@@ -485,7 +480,7 @@ export function CoinFlipClient({
       : chosenSide;
   function chooseAnother() {
     if (round) clearPending(round.id, true);
-    setPhase('idle');
+    advance('restake');
     setRound(null);
     setSelected([]);
     setTicketStake(0);
@@ -497,7 +492,7 @@ export function CoinFlipClient({
     setRound(null);
     setError('');
     focusReview.current = true;
-    setPhase('idle');
+    advance('restake');
   }
   // A win keeps the stake, so the same cards, tickets and call go straight back up
   // for review. The spent quote is never reused: Review quotes them afresh, and the
@@ -520,7 +515,7 @@ export function CoinFlipClient({
     setRound(null);
     setError('');
     focusReview.current = true;
-    setPhase('idle');
+    advance('restake');
   }
 
   // In place, so a row already in the address still opens: a link to it would not.
@@ -929,7 +924,7 @@ export function CoinFlipClient({
                     <Pill
                       variant="secondary"
                       size="lg"
-                      onClick={() => setPhase('idle')}
+                      onClick={() => advance('cancel')}
                     >
                       {live ? 'Cancel' : 'Review again'}
                     </Pill>
@@ -1224,7 +1219,7 @@ export function CoinFlipClient({
             <button
               aria-hidden
               tabIndex={-1}
-              onClick={() => setPhase('idle')}
+              onClick={() => advance('cancel')}
               className="glass-stage absolute inset-0 bg-black/80"
             />
             <div
@@ -1371,7 +1366,7 @@ export function CoinFlipClient({
                   variant="secondary"
                   size="lg"
                   className="px-5"
-                  onClick={() => setPhase('idle')}
+                  onClick={() => advance('cancel')}
                 >
                   Cancel
                 </Pill>
@@ -1379,7 +1374,7 @@ export function CoinFlipClient({
                   size="lg"
                   className="h-auto min-h-12 min-w-0 flex-1 py-2 leading-tight whitespace-normal"
                   disabled={!live}
-                  onClick={() => setPhase('armed')}
+                  onClick={() => advance('arm')}
                 >
                   Confirm{' '}
                   {[

@@ -12,7 +12,7 @@ import { getWallet } from '@/lib/actions/wallet';
 import { getPaymentLimits } from '@/lib/actions/vault';
 import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
 import { pillVariants } from '@/components/ui/pill';
-import { isWithdrawLocked, sen, walletSplit } from '@/lib/wallet-split';
+import { sen, walletSplit } from '@/lib/wallet-split';
 import { rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -53,11 +53,10 @@ export default async function WalletPage() {
   }
 
   const w = res.wallet;
-  const gate = { ...w, remaining: w.playthrough.remaining };
-  const split = walletSplit(gate);
+  const split = walletSplit({ ...w, remaining: w.playthrough.remaining });
   // Can't withdraw yet: never topped up, or money still to use on packs
   // (the backend shuts the whole gate until it is used).
-  const cantYet = !w.isFrozen && (!w.hasTopup || isWithdrawLocked(gate));
+  const cantYet = w.hold === 'no_topup' || w.hold === 'locked';
   const canWithdraw = !w.isFrozen && sen(w.withdrawable) > 0;
 
   return (

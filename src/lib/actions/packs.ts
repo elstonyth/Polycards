@@ -22,9 +22,11 @@ import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import type { PackCard } from '@/lib/packs-data';
 import {
-  friendlyFailure,
+  actionFailure,
+  isLoggedOut,
   RATE_LIMITED,
   UNAUTHORIZED,
+  type ActionFailure,
   type ErrorRule,
 } from '@/lib/errors';
 import { parseOne, UncheckedSchema, WonCardSchema } from '@/lib/data/schemas';
@@ -139,31 +141,23 @@ const TICKETS_CHARGED_BUT_UNSHOWABLE =
   "Your spin went through and your tickets are in your Lucky Draw balance, but we couldn't show them here.";
 
 /**
- * A port `Failure` in the open actions' vocabulary.
+ * A port `Failure` in the open actions' vocabulary: `actionFailure`
+ * (lib/errors.ts) over PACKS_RULES, plus `needsTopUp`.
  *
- * No cookie at all (the call never left — `status` is undefined) keeps the
- * logged-out shape these actions have always returned: the login copy and
- * `needsAuth`, with no `needsTopUp` key at all. Anything the backend actually
- * said goes through PACKS_RULES, with `needsAuth` from the port's
- * classification and `needsTopUp` still a prose probe — no status
- * distinguishes "broke" from any other 400 (see the note on friendlyError in
- * lib/errors.ts).
+ * No cookie at all keeps the logged-out shape these actions have always
+ * returned, with no `needsTopUp` key at all. Otherwise `needsTopUp` is still a
+ * prose probe — no status distinguishes "broke" from any other 400 (see the
+ * note on friendlyError in lib/errors.ts). Both calls use `UncheckedSchema`,
+ * so `invalid_shape` never reaches here.
  */
-function openFailure(f: Failure): {
-  ok: false;
-  error: string;
-  needsAuth?: boolean;
-  needsTopUp?: boolean;
-} {
-  if (f.kind === 'unauthenticated' && f.status === undefined) {
-    return { ok: false, error: LOGIN_TO_OPEN, needsAuth: true };
-  }
-  return {
-    ok: false,
-    error: friendlyFailure(f, PACKS_RULES, PACKS_FALLBACK),
-    needsAuth: f.kind === 'unauthenticated',
-    needsTopUp: /not enough (credits|balance)/i.test(f.text),
-  };
+function openFailure(f: Failure): ActionFailure & { needsTopUp?: boolean } {
+  const base = actionFailure(f, {
+    loggedOut: LOGIN_TO_OPEN,
+    rules: PACKS_RULES,
+    fallback: PACKS_FALLBACK,
+  });
+  if (isLoggedOut(f)) return base;
+  return { ...base, needsTopUp: /not enough (credits|balance)/i.test(f.text) };
 }
 
 export async function openPack(slug: string): Promise<OpenPackResult> {

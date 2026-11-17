@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { parseChance, sampleRarity, demoDraw } from '../demo-spin';
-import { pickDemoOdds } from '@/lib/packs-format';
 import type { PackCard, Rarity } from '@/lib/packs-data';
 
 // The guest demo spin is theater: a client-side weighted sample over the
@@ -104,31 +103,5 @@ describe('demoDraw', () => {
     ];
     const pool = [card('only', 'Legendary')];
     expect(demoDraw(pool, offOdds, 0.5, 0.5)?.handle).toBe('only');
-  });
-});
-
-describe('pickDemoOdds', () => {
-  const set3 = { tiers: { Legendary: 10, Common: 90 } };
-  const published = { tiers: { Legendary: 1, Common: 99 } };
-
-  it('prefers the backend set-3 split', () => {
-    expect(pickDemoOdds(set3, published)).toBe(set3);
-  });
-
-  it('falls back to the published odds when set 3 is withheld', () => {
-    expect(pickDemoOdds(null, published)).toBe(published);
-  });
-
-  // The payload sanitizer returns a TIER-LESS `{ tiers: {} }` — truthy — when
-  // every tier key in the backend's map was unknown. A bare `??` would hand
-  // that to the caller, whose "no rows" fallback then skips the published odds
-  // entirely and drops to the static ODDS.
-  it('does not let an empty tier map shadow the published odds', () => {
-    expect(pickDemoOdds({ tiers: {} }, published)).toBe(published);
-  });
-
-  it('returns null when neither source has odds', () => {
-    expect(pickDemoOdds(null, null)).toBeNull();
-    expect(pickDemoOdds({ tiers: {} }, null)).toBeNull();
   });
 });

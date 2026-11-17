@@ -1,7 +1,7 @@
 'use server';
 
 import { store, type Failure } from '@/lib/store';
-import { friendlyFailure, type ErrorRule } from '@/lib/errors';
+import { actionFailure, COPY, type ErrorRule } from '@/lib/errors';
 import {
   CoinFlipFeedSchema,
   CoinFlipHistorySchema,
@@ -43,11 +43,18 @@ const rules: readonly ErrorRule[] = [
   ],
   [/not found/i, 'This flip or card could not be found.'],
 ];
+// Only `error` is taken from actionFailure: CoinFlipFailure has no `needsAuth`.
+// A malformed 2xx keeps this call's own fallback, as it always has.
 function failure(f: Failure, fallback: string): CoinFlipFailure {
   return {
     ok: false,
     missing: f.status === 404,
-    error: friendlyFailure(f, rules, fallback),
+    error: actionFailure(f, {
+      loggedOut: COPY.loginRequired,
+      rules,
+      fallback,
+      unexpected: fallback,
+    }).error,
     // A valid refusal is final; timeouts, proxy errors and malformed success are not.
     uncertain:
       f.kind === 'invalid_shape' ||

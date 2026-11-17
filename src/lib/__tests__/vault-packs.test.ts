@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   giftsHeldFor,
   giftsUsed,
+  paidCost,
   spinBetLabel,
   vaultButtonLabel,
   vaultCostLabel,
@@ -20,6 +21,22 @@ describe('giftsUsed — gifts cover rows first, never more than held', () => {
 
   it('never goes negative', () => {
     expect(giftsUsed(2, -1)).toBe(0);
+  });
+});
+
+describe('paidCost — only the rows no gift covers are charged', () => {
+  it.each([
+    // price, qty, held, charged
+    [300, 1, 0, 300],
+    [300, 3, 0, 900],
+    [300, 1, 1, 0],
+    [300, 2, 1, 300],
+    [300, 2, 5, 0],
+    [300, 3, 2, 300],
+    [300, 2, -1, 600],
+    [12.5, 3, 1, 25],
+  ])('price %s × %s with %s held = %s', (price, qty, held, charged) => {
+    expect(paidCost(price, qty, held)).toBe(charged);
   });
 });
 

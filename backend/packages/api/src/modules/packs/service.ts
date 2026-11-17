@@ -44,6 +44,8 @@ import {
   playthroughState,
   walletWithdrawable,
   withdrawalGateError,
+  withdrawalHold,
+  type WithdrawalHold,
 } from './withdrawable';
 import {
   loadSavedBankAccounts,
@@ -9695,6 +9697,11 @@ class PacksModuleService extends MedusaService({
     /** Spend-only bonus credit inside `balance` (MYR) — never withdrawable. */
     bonus: number;
     playthrough: { deposited: number; used: number; remaining: number };
+    /** Why nothing may leave, named by the gate (withdrawalHold); null when
+     *  withdrawals are open. */
+    hold: WithdrawalHold | null;
+    /** What packs must still take before a `locked` hold opens (MYR). */
+    unlockSpend: number;
   }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
@@ -9764,18 +9771,21 @@ class PacksModuleService extends MedusaService({
       frozen,
     });
 
+    const playthrough = {
+      deposited: depositedCents / 100,
+      used: usedCents / 100,
+      remaining: fold.remainingCents / 100,
+    };
+    const bonus = fold.bonusCents / 100;
     return {
       balance,
       available: fold.availableCents / 100,
       isFrozen: frozen,
       hasTopup,
       withdrawable: fold.withdrawableCents / 100,
-      bonus: fold.bonusCents / 100,
-      playthrough: {
-        deposited: depositedCents / 100,
-        used: usedCents / 100,
-        remaining: fold.remainingCents / 100,
-      },
+      bonus,
+      playthrough,
+      ...withdrawalHold({ isFrozen: frozen, hasTopup, bonus, playthrough }),
     };
   }
 

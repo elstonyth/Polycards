@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import { withLossless } from '../../../../modules/packs/lossless';
 import { losslessWindowsForDisplay } from '../lossless-display';
 import { packDetailBody } from '../pack-bodies';
+import type { StorePackDetailResponse } from './types';
 
 // GET /store/packs/:slug — one active pack plus its prize pool (each odds row
 // joined to the referenced Card), behind /claw/[slug]'s Top Hits. A plain Medusa
@@ -31,11 +32,10 @@ import { packDetailBody } from '../pack-bodies';
 // computes per window and ≤TTL cross-instance skew, display-only either
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
-// Typed only as far as the Lossless overlay needs; the full body is stored.
-type DetailBody = {
-  pack: { slug: string; category: string; buyback_percent: unknown };
-};
-const packCache = new Map<string, { expires: number; body: DetailBody }>();
+const packCache = new Map<
+  string,
+  { expires: number; body: StorePackDetailResponse }
+>();
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
  *  one process, so test A's cached pack would be served to test B. */
@@ -45,7 +45,7 @@ export function clearPackDetailCache(): void {
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StorePackDetailResponse | { message: string }>,
 ): Promise<void> {
   const packsModuleService: PacksModuleService =
     req.scope.resolve(PACKS_MODULE);
@@ -53,7 +53,7 @@ export async function GET(
 
   // The cache holds the plain body; Lossless Mode is laid over a copy on every
   // request (see store/packs/route.ts), never cached.
-  const send = async (body: DetailBody): Promise<void> => {
+  const send = async (body: StorePackDetailResponse): Promise<void> => {
     const windows = await losslessWindowsForDisplay(req);
     res.json({ ...body, pack: withLossless(body.pack, windows, Date.now()) });
   };

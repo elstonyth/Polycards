@@ -13,7 +13,9 @@
  * The backend is PII-safe (display name + avatar seed only — never email/id),
  * so nothing sensitive crosses into the storefront.
  */
+import type { StoreLeaderboardEntry } from '@acme/api/store/leaderboard';
 import { store } from '@/lib/store';
+import type { MaybeAbsent } from '@/lib/store-wire';
 import { logger } from '@/lib/logger';
 import { avatarForSeed } from '@/lib/profile-view';
 import { rm } from '@/lib/format';
@@ -46,16 +48,10 @@ export interface LeaderboardEntry {
 }
 
 // One row from GET /store/leaderboard (numbers + an avatar seed, no PII).
-interface BackendEntry {
-  rank: number;
-  name: string;
-  handle: string | null;
-  volume: number;
-  pulls: number;
-  seed: number;
-  avatar_url?: string | null;
-  equipped_frame_level?: number | null;
-}
+type BackendEntry = MaybeAbsent<
+  StoreLeaderboardEntry,
+  'avatar_url' | 'equipped_frame_level'
+>;
 
 // Avatar mapping is shared with the profile page (lib/profile-view.ts) so the
 // same PII-safe seed renders the same avatar on both surfaces.
@@ -93,7 +89,7 @@ function fetchBoard(period: LeaderboardPeriod): Promise<BackendEntry[]> {
         query: { period },
       }),
     );
-    return entries as unknown as BackendEntry[];
+    return entries as BackendEntry[];
   });
 }
 

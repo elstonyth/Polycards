@@ -62,27 +62,78 @@ const STOREFRONT_IGNORE_FILES = new Set([
 ]);
 
 const IMPORT_RE = /from\s+['"]((?:\.\.\/)+backend\/[^'"]+)['"]/g;
+// The store response types (ADR 0018): `@acme/api/store/<route>` is a tsconfig
+// path to that route's types.ts.
+const STORE_TYPES_RE = /from\s+['"]@acme\/api\/store\/([^'"]+)['"]/g;
+const STORE_TYPES_DIR = 'backend/packages/api/src/api/store/';
+const ANY_IMPORT_RE = /from\s+['"]([^'"]+)['"]/g;
 
-// Backend files that storefront code imports directly (today: two parity
-// tests). The storefront build type-checks them, so a change there must
-// redeploy the storefront too.
-// shortcut: direct imports only, not their own imports; follow the chain if
-// one of these files ever starts importing other backend code.
-export function backendFilesImportedByStorefront(repoRoot = '.') {
+const asTs = (p) => (/\.(m?ts|tsx|js|mjs)$/.test(p) ? p : `${p}.ts`);
+const resolveFrom = (file, rel) =>
+  asTs(normalize(join(dirname(file), rel)).replaceAll('\\', '/'));
+
+// Every file reachable from `roots` through relative imports. A missing file
+// is skipped: it fails the typecheck on its own.
+function relativeClosure(roots, repoRoot) {
+  const found = new Set(roots);
+  // A Set visits entries added during the loop, so this walks the chain.
+  for (const file of found) {
+    let text;
+    try {
+      text = readFileSync(join(repoRoot, file), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const m of text.matchAll(ANY_IMPORT_RE)) {
+      if (m[1].startsWith('.')) found.add(resolveFrom(file, m[1]));
+    }
+  }
+  return found;
+}
+
+// The backend files storefront code imports: `direct` by relative path (two
+// parity tests), `storeTypes` as `@acme/api/store/<route>`.
+function storefrontBackendRoots(repoRoot) {
   const listed = execFileSync('git', ['ls-files', 'src', 'tests', 'tools'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
-  const found = new Set();
+  const direct = new Set();
+  const storeTypes = new Set();
   for (const file of listed.split('\n')) {
     if (!/\.(m?ts|tsx)$/.test(file)) continue;
     const text = readFileSync(join(repoRoot, file), 'utf8');
     for (const m of text.matchAll(IMPORT_RE)) {
-      const target = normalize(join(dirname(file), m[1])).replaceAll('\\', '/');
-      found.add(/\.(m?ts|tsx|js|mjs)$/.test(target) ? target : `${target}.ts`);
+      direct.add(resolveFrom(file, m[1]));
+    }
+    for (const m of text.matchAll(STORE_TYPES_RE)) {
+      storeTypes.add(`${STORE_TYPES_DIR}${m[1]}/types.ts`);
     }
   }
-  return found;
+  return { direct, storeTypes };
+}
+
+// Backend files the storefront typecheck reads: the ones storefront code
+// imports and, transitively, the backend files those import. A change to any
+// of them must run the storefront checks and redeploy it.
+export function backendFilesImportedByStorefront(repoRoot = '.') {
+  const { direct, storeTypes } = storefrontBackendRoots(repoRoot);
+  return relativeClosure([...direct, ...storeTypes], repoRoot);
+}
+
+// The storefront's CI job and Docker build install only the root packages, so
+// a store types file whose chain reaches a package (`@medusajs/*`, …) passes
+// locally and fails there. Returns each such import as `file: specifier`.
+export function storeTypesPackageImports(repoRoot = '.') {
+  const bad = [];
+  const { storeTypes } = storefrontBackendRoots(repoRoot);
+  for (const file of relativeClosure(storeTypes, repoRoot)) {
+    const text = readFileSync(join(repoRoot, file), 'utf8');
+    for (const m of text.matchAll(ANY_IMPORT_RE)) {
+      if (!m[1].startsWith('.')) bad.push(`${file}: ${m[1]}`);
+    }
+  }
+  return bad;
 }
 
 const firstMatch = (files, pred) => files.find(pred) ?? null;
@@ -206,11 +257,19 @@ function selfTest() {
     }
   }
   const real = backendFilesImportedByStorefront();
-  if (!real.has('backend/packages/api/src/utils/real-name.ts')) {
+  const scanWants = [
+    'backend/packages/api/src/utils/real-name.ts',
+    'backend/packages/api/src/api/store/vault/types.ts',
+  ];
+  for (const want of scanWants) {
+    if (!real.has(want)) {
+      failed++;
+      console.error(`FAIL import scan missed ${want}`);
+    }
+  }
+  for (const bad of storeTypesPackageImports()) {
     failed++;
-    console.error(
-      'FAIL import scan missed backend/packages/api/src/utils/real-name.ts',
-    );
+    console.error(`FAIL store types file imports a package: ${bad}`);
   }
   // Live-commit diffs on real master history (#1048 9f9026d .. #1052 6753561).
   const live = [
@@ -245,7 +304,7 @@ function selfTest() {
   console.log(
     failed
       ? `${failed} failed`
-      : `all ${cases.length + 1 + live.length} checks passed`,
+      : `all ${cases.length + scanWants.length + 1 + live.length} checks passed`,
   );
   process.exit(failed ? 1 : 0);
 }

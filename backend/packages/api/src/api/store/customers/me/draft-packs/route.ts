@@ -8,6 +8,7 @@ import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
 import { customerSeesDrafts } from '../../../../../modules/packs/group-policy';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { catalogRows } from '../../../packs/pack-bodies';
+import type { StorePacksResponse } from '../../../packs/types';
 
 /** Never shown, draft or not: internal draw pools and the claim-only free pack. */
 export const HIDDEN_CATEGORIES = ['reward_box', FREE_WELCOME_CATEGORY];
@@ -21,7 +22,7 @@ export const HIDDEN_CATEGORIES = ['reward_box', FREE_WELCOME_CATEGORY];
 // the server or in a browser.
 export async function GET(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StorePacksResponse>,
 ): Promise<void> {
   const customerId = req.auth_context?.actor_id;
   if (!customerId) {

@@ -12,15 +12,15 @@
  *
  * The call goes through the `Store` port (src/lib/store.ts), which owns the
  * cookie read, the bearer, the schema check and the failure log; what stays
- * here is the logged-out answer and the copy (`vipFailure`, over VIP_RULES).
+ * here is the logged-out answer and the copy (`actionFailure`, over VIP_RULES).
  *
  * `next.reward` is on the wire but is neither validated nor mapped — nothing
  * renders it, and declaring it let a malformed reward blank the LV card (#523).
  * It stays documented here so the wire shape above is still the truth.
  */
-import { store, type Failure } from '@/lib/store';
+import { store } from '@/lib/store';
 import {
-  friendlyFailure,
+  actionFailure,
   COPY,
   UNAUTHORIZED,
   type ErrorRule,
@@ -66,30 +66,15 @@ const LOGIN_TO_VIEW_VIP = 'Please log in to view your VIP status.';
 const VIP_RULES: ErrorRule[] = [[UNAUTHORIZED, LOGIN_TO_VIEW_VIP]];
 const VIP_FALLBACK = COPY.generic;
 
-/** A port `Failure` in this action's vocabulary: no cookie at all (the call
- *  never left — `status` is undefined) and a 2xx that failed VipSchema each
- *  keep their own copy; anything the backend actually said goes through
- *  VIP_RULES, with `needsAuth` when it was a 401. */
-function vipFailure(f: Failure): VipResult {
-  if (f.kind === 'invalid_shape') {
-    return {
-      ok: false,
-      error: 'Got an unexpected response. Please try again.',
-    };
-  }
-  if (f.kind === 'unauthenticated' && f.status === undefined) {
-    return { ok: false, error: LOGIN_TO_VIEW_VIP, needsAuth: true };
-  }
-  return {
-    ok: false,
-    error: friendlyFailure(f, VIP_RULES, VIP_FALLBACK),
-    needsAuth: f.kind === 'unauthenticated',
-  };
-}
-
 export async function getVip(): Promise<VipResult> {
   const r = await store.get('/store/vip', VipSchema);
-  if (!r.ok) return vipFailure(r);
+  if (!r.ok) {
+    return actionFailure(r, {
+      loggedOut: LOGIN_TO_VIEW_VIP,
+      rules: VIP_RULES,
+      fallback: VIP_FALLBACK,
+    });
+  }
   const v = r.data;
 
   return {

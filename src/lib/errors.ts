@@ -66,6 +66,8 @@ export const COPY = {
   rateLimited: 'Too many requests — give it a moment and try again.',
   loginRequired: 'Please log in first.',
   generic: 'Something went wrong. Please try again.',
+  /** A 2xx whose body failed its schema (`invalid_shape`). */
+  unexpected: 'Got an unexpected response. Please try again.',
 } as const;
 
 /**
@@ -120,6 +122,57 @@ export function friendlyFailure(
   fallback: string,
 ): string {
   return friendlyError(f.text, [...rules, ...TRANSPORT_RULES], fallback);
+}
+
+/**
+ * No cookie at all: the call never left, so there is no status and no backend
+ * text worth reading. The port classifies it as `unauthenticated` with
+ * `status` undefined (src/lib/store-port.ts); this is that test, declared once.
+ */
+export const isLoggedOut = (f: Failure): boolean =>
+  f.kind === 'unauthenticated' && f.status === undefined;
+
+/** The `{ ok: false }` half of every action result that can ask for a login. */
+export type ActionFailure = { ok: false; error: string; needsAuth?: boolean };
+
+export type ActionFailureCopy = {
+  /** The action's own sentence for "no cookie at all". */
+  loggedOut: string;
+  /** The action's own ordered rules, consulted before the transport tier. */
+  rules: readonly ErrorRule[];
+  /** The action's answer when nothing matched. */
+  fallback: string;
+  /** A 2xx that failed its schema. Defaults to `COPY.unexpected`. */
+  unexpected?: string;
+};
+
+/**
+ * A port `Failure` as an action's `{ ok: false }` answer. The copy is the
+ * caller's (the port leaves it to them on purpose); the branch order and the
+ * result shape are owned here, so the actions cannot drift apart again:
+ *
+ * 1. no cookie → `loggedOut`, `needsAuth: true`;
+ * 2. `invalid_shape` → `unexpected`, with NO `needsAuth` key (a malformed 2xx
+ *    says nothing about the session);
+ * 3. anything the backend said → `friendlyFailure` over the caller's rules,
+ *    `needsAuth` true exactly when the port classified a 401.
+ */
+export function actionFailure(
+  f: Failure,
+  {
+    loggedOut,
+    rules,
+    fallback,
+    unexpected = COPY.unexpected,
+  }: ActionFailureCopy,
+): ActionFailure {
+  if (isLoggedOut(f)) return { ok: false, error: loggedOut, needsAuth: true };
+  if (f.kind === 'invalid_shape') return { ok: false, error: unexpected };
+  return {
+    ok: false,
+    error: friendlyFailure(f, rules, fallback),
+    needsAuth: f.kind === 'unauthenticated',
+  };
 }
 
 /**

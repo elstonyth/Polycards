@@ -9,6 +9,9 @@ const row = (over: Partial<BackendVaultItem> = {}): BackendVaultItem => ({
   card: {
     handle: 'h',
     name: 'Card',
+    set: 'Base',
+    grader: 'PSA',
+    grade: '10',
     image: '/c.webp',
     rarity: 'Common',
     market_value: 10,

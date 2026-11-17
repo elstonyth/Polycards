@@ -2,6 +2,7 @@ import {
   playthroughState,
   withdrawableCents,
   withdrawalGateError,
+  withdrawalHold,
   type WithdrawalGateWallet,
 } from '../withdrawable';
 
@@ -137,5 +138,95 @@ describe('withdrawalGateError (spend first, 2026-10-15)', () => {
       20,
     );
     expect(err?.message).toMatch(/^Withdrawals unlock once you've used RM 10\.00 more on packs\./);
+  });
+});
+
+// The hold the storefront shows, named here so it is never re-derived there
+// (architecture review 2026-11-17). Same order as the refusals below.
+describe('withdrawalHold', () => {
+  const hold = (over: Partial<WithdrawalGateWallet>) =>
+    withdrawalHold({
+      withdrawable: 0,
+      isFrozen: false,
+      hasTopup: true,
+      bonus: 0,
+      playthrough: { remaining: 0 },
+      ...over,
+    });
+
+  it('is null once nothing is left to use on packs', () => {
+    expect(hold({ withdrawable: 30, bonus: 5 })).toEqual({
+      hold: null,
+      unlockSpend: 0,
+    });
+  });
+
+  it('is locked while money is still to use on packs, with bonus counted in', () => {
+    expect(hold({ bonus: 15, playthrough: { remaining: 30 } })).toEqual({
+      hold: 'locked',
+      unlockSpend: 45,
+    });
+    // Cents-exact, as the refusal prints it.
+    expect(hold({ bonus: 0.1, playthrough: { remaining: 0.2 } }).unlockSpend).toBe(0.3);
+  });
+
+  it('ignores a sub-sen remainder, as the gate does', () => {
+    expect(hold({ playthrough: { remaining: 0.004 } }).hold).toBeNull();
+  });
+
+  it('freeze outranks no top-up, which outranks locked', () => {
+    const all = { isFrozen: true, hasTopup: false, playthrough: { remaining: 10 } };
+    expect(hold(all)).toEqual({ hold: 'frozen', unlockSpend: 0 });
+    expect(hold({ ...all, isFrozen: false })).toEqual({
+      hold: 'no_topup',
+      unlockSpend: 0,
+    });
+    expect(hold({ ...all, isFrozen: false, hasTopup: true }).hold).toBe('locked');
+  });
+});
+
+describe('withdrawalGateError codes', () => {
+  const wallet = (over: Partial<WithdrawalGateWallet>): WithdrawalGateWallet => ({
+    withdrawable: 0,
+    isFrozen: false,
+    hasTopup: true,
+    bonus: 0,
+    playthrough: { remaining: 0 },
+    ...over,
+  });
+
+  it.each([
+    [{ isFrozen: true }, 'frozen'],
+    [{ hasTopup: false }, 'no_topup'],
+    [{ playthrough: { remaining: 10 } }, 'locked'],
+    [{ withdrawable: 5 }, 'over_limit'],
+  ] as const)('%j refuses with code %s', (over, code) => {
+    expect(withdrawalGateError(wallet(over), 20)?.code).toBe(code);
+  });
+
+  // Defense in depth: a disagreeing `withdrawable` never lets money still to
+  // use on packs leave, whichever hold outranks the lock.
+  it.each([
+    [{ isFrozen: true }, 'frozen'],
+    [{ hasTopup: false }, 'no_topup'],
+    [{}, 'locked'],
+  ] as const)('%j with money left for packs refuses (%s) even if withdrawable disagrees', (over, code) => {
+    const err = withdrawalGateError(
+      wallet({ ...over, withdrawable: 50, playthrough: { remaining: 10 } }),
+      20,
+    );
+    expect(err?.code).toBe(code);
+  });
+
+  it('the code matches the hold the wallet reports', () => {
+    for (const over of [
+      { isFrozen: true },
+      { hasTopup: false },
+      { playthrough: { remaining: 10 } },
+    ]) {
+      expect(withdrawalGateError(wallet(over), 20)?.code).toBe(
+        withdrawalHold(wallet(over)).hold,
+      );
+    }
   });
 });

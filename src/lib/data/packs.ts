@@ -14,6 +14,15 @@
  */
 
 import { cache } from 'react';
+import type { StorePackRow } from '@acme/api/store/packs';
+import type {
+  StoreOddsCardRow,
+  StorePackDetailPack,
+} from '@acme/api/store/packs/[slug]';
+import type {
+  StoreRecentCardPull,
+  StoreRecentTicketPull,
+} from '@acme/api/store/pulls/recent';
 import { unstable_cache } from 'next/cache';
 import { cached } from '@/lib/ttl-cache';
 import { store } from '@/lib/store';
@@ -22,6 +31,7 @@ import { isRarity, type PublishedOdds } from '@/lib/packs-format';
 import { avatarForSeed } from '@/lib/profile-view';
 import { relativeTime } from '@/lib/format';
 import { toCardView } from '@/lib/card-view';
+import type { MaybeAbsent } from '@/lib/store-wire';
 import {
   PacksPageSchema,
   UncatalogedPackSchema,
@@ -52,23 +62,23 @@ import {
 // catalog, this feed and (via getPackHighlights) this detail under `revalidate = 15`.
 const PUBLIC = { auth: 'none', cache: 'auto' } as const;
 
-// Shape of a pack row from GET /store/packs (backend Pack model).
-interface BackendPack {
-  slug: string;
-  title: string;
-  category: string;
-  price: number;
-  image: string;
-  display_image?: string | null;
-  boost: boolean;
-  rank: number;
-  buyback_percent?: number;
-  in_stock?: boolean;
-  group?: 'GRADED' | 'RAW' | 'MIX' | null;
-  psa10?: boolean;
-  prize_type?: 'cards' | 'tickets';
-  status?: string;
-}
+// A pack row from GET /store/packs. Absent on an older backend: the fields
+// below; the uncataloged path reads the detail's pack, which has no
+// display_image or pool composition.
+type BackendPack = MaybeAbsent<
+  StorePackRow,
+  | 'display_image'
+  | 'buyback_percent'
+  | 'in_stock'
+  | 'group'
+  | 'psa10'
+  | 'prize_type'
+  | 'status'
+>;
+type BackendDetailPack = MaybeAbsent<
+  StorePackDetailPack,
+  'buyback_percent' | 'in_stock' | 'prize_type' | 'status'
+>;
 
 const toPack = (p: BackendPack): Pack => ({
   id: p.slug,
@@ -140,7 +150,7 @@ async function loadPackCategories(): Promise<PackCategory[]> {
   );
 
   // Group backend packs by category key (response is already rank-ordered).
-  const byCategory = packsByCategory(packs as unknown as BackendPack[]);
+  const byCategory = packsByCategory(packs as BackendPack[]);
 
   // Known categories keep the live-site order + presentational meta (empty
   // ones still render a chip; the client shows empty states). A backend pack
@@ -234,7 +244,7 @@ const DRAFT_PACKS = '/store/customers/me/draft-packs';
  *  guest sends no request at all (`auth: 'required'`). */
 async function draftRows(): Promise<BackendPack[]> {
   const r = await store.get(DRAFT_PACKS, PacksPageSchema, { auth: 'required' });
-  return r.ok ? (r.data.packs as unknown as BackendPack[]) : [];
+  return r.ok ? (r.data.packs as BackendPack[]) : [];
 }
 
 /** The catalog with these drafts added after each category's live packs. Copies,
@@ -346,7 +356,7 @@ async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
   // with the slug in the path it names.
   const row = await packRow(slug, 'pack-base', UncatalogedPackSchema);
   if (!row) return null;
-  const pack = row.pack as unknown as BackendPack;
+  const pack: BackendPack = row.pack as BackendDetailPack;
   const meta = CATEGORY_META.find((c) => c.id === pack.category);
   return {
     pack: {
@@ -370,32 +380,23 @@ async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
 // customer-facing Pull Odds are the SEPARATE, admin-PUBLISHED `published_odds`
 // on the pack (see PackDetail.publishedOdds) — never derived from these
 // weights. Only non-secret card fields (incl. market_value → Top Hits) arrive.
-interface BackendOddsEntry {
-  /** Guaranteed by OddsEntrySchema — a row without a known tier drops. */
-  rarity: Rarity;
-  /** Raw USD FMV — kept for SORTING only (Top Hits/pool order); never format
-   *  it directly as RM (it isn't MYR). Display prefers marketPriceMyr. */
-  market_value: number;
-  /** Live MYR display price (FMV × FX × margin) computed by the backend at
-   *  request time; absent on an older backend → the card renders "—" instead
-   *  of the raw USD number behind an "RM" prefix. */
-  marketPriceMyr?: number;
-  /** Admin-picked Top Hit display order (1-based; null/absent = not one). */
-  top_hit_order?: number | null;
-}
+// `marketPriceMyr` absent on an older backend → the card renders "—" instead
+// of the raw USD number behind an "RM" prefix. `market_value` is raw USD FMV,
+// kept for SORTING only. `rarity` is a known tier: OddsEntrySchema drops the
+// rest.
+type BackendOddsEntry = MaybeAbsent<
+  StoreOddsCardRow,
+  'marketPriceMyr' | 'top_hit_order' | 'pokemon_dex' | 'sprite_image'
+> & { rarity: Rarity };
 
 export interface PackDetail {
   topHits: PackCard[];
   /** The full public prize pool (display fields only, weights stay secret) —
    *  feeds the guest demo spin's client-side weighted sample. */
   pool: PackCard[];
-  /** Admin-published PUBLIC odds; null = not set (the odds panel is hidden). */
+  /** Admin-published PUBLIC odds; null = not set (the odds panel is hidden).
+   *  Also what the guest demo spin samples on. */
   publishedOdds: PublishedOdds | null;
-  /** Odds SET 3's real tier split, backend-aggregated — what the guest demo
-   *  spin samples on (never shown as the odds panel, never used by a real
-   *  spin). Null on an older backend / an unpullable pool → the demo falls
-   *  back to the published odds. */
-  demoOdds: PublishedOdds | null;
 }
 
 // Sanitize the backend's published_odds json (jsonb passthrough — validate at
@@ -436,7 +437,7 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
 function toPackDetail(
   row: ReturnType<typeof PackDetailPageSchema.parse>,
 ): PackDetail | null {
-  const { published_odds, demo_odds } = row;
+  const { published_odds } = row;
   if (row.prize_type === 'tickets') {
     const pool = parseList(TicketOddsRowSchema, row.odds).map((o) =>
       ticketCard(o.tickets, o.rarity),
@@ -447,10 +448,9 @@ function toPackDetail(
           topHits: [],
           pool,
           publishedOdds: parsePublishedOdds(published_odds),
-          demoOdds: parsePublishedOdds(demo_odds),
         };
   }
-  const valid = row.odds as unknown as BackendOddsEntry[];
+  const valid = row.odds as BackendOddsEntry[];
   if (valid.length === 0) return null;
 
   // The tier is re-stated from the schema-guaranteed row so PackCard's
@@ -478,8 +478,6 @@ function toPackDetail(
     topHits,
     pool,
     publishedOdds: parsePublishedOdds(published_odds),
-    // Same { tiers } shape from the backend, so the same sanitizer applies.
-    demoOdds: parsePublishedOdds(demo_odds),
   };
 }
 
@@ -508,29 +506,26 @@ export const getPackHighlights = unstable_cache(
 // One row from the public recent-pulls feed: the won card (wire fields, read
 // by toCardView) + when + the source pack's live catalog label + the puller's
 // display name ("Anonymous" when the account has none).
-interface BackendRecentPull {
-  /** Guaranteed by RecentPullSchema — a row without one drops. A ticket row
-   *  (RecentTicketSpinSchema) has `tickets` instead of the card fields. */
-  handle: string;
-  tickets?: number;
-  /** Guaranteed by RecentPullSchema — a row without a known tier drops. */
-  rarity: Rarity;
-  pack_id: string;
-  /** Pack label from the live catalog; null when the pack was deleted. */
-  pack_title?: string | null;
-  pack_image?: string | null;
-  /** Puller display name (first_name, full); absent on an older backend. */
-  who?: string;
-  rolled_at: string;
-  /** Pull row id — the feed's stable key; absent on an older backend. */
-  id?: string;
-  /** The leaderboard's PII-safe display fields (see publicProfileFields). */
-  seed?: number;
-  profile_handle?: string | null;
-  avatar_url?: string | null;
-  /** Equipped milestone frame, resolved backend-side. */
-  frame_url?: string | null;
-}
+// Absent on an older backend: the puller fields, the row id and the pack
+// label. `rarity` is a known tier: the feed schema drops the rest.
+type RecentPullSkew<T extends StoreRecentCardPull | StoreRecentTicketPull> =
+  MaybeAbsent<
+    T,
+    | 'id'
+    | 'who'
+    | 'seed'
+    | 'profile_handle'
+    | 'avatar_url'
+    | 'frame_url'
+    | 'pack_title'
+    | 'pack_image'
+  > & { rarity: Rarity };
+type BackendRecentPull =
+  | (MaybeAbsent<
+      RecentPullSkew<StoreRecentCardPull>,
+      'marketPriceMyr' | 'pokemon_dex' | 'sprite_image'
+    > & { tickets?: undefined })
+  | (RecentPullSkew<StoreRecentTicketPull> & { handle?: undefined });
 
 /** A feed row: the won card (its `handle` opens the card-detail overlay;
  *  `priceMyr` null = an older backend omitted the MYR price — rows render
@@ -612,7 +607,7 @@ export async function getRecentPulls(
   // card feed: those rows must not show under Poly.
   if (
     category &&
-    (raw.pulls as unknown as BackendRecentPull[]).some((p) => p.tickets == null)
+    (raw.pulls as BackendRecentPull[]).some((p) => p.tickets == null)
   ) {
     return EMPTY_FEED;
   }
@@ -622,31 +617,27 @@ export async function getRecentPulls(
   // whenever the poll prepends a new pull, remounting every feed row (and
   // replaying entry animations) instead of just adding one.
   const seen = new Map<string, number>();
-  const pulls: RecentPull[] = (raw.pulls as unknown as BackendRecentPull[]).map(
-    (p) => {
-      const key = `${p.handle}-${p.rolled_at}`;
-      const n = seen.get(key) ?? 0;
-      seen.set(key, n + 1);
-      return {
-        ...(p.tickets != null
-          ? ticketCard(p.tickets, p.rarity)
-          : toCardView(p)),
-        id: p.id ?? `${key}-${n}`,
-        rarity: p.rarity,
-        // Pack label straight from the backend catalog (source of truth) — a
-        // since-deleted pack degrades to the neutral label, never a wrong one.
-        packName: p.pack_title ?? 'Mystery Pack',
-        packIcon: p.pack_image ?? FALLBACK_PACK_ICON,
-        who: p.who ?? 'Anonymous',
-        profileHandle: p.profile_handle ?? null,
-        // The same seed → pfp mapping as the leaderboard / public profile.
-        avatar: p.avatar_url ?? (p.seed != null ? avatarForSeed(p.seed) : null),
-        frame: p.frame_url ?? null,
-        rolledAt: p.rolled_at,
-        agoLabel: relativeTime(p.rolled_at),
-      };
-    },
-  );
+  const pulls: RecentPull[] = (raw.pulls as BackendRecentPull[]).map((p) => {
+    const key = `${p.handle}-${p.rolled_at}`;
+    const n = seen.get(key) ?? 0;
+    seen.set(key, n + 1);
+    return {
+      ...(p.tickets != null ? ticketCard(p.tickets, p.rarity) : toCardView(p)),
+      id: p.id ?? `${key}-${n}`,
+      rarity: p.rarity,
+      // Pack label straight from the backend catalog (source of truth) — a
+      // since-deleted pack degrades to the neutral label, never a wrong one.
+      packName: p.pack_title ?? 'Mystery Pack',
+      packIcon: p.pack_image ?? FALLBACK_PACK_ICON,
+      who: p.who ?? 'Anonymous',
+      profileHandle: p.profile_handle ?? null,
+      // The same seed → pfp mapping as the leaderboard / public profile.
+      avatar: p.avatar_url ?? (p.seed != null ? avatarForSeed(p.seed) : null),
+      frame: p.frame_url ?? null,
+      rolledAt: p.rolled_at,
+      agoLabel: relativeTime(p.rolled_at),
+    };
+  });
   // Trust boundary: only known tiers with a finite non-negative count.
   const drought: RecentFeed['drought'] = {};
   if (raw.drought && typeof raw.drought === 'object') {
