@@ -107,8 +107,8 @@ export interface RollRequest {
   freeRipClaimId: string | null;
   /** The public pool a demo Spin samples. Empty for every other mode. */
   demoPool: PackCard[];
-  /** Odds a demo Spin samples on — the caller resolves the set-3 → published
-   *  → static fallback (see `pickDemoOdds`). Ignored by every other mode. */
+  /** Odds a demo Spin samples on — the caller resolves the published → static
+   *  fallback. Ignored by every other mode. */
   demoOdds: PublishedOdd[];
   /** Customer this roll is charged to. Null for a guest demo, which is bound
    *  to no account at all — see `RolledBatch.forId`. */

@@ -219,8 +219,8 @@ export const TicketOddsRowSchema = z.looseObject({
 
 /** GET /store/packs/:slug as data/packs.ts#getPackDetail reads it.
  *
- *  `published_odds` / `demo_odds` stay UNVALIDATED here on purpose: they are
- *  jsonb passthrough, and parsePublishedOdds sanitizes them field by field
+ *  `published_odds` stays UNVALIDATED here on purpose: it is jsonb
+ *  passthrough, and parsePublishedOdds sanitizes it field by field
  *  (dropping unknown tiers and out-of-range percentages) rather than
  *  rejecting the whole response over one bad number. `odds` is a
  *  droppableArray for the same reason as the catalog: a bad row drops, a
@@ -229,7 +229,6 @@ export const PackDetailPageSchema = z.looseObject({
   odds: droppableArray(z.union([OddsEntrySchema, TicketOddsRowSchema])),
   prize_type: prizeType,
   published_odds: z.unknown().optional(),
-  demo_odds: z.unknown().optional(),
 });
 
 /** GET /store/pulls/recent row — handle + name + known rarity + finite value.
@@ -1495,7 +1494,6 @@ export const PackPollResponseSchema = z.object({
     topHits: z.array(pollPackCard),
     pool: z.array(pollPackCard),
     publishedOdds: pollOdds,
-    demoOdds: pollOdds,
   }),
 });
 export const RecentPollResponseSchema = z.object({
